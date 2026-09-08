@@ -95,37 +95,103 @@ the suite alone is not the gate.
 - **#1056's per-run temp namespace** (`%TEMP%/kanban/<runId>/`) — suggested in the ticket, not
   built.
 
+### Later still — the view-thinning epic finished (#1062-#1068)
+
+Asked to analyse which board UIs are noise. The answer came from the DATABASE rather than from
+taste, and it closed an epic that had been open since 2026-08-06:
+`docs/view-inventory-and-plugin-extraction.md` had a six-step plan with step 6 never executed,
+and its own blocker was stated in the doc — "there is **no view-usage telemetry** anywhere in
+client or server. Every judgment below is from structure and role, not from observed use."
+
+**The telemetry was never needed.** The board already records what each feature PRODUCES, so
+querying the operated DB (29 projects, 2119 issues, 1314 workspaces, 2026-07-07..) answered it:
+a feature whose table has never held a row has never been used.
+
+| # | What | Result |
+|---|---|---|
+| 1062 | Flaky Tests | **deleted** — 0 rows, and NOT starved: 2034 `test_runs` incl. 187 failures |
+| 1063 | Time tracking | **deleted** — 0 entries ever |
+| 1064 | Showdown | **deleted** — 0 showdowns ever |
+| 1065 | Milestones | **view** deleted; field/CRUD/format KEPT |
+| 1066 | Metrics+Insights+Workflow Analytics | folded into Analytics tabs |
+| 1067 | Capacity+Stale Work | folded into Focus tabs |
+| 1068 | Hotspots + Quality Metrics | moved to the code-metrics plugin (epic step 6) |
+
+Registry **27 -> 18** views, 13 primary / 5 behind "More", single-key shortcuts **17 -> 12**.
+
+**Two zero-row features were deliberately KEPT**, and this is the rule worth carrying: merge
+trains (`merge_trains` 0) only form above a queue-size threshold this board never reaches at
+WIP=1, and scheduled runs (`scheduled_runs` 0) is a capability flag on `resolveStartPolicy`
+(decision 008). Zero rows means "never fired", NOT "not load-bearing".
+
+**#1068 was not the rewrite the epic feared.** The doc warned that extracting a view means
+rewriting it as a standalone iframe app. By now the `code-metrics` plugin had ALREADY built both
+replacements, so the board views were the duplicates. One real gap had to be closed first, in the
+plugin (`code-metrics-skill` commit `7be65c1`): its trend panel filtered the series to `arch.*`,
+which would have orphaned the board's own built-in `quality-metrics-collector` (`code.*`/`git.*`
+keys) the moment the board view went. **The `/api/projects/:id/quality-metrics` endpoints and the
+`quality_metrics` table STAY** — the plugin reads them; only the display case moved.
+
+**No destructive migrations.** Every deletion removed UI and API surface and left the schema, FKs
+and cascade-delete entries alone (this ships on npm; another board may hold rows). Cascade
+regression tests were kept by seeding rows directly instead of through the removed endpoints.
+
+**Two mistakes worth remembering, both caught by things other than my own review:**
+
+1. **`#1069` was my own false positive.** I read the disclose-context hook's bare relative path in
+   `.claude/settings.json` as the CLAUDE.md "never a bare relative path" violation and anchored it
+   with `$CLAUDE_PROJECT_DIR`. It is a DELIBERATE exception (#922/#1000):
+   `$CLAUDE_PROJECT_DIR` is empty in `claude -p` sessions and is pre-expanded textually, so the
+   anchored form resolves to a bogus path and dies in exactly the mode the hook exists for.
+   `claude-md-git-invariants.test.ts` asserts the relative spelling and records that
+   `2ebe615fb3` already made this mistake once. **Reverted (`70b60cd08`).** Only the FULL server
+   suite caught it — my targeted runs never touched that file. The underlying observation is
+   still real and #1069 stays OPEN with the corrected diagnosis: the hook dies with
+   MODULE_NOT_FOUND once the Bash tool's cwd moves into a subdirectory, and the fix must preserve
+   the relative spelling.
+2. **#1067 shipped a dead URL dimension.** `FOCUS_TABS` was declared and wired, the tabs rendered
+   and switched — and the address bar never changed, because `VIEW_TAB_REGISTRY` (what the ROUTER
+   reads) was never updated. Every existing registry test iterates that registry, so all of them
+   passed. **Found by visually verifying with playwright, not by a test**, which is exactly why
+   that convention exists. Fixed in `8ccf0e49c` with a source-scanning guard: every
+   `export const X_TABS` in `viewTabs.ts` must be registered. Mutation-verified.
+
 ## Where this stands (2026-09-08)
 
 **Read this section before anything below it.** Everything under a dated heading describes the
 state at the time it was written. Standing state lives here and nowhere else.
 
-### Verified now (2026-09-08)
+### Verified now (2026-09-08, after the view-thinning pass)
 
-- **Branch `master`, working tree clean, `bcb34bd928`.** **172 commits ahead of `origin/master`**
-  (GitHub `p-wegner/agentic-kanban`). The second remote `gitlab` points at
-  `pizza-und-ai-code/agentic-code-review` — a DIFFERENT project, not a mirror; do not confuse them.
-- **The last full sweep was GREEN** — on `599a1ba507`, 26.5 min, 8,744 + 195 + 1,769 tests across
-  server / mcp-server / client, plus `check:arch`. Recorded in `base_branch_health`, which is what
-  `pnpm promote` reads. This supersedes the old "a whole-repo run is the outstanding verification"
-  item: it has now been done, by the sweep. **Master has since moved 3 commits past that sha** (the
-  archive pass, #1060, the legacy drain) — those three are verified by `check:arch` + `typecheck` +
-  their own suites, NOT by a full sweep. The next promotion will request one.
-- **Stable is `stable-20260908`, live on 3001**, promoted on that green sweep with no
-  `--force-sweep`; smoke passed. Master is now **3 commits ahead of it** — see above.
-- **Board (agentic-kanban project): 1037 Done, 6 Cancelled, 0 open.** The backlog is genuinely
-  empty — nothing in progress, no live workspaces, `BACKLOG.md` re-exported at 0 issues.
-- **`%TEMP%` is healthy** — 68,288 entries walked in 0.18s, far under the gate's 250,000 floor,
-  after today's two drains: 13,437 loose fixture DBs (7.0 GB) and 22,704 legacy fixture dirs.
+- **Branch `master`, working tree clean.** Ahead of `origin/master` by the whole local history
+  (GitHub `p-wegner/agentic-kanban`) — see "Next steps". The second remote `gitlab` points at
+  `pizza-und-ai-code/agentic-code-review`, a DIFFERENT project, not a mirror.
+- **Stable is `stable-20260908-2`, live on 3001.** Master is now WELL ahead of it — the whole
+  #1062-#1068 epic landed after that promotion. **Nothing is live-verified on stable yet.**
+- **Typecheck clean** (5 packages) and the **full client suite green — 184 files / 1758 tests**,
+  re-run after every commit of the pass.
+- **Visually verified** on the dev board (`pnpm dev:devboard`, 5273) with playwright: the 13
+  primary tabs, all 10 Analytics tabs and 3 Focus tabs rendering and switching, tab URLs, a cold
+  deep link, all six legacy redirects, and the four deleted routes falling back to the board.
+  0 console errors. This is what found the #1067 URL bug.
+- **Board (agentic-kanban project): #1062-#1068 Done, #1069 open (Todo).**
+- **The DEV board now has `agentic-kanban` registered** (its own DB,
+  `~/.agentic-kanban-dev/kanban.db`) — added for that visual verification; harmless and useful
+  to keep.
 
 ### Next steps, in order
 
-1. **Operator: decide the push.** 172 commits, clean fast-forward to `origin/master`. The Linux
-   CI run is what #923 needs, and it has never happened — every sweep here is Windows-only. This
-   is the only item left that is not ours to decide.
-2. **Promote again when convenient.** Master has moved past `stable-20260908` (the archive pass,
-   #1060, and the legacy drain). Not urgent: the board is idle and nothing on it is blocked. The
-   next `pnpm promote` will request its own sweep, and #1060 means a red one no longer dead-ends.
+1. **Run the full server suite to completion and read it.** It was still running when this was
+   written; the FIRST run is what caught the #1069 mistake, so this is not a formality.
+   `cd packages/server && pnpm exec vitest run --maxWorkers=4`.
+2. **Then promote.** Master is far ahead of `stable-20260908-2` and the pass is entirely
+   board-UI, so the operated board still shows the OLD views until a promotion. `pnpm promote
+   --dry-run` first; #1044/#1060 mean it will request its own sweep rather than dead-ending.
+3. **Operator: decide the push.** Clean fast-forward to `origin/master`. The Linux CI run #923
+   needs has still never happened — every sweep here is Windows-only. Not ours to decide.
+4. **#1069** — the disclose-context hook dies once the Bash tool's cwd moves. Corrected
+   diagnosis is on the ticket; the fix must preserve the relative spelling.
+
 ### Open, unexplained — chase this if it recurs
 
 **The stable board died overnight on 2026-09-08 at 06:30 UTC.** Nothing listening on 3001/5173
