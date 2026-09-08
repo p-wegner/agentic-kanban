@@ -662,6 +662,10 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
   // ── drives ──
   { method: "POST", template: "/api/projects/:projectId/drives/:id/plan", schema: drivePlanResult },
   { method: "GET", template: "/api/projects/:projectId/drive/preflight", schema: drivePreflight },
+  // #1071: attaching an existing epic (`DriveScopePlanner`'s "Attach epic") — the call site
+  // awaits the result only to know the request succeeded and reads no field off it, so this
+  // asserts just the id that every `DriveService.update()` response carries.
+  { method: "PUT", template: "/api/projects/:projectId/drives/:id", schema: looseObject({ id: str }) },
 
   // ── workspaces ──
   { method: "POST", template: "/api/workspaces", schema: workspaceOrCreateJob },
