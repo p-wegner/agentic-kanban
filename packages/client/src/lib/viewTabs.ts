@@ -258,6 +258,7 @@ export const VIEW_TAB_REGISTRY: Readonly<Record<string, ViewTabSet>> = {
   [ANALYTICS_VIEW_ID]: { tabs: ANALYTICS_TABS, defaultTab: "throughput" },
   [ACTIVITY_VIEW_ID]: { tabs: ACTIVITY_TABS, defaultTab: "activity" },
   [RUNTIME_VIEW_ID]: { tabs: RUNTIME_TABS, defaultTab: "flight-recorder" },
+  [FOCUS_VIEW_ID]: { tabs: FOCUS_TABS, defaultTab: "focus" },
 };
 
 /** True when `viewId` is a tabbed container view. Plain views have no tab dimension. */
