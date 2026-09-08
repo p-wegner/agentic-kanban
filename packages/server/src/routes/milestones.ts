@@ -44,14 +44,6 @@ export function createMilestonesRoute(database: Database) {
     return c.json(await service.list(c.req.param("projectId")));
   });
 
-  // GET /api/projects/:projectId/milestones/summary
-  router.get("/:projectId/milestones/summary", async (c) => {
-    // #511: was `parseInt(...)` with no finiteness check, so `?days=abc` passed NaN
-    // straight into the service. `min: 1` because a non-positive window is meaningless.
-    const days = queryInt(c, "days", { def: 30, min: 1 });
-    return c.json(await service.summary(c.req.param("projectId"), days));
-  });
-
   // POST /api/projects/:projectId/milestones
   router.post("/:projectId/milestones", async (c) => {
     const body = await parseMilestoneBody(c, createMilestoneBody);

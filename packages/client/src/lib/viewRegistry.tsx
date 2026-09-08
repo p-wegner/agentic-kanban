@@ -32,7 +32,6 @@ export type ViewMode =
   | "metrics"
   | "crime-scene"
   | "quality-metrics"
-  | "milestones"
   | "butler"
   | "workflows"
   | "workflow-analytics"
@@ -181,16 +180,6 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "QM",
     paletteDescription: "Show collected code quality metrics",
     shortcut: "y",
-    activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "milestones",
-    toolbarLabel: "Milestones",
-    label: "Milestones",
-    tooltip: "Milestones - progress, counts, and mini-burndown",
-    paletteIcon: "MS",
-    paletteDescription: "Show per-milestone progress, open counts, and burndown",
     activeClass: "bg-emerald-600 text-white",
     group: "secondary",
   },

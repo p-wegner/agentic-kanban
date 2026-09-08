@@ -6,7 +6,7 @@ import { boardSelectionActions } from "../stores/boardSelectionStore.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import {
   GraphView, TableView, AgentGrid, TimelineView, MetricsView, CrimeSceneCityView,
-  QualityMetricsView, MilestonesOverview, ButlerView, WorkflowsView,
+  QualityMetricsView, ButlerView, WorkflowsView,
   WorkflowAnalyticsDashboard, InsightsPanel, BoardFeedView, RuntimeFeedView, FocusView,
   StrategyTargetsView, SwimlaneView,
   RunbooksView, SprintCapacityPlanner,
@@ -143,14 +143,6 @@ export function BoardSecondaryViews({
       {viewMode === "quality-metrics" && activeProjectId && (
         <BoardErrorBoundary columnName="Quality Metrics View">
           <QualityMetricsView projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "milestones" && activeProjectId && (
-        <BoardErrorBoundary columnName="Milestones View">
-          <MilestonesOverview
-            projectId={activeProjectId}
-            onMilestoneClick={onMilestoneClick}
-          />
         </BoardErrorBoundary>
       )}
       {viewMode === "butler" && activeProjectId && (
