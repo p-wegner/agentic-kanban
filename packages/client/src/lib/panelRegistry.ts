@@ -37,7 +37,6 @@ export const PANEL_CLOSE_ORDER = [
   "runQueueForecast",
   "codemod",
   "projectHealth",
-  "timeReport",
 ] as const;
 
 /** Every panel the board can open. */
@@ -56,7 +55,6 @@ export const PANEL_IDS = [
   "multiRepoMonitor",
   "transcriptSearch",
   "projectHealth",
-  "timeReport",
   "commandPalette",
   "shortcutHelp",
   "liveActivityTicker",

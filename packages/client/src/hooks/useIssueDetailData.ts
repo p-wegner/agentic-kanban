@@ -1,4 +1,4 @@
-import type { ActivityEvent, CycleTimeData, RelatedIssue, TimeEntriesData, TouchedFile } from "../lib/issueDetailTypes.js";
+import type { ActivityEvent, CycleTimeData, RelatedIssue, TouchedFile } from "../lib/issueDetailTypes.js";
 import { useEffect, useState } from "react";
 import type { IssueArtifact, IssueWithStatus, DependencyInfo, MilestoneResponse, MergedCommitsResponse, IssueComment} from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
@@ -45,7 +45,6 @@ interface IssueDetailBundle {
   // #418: the previously-separate per-issue fetches, folded into the bundle.
   // Each is null when that server-side sub-fetch failed (best-effort).
   cycleTime: CycleTimeData | null;
-  timeEntries: TimeEntriesData | null;
   touchedFiles: { files: TouchedFile[]; cached: boolean } | null;
   relatedIssues: { related: RelatedIssue[] } | null;
   mergedCommits: MergedCommitsResponse | null;
@@ -78,7 +77,6 @@ export function useIssueDetailData(issue: IssueWithStatus, onIssueUpdate: (issue
   const [descriptionFetching, setDescriptionFetching] = useState(false);
   // #418: bundle-folded per-issue extras (previously 5 separate section fetches).
   const [cycleTime, setCycleTime] = useState<CycleTimeData | null>(null);
-  const [timeEntries, setTimeEntries] = useState<TimeEntriesData | null>(null);
   const [touchedFiles, setTouchedFiles] = useState<TouchedFile[] | null>(null);
   const [relatedIssues, setRelatedIssues] = useState<RelatedIssue[] | null>(null);
   const [mergedCommits, setMergedCommits] = useState<MergedCommitsResponse | null>(null);
@@ -106,7 +104,6 @@ export function useIssueDetailData(issue: IssueWithStatus, onIssueUpdate: (issue
           setArtifacts(bundle.artifacts);
           setActivityEvents(bundle.activity.events);
           setCycleTime(bundle.cycleTime ?? null);
-          setTimeEntries(bundle.timeEntries ?? null);
           setTouchedFiles(bundle.touchedFiles?.files ?? null);
           setRelatedIssues(bundle.relatedIssues?.related ?? null);
           setMergedCommits(bundle.mergedCommits ?? null);
@@ -176,7 +173,6 @@ export function useIssueDetailData(issue: IssueWithStatus, onIssueUpdate: (issue
     descriptionFetching, setDescriptionFetching,
     // #418: bundle-folded extras for the (now fetch-free) section components.
     cycleTime,
-    timeEntries,
     touchedFiles,
     relatedIssues,
     mergedCommits,

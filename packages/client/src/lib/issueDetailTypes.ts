@@ -1,6 +1,6 @@
-import type { ActivityEvent, ActivityEventType, StatusDuration, TimeEntry, TouchedFile } from "@agentic-kanban/shared";
+import type { ActivityEvent, ActivityEventType, StatusDuration, TouchedFile } from "@agentic-kanban/shared";
 // #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
-export type { ActivityEvent, ActivityEventType, StatusDuration, TimeEntry, TouchedFile };
+export type { ActivityEvent, ActivityEventType, StatusDuration, TouchedFile };
 /**
  * DTO shapes for the issue-detail surface (#610).
  *
@@ -37,11 +37,6 @@ export interface CycleTimeData {
 }
 
 
-
-export interface TimeEntriesData {
-  entries: TimeEntry[];
-  totalMinutes: number;
-}
 
 export interface RelatedIssue {
   id: string;

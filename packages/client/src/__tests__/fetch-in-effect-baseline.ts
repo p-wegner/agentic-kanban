@@ -72,7 +72,6 @@ export const FETCH_IN_EFFECT_BASELINE: Record<string, number> = {
   "components/StackProfileSettingsSection.tsx": 1,
   "components/StrategyTargetsView.tsx": 1,
   "components/TableView.tsx": 1,
-  "components/TimeReportPanel.tsx": 1,
   "components/WorkflowAnalyticsDashboard.tsx": 2,
   "components/WorkflowBuilder.tsx": 3,
   "components/WorkflowProgress.tsx": 1,
@@ -96,6 +95,5 @@ export const FETCH_IN_EFFECT_BASELINE: Record<string, number> = {
   "hooks/useRegistrationProgress.ts": 1,
   "hooks/useStaleWorkspaceManager.ts": 1,
   "hooks/useWorkspaceSession.ts": 5,
-  "lib/timeEntriesCache.ts": 1,
   "lib/useWebSocket.ts": 1,
 };

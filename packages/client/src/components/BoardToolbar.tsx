@@ -107,7 +107,6 @@ function AgingHeatmapLegend({ warmDays, hotDays, onChange }: AgingHeatmapLegendP
 
 interface BoardToolbarProps {
   activeColumns: StatusWithIssues[];
-  onShowTimeReport?: () => void;
   onShowQuickTasks: () => void;
   autoMonitor: boolean;
   monitorRunning: boolean;
@@ -161,7 +160,6 @@ interface BoardToolbarProps {
 
 export function BoardToolbar({
   activeColumns,
-  onShowTimeReport: _onShowTimeReport,
   onShowQuickTasks,
   autoMonitor,
   monitorRunning,

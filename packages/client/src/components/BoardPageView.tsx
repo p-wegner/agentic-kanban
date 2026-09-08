@@ -312,7 +312,6 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
       butlerBadgeCount={agentQuestionsCount}
       projectId={activeProjectId}
       onVoiceIssueCreated={() => refetchBoard()}
-      onShowTimeReport={activeProjectId ? () => panels.setShowTimeReport(true) : undefined}
       onShowMergeQueue={() => panels.setShowMergeQueue(true)}
       mergeQueueCount={columns.flatMap(c => c.issues).filter(i => {
         const ws = i.workspaceSummary?.main;

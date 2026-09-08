@@ -42,7 +42,6 @@ import { createHealthRoute } from "./health.js";
 import { createMilestonesRoute } from "./milestones.js";
 import { createDrivesRoute } from "./drives.js";
 import { createDriveObstaclesRoute } from "./drive-obstacles.js";
-import { createTimeReportRoute } from "./time-report.js";
 import { createWorkflowForkService } from "../services/workflow-fork.service.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
@@ -113,7 +112,6 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/projects", createMilestonesRoute(database));
   routes.route("/projects", createDrivesRoute(database));
   routes.route("/projects", createDriveObstaclesRoute(database, { boardEvents: options?.boardEvents }));
-  routes.route("/projects", createTimeReportRoute(database));
   routes.route("/codemods", createCodemodsRoute(database));
   routes.route("/workflows", createWorkflowsRoute(database, { ...options, onWorkflowAdvanced }));
   routes.route("/scheduled-runs", createScheduledRunsRoute(database, getSessionManager, options?.boardEvents));

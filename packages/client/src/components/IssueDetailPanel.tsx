@@ -16,7 +16,6 @@ import type { TrailEntry } from "../hooks/useTicketTrail.js";
 import { TicketTrailStrip } from "./TicketTrailStrip.js";
 import { IssueCycleTimeBadge } from "./IssueCycleTimeBadge.js";
 import { IssueAutoStartSkipBadge } from "./IssueAutoStartSkipBadge.js";
-import { IssueWorkLogSection } from "./IssueWorkLogSection.js";
 import { useIssueDisplayData } from "../hooks/useIssueDisplayData.js";
 import { useIssueDetailKeyboard } from "../hooks/useIssueDetailKeyboard.js";
 import { useModalDrag } from "../hooks/useModalDrag.js";
@@ -116,7 +115,6 @@ export function IssueDetailPanel({
     activeShowdownId, setActiveShowdownId,
     descriptionFetching,
     cycleTime,
-    timeEntries,
     touchedFiles,
     relatedIssues,
     mergedCommits,
@@ -559,7 +557,6 @@ export function IssueDetailPanel({
           )}
 
           {/* Work log section — only shown in view mode */}
-          {!editing && <IssueWorkLogSection issueId={issue.id} initial={timeEntries} loading={extrasLoading} />}
 
           {/* Workspaces section — placed directly below status/metadata for contextual proximity */}
           {!editing && (

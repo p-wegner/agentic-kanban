@@ -27,22 +27,3 @@ export interface TimeEntry {
   createdAt: string;
 }
 
-export interface TimeReportByDay {
-  date: string;
-  totalMinutes: number;
-}
-
-export interface TimeReportByIssue {
-  issueId: string;
-  issueNumber: number | null;
-  issueTitle: string;
-  totalMinutes: number;
-}
-
-export interface TimeReportData {
-  byIssue: TimeReportByIssue[];
-  byDay: TimeReportByDay[];
-  totalMinutes: number;
-  dateFrom: string;
-  dateTo: string;
-}

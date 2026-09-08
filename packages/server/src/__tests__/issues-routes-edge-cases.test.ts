@@ -1,6 +1,6 @@
 /**
  * Edge-case integration tests for routes/issues.ts and routes/issue-export-import.ts
- * Exercises comment CRUD, activity, AI-touched files, time entries, and CSV/JSON
+ * Exercises comment CRUD, activity, AI-touched files, and CSV/JSON
  * import/export against a real test DB via Hono app.request().
  *
  * NOTE: drizzle-orm's db.transaction() with libsql :memory: databases creates a
@@ -18,7 +18,7 @@ import * as schema from "@agentic-kanban/shared/schema";
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
-import type { IssueComment, IssueWithStatus, TimeEntry } from "@agentic-kanban/shared";
+import type { IssueComment, IssueWithStatus } from "@agentic-kanban/shared";
 import type { IssueActivityResult } from "../services/issue-activity.service.js";
 import type { CreateIssueResult } from "../services/issue.service.js";
 import { applyMigrationsToClient } from "./helpers/test-db.js";
@@ -135,14 +135,13 @@ async function fullSeed(db: TestDb) {
  *
  * `Response.json()` is `unknown` by design, so each read below is annotated with the type its
  * route actually returns. Where the route exports one it is imported (`IssueComment`,
- * `TimeEntry`, `IssueWithStatus`, `IssueActivityResult`, `CreateIssueResult`); the rest are
+ * `IssueWithStatus`, `IssueActivityResult`, `CreateIssueResult`); the rest are
  * declared here because `routes/issue-export-import.ts` and the touched-files/related-issues
  * helpers keep their row shapes module-private.
  */
 type TouchedFilesResponse = { files: unknown[]; cached: boolean };
 type RelatedIssue = { id: string; issueNumber: number | null; title: string; sharedFileCount: number };
 type RelatedIssuesResponse = { related: RelatedIssue[] };
-type TimeEntriesResponse = { entries: TimeEntry[]; totalMinutes: number };
 type CommentsPageResponse = { comments: IssueComment[]; totalCount: number; hasMore: boolean; nextCursor: string | null };
 type BatchIssuesResponse = { issues: CreateIssueResult[]; driveId?: string; dependenciesCreated?: number };
 type ExportRowResponse = {
@@ -329,60 +328,6 @@ describe("Issues route — touched files edge cases", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Time entries edge cases (in-memory, no transactions)
-// ---------------------------------------------------------------------------
-
-describe("Issues route — time entries edge cases", () => {
-  const { app, db } = memorySetup();
-  let ids: Awaited<ReturnType<typeof fullSeed>>;
-
-  beforeEach(async () => { ids = await fullSeed(db); });
-
-  it("rejects negative minutes", async () => {
-    expect((await app.request(`/api/issues/${ids.issueId}/time-entries`, json("POST", { minutes: -5 }))).status).toBe(400);
-  });
-
-  it("rejects zero minutes", async () => {
-    expect((await app.request(`/api/issues/${ids.issueId}/time-entries`, json("POST", { minutes: 0 }))).status).toBe(400);
-  });
-
-  it("rejects non-integer minutes", async () => {
-    expect((await app.request(`/api/issues/${ids.issueId}/time-entries`, json("POST", { minutes: 1.5 }))).status).toBe(400);
-  });
-
-  it("round-trips valid minutes", async () => {
-    const res = await app.request(`/api/issues/${ids.issueId}/time-entries`, json("POST", { minutes: 30, note: "Hi" }));
-    expect(res.status).toBe(201);
-    const entry = await res.json() as TimeEntry;
-    expect(entry.minutes).toBe(30);
-    expect(entry.note).toBe("Hi");
-    const list = await (await app.request(`/api/issues/${ids.issueId}/time-entries`)).json() as TimeEntriesResponse;
-    expect(list.entries).toHaveLength(1);
-    expect(list.totalMinutes).toBe(30);
-  });
-
-  it("defaults note to null", async () => {
-    expect((await (await app.request(`/api/issues/${ids.issueId}/time-entries`, json("POST", { minutes: 15 }))).json() as TimeEntry).note).toBeNull();
-  });
-
-  it("DELETE removes the entry", async () => {
-    const { id } = await (await app.request(`/api/issues/${ids.issueId}/time-entries`, json("POST", { minutes: 45 }))).json() as TimeEntry;
-    await app.request(`/api/issues/${ids.issueId}/time-entries/${id}`, { method: "DELETE" });
-    const list = await (await app.request(`/api/issues/${ids.issueId}/time-entries`)).json() as TimeEntriesResponse;
-    expect(list.entries).toHaveLength(0);
-    expect(list.totalMinutes).toBe(0);
-  });
-
-  it("aggregates multiple entries", async () => {
-    await app.request(`/api/issues/${ids.issueId}/time-entries`, json("POST", { minutes: 10 }));
-    await app.request(`/api/issues/${ids.issueId}/time-entries`, json("POST", { minutes: 20 }));
-    const list = await (await app.request(`/api/issues/${ids.issueId}/time-entries`)).json() as TimeEntriesResponse;
-    expect(list.entries).toHaveLength(2);
-    expect(list.totalMinutes).toBe(30);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Transactional issue deletion (file-based — DELETE cascade runs in a tx)
 // arch-review #879: HTTP DELETE must cascade ALL direct child tables, including
 // issue_time_entries, atomically — same single shared implementation as CLI/MCP.
@@ -396,9 +341,13 @@ describe("Issues route — DELETE cascade includes time entries", () => {
   afterAll(() => { cleanup?.(); });
 
   it("DELETE /:id removes issue_time_entries (regression: forked cascade missed them)", async () => {
-    // Seed a time entry via the HTTP endpoint so it lands like a real one.
-    const post = await app.request(`/api/issues/${ids.issueId}/time-entries`, json("POST", { minutes: 25, note: "work" }));
-    expect(post.status).toBe(201);
+    // The time-entry HTTP endpoints were deleted with the time-tracking UI (#1063), but the
+    // TABLE and its cascade remain — so this regression guard seeds the row directly. What it
+    // protects is unchanged: the forked cascade must still clear issue_time_entries.
+    await db.insert(schema.issueTimeEntries).values({
+      id: randomUUID(), issueId: ids.issueId, minutes: 25, note: "work",
+      createdAt: new Date().toISOString(),
+    });
 
     const before = await db.select().from(schema.issueTimeEntries).where(eq(schema.issueTimeEntries.issueId, ids.issueId));
     expect(before).toHaveLength(1);
@@ -420,7 +369,10 @@ describe("Issues route — DELETE cascade includes time entries", () => {
     // edge in both directions — every table the cascade must clear.
     const commentRes = await app.request(`/api/issues/${ids.issueId}/comments`, json("POST", { body: "c" }));
     expect(commentRes.status).toBe(201);
-    await app.request(`/api/issues/${ids.issueId}/time-entries`, json("POST", { minutes: 5 }));
+    await db.insert(schema.issueTimeEntries).values({
+      id: randomUUID(), issueId: ids.issueId, minutes: 5, note: null,
+      createdAt: new Date().toISOString(),
+    });
 
     const otherIssueId = await seedIssue(db, ids.projectId, ids.inProgressId, { issueNumber: 2, title: "Other" });
     await db.insert(schema.issueDependencies).values({

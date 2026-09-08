@@ -12,7 +12,6 @@ export interface IssueDetailBundleData {
   activity: { events: unknown[] };
   // #418: previously-separate per-issue fetches, folded into the bundle.
   cycleTime: unknown;
-  timeEntries: unknown;
   touchedFiles: unknown;
   relatedIssues: unknown;
   mergedCommits: unknown;

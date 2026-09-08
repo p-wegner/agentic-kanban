@@ -493,7 +493,7 @@ const issueListRow = looseObject({ id: str, title: str, statusId: str, projectId
  * Its twelve fields are each a `Promise.all` arm with `.catch(() => …)`, so the failure modes
  * are already distinguished by the server: six arms fall back to `null`, five to `[]`, and
  * `activity` to `{ events: [] }`. Only the arms with a NON-null fallback are asserted —
- * `dependencies`, `cycleTime`, `timeEntries`, `touchedFiles`, `relatedIssues` and
+ * `dependencies`, `cycleTime`, `touchedFiles`, `relatedIssues` and
  * `mergedCommits` are legitimately `null` on a healthy response, and the client's own props
  * are typed `T | null` to match. Asserting them would turn a caught server-side error into a
  * blank panel, which is precisely the outcome this file exists to prevent.
