@@ -16,11 +16,18 @@
  *
  * Zero dependencies. Exit 0 always (never blocks a tool call).
  *
- * Deliberately uses a PLAIN RELATIVE path when wired in settings.json (never
- * `$CLAUDE_PROJECT_DIR`): that variable is empty in `claude -p` sessions and Claude Code
- * pre-expands it textually before spawn, so node would look for `C:\.claude\hooks\...` and
- * fail non-blockingly. `projectRoot()` below self-locates via `.claude`/`.git` walk-up
- * instead of trusting the env var.
+ * Wired in settings.json via a self-locating `node -e` one-liner (#1069), not a plain path:
+ * a plain RELATIVE path breaks the instant a session `cd`s (the hook's actual OS cwd mirrors
+ * wherever the triggering Bash call last moved to, not the worktree root — MODULE_NOT_FOUND
+ * before this file even loads), and a `$CLAUDE_PROJECT_DIR`-anchored one breaks in `claude -p`
+ * sessions (that variable is empty there and Claude Code pre-expands it textually before
+ * spawn, so node looks for `C:\.claude\hooks\...`). The one-liner needs no file-path
+ * resolution at spawn time at all — it walks up from `process.cwd()` for `.claude`/`.git`
+ * (same idea as `projectRoot()` below, just one level earlier) before dynamically `import()`ing
+ * this file from the resolved absolute path. See `DISCLOSE_CONTEXT_COMMAND` in
+ * `packages/server/src/services/project-scaffold.ts` for the exact command and its scaffold
+ * wiring; `projectRoot()` below still exists because the injected content's OWN root-relative
+ * bookkeeping needs it independently of how this file got loaded.
  *
  * Env knobs (KANBAN_ prefixed — see docs/env-vars.md):
  *   KANBAN_DISCLOSE_STATE_DIR   where per-session "already injected" state lives (default: os tmpdir)
