@@ -39,9 +39,7 @@ export type ViewMode =
   | "strategy"
   | "focus"
   | "runbooks"
-  | "capacity"
   | "activity"
-  | "stale-work"
   | "analytics"
   | "calendar"
   | "plugin-views";
@@ -66,7 +64,7 @@ export interface ViewDescriptor {
   shortcut?: string;
   /**
    * Some views use a non-default active-button color (swimlane = blue,
-   * stale-work = amber). Defaults to the brand color when omitted.
+   * crime-scene = red). Defaults to the brand color when omitted.
    */
   activeClass?: string;
   /** `graph` is reached via a `g` chord (g+s opens settings) rather than a plain key handler. */
@@ -184,9 +182,9 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     id: "focus",
     toolbarLabel: "Focus",
     label: "Focus",
-    tooltip: "Focus — what should I work on next?",
+    tooltip: "Focus — what to work on next, free capacity, and stuck work",
     paletteIcon: "◎",
-    paletteDescription: "What should I work on next?",
+    paletteDescription: "What should I work on next? Ranked ready work, agent capacity, and stale issues as tabs",
     shortcut: "o",
     group: "secondary",
   },
@@ -264,17 +262,6 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     shortcut: "j",
     group: "secondary",
   },
-  {
-    id: "capacity",
-    toolbarLabel: "Capacity",
-    label: "Sprint Capacity Planner",
-    tooltip: "Sprint Capacity Planner — agent slots, backlog health, next cycle preview",
-    paletteIcon: "⬡",
-    paletteDescription: "Show agent capacity, open slots, and next issues to launch",
-    // No single-key shortcut: "c" is a reserved global board action (see
-    // useBoardKeyboardShortcuts). Reachable via the More menu and Ctrl+K palette.
-    group: "secondary",
-  },
   // The four decorative views — constellation (`e`), momentum (`v`), fireworks,
   // garden — were extracted to the external `board-whimsy` plugin (#237); momentum
   // was dropped outright (swimlane is a strict superset). The `v` and `e`
@@ -292,16 +279,6 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteDescription: "Board feed: status transitions, merges and sessions, plus standup digest and (multi-repo) cross-repo activity as tabs",
     // No single-key shortcut: "x" is a reserved global board action (see
     // useBoardKeyboardShortcuts). Reachable via the More menu and Ctrl+K palette.
-    group: "secondary",
-  },
-  {
-    id: "stale-work",
-    toolbarLabel: "Stale",
-    label: "Stale Work",
-    tooltip: "Stale Work — issues stuck in a column beyond a configurable threshold",
-    paletteIcon: "⏰",
-    paletteDescription: "List issues stuck in their current column with one-click nudge",
-    activeClass: "bg-amber-500 text-white",
     group: "secondary",
   },
   {

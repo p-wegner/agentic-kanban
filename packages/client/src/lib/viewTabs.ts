@@ -165,6 +165,40 @@ export type ActivityTabId = "activity" | "digest" | "cross-repo";
 
 export const ACTIVITY_TAB_IDS = ACTIVITY_TABS.map((t) => t.id as ActivityTabId);
 
+// ---------------------------------------------------------------------------
+// #1067 — the "what should I work on next?" hub: Focus + Capacity + Stale Work.
+// ---------------------------------------------------------------------------
+
+export const FOCUS_VIEW_ID = "focus";
+
+export const FOCUS_TABS: readonly ViewTabDescriptor[] = [
+  {
+    id: "focus",
+    label: "Focus",
+    paletteLabel: "Focus",
+    paletteIcon: "◎",
+    paletteDescription: "What should I work on next? Ready and blocked issues, ranked",
+  },
+  {
+    id: "capacity",
+    label: "Capacity",
+    paletteLabel: "Sprint Capacity Planner",
+    paletteIcon: "⬡",
+    paletteDescription: "Agent capacity, open slots, and the next issues the monitor would launch",
+  },
+  {
+    id: "stale",
+    label: "Stale",
+    paletteLabel: "Stale Work",
+    paletteIcon: "⏰",
+    paletteDescription: "Issues stuck in their current column beyond a threshold, with one-click nudge",
+  },
+];
+
+export type FocusTabId = "focus" | "capacity" | "stale";
+
+export const FOCUS_TAB_IDS = FOCUS_TABS.map((t) => t.id as FocusTabId);
+
 export const RUNTIME_VIEW_ID = "runtime";
 
 export const RUNTIME_TABS: readonly ViewTabDescriptor[] = [

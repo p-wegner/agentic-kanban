@@ -9,6 +9,8 @@ import {
   ACTIVITY_TABS,
   ACTIVITY_VIEW_ID,
   ANALYTICS_TABS,
+  FOCUS_VIEW_ID,
+  FOCUS_TABS,
   ANALYTICS_VIEW_ID,
   RUNTIME_TABS,
   RUNTIME_VIEW_ID,
@@ -361,7 +363,7 @@ export function useBoardKeyboardShortcuts(
       }));
     }
 
-    // Absorbed container tabs (#234/#235): each former single view stays one
+    // Absorbed container tabs (#234/#235/#1066/#1067): each former single view stays one
     // palette hit away — the action opens its container view at the right tab.
     // Cross-repo activity is only offered on multi-repo projects (#235).
     const containerTabActions: { viewId: string; view: ViewMode; prefix: string; tabs: typeof ANALYTICS_TABS }[] = [
@@ -373,6 +375,7 @@ export function useBoardKeyboardShortcuts(
         tabs: state.hasAdditionalRepos ? ACTIVITY_TABS : ACTIVITY_TABS.filter((t) => t.id !== "cross-repo"),
       },
       { viewId: RUNTIME_VIEW_ID, view: "runtime", prefix: "Runtime Feed", tabs: RUNTIME_TABS },
+      { viewId: FOCUS_VIEW_ID, view: "focus", prefix: "Focus", tabs: FOCUS_TABS },
     ];
     for (const { viewId, view, prefix, tabs } of containerTabActions) {
       for (const tab of tabs) {
