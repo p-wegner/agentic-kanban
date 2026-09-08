@@ -6,7 +6,9 @@
  *    in In Review / Done — it pulls it back to In Progress.
  *  - When all children are terminal (N/N Done), the engine drives the meta to Done and
  *    marks the drive completed.
- *  - A drive with no meta, or a meta with no children, is a no-op.
+ *  - A drive with no meta is a no-op.
+ *  - A meta with no children (#1074, a one-ticket drive) is never forced, but the drive
+ *    is marked completed once the meta reaches a terminal status on its own.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
@@ -192,12 +194,25 @@ describe("reconcileDriveCompletion — drive completion contract (#801)", () => 
     expect(await metaStatusName(db, s)).toBe("In Review");
   });
 
-  it("is a no-op for a meta with no children linked", async () => {
+  it("is a no-op for a meta with no children linked while it is still open", async () => {
     const s = await seed(db, { metaStatus: "In Review", childStatuses: [], linkChildren: false });
     const changed = await reconcileDriveCompletion(db, { now });
     expect(changed).toBe(0);
     expect(await metaStatusName(db, s)).toBe("In Review");
     expect(await driveStatus(db, s)).toBe("active");
+  });
+
+  // #1074: a right-sized epic correctly gets zero children (the #116 atomic floor refused
+  // to split it) — the epic itself IS the drive's work. Nothing should force it, but the
+  // drive must be able to complete once it does, or the drive is a permanent 0/0 dead end.
+  it("completes a one-ticket drive (no children) once the meta reaches Done on its own", async () => {
+    const s = await seed(db, { metaStatus: "Done", childStatuses: [], linkChildren: false });
+    const changed = await reconcileDriveCompletion(db, { now });
+    expect(changed).toBe(1);
+    expect(await metaStatusName(db, s)).toBe("Done");
+    expect(await driveStatus(db, s)).toBe("completed");
+    const finished = await db.select({ finishedAt: drives.finishedAt }).from(drives).where(eq(drives.id, s.driveId)).limit(1);
+    expect(finished[0].finishedAt).toBe(now);
   });
 
   it("ignores already-completed / abandoned drives", async () => {
