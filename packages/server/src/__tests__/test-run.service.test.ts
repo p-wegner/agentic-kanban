@@ -161,11 +161,13 @@ describe("extractTextFromMessageData", () => {
 });
 
 describe("ingestSession (DB-backed)", () => {
-  it("ingests recognizable test results and feeds getFlaky", async () => {
+  it("ingests recognizable test results into test_runs", async () => {
     const { db } = createTestDb();
     const svc = createTestRunService(db);
 
-    // 30 sessions: each reports the same test, ~half pass / half fail → flaky.
+    // 30 sessions, each reporting the same test, ~half pass / half fail. The flaky RADAR that
+    // used to read this back was deleted in #1062; what still matters — and what exit-workflow
+    // depends on — is that every session's result lands in `test_runs` exactly once.
     for (let i = 0; i < 30; i++) {
       const sessionId = `sess-${i}`;
       const passed = i % 2 === 0;
@@ -180,12 +182,10 @@ describe("ingestSession (DB-backed)", () => {
       expect(inserted).toBe(1);
     }
 
-    const flaky = await svc.getFlaky({ minRuns: 5, windowDays: 30 });
-    expect(flaky).toHaveLength(1);
-    expect(flaky[0].testName).toBe("g > flaky");
-    expect(flaky[0].totalRuns).toBe(30);
-    expect(flaky[0].flakeRate).toBeGreaterThan(0.05);
-    expect(flaky[0].flakeRate).toBeLessThan(0.95);
+    const rows = await db.select().from(testRuns);
+    expect(rows).toHaveLength(30);
+    expect(new Set(rows.map((r) => r.testName))).toEqual(new Set(["g > flaky"]));
+    expect(rows.filter((r) => r.passed).length).toBe(15);
   });
 
   it("is idempotent per session (no double-count on re-exit)", async () => {

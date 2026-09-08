@@ -30,7 +30,6 @@ import {
   showdownBody,
 } from "../routes/issue-body-schemas.js";
 import { failurePatternBody, failurePatternIngestBody } from "../routes/failure-pattern-body-schemas.js";
-import { flakyParseBody, flakyPinBody } from "../routes/flaky-test-body-schemas.js";
 import { driveEnabledBody } from "../routes/drive-body-schemas.js";
 import { pickWinnerBody } from "../routes/showdown-body-schemas.js";
 import { voiceCaptureBody } from "../routes/voice-capture-body-schemas.js";
@@ -63,9 +62,6 @@ const REJECTS: Array<[string, ZodType<unknown>, unknown, string]> = [
   ["issues POST /:id/showdown (too few)", showdownBody, { contestants: [{}] }, "contestants must be an array with at least 2 entries"],
   ["failure-patterns POST /", failurePatternBody, { title: " " }, "title is required"],
   ["failure-patterns POST /ingest", failurePatternIngestBody, {}, "filePath is required"],
-  ["flaky-tests POST /parse (no sessionId)", flakyParseBody, {}, "sessionId and output are required"],
-  ["flaky-tests POST /parse (no output)", flakyParseBody, { sessionId: "s" }, "sessionId and output are required"],
-  ["flaky-tests POST /pin", flakyPinBody, {}, "testName is required"],
   ["drive PUT /:projectId/drive (missing)", driveEnabledBody, {}, "enabled (boolean) is required"],
   ["drive PUT /:projectId/drive (wrong type)", driveEnabledBody, { enabled: "true" }, "enabled (boolean) is required"],
   ["showdowns POST /:id/pick-winner", pickWinnerBody, {}, "winnerWorkspaceId is required"],
@@ -113,8 +109,6 @@ describe("#806 batch 3 — bodies that succeed today still succeed", () => {
     ["an absent refresh", analyzeTouchedFilesBody, {}],
     // The handler whitelists `kind`/`author` and FALLS BACK rather than rejecting.
     ["a comment with an unknown kind", issueCommentBody, { body: "hi", kind: "bogus", author: "martian" }],
-    // `parseTestOutput` treats anything but "playwright" as vitest.
-    ["an unknown runner", flakyParseBody, { sessionId: "s", output: "{}", runner: "junit" }],
     // Read as truthiness (`if (body.dryRun)`), so a non-boolean is meaningful, not an error.
     ["a truthy non-boolean dryRun", mergeQueueBody, { workspaceIds: ["w"], dryRun: "yes" }],
     // `severity` is optional; its predicate must short-circuit on `undefined`.

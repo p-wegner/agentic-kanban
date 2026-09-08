@@ -38,7 +38,6 @@ export type ViewMode =
   | "workflow-analytics"
   | "insights"
   | "swimlane"
-  | "flaky-tests"
   | "runtime"
   | "drive"
   | "strategy"
@@ -71,7 +70,7 @@ export interface ViewDescriptor {
   shortcut?: string;
   /**
    * Some views use a non-default active-button color (insights/swimlane = blue,
-   * flaky-tests = amber). Defaults to the brand color when omitted.
+   * stale-work = amber). Defaults to the brand color when omitted.
    */
   activeClass?: string;
   /** `graph` is reached via a `g` chord (g+s opens settings) rather than a plain key handler. */
@@ -275,17 +274,6 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteDescription: "Priority lanes × status columns",
     shortcut: "p",
     activeClass: "bg-blue-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "flaky-tests",
-    toolbarLabel: "Flaky",
-    label: "Flaky Tests Radar",
-    tooltip: "Flaky Tests Radar — intermittent failures",
-    paletteIcon: "⚠",
-    paletteDescription: "Track intermittent test failures",
-    shortcut: "k",
-    activeClass: "bg-amber-500 text-white",
     group: "secondary",
   },
   {

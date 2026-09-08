@@ -23,7 +23,6 @@ import { createInsightsRoute } from "./insights.js";
 import { createDigestRoute } from "./digest.js";
 import { createFocusRoute } from "./focus.js";
 import { createProfileRosterRoute } from "./profile-roster.js";
-import { createFlakyTestsRoute } from "./flaky-tests.js";
 import { createRedDebtRoute } from "./red-debt.js";
 import { createFailurePatternsRoute } from "./failure-patterns.js";
 import { createQualityMetricsRoute } from "./quality-metrics.js";
@@ -102,7 +101,6 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/digest", createDigestRoute(database));
   routes.route("/focus", createFocusRoute(database));
   routes.route("/profile-roster", createProfileRosterRoute(database));
-  routes.route("/flaky-tests", createFlakyTestsRoute(database));
   routes.route("/red-debt", createRedDebtRoute(database));
   routes.route("/failure-patterns", createFailurePatternsRoute(database));
   routes.route("/projects", createQualityMetricsRoute(database));

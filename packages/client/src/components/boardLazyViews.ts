@@ -27,7 +27,6 @@ export const RuntimeFeedView = lazy(() => import("./RuntimeFeedView.js").then((m
 export const FocusView = lazy(() => import("./FocusView.js").then((m) => ({ default: m.FocusView })));
 export const StrategyTargetsView = lazy(() => import("./StrategyTargetsView.js").then((m) => ({ default: m.StrategyTargetsView })));
 export const SwimlaneView = lazy(() => import("./SwimlaneView.js").then((m) => ({ default: m.SwimlaneView })));
-export const FlakyTestsPanel = lazy(() => import("./FlakyTestsPanel.js").then((m) => ({ default: m.FlakyTestsPanel })));
 export const RunbooksView = lazy(() => import("./RunbooksView.js").then((m) => ({ default: m.RunbooksView })));
 export const SprintCapacityPlanner = lazy(() => import("./SprintCapacityPlanner.js").then((m) => ({ default: m.SprintCapacityPlanner })));
 export const StaleWorkDashboard = lazy(() => import("./StaleWorkDashboard.js").then((m) => ({ default: m.StaleWorkDashboard })));
