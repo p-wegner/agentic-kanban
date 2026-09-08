@@ -49,6 +49,12 @@
  *     38 of the offenders and a literal-only scan is blind to every one of them. The helper
  *     names are DERIVED (any function whose body mints a temp dir from a parameter), not
  *     hand-listed, so a newly written helper is covered without editing this file.
+ *  4. A read of `process.env.TEMP`/`TMP`/`TMPDIR` (#1056) — see `tempEnvVarName` below. All
+ *     three passes above key off a `tmpdir()` CALL, and the file filter skipped any file that
+ *     never wrote the word, so a suite reaching the same directory through the environment was
+ *     invisible to every one of them. Two were, and were still leaking a `.db` per test on the
+ *     day #1056 was worked with this suite green.
+ *
  *  3. A NON-`mkdtemp` child of `tmpdir()`: `join(tmpdir(), `thing-${randomUUID()}`)` (#840).
  *     Both passes above key off the word `mkdtemp`, so a path merely BUILT under `tmpdir()` and
  *     then `mkdirSync`'d — or written as a loose file — was invisible to this guard. That blind
@@ -165,6 +171,51 @@ const COMMENT_LINE = /^\s*(\*|\/\/|\/\*)/;
 const MKDTEMP_CALLEES = new Set(["mkdtemp", "mkdtempSync"]);
 const PATH_JOINERS = new Set(["join", "resolve"]);
 
+/**
+ * The env vars that name the OS temp root. Reading one is a SECOND door into `%TEMP%` that every
+ * pass in this guard is blind to (#1056): each keys off a `tmpdir()` call, and the file filter
+ * skipped a file that never writes the word at all. Two suites went through that door —
+ *
+ * ```ts
+ * const dir = process.env.TEMP || process.env.TMP || process.cwd();
+ * const file = `${dir}/dedup-same-root-${randomUUID()}.db`;   // loose in %TEMP%, forever
+ * ```
+ *
+ * — and were still minting a fresh `.db` (+ `-wal`/`-shm`) per test the day #1056 was worked,
+ * while this suite was green. Whether the resulting name lands in a swept namespace is not
+ * knowable from the call text here (the root arrives through a variable), so this guard does not
+ * try to judge the prefix: it forbids the DOOR. `tmpdir()` is the one sanctioned temp root,
+ * because it is the only one the three passes above can actually see.
+ */
+const TEMP_ENV_VARS = new Set(["TEMP", "TMP", "TMPDIR"]);
+/** Cheap pre-filter for the parse set — the AST pass below is what actually decides. */
+const TEMP_ENV_TEXT = /process\s*\.\s*env\s*\.\s*(TEMP|TMP|TMPDIR)|process\s*\.\s*env\s*\[\s*["'`](TEMP|TMP|TMPDIR)["'`]\s*\]/;
+
+/** Is this `process.env.TEMP` (or `.TMP`/`.TMPDIR`, dotted or bracketed)? */
+function tempEnvVarName(node: ts.Node): string | null {
+  let objectExpr: ts.Expression;
+  let name: string | null;
+  if (ts.isPropertyAccessExpression(node)) {
+    objectExpr = node.expression;
+    name = node.name.text;
+  } else if (ts.isElementAccessExpression(node)) {
+    objectExpr = node.expression;
+    const arg = unwrapExpression(node.argumentExpression);
+    name =
+      ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg) ? arg.text : null;
+  } else {
+    return null;
+  }
+  if (name === null || !TEMP_ENV_VARS.has(name)) return null;
+  const obj = unwrapExpression(objectExpr);
+  // `process.env.X` — and nothing else. A local `env.TEMP` could be any object.
+  if (!ts.isPropertyAccessExpression(obj)) return null;
+  if (obj.name.text !== "env") return null;
+  const proc = unwrapExpression(obj.expression);
+  if (!ts.isIdentifier(proc) || proc.text !== "process") return null;
+  return name;
+}
+
 /** Is this expression a call to `tmpdir()` (bare or `os.tmpdir()`)? */
 function isTmpdirCall(expr: ts.Expression): boolean {
   const inner = unwrapExpression(expr);
@@ -258,7 +309,11 @@ function scan(): ScanResult {
   const parsed = new Map<string, { rel: string; lines: string[]; sf: ts.SourceFile }>();
   for (const f of files) {
     const src = readFileSync(f, "utf8");
-    if (!src.includes("tmpdir()") && !src.includes("TEMP-PREFIX OK")) continue;
+    if (
+      !src.includes("tmpdir()")
+      && !TEMP_ENV_TEXT.test(src)
+      && !src.includes("TEMP-PREFIX OK")
+    ) continue;
     parsed.set(f, {
       rel: relative(REPO_ROOT, f).replace(/\\/g, "/"),
       lines: src.split(/\r?\n/),
@@ -342,6 +397,13 @@ function scan(): ScanResult {
         }
       }
 
+      // Pass 4 — a read of `process.env.TEMP`/`TMP`/`TMPDIR` (#1056). Recorded with the env var
+      // as its "prefix" so it flows through the same offender list and the same OK-marker
+      // escape hatch as every other shape; no namespace can ever match `process.env.TEMP`x,
+      // which is the point — the door is forbidden, not the name behind it.
+      const envVar = tempEnvVarName(node);
+      if (envVar !== null) record(entry, node, `process.env.${envVar}`, "temp-env-read");
+
       node.forEachChild(visit);
       if (named !== null) stack.pop();
     };
@@ -403,6 +465,9 @@ describe("every fixture temp dir is minted in a swept namespace (#839)", () => {
         "If it is a loose FILE, a rename buys NOTHING (the reaper is gated on " +
         "`statSync(...).isDirectory()`): mint it INSIDE an `ak-` directory instead — see " +
         "`helpers/test-db.ts` for the pattern.\n" +
+        "If the shape is `temp-env-read`, the offender is the DOOR, not the name: replace " +
+        "`process.env.TEMP` with `tmpdir()` from `node:os` so the three passes above can " +
+        "see where the entry actually lands.\n" +
         "If the path is deliberately never created (a negative test), put " +
         `\`// ${OK_MARKER} <reason>\` on the line, or anywhere in the comment block above it.`,
     ).toEqual([]);
@@ -482,6 +547,39 @@ describe("every fixture temp dir is minted in a swept namespace (#839)", () => {
     // The prefix the wrapped site would be reported under is genuinely unswept, so it would
     // have been an offender — this is not a shape that passes for an unrelated reason.
     expect(matchedNamespace("leaky-abc")).toBeNull();
+  });
+
+  it("a process.env.TEMP read is seen — the door pass 1-3 were blind to (#1056)", () => {
+    // This pass has NO floor it can be held to: once both offenders were fixed the tree holds
+    // zero env reads, which is the desired end state and also exactly what a dead pass looks
+    // like. So it is proven on synthesized source instead — the shape that was leaking a `.db`
+    // per test on the day #1056 was worked, verbatim, plus the forms it must not over-match.
+    const source = [
+      'const dotted = process.env.TEMP || process.env.TMP || process.cwd();',
+      'const bracketed = process.env["TMPDIR"];',
+      "const file = `${dotted}/dedup-same-root-${randomUUID()}.db`;",
+      // Must NOT match: a different env var, and a same-named property on another object.
+      "const unrelated = process.env.HOME;",
+      "const notProcess = config.env.TEMP;",
+      "const alsoNot = someEnv.TEMP;",
+    ].join("\n");
+    const sf = parseGuardSource(join(REPO_ROOT, "__synthetic__", "env-read.ts"), source);
+
+    const found: string[] = [];
+    forEachNode(sf, (node) => {
+      const v = tempEnvVarName(node);
+      if (v !== null) found.push(v);
+    });
+    expect(found, "the three temp-root env reads must all be seen, and nothing else").toEqual([
+      "TEMP",
+      "TMP",
+      "TMPDIR",
+    ]);
+    // And the pre-filter that decides whether a file is even parsed must agree with the AST
+    // pass — a file it skips can never reach `tempEnvVarName`, which is precisely how the two
+    // real offenders stayed invisible while carrying no `tmpdir()` call at all.
+    expect(TEMP_ENV_TEXT.test(source), "the parse pre-filter must admit this file").toBe(true);
+    expect(TEMP_ENV_TEXT.test("const x = process.env.HOME;"), "and must not admit an unrelated one").toBe(false);
   });
 
   it("the guard bites — it flags an unswept prefix and clears the ak- form beside it", () => {
