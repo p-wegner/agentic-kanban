@@ -83,7 +83,32 @@ import {
  * THIS worst-case number, only what an ordinary diff pays, which is the point #1052 exists to
  * shrink for `check:arch` itself. Should shrink at the next `durations.json` capture.
  */
-const BASELINE_TOTAL_MS = 558_000;
+/*
+ * -- Fourth disclosed movement (2026-09-08, #1056 follow-up) — 558,000 -> 561,000 ----------
+ *
+ * `legacy-temp-prefixes.test.ts`, the 182nd guard, at the ASSUMED 3,000 ms.
+ *
+ * The argument for the seconds: it pins a rule that DELETES. `sweep-temp-dirs.mjs --legacy`
+ * removes un-namespaced `%TEMP%` directories by DERIVED ownership — for every `ak-<X>-` prefix
+ * this repo mints today, the bare `<X>-` form came from an older revision of that same call site
+ * — and it removed 22,704 of them on its first run. That derivation is what stands between the
+ * script and deleting a SIBLING tool's directories (refactor-skill and code-metrics live on the
+ * same box), and the specificity filter that declines generic bare forms (`plan`, `ws`, `fork`)
+ * is the only thing making the claim safe. A guard on a deletion rule is not one to leave
+ * scopeable.
+ *
+ * It imports `scripts/legacy-temp-prefixes.mjs`, outside every package's `src/` tree, which is
+ * the import-graph-invisible shape the marker exists for — the same reason `check-arch-scoping`
+ * and `promote-evidence` above carry one. It has a `when:scripts/**` territory, so an ordinary
+ * diff pays nothing; per this file's own doc that does not move THIS worst-case number, only
+ * what a particular diff pays.
+ *
+ * Caught by this ratchet on the master sweep (561s against the 558s floor) rather than at review
+ * time — the mechanism working, since the marker went in without anyone pricing it. Should
+ * shrink at the next `durations.json` capture: measured ~4s wall for three cases, most of it one
+ * tree walk.
+ */
+const BASELINE_TOTAL_MS = 561_000;
 
 /**
  * How far under the baseline is tolerated before it counts as stale.

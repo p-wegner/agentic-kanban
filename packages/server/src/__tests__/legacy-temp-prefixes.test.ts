@@ -1,5 +1,16 @@
-// @gate:always-run — imports scripts/legacy-temp-prefixes.mjs and walks the whole repo tree,
-// which no package-local diff links to (#687).
+// @gate:always-run when:scripts/**
+// Imports scripts/legacy-temp-prefixes.mjs, which no package-local diff links to (#687), so it
+// must not be scoped out BY IMPORT GRAPH. It does not need to run on every diff though, and an
+// unconditional marker here is not free: it costs ~3s on EVERY gate run forever, which is what
+// `always-run-guard-runtime-ratchet.test.ts` (#1042) exists to price — it caught this one on the
+// master sweep, at 561s against a 558s floor.
+//
+// The RULE this pins lives in `scripts/`, so that is the territory. Residual gap, stated rather
+// than hidden: the assertions below also name four `ak-` prefixes minted in `packages/**`
+// (smoke-check, cli, compounding-setup, drive-preflight), so renaming one of those without
+// touching `scripts/` would not force this suite. The full sweep catches that case — which is
+// exactly how this marker's own cost was caught — and paying 3s on every diff to close it is the
+// worse trade.
 /**
  * #1056 follow-up — `sweep-temp-dirs.mjs --legacy` DELETES by a derived rule, so the derivation
  * is the thing that needs pinning.
