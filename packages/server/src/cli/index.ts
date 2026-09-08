@@ -25,6 +25,7 @@ import { registerOpenspecCommand } from "./commands/openspec.js";
 import { registerBoardCommand } from "./commands/board.js";
 import { registerServicesCommand } from "./commands/services.js";
 import { registerWorkerCommand } from "./commands/worker.js";
+import { registerPluginSyncCommand } from "./commands/plugin-sync.js";
 import { runMigrations, logDefaultBranch } from "./shared.js";
 import { homeFallbackDbWarning, probeCheckoutDb } from "./db-warning.js";
 import { checkAndRecordDbResolution } from "./last-resolved-db.js";
@@ -69,6 +70,7 @@ registerOpenspecCommand(program);
 registerBoardCommand(program);
 registerServicesCommand(program);
 registerWorkerCommand(program);
+registerPluginSyncCommand(program);
 
 // ── Split-brain guards (#112, #165): warn loudly whenever a CLI subcommand's
 // resolved DB might not be the one the user expects.

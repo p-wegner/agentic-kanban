@@ -23,6 +23,7 @@ import { createPluginEnablementOps } from "./plugin-enablement.service.js";
 import { createPluginLifecycleOps } from "./plugin-lifecycle.service.js";
 import { createPluginListingOps } from "./plugin-listing.service.js";
 import { createPluginProjectSurfaceOps } from "./plugin-project-surface.service.js";
+import { createPluginSyncOps } from "./plugin-sync.service.js";
 import { buildButlerFragments } from "./plugin/butler-fragments.js";
 import {
   resolveLoopRunContext as resolveLoopRunContextIn,
@@ -242,6 +243,12 @@ export function createPluginService(deps: {
     return resolveLoopRunContextIn(pluginRowId, loopName, projectId, runContextDeps, opts);
   }
 
+  // External-issue-tracker sync (#1076 declares it, #1081 wires it up) — extracted to its own
+  // module (god-module ceiling), same shape as the output-location ops above.
+  const { getSyncConfig, setSyncConfig, validateSync, triggerSync, getSyncStatus } = createPluginSyncOps({
+    database, requirePlugin, requireProject, resolvePluginRunContext,
+  });
+
   /**
    * Advance one converging loop: plan, then create a ticket per outstanding unit.
    * The board's monitor is what STARTS those tickets — see plugin-loop.service.
@@ -317,6 +324,11 @@ export function createPluginService(deps: {
     runSkill,
     getOutputLocation,
     setOutputLocation: invalidatesPluginList(setOutputLocation),
+    getSyncConfig,
+    setSyncConfig,
+    validateSync,
+    triggerSync,
+    getSyncStatus,
   };
 }
 

@@ -249,7 +249,9 @@ export function isProjectScopedDynamicKey(key: string): boolean {
     || isPluginEnabledPreferenceKey(key)
     || isPluginLoopPausedPreferenceKey(key)
     || isPluginLoopConvergedPreferenceKey(key)
-    || isPluginOutputLocationPreferenceKey(key);
+    || isPluginOutputLocationPreferenceKey(key)
+    || isPluginSyncConfigPreferenceKey(key)
+    || isPluginSyncStatusPreferenceKey(key);
 }
 
 /**
@@ -289,6 +291,22 @@ export function isPluginLoopConvergedPreferenceKey(key: string): boolean {
  */
 export function isPluginOutputLocationPreferenceKey(key: string): boolean {
   return /^plugin_output_location_[a-z0-9-]+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(key);
+}
+
+/**
+ * True for the per-project sync CONFIG key (`plugin_sync_config_<pluginSlug>_<projectId>`, #1081).
+ * Same two-dynamic-segment shape as `isPluginEnabledPreferenceKey`, for the same reason.
+ */
+export function isPluginSyncConfigPreferenceKey(key: string): boolean {
+  return /^plugin_sync_config_[a-z0-9-]+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(key);
+}
+
+/**
+ * True for the per-project sync RUN-STATUS key (`plugin_sync_status_<pluginSlug>_<projectId>`,
+ * #1081). Same shape as {@link isPluginSyncConfigPreferenceKey}.
+ */
+export function isPluginSyncStatusPreferenceKey(key: string): boolean {
+  return /^plugin_sync_status_[a-z0-9-]+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(key);
 }
 
 /**
