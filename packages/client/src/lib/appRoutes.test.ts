@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
   buildAppPath,
@@ -10,6 +11,7 @@ import { VIEW_IDS, type ViewMode } from "./viewRegistry";
 import {
   RESERVED_ROUTE_SEGMENTS,
   VIEW_TAB_REGISTRY,
+  type ViewTabDescriptor,
   getDefaultViewTab,
   getViewTabIds,
 } from "./viewTabs";
@@ -559,6 +561,38 @@ describe("tab segment — /p/<slug>/<view>/<tab>", () => {
       expect(RESERVED_ROUTE_SEGMENTS).not.toContain(def);
       // The registry keys ARE view modes — otherwise no URL could reach them.
       expect(VIEW_IDS).toContain(view);
+    }
+  });
+
+  /**
+   * #1067 — every tab set declared in viewTabs.ts must be IN the registry.
+   *
+   * The tests above all iterate `VIEW_TAB_REGISTRY`, so a container whose tab set
+   * was declared and wired into a component but never registered passes all of
+   * them while being silently unroutable: `useViewTab` resolves its ids through
+   * `getViewTabIds`, so an unregistered container's tab never reaches the URL and
+   * a deep link to it can never be parsed. That is exactly what happened when
+   * FOCUS_TABS was added — the tabs rendered and switched, and only the address
+   * bar (and therefore deep-linking) was quietly dead.
+   *
+   * Scanning the source rather than importing a hand-kept list is the point: a
+   * list of "the tab sets we know about" would drift the same way.
+   */
+  it("every *_TABS set declared in viewTabs.ts is registered as a container", async () => {
+    const src = await readFile(new URL("./viewTabs.ts", import.meta.url), "utf8");
+    const declared = [...src.matchAll(/export const ([A-Z0-9_]+)_TABS: readonly ViewTabDescriptor\[\]/g)]
+      .map((m) => m[1]);
+    expect(declared.length).toBeGreaterThan(3);
+
+    const registeredSets = Object.values(VIEW_TAB_REGISTRY).map((set) => set.tabs);
+    const tabSets = await import("./viewTabs.js") as Record<string, unknown>;
+    for (const name of declared) {
+      const set = tabSets[`${name}_TABS`];
+      expect(
+        registeredSets.includes(set as readonly ViewTabDescriptor[]),
+        `${name}_TABS is declared but missing from VIEW_TAB_REGISTRY — its container's tabs ` +
+          `would render but never reach the URL, and a deep link to them would not parse.`,
+      ).toBe(true);
     }
   });
 });
