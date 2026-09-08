@@ -261,8 +261,10 @@ export function isProbingThisProject(answer) {
  * @param {boolean} p.forceSweep   `--force-sweep` — consults no verdict at all, so nothing to acquire
  * @param {boolean} p.awaitSweep   false with `--no-await-sweep`: refuse as before rather than wait
  * @param {boolean} p.canRequest   is there a board to POST the reprobe to? (a sqlite-fallback read has no project id)
+ * @param {string|null} p.headSha   the branch tip, so a RED verdict about a commit that is no longer the tip
+ *                                  can be re-probed rather than refused (#1060). Null keeps the old refusal.
  */
-export function planSweepAcquisition({ verdict, direction = null, forceSweep = false, awaitSweep = true, canRequest = true, recover = false } = {}) {
+export function planSweepAcquisition({ verdict, direction = null, forceSweep = false, awaitSweep = true, canRequest = true, recover = false, headSha = null } = {}) {
   if (recover) {
     return { request: false, reason: "recover", detail: "--recover consults no sweep verdict — the build/migrate/restart/smoke pipeline and its rollback are this lane's gate" };
   }
@@ -281,7 +283,33 @@ export function planSweepAcquisition({ verdict, direction = null, forceSweep = f
   } else if (REPROBEABLE_SWEEP_REASONS.includes(verdict?.reason)) {
     need = `no usable sweep verdict (${verdict.reason})`;
   } else if (verdict?.reason === "red") {
-    return { request: false, reason: "red", detail: "the last sweep was RED — master is broken; re-probing it is not evidence-gathering. Fix master, or promote deliberately with --force-sweep." };
+    // A red verdict refuses a re-probe — but only while it still DESCRIBES the tree (#1060).
+    //
+    // #1044's rule ("re-probing a broken master is not evidence-gathering") is right, and it was
+    // being applied to the verdict alone, ignoring whether the verdict is still about HEAD. Once
+    // the breakage is FIXED, the red row is about a commit that is no longer the tip, and it says
+    // nothing whatever about the new one. Probing then is not "re-probing a red master" — it is
+    // probing a DIFFERENT, unmeasured commit, which is ordinary evidence-gathering and exactly
+    // what a stale-but-green verdict already gets a few lines above.
+    //
+    // That asymmetry was the defect, and it is not theoretical: on 2026-09-08 a promotion went
+    // red, the breach was fixed on master minutes later, and the next run refused with "Fix
+    // master" — which had just been done — offering only `--force-sweep`, the one path #1044
+    // exists to stop being routine. It happened twice in one session.
+    //
+    // Unknown HEAD keeps today's refusal: a comparison that cannot be made is not a licence.
+    if (headSha && verdict.sha && verdict.sha !== headSha) {
+      need = `the RED verdict is on ${verdict.sha} but the branch tip is now ${headSha} — that verdict `
+        + `describes a commit that is no longer the tip, so this is probing an unmeasured tree, not re-probing a broken one`;
+    } else {
+      return {
+        request: false,
+        reason: "red",
+        detail: "the last sweep was RED and it is ON the current branch tip — master is broken; re-probing it is not "
+          + "evidence-gathering. Fix master and re-run this (a red verdict about a commit that is no longer the tip is "
+          + "re-probed automatically), or promote deliberately with --force-sweep.",
+      };
+    }
   } else if (verdict?.reason === "unreadable") {
     return { request: false, reason: "unreadable", detail: "the sweep verdict could not be read at all, and the reprobe goes through the same board — nothing to ask" };
   } else {

@@ -643,8 +643,13 @@ async function main() {
   let verdict = verdictFor(sweep);
 
   const stableHead = readStableHead();
+  // Read the tip BEFORE the acquisition decision, not after it: `planSweepAcquisition` needs it to
+  // tell a RED verdict that still describes the tree from one about a commit that has since been
+  // fixed past (#1060). It was computed below purely by accident of ordering.
+  const branchHead = gitOrThrow(["rev-parse", baseBranch]);
   const acquisition = planSweepAcquisition({
     verdict,
+    headSha: branchHead,
     direction: directionFor(verdict.ok ? verdict.sha : null, stableHead),
     forceSweep: opts.forceSweep,
     recover: opts.recover,
@@ -670,7 +675,7 @@ async function main() {
     }
   }
 
-  const headSha = gitOrThrow(["rev-parse", baseBranch]);
+  const headSha = branchHead;
   const sha = verdict.ok && verdict.sha ? verdict.sha : headSha;
   const gateEvidence = readGateEvidence(verdict.at ?? null);
 

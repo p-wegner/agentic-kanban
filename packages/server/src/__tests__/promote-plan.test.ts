@@ -288,7 +288,13 @@ describe("sweep acquisition (#1044)", () => {
   });
 
   it("does NOT re-probe a red master, an unreadable board, or a verdict that already works", () => {
-    const red = planSweepAcquisition({ verdict: parseSweepVerdict(greenRow({ outcome: "red" }), { nowMs: NOW }) });
+    // The red row's sha IS the tip here (greenRow's default sha, passed as headSha), which is the
+    // case #1044 refuses and #1060 leaves untouched.
+    const redRow = greenRow({ outcome: "red" });
+    const red = planSweepAcquisition({
+      verdict: parseSweepVerdict(redRow, { nowMs: NOW }),
+      headSha: redRow.sha,
+    });
     expect(red.request).toBe(false);
     expect(red.reason).toBe("red");
 
@@ -301,6 +307,68 @@ describe("sweep acquisition (#1044)", () => {
     const usable = planSweepAcquisition({ verdict: green, direction: forward });
     expect(usable.request).toBe(false);
     expect(usable.reason).toBe("verdict-usable");
+  });
+
+  /**
+   * #1060 — the other half of #1044's trap, found by walking into it twice on 2026-09-08.
+   *
+   * #1044 taught promote to REQUEST the sweep it needs, but only for a verdict that was green
+   * (and stale or behind). A RED verdict refused outright, on the rule "re-probing a broken
+   * master is not evidence-gathering" — correct while the verdict still describes the tree, and
+   * wrong the moment the breach is FIXED. The red row is then about a commit that is no longer
+   * the tip and says nothing about the new one.
+   *
+   * The lived sequence: promotion went red on a #726 branch-ceiling breach; the breach was fixed
+   * on master minutes later; the next run refused with "Fix master" — which had just been done —
+   * and offered only `--force-sweep`. That is the single path #1044 exists to stop being routine,
+   * so the red branch was re-creating the trap #1044 closed for green.
+   */
+  describe("a RED verdict that no longer describes the tree (#1060)", () => {
+    const redRow = greenRow({ outcome: "red", sha: "36dc67366d" });
+    const redVerdict = parseSweepVerdict(redRow, { nowMs: NOW });
+
+    it("REPRODUCES the trap: fixing master past a red verdict now asks for a fresh sweep", () => {
+      const decision = planSweepAcquisition({ verdict: redVerdict, headSha: "bb0c5a903d" });
+      expect(decision.request).toBe(true);
+      expect(decision.reason).toBe("acquire");
+      // The message has to say WHY this is not a re-probe of a broken master, or the next reader
+      // reasonably concludes the #1044 rule was simply dropped.
+      expect(decision.detail).toContain("36dc67366d");
+      expect(decision.detail).toContain("bb0c5a903d");
+      expect(decision.detail).toContain("no longer the tip");
+    });
+
+    it("still refuses while the red verdict IS the tip — #1044's rule is intact", () => {
+      const decision = planSweepAcquisition({ verdict: redVerdict, headSha: redRow.sha });
+      expect(decision.request).toBe(false);
+      expect(decision.reason).toBe("red");
+      // And it now tells the operator what to do next, which the old wording did not: it said
+      // "Fix master" to someone who had just fixed master.
+      expect(decision.detail).toContain("re-run this");
+    });
+
+    it("refuses when HEAD is unknown — a comparison that cannot be made is not a licence", () => {
+      // Fail-safe direction: without a tip to compare against, keep #1044's behaviour exactly.
+      expect(planSweepAcquisition({ verdict: redVerdict, headSha: null }).reason).toBe("red");
+      expect(planSweepAcquisition({ verdict: redVerdict }).reason).toBe("red");
+    });
+
+    it("refuses when the red verdict carries no sha at all", () => {
+      const noSha = parseSweepVerdict(greenRow({ outcome: "red", sha: null }), { nowMs: NOW });
+      // `parseSweepVerdict` may classify a sha-less row by another reason; whichever it picks,
+      // the one thing that must not happen is a request justified by a comparison against null.
+      const decision = planSweepAcquisition({ verdict: noSha, headSha: "bb0c5a903d" });
+      if (decision.request) expect(decision.detail).not.toContain("no longer the tip");
+    });
+
+    it("--force-sweep and --no-await-sweep still win over the new path", () => {
+      expect(planSweepAcquisition({ verdict: redVerdict, headSha: "bb0c5a903d", forceSweep: true }).reason)
+        .toBe("force-sweep");
+      expect(planSweepAcquisition({ verdict: redVerdict, headSha: "bb0c5a903d", awaitSweep: false }).reason)
+        .toBe("disabled");
+      expect(planSweepAcquisition({ verdict: redVerdict, headSha: "bb0c5a903d", canRequest: false }).reason)
+        .toBe("no-board");
+    });
   });
 
   it("acquires nothing under --force-sweep, --no-await-sweep, or with no board to ask", () => {
