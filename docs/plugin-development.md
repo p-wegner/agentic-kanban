@@ -463,6 +463,45 @@ stamped on `<html>`). The board holds no doc and no plugin name of its own here 
 listed is exactly what the installed manifests declare, so a board without your plugin shows
 nothing about it.
 
+### sync
+
+```json
+"sync": {
+  "provider": "jira",
+  "pull": { "command": "node tools/sync/pull.mjs", "cwd": "plugin" },
+  "push": { "command": "node tools/sync/push.mjs", "cwd": "plugin" },
+  "config": [
+    { "key": "siteUrl", "label": "Site URL", "required": true },
+    { "key": "projectKey", "label": "Project key", "required": true },
+    { "key": "jql", "label": "JQL filter", "description": "Restricts which issues sync" }
+  ],
+  "secrets": ["JIRA_API_TOKEN", "JIRA_EMAIL"]
+}
+```
+
+Declares that this plugin can sync tickets with an external issue tracker. Same doctrine as
+everywhere else in this contract: the plugin contributes deterministic commands and a config
+shape, never credentials, never a scheduler.
+
+| Field | Meaning |
+|---|---|
+| `provider` | stable id of the tracker (`"jira"`, `"linear"`, …), `^[a-z0-9-]+$` |
+| `pull` | `{ command, cwd?, env? }` — deterministic command pulling remote state into the project |
+| `push` | `{ command, cwd?, env? }` — deterministic command pushing local state to the tracker |
+| `config` | `{ key, label?, description?, required? }[]` — the fields the board should collect before running `pull`/`push` (site URL, project key, JQL, …); `key` is what the resolved value is stored/passed under |
+| `secrets` | names of secret references the sync needs (e.g. `"JIRA_API_TOKEN"`) — **never the values**. The board resolves each name against its own credential store and injects it as an env var when running `pull`/`push` |
+
+At least one of `pull`/`push` is required — a `sync` block naming neither is rejected at parse
+time, since it would declare a capability with no command behind it. `config` and `secrets` are
+both optional; a manifest with no `sync` block at all behaves exactly as before this field
+existed (nothing reads it, nothing is required).
+
+**The manifest names which secrets it needs, never the secrets themselves.** `parsePluginManifest`
+rejects a `secrets[]` entry that reads as an actual token rather than a reference name (a JWT, a
+GitHub/Slack/OpenAI-shaped prefix, or anything implausibly long) — the same reasoning as the
+scaffold's `.git`-write refusal: cheap to catch here, expensive to discover after a token has been
+committed into a plugin repo.
+
 ### scaffold
 
 ```json
@@ -840,6 +879,10 @@ half-valid. The rules that are easy to trip:
 - `views[].kind` must be `"iframe"`.
 - `audience` (on `skills[]`, `scripts[]`, `views[]`) must be `"operator"` or `"developer"` when
   present; absent means `"operator"`.
+- `sync.provider` must match `^[a-z0-9-]+$`; `sync` must declare at least one of `pull`/`push`;
+  `sync.config[].key` and `sync.secrets[]` entries must be unique; a `sync.secrets[]` entry that
+  looks like an inline secret value (a JWT, a known provider token prefix, or anything over 64
+  characters) is rejected — it must be a reference NAME, never the secret itself.
 - In a plan: every unit needs an `id` and a `title`, and duplicate unit ids **within one plan**
   are an error.
 - **Unknown top-level fields are ignored**, deliberately — a manifest using a newer field stays
@@ -930,3 +973,9 @@ other's row. Namespace it.
   the agent exits cleanly from is Done with nobody looking; the plugin's own convergence check and
   the board's merge preflight are the only remaining gates. That is the right trade for unattended
   loops and the wrong one if you want a human to see each round.
+- **`sync` is a declared contract with no board-side runner yet (#1076).** The manifest can name a
+  provider, its `pull`/`push` commands, its config schema and its secret-reference names, and the
+  parser validates all of it — but nothing yet resolves a `sync.secrets[]` name against a
+  credential store, collects `sync.config[]` through a form, or runs `pull`/`push` on a schedule or
+  from the UI. Declaring `sync` today documents the capability; wiring board execution to it is
+  separate, later work.
