@@ -27,11 +27,9 @@ import {
   issueDependencyBody,
   issueArtifactBody,
   issueCommentBody,
-  showdownBody,
 } from "../routes/issue-body-schemas.js";
 import { failurePatternBody, failurePatternIngestBody } from "../routes/failure-pattern-body-schemas.js";
 import { driveEnabledBody } from "../routes/drive-body-schemas.js";
-import { pickWinnerBody } from "../routes/showdown-body-schemas.js";
 import { voiceCaptureBody } from "../routes/voice-capture-body-schemas.js";
 import { checkOverlapBody } from "../routes/project-analytics-body-schemas.js";
 import { mergeQueueBody } from "../routes/merge-queue-body-schemas.js";
@@ -58,13 +56,10 @@ const REJECTS: Array<[string, ZodType<unknown>, unknown, string]> = [
   // The COMBINED message must not split into a per-field one when only `content` is missing.
   ["issues POST /:id/artifacts (no content)", issueArtifactBody, { type: "image" }, "type and content are required"],
   ["issues POST /:id/comments", issueCommentBody, { body: "  " }, "body is required"],
-  ["issues POST /:id/showdown (not an array)", showdownBody, {}, "contestants must be an array with at least 2 entries"],
-  ["issues POST /:id/showdown (too few)", showdownBody, { contestants: [{}] }, "contestants must be an array with at least 2 entries"],
   ["failure-patterns POST /", failurePatternBody, { title: " " }, "title is required"],
   ["failure-patterns POST /ingest", failurePatternIngestBody, {}, "filePath is required"],
   ["drive PUT /:projectId/drive (missing)", driveEnabledBody, {}, "enabled (boolean) is required"],
   ["drive PUT /:projectId/drive (wrong type)", driveEnabledBody, { enabled: "true" }, "enabled (boolean) is required"],
-  ["showdowns POST /:id/pick-winner", pickWinnerBody, {}, "winnerWorkspaceId is required"],
   ["voice-capture POST", voiceCaptureBody, { transcript: "   " }, "transcript is required"],
   ["project-analytics POST /check-overlap (empty)", checkOverlapBody, { issueIds: [] }, "issueIds array is required"],
   ["merge-queue POST /", mergeQueueBody, { workspaceIds: [] }, "workspaceIds is required and must be a non-empty array"],

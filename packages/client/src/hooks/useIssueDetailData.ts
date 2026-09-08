@@ -53,7 +53,7 @@ interface IssueDetailBundle {
 /**
  * Owns the per-issue panel data: the single detail-bundle round-trip plus the
  * project-scoped lists (tags, available issues, skills, milestones) and the
- * showdown probe. Extracted from IssueDetailPanel so the loadData mega-effect and
+ * Extracted from IssueDetailPanel so the loadData mega-effect and
  * its ~16 state slots live as one cohesive unit; the panel destructures the
  * result with identical names and keeps its mutation handlers (delete artifact,
  * add note, …) using the returned setters.
@@ -73,7 +73,6 @@ export function useIssueDetailData(issue: IssueWithStatus, onIssueUpdate: (issue
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const [activityLoading, setActivityLoading] = useState(true);
   const [milestones, setMilestones] = useState<MilestoneResponse[]>([]);
-  const [activeShowdownId, setActiveShowdownId] = useState<string | null>(null);
   const [descriptionFetching, setDescriptionFetching] = useState(false);
   // #418: bundle-folded per-issue extras (previously 5 separate section fetches).
   const [cycleTime, setCycleTime] = useState<CycleTimeData | null>(null);
@@ -138,10 +137,6 @@ export function useIssueDetailData(issue: IssueWithStatus, onIssueUpdate: (issue
         setAvailableIssues(available.filter(i => i.id !== issue.id));
         setAvailableSkills(skills);
         setMilestones(milestonesResp);
-        // Check for active showdown (endpoint returns null when none exists)
-        apiFetch<{ id: string } | null>(`/api/issues/${issue.id}/showdown`)
-          .then(sd => setActiveShowdownId(sd?.id ?? null))
-          .catch(() => {});
       } catch {
         setArtifactsLoading(false);
         setActivityLoading(false);
@@ -169,7 +164,6 @@ export function useIssueDetailData(issue: IssueWithStatus, onIssueUpdate: (issue
     activityEvents, setActivityEvents,
     activityLoading, setActivityLoading,
     milestones, setMilestones,
-    activeShowdownId, setActiveShowdownId,
     descriptionFetching, setDescriptionFetching,
     // #418: bundle-folded extras for the (now fetch-free) section components.
     cycleTime,

@@ -51,7 +51,6 @@ interface IssueWorkspacesSectionProps {
   onStartWorkspace?: (issue: IssueWithStatus) => void;
   onIssueUpdate: (issue: IssueWithStatus) => void;
   onShowCompareAttempts: () => void;
-  onShowShowdown: () => void;
 }
 
 export function IssueWorkspacesSection({
@@ -61,7 +60,6 @@ export function IssueWorkspacesSection({
   onStartWorkspace,
   onIssueUpdate,
   onShowCompareAttempts,
-  onShowShowdown,
 }: IssueWorkspacesSectionProps) {
   const main = issue.workspaceSummary?.main;
   return (
@@ -161,13 +159,6 @@ export function IssueWorkspacesSection({
               Start Workspace
             </button>
           )}
-          <button
-            onClick={onShowShowdown}
-            className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
-            title="Run this ticket with different skill/model combos in parallel"
-          >
-            ⚔️ Showdown…
-          </button>
           <button
             onClick={() => onManageWorkspaces(issue)}
             className="text-sm text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"

@@ -53,9 +53,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   // ── /api/failure-patterns ──
   "GET /api/failure-patterns/search",
   // ── /api/flaky-tests ──
-  "DELETE /api/flaky-tests/pin",
-  "GET /api/flaky-tests",
-  "POST /api/flaky-tests/pin",
   // ── /api/focus ──
   "GET /api/focus",
   // ── /api/inbox ──
@@ -68,19 +65,14 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   // ── /api/issues ──
   "DELETE /api/issues/:param/artifacts/:param",
   "DELETE /api/issues/:param/comments/:param",
-  "DELETE /api/issues/:param/time-entries/:param",
   "GET /api/issues/:param/artifacts",
   "GET /api/issues/:param/dependencies",
-  "GET /api/issues/:param/showdown",
-  "GET /api/issues/:param/time-entries",
   "GET /api/issues/cfd",
   "POST /api/issues/:param/analyze-touched-files",
   "POST /api/issues/:param/artifacts",
   "POST /api/issues/:param/decompose",
   "POST /api/issues/:param/decompose/confirm",
   "POST /api/issues/:param/preflight",
-  "POST /api/issues/:param/showdown",
-  "POST /api/issues/:param/time-entries",
   "POST /api/issues/ai-estimate",
   "POST /api/issues/analyze-dependencies",
   "POST /api/issues/archive-done",
@@ -164,7 +156,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "GET /api/projects/:param/scripts",
   "GET /api/projects/:param/sprint-capacity",
   "GET /api/projects/:param/stats",
-  "GET /api/projects/:param/time-report",
   "GET /api/projects/:param/workspace-launch-failures",
   "GET /api/projects/:param/workspace-repo-status",
   "GET /api/projects/:param/workspace-risk",
@@ -210,9 +201,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "GET /api/sessions/:param/summary",
   "GET /api/sessions/search",
   "POST /api/sessions/:param/stop",
-  // ── /api/showdowns ──
-  "GET /api/showdowns/:param",
-  "POST /api/showdowns/:param/pick-winner",
   // ── /api/workers ──
   "DELETE /api/workers/:param",
   "GET /api/workers",

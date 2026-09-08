@@ -16,7 +16,6 @@ import { updateWorkspaceDiffStatCache } from "../repositories/diff-stat-cache.re
 import {
   aggregateWorkspaceCountRows,
   fetchWorkspaceDetailRows,
-  getShowdownStatuses,
   getWorkflowNodesByIds,
   getOutgoingWorkflowEdges,
   getWorkflowNodeNamesByIds,
@@ -114,8 +113,6 @@ export async function buildWorkspaceSummaryMap(
   // Fetch workspace detail rows to determine main workspace per issue
   const wsDetailRows = await fetchWorkspaceDetailRows(issueIds, database);
 
-  // Phase 2: populate showdown summary metadata
-  await populateShowdownSummaries(wsDetailRows, workspaceSummaryMap, database);
 
   // Phase 3: pick main workspace per issue
   const mainWorkspaceMap = selectMainWorkspaces(wsDetailRows, archivedIssueIds);
@@ -244,39 +241,6 @@ async function aggregateWorkspaceCounts(issueIds: string[], database: Database):
 }
 
 type WorkspaceDetailRow = Awaited<ReturnType<typeof fetchWorkspaceDetailRows>>[number];
-
-// Phase 2: populate showdown summary — find issues that have showdown workspaces.
-async function populateShowdownSummaries(
-  wsDetailRows: WorkspaceDetailRow[],
-  workspaceSummaryMap: Map<string, WorkspaceSummary>,
-  database: Database,
-): Promise<void> {
-  const showdownIdsByIssue = new Map<string, string>();
-  // G14d: group rows by showdown once (O(W)) instead of re-filtering all detail
-  // rows per issue inside the loop below (O(W²) on showdown-heavy boards).
-  const rowsByShowdown = new Map<string, WorkspaceDetailRow[]>();
-  for (const row of wsDetailRows) {
-    if (!row.showdownId) continue;
-    showdownIdsByIssue.set(row.issueId, row.showdownId);
-    const group = rowsByShowdown.get(row.showdownId);
-    if (group) group.push(row);
-    else rowsByShowdown.set(row.showdownId, [row]);
-  }
-  if (showdownIdsByIssue.size === 0) return;
-
-  const allShowdownIds = [...new Set(showdownIdsByIssue.values())];
-  const showdownRows = await getShowdownStatuses(allShowdownIds, database);
-  const showdownStatusMap = new Map(showdownRows.map(r => [r.id, r.status]));
-
-  for (const [issueId, showdownId] of showdownIdsByIssue) {
-    const summary = workspaceSummaryMap.get(issueId);
-    if (!summary) continue;
-    const sdStatus = showdownStatusMap.get(showdownId) ?? "active";
-    const sdWorkspaces = rowsByShowdown.get(showdownId) ?? [];
-    const doneCount = sdWorkspaces.filter(w => w.status === "idle" || w.status === "closed").length;
-    summary.showdown = { id: showdownId, status: sdStatus, total: sdWorkspaces.length, doneCount };
-  }
-}
 
 // Phase 3: pick main workspace per issue: active > awaiting-plan-approval > idle > closed,
 // tie-break by updatedAt.

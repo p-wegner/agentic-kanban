@@ -112,7 +112,6 @@ export function IssueDetailPanel({
     activityEvents,
     activityLoading,
     milestones,
-    activeShowdownId, setActiveShowdownId,
     descriptionFetching,
     cycleTime,
     touchedFiles,
@@ -149,7 +148,6 @@ export function IssueDetailPanel({
     moveToDonePending, setMoveToDonePending,
     dependencyImpactPending, setDependencyImpactPending,
     showDecomposeModal, setShowDecomposeModal,
-    showShowdownDialog, setShowShowdownDialog,
     showCompareAttempts, setShowCompareAttempts,
     newNoteBody, setNewNoteBody,
     submittingNote, setSubmittingNote,
@@ -567,7 +565,6 @@ export function IssueDetailPanel({
               onStartWorkspace={onStartWorkspace}
               onIssueUpdate={onIssueUpdate}
               onShowCompareAttempts={() => setShowCompareAttempts(true)}
-              onShowShowdown={() => setShowShowdownDialog(true)}
             />
           )}
 
@@ -634,10 +631,6 @@ export function IssueDetailPanel({
         setDependencyImpactPending={setDependencyImpactPending}
         showDecomposeModal={showDecomposeModal}
         setShowDecomposeModal={setShowDecomposeModal}
-        showShowdownDialog={showShowdownDialog}
-        setShowShowdownDialog={setShowShowdownDialog}
-        activeShowdownId={activeShowdownId}
-        setActiveShowdownId={setActiveShowdownId}
         showCompareAttempts={showCompareAttempts}
         setShowCompareAttempts={setShowCompareAttempts}
         onIssueUpdate={onIssueUpdate}

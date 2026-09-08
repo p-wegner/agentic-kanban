@@ -4,7 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 
 /** Panel-local UI/action/dialog state for IssueDetailPanel — the transient flags
  *  that coordinate the header actions (delete confirm, visual-verify toggle,
- *  duplicate), the modal dialogs (decompose / showdown / compare-attempts /
+ *  duplicate), the modal dialogs (decompose / compare-attempts /
  *  move-to-done / dependency-impact) and the inline note composer. Extracted
  *  verbatim from IssueDetailPanel; the setters are threaded into useIssueActions
  *  which drives most of these transitions. */
@@ -21,8 +21,6 @@ export interface IssueDetailUiState {
   setDependencyImpactPending: Dispatch<SetStateAction<DependencyImpactPending | null>>;
   showDecomposeModal: boolean;
   setShowDecomposeModal: Dispatch<SetStateAction<boolean>>;
-  showShowdownDialog: boolean;
-  setShowShowdownDialog: Dispatch<SetStateAction<boolean>>;
   showCompareAttempts: boolean;
   setShowCompareAttempts: Dispatch<SetStateAction<boolean>>;
   newNoteBody: string;
@@ -40,7 +38,6 @@ export function useIssueDetailUiState(): IssueDetailUiState {
   const [moveToDonePending, setMoveToDonePending] = useState<MoveToDonePending | null>(null);
   const [dependencyImpactPending, setDependencyImpactPending] = useState<DependencyImpactPending | null>(null);
   const [showDecomposeModal, setShowDecomposeModal] = useState(false);
-  const [showShowdownDialog, setShowShowdownDialog] = useState(false);
   const [showCompareAttempts, setShowCompareAttempts] = useState(false);
   const [newNoteBody, setNewNoteBody] = useState("");
   const [submittingNote, setSubmittingNote] = useState(false);
@@ -53,7 +50,6 @@ export function useIssueDetailUiState(): IssueDetailUiState {
     moveToDonePending, setMoveToDonePending,
     dependencyImpactPending, setDependencyImpactPending,
     showDecomposeModal, setShowDecomposeModal,
-    showShowdownDialog, setShowShowdownDialog,
     showCompareAttempts, setShowCompareAttempts,
     newNoteBody, setNewNoteBody,
     submittingNote, setSubmittingNote,

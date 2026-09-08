@@ -1,4 +1,4 @@
-import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes, repos, issues, workspaceCodeMetrics, workspaceConflictCache, workspaceSummary, workspaceDiffStatCache, workspaceScorecard } from "@agentic-kanban/shared/schema";
+import { workspaces, sessions, sessionMessages, workflowEdges, workflowNodes, repos, issues, workspaceCodeMetrics, workspaceConflictCache, workspaceSummary, workspaceDiffStatCache, workspaceScorecard } from "@agentic-kanban/shared/schema";
 import { and, eq, inArray, sql, desc } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { db } from "../db/index.js";
@@ -84,7 +84,6 @@ export async function fetchWorkspaceDetailRows(issueIds: string[], database: Dat
       codeMetricsJson: workspaceCodeMetrics.metricsJson,
       codeMetricsComputedAt: workspaceCodeMetrics.computedAt,
       currentNodeId: workspaces.currentNodeId,
-      showdownId: workspaces.showdownId,
       mergedAt: workspaces.mergedAt,
     })
     .from(workspaces)
@@ -103,13 +102,6 @@ export async function fetchWorkspaceDetailRows(issueIds: string[], database: Dat
     // scorecard row and must still be returned, which is most of the board at any moment.
     .leftJoin(workspaceScorecard, eq(workspaceScorecard.workspaceId, workspaces.id))
     .where(inArray(workspaces.issueId, issueIds));
-}
-
-export async function getShowdownStatuses(showdownIds: string[], database: Database = db) {
-  return database
-    .select({ id: showdowns.id, status: showdowns.status })
-    .from(showdowns)
-    .where(inArray(showdowns.id, showdownIds));
 }
 
 // #815: `updateWorkspaceConflictCache` moved to `repositories/conflict-cache.repository.ts`

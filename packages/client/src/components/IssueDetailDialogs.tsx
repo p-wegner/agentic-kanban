@@ -4,12 +4,10 @@
 // each modal's wiring lives in one place and the container only owns the state.
 import type { MoveToDonePending, DependencyImpactPending } from "../lib/issueDetailTypes.js";
 import type { Dispatch, SetStateAction } from "react";
-import type { IssueWithStatus, DependencyInfo, ShowdownResponse } from "@agentic-kanban/shared";
+import type { IssueWithStatus, DependencyInfo } from "@agentic-kanban/shared";
 import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
 import { DependencyImpactDialog } from "./DependencyImpactDialog.js";
 import { EpicDecomposerModal } from "./EpicDecomposerModal.js";
-import { ShowdownDialog } from "./ShowdownDialog.js";
-import { ShowdownPanel } from "./ShowdownPanel.js";
 import { CompareAttemptsPanel } from "./CompareAttemptsPanel.js";
 
 
@@ -24,10 +22,6 @@ interface IssueDetailDialogsProps {
   setDependencyImpactPending: Dispatch<SetStateAction<DependencyImpactPending | null>>;
   showDecomposeModal: boolean;
   setShowDecomposeModal: Dispatch<SetStateAction<boolean>>;
-  showShowdownDialog: boolean;
-  setShowShowdownDialog: Dispatch<SetStateAction<boolean>>;
-  activeShowdownId: string | null;
-  setActiveShowdownId: Dispatch<SetStateAction<string | null>>;
   showCompareAttempts: boolean;
   setShowCompareAttempts: Dispatch<SetStateAction<boolean>>;
   onIssueUpdate: (issue: IssueWithStatus) => void;
@@ -45,10 +39,6 @@ export function IssueDetailDialogs({
   setDependencyImpactPending,
   showDecomposeModal,
   setShowDecomposeModal,
-  showShowdownDialog,
-  setShowShowdownDialog,
-  activeShowdownId,
-  setActiveShowdownId,
   showCompareAttempts,
   setShowCompareAttempts,
   onIssueUpdate,
@@ -81,24 +71,6 @@ export function IssueDetailDialogs({
             setShowDecomposeModal(false);
             onIssueUpdate(issue);
           }}
-        />
-      )}
-      {showShowdownDialog && (
-        <ShowdownDialog
-          issue={issue}
-          skills={availableSkills}
-          onCreated={(sd: ShowdownResponse) => {
-            setShowShowdownDialog(false);
-            setActiveShowdownId(sd.id);
-          }}
-          onCancel={() => setShowShowdownDialog(false)}
-        />
-      )}
-      {activeShowdownId && (
-        <ShowdownPanel
-          showdownId={activeShowdownId}
-          onClose={() => setActiveShowdownId(null)}
-          onWinnerPicked={() => setActiveShowdownId(null)}
         />
       )}
       {showCompareAttempts && (
