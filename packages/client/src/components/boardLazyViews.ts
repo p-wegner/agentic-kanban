@@ -20,14 +20,12 @@ export const WorkflowsView = lazy(() => import("./WorkflowsView.js").then((m) =>
 // so each feed is one lazy chunk.
 export const BoardFeedView = lazy(() => import("./BoardFeedView.js").then((m) => ({ default: m.BoardFeedView })));
 export const RuntimeFeedView = lazy(() => import("./RuntimeFeedView.js").then((m) => ({ default: m.RuntimeFeedView })));
-export const FocusView = lazy(() => import("./FocusView.js").then((m) => ({ default: m.FocusView })));
 export const StrategyTargetsView = lazy(() => import("./StrategyTargetsView.js").then((m) => ({ default: m.StrategyTargetsView })));
 export const SwimlaneView = lazy(() => import("./SwimlaneView.js").then((m) => ({ default: m.SwimlaneView })));
 export const RunbooksView = lazy(() => import("./RunbooksView.js").then((m) => ({ default: m.RunbooksView })));
-export const SprintCapacityPlanner = lazy(() => import("./SprintCapacityPlanner.js").then((m) => ({ default: m.SprintCapacityPlanner })));
-export const StaleWorkDashboard = lazy(() => import("./StaleWorkDashboard.js").then((m) => ({ default: m.StaleWorkDashboard })));
 // Tabbed Analytics container (#234) — imports the seven chart components directly,
 // so the whole analytics bundle is one lazy chunk.
+export const FocusHubView = lazy(() => import("./FocusHubView.js").then((m) => ({ default: m.FocusHubView })));
 export const AnalyticsView = lazy(() => import("./AnalyticsView.js").then((m) => ({ default: m.AnalyticsView })));
 export const CalendarView = lazy(() => import("./CalendarView.js").then((m) => ({ default: m.CalendarView })));
 export const DriveDashboard = lazy(() => import("./DriveDashboard.js").then((m) => ({ default: m.DriveDashboard })));

@@ -7,10 +7,10 @@ import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import {
   GraphView, TableView, AgentGrid, TimelineView, CrimeSceneCityView,
   QualityMetricsView, ButlerView, WorkflowsView,
-  BoardFeedView, RuntimeFeedView, FocusView,
+  BoardFeedView, RuntimeFeedView, FocusHubView,
   StrategyTargetsView, SwimlaneView,
-  RunbooksView, SprintCapacityPlanner,
-  StaleWorkDashboard, AnalyticsView, CalendarView,
+  RunbooksView,
+  AnalyticsView, CalendarView,
   DriveDashboard, PluginViewsPanel,
   PluginMarketplacePanel, PluginGuidePanel,
 } from "./boardLazyViews.js";
@@ -155,13 +155,11 @@ export function BoardSecondaryViews({
         </BoardErrorBoundary>
       )}
       {viewMode === "focus" && activeProjectId && (
-        <BoardErrorBoundary columnName="Focus View">
-          <FocusView
+        <BoardErrorBoundary columnName="Focus">
+          <FocusHubView
             projectId={activeProjectId}
-            onIssueClick={(issueId) => {
-              const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
-              if (issue) onIssueClick(issue);
-            }}
+            onIssueClick={onIssueClick}
+            resolveIssue={(issueId) => columns.flatMap(c => c.issues).find(i => i.id === issueId)}
           />
         </BoardErrorBoundary>
       )}
@@ -199,14 +197,6 @@ export function BoardSecondaryViews({
                 onIssueClick(issue);
               }
             }}
-          />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "stale-work" && activeProjectId && (
-        <BoardErrorBoundary columnName="Stale Work">
-          <StaleWorkDashboard
-            projectId={activeProjectId}
-            onIssueClick={onIssueClick}
           />
         </BoardErrorBoundary>
       )}
@@ -274,11 +264,6 @@ export function BoardSecondaryViews({
               }
             }}
           />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "capacity" && activeProjectId && (
-        <BoardErrorBoundary columnName="Sprint Capacity Planner">
-          <SprintCapacityPlanner projectId={activeProjectId} />
         </BoardErrorBoundary>
       )}
       {viewMode === "plugin-views" && activeProjectId && (
