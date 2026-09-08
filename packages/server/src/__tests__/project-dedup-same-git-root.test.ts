@@ -54,7 +54,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createClient, type Client } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
@@ -104,9 +104,23 @@ vi.mock("../db/index.js", () => {
 });
 
 /** Creates a fresh file-backed, migrated client and points h.client/h.db at it. */
+/**
+ * One directory per process, in the reaper's `ak-` namespace, holding this suite's throwaway
+ * `.db` files (#1056). This used to build the path from `process.env.TEMP` and drop the file
+ * LOOSE in `%TEMP%` — and a loose file is in no swept namespace whatever it is called, since
+ * the fixture reaper is gated on `statSync(...).isDirectory()`. Measured at #1056: entries of
+ * this suite's own prefix still being minted daily while `temp-dir-namespace-guard` was green,
+ * because that guard keys off `tmpdir()` and `process.env.TEMP` is an unscanned synonym for it.
+ */
+let scratchDbDir: string | null = null;
+function dbScratchDir(): string {
+  if (scratchDbDir) return scratchDbDir;
+  scratchDbDir = mkdtempSync(join(tmpdir(), "ak-dedup-same-root-"));
+  return scratchDbDir;
+}
+
 function openTestDb(): void {
-  const dir = process.env.TEMP || process.env.TMP || process.cwd();
-  const file = `${dir}/dedup-same-root-${randomUUID()}.db`;
+  const file = join(dbScratchDir(), `dedup-same-root-${randomUUID()}.db`);
   const c = createClient({ url: `file:${file}` });
   applyMigrationsToClient(c);
   c.execute("PRAGMA foreign_keys=ON");

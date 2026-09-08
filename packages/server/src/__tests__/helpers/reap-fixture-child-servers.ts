@@ -116,6 +116,20 @@ async function reapOrphanedFixtureServers(): Promise<number> {
  */
 const MAX_REMOVALS_PER_SWEEP = 500;
 
+/**
+ * Report the backlog even on a sweep that removed nothing, once it is this big (#1056). Below it
+ * a leftover count is genuinely routine — a handful of dirs a concurrent suite still holds open.
+ */
+const BACKLOG_ALARM = 1_000;
+
+/**
+ * Escalate above this many `%TEMP%` entries of ANY kind. Measured: at 707,242 a bare
+ * `EnumerateFileSystemEntries` exceeded 120s; at 100,324 the same walk took 12.7s — already
+ * enough to distort a gate step, and rising. 50,000 is the point where the cost is visible but
+ * the machine is still recoverable in one pass.
+ */
+const TEMP_ENUMERATION_ALARM = 50_000;
+
 export function matchedNamespace(name: string): { minAgeMs: number } | null {
   for (const ns of SWEPT_TEMP_NAMESPACES) {
     if (ns.prefixes.some((prefix) => name.startsWith(prefix))) return ns;
@@ -137,10 +151,17 @@ async function reapStaleFixtureTempDirs(): Promise<number> {
   let removed = 0;
   let failed = 0;
   let truncated = false;
+  // The BACKLOG — every entry this sweep is responsible for, counted whether or not the cap let
+  // it be removed (#1056). Without it the log said only "more remain for the next run", which
+  // reads as routine housekeeping at a backlog of 10 and at a backlog of 510,000 alike; it was
+  // skimmed past four times while `%TEMP%` grew to 707,242 entries. A reaper that cannot state
+  // the size of its own queue cannot tell "draining" from "losing".
+  let sweepable = 0;
   for (const name of entries) {
     const ns = matchedNamespace(name);
     if (!ns) continue;
-    if (removed >= MAX_REMOVALS_PER_SWEEP) { truncated = true; break; }
+    sweepable++;
+    if (removed >= MAX_REMOVALS_PER_SWEEP) { truncated = true; continue; }
     const full = join(base, name);
     try {
       const info = await stat(full);
@@ -155,11 +176,30 @@ async function reapStaleFixtureTempDirs(): Promise<number> {
       failed++;
     }
   }
-  if (removed > 0 || failed > 0) {
+  if (removed > 0 || failed > 0 || sweepable >= BACKLOG_ALARM) {
     console.log(
       `[test-reaper] removed ${removed} stale fixture temp dir(s)`
       + (failed > 0 ? `, ${failed} could not be removed (still held open?)` : "")
-      + (truncated ? `, capped at ${MAX_REMOVALS_PER_SWEEP} — more remain for the next run` : ""),
+      + (truncated
+        ? `, capped at ${MAX_REMOVALS_PER_SWEEP} of ${sweepable} sweepable — `
+          + `${Math.max(0, sweepable - removed)} still queued`
+        : ""),
+    );
+  }
+  // Escalate on SIZE, not on the fact that something was left over. `%TEMP%` holding six figures
+  // of entries is a machine on which NTFS enumeration alone stalls any process that touches the
+  // directory — the state that cost ~113 minutes of gate time and three wrong diagnoses (#1056).
+  // `total` is the whole directory, because the families this sweep does not own (loose `.db`
+  // files, prefixes minted before the namespace rule) are what actually made enumeration
+  // pathological, and a number that counted only our own would understate it by an order of
+  // magnitude.
+  if (entries.length >= TEMP_ENUMERATION_ALARM) {
+    console.warn(
+      `[test-reaper] WARNING: %TEMP% holds ${entries.length} entries (${sweepable} sweepable by `
+      + `this reaper, cap ${MAX_REMOVALS_PER_SWEEP}/run). At this size directory enumeration `
+      + `alone stalls any process that touches %TEMP%, which the pre-merge gate does — a gate `
+      + `that dies during setup with no test output is the signature (#1056). Drain it with `
+      + `\`node scripts/sweep-loose-test-db-files.mjs\` and re-check.`,
     );
   }
   return removed;
