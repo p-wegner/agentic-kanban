@@ -67,16 +67,31 @@ live probe. NOT verified by a full-suite run at commit time — the promotion sw
 
 **Board state: 1036 Done, 6 Cancelled, nothing in flight.**
 
+### Later the same day — archive pass, #1060, and the %TEMP% dir backlog closed
+
+- **Third CONTINUE archive pass** (693 -> 146 lines): ten dated 2026-09-04..09-07 passes moved
+  verbatim to `docs/archive/CONTINUE-archive.md`. The standing "Where this stands" section was
+  REWRITTEN rather than archived — it was dated 09-04 and every load-bearing line had gone false.
+- **#1060 fixed and Done.** A RED sweep verdict now stops refusing a re-probe once master is fixed
+  PAST it: `planSweepAcquisition` takes `headSha` and splits the red case. Red-on-the-tip refuses
+  exactly as #1044 intended; red-on-a-superseded-commit requests a fresh sweep. Unknown HEAD or a
+  sha-less row keeps the refusal — a comparison that cannot be made is not a licence.
+- **#1038 verified end-to-end while refreshing `BACKLOG.md`**: `pnpm cli -- backlog export --out
+  BACKLOG.md` from the repo root now writes the repo-root file and prints the ABSOLUTE path, which
+  is exactly that ticket's acceptance. The backlog is now **0 open issues**.
+- **The `%TEMP%` directory backlog is drained** — the item this file listed as deliberately not
+  done. Ownership is DERIVED, not listed: for every `ak-<X>-` prefix the repo mints today, a bare
+  `<X>-` dir in `%TEMP%` came from an older revision of that same call site. Behind
+  `sweep-temp-dirs.mjs --legacy`, with a specificity filter that declines generic bare forms
+  (`plan`, `ws`, `fork`) and numeric ticket fragments. **22,704 removed, 0 failed; %TEMP% 91,041
+  -> 68,288 entries, walked in 0.18s.**
+
+**Twice today vitest was green while `tsc` was not**, both times on a hand-typed `.d.mts` for a
+plain `.mjs` script (`promote-plan.d.mts`, then `legacy-temp-prefixes.d.mts`). For these scripts
+the suite alone is not the gate.
+
 ### Left undone, deliberately
 
-- **The `%TEMP%` directory backlog.** 87,503 entries remain, ~11,000 of them fixture DIRECTORIES
-  in prefixes no sweeper owns (`defects-` 2342, `impres_` 2039, `smoke-srv-` 1390, `abs2_`,
-  `cli-test-`, `router-`, `ktrefs-`, `compounding-setup-`, `preflight-test-`). All are
-  historical: the board's current source mints every one of these as `ak-*`, and the newest is
-  1.8 days old. `sweep-temp-dirs.mjs` only knows `kanban-`/`ak-`, and widening it was NOT done
-  because several of those prefixes plausibly belong to sibling tools (refactor-skill,
-  code-metrics), and the board deleting another tool's temp dirs is overreach. Below the gate's
-  250,000 floor, so nothing is blocked.
 - **#1056's per-run temp namespace** (`%TEMP%/kanban/<runId>/`) — suggested in the ticket, not
   built.
 
@@ -87,36 +102,30 @@ state at the time it was written. Standing state lives here and nowhere else.
 
 ### Verified now (2026-09-08)
 
-- **Branch `master`, working tree clean, `599a1ba507`.** **169 commits ahead of `origin/master`**
+- **Branch `master`, working tree clean, `bcb34bd928`.** **172 commits ahead of `origin/master`**
   (GitHub `p-wegner/agentic-kanban`). The second remote `gitlab` points at
   `pizza-und-ai-code/agentic-code-review` — a DIFFERENT project, not a mirror; do not confuse them.
-- **Master is GREEN by full sweep** — `599a1ba507`, 26.5 min, 8,744 + 195 + 1,769 tests across
+- **The last full sweep was GREEN** — on `599a1ba507`, 26.5 min, 8,744 + 195 + 1,769 tests across
   server / mcp-server / client, plus `check:arch`. Recorded in `base_branch_health`, which is what
   `pnpm promote` reads. This supersedes the old "a whole-repo run is the outstanding verification"
-  item: it has now been done, by the sweep.
-- **Stable is `stable-20260908`, live on 3001, and equals master** (`git rev-list --count
-  stable-20260908..master` = 0). Promoted on the green sweep, no `--force-sweep`. Smoke passed.
-- **Board (agentic-kanban project): 1036 Done, 6 Cancelled, 1 Todo.** Nothing in progress, no live
-  workspaces. The single Todo is #1060, filed today (see below).
-- **`%TEMP%` is healthy** — ~92,000 entries, under the gate's 250,000 floor, after today's drain of
-  13,437 leaked fixture DBs (7.0 GB).
+  item: it has now been done, by the sweep. **Master has since moved 3 commits past that sha** (the
+  archive pass, #1060, the legacy drain) — those three are verified by `check:arch` + `typecheck` +
+  their own suites, NOT by a full sweep. The next promotion will request one.
+- **Stable is `stable-20260908`, live on 3001**, promoted on that green sweep with no
+  `--force-sweep`; smoke passed. Master is now **3 commits ahead of it** — see above.
+- **Board (agentic-kanban project): 1037 Done, 6 Cancelled, 0 open.** The backlog is genuinely
+  empty — nothing in progress, no live workspaces, `BACKLOG.md` re-exported at 0 issues.
+- **`%TEMP%` is healthy** — 68,288 entries walked in 0.18s, far under the gate's 250,000 floor,
+  after today's two drains: 13,437 loose fixture DBs (7.0 GB) and 22,704 legacy fixture dirs.
 
 ### Next steps, in order
 
-1. **#1060** (Todo, filed today) — `pnpm promote` has no path forward once you FIX a red master:
-   it refuses AND declines to re-probe, leaving `--force-sweep` as the only offered path. A stale
-   GREEN verdict triggers a fresh sweep; a stale RED one does not. The fix is one `git rev-parse`
-   (gate the red refusal on `verdict.sha === HEAD`). Hit for real twice today.
-2. **Operator: decide the push.** 169 commits, clean fast-forward to `origin/master`. The Linux CI
-   run is what #923 needs, and it has never happened — every sweep here is Windows-only.
-3. **The `%TEMP%` directory backlog** — ~11,000 fixture DIRECTORIES in prefixes no sweeper owns
-   (`defects-`, `impres_`, `smoke-srv-`, `abs2_`, `cli-test-`, `router-`, `ktrefs-`,
-   `compounding-setup-`, `preflight-test-`). All historical: current source mints every one of
-   these as `ak-*`, newest is ~2 days old. `sweep-temp-dirs.mjs` knows only `kanban-`/`ak-`.
-   NOT widened, deliberately — several of those prefixes plausibly belong to sibling tools
-   (refactor-skill, code-metrics), and the board deleting another tool's temp dirs is overreach.
-   Nothing is blocked by them.
-
+1. **Operator: decide the push.** 172 commits, clean fast-forward to `origin/master`. The Linux
+   CI run is what #923 needs, and it has never happened — every sweep here is Windows-only. This
+   is the only item left that is not ours to decide.
+2. **Promote again when convenient.** Master has moved past `stable-20260908` (the archive pass,
+   #1060, and the legacy drain). Not urgent: the board is idle and nothing on it is blocked. The
+   next `pnpm promote` will request its own sweep, and #1060 means a red one no longer dead-ends.
 ### Open, unexplained — chase this if it recurs
 
 **The stable board died overnight on 2026-09-08 at 06:30 UTC.** Nothing listening on 3001/5173
