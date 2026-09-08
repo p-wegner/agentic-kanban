@@ -26,6 +26,7 @@ import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys"
 
 import { getPreference } from "../repositories/preferences.repository.js";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
+import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import { countMergedWorkspacesForProject } from "../repositories/workspace.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { listAgentSkills } from "../repositories/agent-skill.repository.js";
@@ -222,7 +223,11 @@ export async function runCompoundingSetupPass(
     { key: compoundingSetupStatePrefKey(projectId), value: JSON.stringify(state) },
   ]);
 
-  await commitProjectScaffoldArtifacts(repoPath);
+  const autoCommit = parseBoolSetting(
+    "scaffold_auto_commit",
+    await getPreference("scaffold_auto_commit", database),
+  );
+  await commitProjectScaffoldArtifacts(repoPath, { autoCommit });
 
   return { ran: true, mergedCount, artifacts };
 }
