@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
 import { getHeadState } from "@agentic-kanban/shared/lib/git-service";
-import { takeScaffoldWrites } from "./scaffold-writes.js";
+import { takeScaffoldWrites, peekScaffoldWrites } from "./scaffold-writes.js";
 
 const SCAFFOLD_COMMIT_MESSAGE = "chore: scaffold agent guards and onboarding";
 
@@ -120,8 +120,12 @@ export async function commitProjectScaffoldArtifacts(
 
     // Files ensureBuildableFromClean rewrote this run (package.json / pnpm-workspace.yaml).
     // Without this the board's own edit is left uncommitted and the main checkout is dirty
-    // from registration onward, which blocks every merge with `dirty_main` (#38).
-    for (const pathName of takeScaffoldWrites(repoPath)) {
+    // from registration onward, which blocks every merge with `dirty_main` (#38). Only DRAIN
+    // the record when we are actually about to commit — these paths are recoverable ONLY from
+    // this record (unlike the `.claude/*` durable paths, re-derived from disk every call), so
+    // consuming it while `autoCommit` is off would permanently lose track of them (#1082).
+    const scaffoldWritePaths = autoCommit ? takeScaffoldWrites(repoPath) : peekScaffoldWrites(repoPath);
+    for (const pathName of scaffoldWritePaths) {
       if (existsSync(join(repoPath, pathName))) pathsToCommit.add(pathName);
     }
 
