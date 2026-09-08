@@ -199,6 +199,45 @@ export function decideGateHostAdmission(input: {
 }
 
 /**
+ * How a refused admission is WORDED, as a pure function — and it lives here rather than at the
+ * call site for a mechanical reason as much as a tidy one (#1056).
+ *
+ * `runPreMergeGate` sits ON the god-module gate's branch ceiling (#726): it is grandfathered at
+ * 34 and the file says so in a comment two lines above the caller. A single `? :` picking the
+ * wording pushed it to 35 and turned the master sweep RED — measured, not predicted. The gate's
+ * own advice for that is "extract the branchy middle" rather than move the file, so the choice
+ * moved to the module that already owns this vocabulary.
+ *
+ * Naming the cause is the point. "host saturated" was the only wording available, and the
+ * #1046/#1048/#1049 runs it was written for turned out to reproduce on an IDLE box — a hold that
+ * misnames itself sends the next reader to the wrong remedy, which is exactly how ~113 minutes
+ * went into three wrong diagnoses of those same runs.
+ */
+export function describeGateHold(
+  admission: Extract<GateHostAdmission, { admit: false }>,
+  projectId: string,
+): { what: string; phaseNote: string; message: string } {
+  const what = HOLD_LABELS[admission.reason];
+  return {
+    what,
+    phaseNote: `${what} — not starting a verify chain`,
+    message:
+      `pre-merge gate HELD — not started (${what}): ${admission.detail}. Nothing was verified `
+      + `and nothing failed; the merge is deferred and will be retried on the next cycle. `
+      + `Override with gate_host_floor_${projectId}=false.`,
+  };
+}
+
+/**
+ * A lookup rather than a conditional, so a THIRD kind of unfitness costs the caller no branch —
+ * the ceiling above is not a one-off, it is the standing constraint on that function.
+ */
+const HOLD_LABELS: Record<Extract<GateHostAdmission, { admit: false }>["reason"], string> = {
+  host_saturated: "host saturated",
+  temp_exhausted: "%TEMP% exhausted",
+};
+
+/**
  * The gate's admission question in one call: read capacity first (process-local and free, no
  * spawn), and only pay for the preference read when the box is actually tight — an idle board
  * never touches the database for this.

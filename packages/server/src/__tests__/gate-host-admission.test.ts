@@ -13,7 +13,7 @@
  * on a tight box since #1009 — the gate, running the very same verify script, started regardless.
  */
 import { describe, it, expect } from "vitest";
-import { decideGateHostAdmission } from "../services/gate-quiesce.js";
+import { decideGateHostAdmission, describeGateHold } from "../services/gate-quiesce.js";
 
 describe("gate host admission (#1057)", () => {
   it("admits a gate when the box has room", () => {
@@ -108,5 +108,37 @@ describe("gate temp-health admission (#1056)", () => {
     const a = decideGateHostAdmission(healthy);
     expect(a.admit).toBe(true);
     expect(a.reason).toBe("host_has_room");
+  });
+});
+
+/**
+ * The wording is a LOOKUP in `gate-quiesce.ts`, not a conditional at the call site, and that is
+ * structural rather than stylistic: `runPreMergeGate` is grandfathered on the #726 branch
+ * ceiling at 34, so the `? :` that first picked this wording made it 35 and turned the master
+ * sweep RED. A third kind of unfitness must therefore cost the caller no branch.
+ */
+describe("gate hold wording (#1056)", () => {
+  it("names the cause for each refusal reason, and never falls back to the wrong one", () => {
+    const temp = describeGateHold(
+      { admit: false, reason: "temp_exhausted", detail: "C:\Temp holds at least 250000 entries" },
+      "proj-1",
+    );
+    expect(temp.what).toBe("%TEMP% exhausted");
+    expect(temp.phaseNote).toContain("%TEMP% exhausted");
+    expect(temp.message).toContain("%TEMP% exhausted");
+    expect(temp.message).toContain("250000 entries");
+    // A hold is not a verdict about the diff, and the message has to say so — #638 depends on a
+    // withheld gate never reading as a failure.
+    expect(temp.message).toContain("Nothing was verified");
+    expect(temp.message).toContain("gate_host_floor_proj-1=false");
+
+    const host = describeGateHold(
+      { admit: false, reason: "host_saturated", detail: "only 0.4 GB free" },
+      "proj-1",
+    );
+    expect(host.what).toBe("host saturated");
+    expect(host.message).toContain("host saturated");
+    // The bug this replaced: every hold said "host saturated" whatever held it.
+    expect(host.message).not.toContain("%TEMP%");
   });
 });
