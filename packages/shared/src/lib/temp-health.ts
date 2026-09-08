@@ -36,18 +36,42 @@ import { tmpdir } from "node:os";
  */
 
 /**
- * Stop counting here. Measured: 100,324 entries walked in 12.7s, 707,242 exceeded 120s — the
- * curve is already steep well below the first number, so a directory holding 50,000 entries
- * is one the gate should not trust even though it is still walkable.
+ * Stop counting here — and this number is a MEASUREMENT, after a first guess of 50,000 was
+ * refuted within the hour.
+ *
+ * Four data points on the authoring box, all of `%TEMP%` on one machine over one morning:
+ *
+ * | entries | walk    | note                                            |
+ * |---------|---------|-------------------------------------------------|
+ * | 707,242 | > 120 s | the incident state — every touching process stalls |
+ * | 100,324 |  12.7 s | cold cache                                      |
+ * |  87,503 |   0.2 s | warm cache, minutes later, same directory       |
+ *
+ * The last two rows are the important pair: **a 13 % change in size moved the walk by 60x**,
+ * because it was the CACHE that changed, not the directory. So elapsed time cannot be the
+ * verdict — it would hold every merge on a cold box and admit on a warm one, for the same
+ * `%TEMP%`. Size is the stable signal; time is only a bound on what the probe may cost.
+ *
+ * 250,000 sits above the whole observed working range (87k-100k, which the gate must not
+ * refuse — those runs were fine) and far below the 707k that was fatal, while still catching
+ * unbounded growth long before it reaches 120 s. A first draft used 50,000 on a "the curve is
+ * steep" argument and would have held every merge on a box that enumerates in 0.2 s: a
+ * threshold guessed from one end of a curve is how a safety check becomes a false positive.
  */
-export const DEFAULT_TEMP_ENTRY_CAP = 50_000;
+export const DEFAULT_TEMP_ENTRY_CAP = 250_000;
 
 /**
- * Wall-clock ceiling for the probe. Two seconds is generous for a healthy `%TEMP%` (the
- * measured box walked ~8,000 entries/second even while degraded) and is a rounding error
- * against the ~28-minute gate run it decides whether to start.
+ * Wall-clock ceiling. Hitting it is ALSO the degraded verdict — a directory the probe cannot
+ * finish in this long is the 707k case, which is what the incident was — but the number is
+ * chosen so a healthy `%TEMP%` never reaches it even cold: at the measured cold rate
+ * (~7,900 entries/s) a directory below the cap's own working range walks in single-digit
+ * seconds, and a warm one in a fifth of a second.
+ *
+ * 20 s is a real cost, paid only in the bad case, against the ~28-minute doomed run it exists
+ * to prevent. A tighter budget was tried first (2 s) and is wrong for the same reason 50,000
+ * was: on a cold cache it fires on a healthy machine.
  */
-export const DEFAULT_TEMP_PROBE_BUDGET_MS = 2_000;
+export const DEFAULT_TEMP_PROBE_BUDGET_MS = 20_000;
 
 /**
  * Env overrides for both bounds, mirroring `SMART_HOOKS_MIN_FREE_GB` on the capacity floor —
