@@ -279,6 +279,20 @@ export function planSweepAcquisition({ verdict, direction = null, forceSweep = f
     // stable checkout has already moved past, which is what a forced promotion leaves behind.
     if (direction && !direction.ok && direction.reason === "behind") {
       need = `the last green sweep (${verdict.sha ?? "<no sha>"}) is BEHIND what the stable checkout already runs — a promotion on it would be a silent no-op`;
+    } else if (direction?.reason === "same" && headSha && verdict.sha && headSha !== verdict.sha) {
+      // #1061 — the same family as #1044 and #1060, and the worst of the three because it does
+      // not refuse: it SUCCEEDS at doing nothing. `sha` to promote is `verdict.sha`, so when the
+      // verdict describes exactly what stable already runs, a promotion mints a second tag on
+      // that identical sha, rebuilds, restarts the operating board, prints "is live", and leaves
+      // every commit made since UNPROMOTED. `checkPromoteDirection` classifies this `ok: true`
+      // ("same" = not blocking), which is what let it through — but "same" means the recorded
+      // verdict cannot authorize ANY change, not that everything is fine.
+      //
+      // There IS work to deploy (the branch has moved), so this is the #1044 shape exactly: the
+      // only thing missing is a CURRENT verdict. Ask for one.
+      need = `the last green sweep (${verdict.sha}) is exactly what the stable checkout already runs, `
+        + `while the branch has moved on to ${headSha} — promoting on this verdict would redeploy the `
+        + `identical sha and silently leave the newer commits behind`;
     }
   } else if (REPROBEABLE_SWEEP_REASONS.includes(verdict?.reason)) {
     need = `no usable sweep verdict (${verdict.reason})`;

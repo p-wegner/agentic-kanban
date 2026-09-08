@@ -371,6 +371,53 @@ describe("sweep acquisition (#1044)", () => {
     });
   });
 
+  /**
+   * #1061 — the third member of this family, and the only one that does not refuse.
+   *
+   * `sha` to promote is `verdict.sha` whenever the verdict is green, so when the verdict
+   * describes exactly what stable already runs, a promotion mints a SECOND tag on that identical
+   * sha, rebuilds, restarts the operating board, prints "is live", and leaves every commit made
+   * since unpromoted. `checkPromoteDirection` calls that `{ ok: true, reason: "same" }` — "not
+   * blocking" — which is what let it through. But `same` means the recorded verdict cannot
+   * authorize ANY change, not that everything is fine.
+   *
+   * Measured on a real dry run: stable at 599a1ba507, master 4 commits ahead, verdict green for
+   * 599a1ba507 -> "the recorded sweep verdict already authorizes this promotion", planning
+   * `tag stable-20260908-2 on 599a1ba507`.
+   */
+  describe("a green verdict for exactly what stable already runs (#1061)", () => {
+    const same = { ok: true, reason: "same" as const, detail: "stable checkout is already at abc1234def" };
+
+    it("REPRODUCES the no-op: a branch that has moved on asks for a fresh sweep", () => {
+      const decision = planSweepAcquisition({ verdict: green, direction: same, headSha: "e42fa67842" });
+      expect(decision.request).toBe(true);
+      expect(decision.reason).toBe("acquire");
+      expect(decision.detail).toContain("already runs");
+      expect(decision.detail).toContain("e42fa67842");
+      // The consequence has to be named, or this reads as a pointless re-sweep of a green tree.
+      expect(decision.detail).toContain("leave the newer commits behind");
+    });
+
+    it("asks for nothing when the branch is AT that sha too — there is simply nothing to promote", () => {
+      // Not an acquisition problem: a fresh sweep would say the same thing. `promote.mjs` handles
+      // this one at the direction check, exiting 0 without tagging or restarting.
+      const decision = planSweepAcquisition({ verdict: green, direction: same, headSha: green.sha });
+      expect(decision.request).toBe(false);
+      expect(decision.reason).toBe("verdict-usable");
+    });
+
+    it("asks for nothing when the branch tip is unknown", () => {
+      // Fail-safe, as with the red case: without a tip there is no comparison to justify a wait.
+      expect(planSweepAcquisition({ verdict: green, direction: same, headSha: null }).request).toBe(false);
+    });
+
+    it("leaves the forward case alone — the ordinary promotion must not start sweeping", () => {
+      const decision = planSweepAcquisition({ verdict: green, direction: forward, headSha: "e42fa67842" });
+      expect(decision.request).toBe(false);
+      expect(decision.reason).toBe("verdict-usable");
+    });
+  });
+
   it("acquires nothing under --force-sweep, --no-await-sweep, or with no board to ask", () => {
     const stale = parseSweepVerdict(greenRow({ createdAt: new Date(NOW - 200 * HOUR).toISOString() }), { nowMs: NOW });
     expect(planSweepAcquisition({ verdict: stale, forceSweep: true }).reason).toBe("force-sweep");
