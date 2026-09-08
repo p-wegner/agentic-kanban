@@ -20,7 +20,24 @@ const packagesRoot = path.join(import.meta.dirname!, "..", "..", "..");
 const SCAN_ROOTS = ["server/src", "shared/src", "mcp-server/src", "client/src"];
 
 const PREF_MENTION = /board_autodrive_|start_mode_/;
-const CONSULTS_RESOLVER = /resolveStartPolicy/;
+/**
+ * The two sanctioned doors to the decision.
+ *
+ * `resolveProjectRuntimeConfig` is the COMPOSITE resolver: it calls `resolveStartPolicy`
+ * itself and exposes the verdict as `startPolicy`, so a caller reading
+ * `runtime.startPolicy.mode` has consulted the resolver just as surely as one calling it by
+ * name — it simply cannot be seen by a regex looking for the inner name. Two files already
+ * reach the mode that way (`drive.service.ts`, `drive-preflight.service.ts`), and excusing
+ * them as "non-deciding" would have been false: both report the resolved mode to an operator.
+ *
+ * Widening a guard to admit a second door is only safe while that door provably leads to the
+ * same place, which is why {@link DELEGATING_RESOLVER} pins the delegation below. If it ever
+ * disappears, this regex becomes a hole — and that test is what says so.
+ */
+const CONSULTS_RESOLVER = /resolveStartPolicy|resolveProjectRuntimeConfig/;
+
+/** The composite resolver, and the call it must keep making for the widening above to hold. */
+const DELEGATING_RESOLVER = "server/src/services/project-runtime-config.service.ts";
 
 /**
  * Files that name the prefs but do NOT decide whether anything auto-starts.
@@ -32,7 +49,6 @@ const NON_DECIDING: Record<string, string> = {
   "shared/src/lib/cascade-delete.ts": "comment: templated keys deleted with a project",
   "shared/src/lib/mcp-tool-definitions.ts": "the set_preference tool's description text",
   "server/src/butler/board-guide.ts": "user-facing how-to text for the butler",
-  "server/src/services/drive.service.ts": "comments describing the legacy keystone flag",
   "server/src/startup/monitor-contract.ts": "comment listing the per-project gates",
   "shared/src/types/api/monitor.ts": "wire types only — the doc comment names the key the resolver reads",
 };
@@ -89,6 +105,21 @@ describe("start-mode prefs are read only through resolveStartPolicy (#600, decis
         "projectId), or add the file to NON_DECIDING with the reason it does not decide:\n" +
         offenders.join("\n"),
     ).toEqual([]);
+  });
+
+  it("the composite resolver really delegates — the widened regex is not a hole", () => {
+    // `CONSULTS_RESOLVER` accepts `resolveProjectRuntimeConfig` because that function calls
+    // `resolveStartPolicy` and republishes its verdict. The moment it stops, every caller
+    // admitted through that door would be reading the mode from somewhere else, and this
+    // guard would be waving them through. Pin the delegation rather than trusting it.
+    const text = fs.readFileSync(path.join(packagesRoot, DELEGATING_RESOLVER), "utf8");
+    expect(
+      /resolveStartPolicy\s*\(/.test(text),
+      `${DELEGATING_RESOLVER} no longer calls resolveStartPolicy, so admitting ` +
+        "`resolveProjectRuntimeConfig` in CONSULTS_RESOLVER now excuses raw reads. Either " +
+        "restore the delegation or narrow the regex back to `resolveStartPolicy`.",
+    ).toBe(true);
+    expect(/startPolicy/.test(text), `${DELEGATING_RESOLVER} no longer exposes startPolicy`).toBe(true);
   });
 
   it("no NON_DECIDING entry is stale", () => {
