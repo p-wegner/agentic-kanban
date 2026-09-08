@@ -35,14 +35,13 @@ import {
 } from "../services/issue-analytics.service.js";
 import { createIssueCommentsService } from "../services/issue-comments.service.js";
 import type { IssueCommentKind, IssueCommentAuthor } from "../repositories/issue-comments.repository.js";
-import { createShowdownService } from "../services/showdown.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import {
   enhanceIssueBody, analyzeDependenciesBody, aiEstimateBody, projectIdBody,
   decomposeConfirmBody, contractConfirmBody, groupScanBody, batchIssuesBody, dependenciesBatchBody,
   contractCoupledBody, bulkUpdateBody,
   archiveDoneBody, createIssueBody, analyzeTouchedFilesBody, preflightBody, reposTouchedBody,
-  issueTagBody, issueDependencyBody, issueArtifactBody, issueCommentBody, showdownBody,
+  issueTagBody, issueDependencyBody, issueArtifactBody, issueCommentBody,
 } from "./issue-body-schemas.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../lib/ai-operation.js";
@@ -158,11 +157,6 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   const issueService = createIssueService({ database, boardEvents: options?.boardEvents, sendWebhook: createWebhookSender(database) });
   const issueCommentsService = createIssueCommentsService({ database, boardEvents: options?.boardEvents });
   const mergedCommitsService = createIssueMergedCommitsService({ database });
-  const showdownService = createShowdownService({
-    database,
-    getSessionManager: options?.getSessionManager,
-    boardEvents: options?.boardEvents,
-  });
 
   // GET /api/issues?projectId=...&issueNumber=N&statusName=InProgress&slim=1
   // slim=1 omits the description field (the bulk of the payload) — opt-in,
@@ -766,24 +760,6 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     const commentId = c.req.param("commentId");
     await issueCommentsService.removeComment(issueId, commentId);
     return c.json({ success: true });
-  });
-
-  // POST /api/issues/:id/showdown — start a showdown with N contestants
-  router.post("/:id/showdown", async (c) => {
-    const issueId = c.req.param("id");
-    const body = await parseJsonBody(c, showdownBody);
-    const result = await showdownService.createShowdown(issueId, body.contestants);
-    return c.json(result, 201);
-  });
-
-  // GET /api/issues/:id/showdown — get active showdown for this issue.
-  // Returns 200 with `null` when none exists: most issues never have a showdown,
-  // so "no showdown" is a normal state, not a client error. (A 404 here floods
-  // the browser console with errors every time an issue detail panel opens.)
-  router.get("/:id/showdown", async (c) => {
-    const issueId = c.req.param("id");
-    const result = await showdownService.getShowdownByIssue(issueId);
-    return c.json(result ?? null);
   });
 
   return router;

@@ -27,7 +27,6 @@ import { z } from "zod";
 // `*-body-schemas.ts` is written against (#806). They are unchanged — only relocated, so the
 // second schema file did not have to copy them.
 import { required, requiredRaw, arrayOnly, unchecked } from "./body-schema-helpers.js";
-import type { ShowdownContestant } from "@agentic-kanban/shared";
 import type { IssueCommentKind, IssueCommentAuthor } from "../repositories/issue-comments.repository.js";
 import type { PreflightClarification } from "../services/ticket-preflight.service.js";
 
@@ -232,10 +231,3 @@ export const issueCommentBody = z.object({
   workspaceId: unchecked<string>(),
 }).passthrough();
 
-/** `POST /api/issues/:id/showdown`. One combined guard, therefore one combined message. */
-export const showdownBody = z.object({
-  contestants: arrayOnly<ShowdownContestant>(
-    "contestants must be an array with at least 2 entries",
-    (v) => v.length >= 2,
-  ),
-}).passthrough();

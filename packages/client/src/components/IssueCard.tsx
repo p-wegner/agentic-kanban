@@ -381,23 +381,6 @@ function IssueCardBody({
             )
           )
         )}
-        {ws?.showdown && (
-          <Badge
-            tone={
-              ws.showdown.status === "decided"
-                ? "success"
-                : ws.showdown.doneCount === ws.showdown.total
-                ? "warning"
-                : "info"
-            }
-            icon={<span aria-hidden="true">⚔️</span>}
-            title={`Showdown: ${ws.showdown.doneCount}/${ws.showdown.total} done`}
-          >
-            {ws.showdown.status === "decided"
-              ? "Decided"
-              : `${ws.showdown.doneCount}/${ws.showdown.total} done`}
-          </Badge>
-        )}
       </div>
       <WorkspaceSummarySection
         issue={issue}

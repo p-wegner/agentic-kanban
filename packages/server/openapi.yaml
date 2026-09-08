@@ -2462,65 +2462,6 @@ paths:
           content:
             application/json:
               schema: {}
-  /api/issues/{id}/showdown:
-    get:
-      summary: the browser console with errors every time an issue detail panel opens.)
-      tags:
-        - issues
-      operationId: get_api_issues_id_showdown
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Success
-          content:
-            application/json:
-              schema: {}
-    post:
-      summary: POST /api/issues/:id/showdown — start a showdown with N contestants
-      tags:
-        - issues
-      operationId: post_api_issues_id_showdown
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                contestants:
-                  type: array
-                  items: {}
-              required:
-                - contestants
-              additionalProperties: true
-              x-unknown-keys: passthrough
-      responses:
-        "201":
-          description: Success
-          content:
-            application/json:
-              schema: {}
-        "400":
-          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
-          content:
-            application/json:
-              schema: {}
-        "404":
-          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
-          content:
-            application/json:
-              schema: {}
   /api/issues/{id}/summary:
     get:
       summary: GET /api/issues/:id/summary
@@ -8195,71 +8136,6 @@ paths:
       responses:
         "200":
           description: Success
-          content:
-            application/json:
-              schema: {}
-        "404":
-          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
-          content:
-            application/json:
-              schema: {}
-  /api/showdowns/{id}:
-    get:
-      summary: GET /api/showdowns/:id
-      tags:
-        - showdowns
-      operationId: get_api_showdowns_id
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Success
-          content:
-            application/json:
-              schema: {}
-        "404":
-          description: Error
-          content:
-            application/json:
-              schema: {}
-  /api/showdowns/{id}/pick-winner:
-    post:
-      summary: POST /api/showdowns/:id/pick-winner
-      tags:
-        - showdowns
-      operationId: post_api_showdowns_id_pick-winner
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                winnerWorkspaceId:
-                  type: string
-                  minLength: 1
-              required:
-                - winnerWorkspaceId
-              additionalProperties: true
-              x-unknown-keys: passthrough
-      responses:
-        "200":
-          description: Success
-          content:
-            application/json:
-              schema: {}
-        "400":
-          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}

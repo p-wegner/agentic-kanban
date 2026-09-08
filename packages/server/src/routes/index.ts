@@ -27,7 +27,6 @@ import { createRedDebtRoute } from "./red-debt.js";
 import { createFailurePatternsRoute } from "./failure-patterns.js";
 import { createQualityMetricsRoute } from "./quality-metrics.js";
 import { createMergeQueueRoute } from "./merge-queue.js";
-import { createShowdownsRoute } from "./showdowns.js";
 import { createCodemodsRoute } from "./codemods.js";
 import { createBoardMonitorRoute } from "./board-monitor.js";
 import { createRunbooksRoute } from "./runbooks.js";
@@ -116,7 +115,6 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/workflows", createWorkflowsRoute(database, { ...options, onWorkflowAdvanced }));
   routes.route("/scheduled-runs", createScheduledRunsRoute(database, getSessionManager, options?.boardEvents));
   routes.route("/merge-queue", createMergeQueueRoute(database, getSessionManager, options));
-  routes.route("/showdowns", createShowdownsRoute(database, getSessionManager, options));
   routes.route("/metrics", createMetricsRoute());
   routes.route("/workers", createWorkersRoute(database));
   routes.route("/plugins", createPluginsRoute(database, { ...options, getSessionManager }));
