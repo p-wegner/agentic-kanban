@@ -14,6 +14,8 @@ import {
   pluginSaveArtifactBody,
   pluginScaffoldFillBody,
   pluginScaffoldSaveBody,
+  pluginSyncConfigBody,
+  pluginSyncTriggerBody,
 } from "./plugin-body-schemas.js";
 import { getPluginService, PluginError } from "../services/plugin.service.js";
 import { createIssueService } from "../services/issue.service.js";
@@ -62,6 +64,21 @@ import { listPluginDocs, readPluginDoc } from "../services/plugin-docs.service.j
  *   POST   /api/plugins/:id/loops/:name/pause  { projectId } → stops the monitor's
  *            auto-advance for this loop only (manual "Advance now" still works)
  *   POST   /api/plugins/:id/loops/:name/resume { projectId } → re-arms auto-advance
+ *
+ *   External-issue-tracker sync (#1076 declares the capability, #1081 wires it up):
+ *   GET    /api/plugins/:id/sync/config?projectId=     declared config fields + current values
+ *            (never a secret VALUE) + which declared secrets the board can currently resolve
+ *   POST   /api/plugins/:id/sync/config { projectId, values: { [configKey]: string } } — MERGES
+ *            onto the existing config, so setting one field never erases the others
+ *   POST   /api/plugins/:id/sync/validate { projectId } → { ok, missingConfig, missingSecrets,
+ *            error? } — fails CLOSED (ok:false with a readable reason) rather than throwing,
+ *            since "not configured yet" is an expected state, not a server error
+ *   POST   /api/plugins/:id/sync/trigger { projectId, direction: "pull"|"push", dryRun? } →
+ *            runs the manifest's pull/push command (refusing, same as validate, when
+ *            unconfigured) and records the outcome as this project's last sync run
+ *   GET    /api/plugins/:id/sync/status?projectId=     last-run record (time, direction,
+ *            outcome, and — best-effort, parsed from the command's own stdout — counts,
+ *            per-issue links and conflicts) for the sync-status plugin view
  *
  * The client's flat per-project listings live under the `/projects` prefix
  * (convention: per-project reads hang off /projects/:projectId/...):
@@ -305,6 +322,36 @@ export function createPluginsRoute(
   router.post("/:id/loops/:name/resume", async (c) => {
     const projectId = await requireProjectId(c);
     return c.json(await service.setLoopPaused(c.req.param("id"), c.req.param("name"), projectId, false));
+  });
+
+  router.get("/:id/sync/config", async (c) => {
+    const projectId = c.req.query("projectId")?.trim();
+    if (!projectId) throw new PluginError("projectId query param is required", "BAD_REQUEST");
+    return c.json(await service.getSyncConfig(c.req.param("id"), projectId));
+  });
+
+  router.post("/:id/sync/config", async (c) => {
+    const body = await parsePluginBody(c, pluginSyncConfigBody);
+    return c.json(await service.setSyncConfig(c.req.param("id"), body.projectId, body.values));
+  });
+
+  router.post("/:id/sync/validate", async (c) => {
+    const projectId = await requireProjectId(c);
+    return c.json(await service.validateSync(c.req.param("id"), projectId));
+  });
+
+  router.post("/:id/sync/trigger", async (c) => {
+    const body = await parsePluginBody(c, pluginSyncTriggerBody);
+    return c.json(await service.triggerSync(c.req.param("id"), body.projectId, {
+      direction: body.direction,
+      dryRun: body.dryRun,
+    }));
+  });
+
+  router.get("/:id/sync/status", async (c) => {
+    const projectId = c.req.query("projectId")?.trim();
+    if (!projectId) throw new PluginError("projectId query param is required", "BAD_REQUEST");
+    return c.json(await service.getSyncStatus(c.req.param("id"), projectId));
   });
 
   router.post("/:id/scripts/:name/run", async (c) => {

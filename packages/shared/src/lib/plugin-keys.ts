@@ -132,3 +132,23 @@ export function pluginOutputLocationPreferenceKey(pluginSlug: string, projectId:
 export function pluginSidecarRepoName(pluginSlug: string): string {
   return `${pluginSlug}-requirements`;
 }
+
+/**
+ * Per-project sync CONFIG pref key (#1081): `plugin_sync_config_<pluginSlug>_<projectId>`,
+ * holding a JSON object of the manifest's declared `sync.config[].key` values. Never carries a
+ * secret — those are named in `sync.secrets[]` and resolved by the board from its own process
+ * env at run time, not stored here.
+ */
+export function pluginSyncConfigPreferenceKey(pluginSlug: string, projectId: string): string {
+  return `plugin_sync_config_${pluginSlug}_${projectId}`;
+}
+
+/**
+ * Per-project sync RUN-STATUS pref key (#1081): `plugin_sync_status_<pluginSlug>_<projectId>`,
+ * holding the board's own record of the last `pull`/`push` trigger (when, direction, dry-run,
+ * outcome, and — best-effort — the counts/per-issue links/conflicts the command's own stdout
+ * reported). Read by the sync-status plugin view; never contains a secret value.
+ */
+export function pluginSyncStatusPreferenceKey(pluginSlug: string, projectId: string): string {
+  return `plugin_sync_status_${pluginSlug}_${projectId}`;
+}
