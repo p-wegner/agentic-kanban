@@ -161,6 +161,17 @@ regression tests were kept by seeding rows directly instead of through the remov
 **Read this section before anything below it.** Everything under a dated heading describes the
 state at the time it was written. Standing state lives here and nowhere else.
 
+### A registration side effect that undid #1040 (#1070)
+
+Registering this checkout on the DEV board (for the visual verification) made the registration
+scaffold write `pnpm.onlyBuiltDependencies` back into `package.json` and **auto-commit it** as
+`Test <test@test.com>` (`81a75e1b9f`). Byte-for-byte the block #1040 removed this morning, and
+dead for the same reason — pnpm 10 no longer reads that field and warns on every command. So a
+landed ticket was silently undone eight hours later by registering the repo. Reverted
+(`91c5cb1439`), filed as **#1070**: the scaffold writes the LEGACY location without checking
+`pnpm-workspace.yaml`, and a registration auto-commits to the user's repo on master under a
+synthetic identity — which is what put it in history rather than in the working tree.
+
 ### Verified now (2026-09-08, after the view-thinning pass)
 
 - **Branch `master`, working tree clean.** Ahead of `origin/master` by the whole local history
@@ -168,8 +179,13 @@ state at the time it was written. Standing state lives here and nowhere else.
   `pizza-und-ai-code/agentic-code-review`, a DIFFERENT project, not a mirror.
 - **Stable is `stable-20260908-2`, live on 3001.** Master is now WELL ahead of it — the whole
   #1062-#1068 epic landed after that promotion. **Nothing is live-verified on stable yet.**
-- **Typecheck clean** (5 packages) and the **full client suite green — 184 files / 1758 tests**,
-  re-run after every commit of the pass.
+- **EVERY suite green, whole-repo**, run to completion after the last commit:
+  **server 894 files / 8823 tests**, **client 184 / 1758**, **shared 121 / 1187**,
+  **mcp-server 44 / 208**, plus `pnpm check:arch` (50s) and `pnpm typecheck` (5 packages).
+  The server run is the one that matters: it is what caught #1069, the nloc shrink and the
+  whole-tree-walk timeout, none of which any targeted run touched.
+- **Nine wire-DTO grandfathering entries banked** plus the `createIssuesRoute` nloc ceiling
+  (463 -> 421) — shrink-only ratchets must be lowered or they become budgets.
 - **Visually verified** on the dev board (`pnpm dev:devboard`, 5273) with playwright: the 13
   primary tabs, all 10 Analytics tabs and 3 Focus tabs rendering and switching, tab URLs, a cold
   deep link, all six legacy redirects, and the four deleted routes falling back to the board.
@@ -181,16 +197,14 @@ state at the time it was written. Standing state lives here and nowhere else.
 
 ### Next steps, in order
 
-1. **Run the full server suite to completion and read it.** It was still running when this was
-   written; the FIRST run is what caught the #1069 mistake, so this is not a formality.
-   `cd packages/server && pnpm exec vitest run --maxWorkers=4`.
-2. **Then promote.** Master is far ahead of `stable-20260908-2` and the pass is entirely
+1. **Promote.** Master is far ahead of `stable-20260908-2` and the pass is entirely
    board-UI, so the operated board still shows the OLD views until a promotion. `pnpm promote
    --dry-run` first; #1044/#1060 mean it will request its own sweep rather than dead-ending.
-3. **Operator: decide the push.** Clean fast-forward to `origin/master`. The Linux CI run #923
+2. **Operator: decide the push.** Clean fast-forward to `origin/master`. The Linux CI run #923
    needs has still never happened — every sweep here is Windows-only. Not ours to decide.
-4. **#1069** — the disclose-context hook dies once the Bash tool's cwd moves. Corrected
+3. **#1069** — the disclose-context hook dies once the Bash tool's cwd moves. Corrected
    diagnosis is on the ticket; the fix must preserve the relative spelling.
+4. **#1070** — the registration scaffold regression above.
 
 ### Open, unexplained — chase this if it recurs
 
