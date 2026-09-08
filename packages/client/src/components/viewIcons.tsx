@@ -103,12 +103,6 @@ export const VIEW_ICONS: Record<ViewMode, ReactNode> = {
   "workflow-analytics": <Icon className="w-3.5 h-3.5" d="M4 19V5m0 14h16M7 15l3-4 3 2 4-7M7 19v-4m6 4v-6m4 6V6" />,
   insights: <Icon className="w-3.5 h-3.5" d="M3 13l4-4 4 4 4-8 4 4" />,
   swimlane: <Icon className="w-3.5 h-3.5" d="M3 6h18M3 12h18M3 18h18" />,
-  "flaky-tests": (
-    <Icon
-      className="w-3.5 h-3.5"
-      d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
-    />
-  ),
   runtime: <Icon className="w-3.5 h-3.5" d="M3 12h3l2 5 4-14 2 9 2-3h5" />,
   runbooks: (
     <Icon

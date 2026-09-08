@@ -8,7 +8,7 @@ import {
   GraphView, TableView, AgentGrid, TimelineView, MetricsView, CrimeSceneCityView,
   QualityMetricsView, MilestonesOverview, ButlerView, WorkflowsView,
   WorkflowAnalyticsDashboard, InsightsPanel, BoardFeedView, RuntimeFeedView, FocusView,
-  StrategyTargetsView, SwimlaneView, FlakyTestsPanel,
+  StrategyTargetsView, SwimlaneView,
   RunbooksView, SprintCapacityPlanner,
   StaleWorkDashboard, AnalyticsView, CalendarView,
   DriveDashboard, PluginViewsPanel,
@@ -280,11 +280,6 @@ export function BoardSecondaryViews({
             onIssueClick={onIssueClick}
             searchQuery={searchQuery}
           />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "flaky-tests" && activeProjectId && (
-        <BoardErrorBoundary columnName="Flaky Tests">
-          <FlakyTestsPanel projectId={activeProjectId} />
         </BoardErrorBoundary>
       )}
       {viewMode === "runbooks" && (

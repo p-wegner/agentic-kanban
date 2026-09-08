@@ -42,7 +42,6 @@ routes. Prefer Markdown links with absolute URLs when you know the app base URL:
 - Focus: \`/focus\`
 - Strategy: \`/strategy\`
 - Swimlane: \`/swimlane\`
-- Flaky tests: \`/flaky-tests\`
 - Monitor history: \`/monitor-history\`
 - Digest: \`/digest\`
 

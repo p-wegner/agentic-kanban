@@ -37,13 +37,13 @@ describe("VIEW_REGISTRY", () => {
     // fireworks, garden) were extracted to the external board-whimsy plugin
     // (momentum dropped outright — swimlane is a strict superset), freeing
     // the `v` and `e` single-key shortcuts.
-    expect(VIEW_REGISTRY).toHaveLength(27);
+    expect(VIEW_REGISTRY).toHaveLength(26);
   });
 
   it("preserves the existing view ids", () => {
     const expected: ViewMode[] = [
       "kanban", "backlog", "graph", "table", "agents", "timeline", "metrics",
-      "quality-metrics", "strategy", "focus", "butler", "workflows", "workflow-analytics", "insights", "swimlane", "flaky-tests",
+      "quality-metrics", "strategy", "focus", "butler", "workflows", "workflow-analytics", "insights", "swimlane",
       "runtime", "drive", "runbooks", "capacity", "activity", "stale-work",
       "analytics", "calendar",
       "crime-scene", "milestones", "plugin-views",
@@ -71,7 +71,6 @@ describe("VIEW_REGISTRY", () => {
     expect(byId.butler).toBe("i");
     expect(byId.swimlane).toBe("p");
     expect(byId.insights).toBe("n");
-    expect(byId["flaky-tests"]).toBe("k");
     expect(byId.strategy).toBe("z");
     expect(byId.focus).toBe("o");
     expect(byId.workflows).toBe("u");
@@ -81,6 +80,9 @@ describe("VIEW_REGISTRY", () => {
   it("keeps the shortcuts freed by the board-whimsy extraction (v, e) unassigned (#237)", () => {
     expect(SHORTCUT_TO_VIEW["v"]).toBeUndefined();
     expect(SHORTCUT_TO_VIEW["e"]).toBeUndefined();
+    // `k` joined them when the Flaky Tests view was deleted (#1062). Reclaiming letters is the
+    // point of the view-thinning epic, so a freed shortcut stays free until a view earns it.
+    expect(SHORTCUT_TO_VIEW["k"]).toBeUndefined();
   });
 
   it("every view has the fields the three consumers need", () => {
@@ -112,7 +114,7 @@ describe("VIEW_REGISTRY", () => {
     // Analytics/secondary views live behind the "More" overflow dropdown.
     expect([...secondaryIds].sort()).toEqual(
       [
-        "flaky-tests", "focus", "metrics", "quality-metrics", "swimlane", "workflow-analytics",
+        "focus", "metrics", "quality-metrics", "swimlane", "workflow-analytics",
         "runbooks", "capacity", "activity", "stale-work",
         "analytics",
         "crime-scene", "milestones",
@@ -142,6 +144,6 @@ describe("VIEW_REGISTRY", () => {
     expect(SHORTCUT_TO_VIEW["g"]).toBeUndefined();
     expect(SHORTCUT_TO_VIEW["b"]).toBe("kanban");
     expect(SHORTCUT_TO_VIEW["r"]).toBe("backlog");
-    expect(SHORTCUT_TO_VIEW["k"]).toBe("flaky-tests");
+    expect(SHORTCUT_TO_VIEW["k"]).toBeUndefined();
   });
 });

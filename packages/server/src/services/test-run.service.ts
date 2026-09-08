@@ -7,11 +7,6 @@ import {
 import { readSessionStdoutFile } from "../lib/session-output-reader.js";
 import {
   insertTestRunBatch,
-  getFlakyAggregates,
-  getFlakyPinNames,
-  insertFlakyPin,
-  deleteFlakyPin,
-  getPinnedTestRows,
   getTestRunIdForSession,
   getSessionStdoutMessages,
 } from "../repositories/test-run.repository.js";
@@ -28,20 +23,6 @@ export interface TestRunRecord {
   runner: "vitest" | "playwright";
 }
 
-export interface FlakyTestEntry {
-  testName: string;
-  file: string | null;
-  suite: string | null;
-  runner: string;
-  totalRuns: number;
-  passCount: number;
-  failCount: number;
-  flakeRate: number; // 0..1
-  score: number;    // flakeRate * log(frequency), for sorting
-  lastSeen: string;
-  isPinned: boolean;
-  lastError: string | null;
-}
 
 // ---- Vitest JSON reporter output shapes ----
 interface VitestTestResult {
@@ -418,58 +399,6 @@ export function createTestRunService(database: Database) {
     }
   }
 
-  async function getFlaky(opts: {
-    limit?: number;
-    minRuns?: number;
-    windowDays?: number;
-  } = {}): Promise<FlakyTestEntry[]> {
-    const { limit = 50, minRuns = 5, windowDays = 30 } = opts;
-    const cutoff = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
-
-    const rows = await getFlakyAggregates(cutoff, minRuns, database);
-
-    const pins = await getFlakyPinNames(database);
-    const pinnedSet = new Set(pins.map(p => p.testName));
-
-    const flaky: FlakyTestEntry[] = [];
-    for (const row of rows) {
-      const total = Number(row.totalRuns);
-      const fail = Number(row.failCount);
-      const pass = Number(row.passCount);
-      const flakeRate = total > 0 ? fail / total : 0;
-      if (flakeRate < 0.05 || flakeRate > 0.95) continue;
-      flaky.push({
-        testName: row.testName,
-        file: row.file,
-        suite: row.suite,
-        runner: row.runner,
-        totalRuns: total,
-        passCount: pass,
-        failCount: fail,
-        flakeRate,
-        score: flakeRate * Math.log1p(total),
-        lastSeen: row.lastSeen,
-        isPinned: pinnedSet.has(row.testName),
-        lastError: row.lastError ?? null,
-      });
-    }
-
-    flaky.sort((a, b) => b.score - a.score);
-    return flaky.slice(0, limit);
-  }
-
-  async function pinTest(testName: string, file?: string): Promise<void> {
-    await insertFlakyPin(testName, file ?? null, new Date().toISOString(), database);
-  }
-
-  async function unpinTest(testName: string): Promise<void> {
-    await deleteFlakyPin(testName, database);
-  }
-
-  async function getPinnedTests(): Promise<Array<{ testName: string; file: string | null; pinnedAt: string }>> {
-    return getPinnedTestRows(database);
-  }
-
   /**
    * Auto-ingest test results from a completed agent/CI session's persisted output.
    * Idempotent per session: if any test_runs row already exists for this session
@@ -504,7 +433,7 @@ export function createTestRunService(database: Database) {
     return records.length;
   }
 
-  return { recordRuns, getFlaky, pinTest, unpinTest, getPinnedTests, ingestSession };
+  return { recordRuns, ingestSession };
 }
 
 export type TestRunService = ReturnType<typeof createTestRunService>;

@@ -21,7 +21,6 @@
 | Workflow Analytics | `h` | `workflow-analytics` |
 | Insights | `n` | `insights` |
 | Swimlane | `p` | `swimlane` |
-| Flaky Tests Radar | `k` | `flaky-tests` |
 | Runbooks | `j` | `runbooks` |
 
 ## Navigation

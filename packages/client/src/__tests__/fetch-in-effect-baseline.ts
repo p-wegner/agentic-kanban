@@ -37,7 +37,6 @@ export const FETCH_IN_EFFECT_BASELINE: Record<string, number> = {
   "components/DriveSettingsSection.tsx": 1,
   "components/FailurePatternHint.tsx": 1,
   "components/FileContentionPanel.tsx": 1,
-  "components/FlakyTestsPanel.tsx": 1,
   "components/FleetServiceStackMap.tsx": 2,
   "components/FocusView.tsx": 1,
   "components/InsightsPanel.tsx": 2,

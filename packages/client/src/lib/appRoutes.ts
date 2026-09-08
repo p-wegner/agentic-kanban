@@ -17,7 +17,6 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   "workflow-analytics": "/workflow-analytics",
   insights: "/insights",
   swimlane: "/swimlane",
-  "flaky-tests": "/flaky-tests",
   runtime: "/runtime",
   drive: "/drive",
   strategy: "/strategy",

@@ -46,7 +46,7 @@ import {
  * FILES using `projectId` as its security boundary), `projects.ts` (9), `workspace-actions.ts`
  * (5), `tags.ts` (2). Batch 2 took 101 → 92 by working the cases batch 1 had declared
  * non-mechanical: `plugins.ts` (12 → 5) and `projects.ts` (6 → 4). Batch 3 took 92 → 70
- * across eleven route files — `issues.ts` (12 → 2), `failure-patterns.ts` (2 → 0), `flaky-tests.ts` (3 → 1),
+ * across eleven route files — `issues.ts` (12 → 2), `failure-patterns.ts` (2 → 0),
  * `agent-questions.ts`, `drive-obstacles.ts`, `merge-queue.ts`, `project-analytics.ts`,
  * `showdowns.ts`, `voice-capture.ts` (each 1 → 0), `drive.ts` (2 → 1) and `agent-skills.ts`
  * (4 → 3) — and REJECTED seven more handlers, each recorded on its entry below. Batch 4 took
@@ -130,7 +130,7 @@ import {
  *      `{ error, boardProtocolVersion }` that the worker daemon branches on (#754).
  *   4. **`parseOptionalJsonBody` by contract.** A missing body is a valid request the handler
  *      answers itself, so `parseJsonBody` would replace its message with `invalid JSON body`.
- *      `flaky-tests.ts DELETE /pin` is the explicit case; the rest are counted-but-correct.
+ *      The remaining entries are counted-but-correct.
  *
  *   5. **ORDER — the guard runs AFTER a lookup that answers 404/403** (new in batch 4). The
  *      body check lives in a service, but not as its first statement: `milestones.ts PUT /:id`,
@@ -286,10 +286,6 @@ const BASELINE: Readonly<Record<string, number>> = {
   // existence + ownership checks, so a schema would answer 400 where a caller gets 404/403)
   // and `POST /:id/finish` (family 4). `POST /:projectId/drives` converted in batch 4.
   "drives.ts": 2,
-  // 1 = `DELETE /pin`. REJECTED: it is a `parseOptionalJsonBody` site whose contract is that
-  // an absent body still reaches its own `testName is required` 400; `parseJsonBody` would
-  // answer `invalid JSON body` for that same request.
-  "flaky-tests.ts": 1,
   // 2 = `POST /api/internal/board-notify` and `/internal/workflow-advanced`. REJECTED,
   // family 4: both answer `{ ok: true }` for an EMPTY body on purpose — they are
   // fire-and-forget notifications whose fields are all `if (body.x)` optional.
@@ -393,7 +389,9 @@ const BASELINE: Readonly<Record<string, number>> = {
 };
 
 /** The total the baseline encodes — asserted separately so a mass edit cannot drift it silently. */
-const BASELINE_TOTAL = 58;
+// 58 -> 57 (#1062): `flaky-tests.ts` held the last remaining allowance, and the whole route file
+// was deleted with the Flaky Tests view. A route that no longer exists cannot be un-validated.
+const BASELINE_TOTAL = 57;
 
 describe("route request-body validation (#806)", () => {
   it("scans the real routes directory", () => {
