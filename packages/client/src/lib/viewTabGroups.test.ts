@@ -48,9 +48,12 @@ describe("withViewTabGroupHeaders (#742)", () => {
     expect(withViewTabGroupHeaders([])).toEqual([]);
   });
 
-  it("gives the real analytics tab set exactly two headers, at the group boundaries", () => {
+  it("gives the real analytics tab set exactly three headers, at the group boundaries", () => {
+    // Board / Flow / Agents (#1066 added the Board group and one tab to each of the other two).
     expect(headers(ANALYTICS_TABS)).toEqual([
-      "Flow", undefined, undefined, "Agents", undefined, undefined, undefined,
+      "Board",
+      "Flow", undefined, undefined, undefined,
+      "Agents", undefined, undefined, undefined, undefined,
     ]);
   });
 
