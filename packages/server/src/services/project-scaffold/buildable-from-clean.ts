@@ -271,6 +271,15 @@ function yamlDepItem(dep: string): string {
 function mergeApprovedDepsIntoWorkspaceYaml(ws: string): string {
   const blockRe = /^onlyBuiltDependencies:[ \t]*\r?\n((?:[ \t]+-[ \t]*.*\r?\n?)*)/m;
   const match = ws.match(blockRe);
+  // The key may already exist in a form this function doesn't parse (e.g. flow-style
+  // `onlyBuiltDependencies: [esbuild, "@swc/core"]`). Appending a second top-level key in
+  // that case would produce a DUPLICATE YAML key, which most parsers (incl. the one pnpm
+  // uses) reject outright — turning a working config into one that fails to parse at all.
+  // Leave the file untouched rather than risk that; block-style is what this scaffold itself
+  // writes, so every file it ever produced stays mergeable.
+  if (!match && /^[ \t]*onlyBuiltDependencies[ \t]*:/m.test(ws)) {
+    return ws;
+  }
   const existing = match
     ? Array.from(match[1].matchAll(/-\s*["']?([^"'\r\n]+?)["']?\s*$/gm)).map((m) => m[1].trim())
     : [];

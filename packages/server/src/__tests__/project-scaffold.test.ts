@@ -827,6 +827,25 @@ describe("project-scaffold", () => {
         await rm(dir, { recursive: true, force: true });
       }
     });
+
+    it("onlyBuiltDependencies already declared in FLOW style: never append a second key (#1070)", async () => {
+      const dir = await tmp();
+      try {
+        await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app" }, null, 2) + "\n");
+        // Valid YAML the block-style parser doesn't recognize as a list — must not be
+        // treated as "no existing declaration", or a duplicate top-level key gets appended
+        // and the file becomes invalid YAML.
+        await writeFile(
+          join(dir, "pnpm-workspace.yaml"),
+          'packages:\n  - "packages/*"\nonlyBuiltDependencies: [esbuild, "@swc/core"]\n'
+        );
+        ensureBuildableFromClean(dir);
+        const ws = await readFile(join(dir, "pnpm-workspace.yaml"), "utf8");
+        expect(ws.match(/onlyBuiltDependencies/g)?.length).toBe(1);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe("registration must not leave the main checkout dirty (#38)", () => {
