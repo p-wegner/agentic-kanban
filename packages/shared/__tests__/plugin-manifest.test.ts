@@ -187,6 +187,125 @@ describe("parsePluginManifest", () => {
       parsePluginManifest({ id: "p", name: "P", skills: [{ dir: "skills/x", init: "yes" }] }),
     ).toThrow(/"skills\[0]\.init" must be a boolean/);
   });
+
+  // #1076 — the declarative external-issue-tracker sync capability.
+  describe("sync", () => {
+    const withSync = (sync: unknown) => ({ id: "p", name: "P", sync });
+
+    it("parses a full sync block: provider, pull/push commands, config schema, secret names", () => {
+      const m = parsePluginManifest(
+        withSync({
+          provider: "jira",
+          pull: { command: "node tools/sync/pull.mjs", cwd: "plugin", env: { JIRA_JQL: "{{repoPath}}" } },
+          push: { command: "node tools/sync/push.mjs" },
+          config: [
+            { key: "siteUrl", label: "Site URL", required: true },
+            { key: "projectKey", label: "Project key", required: true },
+            { key: "jql", label: "JQL filter", description: "Restricts which issues sync" },
+          ],
+          secrets: ["JIRA_API_TOKEN", "JIRA_EMAIL"],
+        }),
+      );
+      expect(m.sync).toMatchObject({
+        provider: "jira",
+        pull: { command: "node tools/sync/pull.mjs", cwd: "plugin" },
+        push: { command: "node tools/sync/push.mjs" },
+      });
+      expect(m.sync?.config).toEqual([
+        { key: "siteUrl", label: "Site URL", description: undefined, required: true },
+        { key: "projectKey", label: "Project key", description: undefined, required: true },
+        { key: "jql", label: "JQL filter", description: "Restricts which issues sync", required: undefined },
+      ]);
+      expect(m.sync?.secrets).toEqual(["JIRA_API_TOKEN", "JIRA_EMAIL"]);
+    });
+
+    it("accepts a sync block with only pull or only push declared", () => {
+      expect(parsePluginManifest(withSync({ provider: "jira", pull: { command: "x" } })).sync?.push).toBeUndefined();
+      expect(parsePluginManifest(withSync({ provider: "jira", push: { command: "x" } })).sync?.pull).toBeUndefined();
+    });
+
+    it("is fully back-compat: a manifest with no sync block behaves exactly as today", () => {
+      const m = parsePluginManifest(JSON.stringify(FULL_MANIFEST));
+      expect(m.sync).toBeUndefined();
+      const minimal = parsePluginManifest({ id: "x1", name: "X" });
+      expect(minimal.sync).toBeUndefined();
+    });
+
+    it("rejects a missing or malformed provider id", () => {
+      expect(() => parsePluginManifest(withSync({ pull: { command: "x" } }))).toThrow(
+        /"sync\.provider" must be a non-empty string/,
+      );
+      expect(() => parsePluginManifest(withSync({ provider: "Bad Provider!", pull: { command: "x" } }))).toThrow(
+        /"sync\.provider" must match/,
+      );
+    });
+
+    it("rejects a sync block declaring neither pull nor push", () => {
+      expect(() => parsePluginManifest(withSync({ provider: "jira" }))).toThrow(
+        /"sync" must declare at least one of "pull"\/"push"/,
+      );
+    });
+
+    it("rejects a pull/push command missing its command string", () => {
+      expect(() => parsePluginManifest(withSync({ provider: "jira", pull: {} }))).toThrow(
+        /"sync\.pull\.command"/,
+      );
+      expect(() => parsePluginManifest(withSync({ provider: "jira", push: { command: "x", cwd: "nowhere" } }))).toThrow(
+        /"sync\.push\.cwd" must be "plugin" or "repo"/,
+      );
+    });
+
+    it("rejects a duplicate sync.config key", () => {
+      expect(() =>
+        parsePluginManifest(
+          withSync({
+            provider: "jira",
+            pull: { command: "x" },
+            config: [{ key: "siteUrl" }, { key: "siteUrl" }],
+          }),
+        ),
+      ).toThrow(/duplicate sync\.config key "siteUrl"/);
+    });
+
+    it("rejects a malformed sync.config entry", () => {
+      expect(() =>
+        parsePluginManifest(withSync({ provider: "jira", pull: { command: "x" }, config: [{}] })),
+      ).toThrow(/"sync\.config\[0]\.key" must be a non-empty string/);
+    });
+
+    it("rejects a non-string secret entry and duplicate secret names", () => {
+      expect(() =>
+        parsePluginManifest(withSync({ provider: "jira", pull: { command: "x" }, secrets: [42] })),
+      ).toThrow(/"sync\.secrets\[0]" must be a string/);
+      expect(() =>
+        parsePluginManifest(
+          withSync({ provider: "jira", pull: { command: "x" }, secrets: ["TOKEN", "TOKEN"] }),
+        ),
+      ).toThrow(/duplicate sync secret name "TOKEN"/);
+    });
+
+    it("rejects a secret entry that looks like an inline value rather than a reference name", () => {
+      const rejects = (value: string) =>
+        expect(() =>
+          parsePluginManifest(withSync({ provider: "jira", pull: { command: "x" }, secrets: [value] })),
+        ).toThrow(/looks like an inline secret VALUE|must be a reference NAME matching/);
+
+      rejects("ghp_1234567890abcdefghijklmnopqrstuvwxyz");
+      rejects("xoxb-1234-5678-abcdefg");
+      rejects("sk-abcdefghijklmnopqrstuvwxyz");
+      rejects("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dQw4w9WgXcQ");
+      rejects("a".repeat(65));
+      rejects("Bearer sometoken");
+      rejects("token with spaces");
+    });
+
+    it("accepts a plausible secret reference name shape", () => {
+      const m = parsePluginManifest(
+        withSync({ provider: "jira", pull: { command: "x" }, secrets: ["JIRA_API_TOKEN", "jira.api-token"] }),
+      );
+      expect(m.sync?.secrets).toEqual(["JIRA_API_TOKEN", "jira.api-token"]);
+    });
+  });
 });
 
 describe("substitutePluginPlaceholders", () => {
