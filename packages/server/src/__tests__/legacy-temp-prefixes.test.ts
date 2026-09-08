@@ -72,7 +72,12 @@ describe("legacy temp-prefix derivation (#1056 follow-up)", () => {
     expect(matchLegacyPrefix("unrelated-thing", prefixes)).toBeNull();
   });
 
-  it("derives real prefixes from the tree — a rule that matches nothing proves nothing", () => {
+  // 300s, not the default 120s: this case walks and reads EVERY source file in the repo, so it
+  // is I/O-bound rather than slow, and under a full-suite run (`--maxWorkers=4`) it contends
+  // with every other suite for the same disk. Measured ~4s standalone; it timed out at 120s
+  // once inside a full run. Raising the budget for the one case that does a whole-tree walk is
+  // the honest fix — trimming the walk would weaken what the guard actually checks.
+  it("derives real prefixes from the tree — a rule that matches nothing proves nothing", { timeout: 300_000 }, () => {
     const { claimable, rejected } = deriveLegacyPrefixes(REPO_ROOT);
     // Measured at 330 claimable / 24 declined. A floor, not the exact number: this is derived
     // from live sources and moves whenever a fixture is added or renamed.
