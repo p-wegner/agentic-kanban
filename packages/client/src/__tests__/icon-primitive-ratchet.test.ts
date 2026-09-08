@@ -74,7 +74,6 @@ const RAW_STROKED_SVG: Record<string, number> = {
   "components/BurndownChart.tsx": 1,
   "components/InsightsPanel.tsx": 1,
   "components/LeadTimeTrendChart.tsx": 1,
-  "components/QualityMetricsView.tsx": 1,
   "components/WorkflowAnalyticsDashboard.tsx": 3,
   // Ring/donut gauges and a draggable radar: `<circle>` arcs whose stroke IS the datum
   // (dasharray progress, axis rings), sized in px rather than on the 24×24 icon grid.

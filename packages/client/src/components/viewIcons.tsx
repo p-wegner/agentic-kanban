@@ -63,16 +63,9 @@ export const VIEW_ICONS: Record<ViewMode, ReactNode> = {
     </Icon>
   ),
 
-  "crime-scene": (
-    <Icon className="w-3.5 h-3.5">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 20h18M5 20V9l4-3 4 3v11M13 20V7l6 3v10" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M7 12h2M7 15h2M15 12h2M15 15h2" />
-      <circle cx="18" cy="6" r="2" fill="currentColor" stroke="none" />
-    </Icon>
-  ),
+
   // The two-`<path>` glyphs below are one `d` with two subpaths: the pair always carried
   // identical stroke attributes, so concatenating them draws the same marks.
-  "quality-metrics": <Icon className="w-3.5 h-3.5" d="M4 19V5m0 14h16M8 16l3-5 3 2 4-7M8 19v-3m6 3v-6m4 6V6" />,
   strategy: (
     <Icon className="w-3.5 h-3.5">
       <circle cx="12" cy="12" r="8" />

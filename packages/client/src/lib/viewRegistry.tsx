@@ -29,8 +29,6 @@ export type ViewMode =
   | "table"
   | "agents"
   | "timeline"
-  | "crime-scene"
-  | "quality-metrics"
   | "butler"
   | "workflows"
   | "swimlane"
@@ -64,7 +62,7 @@ export interface ViewDescriptor {
   shortcut?: string;
   /**
    * Some views use a non-default active-button color (swimlane = blue,
-   * crime-scene = red). Defaults to the brand color when omitted.
+   * strategy = brand). Defaults to the brand color when omitted.
    */
   activeClass?: string;
   /** `graph` is reached via a `g` chord (g+s opens settings) rather than a plain key handler. */
@@ -146,27 +144,6 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "⏱",
     paletteDescription: "Show issues on a chronological timeline",
     shortcut: "f",
-  },
-  {
-    id: "crime-scene",
-    toolbarLabel: "Hotspots",
-    label: "Code Crime Scene",
-    tooltip: "Code Crime Scene - city view of churn hotspots",
-    paletteIcon: "CS",
-    paletteDescription: "Visualize the codebase as districts and buildings with hotspot evidence markers",
-    activeClass: "bg-red-700 text-white",
-    group: "secondary",
-  },
-  {
-    id: "quality-metrics",
-    toolbarLabel: "Quality",
-    label: "Quality Metrics",
-    tooltip: "Quality Metrics view",
-    paletteIcon: "QM",
-    paletteDescription: "Show collected code quality metrics",
-    shortcut: "y",
-    activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
   },
   {
     id: "strategy",

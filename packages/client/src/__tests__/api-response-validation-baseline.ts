@@ -150,7 +150,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "GET /api/projects/:param/onboarding",
   "GET /api/projects/:param/orchestrator",
   "GET /api/projects/:param/plugin-surface",
-  "GET /api/projects/:param/quality-metrics",
   "GET /api/projects/:param/runbooks",
   "GET /api/projects/:param/runbooks/content",
   "GET /api/projects/:param/scripts",
