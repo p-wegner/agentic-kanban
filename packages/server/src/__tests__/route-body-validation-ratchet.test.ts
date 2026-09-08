@@ -294,13 +294,11 @@ const BASELINE: Readonly<Record<string, number>> = {
   // `{ text, format }` object, a bare JSON ARRAY of issues, or (preview) a bare JSON string.
   // A `z.object` cannot express that union, and multipart never reaches a JSON parse at all.
   "issue-export-import.ts": 2,
-  // 2 = `PATCH /:id` and `POST /:id/time-entries`, both REJECTED with reasons at the call
-  // sites. `PATCH /:id` forwards an UNTYPED body whole to `updateIssue(id, Record<string,
-  // unknown>)` — there is nothing to tighten to (the `PATCH /projects/:id` argument).
-  // `POST /:id/time-entries`'s only guard is a coercion (`Number(body.minutes)` then
-  // `Number.isInteger`), so `{"minutes":"30"}` succeeds today and a schema would 400 it;
-  // nothing else in that body is checked, so a schema would be decoration.
-  "issues.ts": 2,
+  // 1 = `PATCH /:id`, REJECTED with its reason at the call site: it forwards an UNTYPED body
+  // whole to `updateIssue(id, Record<string, unknown>)` — there is nothing to tighten to (the
+  // `PATCH /projects/:id` argument). 2 -> 1 (#1063): `POST /:id/time-entries` was the other,
+  // and it was deleted with the time-tracking UI.
+  "issues.ts": 1,
   // 1 = `PUT /:projectId/milestones/:id`. REJECTED, family 5 — the reason is written out in
   // `milestone-body-schemas.ts`. `POST /:projectId/milestones` converted in batch 4.
   "milestones.ts": 1,
@@ -391,7 +389,8 @@ const BASELINE: Readonly<Record<string, number>> = {
 /** The total the baseline encodes — asserted separately so a mass edit cannot drift it silently. */
 // 58 -> 57 (#1062): `flaky-tests.ts` held the last remaining allowance, and the whole route file
 // was deleted with the Flaky Tests view. A route that no longer exists cannot be un-validated.
-const BASELINE_TOTAL = 57;
+// 57 -> 56 (#1063): same reason for `issues.ts` `POST /:id/time-entries`.
+const BASELINE_TOTAL = 56;
 
 describe("route request-body validation (#806)", () => {
   it("scans the real routes directory", () => {

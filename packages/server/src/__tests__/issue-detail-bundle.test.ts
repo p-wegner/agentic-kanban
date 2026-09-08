@@ -84,7 +84,7 @@ describe("GET /api/issues/:id/detail-bundle", () => {
     expect(Array.isArray(body.activity.events)).toBe(true);
   });
 
-  it("folds cycle-time, time-entries, touched-files, related-issues and merged-commits into the bundle, identical to the individual endpoints (#418)", async () => {
+  it("folds cycle-time, touched-files, related-issues and merged-commits into the bundle, identical to the individual endpoints (#418)", async () => {
     const { app, db } = createTestApp();
     const projectId = await seedProject(db);
     const issueId = await seedIssue(db, projectId, "desc");
@@ -105,19 +105,9 @@ describe("GET /api/issues/:id/detail-bundle", () => {
       touchedFilesJson: JSON.stringify([{ path: "src/a.ts", reason: "also", confidence: "low" }]),
     });
 
-    // A time entry.
-    await db.insert(schema.issueTimeEntries).values({
-      id: randomUUID(),
-      issueId,
-      minutes: 25,
-      note: "spike",
-      createdAt: new Date().toISOString(),
-    });
-
-    const [bundleRes, cycleRes, timeRes, touchedRes, relatedRes, mergedRes] = await Promise.all([
+    const [bundleRes, cycleRes, touchedRes, relatedRes, mergedRes] = await Promise.all([
       app.request(`/api/issues/${issueId}/detail-bundle`),
       app.request(`/api/issues/${issueId}/cycle-time`),
-      app.request(`/api/issues/${issueId}/time-entries`),
       app.request(`/api/issues/${issueId}/touched-files`),
       app.request(`/api/issues/${issueId}/related-issues`),
       app.request(`/api/issues/${issueId}/merged-commits`),
@@ -133,13 +123,11 @@ describe("GET /api/issues/:id/detail-bundle", () => {
     expect(bundle.cycleTime.isOpen).toBe(cycleFromEndpoint.isOpen);
     expect(bundle.cycleTime.statusBreakdowns).toEqual(cycleFromEndpoint.statusBreakdowns);
     expect(typeof bundle.cycleTime.totalAgeMs).toBe("number");
-    expect(bundle.timeEntries).toEqual(await timeRes.json());
     expect(bundle.touchedFiles).toEqual(await touchedRes.json());
     expect(bundle.relatedIssues).toEqual(await relatedRes.json());
     expect(bundle.mergedCommits).toEqual(await mergedRes.json());
 
-    // Sanity: the folded data is real, not five empty objects.
-    expect(bundle.timeEntries.totalMinutes).toBe(25);
+    // Sanity: the folded data is real, not four empty objects.
     expect(bundle.touchedFiles.files).toEqual([{ path: "src/a.ts", reason: "r", confidence: "high" }]);
     expect(bundle.relatedIssues.related).toEqual([
       { id: otherIssueId, issueNumber: 2, title: "Overlapping issue", sharedFileCount: 1 },

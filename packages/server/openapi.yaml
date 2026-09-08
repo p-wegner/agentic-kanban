@@ -2626,80 +2626,6 @@ paths:
           content:
             application/json:
               schema: {}
-  /api/issues/{id}/time-entries:
-    get:
-      summary: GET /api/issues/:id/time-entries
-      tags:
-        - issues
-      operationId: get_api_issues_id_time-entries
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Success
-          content:
-            application/json:
-              schema: {}
-    post:
-      summary: POST /api/issues/:id/time-entries
-      tags:
-        - issues
-      operationId: post_api_issues_id_time-entries
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                minutes:
-                  type: number
-                note:
-                  type: string
-      responses:
-        "201":
-          description: Success
-          content:
-            application/json:
-              schema: {}
-        "400":
-          description: Error
-          content:
-            application/json:
-              schema: {}
-  /api/issues/{id}/time-entries/{entryId}:
-    delete:
-      summary: DELETE /api/issues/:id/time-entries/:entryId
-      tags:
-        - issues
-      operationId: delete_api_issues_id_time-entries_entryId
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: entryId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Success
-          content:
-            application/json:
-              schema: {}
   /api/issues/{id}/touched-files:
     get:
       summary: GET /api/issues/:id/touched-files — return cached prediction only (no AI call)
@@ -6616,29 +6542,6 @@ paths:
               schema: {}
         "400":
           description: Error (thrown HTTPException, status from domainErrorHandler)
-          content:
-            application/json:
-              schema: {}
-  /api/projects/{id}/time-report:
-    get:
-      summary: GET /api/projects/:id/time-report?range=30d
-      tags:
-        - time-report
-      operationId: get_api_projects_id_time-report
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: range
-          in: query
-          required: false
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Success
           content:
             application/json:
               schema: {}

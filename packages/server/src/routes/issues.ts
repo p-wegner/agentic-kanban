@@ -34,7 +34,6 @@ import {
   getLeadTimeChart,
 } from "../services/issue-analytics.service.js";
 import { createIssueCommentsService } from "../services/issue-comments.service.js";
-import { createIssueTimeEntriesService } from "../services/issue-time-entries.service.js";
 import type { IssueCommentKind, IssueCommentAuthor } from "../repositories/issue-comments.repository.js";
 import { createShowdownService } from "../services/showdown.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
@@ -158,7 +157,6 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
 
   const issueService = createIssueService({ database, boardEvents: options?.boardEvents, sendWebhook: createWebhookSender(database) });
   const issueCommentsService = createIssueCommentsService({ database, boardEvents: options?.boardEvents });
-  const timeEntriesService = createIssueTimeEntriesService({ database });
   const mergedCommitsService = createIssueMergedCommitsService({ database });
   const showdownService = createShowdownService({
     database,
@@ -510,8 +508,8 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // ~7 separate requests, which queue behind the browser's 6-connection
   // HTTP/1.1 limit (head-of-line blocking — the same problem /settings-bootstrap
   // solved for the settings panel). #418 folds in the remaining per-issue fetches
-  // the panel used to fire separately (cycle-time, time-entries, touched-files,
-  // related-issues, merged-commits — ~5 more requests per open). Project-scoped
+  // the panel used to fire separately (cycle-time, touched-files, related-issues,
+  // merged-commits — several more requests per open). Project-scoped
   // data (all tags, skills, milestones, available issues) stays on its own
   // cacheable endpoints, and the individual per-issue endpoints stay alive for
   // other callers (MCP/CLI/mutation refetches). Each sub-result is independent:
@@ -520,7 +518,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     const id = c.req.param("id");
     const issue = await getIssueDescription(id, database);
     if (!issue) return c.json({ error: "Issue not found" }, 404);
-    const [workspaces, tags, dependencies, artifacts, comments, activity, cycleTime, timeEntries, touchedFiles, relatedIssues, mergedCommits] = await Promise.all([
+    const [workspaces, tags, dependencies, artifacts, comments, activity, cycleTime, touchedFiles, relatedIssues, mergedCommits] = await Promise.all([
       Promise.resolve(issueService.getEnrichedWorkspaces(id)).catch(() => []),
       Promise.resolve(issueService.getTags(id)).catch(() => []),
       Promise.resolve(issueService.getDependencies(id)).catch(() => null),
@@ -528,9 +526,6 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
       Promise.resolve(issueCommentsService.listComments(id)).catch(() => []),
       Promise.resolve(getIssueActivity(id, database)).catch(() => null),
       Promise.resolve(getIssueCycleTime(id, database)).catch(() => null),
-      Promise.all([timeEntriesService.listEntries(id), timeEntriesService.totalMinutes(id)])
-        .then(([entries, totalMinutes]) => ({ entries, totalMinutes }))
-        .catch(() => null),
       readTouchedFiles(id).catch(() => null),
       computeRelatedIssues(id).catch(() => null),
       Promise.resolve(mergedCommitsService.getMergedCommits(id)).catch(() => null),
@@ -544,7 +539,6 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
       comments,
       activity: activity ?? { events: [] },
       cycleTime,
-      timeEntries,
       touchedFiles,
       relatedIssues,
       mergedCommits,
@@ -771,37 +765,6 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     const issueId = c.req.param("id");
     const commentId = c.req.param("commentId");
     await issueCommentsService.removeComment(issueId, commentId);
-    return c.json({ success: true });
-  });
-
-  // GET /api/issues/:id/time-entries
-  router.get("/:id/time-entries", async (c) => {
-    const issueId = c.req.param("id");
-    const entries = await timeEntriesService.listEntries(issueId);
-    const total = await timeEntriesService.totalMinutes(issueId);
-    return c.json({ entries, totalMinutes: total });
-  });
-
-  // POST /api/issues/:id/time-entries
-  router.post("/:id/time-entries", async (c) => {
-    const issueId = c.req.param("id");
-    // #806 batch 3 REJECTED this one: the only guard is a COERCION — `Number(body.minutes)`
-    // then `Number.isInteger`, so the string `"30"` is a valid request today and a schema
-    // that checked `minutes` would 400 it. Nothing else in the body is checked, so the
-    // schema would be decoration that lowers a count without checking anything.
-    const body = await parseJsonBody<{ minutes?: number; note?: string }>(c);
-    const minutes = Number(body.minutes);
-    if (!Number.isInteger(minutes) || minutes <= 0) {
-      return c.json({ error: "minutes must be a positive integer" }, 400);
-    }
-    const entry = await timeEntriesService.addEntry({ issueId, minutes, note: body.note ?? null });
-    return c.json(entry, 201);
-  });
-
-  // DELETE /api/issues/:id/time-entries/:entryId
-  router.delete("/:id/time-entries/:entryId", async (c) => {
-    const entryId = c.req.param("entryId");
-    await timeEntriesService.removeEntry(entryId);
     return c.json({ success: true });
   });
 

@@ -18,7 +18,6 @@ import { RunQueueForecastPanel } from "./RunQueueForecastPanel.js";
 import { AgentStartDryRunModal } from "./AgentStartDryRunModal.js";
 import { WorktreeOverview } from "./WorktreeOverview.js";
 import { ProjectHealthOverview } from "./ProjectHealthOverview.js";
-import { TimeReportPanel } from "./TimeReportPanel.js";
 import { CommandPalette } from "./CommandPalette.js";
 import { StartWorkspacePicker } from "./StartWorkspacePicker.js";
 import { ShortcutHelp } from "./ShortcutHelp.js";
@@ -55,7 +54,6 @@ interface Props {
   showRunQueueForecast: boolean;
   showWorktreeOverview: boolean;
   showProjectHealth: boolean;
-  showTimeReport: boolean;
   showCommandPalette: boolean;
   showStartWorkspacePicker: boolean;
   showShortcutHelp: boolean;
@@ -75,7 +73,6 @@ interface Props {
   onCloseRunQueueForecast: () => void;
   onCloseWorktreeOverview: () => void;
   onCloseProjectHealth: () => void;
-  onCloseTimeReport: () => void;
   onCloseCommandPalette: () => void;
   onCloseStartWorkspacePicker: () => void;
   onWorkspaceStarted: (workspaceId: string, issue: IssueWithStatus) => void;
@@ -140,7 +137,6 @@ export function BoardOverlayPanels({
   showRunQueueForecast,
   showWorktreeOverview,
   showProjectHealth,
-  showTimeReport,
   showCommandPalette,
   showStartWorkspacePicker,
   showShortcutHelp,
@@ -158,7 +154,6 @@ export function BoardOverlayPanels({
   onCloseRunQueueForecast,
   onCloseWorktreeOverview,
   onCloseProjectHealth,
-  onCloseTimeReport,
   onCloseCommandPalette,
   onCloseStartWorkspacePicker,
   onWorkspaceStarted,
@@ -383,12 +378,6 @@ export function BoardOverlayPanels({
           activeProjectId={activeProjectId}
           onProjectChange={handleProjectChange}
           onClose={onCloseProjectHealth}
-        />
-      )}
-      {showTimeReport && activeProjectId && (
-        <TimeReportPanel
-          projectId={activeProjectId}
-          onClose={onCloseTimeReport}
         />
       )}
       {showCommandPalette && (
