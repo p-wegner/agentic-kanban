@@ -29,7 +29,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const UUID_RE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
-const LOOSE_TEST_DB_RE = new RegExp(`^test-db-${UUID_RE}\\.db(-wal|-shm|-journal)?$`, "i");
+/**
+ * ANY prefix, not just `test-db-` (#1056).
+ *
+ * #843 wrote this to drain one prefix, because one prefix was what had been measured. The shape
+ * it was really draining is "a scratch SQLite file named by a fresh uuid", and other suites mint
+ * exactly that under their own names — measured in `%TEMP%` while #1056 was worked:
+ * `manual-migrate-test-`, `project-cascade-completeness-`, `dedup-same-root-`,
+ * `leaked-temp-cleanup-`, `test-issues-`, none of them matched by a `test-db-`-anchored regex,
+ * and two of them still being minted daily. The pre-merge gate's temp-health hold now names this
+ * script as the remedy, and a remedy that does not drain the actual backlog is worse than none.
+ *
+ * The safety argument is unchanged, and is what makes the widening sound: the discriminator is
+ * the UUID-shaped SUFFIX, never the prefix. `test-db-template-<hash>.db` — the persistent
+ * migrated-schema cache #535 built, whose loss costs a full migration replay — carries a HASH,
+ * not a uuid, so it does not match and cannot. Nor does any hand-named file left here.
+ */
+const LOOSE_SCRATCH_DB_RE = new RegExp(`^[A-Za-z0-9._-]*${UUID_RE}\\.db(-wal|-shm|-journal)?$`, "i");
 
 const args = process.argv.slice(2);
 const apply = args.includes("--apply");
@@ -53,7 +69,7 @@ let failed = 0;
 let bytes = 0;
 
 for (const name of entries) {
-  if (!LOOSE_TEST_DB_RE.test(name)) continue;
+  if (!LOOSE_SCRATCH_DB_RE.test(name)) continue;
   const full = join(root, name);
   let st;
   try {
@@ -78,3 +94,19 @@ for (const name of entries) {
 const mb = (bytes / (1024 * 1024)).toFixed(1);
 console.log(`[test-db-sweep] matched=${matched} (~${mb} MB)  removed=${removed}  failed=${failed}`);
 if (!apply) console.log("[test-db-sweep] dry run — pass --apply to remove");
+
+// State the REMAINDER, not only the part this script owns (#1056). The output used to end at
+// "removed=N", which reads as "done" — but the pre-merge gate's temp-health hold is decided by
+// the TOTAL entry count, so a run that cleared its own families and left 90,000 directories
+// behind would leave the operator believing the remedy had worked while every merge kept
+// holding. Silence about the remainder is how a capped sweep looks identical to a finished one,
+// which is the same defect the fixture reaper's "more remain for the next run" line had.
+const remaining = entries.length - removed;
+console.log(
+  `[test-db-sweep] ${remaining} entries remain in ${root}`
+  + (remaining >= 50_000
+    ? " — STILL above the pre-merge gate's temp-health floor (KANBAN_TEMP_ENTRY_CAP, default"
+      + " 50000), so the gate will keep HOLDING. What is left is mostly directories, which this"
+      + " script deliberately never touches: sweep those with scripts/sweep-temp-dirs.mjs."
+    : " — below the gate's temp-health floor."),
+);
