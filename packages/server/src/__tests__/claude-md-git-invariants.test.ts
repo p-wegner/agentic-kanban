@@ -1,7 +1,10 @@
-// @gate:always-run — reads repo files and .claude/settings.json; imports nothing it checks.
+// @gate:always-run — reads repo files and .claude/settings.json directly; the one import
+// (DISCLOSE_CONTEXT_COMMAND) is the source-of-truth constant for a single exempt command, not
+// a stand-in for reading the tree.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { DISCLOSE_CONTEXT_COMMAND } from "../services/project-scaffold.js";
 
 /**
  * CLAUDE.md states these as HARD CONSTRAINTS and nothing tested them (#598).
@@ -107,16 +110,17 @@ describe("CLAUDE.md git/worktree invariants (#598)", () => {
     collect(settings.hooks ?? {});
 
     expect(commands.length, "no hook commands found — the walk broke, not the config").toBeGreaterThan(3);
-    // Exactly one deliberate exception (#922): disclose-context.mjs uses a PLAIN RELATIVE
-    // path on purpose. $CLAUDE_PROJECT_DIR is empty in `claude -p` sessions (review/one-shot/
-    // Pi task agents) and Claude Code pre-expands it textually before spawn, so the anchored
-    // form resolves to a bogus drive-root path (e.g. C:\.claude\hooks\...) and fails
-    // non-blockingly in exactly the launch mode this hook most needs to run in. The hook
-    // self-locates its project root via a `.claude`/`.git` walk-up instead of trusting the
-    // env var — see the header of packages/server/src/scaffold/disclose-context.mjs. Every
-    // other hook stays subject to the rule; this is not a precedent for a second exception.
-    const DISCLOSE_RELATIVE = "node .claude/hooks/disclose-context.mjs";
-    const EXEMPT_COMMANDS = new Set([DISCLOSE_RELATIVE]);
+    // Exactly one deliberate exception (#922, revised #1069): disclose-context.mjs cannot use
+    // a plain relative path (breaks the instant a session `cd`s — the spawned hook's actual OS
+    // cwd mirrors wherever the triggering Bash call last moved to, not the worktree root) NOR a
+    // `$CLAUDE_PROJECT_DIR`-anchored one ($CLAUDE_PROJECT_DIR is empty in `claude -p` sessions
+    // and Claude Code pre-expands it textually before spawn, so the anchored form resolves to a
+    // bogus drive-root path). `DISCLOSE_CONTEXT_COMMAND` (project-scaffold.ts) sidesteps both:
+    // a `node -e` one-liner needing no file-path resolution at spawn time, which self-locates
+    // the project root via a `.claude`/`.git` walk-up before dynamically importing the real
+    // script. Every other hook stays subject to the rule; this is not a precedent for a second
+    // exception.
+    const EXEMPT_COMMANDS = new Set([DISCLOSE_CONTEXT_COMMAND]);
     const bad = commands.filter(
       (c) => !EXEMPT_COMMANDS.has(c) && (!c.includes("$CLAUDE_PROJECT_DIR/") || c.includes("\\")),
     );
@@ -125,18 +129,18 @@ describe("CLAUDE.md git/worktree invariants (#598)", () => {
       `hook commands must be "$CLAUDE_PROJECT_DIR/..."-anchored with forward slashes:\n${bad.join("\n")}`,
     ).toEqual([]);
 
-    // The exception is REQUIRED, not merely tolerated (#1000). Exempting the relative spelling
-    // alone let `2ebe615fb3` rewrite the entry to the anchored form under the general rule and
-    // pass: the scaffold's `ensureHookScaffold` then found no entry matching its relative
-    // command and appended one, so every new worktree committed BOTH spellings under the same
-    // matcher — the hook spawned twice per shell/grep/glob call, and the anchored twin failed in
-    // exactly the `claude -p` mode #922 exists for. So: the relative spelling must be present,
-    // exactly once per matcher, and no anchored spelling of the same script may exist at all.
+    // The exception is REQUIRED, not merely tolerated (#1000). Exempting one spelling alone let
+    // `2ebe615fb3` rewrite the entry under the general rule and pass: the scaffold's
+    // `ensureHookScaffold` then found no entry matching its previous command and appended one,
+    // so every new worktree committed BOTH spellings under the same matcher — the hook spawned
+    // twice per shell/grep/glob call, and the wrong twin failed non-blockingly every time. So:
+    // the canonical command must be present, exactly once per matcher, and no other spelling of
+    // the same script may exist at all.
     const discloseCommands = commands.filter((c) => c.includes("disclose-context.mjs"));
     expect(
       discloseCommands,
-      "disclose-context.mjs must be wired with the plain relative path, exactly once",
-    ).toEqual([DISCLOSE_RELATIVE]);
+      "disclose-context.mjs must be wired with the canonical self-locating command, exactly once",
+    ).toEqual([DISCLOSE_CONTEXT_COMMAND]);
     const postToolUse = (settings.hooks?.PostToolUse ?? []) as { matcher?: string; hooks?: { command?: string }[] }[];
     const perMatcher = new Map<string, number>();
     for (const entry of postToolUse) {
