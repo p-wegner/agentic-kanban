@@ -21,7 +21,7 @@ import { buildSmokeCheck, getStackProfile, resolveEffectiveVerify } from "./stac
 import { resolveDevServerPlan } from "./dev-server.service.js";
 import type { SmokeCheck, StackProfile } from "@agentic-kanban/shared";
 import { resolveProjectDevServerPlan } from "./dev-server.service.js";
-import { quiesceBuildersEnabled, resolveGateHostAdmission } from "./gate-quiesce.js";
+import { describeGateHold, quiesceBuildersEnabled, resolveGateHostAdmission } from "./gate-quiesce.js";
 import { isSelfProjectRepo } from "./self-project.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
@@ -572,22 +572,12 @@ export async function runPreMergeGate(
       () => ({ admit: true, reason: "host_has_room" }) as Awaited<ReturnType<typeof resolveGateHostAdmission>>,
     );
     if (!admission.admit) {
-      // Name WHICH unfitness held it (#1056). "host saturated" was the only wording, and the
-      // #1046/#1048/#1049 failures it was written for turned out to reproduce on an IDLE box —
-      // a hold that misnames its own cause sends the next reader to the wrong remedy, which is
-      // how ~113 minutes went into three wrong diagnoses of those same runs.
-      const what = admission.reason === "temp_exhausted" ? "%TEMP% exhausted" : "host saturated";
-      noteMergeGatePhase(workspace.id, "held", `${what} — not starting a verify chain`);
-      return {
-        passed: false,
-        skipped: false,
-        held: true,
-        stage: "verify",
-        message:
-          `pre-merge gate HELD — not started (${what}): ${admission.detail}. Nothing was verified `
-          + `and nothing failed; the merge is deferred and will be retried on the next cycle. `
-          + `Override with gate_host_floor_${projectId}=false.`,
-      };
+      // The wording lives in `describeGateHold` (a pure lookup, see its header): picking it with
+      // a `? :` HERE added a 35th branch to this function and turned the master sweep red, which
+      // is what the "no branch here" note above is about.
+      const hold = describeGateHold(admission, projectId);
+      noteMergeGatePhase(workspace.id, "held", hold.phaseNote);
+      return { passed: false, skipped: false, held: true, stage: "verify", message: hold.message };
     }
     gateTierInfo.baseHealthNote = (await sequenceBaseHealthBeforeVerify({ projectId, database, workspaceId: workspace.id })).note ?? undefined;
     noteMergeGatePhase(workspace.id, "queued", "waiting for the cross-workspace verify chain");
