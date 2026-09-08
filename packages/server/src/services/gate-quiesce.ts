@@ -25,7 +25,7 @@ import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { readTier0Capacity } from "@agentic-kanban/shared/lib/machine-capacity";
-import { probeTempHealth } from "@agentic-kanban/shared/lib/temp-health";
+import { probeTempHealth } from "../lib/temp-health.js";
 import { buildGateBusy } from "./jvm-build-semaphore.js";
 
 const quiescePrefDef = projectPref("quiesce_builders_during_gate");

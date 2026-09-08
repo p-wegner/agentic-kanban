@@ -30,9 +30,12 @@ import { tmpdir } from "node:os";
  * yields `degraded: false`, so a machine this cannot sample behaves exactly as it does today.
  * A preflight that blocks merges when its own sensor breaks is worse than no preflight.
  *
- * Node-only (`node:fs`/`node:os`): never a VALUE export from the `@agentic-kanban/shared/lib`
- * barrel (white-screens the client bundle, #791). Import via the deep path
- * `@agentic-kanban/shared/lib/temp-health`. Mirrors `machine-capacity.ts` / `git-exec.ts`.
+ * Lives in `packages/server/src/lib/`, NOT in `shared/lib/`, and that is a correction rather
+ * than a first choice: it was written in `shared` to mirror `machine-capacity.ts`, and
+ * `shared-lib-single-consumer-ratchet.test.ts` failed it on the master sweep — only the server's
+ * pre-merge gate consumes it, and #590's rule is that `shared/lib` is for what more than one
+ * package needs. A single-consumer module there adds a package to every commit that touches it
+ * and buys nothing. Move it back only when a second package actually imports it.
  */
 
 /**

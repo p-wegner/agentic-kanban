@@ -10,7 +10,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { probeTempHealth } from "../src/lib/temp-health.js";
+import { DEFAULT_TEMP_ENTRY_CAP, DEFAULT_TEMP_PROBE_BUDGET_MS, probeTempHealth } from "../lib/temp-health.js";
 
 let root: string;
 let small: string;
@@ -78,9 +78,23 @@ describe("probeTempHealth (#1056)", () => {
     expect(h.entries).toBe(0);
   });
 
-  it("defaults are a real ceiling, not unbounded", () => {
-    // A default of Infinity would make the whole module a no-op on the machine it was written
-    // for, which is the failure mode a caller could never see.
-    expect(probeTempHealth({ dir: small }).complete).toBe(true);
+  it("the DEFAULT bounds are real ceilings, asserted directly rather than via a probe run", () => {
+    // Deliberately about the constants, not about a call. This suite now runs in the server
+    // package, whose vitest setup RAISES both bounds via env (`test-setup/temp-health-neutral.ts`)
+    // so ambient `%TEMP%` cannot red unrelated gate tests — which means a probe run here would
+    // exercise the override, not the defaults, and would pass no matter what they were set to.
+    // A default of Infinity is exactly the failure a caller could never see.
+    expect(DEFAULT_TEMP_ENTRY_CAP).toBeGreaterThan(100_000); // above the observed working range
+    expect(DEFAULT_TEMP_ENTRY_CAP).toBeLessThan(707_242); // below the state that was fatal
+    expect(DEFAULT_TEMP_PROBE_BUDGET_MS).toBeGreaterThan(0);
+    expect(DEFAULT_TEMP_PROBE_BUDGET_MS).toBeLessThanOrEqual(60_000); // never a minute of gate time
+  });
+
+  it("an explicit option still beats the env override, so the bounds remain testable", () => {
+    // The neutralising setup must not make the floor unreachable — a safety check that cannot be
+    // exercised under test is one nobody can prove still works.
+    const h = probeTempHealth({ dir: large, maxEntries: 20, budgetMs: 5000 });
+    expect(h.degraded).toBe(true);
+    expect(h.stoppedBy).toBe("entry_cap");
   });
 });

@@ -11,7 +11,7 @@
  * Raising the cap here is the same move `gate-builder-quiesce.test.ts` makes with
  * `SMART_HOOKS_MIN_FREE_GB` for the memory floor, and for the same reason. It does not weaken
  * the check: `probeTempHealth` is covered directly against fixture directories it controls
- * (`packages/shared/__tests__/temp-health.test.ts`), and the admission DECISION is covered
+ * (`packages/server/src/__tests__/temp-health.test.ts`), and the admission DECISION is covered
  * purely (`gate-host-admission.test.ts`). What is switched off is only the ambient read.
  *
  * Not forced: an explicit value from the environment wins, so a test or an operator that WANTS
