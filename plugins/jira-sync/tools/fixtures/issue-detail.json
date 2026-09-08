@@ -1,0 +1,10 @@
+{
+  "id": "10001",
+  "key": "ENG-1",
+  "fields": {
+    "summary": "Set up CI pipeline",
+    "description": "Wire up a build + test pipeline for the main branch.",
+    "status": { "name": "To Do", "statusCategory": { "key": "new" } },
+    "updated": "2026-09-01T10:00:00.000+0000"
+  }
+}
