@@ -3,6 +3,83 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-08 — board restarted after an overnight death; #1056 finished; board empty
+
+**The stable board was DOWN when this session started** — nothing listening on 3001/5173. Its
+log ends mid-cycle at 06:30 UTC with no error, no `[fatal]`, and no shutdown line; the process
+(pid 24720, started by yesterday's recovery promotion) was simply gone. Restarted headless from
+`../agentic-kanban-stable` on the same built artifact (`stable-20260907`), health green.
+**Unexplained and NOT diagnosed** — if it recurs, that silent-death-with-no-log-line is the
+thing to chase, and `.kanban/board.log` around 06:30 is the evidence.
+
+**#1057/#1058/#1059 were merged but sitting in Todo.** Their fix commits are all in
+`stable-20260907`; the tickets were never moved. Closed against git, not against the ticket text.
+
+**#1040 landed** (`36dc67366d`) — the pnpm-workspace YAML bug was already fixed on master, so
+the branch only removed the dead duplicate `pnpm.onlyBuiltDependencies` from `package.json`.
+Two earlier merge attempts had died: one when the board died mid-gate, one killed by the
+no-progress watchdog.
+
+### #1056 is done, in three commits, and the second one was corrected by the third
+
+`f374ac67c4 fix(#1056)` was MIS-NUMBERED — it implemented #1057's host-admission work. #1056's
+own content was untouched until today.
+
+1. **`3ee70dff5a` — the `process.env.TEMP` door.** Two suites
+   (`leaked-temp-project-cleanup`, `project-dedup-same-git-root`) were still minting a loose
+   `.db` per test directly in `%TEMP%`, *on the day this was worked*, with
+   `temp-dir-namespace-guard` green: all three of its passes key off a `tmpdir()` CALL and its
+   parse filter skips any file that never writes the word. Both suites now use an `ak-` scratch
+   dir; the guard gained a fourth pass that forbids the DOOR (the temp root arrives through a
+   variable, so the resulting name is unknowable at the call site). That pass can have no count
+   floor — the tree now holds zero env reads, which is both the goal and what a dead pass looks
+   like — so it is proven on synthesized source in both directions instead.
+   The reaper now states its BACKLOG and escalates on total size; its old "more remain for the
+   next run" read identically at 10 and at 510,000, which is how it was skimmed past four times.
+2. **`710cc1ccf4` — the gate's temp-health preflight** (#1056's third bullet), beside #1057's
+   host-saturation check. A hold now NAMES which unfitness held it.
+3. **`975ff94304` — and the calibration in (2) was WRONG, caught by running it.** The 50,000
+   entry cap was a guess; the next measurement refuted it.
+
+**The measurement, because it is the reusable part:**
+
+| entries | walk | note |
+|---|---|---|
+| 707,242 | > 120 s | the incident state |
+| 100,324 | 12.7 s | cold cache |
+| 87,503 | **0.2 s** | warm cache, minutes later, SAME directory |
+
+A 13 % size change moved the walk 60x — the CACHE changed, not the directory. **So elapsed time
+cannot be the verdict**: it would hold every merge on a cold box and admit on a warm one for
+identical state. Size is the stable signal, time is only a cost bound on the probe. Cap is now
+250,000, budget 20 s. Verified against the live directory: 87,503 walked in 176 ms, admits.
+
+**`sweep-loose-test-db-files.mjs` was also not draining the backlog it is now named as the remedy
+for.** #843 anchored it to `test-db-<uuid>.db`; five other suites mint the same shape under their
+own names. Widened to match the SHAPE (UUID-shaped *suffix*, so the `test-db-template-<hash>`
+cache still cannot match), match set enumerated before applying — 13 prefixes, all board
+fixtures, zero directories. **Applied: 13,437 files, 7.0 GB, 100,940 -> 87,503 entries.**
+
+**Verified by:** the 31 previously-red gate suites (375 passed), `temp-health` (6),
+`gate-host-admission` (8), `env-read-ownership` (14), `barrel-client-safety` (10),
+`temp-dir-namespace-guard` (7), the two repaired suites (6), `pnpm typecheck` clean, and the
+live probe. NOT verified by a full-suite run at commit time — the promotion sweep is that.
+
+**Board state: 1036 Done, 6 Cancelled, nothing in flight.**
+
+### Left undone, deliberately
+
+- **The `%TEMP%` directory backlog.** 87,503 entries remain, ~11,000 of them fixture DIRECTORIES
+  in prefixes no sweeper owns (`defects-` 2342, `impres_` 2039, `smoke-srv-` 1390, `abs2_`,
+  `cli-test-`, `router-`, `ktrefs-`, `compounding-setup-`, `preflight-test-`). All are
+  historical: the board's current source mints every one of these as `ak-*`, and the newest is
+  1.8 days old. `sweep-temp-dirs.mjs` only knows `kanban-`/`ak-`, and widening it was NOT done
+  because several of those prefixes plausibly belong to sibling tools (refactor-skill,
+  code-metrics), and the board deleting another tool's temp dirs is overreach. Below the gate's
+  250,000 floor, so nothing is blocked.
+- **#1056's per-run temp namespace** (`%TEMP%/kanban/<runId>/`) — suggested in the ticket, not
+  built.
+
 ## 2026-09-07 (evening) — the gate failures were the board KILLING ITS OWN verify runs (#1059)
 
 **This supersedes three diagnoses, including this morning's.** The #1046/#1048/#1049 gate
