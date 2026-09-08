@@ -12,7 +12,6 @@
 | Table | `t` | `table` |
 | Agents | `l` | `agents` |
 | Timeline | `f` | `timeline` |
-| Quality Metrics | `y` | `quality-metrics` |
 | Strategic Targets | `z` | `strategy` |
 | Focus | `o` | `focus` |
 | Butler chat | `i` | `butler` |

@@ -37,16 +37,16 @@ describe("VIEW_REGISTRY", () => {
     // fireworks, garden) were extracted to the external board-whimsy plugin
     // (momentum dropped outright — swimlane is a strict superset), freeing
     // the `v` and `e` single-key shortcuts.
-    expect(VIEW_REGISTRY).toHaveLength(20);
+    expect(VIEW_REGISTRY).toHaveLength(18);
   });
 
   it("preserves the existing view ids", () => {
     const expected: ViewMode[] = [
       "kanban", "backlog", "graph", "table", "agents", "timeline",
-      "quality-metrics", "strategy", "focus", "butler", "workflows", "swimlane",
+      "strategy", "focus", "butler", "workflows", "swimlane",
       "runtime", "drive", "runbooks", "activity",
       "analytics", "calendar",
-      "crime-scene", "plugin-views",
+      "plugin-views",
     ];
     expect(VIEW_IDS.slice().sort()).toEqual(expected.slice().sort());
   });
@@ -66,7 +66,6 @@ describe("VIEW_REGISTRY", () => {
     expect(byId.table).toBe("t");
     expect(byId.timeline).toBe("f");
     expect(byId.agents).toBe("l");
-    expect(byId["quality-metrics"]).toBe("y");
     expect(byId.butler).toBe("i");
     expect(byId.swimlane).toBe("p");
     expect(byId.strategy).toBe("z");
@@ -84,6 +83,8 @@ describe("VIEW_REGISTRY", () => {
     expect(SHORTCUT_TO_VIEW["m"]).toBeUndefined();
     expect(SHORTCUT_TO_VIEW["n"]).toBeUndefined();
     expect(SHORTCUT_TO_VIEW["h"]).toBeUndefined();
+    // `y` joined them when Quality Metrics moved into the code-metrics plugin (#1068).
+    expect(SHORTCUT_TO_VIEW["y"]).toBeUndefined();
   });
 
   it("every view has the fields the three consumers need", () => {
@@ -115,10 +116,9 @@ describe("VIEW_REGISTRY", () => {
     // Analytics/secondary views live behind the "More" overflow dropdown.
     expect([...secondaryIds].sort()).toEqual(
       [
-        "focus", "quality-metrics", "swimlane",
+        "focus", "swimlane",
         "runbooks", "activity",
         "analytics",
-        "crime-scene",
       ].sort(),
     );
   });

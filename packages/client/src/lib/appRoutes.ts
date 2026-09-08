@@ -8,8 +8,6 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   table: "/table",
   agents: "/agents",
   timeline: "/timeline",
-  "crime-scene": "/crime-scene",
-  "quality-metrics": "/quality-metrics",
   butler: "/butler",
   workflows: "/workflows",
   swimlane: "/swimlane",

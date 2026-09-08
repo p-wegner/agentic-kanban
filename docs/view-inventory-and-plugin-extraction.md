@@ -4,9 +4,11 @@ Preparation doc for thinning the board's view surface. It answers two questions:
 **which views are genuinely helpful vs. clutter**, and **which of the clutter can actually
 become plugins** given what the plugin system supports today.
 
-Status: assessment + sequenced plan; steps 2 (#234), 3 (#235), 4 (`{{boardUrl}}`/`{{projectId}}`),
-and 5 (#237, the `board-whimsy` extraction — see the learnings section at the end) are executed.
-The registry counts in "The numbers" below describe the original state (41 views); current count: 27.
+Status: **the sequenced plan is fully executed.** Steps 2 (#234), 3 (#235), 4
+(`{{boardUrl}}`/`{{projectId}}`), 5 (#237, the `board-whimsy` extraction) and finally
+step 6 (#1068) are all done, plus a measured deletion pass the plan could not justify
+at the time (#1062–#1067 — see "The 2026-09-08 pass" at the end).
+The registry counts in "The numbers" below describe the original state (41 views); current count: **18**.
 
 ## The numbers
 
@@ -330,3 +332,82 @@ and what step 6 (#238, the code-health views) should expect.
 - Cosmetic residue (out of #237's scope): the four views still appear in
   `docs/user-manual/USER-MANUAL.md`, `CHANGELOG.md` history, and
   `docs/verification/_test-index.json`; the user manual should be regenerated.
+
+## The 2026-09-08 pass — measurement replaced argument (#1062–#1068)
+
+This doc's own caveat was the blocker on everything it could not justify:
+
+> Note what we *cannot* measure: there is **no view-usage telemetry** anywhere in client or
+> server. Every judgment below is from structure and role, not from observed use. If we want
+> evidence rather than argument, a usage counter is a ~1-hour change and should precede any
+> deletion we're unsure about.
+
+The counter was never built, and it turned out not to be needed: the board already records
+what each feature produces. Querying the OPERATED board — 29 projects, 2119 issues, 1314
+workspaces, 2026-07-07..2026-09-08 — answered the question directly, because a feature whose
+table has never held a row has never been used.
+
+| Feature | Rows | Verdict |
+|---|---|---|
+| `flaky_tests` / `flaky_test_pins` | 0 | **deleted** (#1062) — and NOT starved: `test_runs` holds 2034 rows incl. 187 failures |
+| `issue_time_entries` | 0 | **deleted** (#1063) |
+| `showdowns` | 0 | **deleted** (#1064) |
+| `milestones` | 0 | view **deleted**, field/CRUD/format KEPT (#1065) |
+| `merge_trains` | 0 | **kept** — dormant at WIP=1, not unused |
+| `scheduled_runs` | 0 | **kept** — a `resolveStartPolicy` capability flag (decision 008) |
+
+The last two rows are the important ones. Zero rows means "never fired", which is NOT the same
+as "not load-bearing": merge trains only form above a queue-size threshold this board never
+reaches, and scheduled runs is a branch of the one decision every auto-start path consults.
+Deleting either would have been risk for no gain. **Emptiness earns a deletion only when the
+code is also unreachable from anything that matters.**
+
+Consolidation went further than group C proposed, on the same reasoning that produced #234/#235
+— several views were one question each:
+
+- **Analytics** absorbed `metrics`, `workflow-analytics`, `insights` (#1066), joining the seven
+  charts from #234. Groups: Board / Flow / Agents.
+- **Focus** absorbed `capacity` and `stale-work` (#1067) as the "what do I work on next?" hub.
+  Deliberately not extracted: Stale Work nudges agents via `/turn`, and write authority is this
+  doc's stated line between a view that can leave the board and one that cannot.
+
+**Step 6 (#1068) turned out not to be a rewrite.** This doc warned that extracting group B means
+rewriting a React component as a standalone web app, and that it should be attempted only after
+step 5. By the time it came up, the `code-metrics` plugin had ALREADY built the replacements —
+its `overview` view renders the board's quality-metrics series and the riskiest files, and its
+`explore` view has the hotspot-coloured system map that `crime-scene` drew. So the board views
+were the duplicates, and the extraction was a deletion plus one fix in the plugin: its trend
+panel filtered the series to `arch.*`, which would have orphaned the board's own built-in
+`quality-metrics-collector` (`code.*`/`git.*` keys) the moment the board view went. It now
+renders every key. **The `/api/projects/:id/quality-metrics` endpoints and the `quality_metrics`
+table STAY** — the plugin reads them; only the board-side display case moved.
+
+### Where the numbers landed
+
+| Measure | Original | After #237 | Now |
+|---|---|---|---|
+| Views in `VIEW_REGISTRY` | 41 | 27 | **18** |
+| Primary toolbar tabs | 14 | 14 | **13** |
+| Behind "More" | 27 | 13 | **5** |
+| Single-key shortcuts consumed | 22 | 17 | **12** |
+
+Freed and deliberately left free: `v`, `e` (#237), `k` (#1062), `m`, `n`, `h` (#1066), `y`
+(#1068). The doc's original complaint — "the next genuinely useful view has no letter left" —
+no longer holds: 14 letters are available.
+
+### Rules this pass would keep
+
+1. **Ask what the feature WROTE, not how it looks.** Row counts settled in minutes what the
+   structural argument above could not settle in a document.
+2. **Zero rows is necessary, not sufficient.** Check reachability from load-bearing code before
+   deleting; two of six candidates survived that check.
+3. **Never delete the table.** Every deletion here removed UI and API surface and left the
+   schema, its FKs and its cascade-delete entries alone — this ships on npm, and another board
+   may hold rows. No destructive migration was written, and the cascade regression tests were
+   kept by seeding rows directly instead of through the removed endpoints.
+4. **Follow the field before removing the feature.** `milestones` looked like a 0-row deletion
+   until the `milestone` field turned out to be part of the documented `kanban-md 1` interchange
+   format; the view went, the field stayed.
+5. **A tab must stay palette-reachable.** Registering the new tab set in
+   `useBoardKeyboardShortcuts`'s `containerTabActions` is what makes "nothing becomes
+   unreachable" true rather than aspirational — it is one line and easy to forget.

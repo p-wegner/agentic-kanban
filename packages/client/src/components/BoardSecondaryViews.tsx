@@ -5,8 +5,8 @@ import { BoardErrorBoundary } from "./BoardErrorBoundary.js";
 import { boardSelectionActions } from "../stores/boardSelectionStore.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import {
-  GraphView, TableView, AgentGrid, TimelineView, CrimeSceneCityView,
-  QualityMetricsView, ButlerView, WorkflowsView,
+  GraphView, TableView, AgentGrid, TimelineView,
+  ButlerView, WorkflowsView,
   BoardFeedView, RuntimeFeedView, FocusHubView,
   StrategyTargetsView, SwimlaneView,
   RunbooksView,
@@ -123,16 +123,6 @@ export function BoardSecondaryViews({
             onIssueClick={onIssueClick}
             searchQuery={searchQuery}
           />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "crime-scene" && activeProjectId && (
-        <BoardErrorBoundary columnName="Code Crime Scene">
-          <CrimeSceneCityView projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "quality-metrics" && activeProjectId && (
-        <BoardErrorBoundary columnName="Quality Metrics View">
-          <QualityMetricsView projectId={activeProjectId} />
         </BoardErrorBoundary>
       )}
       {viewMode === "butler" && activeProjectId && (
