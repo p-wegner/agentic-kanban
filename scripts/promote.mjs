@@ -827,6 +827,24 @@ async function main() {
   log(`[promote] direction: ${direction.detail}`);
   if (!direction.ok) fail(direction.detail);
 
+  // #1061 — `same` is `ok: true` ("not blocking"), and running ON through it deploys the sha that
+  // is ALREADY deployed: a second tag on an identical commit, a rebuild, a restart of the board
+  // that operates every project, and a "is live" line — all to change nothing. The acquisition
+  // step above turns this into a fresh-sweep request whenever the BRANCH has moved on, so
+  // reaching here with `same` means the branch has not: there is genuinely nothing to promote.
+  //
+  // Exit 0, not `fail`: being up to date is a success, and a scheduled promotion that exits
+  // non-zero on "nothing to do" trains its operator to ignore the exit code. `--force-sweep` and
+  // `--recover` are deliberate lanes and are allowed through, since an operator asking for a
+  // redeploy of the current sha (a rebuild after a dependency change, a rollback rehearsal) is a
+  // real thing to want.
+  if (direction.reason === "same" && !opts.forceSweep && !opts.recover) {
+    log(`[promote] NOTHING TO PROMOTE — the stable checkout already runs ${sha}, and ${baseBranch} is not ahead of it.`);
+    log(`[promote] no tag was created, nothing was rebuilt, and the stable board was NOT restarted.`);
+    log(`[promote] (--force-sweep or --recover redeploy the current sha deliberately, e.g. to rebuild after a dependency change.)`);
+    return;
+  }
+
   gitOrThrow(["tag", tag, sha]);
   log(`[promote] tagged ${tag} on ${sha}`);
 
