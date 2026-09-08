@@ -29,7 +29,10 @@ import type { BoardEventSink } from "../services/board-events.js";
  * Children are linked to the meta via `child_of` dependency edges
  * (`issue_dependencies.dependsOnId == metaIssueId AND type == "child_of"`), the same
  * linkage `create_sub_issue` / `create_issues_batch` write. A drive with no meta issue
- * or a meta with no children is a no-op (the contract has nothing to enforce yet).
+ * is a no-op (the contract has nothing to enforce yet). A meta with no children (#1074:
+ * an already right-sized epic the #116 atomic floor refused to split) is a one-ticket
+ * drive — nothing is forced, but the drive is marked completed once the meta reaches a
+ * terminal status on its own.
  *
  * Runs each auto-merge-orchestrator tick, alongside reconcileCompletionStates. Returns the
  * number of drives whose meta status (or drive status) it changed.
@@ -89,8 +92,25 @@ export async function reconcileDriveCompletion(
         ),
       );
     const childIds = childEdges.map((e) => e.childId);
-    // No children linked yet — the contract has nothing to enforce.
-    if (childIds.length === 0) continue;
+
+    // #1074: a right-sized epic correctly gets ZERO children (the #116 atomic floor
+    // refused to split it) — the epic itself IS the work. There is nothing to hold the
+    // meta open FOR, so don't force it back to In Progress; just close the drive out once
+    // the meta reaches a terminal status on its own (normal workflow/merge), the same way
+    // any other single ticket finishes.
+    if (childIds.length === 0) {
+      if (LEGACY_TERMINAL_STATUS_NAMES.has(meta.statusName)) {
+        await database
+          .update(drives)
+          .set({ status: "completed", finishedAt: now })
+          .where(eq(drives.id, drive.driveId));
+        console.log(
+          `[drive-completion] drive ${drive.driveId}: meta ${meta.id} has no children (single-ticket drive) and reached '${meta.statusName}' — marked completed`,
+        );
+        changed++;
+      }
+      continue;
+    }
 
     const children = await database
       .select({

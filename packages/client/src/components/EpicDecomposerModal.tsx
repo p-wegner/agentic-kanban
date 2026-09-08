@@ -177,7 +177,9 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
               {proposal?.tooSmallToDecompose && (
                 <div className="bg-sky-50 border border-sky-200 rounded-md px-3 py-2 text-xs text-sky-800">
                   ✓ This ticket already looks right-sized for a single agent session — splitting it would add
-                  worktree/orientation overhead for little benefit. You can proceed if you disagree, but consider leaving it as one ticket.
+                  worktree/orientation overhead for little benefit. You can close this dialog and work the
+                  ticket as-is; if it's a drive's target, the drive already counts it as its one unit of work.
+                  You can still proceed below if you disagree.
                 </div>
               )}
               {proposal?.coalescedTestOnly && proposal.coalescedTestOnly.length > 0 && (
