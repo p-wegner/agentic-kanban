@@ -100,6 +100,13 @@ export declare function planSweepAcquisition(input: {
   forceSweep?: boolean;
   awaitSweep?: boolean;
   canRequest?: boolean;
+  /**
+   * The branch tip (#1060). A RED verdict refuses a re-probe only while it still DESCRIBES the
+   * tree; once the breakage is fixed past, the red row is about a commit that is no longer the
+   * tip and probing the new one is ordinary evidence-gathering. Null/absent keeps #1044's
+   * unconditional refusal — a comparison that cannot be made is not a licence.
+   */
+  headSha?: string | null;
 }): SweepAcquisition;
 
 export declare function shouldReinstall(lockBefore: string | null | undefined, lockAfter: string | null | undefined): boolean;
