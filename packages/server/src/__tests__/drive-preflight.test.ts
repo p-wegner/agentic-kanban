@@ -107,6 +107,57 @@ describe("Drive preflight", () => {
     expect(result.drive.enabled).toBe(true);
   });
 
+  /**
+   * #1073 — the false green. `autodrivePrefs` reads the legacy `board_autodrive_<id>` keystone,
+   * while Start Mode is what every auto-start path actually consults. Measured on the operated
+   * board: `enabled: true` with `startMode: "manual"` produced nine green checks and
+   * `ready: true` for a configuration in which no ticket would ever start.
+   */
+  describe("Start Mode (#1073)", () => {
+    it("blocks on manual — the drive would never pull its own tickets", async () => {
+      const projectId = await seedProject();
+      // The exact shape observed live: the keystone on, Start Mode explicitly manual.
+      await runDrivePreflight(projectId, database, { autoRepair: true });
+      await database
+        .insert(schema.preferences)
+        .values({ key: `start_mode_${projectId}`, value: "manual", updatedAt: now })
+        .onConflictDoUpdate({ target: schema.preferences.key, set: { value: "manual" } });
+
+      const result = await runDrivePreflight(projectId, database);
+
+      const mode = check(result, "startMode");
+      expect(mode.severity).toBe("block");
+      expect(mode.autoRepairable).toBe(true);
+      expect(mode.message).toMatch(/nothing auto-starts/i);
+      // The whole verdict must follow — a blocked check that leaves `ready` true is the defect.
+      expect(result.ready).toBe(false);
+      // And the check it was mistaken for is still green, which is why it was missed.
+      expect(check(result, "autodrivePrefs").severity).toBe("ok");
+    });
+
+    it("passes on monitor, which is what the one-switch repair sets", async () => {
+      const projectId = await seedProject();
+      const result = await runDrivePreflight(projectId, database, { autoRepair: true });
+      expect(check(result, "startMode").severity).toBe("ok");
+      expect(check(result, "startMode").message).toMatch(/in-process engine/i);
+    });
+
+    it("passes on conductor, and does NOT offer to auto-repair it", async () => {
+      const projectId = await seedProject();
+      await runDrivePreflight(projectId, database, { autoRepair: true });
+      await database
+        .insert(schema.preferences)
+        .values({ key: `start_mode_${projectId}`, value: "conductor", updatedAt: now })
+        .onConflictDoUpdate({ target: schema.preferences.key, set: { value: "conductor" } });
+
+      const mode = check(await runDrivePreflight(projectId, database), "startMode");
+      expect(mode.severity).toBe("ok");
+      // Auto-repair writes `monitor`, which would demote a project whose out-of-process
+      // Conductor loop is its sole driver by design.
+      expect(mode.autoRepairable).toBe(false);
+    });
+  });
+
   it("reports a null defaultBranch as a hard (non-auto-repairable) blocker", async () => {
     const projectId = await seedProject({ defaultBranch: null });
     const result = await runDrivePreflight(projectId, database, { autoRepair: true });

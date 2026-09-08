@@ -624,6 +624,20 @@ const mergeTrainRow = dtoObject<MergeTrainRowDto>({
 });
 const mergeTrainsResult = looseObject({ ok: bool, trains: arrayOf(nested(mergeTrainRow)) });
 
+// #1072/#1073 — the two drive endpoints the Drive Dashboard calls. Both shapes are bound to
+// a real server DTO: `DrivePlanResult` (shared/types/api/drive.ts) and `DrivePreflightResult`
+// (services/drive-preflight.service.ts).
+const drivePlanResult = looseObject({
+  issue: nested(looseObject({ id: str, projectId: str, issueNumber: nullable(num), title: str })),
+  existing: bool,
+});
+const drivePreflight = looseObject({
+  ready: bool,
+  repairable: bool,
+  repaired: bool,
+  checks: arrayOf(nested(looseObject({ id: str, label: str, severity: str, message: str, autoRepairable: bool }))),
+});
+
 export interface ApiResponseRoute {
   method: ApiMethod;
   /** Express-style template with `:param` segments, matched against the request path. */
@@ -644,6 +658,10 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
   { method: "POST", template: "/api/issues/:id/duplicate", schema: issueRow },
   { method: "POST", template: "/api/issues/:id/comments", schema: issueComment },
   { method: "PUT", template: "/api/issues/:id/repos-touched", schema: looseObject({ reposTouched: arrayOf(str) }) },
+
+  // ── drives ──
+  { method: "POST", template: "/api/projects/:projectId/drives/:id/plan", schema: drivePlanResult },
+  { method: "GET", template: "/api/projects/:projectId/drive/preflight", schema: drivePreflight },
 
   // ── workspaces ──
   { method: "POST", template: "/api/workspaces", schema: workspaceOrCreateJob },

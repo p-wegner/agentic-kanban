@@ -3,6 +3,56 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-08 — Drive: a target-only drive could never acquire a scope (#1071/#1072/#1073)
+
+**Trigger: the operator started a drive from the Drive view with a target and no epic, and the
+dashboard sat at 0/0 forever.** Its empty state said "link a meta/epic issue with children to
+this drive" — an action the board offered NOWHERE. `StartDriveForm` sets `metaIssueId` only at
+creation, there is no edit path, and the only populated route ran the other way round (create an
+epic, decompose it, and let `confirmEpicDecomposition`'s `driveTarget` auto-create the drive
+record). `drive-dashboard.service.ts` referred twice to "the drive-epic seeder"; grep says those
+two comments are the only occurrences in the repo — it was never written.
+
+**`POST /api/projects/:projectId/drives/:id/plan` is that seeder**, and deliberately the
+smallest thing that unblocks the flow: it creates ONE epic from the drive's target (full target
+preserved in the body, completion contract promoted to its own section, `epic`-tagged, landed in
+Backlog), links the drive to it, and returns it. It generates no children and calls no model —
+the caller's next step is the ordinary `/decompose` -> `/decompose/confirm` pair, so there is no
+second way to fan out an epic. Idempotent: a drive has exactly one meta issue, and a second epic
+would silently split its scope since the dashboard reads `metaIssueId` alone.
+
+The empty state is now an action (`DriveScopePlanner`), and one button covers both dead ends
+precisely because `/plan` is idempotent — "no scope at all" and "an epic nobody decomposed" take
+the same path and the caller need not know which it is looking at.
+
+**#1073 — preflight was a false green, measured on the operated board.** `GET /drive` returned
+`enabled: true` with `startMode: "manual"`, and `GET /drive/preflight` returned `ready: true`
+across nine green checks — for a configuration in which no ticket auto-starts at all. The
+`autodrivePrefs` check reads the legacy `board_autodrive_<id>` keystone; Start Mode is what
+CLAUDE.md calls "the one decision EVERY auto-start path consults". Added a `startMode` check
+(`manual` blocks and is auto-repairable, `conductor` passes and is deliberately NOT
+auto-repairable — the one-switch repair writes `monitor`, which would demote a project whose
+out-of-process loop is its sole driver), and surfaced the preflight verdict on the Drive
+Dashboard, where an operator actually asks "is this running?".
+
+**Three client ratchets fired on the first draft, and all three were right.**
+`api-response-validation`, `fetch-in-effect` and `function-nloc` together said: the dashboard had
+grown a hand-rolled fetch ladder and crossed 400 nloc. Fixed as directed rather than baselined —
+schemas registered for both new endpoints, preflight moved onto `useApiResource`, and the
+planning concern extracted into its own component. `wire-dto-single-declaration` then caught the
+new `DecomposableIssue` as a rename-dodge duplicate of `DrivePlanIssue`; the shape is now
+declared once in `shared/types/api/issue.ts` and consumed by both.
+
+**Verified:** 12 new `drive-planning` tests, 3 new `drive-preflight` cases, full client suite
+(185 files / 1768 tests), `pnpm typecheck`, `pnpm check:arch`. Note the FK finding behind one
+test: `drives.meta_issue_id` is `on delete set null`, so a dangling meta pointer is structurally
+impossible and `planDrive` needs no recovery branch for one — deleting the epic RELEASES the
+drive, which the test asserts instead.
+
+**Still open, and NOT part of this pass:** #1071's second half — attaching an *existing* epic to
+a drive from the UI (`PUT /drives/:id` already accepts `metaIssueId`; only the picker is
+missing). The plan path covers the common case, so this was left rather than widened.
+
 ## 2026-09-08 — board restarted after an overnight death; #1056 finished; board empty
 
 **The stable board was DOWN when this session started** — nothing listening on 3001/5173. Its

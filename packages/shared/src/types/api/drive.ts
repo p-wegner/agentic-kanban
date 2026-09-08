@@ -1,3 +1,5 @@
+import type { DecomposableIssue } from "./issue.js";
+
 // Drive-dashboard wire-contract types (pure DTOs). See ../api.ts barrel.
 
 /**
@@ -82,4 +84,22 @@ export interface DriveDashboard {
       eventType: string;
     } | null;
   };
+}
+
+/**
+ * `POST /api/projects/:projectId/drives/:id/plan` (#1072) — turn a target-only drive into a
+ * scopeable one by seeding the meta/epic issue from its target and linking the drive to it.
+ *
+ * The result carries a {@link DecomposableIssue} rather than a drive-specific shape: the
+ * caller's next step is the ordinary `/decompose` -> `/decompose/confirm` pair, which is what
+ * actually fills the backlog, and that is the input it wants.
+ */
+export interface DrivePlanResult {
+  /** The epic that now scopes the drive. */
+  issue: DecomposableIssue;
+  /**
+   * True when the drive already had a meta issue and this call returned it untouched.
+   * Planning is idempotent: it never creates a second epic for the same drive.
+   */
+  existing: boolean;
 }

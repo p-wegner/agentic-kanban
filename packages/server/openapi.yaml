@@ -7375,6 +7375,44 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{projectId}/drives/{id}/plan:
+    post:
+      summary: Seed a target-only drive's meta/epic issue from its target, and link the drive to it.
+      tags:
+        - drives
+      operationId: post_api_projects_projectId_drives_id_plan
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "403":
+          description: Error (thrown FORBIDDEN, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{projectId}/drives/{id}/review-effectiveness:
     get:
       summary: time window and (unless ?wholeProject=true) the meta-issue's dependency subtree.
