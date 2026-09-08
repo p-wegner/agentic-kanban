@@ -198,6 +198,74 @@ describe("Drives API", () => {
     expect(res.status).toBe(404);
   });
 
+  it("plans a target-only drive: seeds an epic, links it, and 201s (#1072)", async () => {
+    const created = await (await app.request(`/api/projects/${projectId}/drives`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        target: "Ship the jira sync plugin",
+        completionContract: "All children Done AND master contains the work",
+      }),
+    })).json() as any;
+    expect(created.metaIssueId).toBeNull();
+
+    const planRes = await app.request(`/api/projects/${projectId}/drives/${created.id}/plan`, {
+      method: "POST",
+    });
+    expect(planRes.status).toBe(201);
+    const planned = await planRes.json() as any;
+    expect(planned.existing).toBe(false);
+    expect(planned.issue.id).toBeTruthy();
+    expect(planned.issue.projectId).toBe(projectId);
+    expect(planned.issue.title).toContain("jira sync plugin");
+
+    // Linked: the drive now carries the created issue as its meta issue.
+    const driveRes = await app.request(`/api/projects/${projectId}/drives/${created.id}`);
+    expect((await driveRes.json() as any).metaIssueId).toBe(planned.issue.id);
+
+    // The issue itself carries the target + completion contract and the `epic` tag.
+    const issueRes = await app.request(`/api/issues/${planned.issue.id}`);
+    const issue = await issueRes.json() as any;
+    expect(issue.description).toContain("Ship the jira sync plugin");
+    expect(issue.description).toContain("All children Done AND master contains the work");
+    const issueTagRows = await db
+      .select({ name: schema.tags.name })
+      .from(schema.issueTags)
+      .innerJoin(schema.tags, eq(schema.tags.id, schema.issueTags.tagId))
+      .where(eq(schema.issueTags.issueId, planned.issue.id));
+    expect(issueTagRows.some((t) => t.name === "epic")).toBe(true);
+
+    // Idempotent: planning again returns the same issue with `existing: true`, not a rival epic.
+    const replanRes = await app.request(`/api/projects/${projectId}/drives/${created.id}/plan`, {
+      method: "POST",
+    });
+    expect(replanRes.status).toBe(200);
+    const replanned = await replanRes.json() as any;
+    expect(replanned.existing).toBe(true);
+    expect(replanned.issue.id).toBe(planned.issue.id);
+  });
+
+  it("returns 404 planning an unknown drive", async () => {
+    const res = await app.request(`/api/projects/${projectId}/drives/${randomUUID()}/plan`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 403 planning a drive from another project", async () => {
+    const created = await (await app.request(`/api/projects/${projectId}/drives`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ target: "Cross-project plan" }),
+    })).json() as any;
+
+    const otherProjectId = await seedProject(db);
+    const res = await app.request(`/api/projects/${otherProjectId}/drives/${created.id}/plan`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(403);
+  });
+
   it("deletes a drive", async () => {
     const created = await (await app.request(`/api/projects/${projectId}/drives`, {
       method: "POST",
