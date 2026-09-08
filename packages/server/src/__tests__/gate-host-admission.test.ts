@@ -51,3 +51,62 @@ describe("gate host admission (#1057)", () => {
     expect(a.admit).toBe(true);
   });
 });
+
+/**
+ * #1056 — `%TEMP%` exhaustion is a SECOND way the same box is unfit, and one CPU and memory
+ * cannot see. The three runs #1057's header attributes to saturation were reproduced on an
+ * IDLE box (CPU 18 %, 4.9 GB usable) and failed identically; the `%TEMP%` the runner writes
+ * into held 707,242 entries, at which size a bare enumeration exceeded 120s.
+ */
+describe("gate temp-health admission (#1056)", () => {
+  const healthy = { capacityHold: false, capacityReason: "4.0 GB free", floorEnabled: true };
+
+  it("refuses a gate when %TEMP% is degraded, and carries the measured reason", () => {
+    const a = decideGateHostAdmission({
+      ...healthy,
+      tempDegraded: true,
+      tempReason: "C:\Temp holds at least 50000 entries (cap 50000)",
+    });
+    expect(a.admit).toBe(false);
+    if (a.admit) throw new Error("unreachable");
+    expect(a.reason).toBe("temp_exhausted");
+    expect(a.detail).toContain("50000 entries");
+    // A hold nobody can act on is a hold nobody will act on.
+    expect(a.detail).toContain("sweep-loose-test-db-files.mjs");
+  });
+
+  it("reports a box that is BOTH saturated and temp-exhausted as saturated", () => {
+    // Deliberate: capacity is the cheaper signal and the more common cause, and it is the one
+    // an operator can act on immediately. Two holds reported as one must pick, and pick stably.
+    const a = decideGateHostAdmission({
+      capacityHold: true,
+      capacityReason: "only 0.4 GB free",
+      floorEnabled: true,
+      tempDegraded: true,
+      tempReason: "temp is huge",
+    });
+    expect(a.admit).toBe(false);
+    if (a.admit) throw new Error("unreachable");
+    expect(a.reason).toBe("host_saturated");
+  });
+
+  it("the operator floor switch turns BOTH holds off, not just the capacity one", () => {
+    // `gate_host_floor_<id>=false` is documented as "run the gate anyway". A second hold that
+    // ignored it would make the escape hatch silently stop working.
+    const a = decideGateHostAdmission({
+      ...healthy,
+      floorEnabled: false,
+      tempDegraded: true,
+      tempReason: "temp is huge",
+    });
+    expect(a.admit).toBe(true);
+    expect(a.reason).toBe("floor_disabled");
+  });
+
+  it("a caller that does not probe temp at all behaves exactly as before", () => {
+    // The fields are optional so #1057's call shape keeps its meaning byte for byte.
+    const a = decideGateHostAdmission(healthy);
+    expect(a.admit).toBe(true);
+    expect(a.reason).toBe("host_has_room");
+  });
+});

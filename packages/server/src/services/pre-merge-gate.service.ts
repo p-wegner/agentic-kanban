@@ -572,15 +572,20 @@ export async function runPreMergeGate(
       () => ({ admit: true, reason: "host_has_room" }) as Awaited<ReturnType<typeof resolveGateHostAdmission>>,
     );
     if (!admission.admit) {
-      noteMergeGatePhase(workspace.id, "held", "host saturated — not starting a verify chain");
+      // Name WHICH unfitness held it (#1056). "host saturated" was the only wording, and the
+      // #1046/#1048/#1049 failures it was written for turned out to reproduce on an IDLE box —
+      // a hold that misnames its own cause sends the next reader to the wrong remedy, which is
+      // how ~113 minutes went into three wrong diagnoses of those same runs.
+      const what = admission.reason === "temp_exhausted" ? "%TEMP% exhausted" : "host saturated";
+      noteMergeGatePhase(workspace.id, "held", `${what} — not starting a verify chain`);
       return {
         passed: false,
         skipped: false,
         held: true,
         stage: "verify",
         message:
-          `pre-merge gate HELD — not started: ${admission.detail}. Nothing was verified and nothing `
-          + `failed; the merge is deferred and will be retried when the box has room. `
+          `pre-merge gate HELD — not started (${what}): ${admission.detail}. Nothing was verified `
+          + `and nothing failed; the merge is deferred and will be retried on the next cycle. `
           + `Override with gate_host_floor_${projectId}=false.`,
       };
     }

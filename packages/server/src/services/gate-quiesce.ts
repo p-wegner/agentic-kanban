@@ -25,6 +25,7 @@ import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { readTier0Capacity } from "@agentic-kanban/shared/lib/machine-capacity";
+import { probeTempHealth } from "@agentic-kanban/shared/lib/temp-health";
 import { buildGateBusy } from "./jvm-build-semaphore.js";
 
 const quiescePrefDef = projectPref("quiesce_builders_during_gate");
@@ -131,7 +132,7 @@ export async function gateHostFloorEnabled(projectId: string, database: Database
 /** Whether a verify chain may START right now, and why not when it may not. */
 export type GateHostAdmission =
   | { admit: true; reason: "host_has_room" | "floor_disabled" }
-  | { admit: false; reason: "host_saturated"; detail: string };
+  | { admit: false; reason: "host_saturated" | "temp_exhausted"; detail: string };
 
 /**
  * DECISION (pure): may a pre-merge gate START its verify chain on this box? (#1057)
@@ -165,10 +166,36 @@ export function decideGateHostAdmission(input: {
   capacityReason: string;
   /** `gate_host_floor_<projectId>` — false lets an operator run the gate anyway. */
   floorEnabled: boolean;
+  /**
+   * {@link probeTempHealth} — is `%TEMP%` too big or too slow to run a verify chain on? (#1056)
+   *
+   * A SECOND way the same box can be unfit, and one CPU and memory cannot see: the three
+   * #1046/#1048/#1049 failures this file's header attributes to saturation were measured
+   * again on an IDLE box (CPU 18 %, 4.9 GB usable) and failed identically, which is what
+   * refuted the load reading. The `%TEMP%` the runner writes into held 707,242 entries.
+   *
+   * Optional so an older caller that does not probe behaves exactly as it does today.
+   */
+  tempDegraded?: boolean;
+  /** The measured reason, for the message. */
+  tempReason?: string;
 }): GateHostAdmission {
   if (!input.floorEnabled) return { admit: true, reason: "floor_disabled" };
-  if (!input.capacityHold) return { admit: true, reason: "host_has_room" };
-  return { admit: false, reason: "host_saturated", detail: input.capacityReason };
+  if (input.capacityHold) return { admit: false, reason: "host_saturated", detail: input.capacityReason };
+  // Capacity first: it is the cheaper signal and the more common cause. A box that is BOTH
+  // saturated and temp-exhausted is reported as saturated, which is the one an operator can
+  // act on immediately.
+  if (input.tempDegraded) {
+    return {
+      admit: false,
+      reason: "temp_exhausted",
+      detail:
+        (input.tempReason ?? "%TEMP% is unusable")
+        + " — drain it with `node scripts/sweep-loose-test-db-files.mjs` and the merge retries "
+        + "on the next cycle",
+    };
+  }
+  return { admit: true, reason: "host_has_room" };
 }
 
 /**
@@ -181,11 +208,21 @@ export async function resolveGateHostAdmission(args: {
   database: Database;
   /** Injected for tests; defaults to the live Tier-0 read. */
   readCapacity?: () => { hold: boolean; reason: string };
+  /** Injected for tests; defaults to the live bounded `%TEMP%` probe (#1056). */
+  readTempHealth?: () => { degraded: boolean; reason: string };
 }): Promise<GateHostAdmission> {
   const capacity = (args.readCapacity ?? readTier0Capacity)();
+  // The temp probe is bounded (at most `DEFAULT_TEMP_PROBE_BUDGET_MS`) but it is not free like
+  // the capacity read, so skip it entirely when capacity has already decided the answer.
+  const temp = capacity.hold
+    ? { degraded: false, reason: "" }
+    : (args.readTempHealth ?? probeTempHealth)();
+  const anyHold = capacity.hold || temp.degraded;
   return decideGateHostAdmission({
     capacityHold: capacity.hold,
     capacityReason: capacity.reason,
-    floorEnabled: capacity.hold ? await gateHostFloorEnabled(args.projectId, args.database) : true,
+    floorEnabled: anyHold ? await gateHostFloorEnabled(args.projectId, args.database) : true,
+    tempDegraded: temp.degraded,
+    tempReason: temp.reason,
   });
 }

@@ -44,6 +44,11 @@ export default defineConfig({
     setupFiles: [
       path.resolve(__dirname, "../../test-setup/git-identity.ts"),
       path.resolve(__dirname, "../../test-setup/db-isolation.ts"),
+      // #1056 gate — the pre-merge gate refuses to START a verify chain on a box whose %TEMP%
+      // is too big or too slow. Correct in production, but it would make every unit test of
+      // what the gate does DOWNSTREAM depend on the developer's own temp directory. See that
+      // file: the probe and the admission decision are each covered directly instead.
+      path.resolve(__dirname, "../../test-setup/temp-health-neutral.ts"),
     ],
     // #352 — reap orphaned fixture child servers (`serve.mjs`) and their temp dirs once before
     // the first fork and once after the last. NOT a setupFile: that runs per fork and would let
