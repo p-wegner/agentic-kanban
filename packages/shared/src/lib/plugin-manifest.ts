@@ -361,6 +361,58 @@ export interface PluginDocDef {
   audience?: PluginAudience;
 }
 
+/** Valid `sync.provider` id: lowercase alphanumerics and dashes, same shape as the plugin id. */
+export const PLUGIN_SYNC_PROVIDER_PATTERN = /^[a-z0-9-]+$/;
+
+/** One command the plugin exposes for the sync direction (same shape as a script). */
+export interface PluginSyncCommandDef {
+  /** Shell command. */
+  command: string;
+  /** Where the command runs. Default "plugin". */
+  cwd?: PluginCwd;
+  /** Extra env vars; values support the same placeholders as script env. */
+  env?: Record<string, string>;
+}
+
+/**
+ * One field of the sync provider's configuration (site URL, project key, JQL, …) — declared so
+ * the board can render a form instead of the plugin author hand-rolling one per provider.
+ */
+export interface PluginSyncConfigFieldDef {
+  /** Stable key the resolved value is stored/passed under. */
+  key: string;
+  label?: string;
+  description?: string;
+  /** Default false — a field the board may leave empty. */
+  required?: boolean;
+}
+
+/**
+ * Declarative external-issue-tracker sync capability (#1076).
+ *
+ * The manifest never carries secret VALUES — only the NAMES of secret references the board
+ * resolves at run time (e.g. an entry in its own credential store) and injects as env vars into
+ * `pull`/`push`. A manifest that put a token inline would leak it into the plugin repo (source
+ * control) and the board's own `plugins` row; naming a reference keeps the secret wherever the
+ * operator already keeps it.
+ */
+export interface PluginSyncDef {
+  /** Stable id of the external tracker this plugin syncs with (e.g. "jira", "linear"). */
+  provider: string;
+  /** Deterministic command pulling remote state into the project. At least one of pull/push is required. */
+  pull?: PluginSyncCommandDef;
+  /** Deterministic command pushing local state to the remote tracker. At least one of pull/push is required. */
+  push?: PluginSyncCommandDef;
+  /** Config fields the board should collect before running pull/push (site URL, project key, JQL, …). */
+  config?: PluginSyncConfigFieldDef[];
+  /**
+   * Names of secret references this sync needs (e.g. "JIRA_API_TOKEN") — never the secret
+   * values themselves. The board resolves each name against its own credential store and injects
+   * it as an env var when running `pull`/`push`.
+   */
+  secrets?: string[];
+}
+
 export type {
   PluginPlaceholderVars,
 } from "./plugin-placeholders.js";
@@ -383,6 +435,8 @@ export interface PluginManifest {
   scripts?: PluginScriptDef[];
   loops?: PluginLoopDef[];
   docs?: PluginDocDef[];
+  /** Declarative external-issue-tracker sync capability (#1076). Absent = no back-compat change. */
+  sync?: PluginSyncDef;
   butler?: {
     /** Path (relative to the plugin root) of a markdown fragment appended to the butler prompt. */
     promptFragment: string;
@@ -619,6 +673,51 @@ export function parsePluginManifest(input: unknown): PluginManifest {
     };
   });
 
+  const sync = obj.sync == null ? undefined : (() => {
+    const rec = asRecord(obj.sync, "sync");
+    const provider = requireString(rec.provider, "sync.provider");
+    if (!PLUGIN_SYNC_PROVIDER_PATTERN.test(provider)) {
+      fail(`"sync.provider" must match ${PLUGIN_SYNC_PROVIDER_PATTERN} (got "${provider}")`);
+    }
+    const pull = rec.pull == null ? undefined : parseSyncCommand(rec.pull, "sync.pull");
+    const push = rec.push == null ? undefined : parseSyncCommand(rec.push, "sync.push");
+    // A sync that can do neither direction is not a sync — declaring it would render a capability
+    // with nothing behind it, and the board would have no command to offer.
+    if (!pull && !push) fail(`"sync" must declare at least one of "pull"/"push"`);
+
+    const seenConfigKeys = new Set<string>();
+    const config = rec.config == null ? undefined : requireArray(rec.config, "sync.config").map((entry, i) => {
+      const c = asRecord(entry, `sync.config[${i}]`);
+      const key = requireString(c.key, `sync.config[${i}].key`);
+      if (seenConfigKeys.has(key)) fail(`duplicate sync.config key "${key}"`);
+      seenConfigKeys.add(key);
+      return {
+        key,
+        label: optionalString(c.label, `sync.config[${i}].label`),
+        description: optionalString(c.description, `sync.config[${i}].description`),
+        required: optionalBoolean(c.required, `sync.config[${i}].required`),
+      };
+    });
+
+    const seenSecrets = new Set<string>();
+    const secrets = rec.secrets == null ? undefined : requireArray(rec.secrets, "sync.secrets").map((entry, i) => {
+      if (typeof entry !== "string") fail(`"sync.secrets[${i}]" must be a string`);
+      const name = entry.trim();
+      if (!name) fail(`"sync.secrets[${i}]" must be a non-empty string`);
+      if (!SYNC_SECRET_NAME_PATTERN.test(name)) {
+        fail(`"sync.secrets[${i}]" must be a reference NAME matching ${SYNC_SECRET_NAME_PATTERN} (got "${name}") — the manifest declares which secret it needs, never the secret's value`);
+      }
+      if (looksLikeInlineSecretValue(name)) {
+        fail(`"sync.secrets[${i}]" looks like an inline secret VALUE, not a reference name (got "${name}") — the manifest must name the secret, e.g. "JIRA_API_TOKEN", and let the board resolve it`);
+      }
+      if (seenSecrets.has(name)) fail(`duplicate sync secret name "${name}"`);
+      seenSecrets.add(name);
+      return name;
+    });
+
+    return { provider, pull, push, config, secrets };
+  })();
+
   const butler = obj.butler == null ? undefined : (() => {
     const rec = asRecord(obj.butler, "butler");
     return { promptFragment: requireRelativePath(rec.promptFragment, "butler.promptFragment") };
@@ -640,7 +739,41 @@ export function parsePluginManifest(input: unknown): PluginManifest {
     };
   })();
 
-  return { id, name, version, description, skills, views, scripts, loops, docs, butler, scaffold };
+  return { id, name, version, description, skills, views, scripts, loops, docs, sync, butler, scaffold };
+}
+
+/** A sync command's field name (`sync.pull`/`sync.push`) — reused so both share one error prefix. */
+function parseSyncCommand(value: unknown, field: string): PluginSyncCommandDef {
+  const rec = asRecord(value, field);
+  return {
+    command: requireString(rec.command, `${field}.command`),
+    cwd: optionalCwd(rec.cwd, `${field}.cwd`),
+    env: optionalEnv(rec.env, `${field}.env`),
+  };
+}
+
+/**
+ * A secret REFERENCE name — the shape a credential-store key actually takes (env-var-like,
+ * optionally dotted/namespaced). Deliberately narrower than a bare identifier so a pasted value
+ * that happens to avoid whitespace (a UUID, a slug-shaped id) still has to clear this too.
+ */
+const SYNC_SECRET_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]*$/;
+
+/**
+ * Heuristic guard against a manifest author inlining an actual secret where a reference NAME
+ * belongs (#1076's "never inline secrets" requirement). Not a proof — a short opaque token could
+ * still slip through — but it catches the shapes real tokens take: JWTs, common provider prefixes
+ * (GitHub, Slack, OpenAI/Anthropic-style), and anything implausibly long for a name someone would
+ * type by hand. An auth-header-shaped value ("Bearer xyz") is already rejected earlier by
+ * `SYNC_SECRET_NAME_PATTERN`, which excludes whitespace.
+ */
+function looksLikeInlineSecretValue(name: string): boolean {
+  if (name.length > 64) return true;
+  if (/^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$/.test(name)) return true; // JWT
+  if (/^(ghp|gho|ghu|ghs|ghr|github_pat)_/i.test(name)) return true; // GitHub token
+  if (/^xox[baprs]-/i.test(name)) return true; // Slack token
+  if (/^sk-[A-Za-z0-9]/i.test(name)) return true; // OpenAI/Anthropic-style key
+  return false;
 }
 
 /**
