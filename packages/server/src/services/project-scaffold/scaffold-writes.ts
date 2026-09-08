@@ -46,3 +46,17 @@ export function takeScaffoldWrites(repoPath: string): string[] {
   scaffoldWrittenFiles.delete(key);
   return [...set];
 }
+
+/**
+ * Read the record WITHOUT clearing it (#1082). Used when `scaffold_auto_commit` is off: the
+ * caller still wants to report which paths *would* have been swept in, but since nothing is
+ * committed the record must survive for the next run that actually commits — draining it here
+ * would permanently lose track of a package.json/pnpm-workspace.yaml rewrite, since those paths
+ * are recoverable ONLY from this record and not from git status (unlike the `.claude/*`
+ * durable-path list, which is re-derived from disk every call).
+ */
+export function peekScaffoldWrites(repoPath: string): string[] {
+  const key = resolve(repoPath);
+  const set = scaffoldWrittenFiles.get(key);
+  return set ? [...set] : [];
+}
