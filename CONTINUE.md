@@ -3,6 +3,40 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-09 — NTFS corruption in the pnpm store is what `verify_infra_missing` meant
+
+**#1077 and #1082 were held by the pre-merge gate as `verify_infra_missing`, four identical
+failures each. The cause was not the board.** Both worktrees had an EMPTY
+`packages/e2e/node_modules`, so `packages/e2e` could not resolve `@playwright/test`; the
+`TS7006: Parameter 'dialog' implicitly has an 'any' type` in the gate message is a downstream
+symptom of the missing module, not a code defect on either branch. The board's classification
+and its auto-install retry were both correct — the retry just could not succeed.
+
+**Why the install could not succeed: individual files in `~/.pnpm-store/v10/files` are corrupt
+at the NTFS level.** They list in a directory read but `stat`/`open`/`unlink` all fail with
+`UNKNOWN`, and `del` reports *"Die Datei oder das Verzeichnis ist beschädigt und nicht lesbar"*.
+A full scan found 2 of 24,315 corrupt; a further ~127 files written during a retry produced one
+NEW corrupt entry, and a later retry corrupted a file inside
+`ak-1077/node_modules/.pnpm/hasown@2.0.3/`. So corruption is being PRODUCED during writes, not
+merely left over.
+
+Workaround that unblocked both worktrees, since a corrupt entry cannot be deleted but its PARENT
+can be renamed: rename the affected store bucket aside (`files/e0` -> `files/e0.corrupt-20260909`,
+same for `8c`, `fd`) and re-run `pnpm install -r`; pnpm re-fetches the bucket. Three buckets plus
+one worktree package dir are currently renamed aside and can be deleted once the filesystem is
+repaired. Both worktrees now hold a correct `packages/e2e/node_modules`.
+
+**Not verified: that the gate now passes.** The merges were deliberately NOT re-triggered —
+`fleet status` reported RAM at 100% with 8.3k page-faults/sec from disk and 39.8 GB committed
+against 27.6 GB physical, which is exactly the condition the capacity rule says not to start a
+test/build run in. Re-run the gate for #1069 and #1077 (both `readyForMerge`) after a reboot.
+
+**Probable root cause, unproven:** the System log carries recurring NTFS Event 7 *"unterbrochener
+Schreibvorgang"* (interrupted write) on 03.09, 04.09, 06.09 x2, 08.09 and 09.09 05:07 — clustering
+on long-uptime days. `fleet status` names a kernel-pool leak in `mssecflt.sys` (6.5 GB, +155 MB/h,
+org-managed) as the memory driver. `Get-PhysicalDisk` reports the SSD Healthy, so this is
+filesystem/driver, not failing hardware. `chkdsk C: /scan` needs elevation and has NOT been run.
+
 ## 2026-09-08 — Drive: a target-only drive could never acquire a scope (#1071/#1072/#1073)
 
 **Trigger: the operator started a drive from the Drive view with a target and no epic, and the
