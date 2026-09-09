@@ -1,20 +1,19 @@
 #!/usr/bin/env node
 // The manifest's `sync.push` command. Applies queued local changes (status
-// transitions, comments) to Jira, one entry at a time, and reports exactly
-// which entries succeeded/failed. --dry-run reports what would be sent
-// without sending it. The outbox is plain JSON at
-// `${JIRA_SYNC_STATE_DIR}/outbox.json`; nothing here decides ITS contents —
-// wiring board-side edits into that file is separate, later work (#1076).
+// transitions resolved via the transition graph, attributed comments, and
+// issue creation for board issues with no `external_key` yet) to Jira, one
+// entry at a time, and reports exactly which entries succeeded/failed.
+// --dry-run reports the exact intended mutations without sending any of
+// them. The outbox is plain JSON at `${JIRA_SYNC_STATE_DIR}/outbox.json`;
+// nothing here decides ITS contents — wiring board-side edits into that
+// file is separate, later work (#1076). The deterministic per-entry logic
+// lives in ../lib/push-plan.mjs so it can be tested with no CLI/env.
 
 import { checkProfile } from "../lib/profile.mjs";
 import { buildClientFromEnv, printResult, isDryRun } from "../lib/cli-client.mjs";
-import { readOutbox, writeJsonFile, outboxPath } from "../lib/state.mjs";
+import { readOutbox, readWritebacks, writeJsonFile, outboxPath, writebacksPath } from "../lib/state.mjs";
+import { runPush } from "../lib/push-plan.mjs";
 import { JiraAuthError } from "../lib/auth.mjs";
-
-async function applyEntry(client, entry) {
-  if (entry.transitionId) await client.transitionIssue(entry.key, entry.transitionId);
-  if (entry.comment) await client.addComment(entry.key, entry.comment);
-}
 
 async function main() {
   const profile = checkProfile(process.env.JIRA_SYNC_PROFILE_PATH);
@@ -33,25 +32,16 @@ async function main() {
 
   const dryRun = isDryRun();
   const outbox = readOutbox(stateDir);
-  const applied = [];
-  const failed = [];
-  const remaining = [];
+  const { applied, failed, remaining, writebacks } = await runPush(ctx.client, outbox.entries, { dryRun });
 
-  for (const entry of outbox.entries) {
-    if (dryRun) {
-      applied.push({ key: entry.key, wouldApply: true });
-      continue;
-    }
-    try {
-      await applyEntry(ctx.client, entry);
-      applied.push({ key: entry.key });
-    } catch (err) {
-      failed.push({ key: entry.key, reason: err.message, code: err.code ?? null });
-      remaining.push(entry);
+  if (!dryRun) {
+    writeJsonFile(outboxPath(stateDir), { entries: remaining });
+    if (writebacks.length > 0) {
+      const existing = readWritebacks(stateDir);
+      for (const wb of writebacks) existing.keys[wb.boardIssueId] = wb.key;
+      writeJsonFile(writebacksPath(stateDir), existing);
     }
   }
-
-  if (!dryRun) writeJsonFile(outboxPath(stateDir), { entries: remaining });
 
   return {
     ok: failed.length === 0,

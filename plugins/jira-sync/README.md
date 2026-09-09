@@ -17,15 +17,19 @@ tools/
   sync/pull.mjs           sync.pull: diff Jira against last-seen state, optionally apply
   sync/push.mjs           sync.push: apply a local outbox of transitions/comments
   lib/
-    jira-client.mjs        the zero-dependency REST client (search, get, transition, comment)
+    jira-client.mjs        the zero-dependency REST client (search, get, transition, comment, create)
     auth.mjs                credential resolution (env) + auth header construction
     errors.mjs              HTTP/network failures normalized to one JiraApiError shape
     fixtures.mjs            fixture-backed fetch for offline testing
     pull-plan.mjs           the deterministic pull diff, shared by plan.mjs and pull.mjs
-    state.mjs               JSON state file helpers (pull state, outbox)
+    push-plan.mjs           the deterministic push apply/describe logic, shared by push.mjs
+    transitions.mjs         resolves a target status name to a Jira transition id via the graph
+    comment-marker.mjs      attribution marker so a pushed comment isn't re-imported as new
+    state.mjs               JSON state file helpers (pull state, outbox, writebacks)
     profile.mjs             the same TODO-marker gate the board's scaffold uses
   fixtures/                 recorded JSON responses used offline
-__tests__/                  unit tests (node:test) — auth, pagination, backoff, error normalization
+__tests__/                  unit tests (node:test) — auth, pagination, backoff, error normalization,
+                             transition resolution, comment marker, push plan, writebacks
 ```
 
 ## Credentials
