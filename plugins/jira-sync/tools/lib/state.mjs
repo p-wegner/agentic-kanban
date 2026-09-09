@@ -27,10 +27,19 @@ export function outboxPath(stateDir) {
   return join(stateDir, "outbox.json");
 }
 
+/** Board-issue-id -> newly-created Jira key, for entries pushed with no `external_key` yet. */
+export function writebacksPath(stateDir) {
+  return join(stateDir, "writebacks.json");
+}
+
 export function readPullState(stateDir) {
   return readJsonFile(pullStatePath(stateDir), { issues: {} });
 }
 
 export function readOutbox(stateDir) {
   return readJsonFile(outboxPath(stateDir), { entries: [] });
+}
+
+export function readWritebacks(stateDir) {
+  return readJsonFile(writebacksPath(stateDir), { keys: {} });
 }

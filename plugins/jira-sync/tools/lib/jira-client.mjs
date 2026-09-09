@@ -171,4 +171,12 @@ export class JiraClient {
       body: { body: adf },
     });
   }
+
+  /** `POST /rest/api/3/issue` — creates a new issue, no key yet. Returns `{id, key, self}`. */
+  async createIssue(fields) {
+    return this.request("/rest/api/3/issue", {
+      method: "POST",
+      body: { fields },
+    });
+  }
 }
