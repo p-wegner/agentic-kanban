@@ -199,6 +199,7 @@ describe("markerColorForEvent", () => {
     expect(markerColorForEvent({ kind: "notification", key: "agent" } as DisplayEvent)).toBe("bg-orange-500");
     expect(markerColorForEvent({ kind: "rate_limit" } as DisplayEvent)).toBe("bg-yellow-500");
     expect(markerColorForEvent({ kind: "raw", text: "x" })).toBe("bg-gray-600");
+    expect(markerColorForEvent({ kind: "tool_progress", toolName: "PowerShell", toolUseId: "t1", elapsedSeconds: 29 } as DisplayEvent)).toBe("bg-gray-700");
   });
 });
 
