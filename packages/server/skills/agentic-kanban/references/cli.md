@@ -118,6 +118,18 @@ Manage living OpenSpec domain specifications.
 | `openspec show <domain>` | Show a living OpenSpec domain spec |
 | `openspec validate [change]` | Validate OpenSpec change deltas under openspec/changes |
 
+## plugin-sync
+
+Configure, validate and trigger a plugin's external-issue-tracker sync (#1076/#1081).
+
+| Command | Does |
+|---|---|
+| `plugin-sync config-get <plugin>` | Show declared sync config fields, their current values, and which declared secrets the board can resolve |
+| `plugin-sync config-set <plugin> <key> <value>` | Set one declared sync config field's value |
+| `plugin-sync validate <plugin>` | Check whether sync is fully configured — fails CLOSED with a readable reason instead of a server error |
+| `plugin-sync trigger <plugin> <direction>` |  |
+| `plugin-sync status <plugin>` | Show the last recorded sync run — time, direction, outcome, counts/conflicts when the command reported them |
+
 ## preferences
 
 Manage CLI preferences.
