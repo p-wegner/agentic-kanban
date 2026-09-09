@@ -246,6 +246,17 @@ const DYNAMIC_ENV_READS: Record<string, string> = {
     "GEMINI_API_KEY, GROQ_API_KEY, MISTRAL_API_KEY, OPENROUTER_API_KEY) — all foreign names " +
     "owned by their vendors, and the question is about the SET, so a literal per key would be " +
     "seven copies of one predicate.",
+  "packages/server/src/services/plugin-sync.service.ts::name":
+    "iterates a plugin manifest's `sync.secrets` to build the env for ONE sync subprocess " +
+    "(#1081). Unlike every other entry here, the reachable set is NOT enumerable from this " +
+    "repo: the names are declared by whichever plugin is installed (a Jira plugin asks for " +
+    "JIRA_API_TOKEN, another asks for something else), so there is no literal to write and no " +
+    "docs/env-vars.md row to check against — these are the PLUGIN's variables, not the board's. " +
+    "The indirection is the feature: the board resolves a secret by name, passes it to that one " +
+    "child process, and never stores or echoes the VALUE back (the config and status views only " +
+    "ever see the secret's name). Declaring the read here rather than exempting the file keeps " +
+    "the #768 property — a reader can see exactly which reads are name-blind and why — while " +
+    "being honest that the names come from third-party manifest data.",
   "packages/server/src/scaffold/machine-capacity.js::envName":
     "`budgetMs(envName, defaultMs)` in the scaffolded capacity hook (#913). Resolves only to the " +
     "literals its two call sites pass — SCOPED_VITEST_BUDGET_MS and SCOPED_TYPECHECK_BUDGET_MS, " +

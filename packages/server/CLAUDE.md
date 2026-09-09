@@ -164,9 +164,18 @@ service to the global db at module load, so a consumer cannot swap the database.
 `routes/config-export-import.ts` already builds its own `createPreferenceService({database})`
 for a service another route took as a singleton. Frozen at 6, shrink-only.
 
-**`createXOps` is not a second kind.** All five are plugin sub-services extracted from an
-oversized service, which is the only meaning the noun carries: *a sub-service split out of a
->800-line service*. Anything else is a `Service`. Frozen at 5.
+**`createXOps` is not a second kind.** All six are plugin sub-services composed into
+`plugin.service.ts`, which is the only meaning the noun carries: *a plugin sub-service that
+keeps that file small*. Anything else is a `Service`. Frozen at 6.
+
+The count went 5 -> 6 with `createPluginSyncOps` (#1081), and the row was widened with it. The
+original wording said "extracted from a >800-line service", describing how the first five got
+there; `plugin-sync` was written new rather than extracted, and `plugin.service.ts` is 376 lines
+(~717 with sync inlined), so the literal reading would have demanded `createPluginSyncService` —
+one `Service` sitting among five `Ops` that are destructured into the same surface in the same
+file. The noun is about the ROLE, not the history. What must still not happen is the noun
+appearing outside the plugin family; that is what `service-wiring-ratchet.test.ts` guards, and
+its baseline carries the same reasoning.
 
 ## Circular imports
 Route modules that need services (e.g., `sessionManager`) should receive them via factory functions or lazy getters, not direct imports from `index.ts`.
