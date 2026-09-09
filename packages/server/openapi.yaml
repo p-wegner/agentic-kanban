@@ -3625,6 +3625,176 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/plugins/{id}/sync/config:
+    get:
+      summary: GET /api/plugins/{id}/sync/config
+      tags:
+        - plugins
+      operationId: get_api_plugins_id_sync_config
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/plugins/{id}/sync/config
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_sync_config
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                values:
+                  type: object
+                  additionalProperties: true
+              required:
+                - projectId
+              additionalProperties: true
+              x-unknown-keys: passthrough
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/sync/status:
+    get:
+      summary: GET /api/plugins/{id}/sync/status
+      tags:
+        - plugins
+      operationId: get_api_plugins_id_sync_status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/sync/trigger:
+    post:
+      summary: POST /api/plugins/{id}/sync/trigger
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_sync_trigger
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                direction:
+                  type: string
+                  enum:
+                    - pull
+                    - push
+                dryRun:
+                  type: boolean
+              required:
+                - projectId
+                - direction
+              additionalProperties: true
+              x-unknown-keys: passthrough
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/sync/validate:
+    post:
+      summary: POST /api/plugins/{id}/sync/validate
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_sync_validate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/plugins/{id}/update:
     post:
       summary: POST /api/plugins/{id}/update
