@@ -4,10 +4,13 @@
 // tier graph, current stalls, the last cascade (merge) event, and cold-build-clean
 // status — all from the board + dependency graph + the board-health-event log.
 //
-// Scope = the drive's meta/epic issue and its DIRECT children (the `parent_of`
-// edges the drive-epic seeder wires). This deliberately mirrors how a drive epic
-// is structured (one epic, a flat fan-out of children) rather than walking an
-// arbitrary tree. The meta issue itself is excluded from progress/tiers.
+// Scope = the drive's meta/epic issue's DIRECT children (the `parent_of` edges
+// the drive-epic seeder wires). This deliberately mirrors how a drive epic is
+// structured (one epic, a flat fan-out of children) rather than walking an
+// arbitrary tree. The meta issue itself is excluded from progress/tiers UNLESS
+// it has no children at all — #1074: a right-sized epic (the #116 atomic floor
+// refused to split it) then scopes ITSELF, so a one-ticket drive still has a
+// progress denominator instead of a permanent 0/0.
 //
 // No live build runs here — the cold-clone gate is a multi-minute fresh clone +
 // build, far too expensive for a pollable dashboard. We report the gate's
@@ -48,9 +51,9 @@ type ScopedIssue = {
 const BUILD_EVENT_RE = /(build|verify|cold-clone|cold clone|compile|typecheck|tsc)/i;
 
 /**
- * Resolve the drive's scoped issues = the meta issue's direct `parent_of` children.
- * Returns an empty list when the drive has no meta issue (a drive can be created
- * before its epic exists).
+ * Resolve the drive's scoped issues = the meta issue's direct `parent_of` children,
+ * or the meta issue itself when it has none (#1074). Returns an empty list only when
+ * the drive has no meta issue at all (a drive can be created before its epic exists).
  */
 async function loadScopedIssues(
   database: Database,
@@ -67,9 +70,16 @@ async function loadScopedIssues(
   const scopedIds = parentOfChildIds.length > 0
     ? parentOfChildIds
     : edges.map((e) => e.childId);
-  if (scopedIds.length === 0) return [];
 
-  const rows = await getScopedIssueRows(scopedIds, database);
+  // #1074: an epic that is already single-session-sized correctly gets ZERO children
+  // (the #116 atomic floor refuses to split it) — but "scope = children only" then reads
+  // as a permanent 0/0 dead end: no progress denominator, invisible to the tier graph and
+  // stall list, and the meta can never satisfy reconcileDriveCompletion's "while any child
+  // is open" check because there is no child to resolve. Fall back to scoping the meta
+  // issue ITSELF so a one-ticket drive has somewhere to go (0/1 -> 1/1).
+  const finalIds = scopedIds.length > 0 ? scopedIds : [metaIssueId];
+
+  const rows = await getScopedIssueRows(finalIds, database);
   // Keep only same-project children with a resolved status (defensive — a drive's
   // children always belong to its project).
   return rows
