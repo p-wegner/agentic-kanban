@@ -332,7 +332,9 @@ export function createPluginsRoute(
 
   router.post("/:id/sync/config", async (c) => {
     const body = await parsePluginBody(c, pluginSyncConfigBody);
-    return c.json(await service.setSyncConfig(c.req.param("id"), body.projectId, body.values));
+    // `values` carries `.default({})` in `pluginSyncConfigBody`, so it is never undefined at
+    // runtime; the coalesce is for the INPUT-vs-OUTPUT type of the parsed body, not a real case.
+    return c.json(await service.setSyncConfig(c.req.param("id"), body.projectId, body.values ?? {}));
   });
 
   router.post("/:id/sync/validate", async (c) => {
