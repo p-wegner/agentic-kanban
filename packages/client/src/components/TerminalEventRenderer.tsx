@@ -575,6 +575,24 @@ function renderNotification(event: EventOf<"notification">, key: number, ctx: Re
   );
 }
 
+/**
+ * A `tool_progress` heartbeat (#1085) — "PowerShell — running 29s".
+ *
+ * Rendered one line, always dim, in both densities: a long call emits one of these every
+ * ~30s, so anything louder would drown the transcript it is meant to reassure you about.
+ * The point is that a slow tool call now LOOKS different from a wedged one.
+ */
+function renderToolProgress(event: EventOf<"tool_progress">, key: number, ctx: RenderContext, d: DerivedRenderState): React.ReactNode {
+  const { isInsideSubagent, isSubagentStart } = d;
+  const { searchQuery } = ctx;
+  const inSubagent = isInsideSubagent && !isSubagentStart;
+  return (
+    <div key={key} data-event-idx={key} className={`mb-0.5 text-[11px] ${inSubagent ? "ml-6" : "ml-1"}`}>
+      <span className="text-gray-500">{highlightText(event.toolName, searchQuery)} — running {event.elapsedSeconds}s</span>
+    </div>
+  );
+}
+
 type KindRenderer<K extends DisplayEvent["kind"]> = (
   event: EventOf<K>,
   key: number,
@@ -594,6 +612,7 @@ const RENDERERS: RendererRegistry = {
   result: renderResult,
   task_started: renderTaskStarted,
   rate_limit: renderRateLimit,
+  tool_progress: renderToolProgress,
   notification: renderNotification,
 };
 

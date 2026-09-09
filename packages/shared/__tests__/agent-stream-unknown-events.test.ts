@@ -4,6 +4,7 @@ import {
   classifyAgentStreamLine,
   createAgentStreamParseContext,
   parseAgentProviderStreamLineObserved,
+  parseAgentStreamLine,
   parseAgentStreamLineObserved,
   getUnknownEventCounters,
   resetUnknownEventCounters,
@@ -146,7 +147,7 @@ describe("agent-stream unknown-event observability", () => {
       expect(logged).toHaveLength(0);
     });
 
-    it("classifies a tool_progress heartbeat as recognized, and yields no provider fields (#1083)", () => {
+    it("parses a tool_progress heartbeat into a display event, and never as drift (#1083/#1085)", () => {
       // The exact wire shape captured from a real session — 483 of these landed in one day and
       // every one was counted as wire-format drift. Written out in full so the next CLI change
       // to this event fails HERE rather than as log volume nobody reads.
@@ -165,9 +166,33 @@ describe("agent-stream unknown-event observability", () => {
       expect(c.validJson).toBe(true);
       expect(c.recognized).toBe(true);
 
-      // Recognized but carrying nothing a consumer reads: the provider-facing parse must still
-      // return undefined, so recognizing it changed no downstream behaviour.
+      // #1083 recognized it; #1085 CONSUMES it as a display event — the only place on the
+      // parsed stream where "this call is still working" is visible.
+      expect(parseAgentStreamLine("claude", line)?.displayEvents).toEqual([
+        { kind: "tool_progress", toolName: "PowerShell", elapsedSeconds: 29, toolUseId: "toolu_01UXJwovvqZonjCi6trN36Ba-heartbeat-0" },
+      ]);
+
+      // Display ONLY. The PROVIDER path still yields nothing, so consuming the heartbeat did
+      // not hand the exit classifier, the stats writer or the liveness detector a new field to
+      // read — #1085 scopes (a)/(c) remain separate, behaviour-changing decisions.
       expect(parseAgentProviderStreamLineObserved("claude", line)).toBeUndefined();
+      expect(getUnknownEventCounters().total).toBe(0);
+      expect(logged).toHaveLength(0);
+    });
+
+    it("a MALFORMED heartbeat stays recognized-and-empty rather than rendering a 0s call (#1085)", () => {
+      // `numberValue` coerces an absent field to 0, so the naive read would emit
+      // "PowerShell — running 0s" for a heartbeat whose elapsed never arrived. It must fall
+      // through to #1083's recognized-but-fieldless path instead — still not drift.
+      for (const payload of [
+        { type: "tool_progress", tool_use_id: "toolu_x", tool_name: "PowerShell" },
+        { type: "tool_progress", tool_use_id: "toolu_x", elapsed_time_seconds: 29 },
+        { type: "tool_progress", tool_use_id: "toolu_x", tool_name: "PowerShell", elapsed_time_seconds: "29" },
+      ]) {
+        const line = JSON.stringify(payload);
+        expect(classifyAgentStreamLine("claude", line).recognized, line).toBe(true);
+        expect(parseAgentStreamLine("claude", line)?.displayEvents, line).toBeUndefined();
+      }
       expect(getUnknownEventCounters().total).toBe(0);
       expect(logged).toHaveLength(0);
     });

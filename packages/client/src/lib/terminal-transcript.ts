@@ -68,6 +68,8 @@ export function eventSearchText(event: DisplayEvent): string {
       return [event.key, event.text, event.priority].filter(Boolean).join("\n");
     case "rate_limit":
       return [event.status, event.rateLimitType, event.overageStatus, event.overageDisabledReason].filter(Boolean).join("\n");
+    case "tool_progress":
+      return `${event.toolName} running ${event.elapsedSeconds}s`;
     case "image":
       return event.mediaType;
   }
@@ -265,6 +267,7 @@ export function markerColorForEvent(event: DisplayEvent): string {
     case "task_started": return "bg-blue-500";
     case "notification": return event.key === "user" ? "bg-blue-500" : "bg-orange-500";
     case "rate_limit": return "bg-yellow-500";
+    case "tool_progress": return "bg-gray-700";
     default: return "bg-gray-600";
   }
 }
