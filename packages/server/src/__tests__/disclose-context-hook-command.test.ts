@@ -1,5 +1,8 @@
-// @gate:always-run — spawns disclose-context.mjs as a real subprocess from a fixture directory
-// tree outside this file's own import graph; a scoped test run would never see that it exercises.
+// @gate:always-run when:.claude/settings.json,.claude/hooks/**,packages/server/src/scaffold/**,packages/server/src/services/project-scaffold.ts
+// It spawns disclose-context.mjs as a real subprocess from a fixture directory tree outside
+// this file's own import graph, so a scoped run would never see what it exercises — but the
+// territory it reads is exactly the wired hook command and the scaffold that ships it, so it
+// carries a `when:` precondition (#1041) rather than ~3s on every gate that cannot narrow.
 // #1069: the disclose-context.mjs PostToolUse hook was wired as a bare relative path
 // (`node .claude/hooks/disclose-context.mjs`). Node resolves that argument against the
 // spawned process's ACTUAL OS cwd — which mirrors wherever the triggering Bash call last

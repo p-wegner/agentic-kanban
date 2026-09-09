@@ -108,7 +108,27 @@ import {
  * shrink at the next `durations.json` capture: measured ~4s wall for three cases, most of it one
  * tree walk.
  */
-const BASELINE_TOTAL_MS = 561_000;
+/*
+ * -- Fifth disclosed movement (2026-09-09, #1069) — 561,000 -> 564,000 --------------------
+ *
+ * `disclose-context-hook-command.test.ts`, the 183rd guard, at the ASSUMED 3,000 ms.
+ *
+ * The argument for the seconds: it is the standing guard for the defect #1069 fixed — the
+ * PostToolUse hook wired as a bare relative path, which Node resolves against the spawned
+ * process's actual OS cwd, so a single `cd` disabled context disclosure for the rest of a
+ * session with only a non-blocking error to show for it. The guard proves the regression and
+ * the fix by SPAWNING the wired command from a subdirectory of a fixture repo, because the
+ * string alone is what the previous review passed. A subprocess launched against a fixture tree
+ * is invisible to every import graph, so `always-run-marker-ratchet` demands the marker the
+ * moment the file lands: the choice was "declared or silently unrun", never "marker or none".
+ *
+ * It carries a `when:` territory of the wired command and the scaffold that ships it
+ * (`.claude/settings.json`, `.claude/hooks/**`, `packages/server/src/scaffold/**`,
+ * `services/project-scaffold.ts`), so an ordinary diff pays nothing for it — which, per this
+ * file's own doc, does not move THIS worst-case number. Should shrink at the next
+ * `durations.json` capture: measured ~1s wall for its four spawn cases.
+ */
+const BASELINE_TOTAL_MS = 564_000;
 
 /**
  * How far under the baseline is tolerated before it counts as stale.
