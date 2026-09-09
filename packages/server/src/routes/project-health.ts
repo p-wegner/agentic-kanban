@@ -11,7 +11,7 @@ import {
 import { getProjectHealth } from "../services/project-health.service.js";
 import { listBaseBranchHealth, getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 import { inFlightBaseBranchProbeCount } from "../services/base-branch-health.service.js";
-import { requestBaseBranchReprobe } from "../services/base-branch-health-reprobe.service.js";
+import { requestBaseBranchReprobe, describeGateBusy } from "../services/base-branch-health-reprobe.service.js";
 import { describeBaseSweep, resolveRiskPosture } from "../services/risk-posture.service.js";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
@@ -100,6 +100,9 @@ export function createProjectHealthRoute(database: Database) {
       previousOutcome: previous?.outcome ?? null,
       previousSha: previous?.sha ?? null,
       previousAt: previous?.createdAt ?? null,
+      // #1084 — "gate_running" alone gives no way to tell a legitimately busy gate from a stuck
+      // one without reading source. Naming the holder count/age settles that from the response.
+      gateBusy: !verdict.due && verdict.reason === "gate_running" ? describeGateBusy() : null,
     });
   });
 

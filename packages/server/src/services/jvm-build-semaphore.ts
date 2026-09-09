@@ -27,6 +27,8 @@ import { readTier0Capacity, deriveVerifyWorkers } from "@agentic-kanban/shared/l
 
 let active = 0;
 const waiters: Array<() => void> = [];
+/** Start time (epoch ms) of every in-flight task, insertion order — for diagnostics only. */
+const activeStartedAtMs: number[] = [];
 
 /** Ceiling on the derived semaphore width, absent an explicit env override — generous because
  *  this bounds backend-spawned BUILD invocations (gradle/verify chains), not vitest forks. */
@@ -55,6 +57,17 @@ export function buildSemaphoreActive(): number {
 }
 
 /**
+ * How long the OLDEST currently-running gated task has been running, in ms — or `null` when
+ * nothing is active (#1084). `buildGateBusy()` alone answers "is the slot held", not "since
+ * when" or "by how many", which is exactly the gap that made a stuck `gate_running` verdict
+ * indistinguishable from a legitimately busy one without reading source.
+ */
+export function buildSemaphoreOldestActiveAgeMs(nowMs: number = Date.now()): number | null {
+  if (activeStartedAtMs.length === 0) return null;
+  return Math.max(0, nowMs - Math.min(...activeStartedAtMs));
+}
+
+/**
  * Is a heavyweight verify/build/smoke task running right now (#581)?
  *
  * The monitor asks this before starting a builder: a gate at 6 workers plus a builder's own
@@ -77,10 +90,14 @@ export async function runUnderBuildSemaphore<T>(task: () => Promise<T>): Promise
     await new Promise<void>((resolve) => waiters.push(resolve));
   }
   active++;
+  const startedAtMs = Date.now();
+  activeStartedAtMs.push(startedAtMs);
   try {
     return await task();
   } finally {
     active--;
+    const idx = activeStartedAtMs.indexOf(startedAtMs);
+    if (idx !== -1) activeStartedAtMs.splice(idx, 1);
     const next = waiters.shift();
     if (next) next();
   }
