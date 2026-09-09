@@ -320,8 +320,9 @@ function handleResultEvent(obj: Record<string, unknown>, result: ParsedStreamEve
 // It is NOT true that it "carries nothing the board needs": `tool_name` +
 // `elapsed_time_seconds` are exactly the liveness evidence #887 infers indirectly from
 // silence, so a long-running tool call currently looks identical to a stalled one. Consuming
-// it is a real change with real reach and is tracked separately — do not quietly widen this
-// entry into that.
+// it is a real change with real reach (`ParsedStreamEvent` would need a heartbeat field, and
+// the liveness detector would change behaviour), so it is tracked as #1085 — do not quietly
+// widen this entry into that.
 const KNOWN_CLAUDE_EVENT_TYPES = new Set(["system", "assistant", "user", "rate_limit_event", "result", "tool_progress"]);
 
 export function parseClaudeEvent(obj: Record<string, unknown>, context: ParseContext): ParsedStreamEvent | undefined {
