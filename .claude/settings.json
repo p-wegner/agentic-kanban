@@ -68,7 +68,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/disclose-context.mjs",
+            "command": "node -e \"const fs=require('fs'),path=require('path'),{pathToFileURL}=require('url');let d=process.cwd();for(let i=0;i<64&&!fs.existsSync(path.join(d,'.claude'))&&!fs.existsSync(path.join(d,'.git'));i++){const p=path.dirname(d);if(p===d)break;d=p;}import(pathToFileURL(path.join(d,'.claude','hooks','disclose-context.mjs')).href).catch(()=>{});\"",
             "timeout": 15
           }
         ]

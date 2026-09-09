@@ -158,6 +158,30 @@ function getDiscloseContextSource(): string | null {
 }
 
 /**
+ * The disclose-context.mjs hook command (#1069).
+ *
+ * Neither a plain relative path NOR a `$CLAUDE_PROJECT_DIR`-anchored one survives both launch
+ * modes this hook runs in: `$CLAUDE_PROJECT_DIR` is empty and textually pre-expanded to a bogus
+ * path in `claude -p` sessions (#922), while a plain relative path is resolved against the
+ * *actual OS cwd of the spawned hook process* — which mirrors wherever the triggering Bash call
+ * last `cd`'d to, not the worktree root, and MODULE_NOT_FOUNDs the instant a session `cd`s
+ * anywhere (#1069; the old #922 comment claiming this "resolves against the hook's actual cwd
+ * (the worktree) in every launch mode" was never verified against a real drifted cwd).
+ *
+ * Fix: a `node -e` one-liner that needs no file-path resolution at spawn time at all (so
+ * `$CLAUDE_PROJECT_DIR` isn't needed), walks up from `process.cwd()` looking for `.claude`/
+ * `.git` (so a drifted cwd isn't fatal — same walk-up disclose-context.mjs's own
+ * `projectRoot()` does internally, just needed one level earlier, before node can even load
+ * the file), then dynamically `import()`s the real script from the resolved absolute path.
+ */
+export const DISCLOSE_CONTEXT_COMMAND =
+  "node -e \"const fs=require('fs'),path=require('path'),{pathToFileURL}=require('url');" +
+  "let d=process.cwd();" +
+  "for(let i=0;i<64&&!fs.existsSync(path.join(d,'.claude'))&&!fs.existsSync(path.join(d,'.git'));i++){" +
+  "const p=path.dirname(d);if(p===d)break;d=p;}" +
+  "import(pathToFileURL(path.join(d,'.claude','hooks','disclose-context.mjs')).href).catch(()=>{});\"";
+
+/**
  * `git-topology-cache.js` — a hard dependency of `smart-hooks-runner.js` (#392/#279).
  *
  * The runner `require`s it at TOP LEVEL to memoize `git rev-parse --show-toplevel` /
@@ -347,8 +371,15 @@ function mergeSmartHooksGuardChecks(
  * master after #922 had deliberately made it relative) gain a second, relative twin in every
  * new worktree's scaffold commit. Strip the anchor (with or without braces, with or without a
  * trailing slash) and compare the rest — matcher-scoping (#369) is unaffected.
+ *
+ * `disclose-context.mjs` has since gained a THIRD command shape (#1069, `DISCLOSE_CONTEXT_COMMAND`)
+ * that shares no textual overlap with either older form (it's a `node -e` one-liner, not
+ * `node <path>`), so anchor-stripping alone would treat an old relative or anchored entry as a
+ * different command and append a duplicate — the exact #1000 failure again, just via a new
+ * door. Any command that targets this script normalizes to one constant key, regardless of shape.
  */
 export function normalizeHookCommand(command: string): string {
+  if (command.includes("disclose-context.mjs")) return "disclose-context.mjs";
   return command.replace(/\$\{?CLAUDE_PROJECT_DIR\}?\/?/g, "").trim();
 }
 
@@ -515,7 +546,7 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
     writeBoardHookIfOutdated(smartRunnerPath, getSmartRunnerSource());
     const smartRunnerWritten = existsSync(smartRunnerPath);
 
-    // --- disclose-context.mjs (#922) ---
+    // --- disclose-context.mjs (#922, revised #1069) ---
     // Closes the progressive-disclosure gap: nested CLAUDE.md / path-scoped rules load only
     // on Read, so a Grep/shell-only builder never sees them. Wired unconditionally — it is a
     // pure PostToolUse observer with no dependency on worktrees or the stack profile.
@@ -586,18 +617,14 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
         command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/smart-hooks-runner.js Stop",
       });
     }
-    // disclose-context.mjs (#922) — deliberately a PLAIN RELATIVE path, not
-    // $CLAUDE_PROJECT_DIR: that variable is empty in `claude -p` sessions (used by review/
-    // one-shot/Pi task agents) and Claude Code pre-expands it textually before spawn, so node
-    // would look for the hook under the shell's cwd root (e.g. C:\.claude\hooks\...) and fail
-    // with a non-blocking hook error. A relative path resolves against the hook's actual cwd
-    // (the worktree) in every launch mode; the hook itself self-locates its project root via
-    // a `.claude`/`.git` walk-up rather than trusting the env var either.
+    // disclose-context.mjs (#922, revised #1069) — see DISCLOSE_CONTEXT_COMMAND's own doc
+    // comment for why neither a plain relative path nor a $CLAUDE_PROJECT_DIR-anchored one
+    // survives both launch modes this hook runs in.
     if (discloseContextWritten) {
       newEntries.push({
         event: "PostToolUse",
         matcher: "Bash|PowerShell|Grep|Glob",
-        command: "node .claude/hooks/disclose-context.mjs",
+        command: DISCLOSE_CONTEXT_COMMAND,
       });
     }
     mergeSettingsHooks(settingsPath, newEntries);
