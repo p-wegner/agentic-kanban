@@ -19,6 +19,7 @@ export type {
   AgentDisplayTaskStartedEvent,
   AgentDisplayNotificationEvent,
   AgentDisplayRateLimitEvent,
+  AgentDisplayToolProgressEvent,
   AgentDisplayRawEvent,
   AgentDisplayEvent,
   ParsedStreamEvent,

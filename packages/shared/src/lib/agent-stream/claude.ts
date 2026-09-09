@@ -298,31 +298,46 @@ function handleResultEvent(obj: Record<string, unknown>, result: ParsedStreamEve
   if (denials.some((d) => d.tool_name === "ExitPlanMode")) result.exitPlanModeDenied = true;
 }
 
+/**
+ * `tool_progress` → a display event (#1085). Emitted only when the payload actually carries
+ * the two fields that make it useful; a heartbeat missing either falls through to the
+ * recognized-but-empty path rather than rendering "undefined — NaNs".
+ */
+function handleToolProgressEvent(obj: Record<string, unknown>, result: ParsedStreamEvent): void {
+  const toolName = stringValue(obj.tool_name);
+  const elapsed = obj.elapsed_time_seconds;
+  // `numberValue` coerces a missing field to 0, which would render a heartbeat that never
+  // arrived as "0s". Check finiteness directly so an absent/garbage elapsed skips instead.
+  if (toolName === undefined || typeof elapsed !== "number" || !Number.isFinite(elapsed)) return;
+  const elapsedSeconds = elapsed;
+  const toolUseId = stringValue(obj.tool_use_id);
+  pushDisplay(result, { kind: "tool_progress", toolName, elapsedSeconds, toolUseId: toolUseId ?? "" });
+}
+
 // Top-level event types this parser understands. A known type that yields no
 // fields (e.g. a plain text-only `user` message — no tool_result blocks) is a
 // HEALTHY event, not wire-format drift: return an empty-but-defined result so
 // the unknown-event drift detector never counts it (#969). Only types outside
 // this set fall through to `undefined` and get flagged as unknown.
-// `tool_progress` (#1083) is a HEARTBEAT the CLI emits while a single tool call is still
-// running, measured on this board as 483 events in one day and the only unrecognized type in
-// the log — one parser gap, not general drift. Wire shape, taken from a captured session
-// rather than inferred:
+// `tool_progress` (#1083, consumed by #1085) is a HEARTBEAT the CLI emits while a single tool
+// call is still running, measured on this board as 483 events in one day and the only
+// unrecognized type in the log. Wire shape, taken from a captured session rather than inferred:
 //
 //   {"type":"tool_progress","tool_use_id":"toolu_…-heartbeat-0","tool_name":"PowerShell",
 //    "parent_tool_use_id":"toolu_…","elapsed_time_seconds":29,"heartbeat":true,
 //    "session_id":"…","uuid":"…"}
 //
-// It is listed here — recognized, yielding no fields — rather than parsed, because nothing
-// downstream consumes a heartbeat yet: `ParsedStreamEvent` has no field for one, and
-// `hasProviderFields({})` is false, so this changes no consumer's behaviour. What it stops is
-// the false drift signal that made a healthy CLI look like a wire-format break.
+// #1083 only RECOGNIZED it, so it stopped reading as wire-format drift. #1085 consumes it as a
+// DISPLAY event (`handleToolProgressEvent`): `tool_name` + `elapsed_time_seconds` is the only
+// evidence on the parsed stream that a long-running tool call is working rather than wedged,
+// which is what #887 otherwise has to infer from silence. It stays in this set because a
+// malformed heartbeat (no `tool_name`, no numeric elapsed) must still be RECOGNIZED-and-empty
+// rather than counted as drift.
 //
-// It is NOT true that it "carries nothing the board needs": `tool_name` +
-// `elapsed_time_seconds` are exactly the liveness evidence #887 infers indirectly from
-// silence, so a long-running tool call currently looks identical to a stalled one. Consuming
-// it is a real change with real reach (`ParsedStreamEvent` would need a heartbeat field, and
-// the liveness detector would change behaviour), so it is tracked as #1085 — do not quietly
-// widen this entry into that.
+// What is deliberately NOT done here: nothing schedules, times out, or classifies an exit from
+// a heartbeat. Feeding the liveness detector (#1085 scope (a)) or advancing a `lastActivityAt`
+// (scope (c)) changes board BEHAVIOUR around stall detection and deserves its own evidence —
+// do not quietly widen this display path into either.
 const KNOWN_CLAUDE_EVENT_TYPES = new Set(["system", "assistant", "user", "rate_limit_event", "result", "tool_progress"]);
 
 export function parseClaudeEvent(obj: Record<string, unknown>, context: ParseContext): ParsedStreamEvent | undefined {
@@ -335,6 +350,7 @@ export function parseClaudeEvent(obj: Record<string, unknown>, context: ParseCon
   if (type === "user") handleUserEvent(obj, context, result);
   if (type === "rate_limit_event") handleRateLimitEvent(obj, result);
   if (type === "result") handleResultEvent(obj, result, isSubagentMessage);
+  if (type === "tool_progress") handleToolProgressEvent(obj, result);
 
   if (hasFields(result)) return result;
   // Known-but-fieldless: recognized-but-empty (#969), unknown types: undefined.

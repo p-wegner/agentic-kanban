@@ -80,6 +80,22 @@ export interface AgentDisplayRateLimitEvent {
   isUsingOverage?: boolean;
 }
 
+/**
+ * A `tool_progress` heartbeat for a tool call that is still running (#1085).
+ *
+ * The Claude CLI emits one every ~30s for a single in-flight call, so this is the only
+ * evidence on the parsed stream that a long `Bash`/`PowerShell` call is WORKING rather than
+ * wedged — the distinction #887 otherwise has to infer from silence. It is a display event
+ * only: nothing schedules, times out or classifies an exit from it yet. Extending it into
+ * the liveness detector is a separate, behaviour-changing decision (#1085 scope (a)/(c)).
+ */
+export interface AgentDisplayToolProgressEvent {
+  kind: "tool_progress";
+  toolName: string;
+  toolUseId: string;
+  elapsedSeconds: number;
+}
+
 export interface AgentDisplayRawEvent {
   kind: "raw";
   text: string;
@@ -96,6 +112,7 @@ export type AgentDisplayEvent =
   | AgentDisplayTaskStartedEvent
   | AgentDisplayNotificationEvent
   | AgentDisplayRateLimitEvent
+  | AgentDisplayToolProgressEvent
   | AgentDisplayRawEvent;
 
 export interface ParsedStreamEvent {

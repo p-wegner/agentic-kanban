@@ -48,6 +48,13 @@ describe("eventSearchText", () => {
   it("returns the text for assistant events", () => {
     expect(eventSearchText(asst("hello world"))).toBe("hello world");
   });
+  it("indexes a tool_progress heartbeat by its tool name, so search finds a long call (#1085)", () => {
+    // The reason to index it at all: when a session looks stuck, the question is which tool is
+    // still running — searching "PowerShell" has to reach the heartbeats, not just the tool_use.
+    const hb = { kind: "tool_progress", toolName: "PowerShell", toolUseId: "toolu_x", elapsedSeconds: 29 } as DisplayEvent;
+    expect(eventSearchText(hb)).toContain("PowerShell");
+    expect(eventSearchText(hb)).toContain("running 29s");
+  });
 });
 
 describe("buildTranscriptSearchEntries", () => {
