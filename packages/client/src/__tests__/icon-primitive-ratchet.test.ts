@@ -1,4 +1,4 @@
-// @gate:always-run — walks the whole client source tree with the TS AST; imports nothing it checks.
+// @gate:always-run when:packages/client/src/** — walks the whole client source tree with the TS AST; imports nothing it checks.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

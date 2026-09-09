@@ -1,4 +1,4 @@
-// @gate:always-run — spawns the live smart-hooks-runner script outside src/; imports nothing it checks (#538).
+// @gate:always-run when:.claude/** — spawns the live smart-hooks-runner script outside src/; imports nothing it checks (#538).
 /**
  * #913 — the Stop chain reads the project's RISK POSTURE, and every spawn goes through
  * the capacity gate.

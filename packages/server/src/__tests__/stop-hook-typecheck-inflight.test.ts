@@ -1,4 +1,4 @@
-// @gate:always-run — loads and spawns the .claude/hooks runner from outside its own package,
+// @gate:always-run when:.claude/** — loads and spawns the .claude/hooks runner from outside its own package,
 // so it reaches state that no import of a changed source file leads to.
 /**
  * #759 — the compile check must not demand you fix a live agent's half-written file.
