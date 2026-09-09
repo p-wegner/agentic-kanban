@@ -9,7 +9,16 @@ import { checkProfile } from "../lib/profile.mjs";
 import { buildClientFromEnv, printResult, isDryRun } from "../lib/cli-client.mjs";
 import { defaultJql } from "../lib/pull-plan.mjs";
 import { runInboundSync } from "../lib/sync-engine.mjs";
-import { readPullState, writeJsonFile, pullStatePath } from "../lib/state.mjs";
+import {
+  readPullState,
+  writeJsonFile,
+  pullStatePath,
+  readConflictRegister,
+  conflictRegisterPath,
+  readCursor,
+  cursorPath,
+} from "../lib/state.mjs";
+import { updateRegister } from "../lib/conflict-register.mjs";
 import { JiraAuthError } from "../lib/auth.mjs";
 import { BoardClient, BoardConfigError, resolveBoardConfigFromEnv } from "../lib/board-client.mjs";
 import { createDefaultBoardFixtureFetch } from "../lib/board-fixtures.mjs";
@@ -68,6 +77,15 @@ async function main() {
 
   if (!dryRun) {
     writeJsonFile(pullStatePath(stateDir), result.nextState);
+
+    const conflicts = result.details
+      .filter((d) => d.action === "conflict")
+      .map((d) => ({ id: d.key, reason: d.reason }));
+    const nextRegister = updateRegister(readConflictRegister(stateDir), conflicts);
+    writeJsonFile(conflictRegisterPath(stateDir), nextRegister);
+
+    const cursor = readCursor(stateDir);
+    writeJsonFile(cursorPath(stateDir), { ...cursor, lastPullAt: new Date().toISOString(), jql });
   }
 
   const { nextState: _nextState, ...summary } = result;

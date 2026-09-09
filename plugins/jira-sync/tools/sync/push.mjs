@@ -11,8 +11,19 @@
 
 import { checkProfile } from "../lib/profile.mjs";
 import { buildClientFromEnv, printResult, isDryRun } from "../lib/cli-client.mjs";
-import { readOutbox, readWritebacks, writeJsonFile, outboxPath, writebacksPath } from "../lib/state.mjs";
+import {
+  readOutbox,
+  readWritebacks,
+  writeJsonFile,
+  outboxPath,
+  writebacksPath,
+  readFailureRegister,
+  failureRegisterPath,
+  readCursor,
+  cursorPath,
+} from "../lib/state.mjs";
 import { runPush } from "../lib/push-plan.mjs";
+import { updateRegister, pushFailureIdentity } from "../lib/conflict-register.mjs";
 import { JiraAuthError } from "../lib/auth.mjs";
 
 async function main() {
@@ -41,6 +52,13 @@ async function main() {
       for (const wb of writebacks) existing.keys[wb.boardIssueId] = wb.key;
       writeJsonFile(writebacksPath(stateDir), existing);
     }
+
+    const failures = failed.map((f) => ({ id: pushFailureIdentity(f), reason: f.reason }));
+    const nextRegister = updateRegister(readFailureRegister(stateDir), failures);
+    writeJsonFile(failureRegisterPath(stateDir), nextRegister);
+
+    const cursor = readCursor(stateDir);
+    writeJsonFile(cursorPath(stateDir), { ...cursor, lastPushAt: new Date().toISOString() });
   }
 
   return {

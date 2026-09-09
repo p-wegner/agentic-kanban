@@ -7,12 +7,15 @@ JQL, push status transitions and comments back.
 ## What's here
 
 ```
-kanban-plugin.json       manifest — scripts, sync.pull/push, scaffold, butler fragment
+kanban-plugin.json       manifest — scripts, loops.sync-conflicts, sync.pull/push, scaffold, butler fragment
 profile-template.md      scaffolded once per project: site URL, project key, JQL — TODO-gated
 butler-fragment.md       what the assistant should (and must not) do with this plugin
+.claude/skills/
+  sync-conflict/SKILL.md  what the sync-conflicts loop's tickets run: resolve one conflict/failure
 tools/
   bootstrap.mjs           script: validate credentials + connectivity, read-only
   plan.mjs                script: dry-run of a Jira-side-only pull diff, prints JSON
+  loop-plan.mjs           loops.sync-conflicts' plan command (#1080) — see below
   selftest.mjs            script (developer): exercises the client offline against fixtures
   sync/pull.mjs           sync.pull: map Jira issues through the field map and write board issues
   sync/push.mjs           sync.push: apply a local outbox of transitions/comments
@@ -29,12 +32,15 @@ tools/
     push-plan.mjs           the deterministic push apply/describe logic, shared by push.mjs
     transitions.mjs         resolves a target status name to a Jira transition id via the graph
     comment-marker.mjs      attribution marker so a pushed comment isn't re-imported as new
-    state.mjs               JSON state file helpers (pull state, outbox, writebacks)
+    state.mjs               JSON state file helpers (pull state, outbox, writebacks, cursor, registers)
+    conflict-register.mjs  pure round-tracking shared by the conflict/failure registers (#1080)
+    loop-plan.mjs           pure plan-building logic behind tools/loop-plan.mjs (#1080)
     profile.mjs             the same TODO-marker gate the board's scaffold uses
   fixtures/                 recorded JSON Jira responses used offline
 __tests__/                  unit tests (node:test) — auth, pagination, backoff, error normalization,
                              field mapping, sync engine (create/idempotent/update/conflict),
-                             transition resolution, comment marker, push plan, writebacks
+                             transition resolution, comment marker, push plan, writebacks,
+                             conflict/failure register round-tracking, loop plan
 ```
 
 ## Credentials
@@ -72,7 +78,43 @@ the board issue's `updatedAt` at the moment of our own last write. If the board 
 `updatedAt` has since moved — someone edited it on the board after our last sync — the issue is
 reported as `conflicted` and left alone, even though Jira also changed.
 
-Every run returns `{ created, updated, skipped, conflicted, reportedOutOfScope, details }`.
+Every run returns `{ created, updated, skipped, conflicted, reportedOutOfScope, details }`. A
+successful (non-dry-run) run also persists the outstanding `conflicted` details into
+`conflict-register.json` and stamps `cursor.json`'s `lastPullAt` — see "The sync-conflicts loop"
+below.
+
+## Outbound sync (`sync/push.mjs`)
+
+Applies queued outbox entries (`outbox.json`) one at a time — a status transition, an attributed
+comment, or creating a Jira issue for a board issue with no `external_key` yet — and reports
+`{ applied, failed, remaining }`. A successful (non-dry-run) run persists `failed` entries into
+`failure-register.json` and stamps `cursor.json`'s `lastPushAt`.
+
+## The sync-conflicts loop (#1080)
+
+The manifest's `loops.sync-conflicts` turns whatever's outstanding in the conflict/failure
+registers into board tickets, one per entry, carrying the `sync-conflict` skill. Its `plan`
+command (`tools/loop-plan.mjs`) is pure and offline — it only reads
+`${JIRA_SYNC_STATE_DIR}/cursor.json` + `conflict-register.json` + `failure-register.json`, never
+touches Jira or the board, and never throws:
+
+- **No successful pull yet** (`cursor.json` absent/`lastPullAt` null) → `{ units: [], converged:
+  false }` — blocked, not done; nothing to plan until a pull has run at least once.
+- **Nothing outstanding** → `{ units: [], converged: true }` — the loop stops advancing until
+  something goes wrong again (a manual **Advance now** always re-plans regardless).
+- **Something outstanding** → one unit per register entry, id `conflict:<jiraKey>:r<round>` or
+  `push-failed:<identity>:r<round>`. `round` comes from the register (`tools/lib/conflict-register.mjs`):
+  it stays the same while an entry is continuously outstanding (so the loop never re-tickets an
+  already-ticketed problem), and increments only when an entry is resolved and then recurs later
+  — which is what gives a genuine re-occurrence a fresh, ticketable id instead of being read as
+  "already handled".
+
+A unit's own ticket (the `sync-conflict` skill) never writes back "resolved" anywhere — closing it
+out means fixing the real disagreement and re-running `sync/pull.mjs`/`sync/push.mjs`, which
+recomputes the register from what's actually still outstanding. That is the "state carried by the
+tickets, not a private run log" property: the register is a snapshot of current reality, not an
+append-only log, and the loop's own state is otherwise exactly the tickets the board already
+tracks.
 
 ## Running it
 
