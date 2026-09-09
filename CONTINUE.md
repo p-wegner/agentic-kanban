@@ -3,6 +3,71 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-09 (late) — backlog drained; master was RED and the cause is worth knowing
+
+**The board's backlog is empty apart from #1085, a follow-up filed deliberately** (see below).
+#1083 and #1084 are Done, and master is green: `pnpm typecheck` clean across 5 packages and
+`pnpm gate:always-run` **GREEN in 4m 17s**.
+
+### Master was RED, and #1081's merge is why
+
+`pnpm typecheck` failed on master with `src/routes/plugins.ts(335,82): error TS2345`. The cause
+generalises, so it is worth stating plainly:
+
+**#1081's fix-and-merge run did its work in the worktree's WORKING TREE and never committed it.
+The merge landed the commit (`e7244f76a0`) and left the rest behind.** Four separate things were
+lost that way, all found only by running the gates on master afterwards:
+
+1. the `body.values ?? {}` type fix (master red — `7d033bb2cc`);
+2. the regenerated `openapi.yaml` (+170 lines of the new `/sync/*` routes) and the bundled
+   skill files (`a7d8301e5c`);
+3. a `DYNAMIC_ENV_READS` declaration for the manifest-driven `process.env[name]` read, and
+   `ak-` prefixes on three fixture temp dirs that were leaking outside the reaper's namespace
+   (`adf5c891cc`);
+4. the `OPS_FACTORY` baseline for the sixth `createPluginOps` (same commit).
+
+**The lesson for next time: seeing a fix in a worktree's files is NOT seeing it in the branch.**
+It was read with `sed` on the working tree at 19:38 and assumed to be part of the branch; it was
+not. Check `git -C <worktree> log -p` or `git diff master...HEAD`, never the file.
+
+Corollary worth keeping: **a merge whose gate "passed" can still leave master red**, because the
+gate ran against the branch's own tree at a moment when the fix was present but uncommitted.
+
+### Landed this pass
+
+- **#1083** — `tool_progress` is now a recognized Claude event (`98f784debd`), so 483 events/day
+  stop reading as CLI wire-format drift. It is recognized-and-ignored, NOT parsed: the wire shape
+  is a liveness heartbeat (`tool_name` + `elapsed_time_seconds`) and consuming it needs a field on
+  `ParsedStreamEvent` that does not exist. Implemented directly on master (its workspace was
+  quota-blocked until 23:34Z); the workspace was deleted and the ticket closed.
+- **#1084** — merged (`c083142ef6`) after an `update-base` rebase, because its branch predated the
+  master fix and therefore failed the gate on the SAME TS2345. Adds
+  `buildSemaphoreOldestActiveAgeMs()` and a `gateBusy` field on the reprobe response. Diagnostics
+  only — it deliberately does NOT try to "fix" the semaphore leak, which was never reproduced.
+- **#1085 filed** — consume the heartbeat as liveness. This is the disclosure channel for the
+  half of #1083 that was deliberately not done, per the CLAUDE.md rule about partial work. The
+  comment in `claude.ts` names #1085 so the cross-reference holds both ways.
+
+### Judgement calls a reviewer may want to reverse
+
+- **`OPS_FACTORY_BASELINE` 5 -> 6.** Bumping a shrink-only ratchet is exactly what that guard
+  exists to expose, so the reasoning is written at the baseline AND in the `packages/server/CLAUDE.md`
+  doc row that defines the noun. Short version: `createPluginSyncOps` is the sixth of the plugin
+  sub-service family, composed into `plugin.service.ts` like the other five; the row's literal
+  wording ("extracted from a >800-line service") would have demanded `createPluginSyncService`,
+  i.e. one `Service` among five `Ops` doing the same job in the same file. **To reverse: rename
+  the symbol and drop the baseline to 5.**
+- **`%TEMP%` still holds ~77k entries** and the test-reaper warns on every run (cap 500/run,
+  ~10.5k sweepable). #1081's three leaking fixture prefixes are fixed, but the existing pile is
+  not this session's to drain and is the #1056 hazard.
+
+### Still true from the earlier passes
+
+`wip_limit_<board>` is still **1** (deliberate throttle, not restored), `start_mode` is `monitor`,
+and **the stable board is still far behind master** — none of today's work is on the board in
+daily use until `pnpm promote` (dry-run first, `docs/two-boards.md` §8). Nothing has been pushed:
+the only remote is the shared GitLab, and pushing was left to the operator.
+
 ## 2026-09-09 (evening) — the Jira epic is DONE; board backlog is empty but for two new tickets
 
 **#1075 and all six children are Done.** Landed this pass, in order: #1079 (`a85b5da4ea`),
