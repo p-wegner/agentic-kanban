@@ -146,6 +146,43 @@ describe("agent-stream unknown-event observability", () => {
       expect(logged).toHaveLength(0);
     });
 
+    it("classifies a tool_progress heartbeat as recognized, and yields no provider fields (#1083)", () => {
+      // The exact wire shape captured from a real session — 483 of these landed in one day and
+      // every one was counted as wire-format drift. Written out in full so the next CLI change
+      // to this event fails HERE rather than as log volume nobody reads.
+      const line = JSON.stringify({
+        type: "tool_progress",
+        tool_use_id: "toolu_01UXJwovvqZonjCi6trN36Ba-heartbeat-0",
+        tool_name: "PowerShell",
+        parent_tool_use_id: "toolu_01UXJwovvqZonjCi6trN36Ba",
+        elapsed_time_seconds: 29,
+        heartbeat: true,
+        session_id: "308754d2-1209-4595-a930-18d4f635946b",
+        uuid: "aa828298-94a5-4f6a-800e-d542c6a8ec19",
+      });
+
+      const c = classifyAgentStreamLine("claude", line);
+      expect(c.validJson).toBe(true);
+      expect(c.recognized).toBe(true);
+
+      // Recognized but carrying nothing a consumer reads: the provider-facing parse must still
+      // return undefined, so recognizing it changed no downstream behaviour.
+      expect(parseAgentProviderStreamLineObserved("claude", line)).toBeUndefined();
+      expect(getUnknownEventCounters().total).toBe(0);
+      expect(logged).toHaveLength(0);
+    });
+
+    it("still flags an UNKNOWN claude event type, so #1083 did not blanket-recognize (#1083)", () => {
+      // The failure mode to guard against is over-correcting: silencing the drift detector for
+      // claude generally instead of for this one event.
+      const line = JSON.stringify({ type: "tool_progress_v2", tool_name: "Bash" });
+      const c = classifyAgentStreamLine("claude", line);
+      expect(c.validJson).toBe(true);
+      expect(c.recognized).toBe(false);
+      parseAgentProviderStreamLineObserved("claude", line);
+      expect(getUnknownEventCounters().total).toBe(1);
+    });
+
     it("classifies a system event with an unhandled subtype as recognized", () => {
       const c = classifyAgentStreamLine("claude", JSON.stringify({ type: "system", subtype: "compact_boundary" }));
       expect(c.recognized).toBe(true);

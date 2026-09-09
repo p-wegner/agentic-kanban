@@ -303,7 +303,26 @@ function handleResultEvent(obj: Record<string, unknown>, result: ParsedStreamEve
 // HEALTHY event, not wire-format drift: return an empty-but-defined result so
 // the unknown-event drift detector never counts it (#969). Only types outside
 // this set fall through to `undefined` and get flagged as unknown.
-const KNOWN_CLAUDE_EVENT_TYPES = new Set(["system", "assistant", "user", "rate_limit_event", "result"]);
+// `tool_progress` (#1083) is a HEARTBEAT the CLI emits while a single tool call is still
+// running, measured on this board as 483 events in one day and the only unrecognized type in
+// the log — one parser gap, not general drift. Wire shape, taken from a captured session
+// rather than inferred:
+//
+//   {"type":"tool_progress","tool_use_id":"toolu_…-heartbeat-0","tool_name":"PowerShell",
+//    "parent_tool_use_id":"toolu_…","elapsed_time_seconds":29,"heartbeat":true,
+//    "session_id":"…","uuid":"…"}
+//
+// It is listed here — recognized, yielding no fields — rather than parsed, because nothing
+// downstream consumes a heartbeat yet: `ParsedStreamEvent` has no field for one, and
+// `hasProviderFields({})` is false, so this changes no consumer's behaviour. What it stops is
+// the false drift signal that made a healthy CLI look like a wire-format break.
+//
+// It is NOT true that it "carries nothing the board needs": `tool_name` +
+// `elapsed_time_seconds` are exactly the liveness evidence #887 infers indirectly from
+// silence, so a long-running tool call currently looks identical to a stalled one. Consuming
+// it is a real change with real reach and is tracked separately — do not quietly widen this
+// entry into that.
+const KNOWN_CLAUDE_EVENT_TYPES = new Set(["system", "assistant", "user", "rate_limit_event", "result", "tool_progress"]);
 
 export function parseClaudeEvent(obj: Record<string, unknown>, context: ParseContext): ParsedStreamEvent | undefined {
   const result: ParsedStreamEvent = {};
