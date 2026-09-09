@@ -490,6 +490,50 @@ describe("project-scaffold", () => {
       }
     });
 
+    it("#1082: autoCommit:false leaves scaffold writes uncommitted and reports them", async () => {
+      const dir = await tmp();
+      try {
+        await gitInit(dir);
+        ensureHookScaffold(dir, { includeWorktreeGuard: false });
+        ensureVerifyGateRunner(dir);
+
+        const result = await commitProjectScaffoldArtifacts(dir, { autoCommit: false });
+
+        expect(result.committed).toBe(false);
+        expect(result.reason).toBe("disabled");
+        expect(result.paths).toContain(".claude/hooks/smart-hooks-runner.js");
+
+        const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {
+          cwd: dir,
+          encoding: "utf8",
+          windowsHide: true,
+        });
+        expect(status).not.toBe(""); // nothing staged or committed
+        const tracked = execFileSync("git", ["ls-files"], { cwd: dir, encoding: "utf8", windowsHide: true });
+        expect(tracked).not.toContain(".claude/hooks/smart-hooks-runner.js");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("#1082: default (autoCommit unset) still commits, reporting the outcome", async () => {
+      const dir = await tmp();
+      try {
+        await gitInit(dir);
+        ensureHookScaffold(dir, { includeWorktreeGuard: false });
+        ensureVerifyGateRunner(dir);
+
+        const result = await commitProjectScaffoldArtifacts(dir);
+
+        expect(result.committed).toBe(true);
+        expect(result.paths).toContain(".claude/hooks/smart-hooks-runner.js");
+        const tracked = execFileSync("git", ["ls-files"], { cwd: dir, encoding: "utf8", windowsHide: true });
+        expect(tracked).toContain(".claude/hooks/smart-hooks-runner.js");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
     it("does not clobber an existing vital-files.json", async () => {
       const dir = await tmp();
       try {

@@ -156,6 +156,13 @@ export const SETTINGS_REGISTRY = {
   codex_license_rotation: { type: "bool", default: "true" },
   claude_subscription_ring: { type: "json", default: "" },
   claude_subscription_rotation: { type: "bool", default: "true" },
+  // #1082 — registration's scaffold commit (`commitProjectScaffoldArtifacts`) silently commits
+  // board-authored writes (hooks, CLAUDE.md, and ensureBuildableFromClean's package.json /
+  // pnpm-workspace.yaml edits) to the user's repo under whatever ambient `git config user.*`
+  // the machine happens to have. ON by default (matches pre-#1082 behaviour — auto-merge relies
+  // on a clean main, #38); turning it off leaves the scaffold writes sitting uncommitted in the
+  // working tree instead, so an operator who wants to review them first can.
+  scaffold_auto_commit: { type: "bool", default: "true" },
 } as const satisfies Record<string, SettingDef>;
 
 /** Union of the registry's static setting keys. */
