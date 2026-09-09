@@ -19,8 +19,11 @@ import { FIELDS, mapJiraIssueToBoardFields, resolveBoardStatusId } from "./field
  * }} opts
  */
 export async function runInboundSync(client, boardClient, { jql, siteUrl, projectId, knownState, dryRun = false }) {
-  const boardStatuses = dryRun ? [] : await boardClient.listStatuses(projectId);
-  const boardIssuesByKey = dryRun ? new Map() : await boardClient.listExternallyTrackedIssues(projectId);
+  // dryRun only suppresses WRITES (create/update/tag calls below) — these three are
+  // reads, and skipping them would make every issue look brand-new (boardIssuesByKey
+  // empty), so a dry run could never report skip/update/conflict, only create.
+  const boardStatuses = await boardClient.listStatuses(projectId);
+  const boardIssuesByKey = await boardClient.listExternallyTrackedIssues(projectId);
   const tagCache = dryRun ? null : new Map((await boardClient.listTags()).map((t) => [t.name.toLowerCase(), t.id]));
 
   const seenKeys = new Set();
