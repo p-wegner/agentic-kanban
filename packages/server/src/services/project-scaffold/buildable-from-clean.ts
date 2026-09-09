@@ -143,6 +143,11 @@ export function ensureBuildableFromClean(repoPath: string): boolean {
   let changed = false;
   try {
     const pkgJsonPath = join(repoPath, "package.json");
+    const wsPath = join(repoPath, "pnpm-workspace.yaml");
+    const hasWorkspaceFile = existsSync(wsPath);
+    let pm: NodePm = "pnpm";
+    let approvalAllowed = false;
+
     if (existsSync(pkgJsonPath)) {
       const raw = readFileSync(pkgJsonPath, "utf8");
       let pkg: Record<string, unknown>;
@@ -153,24 +158,32 @@ export function ensureBuildableFromClean(repoPath: string): boolean {
       }
       let pkgChanged = false;
 
-      const { pm, pinnable } = detectNodePmForApproval(repoPath, pkg);
+      const detection = detectNodePmForApproval(repoPath, pkg);
+      pm = detection.pm;
+      const pinnable = detection.pinnable;
 
       // A guessed manager (bare package.json, no lockfile) is not licence to write that
       // manager's config into someone's project: registering a plain npm repo that depends on
       // neither approved dep used to leave a stray `pnpm.onlyBuiltDependencies` block behind,
       // uncommitted, which made the main checkout dirty from birth and blocked every merge
       // with `dirty_main` (#38). With no manager signal, only act on real evidence.
-      const approvalAllowed = pinnable || needsNativeBuildApproval(repoPath, pkg);
+      approvalAllowed = pinnable || needsNativeBuildApproval(repoPath, pkg);
 
       // 1. Approve native build scripts under the strict managers that block them by default.
       if (!approvalAllowed) {
         // Nothing to approve, and no manager to pin — leave the project's package.json alone.
       } else if (pm === "pnpm") {
-        // pnpm: `pnpm.onlyBuiltDependencies` is the canonical approval mechanism.
-        const pnpmCfg = (pkg.pnpm ?? {}) as Record<string, unknown>;
-        if (mergeApprovedDeps(pnpmCfg, "onlyBuiltDependencies")) {
-          pkg.pnpm = pnpmCfg;
-          pkgChanged = true;
+        // pnpm 10 no longer reads package.json's legacy `pnpm` field at all — it warns on
+        // every command instead (#1040). When the repo already has a pnpm-workspace.yaml,
+        // that is where the approval belongs; it is written there below, and package.json
+        // is left alone. Only a repo with NO workspace file (a real pnpm project has no
+        // other place for it) still gets the legacy field.
+        if (!hasWorkspaceFile) {
+          const pnpmCfg = (pkg.pnpm ?? {}) as Record<string, unknown>;
+          if (mergeApprovedDeps(pnpmCfg, "onlyBuiltDependencies")) {
+            pkg.pnpm = pnpmCfg;
+            pkgChanged = true;
+          }
         }
       } else if (pm === "bun") {
         // bun: `trustedDependencies` whitelists packages allowed to run lifecycle scripts.
@@ -193,26 +206,31 @@ export function ensureBuildableFromClean(repoPath: string): boolean {
         recordScaffoldWrite(repoPath, "package.json");
         changed = true;
       }
+    } else if (hasWorkspaceFile) {
+      // No package.json (unusual, but the workspace file alone is still a pnpm signal) —
+      // detect straight off the workspace file's presence, same as detectNodePmForApproval.
+      approvalAllowed = true;
     }
 
-    // Repair a broken pnpm-workspace.yaml: a placeholder OR a bogus `allowBuilds:` block
-    // (not a real pnpm key — the old repair left `allowBuilds: esbuild: true`, a silent no-op).
-    // Replace it with a VALID `onlyBuiltDependencies:` list.
-    const wsPath = join(repoPath, "pnpm-workspace.yaml");
-    if (existsSync(wsPath)) {
+    // pnpm-workspace.yaml: repair a broken placeholder / bogus `allowBuilds:` block (not a
+    // real pnpm key — the old repair left `allowBuilds: esbuild: true`, a silent no-op), and
+    // — when pnpm approval is warranted and this repo already has a workspace file — ensure
+    // `onlyBuiltDependencies` is declared there. Never written if it already lists every
+    // approved dep (#1070: a fully-declared block must produce zero writes, or every
+    // registration silently re-commits a no-op diff).
+    if (hasWorkspaceFile) {
       const ws = readFileSync(wsPath, "utf8");
-      if (ws.includes(PNPM_PLACEHOLDER_MARKER) || /^\s*allowBuilds\s*:/m.test(ws)) {
-        // Drop the bogus `allowBuilds:` key and its indented children.
-        let repaired = ws.replace(/^[ \t]*allowBuilds[ \t]*:[ \t]*\r?\n(?:[ \t]+\S.*\r?\n?)*/m, "");
-        if (!/^\s*onlyBuiltDependencies\s*:/m.test(repaired)) {
-          const list = PNPM_BUILD_APPROVED_DEPS.map((d) => `  - ${d}`).join("\n");
-          repaired = repaired.replace(/\s*$/, "\n") + `onlyBuiltDependencies:\n${list}\n`;
-        }
-        if (repaired !== ws) {
-          writeFileSync(wsPath, repaired, "utf8");
-          recordScaffoldWrite(repoPath, "pnpm-workspace.yaml");
-          changed = true;
-        }
+      let repaired = ws;
+      if (repaired.includes(PNPM_PLACEHOLDER_MARKER) || /^\s*allowBuilds\s*:/m.test(repaired)) {
+        repaired = repaired.replace(/^[ \t]*allowBuilds[ \t]*:[ \t]*\r?\n(?:[ \t]+\S.*\r?\n?)*/m, "");
+      }
+      if (pm === "pnpm" && approvalAllowed) {
+        repaired = mergeApprovedDepsIntoWorkspaceYaml(repaired);
+      }
+      if (repaired !== ws) {
+        writeFileSync(wsPath, repaired, "utf8");
+        recordScaffoldWrite(repoPath, "pnpm-workspace.yaml");
+        changed = true;
       }
     }
   } catch {
@@ -236,6 +254,48 @@ function mergeApprovedDeps(obj: Record<string, unknown>, key: string): boolean {
   if (merged.length === existing.length && existing.every((d, i) => d === merged[i])) return false;
   obj[key] = merged;
   return true;
+}
+
+/** Quote a YAML list item only when it needs it (e.g. a scoped package name starting with `@`,
+ *  which is a reserved indicator character as the first character of a plain scalar). */
+function yamlDepItem(dep: string): string {
+  return /^[A-Za-z0-9_./-]+$/.test(dep) ? dep : JSON.stringify(dep);
+}
+
+/**
+ * Merge `PNPM_BUILD_APPROVED_DEPS` into pnpm-workspace.yaml's `onlyBuiltDependencies:` list,
+ * preserving whatever the project already declared there (the workspace-file counterpart of
+ * {@link mergeApprovedDeps}). Returns the text UNCHANGED if every approved dep is already
+ * present — so a repo that already moved the approval here produces no write at all (#1070).
+ */
+function mergeApprovedDepsIntoWorkspaceYaml(ws: string): string {
+  const blockRe = /^onlyBuiltDependencies:[ \t]*\r?\n((?:[ \t]+-[ \t]*.*\r?\n?)*)/m;
+  const match = ws.match(blockRe);
+  // The key may already exist in a form this function doesn't parse (e.g. flow-style
+  // `onlyBuiltDependencies: [esbuild, "@swc/core"]`). Appending a second top-level key in
+  // that case would produce a DUPLICATE YAML key, which most parsers (incl. the one pnpm
+  // uses) reject outright — turning a working config into one that fails to parse at all.
+  // Leave the file untouched rather than risk that; block-style is what this scaffold itself
+  // writes, so every file it ever produced stays mergeable.
+  if (!match && /^[ \t]*onlyBuiltDependencies[ \t]*:/m.test(ws)) {
+    return ws;
+  }
+  const existing = match
+    ? Array.from(match[1].matchAll(/-\s*["']?([^"'\r\n]+?)["']?\s*$/gm)).map((m) => m[1].trim())
+    : [];
+  const merged = [...existing];
+  for (const dep of PNPM_BUILD_APPROVED_DEPS) {
+    if (!merged.includes(dep)) merged.push(dep);
+  }
+  if (match && merged.length === existing.length && existing.every((d, i) => d === merged[i])) {
+    return ws;
+  }
+  const list = merged.map((d) => `  - ${yamlDepItem(d)}`).join("\n");
+  const block = `onlyBuiltDependencies:\n${list}\n`;
+  if (match && match.index !== undefined) {
+    return ws.slice(0, match.index) + block + ws.slice(match.index + match[0].length);
+  }
+  return ws.replace(/\s*$/, "\n") + block;
 }
 
 /**
