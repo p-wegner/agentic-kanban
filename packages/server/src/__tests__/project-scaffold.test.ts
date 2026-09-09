@@ -785,6 +785,67 @@ describe("project-scaffold", () => {
         await rm(dir, { recursive: true, force: true });
       }
     });
+
+    it("pnpm-workspace.yaml already declares the approval: package.json's legacy pnpm field is left untouched (#1070)", async () => {
+      const dir = await tmp();
+      try {
+        // packageManager already pinned too, so this is a true "already fully scaffolded"
+        // repo (matching this project's own real root package.json) — a re-registration
+        // must be a complete no-op, not just skip the pnpm field.
+        await writeFile(
+          join(dir, "package.json"),
+          JSON.stringify({ name: "app", packageManager: "pnpm@10.12.1" }, null, 2) + "\n"
+        );
+        await writeFile(
+          join(dir, "pnpm-workspace.yaml"),
+          'packages:\n  - "packages/*"\n\nonlyBuiltDependencies:\n  - esbuild\n  - "@swc/core"\n'
+        );
+        const changed = ensureBuildableFromClean(dir);
+        // Nothing needed adding anywhere -> no-op, so registration never produces a commit.
+        expect(changed).toBe(false);
+        const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+        expect(pkg.pnpm).toBeUndefined();
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("pnpm-workspace.yaml exists but has no approval yet: the approval is written THERE, not into package.json (#1070)", async () => {
+      const dir = await tmp();
+      try {
+        await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app" }, null, 2) + "\n");
+        await writeFile(join(dir, "pnpm-workspace.yaml"), 'packages:\n  - "packages/*"\n');
+        const changed = ensureBuildableFromClean(dir);
+        expect(changed).toBe(true);
+        const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+        expect(pkg.pnpm).toBeUndefined(); // never the legacy package.json field
+        const ws = await readFile(join(dir, "pnpm-workspace.yaml"), "utf8");
+        expect(ws).toMatch(/onlyBuiltDependencies:/);
+        expect(ws).toMatch(/-\s*esbuild/);
+        expect(ws).toContain('packages:'); // unrelated content preserved
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("onlyBuiltDependencies already declared in FLOW style: never append a second key (#1070)", async () => {
+      const dir = await tmp();
+      try {
+        await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app" }, null, 2) + "\n");
+        // Valid YAML the block-style parser doesn't recognize as a list — must not be
+        // treated as "no existing declaration", or a duplicate top-level key gets appended
+        // and the file becomes invalid YAML.
+        await writeFile(
+          join(dir, "pnpm-workspace.yaml"),
+          'packages:\n  - "packages/*"\nonlyBuiltDependencies: [esbuild, "@swc/core"]\n'
+        );
+        ensureBuildableFromClean(dir);
+        const ws = await readFile(join(dir, "pnpm-workspace.yaml"), "utf8");
+        expect(ws.match(/onlyBuiltDependencies/g)?.length).toBe(1);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe("registration must not leave the main checkout dirty (#38)", () => {
