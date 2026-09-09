@@ -57,6 +57,7 @@ export {
 // never duplicated, or a write recorded by one side is invisible to the other (#38 dirty-main).
 export { recordScaffoldArtifactWrite } from "./project-scaffold/scaffold-writes.js";
 export { commitProjectScaffoldArtifacts } from "./project-scaffold/commit.js";
+export type { ScaffoldCommitResult } from "./project-scaffold/commit.js";
 
 // ---------------------------------------------------------------------------
 // Hook scaffold
