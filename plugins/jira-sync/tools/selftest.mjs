@@ -8,6 +8,7 @@
 import { JiraClient } from "./lib/jira-client.mjs";
 import { createDefaultFixtureFetch, createScriptedFetch, loadFixture } from "./lib/fixtures.mjs";
 import { buildAuthHeader } from "./lib/auth.mjs";
+import { runPush } from "./lib/push-plan.mjs";
 
 const checks = [];
 
@@ -103,6 +104,34 @@ check("error normalization: 429/5xx are retryable, 4xx are not", async () => {
       if (err.retryable !== expectRetryable) throw new Error(`${path}: expected retryable=${expectRetryable}, got ${err.retryable}`);
     }
   }
+});
+
+check("push: transitions via the graph, posts an attributed comment, creates an issue and writes back its key", async () => {
+  const client = new JiraClient({ siteUrl: "https://fixture.atlassian.net", apiToken: "x", fetchImpl: createDefaultFixtureFetch() });
+  const { applied, failed, writebacks } = await runPush(client, [
+    { kind: "transition", key: "ENG-1", targetStatus: "Done" },
+    { kind: "comment", key: "ENG-1", comment: { body: "done via self-test", boardCommentId: "c1" } },
+    { kind: "comment", key: "ENG-1", comment: { body: "echo", boardCommentId: "c2", origin: "jira" } },
+    { kind: "create", boardIssueId: "board-1", fields: { summary: "New from self-test" } },
+  ]);
+  if (failed.length !== 0) throw new Error(`expected no failures, got ${JSON.stringify(failed)}`);
+  if (applied.find((a) => a.kind === "comment" && a.skipped !== "echo-suppressed" && a.comment?.origin === "jira")) {
+    throw new Error("a jira-origin comment must never be re-posted");
+  }
+  if (writebacks.length !== 1 || writebacks[0].key !== "ENG-42") throw new Error(`unexpected writebacks: ${JSON.stringify(writebacks)}`);
+});
+
+check("push: --dry-run makes no writes and still reports the intended transition", async () => {
+  const calls = [];
+  const fetchImpl = createScriptedFetch([
+    { match: (url, init) => (init?.method ?? "GET") === "GET" && /\/transitions$/.test(url), respond: () => ({ status: 200, body: loadFixture("transitions") }) },
+    { match: (url, init) => init?.method === "POST", respond: () => { calls.push(1); throw new Error("dry-run must not write"); } },
+  ]);
+  const client = new JiraClient({ siteUrl: "https://fixture.atlassian.net", apiToken: "x", fetchImpl });
+  const { applied, failed } = await runPush(client, [{ kind: "transition", key: "ENG-1", targetStatus: "Done" }], { dryRun: true });
+  if (calls.length !== 0) throw new Error("dry-run made a write call");
+  if (failed.length !== 0) throw new Error(`expected no failures, got ${JSON.stringify(failed)}`);
+  if (!applied[0]?.wouldApply) throw new Error("expected the dry-run entry to report wouldApply");
 });
 
 async function main() {
