@@ -70,12 +70,23 @@ export class BoardClient {
     return this.request(`/api/projects/${encodeURIComponent(projectId)}/statuses`);
   }
 
-  /** Every issue in the project carrying a non-null `externalKey`, keyed by that key. */
+  /**
+   * Every issue in the project carrying a non-null `externalKey`, keyed by that key.
+   * `GET /api/issues?limit=` caps a single page at 500 (server's MAX_ISSUE_PAGE_SIZE) —
+   * paginate via `offset` rather than trusting one page, or a project past 500 issues
+   * would silently miss externalKey lookups and re-create duplicates every pull.
+   */
   async listExternallyTrackedIssues(projectId) {
-    const issues = await this.request(`/api/issues?projectId=${encodeURIComponent(projectId)}&limit=500`);
+    const pageSize = 500;
     const byExternalKey = new Map();
-    for (const issue of issues) {
-      if (issue.externalKey) byExternalKey.set(issue.externalKey, issue);
+    for (let offset = 0; ; offset += pageSize) {
+      const page = await this.request(
+        `/api/issues?projectId=${encodeURIComponent(projectId)}&limit=${pageSize}&offset=${offset}`,
+      );
+      for (const issue of page) {
+        if (issue.externalKey) byExternalKey.set(issue.externalKey, issue);
+      }
+      if (page.length < pageSize) break;
     }
     return byExternalKey;
   }

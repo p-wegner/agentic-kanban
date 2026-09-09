@@ -104,3 +104,26 @@ test("listExternallyTrackedIssues: keys the map by externalKey and drops issues 
   const byKey = await client.listExternallyTrackedIssues("p1");
   assert.deepEqual([...byKey.keys()], ["ENG-1"]);
 });
+
+test("listExternallyTrackedIssues: pages past the 500-item server cap via offset", async () => {
+  const pageSize = 500;
+  const firstPage = Array.from({ length: pageSize }, (_, i) => ({ id: `i${i}`, externalKey: `ENG-${i}` }));
+  const secondPage = [{ id: "i500", externalKey: "ENG-500" }];
+  const client = new BoardClient({
+    boardUrl: "https://board.local",
+    fetchImpl: fakeFetch([
+      {
+        match: (url) => url.includes("offset=0"),
+        respond: () => ({ status: 200, body: firstPage }),
+      },
+      {
+        match: (url) => url.includes(`offset=${pageSize}`),
+        respond: () => ({ status: 200, body: secondPage }),
+      },
+    ]),
+  });
+  const byKey = await client.listExternallyTrackedIssues("p1");
+  assert.equal(byKey.size, pageSize + 1);
+  assert.ok(byKey.has("ENG-0"));
+  assert.ok(byKey.has("ENG-500"), "the 501st tracked issue must not be dropped by the page cap");
+});
