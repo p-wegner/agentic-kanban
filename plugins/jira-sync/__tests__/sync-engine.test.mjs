@@ -179,6 +179,27 @@ test("conflict: a board issue edited locally since the last sync is reported, no
   assert.equal(second.nextState.issues["ENG-1"].updated, "2026-09-01T00:00:00.000Z");
 });
 
+test("conflict: a board issue already carrying externalKey with no local `known` record is reported, not overwritten", async () => {
+  const board = fakeBoardClient();
+
+  // Simulate a board issue that already carries the Jira key (e.g. state.json was
+  // lost/reset, or the key was set by a different path) — no prior `known` entry.
+  const boardIssue = await board.createIssue({ projectId: "proj-1", title: "Pre-existing board issue", externalKey: "ENG-1" });
+
+  const jira = [jiraIssue("ENG-1", { summary: "Set up CI (from Jira)", updated: "2026-09-05T00:00:00.000Z" })];
+  const result = await runInboundSync(fakeJiraClient(jira), board, {
+    jql: "project = ENG",
+    projectId: "proj-1",
+    knownState: { issues: {} },
+  });
+
+  assert.equal(result.created, 0);
+  assert.equal(result.updated, 0);
+  assert.equal(result.conflicted, 1);
+  assert.equal(result.details[0].action, "conflict");
+  assert.equal(board.state.issues.find((i) => i.id === boardIssue.id).title, "Pre-existing board issue", "must not be overwritten with no baseline to prove it's safe");
+});
+
 test("out-of-scope: a previously-synced key no longer returned by the JQL is reported, not deleted", async () => {
   const board = fakeBoardClient();
   const v1 = [

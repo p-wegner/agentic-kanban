@@ -72,7 +72,10 @@ export async function runInboundSync(client, boardClient, { jql, siteUrl, projec
 
     // A board issue that moved since OUR last recorded write means a human (or
     // something else) edited it locally after the last sync — don't clobber that.
-    const locallyEdited = known?.boardUpdatedAt != null && boardIssue.updatedAt !== known.boardUpdatedAt;
+    // No `known` entry at all (lost/reset state file, or externalKey set by another
+    // path e.g. outbound sync) means we have no baseline to prove it's safe to
+    // overwrite either, so that also counts as locally edited rather than a blind write.
+    const locallyEdited = known == null || boardIssue.updatedAt !== known.boardUpdatedAt;
     if (locallyEdited) {
       conflicted++;
       details.push({ key: jiraIssue.key, action: "conflict", reason: "board issue changed locally since the last sync; not overwritten" });
