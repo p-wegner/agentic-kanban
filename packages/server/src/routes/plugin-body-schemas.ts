@@ -100,3 +100,24 @@ export const pluginScaffoldSaveBody = z.object({
   projectId,
   content: stringOnly("content must be a string"),
 }).passthrough();
+
+/**
+ * `POST /api/plugins/:id/sync/config` (#1081). `values` is a flat string-map, one entry per
+ * manifest `sync.config[].key`; the service (not this schema) rejects an undeclared key or a
+ * non-string value, and MERGES `values` onto the project's existing config rather than
+ * overwriting it — so a partial update of only some fields is both accepted and safe.
+ */
+export const pluginSyncConfigBody = z.object({
+  projectId,
+  values: z.record(z.string(), z.unknown()).default({}),
+}).passthrough();
+
+/** `POST /api/plugins/:id/sync/trigger` (#1081). */
+export const pluginSyncTriggerBody = z.object({
+  projectId,
+  direction: z.enum(["pull", "push"], {
+    required_error: '"direction" must be "pull" or "push"',
+    invalid_type_error: '"direction" must be "pull" or "push"',
+  }),
+  dryRun: z.boolean().optional(),
+}).passthrough();

@@ -973,9 +973,15 @@ other's row. Namespace it.
   the agent exits cleanly from is Done with nobody looking; the plugin's own convergence check and
   the board's merge preflight are the only remaining gates. That is the right trade for unattended
   loops and the wrong one if you want a human to see each round.
-- **`sync` is a declared contract with no board-side runner yet (#1076).** The manifest can name a
-  provider, its `pull`/`push` commands, its config schema and its secret-reference names, and the
-  parser validates all of it — but nothing yet resolves a `sync.secrets[]` name against a
-  credential store, collects `sync.config[]` through a form, or runs `pull`/`push` on a schedule or
-  from the UI. Declaring `sync` today documents the capability; wiring board execution to it is
-  separate, later work.
+- **`sync` has a board-side runner now (#1081), but only on demand — nothing schedules it yet.**
+  `GET/POST /api/plugins/:id/sync/config` collects `sync.config[]` through a per-project form
+  (merged onto the existing values, never overwritten); `POST /api/plugins/:id/sync/validate`
+  checks it and reports missing config keys / missing secret NAMES (never a value);
+  `POST /api/plugins/:id/sync/trigger` runs `pull`/`push` (or a `dryRun`), refusing to run at all
+  when validation fails; `GET /api/plugins/:id/sync/status` is the last-run record (time,
+  direction, outcome, and — best-effort, parsed from the command's own stdout — counts, per-issue
+  links and conflicts) a sync-status plugin view reads. Matching `pnpm cli -- plugin-sync ...`
+  subcommands exist. A secret NAME resolves against the board's own process env, nothing more —
+  there is still no dedicated credential store, and nothing runs `pull`/`push` on a schedule or
+  from a button in the main board UI; only the REST/CLI surface above and whatever a plugin's own
+  view chooses to call.
