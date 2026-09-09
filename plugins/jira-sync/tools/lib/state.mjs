@@ -32,6 +32,31 @@ export function writebacksPath(stateDir) {
   return join(stateDir, "writebacks.json");
 }
 
+/**
+ * Last-successful-cursor/watermark for pull and push, so the loop planner can tell
+ * "sync has never run" (no file / missing field) from "sync ran and nothing is
+ * outstanding" without re-deriving it from pull-state/outbox contents. Written only
+ * on a SUCCESSFUL (non-dry-run) run of each half; a failed run leaves the previous
+ * watermark in place.
+ */
+export function cursorPath(stateDir) {
+  return join(stateDir, "cursor.json");
+}
+
+/** Outstanding inbound-pull conflicts (#1078's `conflicted` details), keyed by Jira key,
+ * carried across runs so the loop planner can tell a still-open conflict from a freshly
+ * re-opened one (see conflict-register.mjs). This is a REGISTER of what's outstanding,
+ * not a run log — each pull run replaces an entry's state, it never appends history. */
+export function conflictRegisterPath(stateDir) {
+  return join(stateDir, "conflict-register.json");
+}
+
+/** Outstanding push failures (#1079's `failed` entries), same shape/purpose as the
+ * conflict register but keyed by push-entry identity (see conflict-register.mjs). */
+export function failureRegisterPath(stateDir) {
+  return join(stateDir, "failure-register.json");
+}
+
 export function readPullState(stateDir) {
   return readJsonFile(pullStatePath(stateDir), { issues: {} });
 }
@@ -42,4 +67,16 @@ export function readOutbox(stateDir) {
 
 export function readWritebacks(stateDir) {
   return readJsonFile(writebacksPath(stateDir), { keys: {} });
+}
+
+export function readCursor(stateDir) {
+  return readJsonFile(cursorPath(stateDir), { lastPullAt: null, lastPushAt: null });
+}
+
+export function readConflictRegister(stateDir) {
+  return readJsonFile(conflictRegisterPath(stateDir), { entries: {} });
+}
+
+export function readFailureRegister(stateDir) {
+  return readJsonFile(failureRegisterPath(stateDir), { entries: {} });
 }
