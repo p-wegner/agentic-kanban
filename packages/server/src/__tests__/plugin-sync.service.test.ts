@@ -26,7 +26,7 @@ function makeTempDir(prefix: string): string {
 }
 
 function makeProjectRepo(): string {
-  const parent = makeTempDir("plugin-sync-test-parent-");
+  const parent = makeTempDir("ak-plugin-sync-test-parent-");
   const repo = join(parent, "product-repo");
   mkdirSync(repo, { recursive: true });
   gitExecSync(["init"], { cwd: repo });
@@ -57,7 +57,7 @@ const SYNC_MANIFEST_FAILING_PUSH = {
 };
 
 function makeSyncPluginDir(manifest: Record<string, unknown> = SYNC_MANIFEST): string {
-  const dir = makeTempDir("plugin-sync-test-plugin-");
+  const dir = makeTempDir("ak-plugin-sync-test-plugin-");
   writeFileSync(join(dir, "kanban-plugin.json"), JSON.stringify(manifest, null, 2));
   // Prints a run summary the service should parse: counts + one linked issue + no conflicts.
   writeFileSync(
@@ -161,7 +161,7 @@ describe("plugin sync (#1076/#1081)", () => {
 
   it("getSyncConfig/setSyncConfig/validateSync throw when the plugin declares no sync capability", async () => {
     const noSyncManifest = { id: "no-sync-plugin", name: "No Sync", version: "0.1.0" };
-    const dir = makeTempDir("plugin-sync-test-nosync-");
+    const dir = makeTempDir("ak-plugin-sync-test-nosync-");
     writeFileSync(join(dir, "kanban-plugin.json"), JSON.stringify(noSyncManifest));
     const plugin = await service.installPlugin({ source: dir });
     const projectId = await insertProject(db, makeProjectRepo());
