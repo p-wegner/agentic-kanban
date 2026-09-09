@@ -588,7 +588,7 @@ function renderToolProgress(event: EventOf<"tool_progress">, key: number, ctx: R
   const inSubagent = isInsideSubagent && !isSubagentStart;
   return (
     <div key={key} data-event-idx={key} className={`mb-0.5 text-[11px] ${inSubagent ? "ml-6" : "ml-1"}`}>
-      <span className="text-gray-500">{highlightText(event.toolName, searchQuery)} — running {event.elapsedSeconds}s</span>
+      <span className="text-gray-500"><span className="animate-pulse">⏱</span> Still running: {highlightText(`${event.toolName} — ${event.elapsedSeconds}s`, searchQuery)}</span>
     </div>
   );
 }
