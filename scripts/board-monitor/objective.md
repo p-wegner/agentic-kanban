@@ -55,8 +55,8 @@ The host's measured headroom is a brake on EVERY start, above every target in th
 - If `capacity.hold` is **true**: start ZERO new builders and do not relaunch idle ones; let running sessions finish and keep at most ONE merge-gate run in flight. A gate run on a saturated box dies on fork-worker timeouts, so starting more work makes every lane lose.
 - Otherwise cap this cycle's new starts at `capacity.maxNewStarts` (never above MAX_NEW_STARTS_PER_CYCLE). `null` means the cheap tier could not measure headroom — the target applies unchanged.
 - Whatever you decide, write `capacity.reason` into this cycle's state.md line so the hold is auditable by its measured numbers, not by a token.
-- **CAPACITY_HOLD = false** - last measured when this block was generated (tier 0: 7.0GB free). Stale by definition: the live read above is authoritative.
-- **FREE_GB = 7.0** - MAX_NEW_STARTS this cycle would be 1.
+- **CAPACITY_HOLD = false** - last measured when this block was generated (tier 0: 6.9GB free). Stale by definition: the live read above is authoritative.
+- **FREE_GB = 6.9** - MAX_NEW_STARTS this cycle would be 1.
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
 ## FOCUS POLICY (operator directive 2026-09-06 - authoritative)
