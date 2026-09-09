@@ -1,8 +1,9 @@
-// The deterministic core of a pull: diff what Jira reports against the last
-// known state, with no side effects. Shared by `tools/plan.mjs` (always a dry
-// run) and `tools/sync/pull.mjs` (which also applies the plan unless --dry-run).
+// The deterministic core of a JIRA-SIDE-ONLY pull preview: diff what Jira reports
+// against the last known state, with no side effects and no board involved. Used by
+// `tools/plan.mjs` for its dry run. The real pull — which also maps fields and writes
+// board issues — is `sync-engine.mjs`'s `runInboundSync`, used by `tools/sync/pull.mjs`.
 
-const FIELDS = ["summary", "status", "updated"];
+import { FIELDS } from "./field-map.mjs";
 
 export function defaultJql({ projectKey, jql }) {
   if (jql) return jql;
