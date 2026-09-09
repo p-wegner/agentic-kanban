@@ -169,6 +169,22 @@ describe("drive dashboard service", () => {
     expect(dash.stalls).toEqual([]);
   });
 
+  // #1074: a right-sized epic correctly gets zero `parent_of` children (the #116 atomic
+  // floor refused to split it). Without a fallback the dashboard reads as a permanent 0/0
+  // dead end; it should instead scope the meta issue itself.
+  it("scopes the meta issue itself when it has no children", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusIds } = await seedProject(db);
+    const epic = await insertIssue(db, { projectId, statusId: statusIds["In Progress"], title: "Right-sized epic", issueNumber: 300 });
+    const driveId = await createDriveRecord(db, projectId, epic);
+
+    const dash = await buildDriveDashboard(db, projectId, driveId);
+    expect(dash.progress.total).toBe(1);
+    expect(dash.progress.done).toBe(0);
+    expect(dash.progress.inProgress).toBe(1);
+    expect(dash.tiers.flatMap((t) => t.issues).map((i) => i.issueNumber)).toEqual([300]);
+  });
+
   it("rejects a drive from another project", async () => {
     const { db } = createTestDb();
     const { projectId } = await seedProject(db);
