@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   projectPref,
   isProjectScopedDynamicKey,
+  isPluginSyncConfigPreferenceKey,
+  isPluginSyncStatusPreferenceKey,
   PROJECT_SCOPED_KEY_PREFIXES,
 } from "../src/lib/dynamic-preference-keys.js";
+import { pluginSyncConfigPreferenceKey, pluginSyncStatusPreferenceKey } from "../src/lib/plugin-keys.js";
 
 const PROJECT_ID = "d1c5d9c1-4897-4e1b-acc3-2aa96de04117";
 
@@ -57,5 +60,27 @@ describe("live per-project settings are registered (#496)", () => {
     // settings route/MCP and carry it through config export. See the note in the source.
     expect(isProjectScopedDynamicKey(`butler_model_${PROJECT_ID}`)).toBe(false);
     expect(isProjectScopedDynamicKey(`project_completed_announced_${PROJECT_ID}`)).toBe(false);
+  });
+});
+
+describe("plugin sync preference keys (#1081)", () => {
+  it("isPluginSyncConfigPreferenceKey matches the builder's own output and nothing else", () => {
+    const key = pluginSyncConfigPreferenceKey("jira-sync", PROJECT_ID);
+    expect(key).toBe(`plugin_sync_config_jira-sync_${PROJECT_ID}`);
+    expect(isPluginSyncConfigPreferenceKey(key)).toBe(true);
+    expect(isPluginSyncConfigPreferenceKey(`plugin_sync_status_jira-sync_${PROJECT_ID}`)).toBe(false);
+    expect(isPluginSyncConfigPreferenceKey(`plugin_sync_config_jira-sync_not-a-uuid`)).toBe(false);
+  });
+
+  it("isPluginSyncStatusPreferenceKey matches the builder's own output and nothing else", () => {
+    const key = pluginSyncStatusPreferenceKey("jira-sync", PROJECT_ID);
+    expect(key).toBe(`plugin_sync_status_jira-sync_${PROJECT_ID}`);
+    expect(isPluginSyncStatusPreferenceKey(key)).toBe(true);
+    expect(isPluginSyncStatusPreferenceKey(`plugin_sync_config_jira-sync_${PROJECT_ID}`)).toBe(false);
+  });
+
+  it("both are recognized by the dynamic-key allow-list", () => {
+    expect(isProjectScopedDynamicKey(pluginSyncConfigPreferenceKey("jira-sync", PROJECT_ID))).toBe(true);
+    expect(isProjectScopedDynamicKey(pluginSyncStatusPreferenceKey("jira-sync", PROJECT_ID))).toBe(true);
   });
 });
