@@ -1,0 +1,16 @@
+{
+  "startAt": 2,
+  "maxResults": 2,
+  "total": 3,
+  "issues": [
+    {
+      "id": "10003",
+      "key": "ENG-3",
+      "fields": {
+        "summary": "Write onboarding docs",
+        "status": { "name": "Done", "statusCategory": { "key": "done" } },
+        "updated": "2026-09-03T09:15:00.000+0000"
+      }
+    }
+  ]
+}

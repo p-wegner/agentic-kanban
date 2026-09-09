@@ -1,0 +1,68 @@
+{
+  "id": "jira-sync",
+  "name": "Jira Sync",
+  "version": "0.1.0",
+  "description": "Two-way sync between the board and a Jira project: pull tickets in via JQL, push status transitions and comments back. Zero-dependency REST client, fully offline self-testable against recorded fixtures.",
+  "scripts": [
+    {
+      "name": "bootstrap",
+      "label": "Bootstrap / check connection",
+      "description": "Read-only: validates Jira credentials and site reachability without changing anything.",
+      "command": "node tools/bootstrap.mjs",
+      "cwd": "plugin",
+      "env": {
+        "JIRA_SYNC_STATE_DIR": "{{repoPath}}/.jira-sync",
+        "JIRA_SYNC_PROFILE_PATH": "{{repoPath}}/docs/jira-sync/_profile.md"
+      }
+    },
+    {
+      "name": "plan",
+      "label": "Plan (dry run)",
+      "description": "Prints what a pull would import/update, without writing anything.",
+      "command": "node tools/plan.mjs",
+      "cwd": "plugin",
+      "env": {
+        "JIRA_SYNC_STATE_DIR": "{{repoPath}}/.jira-sync",
+        "JIRA_SYNC_PROFILE_PATH": "{{repoPath}}/docs/jira-sync/_profile.md"
+      }
+    },
+    {
+      "name": "selftest",
+      "label": "Self-test (offline)",
+      "description": "Exercises the whole client end-to-end against recorded fixtures. No network.",
+      "command": "node tools/selftest.mjs --self-test",
+      "cwd": "plugin",
+      "audience": "developer"
+    }
+  ],
+  "sync": {
+    "provider": "jira",
+    "pull": {
+      "command": "node tools/sync/pull.mjs",
+      "cwd": "plugin",
+      "env": {
+        "JIRA_SYNC_STATE_DIR": "{{repoPath}}/.jira-sync",
+        "JIRA_SYNC_PROFILE_PATH": "{{repoPath}}/docs/jira-sync/_profile.md"
+      }
+    },
+    "push": {
+      "command": "node tools/sync/push.mjs",
+      "cwd": "plugin",
+      "env": {
+        "JIRA_SYNC_STATE_DIR": "{{repoPath}}/.jira-sync",
+        "JIRA_SYNC_PROFILE_PATH": "{{repoPath}}/docs/jira-sync/_profile.md"
+      }
+    },
+    "config": [
+      { "key": "siteUrl", "label": "Site URL", "description": "e.g. https://yourteam.atlassian.net", "required": true },
+      { "key": "projectKey", "label": "Project key", "description": "e.g. ENG", "required": true },
+      { "key": "jql", "label": "JQL filter", "description": "Restricts which issues sync. Defaults to \"project = <projectKey> ORDER BY updated ASC\" when omitted." }
+    ],
+    "secrets": ["JIRA_API_TOKEN", "JIRA_EMAIL"]
+  },
+  "scaffold": {
+    "profileTemplate": "profile-template.md",
+    "targetPath": "docs/jira-sync/_profile.md"
+  },
+  "butler": { "promptFragment": "butler-fragment.md" }
+}
