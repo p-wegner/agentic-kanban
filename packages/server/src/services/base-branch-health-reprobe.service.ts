@@ -28,10 +28,11 @@ import {
 import { getProjectById } from "../repositories/project.repository.js";
 import { revParse } from "@agentic-kanban/shared/lib/git-service";
 import { getPreference } from "../repositories/preferences.repository.js";
-import { buildGateBusy } from "./jvm-build-semaphore.js";
+import { buildGateBusy, buildSemaphoreActive, buildSemaphoreOldestActiveAgeMs } from "./jvm-build-semaphore.js";
 import {
   inspectMachineVerifyLock,
   machineVerifyLockEnabled,
+  describeHolder,
 } from "../lib/machine-verify-lock.js";
 import { readTier0Capacity, type Tier0Capacity } from "@agentic-kanban/shared/lib/machine-capacity";
 
@@ -60,6 +61,49 @@ export function resolveGateBusy(): boolean {
   // reading — treating them as busy would let one crashed process starve the probe indefinitely.
   if (held.isStale && !held.ownerProcessAlive) return false;
   return held.contents.pid !== process.pid;
+}
+
+/**
+ * WHO is holding the "gate running" slot `resolveGateBusy()` reports, and for how long (#1084).
+ *
+ * `resolveGateBusy()` collapses two independent sources (this process's build semaphore, the
+ * cross-process machine lock) into one boolean, which is correct for the yield decision but
+ * leaves a `gate_running` reprobe refusal unexplainable without reading source — an operator
+ * cannot tell "legitimately busy" from "stuck" from the HTTP response alone. This names the
+ * source, a holder count/description, and the oldest holder's age, so the reprobe route can say
+ * why it refused instead of just that it refused.
+ */
+export interface GateBusyDiagnostics {
+  busy: boolean;
+  /** Which signal is reporting busy — null when neither is. Both can be true; semaphore wins for
+   *  display since it is this process's own accounting and always has an exact holder count. */
+  source: "semaphore" | "machine-lock" | null;
+  /** Number of in-flight tasks holding the in-process semaphore. */
+  semaphoreActive: number;
+  /** Age (ms) of the oldest in-process semaphore holder, or null when none is active. */
+  semaphoreOldestActiveAgeMs: number | null;
+  /** Free-text description of the machine-lock holder (role/pid/host/duration), or null. */
+  machineLockHolder: string | null;
+}
+
+/** Snapshot of {@link resolveGateBusy}'s two inputs, for a caller that needs to explain "why". */
+export function describeGateBusy(nowMs: number = Date.now()): GateBusyDiagnostics {
+  const semaphoreActive = buildSemaphoreActive();
+  const semaphoreOldestActiveAgeMs = buildSemaphoreOldestActiveAgeMs(nowMs);
+  let machineLockHolder: string | null = null;
+  if (machineVerifyLockEnabled()) {
+    const held = inspectMachineVerifyLock(nowMs);
+    if (held && !(held.isStale && !held.ownerProcessAlive) && held.contents.pid !== process.pid) {
+      machineLockHolder = describeHolder(held);
+    }
+  }
+  const busy = semaphoreActive > 0 || machineLockHolder !== null;
+  const source: GateBusyDiagnostics["source"] = semaphoreActive > 0
+    ? "semaphore"
+    : machineLockHolder !== null
+      ? "machine-lock"
+      : null;
+  return { busy, source, semaphoreActive, semaphoreOldestActiveAgeMs, machineLockHolder };
 }
 
 export interface BaseHealthDueInput {
