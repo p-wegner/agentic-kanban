@@ -3,6 +3,54 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-10 — #1085 landed; board at ZERO open. Also: I raced the monitor and lost track of it
+
+**0 open issues.** #1085 is Done, master is green (`pnpm typecheck` across 5 packages;
+`pnpm gate:always-run` **GREEN in 5m 15s**), the tree is clean, nothing is pushed.
+
+### What #1085 does — scope (b) ONLY
+
+`tool_progress` becomes an `AgentDisplayToolProgressEvent`, rendered as one dim line,
+"⏱ Still running: PowerShell — 29s", and indexed by tool name in transcript search (when a
+session looks stuck the question is WHICH tool is still running). That is the only evidence on
+the parsed stream that a long `Bash`/`PowerShell` call is working rather than wedged.
+
+**Scopes (a) and (c) are NOT done and must not be read into it.** Nothing schedules, times out
+or classifies an exit from a heartbeat. The provider path is untouched — the parse strips
+display events and `hasProviderFields` stays false — so the exit classifier, the stats writer
+and the liveness detector were handed no new field. A test asserts exactly that, beside the one
+asserting the display event.
+
+One trap worth keeping: **`numberValue` coerces an absent field to 0**, so the obvious read
+renders a heartbeat whose `elapsed_time_seconds` never arrived as "running 0s". A malformed
+heartbeat now falls through to #1083's recognized-but-fieldless path instead — still never
+counted as drift — and `agent-stream-unknown-events.test.ts` pins all three malformed shapes.
+
+### The process failure: I implemented on master while `start_mode` was `monitor`
+
+Restoring `start_mode=monitor` after the stall meant the monitor was free to auto-start #1085
+the moment I filed it. I then implemented it directly on master anyway. Both finished within
+minutes of each other, and the collision only surfaced when the Done PATCH came back 409:
+*"it has an open workspace (branch: feature/ak-1085-…) that has not been merged"*.
+
+**The 409 was the board working correctly** — it is the guard that stops a ticket closing over
+an unmerged branch, and without it the duplicate would have been invisible. The lesson is not
+about the guard; it is: **a `monitor` project is a live agent. Filing a ticket into one and
+then hand-implementing it is a race with a real writer, not a private edit.** Set the ticket
+`no-auto-start`, or set `manual`, or let the monitor have it — do not do both.
+
+The branch's implementation reached the SAME design and the SAME scope (b) independently. Its
+work was not thrown away: two things it did better were taken onto master (`⏱ Still running:`
+reads as reassurance where a bare "PowerShell — running 29s" reads as another log line; a
+`markerColorForEvent` case, the one part of the new kind with no coverage). Its `?? "unknown"` /
+`numberValue` reads were NOT taken, for the "0s" reason above. Then the workspace was deleted —
+the sanctioned way to discard a superseded branch, and the path the 409 itself names.
+
+Verified before deleting, and worth repeating as the check: `git diff master <branch> --stat`
+(TWO dots, not three). Three-dot diffs from the merge-base and showed 115 files / 5523
+insertions of already-merged #1080/#1081 work, which reads as "the branch has a lot in it". The
+two-dot tree diff showed master ahead everywhere except the two rival #1085 implementations.
+
 ## 2026-09-09 (late) — backlog drained; master was RED and the cause is worth knowing
 
 **The board's backlog is empty apart from #1085, a follow-up filed deliberately** (see below).
