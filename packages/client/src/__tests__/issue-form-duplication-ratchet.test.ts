@@ -1,4 +1,4 @@
-// @gate:always-run — recursively walks the client component tree; imports nothing it checks.
+// @gate:always-run when:packages/client/src/** — recursively walks the client component tree; imports nothing it checks.
 import { describe, expect, it } from "vitest";
 import crypto from "node:crypto";
 import fs from "node:fs";

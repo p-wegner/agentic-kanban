@@ -17,7 +17,7 @@ tools/
   sync/pull.mjs           sync.pull: map Jira issues through the field map and write board issues
   sync/push.mjs           sync.push: apply a local outbox of transitions/comments
   lib/
-    jira-client.mjs        the zero-dependency Jira REST client (search, get, transition, comment)
+    jira-client.mjs        the zero-dependency Jira REST client (search, get, transition, comment, create)
     auth.mjs                Jira credential resolution (env) + auth header construction
     errors.mjs              HTTP/network failures normalized to one JiraApiError shape
     fixtures.mjs            fixture-backed Jira fetch for offline testing
@@ -25,12 +25,16 @@ tools/
     board-client.mjs        thin REST client for the BOARD's own API (create/update issues, tags)
     board-fixtures.mjs      in-memory fake of the board API, for `--self-test` pull runs
     sync-engine.mjs         the pull itself: fetch, map, create/update by externalKey, report conflicts
-    pull-plan.mjs           the Jira-side-only diff behind plan.mjs (no board involved)
-    state.mjs               JSON state file helpers (pull state, outbox)
+    pull-plan.mjs           the Jira-side-only diff behind plan.mjs (no board involved), shared with pull.mjs
+    push-plan.mjs           the deterministic push apply/describe logic, shared by push.mjs
+    transitions.mjs         resolves a target status name to a Jira transition id via the graph
+    comment-marker.mjs      attribution marker so a pushed comment isn't re-imported as new
+    state.mjs               JSON state file helpers (pull state, outbox, writebacks)
     profile.mjs             the same TODO-marker gate the board's scaffold uses
   fixtures/                 recorded JSON Jira responses used offline
 __tests__/                  unit tests (node:test) — auth, pagination, backoff, error normalization,
-                            field mapping, and the sync engine (create/idempotent/update/conflict)
+                             field mapping, sync engine (create/idempotent/update/conflict),
+                             transition resolution, comment marker, push plan, writebacks
 ```
 
 ## Credentials

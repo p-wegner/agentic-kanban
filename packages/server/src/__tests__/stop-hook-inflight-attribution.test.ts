@@ -1,4 +1,4 @@
-// @gate:always-run — spawns/loads the .claude/hooks Stop hook and reads state outside its own
+// @gate:always-run when:.claude/** — spawns/loads the .claude/hooks Stop hook and reads state outside its own
 // import graph, so import-graph scoping cannot see it.
 /**
  * #771 — the Stop hook must never tell a session to commit a live agent's mid-edit file.
