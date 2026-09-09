@@ -3,6 +3,78 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-09 (evening) — the Jira epic is DONE; board backlog is empty but for two new tickets
+
+**#1075 and all six children are Done.** Landed this pass, in order: #1079 (`a85b5da4ea`),
+#1078 (`082e7e13dc`, with two review fixes — pagination past the 500-item cap, and treating a
+board issue with no local record as a CONFLICT rather than a blind overwrite), #1080
+(`5125fd373a`), #1081 (`5e6809dc1a`). #1073 was closed without work: its fix was already on
+master at `63aad103ef` and its workspace held zero commits.
+
+**Board backlog is now 2 open, both filed today and both by this session** — #1083 (agent-stream
+drops every Claude `tool_progress` event; 483 in one day, and the ONLY unrecognised type, so it is
+one parser gap rather than general drift) and #1084 (see the correction note below).
+
+### What actually blocked the merges for ~4 hours, in the order it was found
+
+1. **A broken worktree `node_modules` in ak-1081** — not only the documented empty
+   `packages/e2e` (`verify_infra_missing`), but a missing `depcruise` and `typescript` at the
+   ROOT, so `lint:arch` failed with *"Der Befehl depcruise ... konnte nicht gefunden werden"*.
+   `ALLOW_CROSS_WORKTREE_WRITE=1 … pnpm install -r` in that worktree fixed both.
+2. **Wedged verify processes blocking the whole verify-chain queue.** A `marker-worker.js` from
+   `ak-verify-gate-test-TxhLp9` had been alive **6.9 hours for 2.1 s of CPU**, zero children, zero
+   CPU delta over 8 s — a leftover from the morning hard-interrupt — plus an orphaned 51-minute
+   vitest for the already-merged #1078. The chain queue had backed up to 5. Killed by pid.
+   **The check that matters is CPU delta over ~10 s plus child count, NOT age or zero-CPU alone**:
+   a legitimate parent (`test-mine.mjs`) waiting on a working child shows exactly zero delta and
+   is NOT wedged. That distinction nearly cost a live gate.
+3. **A real defect on #1081** — `plugins.ts:335` passed `body.values` (`Record<string, unknown> |
+   undefined`) into a required parameter, `TS2345`. Routed to `fix-and-merge`, which applied
+   `body.values ?? {}`, rebased and regenerated `openapi.yaml` + the bundled skill files.
+
+None of it was the base-branch-health probe, which is where the previous note pointed. The probe
+is STILL `unverified` at `a43cb610` and merges landed anyway — so a stale base health does not
+block a merge the way that note implied.
+
+### A correction worth keeping, because it was made twice
+
+`#1084` was first filed as a HIGH-priority "leaked build-semaphore slot permanently starves the
+base-health probe". **That claim could not be reproduced and the ticket has been corrected and
+downgraded.** The evidence was two 40 s samples showing zero processes matching
+`ak-verify|test-mine|vitest` while `reprobe` said `gate_running` — but that regex does not match
+`check-arch.mjs`, `depcruise` or `tsc`, and a gate spends ~100 s per run (48 s arch + 55 s
+typecheck, measured) in exactly those phases. Re-tested with a broad matcher, gates were
+continuously present and `gate_running` was correct every time. What survives is narrower and real:
+**a reprobe refusal names no holder and no age**, so "legitimately busy" and "stuck" are
+indistinguishable without reading source.
+
+The same error — inferring a CAUSE from a point-in-time reading — was also made this afternoon
+about memory: a 17:35 measurement (slidesmith 4.64 GB vs board 1.08 GB) was used to argue the
+morning's 10:56 stall had been misattributed to the board. The timestamps refute it, and the
+morning session's own 8.3 GB → 2.0 GB drop when it stopped board-side work supports the ORIGINAL
+diagnosis. A reading proves a moment; only a timestamp proves a cause.
+
+### Operating state left behind — read before driving this board again
+
+- **`wip_limit_<board>` is 1, deliberately, and has NOT been restored to 2.** It was lowered after
+  the morning stall (note that `resolveWipLimit` makes `wip_limit_<projectId>` BEAT the Strategy
+  Bullseye, #654 — the Bullseye said 1 while the effective limit was 2). Raising it back is a
+  one-line preference write and a judgement about machine load, not about the project.
+- `start_mode_<board>` was temporarily set to `manual` to stop the monitor queueing fresh gates,
+  and **has been restored to `monitor`**. Verified via `GET /drive`.
+- **The stable board is 37 commits behind master** and still on `b7fd0ceff6`. Everything above is
+  on master only — `pnpm promote --dry-run` first, per `docs/two-boards.md` §8.
+- The pnpm store remains clean (0 corrupt of 24,515 scanned).
+
+### Cross-session note
+
+The RAM pressure this afternoon was largely a runaway `slidesmith` build in another live session
+(an infinite loop on a malformed table, since fixed and committed there). It was resolved by
+MESSAGING that session rather than killing its processes — `ListAgents` + `SendMessage` work
+between local sessions and are the right tool when another agent's work is the load. Two idle
+`tools/deck-serve.js` processes (ports 8931/8932) from a third, older session were deliberately
+left alone.
+
 ## 2026-09-09 (later) — pnpm store is CLEAN again; Jira epic resumed after the RAM stall
 
 **The store corruption above is gone: a full scan of `~/.pnpm-store/v10/files` reports 0 corrupt
