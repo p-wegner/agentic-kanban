@@ -66,6 +66,10 @@ export function createDefaultFixtureFetch() {
       respond: () => ({ status: 200, body: loadFixture("comment-response") }),
     },
     {
+      match: (url, init) => init?.method === "POST" && /\/rest\/api\/3\/issue$/.test(url),
+      respond: () => ({ status: 201, body: loadFixture("issue-create-response") }),
+    },
+    {
       match: (url, init) => (init?.method ?? "GET") === "GET" && /\/rest\/api\/3\/issue\/[^/]+$/.test(url),
       respond: () => ({ status: 200, body: loadFixture("issue-detail") }),
     },

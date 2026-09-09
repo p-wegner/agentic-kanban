@@ -3,6 +3,67 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-09 (later) — pnpm store is CLEAN again; Jira epic resumed after the RAM stall
+
+**The store corruption above is gone: a full scan of `~/.pnpm-store/v10/files` reports 0 corrupt
+of 24,515 files across 259 buckets** (`fs.statSync` on every entry; the failing call in the
+recorded probe was a `stat`). The previous pass's bucket-rename workaround held. The
+`ERR_PNPM_UNKNOWN ... stat '...files\e0\0705c803...'` still visible in `board.log` is the
+**14-hour-old cached probe result being re-reported**, not a fresh failure — `e0` and
+`e0.corrupt-20260909` both still exist and `e0` now stats fine.
+
+**So the thing blocking every merge is not the filesystem, it is that `base_branch_health` was
+never re-probed.** The gate refuses with `BASE BRANCH HEALTH UNKNOWN (a43cb610, checked 14h ago)
+— Probe result: could not prepare the base clone`. `POST …/base-branch-health/reprobe` answers
+`skippedReason: "gate_running"` while any verify chain is in flight, so the re-probe has to be
+requested when the chain queue is empty. **Not verified: that a fresh probe now passes** — it had
+not been obtained when this was written.
+
+**Leftover from the workaround, safe to delete once the filesystem is trusted:**
+`files/e0.corrupt-20260909` (and the sibling `8c`/`fd` renames named in the pass above).
+
+### Landed this pass
+
+- **`perf(gate)` `8c95f84563`** — the eleven `when:` scopes the interrupted session had applied
+  but never committed. Verified by `always-run-guard-runtime-ratchet`,
+  `always-run-marker-ratchet` and `always-run-dirs-lockstep` (32 tests green). Measured per-diff
+  guard floor: routes/services-only 357s → 315s, client-only 253s → 223s, scripts-only 222s →
+  183s. `BASELINE_TOTAL_MS` is deliberately unmoved — it prices the WORST case (an unknown change
+  set still forces everything), which `when:` does not change.
+- **#1079 merged** (`a85b5da4ea`) via a direct `POST /merge`; it took the `already-passed`
+  persisted review-exit verdict rather than a fresh gate run.
+- **#1073 closed as Done** — its fix was ALREADY on master (`63aad103ef`, the `startMode` check in
+  `drive-preflight.service.ts` plus `DriveDashboard.tsx` rendering the verdict, covered by
+  `drive-preflight.test.ts`). Its workspace held zero commits: stale board state, not lost work.
+  The empty workspace was deleted before the status change.
+
+### Operating state deliberately changed
+
+- **`wip_limit_<board>` 2 → 1.** The Strategy Bullseye already said `activeAgentsTarget: 1`, but
+  `resolveWipLimit` makes `wip_limit_<projectId>` BEAT the Bullseye (#654), so the effective WIP
+  was 2. Set to 1 after the previous session had to hard-kill an 8.3 GB node tree. **Restore it to
+  2 when the machine is trusted again** — this is a throttle, not a decision about the project.
+- `verify_max_workers_<board>` is 2 and `verify_gate_strategy_<board>` is `impact` (both
+  pre-existing, both left alone).
+
+### Still open, in order
+
+1. **#1081** — reviewed clean, `readyForMerge: true`, gate queued. **Do not re-POST `/merge`**:
+   each call appends another verify chain (three were queued this way before it was noticed), and
+   the chains serialize, so re-triggering makes it strictly slower. Trigger once, then watch
+   `board.log`.
+2. **#1078** — was a ZOMBIE `active` (its agent died in the hard kill at 10:48 but the row was
+   never reconciled; the startup sweep missed it). Cleared to `idle` with `POST /stop`. Branch
+   holds 2 commits and a HANDOFF.md; needs a relaunch to finish, then review + merge.
+3. **#1080** — not started.
+4. **#1075** — the epic; closes when #1078/#1080/#1081 land.
+
+**#1078 and #1081 both carry a sticky "hit a claude usage limit" signal**, which makes the monitor
+log `Needs attention … skipping relaunch` every cycle even though the quota block's release time
+(02:20Z) has long passed. An explicit `POST /review` bypasses it and worked for #1081; the
+allowlist permits all four `andrena_team_5x*` profiles, so this is a stale per-workspace flag, not
+an exhausted account.
+
 ## 2026-09-09 — NTFS corruption in the pnpm store is what `verify_infra_missing` meant
 
 **#1077 and #1082 were held by the pre-merge gate as `verify_infra_missing`, four identical

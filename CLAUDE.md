@@ -287,8 +287,11 @@ still forces everything; a guards-only docs run retains its known changed paths 
 preconditions apply. Packages included only to supply guards run those guards, rather than their
 whole suite; an unknown scope or an affected source with no coverage still widens verification.
 #483's property is intact: the declaration lives in the file, and no hand-maintained
-list can drift. Measured savings with the ten heaviest suites scoped: routes-only 546s → 357s,
-scripts-only → 222s, client-only → 253s. `always-run-guard-runtime-ratchet.test.ts` pins the
+list can drift. Measured savings, cumulative over two scoping passes: routes-only 546s → 357s →
+**315s**, scripts-only → 222s → **183s**, client-only → 253s → **223s** (the second pass scoped
+eleven more — four client tree-walkers, five `.claude/hooks` spawners, `dev-script` and
+`barrel-client-safety` — worth ~42s to any diff outside their territories).
+`always-run-guard-runtime-ratchet.test.ts` pins the
 summed estimated runtime of the UNCONDITIONAL floor (from the committed
 `docs/tests/durations.json`, unmeasured files counted at an explicit 3s and reported), shrink-only
 — so a new marker on a 50s suite reads as a 50s decision at review time. The parse rule and the
