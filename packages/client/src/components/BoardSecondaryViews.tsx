@@ -123,6 +123,7 @@ export function BoardSecondaryViews({
             columns={columns}
             onIssueClick={onIssueClick}
             searchQuery={searchQuery}
+            projectId={activeProjectId}
           />
         </BoardErrorBoundary>
       )}
