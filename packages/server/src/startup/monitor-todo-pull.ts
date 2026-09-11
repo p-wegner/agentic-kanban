@@ -17,7 +17,7 @@
  * `repositories/start-scoring.repository.ts`. Behaviour is unchanged: in production
  * `ctx.database` IS the `db` singleton these queries used to reach for directly.
  */
-import { computeBlockerReadiness, isTerminalStatusIdView, suggestBranchName, type BlockerWorkspaceLanding } from "@agentic-kanban/shared";
+import { suggestBranchName } from "@agentic-kanban/shared";
 import { resolveCoupledComponent } from "@agentic-kanban/shared/lib/dependency-graph";
 import { MAX_TICKET_GROUP_SIZE, isAutoGroupEnabled } from "@agentic-kanban/shared/lib/ticket-group";
 import type { Database } from "../db/index.js";
@@ -34,17 +34,16 @@ import {
 import {
   hasWorkspaceHistory,
   selectAutoStartCandidates,
-  selectBlockerIds,
-  selectBlockerStates,
-  selectBlockerWorkspaceLandings,
   selectCoupledEdges,
 } from "../repositories/auto-start.repository.js";
+import { buildDependencyGate } from "../services/dependency-gate.service.js";
+import { decideStartSlots } from "../services/start-slot-decision.js";
 import { shouldDeferForContention } from "./monitor-file-contention.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { countWipCapacity } from "../repositories/wip-capacity.repository.js";
 import { holdForHarnessBudget } from "./monitor-harness-budget.js";
 import { noteHeldCandidates, noteWipCapSkip } from "./monitor-skip-attribution.js";
-import { clampWipToHeadroom, recordMachineSaturationHold as recordMachineSaturationHoldDetail } from "./monitor-start-holds.js";
+import { recordMachineSaturationHold as recordMachineSaturationHoldDetail } from "./monitor-start-holds.js";
 import {
   evaluateStartCandidate,
   hasFleetOverflow,
@@ -103,30 +102,8 @@ async function resolveAutoStartGroupMembers(args: {
   }
   return members;
 }
-/**
- * The dependency gate for a project's pull loop: a blocker unblocks only when terminal AND
- * landed (#535/#537/#782/#784). Built once per project cycle so the lead candidate and the
- * group-member vetting share one implementation.
- */
-function buildDependencyGate(doneStatusIds: Set<string>, database: Database): (issueId: string) => Promise<boolean> {
-  return async (issueId: string): Promise<boolean> => {
-    const blockerIds = await selectBlockerIds(issueId, database);
-    if (blockerIds.length === 0) return true;
-    const blockerIssues = await selectBlockerStates(blockerIds, database);
-    if (blockerIssues.length !== blockerIds.length) return false;
-    const blockerWorkspaces = await selectBlockerWorkspaceLandings(blockerIds, database);
-    const wsByBlocker = new Map<string, BlockerWorkspaceLanding[]>();
-    for (const w of blockerWorkspaces) {
-      const list = wsByBlocker.get(w.issueId) ?? [];
-      list.push({ mergedAt: w.mergedAt, isDirect: w.isDirect });
-      wsByBlocker.set(w.issueId, list);
-    }
-    return blockerIssues.every((b) => computeBlockerReadiness({
-      isTerminal: isTerminalStatusIdView(b, doneStatusIds),
-      workspaces: wsByBlocker.get(b.id) ?? [],
-    }));
-  };
-}
+// The dependency gate (`buildDependencyGate`) moved to `services/dependency-gate.service.ts`
+// (#1102) so `GET /api/projects/:id/autopilot` counts ready tickets with the same gate.
 
 /**
  * Interpret the `POST /api/workspaces?async=1&autoStart=1` response for the Todo pull loop.
@@ -185,6 +162,12 @@ export async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: strin
   if (capacity.inactiveStale > 0) {
     console.log(`[monitor] Auto-start pull capacity for project ${inProgressSt.projectId}: active=${capacity.active}/${wipLimit} inactiveStale=${capacity.inactiveStale}`);
   }
+  // #1102: same shared slot arithmetic as the backfill loop, asked around the same async reads.
+  const { maxNewStartsPerCycle } = ctx.tunablesFor(inProgressSt.projectId);
+  const slotInput = {
+    wipLimit, active: currentWip, machineCapacity: ctx.machineCapacity, maxNewStartsPerCycle,
+    startedThisCycle: maxNewStartsPerCycle - ctx.startsRemaining(inProgressSt.projectId),
+  };
 
   // #581 held new starts while a gate holds the build semaphore; #936 made that hold a
   // PLACEMENT input (see `resolveGateQuiesce`) rather than an unconditional cycle skip.
@@ -199,7 +182,7 @@ export async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: strin
     return;
   }
 
-  if (currentWip >= wipLimit) {
+  if (decideStartSlots({ ...slotInput, fleetOverflow: false }).holdReason === "wip_full") {
     await noteWipCapSkip(ctx, inProgressSt.projectId, allowFeatureTypes);
     return;
   }
@@ -208,9 +191,10 @@ export async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: strin
   // still pulls new work when this project's fleet can take it; only skip when neither can.
   // #1019: same graded clamp as the backfill loop — `slotsAvailable` below is measured
   // against the clamped target, not the configured one.
-  const wipClamp = clampWipToHeadroom({ wipLimit, currentWip, capacity: ctx.machineCapacity });
-  const hostFull = isHostSaturated(ctx.machineCapacity) && !(await hasFleetOverflow(ctx, inProgressSt.projectId));
-  if (hostFull || currentWip >= wipClamp.effective) {
+  const fleetOverflow = isHostSaturated(ctx.machineCapacity) && (await hasFleetOverflow(ctx, inProgressSt.projectId));
+  const slots = decideStartSlots({ ...slotInput, fleetOverflow });
+  const wipClamp = slots.clamp;
+  if (slots.holdReason === "machine_full") {
     recordMachineSaturationHoldDetail(holdContext(ctx), inProgressSt.projectId, wipClamp.clamped ? wipClamp : undefined);
     // #919: attribute the project-wide hold to each ticket it is holding.
     await noteHeldCandidates(ctx, inProgressSt.projectId, allowFeatureTypes, "machine_saturated", ctx.database);
@@ -220,7 +204,9 @@ export async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: strin
   const todoStatusId = await findProjectStatusIdByName(inProgressSt.projectId, "Todo", ctx.database);
   if (!todoStatusId) return;
 
-  const slotsAvailable = wipClamp.effective - currentWip;
+  // Free WIP slots, NOT capped by the start cap: the loop below checks that per candidate so
+  // each held ticket records `cycle_start_cap`.
+  const slotsAvailable = slots.wipSlots;
   // #119: snapshot once, then gate each candidate; launches this cycle feed back
   // via noteStarted so two backlog tickets sharing a registration file don't both
   // start in the SAME cycle.

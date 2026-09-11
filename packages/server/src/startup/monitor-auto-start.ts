@@ -33,8 +33,8 @@ import { projectCanDispatch, hostOverflowHasFleetCapacity as defaultHasFleetOver
 import {
   recordFleetHold as recordFleetHoldDetail,
   recordMachineSaturationHold as recordMachineSaturationHoldDetail,
-  clampWipToHeadroom,
 } from "./monitor-start-holds.js";
+import { decideStartSlots } from "../services/start-slot-decision.js";
 import { notDriveOrEpicMetaSql } from "../repositories/start-scoring.repository.js";
 import { buildFileContentionGate, type BuildFileContentionGate } from "./monitor-file-contention.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -181,7 +181,16 @@ async function runInProgressBackfill(ctx: AutoStartCycle, inProgressSt: { id: st
   if (capacity.inactiveStale > 0) {
     console.log(`[monitor] Auto-start capacity for project ${inProgressSt.projectId}: active=${capacity.active}/${wipLimit} inactiveStale=${capacity.inactiveStale}`);
   }
-  if (currentWip >= wipLimit) return;
+  // #1102: the slot arithmetic is `decideStartSlots`, shared with the pull loop and with
+  // `GET /api/projects/:id/autopilot`. Asked twice so the async reads keep their order: the WIP
+  // ceiling first (no I/O), then — after the fleet gate — the machine hold with the real
+  // fleet-overflow answer.
+  const { maxNewStartsPerCycle } = ctx.tunablesFor(inProgressSt.projectId);
+  const slotInput = {
+    wipLimit, active: currentWip, machineCapacity: ctx.machineCapacity, maxNewStartsPerCycle,
+    startedThisCycle: maxNewStartsPerCycle - ctx.startsRemaining(inProgressSt.projectId),
+  };
+  if (decideStartSlots({ ...slotInput, fleetOverflow: false }).holdReason === "wip_full") return;
 
   // Fleet gate (epic #184): a strict worker-dispatch project must not start
   // work the fleet cannot take — one check per project per cycle.
@@ -204,9 +213,10 @@ async function runInProgressBackfill(ctx: AutoStartCycle, inProgressSt: { id: st
   // nowhere else to route the overflow.
   // #1019: the GRADED half of the same signal — even an unsaturated box may have room for
   // fewer agents than this project is configured for, and the clamp is what the loop runs at.
-  const wipClamp = clampWipToHeadroom({ wipLimit, currentWip, capacity: ctx.machineCapacity });
-  const hostFull = isHostSaturated(ctx.machineCapacity) && !(await hasFleetOverflow(ctx, inProgressSt.projectId));
-  if (hostFull || currentWip >= wipClamp.effective) {
+  const fleetOverflow = isHostSaturated(ctx.machineCapacity) && (await hasFleetOverflow(ctx, inProgressSt.projectId));
+  const slots = decideStartSlots({ ...slotInput, fleetOverflow });
+  const wipClamp = slots.clamp;
+  if (slots.holdReason === "machine_full") {
     recordMachineSaturationHoldDetail(holdContext(ctx), inProgressSt.projectId, wipClamp.clamped ? wipClamp : undefined);
     // #919: attribute the project-wide hold to each ticket it is holding.
     await noteHeldCandidates(ctx, inProgressSt.projectId, allowFeatureTypes, "machine_saturated", ctx.database);
