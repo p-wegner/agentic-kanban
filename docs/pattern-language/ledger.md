@@ -206,6 +206,35 @@ Round-1 method: caller ran Step 0 (`vocab.py` histograms + `.dependency-cruiser.
   concurrency/recency, merge-gate red-base attribution, background-sweep registry,
   startup-persistence ratchet, sweep-timer mechanism) 43/43 green.
 
+### 2026-09-11 — #1094: the 1 `server-route→server-cli` edge (ak-1094, claude-sonnet-5)
+- **`routes/workers.ts → cli/commands/worker.ts` — REAL, fixed by relocating the shared
+  function.** The route imported `buildWorkerConnectSteps` (the connect-runbook step data)
+  purely so `GET /api/workers/connect-info` and the CLI's `worker instructions` render the
+  same steps. The function itself is pure — no `Command`/commander, no CLI-only state — so
+  it never belonged in `server-cli`; it sat there only because a prior ticket (#1089)
+  deliberately kept it in `cli/commands/worker.ts` to avoid adding a module to the
+  `worker-cli-isolation.test.ts` ceiling (comment in that file said so explicitly).
+- **Fix:** moved `buildWorkerConnectSteps` to a new pure `server-lib` module,
+  `packages/server/src/lib/worker-connect-steps.ts` (only import: the shared
+  `WorkerConnectStep` type). `cli/commands/worker.ts` now imports and re-exports it instead
+  of defining it (existing importers of `buildWorkerConnectSteps` from that module, e.g.
+  `worker-connect-instructions.test.ts`, keep working unchanged), and `routes/workers.ts`
+  imports it from `lib/` — a `server-route → server-lib` edge, already allowed.
+- **The isolation ceiling had to move with it.** `worker-cli-isolation.test.ts` walks the
+  `agentic-kanban-worker` binary's import graph from `worker/worker-cli.ts` and asserts it
+  stays under a hand-raised ceiling (25 → 26 in #1038, for the same reason: a legitimate new
+  pure module joining the graph). The new lib file is one more pure node in that graph (only
+  the shared type import, no db/services/routes), so the ceiling moved 26 → 27 with a comment
+  explaining why, rather than being silently exceeded or the fix being abandoned.
+- **Not a rule widening.** `pattern-language.json` is UNCHANGED — no `match` edit, no `rules`
+  edit. `server-cli` allocation 36 → 35, `server-lib` 66 → 67.
+- Re-measured with `pattern_edges.py --spec … --scan . --violations`: **rule violations 0**
+  (was 1), coverage still 100 % / 0 unassigned, no new pair introduced. `pnpm typecheck`
+  clean, `pnpm check:arch` 0 errors (pre-existing 30 `startup-bypasses-repositories` warnings
+  only), and the impact-selected 17 suites (worker-cli-isolation, worker-connect-instructions,
+  fleet-listener, worker-fleet-observability-routes, worker-dispatch/git-transport/
+  session-probe e2e, placement-explain, worker-incoming-refs, and siblings) 117/117 green.
+
 ## Filed (exclusion list — same idea ⇒ reference, don't refile)
 | # | verb | title |
 |---|---|---|
