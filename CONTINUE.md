@@ -3,6 +3,27 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-11 — merges stuck: a corrupt pnpm store, and a gate that could not say so (#1092)
+
+**#1086/#1087 sat In Review with the merge parked.** Their pre-merge gate failed on
+`depcruise` "konnte nicht gefunden werden", classified `verify_infra_missing`, and backed off 2h.
+The code was never the problem. **Every worktree's `pnpm install -r` had failed**: the shared
+store `~/.pnpm-store/v10` holds entries that are listed but cannot be stat'ed ("Die Datei oder
+das Verzeichnis ist beschädigt"). That is NTFS damage — `chkdsk` is the real fix, and it is the
+operator's to run. Worked around by quarantining the affected shards
+(`files-<xx>-corrupt-2026-09-11`), which makes pnpm re-fetch them.
+
+**#1092 (landed here, direct on master) makes the next occurrence visible:**
+- #169's install retry now recognises German cmd.exe "command not found".
+- Gate summaries drop pnpm's `"pnpm" field` deprecation notice, which had headlined every failure.
+- A failed PARALLEL setup now emits the butler `workspace_error` event, naming the real
+  `ERR_PNPM_*` line (`setupFailureHeadline`).
+
+Verified: the two changed test files (30/30), server `tsc`, `pnpm check:arch`.
+
+**Not done, and not solved by #1092:** the stable board runs `stable-20260910`, so none of this is
+live until `pnpm promote`. A worktree whose setup failed still needs its install re-run by hand.
+
 ## 2026-09-10 — #1085 landed; board at ZERO open. Also: I raced the monitor and lost track of it
 
 **0 open issues.** #1085 is Done, master is green (`pnpm typecheck` across 5 packages;

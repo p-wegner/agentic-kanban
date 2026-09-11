@@ -5,12 +5,38 @@ import {
   buildSymlinkErrorRun,
   buildSymlinkRun,
   disabledSymlinkRun,
+  setupFailureHeadline,
   skippedSetupRun,
   tailOutput,
 } from "./workspace-run-records.js";
 
 const START = "2026-06-19T10:00:00.000Z";
 const NOW = "2026-06-19T10:00:05.000Z"; // 5s later
+
+// #1092: the real failure of 2026-09-11 — a corrupt pnpm store entry — hidden behind the
+// deprecation notice every pnpm run prints first.
+const PNPM_FIELD_WARN =
+  '[WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.onlyBuiltDependencies".';
+
+describe("setupFailureHeadline (#1092)", () => {
+  it("skips pnpm's deprecation notice and returns the ERR_PNPM line", () => {
+    const run = buildSetupRunFromResult(
+      "pnpm install -r",
+      START,
+      { exitCode: 1, stdout: "", stderr: `${PNPM_FIELD_WARN}\n ERR_PNPM_UNKNOWN  UNKNOWN: unknown error, stat 'C:\\store\\files\\06\\cdb7'` },
+      NOW,
+    );
+    expect(setupFailureHeadline(run)).toBe("ERR_PNPM_UNKNOWN  UNKNOWN: unknown error, stat 'C:\\store\\files\\06\\cdb7'");
+  });
+
+  it("falls back to the first non-noise line when nothing looks like an error", () => {
+    expect(setupFailureHeadline({ exitCode: 2, stderrTail: `${PNPM_FIELD_WARN}\nsomething odd`, stdoutTail: null })).toBe("something odd");
+  });
+
+  it("names the exit code when the run produced no usable output", () => {
+    expect(setupFailureHeadline({ exitCode: 1, stderrTail: PNPM_FIELD_WARN, stdoutTail: null })).toBe("exit 1 with no output");
+  });
+});
 
 describe("tailOutput", () => {
   it("returns null for empty/whitespace output", () => {

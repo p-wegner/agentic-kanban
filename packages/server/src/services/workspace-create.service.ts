@@ -38,6 +38,7 @@ import type { ProviderName } from "./agent-provider.js";
 import {
   skippedSetupRun,
   disabledSymlinkRun,
+  setupFailureHeadline,
   type LatestSetupRun,
   type LatestSymlinkRun,
 } from "./workspace-run-records.js";
@@ -850,7 +851,21 @@ export function createWorkspaceCreateService(deps: {
 
       if (setupCompletion) {
         setupCompletion
-          .then((run) => updateLatestSetupRun(id, run, issue.projectId))
+          .then((run) => {
+            // #1092: a failed PARALLEL setup was a console.warn and nothing else. The agent is
+            // already running by then, so nobody learned its worktree has no dependencies until
+            // the pre-merge gate failed hours later on a missing tool and parked in a 2h backoff.
+            // Say so on the same channel #169 gave the blocking path.
+            if (run.state === "failed") {
+              emitButlerSystemEvent({
+                projectId: issue.projectId,
+                kind: "workspace_error",
+                workspaceId: id,
+                text: `Parallel setup script failed for workspace ${id} (branch ${branch}, exit ${run.exitCode ?? "?"}) — the agent is running in a worktree whose dependencies did not install, so its pre-merge gate will fail until setup is re-run: ${setupFailureHeadline(run).slice(0, 200)}`,
+              });
+            }
+            return updateLatestSetupRun(id, run, issue.projectId);
+          })
           .catch((err) => console.warn(`[workspaces] failed to persist setup status: ${errorMessage(err)}`));
       }
 
@@ -874,7 +889,7 @@ export function createWorkspaceCreateService(deps: {
           projectId: issue.projectId,
           kind: "workspace_error",
           workspaceId: id,
-          text: `Setup script failed for workspace ${id} (branch ${branch}, exit ${latestSetup.exitCode ?? "?"}) — workspace blocked, agent was not launched: ${(latestSetup.stderrTail || latestSetup.stdoutTail || "").slice(0, 200)}`,
+          text: `Setup script failed for workspace ${id} (branch ${branch}, exit ${latestSetup.exitCode ?? "?"}) — workspace blocked, agent was not launched: ${setupFailureHeadline(latestSetup).slice(0, 200)}`,
         });
       } else {
         // Defer service-stack provisioning + agent launch off the hot path so the HTTP
