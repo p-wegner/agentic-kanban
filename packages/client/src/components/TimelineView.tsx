@@ -308,7 +308,7 @@ const TimelineLane = memo(function TimelineLane({
                     aria-label={`Priority: ${issue.priority ?? "medium"}`}
                   />
                   {invalidDueDate && (
-                    <span className="text-red-500 dark:text-red-400 text-[10px] font-bold shrink-0" title="Due date is before the created date">âš </span>
+                    <span className="text-red-500 dark:text-red-400 text-[10px] font-bold shrink-0" title="Due date is before the created date">⚠</span>
                   )}
                   <span className={`text-xs font-medium truncate ${cls.text}`}>{issue.title}</span>
                   {clippedEnd ? (
