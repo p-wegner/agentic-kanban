@@ -14,6 +14,8 @@ import {
   ANALYTICS_VIEW_ID,
   RUNTIME_TABS,
   RUNTIME_VIEW_ID,
+  RUNNERS_TABS,
+  RUNNERS_VIEW_ID,
 } from "../lib/viewTabs.js";
 import { viewTabActions } from "../stores/viewTabStore.js";
 import { markProgrammaticNavigation } from "../lib/navigationBurst.js";
@@ -337,7 +339,8 @@ export function useBoardKeyboardShortcuts(
     unregisters.push(registerAction({ id: "view-all-workspaces", label: "All Workspaces", description: "View all workspaces with status, diff stats, and session activity", icon: "⊞", category: "navigation", handler: () => actions.panels.setShowAllWorkspaces(true) }));
     unregisters.push(registerAction({ id: "view-cleanup-queue", label: "Cleanup Queue", description: "View closed workspaces with failed worktree cleanup warnings", icon: "🧹", category: "navigation", handler: () => actions.panels.setShowCleanupQueue(true) }));
     unregisters.push(registerAction({ id: "view-file-contention", label: "File Contention Heatmap", description: "Show which active workspaces touch the same files (merge-risk clusters)", icon: "⚡", category: "navigation", handler: () => actions.panels.setShowFileContention(true) }));
-    unregisters.push(registerAction({ id: "view-worker-fleet", label: "Worker Fleet", description: "Connected compute workers: status, capacity, labels; pair or revoke", icon: "⧉", category: "navigation", handler: () => actions.panels.setShowWorkerFleet(true) }));
+    // #1089 — repointed at the Runners view (the former `WorkerFleetPanel` overlay is retired).
+    unregisters.push(registerAction({ id: "view-worker-fleet", label: "Worker Fleet", description: "Connected compute workers: status, capacity, labels; pair or revoke", icon: "⧉", category: "navigation", handler: () => actions.handleViewModeChange("runners") }));
     if (state.hasAdditionalRepos) {
       unregisters.push(registerAction({ id: "view-multi-repo-monitor", label: "Multi-Repo Monitor", description: "Repo × workspace matrix: per-repo merge state of active workspaces", icon: "⊞", category: "navigation", handler: () => actions.panels.setShowMultiRepoMonitor(true) }));
     }
@@ -376,6 +379,7 @@ export function useBoardKeyboardShortcuts(
       },
       { viewId: RUNTIME_VIEW_ID, view: "runtime", prefix: "Runtime Feed", tabs: RUNTIME_TABS },
       { viewId: FOCUS_VIEW_ID, view: "focus", prefix: "Focus", tabs: FOCUS_TABS },
+      { viewId: RUNNERS_VIEW_ID, view: "runners", prefix: "Runners", tabs: RUNNERS_TABS },
     ];
     for (const { viewId, view, prefix, tabs } of containerTabActions) {
       for (const tab of tabs) {
