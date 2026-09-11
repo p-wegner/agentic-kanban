@@ -11,8 +11,33 @@
 // position in one project's issue-date range, so TimelineView keys by
 // `${projectId}:${viewId}` — otherwise switching projects while on this view
 // would restore a stale anchor from a different project's data range.
+//
+// #1099 P2-16: mirrored into localStorage (manual read/write, matching
+// `boardFilterStore`'s pattern rather than pulling in `zustand/middleware`)
+// so a page reload doesn't lose the anchor/zoom/filters — before this fix,
+// only the scale (the URL tab) survived a reload; everything else reset to
+// "fit all, all types, show completed" every time.
 import { create } from "zustand";
 import type { Scale } from "../lib/timeScale.js";
+
+const STORAGE_KEY = "timeline-view-state";
+
+function readPersisted(): Partial<Record<string, TimelineFilterState>> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writePersisted(byView: Partial<Record<string, TimelineFilterState>>) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(byView));
+  } catch {
+    // ignore (storage disabled/full/unavailable — in-memory state still works for this session)
+  }
+}
 
 export interface TimelineFilterState {
   /** `Viewport.anchor` — left edge of the visible window, ms epoch (local time). */
@@ -38,6 +63,11 @@ interface TimelineViewStoreState {
 }
 
 export const useTimelineViewStore = create<TimelineViewStoreState>((set) => ({
-  byView: {},
-  set: (viewId, state) => set((s) => ({ byView: { ...s.byView, [viewId]: state } })),
+  byView: readPersisted(),
+  set: (viewId, state) =>
+    set((s) => {
+      const byView = { ...s.byView, [viewId]: state };
+      writePersisted(byView);
+      return { byView };
+    }),
 }));
