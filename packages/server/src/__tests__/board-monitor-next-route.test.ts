@@ -133,9 +133,10 @@ describe("GET /api/projects/:id/monitor-tunables - capacity (#1029)", () => {
     expect(body.tunables.maxNewStartsPerCycle).toBe(3);
   });
 
-  // The read-out used to bypass the WIP resolver, so a per-project `wip_limit_<id>` (what the
-  // onboarding wizard writes) showed the Bullseye number while the monitor ran at the pref.
-  it("reports the per-project wip_limit the monitor actually runs at, over the Bullseye target", async () => {
+  // #1102: the Bullseye is the one stored WIP. A leftover `wip_limit_<id>` row (the startup
+  // migration deletes them) must not steer the read-out, and the payload no longer names a
+  // second WIP source.
+  it("reports the Bullseye target, ignores a leftover wip_limit_<id> row, and drops wipLimitSource", async () => {
     const { db } = createTestDb();
     const { projectId } = await seedProject(db);
     await db.insert(preferences).values([
@@ -147,9 +148,9 @@ describe("GET /api/projects/:id/monitor-tunables - capacity (#1029)", () => {
       readMachineCapacity: async () => ({ tier: "1", hold: false, canStartAnother: true, headroomProcesses: 4, thrashing: "none" }),
     }));
     const res = await app.request(`/api/projects/${projectId}/monitor-tunables`);
-    const body = await res.json() as { tunables: { activeAgentsTarget: number }; source: string; wipLimitSource: string; startPolicy: { wip: { activeAgentsTarget: number } } };
-    expect(body.tunables.activeAgentsTarget).toBe(2);
-    expect(body.wipLimitSource).toBe("wip_limit_pref");
+    const body = await res.json() as { tunables: { activeAgentsTarget: number }; source: string; startPolicy: { wip: { activeAgentsTarget: number } } };
+    expect(body.tunables.activeAgentsTarget).toBe(6);
+    expect("wipLimitSource" in body).toBe(false);
     expect(body.source).toBe("strategy");
     expect(body.startPolicy.wip.activeAgentsTarget).toBe(body.tunables.activeAgentsTarget);
   });
