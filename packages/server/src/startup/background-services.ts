@@ -29,9 +29,10 @@ import { updateMergeTrainState } from "../repositories/merge-train.repository.js
 import { startMergeRunReconciler, stopMergeRunReconciler } from "./merge-run-reconciler.js";
 import { setMergeRunMarkerPort } from "../services/merge-job.service.js";
 import { clearMergeRun, setMergeRun } from "../repositories/merge-run.repository.js";
-import { startAgentSessionRegistryReaper, stopAgentSessionRegistryReaper } from "./agent-session-registry-reaper.js";
+import { startAgentSessionRegistryReaper, stopAgentSessionRegistryReaper, isMachineGlobalReapAllowed } from "./agent-session-registry-reaper.js";
 import { startWorkerHealthProbe, stopWorkerHealthProbe } from "../services/worker-health-probe.service.js";
 import { getPreference } from "../repositories/preferences.repository.js";
+import { DB_LOCATION } from "../db/data-dir.js";
 
 /**
  * Background-service (start/stop) plugin registry — the append target for periodic
@@ -322,6 +323,17 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     // in the list because it touches no board state at all: nothing else waits on it.
     name: "agent-session-registry-reaper",
     start() {
+      // #1103 — this sweep reaps `~/.claude*` session files for the WHOLE machine, which is
+      // correct only for the single operated board (default DB, source "home-fallback"). A
+      // worktree/scratch server opened elsewhere (an explicit AGENTIC_KANBAN_DIR/DB_URL, or an
+      // in-checkout dev DB) must not own machine-global state it has no business touching.
+      if (!isMachineGlobalReapAllowed(DB_LOCATION.source)) {
+        console.log(
+          `[startup] skipping agent-session-registry-reaper: this process opened a non-default database ` +
+            `(source: ${DB_LOCATION.source}), so it is not the machine's operated board (#1103)`,
+        );
+        return;
+      }
       startAgentSessionRegistryReaper();
       return stopAgentSessionRegistryReaper;
     },
