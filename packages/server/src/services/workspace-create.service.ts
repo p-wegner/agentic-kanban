@@ -80,6 +80,22 @@ import { insertWorkspaceSetupRun } from "../repositories/workspace-setup-run.rep
 import { insertWorkspaceSymlinkRun } from "../repositories/workspace-symlink-run.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
+/**
+ * #1092: a failed PARALLEL setup was a console.warn and nothing else. The agent is already running
+ * by then, so nobody learned its worktree has no dependencies until the pre-merge gate failed hours
+ * later on a missing tool and parked in a 2h backoff. Say so on the same channel #169 gave the
+ * blocking path. Module-level, not inside the factory: that function is on the nloc ring (#800).
+ */
+function reportFailedParallelSetup(run: LatestSetupRun, projectId: string, workspaceId: string, branch: string): void {
+  if (run.state !== "failed") return;
+  emitButlerSystemEvent({
+    projectId,
+    kind: "workspace_error",
+    workspaceId,
+    text: `Parallel setup script failed for workspace ${workspaceId} (branch ${branch}, exit ${run.exitCode ?? "?"}) — the agent is running in a worktree whose dependencies did not install, so its pre-merge gate will fail until setup is re-run: ${setupFailureHeadline(run).slice(0, 200)}`,
+  });
+}
+
 export function createWorkspaceCreateService(deps: {
   database: Database;
   getSessionManager?: () => SessionLauncher;
@@ -851,21 +867,7 @@ export function createWorkspaceCreateService(deps: {
 
       if (setupCompletion) {
         setupCompletion
-          .then((run) => {
-            // #1092: a failed PARALLEL setup was a console.warn and nothing else. The agent is
-            // already running by then, so nobody learned its worktree has no dependencies until
-            // the pre-merge gate failed hours later on a missing tool and parked in a 2h backoff.
-            // Say so on the same channel #169 gave the blocking path.
-            if (run.state === "failed") {
-              emitButlerSystemEvent({
-                projectId: issue.projectId,
-                kind: "workspace_error",
-                workspaceId: id,
-                text: `Parallel setup script failed for workspace ${id} (branch ${branch}, exit ${run.exitCode ?? "?"}) — the agent is running in a worktree whose dependencies did not install, so its pre-merge gate will fail until setup is re-run: ${setupFailureHeadline(run).slice(0, 200)}`,
-              });
-            }
-            return updateLatestSetupRun(id, run, issue.projectId);
-          })
+          .then((run) => { reportFailedParallelSetup(run, issue.projectId, id, branch); return updateLatestSetupRun(id, run, issue.projectId); })
           .catch((err) => console.warn(`[workspaces] failed to persist setup status: ${errorMessage(err)}`));
       }
 
