@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { errorMessage } from "./error-message.js";
 
 /**
@@ -90,8 +90,37 @@ export interface RepoLockHandle {
   release: () => void;
 }
 
+/**
+ * Resolve the git COMMON directory for `repoPath` (#1103) — `<repoPath>/.git` for a normal
+ * checkout, or the shared directory a LINKED WORKTREE's `.git` actually points at. In a
+ * worktree `.git` is a one-line FILE (`gitdir: <main-repo>/.git/worktrees/<name>`), not a
+ * directory, so writing straight to `<repoPath>/.git/<lockfile>` fails ENOENT/ENOTDIR and the
+ * lock silently never engages there — every worktree writer (a builder's own git commands, a
+ * Conductor loop, this board's own merge queue running IN a worktree) was unserialized.
+ *
+ * Read straight off disk rather than spawning `git rev-parse --git-common-dir`: this sits on
+ * the hot path of every lock attempt and poll (`withRepoLock` polls every second for up to 90
+ * minutes), and the on-disk shape is a stable git internal — the per-worktree git dir's own
+ * `commondir` file names the shared directory (usually `../..`). Falls back to
+ * `<repoPath>/.git` on anything unexpected, which is exactly today's behaviour: correct for a
+ * real checkout, and no worse than before for a worktree shape this doesn't recognize.
+ */
+function resolveGitDir(repoPath: string): string {
+  const dotGit = join(repoPath, ".git");
+  try {
+    if (!statSync(dotGit).isFile()) return dotGit;
+    const match = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf8"));
+    if (!match) return dotGit;
+    const worktreeGitDir = resolve(repoPath, match[1].trim());
+    const commonDirRaw = readFileSync(join(worktreeGitDir, "commondir"), "utf8").trim();
+    return resolve(worktreeGitDir, commonDirRaw);
+  } catch {
+    return dotGit;
+  }
+}
+
 function lockPathFor(repoPath: string): string {
-  return join(repoPath, ".git", LOCK_FILE_NAME);
+  return join(resolveGitDir(repoPath), LOCK_FILE_NAME);
 }
 
 function readLockContents(lockPath: string): RepoLockContents | null {
