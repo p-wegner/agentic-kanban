@@ -5,6 +5,7 @@ import {
   PRIORITY_COLORS,
   PRIORITY_ORDER,
   STATUS_BG,
+  STATUS_BG_SOLID,
   STATUS_BADGE,
   ALL_TYPES,
   COMPLETED_STATUSES,
@@ -84,6 +85,9 @@ interface TooltipState {
   issue: IssueWithStatus;
   x: number;
   y: number;
+  /** The lane (status column) name — shown in the tooltip body (#1086 P2-9). */
+  statusName: string;
+  isCompleted: boolean;
 }
 
 /**
@@ -191,6 +195,7 @@ function TimelineToolbar({
           <button
             key={s}
             onClick={() => onSetScale(s)}
+            aria-pressed={s === scale}
             className={`px-2 h-6 text-xs rounded border transition-colors ${
               s === scale
                 ? "bg-brand-50 dark:bg-brand-950/30 border-brand-300 dark:border-brand-700 text-brand-700 dark:text-brand-400"
@@ -217,8 +222,8 @@ function TimelineToolbar({
         >Fit all</button>
         <span className="text-xs text-gray-400 dark:text-gray-500 mx-2">|</span>
         <span className="text-xs text-gray-400 dark:text-gray-500 mr-1">Zoom</span>
-        <button onClick={() => onZoom(1 / 1.25)} className={navBtn} title="Zoom out">−</button>
-        <button onClick={() => onZoom(1.25)} className={navBtn} title="Zoom in">+</button>
+        <button onClick={() => onZoom(1 / 1.25)} className={navBtn} title="Zoom out" aria-label="Zoom out">−</button>
+        <button onClick={() => onZoom(1.25)} className={navBtn} title="Zoom in" aria-label="Zoom in">+</button>
       </div>
       <div className="flex items-center gap-1">
         {Object.entries(TYPE_COLORS).map(([type, cls]) => {
@@ -228,6 +233,7 @@ function TimelineToolbar({
               key={type}
               onClick={() => onToggleType(type)}
               title={isActive ? `Hide ${type}s` : `Show ${type}s`}
+              aria-pressed={isActive}
               className={`flex items-center gap-1.5 px-2 h-6 text-xs rounded border transition-all select-none ${
                 isActive
                   ? `${cls.bg} ${cls.border} ${cls.text} hover:brightness-95 dark:hover:brightness-110`
@@ -291,17 +297,23 @@ function TimelineLane({
   return (
     <div className={`${STATUS_BG[lane.name] ?? "bg-surface-raised dark:bg-surface-raised-dark"} ${laneIdx > 0 ? "border-t border-gray-200 dark:border-gray-700" : ""}`}>
       {/* Lane header */}
-      <div className="flex items-center sticky top-[28px] z-[5]" style={{ height: 28 }}>
+      {/*
+        #1086 P2-12: the header is sticky (stays pinned while rows scroll under it), so it
+        needs an OPAQUE background — `STATUS_BG` is a soft translucent tint meant for a row,
+        and was empty ("") for a status with no entry, both of which let scrolled-under rows
+        bleed through. `STATUS_BG_SOLID` is the same hue at full opacity, with a real fallback.
+      */}
+      <div className="flex items-center sticky z-[5]" style={{ top: AXIS_H, height: AXIS_H }}>
         <div
-          className={`flex items-center gap-2 px-3 border-r border-gray-200 dark:border-gray-700 h-full ${STATUS_BG[lane.name] ?? ""} border-b border-gray-100 dark:border-gray-800`}
+          className={`flex items-center gap-2 px-3 border-r border-gray-200 dark:border-gray-700 h-full ${STATUS_BG_SOLID[lane.name] ?? "bg-surface-raised dark:bg-surface-raised-dark"} border-b border-gray-100 dark:border-gray-800`}
           style={{ width: LABEL_W, minWidth: LABEL_W }}
         >
           <span className={`text-xs font-semibold truncate ${STATUS_BADGE[lane.name] ?? "text-gray-600 dark:text-gray-400"}`}>{lane.name}</span>
-          <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto shrink-0" title={isCapped ? `${lane.returnedCount} of ${lane.count} loaded` : undefined}>
+          <span className="text-xs text-gray-500 dark:text-gray-400 ml-auto shrink-0" title={isCapped ? `${lane.returnedCount} of ${lane.count} loaded` : undefined}>
             {lane.count}
           </span>
         </div>
-        <div className={`flex-1 h-full border-b border-gray-100 dark:border-gray-800 relative ${STATUS_BG[lane.name] ?? ""}`}>
+        <div className={`flex-1 h-full border-b border-gray-100 dark:border-gray-800 relative ${STATUS_BG_SOLID[lane.name] ?? "bg-surface-raised dark:bg-surface-raised-dark"}`}>
           <GridLines majorTicks={majorTicks} minorTicks={minorTicks} range={range} nowPct={nowPct} strong />
           {isCapped && (
             <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[10px] text-amber-600 dark:text-amber-400 whitespace-nowrap select-none">
@@ -320,13 +332,20 @@ function TimelineLane({
         } = computeIssueBar(issue, range, isCompleted, nowMs);
         return (
           <div key={issue.id} className="flex items-center border-b border-gray-50 dark:border-gray-800" style={{ height: ROW_H }}>
-            <div
-              className="flex items-center gap-1.5 px-2 border-r border-gray-100 dark:border-gray-800 h-full shrink-0 overflow-hidden"
+            {/*
+              #1086 P2-14: this label used to be a plain, unclickable `div` — clicking the row
+              name did nothing, only the bar itself opened the issue. A real `<button>` gets
+              both a click handler and keyboard/focus support for free.
+            */}
+            <button
+              type="button"
+              onClick={() => onIssueClick(issue)}
+              className="flex items-center gap-1.5 px-2 border-r border-gray-100 dark:border-gray-800 h-full shrink-0 overflow-hidden text-left cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-inset"
               style={{ width: LABEL_W, minWidth: LABEL_W }}
             >
-              <span className="text-[11px] text-gray-400 dark:text-gray-500 shrink-0">#{issue.issueNumber}</span>
+              <span className="text-[11px] text-gray-500 dark:text-gray-400 shrink-0">#{issue.issueNumber}</span>
               <span className="text-[11px] text-gray-600 dark:text-gray-400 truncate" title={issue.title}>{issue.title}</span>
-            </div>
+            </button>
             {/*
               #1086 P1-1: `overflow-hidden` is what actually stops a bar painting over the
               label column or piling up at an edge — `startP`/`spanP` are already clipped by
@@ -349,10 +368,13 @@ function TimelineLane({
                 bars on top of each other at the same edge.
               */}
               {startP !== null && (
-                <div
+                <button
+                  type="button"
+                  aria-label={`${issue.title} — ${lane.name}${invalidDueDate ? ", invalid due date" : ""}`}
                   className={`absolute top-1/2 -translate-y-1/2 rounded-md border cursor-pointer
                     transition-all hover:shadow-md hover:brightness-95 dark:hover:brightness-110
-                    flex items-center gap-1.5 px-2 overflow-hidden select-none
+                    focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500
+                    flex items-center gap-1.5 px-2 overflow-hidden select-none text-left
                     ${cls.bg} ${invalidDueDate ? "border-dashed border-red-400 dark:border-red-500" : cls.border}`}
                   title={invalidDueDate ? "Due date is before the created date — showing the fallback end instead" : undefined}
                   style={{
@@ -363,14 +385,30 @@ function TimelineLane({
                   onClick={() => onIssueClick(issue)}
                   onMouseEnter={(e) => {
                     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                    setTooltip({ issue, x: rect.left + rect.width / 2, y: rect.top });
+                    setTooltip({ issue, x: rect.left + rect.width / 2, y: rect.top, statusName: lane.name, isCompleted });
                   }}
                   onMouseLeave={() => setTooltip(null)}
+                  onFocus={(e) => {
+                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                    setTooltip({ issue, x: rect.left + rect.width / 2, y: rect.top, statusName: lane.name, isCompleted });
+                  }}
+                  onBlur={() => setTooltip(null)}
                 >
                   {clippedStart && (
                     <span className="text-gray-500 dark:text-gray-400 text-[10px] shrink-0" title="Continues before this view">«</span>
                   )}
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: priColor }} title={`Priority: ${issue.priority ?? "medium"}`} />
+                  {/*
+                    #1086 P2-10: priority was conveyed by the dot's colour alone (a `title`
+                    only reaches a mouse, not a screen reader or a colour-blind reader without
+                    hovering). `role="img"` + `aria-label` gives it an accessible name; the
+                    visible affordance is left to the follow-up (a shape/pattern distinction).
+                  */}
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: priColor }}
+                    role="img"
+                    aria-label={`Priority: ${issue.priority ?? "medium"}`}
+                  />
                   {invalidDueDate && (
                     <span className="text-red-500 dark:text-red-400 text-[10px] font-bold shrink-0" title="Due date is before the created date">⚠</span>
                   )}
@@ -380,7 +418,7 @@ function TimelineLane({
                   ) : isOpen ? (
                     <span className="text-gray-500 dark:text-gray-400 text-[10px] shrink-0 ml-auto" title="Still open — ongoing">›</span>
                   ) : null}
-                </div>
+                </button>
               )}
             </div>
           </div>
@@ -390,17 +428,69 @@ function TimelineLane({
   );
 }
 
+/**
+ * #1086 P2-9: the tooltip used to be fixed-position with no regard for the viewport, so a
+ * bar near a window edge drew a tooltip that ran off-screen. Measured after mount (its size
+ * depends on its content — tags, a due date row — so it can't be computed in advance) and
+ * clamped horizontally, with a flip below the bar when there isn't enough room above.
+ */
+function useClampedTooltipPosition(anchorX: number, anchorY: number): {
+  ref: (node: HTMLDivElement | null) => void;
+  style: { left: number; top: number; transform: string };
+} {
+  const [node, setNode] = useState<HTMLDivElement | null>(null);
+  const [offset, setOffset] = useState({ dx: 0, flip: false });
+  useEffect(() => {
+    if (!node || typeof window === "undefined") return;
+    const rect = node.getBoundingClientRect();
+    const margin = 8;
+    let dx = 0;
+    if (rect.left < margin) dx = margin - rect.left;
+    else if (rect.right > window.innerWidth - margin) dx = window.innerWidth - margin - rect.right;
+    const flip = rect.top < margin;
+    setOffset((prev) => (prev.dx === dx && prev.flip === flip ? prev : { dx, flip }));
+  }, [node, anchorX, anchorY]);
+  return {
+    ref: setNode,
+    style: {
+      left: anchorX + offset.dx,
+      top: offset.flip ? anchorY + 12 : anchorY - 12,
+      transform: offset.flip ? "translate(-50%, 12px)" : "translate(-50%, -100%)",
+    },
+  };
+}
+
+/** Human-readable span between two timestamps, rounded to whole days (falls back to hours for a same-day span). */
+function fmtDuration(startMs: number, endMs: number): string {
+  const ms = Math.max(0, endMs - startMs);
+  const days = Math.round(ms / DAY_MS);
+  if (days >= 1) return `${days} day${days !== 1 ? "s" : ""}`;
+  const hours = Math.round(ms / (60 * 60 * 1000));
+  return `${hours} hour${hours !== 1 ? "s" : ""}`;
+}
+
 function TimelineTooltip({ tooltip }: { tooltip: TooltipState }) {
+  const { ref, style } = useClampedTooltipPosition(tooltip.x, tooltip.y);
+  const createdMs = new Date(tooltip.issue.createdAt).getTime();
+  const endMs = tooltip.isCompleted
+    ? new Date(tooltip.issue.statusChangedAt ?? tooltip.issue.updatedAt).getTime()
+    : Date.now();
   return (
     <div
+      ref={ref}
+      role="tooltip"
       className="fixed z-50 pointer-events-none bg-surface-raised dark:bg-surface-raised-dark border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-3 text-xs max-w-xs"
-      style={{ left: tooltip.x, top: tooltip.y - 12, transform: "translate(-50%, -100%)" }}
+      style={style}
     >
       <div className="font-semibold text-gray-900 dark:text-gray-100 mb-1.5 flex items-center gap-1.5">
-        <span className="text-gray-400 dark:text-gray-500">#{tooltip.issue.issueNumber}</span>
+        <span className="text-gray-500 dark:text-gray-400">#{tooltip.issue.issueNumber}</span>
         <span className="truncate">{tooltip.issue.title}</span>
       </div>
       <div className="space-y-0.5 text-gray-500 dark:text-gray-400">
+        <div className="flex gap-2">
+          <span className="w-14 shrink-0 text-gray-400">Status</span>
+          {tooltip.statusName}
+        </div>
         <div className="flex gap-2">
           <span className="w-14 shrink-0 text-gray-400">Created</span>
           {fmtTooltipDate(new Date(tooltip.issue.createdAt))}
@@ -408,6 +498,16 @@ function TimelineTooltip({ tooltip }: { tooltip: TooltipState }) {
         <div className="flex gap-2">
           <span className="w-14 shrink-0 text-gray-400">Updated</span>
           {fmtTooltipDate(new Date(tooltip.issue.updatedAt))}
+        </div>
+        {tooltip.isCompleted && (
+          <div className="flex gap-2">
+            <span className="w-14 shrink-0 text-gray-400">Completed</span>
+            {fmtTooltipDate(new Date(tooltip.issue.statusChangedAt ?? tooltip.issue.updatedAt))}
+          </div>
+        )}
+        <div className="flex gap-2">
+          <span className="w-14 shrink-0 text-gray-400">Duration</span>
+          {fmtDuration(createdMs, endMs)}{!tooltip.isCompleted && " (ongoing)"}
         </div>
         {tooltip.issue.dueDate && (() => {
           // #1086 P1-5: `dueDate` is a bare "YYYY-MM-DD" — `parseLocalDate` reads it as local
@@ -745,16 +845,27 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
                     scale-aware — "Week of Mar 9", "September 2026", "Q3 2026") instead of the old
                     span-proportional `fmtAxisDate`.
                   */}
-                  {majorTickList.map((tick, i) => (
-                    <div key={i} className="absolute top-0 h-full flex items-center" style={axisAnchor(pct(tick.ts))}>
-                      <span className={`text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap select-none px-1 shrink-0 ${axisLabelShift(pct(tick.ts))}`}>
-                        {tick.label}
-                      </span>
-                    </div>
-                  ))}
+                  {majorTickList.map((tick, i) => {
+                    // #1086 P3-e: `pct(tick.ts)` was computed twice per tick (once for the
+                    // anchor, once for the label shift) — compute it once and reuse it.
+                    const p = pct(tick.ts);
+                    return (
+                      <div key={i} className="absolute top-0 h-full flex items-center" style={axisAnchor(p)}>
+                        <span className={`text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap select-none px-1 shrink-0 ${axisLabelShift(p)}`}>
+                          {tick.label}
+                        </span>
+                      </div>
+                    );
+                  })}
                   {nowPct >= 0 && nowPct <= 100 && (
                     <div className="absolute top-0 h-full flex items-end pb-0.5" style={axisAnchor(nowPct)}>
-                      <span className={`text-[10px] font-bold text-red-500 whitespace-nowrap select-none shrink-0 ${axisLabelShift(nowPct)}`}>
+                      {/*
+                        #1086 P2-8: a bare red label sitting at the same baseline as the tick
+                        labels could land right on top of one (a major tick and "today" often
+                        fall close together). An opaque pill + higher z-index keeps it legible
+                        instead of the two strings visually merging.
+                      */}
+                      <span className={`text-[10px] font-bold text-red-500 whitespace-nowrap select-none shrink-0 z-[1] px-1 rounded bg-surface-raised dark:bg-surface-raised-dark ${axisLabelShift(nowPct)}`}>
                         Today
                       </span>
                     </div>

@@ -333,6 +333,36 @@ describe("timeline persisted state is scoped by project (#1090)", () => {
   });
 });
 
+describe("TimelineView — a11y (#1086 P2-10)", () => {
+  const board = [column("Todo", [issue({ id: "a", issueNumber: 5, title: "Keyboard reachable" })])];
+
+  it("renders the issue bar as a focusable button with an accessible name", () => {
+    const html = render(board);
+    expect(html).toMatch(/<button[^>]*aria-label="Keyboard reachable — Todo"/);
+  });
+
+  it("renders the row label as a clickable button too (#1086 P2-14)", () => {
+    const html = render(board);
+    expect(html).toMatch(/<button[^>]*>[\s\S]{0,200}#5</);
+  });
+
+  it("marks the priority dot with an accessible name instead of relying on color alone", () => {
+    const html = render(board);
+    expect(html).toContain('role="img"');
+    expect(html).toMatch(/aria-label="Priority: medium"/);
+  });
+
+  it("marks the active scale button with aria-pressed", () => {
+    const html = render(board);
+    expect(html).toMatch(/aria-pressed="true"[^>]*>Month</);
+  });
+
+  it("marks an active type filter chip with aria-pressed", () => {
+    const html = render(board);
+    expect(html).toMatch(/aria-pressed="true"[^>]*>\s*<span[^>]*w-2\.5/);
+  });
+});
+
 describe("timeline axis anchoring (#897)", () => {
   it("pins the final tick by its RIGHT edge, so its label cannot leave the track", () => {
     expect(axisAnchor(100)).toEqual({ right: 0 });
