@@ -3,6 +3,40 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-11 (later) — timeline reconciled (#1090 → #1093); the smoke check boots a second board on the OPERATED DB (#1095)
+
+**Timeline is landed and the four overlapping branches are resolved.** Operator decision: land
+#1090 first, then reconcile. The two merges were #1089 (Runners view, `1a6dde61ea`), then #1090
+(`bb535143cc`). #1093 (`0bcc524416`) then ported what #1088 and #1091 had and #1090 lacked.
+#1086/#1088/#1091 are **Cancelled as superseded**, each with a comment. Their workspaces and
+branches are deleted; the commits survive at `refs/kanban/archive/ak-{1086,1088,1091}-2026-09-11`.
+The auto-merge kill switch (`auto_merge_disabled_<agentic-kanban>`) was armed for the whole
+sequence to enforce that order. It is **disarmed again** (`"false"`, verified).
+
+**#1086 is NOT fully done: its remainder is carried forward, not dropped.** A read-only
+classification at the #1093 tip found 5 of 36 findings done, 10 partial and 21 open.
+- **#1096** (high): correctness. Most important, **P1-1 bar clipping was never wired in**:
+  `clipSpan` exists and is tested but has no production caller. #1093 skipped P1-1 on MY ticket's
+  false claim that #1090 covered it. The monitor started #1096.
+- **#1097** (medium): UX / a11y / perf / polish. Tagged `no-auto-start`, because it edits the same
+  two files as #1096. Start it after #1096 lands.
+
+**#1095 (high, filed): the pre-merge smoke check is a hazard and hides its own errors.**
+- `pre-merge-gate.service.ts:733` calls `runSmokeCheck` with no env, and `smoke-check.ts` spawns
+  with `{...process.env}`. The smoke boot is a FULL board against `~/.agentic-kanban/kanban.db`:
+  monitor loop, startup reconcilers, session reattach. The verify half has been isolated since
+  #231; the smoke half never was.
+- Its failure message uses the log HEAD (`slice(0, 400)`), which is always the pnpm notice plus
+  the banner. Both #1090 (exited, code 1) and #1093 (60s timeout) were withheld with no visible
+  cause. Both passed on a plain retry, i.e. environmental.
+- **Tried and rejected: booting a worktree's `pnpm dev` by hand to diagnose it.** That does the
+  same thing (home-fallback, operated DB): I got a second monitor cycle and a reattached live
+  session for ~100s. No damage, only because the kill switch was armed and WIP was capped. Until
+  #1095 lands, point `AGENTIC_KANBAN_DIR` at a temp dir if you must boot a worktree.
+
+**Still not live:** nothing merged today (#1087, #1089, #1090, #1092, #1093) reaches the operated
+board until `pnpm promote`. `chkdsk C: /f` is still the operator's.
+
 ## 2026-09-11 — merges stuck: a corrupt pnpm store, and a gate that could not say so (#1092)
 
 **#1086/#1087 sat In Review with the merge parked.** Their pre-merge gate failed on
