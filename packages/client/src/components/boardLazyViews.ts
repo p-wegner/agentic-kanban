@@ -18,6 +18,9 @@ export const WorkflowsView = lazy(() => import("./WorkflowsView.js").then((m) =>
 // so each feed is one lazy chunk.
 export const BoardFeedView = lazy(() => import("./BoardFeedView.js").then((m) => ({ default: m.BoardFeedView })));
 export const RuntimeFeedView = lazy(() => import("./RuntimeFeedView.js").then((m) => ({ default: m.RuntimeFeedView })));
+// #1089 — Runners: connected compute workers, follow-up to #1087. Imports its four tab
+// panels directly, so the whole thing is one lazy chunk like the other tabbed containers.
+export const RunnersView = lazy(() => import("./RunnersView.js").then((m) => ({ default: m.RunnersView })));
 export const StrategyTargetsView = lazy(() => import("./StrategyTargetsView.js").then((m) => ({ default: m.StrategyTargetsView })));
 export const SwimlaneView = lazy(() => import("./SwimlaneView.js").then((m) => ({ default: m.SwimlaneView })));
 export const RunbooksView = lazy(() => import("./RunbooksView.js").then((m) => ({ default: m.RunbooksView })));

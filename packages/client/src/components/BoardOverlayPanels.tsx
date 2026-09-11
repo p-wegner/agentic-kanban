@@ -9,7 +9,6 @@ import { AllWorkspacesPanel } from "./AllWorkspacesPanel.js";
 import { WorkspaceLaunchFailuresPanel } from "./WorkspaceLaunchFailuresPanel.js";
 import { CleanupQueuePanel } from "./CleanupQueuePanel.js";
 import { FileContentionPanel } from "./FileContentionPanel.js";
-import { WorkerFleetPanel } from "./WorkerFleetPanel.js";
 import { MultiRepoMonitorPanel } from "./MultiRepoMonitorPanel.js";
 import { TranscriptSearchPanel } from "./TranscriptSearchPanel.js";
 import { SessionTranscriptPanel } from "./SessionTranscriptPanel.js";
@@ -47,7 +46,6 @@ interface Props {
   showLaunchFailures: boolean;
   showCleanupQueue: boolean;
   showFileContention: boolean;
-  showWorkerFleet: boolean;
   showMultiRepoMonitor: boolean;
   showTranscriptSearch: boolean;
   showMergeQueue: boolean;
@@ -66,7 +64,6 @@ interface Props {
   onCloseLaunchFailures: () => void;
   onCloseCleanupQueue: () => void;
   onCloseFileContention: () => void;
-  onCloseWorkerFleet: () => void;
   onCloseMultiRepoMonitor: () => void;
   onCloseTranscriptSearch: () => void;
   onCloseMergeQueue: () => void;
@@ -130,7 +127,6 @@ export function BoardOverlayPanels({
   showLaunchFailures,
   showCleanupQueue,
   showFileContention,
-  showWorkerFleet,
   showMultiRepoMonitor,
   showTranscriptSearch,
   showMergeQueue,
@@ -147,7 +143,6 @@ export function BoardOverlayPanels({
   onCloseLaunchFailures,
   onCloseCleanupQueue,
   onCloseFileContention,
-  onCloseWorkerFleet,
   onCloseMultiRepoMonitor,
   onCloseTranscriptSearch,
   onCloseMergeQueue,
@@ -280,7 +275,6 @@ export function BoardOverlayPanels({
           onClose={onCloseFileContention}
         />
       )}
-      {showWorkerFleet && <WorkerFleetPanel onClose={onCloseWorkerFleet} />}
       {showMultiRepoMonitor && (
         <MultiRepoMonitorPanel
           activeProjectId={activeProjectId ?? null}

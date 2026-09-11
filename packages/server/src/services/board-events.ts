@@ -162,6 +162,25 @@ function createBoardEvents() {
     }
   }
 
+  /**
+   * Broadcast a reason to EVERY project's channel, not one (#1089). The worker fleet is not
+   * scoped to a project — a worker registering, a heldincoming ref landing, or a revoke
+   * changes something every open Runners view should refetch, whichever project it happens to
+   * be looking at. Same "every open socket" shape as `broadcastProjectsChanged`, but reuses
+   * the `board_changed` message so existing `onBoardChange` handlers need no new branch.
+   */
+  function broadcastToAllProjects(reason: BoardEventType) {
+    for (const [projectId, subs] of subscribers) {
+      const message: BoardChangedMessage = { type: "board_changed", projectId, reason };
+      const payload = JSON.stringify(message);
+      for (const sub of subs.values()) {
+        if (sub.ws.readyState === 1) {
+          sub.ws.send(payload);
+        }
+      }
+    }
+  }
+
   function broadcastProjectsChanged(projectId: string, reason: ProjectEventType) {
     const message: ProjectsChangedMessage = { type: "projects_changed", projectId, reason };
     const payload = JSON.stringify(message);
@@ -243,6 +262,7 @@ function createBoardEvents() {
     unsubscribe,
     hasSubscribers,
     broadcast,
+    broadcastToAllProjects,
     broadcastProjectsChanged,
     broadcastActivity,
     broadcastLiveStats,
@@ -270,4 +290,4 @@ export type BoardEvents = ReturnType<typeof createBoardEvents>;
  * (`server-start.ts`, `routes/index.ts`, the WS route) keeps the full type; a service
  * that only emits declares this.
  */
-export type BoardEventSink = Pick<BoardEvents, "broadcast" | "broadcastActivity">;
+export type BoardEventSink = Pick<BoardEvents, "broadcast" | "broadcastActivity" | "broadcastToAllProjects">;

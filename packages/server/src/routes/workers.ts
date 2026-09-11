@@ -33,6 +33,10 @@ import { getPreferenceValue } from "../repositories/session-lifecycle.repository
 import { listWorkerBranchAssignments } from "../repositories/worker.repository.js";
 import type { ProviderName } from "../services/agent-provider.js";
 import { resolveOwnPackageVersion } from "../lib/worker-build.js";
+import type { BoardEventSink } from "../services/board-events.js";
+import { buildWorkerConnectSteps } from "../lib/worker-connect-steps.js";
+import { resolveFleetPort, resolveFleetHost } from "../services/fleet-listener.service.js";
+import { resolveConfiguredGitPort, resolveConfiguredGitHost } from "../services/git-http.service.js";
 
 function bearerFrom(c: Context): string | null {
   return extractBearer(c.req.header("authorization"));
@@ -79,7 +83,7 @@ async function resolveRefOwner(
  * actions with no credential of their own — they ride the board's
  * "only reachable from this machine" trust, exactly like the rest of /api.
  */
-function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Database): void {
+function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Database, boardEvents?: BoardEventSink): void {
   router.post("/pairing-token", (c) => c.json(reg.mintPairingToken(), 201));
 
   // #774 - the list route used to answer the raw `workers` rows, so `connected`, `load`
@@ -188,6 +192,9 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
         payload: { projectId: body.projectId, branch: body.branch, outcome: result.outcome },
       });
     }
+    // #1089 — the Runners view's Git Transport tab refetches on this instead of only its
+    // own 15s poll.
+    boardEvents?.broadcastToAllProjects("workers_changed");
     return c.json({ ok: true, outcome: result.outcome });
   });
 
@@ -214,6 +221,7 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
         },
       });
     }
+    boardEvents?.broadcastToAllProjects("workers_changed");
     return c.json({ ok: true, sha: result.sha });
   });
 
@@ -272,7 +280,37 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
     // fire-and-forget: a revoke must not answer 200 while the timeline is still being
     // dropped, or a poll arriving in between still shows a revoked worker's history.
     const forgotten = await forgetWorkerEvents(workerId, database);
+    boardEvents?.broadcastToAllProjects("workers_changed");
     return c.json({ ok: true, eventsDeleted: forgotten });
+  });
+
+  // #1089 — the Connect tab's data source: fleet-listener/git-transport config plus the
+  // SAME connect runbook the CLI's `worker instructions` prints, so the two never drift.
+  // Owner-only: it names the board's own configured hosts/ports.
+  router.get("/connect-info", (c) => {
+    const fleetPort = resolveFleetPort();
+    const fleetHost = resolveFleetHost();
+    const gitHttpPort = resolveConfiguredGitPort();
+    const gitHttpHost = resolveConfiguredGitHost();
+    // The board's own externally-reachable base URL is not knowable from here (it depends on
+    // the network the operator put the board on) — the fleet port is what a worker's --board
+    // must point at, so build a best-effort loopback URL and let the reader substitute their
+    // own host/IP the same way the CLI's `worker instructions --board` flag already does.
+    const boardUrl = fleetPort ? `http://<board-host>:${fleetPort}` : "http://<board-host>:<KANBAN_FLEET_PORT>";
+    // A placeholder token: this endpoint reports CONFIG, it does not mint. The Connect tab
+    // fills the real value in client-side after `POST /pairing-token`, exactly like the CLI's
+    // `worker instructions --token` flag does when a token isn't passed.
+    const steps = buildWorkerConnectSteps(boardUrl, "<pairing-token>");
+    return c.json({
+      fleetConfigured: fleetPort !== null,
+      fleetPort,
+      fleetHost,
+      gitHttpPort,
+      gitHttpHost,
+      boardWorkerVersion: resolveOwnPackageVersion() ?? null,
+      boardUrl,
+      steps,
+    });
   });
 }
 
@@ -282,7 +320,7 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
  * HTTP surface safe to expose off-loopback, and the fleet listener serves
  * exactly this and nothing else.
  */
-function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry, database: Database): void {
+function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry, database: Database, boardEvents?: BoardEventSink): void {
   router.post("/register", async (c) => {
     const body = await parseOptionalJsonBody<{
       pairingToken?: string;
@@ -336,6 +374,7 @@ function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry, database:
         workerVersion: body.workerVersion ?? null,
       },
     });
+    boardEvents?.broadcastToAllProjects("workers_changed");
     return c.json(result, 201);
   });
 
@@ -408,11 +447,11 @@ function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry, database:
 }
 
 /** The full surface, mounted on the main (loopback) app at /api/workers. */
-export function createWorkersRoute(database: Database, registry?: WorkerRegistry) {
+export function createWorkersRoute(database: Database, registry?: WorkerRegistry, boardEvents?: BoardEventSink) {
   const router = createRouter();
   const reg = registry ?? getWorkerRegistry(database);
-  registerOwnerRoutes(router, reg, database);
-  registerWorkerFacingRoutes(router, reg, database);
+  registerOwnerRoutes(router, reg, database, boardEvents);
+  registerWorkerFacingRoutes(router, reg, database, boardEvents);
   return router;
 }
 

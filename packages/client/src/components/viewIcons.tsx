@@ -111,6 +111,13 @@ export const VIEW_ICONS: Record<ViewMode, ReactNode> = {
       d="M14 7h3a1 1 0 011 1v3h-1.5a1.5 1.5 0 000 3H18v3a1 1 0 01-1 1h-3v-1.5a1.5 1.5 0 00-3 0V18H8a1 1 0 01-1-1v-3H5.5a1.5 1.5 0 010-3H7V8a1 1 0 011-1h3V5.5a1.5 1.5 0 013 0V7z"
     />
   ),
+  runners: (
+    <Icon className="w-3.5 h-3.5">
+      <rect x="2" y="3" width="20" height="6" rx="1" />
+      <rect x="2" y="15" width="20" height="6" rx="1" />
+      <path d="M6 6h.01M6 18h.01" />
+    </Icon>
+  ),
 };
 
 /** The glyph for a view id. */

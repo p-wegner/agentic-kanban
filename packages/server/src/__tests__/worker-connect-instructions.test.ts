@@ -3,7 +3,8 @@
 // binds it to the implementation so a rename breaks the test, not a user's setup.
 
 import { describe, it, expect } from "vitest";
-import { buildWorkerConnectSteps, renderWorkerConnectMarkdown } from "../cli/commands/worker.js";
+import { buildWorkerConnectSteps } from "../lib/worker-connect-steps.js";
+import { renderWorkerConnectMarkdown } from "../cli/commands/worker.js";
 import { BUILTIN_SKILLS } from "../builtin-skills.js";
 import {
   workerDispatchPrefKey,

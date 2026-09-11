@@ -230,6 +230,48 @@ export type RuntimeTabId = "flight-recorder" | "monitor-cycles" | "health-events
 export const RUNTIME_TAB_IDS = RUNTIME_TABS.map((t) => t.id as RuntimeTabId);
 
 // ---------------------------------------------------------------------------
+// #1089 — Runners: connected compute workers, one place instead of a single
+// overlay panel (retired `WorkerFleetPanel`, follow-up to #1087).
+// ---------------------------------------------------------------------------
+
+export const RUNNERS_VIEW_ID = "runners";
+
+export const RUNNERS_TABS: readonly ViewTabDescriptor[] = [
+  {
+    id: "runners",
+    label: "Runners",
+    paletteLabel: "Runners",
+    paletteIcon: "⧉",
+    paletteDescription: "Connected compute workers: identity, status, capabilities, load, and current work",
+  },
+  {
+    id: "dispatch-log",
+    label: "Dispatch Log",
+    paletteLabel: "Dispatch Log",
+    paletteIcon: "▤",
+    paletteDescription: "Where recent sessions actually ran (host or a named worker) and why, with an issue explain box",
+  },
+  {
+    id: "git-transport",
+    label: "Git Transport",
+    paletteLabel: "Git Transport",
+    paletteIcon: "⎇",
+    paletteDescription: "Held incoming refs pushed by workers — land or discard each one deliberately",
+  },
+  {
+    id: "connect",
+    label: "Connect",
+    paletteLabel: "Connect a Worker",
+    paletteIcon: "+",
+    paletteDescription: "Mint a pairing token and get the exact commands to connect another machine as a worker",
+  },
+];
+
+export type RunnersTabId = "runners" | "dispatch-log" | "git-transport" | "connect";
+
+export const RUNNERS_TAB_IDS = RUNNERS_TABS.map((t) => t.id as RunnersTabId);
+
+// ---------------------------------------------------------------------------
 // #446 — the tab as a URL dimension.
 //
 // The router needs to answer "does this view have tabs, which ones, and what is
@@ -259,6 +301,7 @@ export const VIEW_TAB_REGISTRY: Readonly<Record<string, ViewTabSet>> = {
   [ACTIVITY_VIEW_ID]: { tabs: ACTIVITY_TABS, defaultTab: "activity" },
   [RUNTIME_VIEW_ID]: { tabs: RUNTIME_TABS, defaultTab: "flight-recorder" },
   [FOCUS_VIEW_ID]: { tabs: FOCUS_TABS, defaultTab: "focus" },
+  [RUNNERS_VIEW_ID]: { tabs: RUNNERS_TABS, defaultTab: "runners" },
 };
 
 /** True when `viewId` is a tabbed container view. Plain views have no tab dimension. */
