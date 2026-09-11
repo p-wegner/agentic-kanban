@@ -127,6 +127,11 @@ export interface RiskPosture {
 export interface ResolvedTunablesResponse {
   tunables: MonitorTunables;
   source: "strategy" | "prefs";
+  /**
+   * Which surface decided `tunables.activeAgentsTarget` (the WIP resolver's source). Differs
+   * from `source` when a per-project `wip_limit_<id>` overrides the Bullseye/legacy target.
+   */
+  wipLimitSource?: "override" | "wip_limit_pref" | "strategy" | "legacy_pref" | "default";
   startPolicy?: StartPolicy;
 }
 

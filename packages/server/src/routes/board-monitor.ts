@@ -4,6 +4,7 @@ import { getProjectById } from "../repositories/project.repository.js";
 import { getAllPreferences, getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { readOrchestratorStatus } from "../services/orchestrator-monitor.service.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
+import { resolveWipLimit } from "../services/wip-limit.service.js";
 import { resolveProjectRuntimeConfig } from "../services/project-runtime-config.service.js";
 import { conductorAvailable, startConductor, stopConductor } from "../services/conductor-control.service.js";
 import {
@@ -60,10 +61,15 @@ export function createBoardMonitorRoute(
     await requireProject(projectId, database);
     const rows = await getAllPreferences(database);
     const prefMap = toPrefMap(rows);
-    const { tunables, source } = resolveMonitorTunables(prefMap, projectId);
+    const resolved = resolveMonitorTunables(prefMap, projectId);
+    // The WIP target through THE resolver (#919), like the monitor loops that act on it — so a
+    // per-project `wip_limit_<id>` is what this read-out shows, not the Bullseye/legacy number
+    // the monitor is not actually running at. `wipLimitSource` says which surface won.
+    const wip = resolveWipLimit(prefMap, projectId);
+    const tunables = { ...resolved.tunables, activeAgentsTarget: wip.limit };
     const runtime = resolveProjectRuntimeConfig({ projectId, prefMap });
     const capacity = deriveCapacityHold(await readMachineCapacity(), { maxNewStartsPerCycle: tunables.maxNewStartsPerCycle });
-    return c.json({ tunables, source, startPolicy: runtime.startPolicy, capacity });
+    return c.json({ tunables, source: resolved.source, wipLimitSource: wip.source, startPolicy: runtime.startPolicy, capacity });
   });
 
   // #917: top-N ranked Todo-pull candidates for this project, by the same score the

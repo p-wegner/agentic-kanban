@@ -851,7 +851,15 @@ export function EffectiveTargetsSection({ resolvedTunables }: { resolvedTunables
       <div className="grid grid-cols-3 gap-1.5">
         <div className="rounded-md bg-gray-50 dark:bg-gray-800 px-2 py-1">
           <div className="text-[10px] text-gray-400 dark:text-gray-500">Agents target</div>
-          <div className="font-semibold text-gray-700 dark:text-gray-300">{resolvedTunables.tunables.activeAgentsTarget}</div>
+          <div
+            className="font-semibold text-gray-700 dark:text-gray-300"
+            title={resolvedTunables.wipLimitSource === "wip_limit_pref" ? "Set by this project's wip_limit, which overrides the Strategy Bullseye" : undefined}
+          >
+            {resolvedTunables.tunables.activeAgentsTarget}
+            {resolvedTunables.wipLimitSource === "wip_limit_pref" && (
+              <span className="ml-1 text-[10px] font-normal text-amber-600 dark:text-amber-400">project limit</span>
+            )}
+          </div>
         </div>
         <div className="rounded-md bg-gray-50 dark:bg-gray-800 px-2 py-1">
           <div className="text-[10px] text-gray-400 dark:text-gray-500">Backlog floor</div>

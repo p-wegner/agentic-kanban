@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { describe, it, expect } from "vitest";
-import { issues, projectStatuses, projects } from "@agentic-kanban/shared/schema";
+import { issues, preferences, projectStatuses, projects } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createBoardMonitorRoute } from "../routes/board-monitor.js";
@@ -131,5 +131,26 @@ describe("GET /api/projects/:id/monitor-tunables - capacity (#1029)", () => {
     // No Bullseye seeded: the legacy defaults, exactly as before #1029.
     expect(body.tunables.activeAgentsTarget).toBe(5);
     expect(body.tunables.maxNewStartsPerCycle).toBe(3);
+  });
+
+  // The read-out used to bypass the WIP resolver, so a per-project `wip_limit_<id>` (what the
+  // onboarding wizard writes) showed the Bullseye number while the monitor ran at the pref.
+  it("reports the per-project wip_limit the monitor actually runs at, over the Bullseye target", async () => {
+    const { db } = createTestDb();
+    const { projectId } = await seedProject(db);
+    await db.insert(preferences).values([
+      { key: `wip_limit_${projectId}`, value: "2" },
+      { key: `board_strategy_${projectId}`, value: JSON.stringify({ version: 1, activeAgentsTarget: 6, segments: [] }) },
+    ]);
+    const app = new Hono();
+    app.route("/api/projects", createBoardMonitorRoute(db as never, {
+      readMachineCapacity: async () => ({ tier: "1", hold: false, canStartAnother: true, headroomProcesses: 4, thrashing: "none" }),
+    }));
+    const res = await app.request(`/api/projects/${projectId}/monitor-tunables`);
+    const body = await res.json() as { tunables: { activeAgentsTarget: number }; source: string; wipLimitSource: string; startPolicy: { wip: { activeAgentsTarget: number } } };
+    expect(body.tunables.activeAgentsTarget).toBe(2);
+    expect(body.wipLimitSource).toBe("wip_limit_pref");
+    expect(body.source).toBe("strategy");
+    expect(body.startPolicy.wip.activeAgentsTarget).toBe(body.tunables.activeAgentsTarget);
   });
 });
