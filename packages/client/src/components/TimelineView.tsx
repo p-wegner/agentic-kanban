@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import {
   PRIORITY_COLORS,
+  PRIORITY_SHAPE_CLASS,
   STATUS_BG,
   STATUS_BG_SOLID,
   STATUS_BADGE,
@@ -10,7 +11,9 @@ import {
   fmtTooltipDate,
   computeLanes,
   collectAvailableTags,
+  computeLabelStride,
   pctOf,
+  robustRange,
   toggleTypeSet,
   toggleSetMember,
   computeIssueBar,
@@ -20,9 +23,11 @@ import {
 import { TimelineToolbar } from "./TimelineToolbar.js";
 import {
   DAY_MS,
+  panBy,
   parseLocalDate,
   stepAnchor,
   ticksFor,
+  tsAtOffset,
   viewportForFitAll,
   viewportForToday,
   windowFor,
@@ -38,25 +43,28 @@ import { useNow } from "../hooks/usePoll.js";
 import { useTimelineViewStore } from "../stores/timelineViewStore.js";
 import { Icon } from "./Icon.js";
 
-/** The [min,max] of `issues`' created→due/updated dates, folding in "now" (never empty). */
+/**
+ * The [min,max] of `issues`' created→due/updated dates, folding in "now" (never empty).
+ *
+ * #1099 P2-13: uses `robustRange` rather than the raw extremes, so a single far-outlier issue
+ * (an ancient Cancelled ticket, one due a year out) no longer squashes the whole cluster of
+ * real work into a sliver of the canvas. "Now" is always folded into the max afterward — a
+ * board of entirely past issues still shows today, which trimming alone wouldn't guarantee.
+ */
 function issueDateRange(issues: IssueWithStatus[]): { min: number; max: number } {
+  const now = Date.now();
   if (issues.length === 0) {
-    const now = Date.now();
     return { min: now - 7 * DAY_MS, max: now };
   }
-  let min = Infinity;
-  let max = Date.now();
+  const values: number[] = [];
   for (const i of issues) {
-    const created = new Date(i.createdAt).getTime();
+    values.push(new Date(i.createdAt).getTime());
     // `dueDate` is a bare "YYYY-MM-DD" — `parseLocalDate` reads it as local midnight so it
     // doesn't silently shift a day earlier in any timezone west of UTC (#1086 P1-5).
-    const other = i.dueDate ? parseLocalDate(i.dueDate).getTime() : new Date(i.updatedAt).getTime();
-    if (created < min) min = created;
-    if (other < min) min = other;
-    if (created > max) max = created;
-    if (other > max) max = other;
+    values.push(i.dueDate ? parseLocalDate(i.dueDate).getTime() : new Date(i.updatedAt).getTime());
   }
-  return { min, max };
+  const { min, max } = robustRange(values);
+  return { min, max: Math.max(max, now) };
 }
 
 interface TimelineViewProps {
@@ -154,7 +162,13 @@ function GridLines({
   );
 }
 
-function TimelineLane({
+/**
+ * #1099 P2-18: memoized so a tooltip hover — which only ever changes the ROOT's `tooltip`
+ * state — doesn't re-render every lane on every mouse move. `majorTicks`/`minorTicks`/`range`
+ * are themselves memoized in the parent and only change on an actual zoom/pan/scale change, so
+ * this is a real cache hit on the hover path, not a no-op wrapper.
+ */
+const TimelineLane = memo(function TimelineLane({
   lane, laneIdx, majorTicks, minorTicks, range, nowMs, nowPct, onIssueClick, setTooltip,
 }: {
   lane: Lane;
@@ -180,10 +194,14 @@ function TimelineLane({
         needs an OPAQUE background — `STATUS_BG` is a soft translucent tint meant for a row,
         and was empty ("") for a status with no entry, both of which let scrolled-under rows
         bleed through. `STATUS_BG_SOLID` is the same hue at full opacity, with a real fallback.
+
+        #1099 R1: the label cell is ALSO sticky on the horizontal axis (`left-0`, on top of the
+        existing vertical stickiness) — panning/zooming the track used to scroll the status
+        name itself out of view, leaving rows with no visible label at all.
       */}
       <div className="flex items-center sticky z-[5]" style={{ top: AXIS_H, height: AXIS_H }}>
         <div
-          className={`flex items-center gap-2 px-3 border-r border-gray-200 dark:border-gray-700 h-full ${STATUS_BG_SOLID[lane.name] ?? "bg-surface-raised dark:bg-surface-raised-dark"} border-b border-gray-100 dark:border-gray-800`}
+          className={`flex items-center gap-2 px-3 border-r border-gray-200 dark:border-gray-700 h-full sticky left-0 z-[1] ${STATUS_BG_SOLID[lane.name] ?? "bg-surface-raised dark:bg-surface-raised-dark"} border-b border-gray-100 dark:border-gray-800`}
           style={{ width: LABEL_W, minWidth: LABEL_W }}
         >
           <span className={`text-xs font-semibold truncate ${STATUS_BADGE[lane.name] ?? "text-gray-600 dark:text-gray-400"}`}>{lane.name}</span>
@@ -214,11 +232,14 @@ function TimelineLane({
               #1086 P2-14: this label used to be a plain, unclickable `div` — clicking the row
               name did nothing, only the bar itself opened the issue. A real `<button>` gets
               both a click handler and keyboard/focus support for free.
+
+              #1099 R1: sticky + opaque like the lane header (`STATUS_BG_SOLID`) — without an
+              opaque background a bar panned/zoomed under a sticky label would bleed through it.
             */}
             <button
               type="button"
               onClick={() => onIssueClick(issue)}
-              className="flex items-center gap-1.5 px-2 border-r border-gray-100 dark:border-gray-800 h-full shrink-0 overflow-hidden text-left cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-inset"
+              className={`flex items-center gap-1.5 px-2 border-r border-gray-100 dark:border-gray-800 h-full shrink-0 overflow-hidden text-left cursor-pointer sticky left-0 z-[2] hover:bg-black/5 dark:hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-inset ${STATUS_BG_SOLID[lane.name] ?? "bg-surface-raised dark:bg-surface-raised-dark"}`}
               style={{ width: LABEL_W, minWidth: LABEL_W }}
             >
               <span className="text-[11px] text-gray-500 dark:text-gray-400 shrink-0">#{issue.issueNumber}</span>
@@ -282,7 +303,7 @@ function TimelineLane({
                     visible affordance is left to the follow-up (a shape/pattern distinction).
                   */}
                   <span
-                    className="w-2 h-2 rounded-full shrink-0"
+                    className={`shrink-0 ${PRIORITY_SHAPE_CLASS[issue.priority ?? "medium"] ?? PRIORITY_SHAPE_CLASS.medium}`}
                     style={{ backgroundColor: priColor }}
                     role="img"
                     aria-label={`Priority: ${issue.priority ?? "medium"}`}
@@ -304,7 +325,7 @@ function TimelineLane({
       })}
     </div>
   );
-}
+});
 
 /**
  * #1086 P2-9: the tooltip used to be fixed-position with no regard for the viewport, so a
@@ -625,7 +646,12 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
     if (!scrollNode || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width;
-      if (width) setTrackPx(Math.max(300, Math.round(width)));
+      // #1099 R1: `width` is the whole scroll container, including the LABEL_W label column —
+      // the actual drawable track (what `windowFor`/`ticksFor` size the visible time span
+      // against) is everything to the right of it. Sizing the window off the full container
+      // width made the computed span wider than what the track could actually show, so the
+      // last ~220px worth of time was never really visible despite being "in" the window.
+      if (width) setTrackPx(Math.max(300, Math.round(width) - LABEL_W));
     });
     observer.observe(scrollNode);
     return () => observer.disconnect();
@@ -638,6 +664,8 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
   );
   const majorTicks = useMemo(() => majorTickList.map((t) => t.ts), [majorTickList]);
   const minorTicks = useMemo(() => minorTickList.map((t) => t.ts), [minorTickList]);
+  /** #1099 P2-20: how many major ticks to skip between rendered axis LABELS at this width. */
+  const labelStride = useMemo(() => computeLabelStride(majorTickList.length, trackPx), [majorTickList.length, trackPx]);
 
   // #1086 P2-17: a plain `Date.now()` read at render time only ever moves when something ELSE
   // triggers a re-render — the Today marker and every open issue's bar (whose end is "now")
@@ -662,6 +690,74 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
     const { min, max } = issueDateRange(source);
     applyViewport(viewportForFitAll(min, max, trackPx));
   };
+
+  /**
+   * #1099 R1: Ctrl/Cmd+wheel zooms around the timestamp under the cursor (rather than the
+   * window's midpoint, which is all `handleZoom` above can offer) — the wheel is over the
+   * scroll CONTAINER, so the offset is measured against its own box and the LABEL_W label
+   * column subtracted to land in track-relative coordinates. Plain Shift+wheel pans instead
+   * (the common "trackpad shift-scroll = horizontal" gesture); both call `preventDefault` so
+   * the browser's own page-zoom/scroll doesn't also fire.
+   */
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const rect = e.currentTarget.getBoundingClientRect();
+      const offsetX = e.clientX - rect.left - LABEL_W;
+      const focusTs = tsAtOffset(timeWindow, offsetX, trackPx);
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      applyViewport(zoomAround(viewport, factor, focusTs, trackPx));
+    } else if (e.shiftKey) {
+      e.preventDefault();
+      const deltaPx = e.deltaX !== 0 ? e.deltaX : e.deltaY;
+      setZoomState((prev) => {
+        const panned = panBy({ scale: viewport.scale, anchor: prev.anchor, pxPerMs: prev.pxPerMs }, deltaPx);
+        return { anchor: panned.anchor, pxPerMs: prev.pxPerMs };
+      });
+    }
+  };
+
+  /** `+`/`-` zoom the view around its own centre, mirroring the toolbar's zoom buttons (#1099 R1). */
+  const handleTrackKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "+" || e.key === "=") {
+      e.preventDefault();
+      handleZoom(1.25);
+    } else if (e.key === "-" || e.key === "_") {
+      e.preventDefault();
+      handleZoom(1 / 1.25);
+    }
+  };
+
+  /**
+   * #1099 R1 drag-pan: mousedown on the track background starts a drag; the move/up listeners
+   * are attached to `window` (not the element) so the drag keeps tracking even once the
+   * cursor leaves the scroll container mid-gesture. Ignores a mousedown that started on an
+   * interactive element (a bar or a row-label button) so a plain click still just opens the
+   * issue instead of being swallowed by an (effectively) zero-distance drag.
+   */
+  const dragStateRef = useRef<{ startClientX: number; startAnchor: number; pxPerMs: number } | null>(null);
+  const handleTrackMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest("button")) return;
+    dragStateRef.current = { startClientX: e.clientX, startAnchor: viewport.anchor, pxPerMs: viewport.pxPerMs };
+  };
+  useEffect(() => {
+    const handleMove = (e: MouseEvent) => {
+      const drag = dragStateRef.current;
+      if (!drag) return;
+      const deltaPx = e.clientX - drag.startClientX;
+      setZoomState({ anchor: drag.startAnchor - deltaPx / drag.pxPerMs, pxPerMs: drag.pxPerMs });
+    };
+    const handleUp = () => {
+      dragStateRef.current = null;
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, []);
 
   const nowPct = pct(now);
   const isEmpty = allIssues.length === 0;
@@ -731,13 +827,18 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
           {/* Timeline scroll area */}
           <div
             ref={setScrollNode}
-            className="flex-1 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark"
+            className="flex-1 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark cursor-grab active:cursor-grabbing"
+            tabIndex={0}
+            onWheel={handleWheel}
+            onMouseDown={handleTrackMouseDown}
+            onKeyDown={handleTrackKeyDown}
           >
             <div style={{ minWidth: 700 }}>
 
               {/* Date axis row */}
               <div className="flex sticky top-0 z-10 bg-surface-raised dark:bg-surface-raised-dark border-b border-gray-200 dark:border-gray-700" style={{ height: AXIS_H }}>
-                <div style={{ width: LABEL_W, minWidth: LABEL_W }} className="border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800" />
+                {/* #1099 R1: sticky on the horizontal axis too, like the lane/row labels below. */}
+                <div style={{ width: LABEL_W, minWidth: LABEL_W }} className="border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 sticky left-0 z-[1]" />
                 <div className="flex-1 relative">
                   {/*
                     #897: an axis label is centred on its tick, so at the range's FIRST and LAST
@@ -751,8 +852,14 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
                     #1088: labels come pre-computed from `ticksFor` (calendar-boundary-snapped,
                     scale-aware — "Week of Mar 9", "September 2026", "Q3 2026") instead of the old
                     span-proportional `fmtAxisDate`.
+
+                    #1099 P2-20: at a narrow track width, showing every major tick's label
+                    crowds or overlaps them — `labelStride` (derived from `computeLabelStride`)
+                    thins the LABELS only; the gridlines below (`GridLines`, fed the full
+                    `majorTicks`) are unaffected, so the axis stays fully marked either way.
                   */}
                   {majorTickList.map((tick, i) => {
+                    if (i % labelStride !== 0) return null;
                     // #1086 P3-e: `pct(tick.ts)` was computed twice per tick (once for the
                     // anchor, once for the label shift) — compute it once and reuse it.
                     const p = pct(tick.ts);

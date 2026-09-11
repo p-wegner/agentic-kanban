@@ -3,6 +3,7 @@ import {
   TYPE_COLORS,
   PRIORITY_COLORS,
   PRIORITY_ORDER,
+  PRIORITY_SHAPE_CLASS,
 } from "../lib/timelineView.js";
 import { useDismissable } from "../hooks/useDismissable.js";
 import type { Scale } from "../lib/timeScale.js";
@@ -237,13 +238,34 @@ export function TimelineToolbar({
         <span>Priority</span>
         {PRIORITY_ORDER.map((p) => (
           <span key={p} className="flex items-center gap-1" title={`Priority: ${p}`}>
-            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: PRIORITY_COLORS[p] }} />
+            {/*
+              #1099 P2-10: priority used to be color alone — a sighted reader who can't tell
+              the four hues apart (low vision, color blindness, a grayscale screenshot) had no
+              other cue. Each priority now also has a distinct shape (see
+              `PRIORITY_SHAPE_CLASS`), mirrored here in the legend and on every bar's dot.
+            */}
+            <span className={`shrink-0 ${PRIORITY_SHAPE_CLASS[p] ?? PRIORITY_SHAPE_CLASS.medium}`} style={{ backgroundColor: PRIORITY_COLORS[p] }} />
             <span className="capitalize">{p}</span>
           </span>
         ))}
         <span className="flex items-center gap-1 ml-1" title="Due date is before the created date">
           <span className="text-red-500 dark:text-red-400 font-bold">⚠</span>
           <span>Invalid due date</span>
+        </span>
+        {/*
+          #1099 P2-7: the priority/invalid-due-date keys explain a bar's CHROME, but nothing
+          said what the bar's own extent means, or what the row shading and the red vertical
+          line are — both were previously only guessable. This closes that gap without
+          enumerating every possible status color (which would drift from `STATUS_BG` and
+          double the maintenance surface for little extra clarity).
+        */}
+        <span className="flex items-center gap-1 ml-1 border-l border-gray-200 dark:border-gray-700 pl-3" title="A bar spans from when the issue was created to when it was completed, or to now if it's still open">
+          <span className="w-4 h-1.5 rounded-sm bg-slate-300 dark:bg-slate-600 shrink-0" />
+          <span>Bar: created → done/now</span>
+        </span>
+        <span className="flex items-center gap-1" title="Today">
+          <span className="w-0.5 h-3 bg-red-400/60 dark:bg-red-500/50 shrink-0" />
+          <span>Today</span>
         </span>
       </div>
     </div>
