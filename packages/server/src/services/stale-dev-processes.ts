@@ -72,14 +72,6 @@ function normalizePath(value: string | null | undefined): string {
   return (value ?? "").replace(/\\/g, "/").toLowerCase();
 }
 
-function worktreeScopeRoot(value: string | null | undefined): string | null {
-  const normalized = normalizePath(value);
-  const marker = "/.worktrees/";
-  const markerIndex = normalized.indexOf(marker);
-  if (markerIndex < 0) return null;
-  return normalized.slice(0, markerIndex + marker.length - 1);
-}
-
 export function resolveWorktreeDevPorts(workingDir: string | null, issueNumber: number | null): number[] {
   if (issueNumber && Number.isInteger(issueNumber) && issueNumber > 0) {
     return [DEFAULT_BOARD_SERVER_PORT + issueNumber, DEFAULT_BOARD_CLIENT_PORT + issueNumber];
@@ -272,15 +264,18 @@ export function classifyStaleDevProcessTrees(input: RuntimeSnapshotInput): Board
   };
 }
 
-async function getWorkspaceCleanupScopePaths(database: Database): Promise<string[]> {
+// Scope is EXACTLY the working directories of workspaces the board actually knows about
+// (any status, so a closed/deleted row's leaked worktree is still reapable) — never the
+// shared parent `.worktrees` root. Widening to the root would put every hand-made worktree
+// under it "in scope" merely because SOME workspace happens to live nearby, and the
+// monitor would then reap that worktree's dev servers and test runs even though no
+// workspace row references it at all (#1105).
+export async function getWorkspaceCleanupScopePaths(database: Database): Promise<string[]> {
   const rows = await getAllWorkspaceWorkingDirs(database);
   const paths = new Set<string>();
   for (const row of rows) {
     const dir = normalizePath(row.workingDir);
-    if (!dir) continue;
-    paths.add(dir);
-    const root = worktreeScopeRoot(dir);
-    if (root) paths.add(root);
+    if (dir) paths.add(dir);
   }
   return [...paths].sort();
 }
@@ -379,7 +374,13 @@ export async function cleanStaleDevProcessSnapshot(
   for (const decision of snapshot.cleaned) {
     try {
       await killTree(decision.rootPid);
-      auditProcessEvent({ action: "monitor-stale-dev-tree-cleaned", rootPid: decision.rootPid, pids: decision.pids, reason: decision.reason });
+      auditProcessEvent({
+        action: "monitor-stale-dev-tree-cleaned",
+        rootPid: decision.rootPid,
+        pids: decision.pids,
+        reason: decision.reason,
+        commandLine: decision.commandLine,
+      });
     } catch (err) {
       decision.action = "cleanup_failed";
       decision.reason = `cleanup-failed:${errorMessage(err)}`;
