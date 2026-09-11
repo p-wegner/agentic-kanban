@@ -6,6 +6,7 @@ import { applyMigrations } from "../db/manual-migrate.js";
 import { listAbandonedProvisioning, finishProvisioning } from "../repositories/workspace-provisioning.repository.js";
 import { deduplicateProjects, unregisterLeakedTempProjects, findProjectsWithMissingRepoPath } from "../services/project-registration.js";
 import { getAllProjects } from "../repositories/project.repository.js";
+import { migrateWipLimitPrefsIntoBullseye } from "../services/wip-limit-migration.service.js";
 import { sweepHookWiring, formatHookWiringReport } from "../services/hook-wiring-audit.service.js";
 import type * as agentServiceType from "../services/agent.service.js";
 import * as agentService from "../services/agent.service.js";import * as realGitService from "../services/git.service.js";
@@ -270,6 +271,14 @@ export async function runMigrations(): Promise<void> {
     await migrateGlobalDefaultModelToProviderScope(db);
   } catch (err) {
     console.warn("[startup] default_model provider-scope migration failed (non-fatal):", errorMessage(err));
+  }
+
+  // #1102: retire `wip_limit_<projectId>` into the Strategy Bullseye — the one stored WIP — and
+  // delete the rows. Idempotent: a no-op once no per-project WIP pref is left.
+  try {
+    await migrateWipLimitPrefsIntoBullseye({ database: db });
+  } catch (err) {
+    console.warn("[startup] wip_limit -> Bullseye migration failed (non-fatal):", errorMessage(err));
   }
 
   // Backfill failure patterns from docs/learnings/ in all registered projects (non-fatal)

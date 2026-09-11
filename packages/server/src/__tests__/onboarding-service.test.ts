@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import * as schema from "@agentic-kanban/shared/schema";
-import { setPreference } from "../repositories/preferences.repository.js";
+import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { saveStackProfile } from "../services/stack-profile.service.js";
 import { insertProjectRepo } from "../repositories/repo.repository.js";
 import { upsertPluginRow } from "../repositories/plugins.repository.js";
@@ -130,8 +130,8 @@ describe("onboarding.service", () => {
     await db.update(schema.projects).set({ setupScript: "pnpm install" }).where(eq(schema.projects.id, projectId));
     await setPreference("verify_script_" + projectId, "pnpm test", db);
     await setPreference("start_mode_" + projectId, "monitor", db);
-    await setPreference("wip_limit_" + projectId, "3", db);
-    await setPreference("board_strategy_" + projectId, JSON.stringify({ provider: "claude_code" }), db);
+    // #1102: the WIP step is answered by the Bullseye's own target.
+    await setPreference("board_strategy_" + projectId, JSON.stringify({ provider: "claude_code", activeAgentsTarget: 3 }), db);
     await insertProjectRepo({ projectId, path: "C:/tmp/sibling", name: "sibling", defaultBranch: "main" }, db);
 
     const service = buildOnboardingServiceFor(db);
@@ -166,6 +166,25 @@ describe("onboarding.service", () => {
     expect(issuesAfterSecond.length).toBe(1);
   });
 
+  it("the wip-limit step writes the Bullseye's activeAgentsTarget and keeps the rest of it (#1102)", async () => {
+    const { projectId } = await seedProject(db);
+    const key = "board_strategy_" + projectId;
+    await setPreference(key, JSON.stringify({ version: 1, segments: [{ id: "s", label: "Bugs", weight: 3 }], harnessSharePct: 40 }), db);
+    const service = buildOnboardingServiceFor(db);
+
+    // A Bullseye with no target has not answered the WIP question.
+    expect((await service.buildOnboardingPlan(projectId)).steps.find((s) => s.id === "wip-limit")?.status).not.toBe("done");
+
+    const plan = await service.applyOnboardingStep(projectId, "wip-limit", { value: 2 });
+    expect(plan.steps.find((s) => s.id === "wip-limit")?.status).toBe("done");
+    const stored = JSON.parse((await getPreference(key, db))!);
+    expect(stored.activeAgentsTarget).toBe(2);
+    expect(stored.harnessSharePct).toBe(40);
+    expect(stored.segments).toHaveLength(1);
+    // The retired key is never written again.
+    expect(await getPreference("wip_limit_" + projectId, db)).toBeNull();
+  });
+
   it("rejects an unknown step id", async () => {
     const { projectId } = await seedProject(db);
     const service = buildOnboardingServiceFor(db);
@@ -191,7 +210,7 @@ describe("onboarding.service", () => {
     expect(dismissed.dismissedAt).not.toBeNull();
 
     // A step that is later actually configured reports done, not skipped — done wins.
-    await setPreference("wip_limit_" + projectId, "5", db);
+    await setPreference("board_strategy_" + projectId, JSON.stringify({ activeAgentsTarget: 5 }), db);
     const afterConfigure = await service.buildOnboardingPlan(projectId);
     expect(afterConfigure.steps.find((s) => s.id === "wip-limit")?.status).toBe("done");
   });

@@ -167,6 +167,20 @@ describe("PUT /api/preferences/settings — project-scoped dynamic keys (#648)",
     expect(status).toBe(422);
     expect(body.droppedKeys).toEqual([key]);
   });
+
+  // #1102: WIP has one stored home, the Strategy Bullseye. Both retired keys must fail loudly
+  // rather than quietly create a second number nothing reads.
+  it("rejects the retired per-project wip_limit_<id> and the global nudge_wip_limit", async () => {
+    const { app } = createTestApp();
+    const perProject = `wip_limit_${randomUUID()}`;
+
+    const { status, body } = await putSettings(app, { [perProject]: "2", nudge_wip_limit: "3" });
+
+    expect(status).toBe(422);
+    expect([...(body.droppedKeys ?? [])].sort()).toEqual([perProject, "nudge_wip_limit"].sort());
+    const stored = await getSettings(app);
+    expect(stored[perProject]).toBeUndefined();
+  });
 });
 
 describe("PUT /api/preferences/settings — provider divergence guard (#648/#903)", () => {

@@ -29,6 +29,8 @@ import type { CreateIssueInput, CreateIssueResult } from "./issue.service.js";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { strategyPrefKey } from "@agentic-kanban/shared/lib/strategy-policy";
+import { resolveMonitorTunables } from "@agentic-kanban/shared/lib/strategy-objective-file";
+import { bullseyeActiveAgentsTarget, patchStrategyBullseyeJson } from "@agentic-kanban/shared/lib/strategy-bullseye-patch";
 export class OnboardingError extends Error {
   constructor(
     message: string,
@@ -128,8 +130,10 @@ export function createOnboardingService(deps: OnboardingServiceDeps) {
         return resolveStartPolicy(prefMap, projectId).mode !== "manual";
       }
       case "wip-limit": {
-        const value = await getPreference(`wip_limit_${projectId}`, database);
-        return Boolean(value?.trim());
+        // #1102: the Bullseye's `activeAgentsTarget` is the one stored WIP. A Bullseye that exists
+        // for its segments or provider policy alone has not answered this step.
+        const value = await getPreference(strategyPrefKey(projectId), database);
+        return bullseyeActiveAgentsTarget(value) !== null;
       }
       case "strategy-bullseye": {
         const value = await getPreference(strategyPrefKey(projectId), database);
@@ -335,9 +339,18 @@ export function createOnboardingService(deps: OnboardingServiceDeps) {
         if (typeof value !== "number" || !Number.isFinite(value) || value < 1) {
           throw new OnboardingError("value must be a positive number", "BAD_REQUEST");
         }
-        await setPreferenceChecked(database, [
-          { key: `wip_limit_${projectId}`, value: String(value) },
-        ]);
+        // #1102: write the Bullseye, keeping whatever else it holds. Minting one carries the floor
+        // and start cap the monitor already runs at, so only the number asked about changes.
+        const prefMap = toPrefMap(await getAllPreferences(database));
+        const legacy = resolveMonitorTunables(prefMap, projectId).tunables;
+        const patched = patchStrategyBullseyeJson(prefMap.get(strategyPrefKey(projectId)), { activeAgentsTarget: value }, {
+          backlogFloor: legacy.backlogFloor,
+          maxNewStartsPerCycle: legacy.maxNewStartsPerCycle,
+        });
+        if (!patched.ok) {
+          throw new OnboardingError("this project's Strategy Bullseye is not valid JSON; fix it in the Strategy Targets editor first", "CONFLICT");
+        }
+        await setPreferenceChecked(database, [{ key: strategyPrefKey(projectId), value: patched.value }]);
         return;
       }
       case "strategy-bullseye": {

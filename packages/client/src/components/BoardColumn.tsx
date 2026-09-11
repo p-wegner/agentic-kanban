@@ -4,7 +4,6 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { type ProjectTag, type QuickUpdateCallbacks } from "./IssueCard.js";
 import { BoardColumnCard } from "./BoardColumnCard.js";
-import { evaluateWipLimit } from "../lib/wipLimits.js";
 import { computeDropSortOrder } from "../lib/reorderIssues.js";
 import { computeColumnScrollState, showsBottomFade, showsTopFade } from "../lib/columnScrollState.js";
 import { computeColumnEstimate } from "../lib/columnHelpers.js";
@@ -53,8 +52,6 @@ interface BoardColumnProps {
   stacked?: boolean;
   onResizeStart?: (e: React.MouseEvent) => void;
   onResizeReset?: () => void;
-  wipLimit?: number | null;
-  onSetWipLimit?: (statusId: string, limit: number | null) => void;
   cardDensity?: CardDensity;
   onColumnDragStart?: (e: React.DragEvent) => void;
   onColumnDragOver?: (e: React.DragEvent) => void;
@@ -105,8 +102,6 @@ export function BoardColumn({
   stacked = false,
   onResizeStart,
   onResizeReset,
-  wipLimit,
-  onSetWipLimit,
   cardDensity = "comfortable",
   onColumnDragStart,
   onColumnDragOver,
@@ -198,34 +193,8 @@ export function BoardColumn({
     saveSortMode(column.id, next);
   }
 
-  const [editingWipLimit, setEditingWipLimit] = useState(false);
-  const [wipLimitInput, setWipLimitInput] = useState("");
-
-  function startEditWipLimit() {
-    setWipLimitInput(wipLimit != null ? String(wipLimit) : "");
-    setEditingWipLimit(true);
-  }
-
-  function commitWipLimit() {
-    setEditingWipLimit(false);
-    if (!onSetWipLimit) return;
-    const trimmed = wipLimitInput.trim();
-    if (!trimmed) {
-      onSetWipLimit(column.id, null);
-    } else {
-      const parsed = parseInt(trimmed, 10);
-      onSetWipLimit(column.id, Number.isFinite(parsed) && parsed > 0 ? parsed : null);
-    }
-  }
-
-  function handleWipLimitKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter") commitWipLimit();
-    if (e.key === "Escape") setEditingWipLimit(false);
-  }
-
   const isCreating = creatingInColumn === column.id;
   const displayedIssues = sortColumnIssues(column.issues, sortMode);
-  const wipStatus = evaluateWipLimit(column.issues.length, wipLimit ?? null);
   const estimateRollup = computeColumnEstimate(column.issues);
   const shouldVirtualizeIssues =
     !stacked && swimlaneDimension === "none" && displayedIssues.length > VIRTUALIZE_ISSUE_THRESHOLD;
@@ -299,7 +268,7 @@ export function BoardColumn({
       onDrop={(e) => { handleDrop(e); onColumnDrop?.(e); }}
       onDragEnd={onColumnDragEnd}
     >
-      <div className={`flex items-center justify-between mb-2 px-1 shrink-0 rounded-lg transition-colors ${wipStatus === "over" ? "bg-red-50/60 dark:bg-red-900/20" : ""}`}>
+      <div className={`flex items-center justify-between mb-2 px-1 shrink-0 rounded-lg transition-colors`}>
         <div className="flex items-start gap-1">
           {onColumnDragStart && (
             <div
@@ -318,33 +287,13 @@ export function BoardColumn({
         <div className="flex flex-col gap-0.5">
           <h2 className="font-semibold text-sm text-ink-soft dark:text-gray-300 flex items-center gap-2 tracking-tight">
             {column.name}
-            {editingWipLimit ? (
-              <input
-                autoFocus
-                type="number"
-                min="1"
-                value={wipLimitInput}
-                onChange={(e) => setWipLimitInput(e.target.value)}
-                onBlur={commitWipLimit}
-                onKeyDown={handleWipLimitKeyDown}
-                placeholder="limit"
-                className="w-14 text-[11px] rounded px-1 py-0.5 border border-brand-300 dark:border-brand-600 bg-white dark:bg-gray-800 text-ink dark:text-gray-100 outline-none"
-              />
-            ) : (
-              <span
-                className={`text-[11px] rounded-full px-2 py-0.5 font-medium shadow-sm ${
-                  wipStatus === "over"
-                    ? "bg-red-100 dark:bg-red-900/60 text-red-600 dark:text-red-400"
-                    : "bg-surface-raised/80 dark:bg-gray-900/80 text-ink-faint dark:text-gray-500"
-                }`}
-              >
-                {wipLimit != null
-                  ? `${column.issues.length} / ${wipLimit}`
-                  : column.count > column.issues.length
-                    ? `${column.issues.length} of ${column.count}`
-                    : column.count}
-              </span>
-            )}
+            {/* #1102: the per-column visual WIP limit (and its gear editor) is gone. It throttled
+                nothing; "WIP" now means only the monitor's agent target (the Autopilot chip). */}
+            <span className="text-[11px] rounded-full px-2 py-0.5 font-medium shadow-sm bg-surface-raised/80 dark:bg-gray-900/80 text-ink-faint dark:text-gray-500">
+              {column.count > column.issues.length
+                ? `${column.issues.length} of ${column.count}`
+                : column.count}
+            </span>
           </h2>
           {column.name === "AI Reviewed" && (
             <span className="text-[10px] text-accent-700 dark:text-accent-300 font-medium">Awaiting manual merge</span>
@@ -370,15 +319,7 @@ export function BoardColumn({
           >
             ↑T
           </button>
-          {onSetWipLimit && (
-            <button
-              onClick={startEditWipLimit}
-              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-800/60 rounded-md w-6 h-6 flex items-center justify-center text-xs leading-none transition-colors"
-              title={wipLimit != null ? `WIP limit: ${wipLimit} — click to edit` : "Set WIP limit"}
-            >
-              ⚙
-            </button>
-          )}
+
           {!isCreating && column.name === "Todo" && (
             <button
               onClick={() => onCreateClick(column.id)}

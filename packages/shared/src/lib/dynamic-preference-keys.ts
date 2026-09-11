@@ -34,7 +34,9 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "launch_templates",
   "agent_presets",
   "monitor_policy_presets",
-  "wip_limit",
+  // `wip_limit` was retired by #1102: a project's WIP lives ONLY in its Strategy Bullseye
+  // (`activeAgentsTarget`). Unregistered, a write 422s instead of minting a second WIP number;
+  // stored rows were migrated into the Bullseye at startup (`wip-limit-migration.service.ts`).
   "outbound_webhook_url",
   // #613 — was absent from this table for its whole life. It was still ACCEPTED on write,
   // via the dedicated `isBoardStrategyPreferenceKey` predicate OR-ed in beside the table,

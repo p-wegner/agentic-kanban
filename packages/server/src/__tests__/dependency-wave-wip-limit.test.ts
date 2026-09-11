@@ -2,14 +2,15 @@
  * #654 — the board reported two contradictory WIP limits, both authoritatively.
  *
  * The Backlog's Dependency Waves panel showed "0/5 WIP, 5 slots open" and offered
- * "Start Next Wave (5)" on `comet`, whose `wip_limit_<id>`, Strategy Bullseye
- * `activeAgentsTarget` and `maxNewStartsPerCycle` were all 2 — while the Board Monitor
- * popover, two clicks away, correctly said "Agents target 2".
+ * "Start Next Wave (5)" on `comet`, whose Strategy Bullseye `activeAgentsTarget` and
+ * `maxNewStartsPerCycle` were both 2 — while the Board Monitor popover, two clicks away,
+ * correctly said "Agents target 2".
  *
  * Cause: `getWipInfo` read only the GLOBAL `nudge_wip_limit`, which is unset in most installs,
  * so it fell through to a hardcoded 5. The fix is not another parse — it is routing the panel
- * through `resolveMonitorTunables`, the same function the monitor popover reads, so the two
- * surfaces cannot disagree again.
+ * through the one WIP resolver the monitor reads, so the two surfaces cannot disagree again.
+ *
+ * #1102 then removed the per-project `wip_limit_<id>` pref: the Bullseye is the only stored WIP.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -50,31 +51,27 @@ beforeEach(() => {
   getActiveWipCountMock.mockResolvedValue(0);
 });
 
-describe("dependency-wave WIP limit (#654)", () => {
-  it("honours the per-project `wip_limit_<id>` — the pref the onboarding wizard writes", async () => {
-    expect(await limitFor({ [`wip_limit_${PROJECT}`]: "2" })).toBe(2);
-  });
-
-  it("falls back to the Strategy Bullseye, the same source the monitor popover reports", async () => {
+describe("dependency-wave WIP limit (#654, one stored answer since #1102)", () => {
+  it("reads the Strategy Bullseye, the same source the monitor popover reports", async () => {
     expect(await limitFor({ [`board_strategy_${PROJECT}`]: bullseye(2) })).toBe(2);
   });
 
-  it("prefers the per-project pref over the Bullseye when both exist", async () => {
-    expect(await limitFor({ [`wip_limit_${PROJECT}`]: "3", [`board_strategy_${PROJECT}`]: bullseye(7) })).toBe(3);
+  it("IGNORES a leftover per-project wip_limit_<id> row — the pref was retired by #1102", async () => {
+    expect(await limitFor({ [`wip_limit_${PROJECT}`]: "3", [`board_strategy_${PROJECT}`]: bullseye(7) })).toBe(7);
   });
 
-  it("still honours the legacy global `nudge_wip_limit` when nothing more specific is set", async () => {
+  it("a stored legacy global `nudge_wip_limit` still feeds the default path when there is no Bullseye", async () => {
     expect(await limitFor({ nudge_wip_limit: "4" })).toBe(4);
   });
 
   it("an explicit caller override beats every preference", async () => {
-    expect(await limitFor({ [`wip_limit_${PROJECT}`]: "2", nudge_wip_limit: "4" }, 9)).toBe(9);
+    expect(await limitFor({ [`board_strategy_${PROJECT}`]: bullseye(2), nudge_wip_limit: "4" }, 9)).toBe(9);
   });
 
-  it("does NOT read another project's per-project limit", async () => {
+  it("does NOT read another project's Bullseye", async () => {
     // The map is fetched by key, but a wrong-key read would silently look correct on a
     // single-project install — this pins the scoping.
-    expect(await limitFor({ "wip_limit_someone-else": "11", nudge_wip_limit: "4" })).toBe(4);
+    expect(await limitFor({ "board_strategy_someone-else": bullseye(11), nudge_wip_limit: "4" })).toBe(4);
   });
 
   it("keeps the hardcoded 5 only as a LAST resort, with nothing configured at all", async () => {
@@ -82,14 +79,13 @@ describe("dependency-wave WIP limit (#654)", () => {
   });
 
   it("ignores nonsense rather than letting it become the limit", async () => {
-    expect(await limitFor({ [`wip_limit_${PROJECT}`]: "0", nudge_wip_limit: "4" })).toBe(4);
-    expect(await limitFor({ [`wip_limit_${PROJECT}`]: "soon", nudge_wip_limit: "4" })).toBe(4);
-    expect(await limitFor({ [`wip_limit_${PROJECT}`]: "-3" })).toBe(5);
+    expect(await limitFor({ [`board_strategy_${PROJECT}`]: "not json", nudge_wip_limit: "4" })).toBe(4);
+    expect(await limitFor({ nudge_wip_limit: "soon" })).toBe(5);
   });
 
   it("reports available slots against the real limit, which is what the button offers", async () => {
     getActiveWipCountMock.mockResolvedValue(1);
-    getWipLimitPrefMapMock.mockResolvedValue(new Map([[`wip_limit_${PROJECT}`, "2"]]));
+    getWipLimitPrefMapMock.mockResolvedValue(new Map([[`board_strategy_${PROJECT}`, bullseye(2)]]));
     const plan = await buildDependencyWavePlan(db, PROJECT, {});
     expect(plan.wip).toMatchObject({ current: 1, limit: 2, available: 1 });
   });
