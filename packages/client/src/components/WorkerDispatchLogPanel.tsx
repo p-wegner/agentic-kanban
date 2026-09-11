@@ -1,40 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { useEffect, useMemo, useState } from "react";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
-
-interface PlacementRow {
-  sessionId: string;
-  workspaceId: string;
-  branch: string | null;
-  issueNumber: number | null;
-  issueTitle: string | null;
-  status: string;
-  executor: string;
-  startedAt: string;
-  endedAt: string | null;
-  placement: "remote" | "host";
-  workerId: string | null;
-  workerName: string | null;
-  placementReason: string | null;
-  placementDetail: string | null;
-}
-
-interface ExplainCheck {
-  id: string;
-  title: string;
-  outcome: string;
-  detail: string;
-}
-
-interface ExplainResponse {
-  explanation: {
-    summary: string;
-    chain: ExplainCheck[];
-    decidedBy: string | null;
-    agreesWithResolver: boolean;
-  };
-}
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  useWorkerPlacementsQuery,
+  invalidateWorkerPlacements,
+  fetchWorkerExplain,
+  type ExplainResponse,
+} from "../hooks/useWorkerFleetQueries.js";
 
 interface WorkerDispatchLogPanelProps {
   projectId: string | null;
@@ -46,33 +19,27 @@ interface WorkerDispatchLogPanelProps {
  * dispatched at all yet.
  */
 export function WorkerDispatchLogPanel({ projectId }: WorkerDispatchLogPanelProps) {
-  const [placements, setPlacements] = useState<PlacementRow[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const params = useMemo(() => {
+    const p = new URLSearchParams({ limit: "100" });
+    if (projectId) p.set("projectId", projectId);
+    return p;
+  }, [projectId]);
+  const { data, error: queryError } = useWorkerPlacementsQuery(params);
+  const placements = data?.placements ?? null;
   const [issueInput, setIssueInput] = useState("");
   const [explain, setExplain] = useState<ExplainResponse | null>(null);
   const [explainError, setExplainError] = useState<string | null>(null);
   const [explainLoading, setExplainLoading] = useState(false);
 
-  const load = useCallback(() => {
-    const params = new URLSearchParams({ limit: "100" });
-    if (projectId) params.set("projectId", projectId);
-    apiFetch<{ placements: PlacementRow[] }>(`/api/workers/placements?${params}`)
-      .then((r) => setPlacements(r.placements))
-      .catch((err) => setError(errorMessage(err)));
-  }, [projectId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<BoardWsEventDetail>).detail;
-      if (detail?.reason === "workers_changed") load();
+      if (detail?.reason === "workers_changed") invalidateWorkerPlacements(queryClient);
     };
     window.addEventListener(BOARD_WS_EVENT, handler);
     return () => window.removeEventListener(BOARD_WS_EVENT, handler);
-  }, [load]);
+  }, [queryClient]);
 
   const runExplain = async () => {
     const issue = Number(issueInput);
@@ -84,9 +51,9 @@ export function WorkerDispatchLogPanel({ projectId }: WorkerDispatchLogPanelProp
     setExplainError(null);
     setExplain(null);
     try {
-      const params = new URLSearchParams({ issue: String(issue) });
-      if (projectId) params.set("projectId", projectId);
-      const res = await apiFetch<ExplainResponse>(`/api/workers/explain?${params}`);
+      const explainParams = new URLSearchParams({ issue: String(issue) });
+      if (projectId) explainParams.set("projectId", projectId);
+      const res = await fetchWorkerExplain(explainParams);
       setExplain(res);
     } catch (err) {
       setExplainError(errorMessage(err));
@@ -147,7 +114,7 @@ export function WorkerDispatchLogPanel({ projectId }: WorkerDispatchLogPanelProp
 
       <div>
         <div className="text-sm font-medium text-ink dark:text-stone-100 mb-2">Recent placements</div>
-        {error && <div className="text-xs text-red-600 dark:text-red-400 mb-2">{error}</div>}
+        {queryError && <div className="text-xs text-red-600 dark:text-red-400 mb-2">{errorMessage(queryError)}</div>}
         {placements && placements.length === 0 && (
           <div className="text-sm text-gray-500 dark:text-gray-400 py-4 text-center">No sessions recorded yet.</div>
         )}

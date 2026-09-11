@@ -69,8 +69,7 @@ describe.each(RESOLVERS)("%s bind host (#652)", (_name, resolve, envVar) => {
 
 describe("the bind host reaches the operator (#652)", () => {
   it("worker instructions document both env vars and the reverse-proxy caveat", async () => {
-    const { buildWorkerConnectSteps } = await import("../lib/worker-connect-steps.js");
-    const { renderWorkerConnectMarkdown } = await import("../cli/commands/worker.js");
+    const { buildWorkerConnectSteps, renderWorkerConnectMarkdown } = await import("../cli/commands/worker.js");
     const md = renderWorkerConnectMarkdown(
       "http://board:3003",
       "tok",

@@ -1,25 +1,9 @@
-import { useEffect, useState } from "react";
-import { apiFetch, apiPost } from "../lib/api.js";
+import { useState } from "react";
+import { apiPost } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-
-interface WorkerConnectStep {
-  title: string;
-  detail: string;
-  commands: string[];
-  where: "worker" | "board" | "either";
-}
-
-interface ConnectInfo {
-  fleetConfigured: boolean;
-  fleetPort: number | null;
-  fleetHost: string;
-  gitHttpPort: number;
-  gitHttpHost: string;
-  boardWorkerVersion: string | null;
-  boardUrl: string;
-  steps: WorkerConnectStep[];
-}
+import type { WorkerConnectStep } from "@agentic-kanban/shared/lib/worker-connect-steps";
+import { useWorkerConnectInfoQuery } from "../hooks/useWorkerFleetQueries.js";
 
 const PLACEHOLDER_TOKEN = "<pairing-token>";
 
@@ -36,16 +20,10 @@ const WHERE_LABEL: Record<WorkerConnectStep["where"], string> = {
  * never drift into two different sets of commands.
  */
 export function WorkerConnectPanel() {
-  const [info, setInfo] = useState<ConnectInfo | null>(null);
+  const { data: info, error: queryError } = useWorkerConnectInfoQuery();
   const [error, setError] = useState<string | null>(null);
   const [pairing, setPairing] = useState<{ pairingToken: string; expiresAt: string } | null>(null);
   const [minting, setMinting] = useState(false);
-
-  useEffect(() => {
-    apiFetch<ConnectInfo>("/api/workers/connect-info")
-      .then(setInfo)
-      .catch((err) => setError(errorMessage(err)));
-  }, []);
 
   const mintPairingToken = async () => {
     setMinting(true);
@@ -64,9 +42,9 @@ export function WorkerConnectPanel() {
 
   return (
     <div className="space-y-4">
-      {error && (
+      {(error || queryError) && (
         <div className="rounded border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-700 dark:text-red-300">
-          {error}
+          {error ?? errorMessage(queryError)}
         </div>
       )}
 

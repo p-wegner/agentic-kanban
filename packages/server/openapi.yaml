@@ -8521,10 +8521,10 @@ paths:
               schema: {}
   /api/workers/connect-info:
     get:
-      summary: SAME connect runbook the CLI's `worker instructions` prints, so the two never drift.
+      summary: "Owner-only: it names the board's own configured hosts/ports."
       tags:
         - workers
-      operationId: get_api_workers_connect_info
+      operationId: get_api_workers_connect-info
       responses:
         "200":
           description: Success
