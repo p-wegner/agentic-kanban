@@ -2,9 +2,29 @@ import { existsSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import type { DbPathSource } from "@agentic-kanban/shared/lib/db-path";
 import { isPidAlive } from "../lib/pid.js";
 import { emptyPassReport, formatPassReportBody, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
+
+/**
+ * Is THIS process the one machine-wide board this sweep is meant to own (#1103)?
+ *
+ * The sweep deletes `<pid>.json` files across EVERY `~/.claude*` profile on the machine —
+ * state that belongs to whichever agent runs there, not to any one board's database. That is
+ * correct for the single operated board (the default `~/.agentic-kanban/kanban.db`, i.e.
+ * `source: "home-fallback"`), and wrong for anything else: a worktree dev server pointed at a
+ * scratch `AGENTIC_KANBAN_DIR`/`DB_URL`, or an in-checkout dev DB, is a throwaway instance that
+ * happens to run on the same machine — it must not reap session files an unrelated (possibly
+ * still-live) agent on the real board depends on.
+ *
+ * A `DbPathSource`, not a preference: the whole point is that a scratch board never has to
+ * remember to opt out — it is scratch by construction the moment it resolves its DB anywhere
+ * other than the default fallback.
+ */
+export function isMachineGlobalReapAllowed(dbSource: DbPathSource): boolean {
+  return dbSource === "home-fallback";
+}
 
 /**
  * Delete the session-registry files left behind by agents this board KILLED (#708).
