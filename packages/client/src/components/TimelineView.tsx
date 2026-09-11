@@ -372,6 +372,31 @@ function TimelineTooltip({ tooltip }: { tooltip: TooltipState }) {
 /** Default track width used before the scroll container has been measured (e.g. static render). */
 const DEFAULT_TRACK_PX = 1200;
 
+/**
+ * Re-derive `anchor`/`pxPerMs` for `toScale` when they were last computed for a DIFFERENT
+ * scale (#1090 fix). Scale (URL tab) and anchor/pxPerMs (persisted store) are tracked as two
+ * independent pieces of state; when the scale changes WITHOUT going through this component's
+ * own `applyViewport` — a command-palette "Day Scale" action, a deep link whose tab differs
+ * from what was last persisted, browser back/forward — the persisted pxPerMs still reflects
+ * the OLD scale's zoom density. Left unreconciled, e.g. a "quarter" pxPerMs paired with a
+ * "day" tab produces a multi-hundred-day window and hundreds of day ticks, which is not what
+ * selecting "Day" means. Reusing `withScale` keeps the same centred timestamp the toolbar's
+ * own scale switcher already preserves, so the two paths end up consistent.
+ */
+function reconcileToScale(
+  anchor: number,
+  pxPerMs: number,
+  fromScale: Scale,
+  toScale: Scale,
+  trackPx: number,
+): { anchor: number; pxPerMs: number } {
+  if (fromScale === toScale) return { anchor, pxPerMs };
+  const win = windowFor({ scale: fromScale, anchor, pxPerMs }, trackPx);
+  const focusTs = (win.min + win.max) / 2;
+  const next = withScale({ scale: fromScale, anchor, pxPerMs }, toScale, focusTs, trackPx);
+  return { anchor: next.anchor, pxPerMs: next.pxPerMs };
+}
+
 export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: TimelineViewProps) {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [trackPx, setTrackPx] = useState(DEFAULT_TRACK_PX);
@@ -431,10 +456,15 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
   // deriving it from the data would make the very same URL show a different scale depending
   // on what is currently open, and disagree with what "Fit all" recomputes later anyway.
   const [zoomState, setZoomState] = useState<{ anchor: number; pxPerMs: number }>(() => {
-    if (persistedAtMount) return { anchor: persistedAtMount.anchor, pxPerMs: persistedAtMount.pxPerMs };
+    if (persistedAtMount) {
+      const fromScale = persistedAtMount.scale ?? tab;
+      return reconcileToScale(persistedAtMount.anchor, persistedAtMount.pxPerMs, fromScale, tab, DEFAULT_TRACK_PX);
+    }
     const { min, max } = issueDateRange(allIssuesUnfiltered);
     return viewportForFitAll(min, max, DEFAULT_TRACK_PX, tab);
   });
+  /** The scale `zoomState` currently corresponds to — see `reconcileToScale`'s doc comment. */
+  const committedScaleRef = useRef<Scale>(tab);
 
   const viewport: Viewport = useMemo(
     () => ({ scale: tab, anchor: zoomState.anchor, pxPerMs: zoomState.pxPerMs }),
@@ -454,7 +484,8 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
     appliedStoreKeyRef.current = storeKey;
     const persisted = useTimelineViewStore.getState().byView[storeKey];
     if (persisted) {
-      setZoomState({ anchor: persisted.anchor, pxPerMs: persisted.pxPerMs });
+      const fromScale = persisted.scale ?? tab;
+      setZoomState(reconcileToScale(persisted.anchor, persisted.pxPerMs, fromScale, tab, trackPx));
       setShowCompleted(persisted.showCompleted);
       setActiveTypes(new Set(persisted.activeTypes));
     } else {
@@ -463,16 +494,30 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
       setShowCompleted(true);
       setActiveTypes(new Set(ALL_TYPES));
     }
+    committedScaleRef.current = tab;
   }
+
+  // #1090 fix: reconcile pxPerMs/anchor whenever `tab` changes WITHOUT going through
+  // `applyViewport` below (command palette, deep link, browser back/forward) — see
+  // `reconcileToScale`'s doc comment. `applyViewport` and the store-key-switch block above
+  // both keep `committedScaleRef` in sync with their own scale changes, so this is a no-op
+  // for any change already reconciled by them.
+  useEffect(() => {
+    if (committedScaleRef.current === tab) return;
+    const fromScale = committedScaleRef.current;
+    committedScaleRef.current = tab;
+    setZoomState((prev) => reconcileToScale(prev.anchor, prev.pxPerMs, fromScale, tab, trackPx));
+  }, [tab, trackPx]);
 
   useEffect(() => {
     useTimelineViewStore.getState().set(storeKey, {
       anchor: zoomState.anchor,
       pxPerMs: zoomState.pxPerMs,
+      scale: tab,
       showCompleted,
       activeTypes: [...activeTypes],
     });
-  }, [storeKey, zoomState, showCompleted, activeTypes]);
+  }, [storeKey, zoomState, showCompleted, activeTypes, tab]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -498,6 +543,7 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
 
   /** Apply a computed Viewport: publish a scale change to the URL tab, keep anchor/zoom local. */
   const applyViewport = (next: Viewport) => {
+    committedScaleRef.current = next.scale;
     if (next.scale !== tab) setTab(next.scale);
     setZoomState({ anchor: next.anchor, pxPerMs: next.pxPerMs });
   };

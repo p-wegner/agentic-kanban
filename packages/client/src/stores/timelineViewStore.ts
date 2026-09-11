@@ -12,12 +12,21 @@
 // `${projectId}:${viewId}` — otherwise switching projects while on this view
 // would restore a stale anchor from a different project's data range.
 import { create } from "zustand";
+import type { Scale } from "../lib/timeScale.js";
 
 export interface TimelineFilterState {
   /** `Viewport.anchor` — left edge of the visible window, ms epoch (local time). */
   anchor: number;
   /** `Viewport.pxPerMs` — zoom level. */
   pxPerMs: number;
+  /**
+   * The scale `anchor`/`pxPerMs` were computed for, so a restore can tell whether the
+   * CURRENT scale (the URL tab, resolved independently — see TimelineView) still matches
+   * what this zoom density means. Optional only for entries written before this field
+   * existed; a missing value is treated as "assume it already matches" rather than forcing
+   * a reconciliation with no basis for one.
+   */
+  scale?: Scale;
   showCompleted: boolean;
   /** `Set<string>` is not itself persistable across renders as a plain value; store the array. */
   activeTypes: string[];
