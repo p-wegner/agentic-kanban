@@ -171,6 +171,14 @@ export interface WorkerEligibility {
   attestedProfiles?: WorkerProfileAttestation[];
   /** Sessions the board currently has assigned to this worker. `load` is its length. */
   assignedSessionIds: string[];
+  /**
+   * What this worker is actually running right now (#1087) — the join `assignedSessionIds`
+   * never got: issue/project/branch identity per assigned session, so a Runners view can
+   * answer "what is it doing" without a second round trip per id. Sessions the board holds
+   * no workspace/issue identity for (deleted mid-flight) are simply absent, same convention
+   * as `getWorkerNamesByIds`.
+   */
+  assignments: WorkerAssignment[];
   /** Free slots on THIS worker: `maxConcurrency - load`, floored at 0. */
   freeSlots: number;
   /**
@@ -230,6 +238,19 @@ export interface PlacementExplanation {
   fleet: FleetSnapshot;
   /** Single-sentence answer to "why was it not dispatched". */
   summary: string;
+}
+
+/** One assigned session's identity, for the Runners view's "current work" join (#1087). */
+export interface WorkerAssignment {
+  sessionId: string;
+  workspaceId: string;
+  issueId: string | null;
+  issueNumber: number | null;
+  issueTitle: string | null;
+  projectId: string | null;
+  branch: string | null;
+  status: string;
+  startedAt: string;
 }
 
 export interface SessionPlacementRecord {

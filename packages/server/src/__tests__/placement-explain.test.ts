@@ -330,6 +330,45 @@ describe("per-session placement (#755)", () => {
     const report = await explainIssuePlacement({ database: db, projectId: PROJECT_ID, issueNumber: 999 });
     expect("error" in report).toBe(true);
   });
+
+  it("#1087: remoteOnly + limit returns up to `limit` remote rows, not the remote subset of the newest `limit` rows", async () => {
+    await db.insert(issues).values({
+      id: "issue-1",
+      projectId: PROJECT_ID,
+      statusId,
+      title: "a ticket",
+      issueNumber: 7,
+    } as typeof issues.$inferInsert);
+    await db.insert(workspaces).values({
+      id: "ws-1",
+      issueId: "issue-1",
+      branch: "feature/7-a-ticket",
+    } as typeof workspaces.$inferInsert);
+
+    // One remote session, older than a run of newer host-only sessions that would otherwise
+    // fill the whole `limit` window before `remoteOnly` ever gets a chance to filter it out.
+    await db.insert(sessions).values({
+      id: "sess-remote-old",
+      workspaceId: "ws-1",
+      status: "completed",
+      startedAt: new Date(Date.now() - 600_000).toISOString(),
+      workerId: "worker-1",
+    } as typeof sessions.$inferInsert);
+    for (let i = 0; i < 5; i++) {
+      await db.insert(sessions).values({
+        id: `sess-host-${i}`,
+        workspaceId: "ws-1",
+        status: "completed",
+        startedAt: new Date(Date.now() - i * 1000).toISOString(),
+        workerId: null,
+      } as typeof sessions.$inferInsert);
+    }
+
+    const rows = await listSessionPlacements({ database: db, issueId: "issue-1", remoteOnly: true, limit: 3 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.sessionId).toBe("sess-remote-old");
+    expect(rows[0]!.placement).toBe("remote");
+  });
 });
 
 describe("placement observability over HTTP (#755)", () => {

@@ -3,7 +3,7 @@
 // The policy — the ordered decision chain and how it is explained — lives in
 // `services/placement-explain.service.ts`. Only the reads live here, so the service
 // stays a policy module and `lint:arch`'s `services-bypass-repositories` rule holds.
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { issues, sessions, workers, workspaces } from "@agentic-kanban/shared/schema";
 
 import { db } from "../db/index.js";
@@ -14,6 +14,8 @@ import { updateSessionPlacementReason as updateSessionPlacementReasonForSession 
 export interface SessionPlacementRow {
   sessionId: string;
   workspaceId: string;
+  issueId: string | null;
+  projectId: string | null;
   branch: string | null;
   issueNumber: number | null;
   issueTitle: string | null;
@@ -32,6 +34,10 @@ export interface SessionPlacementQuery {
   workspaceId?: string;
   issueId?: string;
   workerId?: string;
+  /** Restrict to sessions that ran on a worker (#1087) — pushed into SQL, not applied after `limit`. */
+  remoteOnly?: boolean;
+  /** Restrict to a set of session ids (#1087 — runner "current work" join). */
+  sessionIds?: string[];
   limit?: number;
 }
 
@@ -49,12 +55,16 @@ export async function listSessionPlacementRows(
     query.issueId ? eq(workspaces.issueId, query.issueId) : undefined,
     query.projectId ? eq(issues.projectId, query.projectId) : undefined,
     query.workerId ? eq(sessions.workerId, query.workerId) : undefined,
+    query.remoteOnly ? isNotNull(sessions.workerId) : undefined,
+    query.sessionIds ? inArray(sessions.id, query.sessionIds) : undefined,
   ].filter((c): c is NonNullable<typeof c> => c !== undefined);
 
   const rows = await database
     .select({
       sessionId: sessions.id,
       workspaceId: sessions.workspaceId,
+      issueId: workspaces.issueId,
+      projectId: issues.projectId,
       branch: workspaces.branch,
       issueNumber: issues.issueNumber,
       issueTitle: issues.title,
