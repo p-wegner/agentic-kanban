@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import {
   TYPE_COLORS,
@@ -6,20 +6,44 @@ import {
   STATUS_BG,
   STATUS_BADGE,
   ALL_TYPES,
-  WEEK_MS,
-  MONTH_MS,
-  fmtAxisDate,
   fmtTooltipDate,
   computeLanes,
-  computeBaseRange,
-  computeTicks,
   pctOf,
   toggleTypeSet,
   computeIssueBar,
   type DateRange,
   type Lane,
 } from "../lib/timelineView.js";
+import {
+  DAY_MS,
+  stepAnchor,
+  ticksFor,
+  viewportForFitAll,
+  viewportForToday,
+  windowFor,
+  withScale,
+  zoomAround,
+  type Scale,
+  type TimeWindow,
+  type Viewport,
+} from "../lib/timeScale.js";
 import { Icon } from "./Icon.js";
+
+const SCALES: readonly Scale[] = ["day", "week", "month", "quarter"];
+const SCALE_LABELS: Record<Scale, string> = { day: "Day", week: "Week", month: "Month", quarter: "Quarter" };
+
+/** The [min,max] of `issues`' created→due/updated dates, folding in "now" (never empty). */
+function issueDateRange(issues: IssueWithStatus[]): { min: number; max: number } {
+  if (issues.length === 0) {
+    const now = Date.now();
+    return { min: now - 7 * DAY_MS, max: now };
+  }
+  const dates = issues.flatMap((i) => [
+    new Date(i.createdAt).getTime(),
+    i.dueDate ? new Date(i.dueDate).getTime() : new Date(i.updatedAt).getTime(),
+  ]);
+  return { min: Math.min(...dates), max: Math.max(...dates, Date.now()) };
+}
 
 interface TimelineViewProps {
   columns: StatusWithIssues[];
@@ -70,7 +94,15 @@ export function axisLabelShift(p: number): string {
 }
 
 /** Vertical tick gridlines + the "today" marker, shared by the lane header and issue rows. */
-function GridLines({ ticks, range, nowPct, strong }: { ticks: Date[]; range: DateRange; nowPct: number; strong?: boolean }) {
+function GridLines({
+  majorTicks, minorTicks, range, nowPct, strong,
+}: {
+  majorTicks: number[];
+  minorTicks: number[];
+  range: DateRange;
+  nowPct: number;
+  strong?: boolean;
+}) {
   return (
     <>
       {/*
@@ -78,9 +110,15 @@ function GridLines({ ticks, range, nowPct, strong }: { ticks: Date[]; range: Dat
         exactly left:100% sits one pixel outside its container, and one pixel of scrollable
         overflow paints a full scrollbar — the range's last tick is always at 100%, so this
         fired on every render.
+
+        Two bands (#1088): minor ticks are the finer calendar unit (hours/days/weeks/months
+        depending on scale) drawn faint; major ticks are the labelled boundary and drawn solid.
       */}
-      {ticks.map((tick, i) => (
-        <div key={i} className="absolute top-0 h-full border-l border-gray-100 dark:border-gray-800" style={{ left: `min(${pctOf(tick.getTime(), range)}%, calc(100% - 1px))` }} />
+      {minorTicks.map((ts, i) => (
+        <div key={`mi-${i}`} className="absolute top-0 h-full border-l border-gray-50 dark:border-gray-800/50" style={{ left: `min(${pctOf(ts, range)}%, calc(100% - 1px))` }} />
+      ))}
+      {majorTicks.map((ts, i) => (
+        <div key={`ma-${i}`} className="absolute top-0 h-full border-l border-gray-100 dark:border-gray-800" style={{ left: `min(${pctOf(ts, range)}%, calc(100% - 1px))` }} />
       ))}
       {nowPct >= 0 && nowPct <= 100 && (
         <div
@@ -93,16 +131,18 @@ function GridLines({ ticks, range, nowPct, strong }: { ticks: Date[]; range: Dat
 }
 
 function TimelineToolbar({
-  issueCount, laneCount, showCompleted, setShowCompleted, panOffsetMs, setPanOffsetMs, zoom, setZoom, activeTypes, onToggleType,
+  issueCount, laneCount, showCompleted, setShowCompleted, scale, onSetScale, onStep, onToday, onFitAll, onZoom, activeTypes, onToggleType,
 }: {
   issueCount: number;
   laneCount: number;
   showCompleted: boolean;
   setShowCompleted: Dispatch<SetStateAction<boolean>>;
-  panOffsetMs: number;
-  setPanOffsetMs: Dispatch<SetStateAction<number>>;
-  zoom: number;
-  setZoom: Dispatch<SetStateAction<number>>;
+  scale: Scale;
+  onSetScale: (scale: Scale) => void;
+  onStep: (direction: 1 | -1) => void;
+  onToday: () => void;
+  onFitAll: () => void;
+  onZoom: (factor: number) => void;
   activeTypes: Set<string>;
   onToggleType: (type: string) => void;
 }) {
@@ -124,22 +164,39 @@ function TimelineToolbar({
         <span className={`w-1.5 h-1.5 rounded-full ${showCompleted ? "bg-green-500" : "bg-gray-400"}`} />
         Show completed
       </button>
+      <div className="flex items-center gap-1">
+        {SCALES.map((s) => (
+          <button
+            key={s}
+            onClick={() => onSetScale(s)}
+            className={`px-2 h-6 text-xs rounded border transition-colors ${
+              s === scale
+                ? "bg-brand-50 dark:bg-brand-950/30 border-brand-300 dark:border-brand-700 text-brand-700 dark:text-brand-400"
+                : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+            }`}
+          >
+            {SCALE_LABELS[s]}
+          </button>
+        ))}
+      </div>
       <div className="ml-auto flex items-center gap-1">
         <span className="text-xs text-gray-400 dark:text-gray-500 mr-1">Navigate</span>
-        <button onClick={() => setPanOffsetMs((o) => o - MONTH_MS)} className={navBtn} title="Back 1 month">«</button>
-        <button onClick={() => setPanOffsetMs((o) => o - WEEK_MS)} className={navBtn} title="Back 1 week">‹</button>
+        <button onClick={() => onStep(-1)} className={navBtn} title={`Back 1 ${scale}`}>‹</button>
         <button
-          onClick={() => setPanOffsetMs(0)}
-          className={`px-1.5 h-6 text-xs flex items-center justify-center rounded border bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 min-w-[40px] ${panOffsetMs !== 0 ? "border-brand-400 dark:border-brand-600" : "border-gray-200 dark:border-gray-700"}`}
-          title="Reset to today"
+          onClick={onToday}
+          className="px-1.5 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 min-w-[40px]"
+          title="Recenter on today"
         >Today</button>
-        <button onClick={() => setPanOffsetMs((o) => o + WEEK_MS)} className={navBtn} title="Forward 1 week">›</button>
-        <button onClick={() => setPanOffsetMs((o) => o + MONTH_MS)} className={navBtn} title="Forward 1 month">»</button>
+        <button onClick={() => onStep(1)} className={navBtn} title={`Forward 1 ${scale}`}>›</button>
+        <button
+          onClick={onFitAll}
+          className="px-1.5 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
+          title="Fit all visible issues"
+        >Fit all</button>
         <span className="text-xs text-gray-400 dark:text-gray-500 mx-2">|</span>
         <span className="text-xs text-gray-400 dark:text-gray-500 mr-1">Zoom</span>
-        <button onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))} className={navBtn}>−</button>
-        <button onClick={() => setZoom(1)} className="px-1.5 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 min-w-[40px]">{Math.round(zoom * 100)}%</button>
-        <button onClick={() => setZoom((z) => Math.min(5, +(z + 0.25).toFixed(2)))} className={navBtn}>+</button>
+        <button onClick={() => onZoom(1 / 1.25)} className={navBtn} title="Zoom out">−</button>
+        <button onClick={() => onZoom(1.25)} className={navBtn} title="Zoom in">+</button>
       </div>
       <div className="flex items-center gap-1">
         {Object.entries(TYPE_COLORS).map(([type, cls]) => {
@@ -169,11 +226,12 @@ function TimelineToolbar({
 }
 
 function TimelineLane({
-  lane, laneIdx, ticks, range, nowPct, onIssueClick, setTooltip,
+  lane, laneIdx, majorTicks, minorTicks, range, nowPct, onIssueClick, setTooltip,
 }: {
   lane: Lane;
   laneIdx: number;
-  ticks: Date[];
+  majorTicks: number[];
+  minorTicks: number[];
   range: DateRange;
   nowPct: number;
   onIssueClick: (issue: IssueWithStatus) => void;
@@ -191,7 +249,7 @@ function TimelineLane({
           <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto shrink-0">{lane.issues.length}</span>
         </div>
         <div className={`flex-1 h-full border-b border-gray-100 dark:border-gray-800 relative ${STATUS_BG[lane.name] ?? ""}`}>
-          <GridLines ticks={ticks} range={range} nowPct={nowPct} strong />
+          <GridLines majorTicks={majorTicks} minorTicks={minorTicks} range={range} nowPct={nowPct} strong />
         </div>
       </div>
 
@@ -208,7 +266,7 @@ function TimelineLane({
               <span className="text-[11px] text-gray-600 dark:text-gray-400 truncate" title={issue.title}>{issue.title}</span>
             </div>
             <div className="flex-1 relative h-full">
-              <GridLines ticks={ticks} range={range} nowPct={nowPct} />
+              <GridLines majorTicks={majorTicks} minorTicks={minorTicks} range={range} nowPct={nowPct} />
               <div
                 className={`absolute top-1/2 -translate-y-1/2 rounded-md border cursor-pointer
                   transition-all hover:shadow-md hover:brightness-95 dark:hover:brightness-110
@@ -306,12 +364,14 @@ function TimelineTooltip({ tooltip }: { tooltip: TooltipState }) {
   );
 }
 
+/** Default track width used before the scroll container has been measured (e.g. static render). */
+const DEFAULT_TRACK_PX = 1200;
+
 export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineViewProps) {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
-  const [zoom, setZoom] = useState(1);
-  const [panOffsetMs, setPanOffsetMs] = useState(0);
   const [showCompleted, setShowCompleted] = useState(true);
   const [activeTypes, setActiveTypes] = useState<Set<string>>(new Set(ALL_TYPES));
+  const [trackPx, setTrackPx] = useState(DEFAULT_TRACK_PX);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const q = searchQuery?.toLowerCase() ?? "";
@@ -325,19 +385,50 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
 
   const allIssues = useMemo(() => lanes.flatMap((l) => l.issues), [lanes]);
 
-  const baseRange = useMemo(() => computeBaseRange(allIssues), [allIssues]);
+  // Unfiltered, so the initial viewport isn't at the mercy of the default filter state.
+  const allIssuesUnfiltered = useMemo(() => columns.flatMap((c) => c.issues), [columns]);
 
-  const range = useMemo(() => ({
-    min: baseRange.min + panOffsetMs,
-    max: baseRange.max + panOffsetMs,
-  }), [baseRange, panOffsetMs]);
+  // #1088 (R1/R2/P1-6): the viewport (scale/anchor/zoom) is now independent state, computed
+  // once from the data on mount rather than re-derived from whatever is currently filtered —
+  // that decoupling is what stops the axis window rescaling under the user on every
+  // search/filter change. Real zoom (day/week/month/quarter, real time-scale math) replaces
+  // the old CSS `min-width` multiplier that had no effect on what was actually shown.
+  const [viewport, setViewport] = useState<Viewport>(() => {
+    const { min, max } = issueDateRange(allIssuesUnfiltered);
+    return viewportForFitAll(min, max, DEFAULT_TRACK_PX);
+  });
 
-  const ticks = useMemo(() => computeTicks(range), [range]);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (width) setTrackPx(Math.max(300, Math.round(width)));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
-  const span = range.max - range.min;
+  const timeWindow: TimeWindow = useMemo(() => windowFor(viewport, trackPx), [viewport, trackPx]);
+  const { major: majorTickList, minor: minorTickList } = useMemo(
+    () => ticksFor(timeWindow, viewport.scale),
+    [timeWindow, viewport.scale],
+  );
+  const majorTicks = useMemo(() => majorTickList.map((t) => t.ts), [majorTickList]);
+  const minorTicks = useMemo(() => minorTickList.map((t) => t.ts), [minorTickList]);
+
   const now = Date.now();
+  const pct = (ts: number): number => pctOf(ts, timeWindow);
 
-  const pct = (ts: number): number => pctOf(ts, range);
+  const handleSetScale = (scale: Scale) => setViewport((v) => withScale(v, scale, (timeWindow.min + timeWindow.max) / 2, trackPx));
+  const handleStep = (direction: 1 | -1) => setViewport((v) => stepAnchor(v, direction));
+  const handleToday = () => setViewport((v) => viewportForToday(v.scale, v.pxPerMs, trackPx));
+  const handleZoom = (factor: number) => setViewport((v) => zoomAround(v, factor, (timeWindow.min + timeWindow.max) / 2, trackPx));
+  const handleFitAll = () => {
+    const source = allIssues.length > 0 ? allIssues : allIssuesUnfiltered;
+    const { min, max } = issueDateRange(source);
+    setViewport(viewportForFitAll(min, max, trackPx));
+  };
 
   if (allIssues.length === 0) {
     return (
@@ -349,7 +440,6 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
   }
 
   const nowPct = pct(now);
-  const minWidth = Math.max(700, 700 * zoom);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 px-4 pb-4">
@@ -358,10 +448,12 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
         laneCount={lanes.length}
         showCompleted={showCompleted}
         setShowCompleted={setShowCompleted}
-        panOffsetMs={panOffsetMs}
-        setPanOffsetMs={setPanOffsetMs}
-        zoom={zoom}
-        setZoom={setZoom}
+        scale={viewport.scale}
+        onSetScale={handleSetScale}
+        onStep={handleStep}
+        onToday={handleToday}
+        onFitAll={handleFitAll}
+        onZoom={handleZoom}
         activeTypes={activeTypes}
         onToggleType={toggleType}
       />
@@ -371,7 +463,7 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
         ref={scrollRef}
         className="flex-1 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark"
       >
-        <div style={{ minWidth }}>
+        <div style={{ minWidth: 700 }}>
 
           {/* Date axis row */}
           <div className="flex sticky top-0 z-10 bg-surface-raised dark:bg-surface-raised-dark border-b border-gray-200 dark:border-gray-700" style={{ height: AXIS_H }}>
@@ -385,11 +477,15 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
                 LABEL's anchor changes at the two edges: flush-left at the start, flush-right
                 at the end, centred everywhere in between. Every date stays fully readable and
                 none of them leaves the track.
+
+                #1088: labels come pre-computed from `ticksFor` (calendar-boundary-snapped,
+                scale-aware — "Week of Mar 9", "September 2026", "Q3 2026") instead of the old
+                span-proportional `fmtAxisDate`.
               */}
-              {ticks.map((tick, i) => (
-                <div key={i} className="absolute top-0 h-full flex items-center" style={axisAnchor(pct(tick.getTime()))}>
-                  <span className={`text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap select-none px-1 shrink-0 ${axisLabelShift(pct(tick.getTime()))}`}>
-                    {fmtAxisDate(tick, span)}
+              {majorTickList.map((tick, i) => (
+                <div key={i} className="absolute top-0 h-full flex items-center" style={axisAnchor(pct(tick.ts))}>
+                  <span className={`text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap select-none px-1 shrink-0 ${axisLabelShift(pct(tick.ts))}`}>
+                    {tick.label}
                   </span>
                 </div>
               ))}
@@ -409,8 +505,9 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
               key={lane.name}
               lane={lane}
               laneIdx={laneIdx}
-              ticks={ticks}
-              range={range}
+              majorTicks={majorTicks}
+              minorTicks={minorTicks}
+              range={timeWindow}
               nowPct={nowPct}
               onIssueClick={onIssueClick}
               setTooltip={setTooltip}
