@@ -36,6 +36,26 @@ export function tailOutput(output: string): string | null {
   return lines.length > 2000 ? lines.slice(-2000) : lines;
 }
 
+/** pnpm's `pnpm`-field deprecation notice leads every install's output and explains nothing (#1092). */
+const SETUP_NOISE_LINE = /^\[WARN\] The "pnpm" field in package\.json is no longer read by pnpm\b/i;
+const SETUP_ERROR_LINE = /\bERR_[A-Z0-9_]+\b|\berror\b|nicht gefunden|is not recognized as an internal or external command/i;
+
+/**
+ * The one line that says WHY a setup run failed (#1092): the first error-looking line of its output
+ * tails, skipping pnpm's deprecation notice, else the first remaining line. A failed install used to
+ * be reported by its FIRST line, which for pnpm is always that notice — the `ERR_PNPM_*` line naming
+ * the cause was never the one anybody saw.
+ */
+export function setupFailureHeadline(run: Pick<LatestSetupRun, "stdoutTail" | "stderrTail" | "exitCode">): string {
+  const lines = [run.stderrTail, run.stdoutTail]
+    .filter((tail): tail is string => Boolean(tail))
+    .join("\n")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !SETUP_NOISE_LINE.test(line));
+  return lines.find((line) => SETUP_ERROR_LINE.test(line)) ?? lines[0] ?? `exit ${run.exitCode ?? "?"} with no output`;
+}
+
 function durationMs(startedAt: string, endedAt: string): number {
   return Math.max(0, new Date(endedAt).getTime() - new Date(startedAt).getTime());
 }

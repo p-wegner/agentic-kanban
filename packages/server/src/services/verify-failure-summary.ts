@@ -19,6 +19,13 @@ import { join } from "node:path";
  */
 const BENIGN_GIT_NOISE = /^\s*(hint:|warning: in the working copy of .+ (LF|CRLF) will be replaced|warning: (LF|CRLF) will be replaced)/i;
 
+/**
+ * pnpm's deprecation notice for the `pnpm` field in package.json (#1092). Every `pnpm` invocation
+ * prints it FIRST, so it became the headline of every failed gate — "verify_script failed (exit 1):
+ * [WARN] The "pnpm" field…" — while the line that named the cause (`depcruise` not found) sat below it.
+ */
+const BENIGN_PNPM_NOISE = /^\s*\[WARN\] The "pnpm" field in package\.json is no longer read by pnpm\b/i;
+
 /** How many chars of (noise-filtered) TAIL to keep in the stored gate message (#221). */
 const VERIFY_FAILURE_TAIL_CHARS = 1500;
 
@@ -181,7 +188,7 @@ export function summarizeVerifyFailure(
   }
   const filtered = combined
     .split(/\r?\n/)
-    .filter((line) => !BENIGN_GIT_NOISE.test(line))
+    .filter((line) => !BENIGN_GIT_NOISE.test(line) && !BENIGN_PNPM_NOISE.test(line))
     .join("\n")
     .trim();
   const body = filtered || combined.trim();

@@ -4,7 +4,7 @@
 // 20+ minute suite by hand. The summary must keep the (noise-filtered) TAIL, where vitest
 // prints its failures and summary, and reference a persisted full log.
 import { describe, expect, it } from "vitest";
-import { summarizeVerifyFailure } from "../services/pre-merge-gate.service.js";
+import { looksLikeMissingDepsFailure, summarizeVerifyFailure } from "../services/pre-merge-gate.service.js";
 
 const GIT_NOISE = [
   "hint: Using 'master' as the name for the initial branch. This default branch name",
@@ -54,6 +54,38 @@ describe("summarizeVerifyFailure (#221)", () => {
     });
     expect(summary).toContain("AssertionError");
     expect(summary).not.toContain("full verify log");
+  });
+});
+
+// #1092: a worktree whose install never completed failed `check:arch` with a LOCALIZED cmd.exe
+// "command not found", and the gate summary led with pnpm's deprecation notice instead of it.
+const PNPM_FIELD_WARN =
+  '[WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.onlyBuiltDependencies". See https://pnpm.io/settings for the new home of each setting.';
+const GERMAN_COMMAND_NOT_FOUND = [
+  'Der Befehl "depcruise" ist entweder falsch geschrieben oder',
+  "konnte nicht gefunden werden.",
+  "[check:arch] FAILED at lint:arch",
+].join("\n");
+
+describe("summarizeVerifyFailure — pnpm deprecation notice is noise (#1092)", () => {
+  it("does not lead the summary with pnpm's `pnpm`-field warning", () => {
+    const summary = summarizeVerifyFailure("", `${PNPM_FIELD_WARN}\n${GERMAN_COMMAND_NOT_FOUND}`, "ws-1092", () => null);
+    expect(summary).not.toContain('The "pnpm" field');
+    expect(summary.startsWith('Der Befehl "depcruise"')).toBe(true);
+  });
+});
+
+describe("looksLikeMissingDepsFailure — localized cmd.exe command-not-found (#1092)", () => {
+  it("recognizes the German wording, which cmd.exe splits across two lines", () => {
+    expect(looksLikeMissingDepsFailure(`${PNPM_FIELD_WARN}\n${GERMAN_COMMAND_NOT_FOUND}`)).toBe(true);
+  });
+
+  it("still recognizes the English wording", () => {
+    expect(looksLikeMissingDepsFailure("'depcruise' is not recognized as an internal or external command,")).toBe(true);
+  });
+
+  it("does not treat an ordinary test failure as missing dependencies", () => {
+    expect(looksLikeMissingDepsFailure(VITEST_TAIL)).toBe(false);
   });
 });
 
