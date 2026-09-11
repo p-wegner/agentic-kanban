@@ -363,6 +363,99 @@ describe("TimelineView — a11y (#1086 P2-10)", () => {
   });
 });
 
+describe("TimelineView — priority/tag filters (P2-15 remainder, #1100)", () => {
+  it("renders the priority/tag filter menu button in the toolbar", () => {
+    const html = render([column("Todo", [issue({ id: "a", title: "Add pagination" })])]);
+    expect(html).toContain("Priority/Tags");
+  });
+
+  it("honours a persisted priority filter, hiding issues of a different priority", () => {
+    useTimelineViewStore.setState({
+      byView: {
+        [`proj-pri:${TIMELINE_VIEW_ID}`]: {
+          anchor: 0, pxPerMs: 1, showCompleted: true, activeTypes: ["task", "bug", "feature", "chore"],
+          activePriorities: ["critical"],
+        },
+      },
+    });
+    const html = render(
+      [column("Todo", [issue({ id: "a", title: "Low priority thing", priority: "low" })])],
+      undefined,
+      "proj-pri",
+    );
+    expect(html).not.toContain("Low priority thing");
+    expect(html).toContain("No issues match the current filters");
+  });
+
+  it("shows a matching issue when its priority is in the persisted filter", () => {
+    useTimelineViewStore.setState({
+      byView: {
+        [`proj-pri2:${TIMELINE_VIEW_ID}`]: {
+          anchor: 0, pxPerMs: 1, showCompleted: true, activeTypes: ["task", "bug", "feature", "chore"],
+          activePriorities: ["critical"],
+        },
+      },
+    });
+    const html = render(
+      [column("Todo", [issue({ id: "a", title: "Urgent thing", priority: "critical" })])],
+      undefined,
+      "proj-pri2",
+    );
+    expect(html).toContain("Urgent thing");
+  });
+
+  it("honours a persisted tag filter, hiding an issue with none of the selected tags", () => {
+    useTimelineViewStore.setState({
+      byView: {
+        [`proj-tag:${TIMELINE_VIEW_ID}`]: {
+          anchor: 0, pxPerMs: 1, showCompleted: true, activeTypes: ["task", "bug", "feature", "chore"],
+          activeTagIds: ["t1"],
+        },
+      },
+    });
+    const html = render(
+      [column("Todo", [issue({ id: "a", title: "Untagged thing", tags: [] })])],
+      undefined,
+      "proj-tag",
+    );
+    expect(html).not.toContain("Untagged thing");
+  });
+
+  it("shows an issue carrying one of the selected tags", () => {
+    useTimelineViewStore.setState({
+      byView: {
+        [`proj-tag2:${TIMELINE_VIEW_ID}`]: {
+          anchor: 0, pxPerMs: 1, showCompleted: true, activeTypes: ["task", "bug", "feature", "chore"],
+          activeTagIds: ["t1"],
+        },
+      },
+    });
+    const html = render(
+      [column("Todo", [issue({ id: "a", title: "Backend thing", tags: [{ id: "t1", name: "backend", color: null }] })])],
+      undefined,
+      "proj-tag2",
+    );
+    expect(html).toContain("Backend thing");
+  });
+
+  it("counts priority + tag filters toward the filter-reset condition", () => {
+    useTimelineViewStore.setState({
+      byView: {
+        [`proj-tag3:${TIMELINE_VIEW_ID}`]: {
+          anchor: 0, pxPerMs: 1, showCompleted: true, activeTypes: ["task", "bug", "feature", "chore"],
+          activeTagIds: ["nonexistent-tag"],
+        },
+      },
+    });
+    const html = render(
+      [column("Todo", [issue({ id: "a", title: "Anything" })])],
+      undefined,
+      "proj-tag3",
+    );
+    expect(html).toContain("Reset type &amp; completed filters");
+  });
+});
+
 describe("timeline axis anchoring (#897)", () => {
   it("pins the final tick by its RIGHT edge, so its label cannot leave the track", () => {
     expect(axisAnchor(100)).toEqual({ right: 0 });

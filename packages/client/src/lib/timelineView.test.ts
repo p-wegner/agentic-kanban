@@ -3,8 +3,10 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { PRIORITY_META } from "./chartColors.js";
 import {
   computeLanes,
+  collectAvailableTags,
   pctOf,
   toggleTypeSet,
+  toggleSetMember,
   computeIssueBar,
   ALL_TYPES,
   DAY_MS,
@@ -267,6 +269,77 @@ describe("computeLanes — search by issue number (#1086/#1091 P1-4)", () => {
     const columns = [col("Todo", [issue({ id: "a", issueNumber: 42, title: "Unrelated title" })])];
     const lanes = computeLanes(columns, { showCompleted: true, activeTypes: new Set(ALL_TYPES), query: "43" });
     expect(lanes).toEqual([]);
+  });
+});
+
+describe("computeLanes — priority/tag filters (P2-15 remainder, #1100)", () => {
+  it("drops an issue whose priority is not in a non-empty activePriorities set", () => {
+    const columns = [col("Todo", [issue({ id: "a", priority: "low" }), issue({ id: "b", priority: "critical" })])];
+    const lanes = computeLanes(columns, {
+      showCompleted: true, activeTypes: new Set(ALL_TYPES), query: "", activePriorities: new Set(["critical"]),
+    });
+    expect(lanes.flatMap((l) => l.issues.map((i) => i.id))).toEqual(["b"]);
+  });
+
+  it("an empty activePriorities set means no priority filter at all", () => {
+    const columns = [col("Todo", [issue({ id: "a", priority: "low" })])];
+    const lanes = computeLanes(columns, {
+      showCompleted: true, activeTypes: new Set(ALL_TYPES), query: "", activePriorities: new Set(),
+    });
+    expect(lanes.flatMap((l) => l.issues.map((i) => i.id))).toEqual(["a"]);
+  });
+
+  it("keeps an issue carrying any one of the selected tags (OR, not AND)", () => {
+    const columns = [
+      col("Todo", [
+        issue({ id: "a", tags: [{ id: "t1", name: "backend", color: null }] }),
+        issue({ id: "b", tags: [{ id: "t2", name: "frontend", color: null }] }),
+        issue({ id: "c", tags: [] }),
+      ]),
+    ];
+    const lanes = computeLanes(columns, {
+      showCompleted: true, activeTypes: new Set(ALL_TYPES), query: "", activeTagIds: new Set(["t1"]),
+    });
+    expect(lanes.flatMap((l) => l.issues.map((i) => i.id))).toEqual(["a"]);
+  });
+
+  it("an untagged issue is dropped once a non-empty tag filter is set", () => {
+    const columns = [col("Todo", [issue({ id: "a", tags: [] })])];
+    const lanes = computeLanes(columns, {
+      showCompleted: true, activeTypes: new Set(ALL_TYPES), query: "", activeTagIds: new Set(["t1"]),
+    });
+    expect(lanes).toEqual([]);
+  });
+});
+
+describe("collectAvailableTags", () => {
+  it("dedupes tags by id across issues", () => {
+    const columns = [
+      issue({ id: "a", tags: [{ id: "t1", name: "backend", color: null }] }),
+      issue({ id: "b", tags: [{ id: "t1", name: "backend", color: null }, { id: "t2", name: "frontend", color: "#fff" }] }),
+    ];
+    expect(collectAvailableTags(columns)).toEqual([
+      { id: "t1", name: "backend", color: null },
+      { id: "t2", name: "frontend", color: "#fff" },
+    ]);
+  });
+
+  it("returns an empty list when no issue carries any tag", () => {
+    expect(collectAvailableTags([issue({ id: "a" })])).toEqual([]);
+  });
+});
+
+describe("toggleSetMember", () => {
+  it("adds an absent id", () => {
+    expect([...toggleSetMember(new Set(), "t1")]).toEqual(["t1"]);
+  });
+
+  it("removes a present id, with no reset-to-all special case (unlike toggleTypeSet)", () => {
+    expect([...toggleSetMember(new Set(["t1"]), "t1")]).toEqual([]);
+  });
+
+  it("leaves other members untouched", () => {
+    expect([...toggleSetMember(new Set(["t1", "t2"]), "t1")].sort()).toEqual(["t2"]);
   });
 });
 

@@ -1,9 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import {
-  TYPE_COLORS,
   PRIORITY_COLORS,
-  PRIORITY_ORDER,
   STATUS_BG,
   STATUS_BG_SOLID,
   STATUS_BADGE,
@@ -11,12 +9,15 @@ import {
   COMPLETED_STATUSES,
   fmtTooltipDate,
   computeLanes,
+  collectAvailableTags,
   pctOf,
   toggleTypeSet,
+  toggleSetMember,
   computeIssueBar,
   type DateRange,
   type Lane,
 } from "../lib/timelineView.js";
+import { TimelineToolbar } from "./TimelineToolbar.js";
 import {
   DAY_MS,
   parseLocalDate,
@@ -36,9 +37,6 @@ import { useViewTab } from "../hooks/useViewTab.js";
 import { useNow } from "../hooks/usePoll.js";
 import { useTimelineViewStore } from "../stores/timelineViewStore.js";
 import { Icon } from "./Icon.js";
-
-const SCALES: readonly Scale[] = ["day", "week", "month", "quarter"];
-const SCALE_LABELS: Record<Scale, string> = { day: "Day", week: "Week", month: "Month", quarter: "Quarter" };
 
 /** The [min,max] of `issues`' created→due/updated dates, folding in "now" (never empty). */
 function issueDateRange(issues: IssueWithStatus[]): { min: number; max: number } {
@@ -153,126 +151,6 @@ function GridLines({
         />
       )}
     </>
-  );
-}
-
-function TimelineToolbar({
-  issueCount, laneCount, showCompleted, setShowCompleted, scale, onSetScale, onStep, onToday, onFitAll, onZoom, activeTypes, onToggleType,
-}: {
-  issueCount: number;
-  laneCount: number;
-  showCompleted: boolean;
-  setShowCompleted: Dispatch<SetStateAction<boolean>>;
-  scale: Scale;
-  onSetScale: (scale: Scale) => void;
-  onStep: (direction: 1 | -1) => void;
-  onToday: () => void;
-  onFitAll: () => void;
-  onZoom: (factor: number) => void;
-  activeTypes: Set<string>;
-  onToggleType: (type: string) => void;
-}) {
-  const navBtn = "w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300";
-  return (
-    <div className="flex items-center gap-3 py-2 mb-1 flex-wrap">
-      <span className="text-xs text-gray-500 dark:text-gray-400">
-        {issueCount} issue{issueCount !== 1 ? "s" : ""} across {laneCount} status{laneCount !== 1 ? "es" : ""}
-      </span>
-      <button
-        onClick={() => setShowCompleted((v) => !v)}
-        className={`flex items-center gap-1.5 px-2 h-6 text-xs rounded border transition-colors ${
-          showCompleted
-            ? "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-            : "bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400"
-        }`}
-        title={showCompleted ? "Hide completed issues" : "Show completed issues"}
-      >
-        <span className={`w-1.5 h-1.5 rounded-full ${showCompleted ? "bg-green-500" : "bg-gray-400"}`} />
-        Show completed
-      </button>
-      <div className="flex items-center gap-1">
-        {SCALES.map((s) => (
-          <button
-            key={s}
-            onClick={() => onSetScale(s)}
-            aria-pressed={s === scale}
-            className={`px-2 h-6 text-xs rounded border transition-colors ${
-              s === scale
-                ? "bg-brand-50 dark:bg-brand-950/30 border-brand-300 dark:border-brand-700 text-brand-700 dark:text-brand-400"
-                : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-            }`}
-          >
-            {SCALE_LABELS[s]}
-          </button>
-        ))}
-      </div>
-      <div className="ml-auto flex items-center gap-1">
-        <span className="text-xs text-gray-400 dark:text-gray-500 mr-1">Navigate</span>
-        <button onClick={() => onStep(-1)} className={navBtn} title={`Back 1 ${scale}`}>‹</button>
-        <button
-          onClick={onToday}
-          className="px-1.5 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 min-w-[40px]"
-          title="Recenter on today"
-        >Today</button>
-        <button onClick={() => onStep(1)} className={navBtn} title={`Forward 1 ${scale}`}>›</button>
-        <button
-          onClick={onFitAll}
-          className="px-1.5 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
-          title="Fit all visible issues"
-        >Fit all</button>
-        <span className="text-xs text-gray-400 dark:text-gray-500 mx-2">|</span>
-        <span className="text-xs text-gray-400 dark:text-gray-500 mr-1">Zoom</span>
-        <button onClick={() => onZoom(1 / 1.25)} className={navBtn} title="Zoom out" aria-label="Zoom out">−</button>
-        <button onClick={() => onZoom(1.25)} className={navBtn} title="Zoom in" aria-label="Zoom in">+</button>
-      </div>
-      <div className="flex items-center gap-1">
-        {Object.entries(TYPE_COLORS).map(([type, cls]) => {
-          const isActive = activeTypes.has(type);
-          return (
-            <button
-              key={type}
-              onClick={() => onToggleType(type)}
-              title={isActive ? `Hide ${type}s` : `Show ${type}s`}
-              aria-pressed={isActive}
-              className={`flex items-center gap-1.5 px-2 h-6 text-xs rounded border transition-all select-none ${
-                isActive
-                  ? `${cls.bg} ${cls.border} ${cls.text} hover:brightness-95 dark:hover:brightness-110`
-                  : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-600 opacity-50 hover:opacity-75"
-              }`}
-            >
-              <span
-                className="w-2.5 h-2.5 rounded border shrink-0"
-                style={isActive ? { background: cls.dot + "33", borderColor: cls.dot + "99" } : { background: "transparent", borderColor: "currentColor" }}
-              />
-              {type.charAt(0).toUpperCase() + type.slice(1)}
-            </button>
-          );
-        })}
-      </div>
-
-      {/*
-        #1088 P2-7: a bar's priority dot, dashed border and the red "today" line were each
-        readable only by hovering (the dot's own `title`, the bar's own `title`) or by
-        already knowing the convention — nothing on the toolbar named what a colour or a
-        marker meant. This legend states the one thing a bar's OWN chrome cannot make
-        discoverable without hovering: the priority colour scale (type colour/border is
-        already legend-shaped via the type filter chips above, which double as their own
-        key).
-      */}
-      <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500 border-l border-gray-200 dark:border-gray-700 pl-3">
-        <span>Priority</span>
-        {PRIORITY_ORDER.map((p) => (
-          <span key={p} className="flex items-center gap-1" title={`Priority: ${p}`}>
-            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: PRIORITY_COLORS[p] }} />
-            <span className="capitalize">{p}</span>
-          </span>
-        ))}
-        <span className="flex items-center gap-1 ml-1" title="Due date is before the created date">
-          <span className="text-red-500 dark:text-red-400 font-bold">⚠</span>
-          <span>Invalid due date</span>
-        </span>
-      </div>
-    </div>
   );
 }
 
@@ -613,20 +491,35 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
   const [activeTypes, setActiveTypes] = useState<Set<string>>(
     () => new Set(persistedAtMount?.activeTypes ?? ALL_TYPES),
   );
+  // P2-15 remainder (#1100): priority/tag filters, alongside activeTypes/showCompleted above.
+  // Empty set means "no filter" for both — unlike activeTypes, neither has a fixed universe
+  // that "all selected" could stand in for (tags in particular are per-project and open-ended).
+  const [activePriorities, setActivePriorities] = useState<Set<string>>(
+    () => new Set(persistedAtMount?.activePriorities ?? []),
+  );
+  const [activeTagIds, setActiveTagIds] = useState<Set<string>>(
+    () => new Set(persistedAtMount?.activeTagIds ?? []),
+  );
 
   const q = searchQuery?.toLowerCase() ?? "";
 
   const toggleType = (type: string) => setActiveTypes((prev) => toggleTypeSet(prev, type));
+  const togglePriority = (priority: string) => setActivePriorities((prev) => toggleSetMember(prev, priority));
+  const toggleTag = (tagId: string) => setActiveTagIds((prev) => toggleSetMember(prev, tagId));
 
   const lanes = useMemo(
-    () => computeLanes(columns, { showCompleted, activeTypes, query: q }),
-    [columns, q, showCompleted, activeTypes],
+    () => computeLanes(columns, { showCompleted, activeTypes, query: q, activePriorities, activeTagIds }),
+    [columns, q, showCompleted, activeTypes, activePriorities, activeTagIds],
   );
 
   const allIssues = useMemo(() => lanes.flatMap((l) => l.issues), [lanes]);
 
   // Unfiltered, so the initial viewport isn't at the mercy of the default filter state.
   const allIssuesUnfiltered = useMemo(() => columns.flatMap((c) => c.issues), [columns]);
+
+  // Tags available to filter BY come from the unfiltered set — otherwise picking a tag would
+  // make every other tag's chip disappear (only one tag would ever be filterable at a time).
+  const availableTags = useMemo(() => collectAvailableTags(allIssuesUnfiltered), [allIssuesUnfiltered]);
 
   // #1088 (R1/R2/P1-6): the viewport (scale/anchor/zoom) is independent state, computed once
   // from the data on mount rather than re-derived from whatever is currently filtered — that
@@ -691,11 +584,15 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
       setZoomState(reconcileToScale(persisted.anchor, persisted.pxPerMs, fromScale, tab, trackPx));
       setShowCompleted(persisted.showCompleted);
       setActiveTypes(new Set(persisted.activeTypes));
+      setActivePriorities(new Set(persisted.activePriorities ?? []));
+      setActiveTagIds(new Set(persisted.activeTagIds ?? []));
     } else {
       const { min, max } = issueDateRange(allIssuesUnfiltered);
       setZoomState(viewportForFitAll(min, max, trackPx, tab));
       setShowCompleted(true);
       setActiveTypes(new Set(ALL_TYPES));
+      setActivePriorities(new Set());
+      setActiveTagIds(new Set());
     }
     committedScaleRef.current = tab;
   }
@@ -719,8 +616,10 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
       scale: tab,
       showCompleted,
       activeTypes: [...activeTypes],
+      activePriorities: [...activePriorities],
+      activeTagIds: [...activeTagIds],
     });
-  }, [storeKey, zoomState, showCompleted, activeTypes, tab]);
+  }, [storeKey, zoomState, showCompleted, activeTypes, activePriorities, activeTagIds, tab]);
 
   useEffect(() => {
     if (!scrollNode || typeof ResizeObserver === "undefined") return;
@@ -769,10 +668,13 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
   // Unfiltered count, so the empty state can tell "no issues at all" apart from "a filter
   // hid everything" (#1086/#1091 P1-4) — the two need different recoveries.
   const rawIssueCount = allIssuesUnfiltered.length;
-  const filtersActive = !showCompleted || activeTypes.size < ALL_TYPES.length || q.length > 0;
+  const filtersActive =
+    !showCompleted || activeTypes.size < ALL_TYPES.length || q.length > 0 || activePriorities.size > 0 || activeTagIds.size > 0;
   const resetFilters = () => {
     setShowCompleted(true);
     setActiveTypes(new Set(ALL_TYPES));
+    setActivePriorities(new Set());
+    setActiveTagIds(new Set());
   };
 
   return (
@@ -797,6 +699,11 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
         onZoom={handleZoom}
         activeTypes={activeTypes}
         onToggleType={toggleType}
+        availableTags={availableTags}
+        activePriorities={activePriorities}
+        onTogglePriority={togglePriority}
+        activeTagIds={activeTagIds}
+        onToggleTag={toggleTag}
       />
 
       {isEmpty ? (
