@@ -1,4 +1,4 @@
-import { boardStrategyPref, projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { boardStrategyPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { issueDependencies, issues, preferences, projectStatuses, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -13,16 +13,15 @@ import { issueDependencyColumns, issueIdentityColumns, preferenceKeyValueColumns
  * 2 — while the Board Monitor popover two clicks away correctly said 2. The board presented
  * two contradictory WIP numbers, both authoritatively.
  *
- * Returns the whole map rather than one value so the caller can apply the same precedence the
- * monitor uses (`resolveMonitorTunables`) instead of re-deriving a second answer here.
+ * Returns the whole map rather than one value so the caller applies THE WIP resolver
+ * (`resolveWipLimit`) instead of re-deriving a second answer here. Since #1102 that is the
+ * Bullseye plus the legacy global its default path still reads — `wip_limit_<id>` is retired.
  */
-const wipLimitPref = projectPref("wip_limit");
-
 export async function getWipLimitPrefMap(
   projectId: string,
   database: Database = db,
 ): Promise<Map<string, string>> {
-  const keys = [wipLimitPref.key(projectId), boardStrategyPref.key(projectId), "nudge_wip_limit"];
+  const keys = [boardStrategyPref.key(projectId), "nudge_wip_limit"];
   const prefRows = await database
     .select(preferenceKeyValueColumns)
     .from(preferences)

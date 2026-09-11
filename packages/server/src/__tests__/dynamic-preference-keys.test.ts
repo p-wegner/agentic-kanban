@@ -26,6 +26,10 @@ describe("isProjectScopedDynamicKey", () => {
     expect(isProjectScopedDynamicKey(`board_aging_hot_days_${PROJECT_ID}`)).toBe(true);
   });
 
+  it("no longer accepts the retired per-project wip_limit key (#1102)", () => {
+    expect(isProjectScopedDynamicKey(`wip_limit_${PROJECT_ID}`)).toBe(false);
+  });
+
   it("rejects a project-scoped prefix with a non-hex suffix", () => {
     expect(isProjectScopedDynamicKey("start_mode_NotAUuid")).toBe(false);
     expect(isProjectScopedDynamicKey("wip_limit_ZZZ")).toBe(false);

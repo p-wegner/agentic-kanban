@@ -287,13 +287,11 @@ export async function runDrivePreflight(
     }
 
     // --- WIP target: 1 means no real parallelism (degraded, not blocking). ---
-    // #919: reads THE WIP resolver like every other surface. This check used to bypass it
-    // (Bullseye raw, then the legacy `nudge_wip_limit`, then null) because it needs `null` to
-    // mean "no WIP target configured" so it can stay silent, and `resolveMonitorTunables`
-    // substitutes its default of 5 — erasing that distinction. `resolveWipLimit` reports BOTH:
-    // `configured` is null exactly when nothing is set, `limit` is what the board acts on. The
-    // bypass also meant this check was blind to `wip_limit_<projectId>`, so a project pinned to
-    // 1 by the onboarding wizard passed the parallelism check.
+    // #919: reads THE WIP resolver like every other surface. This check needs `null` to mean
+    // "no WIP target configured" so it can stay silent, and `resolveMonitorTunables` substitutes
+    // its default — erasing that distinction. `resolveWipLimit` reports BOTH: `configured` is null
+    // exactly when the Bullseye names no target (since #1102 the only place WIP is configured),
+    // `limit` is what the board acts on.
     const wipTarget = resolveWipLimit(prefMap, projectId).configured;
     if (wipTarget !== null && wipTarget < 2) {
       checks.push(

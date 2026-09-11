@@ -1,5 +1,5 @@
 import { preferences } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { recordOperation } from "@agentic-kanban/shared/lib/operation-metrics";
 import { onPreferenceWrite } from "@agentic-kanban/shared/lib/checked-preference-write";
 import { db } from "../db/index.js";
@@ -73,6 +73,19 @@ export async function setPreferences(
         set: { value, updatedAt: now },
       });
   }
+  invalidatePreferencesCache();
+}
+
+/**
+ * Delete preference rows by exact key (#1102 — a retired pref's rows go once they are migrated).
+ * An empty list is a no-op. Busts the prefs cache like every other write here.
+ */
+export async function deletePreferences(
+  keys: readonly string[],
+  database: Database = db,
+): Promise<void> {
+  if (keys.length === 0) return;
+  await database.delete(preferences).where(inArray(preferences.key, [...keys]));
   invalidatePreferencesCache();
 }
 
