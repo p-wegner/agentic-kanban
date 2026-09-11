@@ -22,6 +22,18 @@ export function xOf(ts: number, win: TimeWindow, trackPx: number): number {
 }
 
 /**
+ * Inverse of `xOf`: the timestamp under a pixel offset within `win` over a track `trackPx`
+ * wide (#1099 R1) — lets an interaction (wheel-zoom, click) target the timestamp under the
+ * cursor instead of always the window's midpoint. `offsetPx` is clamped to `[0, trackPx]` so a
+ * cursor briefly outside the track (e.g. mid-drag) still resolves to an in-window timestamp.
+ */
+export function tsAtOffset(win: TimeWindow, offsetPx: number, trackPx: number): number {
+  if (trackPx <= 0) return win.min;
+  const clamped = Math.min(Math.max(offsetPx, 0), trackPx);
+  return win.min + (clamped / trackPx) * (win.max - win.min);
+}
+
+/**
  * `[start,end]` clipped to `win` and converted to pixel geometry, or `null` when the span
  * doesn't overlap the window at all (so the caller can skip drawing it, rather than drawing a
  * zero-width bar at an edge).

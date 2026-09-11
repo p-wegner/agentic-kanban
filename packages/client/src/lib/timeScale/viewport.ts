@@ -50,6 +50,16 @@ export function stepAnchor(viewport: Viewport, direction: 1 | -1): Viewport {
   return { ...viewport, anchor: stepBoundary(snapDown(viewport.anchor, viewport.scale), viewport.scale, direction) };
 }
 
+/**
+ * Pan the viewport by `deltaPx` screen pixels (#1099 R1 drag-pan/shift-wheel) — a positive
+ * `deltaPx` is a drag-right / scroll-toward-later-content gesture, which reveals EARLIER
+ * content, so the anchor moves backward by the equivalent time span. Scale and zoom level are
+ * untouched; only the window's position shifts.
+ */
+export function panBy(viewport: Viewport, deltaPx: number): Viewport {
+  return { ...viewport, anchor: viewport.anchor - deltaPx / viewport.pxPerMs };
+}
+
 /** A viewport centred on `now` at the given scale/zoom. */
 export function viewportForToday(scale: Scale, pxPerMs: number, trackPx: number, nowMs: number = Date.now()): Viewport {
   const span = trackPx / pxPerMs;
