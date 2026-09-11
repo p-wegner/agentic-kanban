@@ -12,6 +12,7 @@ import { join } from "node:path";
 import {
   decideRegistryFile,
   discoverClaudeConfigDirs,
+  isMachineGlobalReapAllowed,
   reapAgentSessionRegistry,
   type RegistryFs,
 } from "../startup/agent-session-registry-reaper.js";
@@ -235,4 +236,17 @@ describe("discoverClaudeConfigDirs (#708)", () => {
       vi.unstubAllEnvs();
     }
   });
+});
+
+describe("isMachineGlobalReapAllowed (#1103)", () => {
+  it("allows the sweep only for the default (home-fallback) database — the one operated board", () => {
+    expect(isMachineGlobalReapAllowed("home-fallback")).toBe(true);
+  });
+
+  it.each(["DB_URL", "AGENTIC_KANBAN_DIR", "local-checkout", "test-throwaway"] as const)(
+    "refuses for a non-default database source (%s) — a worktree/scratch server is not the operated board",
+    (source) => {
+      expect(isMachineGlobalReapAllowed(source)).toBe(false);
+    },
+  );
 });

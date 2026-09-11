@@ -23,11 +23,61 @@ describe("repo-lock (#993 on-disk cross-process merge lock)", () => {
     return dir;
   }
 
+  /**
+   * A LINKED worktree the way git actually lays it out: `<worktree>/.git` is a one-line FILE
+   * naming the per-worktree git dir under the main repo's `.git/worktrees/<name>`, and that
+   * dir's own `commondir` file names the shared `.git` back (#1103).
+   */
+  function makeLinkedWorktree(): { mainGitDir: string; worktree: string } {
+    const main = mkdtempSync(join(tmpdir(), "ak-repo-lock-test-main-"));
+    const mainGitDir = join(main, ".git");
+    mkdirSync(mainGitDir, { recursive: true });
+    dirs.push(main);
+
+    const worktree = mkdtempSync(join(tmpdir(), "ak-repo-lock-test-wt-"));
+    dirs.push(worktree);
+    const worktreeGitDir = join(mainGitDir, "worktrees", "wt");
+    mkdirSync(worktreeGitDir, { recursive: true });
+    writeFileSync(join(worktreeGitDir, "commondir"), "../..\n");
+    writeFileSync(join(worktree, ".git"), `gitdir: ${worktreeGitDir}\n`);
+
+    return { mainGitDir, worktree };
+  }
+
   afterEach(() => {
     while (dirs.length > 0) {
       const dir = dirs.pop()!;
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  describe("linked worktrees resolve the lock into the shared .git, not the per-worktree file (#1103)", () => {
+    it("acquires the lock under the main checkout's .git", () => {
+      const { mainGitDir, worktree } = makeLinkedWorktree();
+      const handle = tryAcquireRepoLock(worktree, "worktree-holder");
+      expect(handle).not.toBeNull();
+      expect(handle!.path).toBe(join(mainGitDir, "agentic-kanban-merge.lock"));
+      expect(existsSync(handle!.path)).toBe(true);
+    });
+
+    it("a lock acquired from the worktree is visible (and contended) from the main checkout path", () => {
+      const { mainGitDir, worktree } = makeLinkedWorktree();
+      const first = tryAcquireRepoLock(worktree, "worktree-holder");
+      expect(first).not.toBeNull();
+
+      // The main checkout is just `mainGitDir`'s parent — a normal, non-worktree repoPath.
+      const mainRepoPath = join(mainGitDir, "..");
+      expect(tryAcquireRepoLock(mainRepoPath, "main-holder")).toBeNull();
+      expect(inspectRepoLock(mainRepoPath)!.contents.holder).toBe("worktree-holder");
+    });
+
+    it("release() from the worktree removes the lock the main checkout would see", () => {
+      const { mainGitDir, worktree } = makeLinkedWorktree();
+      const handle = tryAcquireRepoLock(worktree, "worktree-holder");
+      expect(handle).not.toBeNull();
+      handle!.release();
+      expect(existsSync(join(mainGitDir, "agentic-kanban-merge.lock"))).toBe(false);
+    });
   });
 
   it("acquires a fresh lock and writes pid/holder/heartbeat to disk", () => {
