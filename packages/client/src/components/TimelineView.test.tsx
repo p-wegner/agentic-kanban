@@ -147,6 +147,25 @@ describe("TimelineView — the chart", () => {
     expect(html).toContain("Invalid due date");
   });
 
+  it("#1099 P2-7: the legend also explains the Today line and a bar's start/end", () => {
+    const html = render(board);
+    expect(html).toContain("Bar: created");
+    expect(html).toContain("Today");
+  });
+
+  it("#1099 P2-10: a bar's priority dot carries a shape class, not just a color", () => {
+    const html = render([column("Todo", [issue({ id: "a", title: "High prio", priority: "high" })])]);
+    expect(html).toContain("rotate-45"); // "high" is a diamond
+  });
+
+  it("#1099 R1: the label column is sticky on horizontal scroll, in the header and every row", () => {
+    const html = render(board);
+    // The axis spacer (1) + one lane header per non-empty column (2) + one row label per
+    // visible issue (3) — all carry `sticky left-0`.
+    const totalIssues = board.reduce((n, c) => n + c.issues.length, 0);
+    expect((html.match(/sticky left-0/g) ?? []).length).toBe(1 + board.length + totalIssues);
+  });
+
   it("omits a lane whose issues were all filtered out, rather than drawing an empty lane", () => {
     const html = render(board, "pagination");
     expect(rowCount(html)).toBe(1);

@@ -4,7 +4,9 @@ import { PRIORITY_META } from "./chartColors.js";
 import {
   computeLanes,
   collectAvailableTags,
+  computeLabelStride,
   pctOf,
+  robustRange,
   toggleTypeSet,
   toggleSetMember,
   computeIssueBar,
@@ -12,6 +14,7 @@ import {
   DAY_MS,
   PRIORITY_COLORS,
   PRIORITY_ORDER,
+  PRIORITY_SHAPE_CLASS,
   type DateRange,
 } from "./timelineView.js";
 
@@ -78,6 +81,18 @@ describe("computeLanes", () => {
     expect(lanes[0].issues).toHaveLength(1); // filtered down to the bug
     expect(lanes[0].returnedCount).toBe(2); // but the server sent both
     expect(lanes[0].count).toBe(2); // and there were only 2 total (no server-side cap)
+  });
+
+  it("#1099 P2-15: orders a lane's issues by createdAt, not kanban sort order", () => {
+    const columns2 = [
+      col("Todo", [
+        issue({ id: "newest", createdAt: "2026-03-03T00:00:00Z" }),
+        issue({ id: "oldest", createdAt: "2026-01-01T00:00:00Z" }),
+        issue({ id: "middle", createdAt: "2026-02-01T00:00:00Z" }),
+      ]),
+    ];
+    const lanes = computeLanes(columns2, { showCompleted: true, activeTypes: new Set(ALL_TYPES), query: "" });
+    expect(lanes[0].issues.map((i) => i.id)).toEqual(["oldest", "middle", "newest"]);
   });
 });
 
@@ -352,5 +367,51 @@ describe("#1086 P3-a: priority colors are derived from chartColors.PRIORITY_META
 
   it("orders the legend critical -> high -> medium -> low, matching PRIORITY_META", () => {
     expect(PRIORITY_ORDER).toEqual(PRIORITY_META.map((p) => p.key));
+  });
+});
+
+describe("#1099 P2-10: priority carries a shape as well as a color", () => {
+  it("gives every priority in PRIORITY_ORDER a distinct shape class", () => {
+    const shapes = PRIORITY_ORDER.map((p) => PRIORITY_SHAPE_CLASS[p]);
+    expect(shapes.every(Boolean)).toBe(true);
+    expect(new Set(shapes).size).toBe(shapes.length); // no two priorities share a shape
+  });
+});
+
+describe("robustRange — #1099 P2-13: drops extreme outliers once there are enough points", () => {
+  it("returns the exact min/max for a small set (trimming would just be noise)", () => {
+    expect(robustRange([10, 1, 5])).toEqual({ min: 1, max: 10 });
+  });
+
+  it("returns {0,0} for an empty set", () => {
+    expect(robustRange([])).toEqual({ min: 0, max: 0 });
+  });
+
+  it("trims a far outlier off a large cluster once there are enough points", () => {
+    // A tight cluster of 20 points around 100-119, plus one wild outlier at 100000.
+    const cluster = Array.from({ length: 20 }, (_, i) => 100 + i);
+    const values = [...cluster, 100000];
+    const { min, max } = robustRange(values);
+    expect(min).toBeGreaterThanOrEqual(100);
+    expect(max).toBeLessThan(1000); // the outlier is dropped, not stretching the range to it
+  });
+});
+
+describe("computeLabelStride — #1099 P2-20: thins axis labels at narrow widths", () => {
+  it("shows every tick's label when there is ample room", () => {
+    expect(computeLabelStride(5, 1000)).toBe(1);
+  });
+
+  it("skips labels proportionally once the track is too narrow for all of them", () => {
+    // 20 ticks, 200px track: 10px/tick is far under the 70px minimum -> needs to skip several.
+    const stride = computeLabelStride(20, 200);
+    expect(stride).toBeGreaterThan(1);
+    // The rendered labels must still fit with real spacing between them.
+    expect((200 / 20) * stride).toBeGreaterThanOrEqual(70 - 1e-6);
+  });
+
+  it("never returns less than 1, even with degenerate inputs", () => {
+    expect(computeLabelStride(0, 1000)).toBe(1);
+    expect(computeLabelStride(10, 0)).toBe(1);
   });
 });
