@@ -8,6 +8,7 @@ import {
   GraphView, TableView, AgentGrid, TimelineView,
   ButlerView, WorkflowsView,
   BoardFeedView, RuntimeFeedView, FocusHubView,
+  RunnersView,
   StrategyTargetsView, SwimlaneView,
   RunbooksView,
   AnalyticsView, CalendarView,
@@ -188,6 +189,11 @@ export function BoardSecondaryViews({
               }
             }}
           />
+        </BoardErrorBoundary>
+      )}
+      {viewMode === "runners" && (
+        <BoardErrorBoundary columnName="Runners">
+          <RunnersView projectId={activeProjectId} />
         </BoardErrorBoundary>
       )}
       {viewMode === "analytics" && activeProjectId && (

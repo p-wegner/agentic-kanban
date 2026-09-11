@@ -8519,6 +8519,18 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/workers/connect-info:
+    get:
+      summary: SAME connect runbook the CLI's `worker instructions` prints, so the two never drift.
+      tags:
+        - workers
+      operationId: get_api_workers_connect_info
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
   /api/workers/explain:
     get:
       summary: reports preference values and the whole fleet's shape.
