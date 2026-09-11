@@ -190,4 +190,35 @@ describe("runSmokeCheck", () => {
     expect(result.passed).toBe(false);
     expect(result.status).toBe(0);
   }, 15000);
+
+  // #1095: the pre-merge gate's smoke boot must be able to neutralize the env it spawns
+  // with (DB location, listener pins) instead of blindly inheriting the board process's own
+  // — the child previously always spawned with a bare `{ ...process.env }`.
+  it("passes an env override through to the spawned dev server", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ak-smoke-env-"));
+    tmpDirs.push(dir);
+    const script = `console.error("MARKER=" + (process.env.SMOKE_TEST_MARKER || "MISSING")); process.exit(1);`;
+    writeFileSync(join(dir, "server.js"), script, "utf8");
+    const p = await port();
+    const check: SmokeCheck = { devCommand: "node server.js", healthUrl: `http://127.0.0.1:${p}`, expectBodyContains: [] };
+    const result = await runSmokeCheck(dir, check, { ...FAST, env: { SMOKE_TEST_MARKER: "override-seen" } });
+    expect(result.passed).toBe(false);
+    expect(result.message).toContain("MARKER=override-seen");
+  }, 15000);
+
+  // #1095: the failure message used to be a HEAD slice of the server log, so a boot error
+  // sitting behind a long banner (the pnpm deprecation notice + the dev-command banner, on
+  // this repo) was never visible — it silently ended at whatever the banner's 400th char was.
+  it("surfaces the server's LAST line even behind a long banner (tail, not head)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ak-smoke-tail-"));
+    tmpDirs.push(dir);
+    const banner = "B".repeat(1200);
+    const script = `console.log(${JSON.stringify(banner)}); console.error("FATAL: the real cause of the boot failure"); process.exit(1);`;
+    writeFileSync(join(dir, "server.js"), script, "utf8");
+    const p = await port();
+    const check: SmokeCheck = { devCommand: "node server.js", healthUrl: `http://127.0.0.1:${p}`, expectBodyContains: [] };
+    const result = await runSmokeCheck(dir, check, FAST);
+    expect(result.passed).toBe(false);
+    expect(result.message).toContain("FATAL: the real cause of the boot failure");
+  }, 15000);
 });
