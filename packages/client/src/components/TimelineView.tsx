@@ -441,6 +441,30 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
     [tab, zoomState],
   );
 
+  // #1090 fix: TimelineView is not remounted on a project switch (no `key` at the call site),
+  // so `storeKey` can change under an already-mounted component. Without this, the persist
+  // effect below (keyed on `storeKey`) would fire on the very next render with the OLD
+  // project's still-current `zoomState`/`showCompleted`/`activeTypes` and overwrite the NEW
+  // project's stored entry with stale data — corrupting it before the user ever interacted
+  // with the new project's timeline. Resetting synchronously during render (the standard
+  // "adjust state when a prop changes" pattern) lands the correct values before that effect
+  // ever observes the new key.
+  const appliedStoreKeyRef = useRef(storeKey);
+  if (appliedStoreKeyRef.current !== storeKey) {
+    appliedStoreKeyRef.current = storeKey;
+    const persisted = useTimelineViewStore.getState().byView[storeKey];
+    if (persisted) {
+      setZoomState({ anchor: persisted.anchor, pxPerMs: persisted.pxPerMs });
+      setShowCompleted(persisted.showCompleted);
+      setActiveTypes(new Set(persisted.activeTypes));
+    } else {
+      const { min, max } = issueDateRange(allIssuesUnfiltered);
+      setZoomState(viewportForFitAll(min, max, trackPx, tab));
+      setShowCompleted(true);
+      setActiveTypes(new Set(ALL_TYPES));
+    }
+  }
+
   useEffect(() => {
     useTimelineViewStore.getState().set(storeKey, {
       anchor: zoomState.anchor,
