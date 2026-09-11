@@ -20,6 +20,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { TimelineView, axisAnchor, axisLabelShift } from "./TimelineView.js";
+import { TIMELINE_VIEW_ID } from "../lib/viewTabs.js";
+import { useTimelineViewStore } from "../stores/timelineViewStore.js";
 
 const DAY = 86_400_000;
 
@@ -45,9 +47,9 @@ function column(name: string, issues: IssueWithStatus[]): StatusWithIssues {
   return { id: name.toLowerCase(), name, projectId: "p", sortOrder: 0, issues, count: issues.length } as StatusWithIssues;
 }
 
-function render(columns: StatusWithIssues[], searchQuery?: string): string {
+function render(columns: StatusWithIssues[], searchQuery?: string, projectId?: string | null): string {
   return renderToStaticMarkup(
-    <TimelineView columns={columns} onIssueClick={() => {}} searchQuery={searchQuery} />,
+    <TimelineView columns={columns} onIssueClick={() => {}} searchQuery={searchQuery} projectId={projectId} />,
   );
 }
 
@@ -177,6 +179,35 @@ describe("TimelineView — issues the range has to cope with", () => {
  * past its own `left` origin and overflows even though the transformed label does not, which
  * was invisible at 1440px and a 6px scrollbar at 900px.
  */
+/**
+ * #1090 batch-2 follow-up: the persisted anchor/zoom/filter state is scoped per PROJECT,
+ * not just per view id — otherwise switching projects while on the Timeline view would
+ * restore a stale anchor/filter sitting outside the new project's issue-date range.
+ *
+ * The write happens in a `useEffect`, unreachable via `renderToStaticMarkup` (SSR runs no
+ * effects) — see the file header. The read half (`persistedAtMount`, a `useRef` initializer)
+ * runs synchronously during render, so it IS reachable: seed the store directly, then assert
+ * on what the first render honours.
+ */
+describe("timeline persisted state is scoped by project (#1090)", () => {
+  const board = [column("Done", [issue({ id: "a", title: "Shipped it" })])];
+
+  it("honours a persisted showCompleted=false only for the project it was stored under", () => {
+    useTimelineViewStore.setState({
+      byView: { [`proj-1:${TIMELINE_VIEW_ID}`]: { anchor: 0, pxPerMs: 1, showCompleted: false, activeTypes: ["task"] } },
+    });
+    expect(render(board, undefined, "proj-1")).not.toContain("Shipped it");
+  });
+
+  it("does not leak proj-1's persisted state onto a different project", () => {
+    useTimelineViewStore.setState({
+      byView: { [`proj-1:${TIMELINE_VIEW_ID}`]: { anchor: 0, pxPerMs: 1, showCompleted: false, activeTypes: ["task"] } },
+    });
+    // proj-2 has nothing stored under its own key, so it falls back to the default (show all).
+    expect(render(board, undefined, "proj-2")).toContain("Shipped it");
+  });
+});
+
 describe("timeline axis anchoring (#897)", () => {
   it("pins the final tick by its RIGHT edge, so its label cannot leave the track", () => {
     expect(axisAnchor(100)).toEqual({ right: 0 });

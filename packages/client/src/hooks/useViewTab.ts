@@ -32,8 +32,13 @@ export function useViewTab<T extends string>(viewId: string): [T, (tab: T) => vo
   const requested = useViewTabStore((s) => s.requested[viewId]);
 
   const [tab, setTab] = useState<T>(() => {
-    const fromPath = parseAppPath(window.location.pathname);
-    if (fromPath.view === viewId && isValid(fromPath.tab)) return fromPath.tab;
+    // `window` is absent under the client package's default (non-DOM) vitest environment, which
+    // is how TimelineView.test.tsx renders via `renderToStaticMarkup` with no jsdom — falling
+    // through to the registry default there is exactly what a server/no-history render should do.
+    if (typeof window !== "undefined") {
+      const fromPath = parseAppPath(window.location.pathname);
+      if (fromPath.view === viewId && isValid(fromPath.tab)) return fromPath.tab;
+    }
     return (getDefaultViewTab(viewId) ?? getViewTabIds(viewId)[0] ?? "") as T;
   });
 
