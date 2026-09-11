@@ -18,6 +18,7 @@ import {
 } from "../lib/timelineView.js";
 import {
   DAY_MS,
+  parseLocalDate,
   stepAnchor,
   ticksFor,
   viewportForFitAll,
@@ -31,6 +32,7 @@ import {
 } from "../lib/timeScale.js";
 import { TIMELINE_VIEW_ID, type TimelineScaleId } from "../lib/viewTabs.js";
 import { useViewTab } from "../hooks/useViewTab.js";
+import { useNow } from "../hooks/usePoll.js";
 import { useTimelineViewStore } from "../stores/timelineViewStore.js";
 import { Icon } from "./Icon.js";
 
@@ -43,11 +45,19 @@ function issueDateRange(issues: IssueWithStatus[]): { min: number; max: number }
     const now = Date.now();
     return { min: now - 7 * DAY_MS, max: now };
   }
-  const dates = issues.flatMap((i) => [
-    new Date(i.createdAt).getTime(),
-    i.dueDate ? new Date(i.dueDate).getTime() : new Date(i.updatedAt).getTime(),
-  ]);
-  return { min: Math.min(...dates), max: Math.max(...dates, Date.now()) };
+  let min = Infinity;
+  let max = Date.now();
+  for (const i of issues) {
+    const created = new Date(i.createdAt).getTime();
+    // `dueDate` is a bare "YYYY-MM-DD" — `parseLocalDate` reads it as local midnight so it
+    // doesn't silently shift a day earlier in any timezone west of UTC (#1086 P1-5).
+    const other = i.dueDate ? parseLocalDate(i.dueDate).getTime() : new Date(i.updatedAt).getTime();
+    if (created < min) min = created;
+    if (other < min) min = other;
+    if (created > max) max = created;
+    if (other > max) max = other;
+  }
+  return { min, max };
 }
 
 interface TimelineViewProps {
@@ -60,8 +70,13 @@ interface TimelineViewProps {
 
 const LABEL_W = 220;
 const BAR_H = 30;
-/** Floor on a bar's rendered width: a same-day issue is 0% wide and would be invisible. */
-const MIN_BAR_W = 90;
+/**
+ * Floor on a bar's rendered width: a same-day issue is 0% wide and would be invisible.
+ * A small pixel floor rather than the old 90px — the row track now clips overflow, so a
+ * bar near the right edge no longer needs headroom reserved for a wide readability floor
+ * (#1086 P1-2 remainder A).
+ */
+const MIN_BAR_W = 6;
 const ROW_H = 46;
 const AXIS_H = 28;
 
@@ -256,17 +271,23 @@ function TimelineToolbar({
 }
 
 function TimelineLane({
-  lane, laneIdx, majorTicks, minorTicks, range, nowPct, onIssueClick, setTooltip,
+  lane, laneIdx, majorTicks, minorTicks, range, nowMs, nowPct, onIssueClick, setTooltip,
 }: {
   lane: Lane;
   laneIdx: number;
   majorTicks: number[];
   minorTicks: number[];
   range: DateRange;
+  nowMs: number;
   nowPct: number;
   onIssueClick: (issue: IssueWithStatus) => void;
   setTooltip: (t: TooltipState | null) => void;
 }) {
+  // #1086 P1-3: `lane.count` is the column's TRUE total — for a terminal (Done/Cancelled)
+  // column the server caps `issues` at 50, so `lane.issues.length` silently undercounts
+  // whenever a project has real history. `lane.returnedCount` is what the server actually
+  // sent before any client-side filtering; a gap between the two means the server truncated.
+  const isCapped = lane.count > lane.returnedCount;
   return (
     <div className={`${STATUS_BG[lane.name] ?? "bg-surface-raised dark:bg-surface-raised-dark"} ${laneIdx > 0 ? "border-t border-gray-200 dark:border-gray-700" : ""}`}>
       {/* Lane header */}
@@ -276,17 +297,27 @@ function TimelineLane({
           style={{ width: LABEL_W, minWidth: LABEL_W }}
         >
           <span className={`text-xs font-semibold truncate ${STATUS_BADGE[lane.name] ?? "text-gray-600 dark:text-gray-400"}`}>{lane.name}</span>
-          <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto shrink-0">{lane.issues.length}</span>
+          <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto shrink-0" title={isCapped ? `${lane.returnedCount} of ${lane.count} loaded` : undefined}>
+            {lane.count}
+          </span>
         </div>
         <div className={`flex-1 h-full border-b border-gray-100 dark:border-gray-800 relative ${STATUS_BG[lane.name] ?? ""}`}>
           <GridLines majorTicks={majorTicks} minorTicks={minorTicks} range={range} nowPct={nowPct} strong />
+          {isCapped && (
+            <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[10px] text-amber-600 dark:text-amber-400 whitespace-nowrap select-none">
+              showing latest {lane.returnedCount} of {lane.count}
+            </span>
+          )}
         </div>
       </div>
 
       {/* Issue rows */}
       {lane.issues.map((issue) => {
         const isCompleted = COMPLETED_STATUSES.has(lane.name);
-        const { startPct: startP, spanPct: spanP, colors: cls, priorityColor: priColor, invalidDueDate } = computeIssueBar(issue, range, isCompleted);
+        const {
+          startPct: startP, spanPct: spanP, clippedStart, clippedEnd,
+          colors: cls, priorityColor: priColor, invalidDueDate, duePct, isOpen,
+        } = computeIssueBar(issue, range, isCompleted, nowMs);
         return (
           <div key={issue.id} className="flex items-center border-b border-gray-50 dark:border-gray-800" style={{ height: ROW_H }}>
             <div
@@ -296,50 +327,61 @@ function TimelineLane({
               <span className="text-[11px] text-gray-400 dark:text-gray-500 shrink-0">#{issue.issueNumber}</span>
               <span className="text-[11px] text-gray-600 dark:text-gray-400 truncate" title={issue.title}>{issue.title}</span>
             </div>
-            <div className="flex-1 relative h-full">
+            {/*
+              #1086 P1-1: `overflow-hidden` is what actually stops a bar painting over the
+              label column or piling up at an edge — `startP`/`spanP` are already clipped by
+              `computeIssueBar` (via `clipSpan`), but without this the readability floor
+              (`MIN_BAR_W`) could still nudge a few px of a right-edge bar past the track.
+            */}
+            <div className="flex-1 relative h-full overflow-hidden">
               <GridLines majorTicks={majorTicks} minorTicks={minorTicks} range={range} nowPct={nowPct} />
-              <div
-                className={`absolute top-1/2 -translate-y-1/2 rounded-md border cursor-pointer
-                  transition-all hover:shadow-md hover:brightness-95 dark:hover:brightness-110
-                  flex items-center gap-1.5 px-2 overflow-hidden select-none
-                  ${cls.bg} ${invalidDueDate ? "border-dashed border-red-400 dark:border-red-500" : cls.border}`}
-                title={invalidDueDate ? "Due date is before the created date — showing the fallback end instead" : undefined}
-                /*
-                  #897: the bar is clamped so it cannot spill past the track.
-                  `pctOf` already clamps to 0-100, so the percentages alone never overflow —
-                  the sole cause was the `max(MIN_BAR_W, …)` readability floor, which widens a
-                  short bar beyond its true span while still anchoring it by its LEFT edge. An
-                  issue created near the right end of the range therefore painted up to
-                  MIN_BAR_W past 100% and gave the whole view a horizontal scrollbar for ~48px
-                  of nothing. Measured on /p/agentic-kanban/timeline at 1440x900.
-
-                  The floor is kept — it is what makes a same-day issue readable at all — so
-                  the fix clamps both ends instead of dropping it: the left edge never gets
-                  closer than MIN_BAR_W to the track's right edge (so the floor always fits),
-                  and max-width caps the bar at whatever track remains. The `max(0px, …)` is
-                  for a track narrower than MIN_BAR_W, where the inner clamp would otherwise
-                  go negative and push the bar off the LEFT edge instead.
-                */
-                style={{
-                  ["--bar-left" as string]: `min(${startP}%, max(0px, calc(100% - ${MIN_BAR_W}px)))`,
-                  left: "var(--bar-left)",
-                  width: `max(${MIN_BAR_W}px, ${spanP}%)`,
-                  maxWidth: "calc(100% - var(--bar-left))",
-                  height: BAR_H,
-                }}
-                onClick={() => onIssueClick(issue)}
-                onMouseEnter={(e) => {
-                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                  setTooltip({ issue, x: rect.left + rect.width / 2, y: rect.top });
-                }}
-                onMouseLeave={() => setTooltip(null)}
-              >
-                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: priColor }} title={`Priority: ${issue.priority ?? "medium"}`} />
-                {invalidDueDate && (
-                  <span className="text-red-500 dark:text-red-400 text-[10px] font-bold shrink-0" title="Due date is before the created date">⚠</span>
-                )}
-                <span className={`text-xs font-medium truncate ${cls.text}`}>{issue.title}</span>
-              </div>
+              {duePct !== null && (
+                <div
+                  className={`absolute top-1 bottom-1 w-0.5 ${isCompleted ? "bg-gray-300 dark:bg-gray-600" : duePct <= nowPct ? "bg-red-500" : "bg-gray-400 dark:bg-gray-500"}`}
+                  style={{ left: `${duePct}%` }}
+                  title={`Due ${fmtTooltipDate(parseLocalDate(issue.dueDate!))}`}
+                />
+              )}
+              {/*
+                #1086 P1-1: `startP === null` means the bar's whole span falls outside the
+                visible window — draw nothing rather than a bar clamped to one edge, which
+                used to paint a phantom sliver over the label column or pile several unrelated
+                bars on top of each other at the same edge.
+              */}
+              {startP !== null && (
+                <div
+                  className={`absolute top-1/2 -translate-y-1/2 rounded-md border cursor-pointer
+                    transition-all hover:shadow-md hover:brightness-95 dark:hover:brightness-110
+                    flex items-center gap-1.5 px-2 overflow-hidden select-none
+                    ${cls.bg} ${invalidDueDate ? "border-dashed border-red-400 dark:border-red-500" : cls.border}`}
+                  title={invalidDueDate ? "Due date is before the created date — showing the fallback end instead" : undefined}
+                  style={{
+                    left: `${startP}%`,
+                    width: `max(${MIN_BAR_W}px, ${spanP}%)`,
+                    height: BAR_H,
+                  }}
+                  onClick={() => onIssueClick(issue)}
+                  onMouseEnter={(e) => {
+                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                    setTooltip({ issue, x: rect.left + rect.width / 2, y: rect.top });
+                  }}
+                  onMouseLeave={() => setTooltip(null)}
+                >
+                  {clippedStart && (
+                    <span className="text-gray-500 dark:text-gray-400 text-[10px] shrink-0" title="Continues before this view">«</span>
+                  )}
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: priColor }} title={`Priority: ${issue.priority ?? "medium"}`} />
+                  {invalidDueDate && (
+                    <span className="text-red-500 dark:text-red-400 text-[10px] font-bold shrink-0" title="Due date is before the created date">⚠</span>
+                  )}
+                  <span className={`text-xs font-medium truncate ${cls.text}`}>{issue.title}</span>
+                  {clippedEnd ? (
+                    <span className="text-gray-500 dark:text-gray-400 text-[10px] shrink-0 ml-auto" title="Continues beyond this view">»</span>
+                  ) : isOpen ? (
+                    <span className="text-gray-500 dark:text-gray-400 text-[10px] shrink-0 ml-auto" title="Still open — ongoing">›</span>
+                  ) : null}
+                </div>
+              )}
             </div>
           </div>
         );
@@ -368,7 +410,10 @@ function TimelineTooltip({ tooltip }: { tooltip: TooltipState }) {
           {fmtTooltipDate(new Date(tooltip.issue.updatedAt))}
         </div>
         {tooltip.issue.dueDate && (() => {
-          const due = new Date(tooltip.issue.dueDate);
+          // #1086 P1-5: `dueDate` is a bare "YYYY-MM-DD" — `parseLocalDate` reads it as local
+          // midnight, avoiding the off-by-one-day shift `new Date(dueDate)` produces in any
+          // timezone west of UTC (it parses the bare date as UTC midnight).
+          const due = parseLocalDate(tooltip.issue.dueDate);
           const invalidDueDate = due.getTime() < new Date(tooltip.issue.createdAt).getTime();
           const overdue = due < new Date(new Date().toDateString());
           return (
@@ -595,7 +640,11 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
   const majorTicks = useMemo(() => majorTickList.map((t) => t.ts), [majorTickList]);
   const minorTicks = useMemo(() => minorTickList.map((t) => t.ts), [minorTickList]);
 
-  const now = Date.now();
+  // #1086 P2-17: a plain `Date.now()` read at render time only ever moves when something ELSE
+  // triggers a re-render — the Today marker and every open issue's bar (whose end is "now")
+  // would otherwise freeze at whatever they happened to be on the last state change. `useNow`
+  // re-renders this component periodically, like any other live clock in the client.
+  const now = useNow(60_000);
   const pct = (ts: number): number => pctOf(ts, timeWindow);
 
   /** Apply a computed Viewport: publish a scale change to the URL tab, keep anchor/zoom local. */
@@ -722,6 +771,7 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
                   majorTicks={majorTicks}
                   minorTicks={minorTicks}
                   range={timeWindow}
+                  nowMs={now}
                   nowPct={nowPct}
                   onIssueClick={onIssueClick}
                   setTooltip={setTooltip}
