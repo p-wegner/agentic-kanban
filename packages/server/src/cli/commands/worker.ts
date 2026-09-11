@@ -24,6 +24,15 @@ import { renderDoctorReport, runBoardDoctor, runWorkerDoctor } from "./worker-do
 // #880 — the read-only update-check. Db-free like the doctor: also part of the
 // standalone worker binary.
 import { renderUpdateCheckReport, runWorkerUpdateCheck } from "./worker-update-check.js";
+// The step SHAPE lives in shared/lib (#1089, wire-dto-single-declaration) — a deep `lib/` path,
+// not the `types` barrel, because this file is reached by the `agentic-kanban-worker` binary's
+// isolation-tested import graph (`worker-cli-isolation.test.ts`), which permits only
+// `@agentic-kanban/shared/lib/*` specifiers. The `buildWorkerConnectSteps` FUNCTION stays here
+// rather than in a new server-side lib module: that graph is also ceiling-capped at 25 modules,
+// so a dedicated file this module reaches would trip the ceiling for free, whereas this file is
+// already in the graph. `routes/workers.ts` (`GET /api/workers/connect-info`) imports the
+// function from this module directly.
+import type { WorkerConnectStep } from "@agentic-kanban/shared/lib/worker-connect-steps";
 
 const DEFAULT_BOARD_URL = "http://127.0.0.1:3001";
 
@@ -83,19 +92,59 @@ function splitList(value?: string): string[] | undefined {
   return items.length > 0 ? items : undefined;
 }
 
-export interface WorkerConnectStep {
-  title: string;
-  detail: string;
-  /** Commands to run for this step, in order. Empty for check-only steps. */
-  commands: string[];
-  /** Where the step runs — worker machine, board machine, or either. */
-  where: "worker" | "board" | "either";
+/**
+ * Windows-only: point the reader at the service/tray scripts that ship IN the
+ * package, so an unattended worker is a documented install step rather than
+ * scripts someone hand-copies between machines. Kept out of the numbered steps
+ * because it is optional and platform-specific — the foreground `start` above is
+ * what proves the pairing works, and this survives the shell closing.
+ */
+function renderWindowsServiceSection(): string[] {
+  const toolsDir = resolveWindowsToolsDir();
+  // Not found = running from somewhere the scripts were not shipped to. Say how
+  // to locate them rather than printing a path that is wrong on this machine.
+  const dir = toolsDir ?? "$(Join-Path (npm prefix -g) 'node_modules\\agentic-kanban\\tools\\worker-windows')";
+  const lines: string[] = [];
+  lines.push("## Windows: keep the worker running unattended (optional)");
+  lines.push("");
+  lines.push(
+    "The foreground `start` above dies with its shell. On Windows the package ships scripts that register the " +
+      "worker as the Scheduled Task `AgenticKanbanWorker` — at logon, in YOUR session, so agents keep using this " +
+      "account's provider credentials — under a supervisor that restarts the daemon with backoff, plus a systray " +
+      "dot for its real state. They live inside the installed package here:",
+  );
+  lines.push("");
+  lines.push("```text");
+  lines.push(dir);
+  lines.push("```");
+  lines.push("");
+  lines.push("```powershell");
+  lines.push(`Set-Location "${dir}"`);
+  lines.push("");
+  lines.push("# install + start the background service (-Board is the board's FLEET port)");
+  lines.push(".\\ak-worker-service.ps1 -Install -Board <board-url> -Labels windows -Providers claude -ClaudeConfigDir $env:CLAUDE_CONFIG_DIR");
+  lines.push(".\\ak-worker-service.ps1 -Status");
+  lines.push(".\\ak-worker-service.ps1 -Log -Tail 50");
+  lines.push("");
+  lines.push("# the systray dot (hidden launcher; shortcut it into shell:startup to get it at logon)");
+  lines.push("wscript.exe .\\ak-worker-tray-launch.vbs");
+  lines.push("```");
+  lines.push("");
+  lines.push(
+    "Pair once in the foreground first (the step above): the service reuses the saved per-worker token. No admin " +
+      "rights are needed. Set `-ClaudeConfigDir` explicitly — a Scheduled Task inherits nothing, and an unset " +
+      "`CLAUDE_CONFIG_DIR` silently runs the agents under the default `~/.claude` account. The supervisor also " +
+      "forces `ACP_AUTOCONNECT=0`, without which a headless agent can hang forever with no output. See the " +
+      "README in that directory for the rest.",
+  );
+  lines.push("");
+  return lines;
 }
 
 /**
  * The connect runbook, as data. Exported so `worker instructions --json`, the
- * `fleet-worker` agent skill and the docs all render the SAME steps instead of
- * three copies that drift.
+ * `fleet-worker` agent skill, the docs, and the Connect tab (`GET /api/workers/connect-info`)
+ * all render the SAME steps instead of copies that drift.
  */
 export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string): WorkerConnectStep[] {
   return [
@@ -148,8 +197,8 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string):
       where: "board",
       detail:
         "Pairing tokens are single-use and expire in 10 minutes. Mint one on the board host (the mint endpoint " +
-        "rides the board's loopback trust), or use the Workers UI panel: command palette → \"Worker Fleet\" → " +
-        "Mint token. Copy the token to this machine.",
+        "rides the board's loopback trust), or use the Runners view's Connect tab: command palette → \"Runners\" → " +
+        "Connect → Mint token. Copy the token to this machine.",
       commands: ["agentic-kanban worker pair"],
     },
     {
@@ -191,55 +240,6 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string):
       ],
     },
   ];
-}
-
-/**
- * Windows-only: point the reader at the service/tray scripts that ship IN the
- * package, so an unattended worker is a documented install step rather than
- * scripts someone hand-copies between machines. Kept out of the numbered steps
- * because it is optional and platform-specific — the foreground `start` above is
- * what proves the pairing works, and this survives the shell closing.
- */
-function renderWindowsServiceSection(): string[] {
-  const toolsDir = resolveWindowsToolsDir();
-  // Not found = running from somewhere the scripts were not shipped to. Say how
-  // to locate them rather than printing a path that is wrong on this machine.
-  const dir = toolsDir ?? "$(Join-Path (npm prefix -g) 'node_modules\\agentic-kanban\\tools\\worker-windows')";
-  const lines: string[] = [];
-  lines.push("## Windows: keep the worker running unattended (optional)");
-  lines.push("");
-  lines.push(
-    "The foreground `start` above dies with its shell. On Windows the package ships scripts that register the " +
-      "worker as the Scheduled Task `AgenticKanbanWorker` — at logon, in YOUR session, so agents keep using this " +
-      "account's provider credentials — under a supervisor that restarts the daemon with backoff, plus a systray " +
-      "dot for its real state. They live inside the installed package here:",
-  );
-  lines.push("");
-  lines.push("```text");
-  lines.push(dir);
-  lines.push("```");
-  lines.push("");
-  lines.push("```powershell");
-  lines.push(`Set-Location "${dir}"`);
-  lines.push("");
-  lines.push("# install + start the background service (-Board is the board's FLEET port)");
-  lines.push(".\\ak-worker-service.ps1 -Install -Board <board-url> -Labels windows -Providers claude -ClaudeConfigDir $env:CLAUDE_CONFIG_DIR");
-  lines.push(".\\ak-worker-service.ps1 -Status");
-  lines.push(".\\ak-worker-service.ps1 -Log -Tail 50");
-  lines.push("");
-  lines.push("# the systray dot (hidden launcher; shortcut it into shell:startup to get it at logon)");
-  lines.push("wscript.exe .\\ak-worker-tray-launch.vbs");
-  lines.push("```");
-  lines.push("");
-  lines.push(
-    "Pair once in the foreground first (the step above): the service reuses the saved per-worker token. No admin " +
-      "rights are needed. Set `-ClaudeConfigDir` explicitly — a Scheduled Task inherits nothing, and an unset " +
-      "`CLAUDE_CONFIG_DIR` silently runs the agents under the default `~/.claude` account. The supervisor also " +
-      "forces `ACP_AUTOCONNECT=0`, without which a headless agent can hang forever with no output. See the " +
-      "README in that directory for the rest.",
-  );
-  lines.push("");
-  return lines;
 }
 
 export function renderWorkerConnectMarkdown(

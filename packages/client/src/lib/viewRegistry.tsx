@@ -40,7 +40,8 @@ export type ViewMode =
   | "activity"
   | "analytics"
   | "calendar"
-  | "plugin-views";
+  | "plugin-views"
+  | "runners";
 
 export interface ViewDescriptor {
   /** Stable view id — matches BoardPage's `viewMode` state. */
@@ -272,6 +273,18 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "▦",
     paletteDescription: "Tabbed analytics charts: flow (throughput, lead time, burndown) and agents (provider mix, cost, leaderboard, score distribution)",
     activeClass: "bg-emerald-600 text-white",
+    group: "secondary",
+  },
+  {
+    // #1089 — follow-up to #1087: connected compute workers, as a tabbed view instead of the
+    // former `WorkerFleetPanel` overlay (retired). Runners / Dispatch Log / Git Transport /
+    // Connect as tabs.
+    id: "runners",
+    toolbarLabel: "Runners",
+    label: "Runners",
+    tooltip: "Runners — connected compute workers, dispatch log, git transport, and how to connect one",
+    paletteIcon: "⧉",
+    paletteDescription: "Worker fleet: identity/status/capabilities/load and current work, dispatch log, held git-transport refs, and connect instructions as tabs",
     group: "secondary",
   },
 ];

@@ -116,7 +116,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/scheduled-runs", createScheduledRunsRoute(database, getSessionManager, options?.boardEvents));
   routes.route("/merge-queue", createMergeQueueRoute(database, getSessionManager, options));
   routes.route("/metrics", createMetricsRoute());
-  routes.route("/workers", createWorkersRoute(database));
+  routes.route("/workers", createWorkersRoute(database, undefined, options?.boardEvents));
   routes.route("/plugins", createPluginsRoute(database, { ...options, getSessionManager }));
   routes.route("/projects", createPluginProjectViewsRoute(database));
   routes.route("/health", createHealthRoute());
