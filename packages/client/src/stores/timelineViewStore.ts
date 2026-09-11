@@ -5,10 +5,12 @@
 // Scale itself is NOT stored here — it is the URL tab (lib/viewTabs.ts
 // TIMELINE_TABS), and useViewTab already publishes it to viewTabStore. This
 // store only holds what a URL segment cannot: the pan position, zoom level,
-// and the toolbar's own filter toggles. Keyed by view id, same shape as
-// viewTabStore, even though only "timeline" uses it today — a bespoke
-// singleton would just have to grow this shape the next time a second view
-// needs it.
+// and the toolbar's own filter toggles.
+//
+// `byView` is keyed by the CALLER-BUILT key, not bare view id: an anchor is a
+// position in one project's issue-date range, so TimelineView keys by
+// `${projectId}:${viewId}` — otherwise switching projects while on this view
+// would restore a stale anchor from a different project's data range.
 import { create } from "zustand";
 
 export interface TimelineFilterState {

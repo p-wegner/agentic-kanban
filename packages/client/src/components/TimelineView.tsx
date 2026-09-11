@@ -52,6 +52,8 @@ interface TimelineViewProps {
   columns: StatusWithIssues[];
   onIssueClick: (issue: IssueWithStatus) => void;
   searchQuery?: string;
+  /** Scopes the persisted anchor/zoom/filter state (below) to one project. */
+  projectId?: string | null;
 }
 
 const LABEL_W = 220;
@@ -370,7 +372,7 @@ function TimelineTooltip({ tooltip }: { tooltip: TooltipState }) {
 /** Default track width used before the scroll container has been measured (e.g. static render). */
 const DEFAULT_TRACK_PX = 1200;
 
-export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineViewProps) {
+export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: TimelineViewProps) {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [trackPx, setTrackPx] = useState(DEFAULT_TRACK_PX);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -385,7 +387,14 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
   // to react to a later write, since this component is the only writer) — a plain `useState`
   // reset to the defaults every time the user came back to this view, even though the scale
   // (URL tab) and the search box (global filter store) already didn't.
-  const persistedAtMount = useRef(useTimelineViewStore.getState().byView[TIMELINE_VIEW_ID]).current;
+  //
+  // Keyed by project, not just by view id: an anchor/zoom is a position in ONE project's
+  // issue-date range, and `TIMELINE_VIEW_ID` alone is the same constant for every project on
+  // the board — without the project in the key, switching projects while on the Timeline view
+  // would restore the previous project's anchor (often outside the new project's data range)
+  // instead of resetting to a sensible default.
+  const storeKey = `${projectId ?? "none"}:${TIMELINE_VIEW_ID}`;
+  const persistedAtMount = useRef(useTimelineViewStore.getState().byView[storeKey]).current;
 
   const [showCompleted, setShowCompleted] = useState(persistedAtMount?.showCompleted ?? true);
   const [activeTypes, setActiveTypes] = useState<Set<string>>(
@@ -433,13 +442,13 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
   );
 
   useEffect(() => {
-    useTimelineViewStore.getState().set(TIMELINE_VIEW_ID, {
+    useTimelineViewStore.getState().set(storeKey, {
       anchor: zoomState.anchor,
       pxPerMs: zoomState.pxPerMs,
       showCompleted,
       activeTypes: [...activeTypes],
     });
-  }, [zoomState, showCompleted, activeTypes]);
+  }, [storeKey, zoomState, showCompleted, activeTypes]);
 
   useEffect(() => {
     const el = scrollRef.current;
