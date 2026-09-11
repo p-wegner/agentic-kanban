@@ -161,6 +161,69 @@ describe("#361: reconcileOrphanedWorktrees on the measured kassenbuch state", ()
 });
 
 /**
+ * #1104 — the reconciler refuses to sweep a project registered AT a linked worktree's own
+ * path, because `git worktree list` there enumerates every sibling worktree of the shared
+ * repo, not just this project's own. `detectRepoInfo` now refuses this at registration time;
+ * this is the defensive backstop for a project that was already registered this way.
+ */
+describe("#1104: refuses to sweep a repoPath that is itself a linked worktree", () => {
+  it("skips the sweep entirely and never calls git.listWorktrees", async () => {
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { execFile } = await import("node:child_process");
+    const exec = (cmd: string, args: string[], cwd: string) =>
+      new Promise<string>((res, rej) => execFile(cmd, args, { cwd }, (err, stdout) => (err ? rej(err) : res(stdout.toString().trim()))));
+
+    const mainDir = await mkdtemp(join(tmpdir(), "kanban-1104-main-"));
+    await exec("git", ["init", "-b", "master"], mainDir);
+    await exec("git", ["commit", "--allow-empty", "-m", "init"], mainDir);
+    await exec("git", ["branch", "feature/wt"], mainDir);
+    const worktreeDir = join(mainDir, "..", "kanban-1104-wt");
+    await exec("git", ["worktree", "add", worktreeDir, "feature/wt"], mainDir);
+
+    try {
+      const git = makeGit();
+      const report = await reconcileOrphanedWorktrees({
+        repoPath: worktreeDir, baseBranch: "master", claims: [], git, database: guardDb(),
+      });
+
+      expect(report).toEqual({ removed: [], keptWithUnshippedWork: [], keptClaimed: [] });
+      expect(vi.mocked(git.listWorktrees)).not.toHaveBeenCalled();
+    } finally {
+      await exec("git", ["worktree", "remove", "--force", worktreeDir], mainDir).catch(() => undefined);
+      await rm(mainDir, { recursive: true, force: true });
+      await rm(worktreeDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  });
+
+  it("still sweeps a normal main checkout (not a linked worktree)", async () => {
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { execFile } = await import("node:child_process");
+    const exec = (cmd: string, args: string[], cwd: string) =>
+      new Promise<string>((res, rej) => execFile(cmd, args, { cwd }, (err, stdout) => (err ? rej(err) : res(stdout.toString().trim()))));
+
+    const mainDir = await mkdtemp(join(tmpdir(), "kanban-1104-plain-"));
+    await exec("git", ["init", "-b", "master"], mainDir);
+    await exec("git", ["commit", "--allow-empty", "-m", "init"], mainDir);
+
+    try {
+      const git = makeGit({ listWorktrees: vi.fn(async () => [{ path: mainDir, branch: "master" }]) });
+      const report = await reconcileOrphanedWorktrees({
+        repoPath: mainDir, baseBranch: "master", claims: [], git, database: guardDb(),
+      });
+
+      expect(report).toEqual({ removed: [], keptWithUnshippedWork: [], keptClaimed: [] });
+      expect(vi.mocked(git.listWorktrees)).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(mainDir, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
  * #735 — the removal is the shared guard's now, and the guard is a SUPERSET of what this
  * file's `claims` can see: its read is unfiltered by project, so a claim this reconciler's
  * project-scoped rows do not contain still stops the delete.

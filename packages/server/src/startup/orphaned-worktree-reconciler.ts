@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { samePath as sharedSamePath } from "@agentic-kanban/shared/lib/path-key";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
@@ -294,6 +295,28 @@ async function probeWorkingTreeDirt(
 }
 
 /**
+ * True when `repoPath` is a LINKED worktree's own directory rather than a main
+ * checkout/bare-repo — its `.git` entry is a FILE containing `gitdir: ...`, not a
+ * directory (#1104). A linked worktree shares its underlying repository with every
+ * sibling worktree, so `git worktree list` run against it enumerates ALL of them, not
+ * just ones belonging to whatever project got registered at this path. `detectRepoInfo`
+ * now refuses to register such a path going forward; this is the defensive backstop for
+ * a project that was already registered this way before the fix landed.
+ *
+ * Fails OPEN (`false`) on any read error — an unreadable `.git` is reported by the sweep
+ * itself, not silently swallowed here.
+ */
+function repoPathIsLinkedWorktree(repoPath: string): boolean {
+  const gitEntry = join(repoPath, ".git");
+  try {
+    if (!statSync(gitEntry).isFile()) return false;
+    return /^gitdir:/m.test(readFileSync(gitEntry, "utf8"));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Sweep one project's registered worktrees and remove the ones nothing claims.
  *
  * Returns what it did rather than logging only, so a caller (startup, or a post-merge hook) can
@@ -313,6 +336,15 @@ export async function reconcileOrphanedWorktrees(args: {
   database: Database;
 }): Promise<OrphanedWorktreeReport> {
   const report: OrphanedWorktreeReport = { removed: [], keptWithUnshippedWork: [], keptClaimed: [] };
+
+  if (repoPathIsLinkedWorktree(args.repoPath)) {
+    console.warn(
+      `[worktree-reconcile] refusing to sweep ${args.repoPath}: it is a linked git worktree, not a main ` +
+        `checkout, so "git worktree list" would enumerate every sibling worktree of its shared repo, not ` +
+        `just this project's own (#1104). Re-register the project at its main checkout path instead.`,
+    );
+    return report;
+  }
 
   let worktrees: { path: string; branch: string }[];
   try {
