@@ -34,7 +34,7 @@ import { listWorkerBranchAssignments } from "../repositories/worker.repository.j
 import type { ProviderName } from "../services/agent-provider.js";
 import { resolveOwnPackageVersion } from "../lib/worker-build.js";
 import type { BoardEventSink } from "../services/board-events.js";
-import { buildWorkerConnectSteps } from "../cli/commands/worker.js";
+import { buildWorkerConnectSteps } from "../lib/worker-connect-steps.js";
 import { resolveFleetPort, resolveFleetHost } from "../services/fleet-listener.service.js";
 import { resolveConfiguredGitPort, resolveConfiguredGitHost } from "../services/git-http.service.js";
 
