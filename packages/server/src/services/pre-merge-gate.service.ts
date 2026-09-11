@@ -46,6 +46,7 @@ import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
 // 1000-line god-module ceiling). Re-exported below so its importers are unchanged.
 import { summarizeVerifyFailure } from "./verify-failure-summary.js";
 import { VERIFY_NEUTRALIZED_DB_LOCATION_ENV, VERIFY_NEUTRALIZED_LISTENER_ENV } from "../lib/verify-env.js";
+import { createSmokeIsolation } from "../lib/smoke-isolation.js";
 import { resolveVerifyOutcome } from "./verify-retry-strategies.js";
 import type { FailedSuite } from "./verify-flake-retry.js";
 import { parseVerifyStepTimings, type VerifyStepTiming } from "./verify-step-timings.js";
@@ -725,16 +726,29 @@ export async function runPreMergeGate(
       } else {
         smokeApplies = true;
         noteMergeGatePhase(workspace.id, "smoke", "boot + render check");
-        // #949: the chain semaphore, not just the build semaphore. This boots a real dev server
-        // and polls a health URL; under the build semaphore alone (derived width up to 8) it ran
-        // freely alongside ANOTHER gate's verify chain, which is the contention #903 set out to
-        // remove and only removed for the verify half.
-        const smoke = await runUnderVerifyChainSemaphore(
-          () => runUnderBuildSemaphore(() => runSmokeCheck(workspace.workingDir!, smokeCheck)),
-          `smoke check for workspace ${workspace.id}`,
-        );
-        if (!smoke.passed) {
-          return { passed: false, skipped: false, stage: "smoke", message: `smoke check failed: ${smoke.message}` };
+        // #1095: the smoke boot starts a SECOND full board process next to the live one, and
+        // without isolation it inherits the live board's KANBAN_DB_URL/listener pins (or, absent
+        // those, still resolves the operated `~/.agentic-kanban/kanban.db` home-fallback) — so it
+        // reattached a live agent session and ran its own monitor cycle (auto-merge selection,
+        // auto-start) against the OPERATED database. Same isolation the verify half already gets
+        // (#231, see createSmokeIsolation below): a throwaway AGENTIC_KANBAN_DIR plus the
+        // neutralized DB-location/listener env, and — since even a throwaway DB should not run a
+        // monitor loop — background services skipped outright for this boot.
+        const smokeIsolation = createSmokeIsolation();
+        try {
+          // #949: the chain semaphore, not just the build semaphore. This boots a real dev server
+          // and polls a health URL; under the build semaphore alone (derived width up to 8) it ran
+          // freely alongside ANOTHER gate's verify chain, which is the contention #903 set out to
+          // remove and only removed for the verify half.
+          const smoke = await runUnderVerifyChainSemaphore(
+            () => runUnderBuildSemaphore(() => runSmokeCheck(workspace.workingDir!, smokeCheck, { env: smokeIsolation.env })),
+            `smoke check for workspace ${workspace.id}`,
+          );
+          if (!smoke.passed) {
+            return { passed: false, skipped: false, stage: "smoke", message: `smoke check failed: ${smoke.message}` };
+          }
+        } finally {
+          smokeIsolation.disposeAndWarn(`workspace ${workspace.id}`);
         }
       }
     }

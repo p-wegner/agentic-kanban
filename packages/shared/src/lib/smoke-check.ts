@@ -62,6 +62,14 @@ export interface RunSmokeCheckOptions {
   requestTimeoutMs?: number;
   /** Max characters of body to keep for diagnostics. Default 600. */
   snippetLength?: number;
+  /**
+   * Extra env vars OVERLAID onto the spawned dev server's environment (on top of
+   * `process.env`, which is always inherited as a base). Callers that boot a SECOND instance
+   * of a stateful app next to a live one (the pre-merge gate's smoke boot is the motivating
+   * case) use this to neutralize whatever pins the live instance onto shared state — a DB
+   * location, a listener port — the same way the gate's own verify half already does.
+   */
+  env?: Record<string, string>;
 }
 
 const SIGNAL_NOOP: SmokeCheckResult = {
@@ -136,6 +144,28 @@ function snippet(body: string, max: number): string {
 }
 
 /**
+ * pnpm's deprecation notice for the `pnpm` field in package.json. Every `pnpm` invocation
+ * prints it FIRST, so on a repo using pnpm the server log's first ~400 chars are always this
+ * notice plus the dev-command banner — a HEAD slice of the log never reaches the actual error.
+ * Same noise, same fix shape as `verify-failure-summary.ts`'s `BENIGN_PNPM_NOISE`.
+ */
+const BENIGN_PNPM_NOISE = /^\s*\[WARN\] The "pnpm" field in package\.json is no longer read by pnpm\b/i;
+
+/**
+ * A bounded TAIL of the server log, noise-filtered, instead of a head slice — the log's front
+ * is reliably banner/deprecation-notice noise, and the actual boot error (if any) is at the end.
+ */
+function tailLogSnippet(serverLog: string, max: number): string {
+  const filtered = serverLog
+    .split(/\r?\n/)
+    .filter((line) => !BENIGN_PNPM_NOISE.test(line))
+    .join("\n")
+    .trim();
+  const body = filtered || serverLog.trim();
+  return body.length > max ? body.slice(-max) : body;
+}
+
+/**
  * True when the observed status means "the server is up" for this check (#121).
  *
  * Status 0 (unreachable) is never up. Otherwise a 200 always counts; under `acceptNon5xx`
@@ -191,7 +221,7 @@ async function runSmokeCheckInner(
 
   const proc = spawn(shell, shellArgs, {
     cwd: worktreePath,
-    env: { ...process.env },
+    env: { ...process.env, ...options?.env },
     windowsHide: true,
     // POSIX: own process group so we can kill the whole tree via the negative pid.
     detached: !isWindows,
@@ -224,8 +254,8 @@ async function runSmokeCheckInner(
           passed: false,
           skipped: false,
           status: 0,
-          message: `Dev server "${check.devCommand}" exited before serving (code ${exitCode ?? "?"}). Server output: ${snippet(serverLog, 400)}`,
-          bodySnippet: snippet(serverLog, snippetLength),
+          message: `Dev server "${check.devCommand}" exited before serving (code ${exitCode ?? "?"}). Server output: ${tailLogSnippet(serverLog, 400)}`,
+          bodySnippet: tailLogSnippet(serverLog, snippetLength),
         };
       }
 
@@ -249,8 +279,8 @@ async function runSmokeCheckInner(
         passed: false,
         skipped: false,
         status: 0,
-        message: `Smoke check timed out: ${check.healthUrl} never became reachable within ${timeoutSeconds}s. Server output: ${snippet(serverLog, 400)}`,
-        bodySnippet: snippet(serverLog, snippetLength),
+        message: `Smoke check timed out: ${check.healthUrl} never became reachable within ${timeoutSeconds}s. Server output: ${tailLogSnippet(serverLog, 400)}`,
+        bodySnippet: tailLogSnippet(serverLog, snippetLength),
       };
     }
     if (!statusIsUp(last.status, check)) {
