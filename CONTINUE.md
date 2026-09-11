@@ -3,6 +3,38 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-11 (evening) — `stable-20260911` promoted at `37e19756b6`; #1094 merged after it
+
+**Stable runs `stable-20260911` = `37e19756b6`.** That commit includes #1087, #1089, #1090, #1092,
+#1093, #1095 and #1096. The smoke test passed (health 200, 2 projects, board status answered);
+the rollback target is `stable-20260910`. **#1094 (`a13dbaf2d0`) merged AFTER the promote and is
+not live yet.** Master is at `a13dbaf2d0`.
+
+**Why the promote needed a fresh sweep first.** The first dry run would have promoted
+`7858da2470`, last night's swept sha, so none of today's work would have gone live. No sweep had
+recorded all day: the base probe kept YIELDING its verify slot to queued merge gates, twice after
+10+ minutes of work, 2 of 3 consecutive yields. What unblocked it: re-arm the
+`auto_merge_disabled` kill switch so no gate queued, then join the running probe. It came back
+green at the tip in ~14 min. The kill switch is **disarmed again** (`"false"`, verified).
+**Lesson:** on a busy merge day, "promote" silently means "promote last night"; read the
+dry run's `promote sha` line before running it for real.
+
+**#1095 is live but NOT yet exercised.** #1094's gate ran `stage=verify` only, with no smoke
+boot. The `[db] opening … (source: DB_URL)` line in the board log is the promoted board's own
+start. The first gate that runs a smoke check on `stable-20260911` is the real verification: its
+server must not resolve `~/.agentic-kanban/kanban.db`.
+
+**Filed #1098 (medium, `no-auto-start`).** `recordGateOutcome` → `buildRecordArgs` passes
+`--selected`/`--failed` comma-joined on the command line. A day-wide base sweep exceeds Windows'
+32,767-char limit, fails `spawn ENAMETOOLONG`, and silently drops the base-sweep row from the
+test-impact ledger (the #954 corpus). #967 moved only `select --union` to stdin. The fix needs the
+test-impact tool's `record` to accept stdin lists too. That tool is its own repo, hence
+`no-auto-start`.
+
+**Open, in order:** #1097 (timeline remainder B, `no-auto-start`; #1096 has landed, so it may start
+now), #1098. `chkdsk C: /f` is still the operator's. CONTINUE.md is far past its ~150-line cap;
+an archive pass is due (move the 2026-09-10 and older passes).
+
 ## 2026-09-11 (later) — timeline reconciled (#1090 → #1093); the smoke check boots a second board on the OPERATED DB (#1095)
 
 **Timeline is landed and the four overlapping branches are resolved.** Operator decision: land
