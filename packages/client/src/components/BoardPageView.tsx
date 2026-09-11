@@ -67,6 +67,7 @@ import type { useBoardPageRoute } from "../routes/useBoardPageRoute.js";
 import type { useColumnResize } from "../lib/columnResizeHandler.js";
 import type { createQuickUpdateHandlers } from "../lib/issueQuickUpdates.js";
 import type { buildRunQueueForecast } from "./RunQueueForecastPanel.js";
+import type { AutopilotController } from "../hooks/useAutopilot.js";
 import { Spinner } from "./Icon.js";
 
 type PanelNav = ReturnType<typeof useBoardPanelNavigation>;
@@ -163,6 +164,8 @@ interface BoardPageViewModel {
   refetchBoard: (projectId?: string, options?: { force?: boolean }) => Promise<StatusWithIssues[] | undefined>;
   resetColumnWidth: ColumnResize["resetColumnWidth"];
   runQueueForecast: ReturnType<typeof buildRunQueueForecast>;
+  /** #1102: the Autopilot chip's read, shared by the toolbar and the run-queue forecast. */
+  autopilot: AutopilotController;
   sessionActivity: Record<string, string>;
   sessionTodos: Record<string, TodoItem[]>;
   setApprovalRequests: Dispatch<SetStateAction<ApprovalRequest[]>>;
@@ -193,7 +196,7 @@ type BoardDataController = Pick<BoardPageViewModel,
   "backlogColumn" | "boardStatusOptions" | "boardTagOptions" | "bulk" |
   "canStartWorkspace" | "collapsedGroups" | "columnWidths" | "columns" | "columnsRef" |
   "creatingInColumnId" | "expandedCreatePanel" | "milestones" |
-  "runQueueForecast" | "visibilityColumns"
+  "runQueueForecast" | "visibilityColumns" | "autopilot"
 >;
 // Filter state itself moved into the board filter store (#958); what remains
 // here are the data-loading callbacks and the milestone drill-down (which also
@@ -242,7 +245,7 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
     activeAgentsTarget, activeColumns, allMentionIssues, allTags, archiveColumns, backlogColumn,
     boardStatusOptions, boardTagOptions, bulk, canStartWorkspace, collapsedGroups,
     columnWidths, columns, columnsRef, creatingInColumnId, expandedCreatePanel,
-    milestones, runQueueForecast, visibilityColumns,
+    milestones, runQueueForecast, visibilityColumns, autopilot,
   } = board;
   const {
     dependencyImpactPending, error, graphFocusIssueId, isDark, moveToDonePending, mutating, panels,
@@ -303,9 +306,8 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
       onIntervalChange={prefs.handleIntervalChange}
       nudgeAutoStart={prefs.nudgeAutoStart}
       onNudgeAutoStartChange={prefs.handleNudgeAutoStartChange}
-      nudgeWipLimit={prefs.nudgeWipLimit}
-      onNudgeWipLimitChange={prefs.handleNudgeWipLimitChange}
       columns={columns}
+      autopilot={autopilot}
       onOpenWorkspace={handleOpenWorkspaceById}
       viewMode={viewMode}
       onViewModeChange={handleViewModeChange}
@@ -529,8 +531,6 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
               onRemoveTag: handleQuickRemoveTag,
               onTogglePinned: handleQuickTogglePinned,
             }}
-            wipLimits={prefs.wipLimits}
-            onSetWipLimit={prefs.handleSetWipLimit}
             onColumnReorder={handleColumnReorder}
             showAgingHeatmap={prefs.showCardAgingHeatmap}
             agingWarmDays={prefs.agingWarmDays}
@@ -618,7 +618,7 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
         activeProjectId={activeProjectId}
         leadingRepoPath={activeProject?.repoPath ?? null}
         columns={columns}
-        nudgeWipLimit={prefs.nudgeWipLimit}
+        activeAgentsTarget={runQueueForecast.activeTarget}
         viewMode={viewMode}
         columnsRef={columnsRef}
         handleStartWorkspace={handleStartWorkspace}

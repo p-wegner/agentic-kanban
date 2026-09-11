@@ -459,7 +459,7 @@ export function WorkflowBoardMonitorSection({
               </div>
               {monitorTunables.source === "prefs" ? (
                 <div className="px-3 pb-2 text-[11px] text-amber-600 dark:text-amber-400 leading-snug">
-                  <span className="font-semibold">nudge_wip_limit</span> and <span className="font-semibold">nudge_auto_start</span> are the active tuning prefs. Open the Strategy Bullseye or click Migrate to upgrade to the full target set.
+                  No Strategy Bullseye yet, so the monitor runs at the default targets. Set Agents on the toolbar's Autopilot chip, open the Strategy Bullseye, or click Migrate to upgrade to the full target set.
                 </div>
               ) : (
                 <div className="px-3 pb-2 text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
@@ -492,7 +492,7 @@ export function WorkflowBoardMonitorSection({
                 <span className="font-semibold text-gray-700 dark:text-gray-300">In-process monitor</span>
                 <span className="text-[10px] px-1 py-0 rounded bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300 border border-green-200 dark:border-green-700">default on</span>
               </div>
-              <div className="text-gray-500 dark:text-gray-400">Runs inside the server. Toggle: <span className="font-mono">auto_monitor</span> above. Targets from: Strategy Bullseye when a <span className="font-mono">board_strategy_*</span> pref exists, otherwise <span className="font-mono text-amber-600 dark:text-amber-400">nudge_wip_limit</span> (legacy). Use for any project you develop with agentic-kanban.</div>
+              <div className="text-gray-500 dark:text-gray-400">Runs inside the server. Toggle: <span className="font-mono">auto_monitor</span> above. Targets from: Strategy Bullseye when a <span className="font-mono">board_strategy_*</span> pref exists, otherwise the default targets. Use for any project you develop with agentic-kanban.</div>
             </div>
             <div className="px-3 py-2 space-y-0.5">
               <div className="flex items-center gap-1.5">
