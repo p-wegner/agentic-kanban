@@ -1,6 +1,8 @@
 import { useState, useRef, useMemo, useEffect, useLayoutEffect } from "react";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
+import { AutopilotChip } from "./AutopilotChip.js";
+import type { AutopilotController } from "../hooks/useAutopilot.js";
 import { useOrchestrator } from "../hooks/useOrchestrator.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { VoiceInboxButton } from "./VoiceInboxButton.js";
@@ -117,9 +119,9 @@ interface BoardToolbarProps {
   onIntervalChange: (v: string) => void;
   nudgeAutoStart: boolean;
   onNudgeAutoStartChange: (v: boolean) => void;
-  nudgeWipLimit: string;
-  onNudgeWipLimitChange: (v: string) => void;
   columns: StatusWithIssues[];
+  /** #1102: the project's autopilot read, rendered by the chip that replaced the Monitor button. */
+  autopilot?: AutopilotController;
   /** Backlog column count, rendered as an inline badge on the Backlog tab (mirrors
       the Board tab's activity summary — one consistent tab-header treatment). */
   backlogCount?: number;
@@ -170,9 +172,8 @@ export function BoardToolbar({
   onIntervalChange,
   nudgeAutoStart,
   onNudgeAutoStartChange,
-  nudgeWipLimit,
-  onNudgeWipLimitChange,
   columns,
+  autopilot,
   backlogCount = 0,
   onOpenWorkspace,
   viewMode,
@@ -440,46 +441,31 @@ export function BoardToolbar({
           shouldn't hide behind the More cluster. */}
       <VoiceInboxButton projectId={projectId} onIssueCreated={onVoiceIssueCreated} />
       <div className="relative shrink-0 flex items-center gap-0.5">
-        <button
-          onClick={() => setShowMonitorPopover(v => !v)}
-          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
-            hasMonitorWarnings
-              ? "bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900"
-              : (autoMonitor || monitorButlerEnabled || (orchestrator?.available && orchestrator.alive))
-                ? "bg-accent-50 dark:bg-accent-950 border-accent-200 dark:border-accent-800 text-accent-700 hover:bg-accent-100 dark:hover:bg-accent-900"
-                : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
-          }`}
-          title={
-            hasMonitorWarnings
-              ? monitorWarningTitle
-              : buildMonitorTitle(autoMonitor, monitorButlerEnabled, orchestrator?.available && orchestrator.alive)
-          }
-        >
-          {hasMonitorWarnings ? (
-            <Icon className="w-3 h-3" strokeWidth={2.5} d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
-          ) : (
+        {/* #1102: the Autopilot chip replaced the bare "Monitor" button — one glance for
+            auto-start, the next cycle and auto-merge; its panel links to the full popover. */}
+        <AutopilotChip
+          projectId={projectId}
+          autopilot={autopilot}
+          warningTitle={hasMonitorWarnings ? (monitorWarningTitle ?? "Monitor warnings") : null}
+          mechanismsTitle={buildMonitorTitle(autoMonitor, monitorButlerEnabled, orchestrator?.available && orchestrator.alive)}
+          indicator={
             <>
-              {/* Base monitor icon always renders so the button isn't empty on
-                  small screens (the label is hidden < sm and the active dots are
-                  null when no monitor mechanism is running). */}
-              <Icon className="w-3 h-3 shrink-0">
-                <rect x="3" y="4" width="18" height="12" rx="2" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 20h8M12 16v4" />
-              </Icon>
               <ActiveMonitorDots
                 autoMonitor={autoMonitor}
                 butlerEnabled={monitorButlerEnabled}
                 orchestratorAlive={orchestrator?.available && orchestrator.alive}
               />
+              <ActiveMonitorBadge
+                autoMonitor={autoMonitor}
+                butlerEnabled={monitorButlerEnabled}
+                orchestratorAlive={orchestrator?.available && orchestrator.alive}
+              />
             </>
-          )}
-          <span className="hidden sm:inline">Monitor</span>
-          <ActiveMonitorBadge
-            autoMonitor={autoMonitor}
-            butlerEnabled={monitorButlerEnabled}
-            orchestratorAlive={orchestrator?.available && orchestrator.alive}
-          />
-        </button>
+          }
+          orchestratorAvailable={Boolean(orchestrator?.available)}
+          nextRunAt={monitorStatus?.nextRunAt ?? null}
+          onOpenFullMonitor={() => setShowMonitorPopover(true)}
+        />
         <button
           onClick={onMonitorRunNow}
           disabled={monitorRunning}
@@ -511,8 +497,6 @@ export function BoardToolbar({
             onIntervalChange={onIntervalChange}
             nudgeAutoStart={nudgeAutoStart}
             onNudgeAutoStartChange={onNudgeAutoStartChange}
-            nudgeWipLimit={nudgeWipLimit}
-            onNudgeWipLimitChange={onNudgeWipLimitChange}
             projectId={projectId}
             orchestrator={orchestrator}
             orchestratorNotify={orchestratorNotify}

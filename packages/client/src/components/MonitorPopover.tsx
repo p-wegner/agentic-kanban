@@ -33,8 +33,6 @@ interface MonitorPopoverProps {
   onIntervalChange: (v: string) => void;
   nudgeAutoStart: boolean;
   onNudgeAutoStartChange: (v: boolean) => void;
-  nudgeWipLimit: string;
-  onNudgeWipLimitChange: (v: string) => void;
   projectId: string | null;
   orchestrator?: OrchestratorStatus | null;
   orchestratorNotify?: boolean;
@@ -56,8 +54,6 @@ export function MonitorPopover({
   onIntervalChange,
   nudgeAutoStart,
   onNudgeAutoStartChange,
-  nudgeWipLimit,
-  onNudgeWipLimitChange,
   projectId,
   orchestrator,
   orchestratorNotify = false,
@@ -296,9 +292,6 @@ export function MonitorPopover({
             autoMonitor={autoMonitor}
             nudgeAutoStart={nudgeAutoStart}
             onNudgeAutoStartChange={onNudgeAutoStartChange}
-            nudgeWipLimit={nudgeWipLimit}
-            onNudgeWipLimitChange={onNudgeWipLimitChange}
-            resolvedTunables={resolvedTunables}
           />
         </div>
       </div>

@@ -94,7 +94,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
     fetchMonitorTunables,
     handleMigrateToStrategy,
     handleMonitorRunNow,
-  } = useMonitorControls(activeProjectId, settings.nudge_wip_limit);
+  } = useMonitorControls(activeProjectId);
 
   // Provider divergence + per-project provider/roster controls (state + handlers
   // self-contained in the hook; settings is read for the current Strategy config and

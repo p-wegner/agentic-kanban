@@ -6,14 +6,21 @@ test.describe("Board header monitor toolbar", () => {
     await getE2EProjectId(request);
   });
 
-  test("opens the Monitor control and triggers a run-now cycle", async ({
+  // #1102: the bare "Monitor" button became the Autopilot chip. The full Monitor popover is one
+  // link inside the chip's panel.
+  test("opens the Autopilot chip, reaches the full Monitor, and triggers a run-now cycle", async ({
     page,
   }) => {
     await page.goto("/");
 
-    const monitorButton = page.getByRole("button", { name: "Monitor", exact: true });
-    await expect(monitorButton).toBeVisible();
-    await monitorButton.click();
+    const chip = page.getByTestId("autopilot-chip");
+    await expect(chip).toBeVisible();
+    await chip.click();
+
+    const panel = page.getByTestId("autopilot-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel.getByRole("radiogroup", { name: "Start Mode" })).toBeVisible();
+    await panel.getByRole("button", { name: "Full monitor…" }).click();
 
     const popover = page.locator("#monitor-popover");
     await expect(popover).toBeVisible();
