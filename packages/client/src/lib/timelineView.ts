@@ -1,6 +1,8 @@
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { TYPE_COLORS as TYPE_DOT, PRIORITY_META } from "./chartColors.js";
-import { clipSpan, parseLocalDate } from "./timeScale.js";
+import { clipSpan, parseLocalDate, DAY_MS } from "./timeScale.js";
+
+export { DAY_MS };
 
 // Pure view-model for TimelineView: config maps, lane filtering, date-range +
 // tick math, and per-issue bar positioning. No JSX/hooks, so the date/tick/lane
@@ -32,6 +34,21 @@ export const PRIORITY_COLORS: Record<string, string> = Object.fromEntries(
  * is already critical→high→medium→low.
  */
 export const PRIORITY_ORDER: readonly string[] = PRIORITY_META.map((p) => p.key);
+
+/**
+ * Shape class for a priority dot, on top of its color (#1099 P2-10) — a sighted reader who
+ * can't distinguish the four hues (low vision, color blindness, a grayscale screenshot) still
+ * had nothing to go on once #1097 gave the dot an accessible name for screen readers; the
+ * VISUAL affordance was still color alone. Each priority now also gets a distinct silhouette:
+ * a plain square (low), a circle (medium), a diamond (high, a rotated square), and a
+ * ring-bordered circle (critical, the only one with an outline of its own).
+ */
+export const PRIORITY_SHAPE_CLASS: Record<string, string> = {
+  critical: "w-2.5 h-2.5 rounded-full ring-2 ring-white/80 dark:ring-gray-900/80",
+  high: "w-2 h-2 rounded-none rotate-45",
+  medium: "w-2 h-2 rounded-full",
+  low: "w-2 h-2 rounded-none",
+};
 
 export const STATUS_BG: Record<string, string> = {
   "Todo":        "bg-gray-50 dark:bg-gray-900",
@@ -65,8 +82,6 @@ export const STATUS_BG_SOLID: Record<string, string> = Object.fromEntries(
   Object.entries(STATUS_BG).map(([name, cls]) => [name, cls.replace(/\/\d+/g, "")]),
 );
 
-export const DAY_MS = 86_400_000;
-
 export const COMPLETED_STATUSES = new Set(["Done", "Cancelled"]);
 export const ALL_TYPES = Object.keys(TYPE_COLORS);
 
@@ -95,13 +110,19 @@ export function computeLanes(columns: StatusWithIssues[], filter: LaneFilter): L
     .filter((col) => filter.showCompleted || !COMPLETED_STATUSES.has(col.name))
     .map((col) => ({
       name: col.name,
-      issues: col.issues.filter((i) => {
-        const type = i.issueType ?? "task";
-        if (!filter.activeTypes.has(type)) return false;
-        if (!q) return true;
-        if (numberMatch && String(i.issueNumber) === numberMatch) return true;
-        return i.title.toLowerCase().includes(q) || (i.description ?? "").toLowerCase().includes(q);
-      }),
+      issues: col.issues
+        .filter((i) => {
+          const type = i.issueType ?? "task";
+          if (!filter.activeTypes.has(type)) return false;
+          if (!q) return true;
+          if (numberMatch && String(i.issueNumber) === numberMatch) return true;
+          return i.title.toLowerCase().includes(q) || (i.description ?? "").toLowerCase().includes(q);
+        })
+        // #1099 P2-15 (partial): time-ordered rows instead of raw kanban sort order, so a
+        // lane reads top-to-bottom as "oldest started first" like the axis itself. Grouping
+        // by epic/tag/agent and tag/priority filters are the larger remainder, tracked as a
+        // follow-up ticket rather than folded in here.
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
       count: col.count,
       returnedCount: col.issues.length,
     }))
@@ -202,4 +223,43 @@ export function computeIssueBar(
     duePct,
     isOpen: !isCompleted,
   };
+}
+
+/** Below this many points, percentile trimming would drop a meaningful fraction of the data — keep the exact min/max instead. */
+const MIN_POINTS_FOR_TRIM = 8;
+/** Fraction of points dropped from EACH end when trimming (10% total). */
+const TRIM_FRACTION = 0.05;
+
+/**
+ * A robust [min,max] over `values`, dropping the extreme ends once there are enough points to
+ * make percentile trimming meaningful (#1088/#1099 P2-13). The initial "fit all" viewport used
+ * to be a raw min/max over every issue's dates — a single old Cancelled issue (or one due a
+ * year out) could leave ~90% of the canvas empty for everything else. Trimming the tails
+ * instead means the default view fits the CLUSTER most issues actually sit in; callers that
+ * want the literal extremes (e.g. checking whether a value is itself an outlier) should use
+ * `values` directly rather than this.
+ */
+export function robustRange(values: number[]): { min: number; max: number } {
+  if (values.length === 0) return { min: 0, max: 0 };
+  const sorted = [...values].sort((a, b) => a - b);
+  if (sorted.length < MIN_POINTS_FOR_TRIM) {
+    return { min: sorted[0], max: sorted[sorted.length - 1] };
+  }
+  const cut = Math.floor(sorted.length * TRIM_FRACTION);
+  return { min: sorted[cut], max: sorted[sorted.length - 1 - cut] };
+}
+
+/** Minimum pixel width a major tick's label needs before two adjacent labels start to crowd. */
+const MIN_LABEL_PX = 70;
+
+/**
+ * How many major ticks to skip between rendered LABELS at a given track width (#1099 P2-20) —
+ * the gridlines themselves are unaffected; only the text is thinned. At the full label density
+ * a narrow viewport (a sidebar-docked window, a phone) would either wrap, truncate, or overlap
+ * every other date; showing every Nth one instead keeps each label readable and unambiguous
+ * (still anchored to a real tick, not interpolated).
+ */
+export function computeLabelStride(tickCount: number, trackPx: number): number {
+  if (tickCount <= 0 || trackPx <= 0) return 1;
+  return Math.max(1, Math.ceil((MIN_LABEL_PX * tickCount) / trackPx));
 }

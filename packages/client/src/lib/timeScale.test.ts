@@ -3,9 +3,11 @@ import {
   DAY_MS,
   clipSpan,
   defaultPxPerMs,
+  panBy,
   parseLocalDate,
   stepAnchor,
   ticksFor,
+  tsAtOffset,
   viewportForFitAll,
   viewportForToday,
   windowFor,
@@ -81,6 +83,34 @@ describe("ticksFor — two-band axis", () => {
     const { major } = ticksFor(window, "quarter");
     for (const t of major) expect([0, 3, 6, 9]).toContain(new Date(t.ts).getMonth());
     expect(major.some((t) => /^Q[1-4] /.test(t.label))).toBe(true);
+  });
+
+  // #1099 R2: day/week labels omit the year by default (there's nothing to disambiguate within
+  // one year), but a window straddling New Year's needs it on the tick where the year changes
+  // — otherwise two ticks both reading e.g. "Dec 30"/"Jan 2" give no clue which belongs to which
+  // year.
+  it("day scale: no tick shows a year when the window stays within one year", () => {
+    const window = { min: local(2026, 6, 1), max: local(2026, 6, 10) };
+    const { major } = ticksFor(window, "day");
+    for (const t of major) expect(t.label).not.toMatch(/\d{4}/);
+  });
+
+  it("day scale: shows the year only on the tick where the year changes", () => {
+    const window = { min: local(2025, 12, 29), max: local(2026, 1, 3) };
+    const { major } = ticksFor(window, "day");
+    const withYear = major.filter((t) => /\d{4}/.test(t.label));
+    expect(withYear).toHaveLength(1);
+    expect(new Date(withYear[0].ts).getFullYear()).toBe(2026);
+    expect(new Date(withYear[0].ts).getMonth()).toBe(0); // January
+    expect(new Date(withYear[0].ts).getDate()).toBe(1);
+  });
+
+  it("week scale: shows the year only on the 'Week of' tick where the year changes", () => {
+    const window = { min: local(2025, 12, 15), max: local(2026, 1, 20) };
+    const { major } = ticksFor(window, "week");
+    const withYear = major.filter((t) => /\d{4}/.test(t.label));
+    expect(withYear.length).toBe(1);
+    expect(new Date(withYear[0].ts).getFullYear()).toBe(2026);
   });
 });
 
@@ -266,6 +296,55 @@ describe("clipSpan — pixel geometry clipped to the visible window", () => {
     const clipped = clipSpan(local(2026, 3, 5), local(2026, 3, 2), window, trackPx);
     expect(clipped).not.toBeNull();
     expect(clipped!.width).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("tsAtOffset — inverse of xOf, for cursor-relative zoom (#1099 R1)", () => {
+  const window = { min: local(2026, 3, 1), max: local(2026, 3, 11) }; // 10 days
+  const trackPx = 1000; // 100px/day
+
+  it("resolves offset 0 to the window's start", () => {
+    expect(tsAtOffset(window, 0, trackPx)).toBe(window.min);
+  });
+
+  it("resolves the full track width to the window's end", () => {
+    expect(tsAtOffset(window, trackPx, trackPx)).toBe(window.max);
+  });
+
+  it("resolves the midpoint offset to the midpoint timestamp", () => {
+    expect(tsAtOffset(window, trackPx / 2, trackPx)).toBeCloseTo((window.min + window.max) / 2, 0);
+  });
+
+  it("round-trips with xOf", () => {
+    const ts = local(2026, 3, 4);
+    expect(tsAtOffset(window, xOf(ts, window, trackPx), trackPx)).toBeCloseTo(ts, 0);
+  });
+
+  it("clamps an offset outside the track instead of extrapolating past the window", () => {
+    expect(tsAtOffset(window, -50, trackPx)).toBe(window.min);
+    expect(tsAtOffset(window, trackPx + 50, trackPx)).toBe(window.max);
+  });
+});
+
+describe("panBy — shifts the anchor without touching scale or zoom (#1099 R1)", () => {
+  it("dragging right (positive deltaPx) reveals earlier content", () => {
+    const viewport: Viewport = { scale: "day", anchor: local(2026, 3, 10), pxPerMs: 0.01 };
+    const panned = panBy(viewport, 100);
+    expect(panned.anchor).toBeLessThan(viewport.anchor);
+    expect(panned.scale).toBe(viewport.scale);
+    expect(panned.pxPerMs).toBe(viewport.pxPerMs);
+  });
+
+  it("dragging left (negative deltaPx) reveals later content", () => {
+    const viewport: Viewport = { scale: "day", anchor: local(2026, 3, 10), pxPerMs: 0.01 };
+    const panned = panBy(viewport, -100);
+    expect(panned.anchor).toBeGreaterThan(viewport.anchor);
+  });
+
+  it("moves the anchor by exactly deltaPx / pxPerMs", () => {
+    const viewport: Viewport = { scale: "day", anchor: local(2026, 3, 10), pxPerMs: 0.01 };
+    const panned = panBy(viewport, 250);
+    expect(viewport.anchor - panned.anchor).toBeCloseTo(250 / 0.01, 5);
   });
 });
 
