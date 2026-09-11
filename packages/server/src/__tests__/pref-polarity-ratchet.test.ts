@@ -110,8 +110,11 @@ const BASELINE: Record<string, number> = {
   // plugin_enabled_* anywhere is the violation this ratchet exists to catch.
   "server/src/repositories/plugins.repository.ts::<row-value>": 1,
   "server/src/startup/done-unmerged-invariant-sweep.ts::<row-value>": 1,
-  "server/src/startup/exit-workflow.ts::<row-value>": 1,
-  "server/src/startup/monitor-setup.ts::<row-value>": 2,
+  // #1102: exit-workflow read `auto_merge_disabled_<id>` raw; that read now goes through
+  // `listAutoMergeDisabledProjectIds`, so the file has no raw polarity read left.
+  // #1102: one of the two raw reads was the `auto_merge_disabled_<id>` scan, which moved
+  // into `resolveAutoMerge`/`listAutoMergeDisabledProjectIds`, the canonical accessor.
+  "server/src/startup/monitor-setup.ts::<row-value>": 1,
   // Both reconcilers now read their toggle through a NAMED constant rather than an inline
   // row value, so the ratchet id moved from `<row-value>` to the constant. Same single read
   // in each (a tri-state default-on check: absent pref means enabled), not a new violation.

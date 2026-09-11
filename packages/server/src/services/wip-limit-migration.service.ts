@@ -132,7 +132,7 @@ export interface WipMigrationDeps {
 export async function migrateWipLimitPrefsIntoBullseye(deps: WipMigrationDeps = {}): Promise<WipMigrationPlan> {
   const database = deps.database ?? db;
   const write = deps.write ?? ((d: Database, entries: PreferenceEntry[]) => setPreferenceChecked(d, entries));
-  const log = deps.log ?? ((line: string) => console.log(line));
+  const log = deps.log ?? ((line: string) => console.log(`[wip-limit-migration] ${line}`));
 
   const prefMap = toPrefMap(await getAllPreferences(database));
   const hasAnyWipKey = [...prefMap.keys()].some((key) => key.startsWith(WIP_LIMIT_PREFIX));
@@ -144,14 +144,14 @@ export async function migrateWipLimitPrefsIntoBullseye(deps: WipMigrationDeps = 
 
   for (const entry of plan.writes) {
     await write(database, [{ key: entry.key, value: entry.value }]);
-    log(`[wip-limit-migration] ${entry.reason}: project ${entry.projectId} Bullseye activeAgentsTarget <- ${JSON.parse(entry.value).activeAgentsTarget}`);
+    log(`${entry.reason}: project ${entry.projectId} Bullseye activeAgentsTarget <- ${JSON.parse(entry.value).activeAgentsTarget}`);
   }
   if (plan.deletes.length > 0) {
     await deletePreferences(plan.deletes.map((d) => d.key), database);
-    log(`[wip-limit-migration] deleted ${plan.deletes.length} retired wip_limit_<projectId> pref(s)`);
+    log(`deleted ${plan.deletes.length} retired wip_limit_<projectId> pref(s)`);
   }
   for (const skip of plan.skipped) {
-    log(`[wip-limit-migration] KEPT ${skip.key}: the project's Bullseye is not valid JSON, so its WIP could not be moved. The value is no longer read — fix the Bullseye and set Agents on the Autopilot chip.`);
+    log(`KEPT ${skip.key}: the project's Bullseye is not valid JSON, so its WIP could not be moved. The value is no longer read — fix the Bullseye and set Agents on the Autopilot chip.`);
   }
   return plan;
 }

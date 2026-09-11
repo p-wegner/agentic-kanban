@@ -1,12 +1,13 @@
 // #1102 — the one-shot migration that retires `wip_limit_<projectId>` into the Strategy Bullseye.
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { preferences, projects } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { resolveMonitorTunables } from "@agentic-kanban/shared/lib/strategy-objective-file";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { migrateWipLimitPrefsIntoBullseye, planWipLimitMigration } from "../services/wip-limit-migration.service.js";
 import { resolveWipLimit } from "../services/wip-limit.service.js";
+import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
 
 const P = "11111111-2222-3333-4444-555555555555";
 const Q = "99999999-8888-7777-6666-555555555555";
@@ -127,7 +128,19 @@ describe("migrateWipLimitPrefsIntoBullseye — against a real database", () => {
     // The resolver now answers 2 from the Bullseye — the same number the monitor ran at before.
     const prefMap = new Map((await db.select().from(preferences)).map((r) => [r.key, r.value]));
     expect(resolveWipLimit(prefMap, projectId)).toEqual({ limit: 2, configured: 2, source: "strategy" });
-    expect(lines.some((l) => l.startsWith("[wip-limit-migration] pref_overrides_bullseye"))).toBe(true);
+    // #1102: the `[wip-limit-migration]` tag belongs to the DEFAULT logger (the console-tag
+    // ratchet wants every console.log tagged), so an injected `log` receives the bare reason.
+    expect(lines.some((l) => l.startsWith("pref_overrides_bullseye"))).toBe(true);
+    // ...and the default logger is the one that tags, so the prefix stays covered.
+    const tagged: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((l: unknown) => { tagged.push(String(l)); });
+    try {
+      await setPreferenceChecked(db as never, [{ key: `wip_limit_${projectId}`, value: "3" }]);
+      await migrateWipLimitPrefsIntoBullseye({ database: db as never });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(tagged.some((l) => l.startsWith("[wip-limit-migration] "))).toBe(true);
 
     const second = await migrateWipLimitPrefsIntoBullseye({ database: db as never, log: () => {} });
     expect(second).toEqual({ writes: [], deletes: [], skipped: [] });
