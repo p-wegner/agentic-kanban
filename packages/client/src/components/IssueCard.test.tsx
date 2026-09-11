@@ -34,6 +34,18 @@ function render(i: IssueWithStatus, props: { isPendingIssue?: boolean; isPending
   );
 }
 
+describe("IssueCard due date — local-midnight parsing (#1091 P1-5)", () => {
+  it("renders a YYYY-MM-DD due date on the same calendar day it names, regardless of timezone offset", () => {
+    // A due date is a date-ONLY string. Parsing it via `new Date("2026-12-25")` reads it as
+    // UTC midnight, which prints as the DAY BEFORE in any timezone west of UTC — a due date
+    // that silently moved a day earlier than what was actually set. `parseLocalDate` reads
+    // it as local midnight instead. A future date is used so the badge takes the "Due:"
+    // branch (short month/day) rather than "Overdue:" (full date).
+    const html = render(issue({ dueDate: "2026-12-25", statusName: "Todo" }));
+    expect(html).toContain("Dec 25");
+  });
+});
+
 describe("IssueCard external tracker link", () => {
   it("renders a link with the external key when externalUrl is present", () => {
     const html = render(
