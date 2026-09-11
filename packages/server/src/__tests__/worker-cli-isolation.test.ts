@@ -86,8 +86,13 @@ describe("agentic-kanban-worker binary isolation", () => {
     // The ceiling is a smell bound, not the guarantee — that is the FORBIDDEN_LOCAL /
     // FORBIDDEN_PACKAGES assertions below. Raised 25 → 26 in #1038 for `cli/cli-path.ts`,
     // which imports only `node:path` and resolves CLI path arguments against INIT_CWD.
+    // Raised 26 → 27 in the arch loop (ak-1094) for `lib/worker-connect-steps.ts`: the
+    // pattern-language spec forbids `server-route` (routes/workers.ts) importing
+    // `server-cli` (cli/commands/worker.ts), so `buildWorkerConnectSteps` moved to pure
+    // server-lib and this CLI module now imports it instead of defining it — one more
+    // node in this graph, same pure shape (only the shared step-shape type).
     expect(files.size).toBeGreaterThan(3);
-    expect(files.size).toBeLessThan(26);
+    expect(files.size).toBeLessThan(27);
   });
 
   it("never reaches the database or board-service layer", () => {
