@@ -210,6 +210,26 @@ describe("runPreMergeGate (#821) — shared verify+smoke gate the monitor's auto
     expect(runSmokeCheck).toHaveBeenCalledTimes(1);
   });
 
+  // #1095: the smoke boot spawns a SECOND full board process, so — same as the verify half
+  // (#231) — it must never be able to resolve the OPERATED `~/.agentic-kanban/kanban.db` /
+  // inherit the live board's listener pins, and must not start its own monitor loop.
+  it("#1095: calls the smoke check with an isolated data dir, neutralized DB/listener env, and background services disabled", async () => {
+    await saveStackProfile("p", webProfile(), db);
+    runSmokeCheck.mockResolvedValue({ passed: true, skipped: false, status: 200, message: "ok", bodySnippet: "" });
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt" }, "p", db);
+    expect(res.passed).toBe(true);
+    expect(runSmokeCheck).toHaveBeenCalledTimes(1);
+    const call = runSmokeCheck.mock.calls[0];
+    const options = call[2] as { env?: Record<string, string> } | undefined;
+    const env = options?.env;
+    expect(env, "runSmokeCheck must be called with an env override").toBeTruthy();
+    expect(env!.AGENTIC_KANBAN_DIR).toBeTruthy();
+    expect(env!.AGENTIC_KANBAN_DIR).toContain("kanban-smoke-gate-");
+    expect(env!.KANBAN_DB_URL).toBe("");
+    expect(env!.DB_URL).toBe("");
+    expect(env!.KANBAN_SKIP_BACKGROUND_SERVICES).toBe("1");
+  });
+
   // ---- #362: the gate's AGENTIC_KANBAN_DIR must not survive the gate ----------------------
   //
   // Measured before the fix: 710 `kanban-verify-gate-*` directories in %TEMP% over two days,

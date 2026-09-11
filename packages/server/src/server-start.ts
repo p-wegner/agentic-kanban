@@ -146,9 +146,20 @@ export async function startServer(port?: number, hostname?: string) {
     reviewSessionIds: workflow.reviewSessionIds,
     boardRepoRoot: serverStartRepoRoot,
   };
-  for (const service of BACKGROUND_SERVICES) {
-    const cleanup = await service.start(backgroundServiceContext);
-    if (cleanup) cleanupCallbacks.push(cleanup);
+  // #1095: a throwaway boot for the pre-merge gate's smoke check has nothing to reconcile —
+  // it exists only to prove the dev command boots and the health URL answers, and it is torn
+  // down within seconds. Starting the monitor/auto-merge/reconciler machinery on it is pure
+  // risk with zero benefit: even against an isolated DB it burns the boot budget, and against
+  // an ACCIDENTALLY-inherited live DB (the failure this ticket fixes) it is what let a smoke
+  // boot reattach a live session and run auto-merge candidate selection. Opt-in via env so a
+  // normal boot (dev, worktree, stable) is completely unaffected.
+  if (!process.env.KANBAN_SKIP_BACKGROUND_SERVICES) {
+    for (const service of BACKGROUND_SERVICES) {
+      const cleanup = await service.start(backgroundServiceContext);
+      if (cleanup) cleanupCallbacks.push(cleanup);
+    }
+  } else {
+    console.log("[startup] KANBAN_SKIP_BACKGROUND_SERVICES set — background services (monitor, reconcilers, schedulers) not started");
   }
 
   // Fleet listener (epic #184): the ONLY surface exposed off-loopback, and only
