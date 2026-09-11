@@ -1,16 +1,125 @@
-import type { Dispatch, SetStateAction } from "react";
-import { TYPE_COLORS, PRIORITY_COLORS, PRIORITY_ORDER, PRIORITY_SHAPE_CLASS } from "../lib/timelineView.js";
+import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  TYPE_COLORS,
+  PRIORITY_COLORS,
+  PRIORITY_ORDER,
+  PRIORITY_SHAPE_CLASS,
+} from "../lib/timelineView.js";
+import { useDismissable } from "../hooks/useDismissable.js";
 import type { Scale } from "../lib/timeScale.js";
 
-// Extracted out of TimelineView.tsx (#1099 god-module gate: that file crossed the 1000-line
-// hard ceiling once R1/P2-20/P2-13 landed) — a self-contained, prop-driven toolbar with no
-// dependency on the rest of the view beyond these types.
+// Toolbar half of TimelineView, split out to keep TimelineView.tsx under the god-module line
+// ceiling (#1100) — this file owns the scale switcher, nav/zoom controls, the type chips, the
+// priority/tag filter popover, and the priority legend. No state here is shared with the lane
+// rendering in TimelineView.tsx beyond what is passed in as props.
 
-const SCALES: readonly Scale[] = ["day", "week", "month", "quarter"];
-const SCALE_LABELS: Record<Scale, string> = { day: "Day", week: "Week", month: "Month", quarter: "Quarter" };
+export const SCALES: readonly Scale[] = ["day", "week", "month", "quarter"];
+export const SCALE_LABELS: Record<Scale, string> = { day: "Day", week: "Week", month: "Month", quarter: "Quarter" };
+
+/**
+ * Priority + tag filter popover (P2-15 remainder, #1100). Split out from the always-visible
+ * type chips because both are open-ended enough (priority has 4 values, tags an unbounded,
+ * per-project count) that inlining them as chips the way types are would crowd the toolbar
+ * whenever a project has more than a couple of tags — the same reasoning `BoardFilterMenu`
+ * already applies board-wide.
+ */
+function TimelineFilterMenu({
+  availableTags, activePriorities, onTogglePriority, activeTagIds, onToggleTag,
+}: {
+  availableTags: { id: string; name: string; color?: string | null }[];
+  activePriorities: Set<string>;
+  onTogglePriority: (priority: string) => void;
+  activeTagIds: Set<string>;
+  onToggleTag: (tagId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useDismissable(ref, open, useCallback(() => setOpen(false), []));
+  const activeCount = activePriorities.size + activeTagIds.size;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Filter by priority or tag"
+        className={`flex items-center gap-1.5 px-2 h-6 text-xs rounded border transition-colors ${
+          activeCount > 0
+            ? "bg-brand-50 dark:bg-brand-950/30 border-brand-300 dark:border-brand-700 text-brand-700 dark:text-brand-400"
+            : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+        }`}
+      >
+        Priority/Tags
+        {activeCount > 0 && (
+          <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-brand-600 text-white px-1 text-[10px] font-semibold leading-none">
+            {activeCount}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div role="menu" className="absolute left-0 top-full z-30 mt-1 w-56 rounded-md border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900 flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Priority</label>
+            <div className="flex items-center gap-1 flex-wrap">
+              {PRIORITY_ORDER.map((p) => {
+                const isActive = activePriorities.has(p);
+                return (
+                  <button
+                    key={p}
+                    onClick={() => onTogglePriority(p)}
+                    aria-pressed={isActive}
+                    title={`Filter by priority: ${p}`}
+                    className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border transition-colors capitalize ${
+                      isActive
+                        ? "border-brand-600 bg-brand-600 text-white"
+                        : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    }`}
+                  >
+                    <span aria-hidden="true" className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: PRIORITY_COLORS[p] }} />
+                    {p}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          {availableTags.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Tags</label>
+              <div className="flex items-center gap-1 flex-wrap">
+                {availableTags.map((tag) => {
+                  const isActive = activeTagIds.has(tag.id);
+                  return (
+                    <button
+                      key={tag.id}
+                      onClick={() => onToggleTag(tag.id)}
+                      aria-pressed={isActive}
+                      title={`Filter by tag: ${tag.name}`}
+                      className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
+                        isActive
+                          ? "border-brand-600 bg-brand-600 text-white"
+                          : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                      }`}
+                    >
+                      {tag.color && (
+                        <span aria-hidden="true" className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
+                      )}
+                      {tag.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function TimelineToolbar({
   issueCount, laneCount, showCompleted, setShowCompleted, scale, onSetScale, onStep, onToday, onFitAll, onZoom, activeTypes, onToggleType,
+  availableTags, activePriorities, onTogglePriority, activeTagIds, onToggleTag,
 }: {
   issueCount: number;
   laneCount: number;
@@ -24,6 +133,11 @@ export function TimelineToolbar({
   onZoom: (factor: number) => void;
   activeTypes: Set<string>;
   onToggleType: (type: string) => void;
+  availableTags: { id: string; name: string; color?: string | null }[];
+  activePriorities: Set<string>;
+  onTogglePriority: (priority: string) => void;
+  activeTagIds: Set<string>;
+  onToggleTag: (tagId: string) => void;
 }) {
   const navBtn = "w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300";
   return (
@@ -102,6 +216,14 @@ export function TimelineToolbar({
           );
         })}
       </div>
+
+      <TimelineFilterMenu
+        availableTags={availableTags}
+        activePriorities={activePriorities}
+        onTogglePriority={onTogglePriority}
+        activeTagIds={activeTagIds}
+        onToggleTag={onToggleTag}
+      />
 
       {/*
         #1088 P2-7: a bar's priority dot, dashed border and the red "today" line were each

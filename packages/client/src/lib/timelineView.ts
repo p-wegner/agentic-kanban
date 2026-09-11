@@ -98,14 +98,31 @@ export interface Lane {
   /** How many issues the server actually returned for this column, before client-side filtering. `count > returnedCount` means the server truncated it. */
   returnedCount: number;
 }
-export interface LaneFilter { showCompleted: boolean; activeTypes: Set<string>; query: string }
+export interface LaneFilter {
+  showCompleted: boolean;
+  activeTypes: Set<string>;
+  query: string;
+  /**
+   * Priority filter (P2-15 remainder, #1100). Empty set means "no priority filter" —
+   * matching the same convention `activeTagIds` below uses, rather than `activeTypes`'
+   * "all selected = no filter" convention, since priority has no toolbar-visible "select
+   * all" state to fall back to.
+   */
+  activePriorities?: Set<string>;
+  /** Tag filter (P2-15 remainder, #1100). Empty set means "no tag filter" — an issue with
+   * any one of the selected tags matches (OR, not AND), matching the board-wide tag filter's
+   * own semantics in `boardFilterStore.ts`. */
+  activeTagIds?: Set<string>;
+}
 
-/** Lanes per status column, filtered by completed-toggle, active types, and search; empty lanes dropped. */
+/** Lanes per status column, filtered by completed-toggle, active types, priority, tags, and search; empty lanes dropped. */
 export function computeLanes(columns: StatusWithIssues[], filter: LaneFilter): Lane[] {
   const q = filter.query;
   // A bare or `#`-prefixed issue number (#1086/#1091 P1-4) — title/description search alone
   // can't find an issue by its number, which is how people actually refer to one.
   const numberMatch = /^#?(\d+)$/.exec(q)?.[1];
+  const activePriorities = filter.activePriorities;
+  const activeTagIds = filter.activeTagIds;
   return columns
     .filter((col) => filter.showCompleted || !COMPLETED_STATUSES.has(col.name))
     .map((col) => ({
@@ -114,19 +131,41 @@ export function computeLanes(columns: StatusWithIssues[], filter: LaneFilter): L
         .filter((i) => {
           const type = i.issueType ?? "task";
           if (!filter.activeTypes.has(type)) return false;
+          if (activePriorities && activePriorities.size > 0 && !activePriorities.has(i.priority ?? "medium")) return false;
+          if (activeTagIds && activeTagIds.size > 0 && !(i.tags ?? []).some((t) => activeTagIds.has(t.id))) return false;
           if (!q) return true;
           if (numberMatch && String(i.issueNumber) === numberMatch) return true;
           return i.title.toLowerCase().includes(q) || (i.description ?? "").toLowerCase().includes(q);
         })
         // #1099 P2-15 (partial): time-ordered rows instead of raw kanban sort order, so a
         // lane reads top-to-bottom as "oldest started first" like the axis itself. Grouping
-        // by epic/tag/agent and tag/priority filters are the larger remainder, tracked as a
-        // follow-up ticket rather than folded in here.
+        // by epic/tag/agent is the larger remainder, tracked as a follow-up ticket rather
+        // than folded in here.
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
       count: col.count,
       returnedCount: col.issues.length,
     }))
     .filter((lane) => lane.issues.length > 0);
+}
+
+/** All distinct tags present across `issues`, deduped by id, in first-seen order. */
+export function collectAvailableTags(issues: IssueWithStatus[]): { id: string; name: string; color: string | null }[] {
+  const seen = new Map<string, { id: string; name: string; color: string | null }>();
+  for (const issue of issues) {
+    for (const tag of issue.tags ?? []) {
+      if (!seen.has(tag.id)) seen.set(tag.id, { id: tag.id, name: tag.name, color: tag.color ?? null });
+    }
+  }
+  return [...seen.values()];
+}
+
+/** Toggle a member of a set with no other special-casing — for tags, where there is no
+ * meaningful "all selected" state to reset to (unlike `toggleTypeSet`'s fixed universe). */
+export function toggleSetMember(prev: Set<string>, id: string): Set<string> {
+  const next = new Set(prev);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
 }
 
 /** A timestamp's horizontal position within the range, as a 0–100 percentage. */

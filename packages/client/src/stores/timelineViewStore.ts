@@ -55,6 +55,13 @@ export interface TimelineFilterState {
   showCompleted: boolean;
   /** `Set<string>` is not itself persistable across renders as a plain value; store the array. */
   activeTypes: string[];
+  /**
+   * Priority/tag filters (P2-15 remainder, #1100). Optional — entries persisted before these
+   * fields existed have neither, which reads as "no filter" (an empty array), same as an
+   * explicit empty selection.
+   */
+  activePriorities?: string[];
+  activeTagIds?: string[];
 }
 
 interface TimelineViewStoreState {
