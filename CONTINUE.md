@@ -21,6 +21,14 @@ operator's to run. Worked around by quarantining the affected shards
 
 Verified: the two changed test files (30/30), server `tsc`, `pnpm check:arch`.
 
+`pnpm gate:always-run` came back **1198/1200**:
+- `function-nloc-ratchet` was mine: `createWorkspaceCreateService` grew 644 → 654. It is fixed in
+  `567add1cf8` (notification moved to a module-level helper) and re-verified.
+- `legacy-temp-prefixes` timed out at 300s under load: installs plus 4 gate workers, with
+  `%TEMP%` at ~78k entries. Run alone it passes in 10s.
+
+The full gate was NOT re-run after the fix. Say so rather than imply it.
+
 **Not done, and not solved by #1092:** the stable board runs `stable-20260910`, so none of this is
 live until `pnpm promote`. A worktree whose setup failed still needs its install re-run by hand.
 
