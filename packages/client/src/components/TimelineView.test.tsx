@@ -67,14 +67,43 @@ describe("TimelineView — nothing to show", () => {
 
   it("shows the empty state when every column is empty, rather than an axis with no rows", () => {
     // An axis and lane headers over zero rows reads as a broken chart, not as "no work".
+    // The toolbar (incl. its own "Today" nav button, #1086/#1091 P1-4) still renders — only
+    // the chart body is replaced by the empty state — so this checks for the absence of any
+    // drawn row, not for the literal word "Today" (which the toolbar always contains now).
     const html = render([column("Todo", []), column("Done", [])]);
     expect(html).toContain(EMPTY_MESSAGE);
-    expect(html).not.toContain("Today");
+    expect(rowCount(html)).toBe(0);
   });
 
   it("shows the empty state when the search matches nothing", () => {
     const html = render([column("Todo", [issue({ id: "a", title: "Add pagination" })])], "nothing matches this");
-    expect(html).toContain(EMPTY_MESSAGE);
+    expect(html).not.toContain(EMPTY_MESSAGE); // there IS an issue — a filter hid it, so #1086/#1091 P1-4 applies
+    expect(html).toContain("No issues match the current filters");
+  });
+
+  it("#1086/#1091 P1-4: keeps the toolbar (incl. the Show completed toggle) visible when a filter hides everything", () => {
+    const html = render([column("Todo", [issue({ id: "a", title: "Add pagination" })])], "nothing matches this");
+    expect(html).toContain("Show completed");
+  });
+
+  it("#1086/#1091 P1-4: offers a one-click filter reset when a filter hides everything", () => {
+    const html = render([column("Todo", [issue({ id: "a", title: "Add pagination" })])], "nothing matches this");
+    expect(html).toContain("Reset type &amp; completed filters");
+  });
+
+  it("#1086/#1091 P1-4: does not offer a filter reset when there are genuinely no issues", () => {
+    const html = render([column("Todo", [])]);
+    expect(html).not.toContain("Reset type &amp; completed filters");
+  });
+
+  it("#1086/#1091 P1-4: search matches an issue by its number", () => {
+    const html = render([column("Todo", [issue({ id: "a", issueNumber: 42, title: "Unrelated title" })])], "42");
+    expect(html).toContain("Unrelated title");
+  });
+
+  it("#1086/#1091 P1-4: search matches an issue by a #-prefixed number", () => {
+    const html = render([column("Todo", [issue({ id: "a", issueNumber: 42, title: "Unrelated title" })])], "#42");
+    expect(html).toContain("Unrelated title");
   });
 });
 
@@ -111,6 +140,13 @@ describe("TimelineView — the chart", () => {
     expect(render(board)).toContain("Today");
   });
 
+  it("#1088 P2-7: shows a priority legend in the toolbar", () => {
+    const html = render(board);
+    expect(html).toContain("Priority");
+    expect(html).toContain("critical");
+    expect(html).toContain("Invalid due date");
+  });
+
   it("omits a lane whose issues were all filtered out, rather than drawing an empty lane", () => {
     const html = render(board, "pagination");
     expect(rowCount(html)).toBe(1);
@@ -129,11 +165,26 @@ describe("TimelineView — the chart", () => {
 
 describe("TimelineView — issues the range has to cope with", () => {
   it("renders an issue with no due date (the common case) rather than skipping it", () => {
-    // The bar's end falls back to `updatedAt`; a null due date used to produce no bar.
+    // The bar's end falls back to "now" for an open issue (#1088 P1-2); a null due date used
+    // to produce no bar at all.
     const html = render([column("Todo", [issue({ id: "a", issueNumber: 7, title: "No deadline", dueDate: null })])]);
     expect(html).toContain("#7");
     expect(html).toContain("No deadline");
     expect(rowCount(html)).toBe(1);
+  });
+
+  it("#1088 P1-2: flags a due date that predates the created date instead of a normal-looking bar", () => {
+    // The toolbar's priority legend (#1088 P2-7) always shows a "⚠" as part of its own key,
+    // so the dashed border — the bar-specific marker — is the signal checked here.
+    const html = render([
+      column("Todo", [issue({ id: "a", title: "Backwards due date", createdAt: iso(1), dueDate: iso(5) })]),
+    ]);
+    expect(html).toContain("border-dashed");
+  });
+
+  it("does not flag a well-formed due date as invalid", () => {
+    const html = render([column("Todo", [issue({ id: "a", title: "Fine", createdAt: iso(5), dueDate: iso(1) })])]);
+    expect(html).not.toContain("border-dashed");
   });
 
   it("renders a single issue created and updated in the same instant", () => {
