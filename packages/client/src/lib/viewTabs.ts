@@ -272,6 +272,52 @@ export type RunnersTabId = "runners" | "dispatch-log" | "git-transport" | "conne
 export const RUNNERS_TAB_IDS = RUNNERS_TABS.map((t) => t.id as RunnersTabId);
 
 // ---------------------------------------------------------------------------
+// #1090 (#1088 batch-2 follow-up) — the timeline's day/week/month/quarter scale
+// as a URL tab. Unlike the container views above, "timeline" stays ONE component
+// for every tab — the tab picks a time-scale model (lib/timeScale.ts), not a
+// different child to render — so TimelineView reads the tab via useViewTab and
+// drives its own toolbar's scale buttons from it instead of rendering a second,
+// redundant <ViewTabBar>.
+// ---------------------------------------------------------------------------
+
+export const TIMELINE_VIEW_ID = "timeline";
+
+export const TIMELINE_TABS: readonly ViewTabDescriptor[] = [
+  {
+    id: "day",
+    label: "Day",
+    paletteLabel: "Day Scale",
+    paletteIcon: "D",
+    paletteDescription: "Timeline zoomed to individual days",
+  },
+  {
+    id: "week",
+    label: "Week",
+    paletteLabel: "Week Scale",
+    paletteIcon: "W",
+    paletteDescription: "Timeline zoomed to weeks",
+  },
+  {
+    id: "month",
+    label: "Month",
+    paletteLabel: "Month Scale",
+    paletteIcon: "M",
+    paletteDescription: "Timeline zoomed to months",
+  },
+  {
+    id: "quarter",
+    label: "Quarter",
+    paletteLabel: "Quarter Scale",
+    paletteIcon: "Q",
+    paletteDescription: "Timeline zoomed to quarters",
+  },
+];
+
+export type TimelineScaleId = "day" | "week" | "month" | "quarter";
+
+export const TIMELINE_TAB_IDS = TIMELINE_TABS.map((t) => t.id as TimelineScaleId);
+
+// ---------------------------------------------------------------------------
 // #446 — the tab as a URL dimension.
 //
 // The router needs to answer "does this view have tabs, which ones, and what is
@@ -302,6 +348,7 @@ export const VIEW_TAB_REGISTRY: Readonly<Record<string, ViewTabSet>> = {
   [RUNTIME_VIEW_ID]: { tabs: RUNTIME_TABS, defaultTab: "flight-recorder" },
   [FOCUS_VIEW_ID]: { tabs: FOCUS_TABS, defaultTab: "focus" },
   [RUNNERS_VIEW_ID]: { tabs: RUNNERS_TABS, defaultTab: "runners" },
+  [TIMELINE_VIEW_ID]: { tabs: TIMELINE_TABS, defaultTab: "month" },
 };
 
 /** True when `viewId` is a tabbed container view. Plain views have no tab dimension. */

@@ -27,6 +27,9 @@ import {
   type TimeWindow,
   type Viewport,
 } from "../lib/timeScale.js";
+import { TIMELINE_VIEW_ID, type TimelineScaleId } from "../lib/viewTabs.js";
+import { useViewTab } from "../hooks/useViewTab.js";
+import { useTimelineViewStore } from "../stores/timelineViewStore.js";
 import { Icon } from "./Icon.js";
 
 const SCALES: readonly Scale[] = ["day", "week", "month", "quarter"];
@@ -369,10 +372,25 @@ const DEFAULT_TRACK_PX = 1200;
 
 export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineViewProps) {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
-  const [showCompleted, setShowCompleted] = useState(true);
-  const [activeTypes, setActiveTypes] = useState<Set<string>>(new Set(ALL_TYPES));
   const [trackPx, setTrackPx] = useState(DEFAULT_TRACK_PX);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // #1090: scale is a URL tab (VIEW_TAB_REGISTRY), so `/p/<slug>/timeline/week` is a real deep
+  // link and the toolbar's scale buttons below double as that tab's selector — a second
+  // <ViewTabBar> would just duplicate them, since "timeline" stays one component per tab.
+  const [tab, setTab] = useViewTab<TimelineScaleId>(TIMELINE_VIEW_ID);
+
+  // #1090: anchor/zoom and the filter toggles survive a view switch via a small persisted
+  // store, read once at mount (imperative `getState`, not a subscription — nothing here needs
+  // to react to a later write, since this component is the only writer) — a plain `useState`
+  // reset to the defaults every time the user came back to this view, even though the scale
+  // (URL tab) and the search box (global filter store) already didn't.
+  const persistedAtMount = useRef(useTimelineViewStore.getState().byView[TIMELINE_VIEW_ID]).current;
+
+  const [showCompleted, setShowCompleted] = useState(persistedAtMount?.showCompleted ?? true);
+  const [activeTypes, setActiveTypes] = useState<Set<string>>(
+    () => new Set(persistedAtMount?.activeTypes ?? ALL_TYPES),
+  );
 
   const q = searchQuery?.toLowerCase() ?? "";
 
@@ -388,15 +406,40 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
   // Unfiltered, so the initial viewport isn't at the mercy of the default filter state.
   const allIssuesUnfiltered = useMemo(() => columns.flatMap((c) => c.issues), [columns]);
 
-  // #1088 (R1/R2/P1-6): the viewport (scale/anchor/zoom) is now independent state, computed
-  // once from the data on mount rather than re-derived from whatever is currently filtered —
-  // that decoupling is what stops the axis window rescaling under the user on every
-  // search/filter change. Real zoom (day/week/month/quarter, real time-scale math) replaces
-  // the old CSS `min-width` multiplier that had no effect on what was actually shown.
-  const [viewport, setViewport] = useState<Viewport>(() => {
+  // #1088 (R1/R2/P1-6): the viewport (scale/anchor/zoom) is independent state, computed once
+  // from the data on mount rather than re-derived from whatever is currently filtered — that
+  // decoupling is what stops the axis window rescaling under the user on every search/filter
+  // change. Real zoom (day/week/month/quarter, real time-scale math) replaces the old CSS
+  // `min-width` multiplier that had no effect on what was actually shown.
+  //
+  // #1090: `scale` is not part of this local state — it comes from `tab` above. Only the
+  // pan/zoom half (anchor, pxPerMs) is tracked here, restored from the persisted store when
+  // present so re-entering the view doesn't jump back to "fit all".
+  //
+  // A fresh, never-visited-before mount (no persisted state, no explicit URL tab) now fits
+  // the data at `tab`'s resolved value (the registry default, "month") rather than #1088's
+  // auto-picked scale — a stable default is what makes the URL tab meaningful at all;
+  // deriving it from the data would make the very same URL show a different scale depending
+  // on what is currently open, and disagree with what "Fit all" recomputes later anyway.
+  const [zoomState, setZoomState] = useState<{ anchor: number; pxPerMs: number }>(() => {
+    if (persistedAtMount) return { anchor: persistedAtMount.anchor, pxPerMs: persistedAtMount.pxPerMs };
     const { min, max } = issueDateRange(allIssuesUnfiltered);
-    return viewportForFitAll(min, max, DEFAULT_TRACK_PX);
+    return viewportForFitAll(min, max, DEFAULT_TRACK_PX, tab);
   });
+
+  const viewport: Viewport = useMemo(
+    () => ({ scale: tab, anchor: zoomState.anchor, pxPerMs: zoomState.pxPerMs }),
+    [tab, zoomState],
+  );
+
+  useEffect(() => {
+    useTimelineViewStore.getState().set(TIMELINE_VIEW_ID, {
+      anchor: zoomState.anchor,
+      pxPerMs: zoomState.pxPerMs,
+      showCompleted,
+      activeTypes: [...activeTypes],
+    });
+  }, [zoomState, showCompleted, activeTypes]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -420,14 +463,20 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
   const now = Date.now();
   const pct = (ts: number): number => pctOf(ts, timeWindow);
 
-  const handleSetScale = (scale: Scale) => setViewport((v) => withScale(v, scale, (timeWindow.min + timeWindow.max) / 2, trackPx));
-  const handleStep = (direction: 1 | -1) => setViewport((v) => stepAnchor(v, direction));
-  const handleToday = () => setViewport((v) => viewportForToday(v.scale, v.pxPerMs, trackPx));
-  const handleZoom = (factor: number) => setViewport((v) => zoomAround(v, factor, (timeWindow.min + timeWindow.max) / 2, trackPx));
+  /** Apply a computed Viewport: publish a scale change to the URL tab, keep anchor/zoom local. */
+  const applyViewport = (next: Viewport) => {
+    if (next.scale !== tab) setTab(next.scale);
+    setZoomState({ anchor: next.anchor, pxPerMs: next.pxPerMs });
+  };
+
+  const handleSetScale = (scale: Scale) => applyViewport(withScale(viewport, scale, (timeWindow.min + timeWindow.max) / 2, trackPx));
+  const handleStep = (direction: 1 | -1) => applyViewport(stepAnchor(viewport, direction));
+  const handleToday = () => applyViewport(viewportForToday(viewport.scale, viewport.pxPerMs, trackPx));
+  const handleZoom = (factor: number) => applyViewport(zoomAround(viewport, factor, (timeWindow.min + timeWindow.max) / 2, trackPx));
   const handleFitAll = () => {
     const source = allIssues.length > 0 ? allIssues : allIssuesUnfiltered;
     const { min, max } = issueDateRange(source);
-    setViewport(viewportForFitAll(min, max, trackPx));
+    applyViewport(viewportForFitAll(min, max, trackPx));
   };
 
   if (allIssues.length === 0) {
