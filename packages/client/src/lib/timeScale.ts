@@ -18,6 +18,6 @@ export type { Scale, Viewport, TimeWindow, Tick, TickBands, ClippedSpan } from "
 export { DAY_MS } from "./timeScale/types";
 
 export { defaultPxPerMs } from "./timeScale/scaleDensity";
-export { windowFor, xOf, clipSpan } from "./timeScale/geometry";
+export { windowFor, xOf, clipSpan, tsAtOffset } from "./timeScale/geometry";
 export { ticksFor } from "./timeScale/ticks";
-export { zoomAround, stepAnchor, viewportForToday, viewportForFitAll, withScale, parseLocalDate } from "./timeScale/viewport";
+export { zoomAround, stepAnchor, panBy, viewportForToday, viewportForFitAll, withScale, parseLocalDate } from "./timeScale/viewport";
