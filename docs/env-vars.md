@@ -119,6 +119,7 @@ Set by the board on an agent subprocess; read by hooks and skills inside a workt
 | `KANBAN_EXIT_LOG_FILE` | Where process exits are recorded. |
 | `KANBAN_SPAWN_BASELINE_FILE` | Baseline of pre-existing processes, so cleanup only reaps what the board started. |
 | `KANBAN_SPAWN_BASELINE_PERSIST` | Persist that baseline across restarts. |
+| `KANBAN_SKIP_BACKGROUND_SERVICES` | Set to skip starting `BACKGROUND_SERVICES` (monitor/auto-merge orchestrator, reconcilers, schedulers) entirely. Set by the pre-merge gate's smoke boot (#1095): that boot is a second full board process that exists only to prove the dev command boots and the health URL answers, torn down within seconds — starting the monitor loop on it is pure risk (it is what let a smoke boot reattach a live session and run auto-merge selection when it also inherited the OPERATED database) for zero benefit. Not for a normal boot. |
 
 ## Test-run scoping
 
