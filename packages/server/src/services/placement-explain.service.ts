@@ -49,6 +49,7 @@ import {
   getWorkerNamesByIds,
   listSessionPlacementRows,
 } from "../repositories/placement-observability.repository.js";
+import type { WorkerAssignment } from "../lib/placement-explain.types.js";
 import type { ProviderName } from "./agent-provider.js";
 import type {
   BranchSource,
@@ -80,6 +81,7 @@ export type {
   PlacementReason,
   PlacementReasonId,
   SessionPlacementRecord,
+  WorkerAssignment,
   WorkerEligibility,
 };
 import { isPlacementReasonId } from "../lib/placement-explain.types.js";
@@ -251,8 +253,30 @@ async function describeWorkers(
   providerName: ProviderName,
   requiredLabels: string[],
   now?: string,
+  database: Database = realDb,
 ): Promise<WorkerEligibility[]> {
   const workers = await fleet.registry.listWorkersView(now);
+  const allAssignedIds = workers.flatMap((w) => fleet.connections.assignedSessionIds(w.id));
+  const assignmentsBySession = new Map<string, WorkerAssignment>();
+  if (allAssignedIds.length > 0) {
+    const rows = await listSessionPlacementRows(
+      { sessionIds: allAssignedIds, limit: allAssignedIds.length },
+      database,
+    );
+    for (const r of rows) {
+      assignmentsBySession.set(r.sessionId, {
+        sessionId: r.sessionId,
+        workspaceId: r.workspaceId,
+        issueId: r.issueId ?? null,
+        issueNumber: r.issueNumber ?? null,
+        issueTitle: r.issueTitle ?? null,
+        projectId: r.projectId ?? null,
+        branch: r.branch ?? null,
+        status: r.status,
+        startedAt: r.startedAt,
+      });
+    }
+  }
   return workers.map((w) => {
     const labels = parseJsonList(w.labels);
     const connected = fleet.connections.isConnected(w.id);
@@ -298,6 +322,10 @@ async function describeWorkers(
             buildFreshness: compareWorkerBuild(w.workerVersion, resolveOwnPackageVersion()),
           }),
       assignedSessionIds: fleet.connections.assignedSessionIds(w.id),
+      assignments: fleet.connections
+        .assignedSessionIds(w.id)
+        .map((sid) => assignmentsBySession.get(sid))
+        .filter((a): a is WorkerAssignment => a !== undefined),
       freeSlots: Math.max(0, w.maxConcurrency - load),
       // #910: the headroom placement actually compared, not just its outcome.
       ...(w.capacity ? { capacity: w.capacity } : {}),
@@ -343,7 +371,7 @@ export async function describeFleet(params: {
   const requiredLabels = params.projectId
     ? parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(params.projectId), database))
     : [];
-  const workers = await describeWorkers(fleet, providerName, requiredLabels, params.now);
+  const workers = await describeWorkers(fleet, providerName, requiredLabels, params.now, database);
   const capacity = await resolveFleetCapacity(fleet, providerName, requiredLabels, params.now);
   return {
     registered: workers.length,
@@ -568,22 +596,25 @@ export async function listSessionPlacements(
   } = {},
 ): Promise<SessionPlacementRecord[]> {
   const database = opts.database ?? realDb;
+  // #1087: remoteOnly must be a SQL condition, not a post-filter — the repository applies
+  // `limit` before returning, so filtering afterwards silently drops remote rows that fell
+  // outside the limited window instead of returning up to `limit` remote rows.
   const rows = await listSessionPlacementRows(
     {
       projectId: opts.projectId,
       workspaceId: opts.workspaceId,
       issueId: opts.issueId,
       workerId: opts.workerId,
+      remoteOnly: opts.remoteOnly,
       limit: opts.limit,
     },
     database,
   );
-  const filtered = opts.remoteOnly ? rows.filter((r) => r.workerId !== null) : rows;
   const names = await getWorkerNamesByIds(
-    filtered.map((r) => r.workerId),
+    rows.map((r) => r.workerId),
     database,
   );
-  return filtered.map((r) => ({
+  return rows.map((r) => ({
     ...r,
     // #801: WHY, beside WHERE. Narrowed back to the id union here rather than in the
     // repository — the column is free text to SQLite, and a row written by an older build
