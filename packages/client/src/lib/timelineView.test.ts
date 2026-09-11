@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
+import { PRIORITY_META } from "./chartColors.js";
 import {
   computeLanes,
   pctOf,
@@ -7,8 +8,12 @@ import {
   computeIssueBar,
   ALL_TYPES,
   DAY_MS,
+  PRIORITY_COLORS,
+  PRIORITY_ORDER,
   type DateRange,
 } from "./timelineView.js";
+
+const priorityColor = (key: string) => PRIORITY_META.find((p) => p.key === key)!.color;
 
 function issue(over: Partial<IssueWithStatus> = {}): IssueWithStatus {
   return {
@@ -109,7 +114,7 @@ describe("computeIssueBar", () => {
     expect(bar.spanPct).toBe(70); // 90 - 20, unaffected by the due date
     expect(bar.duePct).toBe(60); // the due date shows up as its own marker instead
     expect(bar.type).toBe("feature");
-    expect(bar.priorityColor).toBe("#f97316");
+    expect(bar.priorityColor).toBe(priorityColor("high"));
     expect(bar.invalidDueDate).toBe(false);
   });
 
@@ -131,7 +136,7 @@ describe("computeIssueBar", () => {
   it("falls back to task colors and medium priority for unknown values", () => {
     const bar = computeIssueBar(issue({ issueType: "weird", priority: "weird" }), range, false, 50);
     expect(bar.colors).toBe(computeIssueBar(issue({ issueType: "task" }), range, false, 50).colors);
-    expect(bar.priorityColor).toBe("#eab308");
+    expect(bar.priorityColor).toBe(priorityColor("medium"));
   });
 
   it("#1088 P1-2: an OPEN issue's bar ends at 'now', not at its last edit", () => {
@@ -262,5 +267,17 @@ describe("computeLanes — search by issue number (#1086/#1091 P1-4)", () => {
     const columns = [col("Todo", [issue({ id: "a", issueNumber: 42, title: "Unrelated title" })])];
     const lanes = computeLanes(columns, { showCompleted: true, activeTypes: new Set(ALL_TYPES), query: "43" });
     expect(lanes).toEqual([]);
+  });
+});
+
+describe("#1086 P3-a: priority colors are derived from chartColors.PRIORITY_META, not a second table", () => {
+  it("matches PRIORITY_META for every priority", () => {
+    for (const p of PRIORITY_META) {
+      expect(PRIORITY_COLORS[p.key]).toBe(p.color);
+    }
+  });
+
+  it("orders the legend critical -> high -> medium -> low, matching PRIORITY_META", () => {
+    expect(PRIORITY_ORDER).toEqual(PRIORITY_META.map((p) => p.key));
   });
 });

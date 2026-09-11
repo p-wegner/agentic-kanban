@@ -1,5 +1,5 @@
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
-import { TYPE_COLORS as TYPE_DOT } from "./chartColors.js";
+import { TYPE_COLORS as TYPE_DOT, PRIORITY_META } from "./chartColors.js";
 import { clipSpan, parseLocalDate } from "./timeScale.js";
 
 // Pure view-model for TimelineView: config maps, lane filtering, date-range +
@@ -16,20 +16,22 @@ export const TYPE_COLORS: Record<string, TypeColor> = {
   chore:   { bg: "bg-amber-100 dark:bg-amber-900/50",  border: "border-amber-300 dark:border-amber-700",  text: "text-amber-800 dark:text-amber-200",  dot: TYPE_DOT.chore },
 };
 
-export const PRIORITY_COLORS: Record<string, string> = {
-  critical: "#ef4444",
-  high:     "#f97316",
-  medium:   "#eab308",
-  low:      "#6b7280",
-};
+/**
+ * Priority -> color, derived from the shared `chartColors.PRIORITY_META` instead of a
+ * second, independently-maintained hex table (#1086 P3-a) — the timeline used to carry its
+ * own saturated red/orange/yellow/gray values that disagreed with the editorial palette
+ * every other data-viz view already draws from.
+ */
+export const PRIORITY_COLORS: Record<string, string> = Object.fromEntries(
+  PRIORITY_META.map((p) => [p.key, p.color]),
+);
 
 /**
  * Display order for the priority legend (#1088 P2-7) — highest urgency first, matching the
- * order a reader scans a priority column in. `PRIORITY_COLORS`'s own key order already
- * happens to match this, but that is an implementation detail of an object literal, not a
- * contract; the legend imports this explicitly instead of relying on it.
+ * order a reader scans a priority column in. Derived from `PRIORITY_META`'s own order, which
+ * is already critical→high→medium→low.
  */
-export const PRIORITY_ORDER = ["critical", "high", "medium", "low"] as const;
+export const PRIORITY_ORDER: readonly string[] = PRIORITY_META.map((p) => p.key);
 
 export const STATUS_BG: Record<string, string> = {
   "Todo":        "bg-gray-50 dark:bg-gray-900",
@@ -41,7 +43,7 @@ export const STATUS_BG: Record<string, string> = {
 };
 
 // #517: not folded into the status tones. These are bare TEXT colours with no background
-// — the timeline draws its own row tint (STATUS_ROW above) and a tone class would paint a
+// — the timeline draws its own row tint (STATUS_BG above) and a tone class would paint a
 // second, conflicting pill background over it. Same statuses, different affordance.
 export const STATUS_BADGE: Record<string, string> = {
   "Todo":        "text-gray-600 dark:text-gray-400",
@@ -51,6 +53,17 @@ export const STATUS_BADGE: Record<string, string> = {
   "Done":        "text-green-700 dark:text-green-300",
   "Cancelled":   "text-gray-500 dark:text-gray-500",
 };
+
+/**
+ * Opaque counterpart of `STATUS_BG` for surfaces that must not let content bleed through them
+ * — the sticky lane header (#1086 P2-12). `STATUS_BG`'s own values are deliberately
+ * translucent (a soft row tint over many stacked rows); stripping the `/NN` opacity suffix
+ * gives the same hue at full opacity instead of a second hand-maintained color table. Falls
+ * back to the shared surface color for a status with no entry (both here and in `STATUS_BG`).
+ */
+export const STATUS_BG_SOLID: Record<string, string> = Object.fromEntries(
+  Object.entries(STATUS_BG).map(([name, cls]) => [name, cls.replace(/\/\d+/g, "")]),
+);
 
 export const DAY_MS = 86_400_000;
 
