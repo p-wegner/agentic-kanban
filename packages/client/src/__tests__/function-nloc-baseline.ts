@@ -18,7 +18,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "components/Layout.tsx::Layout": 691,
   "components/ButlerView.tsx::ButlerView": 693,
   "components/CreateWorkspaceForm.tsx::CreateWorkspaceForm": 694,
-  "routes/BoardPage.tsx::BoardPage": 627,
+  "routes/BoardPage.tsx::BoardPage": 625,
   // master shrank this one; #972 never touched it.
   "components/WorkspaceCard.tsx::WorkspaceCard": 570,
   // #972 moved the dependency-wave concern out to `hooks/useDependencyWave.ts`.
@@ -31,12 +31,12 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "components/WorkspacePanel.tsx::WorkspacePanel": 512,
   "components/StrategyTargetsView.tsx::StrategyTargetsView": 505,
   "components/SettingsPanel.tsx::SettingsPanel": 426,
-  "components/BoardToolbar.tsx::BoardToolbar": 490,
+  "components/BoardToolbar.tsx::BoardToolbar": 472,
   "components/settings/ProjectSettings.tsx::ProjectSettings": 465,
   "components/AllWorkspacesPanel.tsx::AllWorkspacesPanel": 438,
   "components/CreateIssuePanel.tsx::CreateIssuePanel": 353,
   "components/ButlerViewBody.tsx::ButlerViewBody": 415,
-  "components/BoardPageView.tsx::BoardPageView": 413,
+  "components/BoardPageView.tsx::BoardPageView": 410,
   "components/TableView.tsx::TableView": 416,
   "components/AddProjectModal.tsx::AddProjectModal": 408,
   "components/PluginActionPanes.tsx::PluginLoopPane": 406,

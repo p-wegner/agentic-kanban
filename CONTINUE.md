@@ -3,6 +3,68 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-12 — #1102 Autopilot chip on `feature/ak-1102-autopilot-chip` (unmerged, verified)
+
+**What the branch does (operator decision 2026-09-11).** WIP has ONE meaning and one home.
+Column WIP limits are gone; the per-project limit is the Strategy Bullseye's `activeAgentsTarget`.
+`wip_limit_<id>` and `nudge_wip_limit` are retired, so writing either returns 422.
+`resolveWipLimit` is override -> Bullseye -> default. `resolveAutoMerge(prefMap, projectId)` is the
+one auto-merge answer, used by exit-workflow and monitor-setup. `decideStartSlots` is the slot
+arithmetic BOTH monitor loops share, and `GET /api/projects/:id/autopilot` replays it. The toolbar
+Monitor button is now the Autopilot chip: mode, running/limit, next-cycle starts or the one hold,
+and auto-merge; its panel holds Start Mode, the Agents stepper, the auto-merge switch, starts per
+cycle, and a link to the full Monitor.
+
+**Promote-time effect on the operated DB.** A one-shot startup migration moves every
+`wip_limit_<projectId>` into that project's Bullseye and then deletes the row. The pref wins over
+an existing target; the legacy global `nudge_wip_limit` fills only an existing Bullseye that has no
+target; a malformed Bullseye is never overwritten and keeps its row (logged). It is idempotent and
+writes through `setPreferenceChecked`, so `objective.md` regenerates (and auto-commits) for
+Conductor repos. Stored `wip_limit_<statusId>` COLUMN rows are not migrated and simply stop being
+read. Exercised only in tests and against a scratch `AGENTIC_KANBAN_DIR`. Log tag to look for on
+the promoted board: `[wip-limit-migration]`.
+
+**Verified (2026-09-12, worktree `autopilot-1102-verify`):**
+- `pnpm typecheck` exit 0 (5 packages).
+- `pnpm check:arch` exit 0 — 0 errors, 30 pre-existing `startup-bypasses-repositories` warnings.
+- Server vs master, sharded (the package exceeds a single 580s window): shard 1/2 **791 suites /
+  2264 tests passed, 0 failed**; shard 2/2 **835 suites / 2581 tests, 2579 passed, 1 skipped**.
+- Client vs master: **221 suites / 547 tests passed, 0 failed**.
+- The 5 ratchets this change disturbed are green: `console-tag-ratchet`, `pref-polarity-ratchet`,
+  `codex-skills-parity` (20 tests), the client `function-nloc-ratchet` (11), and
+  `wip-limit-migration` (12).
+- `autopilot-route.test.ts` pins PARITY: the route's `willStartNextCycle` equals the launches
+  `runAutoStart` attempts, across 11 seeded states.
+- Chip states screenshotted with playwright-cli against a worktree dev server on a scratch DB:
+  manual, autopilot-with-slots, WIP-full hold, Conductor, the panel's steppers changing the
+  numbers, and ~400px.
+
+**Two defects found in my own work by the 400px check, both fixed:**
+- The chip's panel anchored to the chip (`right-0`/`left-0`), and the chip sits mid-toolbar, so a
+  19rem panel rendered at `left:-77` in a 400px viewport — the left third unreachable. Below `sm`
+  the panel is now a viewport-anchored sheet (`fixed inset-x-2 bottom-2`, scrollable); `sm+` still
+  hangs it under the chip (measured: 304px, left-aligned to the chip).
+- Below `sm` the chip renders only after the toolbar's `⋯` "Board actions" toggle — same gating the
+  old Monitor button had, so it is pre-existing behaviour, NOT introduced here. Worth a follow-up
+  decision: the chip answers "will work start on its own", which is arguably bar-permanent like
+  Voice.
+
+**Not done, deliberately:**
+- The prediction ignores the contention gate, the harness budget and reopen retries.
+- `nextCycleAt` is always null from the route; the chip reads the next run time from
+  monitor-status.
+- The chip does not predict the Conductor; it reports that the Conductor is driving.
+- A stored `nudge_wip_limit` still feeds the DEFAULT path, reported as source `default`.
+
+**Commit shape to know about:** `39c43d547b` ("chore: scaffold agent guards and onboarding")
+carries the #1102 `CLAUDE.md` edit under the board scaffold's subject — `pnpm db:setup` registered
+the worktree as a project and its scaffold committed the dirty tree. `5536261839` is a WIP commit
+(the chip, banked so an interrupted run could not lose it). Neither is rewritten; HEAD is coherent.
+
+**Next:** review, then merge. Filed #1103 (a worktree dev server on a scratch DB still runs the
+machine-global sweeps) and #1105 (the operated board's monitor resource sweep killed unrelated
+vitest/dev trees under `.worktrees/`, which is what made four earlier verification runs die with a
+misleading exit 0).
 ## 2026-09-11 (evening) — `stable-20260911` promoted at `37e19756b6`; #1094 merged after it
 
 **Stable runs `stable-20260911` = `37e19756b6`.** That commit includes #1087, #1089, #1090, #1092,

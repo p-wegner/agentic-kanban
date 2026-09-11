@@ -18,7 +18,6 @@ import { reconcileSelectedIssue } from "../lib/selectedIssueSync.js";
 import { createQuickUpdateHandlers } from "../lib/issueQuickUpdates.js";
 import { useColumnResize } from "../lib/columnResizeHandler.js";
 import { useActivityNotifications, type NotificationEvent } from "../hooks/useActivityNotifications.js";
-import { buildRunQueueForecast } from "../components/RunQueueForecastPanel.js";
 import { useBoardPageRoute } from "./useBoardPageRoute.js";
 import { markProgrammaticNavigation, navigationBurst } from "./boardRouteSync.js";
 import type { IssuePanel } from "../lib/appRoutes.js";
@@ -30,7 +29,7 @@ import type { IssuePanel } from "../lib/appRoutes.js";
  */
 const FOCUS_ISSUE_HOLD_MS = 15_000;
 import { useBoardPreferences } from "../hooks/useBoardPreferences.js";
-import { useAutopilot } from "../hooks/useAutopilot.js";
+import { useAutopilotForecast } from "../hooks/useAutopilotForecast.js";
 import { useBoardPanels } from "../hooks/useBoardPanels.js";
 import { useBoardNavigation } from "../hooks/useBoardNavigation.js";
 import { useBoardBulkSelection } from "../hooks/useBoardBulkSelection.js";
@@ -577,14 +576,8 @@ export function BoardPage() {
         .map((i) => ({ id: i.id, issueNumber: i.issueNumber, title: i.title })),
     [columns],
   );
-  // #1102: the forecast's WIP target is the project's one limit, from the same autopilot read the
-  // toolbar chip renders (the sprint-capacity policy — the same resolver — until that read lands).
-  const autopilot = useAutopilot(activeProjectId, columns);
-  const forecastTarget = autopilot.status?.limit ?? activeAgentsTarget ?? 5;
-  const runQueueForecast = useMemo(
-    () => buildRunQueueForecast(columns, forecastTarget),
-    [columns, forecastTarget],
-  );
+  // #1102: the chip read and the forecast share one WIP number — see `useAutopilotForecast`.
+  const { autopilot, runQueueForecast } = useAutopilotForecast(activeProjectId, columns, activeAgentsTarget);
 
   const { openIssueById, trailControls, ticketTrail } = useBoardNavigation(columns);
 

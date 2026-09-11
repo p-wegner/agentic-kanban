@@ -98,7 +98,7 @@ export function AutopilotChip(props: AutopilotChipProps) {
           role="dialog"
           aria-label="Autopilot"
           data-testid="autopilot-panel"
-          className="absolute right-0 sm:right-auto sm:left-0 top-full mt-1 z-50 w-[min(19rem,calc(100vw-2rem))] rounded-xl border border-black/[0.07] dark:border-white/10 bg-surface-raised dark:bg-surface-raised-dark shadow-lg p-3 space-y-3 text-xs text-ink dark:text-gray-200"
+          className="fixed inset-x-2 bottom-2 z-50 max-h-[75vh] overflow-y-auto sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:top-full sm:mt-1 sm:max-h-none sm:overflow-visible sm:w-[19rem] rounded-xl border border-black/[0.07] dark:border-white/10 bg-surface-raised dark:bg-surface-raised-dark shadow-lg p-3 space-y-3 text-xs text-ink dark:text-gray-200"
         >
           {status ? (
             <AutopilotPanelBody {...props} status={status} />
