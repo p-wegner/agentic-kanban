@@ -22,6 +22,14 @@ export const PRIORITY_COLORS: Record<string, string> = {
   low:      "#6b7280",
 };
 
+/**
+ * Display order for the priority legend (#1088 P2-7) — highest urgency first, matching the
+ * order a reader scans a priority column in. `PRIORITY_COLORS`'s own key order already
+ * happens to match this, but that is an implementation detail of an object literal, not a
+ * contract; the legend imports this explicitly instead of relying on it.
+ */
+export const PRIORITY_ORDER = ["critical", "high", "medium", "low"] as const;
+
 export const STATUS_BG: Record<string, string> = {
   "Todo":        "bg-gray-50 dark:bg-gray-900",
   "In Progress": "bg-blue-50/50 dark:bg-blue-950/20",
@@ -69,6 +77,9 @@ export interface LaneFilter { showCompleted: boolean; activeTypes: Set<string>; 
 /** Lanes per status column, filtered by completed-toggle, active types, and search; empty lanes dropped. */
 export function computeLanes(columns: StatusWithIssues[], filter: LaneFilter): Lane[] {
   const q = filter.query;
+  // A bare or `#`-prefixed issue number (#1086/#1091 P1-4) — title/description search alone
+  // can't find an issue by its number, which is how people actually refer to one.
+  const numberMatch = /^#?(\d+)$/.exec(q)?.[1];
   return columns
     .filter((col) => filter.showCompleted || !COMPLETED_STATUSES.has(col.name))
     .map((col) => ({
@@ -76,7 +87,9 @@ export function computeLanes(columns: StatusWithIssues[], filter: LaneFilter): L
       issues: col.issues.filter((i) => {
         const type = i.issueType ?? "task";
         if (!filter.activeTypes.has(type)) return false;
-        return !q || i.title.toLowerCase().includes(q) || (i.description ?? "").toLowerCase().includes(q);
+        if (!q) return true;
+        if (numberMatch && String(i.issueNumber) === numberMatch) return true;
+        return i.title.toLowerCase().includes(q) || (i.description ?? "").toLowerCase().includes(q);
       }),
     }))
     .filter((lane) => lane.issues.length > 0);
@@ -140,12 +153,37 @@ export interface IssueBar {
   type: string;
   colors: TypeColor;
   priorityColor: string;
+  /**
+   * `dueDate` is set but predates `createdAt` — a data problem, not a real (negative) span
+   * (#1088 P1-2). The bar falls back to the same end-date rule as a due-dateless issue, but a
+   * caller must render this visually distinct from an honest short bar, since silently
+   * clamping the span to 0 previously made a broken due date look like a same-day issue.
+   */
+  invalidDueDate: boolean;
 }
 
-/** The horizontal bar geometry + colors for one issue on the timeline. */
-export function computeIssueBar(issue: IssueWithStatus, range: DateRange): IssueBar {
+/**
+ * The horizontal bar geometry + colors for one issue on the timeline.
+ *
+ * The bar's END (#1088 P1-2) is, in priority order:
+ *  1. A valid due date (`>= createdAt`).
+ *  2. For a COMPLETED issue, `statusChangedAt` — when it actually left the board — falling
+ *     back to `updatedAt` for rows stamped before that column existed.
+ *  3. For an OPEN issue, `nowMs`. An open issue's bar must keep growing every day it stays
+ *     open; ending it at `updatedAt` (the old rule) froze it at whenever it was last edited,
+ *     which made an untouched-for-weeks open issue look like it had been done for weeks.
+ */
+export function computeIssueBar(
+  issue: IssueWithStatus,
+  range: DateRange,
+  isCompleted: boolean,
+  nowMs: number = Date.now(),
+): IssueBar {
   const start = new Date(issue.createdAt).getTime();
-  const end = issue.dueDate ? new Date(issue.dueDate).getTime() : new Date(issue.updatedAt).getTime();
+  const dueTs = issue.dueDate ? new Date(issue.dueDate).getTime() : null;
+  const invalidDueDate = dueTs !== null && dueTs < start;
+  const fallbackEnd = isCompleted ? new Date(issue.statusChangedAt ?? issue.updatedAt).getTime() : nowMs;
+  const end = dueTs !== null && !invalidDueDate ? dueTs : fallbackEnd;
   const startPct = pctOf(start, range);
   const type = issue.issueType ?? "task";
   return {
@@ -154,5 +192,6 @@ export function computeIssueBar(issue: IssueWithStatus, range: DateRange): Issue
     type,
     colors: TYPE_COLORS[type] ?? TYPE_COLORS.task,
     priorityColor: PRIORITY_COLORS[issue.priority ?? "medium"] ?? PRIORITY_COLORS.medium,
+    invalidDueDate,
   };
 }
