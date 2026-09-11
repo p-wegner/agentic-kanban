@@ -23,6 +23,7 @@ function issue(over: Partial<IssueWithStatus> = {}): IssueWithStatus {
     priority: over.priority ?? "medium",
     createdAt: over.createdAt ?? "2026-01-01T00:00:00Z",
     updatedAt: over.updatedAt ?? "2026-01-02T00:00:00Z",
+    statusChangedAt: over.statusChangedAt ?? null,
     dueDate: over.dueDate,
     ...over,
   } as IssueWithStatus;
@@ -113,20 +114,95 @@ describe("toggleTypeSet", () => {
 
 describe("computeIssueBar", () => {
   const range: DateRange = { min: 0, max: 100 };
-  it("computes start/span pct and resolves colors", () => {
-    const bar = computeIssueBar(issue({ createdAt: new Date(20).toISOString(), dueDate: new Date(60).toISOString(), issueType: "feature", priority: "high" }), range);
+  it("computes start/span pct and resolves colors for a valid due date", () => {
+    const bar = computeIssueBar(
+      issue({ createdAt: new Date(20).toISOString(), dueDate: new Date(60).toISOString(), issueType: "feature", priority: "high" }),
+      range,
+      false,
+    );
     expect(bar.startPct).toBe(20);
     expect(bar.spanPct).toBe(40);
     expect(bar.type).toBe("feature");
     expect(bar.priorityColor).toBe("#f97316");
+    expect(bar.invalidDueDate).toBe(false);
   });
-  it("clamps a negative span to 0", () => {
-    const bar = computeIssueBar(issue({ createdAt: new Date(60).toISOString(), dueDate: new Date(20).toISOString() }), range);
+
+  it("falls back to task colors and medium priority for unknown values", () => {
+    const bar = computeIssueBar(issue({ issueType: "weird", priority: "weird" }), range, false);
+    expect(bar.colors).toBe(computeIssueBar(issue({ issueType: "task" }), range, false).colors);
+    expect(bar.priorityColor).toBe("#eab308");
+  });
+
+  it("#1088 P1-2: an OPEN issue's bar ends at 'now', not at its last edit", () => {
+    const bar = computeIssueBar(
+      issue({ createdAt: new Date(10).toISOString(), updatedAt: new Date(20).toISOString(), dueDate: null }),
+      range,
+      false,
+      90,
+    );
+    expect(bar.spanPct).toBe(80); // 90 - 10
+  });
+
+  it("#1088 P1-2: a COMPLETED issue's bar ends at statusChangedAt, not at a later edit", () => {
+    const bar = computeIssueBar(
+      issue({
+        createdAt: new Date(10).toISOString(),
+        statusChangedAt: new Date(40).toISOString(),
+        updatedAt: new Date(90).toISOString(), // a later comment/edit after it was closed
+        dueDate: null,
+      }),
+      range,
+      true,
+      95,
+    );
+    expect(bar.spanPct).toBe(30); // 40 - 10, not 90 - 10 (updatedAt) or 95 - 10 (now)
+  });
+
+  it("#1088 P1-2: a COMPLETED issue with no statusChangedAt falls back to updatedAt", () => {
+    const bar = computeIssueBar(
+      issue({ createdAt: new Date(10).toISOString(), statusChangedAt: null, updatedAt: new Date(40).toISOString(), dueDate: null }),
+      range,
+      true,
+      95,
+    );
+    expect(bar.spanPct).toBe(30); // 40 - 10
+  });
+
+  it("#1088 P1-2: a due date before the created date is flagged invalid and falls back to the open/closed rule instead of a negative span", () => {
+    const bar = computeIssueBar(
+      issue({ createdAt: new Date(60).toISOString(), dueDate: new Date(20).toISOString() }),
+      range,
+      false,
+      90,
+    );
+    expect(bar.invalidDueDate).toBe(true);
+    expect(bar.spanPct).toBe(30); // falls back to nowMs (90) - created (60), never negative
+  });
+
+  it("a valid due date on the created date itself is not flagged invalid", () => {
+    const t = new Date(30).toISOString();
+    const bar = computeIssueBar(issue({ createdAt: t, dueDate: t }), range, false);
+    expect(bar.invalidDueDate).toBe(false);
     expect(bar.spanPct).toBe(0);
   });
-  it("falls back to task colors and medium priority for unknown values", () => {
-    const bar = computeIssueBar(issue({ issueType: "weird", priority: "weird" }), range);
-    expect(bar.colors).toBe(computeIssueBar(issue({ issueType: "task" }), range).colors);
-    expect(bar.priorityColor).toBe("#eab308");
+});
+
+describe("computeLanes — search by issue number (#1086/#1091 P1-4)", () => {
+  it("matches a bare issue number", () => {
+    const columns = [col("Todo", [issue({ id: "a", issueNumber: 42, title: "Unrelated title" })])];
+    const lanes = computeLanes(columns, { showCompleted: true, activeTypes: new Set(ALL_TYPES), query: "42" });
+    expect(lanes.flatMap((l) => l.issues.map((i) => i.id))).toEqual(["a"]);
+  });
+
+  it("matches a #-prefixed issue number", () => {
+    const columns = [col("Todo", [issue({ id: "a", issueNumber: 42, title: "Unrelated title" })])];
+    const lanes = computeLanes(columns, { showCompleted: true, activeTypes: new Set(ALL_TYPES), query: "#42" });
+    expect(lanes.flatMap((l) => l.issues.map((i) => i.id))).toEqual(["a"]);
+  });
+
+  it("does not match a different issue number", () => {
+    const columns = [col("Todo", [issue({ id: "a", issueNumber: 42, title: "Unrelated title" })])];
+    const lanes = computeLanes(columns, { showCompleted: true, activeTypes: new Set(ALL_TYPES), query: "43" });
+    expect(lanes).toEqual([]);
   });
 });

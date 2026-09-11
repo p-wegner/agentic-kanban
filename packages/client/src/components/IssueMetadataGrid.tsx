@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { IssueWithStatus, MilestoneResponse } from "@agentic-kanban/shared";
 import { isHttpUrl } from "../lib/url.js";
+import { parseLocalDate } from "../lib/timeScale.js";
 import { ISSUE_TYPES, ISSUE_ESTIMATES, issueTypeLabel } from "@agentic-kanban/shared";
 import { Icon, Spinner } from "./Icon.js";
 
@@ -206,13 +207,14 @@ export function IssueMetadataGrid({
                   </div>
                 </div>
                 {issue.dueDate && (() => {
-                  const overdue = new Date(issue.dueDate) < new Date(new Date().toDateString()) &&
+                  const due = parseLocalDate(issue.dueDate);
+                  const overdue = due < new Date(new Date().toDateString()) &&
                     issue.statusName !== "Done" && issue.statusName !== "Cancelled";
                   return (
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs text-gray-500 dark:text-gray-400">Due:</span>
                       <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded ${overdue ? "bg-red-100 text-red-700" : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}>
-                        {new Date(issue.dueDate).toLocaleDateString('en-US', { month: "short", day: "numeric", year: "numeric" })}
+                        {due.toLocaleDateString('en-US', { month: "short", day: "numeric", year: "numeric" })}
                         {overdue && " ⚠ overdue"}
                       </span>
                     </div>

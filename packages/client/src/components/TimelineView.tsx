@@ -3,9 +3,11 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import {
   TYPE_COLORS,
   PRIORITY_COLORS,
+  PRIORITY_ORDER,
   STATUS_BG,
   STATUS_BADGE,
   ALL_TYPES,
+  COMPLETED_STATUSES,
   fmtTooltipDate,
   computeLanes,
   pctOf,
@@ -226,6 +228,29 @@ function TimelineToolbar({
           );
         })}
       </div>
+
+      {/*
+        #1088 P2-7: a bar's priority dot, dashed border and the red "today" line were each
+        readable only by hovering (the dot's own `title`, the bar's own `title`) or by
+        already knowing the convention — nothing on the toolbar named what a colour or a
+        marker meant. This legend states the one thing a bar's OWN chrome cannot make
+        discoverable without hovering: the priority colour scale (type colour/border is
+        already legend-shaped via the type filter chips above, which double as their own
+        key).
+      */}
+      <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500 border-l border-gray-200 dark:border-gray-700 pl-3">
+        <span>Priority</span>
+        {PRIORITY_ORDER.map((p) => (
+          <span key={p} className="flex items-center gap-1" title={`Priority: ${p}`}>
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: PRIORITY_COLORS[p] }} />
+            <span className="capitalize">{p}</span>
+          </span>
+        ))}
+        <span className="flex items-center gap-1 ml-1" title="Due date is before the created date">
+          <span className="text-red-500 dark:text-red-400 font-bold">⚠</span>
+          <span>Invalid due date</span>
+        </span>
+      </div>
     </div>
   );
 }
@@ -260,7 +285,8 @@ function TimelineLane({
 
       {/* Issue rows */}
       {lane.issues.map((issue) => {
-        const { startPct: startP, spanPct: spanP, colors: cls, priorityColor: priColor } = computeIssueBar(issue, range);
+        const isCompleted = COMPLETED_STATUSES.has(lane.name);
+        const { startPct: startP, spanPct: spanP, colors: cls, priorityColor: priColor, invalidDueDate } = computeIssueBar(issue, range, isCompleted);
         return (
           <div key={issue.id} className="flex items-center border-b border-gray-50 dark:border-gray-800" style={{ height: ROW_H }}>
             <div
@@ -276,7 +302,8 @@ function TimelineLane({
                 className={`absolute top-1/2 -translate-y-1/2 rounded-md border cursor-pointer
                   transition-all hover:shadow-md hover:brightness-95 dark:hover:brightness-110
                   flex items-center gap-1.5 px-2 overflow-hidden select-none
-                  ${cls.bg} ${cls.border}`}
+                  ${cls.bg} ${invalidDueDate ? "border-dashed border-red-400 dark:border-red-500" : cls.border}`}
+                title={invalidDueDate ? "Due date is before the created date — showing the fallback end instead" : undefined}
                 /*
                   #897: the bar is clamped so it cannot spill past the track.
                   `pctOf` already clamps to 0-100, so the percentages alone never overflow —
@@ -308,6 +335,9 @@ function TimelineLane({
                 onMouseLeave={() => setTooltip(null)}
               >
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: priColor }} title={`Priority: ${issue.priority ?? "medium"}`} />
+                {invalidDueDate && (
+                  <span className="text-red-500 dark:text-red-400 text-[10px] font-bold shrink-0" title="Due date is before the created date">⚠</span>
+                )}
                 <span className={`text-xs font-medium truncate ${cls.text}`}>{issue.title}</span>
               </div>
             </div>
@@ -337,14 +367,20 @@ function TimelineTooltip({ tooltip }: { tooltip: TooltipState }) {
           <span className="w-14 shrink-0 text-gray-400">Updated</span>
           {fmtTooltipDate(new Date(tooltip.issue.updatedAt))}
         </div>
-        {tooltip.issue.dueDate && (
-          <div className="flex gap-2">
-            <span className="w-14 shrink-0 text-gray-400">Due</span>
-            <span className={new Date(tooltip.issue.dueDate) < new Date(new Date().toDateString()) ? "text-red-500 font-medium" : ""}>
-              {fmtTooltipDate(new Date(tooltip.issue.dueDate))}
-            </span>
-          </div>
-        )}
+        {tooltip.issue.dueDate && (() => {
+          const due = new Date(tooltip.issue.dueDate);
+          const invalidDueDate = due.getTime() < new Date(tooltip.issue.createdAt).getTime();
+          const overdue = due < new Date(new Date().toDateString());
+          return (
+            <div className="flex gap-2">
+              <span className="w-14 shrink-0 text-gray-400">Due</span>
+              <span className={invalidDueDate || overdue ? "text-red-500 font-medium" : ""}>
+                {fmtTooltipDate(due)}
+                {invalidDueDate && " (before created!)"}
+              </span>
+            </div>
+          );
+        })()}
         <div className="flex gap-2">
           <span className="w-14 shrink-0 text-gray-400">Type</span>
           <span className="capitalize">{tooltip.issue.issueType ?? "task"}</span>
@@ -400,7 +436,14 @@ function reconcileToScale(
 export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: TimelineViewProps) {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [trackPx, setTrackPx] = useState(DEFAULT_TRACK_PX);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  // A callback ref, not `useRef` + an effect with `[]` deps: this component returns an
+  // early empty-state div (below) whenever `allIssues` is empty — which is also the state
+  // it mounts in while `columns` is still loading from the API. A `useRef`-based effect
+  // observes whatever `.current` is AT MOUNT TIME and never re-runs, so it would permanently
+  // miss the scroll container that only appears once real issues arrive. The callback ref
+  // fires every time the node is attached or detached, so the observer (re)attaches whenever
+  // the container actually mounts.
+  const [scrollNode, setScrollNode] = useState<HTMLDivElement | null>(null);
 
   // #1090: scale is a URL tab (VIEW_TAB_REGISTRY), so `/p/<slug>/timeline/week` is a real deep
   // link and the toolbar's scale buttons below double as that tab's selector — a second
@@ -466,6 +509,21 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
   /** The scale `zoomState` currently corresponds to — see `reconcileToScale`'s doc comment. */
   const committedScaleRef = useRef<Scale>(tab);
 
+  // #1088 fix: `viewMode` is route-derived, so a page load/refresh landing directly on the
+  // Timeline tab mounts this component before `columns` has arrived from the API. When there
+  // is no persisted state to restore, the `zoomState` initializer above then locks onto the
+  // empty-data fallback range (now-7d..now) permanently — it never recomputes once the real
+  // issues load, stranding the user on an arbitrary window until they manually click "Fit
+  // all". Re-fit once, the first time `allIssuesUnfiltered` goes from empty to non-empty.
+  // Skipped when a persisted anchor was restored, so this never fights the user's own zoom.
+  const hasFitRealDataRef = useRef(persistedAtMount != null || allIssuesUnfiltered.length > 0);
+  useEffect(() => {
+    if (hasFitRealDataRef.current || allIssuesUnfiltered.length === 0) return;
+    hasFitRealDataRef.current = true;
+    const { min, max } = issueDateRange(allIssuesUnfiltered);
+    setZoomState(viewportForFitAll(min, max, trackPx, tab));
+  }, [allIssuesUnfiltered, trackPx, tab]);
+
   const viewport: Viewport = useMemo(
     () => ({ scale: tab, anchor: zoomState.anchor, pxPerMs: zoomState.pxPerMs }),
     [tab, zoomState],
@@ -520,15 +578,14 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
   }, [storeKey, zoomState, showCompleted, activeTypes, tab]);
 
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
+    if (!scrollNode || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width;
       if (width) setTrackPx(Math.max(300, Math.round(width)));
     });
-    observer.observe(el);
+    observer.observe(scrollNode);
     return () => observer.disconnect();
-  }, []);
+  }, [scrollNode]);
 
   const timeWindow: TimeWindow = useMemo(() => windowFor(viewport, trackPx), [viewport, trackPx]);
   const { major: majorTickList, minor: minorTickList } = useMemo(
@@ -558,19 +615,26 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
     applyViewport(viewportForFitAll(min, max, trackPx));
   };
 
-  if (allIssues.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center flex-1 gap-3 text-gray-400 dark:text-gray-500">
-        <Icon className="w-14 h-14 opacity-25" strokeWidth={1} d="M6 6h12M6 10h8M6 14h5M6 18h3" />
-        <p className="text-sm">No issues to display on the timeline</p>
-      </div>
-    );
-  }
-
   const nowPct = pct(now);
+  const isEmpty = allIssues.length === 0;
+  // Unfiltered count, so the empty state can tell "no issues at all" apart from "a filter
+  // hid everything" (#1086/#1091 P1-4) — the two need different recoveries.
+  const rawIssueCount = allIssuesUnfiltered.length;
+  const filtersActive = !showCompleted || activeTypes.size < ALL_TYPES.length || q.length > 0;
+  const resetFilters = () => {
+    setShowCompleted(true);
+    setActiveTypes(new Set(ALL_TYPES));
+  };
 
   return (
     <div className="flex flex-col flex-1 min-h-0 px-4 pb-4">
+      {/*
+        #1086/#1091 P1-4: the toolbar is now ALWAYS rendered, even when nothing matches. It
+        used to be conditionally mounted alongside the chart, so unticking "Show completed" on
+        a board with only completed issues (or a search matching nothing) hid the toolbar
+        along with the chart — including the "Show completed" toggle itself, the only way
+        back. A reload or a view switch was the only recovery.
+      */}
       <TimelineToolbar
         issueCount={allIssues.length}
         laneCount={lanes.length}
@@ -586,63 +650,87 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
         onToggleType={toggleType}
       />
 
-      {/* Timeline scroll area */}
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark"
-      >
-        <div style={{ minWidth: 700 }}>
+      {isEmpty ? (
+        <div className="flex flex-col items-center justify-center flex-1 gap-3 text-gray-400 dark:text-gray-500">
+          <Icon className="w-14 h-14 opacity-25" strokeWidth={1} d="M6 6h12M6 10h8M6 14h5M6 18h3" />
+          <p className="text-sm">
+            {rawIssueCount === 0
+              ? "No issues to display on the timeline"
+              : "No issues match the current filters"}
+          </p>
+          {rawIssueCount > 0 && filtersActive && (
+            <button
+              onClick={resetFilters}
+              className="px-2.5 h-7 text-xs rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
+            >
+              Reset type &amp; completed filters
+            </button>
+          )}
+          {rawIssueCount > 0 && q.length > 0 && (
+            <p className="text-xs text-gray-400 dark:text-gray-500">Clear the search to see more</p>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Timeline scroll area */}
+          <div
+            ref={setScrollNode}
+            className="flex-1 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark"
+          >
+            <div style={{ minWidth: 700 }}>
 
-          {/* Date axis row */}
-          <div className="flex sticky top-0 z-10 bg-surface-raised dark:bg-surface-raised-dark border-b border-gray-200 dark:border-gray-700" style={{ height: AXIS_H }}>
-            <div style={{ width: LABEL_W, minWidth: LABEL_W }} className="border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800" />
-            <div className="flex-1 relative">
-              {/*
-                #897: an axis label is centred on its tick, so at the range's FIRST and LAST
-                tick half of it hangs outside the track — measured as the 48px horizontal
-                scrollbar this view painted at 1440x900. Clipping the strip would hide half a
-                date; nudging the tick would put the label under the wrong day. So only the
-                LABEL's anchor changes at the two edges: flush-left at the start, flush-right
-                at the end, centred everywhere in between. Every date stays fully readable and
-                none of them leaves the track.
+              {/* Date axis row */}
+              <div className="flex sticky top-0 z-10 bg-surface-raised dark:bg-surface-raised-dark border-b border-gray-200 dark:border-gray-700" style={{ height: AXIS_H }}>
+                <div style={{ width: LABEL_W, minWidth: LABEL_W }} className="border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800" />
+                <div className="flex-1 relative">
+                  {/*
+                    #897: an axis label is centred on its tick, so at the range's FIRST and LAST
+                    tick half of it hangs outside the track — measured as the 48px horizontal
+                    scrollbar this view painted at 1440x900. Clipping the strip would hide half a
+                    date; nudging the tick would put the label under the wrong day. So only the
+                    LABEL's anchor changes at the two edges: flush-left at the start, flush-right
+                    at the end, centred everywhere in between. Every date stays fully readable and
+                    none of them leaves the track.
 
-                #1088: labels come pre-computed from `ticksFor` (calendar-boundary-snapped,
-                scale-aware — "Week of Mar 9", "September 2026", "Q3 2026") instead of the old
-                span-proportional `fmtAxisDate`.
-              */}
-              {majorTickList.map((tick, i) => (
-                <div key={i} className="absolute top-0 h-full flex items-center" style={axisAnchor(pct(tick.ts))}>
-                  <span className={`text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap select-none px-1 shrink-0 ${axisLabelShift(pct(tick.ts))}`}>
-                    {tick.label}
-                  </span>
+                    #1088: labels come pre-computed from `ticksFor` (calendar-boundary-snapped,
+                    scale-aware — "Week of Mar 9", "September 2026", "Q3 2026") instead of the old
+                    span-proportional `fmtAxisDate`.
+                  */}
+                  {majorTickList.map((tick, i) => (
+                    <div key={i} className="absolute top-0 h-full flex items-center" style={axisAnchor(pct(tick.ts))}>
+                      <span className={`text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap select-none px-1 shrink-0 ${axisLabelShift(pct(tick.ts))}`}>
+                        {tick.label}
+                      </span>
+                    </div>
+                  ))}
+                  {nowPct >= 0 && nowPct <= 100 && (
+                    <div className="absolute top-0 h-full flex items-end pb-0.5" style={axisAnchor(nowPct)}>
+                      <span className={`text-[10px] font-bold text-red-500 whitespace-nowrap select-none shrink-0 ${axisLabelShift(nowPct)}`}>
+                        Today
+                      </span>
+                    </div>
+                  )}
                 </div>
+              </div>
+
+              {/* Status lanes */}
+              {lanes.map((lane, laneIdx) => (
+                <TimelineLane
+                  key={lane.name}
+                  lane={lane}
+                  laneIdx={laneIdx}
+                  majorTicks={majorTicks}
+                  minorTicks={minorTicks}
+                  range={timeWindow}
+                  nowPct={nowPct}
+                  onIssueClick={onIssueClick}
+                  setTooltip={setTooltip}
+                />
               ))}
-              {nowPct >= 0 && nowPct <= 100 && (
-                <div className="absolute top-0 h-full flex items-end pb-0.5" style={axisAnchor(nowPct)}>
-                  <span className={`text-[10px] font-bold text-red-500 whitespace-nowrap select-none shrink-0 ${axisLabelShift(nowPct)}`}>
-                    Today
-                  </span>
-                </div>
-              )}
             </div>
           </div>
-
-          {/* Status lanes */}
-          {lanes.map((lane, laneIdx) => (
-            <TimelineLane
-              key={lane.name}
-              lane={lane}
-              laneIdx={laneIdx}
-              majorTicks={majorTicks}
-              minorTicks={minorTicks}
-              range={timeWindow}
-              nowPct={nowPct}
-              onIssueClick={onIssueClick}
-              setTooltip={setTooltip}
-            />
-          ))}
-        </div>
-      </div>
+        </>
+      )}
 
       {tooltip && <TimelineTooltip tooltip={tooltip} />}
     </div>
