@@ -51,9 +51,9 @@ export function stepAnchor(viewport: Viewport, direction: 1 | -1): Viewport {
 }
 
 /** A viewport centred on `now` at the given scale/zoom. */
-export function viewportForToday(scale: Scale, pxPerMs: number, trackPx: number, now: number = Date.now()): Viewport {
+export function viewportForToday(scale: Scale, pxPerMs: number, trackPx: number, nowMs: number = Date.now()): Viewport {
   const span = trackPx / pxPerMs;
-  return { scale, anchor: snapDown(now - span / 2, scale), pxPerMs };
+  return { scale, anchor: snapDown(nowMs - span / 2, scale), pxPerMs };
 }
 
 /**
@@ -85,7 +85,7 @@ export function withScale(viewport: Viewport, scale: Scale, focusTs: number, tra
 
 /** Local-midnight parse of a `YYYY-MM-DD` date-only string (falls back to native parsing). */
 export function parseLocalDate(value: string): Date {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   return new Date(value);
 }
