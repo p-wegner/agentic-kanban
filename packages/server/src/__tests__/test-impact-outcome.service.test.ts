@@ -12,6 +12,8 @@ import {
   recordGateOutcome,
   recordBaseSweepOutcome,
   recordVerifyGateOutcome,
+  recordAcceptsSelectedViaStdin,
+  RECORD_ARGV_SAFE_LIMIT,
   IMPACT_TOOL_RELATIVE_PATH,
   OUTCOMES_RELATIVE_PATH,
   type RunImpactCommand,
@@ -126,7 +128,7 @@ describe("gateRanScope", () => {
 
 describe("buildRecordArgs", () => {
   it("carries the verdict, both scopes and the ledger path", () => {
-    const args = buildRecordArgs({
+    const { args, stdin } = buildRecordArgs({
       toolPath: "/w/impact.mjs",
       outcomesPath: "/main/.test-impact/outcomes.jsonl",
       passed: false,
@@ -146,6 +148,8 @@ describe("buildRecordArgs", () => {
     expect(at("--ran")).toBe("full");
     expect(at("--source")).toBe("ci");
     expect(at("--outcomes")).toBe("/main/.test-impact/outcomes.jsonl");
+    // No stdin form requested, so nothing is written to it.
+    expect(stdin).toBeUndefined();
   });
 
   it("passes --selected VERBATIM when the selection is empty, so the row is scored not skipped", () => {
@@ -159,7 +163,7 @@ describe("buildRecordArgs", () => {
     // Unreachable on THIS project (the recorder passes --always-run over ~170 guard suites) and
     // that is why the old rule survived; the recorder runs for every registered project, and a
     // small repo with no always-run markers legitimately selects nothing for a docs change.
-    const args = buildRecordArgs({
+    const { args } = buildRecordArgs({
       toolPath: "/w/impact.mjs",
       outcomesPath: "/o.jsonl",
       passed: true,
@@ -179,7 +183,7 @@ describe("buildRecordArgs", () => {
   });
 
   it("carries --base when one was resolved", () => {
-    const args = buildRecordArgs({
+    const { args } = buildRecordArgs({
       toolPath: "/w/impact.mjs",
       outcomesPath: "/o.jsonl",
       passed: true,
@@ -191,6 +195,30 @@ describe("buildRecordArgs", () => {
       baseBranch: "master",
     });
     expect(args[args.indexOf("--base") + 1]).toBe("master");
+  });
+
+  it("streams --selected over stdin as `-` when requested, keeping argv short (#1098)", () => {
+    // A base sweep's selection can run to hundreds of suites; comma-joined inline that overflows
+    // Windows' 32,767-char CreateProcess limit. Requested explicitly (the caller decides based on
+    // whether the installed tool advertises support — see `recordAcceptsSelectedViaStdin`), the
+    // huge list goes over stdin instead, the same `-` convention `select --union` already uses.
+    const selected = Array.from({ length: 600 }, (_, i) => `packages/server/src/__tests__/wide-${i}.test.ts`);
+    const { args, stdin } = buildRecordArgs({
+      toolPath: "/w/impact.mjs",
+      outcomesPath: "/o.jsonl",
+      passed: false,
+      selected,
+      failedSuites: ["packages/server/src/__tests__/one.test.ts"],
+      tier: "impact",
+      ran: "full",
+      source: "ci",
+      selectedViaStdin: true,
+    });
+    expect(args[args.indexOf("--selected") + 1]).toBe("-");
+    expect(args.join(" ").length).toBeLessThan(RECORD_ARGV_SAFE_LIMIT);
+    expect(stdin).toBe(`${selected.join("\n")}\n`);
+    // `--failed` is unaffected — small failing-suite lists are not what overflowed argv.
+    expect(args[args.indexOf("--failed") + 1]).toBe("packages/server/src/__tests__/one.test.ts");
   });
 });
 
@@ -763,6 +791,96 @@ describe("recordGateOutcome", () => {
     } finally {
       repos.cleanup();
     }
+  });
+
+  /**
+   * #1098 — a wide base sweep's `--selected` list, comma-joined inline, can pass Windows'
+   * 32,767-char CreateProcess limit and spawn `ENAMETOOLONG`. Reproduced here with ~600 selected
+   * suites (the same order of magnitude as the 536-suite case measured in the ticket), against
+   * BOTH an old tool (no stdin support — must fail loudly, never spawn) and a tool that advertises
+   * the `--selected <a,b|->` form (must stream via stdin and keep argv short).
+   */
+  describe("wide selections (#1098)", () => {
+    // Long, package-nested paths — like the real #1098 measurement (536 suites -> 33,735 chars,
+    // ~63 chars/entry incl. comma). Short fixture names would not reliably clear the safe limit.
+    const wideSelection = Array.from(
+      { length: 600 },
+      (_, i) => `packages/server/src/services/some-module/__tests__/wide-selected-suite-${i}.test.ts`,
+    );
+
+    it("reproduces the bug: an OLD tool would overflow argv, so it fails LOUDLY instead of spawning", async () => {
+      const repos = makeRepos(); // makeRepos() stubs impact.mjs with plain "// stub\n" — no marker
+      try {
+        const calls: { args: string[]; stdin?: string }[] = [];
+        const run: RunImpactCommand = async ({ args, stdin }) => {
+          calls.push({ args, stdin });
+          if (args[1] === "select") return { exitCode: 0, stdout: selectionJson("impact", wideSelection), stderr: "" };
+          // Should never be reached — the guard must stop the call before it spawns `record`.
+          return { exitCode: 0, stdout: "", stderr: "" };
+        };
+        const result = await recordGateOutcome({
+          workingDir: repos.worktree,
+          repoPath: repos.main,
+          passed: false,
+          failedSuites: [],
+          tierInfo: tierInfo(),
+          runCommand: run,
+        });
+        expect(result.recorded).toBe(false);
+        expect(result.reason).toMatch(/too long/);
+        expect(result.reason).toContain("--selected -");
+        // Only `select` ran; `record` was never spawned with the overflowing argv.
+        expect(calls).toHaveLength(1);
+        expect(calls[0]!.args[1]).toBe("select");
+      } finally {
+        repos.cleanup();
+      }
+    });
+
+    it("fixed: a tool that advertises the stdin form records the row, argv short, list on stdin", async () => {
+      const repos = makeRepos();
+      writeFileSync(
+        join(repos.worktree, IMPACT_TOOL_RELATIVE_PATH),
+        "//   record --result pass|fail [--failed a,b] [--selected <a,b|->] [--source local|ci] [--base <ref>]\n",
+      );
+      try {
+        const calls: { args: string[]; stdin?: string }[] = [];
+        const run: RunImpactCommand = async ({ args, stdin }) => {
+          calls.push({ args, stdin });
+          if (args[1] === "select") return { exitCode: 0, stdout: selectionJson("impact", wideSelection), stderr: "" };
+          return { exitCode: 0, stdout: "", stderr: "" };
+        };
+        const result = await recordGateOutcome({
+          workingDir: repos.worktree,
+          repoPath: repos.main,
+          passed: false,
+          failedSuites: [],
+          tierInfo: tierInfo(),
+          runCommand: run,
+        });
+        expect(result.recorded).toBe(true);
+        expect(calls).toHaveLength(2);
+        const recordCall = calls[1]!;
+        expect(recordCall.args.join(" ").length).toBeLessThan(RECORD_ARGV_SAFE_LIMIT);
+        expect(recordCall.args[recordCall.args.indexOf("--selected") + 1]).toBe("-");
+        expect(recordCall.stdin).toBe(`${wideSelection.join("\n")}\n`);
+      } finally {
+        repos.cleanup();
+      }
+    });
+  });
+});
+
+describe("recordAcceptsSelectedViaStdin", () => {
+  it("reads false for a tool whose usage text never mentions the stdin form", () => {
+    expect(recordAcceptsSelectedViaStdin("// stub\n")).toBe(false);
+    expect(recordAcceptsSelectedViaStdin("record --result pass|fail [--selected a,b] [--failed a,b]")).toBe(false);
+  });
+
+  it("reads true once the tool's own usage text advertises `--selected <a,b|->`", () => {
+    expect(
+      recordAcceptsSelectedViaStdin("record --result pass|fail [--selected <a,b|->] [--failed a,b]"),
+    ).toBe(true);
   });
 });
 
