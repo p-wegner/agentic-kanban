@@ -1,10 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import {
-  fmtAxisDate,
   computeLanes,
-  computeBaseRange,
-  computeTicks,
   pctOf,
   toggleTypeSet,
   computeIssueBar,
@@ -28,17 +25,9 @@ function issue(over: Partial<IssueWithStatus> = {}): IssueWithStatus {
     ...over,
   } as IssueWithStatus;
 }
-function col(name: string, issues: IssueWithStatus[]): StatusWithIssues {
-  return { id: name, name, issues } as unknown as StatusWithIssues;
+function col(name: string, issues: IssueWithStatus[], count?: number): StatusWithIssues {
+  return { id: name, name, issues, count: count ?? issues.length } as unknown as StatusWithIssues;
 }
-
-describe("fmtAxisDate", () => {
-  it("shows time for sub-2-day spans, date otherwise", () => {
-    const d = new Date("2026-03-04T13:05:00Z");
-    expect(fmtAxisDate(d, DAY_MS)).toMatch(/\d{1,2}:\d{2}/);
-    expect(fmtAxisDate(d, 10 * DAY_MS)).toMatch(/Mar/);
-  });
-});
 
 describe("computeLanes", () => {
   const columns = [
@@ -66,28 +55,22 @@ describe("computeLanes", () => {
     const lanes = computeLanes(columns, { showCompleted: true, activeTypes: new Set(ALL_TYPES), query: "login" });
     expect(lanes.flatMap((l) => l.issues.map((i) => i.id))).toEqual(["a"]);
   });
-});
 
-describe("computeBaseRange", () => {
-  it("returns a 7-day window ending now for an empty set", () => {
-    const r = computeBaseRange([]);
-    expect(r.max - r.min).toBeCloseTo(7 * DAY_MS, -5);
+  it("#1086 P1-3: carries the column's true total and returned count, not just the filtered length", () => {
+    // A terminal column truncated server-side to 50: `count` (the true total) exceeds
+    // `issues.length` (what the server actually returned).
+    const capped = [col("Done", [issue({ id: "b" })], 137)];
+    const lanes = computeLanes(capped, { showCompleted: true, activeTypes: new Set(ALL_TYPES), query: "" });
+    expect(lanes[0].count).toBe(137);
+    expect(lanes[0].returnedCount).toBe(1);
   });
 
-  it("spans created→due with padding", () => {
-    const r = computeBaseRange([issue({ createdAt: "2026-01-01T00:00:00Z", dueDate: "2026-01-11T00:00:00Z" })]);
-    // 10 day span, +Date.now() pulls max out; just assert min is padded below the created date
-    expect(r.min).toBeLessThan(new Date("2026-01-01T00:00:00Z").getTime());
-  });
-});
-
-describe("computeTicks", () => {
-  it("produces between a few and ~11 ticks with no duplicate labels", () => {
-    const range: DateRange = { min: new Date("2026-01-01").getTime(), max: new Date("2026-02-01").getTime() };
-    const ticks = computeTicks(range);
-    const labels = ticks.map((t) => fmtAxisDate(t, range.max - range.min));
-    expect(new Set(labels).size).toBe(labels.length); // deduped
-    expect(ticks.length).toBeGreaterThanOrEqual(3);
+  it("returnedCount reflects what the server sent BEFORE client-side filtering", () => {
+    const columns2 = [col("Todo", [issue({ id: "a", issueType: "bug" }), issue({ id: "b", issueType: "task" })])];
+    const lanes = computeLanes(columns2, { showCompleted: true, activeTypes: new Set(["bug"]), query: "" });
+    expect(lanes[0].issues).toHaveLength(1); // filtered down to the bug
+    expect(lanes[0].returnedCount).toBe(2); // but the server sent both
+    expect(lanes[0].count).toBe(2); // and there were only 2 total (no server-side cap)
   });
 });
 
@@ -114,22 +97,40 @@ describe("toggleTypeSet", () => {
 
 describe("computeIssueBar", () => {
   const range: DateRange = { min: 0, max: 100 };
-  it("computes start/span pct and resolves colors for a valid due date", () => {
+
+  it("#1086 P1-2 remainder A: a valid due date is a MARKER, not the bar's end", () => {
     const bar = computeIssueBar(
       issue({ createdAt: new Date(20).toISOString(), dueDate: new Date(60).toISOString(), issueType: "feature", priority: "high" }),
       range,
       false,
+      90, // open issue: bar ends at "now", the due date no longer moves the end
     );
     expect(bar.startPct).toBe(20);
-    expect(bar.spanPct).toBe(40);
+    expect(bar.spanPct).toBe(70); // 90 - 20, unaffected by the due date
+    expect(bar.duePct).toBe(60); // the due date shows up as its own marker instead
     expect(bar.type).toBe("feature");
     expect(bar.priorityColor).toBe("#f97316");
     expect(bar.invalidDueDate).toBe(false);
   });
 
+  it("has no due marker for an issue with no due date", () => {
+    const bar = computeIssueBar(issue({ createdAt: new Date(20).toISOString(), dueDate: null }), range, false, 90);
+    expect(bar.duePct).toBeNull();
+  });
+
+  it("has no due marker when the due date falls outside the visible window", () => {
+    const bar = computeIssueBar(
+      issue({ createdAt: new Date(20).toISOString(), dueDate: new Date(500).toISOString() }),
+      range,
+      false,
+      90,
+    );
+    expect(bar.duePct).toBeNull();
+  });
+
   it("falls back to task colors and medium priority for unknown values", () => {
-    const bar = computeIssueBar(issue({ issueType: "weird", priority: "weird" }), range, false);
-    expect(bar.colors).toBe(computeIssueBar(issue({ issueType: "task" }), range, false).colors);
+    const bar = computeIssueBar(issue({ issueType: "weird", priority: "weird" }), range, false, 50);
+    expect(bar.colors).toBe(computeIssueBar(issue({ issueType: "task" }), range, false, 50).colors);
     expect(bar.priorityColor).toBe("#eab308");
   });
 
@@ -141,6 +142,7 @@ describe("computeIssueBar", () => {
       90,
     );
     expect(bar.spanPct).toBe(80); // 90 - 10
+    expect(bar.isOpen).toBe(true);
   });
 
   it("#1088 P1-2: a COMPLETED issue's bar ends at statusChangedAt, not at a later edit", () => {
@@ -156,6 +158,7 @@ describe("computeIssueBar", () => {
       95,
     );
     expect(bar.spanPct).toBe(30); // 40 - 10, not 90 - 10 (updatedAt) or 95 - 10 (now)
+    expect(bar.isOpen).toBe(false);
   });
 
   it("#1088 P1-2: a COMPLETED issue with no statusChangedAt falls back to updatedAt", () => {
@@ -177,13 +180,68 @@ describe("computeIssueBar", () => {
     );
     expect(bar.invalidDueDate).toBe(true);
     expect(bar.spanPct).toBe(30); // falls back to nowMs (90) - created (60), never negative
+    expect(bar.duePct).toBeNull(); // an invalid due date is never shown as a marker either
   });
 
   it("a valid due date on the created date itself is not flagged invalid", () => {
     const t = new Date(30).toISOString();
-    const bar = computeIssueBar(issue({ createdAt: t, dueDate: t }), range, false);
+    const bar = computeIssueBar(issue({ createdAt: t, dueDate: t }), range, false, 30);
     expect(bar.invalidDueDate).toBe(false);
     expect(bar.spanPct).toBe(0);
+    expect(bar.duePct).toBe(30);
+  });
+
+  describe("#1086 P1-1: clipping via clipSpan", () => {
+    it("returns null startPct and skips drawing a bar entirely outside the visible window", () => {
+      const bar = computeIssueBar(
+        issue({ createdAt: new Date(200).toISOString(), statusChangedAt: new Date(300).toISOString() }),
+        range,
+        true,
+      );
+      expect(bar.startPct).toBeNull();
+      expect(bar.spanPct).toBe(0);
+    });
+
+    it("clips a bar that starts before the window and marks it as continuing", () => {
+      const bar = computeIssueBar(
+        issue({ createdAt: new Date(-50).toISOString(), statusChangedAt: new Date(30).toISOString() }),
+        range,
+        true,
+      );
+      expect(bar.startPct).toBe(0);
+      expect(bar.clippedStart).toBe(true);
+      expect(bar.clippedEnd).toBe(false);
+    });
+
+    it("clips a bar that ends after the window and marks it as continuing", () => {
+      const bar = computeIssueBar(
+        issue({ createdAt: new Date(80).toISOString() }),
+        range,
+        false,
+        500, // an open issue whose "now" end is far past the visible window
+      );
+      expect(bar.clippedEnd).toBe(true);
+      expect(bar.startPct! + bar.spanPct).toBeCloseTo(100, 5);
+    });
+  });
+
+  describe("#1086 P1-5: due date parsing avoids the timezone-west-of-UTC shift", () => {
+    it("reads a bare 'YYYY-MM-DD' due date as LOCAL midnight, not UTC midnight", () => {
+      // A due date one day after `createdAt`'s local midnight. `new Date("2026-03-02")` parses
+      // as UTC midnight, which in any timezone west of UTC is still "2026-03-01" locally — the
+      // exact off-by-one #1086/#1091 already fixed for IssueCard/IssueMetadataGrid.
+      const created = new Date(2026, 2, 1, 0, 0, 0); // local midnight, March 1
+      const localRange: DateRange = { min: created.getTime() - DAY_MS, max: created.getTime() + 5 * DAY_MS };
+      const bar = computeIssueBar(
+        issue({ createdAt: created.toISOString(), dueDate: "2026-03-02" }),
+        localRange,
+        false,
+        created.getTime(),
+      );
+      const expectedDueLocalMidnight = new Date(2026, 2, 2, 0, 0, 0).getTime();
+      expect(bar.duePct).toBeCloseTo(pctOf(expectedDueLocalMidnight, localRange), 5);
+      expect(bar.invalidDueDate).toBe(false);
+    });
   });
 });
 

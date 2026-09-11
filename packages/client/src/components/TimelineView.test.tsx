@@ -43,8 +43,8 @@ function issue(over: Partial<IssueWithStatus> & { id: string; title: string }): 
   } as IssueWithStatus;
 }
 
-function column(name: string, issues: IssueWithStatus[]): StatusWithIssues {
-  return { id: name.toLowerCase(), name, projectId: "p", sortOrder: 0, issues, count: issues.length } as StatusWithIssues;
+function column(name: string, issues: IssueWithStatus[], count?: number): StatusWithIssues {
+  return { id: name.toLowerCase(), name, projectId: "p", sortOrder: 0, issues, count: count ?? issues.length } as StatusWithIssues;
 }
 
 function render(columns: StatusWithIssues[], searchQuery?: string, projectId?: string | null): string {
@@ -213,6 +213,80 @@ describe("TimelineView — issues the range has to cope with", () => {
     const html = render([column("Done", [issue({ id: "a", title: "Shipped it" })])]);
     expect(html).toContain("Shipped it");
     expect(html).toContain("Done");
+  });
+});
+
+/**
+ * #1086 P1-1 correction to #1093: `clipSpan` was unit-tested but never wired into
+ * `TimelineView.tsx` — bars were still positioned with a raw, unclamped `pctOf`, and the row
+ * track had no `overflow-hidden`. These pin the fix at the component level: the track clips,
+ * and a bar entirely outside the visible window draws nothing instead of piling at an edge.
+ */
+describe("TimelineView — bar clipping (#1086 P1-1)", () => {
+  it("gives every row track overflow-hidden, so a floor-widened bar cannot spill past it", () => {
+    const html = render([column("Todo", [issue({ id: "a", title: "Any issue" })])]);
+    expect(html).toContain("flex-1 relative h-full overflow-hidden");
+  });
+
+  it("uses a small (~6px) readability floor instead of the old 90px one", () => {
+    // A same-day issue (createdAt === updatedAt) has a 0%-span bar; only the floor keeps it visible.
+    const t = iso(0);
+    const html = render([column("Todo", [issue({ id: "a", title: "Same day", createdAt: t, updatedAt: t })])]);
+    expect(html).toContain("max(6px");
+    expect(html).not.toContain("max(90px");
+  });
+
+  it("draws no bar at all for an issue whose whole span falls outside the persisted viewport", () => {
+    // Seed a narrow, far-future viewport (see the project-scoping tests above for the pattern)
+    // so a present-day issue's [created, now] span is entirely to the LEFT of the visible window.
+    const farFuture = Date.now() + 400 * DAY;
+    useTimelineViewStore.setState({
+      byView: { [`proj-clip:${TIMELINE_VIEW_ID}`]: { anchor: farFuture, pxPerMs: 1e-8, showCompleted: true, activeTypes: ["task", "bug", "feature", "chore"] } },
+    });
+    const html = render(
+      [column("Todo", [issue({ id: "a", issueNumber: 9, title: "Out of view", createdAt: iso(7), updatedAt: iso(1) })])],
+      undefined,
+      "proj-clip",
+    );
+    // The row (label) still renders — only the bar itself is skipped, so the issue is not
+    // silently dropped from the chart, just drawn with no visible span.
+    expect(html).toContain("#9");
+    expect(html).toContain("Out of view");
+    expect(rowCount(html)).toBe(1);
+  });
+});
+
+describe("TimelineView — bar duration (#1086 P1-2 remainder A)", () => {
+  it("shows an ongoing indicator on an open issue's bar", () => {
+    const html = render([column("Todo", [issue({ id: "a", title: "Still working" })])]);
+    expect(html).toContain("Still open — ongoing");
+  });
+
+  it("does not show the ongoing indicator on a completed issue's bar", () => {
+    const html = render([column("Done", [issue({ id: "a", title: "Wrapped up" })])]);
+    expect(html).not.toContain("Still open — ongoing");
+  });
+
+  it("draws a separate due-date marker instead of ending the bar at the due date", () => {
+    const html = render([column("Todo", [issue({ id: "a", title: "Has a deadline", dueDate: iso(-2) })])]);
+    expect(html).toMatch(/title="Due [A-Z][a-z]{2} \d{1,2}, \d{4}"/);
+  });
+});
+
+describe("TimelineView — history cap notice (#1086 P1-3)", () => {
+  it("shows the column's true total in the lane header, not just the loaded/filtered count", () => {
+    const html = render([column("Done", [issue({ id: "a", title: "One of many" })], 137)]);
+    expect(html).toContain(">137<");
+  });
+
+  it("shows a 'showing latest N of total' notice when the server truncated the column", () => {
+    const html = render([column("Done", [issue({ id: "a", title: "One of many" })], 137)]);
+    expect(html).toContain("showing latest 1 of 137");
+  });
+
+  it("shows no notice when the column was not truncated", () => {
+    const html = render([column("Done", [issue({ id: "a", title: "Only issue" })])]);
+    expect(html).not.toContain("showing latest");
   });
 });
 

@@ -1,5 +1,6 @@
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { TYPE_COLORS as TYPE_DOT } from "./chartColors.js";
+import { clipSpan, parseLocalDate } from "./timeScale.js";
 
 // Pure view-model for TimelineView: config maps, lane filtering, date-range +
 // tick math, and per-issue bar positioning. No JSX/hooks, so the date/tick/lane
@@ -52,26 +53,23 @@ export const STATUS_BADGE: Record<string, string> = {
 };
 
 export const DAY_MS = 86_400_000;
-export const WEEK_MS = 7 * DAY_MS;
-export const MONTH_MS = 30 * DAY_MS;
 
 export const COMPLETED_STATUSES = new Set(["Done", "Cancelled"]);
 export const ALL_TYPES = Object.keys(TYPE_COLORS);
-
-export function fmtAxisDate(d: Date, spanMs: number): string {
-  if (spanMs < 2 * DAY_MS) {
-    // Sub-2-day span: show time so adjacent ticks are distinguishable
-    return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-  }
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
 
 export function fmtTooltipDate(d: Date): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 export interface DateRange { min: number; max: number }
-export interface Lane { name: string; issues: IssueWithStatus[] }
+export interface Lane {
+  name: string;
+  issues: IssueWithStatus[];
+  /** The column's TRUE total (#1086 P1-3) — server-side terminal columns cap `issues` at 50. */
+  count: number;
+  /** How many issues the server actually returned for this column, before client-side filtering. `count > returnedCount` means the server truncated it. */
+  returnedCount: number;
+}
 export interface LaneFilter { showCompleted: boolean; activeTypes: Set<string>; query: string }
 
 /** Lanes per status column, filtered by completed-toggle, active types, and search; empty lanes dropped. */
@@ -91,43 +89,10 @@ export function computeLanes(columns: StatusWithIssues[], filter: LaneFilter): L
         if (numberMatch && String(i.issueNumber) === numberMatch) return true;
         return i.title.toLowerCase().includes(q) || (i.description ?? "").toLowerCase().includes(q);
       }),
+      count: col.count,
+      returnedCount: col.issues.length,
     }))
     .filter((lane) => lane.issues.length > 0);
-}
-
-/** The unpanned [min,max] time window over all issues (created → due/updated), padded 4%. */
-export function computeBaseRange(allIssues: IssueWithStatus[]): DateRange {
-  if (allIssues.length === 0) {
-    const now = Date.now();
-    return { min: now - 7 * DAY_MS, max: now };
-  }
-  const dates = allIssues.flatMap((i) => [
-    new Date(i.createdAt).getTime(),
-    i.dueDate ? new Date(i.dueDate).getTime() : new Date(i.updatedAt).getTime(),
-  ]);
-  const rawMin = Math.min(...dates);
-  const rawMax = Math.max(...dates, Date.now());
-  const span = Math.max(rawMax - rawMin, DAY_MS); // at least 1 day
-  const pad = span * 0.04;
-  return { min: rawMin - pad, max: rawMax + pad };
-}
-
-/** Evenly-spaced axis ticks (4–10 by span), dropping adjacent ticks with identical labels. */
-export function computeTicks(range: DateRange): Date[] {
-  const span = range.max - range.min;
-  const days = span / DAY_MS;
-  const count = Math.min(10, Math.max(4, Math.floor(days / 3)));
-  const raw = Array.from({ length: count + 1 }, (_, i) => new Date(range.min + (i / count) * span));
-  const deduped: Date[] = [];
-  let lastLabel = "";
-  for (const tick of raw) {
-    const label = fmtAxisDate(tick, span);
-    if (label !== lastLabel) {
-      deduped.push(tick);
-      lastLabel = label;
-    }
-  }
-  return deduped;
 }
 
 /** A timestamp's horizontal position within the range, as a 0–100 percentage. */
@@ -148,30 +113,48 @@ export function toggleTypeSet(prev: Set<string>, type: string): Set<string> {
 }
 
 export interface IssueBar {
-  startPct: number;
+  /**
+   * Percent position of the bar's visible (clipped) start, or `null` when `[start,end]`
+   * doesn't overlap the visible window at all — the caller draws no bar for that issue (#1086
+   * P1-1). Computed via `clipSpan` against `range` treated as a 0-100 track, so the values are
+   * already clamped and never need a CSS-side min/max dance.
+   */
+  startPct: number | null;
   spanPct: number;
+  /** The bar's true start (or end) lies before (after) the visible window — draw a "continues" edge marker. */
+  clippedStart: boolean;
+  clippedEnd: boolean;
   type: string;
   colors: TypeColor;
   priorityColor: string;
   /**
    * `dueDate` is set but predates `createdAt` — a data problem, not a real (negative) span
-   * (#1088 P1-2). The bar falls back to the same end-date rule as a due-dateless issue, but a
-   * caller must render this visually distinct from an honest short bar, since silently
-   * clamping the span to 0 previously made a broken due date look like a same-day issue.
+   * (#1088 P1-2). A caller must render this visually distinct from an honest bar, since
+   * silently ignoring a broken due date would make it look like there never was one.
    */
   invalidDueDate: boolean;
+  /**
+   * Percent position of a valid due-date MARKER (#1086 P1-2 remainder A) — the due date is no
+   * longer the bar's end, since that made an issue due next week look already-finished-by-then.
+   * `null` when there is no valid due date, or it falls outside the visible window.
+   */
+  duePct: number | null;
+  /** Not completed — the bar's end is "now", not a fixed date, and keeps growing every day it stays open. */
+  isOpen: boolean;
 }
 
 /**
  * The horizontal bar geometry + colors for one issue on the timeline.
  *
- * The bar's END (#1088 P1-2) is, in priority order:
- *  1. A valid due date (`>= createdAt`).
- *  2. For a COMPLETED issue, `statusChangedAt` — when it actually left the board — falling
+ * The bar's END is, in priority order:
+ *  1. For a COMPLETED issue, `statusChangedAt` — when it actually left the board — falling
  *     back to `updatedAt` for rows stamped before that column existed.
- *  3. For an OPEN issue, `nowMs`. An open issue's bar must keep growing every day it stays
+ *  2. For an OPEN issue, `nowMs`. An open issue's bar must keep growing every day it stays
  *     open; ending it at `updatedAt` (the old rule) froze it at whenever it was last edited,
  *     which made an untouched-for-weeks open issue look like it had been done for weeks.
+ *
+ * A due date (if present and valid) is a separate MARKER, not the bar's end (#1086 P1-2
+ * remainder A) — conflating the two made an issue due next month look already finished today.
  */
 export function computeIssueBar(
   issue: IssueWithStatus,
@@ -180,18 +163,30 @@ export function computeIssueBar(
   nowMs: number = Date.now(),
 ): IssueBar {
   const start = new Date(issue.createdAt).getTime();
-  const dueTs = issue.dueDate ? new Date(issue.dueDate).getTime() : null;
+  // `dueDate` is a bare "YYYY-MM-DD" (an HTML `<input type="date">`), not a full timestamp —
+  // `parseLocalDate` reads it as local midnight so it doesn't silently shift a day earlier in
+  // any timezone west of UTC, the same fix IssueCard/IssueMetadataGrid already apply.
+  const dueTs = issue.dueDate ? parseLocalDate(issue.dueDate).getTime() : null;
   const invalidDueDate = dueTs !== null && dueTs < start;
-  const fallbackEnd = isCompleted ? new Date(issue.statusChangedAt ?? issue.updatedAt).getTime() : nowMs;
-  const end = dueTs !== null && !invalidDueDate ? dueTs : fallbackEnd;
-  const startPct = pctOf(start, range);
+  const end = isCompleted ? new Date(issue.statusChangedAt ?? issue.updatedAt).getTime() : nowMs;
+  // `range` is the visible window; treating it as a 0-100 "track" lets `clipSpan`'s pixel
+  // geometry double as percentage geometry, so the bar is clamped/clipped for free instead of
+  // via ad hoc CSS min()/max() (#1086 P1-1).
+  const clipped = clipSpan(start, end, range, 100);
   const type = issue.issueType ?? "task";
+  const duePct = dueTs !== null && !invalidDueDate && dueTs >= range.min && dueTs <= range.max
+    ? pctOf(dueTs, range)
+    : null;
   return {
-    startPct,
-    spanPct: Math.max(0, pctOf(end, range) - startPct),
+    startPct: clipped ? clipped.x : null,
+    spanPct: clipped ? clipped.width : 0,
+    clippedStart: clipped?.clippedStart ?? false,
+    clippedEnd: clipped?.clippedEnd ?? false,
     type,
     colors: TYPE_COLORS[type] ?? TYPE_COLORS.task,
     priorityColor: PRIORITY_COLORS[issue.priority ?? "medium"] ?? PRIORITY_COLORS.medium,
     invalidDueDate,
+    duePct,
+    isOpen: !isCompleted,
   };
 }
