@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import {
   PRIORITY_COLORS,
@@ -10,14 +10,17 @@ import {
   COMPLETED_STATUSES,
   fmtTooltipDate,
   computeLanes,
+  collectAvailableTags,
   computeLabelStride,
   pctOf,
   robustRange,
   toggleTypeSet,
+  toggleSetMember,
   computeIssueBar,
   type DateRange,
   type Lane,
 } from "../lib/timelineView.js";
+import { TimelineToolbar } from "./TimelineToolbar.js";
 import {
   DAY_MS,
   panBy,
@@ -39,10 +42,9 @@ import { useViewTab } from "../hooks/useViewTab.js";
 import { useNow } from "../hooks/usePoll.js";
 import { useTimelineViewStore } from "../stores/timelineViewStore.js";
 import { Icon } from "./Icon.js";
-import { TimelineToolbar } from "./TimelineToolbar.js";
 
 /**
- * The [min,max] of `issues`' createdâ†’due/updated dates, folding in "now" (never empty).
+ * The [min,max] of `issues`' created→due/updated dates, folding in "now" (never empty).
  *
  * #1099 P2-13: uses `robustRange` rather than the raw extremes, so a single far-outlier issue
  * (an ancient Cancelled ticket, one due a year out) no longer squashes the whole cluster of
@@ -159,7 +161,6 @@ function GridLines({
     </>
   );
 }
-
 
 /**
  * #1099 P2-18: memoized so a tooltip hover — which only ever changes the ROOT's `tooltip`
@@ -511,20 +512,35 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
   const [activeTypes, setActiveTypes] = useState<Set<string>>(
     () => new Set(persistedAtMount?.activeTypes ?? ALL_TYPES),
   );
+  // P2-15 remainder (#1100): priority/tag filters, alongside activeTypes/showCompleted above.
+  // Empty set means "no filter" for both — unlike activeTypes, neither has a fixed universe
+  // that "all selected" could stand in for (tags in particular are per-project and open-ended).
+  const [activePriorities, setActivePriorities] = useState<Set<string>>(
+    () => new Set(persistedAtMount?.activePriorities ?? []),
+  );
+  const [activeTagIds, setActiveTagIds] = useState<Set<string>>(
+    () => new Set(persistedAtMount?.activeTagIds ?? []),
+  );
 
   const q = searchQuery?.toLowerCase() ?? "";
 
   const toggleType = (type: string) => setActiveTypes((prev) => toggleTypeSet(prev, type));
+  const togglePriority = (priority: string) => setActivePriorities((prev) => toggleSetMember(prev, priority));
+  const toggleTag = (tagId: string) => setActiveTagIds((prev) => toggleSetMember(prev, tagId));
 
   const lanes = useMemo(
-    () => computeLanes(columns, { showCompleted, activeTypes, query: q }),
-    [columns, q, showCompleted, activeTypes],
+    () => computeLanes(columns, { showCompleted, activeTypes, query: q, activePriorities, activeTagIds }),
+    [columns, q, showCompleted, activeTypes, activePriorities, activeTagIds],
   );
 
   const allIssues = useMemo(() => lanes.flatMap((l) => l.issues), [lanes]);
 
   // Unfiltered, so the initial viewport isn't at the mercy of the default filter state.
   const allIssuesUnfiltered = useMemo(() => columns.flatMap((c) => c.issues), [columns]);
+
+  // Tags available to filter BY come from the unfiltered set — otherwise picking a tag would
+  // make every other tag's chip disappear (only one tag would ever be filterable at a time).
+  const availableTags = useMemo(() => collectAvailableTags(allIssuesUnfiltered), [allIssuesUnfiltered]);
 
   // #1088 (R1/R2/P1-6): the viewport (scale/anchor/zoom) is independent state, computed once
   // from the data on mount rather than re-derived from whatever is currently filtered — that
@@ -589,11 +605,15 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
       setZoomState(reconcileToScale(persisted.anchor, persisted.pxPerMs, fromScale, tab, trackPx));
       setShowCompleted(persisted.showCompleted);
       setActiveTypes(new Set(persisted.activeTypes));
+      setActivePriorities(new Set(persisted.activePriorities ?? []));
+      setActiveTagIds(new Set(persisted.activeTagIds ?? []));
     } else {
       const { min, max } = issueDateRange(allIssuesUnfiltered);
       setZoomState(viewportForFitAll(min, max, trackPx, tab));
       setShowCompleted(true);
       setActiveTypes(new Set(ALL_TYPES));
+      setActivePriorities(new Set());
+      setActiveTagIds(new Set());
     }
     committedScaleRef.current = tab;
   }
@@ -617,8 +637,10 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
       scale: tab,
       showCompleted,
       activeTypes: [...activeTypes],
+      activePriorities: [...activePriorities],
+      activeTagIds: [...activeTagIds],
     });
-  }, [storeKey, zoomState, showCompleted, activeTypes, tab]);
+  }, [storeKey, zoomState, showCompleted, activeTypes, activePriorities, activeTagIds, tab]);
 
   useEffect(() => {
     if (!scrollNode || typeof ResizeObserver === "undefined") return;
@@ -742,10 +764,13 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
   // Unfiltered count, so the empty state can tell "no issues at all" apart from "a filter
   // hid everything" (#1086/#1091 P1-4) — the two need different recoveries.
   const rawIssueCount = allIssuesUnfiltered.length;
-  const filtersActive = !showCompleted || activeTypes.size < ALL_TYPES.length || q.length > 0;
+  const filtersActive =
+    !showCompleted || activeTypes.size < ALL_TYPES.length || q.length > 0 || activePriorities.size > 0 || activeTagIds.size > 0;
   const resetFilters = () => {
     setShowCompleted(true);
     setActiveTypes(new Set(ALL_TYPES));
+    setActivePriorities(new Set());
+    setActiveTagIds(new Set());
   };
 
   return (
@@ -770,6 +795,11 @@ export function TimelineView({ columns, onIssueClick, searchQuery, projectId }: 
         onZoom={handleZoom}
         activeTypes={activeTypes}
         onToggleType={toggleType}
+        availableTags={availableTags}
+        activePriorities={activePriorities}
+        onTogglePriority={togglePriority}
+        activeTagIds={activeTagIds}
+        onToggleTag={toggleTag}
       />
 
       {isEmpty ? (
