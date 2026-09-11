@@ -34,7 +34,7 @@
  * a merge is worse than no measurement.
  */
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { GateImpactSelection, GateTierInfo } from "./pre-merge-gate-tier.js";
@@ -615,65 +615,18 @@ import {
 export { unattributedFailureReason, emptyChangeSetReason, unmeasuredUnionReason };
 
 /**
- * Build the argv for `impact.mjs record`.
- *
- * Pure and exported so the flag wiring — the part that silently produces a useless row when it is
- * wrong — is a table test rather than something only an end-to-end gate run would catch.
- *
- * **`--selected` is passed VERBATIM, including when the selection is empty.** It used to be
- * omitted, on the reasoning that `record` treated an empty selection as "no selection recorded"
- * so passing `--selected ""` would make every failure read as a miss. The tool no longer works
- * that way and the distinction is now load-bearing (verified against the skill at `3e362b6`,
- * `impact.mjs:1662`/`:1680`):
- *
- *  - flag PRESENT with zero entries -> `selectionEmpty: true`, and `missed` is computed, so a
- *    failing run whose selector picked nothing is scored as the full miss it is;
- *  - flag ABSENT -> unknown, the row witnesses nothing. Same as before.
- *
- * Which of those a row gets is the difference between measuring the selector and quietly
- * excusing it in exactly the case where it did worst.
- *
- * An empty selection is unreachable for THIS project — the recorder passes `--always-run` and
- * this repo has ~170 guard suites, so the selection is never smaller than that — and that is
- * precisely why the old reasoning survived. It is not a property of the recorder: it runs for
- * every registered project with the plugin, and a small repo with no `@gate:always-run` markers
- * legitimately selects nothing for a docs-shaped change. The first external adopter is where the
- * old behaviour would have silently stopped counting. (Raised by the test-impact session, whose
- * pushback on this was right and whose reasoning is preserved here rather than in a chat log.)
+ * The `record` argv/stdin builder and its stdin-capability probe moved to
+ * `./test-impact-outcome/record-args.ts` when #1098's fix pushed this file past the 1000-line
+ * god-module ceiling — the same seam #998 used for `row-quality.ts`. Imported AND re-exported so
+ * existing importers (the recorder below, and the tests) are unaffected.
  */
-export function buildRecordArgs(input: {
-  toolPath: string;
-  outcomesPath: string;
-  passed: boolean;
-  selected: string[];
-  failedSuites: string[];
-  tier: string;
-  ran: GateRanScope;
-  source: string;
-  /** #963 — `record` recomputes the change set itself, so it needs the same base `select` got. */
-  baseBranch?: string | null;
-}): string[] {
-  const args = [
-    input.toolPath,
-    "record",
-    "--result",
-    input.passed ? "pass" : "fail",
-    "--source",
-    input.source,
-    "--tier",
-    input.tier,
-    "--ran",
-    input.ran,
-    "--outcomes",
-    input.outcomesPath,
-  ];
-  if (input.baseBranch) args.push("--base", input.baseBranch);
-  // Verbatim, empty included — see the note above: the empty case is the one that must be said
-  // out loud, not the one to skip.
-  args.push("--selected", input.selected.join(","));
-  if (input.failedSuites.length > 0) args.push("--failed", input.failedSuites.join(","));
-  return args;
-}
+import {
+  buildRecordArgs,
+  recordAcceptsSelectedViaStdin,
+  estimatedArgvLength,
+  RECORD_ARGV_SAFE_LIMIT,
+} from "./test-impact-outcome/record-args.js";
+export { buildRecordArgs, recordAcceptsSelectedViaStdin, RECORD_ARGV_SAFE_LIMIT };
 
 /**
  * Record one gate run. Resolves to a `skipped` result rather than throwing, always.
@@ -759,20 +712,40 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
     const sourceSuffix =
       `${noChangeReason ? "-nochange" : ""}${unionReason ? "-partialselection" : ""}`
       + `${unattributedReason ? "-unattributed" : ""}`;
+    // #1098 — the tool at THIS path may or may not accept `--selected -` yet; see
+    // `recordAcceptsSelectedViaStdin`. A stale read (the tool updates mid-session) just costs one
+    // more inline attempt, never a wrong ledger row.
+    const selectedViaStdin = recordAcceptsSelectedViaStdin(readFileSync(toolPath, "utf8"));
+    const built = buildRecordArgs({
+      toolPath,
+      outcomesPath,
+      passed: input.passed,
+      selected: parsed.selected,
+      failedSuites: input.failedSuites,
+      tier: parsed.tier,
+      ran,
+      source: `${source}${sourceSuffix}`,
+      baseBranch,
+      selectedViaStdin,
+    });
+    // #1098 — an OLD tool takes `--selected` inline only, and a wide base sweep's selection can
+    // comma-join past Windows' 32,767-char CreateProcess limit (measured: 536 suites -> 33,735
+    // chars). Spawning anyway would fail `ENAMETOOLONG`, indistinguishable in the log from any
+    // other unexpected error. Caught HERE, before the spawn, so the reason names the actual cause
+    // and the remedy (the tool's own repo needs the stdin form) instead of a bare platform error.
+    if (!built.stdin && estimatedArgvLength(built.args) > RECORD_ARGV_SAFE_LIMIT) {
+      const reason =
+        `record args too long (~${estimatedArgvLength(built.args)} chars for ${parsed.selected.length} selected ` +
+        `suite(s)) and the test-impact tool at ${IMPACT_TOOL_RELATIVE_PATH} does not yet accept ` +
+        "`--selected -` over stdin (#1098) — this row cannot be recorded until that tool is updated";
+      log(reason);
+      return { recorded: false, reason };
+    }
     const record = await run({
       cwd: workingDir,
-      args: buildRecordArgs({
-        toolPath,
-        outcomesPath,
-        passed: input.passed,
-        selected: parsed.selected,
-        failedSuites: input.failedSuites,
-        tier: parsed.tier,
-        ran,
-        source: `${source}${sourceSuffix}`,
-        baseBranch,
-      }),
+      args: built.args,
       timeoutMs: IMPACT_COMMAND_TIMEOUT_MS,
+      ...(built.stdin !== undefined ? { stdin: built.stdin } : {}),
     });
     if (record.exitCode !== 0) {
       return { recorded: false, reason: `record exited ${record.exitCode}: ${(record.stderr || record.stdout).trim()}` };
