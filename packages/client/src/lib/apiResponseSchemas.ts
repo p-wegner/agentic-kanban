@@ -638,6 +638,69 @@ const drivePreflight = looseObject({
   checks: arrayOf(nested(looseObject({ id: str, label: str, severity: str, message: str, autoRepairable: bool }))),
 });
 
+// #1089 — the Runners view's four tabs.
+
+/**
+ * `GET /api/workers/connect-info` → `routes/workers.ts`'s inline projection (no shared DTO).
+ * The Connect tab renders `fleetConfigured` to choose its two messages and `steps` as the
+ * whole runbook body; the other fields (ports/hosts/version) are display-only strings the
+ * panel never branches on, so per this file's convention they stay unasserted.
+ */
+const workerConnectStep = looseObject({ title: str, detail: str, commands: anyArray(), where: str });
+const workerConnectInfo = looseObject({
+  fleetConfigured: bool,
+  boardUrl: str,
+  steps: arrayOf(nested(workerConnectStep)),
+});
+
+/**
+ * `GET /api/workers/explain` → `{ explanation: PlacementExplanation }` — both the project-level
+ * and per-issue variants answer this shape (`explainPlacement`/`explainIssuePlacement`,
+ * `lib/placement-explain.types.ts`). The Dispatch Log tab's "Explain" box reads `summary`,
+ * `chain` (each entry's `id`/`title`/`outcome`/`detail`), `decidedBy` and `agreesWithResolver`.
+ */
+const workerExplainResponse = looseObject({
+  explanation: nested(
+    looseObject({
+      summary: str,
+      chain: arrayOf(nested(looseObject({ id: str, title: str, outcome: str, detail: str }))),
+      decidedBy: nullable(str),
+      agreesWithResolver: bool,
+    }),
+  ),
+});
+
+/**
+ * `GET /api/workers/placements` → `{ placements: SessionPlacementRecord[] }`
+ * (`services/placement-explain.service.ts`). Two panels share this one endpoint: the Runners
+ * tab's "current work" line (`workspaceId`/`branch`/`issueNumber`/`issueTitle`/`status`/
+ * `workerId`/`startedAt`/`endedAt`) and the Dispatch Log tab's full row
+ * (adds `sessionId`/`executor`/`placement`/`workerName`/`placementReason`/`placementDetail`).
+ */
+const sessionPlacementRow = looseObject({
+  sessionId: str,
+  workspaceId: str,
+  branch: nullable(str),
+  issueNumber: nullable(num),
+  issueTitle: nullable(str),
+  status: str,
+  executor: str,
+  startedAt: str,
+  endedAt: nullable(str),
+  placement: str,
+  workerId: nullable(str),
+  workerName: nullable(str),
+  placementReason: nullable(str),
+  placementDetail: nullable(str),
+});
+const sessionPlacements = looseObject({ placements: arrayOf(nested(sessionPlacementRow)) });
+
+/** `POST /api/workers/incoming/land` and `/discard` → `{ ok: true, ... }`
+ *  (`routes/workers.ts`). Neither Git Transport tab caller reads a field off the result —
+ *  it just reloads the list on success — so, like `PUT /api/projects/:projectId/drives/:id`
+ *  above, this asserts only that the request actually succeeded. */
+const incomingRefActionResult = looseObject({ ok: trueLiteral });
+
 export interface ApiResponseRoute {
   method: ApiMethod;
   /** Express-style template with `:param` segments, matched against the request path. */
@@ -746,6 +809,13 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
 
   // ── #906 ──
   { method: "GET", template: "/api/merge-queue/trains", schema: mergeTrainsResult },
+
+  // ── #1089: the Runners view ──
+  { method: "GET", template: "/api/workers/connect-info", schema: workerConnectInfo },
+  { method: "GET", template: "/api/workers/explain", schema: workerExplainResponse },
+  { method: "GET", template: "/api/workers/placements", schema: sessionPlacements },
+  { method: "POST", template: "/api/workers/incoming/land", schema: incomingRefActionResult },
+  { method: "POST", template: "/api/workers/incoming/discard", schema: incomingRefActionResult },
 
   // ── #1028: the profile roster read model ──
   // The invariants the UI actually depends on: a list of profiles it maps over, the

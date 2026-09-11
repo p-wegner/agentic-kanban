@@ -37,7 +37,9 @@ describe("VIEW_REGISTRY", () => {
     // fireworks, garden) were extracted to the external board-whimsy plugin
     // (momentum dropped outright — swimlane is a strict superset), freeing
     // the `v` and `e` single-key shortcuts.
-    expect(VIEW_REGISTRY).toHaveLength(18);
+    // 27 → 18 is history; 18 → 19 (#1089): Runners (connected compute workers,
+    // dispatch log, git transport, connect) replaces the retired `WorkerFleetPanel` overlay.
+    expect(VIEW_REGISTRY).toHaveLength(19);
   });
 
   it("preserves the existing view ids", () => {
@@ -46,7 +48,7 @@ describe("VIEW_REGISTRY", () => {
       "strategy", "focus", "butler", "workflows", "swimlane",
       "runtime", "drive", "runbooks", "activity",
       "analytics", "calendar",
-      "plugin-views",
+      "plugin-views", "runners",
     ];
     expect(VIEW_IDS.slice().sort()).toEqual(expected.slice().sort());
   });
@@ -118,7 +120,7 @@ describe("VIEW_REGISTRY", () => {
       [
         "focus", "swimlane",
         "runbooks", "activity",
-        "analytics",
+        "analytics", "runners",
       ].sort(),
     );
   });
