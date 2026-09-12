@@ -157,6 +157,11 @@ export const createIssueBody = z.object({
   externalKey: unchecked<string | null>(),
   externalUrl: unchecked<string | null>(),
   reposTouched: unchecked<string[]>(),
+  // #1108: a ticket can be born already tagged (e.g. `no-auto-start`) — closes the race
+  // where a follow-up `POST /:id/tags` call arrives after the monitor has already
+  // provisioned a workspace for a freshly-filed ticket.
+  tags: unchecked<string[]>(),
+  noAutoStart: unchecked<boolean>(),
 }).passthrough();
 
 /**

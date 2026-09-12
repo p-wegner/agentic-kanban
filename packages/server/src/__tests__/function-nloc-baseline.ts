@@ -229,6 +229,33 @@
  * already had, matching the shape the board endpoint already returns. Neither is extractable
  * without splitting the hydration from the response it decorates. Both still want splitting for
  * their own sake; this is not the ticket.
+ *
+ * -- Twelfth disclosed movement (2026-09-12, #1108 project quiesce + born-tagged issues) --
+ *
+ *   services/workspace-create.service.ts::createWorkspaceCreateService  644 -> 645  (+1)
+ *   services/issue.service.ts::createIssueService                      616 -> 629  (+13)
+ *   routes/issues.ts::createIssuesRoute                       424 (post-#1107) -> 426  (+2)
+ *
+ * `createWorkspaceCreateService` gained ONE line — `await assertProjectNotQuiesced(database,
+ * issue.projectId, "workspace creation")` — the chokepoint every workspace-creating path
+ * (monitor auto-start, post-merge cascade, cron, the external Conductor loop, a human "New
+ * Workspace") now funnels through, closing the #1106/#1108 gap where `start_mode=manual` was
+ * documented to still permit a relaunch/create. The decision itself is NOT here: it lives in
+ * the new `services/quiesce.service.ts`, a plain prefMap resolver plus a one-line assertion
+ * helper, so this factory only carries the single call site.
+ *
+ * `createIssueService` grew because a ticket must be able to be BORN tagged (e.g.
+ * `no-auto-start`) — otherwise "file it for a maintenance window" loses a race against the
+ * monitor provisioning a workspace before a follow-up `POST /:id/tags` call lands (measured at
+ * #1107: 12s too late). The tag-resolution loop (find-or-create by name, dedupe, assign) has a
+ * precedent it deliberately mirrors — `create_issues_batch`'s own inline resolver — rather than
+ * introducing a third spelling of the same eight lines.
+ *
+ * `createIssuesRoute` grew by two MORE lines on top of #1107's own raise on this same factory
+ * (421 -> 424, the list route's tag hydration): the same `tags`/`noAutoStart` fields forwarded
+ * from the parsed request body into `issueService.createIssue(...)`, alongside the existing
+ * `reposTouched` line they sit next to. See the entry's own comment below for the measured
+ * combined total.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 718 -> 720, a DISCLOSED raise (#1107, landed 2026-09-12 in d90659d081). `issue get` gained
@@ -246,9 +273,11 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // Raised rather than worked around: the ring exists to stop unmanaged growth, not to make a
   // sanctioned extraction unlandable, and 2 nloc here bought 8 columns off the hottest table
   // in the board. It is still the largest entry in this ring and still wants splitting.
-  // 635 -> 641 (#1025) -> 644 (#1026), disclosed in the seventh and eighth movements above.
-  "services/workspace-create.service.ts::createWorkspaceCreateService": 644,
-  "services/issue.service.ts::createIssueService": 616,
+  // 635 -> 641 (#1025) -> 644 (#1026) -> 645 (#1108), disclosed in the seventh, eighth and
+  // eleventh movements above.
+  "services/workspace-create.service.ts::createWorkspaceCreateService": 645,
+  // 616 -> 629 (#1108), disclosed in the eleventh movement above.
+  "services/issue.service.ts::createIssueService": 629,
   // 618 -> 620 (#968), disclosed in the sixth movement above.
   "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 621,
   "services/workflow-fork.service.ts::createWorkflowForkService": 581,
@@ -286,7 +315,13 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // very ratchet and it landed anyway — see the #1107 trail), so the choice on master was a
   // disclosed raise or a red gate blocking every other merge. Prefer the extraction if you are
   // in this file for another reason. Disclosed in the eleventh movement above.
-  "routes/issues.ts::createIssuesRoute": 424,
+  //
+  // 424 -> 426 (#1108, rebased on top of #1107): the create route forwards the same
+  // `tags`/`noAutoStart` fields parsed off the request body into `issueService.createIssue(...)`
+  // (+2 lines), landing in the SAME factory #1107 already raised for the list route's tag
+  // hydration -- both handlers live in this one `createIssuesRoute` body. Measured on the
+  // rebased tree with the shared scanner, not guessed from either parent's delta.
+  "routes/issues.ts::createIssuesRoute": 426,
   "services/workflow.service.ts::createWorkflowService": 456,
   // 418 -> 409, banked (#892): the skill-materialization body (resolveSkillFile +
   // materializeEnabledPluginSkills + the new materializeWorkspaceSkills) moved to
