@@ -59,19 +59,39 @@ function notifySetupObserver(kind: "onSpawn" | "onSettle", pid: number | undefin
  * collision observed on #999, on a host that then timed both out. A 90-minute timeout kill
  * orphaned the branch's own workers the same way.
  *
- * `taskkill /T /F` is the same tree kill `smoke-check.ts` already uses for a dev server. On
- * POSIX the child is a `/bin/sh -c` whose children die with it for the scripts this runs
- * (`pnpm`/`gradle` wrappers forward the signal), so the plain kill is kept there. Best-effort by
- * construction: a kill that cannot be issued must not turn the timeout/abort verdict into a
- * throw, and the caller's `resolve` runs regardless.
+ * `taskkill /T /F` is the same tree kill `smoke-check.ts` already uses for a dev server.
+ *
+ * On POSIX (#1009 follow-up), a plain `proc.kill()` only ever covered the scripts this runs
+ * TODAY — a `/bin/sh -c` child whose own children die with it for `pnpm`/`gradle` wrappers that
+ * forward the signal, but not a grandchild that forwards nothing (a detached background process,
+ * or one that installs its own signal handler). `runSetupScript` now spawns the POSIX host child
+ * with `detached: true` (the same POSIX-only choice `worker-agent-runner.ts` makes for agent
+ * processes, and for the same reason: it makes the child the leader of its own process group, so
+ * `-pid` addresses the WHOLE group rather than the one process), and this function signals that
+ * group first. `ESRCH` (already gone) or `EPERM`/anything else falls through to the bare-pid kill,
+ * which is what a container-run or non-detached child (there is none today, but the fallback
+ * costs nothing) still gets. Best-effort by construction: a kill that cannot be issued must not
+ * turn the timeout/abort verdict into a throw, and the caller's `resolve` runs regardless.
  */
 function killSetupProcessTree(proc: ChildProcess): void {
-  if (process.platform === "win32" && proc.pid) {
+  if (process.platform === "win32") {
+    if (proc.pid) {
+      try {
+        spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+        return;
+      } catch {
+        // fall through to the plain kill
+      }
+    }
+  } else if (proc.pid) {
     try {
-      spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+      process.kill(-proc.pid, "SIGKILL");
       return;
-    } catch {
-      // fall through to the plain kill
+    } catch (err) {
+      // Not a group leader (never detached, e.g. a container-run child) — fall through to the
+      // bare-pid kill below. Anything other than "no such process" is swallowed the same way,
+      // since this path must never throw.
+      void err;
     }
   }
   try {
@@ -266,6 +286,13 @@ export function runSetupScript(
       // or the script would be corrupted on the way into the container.
       windowsVerbatimArguments: isWindows && !container,
       stdio: ["pipe", "pipe", "pipe"],
+      // #1009 — POSIX-only, host-run only (never a container-exec'd child, which has no
+      // process of its own on this host to lead a group). Makes the child the leader of its
+      // own process group so `killSetupProcessTree` can signal the WHOLE group with `-pid`
+      // instead of just the shell. `worker-agent-runner.ts` makes the same POSIX-only choice
+      // for the same reason, and excludes win32 for the same reason this does: `detached: true`
+      // there measurably hangs.
+      detached: !isWindows && !container,
     });
 
     // #1059 — protect the tree for as long as this call is awaiting it. Released in
