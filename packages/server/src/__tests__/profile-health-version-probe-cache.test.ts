@@ -28,6 +28,24 @@ import {
   type AgentProfilePreflightResult,
 } from "../services/agent-profile-health.service.js";
 import type { CliVersionResult } from "../services/agent-cli-version.service.js";
+import type { FileSystem } from "../services/agent-provider/types.js";
+
+// #1106: avoid writing the machine-global MCP config path from this suite (see the
+// fuller comment in agent-profile-health.service.test.ts).
+function inMemoryFs(): FileSystem {
+  const files = new Map<string, string>();
+  return {
+    existsSync: (p) => files.has(p),
+    readFileSync: (p) => {
+      const content = files.get(p);
+      if (content === undefined) throw new Error(`ENOENT: ${p}`);
+      return content;
+    },
+    writeFileSync: (p, data) => {
+      files.set(p, data);
+    },
+  };
+}
 
 const okVersion: CliVersionResult = { detected: true, raw: "9.9.9", version: "9.9.9", status: "ok", message: null };
 
@@ -57,7 +75,7 @@ describe("profile health version-probe cache + verdict fold", () => {
       codexProfiles: [],
       copilotProfiles: [],
       piProfiles: [],
-    });
+    }, inMemoryFs());
 
     // All four Claude profiles produced rows.
     const claudeRows = rows.filter((r) => r.provider === "claude");
@@ -82,7 +100,7 @@ describe("profile health version-probe cache + verdict fold", () => {
       codexProfiles: [],
       copilotProfiles: [],
       piProfiles: [],
-    });
+    }, inMemoryFs());
 
     // claude/codex/copilot/pi defaults each resolve to a distinct command -> one
     // probe per provider; the two extra claude profiles add no extra probe.
@@ -128,13 +146,13 @@ describe("profile health version-probe cache + verdict fold", () => {
 
   it("error from auth validation DOMINATES the folded version verdict (config-file vs license-ring paths agree)", () => {
     // Config-file auth path: a named codex profile with no settings file on disk.
-    const configFileBase = preflightAgentProfile(new Map(), "codex", "nonexistent-xyz");
+    const configFileBase = preflightAgentProfile(new Map(), "codex", "nonexistent-xyz", inMemoryFs());
     expect(configFileBase.status).toBe("error");
     expect(configFileBase.errors.some((e) => e.includes("Profile config not found"))).toBe(true);
 
     // License-ring auth path: a codex license whose CODEX_HOME has no auth.json.
     const ring = JSON.stringify([{ profile: "lic-xyz", codexHome: "C:/nonexistent-codex-home-xyz" }]);
-    const licenseRingBase = preflightAgentProfile(new Map([["codex_license_ring", ring]]), "codex", "lic-xyz");
+    const licenseRingBase = preflightAgentProfile(new Map([["codex_license_ring", ring]]), "codex", "lic-xyz", inMemoryFs());
     expect(licenseRingBase.status).toBe("error");
     expect(licenseRingBase.errors.some((e) => e.includes("not logged in"))).toBe(true);
 

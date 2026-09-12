@@ -1,4 +1,4 @@
-import type { AgentLaunchConfig, AgentProvider, BuildAgentLaunchConfigOptions, ProviderName } from "./types.js";
+import type { AgentLaunchConfig, AgentProvider, BuildAgentLaunchConfigOptions, FileSystem, ProviderName } from "./types.js";
 import { PROVIDER_NAMES } from "./types.js";
 import { ClaudeProvider } from "./claude-provider.js";
 import { CodexProvider } from "./codex-provider.js";
@@ -30,8 +30,25 @@ registerProvider(new CodexProvider());
 registerProvider(new CopilotProvider());
 registerProvider(new PiProvider());
 
-export function buildAgentLaunchConfig(options: BuildAgentLaunchConfigOptions = {}): AgentLaunchConfig {
+/**
+ * Construct a FRESH provider instance bound to `fs` instead of resolving the module
+ * singleton (which is permanently bound to `nodeFileSystem`). Used by callers that need
+ * to inject a fake filesystem for a single launch-config build — e.g. a test, or the
+ * profile-health preflight when it wants to avoid touching the real machine-global MCP
+ * config path (#1106).
+ */
+function createProvider(name: ProviderName, fs: FileSystem): AgentProvider {
+  switch (name) {
+    case "claude": return new ClaudeProvider(fs);
+    case "codex": return new CodexProvider(fs);
+    case "copilot": return new CopilotProvider(fs);
+    case "pi": return new PiProvider(fs);
+  }
+}
+
+export function buildAgentLaunchConfig(options: BuildAgentLaunchConfigOptions = {}, fs?: FileSystem): AgentLaunchConfig {
   const providerName = options.provider ?? undefined;
+  if (fs) return createProvider(narrowProviderName(providerName), fs).buildLaunchConfig(options);
   return getProvider(providerName).buildLaunchConfig(options);
 }
 
