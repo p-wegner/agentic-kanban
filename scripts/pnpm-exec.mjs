@@ -28,7 +28,14 @@ import { spawn, spawnSync } from "node:child_process";
 function quoteForCmdShell(arg) {
   if (arg === "") return '""';
   if (!/[\s"&|<>^%,;=]/.test(arg)) return arg;
-  return `"${arg.replace(/"/g, '""')}"`;
+  const doubledQuotes = arg.replace(/"/g, '""');
+  // Quoting alone does NOT stop cmd.exe expanding a literal %VAR% - that expansion happens
+  // regardless of quotes, and is why an issue title containing "%WINDIR%" was silently
+  // replaced with the real path before ever reaching the CLI. Toggle out of the quoted
+  // string for each `%` (close quote, caret-escape the `%` unquoted, reopen quote) so no
+  // contiguous "%NAME%" ever appears in a form cmd.exe's variable lookup can match.
+  const percentEscaped = doubledQuotes.replace(/%/g, '"^%"');
+  return `"${percentEscaped}"`;
 }
 
 export function resolvePnpmInvocation(pnpmArgs, env = process.env, platform = process.platform) {
