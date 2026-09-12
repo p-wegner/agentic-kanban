@@ -216,6 +216,19 @@
  * line per flag by construction; there is nothing extractable in a flag declaration, and the
  * function is the `registerXCommand` shape this file's header already names as architecture
  * rather than tangle. It still wants splitting for its own sake; this is not the ticket.
+ *
+ * -- Eleventh disclosed movement (2026-09-12, #1107 issue-tag reads were blind) --------
+ *
+ *   cli/commands/issue.ts::registerIssueCommand   718 -> 720  (+2)
+ *   routes/issues.ts::createIssuesRoute           421 -> 424  (+3)
+ *
+ * Landed on master in `83c7497a8c` as direct-master work (the #817 gap again), found while
+ * running the merge gate for an unrelated ticket (#1109/#1114). Both are one hand-off apiece:
+ * `registerIssueCommand` gained a `getIssueTags` read plus one print line for the CLI's `issue
+ * get`; `createIssuesRoute`'s list handler gained a `buildTagMap` batch-hydrate over the rows it
+ * already had, matching the shape the board endpoint already returns. Neither is extractable
+ * without splitting the hydration from the response it decorates. Both still want splitting for
+ * their own sake; this is not the ticket.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 718 -> 720, a DISCLOSED raise (#1107, landed 2026-09-12 in d90659d081). `issue get` gained
@@ -225,7 +238,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // not be fixed without those two lines. This is the `registerXCommand` builder shape this
   // file's header names as architecture rather than tangle, so there is nothing to extract that
   // would not be ceremony. Raised rather than worked around, per the header's rule: a named
-  // cause and a ticket, or it is just a budget.
+  // cause and a ticket, or it is just a budget. Disclosed in the eleventh movement above.
   "cli/commands/issue.ts::registerIssueCommand": 720,
   // 621 -> 623, a DELIBERATE raise (#815). The eight `latest_setup_*` columns moved off
   // `workspaces` into `workspace_setup_run`, and writing a child row costs an
@@ -272,7 +285,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // discovered AFTER the branch had already merged (the pre-merge gate refused it twice on this
   // very ratchet and it landed anyway — see the #1107 trail), so the choice on master was a
   // disclosed raise or a red gate blocking every other merge. Prefer the extraction if you are
-  // in this file for another reason.
+  // in this file for another reason. Disclosed in the eleventh movement above.
   "routes/issues.ts::createIssuesRoute": 424,
   "services/workflow.service.ts::createWorkflowService": 456,
   // 418 -> 409, banked (#892): the skill-materialization body (resolveSkillFile +
