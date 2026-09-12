@@ -303,6 +303,12 @@ async function probeWorkingTreeDirt(
  * now refuses to register such a path going forward; this is the defensive backstop for
  * a project that was already registered this way before the fix landed.
  *
+ * A git SUBMODULE also has a `.git` FILE containing `gitdir: ...` — a submodule's own
+ * gitdir sits under the superproject's `.git/modules/<name>`, never under
+ * `.git/worktrees/<name>`, and a submodule does not share its worktree list with the
+ * superproject the way a linked worktree does. So this only matches the `worktrees`
+ * form, not a bare "has a gitdir file" test that would also swallow submodules.
+ *
  * Fails OPEN (`false`) on any read error — an unreadable `.git` is reported by the sweep
  * itself, not silently swallowed here.
  */
@@ -310,7 +316,10 @@ function repoPathIsLinkedWorktree(repoPath: string): boolean {
   const gitEntry = join(repoPath, ".git");
   try {
     if (!statSync(gitEntry).isFile()) return false;
-    return /^gitdir:/m.test(readFileSync(gitEntry, "utf8"));
+    const match = /^gitdir:\s*(.+)$/m.exec(readFileSync(gitEntry, "utf8"));
+    if (!match) return false;
+    const gitDirPath = match[1].trim().replace(/\\/g, "/");
+    return /(^|\/)\.git\/worktrees\//.test(gitDirPath);
   } catch {
     return false;
   }
