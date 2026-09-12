@@ -49,6 +49,7 @@ import { runTicketPreflight, formatClarificationsBlock, type PreflightVerdict } 
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { getIssueActivity } from "../services/issue-activity.service.js";
+import { buildTagMap } from "../services/board-aggregation.service.js";
 import { createIssueMergedCommitsService } from "../services/issue-merged-commits.service.js";
 import { getIssueCycleTime } from "../services/cycle-time.service.js";
 import { createWebhookSender } from "../services/outbound-webhook.service.js";
@@ -177,7 +178,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     const offsetParam = Number(c.req.query("offset"));
     const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? Math.floor(offsetParam) : undefined;
 
-    const result = await issueService.listIssues(
+    const rows = await issueService.listIssues(
       projectId,
       issueNumberParam ? Number(issueNumberParam) : undefined,
       statusName,
@@ -185,6 +186,11 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
         ? { excludeDescription: slim, limit, offset }
         : undefined,
     );
+    // #1107: tag reads were blind everywhere except the board endpoint — a caller of this
+    // list route had no way to see an issue's tags short of the board's own aggregation, and
+    // reasonably read the absence as "untagged". Same batch hydration the board uses.
+    const tagMap = await buildTagMap(rows.map((r) => r.id), database);
+    const result = rows.map((r) => ({ ...r, tags: tagMap.get(r.id) ?? [] }));
     // Conditional GET (#418, the #400 pattern): the full issue list is the largest payload in the
     // app (~1MB of descriptions on a big board) and mostly unchanged between polls — hash the
     // serialized body and answer 304 when If-None-Match matches.
@@ -591,7 +597,10 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     const id = c.req.param("id");
     const result = await getIssueDescription(id, database);
     if (!result) return c.json({ error: "Issue not found" }, 404);
-    return c.json(result);
+    // #1107: this was the response with "no tags key at all" — an absent tag read as an
+    // unset one. Hydrate the same shape the board endpoint already returns.
+    const tags = await issueService.getTags(id).catch(() => []);
+    return c.json({ ...result, tags });
   });
 
   // GET /api/issues/:id/summary
@@ -652,12 +661,13 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     return c.json(await issueService.getTags(issueId));
   });
 
-  // POST /api/issues/:id/tags
+  // POST /api/issues/:id/tags — idempotent (#1107): attaching an already-attached tag
+  // returns the existing join row with 200 instead of minting a second one with 201.
   router.post("/:id/tags", async (c) => {
     const issueId = c.req.param("id");
     const body = await parseJsonBody(c, issueTagBody);
-    const result = await issueService.assignTag(issueId, body.tagId);
-    return c.json(result, 201);
+    const { alreadyExisted, ...result } = await issueService.assignTag(issueId, body.tagId);
+    return c.json(result, alreadyExisted ? 200 : 201);
   });
 
   // DELETE /api/issues/:id/tags/:tagId

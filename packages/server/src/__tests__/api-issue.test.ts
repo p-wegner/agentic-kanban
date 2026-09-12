@@ -49,6 +49,49 @@ describe("Issues API", () => {
     expect(res.status).toBe(400);
   });
 
+  // #1107: both the list and single-issue readers used to carry no usable `tags` field —
+  // the board endpoint was the only honest reader. An absent tag was indistinguishable from
+  // an unset one, which is what made the double-tagging trap possible.
+  it("GET /api/issues and GET /api/issues/:id hydrate tags", async () => {
+    const tagRes = await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "hydration-tag", color: "#123456" }),
+    });
+    const { id: tagId } = await tagRes.json() as { id: string };
+
+    const issueRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Tag hydration issue", statusId, projectId }),
+    });
+    const { id: issueId } = await issueRes.json() as { id: string };
+
+    await app.request(`/api/issues/${issueId}/tags`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tagId }),
+    });
+
+    const single = await (await app.request(`/api/issues/${issueId}`)).json() as { tags: { id: string; name: string }[] };
+    expect(single.tags).toBeDefined();
+    expect(single.tags.map((t) => t.name)).toEqual(["hydration-tag"]);
+
+    const list = await (await app.request(`/api/issues?projectId=${projectId}`)).json() as { id: string; tags: { name: string }[] }[];
+    const listed = list.find((i) => i.id === issueId);
+    expect(listed?.tags.map((t) => t.name)).toEqual(["hydration-tag"]);
+
+    // An untagged issue reads as an honest empty array, not an absent key.
+    const untaggedRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "No tags issue", statusId, projectId }),
+    });
+    const { id: untaggedId } = await untaggedRes.json() as { id: string };
+    const untagged = await (await app.request(`/api/issues/${untaggedId}`)).json() as { tags: unknown[] };
+    expect(untagged.tags).toEqual([]);
+  });
+
   it("GET /api/issues?statusName= filters to matching issues and leaves unfiltered path unchanged", async () => {
     const p = await createProjectDirectly(database, { name: "StatusFilter Project" });
     const todoId = await createStatusDirectly(database, p, "Todo", 0);

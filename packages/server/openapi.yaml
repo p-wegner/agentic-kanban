@@ -2509,7 +2509,7 @@ paths:
             application/json:
               schema: {}
     post:
-      summary: POST /api/issues/:id/tags
+      summary: returns the existing join row with 200 instead of minting a second one with 201.
       tags:
         - issues
       operationId: post_api_issues_id_tags
@@ -2534,7 +2534,7 @@ paths:
               additionalProperties: true
               x-unknown-keys: passthrough
       responses:
-        "201":
+        "200":
           description: Success
           content:
             application/json:
