@@ -218,7 +218,15 @@
  * rather than tangle. It still wants splitting for its own sake; this is not the ticket.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
-  "cli/commands/issue.ts::registerIssueCommand": 718,
+  // 718 -> 720, a DISCLOSED raise (#1107, landed 2026-09-12 in d90659d081). `issue get` gained
+  // an honest tag read: one `getIssueTags(issue.id)` call and one printed `Tags:` line. #1107
+  // exists because every reader except the board endpoint reported `tags=[]` whether or not an
+  // issue was tagged, so an absent tag was indistinguishable from an unset one — the CLI could
+  // not be fixed without those two lines. This is the `registerXCommand` builder shape this
+  // file's header names as architecture rather than tangle, so there is nothing to extract that
+  // would not be ceremony. Raised rather than worked around, per the header's rule: a named
+  // cause and a ticket, or it is just a budget.
+  "cli/commands/issue.ts::registerIssueCommand": 720,
   // 621 -> 623, a DELIBERATE raise (#815). The eight `latest_setup_*` columns moved off
   // `workspaces` into `workspace_setup_run`, and writing a child row costs an
   // `insertWorkspaceSetupRun(...)` call where eight inline field assignments used to sit.
@@ -254,7 +262,18 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "services/merge-queue.service.ts::createMergeQueueService": 427,
   // 506 -> 474 in #806 batch 3: ten handlers dropped their inline type literal and guard
   // ladder for a `parseJsonBody(c, schema)` call.
-  "routes/issues.ts::createIssuesRoute": 421,
+  // 421 -> 424, a DISCLOSED raise (#1107, landed 2026-09-12 in d90659d081). The list route now
+  // batch-hydrates tags (`buildTagMap`) the same way the board endpoint already did, so a caller
+  // of `GET /api/issues` can finally see them. +3 lines.
+  //
+  // NOTE for whoever touches this next: unlike the `registerIssueCommand` entry above, this one
+  // IS extractable — the hydration block would sit happily in a module-level helper, which would
+  // let this entry go back to 421. It was raised rather than extracted because the growth was
+  // discovered AFTER the branch had already merged (the pre-merge gate refused it twice on this
+  // very ratchet and it landed anyway — see the #1107 trail), so the choice on master was a
+  // disclosed raise or a red gate blocking every other merge. Prefer the extraction if you are
+  // in this file for another reason.
+  "routes/issues.ts::createIssuesRoute": 424,
   "services/workflow.service.ts::createWorkflowService": 456,
   // 418 -> 409, banked (#892): the skill-materialization body (resolveSkillFile +
   // materializeEnabledPluginSkills + the new materializeWorkspaceSkills) moved to
