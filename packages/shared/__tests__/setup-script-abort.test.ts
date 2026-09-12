@@ -97,21 +97,14 @@ describe("runSetupScript abort signal (#989)", () => {
  * full suite on the box and the gate ran a second one beside it (the #999 collision).
  */
 describe("runSetupScript kills the child's process TREE, not just the shell (#1009)", () => {
-  // WINDOWS-ONLY, because the tree kill itself is (see `killSetupProcessTree`): on win32 it is
-  // `taskkill /T /F`, and on POSIX the implementation DELIBERATELY keeps a plain `proc.kill()`,
-  // reasoning that "the child is a `/bin/sh -c` whose children die with it for the scripts this
-  // runs (`pnpm`/`gradle` wrappers forward the signal)".
-  //
-  // This test's grandchild is a raw `node` that forwards nothing, so on Linux it asserts a
-  // guarantee the code never claimed to make, and it has failed every CI run since it landed
-  // (verified across the 2026-09-01, 09-03, 09-08 and 09-12 arch-gate runs). Gating it does not
-  // weaken anything that was holding — it stops the suite asserting a capability that does not
-  // exist on that platform.
-  //
-  // Whether POSIX SHOULD get a real process-group kill is a separate, open question — the
-  // `pnpm`-forwards-the-signal argument covers the scripts this runs today and nothing more.
-  // Tracked rather than left as a silent gap; see the CI-triage ticket referenced in the commit.
-  it.runIf(process.platform === "win32")("a grandchild spawned by the script is dead after an abort (win32)", async () => {
+  // Was WINDOWS-ONLY: on win32 the tree kill is `taskkill /T /F`, and POSIX used to keep a plain
+  // `proc.kill()`, which only ever covered a grandchild that FORWARDS the signal (a `pnpm`/`gradle`
+  // wrapper) — this test's raw `node` grandchild forwards nothing, so it failed on Linux from the
+  // day it landed (2026-09-01 through 09-12). Fixed (#1115) by giving the POSIX host child its own
+  // process group (`detached: true`, matching `worker-agent-runner.ts`) and signalling the group
+  // (`process.kill(-pid, "SIGKILL")`) instead of the single shell — so this now runs, and must pass,
+  // on every platform.
+  it("a grandchild spawned by the script is dead after an abort", async () => {
     const { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
