@@ -32,7 +32,7 @@ function harness(overrides: Partial<Parameters<typeof resolveRedProbeOutcome>[0]
     combined: FLAKY_OUTPUT,
     startedAt: 1_000,
     scoped: true,
-    now: () => 1_000 + 5_000,
+    nowMs: 1_000 + 5_000,
     runRetry: async (retryScopeEnv: string) => {
       calls.retry++;
       scopes.push(retryScopeEnv);

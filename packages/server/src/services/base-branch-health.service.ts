@@ -235,10 +235,11 @@ export async function resolveRedProbeOutcome(input: {
   /** Whether this project's verify_script honours `KANBAN_RETRY_TEST_FILES` at all. */
   scoped: boolean;
   runRetry: (retryScopeEnv: string) => Promise<RetryRunResult>;
-  now?: () => number;
+  /** Epoch ms for the pure `durationMs` arithmetic below (not persisted) — injected for tests. */
+  nowMs?: number;
 }): Promise<BaseBranchVerifyResult> {
   const { projectId, sha, branch, exitCode, combined, startedAt, scoped, runRetry } = input;
-  const now = input.now ?? Date.now;
+  const now = () => input.nowMs ?? Date.now();
   const flake = decideFlakeRetry({ output: combined, timedOut: false, scoped });
   if (flake.retry) {
     const names = flake.suites.map((s) => `${s.packageLabel}/${s.file}`).join(", ");
