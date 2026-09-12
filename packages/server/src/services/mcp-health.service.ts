@@ -1,7 +1,7 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { getMcpServersConfig } from "./agent-provider/helpers.js";
+import { getMcpConfigPath, getMcpServersConfig } from "./agent-provider/helpers.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export type McpProbeStatus = "ok" | "error" | "unknown";
@@ -19,6 +19,10 @@ export interface McpServerProbeConfig {
   args: string[];
   cwd?: string;
   env?: Record<string, string>;
+  /** Where this invocation came from: the on-disk `--mcp-config` file agents are actually
+   * launched with, or "recomputed" when that file was missing/unreadable/malformed. */
+  configPath?: string;
+  configSource?: "file" | "recomputed";
 }
 
 export interface McpProbeError {
@@ -43,6 +47,12 @@ export interface McpHealthSummary {
     args: string[];
     cwd: string | null;
     path: string | null;
+    configPath: string | null;
+    configSource: "file" | "recomputed" | null;
+    /** False when the script path this config points at does not exist on disk — the
+     * #1106/#1111 failure mode (a poisoned or dangling invocation) surfaced WITHOUT
+     * needing a live spawn. Null when no script path could be identified at all. */
+    configFileValid: boolean | null;
   };
   lastProbe: McpProbeResult | null;
 }
@@ -64,25 +74,65 @@ interface ProbeDeps {
 
 let lastProbe: McpProbeResult | null = null;
 
+/**
+ * #1111: the old version RECOMPUTED the invocation from this process's own `__dirname`
+ * and never looked at the `--mcp-config` file agents are actually launched with — so the
+ * board's self-check could report healthy while every spawned agent read a stale or
+ * foreign invocation from that file. `getMcpConfigPath()` is now content-addressed per
+ * checkout (helpers.ts) and self-heals the file to match this process, so reading it back
+ * here is what makes the probe test the SAME thing an agent launch reads, not a parallel
+ * computation that happens to usually agree with it.
+ */
 export function getDefaultMcpProbeConfig(): McpServerProbeConfig {
-  const config = getMcpServersConfig()["agentic-kanban"];
+  const configPath = getMcpConfigPath();
+  let server: { command: string; args: string[]; env?: Record<string, string> } | undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(configPath, "utf-8")) as {
+      mcpServers?: Record<string, { command: string; args: string[]; env?: Record<string, string> }>;
+    };
+    server = parsed.mcpServers?.["agentic-kanban"];
+  } catch {
+    server = undefined;
+  }
+
+  if (server) {
+    return {
+      name: "agentic-kanban",
+      command: server.command,
+      args: server.args,
+      cwd: process.cwd(),
+      env: server.env,
+      configPath,
+      configSource: "file",
+    };
+  }
+
+  // The config file was missing/unreadable/malformed despite getMcpConfigPath() just
+  // having written it — fall back to a fresh recompute so a probe still runs, but say so.
+  const fallback = getMcpServersConfig()["agentic-kanban"];
   return {
     name: "agentic-kanban",
-    command: config.command,
-    args: config.args,
+    command: fallback.command,
+    args: fallback.args,
     cwd: process.cwd(),
-    env: config.env,
+    env: fallback.env,
+    configPath,
+    configSource: "recomputed",
   };
 }
 
 export function getMcpHealthSummary(config: McpServerProbeConfig = getDefaultMcpProbeConfig()): McpHealthSummary {
+  const serverPath = detectServerPath(config.args);
   return {
     server: {
       name: config.name,
       command: sanitizeCommand(config.command),
       args: config.args,
       cwd: config.cwd ?? null,
-      path: detectServerPath(config.args),
+      path: serverPath,
+      configPath: config.configPath ?? null,
+      configSource: config.configSource ?? null,
+      configFileValid: serverPath ? existsSync(serverPath) : null,
     },
     lastProbe,
   };
