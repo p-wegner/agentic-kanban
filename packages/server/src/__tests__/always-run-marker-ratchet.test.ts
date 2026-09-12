@@ -272,6 +272,10 @@ const KNOWN_SAFE_UNMARKED = new Set<string>([
   "mcp-server/disabled-tools.test.ts",
   "mcp-server/mcp-tools.test.ts",
   "mcp-server/tools/get-context-boundary.test.ts",
+  // #1109: imports `scripts/cli-json.mjs` directly (its arg-building helpers) rather than
+  // spawning it, so a change to that script is already in this suite's own import graph —
+  // reachable, not reads-outside-own-dir, despite matching the "imports a repo script" regex.
+  "server/cli-json-script.test.mjs",
 ]);
 
 interface Offender {

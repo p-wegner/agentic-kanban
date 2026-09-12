@@ -44,6 +44,12 @@ export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSess
   app.route("/api", createRoutes(db, () => sessionManager, { boardEvents, fixAndMergeSessionIds, forkService }));
   app.route("/api/sessions", createSessionsRoute(db));
 
+  // An unmatched /api/* must not fall through to the SPA fallback below — the
+  // SPA's index.html is not JSON, and a 200 makes a machine caller believe the
+  // route exists with an empty body (#1109). Registered after every real /api
+  // route, so it only catches what nothing above matched.
+  app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
+
   const clientDir = resolve(__dirname, "../client");
   if (existsSync(resolve(clientDir, "index.html"))) {
     app.use("/*", serveStatic({ root: clientDir }));

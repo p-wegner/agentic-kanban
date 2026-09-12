@@ -220,6 +220,8 @@ is also what every protocol-1 worker gets: `WORKER_PROTOCOL_VERSION` is 2 but
 ## Board Operations
 Tool precedence: **MCP** (`mcp__agentic-kanban__*`) → **CLI** (`pnpm cli -- ...`) → **REST**. Use the board's own features — review (`POST /api/workspaces/:id/review`), merge (`merge_workspace`), fix-and-merge, rebase (`update-base`), enhance, dependency-analyze — don't replicate manually. For narrow questions use `list_issues`/`get_board_status`, not unbounded `list_workspaces`. Don't hand-roll `curl | python`.
 
+**A program parsing `--json` output must not invoke the CLI via `pnpm cli -- ... --json` (#1109).** `pnpm run <script>` unconditionally prints a `> agentic-kanban@ cli ... > <command>` banner to stdout ahead of the script's real output — for ANY script name, and no flag inside the script body suppresses it. `json.load(stdout)` then fails on the banner text, not the JSON. Two ways out: pass `--silent` on the outer pnpm invocation yourself (`pnpm --silent cli -- issue get <N> --json`), or invoke `node scripts/cli-json.mjs -- issue get <N> --json` directly — it never goes through `pnpm run`, so the banner never fires. Prefer the latter from a script/agent, since it needs no flag to remember.
+
 - Read a ticket: `pnpm cli -- issue get <N>` (`--json` for JSON).
 - Backlog as ONE markdown file, both ways: `pnpm cli -- backlog export --out BACKLOG.md [--status …]` / `pnpm cli -- backlog import FILE [--apply]` (preview first); MCP `export_backlog_markdown` / `import_backlog_markdown`; UI Settings → UI → Export menu. Format + rules: `docs/backlog-markdown.md`.
 - "resume #N" = `pnpm cli -- workspace resume <N>` (relaunch agent), not manual investigation.
