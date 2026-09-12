@@ -45,9 +45,13 @@ describe("project quiesce holds create + relaunch (#1108)", () => {
     });
 
     expect(res.status).toBeGreaterThanOrEqual(400);
-    const body = await res.json() as { error?: string };
+    const body = await res.json() as { error?: string; code?: string };
     expect(body.error).toContain("quiesced");
     expect(body.error).toContain("promoting master");
+    // #1108: the specific refusal reason must survive to the response body's `code` field
+    // (not just fold into the generic "CONFLICT" status code) — a caller like the UI banner
+    // or `pnpm promote` needs to branch on this, not string-match the prose message.
+    expect(body.code).toBe("PROJECT_QUIESCED");
 
     await setPreference(`project_quiesced_${projectId}`, "false", database);
   });
