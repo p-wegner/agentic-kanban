@@ -44,10 +44,15 @@ the promoted board: `[wip-limit-migration]`.
   19rem panel rendered at `left:-77` in a 400px viewport — the left third unreachable. Below `sm`
   the panel is now a viewport-anchored sheet (`fixed inset-x-2 bottom-2`, scrollable); `sm+` still
   hangs it under the chip (measured: 304px, left-aligned to the chip).
-- Below `sm` the chip renders only after the toolbar's `⋯` "Board actions" toggle — same gating the
-  old Monitor button had, so it is pre-existing behaviour, NOT introduced here. Worth a follow-up
-  decision: the chip answers "will work start on its own", which is arguably bar-permanent like
-  Voice.
+- Below `sm` the chip used to render only after the toolbar's `⋯` "Board actions" toggle (the same
+  gating the old Monitor button had). **DECIDED and DONE (operator, 2026-09-12): the chip is
+  PERMANENT on the bar at every width**, outside the sm-gated cluster, like `VoiceInboxButton` —
+  it answers "will work start on its own?", which must not need a menu. The run-now (▶) button is
+  its sibling and travels with it: measured at 400px the chip is 53px (compact label `● 0/4`), ▶
+  is 24px at x=231-255, and the page does NOT overflow horizontally (scrollWidth 400 =
+  clientWidth 400); the panel opens fully on-screen (384px, left 8, right 392). Rationale lives in
+  `CHIP_PLACEMENT_NOTE` above `BoardToolbar` (the nloc ring counts in-function comment lines and
+  is shrink-only, so it could not live inside the component).
 
 **Not done, deliberately:**
 - The prediction ignores the contention gate, the harness budget and reopen retries.
