@@ -437,14 +437,29 @@ export async function getIssueArtifacts(
     .orderBy(issueArtifacts.createdAt);
 }
 
+/**
+ * Attach a tag to an issue. Idempotent (#1107): re-attaching an already-attached tag returns
+ * the EXISTING join row instead of minting a second one — the old behaviour let a caller who
+ * (reasonably) read a blind `tags=[]` as "untagged" silently double-tag an issue on re-attach.
+ * `alreadyExisted` lets the route pick 200 vs 201 without a second lookup.
+ */
 export async function assignTag(
   issueId: string,
   tagId: string,
   database: Database = db,
 ) {
+  const existing = await firstRow(
+    database
+      .select({ id: issueTags.id })
+      .from(issueTags)
+      .where(and(eq(issueTags.issueId, issueId), eq(issueTags.tagId, tagId)))
+      .limit(1)
+  );
+  if (existing) return { id: existing.id, alreadyExisted: true };
+
   const id = randomUUID();
   await database.insert(issueTags).values({ id, issueId, tagId });
-  return { id };
+  return { id, alreadyExisted: false };
 }
 
 export async function removeTag(
