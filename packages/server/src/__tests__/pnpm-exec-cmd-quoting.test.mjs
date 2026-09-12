@@ -32,4 +32,26 @@ describe("resolvePnpmInvocation win32 shell quoting (#1109)", () => {
     const inv = win32NoExecpath({ args: ["issue", "update", "1", "--title", 'He said "hi"'] });
     expect(inv.cmd).toContain('"He said ""hi"""');
   });
+
+  // #1116: quoting alone does not suppress cmd.exe's %VAR% expansion - a title containing
+  // %WINDIR%/%APPDATA%/%PATH% was silently replaced with the real environment value.
+  it("neutralizes a %VAR% pattern so cmd.exe cannot expand it", () => {
+    const inv = win32NoExecpath({ args: ["issue", "update", "1", "--title", "issue title %WINDIR% end"] });
+    expect(inv.cmd).not.toMatch(/(?<!\^)%WINDIR%/);
+    expect(inv.cmd).toContain('"^%"');
+  });
+
+  it("neutralizes a leading and trailing %", () => {
+    const inv = win32NoExecpath({ args: ["issue", "update", "1", "--title", "%PATH% then %APPDATA%"] });
+    expect(inv.cmd).not.toMatch(/(?<!\^)%PATH%/);
+    expect(inv.cmd).not.toMatch(/(?<!\^)%APPDATA%/);
+  });
+
+  it("passes a lone % that matches no env var through unharmed once reconstructed", () => {
+    const inv = win32NoExecpath({ args: ["issue", "update", "1", "--title", "50% to 80%"] });
+    // The escaped form round-trips to the original text once cmd.exe re-joins the
+    // caret-escaped `%` with its surrounding quoted segments.
+    expect(inv.cmd).toContain('50');
+    expect(inv.cmd).toContain('80');
+  });
 });
