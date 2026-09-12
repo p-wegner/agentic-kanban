@@ -11,9 +11,11 @@
  *
  * Two halves, because the leak has two doors and only one of them was ever visible:
  *  1. the VALUES are the ones every consumer reads as "absent" (a spread cannot delete);
- *  2. BOTH spawn sites overlay them — the gate and the base-branch health probe. A pin
- *     leaking into the probe is the worse failure: it is recorded as "the base is red" and
- *     then withholds every OTHER branch's merge too.
+ *  2. ALL THREE spawn sites overlay them — the gate, and the base-branch health probe's
+ *     install AND verify calls, the latter now including the #1110 isolated flake-retry
+ *     spawn alongside the original full verify run. A pin leaking into the probe is the
+ *     worse failure: it is recorded as "the base is red" and then withholds every OTHER
+ *     branch's merge too.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -61,9 +63,9 @@ describe("verify subprocesses do not inherit the board's listener pins (#846 gat
     expect(merged.AGENTIC_KANBAN_DIR).toBe("/tmp/gate");
   });
 
-  it("BOTH verify spawn sites apply it — the gate and the base-branch health probe", () => {
+  it("all THREE verify spawn sites apply it — the gate, and both base-probe spawns", () => {
     // Source-level, deliberately: the alternative is booting a whole gate run to observe an
-    // env var, and the drift this guards against is someone adding a THIRD spawn site.
+    // env var, and the drift this guards against is someone adding a FOURTH spawn site.
     const gate = read("pre-merge-gate.service.ts");
     expect(gate).toContain("VERIFY_NEUTRALIZED_LISTENER_ENV");
     // In `isolationEnv`, which every branch of `verifyEnv` spreads — not in one branch of it.
@@ -71,9 +73,10 @@ describe("verify subprocesses do not inherit the board's listener pins (#846 gat
     expect(isolation.slice(0, isolation.indexOf("};"))).toContain("VERIFY_NEUTRALIZED_LISTENER_ENV");
 
     const base = read("base-branch-health.service.ts");
-    // Both the install and the verify call: an install command can open a listener too.
+    // The install call, the full verify call, and the #1110 isolated flake-retry call: an
+    // install command can open a listener too, and the retry is a spawn site in its own right.
     const spawns = base.split("runSetupScript(dest,").slice(1);
-    expect(spawns.length).toBe(2);
+    expect(spawns.length).toBe(3);
     for (const call of spawns) {
       expect(call.slice(0, call.indexOf(")"))).toContain("VERIFY_NEUTRALIZED_LISTENER_ENV");
     }
@@ -115,16 +118,16 @@ describe("verify subprocesses do not inherit the board's DB-location overrides (
     expect(isolated.dir).toBe(gateDir);
   });
 
-  it("all THREE verify spawn sites apply it — the gate, and both base-probe spawns", () => {
+  it("all FOUR verify spawn sites apply it — the gate, and all three base-probe spawns", () => {
     // Source-level for the same reason as the listener half above: the drift being guarded
-    // against is a fourth spawn site, which no runtime assertion here would ever see.
+    // against is a fifth spawn site, which no runtime assertion here would ever see.
     const gate = read("pre-merge-gate.service.ts");
     const isolation = gate.slice(gate.indexOf("const isolationEnv = {"));
     expect(isolation.slice(0, isolation.indexOf("};"))).toContain("VERIFY_NEUTRALIZED_DB_LOCATION_ENV");
 
     const base = read("base-branch-health.service.ts");
     const spawns = base.split("runSetupScript(dest,").slice(1);
-    expect(spawns.length).toBe(2);
+    expect(spawns.length).toBe(3);
     for (const call of spawns) {
       expect(call.slice(0, call.indexOf(")"))).toContain("VERIFY_NEUTRALIZED_DB_LOCATION_ENV");
     }
