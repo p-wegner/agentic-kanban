@@ -128,7 +128,38 @@ import {
  * file's own doc, does not move THIS worst-case number. Should shrink at the next
  * `durations.json` capture: measured ~1s wall for its four spawn cases.
  */
-const BASELINE_TOTAL_MS = 564_000;
+/*
+ * -- Sixth disclosed movement (2026-09-12, #1110 follow-up) — 564,000 -> 567,000 ------------
+ *
+ * `temp-entry-cap-lockstep.test.ts`, the 184th guard, at the ASSUMED 3,000 ms.
+ *
+ * The argument for the seconds: it pins a number that a REMEDY restates, and the drift had
+ * already done damage. `scripts/sweep-loose-test-db-files.mjs` hard-coded 50,000 as "the
+ * pre-merge gate's temp-health floor" and printed "so the gate will keep HOLDING" above it. The
+ * real floor is `DEFAULT_TEMP_ENTRY_CAP` = 250,000 — and 50,000 is specifically the value
+ * `temp-health.ts` tried FIRST and then refuted by measurement, because it would hold every merge
+ * on a box whose `%TEMP%` enumerates in 0.2 s. So the script asserted a blocker that cannot occur,
+ * in the authoritative voice of the tool you run to fix things. On 2026-09-12 that line sent an
+ * operator investigating a phantom merge hold on a box sitting at ~82,000 entries (a third of the
+ * floor), while the actual gate failure lay elsewhere. A wrong number inside a remedy is worse
+ * than no remedy: it looks authoritative and it points away from the cause.
+ *
+ * Why it must be a guard rather than a comment: the two sides CANNOT import each other, for the
+ * same packaging reason `always-run-dirs-lockstep.test.ts` documents — `scripts/*.mjs` runs under
+ * bare `node` with no build step, and `packages/server` ships only `dist/`. Two implementations
+ * is the floor the packaging allows, so the only thing that can hold them together is a test. And
+ * it reads the script's SOURCE rather than importing it, because that script performs its whole
+ * sweep at import time; an importing guard would enumerate the developer's real `%TEMP%` as a
+ * side effect of running the suite. Reading a file outside its own import graph is exactly the
+ * shape `always-run-marker-ratchet` demands a marker for, so the choice here was never "marker or
+ * no marker", only "declared or silently unrun".
+ *
+ * It carries a `when:scripts/**,…/lib/temp-health.ts,…/__tests__/helpers/**` territory, so an
+ * ordinary diff pays nothing for it — which, per this file's own doc above, does not move THIS
+ * worst-case number. Should shrink at the next `durations.json` capture: measured ~0.4s wall for
+ * its four cases, against the 3,000 ms placeholder.
+ */
+const BASELINE_TOTAL_MS = 567_000;
 
 /**
  * How far under the baseline is tolerated before it counts as stale.

@@ -50,6 +50,26 @@ const LOOSE_SCRATCH_DB_RE = new RegExp(`^[A-Za-z0-9._-]*${UUID_RE}\\.db(-wal|-sh
 const args = process.argv.slice(2);
 const apply = args.includes("--apply");
 
+/**
+ * The pre-merge gate's temp-health floor, MIRRORED from `DEFAULT_TEMP_ENTRY_CAP` in
+ * `packages/server/src/lib/temp-health.ts`. Held in lockstep with it by
+ * `packages/server/src/__tests__/temp-entry-cap-lockstep.test.ts`, which reads this file's
+ * source — this script runs its whole sweep at import time, so a guard must never import it.
+ *
+ * Two implementations is the floor the packaging allows, exactly as `always-run-dirs-lockstep`
+ * documents: this script is run by bare `node` with no build step, and `packages/server` ships
+ * only `dist/`, so neither side can import the other's constant.
+ *
+ * Why this exists at all: the epilogue used to hard-code 50,000 and tell the operator "the gate
+ * will keep HOLDING". The real floor is 250,000 — and 50,000 is the value a first draft of
+ * `temp-health.ts` used and then REFUTED by measurement, because it would hold every merge on a
+ * box whose `%TEMP%` enumerates in 0.2 s. So the message asserted a blocker that cannot occur and
+ * sent at least one operator hunting a phantom hold. A number restated from another module is a
+ * number that drifts; this one is now pinned.
+ */
+const GATE_TEMP_ENTRY_CAP =
+  Number(process.env.KANBAN_TEMP_ENTRY_CAP) > 0 ? Number(process.env.KANBAN_TEMP_ENTRY_CAP) : 250_000;
+
 const root = tmpdir();
 
 console.log(`[test-db-sweep] scanning ${root} (this can take a while on a heavily populated %TEMP%)`);
@@ -104,9 +124,11 @@ if (!apply) console.log("[test-db-sweep] dry run — pass --apply to remove");
 const remaining = entries.length - removed;
 console.log(
   `[test-db-sweep] ${remaining} entries remain in ${root}`
-  + (remaining >= 50_000
-    ? " — STILL above the pre-merge gate's temp-health floor (KANBAN_TEMP_ENTRY_CAP, default"
-      + " 50000), so the gate will keep HOLDING. What is left is mostly directories, which this"
-      + " script deliberately never touches: sweep those with scripts/sweep-temp-dirs.mjs."
-    : " — below the gate's temp-health floor."),
+  + (remaining >= GATE_TEMP_ENTRY_CAP
+    ? ` — ABOVE the pre-merge gate's temp-health floor (${GATE_TEMP_ENTRY_CAP}), so the gate will`
+      + " HOLD. What is left is mostly directories, which this script deliberately never touches:"
+      + " sweep those with scripts/sweep-temp-dirs.mjs."
+    : ` — below the pre-merge gate's temp-health floor (${GATE_TEMP_ENTRY_CAP}), so the gate`
+      + " admits. A large remainder here is untidy, not a merge blocker; the reaper's own"
+      + " 50,000-entry line is an EARLY WARNING well below that floor, not a hold."),
 );
