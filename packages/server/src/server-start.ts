@@ -9,7 +9,7 @@ import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { resolveFleetHost, resolveFleetPort, startFleetListener } from "./services/fleet-listener.service.js";
 import { ensureGitHttpServer, stopGitHttpServer } from "./services/git-http.service.js";
 import { createFleetWorkersRoute } from "./routes/workers.js";
-import { setupRoutes } from "./startup/route-setup.js";
+import { setupApiNotFoundAndSpaFallback, setupRoutes } from "./startup/route-setup.js";
 import { BACKGROUND_SERVICES } from "./startup/background-services.js";
 import { runGatedDeferredStartupTasks, runStartupAuditTasks } from "./startup/startup-tasks.js";
 import { markStartupComplete } from "./startup/readiness.js";
@@ -57,6 +57,9 @@ export async function startServer(port?: number, hostname?: string) {
   const monitorSetup = createMonitorSetup({ sessionManager, boardEvents, serverPort, reviewSessionIds: workflow.reviewSessionIds, fixAndMergeSessionIds: workflow.fixAndMergeSessionIds });
   cleanupCallbacks.push(() => monitorSetup.stop());
   monitorSetup.setupMonitorRoutes(app);
+  // Must run after every route-mounting call above, including setupMonitorRoutes —
+  // see the doc comment on setupApiNotFoundAndSpaFallback.
+  setupApiNotFoundAndSpaFallback(app);
 
   console.log(`Server starting on port ${serverPort}...`);
   // Optional HTTP/2: set KANBAN_TLS_CERT + KANBAN_TLS_KEY to PEM paths to serve over

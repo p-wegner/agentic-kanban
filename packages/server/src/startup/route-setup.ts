@@ -43,6 +43,23 @@ export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSess
   app.get("/ws/workers/:id", createWorkerWsRoute(upgradeWebSocket, workerFleet.registry, workerFleet.connections));
   app.route("/api", createRoutes(db, () => sessionManager, { boardEvents, fixAndMergeSessionIds, forkService }));
   app.route("/api/sessions", createSessionsRoute(db));
+}
+
+/**
+ * Must be called LAST, after every other route-mounting call — including
+ * `monitorSetup.setupMonitorRoutes(app)`, which registers `/api/internal/*` routes
+ * from the composition root but AFTER `setupRoutes` returns. Hono runs same-path
+ * handlers in registration order and stops at the first one that responds without
+ * calling `next()`, so mounting either the `/api/*` 404 catch-all or the SPA
+ * fallback before those routes exist would silently shadow them (#1109 measured
+ * this shape for the SPA fallback; the same trap applies to the fix for it).
+ */
+export function setupApiNotFoundAndSpaFallback(app: Hono) {
+  // An unmatched /api/* must not fall through to the SPA fallback below — the
+  // SPA's index.html is not JSON, and a 200 makes a machine caller believe the
+  // route exists with an empty body (#1109). Registered after every real /api
+  // route, so it only catches what nothing above matched.
+  app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
   const clientDir = resolve(__dirname, "../client");
   if (existsSync(resolve(clientDir, "index.html"))) {
