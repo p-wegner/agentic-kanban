@@ -9,7 +9,7 @@
  * facade re-exporting both, so no importer changed.
  */
 
-import { resolve, basename } from "node:path";
+import { resolve, dirname, basename } from "node:path";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 
 export interface RepoInfo {
@@ -48,6 +48,31 @@ export async function detectDefaultBranch(repoPath: string): Promise<string | nu
 }
 
 /**
+ * A LINKED worktree's `--git-dir` (`<main>/.git/worktrees/<name>`) differs from its
+ * `--git-common-dir` (the shared `<main>/.git`); a main checkout's / a bare repo's own
+ * worktree's two resolve to the same directory (#1104). This is what `git worktree list`
+ * later enumerates by REPO, not by project, so registering a linked worktree's own
+ * toplevel (which `--show-toplevel` happily returns) as a project's `repoPath` makes
+ * every sibling worktree of that shared repo look like it belongs to this one project.
+ *
+ * Returns the main checkout's path when `gitRoot` is a linked worktree, `null` otherwise
+ * (including when the probe itself fails — fail OPEN here, since refusing every
+ * registration on a git hiccup is worse than occasionally missing this specific check).
+ */
+async function detectLinkedWorktreeMainCheckout(gitRoot: string): Promise<string | null> {
+  try {
+    const [gitDir, commonDir] = await Promise.all([
+      execGit(["rev-parse", "--path-format=absolute", "--git-dir"], gitRoot),
+      execGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], gitRoot),
+    ]);
+    if (resolve(gitDir) === resolve(commonDir)) return null;
+    return resolve(dirname(resolve(commonDir)));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Detect git repo information from a local path.
  * Validates the path is a git repo and extracts branch/remote info.
  * Always resolves to the git repository root, so registering from a subdirectory
@@ -64,6 +89,20 @@ export async function detectRepoInfo(repoPath: string): Promise<RepoInfo> {
     gitRoot = resolve(await execGit(["rev-parse", "--show-toplevel"], absPath));
   } catch {
     throw new Error(`Not a git repository: ${absPath}`);
+  }
+
+  // #1104: `--show-toplevel` inside a LINKED worktree returns the worktree's own
+  // directory, so nothing above this would ever notice it isn't a main checkout. A
+  // worktree shares its underlying repo with every sibling worktree, so registering
+  // it as a project made `orphaned-worktree-reconciler`'s `git worktree list` (scoped
+  // by repoPath) sweep every sibling worktree of the shared repo as if it belonged to
+  // this one project. Refuse outright — the fix is to register the main checkout.
+  const mainCheckoutPath = await detectLinkedWorktreeMainCheckout(gitRoot);
+  if (mainCheckoutPath) {
+    throw new Error(
+      `${gitRoot} is a linked git worktree, not a main checkout — it shares its repository with ` +
+        `every other worktree of ${mainCheckoutPath}. Register ${mainCheckoutPath} instead.`,
+    );
   }
 
   const defaultBranch = await detectDefaultBranch(gitRoot);

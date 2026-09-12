@@ -86,6 +86,30 @@ describe("detectRepoInfo", () => {
 
     await rm(bothDir, { recursive: true, force: true });
   });
+
+  // #1104: a linked worktree shares its repository with every sibling worktree, so
+  // registering ITS OWN toplevel as a project's repoPath made the orphaned-worktree
+  // reconciler's `git worktree list` (scoped by repoPath) sweep every sibling too.
+  it("refuses to register a linked worktree's own directory, naming the main checkout", async () => {
+    const mainDir = await mkdtemp(join(tmpdir(), "kanban-linked-main-"));
+    await exec("git", ["init", "-b", "master"], mainDir);
+    await exec("git", ["commit", "--allow-empty", "-m", "init"], mainDir);
+    await exec("git", ["branch", "feature/wt"], mainDir);
+
+    const worktreeDir = join(mainDir, "..", "kanban-linked-wt");
+    await exec("git", ["worktree", "add", worktreeDir, "feature/wt"], mainDir);
+
+    try {
+      await expect(detectRepoInfo(worktreeDir)).rejects.toThrow(/linked git worktree/);
+      // The main checkout itself must still register fine.
+      const info = await detectRepoInfo(mainDir);
+      expect(info.repoPath).toBe(mainDir);
+    } finally {
+      await exec("git", ["worktree", "remove", "--force", worktreeDir], mainDir).catch(() => undefined);
+      await rm(mainDir, { recursive: true, force: true });
+      await rm(worktreeDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  });
 });
 
 describe("getProjectGitStatsAsync", () => {
