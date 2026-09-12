@@ -894,7 +894,7 @@ describe("CopilotProvider", () => {
     expect(config.args).not.toContain("--allow-all");
     expect(config.args).not.toContain("--allow-all-tools");
     expect(config.args).toContain("--additional-mcp-config");
-    expect(config.args.some((arg) => arg.startsWith("@") && arg.includes("agentic-kanban-mcp-config.json"))).toBe(true);
+    expect(config.args.some((arg) => arg.startsWith("@") && /agentic-kanban-mcp-config-[0-9a-f]+\.json$/.test(arg))).toBe(true);
     expect(config.isMockAgent).toBe(false);
     expect(config.suppressStdinPrompt).toBe(true);
   });
