@@ -79,6 +79,7 @@ import {
 import { insertWorkspaceSetupRun } from "../repositories/workspace-setup-run.repository.js";
 import { insertWorkspaceSymlinkRun } from "../repositories/workspace-symlink-run.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { assertProjectNotQuiesced } from "./quiesce.service.js";
 
 /**
  * #1092: a failed PARALLEL setup was a console.warn and nothing else. The agent is already running
@@ -611,7 +612,8 @@ export function createWorkspaceCreateService(deps: {
       const { issue, project, setupConfig, symlinkConfig } = await resolveIssueAndProject(input.issueId);
       timing("resolve-issue", t);
       repoPath = project.repoPath;
-
+      // #1108: every workspace-creating path funnels through here — see quiesce.service.ts.
+      await assertProjectNotQuiesced(database, issue.projectId, "workspace creation");
       // Ticket group (#661): resolve + validate member issues BEFORE any disk work, so a
       // bad group fails as a clean 4xx rather than after minutes of provisioning.
       const groupMembers = await resolveGroupMembers(input, issue.projectId);
