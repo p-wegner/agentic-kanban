@@ -195,11 +195,16 @@ async function reapStaleFixtureTempDirs(): Promise<number> {
   // magnitude.
   if (entries.length >= TEMP_ENUMERATION_ALARM) {
     console.warn(
-      `[test-reaper] WARNING: %TEMP% holds ${entries.length} entries (${sweepable} sweepable by `
-      + `this reaper, cap ${MAX_REMOVALS_PER_SWEEP}/run). At this size directory enumeration `
-      + `alone stalls any process that touches %TEMP%, which the pre-merge gate does — a gate `
-      + `that dies during setup with no test output is the signature (#1056). Drain it with `
-      + `\`node scripts/sweep-loose-test-db-files.mjs\` and re-check.`,
+      `[test-reaper] NOTICE: %TEMP% holds ${entries.length} entries (${sweepable} sweepable by `
+      + `this reaper, cap ${MAX_REMOVALS_PER_SWEEP}/run). This is an EARLY WARNING, not a merge `
+      + `blocker: the pre-merge gate's own temp-health floor is DEFAULT_TEMP_ENTRY_CAP (250,000, `
+      + `a measurement — see lib/temp-health.ts), so the gate still admits here. Left to grow it `
+      + `ends at the #1056 state, where enumeration alone stalls any process touching %TEMP% and `
+      + `a gate dies during setup with no test output. Note the two sweeps only own their own `
+      + `namespaces: \`node scripts/sweep-temp-dirs.mjs\` (kanban-*/ak-* DIRECTORIES) and `
+      + `\`node scripts/sweep-loose-test-db-files.mjs\` (uuid-named scratch .db FILES). Neither `
+      + `touches a family minted by another tool on this machine, so a remainder they cannot `
+      + `drain is expected and is not theirs to delete.`,
     );
   }
   return removed;
