@@ -42,8 +42,6 @@ export function resolveMcpServerInvocation(fs: FileSystem = nodeFileSystem): { c
   return { command: "node", args: ["--import", TSX_URL, MCP_SERVER_PATH] };
 }
 
-let claudeMcpConfigPath: string | null = null;
-
 // --- Copilot constants ---
 
 export const COPILOT_PLAN_PROMPT_PREFIX = [
@@ -92,18 +90,44 @@ export const COPILOT_DEFAULT_ALLOWED_TOOLS = [
 
 // --- MCP config ---
 
+/**
+ * The config path is MACHINE-GLOBAL (`<tmpdir>/agentic-kanban-mcp-config.json`), so any
+ * process that constructs a provider on this box — including another checkout's test run
+ * or a throwaway clone's base-health probe — writes THIS file with ITS OWN invocation
+ * (derived from ITS `__dirname`). #1106: the old check only asked whether the file
+ * EXISTED, so a poisoned file (pointing at a since-deleted clone) satisfied it forever —
+ * every agent launched after that pointed at a dead path and lost its kanban MCP tools,
+ * with nothing to self-correct it.
+ *
+ * Fix: compare the file's CONTENT against what this process would write, and repair on
+ * any mismatch (missing, unreadable, or written by a different install). This makes the
+ * shared file self-healing on the very next launch from a process with the right paths,
+ * rather than requiring a human to notice and hand-repair it.
+ */
 export function getMcpConfigPath(fs: FileSystem = nodeFileSystem): string {
-  if (claudeMcpConfigPath && fs.existsSync(claudeMcpConfigPath)) return claudeMcpConfigPath;
   const invocation = resolveMcpServerInvocation(fs);
   const config = {
     mcpServers: {
       "agentic-kanban": invocation,
     },
   };
+  const expectedContent = JSON.stringify(config, null, 2);
   const path = resolve(tmpdir(), "agentic-kanban-mcp-config.json");
-  fs.writeFileSync(path, JSON.stringify(config, null, 2), "utf-8");
-  claudeMcpConfigPath = path;
-  console.log(`[agent] Claude MCP config written to ${path}`);
+
+  let currentContent: string | null = null;
+  if (fs.existsSync(path)) {
+    try {
+      currentContent = fs.readFileSync(path, "utf-8");
+    } catch {
+      currentContent = null;
+    }
+  }
+
+  if (currentContent !== expectedContent) {
+    fs.writeFileSync(path, expectedContent, "utf-8");
+    console.log(`[agent] Claude MCP config written to ${path}`);
+  }
+
   return path;
 }
 
