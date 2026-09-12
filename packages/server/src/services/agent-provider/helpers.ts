@@ -92,16 +92,46 @@ export const COPILOT_DEFAULT_ALLOWED_TOOLS = [
 
 // --- MCP config ---
 
+/**
+ * The config file is at a MACHINE-GLOBAL path, so it is not ours alone (#1106).
+ *
+ * `resolveMcpServerInvocation` derives its paths from `__dirname` of the RUNNING module, and
+ * every process on this box that builds a provider writes the same file — another checkout, a
+ * worktree, or a base-health probe's throwaway clone running the test suite (both providers
+ * default `fs` to the real filesystem, so `new CopilotProvider()` in a test writes it for real).
+ *
+ * Measured 2026-09-12: a probe clone wrote a tsx invocation pointing into its own
+ * `<tmp>/kanban-base-health-master-<id>/repo` at 02:33; the clone was deleted at ~03:09; every agent
+ * launched afterwards got `agentic-kanban (CONNECTION_CLOSED)` and silently ran with NO board
+ * tools. The old guard asked only whether the FILE existed — which a poisoned file also satisfies
+ * — so the board never repaired it, and `mcp-health` recomputes rather than reading the file, so
+ * its self-check could not see the failure either.
+ *
+ * Hence: compare the CONTENT against what THIS process would write, and repair on mismatch.
+ */
+function readConfigIfPossible(fs: FileSystem, path: string): string | null {
+  try {
+    return fs.readFileSync(path, "utf-8");
+  } catch {
+    return null;
+  }
+}
+
 export function getMcpConfigPath(fs: FileSystem = nodeFileSystem): string {
-  if (claudeMcpConfigPath && fs.existsSync(claudeMcpConfigPath)) return claudeMcpConfigPath;
   const invocation = resolveMcpServerInvocation(fs);
   const config = {
     mcpServers: {
       "agentic-kanban": invocation,
     },
   };
+  const serialized = JSON.stringify(config, null, 2);
   const path = resolve(tmpdir(), "agentic-kanban-mcp-config.json");
-  fs.writeFileSync(path, JSON.stringify(config, null, 2), "utf-8");
+  // Deliberately NOT `existsSync` alone: a file another process poisoned exists too.
+  if (fs.existsSync(path) && readConfigIfPossible(fs, path) === serialized) {
+    claudeMcpConfigPath = path;
+    return path;
+  }
+  fs.writeFileSync(path, serialized, "utf-8");
   claudeMcpConfigPath = path;
   console.log(`[agent] Claude MCP config written to ${path}`);
   return path;
