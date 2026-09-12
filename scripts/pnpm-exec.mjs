@@ -16,13 +16,18 @@ import { spawn, spawnSync } from "node:child_process";
  * Returns `{ cmd, args, shell }` ready for spawn/spawnSync.
  */
 // cmd.exe treats a bare space, quote, or one of `&|<>^%` as significant when it appears
-// unquoted on the joined command line. Wrapping such an argument in double quotes (doubling
-// any embedded `"`) keeps it as one token and stops it being parsed as a second command —
+// unquoted on the joined command line. The target here (`pnpm`) resolves to `pnpm.cmd`, a
+// BATCH FILE — and batch parameter substitution (%1, %2, ...) additionally splits an
+// unquoted argument on comma, semicolon and `=` (treating them like a space) before %1 is
+// even assigned, independently of cmd.exe's own tokenizing. An issue title containing a
+// comma ("Fix bug, retry") would silently become two arguments to the batch file without
+// this. Wrapping such an argument in double quotes (doubling any embedded `"`) keeps it as
+// one token and stops it being parsed as a second command or split into extra params —
 // load-bearing since #1109's `cli-json.mjs` forwards arbitrary user text (issue titles/
 // descriptions) through this join.
 function quoteForCmdShell(arg) {
   if (arg === "") return '""';
-  if (!/[\s"&|<>^%]/.test(arg)) return arg;
+  if (!/[\s"&|<>^%,;=]/.test(arg)) return arg;
   return `"${arg.replace(/"/g, '""')}"`;
 }
 
