@@ -42,12 +42,11 @@ export interface MonitorControls {
 
 /** Owns the Settings → Workflow tab's scheduled-monitor controls: live status,
  *  resolved tunables, the "run now" trigger and the migrate-to-Strategy-Bullseye
- *  action. Extracted verbatim from SettingsPanel — the only external inputs are
- *  the active project id and the current WIP-limit pref (for the migration
- *  config seed). */
+ *  action. The only external input is the active project id; the migration seeds
+ *  its WIP from the resolved tunables, since #1102 retired the `nudge_wip_limit`
+ *  pref it used to read. */
 export function useMonitorControls(
   activeProjectId: string | null | undefined,
-  wipLimit: string | undefined,
 ): MonitorControls {
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus | null>(null);
@@ -75,7 +74,10 @@ export function useMonitorControls(
     if (!activeProjectId || migratingToStrategy) return;
     setMigratingToStrategy(true);
     try {
-      const strategyConfig = buildMigrationConfig(wipLimit);
+      const current = monitorTunables ?? await apiFetch<{ tunables: MonitorTunables; source: "strategy" | "prefs" }>(
+        `/api/projects/${activeProjectId}/monitor-tunables`,
+      );
+      const strategyConfig = buildMigrationConfig(String(current.tunables.activeAgentsTarget));
       await savePreferences({ [boardStrategyPref.key(activeProjectId)]: JSON.stringify(strategyConfig) });
       showToast("Migrated to Strategy Bullseye", "success");
       await fetchMonitorTunables();

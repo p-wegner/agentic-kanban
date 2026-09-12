@@ -212,7 +212,8 @@ describe("Drive preflight", () => {
 
   it("warns (does not block) when the WIP target is 1 — no real parallelism", async () => {
     const projectId = await seedProject();
-    await setPref("nudge_wip_limit", "1");
+    // #1102: the Bullseye is the only place a WIP target is configured.
+    await setPref(`board_strategy_${projectId}`, JSON.stringify({ version: 1, activeAgentsTarget: 1, segments: [] }));
 
     const result = await runDrivePreflight(projectId, database);
     expect(check(result, "wipTarget").severity).toBe("warn");

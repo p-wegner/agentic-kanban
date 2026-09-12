@@ -302,7 +302,8 @@ export function presetMatchesConfig(preset: MonitorPolicyPreset, config: Strateg
 
 /**
  * Derive the Strategy-Bullseye config persisted when migrating off the legacy
- * nudge_wip_limit pref: the clamped WIP limit becomes activeAgentsTarget (NaN →
+ * default targets: the current WIP (#1102 retired the nudge_wip_limit pref that
+ * used to supply it) becomes activeAgentsTarget (NaN →
  * 5). Intentionally minimal (no segments/providerPolicies) — matches the exact
  * shape the SettingsPanel migration used to build inline.
  */

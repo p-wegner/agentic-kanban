@@ -137,7 +137,7 @@ note: Ubiquitous language merged from the 15 module docs. Terms are defined AS T
 ## ⚠ Term collisions (bounded-context smells)
 | Word | Meaning A | Meaning B | Why it matters |
 |---|---|---|---|
-| **WIP** | Board-UI: a column's *visual* load classification (under/at/over). | Monitor: the agent-throttle ceiling (`nudge_wip_limit`). Only this one throttles anything. | One word, two unrelated mechanisms — readers conflate "column is full" with "monitor won't start more agents". |
+| **WIP** | ~~Board-UI: a column's *visual* load classification (under/at/over).~~ Removed by #1102. | Monitor: the agent-throttle ceiling — the Strategy Bullseye's `activeAgentsTarget`, resolved by `resolveWipLimit` and set from the toolbar Autopilot chip. | Resolved by #1102: one word, one mechanism. The column limit and the `wip_limit_<id>` / `nudge_wip_limit` prefs are retired. |
 | **Drive** | Monitor: a *one-switch pref set* for hands-off mode. | Monitor: a *DB record* tracking an epic/decomposition run. | Same noun, two referents within one context — a known confusion point. |
 | **Mode** | `merge_strategy` (direct/monitor/merge_queue). | `ReconcileStrategy` (per-cluster merge HOW) **and** Start Mode (manual/monitor/conductor). | Three independent "mode" vocabularies; easy to misconfigure across review-merge ↔ monitor. |
 | **providerSessionId / claudeSessionId** | Schema: a generic provider resume id reused across Claude/Pi/etc. | `server/CLAUDE.md` still calls it "claudeSessionId". | Doc lag on a renamed column; schema is the source of truth. |

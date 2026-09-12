@@ -851,15 +851,7 @@ export function EffectiveTargetsSection({ resolvedTunables }: { resolvedTunables
       <div className="grid grid-cols-3 gap-1.5">
         <div className="rounded-md bg-gray-50 dark:bg-gray-800 px-2 py-1">
           <div className="text-[10px] text-gray-400 dark:text-gray-500">Agents target</div>
-          <div
-            className="font-semibold text-gray-700 dark:text-gray-300"
-            title={resolvedTunables.wipLimitSource === "wip_limit_pref" ? "Set by this project's wip_limit, which overrides the Strategy Bullseye" : undefined}
-          >
-            {resolvedTunables.tunables.activeAgentsTarget}
-            {resolvedTunables.wipLimitSource === "wip_limit_pref" && (
-              <span className="ml-1 text-[10px] font-normal text-amber-600 dark:text-amber-400">project limit</span>
-            )}
-          </div>
+          <div className="font-semibold text-gray-700 dark:text-gray-300">{resolvedTunables.tunables.activeAgentsTarget}</div>
         </div>
         <div className="rounded-md bg-gray-50 dark:bg-gray-800 px-2 py-1">
           <div className="text-[10px] text-gray-400 dark:text-gray-500">Backlog floor</div>
@@ -882,18 +874,12 @@ export function MonitorSettingsSection({
   autoMonitor,
   nudgeAutoStart,
   onNudgeAutoStartChange,
-  nudgeWipLimit,
-  onNudgeWipLimitChange,
-  resolvedTunables,
 }: {
   interval: string;
   onIntervalChange: (v: string) => void;
   autoMonitor: boolean;
   nudgeAutoStart: boolean;
   onNudgeAutoStartChange: (v: boolean) => void;
-  nudgeWipLimit: string;
-  onNudgeWipLimitChange: (v: string) => void;
-  resolvedTunables: ResolvedTunables | null;
 }) {
   return (
     <div className="px-3 py-2.5 space-y-2.5 rounded-b-xl">
@@ -923,29 +909,8 @@ export function MonitorSettingsSection({
           <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${nudgeAutoStart ? "translate-x-[1.125rem]" : "translate-x-0.5"}`} />
         </button>
       </div>
-      {nudgeAutoStart && autoMonitor && (
-        <div className="flex flex-col gap-1.5 pl-2.5 border-l-2 border-emerald-200 dark:border-green-800 ml-0.5">
-          <div className="flex items-center gap-2">
-            <label className="text-gray-500 dark:text-gray-400 flex-1 text-[11px]">WIP limit</label>
-            <div className="flex items-center gap-1.5">
-              <input
-                type="number"
-                min={1}
-                max={20}
-                value={nudgeWipLimit}
-                onChange={(e) => onNudgeWipLimitChange(e.target.value)}
-                className={`w-12 border rounded-md px-2 py-1 text-center text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-400 ${resolvedTunables?.source === "strategy" ? "opacity-50 border-gray-200 dark:border-gray-700" : "border-gray-200 dark:border-gray-700"}`}
-              />
-              <span className="text-gray-500 dark:text-gray-400 text-[11px]">in progress</span>
-            </div>
-          </div>
-          {resolvedTunables?.source === "strategy" && (
-            <p className="text-[10px] text-indigo-600 dark:text-indigo-400 leading-snug">
-              Overridden by Strategy Bullseye (effective: {resolvedTunables.tunables.activeAgentsTarget})
-            </p>
-          )}
-        </div>
-      )}
+      {/* #1102: the "WIP limit" input that lived here wrote the retired `nudge_wip_limit`. A
+          project's WIP is set in ONE place now — Agents on the toolbar's Autopilot chip. */}
     </div>
   );
 }

@@ -185,10 +185,8 @@ export interface AutoStartCycle {
   tunablesFor: (projectId: string) => ReturnType<typeof resolveMonitorTunables>["tunables"];
   /**
    * The project's WIP target, through THE resolver (#919) rather than
-   * `tunablesFor(...).activeAgentsTarget`. Both loops read this: the Bullseye alone was blind
-   * to `wip_limit_<projectId>`, the pref the onboarding wizard writes — so a project pinned to
-   * 2 by the wizard was run at the Bullseye's (or the default) 5 by the monitor while the
-   * Dependency Waves panel, which DID read it, said 2.
+   * `tunablesFor(...).activeAgentsTarget`, so every WIP surface reads one precedence
+   * (override -> Bullseye -> default since #1102, which retired `wip_limit_<projectId>`).
    */
   wipLimitFor: (projectId: string) => number;
   startsRemaining: (projectId: string) => number;

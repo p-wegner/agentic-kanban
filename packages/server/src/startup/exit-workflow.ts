@@ -19,7 +19,7 @@
  */
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
-import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { listAutoMergeDisabledProjectIds } from "@agentic-kanban/shared/lib/merge-policy";
 import { isSpecPlanningStageName, transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
@@ -60,7 +60,6 @@ import { describeWithheldReviewArm, graphOwnsPostExitReview, graphOwnsReviewSess
 import { isWorkspaceTerminalOnExit, terminalGuardCasStatus } from "./exit/workspace-terminal-guard.js";
 import { getWorkflowNodeById, getWorkspaceCurrentWorkflowNode } from "../repositories/workflow.repository.js";
 
-const autoMergeDisabledPref = projectPref("auto_merge_disabled");
 
 export interface WorkflowDeps {
   sessionManager: ReturnType<typeof createSessionManager>;
@@ -277,11 +276,8 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
       const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : null;
 
-      const autoMergeDisabledProjectIds = new Set(
-        [...prefMap]
-          .filter(([key, value]) => autoMergeDisabledPref.projectIdOf(key) !== null && value === "true")
-          .map(([key]) => key.replace("auto_merge_disabled_", "")),
-      );
+      // #1102: the per-project half of THE auto-merge resolver, not a second key parse.
+      const autoMergeDisabledProjectIds = listAutoMergeDisabledProjectIds(prefMap);
 
       const ctx: ExitContext = { workspace, projectId, issueId, skipAutoReview, sessionId, exitCode, now, prefMap, statuses, findStatus, autoMergeEnabled, defaultBranch, autoMergeDisabledProjectIds };
       if (classification.action === "fix-and-merge") { await handleFixAndMergeExit(ctx); return; }

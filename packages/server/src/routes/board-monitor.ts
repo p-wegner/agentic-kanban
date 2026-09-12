@@ -20,6 +20,25 @@ import { deriveCapacityHold, resolveMachineCapacity } from "@agentic-kanban/shar
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { requireProject } from "../services/require-project.js";
 import { previewNextStartCandidates } from "../services/start-score-preview.service.js";
+import { getAutopilotStatus, type AutopilotStatusDeps } from "../services/autopilot-status.service.js";
+
+/**
+ * #1102: the Autopilot chip re-reads on board events, and a Tier-1 capacity read spawns a
+ * process — so `/autopilot` shares one read for a few seconds.
+ */
+const AUTOPILOT_CAPACITY_TTL_MS = 5_000;
+
+function memoizeRecent<T>(read: () => Promise<T>, ttlMs: number): () => Promise<T> {
+  let cached: { readAtMs: number; value: Promise<T> } | null = null;
+  return () => {
+    const readAtMs = Date.now();
+    if (!cached || readAtMs - cached.readAtMs > ttlMs) {
+      const value = read().catch((err: unknown) => { cached = null; throw err; });
+      cached = { readAtMs, value };
+    }
+    return cached.value;
+  };
+}
 /**
  * Read-only observability for the detached board-monitor orchestrator loop
  * (scripts/board-monitor/). Mounted under /projects.
@@ -29,8 +48,8 @@ import { previewNextStartCandidates } from "../services/start-score-preview.serv
  * so the UI strip stays hidden for normal installs (which use the in-process monitor).
  *
  * GET /api/projects/:id/monitor-tunables → the resolved effective tunables with source.
- * Lets the UI show which control surface (Strategy Bullseye vs legacy prefs) is driving
- * the in-process monitor so users understand why editing nudge_wip_limit has no effect.
+ * Lets the UI show which control surface (Strategy Bullseye vs the legacy default) is driving
+ * the in-process monitor.
  * Since #1029 it also carries `capacity` — the LIVE machine-capacity verdict projected
  * through `deriveCapacityHold` — because this payload is what the out-of-process Conductor
  * reads once per cycle before any start (the generated CAPACITY HOLD section of its
@@ -42,10 +61,11 @@ import { previewNextStartCandidates } from "../services/start-score-preview.serv
  */
 export function createBoardMonitorRoute(
   database: Database,
-  deps: { readMachineCapacity?: typeof resolveMachineCapacity } = {},
+  deps: { readMachineCapacity?: typeof resolveMachineCapacity } & Omit<AutopilotStatusDeps, "database" | "readMachineCapacity"> = {},
 ) {
   const router = createRouter();
   const readMachineCapacity = deps.readMachineCapacity ?? resolveMachineCapacity;
+  const readCapacityForAutopilot = memoizeRecent(() => readMachineCapacity(), AUTOPILOT_CAPACITY_TTL_MS);
 
   router.get("/:id/orchestrator", async (c) => {
     const projectId = c.req.param("id");
@@ -62,14 +82,29 @@ export function createBoardMonitorRoute(
     const rows = await getAllPreferences(database);
     const prefMap = toPrefMap(rows);
     const resolved = resolveMonitorTunables(prefMap, projectId);
-    // The WIP target through THE resolver (#919), like the monitor loops that act on it — so a
-    // per-project `wip_limit_<id>` is what this read-out shows, not the Bullseye/legacy number
-    // the monitor is not actually running at. `wipLimitSource` says which surface won.
+    // The WIP target through THE resolver (#919), like the monitor loops that act on it. Since
+    // #1102 the Bullseye is the only stored answer, so `source` alone says where it came from.
     const wip = resolveWipLimit(prefMap, projectId);
     const tunables = { ...resolved.tunables, activeAgentsTarget: wip.limit };
     const runtime = resolveProjectRuntimeConfig({ projectId, prefMap });
     const capacity = deriveCapacityHold(await readMachineCapacity(), { maxNewStartsPerCycle: tunables.maxNewStartsPerCycle });
-    return c.json({ tunables, source: resolved.source, wipLimitSource: wip.source, startPolicy: runtime.startPolicy, capacity });
+    return c.json({ tunables, source: resolved.source, startPolicy: runtime.startPolicy, capacity });
+  });
+
+  // #1102: one glance for the toolbar Autopilot chip — Start Mode, running vs. limit, how many
+  // tickets the NEXT cycle starts (through the monitor's own `decideStartSlots`), the hold that
+  // stops it, and the effective auto-merge answer. Read-only.
+  router.get("/:id/autopilot", async (c) => {
+    const projectId = c.req.param("id");
+    const status = await getAutopilotStatus(projectId, {
+      database,
+      readMachineCapacity: readCapacityForAutopilot,
+      canDispatch: deps.canDispatch,
+      hasFleetOverflowCapacity: deps.hasFleetOverflowCapacity,
+      quiesceHostHeld: deps.quiesceHostHeld,
+      nextCycleAt: deps.nextCycleAt,
+    });
+    return c.json(status);
   });
 
   // #917: top-N ranked Todo-pull candidates for this project, by the same score the

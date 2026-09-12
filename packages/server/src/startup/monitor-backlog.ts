@@ -112,7 +112,7 @@ export interface BacklogEmptyDeps {
  *
  * The floor and WIP target come from {@link resolveMonitorTunables}: the project's
  * Strategy Bullseye (`board_strategy_<projectId>`) when configured, else the legacy
- * `nudge_wip_limit` with a floor of 1 (refill only when truly empty) — so projects
+ * default path (a stored `nudge_wip_limit`, no longer writable since #1102) — so projects
  * that never opened the Bullseye keep their prior "refill at zero" behavior. The
  * derived `REFILL_FOCUS` steers the generation prompt (bugfix-only vs balanced).
  *

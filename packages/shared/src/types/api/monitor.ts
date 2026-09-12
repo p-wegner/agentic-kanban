@@ -127,12 +127,50 @@ export interface RiskPosture {
 export interface ResolvedTunablesResponse {
   tunables: MonitorTunables;
   source: "strategy" | "prefs";
-  /**
-   * Which surface decided `tunables.activeAgentsTarget` (the WIP resolver's source). Differs
-   * from `source` when a per-project `wip_limit_<id>` overrides the Bullseye/legacy target.
-   */
-  wipLimitSource?: "override" | "wip_limit_pref" | "strategy" | "legacy_pref" | "default";
   startPolicy?: StartPolicy;
+}
+
+/**
+ * Why the next in-process monitor cycle starts nothing for a project (#1102) — the single most
+ * relevant hold, for the toolbar Autopilot chip.
+ */
+export type AutopilotHoldReason =
+  | "manual_mode"
+  | "conductor_mode"
+  | "wip_full"
+  | "machine_full"
+  | "start_cap"
+  | "gate_running"
+  | "no_worker"
+  | "no_ready_tickets";
+
+/** `GET /api/projects/:id/autopilot` — one glance at a project's auto-start and auto-merge (#1102). */
+export interface AutopilotStatusResponse {
+  projectId: string;
+  startMode: "manual" | "monitor" | "conductor";
+  startModeSource: "start_mode" | "derived";
+  /** The in-process monitor auto-starts this project (Start Mode `monitor`). */
+  autoStart: boolean;
+  /** Active WIP right now. */
+  running: number;
+  /** The WIP limit (`resolveWipLimit`) — the Strategy Bullseye's `activeAgentsTarget` or the default. */
+  limit: number;
+  /** False when the Bullseye names no target and `limit` is the default. */
+  limitConfigured: boolean;
+  /** `limit` after the machine-headroom clamp. */
+  effectiveLimit: number;
+  startsPerCycle: number;
+  backlogFloor: number;
+  /** Starts the slot arithmetic allows (as if auto-started), before counting ready tickets. */
+  slots: number;
+  /** Tickets that pass the cheap start gates (counting stops at 25 per pass). */
+  eligibleCount: number;
+  eligibleCountCapped: boolean;
+  /** What the next cycle will start: 0 unless `autoStart`. */
+  willStartNextCycle: number;
+  holdReason: AutopilotHoldReason | null;
+  autoMerge: { enabled: boolean; source: "project_disabled" | "global_off" | "direct_strategy" | "enabled" };
+  nextCycleAt: string | null;
 }
 
 export interface ConductorSchedule {

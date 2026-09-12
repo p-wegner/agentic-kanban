@@ -80,7 +80,8 @@ interface Props {
   /** Leading repo path of the active project — used by the Multi-Repo Monitor (#82). */
   leadingRepoPath?: string | null;
   columns: StatusWithIssues[];
-  nudgeWipLimit: string;
+  /** The project's WIP limit (#1102: the Strategy Bullseye's activeAgentsTarget), for the run-queue forecast. */
+  activeAgentsTarget: number;
   viewMode: ViewMode;
   columnsRef: RefObject<StatusWithIssues[]>;
 
@@ -156,7 +157,7 @@ export function BoardOverlayPanels({
   activeProjectId,
   leadingRepoPath,
   columns,
-  nudgeWipLimit,
+  activeAgentsTarget,
   viewMode,
   columnsRef,
   dryRunIssue,
@@ -328,7 +329,7 @@ export function BoardOverlayPanels({
       {showRunQueueForecast && (
         <RunQueueForecastPanel
           columns={columns}
-          activeTarget={nudgeWipLimit}
+          activeTarget={activeAgentsTarget}
           onClose={onCloseRunQueueForecast}
           onIssueClick={(issue) => {
             setSelectedIssue(issue);

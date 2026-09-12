@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS, getBool } from "@agentic-kanban/shared/lib/settings-r
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
-import { getWipLimit, wipLimitKey } from "../lib/wipLimits.js";
+
 import { startStaggeredPoll, type PollHandle } from "../lib/pollScheduler.js";
 import { showToast } from "../lib/toast.js";
 import type { MonitorStatus } from "../lib/monitor-popover.js";
@@ -18,10 +18,8 @@ export interface BoardPreferences {
   autoMonitor: boolean;
   autoMonitorInterval: string;
   nudgeAutoStart: boolean;
-  nudgeWipLimit: string;
   monitorStatus: MonitorStatus | null;
   monitorRunning: boolean;
-  wipLimits: Record<string, number | null>;
   dynamicColumnScaling: boolean;
   cardDensity: CardDensity;
   hiddenColumns: Set<string>;
@@ -40,8 +38,6 @@ export interface BoardPreferences {
   handleMonitorRunNow: () => Promise<void>;
   handleIntervalChange: (v: string) => Promise<void>;
   handleNudgeAutoStartChange: (v: boolean) => Promise<void>;
-  handleNudgeWipLimitChange: (v: string) => Promise<void>;
-  handleSetWipLimit: (statusId: string, limit: number | null) => Promise<void>;
 }
 
 export function useBoardPreferences(projectId: string | null): BoardPreferences & { prefsLoaded: boolean } {
@@ -50,10 +46,9 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
   const [autoMonitor, setAutoMonitor] = useState(false);
   const [autoMonitorInterval, setAutoMonitorInterval] = useState("4");
   const [nudgeAutoStart, setNudgeAutoStart] = useState(false);
-  const [nudgeWipLimit, setNudgeWipLimit] = useState("5");
+
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus | null>(null);
   const [monitorRunning, setMonitorRunning] = useState(false);
-  const [wipLimits, setWipLimits] = useState<Record<string, number | null>>({});
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
   const [cardDensity, setCardDensity] = useState<CardDensity>("comfortable");
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
@@ -87,16 +82,7 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
       setAutoMonitor(getBool(s, "auto_monitor"));
       setAutoMonitorInterval(s.auto_monitor_interval ?? DEFAULT_SETTINGS.auto_monitor_interval);
       setNudgeAutoStart(getBool(s, "nudge_auto_start"));
-      setNudgeWipLimit(s.nudge_wip_limit ?? "5");
-      const loadedWipLimits: Record<string, number | null> = {};
-      for (const key of Object.keys(s)) {
-        if (key.startsWith("wip_limit_")) {
-          const statusId = key.slice("wip_limit_".length);
-          const limit = getWipLimit(s, statusId);
-          if (limit !== null) loadedWipLimits[statusId] = limit;
-        }
-      }
-      setWipLimits(loadedWipLimits);
+
     } catch {
       // ignore
     }
@@ -175,10 +161,6 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
     await setSettings({ nudge_auto_start: String(v) }).catch(() => {});
   }, []);
 
-  const handleNudgeWipLimitChange = useCallback(async (v: string) => {
-    setNudgeWipLimit(v);
-    await setSettings({ nudge_wip_limit: v }).catch(() => {});
-  }, []);
 
   const handleCardDensityChange = useCallback(async (v: CardDensity) => {
     setCardDensity(v);
@@ -242,18 +224,6 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
     await setSettings({ [`board_hidden_columns_${projectId}`]: [...next].join(",") }).catch(() => {});
   }, [projectId, hiddenColumns]);
 
-  const handleSetWipLimit = useCallback(async (statusId: string, limit: number | null) => {
-    setWipLimits((prev) => {
-      const next = { ...prev };
-      if (limit === null) {
-        delete next[statusId];
-      } else {
-        next[statusId] = limit;
-      }
-      return next;
-    });
-    await setSettings({ [wipLimitKey(statusId)]: limit != null ? String(limit) : "" }).catch(() => {});
-  }, []);
 
   return {
     autoReview,
@@ -263,10 +233,8 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
     autoMonitor,
     autoMonitorInterval,
     nudgeAutoStart,
-    nudgeWipLimit,
     monitorStatus,
     monitorRunning,
-    wipLimits,
     dynamicColumnScaling,
     cardDensity,
     hiddenColumns,
@@ -286,8 +254,6 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
     handleMonitorRunNow,
     handleIntervalChange,
     handleNudgeAutoStartChange,
-    handleNudgeWipLimitChange,
-    handleSetWipLimit,
   };
 }
 

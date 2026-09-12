@@ -749,6 +749,26 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
   { method: "POST", template: "/api/projects/create", schema: projectHandle },
   { method: "PATCH", template: "/api/projects/:id", schema: project },
   { method: "DELETE", template: "/api/projects/:id", schema: successFlag },
+  // #1102: the toolbar Autopilot chip renders every one of these. `looseObject`, not
+  // `dtoObject<AutopilotStatusResponse>`: `startMode`/`holdReason` are string unions, and a
+  // `Check<string>` is not assignable to a union-typed field.
+  {
+    method: "GET",
+    template: "/api/projects/:id/autopilot",
+    schema: looseObject({
+      startMode: str,
+      autoStart: bool,
+      running: num,
+      limit: num,
+      effectiveLimit: num,
+      startsPerCycle: num,
+      willStartNextCycle: num,
+      eligibleCount: num,
+      holdReason: nullable(str),
+      autoMerge: nested(looseObject({ enabled: bool, source: str })),
+      nextCycleAt: nullable(str),
+    }),
+  },
 
   // ── tags (#806 batch 1) ──
   { method: "GET", template: "/api/tags", schema: arrayRoot(tagRow) },
