@@ -707,12 +707,19 @@ describe("dev launcher port guard", () => {
   });
 
   it("gives the dev board a database of its own, never the operated one", () => {
-    const homeDir = "C:/Users/dev";
-    const repoRoot = "C:/repo/agentic-kanban";
+    // The fixture has to be an ABSOLUTE path for the platform the test is running on, because
+    // `fileUrl` resolves it. `C:/Users/dev` is absolute on Windows and a RELATIVE segment on
+    // POSIX, where it was resolved against the cwd — so on Linux CI this asserted
+    // `file:/home/runner/work/.../packages/server/C:/Users/dev/...` and failed on every run since
+    // it landed. Derive the expectation from the fixture instead of hard-coding one platform's
+    // spelling, so the property is asserted on BOTH rather than gated to one.
+    const win = process.platform === "win32";
+    const homeDir = win ? "C:/Users/dev" : "/home/dev";
+    const repoRoot = win ? "C:/repo/agentic-kanban" : "/repo/agentic-kanban";
     const env = { KANBAN_BOARD_ROLE: "dev" };
 
     const url = resolveDevBoardDbUrl({ env, homeDir });
-    expect(url).toBe("file:C:/Users/dev/.agentic-kanban-dev/kanban.db");
+    expect(url).toBe(`file:${homeDir}/.agentic-kanban-dev/kanban.db`);
     expect(operatedDbUrls({ homeDir, repoRoot })).not.toContain(url);
     expect(buildBoardRoleEnv({ env, homeDir, repoRoot })).toEqual({ KANBAN_DB_URL: url });
 

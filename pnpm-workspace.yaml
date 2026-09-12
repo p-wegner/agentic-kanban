@@ -33,11 +33,21 @@ overrides:
   # 1.19.15 fixes GHSA-frvp-7c67-39w9, a Windows path traversal in serve-static; this
   # board serves its client through that handler and Windows is its primary platform.
   "@hono/node-server": "1.19.17"
-  # 3.1.5 fixes GHSA-7p8r-x3mc-p8w7 (host confusion via a backslash authority),
-  # the high in the production graph under @modelcontextprotocol/sdk>ajv. ajv
+  # The high(s) in the production graph under @modelcontextprotocol/sdk>ajv. ajv
   # declares ^3.0.1, so this raises a floor rather than forcing an out-of-range
   # version (#760). Verified against the installed ajv@8.20.0 manifest.
-  fast-uri: "^3.1.5"
+  #
+  # 3.1.5 cleared GHSA-7p8r-x3mc-p8w7 (host confusion via a backslash authority).
+  # Raised to 3.1.6 on 2026-09-12: FOUR further highs landed against <3.1.6 and had
+  # been failing the `security-scan` workflow on every push since (measured: "gating
+  # severities in production: 4 (0 accepted, 4 unaccepted)"), all in this one package —
+  #   GHSA-5jgf-p345-68v8  host confusion via skipped IDN canonicalization on
+  #                        scheme-relative references (>=3.1.3 <3.1.6)
+  #   GHSA-f65p-4m7j-42xc  SSRF via malformed IPv6 normalization (>=3.0.0 <3.1.6)
+  #   GHSA-fph4-wmhf-6fwf  SSRF via repeated hostname percent-decoding (>=3.1.2 <3.1.6)
+  #   GHSA-jqff-g426-hqxp  host confusion via percent-encoded scheme normalization
+  #                        (>=3.0.0 <3.1.6)
+  fast-uri: "^3.1.6"
   ws: "^8.21.0"
   # 2.1.4 fixes both production highs GHSA-mh99-v99m-4gvg and GHSA-rgw5-rvv9-x895
   # (ReDoS) under ts-morph>@ts-morph/common>minimatch. That minimatch is 9.0.9, which

@@ -91,11 +91,21 @@ describe("rewritePathPrefix (#964)", () => {
     expect(rewritePathPrefix(resolve("srv/repo-2/x"), resolve("srv/repo"), resolve("srv/moved"))).toBeNull();
   });
 
-  it("preserves the separator style of the input", () => {
+  // Separator style is a WINDOWS property, and this assertion had never actually run off
+  // Windows — the same trap #828 found two describes up, and the same remedy.
+  //
+  // The `: null` arm was a guess about POSIX and it is wrong. On Linux a backslash is an
+  // ordinary filename character, so `C:\old\app\src` is ONE segment — but `isPathInside`
+  // compares through `normalizeSlashes`, which folds `\` to `/`, so the path IS judged inside
+  // `C:\old` and gets rebased. CI measured exactly that: `'\home\runner\work\agentic-kanban\…'`
+  // where the test demanded null. Nothing is broken in `rewritePathPrefix` — a Windows-shaped
+  // path simply has no meaning to assert off Windows, which is why this is gated rather than
+  // re-specified.
+  it.runIf(WIN)("preserves the separator style of the input (win32)", () => {
     // repoPath / workingDir rows hold backslash paths; forward-slashing them on rewrite
     // would still compare equal under pathKey but no longer match a raw string read.
     const out = rewritePathPrefix(String.raw`C:\old\app\src`, String.raw`C:\old`, String.raw`C:\new`);
-    expect(out).toBe(WIN ? String.raw`C:\new\app\src` : null);
+    expect(out).toBe(String.raw`C:\new\app\src`);
   });
 
   it("is unfazed by a trailing separator on either prefix", () => {

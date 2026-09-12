@@ -111,6 +111,30 @@ describe("assign() passes detached: true on POSIX only, and only for a shell lau
 describe("stopping a POSIX shell agent kills the whole pipeline, not just the shell (#841, real evidence)", () => {
   const isPosix = process.platform !== "win32";
 
+  /**
+   * THE MOCK FROM THE FIRST DESCRIBE LEAKS IN HERE, AND IT MADE THIS TEST VACUOUS.
+   *
+   * `vi.doMock("node:child_process")` above registers a mock for every SUBSEQUENT import in this
+   * file. `vi.resetModules()` clears the module registry — not the MOCK registry — so the dynamic
+   * import below kept receiving `spawnMock`, whose fake ChildProcess never emits `exit`. The test
+   * then died at the `vi.waitFor` on line ~139 ("expected undefined to be truthy"), long before it
+   * could look at the marker.
+   *
+   * The evidence is in the CI log verbatim: `[worker] launched agent: sessionId=s1 pid=4242` —
+   * 4242 is `spawnMock`'s hard-coded pid. No `sh`, no pipeline, no real process ever existed.
+   *
+   * So this suite has been RED on every Linux run since it landed (2026-09-01 through 09-12) while
+   * appearing to be #841's "real evidence". The consequence worth stating plainly: the POSIX
+   * process-group kill this ticket exists to prove has never actually been exercised by CI. The
+   * production path reads correct (`assign` sets `detached: true` for POSIX shell launches, `stop`
+   * calls `killProcessTree(pid, { signal: "SIGTERM", group: true })`, and that issues
+   * `process.kill(-pid, signal)`) — but "reads correct" is what this test was supposed to replace.
+   */
+  beforeEach(() => {
+    vi.doUnmock("node:child_process");
+    vi.resetModules();
+  });
+
   it.skipIf(!isPosix)("SIGTERM on stop() reaches a child spawned by a pipeline's sh -c", async () => {
     const { createWorkerAgentRunner } = await import("../worker/worker-agent-runner.js");
     const { runner, exitOf } = collector({ createWorkerAgentRunner } as never);
