@@ -12,7 +12,15 @@
 import { join } from "node:path";
 import { createManagedTempDir } from "@agentic-kanban/shared/lib/temp-dir";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
-import { runUnderVerifyChainSemaphore, verifyChainGateWaiting } from "./verify-chain-semaphore.js";
+import { readCpuBusyPct, readTier0Capacity } from "@agentic-kanban/shared/lib/machine-capacity";
+import {
+  runUnderVerifyChainSemaphore,
+  verifyChainGateWaiting,
+  verifyChainSemaphoreActive,
+  verifyChainSemaphoreQueueLength,
+} from "./verify-chain-semaphore.js";
+import { decideFlakeRetry, retryScopeEnvValue } from "./verify-flake-retry.js";
+import { isSelfProjectRepo } from "./self-project.js";
 import {
   clearProbeYieldStreak,
   probeConsecutiveYields,
@@ -104,6 +112,34 @@ export interface BaseBranchVerifyResult {
    * all — see `failedSuitesForOutcome`.
    */
   failedSuites?: string[] | null;
+  /** Set when a targeted re-run cleared a small failed-suite set (#1110) — see the retry below. */
+  flaky?: boolean;
+  /** Machine-load context around this probe (#1110) — see `captureCapacitySample`. */
+  contention?: ProbeContentionSnapshot | null;
+}
+
+/**
+ * Machine-load context around one probe (#1110) — answers "was this verdict produced under
+ * contention" without a reader having to correlate a timestamp against some other log.
+ * `null` fields mean the read failed or was skipped, never a fabricated zero.
+ */
+export interface ProbeContentionSnapshot {
+  freeGbStart: number | null;
+  freeGbEnd: number | null;
+  cpuPctStart: number | null;
+  cpuPctEnd: number | null;
+  /** How long THIS probe queued behind another verify chain before it got its slot. */
+  queueWaitMs: number;
+  /** Verify chains already running/queued in this process when this probe started. */
+  chainActiveAtStart: number;
+  chainQueuedAtStart: number;
+}
+
+/** Best-effort capacity read for a contention snapshot — never throws, never blocks long. */
+async function captureCapacitySample(): Promise<{ freeGb: number | null; cpuPct: number | null }> {
+  const freeGb = readTier0Capacity().freeGb;
+  const cpuPct = await readCpuBusyPct().catch(() => null);
+  return { freeGb, cpuPct };
 }
 
 /**
@@ -167,6 +203,89 @@ export function verifyBaseBranchHealth(
   return probe;
 }
 
+/** What a retry run reports — the shape `runSetupScript` returns, narrowed to what this needs. */
+export interface RetryRunResult {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut?: boolean;
+}
+
+/**
+ * A run's `verify_script` failed — decide the final verdict, applying at most one targeted
+ * flake retry (#1110, the base-health twin of the pre-merge gate's #894 retry — see
+ * `verify-retry-strategies.ts` for the fuller version this mirrors, minus its install retry,
+ * which has no analogue here since the clone is already installed before this is reached).
+ *
+ * A standalone function rather than inline branches in the caller so the verdict is built by a
+ * single `return`, not by mutating an outer `result` across nested `if`s — the shape
+ * `runBaseBranchProbe`'s own `let result` assignment already relies on, one level up.
+ *
+ * `runRetry` is injected (rather than this function spawning the retry itself) so it is testable
+ * without a real worktree or verify chain — the same shape `resolveVerifyOutcome` in
+ * `verify-retry-strategies.ts` uses for exactly this reason.
+ */
+export async function resolveRedProbeOutcome(input: {
+  projectId: string;
+  sha: string;
+  branch: string;
+  exitCode: number | null;
+  combined: string;
+  startedAt: number;
+  /** Whether this project's verify_script honours `KANBAN_RETRY_TEST_FILES` at all. */
+  scoped: boolean;
+  runRetry: (retryScopeEnv: string) => Promise<RetryRunResult>;
+  now?: () => number;
+}): Promise<BaseBranchVerifyResult> {
+  const { projectId, sha, branch, exitCode, combined, startedAt, scoped, runRetry } = input;
+  const now = input.now ?? Date.now;
+  const flake = decideFlakeRetry({ output: combined, timedOut: false, scoped });
+  if (flake.retry) {
+    const names = flake.suites.map((s) => `${s.packageLabel}/${s.file}`).join(", ");
+    console.log(
+      `[base-branch-health] verify_script failed on ${flake.suites.length} suite(s) for project ${projectId} `
+        + `— re-running just those before declaring the base red: ${names}`,
+    );
+    const retryRun = await runRetry(retryScopeEnvValue(flake.suites));
+    if (retryRun.exitCode === 0 && !retryRun.timedOut) {
+      console.log(
+        `[base-branch-health] ${flake.suites.length} suite(s) failed under load and PASSED on a targeted `
+          + `re-run for project ${projectId}: ${names} — recording GREEN (flaky)`,
+      );
+      return {
+        outcome: "green",
+        sha,
+        branch,
+        durationMs: now() - startedAt,
+        flaky: true,
+        message: `${flake.suites.length} suite(s) failed under load and passed on a targeted re-run: ${names}`,
+        failedSuites: [],
+      };
+    }
+    const retryCombined = [retryRun.stderr, retryRun.stdout].filter(Boolean).join("\n").trim();
+    return {
+      outcome: "red",
+      sha,
+      branch,
+      durationMs: now() - startedAt,
+      message: `verify_script failed (exit ${exitCode}) and the same ${flake.suites.length} suite(s) failed `
+        + `again on a targeted re-run — this is a real failure, not machine load:\n${tail(retryCombined || combined)}`,
+      // Parsed from the UNTAILED output (#681 half B): the failing-suite lines are scattered
+      // through a vitest run, and the 40-line tail that becomes `message` routinely keeps
+      // none of them.
+      failedSuites: failedSuitesForOutcome("red", combined),
+    };
+  }
+  return {
+    outcome: "red",
+    sha,
+    branch,
+    durationMs: now() - startedAt,
+    message: tail(combined),
+    failedSuites: failedSuitesForOutcome("red", combined),
+  };
+}
+
 async function runBaseBranchProbe(
   projectId: string,
   database: Database,
@@ -213,6 +332,13 @@ async function runBaseBranchProbe(
   await setPreference(baseHealthProbeStartPrefKey(projectId), now ?? new Date().toISOString(), database)
     .catch(() => {});
 
+  // #1110 — the box's state BEFORE this probe does anything expensive, so a red/timeout can
+  // later be judged against it. Read before the clone (which is itself load), and cheap: one
+  // freemem read plus one ~150ms CPU sample.
+  const capacityStart = await captureCapacitySample();
+  const chainActiveAtStart = verifyChainSemaphoreActive();
+  const chainQueuedAtStart = verifyChainSemaphoreQueueLength();
+
   // #674: the clone must be INSTALLED before verify. "No warm deps" was meant to buy
   // cold-clone realism, but an UNINSTALLED clone is not a cold clone — it is a broken
   // tree. This repo's shared package only exists after a build (its `prepare` runs
@@ -228,6 +354,9 @@ async function runBaseBranchProbe(
   // #989 — set when the running verify was abandoned for a waiting gate, so the `finally` below
   // can tell a yield (streak continues) from a completed run (streak clears).
   let didYield = false;
+  // #1110 — hoisted out of the try so the contention snapshot recorded after it can read the
+  // final wait, matching how `result` itself is hoisted for the same reason.
+  let queueWaitMs = 0;
   try {
     await cloneBranchTo(project.repoPath, branch, dest, CLONE_TIMEOUT_MS);
     if (installCommand) {
@@ -265,7 +394,6 @@ ${tail(combined)}`,
     // afterwards acquired its chain slot immediately and ran a full suite alongside this one.
     // Two full suites on one box is the #949 symptom regardless of which started first, and
     // sharing a worker cap does not help when there are two of everything.
-    let queueWaitMs = 0;
     let probeMaxWorkers = 1;
     const run = await runUnderVerifyChainSemaphore(
       async () => {
@@ -374,17 +502,30 @@ ${tail(combined)}`,
         failedSuites: failedSuitesForOutcome("timeout", combined),
       };
     } else if (run.exitCode !== 0) {
-      result = {
-        outcome: "red",
+      result = await resolveRedProbeOutcome({
+        projectId,
         sha,
         branch,
-        durationMs,
-        message: tail(combined),
-        // Parsed from the UNTAILED output (#681 half B): the failing-suite lines are scattered
-        // through a vitest run, and the 40-line tail that becomes `message` routinely keeps
-        // none of them.
-        failedSuites: failedSuitesForOutcome("red", combined),
-      };
+        exitCode: run.exitCode,
+        combined,
+        startedAt,
+        scoped: isSelfProjectRepo(project.repoPath),
+        runRetry: (retryScopeEnv) => runUnderVerifyChainSemaphore(
+          () => runSetupScript(dest, verifyScript, {
+            timeoutMs: VERIFY_TIMEOUT_MS,
+            env: {
+              ...VERIFY_NEUTRALIZED_LISTENER_ENV,
+              ...VERIFY_NEUTRALIZED_DB_LOCATION_ENV,
+              ...buildVerifyResourceEnv(probeMaxWorkers),
+              KANBAN_RETRY_TEST_FILES: retryScopeEnv,
+            },
+          }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
+          `base-branch health flake retry for project ${projectId}`,
+          undefined,
+          undefined,
+          { priority: "background" },
+        ),
+      });
     } else {
       result = { outcome: "green", sha, branch, durationMs, failedSuites: failedSuitesForOutcome("green", combined) };
     }
@@ -414,6 +555,35 @@ ${tail(combined)}`,
     await setPreference(baseHealthProbeStartPrefKey(projectId), "", database).catch(() => {});
   }
 
+  // #1110 — the box's state at the END too, so a reader can see whether load changed over the
+  // run (a probe that STARTED idle and ENDED starved is a different story than one starved
+  // throughout). Best-effort: an unreadable capacity read must never affect the verdict.
+  const capacityEnd = await captureCapacitySample().catch(() => ({ freeGb: null, cpuPct: null }));
+  result.contention = {
+    freeGbStart: capacityStart.freeGb,
+    freeGbEnd: capacityEnd.freeGb,
+    cpuPctStart: capacityStart.cpuPct,
+    cpuPctEnd: capacityEnd.cpuPct,
+    queueWaitMs,
+    chainActiveAtStart,
+    chainQueuedAtStart,
+  };
+
+  // #1110 (item 3) — the base can move WHILE this probe was running (a merge landed mid-sweep),
+  // which makes the verdict stale the moment it is recorded: it answers for `sha`, not for
+  // whatever the branch tip is now. Never fails the probe over this — it is provenance, not a
+  // verdict — and it is deliberately NOT re-verified here: re-probing on every tip move is the
+  // treadmill #1110 describes, and `promote`'s own sweep-acquisition logic already re-probes a
+  // stale-but-green verdict on demand (see `planSweepAcquisition` in `scripts/promote-plan.mjs`).
+  const currentTip = await revParse(project.repoPath, branch).catch(() => null);
+  if (currentTip && currentTip !== sha) {
+    const staleNote = `NOTE: ${branch} moved during this ${Math.round(result.durationMs / 1000)}s sweep `
+      + `(swept ${sha.slice(0, 8)}, tip is now ${currentTip.slice(0, 8)}) — this verdict is for the swept `
+      + `sha only and does not describe the current tip.`;
+    console.log(`[base-branch-health] ${staleNote}`);
+    result.message = result.message ? `${result.message}\n\n${staleNote}` : staleNote;
+  }
+
   // Read the last green BEFORE recording this run, or a green run would find itself.
   const lastGreen = isBaseHealthAnswer(result.outcome)
     ? await getLastGreenBaseBranchHealth(projectId, database).catch(() => null)
@@ -428,6 +598,8 @@ ${tail(combined)}`,
       durationMs: result.durationMs,
       message: result.message,
       failedSuites: result.failedSuites,
+      flaky: result.flaky,
+      contention: result.contention,
     },
     database,
   );

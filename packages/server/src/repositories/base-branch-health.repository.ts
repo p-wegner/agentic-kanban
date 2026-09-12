@@ -44,6 +44,10 @@ export interface RecordBaseBranchHealthInput {
    * the same as an empty array.
    */
   failedSuites?: string[] | null;
+  /** Set true when this `green` row was only reached after a targeted flake retry (#1110). */
+  flaky?: boolean;
+  /** Machine-load snapshot around this probe (#1110), stored as an opaque JSON object. */
+  contention?: object | null;
 }
 
 /** Record one verify attempt against a project's base branch at a given sha. Returns the row id. */
@@ -64,6 +68,8 @@ export async function recordBaseBranchHealth(
     // still be stored as `"[]"`, since "green, nothing failed" is the verdict that breaks a
     // suite's red streak.
     failedSuites: input.failedSuites == null ? null : JSON.stringify(input.failedSuites),
+    flaky: input.flaky ?? null,
+    contention: input.contention == null ? null : JSON.stringify(input.contention),
     createdAt: new Date().toISOString(),
   });
   return id;
