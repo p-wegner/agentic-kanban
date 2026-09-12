@@ -29,6 +29,7 @@ import { setWorkspaceStatus } from "../../repositories/workspace-status.reposito
 import { rotateCodexLicense } from "../../services/codex-license-ring.js";
 import { rotateClaudeSubscription } from "../../services/claude-subscription-ring.js";
 import { emitButlerSystemEvent } from "../../services/butler-event-feed.js";
+import { assertProjectNotQuiesced } from "../../services/quiesce.service.js";
 import { decideRateLimitExit, formatRateLimitBlockedReason } from "../rate-limit-exit-decision.js";
 import type { RateLimitProvider } from "../rate-limit-exit-decision.js";
 import type { SessionRoleFlags } from "../session-exit-classification.js";
@@ -167,6 +168,10 @@ export function createUsageLimitExitHandler({ database: db, sessionManager, boar
 
     if (decideRateLimitExit(rotation, builder).action === "relaunch") {
       try {
+        // #1113: this relaunch is a direct `startSession` call, bypassing the
+        // create/launchSession quiesce chokepoints — hold it too, falling through to
+        // the ordinary "blocked" outcome below just like any other relaunch failure.
+        await assertProjectNotQuiesced(db, projectId, "usage-limit rotation relaunch");
         const continuation = await buildRotationContinuationPrompt(db, issueId, cfg.label);
         await setWorkspaceStatus(db, workspaceId, "active", { now });
         const relaunchSessionId = await sessionManager.startSession({

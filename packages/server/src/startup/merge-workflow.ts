@@ -28,6 +28,7 @@ import { resolveAgentSettings } from "../services/agent-settings.service.js";
 import { insertIssueComment, listRecentIssueComments } from "../repositories/issue-comments.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
+import { assertProjectNotQuiesced } from "../services/quiesce.service.js";
 import { resolveMergeGate, type MergeGateToken } from "../services/pre-merge-gate.service.js";
 import { advanceLoopAfterMergedIssue } from "../services/plugin-loop-hooks.service.js";
 import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
@@ -365,6 +366,10 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
       const prefMapLearning = toPrefMap(prefRowsLearning);
       if (getBool(prefMapLearning, "learning_step_before_merge") && workspace.workingDir) {
         try {
+          // #1113: this is a direct `startSession` call, bypassing the create/launchSession
+          // quiesce chokepoints — hold it too, same as any other agent launch on this project.
+          await assertProjectNotQuiesced(db, projectId, "post-merge learning step");
+
           const learningPrompt = buildLearningStepPrompt(true);
           // #541: resolveAgentSettings, not resolveWorkspaceLaunchSettings — MergeWorkspace
           // carries no provider/claudeProfile, so this step has never been able to pin the
@@ -538,6 +543,10 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
               const issueTagged = await db.select({ tagId: issueTags.tagId }).from(issueTags).where(eq(issueTags.issueId, issueId)).limit(100).then((rows) => rows.some((r) => r.tagId !== null));
               if (verifyAgent === "dedicated" && issueTagged) {
                 try {
+                  // #1113: same quiesce hold as every other direct `startSession` call —
+                  // the merge already landed, but the verify session is a fresh agent launch.
+                  await assertProjectNotQuiesced(db, projectId, "post-merge verification session");
+
                   const clientPort = resolveBoardClientPort();
                   const serverPort = resolveBoardServerPort();
                   const verifyPrompt = `You are a visual verification agent. The branch '${workspace.branch}' was just merged into master.
