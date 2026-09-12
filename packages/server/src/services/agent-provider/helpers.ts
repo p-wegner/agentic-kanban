@@ -1,6 +1,7 @@
 import { readBoardEnv } from "../../lib/env-registry.js";
 import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -91,25 +92,23 @@ export const COPILOT_DEFAULT_ALLOWED_TOOLS = [
 // --- MCP config ---
 
 /**
- * The config path is MACHINE-GLOBAL (`<tmpdir>/agentic-kanban-mcp-config.json`), so any
- * process that constructs a provider on this box — including another checkout's test run
- * or a throwaway clone's base-health probe — writes THIS file with ITS OWN invocation
- * (derived from ITS `__dirname`). #1106: the old check only asked whether the file
- * EXISTED, so a poisoned file (pointing at a since-deleted clone) satisfied it forever —
- * every agent launched after that pointed at a dead path and lost its kanban MCP tools,
- * with nothing to self-correct it.
+ * #1106 made the machine-global config file self-healing (content-compare before
+ * writing) but left its ROOT SHAPE untouched: every checkout on the box — main, each
+ * worktree, a base-health probe clone — still resolved to the SAME filename
+ * (`<tmpdir>/agentic-kanban-mcp-config.json`) and last-write-wins overwrote whatever
+ * invocation another checkout had put there. Self-healing only helps once a HEALTHY
+ * process launches an agent afterwards; between a poisoning write and that next launch,
+ * every agent gets `agentic-kanban (CONNECTION_CLOSED)` with no board tools. Measured
+ * again on 2026-09-12: a merge queued a worktree removal that would have deleted the
+ * checkout the shared file was pointing at.
  *
- * Fix: compare the file's CONTENT against what this process would write, and repair on
- * any mismatch (missing, unreadable, or written by a different install). This makes the
- * shared file self-healing on the very next launch from a process with the right paths,
- * rather than requiring a human to notice and hand-repair it.
- *
- * The incident this was measured on (2026-09-12): a base-health probe clone wrote a tsx
- * invocation into its own `<tmp>/kanban-base-health-master-<id>/repo` at 02:33, the clone
- * was deleted at ~03:09, and every agent launched afterwards got
- * `agentic-kanban (CONNECTION_CLOSED)` and silently ran with NO board tools. Nothing
- * surfaced it, because `mcp-health` RECOMPUTES the invocation instead of reading this
- * file — so the board's own self-check reported healthy while every agent failed.
+ * Fix: the filename is now CONTENT-ADDRESSED (`agentic-kanban-mcp-config-<hash>.json`,
+ * hashing the invocation this process would write) instead of one fixed name. Two
+ * checkouts resolve to different invocations, hence different files, and can no longer
+ * fight over one — this is what makes the config effectively per-checkout without
+ * having to write inside the (possibly-transient, possibly-removed) checkout itself.
+ * The content-compare-before-write from #1106 is kept as defense against a corrupted or
+ * hand-edited file at that path.
  */
 export function getMcpConfigPath(fs: FileSystem = nodeFileSystem): string {
   const invocation = resolveMcpServerInvocation(fs);
@@ -119,7 +118,14 @@ export function getMcpConfigPath(fs: FileSystem = nodeFileSystem): string {
     },
   };
   const expectedContent = JSON.stringify(config, null, 2);
-  const path = resolve(tmpdir(), "agentic-kanban-mcp-config.json");
+  const hash = createHash("sha256").update(expectedContent).digest("hex").slice(0, 16);
+  // TEMP-PREFIX OK: the hash is a CONTENT digest of this checkout's own invocation, not a
+  // per-run/per-launch value (no uuid/pid/timestamp) — repeated calls from the same checkout
+  // reuse the same file. It accumulates at most one entry per distinct checkout that has ever
+  // launched an agent on this box, same shape as the `agentic-kanban-vitest-` exemption in
+  // db-path.ts, and replaces the single machine-global file two checkouts used to fight over
+  // (#1106/#1111) — a small bounded set of files instead of one contested one is the fix.
+  const path = resolve(tmpdir(), `agentic-kanban-mcp-config-${hash}.json`);
 
   let currentContent: string | null = null;
   if (fs.existsSync(path)) {
