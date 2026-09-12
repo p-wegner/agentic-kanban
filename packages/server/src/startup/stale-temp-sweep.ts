@@ -21,8 +21,22 @@
  */
 import { sweepStaleTempDirsAsync, TEMP_DIR_NAMESPACE } from "@agentic-kanban/shared/lib/temp-dir";
 import type { SweepTempDirsResult } from "@agentic-kanban/shared/lib/temp-dir";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
 export type StaleTempSweepResult = SweepTempDirsResult;
+
+/**
+ * How often the periodic sweep below reaps — independent of server restarts (#1110).
+ *
+ * The startup-only call this module has carried since #1050 only ever runs once per BOOT, so a
+ * board that stays up for days (the common case — nothing here restarts on its own) never sweeps
+ * again until the next restart. Measured directly on this ticket: a base-health probe root from
+ * 04:41 was still on disk at 12:56, ~8 hours and several later probes later, on a server that
+ * never restarted in between. Each root is a full repo clone plus its installed `node_modules`,
+ * so that is not cosmetic — it is the same leak #1050 fixed, just on a longer clock than "once
+ * at boot" covers.
+ */
+const DEFAULT_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 
 /**
  * Idempotent and safe to run at every boot: `sweepStaleTempDirs` never throws, skips
@@ -44,4 +58,29 @@ export async function sweepStaleTempDirsOnce(
     );
   }
   return result;
+}
+
+let activeStaleTempSweep: PeriodicSweepHandle | null = null;
+
+export function stopStaleTempSweeper(): void {
+  activeStaleTempSweep?.stop();
+  activeStaleTempSweep = null;
+}
+
+/**
+ * Periodic counterpart to the boot-time sweep above (#1110) — same idempotent, ownership-safe
+ * pass, just re-run on an interval so a long-lived server without any restart still reaps a
+ * leaked probe root within an hour instead of at the next boot, whenever that is.
+ */
+export function startStaleTempSweeper(intervalMs = DEFAULT_SWEEP_INTERVAL_MS): PeriodicSweepHandle {
+  stopStaleTempSweeper();
+  activeStaleTempSweep = startPeriodicSweep({
+    name: "stale-temp-sweep",
+    tick: () => sweepStaleTempDirsOnce(),
+    // The boot-time call in STARTUP_AUDIT_TASKS already covers the first pass; starting this
+    // timer with its own boot-delay run would just duplicate that within seconds of it.
+    bootDelayMs: null,
+    intervalMs,
+  });
+  return activeStaleTempSweep;
 }
