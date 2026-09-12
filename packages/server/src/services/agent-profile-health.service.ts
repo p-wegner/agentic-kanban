@@ -23,7 +23,8 @@ export {
 } from "./agent-profile-failure-record.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { buildAgentLaunchConfig, getProfilePrefKey, narrowProviderName, type ProviderName } from "./agent-provider.js";
-import { resolvePiExecutable, splitArgs } from "./agent-provider/helpers.js";
+import { nodeFileSystem, resolvePiExecutable, splitArgs } from "./agent-provider/helpers.js";
+import type { FileSystem } from "./agent-provider/types.js";
 import { parseCodexLicenseRing, codexHomeHasAuth, resolveCodexHomeForProfile } from "./codex-license-ring.js";
 import { parseClaudeSubscriptionRing, claudeConfigDirHasAuth, resolveClaudeConfigDirForProfile } from "./claude-subscription-ring.js";
 import { detectCliVersion, type CliVersionResult, type VersionRunner } from "./agent-cli-version.service.js";
@@ -183,6 +184,7 @@ export function preflightAgentProfile(
   prefMap: Map<string, string>,
   provider: ProviderName,
   profileName: string,
+  fs: FileSystem = nodeFileSystem,
 ): AgentProfilePreflightResult {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -276,7 +278,7 @@ export function preflightAgentProfile(
       provider: toExecutorProvider(provider),
       permissionPromptTool: settings.permissionPromptTool,
       prompt: "preflight",
-    });
+    }, fs);
     command = sanitizeCommand(launchConfig.command) || command;
     flags = [...new Set([...flags, ...sanitizeFlags(launchConfig.args)])];
   } catch (err) {
@@ -372,6 +374,7 @@ export async function listAgentProfileHealth(
     copilotProfiles: string[];
     piProfiles: string[];
   },
+  fs: FileSystem = nodeFileSystem,
 ): Promise<AgentProfileHealthRow[]> {
   const prefRows = await getAllPreferences(database);
   const prefMap = toPrefMap(prefRows);
@@ -403,7 +406,7 @@ export async function listAgentProfileHealth(
   // Run the static preflight for every candidate up front.
   const preflights = uniqueCandidates.map((candidate) => ({
     candidate,
-    preflight: preflightAgentProfile(prefMap, candidate.provider, candidate.profileName),
+    preflight: preflightAgentProfile(prefMap, candidate.provider, candidate.profileName, fs),
   }));
 
   // Probe `<cli> --version` ONCE per distinct (provider, command) pair — many

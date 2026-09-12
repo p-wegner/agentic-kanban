@@ -42,8 +42,6 @@ export function resolveMcpServerInvocation(fs: FileSystem = nodeFileSystem): { c
   return { command: "node", args: ["--import", TSX_URL, MCP_SERVER_PATH] };
 }
 
-let claudeMcpConfigPath: string | null = null;
-
 // --- Copilot constants ---
 
 export const COPILOT_PLAN_PROMPT_PREFIX = [
@@ -93,30 +91,26 @@ export const COPILOT_DEFAULT_ALLOWED_TOOLS = [
 // --- MCP config ---
 
 /**
- * The config file is at a MACHINE-GLOBAL path, so it is not ours alone (#1106).
+ * The config path is MACHINE-GLOBAL (`<tmpdir>/agentic-kanban-mcp-config.json`), so any
+ * process that constructs a provider on this box — including another checkout's test run
+ * or a throwaway clone's base-health probe — writes THIS file with ITS OWN invocation
+ * (derived from ITS `__dirname`). #1106: the old check only asked whether the file
+ * EXISTED, so a poisoned file (pointing at a since-deleted clone) satisfied it forever —
+ * every agent launched after that pointed at a dead path and lost its kanban MCP tools,
+ * with nothing to self-correct it.
  *
- * `resolveMcpServerInvocation` derives its paths from `__dirname` of the RUNNING module, and
- * every process on this box that builds a provider writes the same file — another checkout, a
- * worktree, or a base-health probe's throwaway clone running the test suite (both providers
- * default `fs` to the real filesystem, so `new CopilotProvider()` in a test writes it for real).
+ * Fix: compare the file's CONTENT against what this process would write, and repair on
+ * any mismatch (missing, unreadable, or written by a different install). This makes the
+ * shared file self-healing on the very next launch from a process with the right paths,
+ * rather than requiring a human to notice and hand-repair it.
  *
- * Measured 2026-09-12: a probe clone wrote a tsx invocation pointing into its own
- * `<tmp>/kanban-base-health-master-<id>/repo` at 02:33; the clone was deleted at ~03:09; every agent
- * launched afterwards got `agentic-kanban (CONNECTION_CLOSED)` and silently ran with NO board
- * tools. The old guard asked only whether the FILE existed — which a poisoned file also satisfies
- * — so the board never repaired it, and `mcp-health` recomputes rather than reading the file, so
- * its self-check could not see the failure either.
- *
- * Hence: compare the CONTENT against what THIS process would write, and repair on mismatch.
+ * The incident this was measured on (2026-09-12): a base-health probe clone wrote a tsx
+ * invocation into its own `<tmp>/kanban-base-health-master-<id>/repo` at 02:33, the clone
+ * was deleted at ~03:09, and every agent launched afterwards got
+ * `agentic-kanban (CONNECTION_CLOSED)` and silently ran with NO board tools. Nothing
+ * surfaced it, because `mcp-health` RECOMPUTES the invocation instead of reading this
+ * file — so the board's own self-check reported healthy while every agent failed.
  */
-function readConfigIfPossible(fs: FileSystem, path: string): string | null {
-  try {
-    return fs.readFileSync(path, "utf-8");
-  } catch {
-    return null;
-  }
-}
-
 export function getMcpConfigPath(fs: FileSystem = nodeFileSystem): string {
   const invocation = resolveMcpServerInvocation(fs);
   const config = {
@@ -124,16 +118,23 @@ export function getMcpConfigPath(fs: FileSystem = nodeFileSystem): string {
       "agentic-kanban": invocation,
     },
   };
-  const serialized = JSON.stringify(config, null, 2);
+  const expectedContent = JSON.stringify(config, null, 2);
   const path = resolve(tmpdir(), "agentic-kanban-mcp-config.json");
-  // Deliberately NOT `existsSync` alone: a file another process poisoned exists too.
-  if (fs.existsSync(path) && readConfigIfPossible(fs, path) === serialized) {
-    claudeMcpConfigPath = path;
-    return path;
+
+  let currentContent: string | null = null;
+  if (fs.existsSync(path)) {
+    try {
+      currentContent = fs.readFileSync(path, "utf-8");
+    } catch {
+      currentContent = null;
+    }
   }
-  fs.writeFileSync(path, serialized, "utf-8");
-  claudeMcpConfigPath = path;
-  console.log(`[agent] Claude MCP config written to ${path}`);
+
+  if (currentContent !== expectedContent) {
+    fs.writeFileSync(path, expectedContent, "utf-8");
+    console.log(`[agent] Claude MCP config written to ${path}`);
+  }
+
   return path;
 }
 
