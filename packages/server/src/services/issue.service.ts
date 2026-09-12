@@ -25,6 +25,8 @@ import {
     updateIssueTitleDescription,
 } from "../repositories/issue-ai.repository.js";
 import { getProjectRepoNames } from "../repositories/repo.repository.js";
+import { findTagByName, createTag } from "../repositories/tag.repository.js";
+import { SKIP_AUTO_START_TAG } from "../repositories/wip-capacity.repository.js";
 import { resolveRepoName } from "@agentic-kanban/shared/lib/repo-tags";
 import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "../repositories/issue-number.repository.js";
 import { applyRepoTags } from "./repo-tags.service.js";
@@ -135,6 +137,16 @@ export interface CreateIssueInput {
   /** Repos this issue touches (#94). Applied as `repo:<name>` tags after insert (multi-repo
    *  authoring); omitted/empty for single-repo projects. */
   reposTouched?: string[];
+  /**
+   * Tag NAMES to apply right after insert (#1108) — an existing tag is reused (case-
+   * insensitively), an unknown name is created. This is what closes the race a ticket filed
+   * on a monitor-driven project used to lose: "file a ticket for later" requires the ticket
+   * to be BORN tagged, since a `POST /api/issues/:id/tags` follow-up call arrives too late —
+   * measured at #1107, the monitor provisioned the workspace 12s before the tag POST landed.
+   */
+  tags?: string[];
+  /** Shorthand for `tags: ["no-auto-start"]` — the common case of this race. */
+  noAutoStart?: boolean;
 }
 
 export type CreateIssueResult = NonNullable<Awaited<ReturnType<typeof getIssueDescription>>>;
@@ -241,6 +253,24 @@ export function createIssueService(deps: {
           .filter((r): r is string => r !== null);
         if (valid.length > 0) await applyRepoTags(createdId, valid, database);
       } catch { /* tagging is best-effort */ }
+    }
+
+    // #1108: apply requested tags (incl. the `noAutoStart` shorthand for `no-auto-start`)
+    // BEFORE the created-event broadcasts — this is what lets a ticket be born already
+    // tagged, closing the race where a follow-up `POST /:id/tags` call arrives after the
+    // monitor has already provisioned a workspace for it.
+    const requestedTagNames = [
+      ...(input.tags ?? []),
+      ...(input.noAutoStart ? [SKIP_AUTO_START_TAG] : []),
+    ];
+    if (requestedTagNames.length > 0) {
+      try {
+        for (const name of new Set(requestedTagNames.map((n) => n.trim()).filter(Boolean))) {
+          const existing = await findTagByName(name, database);
+          const tag = existing ?? await createTag(name, null, database);
+          await assignTagRepo(createdId, tag.id, database);
+        }
+      } catch { /* tagging is best-effort, same as reposTouched above */ }
     }
 
     if (input.projectId) boardEvents?.broadcast(input.projectId, "issue_created");

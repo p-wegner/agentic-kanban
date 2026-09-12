@@ -344,6 +344,8 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
       externalKey: body.externalKey,
       externalUrl: body.externalUrl,
       reposTouched: Array.isArray(body.reposTouched) ? body.reposTouched : undefined,
+      tags: Array.isArray(body.tags) ? body.tags : undefined,
+      noAutoStart: body.noAutoStart,
     });
     return c.json(result, 201);
   });
