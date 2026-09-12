@@ -70,7 +70,7 @@ we keep it agentic-kanban-only and drive other projects entirely on the in-proce
   reads the project's `board_strategy_<projectId>` Strategy Bullseye preference directly; there is no
   file to render. `writeStrategyObjective()` is a no-op when `objective.md` is absent, so saving a
   driven project's Bullseye never tries to author one. Legacy fallback when no Bullseye is set:
-  `activeAgentsTarget` ← `nudge_wip_limit`, `backlogFloor = 3`, `maxNewStartsPerCycle = 3`.
+  `activeAgentsTarget` ← a stored legacy `nudge_wip_limit` (no longer writable since #1102) or 5, `backlogFloor = 3`, `maxNewStartsPerCycle = 3`.
 - **New-project scaffold writes no `objective.md`.** `project-scaffold.ts` is deliberately generic and
   never emits one (see its module comment) — a fresh driven project is hands-off-ready without it.
 - **Acceptance (the #802 contract):** a non-agentic-kanban project drives hands-off with no

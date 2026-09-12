@@ -28,6 +28,7 @@ import { scanRottedSuites } from "../services/rotted-suite-scan.js";
 import { scanDegenerateBaseHealth } from "../services/degenerate-base-health.js";
 import { scanAutodriveStallWarnings, buildAutoStartSkipWarnings } from "../services/autodrive-stall-warning.service.js";
 import { resolveMergePolicy } from "./merge-strategy.js";
+import { listAutoMergeDisabledProjectIds } from "@agentic-kanban/shared/lib/merge-policy";
 import { resolveRiskPosture } from "../services/risk-posture.service.js";
 import { getAllPreferencesCached, invalidatePreferencesCache } from "../repositories/preferences.repository.js";
 import { conditionalJsonResponse } from "../services/board-etag-cache.service.js";
@@ -53,7 +54,7 @@ import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 // COMPILE error rather than a regex that quietly matches nothing.
 const autodrivePref = projectPref("board_autodrive");
 const startModePref = projectPref("start_mode");
-const autoMergeDisabledPref = projectPref("auto_merge_disabled");
+
 export function autoDriveProjectIds(prefMap: Map<string, string>): Set<string> {
   const ids = new Set<string>();
   for (const [key, value] of prefMap) {
@@ -460,11 +461,8 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       const cycleBudgetMs = Number.isFinite(budgetPrefMs) && budgetPrefMs > 0
         ? budgetPrefMs
         : Math.round((Number.isFinite(intervalMinForBudget) && intervalMinForBudget > 0 ? intervalMinForBudget : 4) * 60_000 * CYCLE_BUDGET_INTERVAL_FRACTION);
-      const autoMergeDisabledProjectIds = new Set(
-        [...prefMap]
-          .filter(([key, value]) => autoMergeDisabledPref.projectIdOf(key) !== null && value === "true")
-          .map(([key]) => key.replace("auto_merge_disabled_", "")),
-      );
+      // #1102: the per-project half of THE auto-merge resolver, not a second key parse.
+      const autoMergeDisabledProjectIds = listAutoMergeDisabledProjectIds(prefMap);
       setPhase("processing-candidates");
       const candidateResult = await processWorkspaceCandidates(scheduledCandidates, {
         sessionManager,

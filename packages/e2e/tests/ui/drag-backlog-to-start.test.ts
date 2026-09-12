@@ -6,6 +6,8 @@ test.describe("Drag backlog card onto empty agent slot", () => {
   let projectId: string;
   let backlogStatusId: string;
   let suffix: string;
+  /** The project's Strategy Bullseye before this suite patched its WIP target (#1102). */
+  let previousBullseye = "";
   const createdIssueIds: string[] = [];
   const createdWorkspaceIds: string[] = [];
 
@@ -48,9 +50,19 @@ test.describe("Drag backlog card onto empty agent slot", () => {
         claude_profile: "mock",
         auto_review: "false",
         auto_merge: "false",
-        // Ensure activeAgentsTarget >= 1 so EmptySlot renders on the agents view.
-        nudge_wip_limit: "3",
       },
+    });
+
+    // Ensure activeAgentsTarget = 3 so EmptySlot renders on the agents view. Since #1102 a
+    // project's WIP lives only in its Strategy Bullseye, so patch that and restore it afterwards.
+    const settings = (await (await request.get(`${SERVER_URL}/api/preferences/settings`)).json()) as Record<string, string | undefined>;
+    previousBullseye = settings[`board_strategy_${projectId}`] ?? "";
+    let bullseye: Record<string, unknown> = { version: 1, segments: [] };
+    try {
+      if (previousBullseye) bullseye = JSON.parse(previousBullseye) as Record<string, unknown>;
+    } catch { /* malformed: start from an empty Bullseye */ }
+    await request.put(`${SERVER_URL}/api/preferences/settings`, {
+      data: { [`board_strategy_${projectId}`]: JSON.stringify({ ...bullseye, activeAgentsTarget: 3 }) },
     });
   });
 
@@ -67,8 +79,10 @@ test.describe("Drag backlog card onto empty agent slot", () => {
         claude_profile: "",
         auto_review: "true",
         auto_merge: "true",
-        nudge_wip_limit: "",
       },
+    });
+    await request.put(`${SERVER_URL}/api/preferences/settings`, {
+      data: { [`board_strategy_${projectId}`]: previousBullseye },
     });
   });
 
@@ -119,7 +133,7 @@ test.describe("Drag backlog card onto empty agent slot", () => {
 
     // The EmptySlot renders "Drop issue here" when no drag is in progress.
     // It only appears when activeAgentsTarget > activeAgentCount, which we've ensured
-    // by setting nudge_wip_limit=3 above.
+    // by setting the Bullseye's activeAgentsTarget to 3 above.
     const emptySlot = page.locator("p", { hasText: "Drop issue here" }).first();
     await expect(emptySlot).toBeVisible({ timeout: 10000 });
 

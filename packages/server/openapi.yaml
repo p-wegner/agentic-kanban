@@ -4823,6 +4823,29 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{id}/autopilot:
+    get:
+      summary: stops it, and the effective auto-merge answer. Read-only.
+      tags:
+        - board-monitor
+      operationId: get_api_projects_id_autopilot
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/base-branch-health:
     get:
       summary: GET /api/projects/:id/base-branch-health — latest + recent history of base-branch verify runs (#491)
@@ -5970,6 +5993,11 @@ paths:
               schema: {}
         "404":
           description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
           content:
             application/json:
               schema: {}

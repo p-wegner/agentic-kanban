@@ -24,7 +24,7 @@ export interface AutoStartSkipDisplay {
 const REASONS: Record<string, AutoStartSkipDisplay> = {
   wip_cap: {
     label: "WIP cap",
-    detail: "The project is already running its full WIP target. Raise the WIP limit (Strategy Bullseye → Agents, or the project's wip_limit) or wait for a ticket to land.",
+    detail: "The project is already running its full WIP target. Raise Agents on the toolbar's Autopilot chip (the Strategy Bullseye's activeAgentsTarget) or wait for a ticket to land.",
     kind: "hold",
   },
   machine_saturated: {

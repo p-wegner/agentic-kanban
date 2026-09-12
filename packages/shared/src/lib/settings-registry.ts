@@ -107,7 +107,9 @@ export const SETTINGS_REGISTRY = {
   // In a DinD deployment the KANBAN_STACK_PORT_RANGE size is ALSO a natural cap.
   max_concurrent_stacks: { type: "number", default: "" },
   nudge_auto_start: { type: "bool", default: "false" },
-  nudge_wip_limit: { type: "number", default: "" },
+  // `nudge_wip_limit` was retired by #1102 — WIP is configured only in a project's Strategy
+  // Bullseye. A stored row still feeds `resolveMonitorTunables`' no-Bullseye default path, but
+  // the key is no longer writable (PUT /settings answers 422).
   // Idle-seconds threshold after which a running/fixing agent that has produced no
   // activity/stats delta is surfaced with a "stalled" badge on the agent views (#86).
   agent_stall_threshold_sec: { type: "number", default: "240" },

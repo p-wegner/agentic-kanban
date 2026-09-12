@@ -59,6 +59,60 @@ export function resolveMergePolicy(prefMap: Map<string, string>, projectId?: str
   };
 }
 
+/** Why a project's effective auto-merge is what it is — the first rule that decides wins. */
+export type AutoMergeSource =
+  /** `auto_merge_disabled_<projectId>` is "true": this project opted out. */
+  | "project_disabled"
+  /** The global `auto_merge` is off. */
+  | "global_off"
+  /** On, but merge strategy `direct` reserves merging for a human. */
+  | "direct_strategy"
+  /** On, owned by automation, and this project has not opted out. */
+  | "enabled";
+
+export interface EffectiveAutoMerge {
+  enabled: boolean;
+  source: AutoMergeSource;
+  owner: MergeStrategy | "off";
+  /** Unchanged `auto_merge_in_review` semantics — reported, not folded into `enabled`. */
+  autoMergeInReview: boolean;
+}
+
+/**
+ * THE effective auto-merge answer for ONE project (#1102): the global `auto_merge` AND NOT
+ * `auto_merge_disabled_<projectId>` — and not a `direct` strategy, which reserves merging for a
+ * human. The toolbar Autopilot chip, `GET /api/projects/:id/autopilot`, the exit workflow and the
+ * monitor all ask this, so "will this project auto-merge?" has one answer instead of a global
+ * toggle in one place and a per-project kill-switch parsed by hand in two others.
+ *
+ * `source` names the most specific rule that decided: a project opt-out is reported even when
+ * the global switch is also off, since that is the one the per-project toggle can change.
+ */
+export function resolveAutoMerge(prefMap: Map<string, string>, projectId: string): EffectiveAutoMerge {
+  const policy = resolveMergePolicy(prefMap, projectId);
+  const source: AutoMergeSource = !policy.allowedForProject
+    ? "project_disabled"
+    : policy.owner === "off"
+      ? "global_off"
+      : policy.owner === "direct"
+        ? "direct_strategy"
+        : "enabled";
+  return { enabled: source === "enabled", source, owner: policy.owner, autoMergeInReview: policy.autoMergeInReview };
+}
+
+/**
+ * Every project whose effective auto-merge is off by its OWN opt-out — the set the monitor and
+ * the exit workflow pass down. Derived from {@link resolveAutoMerge}, not a second key parse.
+ */
+export function listAutoMergeDisabledProjectIds(prefMap: Map<string, string>): Set<string> {
+  const ids = new Set<string>();
+  for (const key of prefMap.keys()) {
+    const projectId = autoMergeDisabledPref.projectIdOf(key);
+    if (projectId !== null && resolveAutoMerge(prefMap, projectId).source === "project_disabled") ids.add(projectId);
+  }
+  return ids;
+}
+
 /** Some automation owns merging — i.e. not off, and not reserved for a human. */
 export function isAutomaticMergeEnabled(prefMap: Map<string, string>): boolean {
   const { owner } = resolveMergePolicy(prefMap);

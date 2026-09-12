@@ -112,8 +112,6 @@ export interface BoardKanbanViewProps {
   onExpandCreate: (statusId: string, statusName: string, state: Partial<CreateIssueFormState>) => void;
   allProjectTags?: ProjectTag[];
   quickUpdate?: QuickUpdateCallbacks;
-  wipLimits?: Record<string, number | null>;
-  onSetWipLimit?: (statusId: string, limit: number | null) => void;
   cardDensity?: CardDensity;
   onColumnReorder?: (draggedColumnId: string, targetSortOrder: number) => void;
   swimlaneDimension?: SwimlaneDimension;
@@ -155,8 +153,6 @@ export function BoardKanbanView({
   onExpandCreate,
   allProjectTags,
   quickUpdate,
-  wipLimits,
-  onSetWipLimit,
   cardDensity = "comfortable",
   onColumnReorder,
   swimlaneDimension = "none",
@@ -302,8 +298,6 @@ export function BoardKanbanView({
               sessionTodos={sessionTodos}
               allProjectTags={allProjectTags}
               quickUpdate={quickUpdate}
-              wipLimit={wipLimits?.[col.id]}
-              onSetWipLimit={onSetWipLimit}
               cardDensity={cardDensity}
               onColumnDragStart={onColumnReorder && !isNarrow ? (e) => handleColumnDragStart(e, col.id) : undefined}
               onColumnDragOver={onColumnReorder && !isNarrow ? (e) => handleColumnDragOver(e, col.id) : undefined}
