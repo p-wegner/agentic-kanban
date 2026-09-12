@@ -861,7 +861,21 @@ describe("CodexProvider", () => {
 });
 
 describe("CopilotProvider", () => {
-  const provider = new CopilotProvider();
+  /**
+   * Inject a fake filesystem (#1106). `buildLaunchConfig` calls `getMcpConfigPath(this.fs)`,
+   * and the constructor defaults `fs` to the REAL `nodeFileSystem` — the module-level
+   * `vi.mock("node:fs")` above does not cover it, because the helper writes through this
+   * injected port rather than importing `node:fs` itself. So `new CopilotProvider()` with no
+   * argument made this suite write the machine-global `<tmpdir>/agentic-kanban-mcp-config.json`
+   * for real, with THIS checkout's paths. When the suite ran inside a base-health probe's
+   * throwaway clone, that poisoned the operated board: every agent launched afterwards got
+   * `agentic-kanban (CONNECTION_CLOSED)` and silently ran with no board tools.
+   */
+  const provider = new CopilotProvider({
+    existsSync: () => false,
+    readFileSync: vi.fn(() => ""),
+    writeFileSync: vi.fn(),
+  });
 
   it("builds default Copilot launch config with verified non-interactive JSON streaming flags", () => {
     const config = provider.buildLaunchConfig({ prompt: "Fix the bug" });
@@ -883,6 +897,42 @@ describe("CopilotProvider", () => {
     expect(config.args.some((arg) => arg.startsWith("@") && arg.includes("agentic-kanban-mcp-config.json"))).toBe(true);
     expect(config.isMockAgent).toBe(false);
     expect(config.suppressStdinPrompt).toBe(true);
+  });
+
+  it("REWRITES an MCP config another process poisoned, instead of trusting that the file exists (#1106)", () => {
+    // The real failure: a base-health probe's clone (or any other checkout) wrote this
+    // machine-global file with ITS paths, then the clone was deleted. The old guard asked
+    // only `existsSync`, which a poisoned file satisfies, so the board reused it forever and
+    // every agent launched with no MCP tools. Content equality is the fix.
+    const stale = JSON.stringify(
+      { mcpServers: { "agentic-kanban": { command: "node", args: ["C:\\deleted-probe-clone\\mcp-server\\src\\index.ts"] } } },
+      null,
+      2,
+    );
+    const writeFileSync = vi.fn();
+    const poisoned = new CopilotProvider({
+      existsSync: () => true,
+      readFileSync: () => stale,
+      writeFileSync,
+    });
+
+    poisoned.buildLaunchConfig({ prompt: "Run" });
+
+    expect(writeFileSync).toHaveBeenCalledTimes(1);
+    const [, written] = writeFileSync.mock.calls[0] as [string, string, string];
+    expect(written).not.toBe(stale);
+    expect(written).not.toContain("deleted-probe-clone");
+
+    // And the converse: a config that already matches is left alone, so this does not
+    // rewrite the file on every single launch.
+    const writeAgain = vi.fn();
+    const healthy = new CopilotProvider({
+      existsSync: () => true,
+      readFileSync: () => written,
+      writeFileSync: writeAgain,
+    });
+    healthy.buildLaunchConfig({ prompt: "Run" });
+    expect(writeAgain).not.toHaveBeenCalled();
   });
 
   it("uses --resume=<id> for Copilot resume", () => {
