@@ -42,9 +42,13 @@ const BASELINE: Record<string, number> = {
   "client/src/components/IssueMetadataGrid.tsx": 2,
   "client/src/components/MetricsView.tsx": 4,
   "client/src/components/MilestoneFilterBanner.tsx": 1,
-  "client/src/components/RunQueueForecastPanel.tsx": 1,
   "client/src/lib/boardStats.ts": 2,
   "client/src/lib/issueCardDisplay.ts": 2,
+  // #1102 MOVED this comparison out of `RunQueueForecastPanel.tsx` into the extracted
+  // forecast lib (13e3ca2183) — `isStartableIssue`'s `=== "Backlog"`. The count is
+  // unchanged at 1, so this is a relocation of the grandfathered entry, not a raise:
+  // the panel's entry went stale at 0 and this one took it over.
+  "client/src/lib/runQueueForecast.ts": 1,
   "client/src/lib/tableView-cells.ts": 2,
   "mcp-server/src/tools/contract-coupled-issues.ts": 2,
   "mcp-server/src/tools/get-board-status.ts": 3,
