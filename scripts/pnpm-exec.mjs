@@ -15,6 +15,17 @@ import { spawn, spawnSync } from "node:child_process";
  * Resolve how to invoke pnpm with the given CLI args.
  * Returns `{ cmd, args, shell }` ready for spawn/spawnSync.
  */
+// cmd.exe treats a bare space, quote, or one of `&|<>^%` as significant when it appears
+// unquoted on the joined command line. Wrapping such an argument in double quotes (doubling
+// any embedded `"`) keeps it as one token and stops it being parsed as a second command —
+// load-bearing since #1109's `cli-json.mjs` forwards arbitrary user text (issue titles/
+// descriptions) through this join.
+function quoteForCmdShell(arg) {
+  if (arg === "") return '""';
+  if (!/[\s"&|<>^%]/.test(arg)) return arg;
+  return `"${arg.replace(/"/g, '""')}"`;
+}
+
 export function resolvePnpmInvocation(pnpmArgs, env = process.env, platform = process.platform) {
   const execpath = env.npm_execpath;
   if (execpath && /\.[cm]?js$/i.test(execpath)) {
@@ -22,9 +33,9 @@ export function resolvePnpmInvocation(pnpmArgs, env = process.env, platform = pr
   }
   if (platform === "win32") {
     // No pnpm.exe guarantee — go through the shell so pnpm.cmd resolves.
-    // Args are joined ourselves (none of our callers pass args with spaces);
+    // Args are joined ourselves and individually quoted (see `quoteForCmdShell`);
     // passing an args array together with shell:true is deprecated (DEP0190).
-    return { cmd: ["pnpm", ...pnpmArgs].join(" "), args: [], shell: true };
+    return { cmd: ["pnpm", ...pnpmArgs].map(quoteForCmdShell).join(" "), args: [], shell: true };
   }
   return { cmd: "pnpm", args: pnpmArgs, shell: false };
 }
