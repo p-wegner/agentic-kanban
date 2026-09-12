@@ -58,7 +58,9 @@ const BASELINE: Record<string, number> = {
   "repositories/issue/analytics.repository.ts": 4,
   "repositories/issue/touched-files.repository.ts": 4,
   "services/git-info.service.ts": 0,
-  "services/git-info/repo-detect.ts": 6,
+  // #1104 spent one declaration here on detectLinkedWorktreeMainCheckout (the
+  // linked-worktree guard) — a deliberate budget spend, not a reset.
+  "services/git-info/repo-detect.ts": 7,
   "services/git-info/project-stats.ts": 32,
 
   // --- split in #819 batch 2 ---
