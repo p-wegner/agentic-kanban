@@ -16,6 +16,7 @@ import {
   createSubIssueWithParentLink,
   getIssuesTouchedFilesByNumbers,
   getIssueSummary,
+  getIssueTags,
 } from "../../repositories/issue.repository.js";
 import {
   updateIssueById,
@@ -108,8 +109,13 @@ Examples:
         process.exit(1);
       }
 
+      // #1107: this command used to have no `tags` field at all — a caller reading it (or
+      // seeing a stale `tags=[]` from an ad-hoc merge elsewhere) had no honest way to tell
+      // "untagged" from "the CLI never looked". Same shape the board endpoint returns.
+      const tags = await getIssueTags(issue.id);
+
       if (options.json) {
-        console.log(JSON.stringify(issue, null, 2));
+        console.log(JSON.stringify({ ...issue, tags }, null, 2));
         process.exit(0);
       }
 
@@ -118,6 +124,7 @@ Examples:
       console.log(`  Type:     ${issue.issueType ?? "task"}`);
       console.log(`  Priority: ${issue.priority}`);
       console.log(`  ID:       ${issue.id}`);
+      console.log(`  Tags:     ${tags.length ? tags.map((t) => t.name).join(", ") : "(none)"}`);
       if (issue.description) {
         console.log(`\n  Description:`);
         for (const line of issue.description.split("\n")) {

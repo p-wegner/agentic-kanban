@@ -328,6 +328,46 @@ describe("Tags API - Issue Associations", () => {
     expect(remaining[0].name).toBe("e2e-tag-2");
   });
 
+  it("POST /api/issues/:id/tags is idempotent — re-attaching returns 200 and does not duplicate (#1107)", async () => {
+    const { projectId, statusId } = await createProjectAndStatus(database, "Idempotent Tag Project");
+
+    const tagRes = await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "idempotent-tag" }),
+    });
+    const tag = await tagRes.json() as TagRow;
+
+    const issueRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Idempotent tag issue", statusId, projectId }),
+    });
+    const issue = await issueRes.json() as IssueRow;
+
+    const first = await app.request(`/api/issues/${issue.id}/tags`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tagId: tag.id }),
+    });
+    expect(first.status).toBe(201);
+    const firstBody = await first.json() as { id: string };
+
+    const second = await app.request(`/api/issues/${issue.id}/tags`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tagId: tag.id }),
+    });
+    expect(second.status).toBe(200);
+    const secondBody = await second.json() as { id: string };
+    expect(secondBody.id).toBe(firstBody.id);
+
+    const tags = await (
+      await app.request(`/api/issues/${issue.id}/tags`)
+    ).json() as TagRow[];
+    expect(tags.length).toBe(1);
+  });
+
   it("POST /api/issues/:id/tags requires tagId", async () => {
     const { projectId, statusId } = await createProjectAndStatus(database, "Tag Validation Project");
     const issueRes = await app.request("/api/issues", {
