@@ -46,6 +46,14 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "board_strategy",
   "board_autodrive",
   "start_mode",
+  // Quiesce (#1108): `project_quiesced_<id>` is a maintenance-window HOLD distinct from Start
+  // Mode — `start_mode=manual` deliberately still allows explicit relaunch (its own docstring
+  // says so), which is not a true stop for a promotion/base-health window. Quiesce is enforced
+  // at the workspace-create/launch chokepoints themselves, so it holds regardless of which path
+  // (monitor, cron, conductor, or a human) tried to start a workspace. `project_quiesce_reason_
+  // <id>` is the operator-supplied reason shown on the banner and in the refusal message.
+  "project_quiesced",
+  "project_quiesce_reason",
   "board_conductor",
   "conductor_cron",
   "verify_script",

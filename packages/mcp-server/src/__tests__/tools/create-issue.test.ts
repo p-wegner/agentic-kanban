@@ -55,4 +55,31 @@ describe("create_issue tool", () => {
     expect(data.projectId).toBe(projectId);
     expect(data.projectName).toBe("habitloop");
   });
+
+  // #1108 gap 3: a ticket must be able to be born already tagged, so filing one for a
+  // maintenance window doesn't have to win a race against the monitor.
+  it("applies requested tags, creating an unknown tag on the fly", async () => {
+    const { invoke, db } = setupTool(registerCreateIssue);
+    const { projectId } = await seedProject(db);
+
+    const data = parseResult(await invoke({ title: "held for maintenance", projectId, tags: ["no-auto-start", "brand-new"] }));
+
+    const rows = await db.select({ name: schema.tags.name })
+      .from(schema.issueTags)
+      .innerJoin(schema.tags, eq(schema.issueTags.tagId, schema.tags.id))
+      .where(eq(schema.issueTags.issueId, data.id));
+    expect(rows.map((r) => r.name).sort()).toEqual(["brand-new", "no-auto-start"]);
+  });
+
+  it("noAutoStart:true is shorthand for tags:['no-auto-start'], reusing an existing tag case-insensitively", async () => {
+    const { invoke, db } = setupTool(registerCreateIssue);
+    const { projectId } = await seedProject(db);
+    await db.insert(schema.tags).values({ id: "seeded-tag", name: "No-Auto-Start", color: null, createdAt: new Date().toISOString() });
+
+    const data = parseResult(await invoke({ title: "shorthand", projectId, noAutoStart: true }));
+
+    const rows = await db.select().from(schema.issueTags).where(eq(schema.issueTags.issueId, data.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].tagId).toBe("seeded-tag");
+  });
 });
