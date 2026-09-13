@@ -28,6 +28,7 @@ import { invokeClaudePrompt } from "./claude-cli.service.js";
 import { NotFoundError } from "../errors/index.js";
 import { createDrive } from "../repositories/drive.repository.js";
 import * as repo from "../repositories/issue-ai.repository.js";
+import { getEpicChildrenWithStatus } from "../repositories/drive-dashboard.repository.js";
 import { getProjectRepoNames } from "../repositories/repo.repository.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { nextIssueNumber } from "../repositories/issue-number.repository.js";
@@ -480,6 +481,9 @@ export interface DecomposeEpicResult {
    *  implementation sibling they depended on (a test belongs in the same vertical slice as
    *  the code it covers, never its own ticket). Empty when nothing was coalesced. */
   coalescedTestOnly: string[];
+  /** The epic's existing `parent_of` children (#1131), for the modal to show alongside the
+   *  proposal — empty when the epic has none (byte-for-byte today's behaviour in that case). */
+  existingChildren: Array<{ issueNumber: number; title: string; statusName: string }>;
 }
 
 export async function decomposeEpic(
@@ -493,6 +497,11 @@ export async function decomposeEpic(
   // Check if already decomposed (has parent_of dependencies)
   const existingChildDeps = await repo.getParentOfDependency(issueId, database);
   const alreadyDecomposed = existingChildDeps.length > 0;
+
+  // #1131: load the epic's existing children (with status) so a re-decomposition is TOLD
+  // what already exists and can propose only new, non-overlapping work — instead of the
+  // prompt seeing only the epic title/description and duplicating shipped work.
+  const existingChildren = await getEpicChildrenWithStatus(issueId, database);
 
   // Get recent closed issues for context
   const doneStatusIds = await repo.getTerminalStatusIds(projectId, [...TERMINAL_STATUS_NAMES], database);
@@ -520,6 +529,13 @@ export async function decomposeEpic(
 
   const repoField = isMultiRepo ? `, "targetRepo": "<repo name from the list, or omit>"` : "";
 
+  // #1131: name the epic's existing children + status so a re-decomposition proposes only
+  // NEW, non-overlapping work instead of duplicating what already exists (esp. Done work).
+  // Empty when the epic has no children yet — prompt is then byte-for-byte today's.
+  const existingChildrenContext = existingChildren.length > 0
+    ? `\nThis epic already has these child tickets:\n${existingChildren.map(c => `  - #${c.issueNumber} ${c.title} [${c.statusName}]`).join("\n")}\nPropose ONLY new work not already covered by the tickets above — do not duplicate a child that already exists, especially one that is Done. If the epic's remaining scope is already fully covered by the existing children, return an EMPTY "children" array.`
+    : "";
+
   const prompt = `You are a software project planner. You must decompose a large epic ticket into smaller, focused child tickets that can each be completed in a single agent session (typically 1-4 hours of work each).
 
 Project: ${projectName}
@@ -528,6 +544,7 @@ Epic description:
 ${targetIssue.description || "(no description)"}
 ${recentContext}
 ${repoContext}
+${existingChildrenContext}
 
 Right-sizing (READ FIRST):
 - If the epic is ALREADY completable in a single agent session — a single function, a single route/endpoint, a single file, or a change under ~50 lines — DO NOT invent sub-tasks. Return an EMPTY "children" array. Over-splitting is expensive: every child ticket re-pays a fixed cost (a fresh worktree, the agent re-orienting in the repo, re-running tests, a separate commit), so fragmenting small work multiplies cost for no benefit.
@@ -610,6 +627,7 @@ Respond ONLY with valid JSON, no markdown, no explanation:
     repos: isMultiRepo ? projectRepos : [],
     tooSmallToDecompose: floored.tooSmallToDecompose,
     coalescedTestOnly: floored.coalescedTestOnly,
+    existingChildren,
   };
 }
 
