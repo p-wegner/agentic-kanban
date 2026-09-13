@@ -10,6 +10,7 @@ function resetStore() {
     focusMode: false,
     statusFilterId: null,
     milestoneFilterId: null,
+    driveFilterId: null,
     createdDateFilter: null,
     showBlocked: false,
     showStaleOnly: false,
@@ -53,6 +54,13 @@ describe("boardFilterStore", () => {
     expect(next.showStaleOnly).toBe(true);
     useBoardFilterStore.getState().toggleShowBlocked();
     expect(useBoardFilterStore.getState().showBlocked).toBe(false);
+  });
+
+  it("sets and clears the drive filter", () => {
+    useBoardFilterStore.getState().setDriveFilterId("drive-1");
+    expect(useBoardFilterStore.getState().driveFilterId).toBe("drive-1");
+    useBoardFilterStore.getState().setDriveFilterId(null);
+    expect(useBoardFilterStore.getState().driveFilterId).toBeNull();
   });
 
   it("toggles tag filters immutably and clears them", () => {

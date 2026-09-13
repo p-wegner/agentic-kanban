@@ -21,6 +21,8 @@ export const MONITOR_ACTION_NAMES = [
   "generate_tickets",
   "auto_contract",
   "auto_contract_suggest",
+  "auto_decompose",
+  "auto_decompose_right_sized",
 ] as const;
 
 export type MonitorActionName = (typeof MONITOR_ACTION_NAMES)[number];

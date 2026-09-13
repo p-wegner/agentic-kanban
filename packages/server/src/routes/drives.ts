@@ -107,13 +107,18 @@ export function createDrivesRoute(database: Database) {
     return c.json(result, 201);
   });
 
-  // POST /api/projects/:projectId/drives/:id/plan
+  // POST /api/projects/:projectId/drives/:id/plan[?decompose=1]
   // Creates no children — the caller decomposes the returned epic through the normal
   // /decompose -> /decompose/confirm pair. Idempotent: a drive that already has a meta issue
   // gets it back untouched, since a second epic would silently split the drive's scope.
+  // `?decompose=1` (#1133) additionally fetches the /decompose proposal for that epic in the
+  // same request, so the UI can open straight to the reviewable preview; a plain call makes
+  // no model call, unchanged.
   // Seed a target-only drive's meta/epic issue from its target, and link the drive to it.
   router.post("/:projectId/drives/:id/plan", async (c) => {
-    const result = await planDrive(c.req.param("projectId"), c.req.param("id"), database);
+    const result = await planDrive(c.req.param("projectId"), c.req.param("id"), database, {
+      decompose: queryFlag(c, "decompose"),
+    });
     return c.json(result, result.existing ? 200 : 201);
   });
 

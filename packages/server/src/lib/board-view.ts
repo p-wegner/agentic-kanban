@@ -48,6 +48,12 @@ export interface BoardIssueTag {
   color: string | null;
 }
 
+/** The drive owning an issue (from `buildDriveMap`), or absent when there is none. */
+export interface BoardIssueDrive {
+  id: string;
+  target: string;
+}
+
 /** The workspace-summary fields the terminal-status override and the no-driver check read. */
 export interface BoardWorkspaceSummaryShape {
   main?: {
@@ -85,6 +91,9 @@ export interface BuildBoardColumnsParams<
   workspaceSummaryMap: Map<string, TSummary>;
   blockedMap: Map<string, BlockedInfo>;
   issueTagMap: Map<string, BoardIssueTag[]>;
+  /** Drive ownership per issue id (from `buildDriveMap`). Optional — callers that don't
+   *  care about drives (tests, secondary projections) simply omit it. */
+  driveMap?: Map<string, BoardIssueDrive>;
   /** Reference time in ms (already resolved from any nowOverride). */
   now: number;
   /** Backlog staleness threshold in days. */
@@ -117,6 +126,7 @@ export function buildBoardColumns<
     workspaceSummaryMap,
     blockedMap,
     issueTagMap,
+    driveMap,
     now,
     staleDays,
     inProgressStaleDays,
@@ -223,6 +233,7 @@ export function buildBoardColumns<
         return {
           ...rest,
           tags: issueTagMap.get(i.id) ?? [],
+          drive: driveMap?.get(i.id) ?? null,
           ...(checklist && checklist.length > 0 ? { checklist } : {}),
         };
       }),

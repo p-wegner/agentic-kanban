@@ -3,11 +3,13 @@ import type { FormEvent } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { DriveScopePlanner } from "./DriveScopePlanner.js";
 import { EpicDecomposerModal } from "./EpicDecomposerModal.js";
+import { resolveDriveTierGraphView } from "../lib/driveScopeView.js";
 import { useApiResource } from "../hooks/useApiResource.js";
 import { STATUS_COLORS, ACCENT, BRAND } from "../lib/chartColors.js";
 import { showToast } from "../lib/toast.js";
 import type { DriveDashboard as DriveDashboardData, DriveExtendResult, DecomposableIssue } from "@agentic-kanban/shared";
 import { startStaggeredPoll } from "../lib/pollScheduler.js";
+import { FOCUS_DRIVE_EVENT, type FocusDriveDetail } from "../lib/navigateView.js";
 import { Icon, Spinner } from "./Icon.js";
 
 /**
@@ -153,6 +155,17 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
     [fetchDrives, fetchDashboard],
   );
 
+  // #1135: a drive badge elsewhere on the board (IssueCard) names a specific drive to
+  // jump to — select it once the list has loaded (or immediately if it already has).
+  useEffect(() => {
+    function handleFocusDrive(e: Event) {
+      const driveId = (e as CustomEvent<FocusDriveDetail>).detail?.driveId;
+      if (driveId) setSelectedDriveId(driveId);
+    }
+    window.addEventListener(FOCUS_DRIVE_EVENT, handleFocusDrive);
+    return () => window.removeEventListener(FOCUS_DRIVE_EVENT, handleFocusDrive);
+  }, []);
+
   const maxTierWidth = useMemo(() => {
     if (!data) return 0;
     return Math.max(1, ...data.tiers.map((t) => t.issues.length));
@@ -211,7 +224,8 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
 
   if (!data) return null;
 
-  const { drive, progress, tiers, stalls, lastCascade, buildClean } = data;
+  const { drive, progress, tiers, selfScoped, stalls, lastCascade, buildClean } = data;
+  const tierGraphView = resolveDriveTierGraphView(tiers.length, selfScoped);
   const statusBadge =
     drive.status === "active"
       ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
@@ -339,15 +353,29 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
             Dependency tier graph
           </span>
         </div>
-        {tiers.length === 0 ? (
+        {tierGraphView.showEmptyScopePlanner && (
           <DriveScopePlanner
             projectId={projectId}
             driveId={drive.id}
             hasMetaIssue={drive.metaIssueId != null}
             onScoped={fetchDashboard}
           />
-        ) : (
+        )}
+        {tierGraphView.showTierGraph && (
           <DriveTierGraph tiers={tiers} maxTierWidth={maxTierWidth} onIssueClick={onIssueClick} />
+        )}
+        {tierGraphView.showDecomposeDoor && (
+          <div className="border-t border-gray-200 dark:border-gray-700">
+            <div className="px-3 pt-3 text-xs text-amber-700 dark:text-amber-400 font-medium">
+              This drive is planned but not yet decomposed — its epic has no child tickets yet.
+            </div>
+            <DriveScopePlanner
+              projectId={projectId}
+              driveId={drive.id}
+              hasMetaIssue={drive.metaIssueId != null}
+              onScoped={fetchDashboard}
+            />
+          </div>
         )}
       </div>
 
