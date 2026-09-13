@@ -19,6 +19,8 @@ const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: str
   // popover crashed. The union is shared now, so omitting a new action fails typecheck.
   auto_contract:         { label: "Auto-contracted",      color: "text-teal-600 dark:text-teal-400" },
   auto_contract_suggest: { label: "Suggested contract",   color: "text-teal-600 dark:text-teal-400" },
+  auto_decompose:             { label: "Auto-decomposed epic",    color: "text-purple-600 dark:text-purple-400" },
+  auto_decompose_right_sized: { label: "Epic marked right-sized", color: "text-purple-600 dark:text-purple-400" },
 };
 
 export function SubToggle({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (v: boolean) => void }) {

@@ -54,6 +54,16 @@ export interface UpdateIssueRequest {
   workflowTemplateId?: string | null;
 }
 
+/**
+ * The drive that owns an issue, derived from the drive's meta/epic issue's
+ * dependency subtree (the same resolution `drive-dashboard.service.ts` uses).
+ * Null when the issue is outside any active drive's scope.
+ */
+export interface IssueDrive {
+  id: string;
+  target: string;
+}
+
 export interface IssueWithStatus {
   id: string;
   issueNumber: number | null;
@@ -99,6 +109,12 @@ export interface IssueWithStatus {
    */
   lastAutoStartSkipReason?: string | null;
   lastAutoStartSkipAt?: string | null;
+  /**
+   * #1135: the drive that owns this issue (via the epic-subtree derivation), or
+   * null when it is outside any active drive's scope. Derived, never stored —
+   * see `buildDriveMap` in `services/drive-membership.service.ts`.
+   */
+  drive?: IssueDrive | null;
 }
 
 export interface MilestoneResponse {

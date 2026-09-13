@@ -631,6 +631,10 @@ Respond ONLY with valid JSON, no markdown, no explanation:
   };
 }
 
+// The persisted "right-sized" decomposer verdict (#1134) lives in `decompose-verdict.service.ts`
+// — this file was at the 1000-line god-module ceiling, and the verdict has no other dependency
+// on anything else here.
+
 export interface ConfirmDecomposeInput {
   issueId: string;
   projectId: string;

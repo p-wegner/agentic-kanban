@@ -5,7 +5,7 @@ import { showToast } from "../lib/toast.js";
 import { priorityLabel, priorityTraits, type IssuePriority } from "../lib/priorityTraits.js";
 import { Icon, Spinner } from "./Icon.js";
 
-interface ChildProposal {
+export interface ChildProposal {
   tempId: string;
   title: string;
   description: string;
@@ -16,13 +16,19 @@ interface ChildProposal {
   targetRepo?: string | null;
 }
 
-interface DependencyProposal {
+export interface DependencyProposal {
   fromTempId: string;
   toTempId: string;
   type: string;
 }
 
-interface DecomposeProposal {
+/**
+ * Exported so `DriveScopePlanner` (#1133) can type the proposal it gets back from
+ * `POST .../plan?decompose=1` and hand it straight to this modal via `initialProposal` —
+ * the one client-side shape for a decompose proposal, rather than a second declaration
+ * that could drift from this one.
+ */
+export interface DecomposeProposal {
   children: ChildProposal[];
   dependencies: DependencyProposal[];
   alreadyDecomposed: boolean;
@@ -41,14 +47,23 @@ interface EpicDecomposerModalProps {
   issue: DecomposableIssue;
   onClose: () => void;
   onConfirmed: () => void;
+  /**
+   * A proposal already fetched by the caller (#1133 — `POST .../plan?decompose=1` returns one
+   * alongside the seeded epic), so the modal opens straight at the editable preview instead of
+   * behind a second "Generate Decomposition" click. Omitted for every other opener, which is
+   * unchanged: it starts at `idle` and fetches on demand.
+   */
+  initialProposal?: DecomposeProposal;
 }
 
-export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecomposerModalProps) {
-  const [stage, setStage] = useState<"idle" | "loading" | "preview" | "confirming">("idle");
-  const [proposal, setProposal] = useState<DecomposeProposal | null>(null);
-  const [children, setChildren] = useState<ChildProposal[]>([]);
-  const [dependencies, setDependencies] = useState<DependencyProposal[]>([]);
-  const [repos, setRepos] = useState<string[]>([]);
+export function EpicDecomposerModal({ issue, onClose, onConfirmed, initialProposal }: EpicDecomposerModalProps) {
+  const [stage, setStage] = useState<"idle" | "loading" | "preview" | "confirming">(
+    initialProposal ? "preview" : "idle",
+  );
+  const [proposal, setProposal] = useState<DecomposeProposal | null>(initialProposal ?? null);
+  const [children, setChildren] = useState<ChildProposal[]>(initialProposal?.children ?? []);
+  const [dependencies, setDependencies] = useState<DependencyProposal[]>(initialProposal?.dependencies ?? []);
+  const [repos, setRepos] = useState<string[]>(initialProposal?.repos ?? []);
   const [error, setError] = useState<string | null>(null);
   const [regenerating, setRegenerating] = useState(false);
 
@@ -65,6 +80,17 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate decomposition");
       setStage("idle");
+    }
+  }
+
+  async function handleAcceptRightSized() {
+    try {
+      await apiPost(`/api/issues/${issue.id}/decompose/too-small`, { projectId: issue.projectId });
+      showToast("Marked right-sized — ticket stays startable as-is", "success");
+      onConfirmed();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to record right-sized verdict");
     }
   }
 
@@ -178,11 +204,18 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
           {(stage === "preview" || stage === "confirming") && (
             <>
               {proposal?.tooSmallToDecompose && (
-                <div className="bg-sky-50 border border-sky-200 rounded-md px-3 py-2 text-xs text-sky-800">
-                  ✓ This ticket already looks right-sized for a single agent session — splitting it would add
-                  worktree/orientation overhead for little benefit. You can close this dialog and work the
-                  ticket as-is; if it's a drive's target, the drive already counts it as its one unit of work.
-                  You can still proceed below if you disagree.
+                <div className="bg-sky-50 border border-sky-200 rounded-md px-3 py-2 text-xs text-sky-800 space-y-2">
+                  <p>
+                    ✓ This ticket already looks right-sized for a single agent session — splitting it would add
+                    worktree/orientation overhead for little benefit. If it's a drive's target, the drive already
+                    counts it as its one unit of work. You can still proceed below if you disagree.
+                  </p>
+                  <button
+                    onClick={handleAcceptRightSized}
+                    className="text-xs font-medium text-sky-700 hover:text-sky-900 underline"
+                  >
+                    Keep as one ticket (mark right-sized)
+                  </button>
                 </div>
               )}
               {proposal?.coalescedTestOnly && proposal.coalescedTestOnly.length > 0 && (

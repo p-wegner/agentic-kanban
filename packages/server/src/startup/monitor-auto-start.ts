@@ -21,7 +21,7 @@
  * as this file already did for `monitor-start-holds.ts` and `wip-capacity.repository.ts`.
  */
 import { suggestBranchName } from "@agentic-kanban/shared";
-import { drives, issueDependencies, issues, projectStatuses } from "@agentic-kanban/shared/schema";
+import { drives, issueDependencies, issues, issueTags, projectStatuses, tags } from "@agentic-kanban/shared/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { createBoardEvents } from "../services/board-events.js";
@@ -77,9 +77,11 @@ import type { AutoStartSkipInfo, AutoStartSkipReason } from "./monitor-auto-star
  * A drive/epic META issue must NOT be auto-started as a builder (#824, #664). You don't *build* the
  * meta — its children are the buildable leaves; the meta is driven to Done by the drive lifecycle
  * once the children land. Auto-starting it spawns a stray builder workspace that drifts to In
- * Review and inflates WIP (starving real leaves). Two robust signals: (1) it's a first-class Drive
- * record's metaIssueId (#799), or (2) it is a parent of other issues via a parent_of/child_of edge.
- * (REST-seeded epics with neither still rely on the `no-auto-start` tag the drive skill applies.)
+ * Review and inflates WIP (starving real leaves). Signals: (1) it's a first-class Drive record's
+ * metaIssueId (#799), (2) it is a parent of other issues via a parent_of/child_of edge, or (3) it
+ * carries the `epic` tag with neither of the above (a REST-seeded, never-decomposed epic, #1134) —
+ * UNLESS it also carries `right-sized`, the decomposer's persisted "already single-session-sized"
+ * verdict (#1074), which is the one childless-epic case that must stay startable.
  */
 export async function isDriveOrEpicMeta(issueId: string, database = db): Promise<boolean> {
   try {
@@ -89,7 +91,13 @@ export async function isDriveOrEpicMeta(issueId: string, database = db): Promise
     const childEdges = await database.select({ id: issueDependencies.id }).from(issueDependencies)
       .where(sql`(${issueDependencies.issueId} = ${issueId} AND ${issueDependencies.type} = 'parent_of') OR (${issueDependencies.dependsOnId} = ${issueId} AND ${issueDependencies.type} = 'child_of')`)
       .limit(1);
-    return childEdges.length > 0;
+    if (childEdges.length > 0) return true;
+
+    const issueTagNames = await database.select({ name: tags.name }).from(issueTags)
+      .innerJoin(tags, eq(issueTags.tagId, tags.id))
+      .where(eq(issueTags.issueId, issueId));
+    const names = new Set(issueTagNames.map((t) => t.name));
+    return names.has("epic") && !names.has("right-sized");
   } catch {
     return false; // best-effort: a detection error must never block auto-start
   }
