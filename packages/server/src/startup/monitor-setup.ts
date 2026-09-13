@@ -8,6 +8,7 @@ import { createBoardEvents } from "../services/board-events.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { runAutoStart } from "./monitor-auto-start.js";
 import { runAutoContract } from "./monitor-contract.js";
+import { runAutoDecompose } from "./monitor-decompose.js";
 import { runCompoundingSetup } from "./monitor-compounding-setup.js";
 import { runTestImpactMapRefresh } from "./monitor-test-impact-map.js";
 import { runBacklogEmptyStrategy } from "./monitor-backlog.js";
@@ -515,6 +516,12 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       // monitor would otherwise auto-start work for (same gate as runAutoStart below).
       setPhase("auto-contract");
       await runAutoContract(prefMap, { boardEvents, allowProject: shouldAutoStartProject, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
+      // Auto-decompose (#1134): a planned-but-undecomposed drive/epic ticket is work for the
+      // decomposer, not for a builder — advance it (split into children, or mark right-sized)
+      // BEFORE the fan-out so a drive planned hands-off fans out instead of stalling, under the
+      // same allowProject gate as everything else in this hands-off pipeline.
+      setPhase("auto-decompose");
+      await runAutoDecompose({ boardEvents, allowProject: shouldAutoStartProject, projectIds: cyclePlan.toRun, database: db, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
       // Compounding "setup once" pass (#127): a project that has accumulated enough merged
       // work gets its harness scaffolded ONCE, between tickets, so every later builder
       // inherits it instead of re-discovering the environment. Runs BEFORE the fan-out so a

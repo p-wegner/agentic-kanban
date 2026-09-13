@@ -1,13 +1,23 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { randomUUID } from "node:crypto";
 import { createTestDb } from "./helpers/test-db.js";
 import { isDriveOrEpicMeta, notDriveOrEpicMetaSql } from "../startup/monitor-auto-start.js";
-import { projects, projectStatuses, issues, drives, issueDependencies } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, drives, issueDependencies, tags, issueTags } from "@agentic-kanban/shared/schema";
 import { and, eq } from "drizzle-orm";
 
 const now = "2026-06-15T00:00:00.000Z";
 
 async function seedIssue(db: ReturnType<typeof createTestDb>["db"], projectId: string, statusId: string, id: string, num: number) {
   await db.insert(issues).values({ id, issueNumber: num, title: `Issue ${num}`, statusId, projectId, createdAt: now, updatedAt: now });
+}
+
+async function tagIssue(db: ReturnType<typeof createTestDb>["db"], issueId: string, tagName: string) {
+  const existing = await db.select({ id: tags.id }).from(tags).where(eq(tags.name, tagName)).limit(1);
+  const tagId = existing[0]?.id ?? randomUUID();
+  if (existing.length === 0) {
+    await db.insert(tags).values({ id: tagId, name: tagName, isBuiltin: true, createdAt: now });
+  }
+  await db.insert(issueTags).values({ id: randomUUID(), issueId, tagId });
 }
 
 describe("isDriveOrEpicMeta (#824) — a drive/epic meta must not be auto-started as a builder", () => {
@@ -63,5 +73,41 @@ describe("isDriveOrEpicMeta (#824) — a drive/epic meta must not be auto-starte
     const ids = rows.map((r) => r.id).sort();
     // epic (parent_of) and leaf-b (drive meta) are excluded; only the plain leaf-a remains.
     expect(ids).toEqual(["leaf-a"]);
+  });
+
+  describe("#1134 — an epic-tagged issue with NO children and NO drive row", () => {
+    it("true: a freshly planned, never-decomposed drive epic must not be auto-started", async () => {
+      await seedIssue(db, projectId, statusId, "undecomposed-epic", 1);
+      await tagIssue(db, "undecomposed-epic", "epic");
+      expect(await isDriveOrEpicMeta("undecomposed-epic", db)).toBe(true);
+    });
+
+    it("false: a decomposer verdict of right-sized makes it startable again (#1074)", async () => {
+      await seedIssue(db, projectId, statusId, "right-sized-epic", 1);
+      await tagIssue(db, "right-sized-epic", "epic");
+      await tagIssue(db, "right-sized-epic", "right-sized");
+      expect(await isDriveOrEpicMeta("right-sized-epic", db)).toBe(false);
+    });
+
+    it("false: a non-epic childless issue is unaffected (regression)", async () => {
+      await seedIssue(db, projectId, statusId, "ordinary-todo", 1);
+      expect(await isDriveOrEpicMeta("ordinary-todo", db)).toBe(false);
+    });
+
+    it("notDriveOrEpicMetaSql excludes the undecomposed epic but keeps the right-sized one and an ordinary issue (real DB)", async () => {
+      await seedIssue(db, projectId, statusId, "undecomposed-epic", 1);
+      await tagIssue(db, "undecomposed-epic", "epic");
+
+      await seedIssue(db, projectId, statusId, "right-sized-epic", 2);
+      await tagIssue(db, "right-sized-epic", "epic");
+      await tagIssue(db, "right-sized-epic", "right-sized");
+
+      await seedIssue(db, projectId, statusId, "ordinary-todo", 3);
+
+      const rows = await db.select({ id: issues.id }).from(issues)
+        .where(and(eq(issues.projectId, projectId), notDriveOrEpicMetaSql()));
+      const ids = rows.map((r) => r.id).sort();
+      expect(ids).toEqual(["ordinary-todo", "right-sized-epic"]);
+    });
   });
 });
