@@ -21,7 +21,7 @@
  * `getWorkspaceById` / `getIssueDescription`.
  */
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
-import { readUsageLimitStats, type UsageLimitKind } from "@agentic-kanban/shared/lib/session-stats-blob";
+import { parseSessionStatsBlob, readUsageLimitStats, type UsageLimitKind } from "@agentic-kanban/shared/lib/session-stats-blob";
 import { getAllPreferencesCached } from "../../repositories/preferences.repository.js";
 import { getIssueDescription } from "../../repositories/issue.repository.js";
 import { getWorkspaceById } from "../../repositories/workspace-reads.repository.js";
@@ -89,14 +89,45 @@ const USAGE_LIMIT_PROVIDERS: UsageLimitProviderConfig[] = [
   },
 ];
 
+/** The executor id a usage-limit `kind` is expected to have been launched under. */
+const EXECUTOR_BY_KIND: Record<UsageLimitKind, string> = { codex: "codex", claude: "claude-code" };
+
+/**
+ * The launch's OWN recorded provider (`launch.provider`, written once at session insert and
+ * preserved verbatim through every exit-time stats merge — see session-lifecycle.ts). `null`
+ * when the blob predates that field or is unreadable, in which case the mismatch check below
+ * cannot run and is skipped rather than refusing a legitimate old row.
+ */
+function launchExecutor(statsJson: string | null | undefined): string | null {
+  const stats = parseSessionStatsBlob(statsJson);
+  const launch = stats?.launch && typeof stats.launch === "object" ? stats.launch as Record<string, unknown> : null;
+  return typeof launch?.provider === "string" ? launch.provider : null;
+}
+
 /**
  * Which provider (if any) this session's stats blob says hit its usage limit. ONE read of the
  * discriminant picks the config (#542), instead of asking each provider's predicate whether the
  * blob is its own. `undefined` = not a usage-limit exit at all, i.e. the dispatcher carries on.
+ *
+ * #1139: a `rateLimitKind` that contradicts the session's OWN recorded launch provider (a
+ * `codex-usage-limit` on a session launched as `claude-code`) is refused rather than honoured —
+ * that contradiction is itself proof the kind was misclassified (usage-limit detection ran
+ * against the wrong provider's messages, or matched free-form output), never a real quota hit.
  */
 export function findUsageLimitProvider(statsJson: string | null | undefined): UsageLimitProviderConfig | undefined {
   const usageLimit = readUsageLimitStats(statsJson);
-  return usageLimit ? USAGE_LIMIT_PROVIDERS.find((cfg) => cfg.kind === usageLimit.kind) : undefined;
+  if (!usageLimit) return undefined;
+  const cfg = USAGE_LIMIT_PROVIDERS.find((c) => c.kind === usageLimit.kind);
+  if (!cfg) return undefined;
+  const executor = launchExecutor(statsJson);
+  if (executor && executor !== EXECUTOR_BY_KIND[usageLimit.kind]) {
+    console.warn(
+      `[workflow] refusing ${usageLimit.kind}-usage-limit classification: session launched as '${executor}', ` +
+      `not '${EXECUTOR_BY_KIND[usageLimit.kind]}' — treating as not a usage-limit exit`,
+    );
+    return undefined;
+  }
+  return cfg;
 }
 
 /** Extract the "try again / resets at X" hint persisted on the rate-limited session's stats. */
