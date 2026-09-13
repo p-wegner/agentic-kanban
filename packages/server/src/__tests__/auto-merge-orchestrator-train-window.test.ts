@@ -4,6 +4,7 @@ import { issues, projectStatuses, projects, workspaces, preferences } from "@age
 import { createTestDb } from "./helpers/test-db.js";
 import { createAutoMergeOrchestrator } from "../startup/auto-merge-orchestrator.js";
 import { invalidatePreferencesCache } from "../repositories/preferences.repository.js";
+import { runUnderVerifyChainSemaphore } from "../services/verify-chain-semaphore.js";
 
 async function seedProject(db: ReturnType<typeof createTestDb>["db"]) {
   const now = new Date().toISOString();
@@ -190,5 +191,56 @@ describe("auto-merge orchestrator train batching window (#905)", () => {
     expect(released).toEqual([wsB]);
     expect(orchestrator.state.trainWindows.get(projectA)?.pendingIds).toEqual([wsA]);
     expect(orchestrator.state.trainWindows.has(projectB)).toBe(false);
+  });
+
+  describe("gate-busy hold (#1138)", () => {
+    // Reproduces the livelock: a project on `train_max_size_<id>=1` (e.g. `iterate`/`standard`
+    // posture) sees a lone ready workspace and would normally release it instantly. If a verify
+    // chain is already running on the box, releasing straight into it wastes the run — the
+    // in-flight gate finishes later, discovers the base moved (#243), and its own verdict is
+    // discarded. `applyTrainWindow` must hold the release while `verifyChainSemaphoreActive()`
+    // is nonzero, exactly as it already holds below max_size/before max_wait.
+
+    it("holds a max-size-1 release while a verify chain is active", async () => {
+      const { db } = createTestDb();
+      const { projectId, statusId } = await seedProject(db);
+      await db.insert(preferences).values({
+        key: `train_max_size_${projectId}`,
+        value: "1",
+        updatedAt: new Date().toISOString(),
+      });
+      invalidatePreferencesCache();
+      const ws = await seedReadyWorkspace(db, projectId, statusId);
+
+      const orchestrator = createAutoMergeOrchestrator({ database: db });
+      const rows = await orchestrator.findCompletedWorkspaceRows();
+
+      let releasedWhileBusy: string[] | undefined;
+      await runUnderVerifyChainSemaphore(async () => {
+        releasedWhileBusy = await orchestrator.applyTrainWindow(rows, new Date().toISOString());
+      });
+
+      expect(releasedWhileBusy).toEqual([]);
+      expect(orchestrator.state.trainWindows.get(projectId)?.pendingIds).toEqual([ws]);
+    });
+
+    it("releases a max-size-1 batch immediately once the verify chain finishes (no artificial hold on an idle box)", async () => {
+      const { db } = createTestDb();
+      const { projectId, statusId } = await seedProject(db);
+      await db.insert(preferences).values({
+        key: `train_max_size_${projectId}`,
+        value: "1",
+        updatedAt: new Date().toISOString(),
+      });
+      invalidatePreferencesCache();
+      const ws = await seedReadyWorkspace(db, projectId, statusId);
+
+      const orchestrator = createAutoMergeOrchestrator({ database: db });
+      const rows = await orchestrator.findCompletedWorkspaceRows();
+
+      // No verify chain running — must release exactly as before (#905's original behaviour).
+      const released = await orchestrator.applyTrainWindow(rows, new Date().toISOString());
+      expect(released).toEqual([ws]);
+    });
   });
 });
