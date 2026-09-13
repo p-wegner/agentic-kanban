@@ -15,7 +15,7 @@ import {
   type ConductorSchedule,
 } from "../services/conductor-schedule.service.js";
 import { validateCronExpression } from "@agentic-kanban/shared/lib/cron-utils";
-import { deriveCapacityHold, resolveMachineCapacity } from "@agentic-kanban/shared/lib/machine-capacity";
+import { deriveCapacityHold, readDiskHealthEvents, resolveMachineCapacity } from "@agentic-kanban/shared/lib/machine-capacity";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { requireProject } from "../services/require-project.js";
@@ -61,10 +61,14 @@ function memoizeRecent<T>(read: () => Promise<T>, ttlMs: number): () => Promise<
  */
 export function createBoardMonitorRoute(
   database: Database,
-  deps: { readMachineCapacity?: typeof resolveMachineCapacity } & Omit<AutopilotStatusDeps, "database" | "readMachineCapacity"> = {},
+  deps: {
+    readMachineCapacity?: typeof resolveMachineCapacity;
+    readDiskHealth?: typeof readDiskHealthEvents;
+  } & Omit<AutopilotStatusDeps, "database" | "readMachineCapacity"> = {},
 ) {
   const router = createRouter();
   const readMachineCapacity = deps.readMachineCapacity ?? resolveMachineCapacity;
+  const readDiskHealth = deps.readDiskHealth ?? readDiskHealthEvents;
   const readCapacityForAutopilot = memoizeRecent(() => readMachineCapacity(), AUTOPILOT_CAPACITY_TTL_MS);
 
   router.get("/:id/orchestrator", async (c) => {
@@ -88,7 +92,10 @@ export function createBoardMonitorRoute(
     const tunables = { ...resolved.tunables, activeAgentsTarget: wip.limit };
     const runtime = resolveProjectRuntimeConfig({ projectId, prefMap });
     const capacity = deriveCapacityHold(await readMachineCapacity(), { maxNewStartsPerCycle: tunables.maxNewStartsPerCycle });
-    return c.json({ tunables, source: resolved.source, startPolicy: runtime.startPolicy, capacity });
+    // #1127: same cheap, fail-open shape as `capacity` above — `null` when the host isn't
+    // Windows or the event log can't be read, never a thrown error and never a false alarm.
+    const diskHealth = await readDiskHealth().catch(() => null);
+    return c.json({ tunables, source: resolved.source, startPolicy: runtime.startPolicy, capacity, diskHealth });
   });
 
   // #1102: one glance for the toolbar Autopilot chip — Start Mode, running vs. limit, how many

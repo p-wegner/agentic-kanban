@@ -15,6 +15,7 @@
 import type { MonitorActionName } from "../../lib/monitor-action.js";
 import type { MonitorTunables } from "../../lib/strategy-objective-file.js";
 import type { RISK_POSTURES } from "../../lib/risk-posture.js";
+import type { DiskHealthSignal } from "../../lib/machine-capacity.js";
 
 // Re-exported so consumers take it from the wire-contract barrel. The client used to
 // deep-import lib/strategy-objective-file for it, which drags a Node-builtin chain into
@@ -139,6 +140,11 @@ export interface ResolvedTunablesResponse {
   tunables: MonitorTunables;
   source: "strategy" | "prefs";
   startPolicy?: StartPolicy;
+  /**
+   * Host disk-health signal (#1127), alongside the CPU/RAM `capacity` read above: `null` on a
+   * non-Windows host or when the event log can't be read, never a false alarm.
+   */
+  diskHealth?: DiskHealthSignal | null;
 }
 
 /**
