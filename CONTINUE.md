@@ -3,225 +3,115 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
-## 2026-09-12 — #1102 Autopilot chip on `feature/ak-1102-autopilot-chip` (unmerged, verified)
+## 2026-09-13 — board at ZERO open; `stable-20260913` live at `3d2d681710`
 
-**What the branch does (operator decision 2026-09-11).** WIP has ONE meaning and one home.
-Column WIP limits are gone; the per-project limit is the Strategy Bullseye's `activeAgentsTarget`.
-`wip_limit_<id>` and `nudge_wip_limit` are retired, so writing either returns 422.
-`resolveWipLimit` is override -> Bullseye -> default. `resolveAutoMerge(prefMap, projectId)` is the
-one auto-merge answer, used by exit-workflow and monitor-setup. `decideStartSlots` is the slot
-arithmetic BOTH monitor loops share, and `GET /api/projects/:id/autopilot` replays it. The toolbar
-Monitor button is now the Autopilot chip: mode, running/limit, next-cycle starts or the one hold,
-and auto-merge; its panel holds Start Mode, the Agents stepper, the auto-merge switch, starts per
-cycle, and a link to the full Monitor.
+**The board is empty.** 1102 issues: 1092 Done, 10 Cancelled, **0 non-terminal**. The last to
+land were #1108, #1110, #1111, #1113, #1116 and #1118. #1117 is Cancelled — it was filed on a
+misdiagnosis of mine (below).
 
-**Promote-time effect on the operated DB.** A one-shot startup migration moves every
-`wip_limit_<projectId>` into that project's Bullseye and then deletes the row. The pref wins over
-an existing target; the legacy global `nudge_wip_limit` fills only an existing Bullseye that has no
-target; a malformed Bullseye is never overwritten and keeps its row (logged). It is idempotent and
-writes through `setPreferenceChecked`, so `objective.md` regenerates (and auto-commits) for
-Conductor repos. Stored `wip_limit_<statusId>` COLUMN rows are not migrated and simply stop being
-read. Exercised only in tests and against a scratch `AGENTIC_KANBAN_DIR`. Log tag to look for on
-the promoted board: `[wip-limit-migration]`.
+**`stable-20260913` is live on 3001** at `3d2d681710` (pid 31664), smoke passed (2 projects,
+board status answered), rollback target `stable-20260912`. Master and `origin/master` are IN
+SYNC — the 78-commit unpushed backlog the previous standing section described is gone.
 
-**Verified (2026-09-12, worktree `autopilot-1102-verify`):**
-- `pnpm typecheck` exit 0 (5 packages).
-- `pnpm check:arch` exit 0 — 0 errors, 30 pre-existing `startup-bypasses-repositories` warnings.
-- Server vs master, sharded (the package exceeds a single 580s window): shard 1/2 **791 suites /
-  2264 tests passed, 0 failed**; shard 2/2 **835 suites / 2581 tests, 2579 passed, 1 skipped**.
-- Client vs master: **221 suites / 547 tests passed, 0 failed**.
-- The 5 ratchets this change disturbed are green: `console-tag-ratchet`, `pref-polarity-ratchet`,
-  `codex-skills-parity` (20 tests), the client `function-nloc-ratchet` (11), and
-  `wip-limit-migration` (12).
-- `autopilot-route.test.ts` pins PARITY: the route's `willStartNextCycle` equals the launches
-  `runAutoStart` attempts, across 11 seeded states.
-- Chip states screenshotted with playwright-cli against a worktree dev server on a scratch DB:
-  manual, autopilot-with-slots, WIP-full hold, Conductor, the panel's steppers changing the
-  numbers, and ~400px.
+**What blocked the promotion for hours.** `pnpm promote` refused repeatedly with `unverified`:
+the base-health sweep returned no verdict in ~90s. The chain — `ak-1118`'s worktree had an EMPTY
+`node_modules`, so its pre-merge gate died in ~4s (`ERROR: chalk.Instance is not a
+constructor`); the monitor retried it; each retry queued a GATE-class waiter, which under #978
+preempts the background base-health probe; the probe yielded mid-run and recorded `unverified`.
+The empty `node_modules` was **NTFS corruption in the shared pnpm store**:
+`~/.pnpm-store/v10/files/80/a0605c37…` lists but cannot be stat'ed, and `rm` refuses it with
+"File exists" on a file `ls` can see.
 
-**Two defects found in my own work by the 400px check, both fixed:**
-- The chip's panel anchored to the chip (`right-0`/`left-0`), and the chip sits mid-toolbar, so a
-  19rem panel rendered at `left:-77` in a 400px viewport — the left third unreachable. Below `sm`
-  the panel is now a viewport-anchored sheet (`fixed inset-x-2 bottom-2`, scrollable); `sm+` still
-  hangs it under the chip (measured: 304px, left-aligned to the chip).
-- Below `sm` the chip used to render only after the toolbar's `⋯` "Board actions" toggle (the same
-  gating the old Monitor button had). **DECIDED and DONE (operator, 2026-09-12): the chip is
-  PERMANENT on the bar at every width**, outside the sm-gated cluster, like `VoiceInboxButton` —
-  it answers "will work start on its own?", which must not need a menu. The run-now (▶) button is
-  its sibling and travels with it: measured at 400px the chip is 53px (compact label `● 0/4`), ▶
-  is 24px at x=231-255, and the page does NOT overflow horizontally (scrollWidth 400 =
-  clientWidth 400); the panel opens fully on-screen (384px, left 8, right 392). Rationale lives in
-  `CHIP_PLACEMENT_NOTE` above `BoardToolbar` (the nloc ring counts in-function comment lines and
-  is shrink-only, so it could not live inside the component).
+**Second occurrence in two days** — the archived 2026-09-11 pass hit the same damage and
+quarantined `files-<xx>-corrupt-2026-09-11`. Same workaround: `files/80` is parked as
+`files/80.corrupt-20260913` (renaming the DIRECTORY works where deleting the child does not),
+which makes pnpm re-fetch. **`chkdsk C: /f` is still the operator's, and is now overdue.**
 
-**Not done, deliberately:**
-- The prediction ignores the contention gate, the harness budget and reopen retries.
-- `nextCycleAt` is always null from the route; the chip reads the next run time from
-  monitor-status.
-- The chip does not predict the Conductor; it reports that the Conductor is driving.
-- A stored `nudge_wip_limit` still feeds the DEFAULT path, reported as source `default`.
+**Then master went RED — honestly, which was progress.** With the probe unblocked the sweep
+produced a verdict instead of a timeout: **1 failed of 8,907** —
+`always-run-guard-runtime-ratchet`. Tonight's `072f643ffb` added the #1113 guard with a BARE
+`@gate:always-run` marker, so it joined the unconditional floor at the assumed 3,000 ms and
+pushed it to 569,748 ms against a 567,000 baseline. Fixed in `3d2d681710`: the guard declares
+`when:packages/server/src/startup/**` (the one tree it walks), and `BASELINE_TOTAL_MS` moves
+567,000 -> 570,000 with a **Seventh disclosed movement**.
 
-**Commit shape to know about:** `39c43d547b` ("chore: scaffold agent guards and onboarding")
-carries the #1102 `CLAUDE.md` edit under the board scaffold's subject — `pnpm db:setup` registered
-the worktree as a project and its scaffold committed the dirty tree. `5536261839` is a WIP commit
-(the chip, banked so an interrupted run could not lose it). Neither is rewritten; HEAD is coherent.
+**`when:` ALONE does not clear that ratchet** — it measures the WORST case (an unknown change
+set forces every guard, preconditions ignored). The fifth and sixth movements say so about
+themselves; I re-derived it the hard way after a "fix" that moved the number by zero.
 
-**Next:** review, then merge. Filed #1103 (a worktree dev server on a scratch DB still runs the
-machine-global sweeps) and #1105 (the operated board's monitor resource sweep killed unrelated
-vitest/dev trees under `.worktrees/`, which is what made four earlier verification runs die with a
-misleading exit 0).
-## 2026-09-11 (evening) — `stable-20260911` promoted at `37e19756b6`; #1094 merged after it
+**Tried and rejected:**
+- **`--force-sweep`.** There WAS a verdict (red), so forcing would have promoted known-broken
+  code and poisoned the next honest promotion. Never needed: #1044's logic recognised that the
+  red verdict described a sha which was no longer the tip, and requested a fresh sweep itself.
+- **Re-running `pnpm promote` after the harness killed its wrapper for low memory.**
+  `promote.mjs` survives as an ORPHAN and keeps working (measured twice). A second concurrent
+  run would tag, fast-forward and restart the operated board underneath the first. Read
+  `promote.log`; do not relaunch.
+- **Editing `auto_merge_disabled_<id>` to quiet the failing gate.** Prepared, then unnecessary
+  once the store was repaired. No preference was changed this session.
 
-**Stable runs `stable-20260911` = `37e19756b6`.** That commit includes #1087, #1089, #1090, #1092,
-#1093, #1095 and #1096. The smoke test passed (health 200, 2 projects, board status answered);
-the rollback target is `stable-20260910`. **#1094 (`a13dbaf2d0`) merged AFTER the promote and is
-not live yet.** Master is at `a13dbaf2d0`.
+**#1117 is Cancelled as a misdiagnosis**, with a correction comment on the ticket. "Merge POST
+hangs forever" was my own `curl --max-time` being shorter than a ~759s gate; `http=000` was the
+client, not the board. A real merge POST measured **369,583 ms**.
 
-**Why the promote needed a fresh sweep first.** The first dry run would have promoted
-`7858da2470`, last night's swept sha, so none of today's work would have gone live. No sweep had
-recorded all day: the base probe kept YIELDING its verify slot to queued merge gates, twice after
-10+ minutes of work, 2 of 3 consecutive yields. What unblocked it: re-arm the
-`auto_merge_disabled` kill switch so no gate queued, then join the running probe. It came back
-green at the tip in ~14 min. The kill switch is **disarmed again** (`"false"`, verified).
-**Lesson:** on a busy merge day, "promote" silently means "promote last night"; read the
-dry run's `promote sha` line before running it for real.
+**The livelock worth never repeating:** 34 gate verdicts were DISCARDED under #243 (branch or
+base moved during the run), including one 4,380s run that PASSED. The cause was my own rebases
+and agent turns moving branches while their gates ran. Stopping all of it let #1108, #1110 and
+#1111 land unaided.
 
-**#1095 is live but NOT yet exercised.** #1094's gate ran `stage=verify` only, with no smoke
-boot. The `[db] opening … (source: DB_URL)` line in the board log is the promoted board's own
-start. The first gate that runs a smoke check on `stable-20260911` is the real verification: its
-server must not resolve `~/.agentic-kanban/kanban.db`.
-
-**Filed #1098 (medium, `no-auto-start`).** `recordGateOutcome` → `buildRecordArgs` passes
-`--selected`/`--failed` comma-joined on the command line. A day-wide base sweep exceeds Windows'
-32,767-char limit, fails `spawn ENAMETOOLONG`, and silently drops the base-sweep row from the
-test-impact ledger (the #954 corpus). #967 moved only `select --union` to stdin. The fix needs the
-test-impact tool's `record` to accept stdin lists too. That tool is its own repo, hence
-`no-auto-start`.
-
-**Open, in order:** #1097 (timeline remainder B, `no-auto-start`; #1096 has landed, so it may start
-now), #1098. `chkdsk C: /f` is still the operator's. CONTINUE.md is far past its ~150-line cap;
-an archive pass is due (move the 2026-09-10 and older passes).
-
-## 2026-09-11 (later) — timeline reconciled (#1090 → #1093); the smoke check boots a second board on the OPERATED DB (#1095)
-
-**Timeline is landed and the four overlapping branches are resolved.** Operator decision: land
-#1090 first, then reconcile. The two merges were #1089 (Runners view, `1a6dde61ea`), then #1090
-(`bb535143cc`). #1093 (`0bcc524416`) then ported what #1088 and #1091 had and #1090 lacked.
-#1086/#1088/#1091 are **Cancelled as superseded**, each with a comment. Their workspaces and
-branches are deleted; the commits survive at `refs/kanban/archive/ak-{1086,1088,1091}-2026-09-11`.
-The auto-merge kill switch (`auto_merge_disabled_<agentic-kanban>`) was armed for the whole
-sequence to enforce that order. It is **disarmed again** (`"false"`, verified).
-
-**#1086 is NOT fully done: its remainder is carried forward, not dropped.** A read-only
-classification at the #1093 tip found 5 of 36 findings done, 10 partial and 21 open.
-- **#1096** (high): correctness. Most important, **P1-1 bar clipping was never wired in**:
-  `clipSpan` exists and is tested but has no production caller. #1093 skipped P1-1 on MY ticket's
-  false claim that #1090 covered it. The monitor started #1096.
-- **#1097** (medium): UX / a11y / perf / polish. Tagged `no-auto-start`, because it edits the same
-  two files as #1096. Start it after #1096 lands.
-
-**#1095 (high, filed): the pre-merge smoke check is a hazard and hides its own errors.**
-- `pre-merge-gate.service.ts:733` calls `runSmokeCheck` with no env, and `smoke-check.ts` spawns
-  with `{...process.env}`. The smoke boot is a FULL board against `~/.agentic-kanban/kanban.db`:
-  monitor loop, startup reconcilers, session reattach. The verify half has been isolated since
-  #231; the smoke half never was.
-- Its failure message uses the log HEAD (`slice(0, 400)`), which is always the pnpm notice plus
-  the banner. Both #1090 (exited, code 1) and #1093 (60s timeout) were withheld with no visible
-  cause. Both passed on a plain retry, i.e. environmental.
-- **Tried and rejected: booting a worktree's `pnpm dev` by hand to diagnose it.** That does the
-  same thing (home-fallback, operated DB): I got a second monitor cycle and a reattached live
-  session for ~100s. No damage, only because the kill switch was armed and WIP was capped. Until
-  #1095 lands, point `AGENTIC_KANBAN_DIR` at a temp dir if you must boot a worktree.
-
-**Still not live:** nothing merged today (#1087, #1089, #1090, #1092, #1093) reaches the operated
-board until `pnpm promote`. `chkdsk C: /f` is still the operator's.
-
-## 2026-09-11 — merges stuck: a corrupt pnpm store, and a gate that could not say so (#1092)
-
-**#1086/#1087 sat In Review with the merge parked.** Their pre-merge gate failed on
-`depcruise` "konnte nicht gefunden werden", classified `verify_infra_missing`, and backed off 2h.
-The code was never the problem. **Every worktree's `pnpm install -r` had failed**: the shared
-store `~/.pnpm-store/v10` holds entries that are listed but cannot be stat'ed ("Die Datei oder
-das Verzeichnis ist beschädigt"). That is NTFS damage — `chkdsk` is the real fix, and it is the
-operator's to run. Worked around by quarantining the affected shards
-(`files-<xx>-corrupt-2026-09-11`), which makes pnpm re-fetch them.
-
-**#1092 (landed here, direct on master) makes the next occurrence visible:**
-- #169's install retry now recognises German cmd.exe "command not found".
-- Gate summaries drop pnpm's `"pnpm" field` deprecation notice, which had headlined every failure.
-- A failed PARALLEL setup now emits the butler `workspace_error` event, naming the real
-  `ERR_PNPM_*` line (`setupFailureHeadline`).
-
-Verified: the two changed test files (30/30), server `tsc`, `pnpm check:arch`.
-
-`pnpm gate:always-run` came back **1198/1200**:
-- `function-nloc-ratchet` was mine: `createWorkspaceCreateService` grew 644 → 654. It is fixed in
-  `567add1cf8` (notification moved to a module-level helper) and re-verified.
-- `legacy-temp-prefixes` timed out at 300s under load: installs plus 4 gate workers, with
-  `%TEMP%` at ~78k entries. Run alone it passes in 10s.
-
-The full gate was NOT re-run after the fix. Say so rather than imply it.
-
-**Not done, and not solved by #1092:** the stable board runs `stable-20260910`, so none of this is
-live until `pnpm promote`. A worktree whose setup failed still needs its install re-run by hand.
-
-## Where this stands (2026-09-11)
+## Where this stands (2026-09-13)
 
 **Read this section before the dated passes above.** Each dated pass describes the state at the
 time it was written. Standing state lives here.
 
-### Verified now (2026-09-11, evening)
+### Verified now (2026-09-13, ~04:25 local)
 
-- **Branch `master`, working tree clean.** It is **78 commits ahead of `origin/master`** (GitHub
-  `p-wegner/agentic-kanban`) per the local `origin/master` ref, which was last updated 2026-09-08,
-  and 0 behind. Nothing from 2026-09-08 onward is pushed. The `gitlab` remote points at
-  `pizza-und-ai-code/agentic-code-review`, a DIFFERENT project, not a mirror.
-- **Stable is `stable-20260911` = `37e19756b6`, live on 3001.** The promote smoke test passed.
-  Rollback target: `stable-20260910`. Master is ahead of it by #1094 (`a13dbaf2d0`) plus docs
-  commits.
-- **Last full base sweep: green at `37e19756b6`** (2026-09-11 16:13 UTC). It is the sweep that
-  authorized the promotion.
-- **Board (agentic-kanban): two open tickets, both tagged `no-auto-start`.**
-  - **#1097**: timeline remainder B. Its prerequisite #1096 has landed, so it may start; remove the
-    tag to let the monitor take it.
-  - **#1098**: test-impact `record` fails with `ENAMETOOLONG`. It needs the test-impact tool (its
-    own repo) to accept stdin lists first.
-  - #1069 and #1070 from the previous standing list are Done.
-- **Auto-merge kill switch** `auto_merge_disabled_d1c5d9c1-…` = `"false"` (verified after the
-  #1094 merge).
+- **`master` = `3d2d681710`, working tree clean, IN SYNC with `origin/master`.**
+- **Stable is `stable-20260913` = `3d2d681710`, live on 3001** (pid 31664); `/health` ok with
+  all three checks green. Rollback target: `stable-20260912`.
+- **Last full base sweep: GREEN at `3d2d681710`** (2026-09-13 02:23 UTC) — the sweep that
+  authorized this promotion. It ran ~28 min.
+- **Board: ZERO non-terminal tickets.** #1097, #1098, #1102, #1103, #1105, #1113 and #1118 are
+  Done; #1117 Cancelled.
+- **Auto-merge kill switch** `auto_merge_disabled_d1c5d9c1-…` = `"false"`, untouched all session.
 
 ### Next steps, in order
 
-1. **Verify #1095 live.** The first gate on `stable-20260911` that reaches the smoke stage must
-   boot its server on a throwaway data dir, not `~/.agentic-kanban/kanban.db`. #1094's gate ran
-   verify only, so this is still unobserved.
-2. **#1097**: remove `no-auto-start` when the timeline work should continue.
-3. **#1098**: file or make the tool-side stdin change in the test-impact tool's repo, then the
-   board half.
-4. **Operator: decide the push** (78 commits, fast-forward). The Linux CI run is still unrun;
-   every sweep here is Windows-only.
-5. **Operator: run `chkdsk C: /f`** (admin, reboot). The pnpm store's corrupt shards are
-   quarantined as `files-<xx>-corrupt-2026-09-11`, not repaired.
+1. **Operator: `chkdsk C: /f`** (admin, reboot). Two pnpm-store corruptions in two days, plus
+   `ak-1117-2` unreadable at the NTFS level. Quarantined, never repaired:
+   `files-<xx>-corrupt-2026-09-11` and `files/80.corrupt-20260913` — both safe to delete after.
+2. **`%TEMP%` holds ~82,000 entries**, reaper capped at 500/run. Far under the gate's 250,000
+   floor (`DEFAULT_TEMP_ENTRY_CAP`), so it blocks nothing — but #1056 is what the far end looks
+   like. `node scripts/sweep-temp-dirs.mjs` + `scripts/sweep-loose-test-db-files.mjs`.
+3. **The Seventh movement should SHRINK at the next `pnpm test:durations` capture** — the #1113
+   guard costs 4 ms of test time against its 3,000 ms placeholder.
+4. **The Linux CI run is still unrun**; every sweep here is Windows-only.
 
-### Open, unexplained — chase this if it recurs
+### Unfiled findings from this session
 
-**The stable board died silently on 2026-09-08 at 06:30 UTC**: no error, no `[fatal]`, no
-shutdown line (details in the archived 2026-09-08 pass). It has not recurred since. It stayed up
-through this whole session until `pnpm promote` restarted it deliberately.
+Nothing was filed after the #1117 misfire, so these are recorded here rather than dropped:
+- Three fix-and-merge sessions launched for ONE workspace within two seconds (00:34:48/:49/:50).
+- A base sweep whose only failed suite is package-relative records NO test-impact outcome at all
+  ("an incomplete failed set would understate the miss rate"), so a red sweep can leave the #954
+  corpus with a hole. Seen live on the red sweep at `89aa325fd8`.
+- `[test-impact] record args too long (~59,380 chars for 961 suites)` still silently drops
+  outcomes. #1098 is Done for the ENAMETOOLONG spawn; verify whether it covers this path too.
 
 ### Which `[db] opening` line is normal
 
 The stable board logs `[db] opening C:\Users\pwegner\.agentic-kanban\kanban.db (source: DB_URL)`;
 that is expected. A **worktree** server logging the same file with `(source: home-fallback)` has
-reached the operated DB. That is the #1095 hazard, not a normal path. The old "home-fallback is
-normal" flag (archived) predates the two-board split.
+reached the operated DB — the #1095 hazard, not a normal path.
 
 ## Archive
 
-Passes older than 2026-09-11 have been moved **verbatim, newest first** into
+Passes older than 2026-09-13 have been moved **verbatim, newest first** into
 [`docs/archive/CONTINUE-archive.md`](docs/archive/CONTINUE-archive.md). Nothing is re-verified or
 edited on the way in, so each pass records what that session believed at the time. The archive
 holds:
+- **2026-09-11..09-12:** the #1102 Autopilot-chip pass, `stable-20260911`, the timeline
+  reconciliation (#1090 → #1093), the first pnpm-store corruption (#1092), and the stale
+  `## Where this stands (2026-09-11)` standing section.
 - **2026-09-08..09-10:** the overnight board death and #1056, the target-only drive scope fix
   (#1071-#1073), the NTFS pnpm store corruption behind `verify_infra_missing`, the Jira-epic
   passes, #1085 and the monitor race, and the stale 2026-09-08 standing section.
