@@ -288,7 +288,9 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "cli/commands/session.ts::registerSessionCommand": 569,
   // 564 -> 536 (#992): the PATCH field `if` chain became the table in
   // `services/project-update-fields.ts`, which is also what derives the recognized-key set.
-  "services/project.service.ts::createProjectService": 536,
+  // 536 -> 538 (#1135): getBoard batches buildDriveMap alongside blocked/tag map builds so
+  // the board build can attach each issue's owning drive.
+  "services/project.service.ts::createProjectService": 538,
   // 529 -> 534, a DELIBERATE raise (#835). `mergeWorkspace` used to return the lock's
   // `Promise<unknown>`; it now declares `MergeWorkspaceResult` and publishes through
   // `publishMergeResponse`, and the lock-reuse path answers CONFLICT instead of handing back

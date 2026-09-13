@@ -53,3 +53,18 @@ export interface FocusIssueDetail {
 export function requestIssueFocus(detail: FocusIssueDetail): void {
   window.dispatchEvent(new CustomEvent<FocusIssueDetail>(FOCUS_ISSUE_EVENT, { detail }));
 }
+
+// #1135: the drive badge on an issue card links to that drive's dashboard. The card has
+// no reach into DriveDashboard's own selection state (prop-drilling it through every
+// board-column layer for one badge is not worth it), so it navigates to the Drive view
+// AND names the drive the same way requestIssueFocus names an issue.
+export const FOCUS_DRIVE_EVENT = "kanban:focus-drive";
+
+export interface FocusDriveDetail {
+  driveId: string;
+}
+
+export function requestDriveFocus(driveId: string): void {
+  requestViewNavigation("drive");
+  window.dispatchEvent(new CustomEvent<FocusDriveDetail>(FOCUS_DRIVE_EVENT, { detail: { driveId } }));
+}

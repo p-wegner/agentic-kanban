@@ -18,7 +18,9 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "components/Layout.tsx::Layout": 691,
   "components/ButlerView.tsx::ButlerView": 693,
   "components/CreateWorkspaceForm.tsx::CreateWorkspaceForm": 694,
-  "routes/BoardPage.tsx::BoardPage": 625,
+  // 625 -> 637 (#1135): boardDriveOptions derivation + driveFilterId wiring for the new
+  // drive board filter.
+  "routes/BoardPage.tsx::BoardPage": 637,
   // master shrank this one; #972 never touched it.
   "components/WorkspaceCard.tsx::WorkspaceCard": 570,
   // #972 moved the dependency-wave concern out to `hooks/useDependencyWave.ts`.
@@ -36,7 +38,8 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "components/AllWorkspacesPanel.tsx::AllWorkspacesPanel": 438,
   "components/CreateIssuePanel.tsx::CreateIssuePanel": 353,
   "components/ButlerViewBody.tsx::ButlerViewBody": 415,
-  "components/BoardPageView.tsx::BoardPageView": 410,
+  // 410 -> 411 (#1135): threads boardDriveOptions into BoardFilterMenu.
+  "components/BoardPageView.tsx::BoardPageView": 411,
   "components/TableView.tsx::TableView": 416,
   "components/AddProjectModal.tsx::AddProjectModal": 408,
   "components/PluginActionPanes.tsx::PluginLoopPane": 406,
