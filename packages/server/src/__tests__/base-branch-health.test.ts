@@ -117,6 +117,8 @@ describe("describeRedBaseAttribution (#491)", () => {
         message: "verify_script failed (exit 1): TypeError somewhere",
         createdAt: new Date().toISOString(),
         failedSuites: null,
+        flaky: null,
+        contention: null,
       },
     });
     expect(attribution).not.toBeNull();
@@ -138,6 +140,8 @@ describe("describeRedBaseAttribution (#491)", () => {
         message: null,
         createdAt: new Date().toISOString(),
         failedSuites: null,
+        flaky: null,
+        contention: null,
       },
     });
     expect(attribution).toBeNull();
@@ -160,6 +164,8 @@ describe("describeRedBaseAttribution (#491)", () => {
         message: "still broken",
         createdAt: new Date().toISOString(),
         failedSuites: null,
+        flaky: null,
+        contention: null,
       },
     });
     expect(attribution).not.toBeNull();
