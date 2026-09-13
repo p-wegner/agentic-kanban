@@ -198,6 +198,18 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
             {installing ? "Installing…" : "Install"}
           </button>
         </div>
+        <p className="text-[11px] text-gray-400 dark:text-gray-500">
+          Don't have a path? The{" "}
+          <a
+            href={getViewRoutePath("plugin-views")}
+            className="text-brand-600 dark:text-brand-400 hover:underline"
+            data-testid="plugin-install-open-marketplace"
+          >
+            Marketplace
+          </a>{" "}
+          in the Plugins board view lists the plugins bundled with the board plus any in your{" "}
+          <span className="font-mono">marketplace.json</span> catalog, installable in one click.
+        </p>
       </div>
 
       {/* Installed plugins */}

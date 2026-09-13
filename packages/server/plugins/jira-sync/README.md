@@ -129,7 +129,7 @@ node tools/sync/push.mjs --dry-run     # what the outbox would send
 # offline, no network and no real credentials required:
 node tools/selftest.mjs --self-test
 JIRA_SYNC_SELF_TEST=1 node tools/bootstrap.mjs
-node --test __tests__
+node --test __tests__/*.test.mjs   # the bare directory form fails on Node 24
 ```
 
 Every command prints one JSON object to stdout and exits non-zero on failure — safe to run from

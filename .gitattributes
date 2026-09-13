@@ -39,10 +39,11 @@ scripts/** text eol=lf
 packages/desktop/src-tauri/src/main.rs text eol=lf
 packages/mcp-server/src/index.ts text eol=lf
 packages/server/bin/*.js text eol=lf
-packages/server/plugins/**/tools/*.mjs text eol=lf
-# Repo-root plugin checkouts (#1077 added the first one). Their `tools/` trees nest, so the
-# glob is `**` on both sides rather than a copy of the packaged-plugin rule above.
-plugins/**/tools/**/*.mjs text eol=lf
+# Bundled plugins. `**` on BOTH sides: a plugin's `tools/` tree nests (jira-sync has
+# `tools/sync/*.mjs`), which a single-`*` tail would miss. There is deliberately no
+# repo-root `plugins/**` rule any more — a bundled plugin lives here or it is not bundled
+# (see docs/plugin-development.md, "Bundling a plugin with the board").
+packages/server/plugins/**/tools/**/*.mjs text eol=lf
 packages/server/scripts/*.mjs text eol=lf
 packages/server/src/cli/index.ts text eol=lf
 packages/server/src/scaffold/*.js text eol=lf

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { readWritebacks, writebacksPath, writeJsonFile } from "../tools/lib/state.mjs";
 
 test("readWritebacks: defaults to an empty map when no writebacks file exists yet", () => {
-  const dir = mkdtempSync(join(tmpdir(), "jira-sync-writebacks-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-jira-sync-writebacks-"));
   try {
     assert.deepEqual(readWritebacks(dir), { keys: {} });
   } finally {
@@ -15,7 +15,7 @@ test("readWritebacks: defaults to an empty map when no writebacks file exists ye
 });
 
 test("readWritebacks: round-trips a written key map", () => {
-  const dir = mkdtempSync(join(tmpdir(), "jira-sync-writebacks-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-jira-sync-writebacks-"));
   try {
     writeJsonFile(writebacksPath(dir), { keys: { "board-issue-1": "ENG-42" } });
     assert.deepEqual(readWritebacks(dir), { keys: { "board-issue-1": "ENG-42" } });

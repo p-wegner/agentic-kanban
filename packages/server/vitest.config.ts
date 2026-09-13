@@ -54,7 +54,14 @@ export default defineConfig({
     // the first fork and once after the last. NOT a setupFile: that runs per fork and would let
     // concurrent sweeps reap a sibling fork's live fixture. See the module header.
     globalSetup: [path.resolve(__dirname, "src/__tests__/helpers/reap-fixture-child-servers.ts")],
-    exclude: ["**/dist/**", "**/node_modules/**"],
+    // `plugins/**`: bundled plugins are standalone `node --test` trees, not vitest suites
+    // (`import { test } from "node:test"`). Vitest's default include matches their
+    // `__tests__/*.test.mjs`, and this `exclude` REPLACES vitest's defaults — so without this
+    // line a bundled plugin's tests are collected into the server run and fail there while
+    // passing under `node --test`. Latent until #1122 moved the first plugin WITH tests
+    // (jira-sync) in here; app-runner has none. Run them with
+    // `node --test packages/server/plugins/<slug>/__tests__`.
+    exclude: ["**/dist/**", "**/node_modules/**", "plugins/**"],
     testTimeout,
     hookTimeout: testTimeout,
     pool: "forks",
