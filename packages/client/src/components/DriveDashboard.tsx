@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { DriveScopePlanner } from "./DriveScopePlanner.js";
+import { EpicDecomposerModal } from "./EpicDecomposerModal.js";
 import { resolveDriveTierGraphView } from "../lib/driveScopeView.js";
 import { useApiResource } from "../hooks/useApiResource.js";
 import { STATUS_COLORS, ACCENT, BRAND } from "../lib/chartColors.js";
 import { showToast } from "../lib/toast.js";
-import type { DriveDashboard as DriveDashboardData } from "@agentic-kanban/shared";
+import type { DriveDashboard as DriveDashboardData, DriveExtendResult, DecomposableIssue } from "@agentic-kanban/shared";
 import { startStaggeredPoll } from "../lib/pollScheduler.js";
 import { FOCUS_DRIVE_EVENT, type FocusDriveDetail } from "../lib/navigateView.js";
 import { Icon, Spinner } from "./Icon.js";
@@ -63,6 +64,8 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showStartForm, setShowStartForm] = useState(false);
+  const [showExtendForm, setShowExtendForm] = useState(false);
+  const [decomposerIssue, setDecomposerIssue] = useState<DecomposableIssue | null>(null);
 
   // Load the drive list and default to the most recent active drive.
   const fetchDrives = useCallback(() => {
@@ -132,6 +135,25 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
     const poll = startStaggeredPoll(fetchDashboard, POLL_MS);
     return () => poll.stop();
   }, [selectedDriveId, fetchDashboard, drives]);
+
+  // Extending a drive (#1132) appends the addendum to the epic and reactivates a completed
+  // drive; the next step is the extension-aware decomposer on that epic, so open it right
+  // away rather than making the operator find the epic and click Decompose separately.
+  const handleExtended = useCallback(
+    (result: DriveExtendResult) => {
+      setShowExtendForm(false);
+      showToast(
+        result.reactivated
+          ? `Drive reactivated — Increment ${result.increment} added`
+          : `Increment ${result.increment} added`,
+        "success",
+      );
+      fetchDrives();
+      fetchDashboard();
+      setDecomposerIssue(result.issue);
+    },
+    [fetchDrives, fetchDashboard],
+  );
 
   // #1135: a drive badge elsewhere on the board (IssueCard) names a specific drive to
   // jump to — select it once the list has loaded (or immediately if it already has).
@@ -238,6 +260,14 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
         </span>
         <div className="ml-auto flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
           <span>Started {fmtTime(drive.startedAt)}</span>
+          {(drive.status === "active" || drive.status === "completed") && (
+            <button
+              onClick={() => setShowExtendForm((v) => !v)}
+              className="px-2 py-1 rounded-md text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+            >
+              Extend this drive
+            </button>
+          )}
           <button
             onClick={() => setShowStartForm((v) => !v)}
             className="px-2 py-1 rounded-md text-xs font-medium text-white"
@@ -263,6 +293,26 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
         />
       )}
 
+      {showExtendForm && (
+        <ExtendDriveForm
+          projectId={projectId}
+          driveId={drive.id}
+          onExtended={handleExtended}
+          onCancel={() => setShowExtendForm(false)}
+        />
+      )}
+
+      {decomposerIssue && (
+        <EpicDecomposerModal
+          issue={decomposerIssue}
+          onClose={() => setDecomposerIssue(null)}
+          onConfirmed={() => {
+            setDecomposerIssue(null);
+            fetchDashboard();
+          }}
+        />
+      )}
+
       <p className="text-sm text-gray-600 dark:text-gray-400 -mt-1">{drive.target}</p>
 
       {preflight && !preflight.ready && drive.status === "active" && (
@@ -276,69 +326,7 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
       )}
 
       {/* Progress + build-clean cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Progress */}
-        <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-          <div className="flex items-baseline justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-              Progress
-            </span>
-            <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-              {progress.done}/{progress.total}
-              <span className="ml-1 text-sm font-normal text-gray-400">done</span>
-            </span>
-          </div>
-          <div className="mt-3 h-2.5 w-full rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all"
-              style={{ width: `${progress.percentDone}%`, backgroundColor: ACCENT }}
-            />
-          </div>
-          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
-            <span><strong className="text-gray-900 dark:text-gray-100">{progress.inProgress}</strong> in progress</span>
-            <span><strong className="text-gray-900 dark:text-gray-100">{progress.inReview}</strong> in review</span>
-            <span><strong className="text-gray-900 dark:text-gray-100">{progress.todo}</strong> to do</span>
-            <span className="ml-auto font-medium" style={{ color: ACCENT }}>{progress.percentDone}%</span>
-          </div>
-        </div>
-
-        {/* Build-clean status */}
-        <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-            Build-clean status
-          </span>
-          <div className="mt-3 flex flex-col gap-2 text-sm">
-            <StatusRow
-              ok={buildClean.coldCloneGateEnabled}
-              label="Cold-clone build gate"
-              okText="enabled"
-              offText="not enabled"
-            />
-            <StatusRow
-              ok={buildClean.verifyGateConfigured}
-              label="Verify gate"
-              okText="configured"
-              offText="missing"
-            />
-            {buildClean.lastBuildEvent ? (
-              <div className="mt-1 rounded bg-amber-50 dark:bg-amber-900/20 px-2 py-1.5 text-xs text-amber-800 dark:text-amber-300">
-                <span className="font-medium">Last build/verify event: </span>
-                {buildClean.lastBuildEvent.issueNumber != null && (
-                  <span className="font-mono">#{buildClean.lastBuildEvent.issueNumber} </span>
-                )}
-                {buildClean.lastBuildEvent.summary}
-                <span className="ml-1 text-amber-600/70 dark:text-amber-400/60">
-                  ({fmtTime(buildClean.lastBuildEvent.createdAt)})
-                </span>
-              </div>
-            ) : (
-              <span className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                No recent build/verify events.
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
+      <DriveProgressCards progress={progress} buildClean={buildClean} />
 
       {/* Last cascade event */}
       <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 flex items-center gap-3">
@@ -374,39 +362,7 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
           />
         )}
         {tierGraphView.showTierGraph && (
-          <div className="p-3 flex flex-col gap-2 overflow-x-auto">
-            {tiers.map(({ tier, issues }) => (
-              <div key={tier} className="flex items-stretch gap-2">
-                <div className="shrink-0 w-16 flex items-center justify-center text-xs font-semibold text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-800/60 rounded">
-                  Tier {tier}
-                </div>
-                <div
-                  className="grid gap-2 flex-1"
-                  style={{ gridTemplateColumns: `repeat(${maxTierWidth}, minmax(120px, 1fr))` }}
-                >
-                  {issues.map((issue) => (
-                    <button
-                      key={issue.id}
-                      onClick={() => onIssueClick?.(issue.id)}
-                      className="text-left rounded border border-gray-200 dark:border-gray-700 px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors"
-                      style={{ borderLeftWidth: 3, borderLeftColor: statusColor(issue.statusName) }}
-                      title={issue.title}
-                    >
-                      <div className="text-[11px] font-mono text-gray-400">
-                        {issue.issueNumber != null ? `#${issue.issueNumber}` : "—"}
-                      </div>
-                      <div className="text-xs text-gray-800 dark:text-gray-200 line-clamp-2">
-                        {issue.title}
-                      </div>
-                      <div className="mt-0.5 text-[10px]" style={{ color: statusColor(issue.statusName) }}>
-                        {issue.statusName}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
+          <DriveTierGraph tiers={tiers} maxTierWidth={maxTierWidth} onIssueClick={onIssueClick} />
         )}
         {tierGraphView.showDecomposeDoor && (
           <div className="border-t border-gray-200 dark:border-gray-700">
@@ -424,55 +380,190 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
       </div>
 
       {/* Stalls / obstacle feed */}
-      <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700">
+      <DriveStallList stalls={stalls} onIssueClick={onIssueClick} />
+    </div>
+  );
+}
+
+/** Progress + build-clean status cards (extracted to keep `DriveDashboard` itself short). */
+function DriveProgressCards({
+  progress,
+  buildClean,
+}: {
+  progress: DriveDashboardData["progress"];
+  buildClean: DriveDashboardData["buildClean"];
+}) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Progress */}
+      <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+        <div className="flex items-baseline justify-between">
           <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-            Current stalls
+            Progress
           </span>
-          <span className="ml-auto text-xs font-medium text-gray-400 dark:text-gray-500 bg-gray-200 dark:bg-gray-700 rounded-full px-2 py-0.5">
-            {stalls.length}
+          <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+            {progress.done}/{progress.total}
+            <span className="ml-1 text-sm font-normal text-gray-400">done</span>
           </span>
         </div>
-        {stalls.length === 0 ? (
-          <div className="px-3 py-6 text-sm text-center text-gray-400 dark:text-gray-500">
-            No stalls — every open issue is unblocked. 🎉
+        <div className="mt-3 h-2.5 w-full rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all"
+            style={{ width: `${progress.percentDone}%`, backgroundColor: ACCENT }}
+          />
+        </div>
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
+          <span><strong className="text-gray-900 dark:text-gray-100">{progress.inProgress}</strong> in progress</span>
+          <span><strong className="text-gray-900 dark:text-gray-100">{progress.inReview}</strong> in review</span>
+          <span><strong className="text-gray-900 dark:text-gray-100">{progress.todo}</strong> to do</span>
+          <span className="ml-auto font-medium" style={{ color: ACCENT }}>{progress.percentDone}%</span>
+        </div>
+      </div>
+
+      {/* Build-clean status */}
+      <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+        <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          Build-clean status
+        </span>
+        <div className="mt-3 flex flex-col gap-2 text-sm">
+          <StatusRow
+            ok={buildClean.coldCloneGateEnabled}
+            label="Cold-clone build gate"
+            okText="enabled"
+            offText="not enabled"
+          />
+          <StatusRow
+            ok={buildClean.verifyGateConfigured}
+            label="Verify gate"
+            okText="configured"
+            offText="missing"
+          />
+          {buildClean.lastBuildEvent ? (
+            <div className="mt-1 rounded bg-amber-50 dark:bg-amber-900/20 px-2 py-1.5 text-xs text-amber-800 dark:text-amber-300">
+              <span className="font-medium">Last build/verify event: </span>
+              {buildClean.lastBuildEvent.issueNumber != null && (
+                <span className="font-mono">#{buildClean.lastBuildEvent.issueNumber} </span>
+              )}
+              {buildClean.lastBuildEvent.summary}
+              <span className="ml-1 text-amber-600/70 dark:text-amber-400/60">
+                ({fmtTime(buildClean.lastBuildEvent.createdAt)})
+              </span>
+            </div>
+          ) : (
+            <span className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+              No recent build/verify events.
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Dependency tier graph body (extracted to keep `DriveDashboard` itself short). */
+function DriveTierGraph({
+  tiers,
+  maxTierWidth,
+  onIssueClick,
+}: {
+  tiers: DriveDashboardData["tiers"];
+  maxTierWidth: number;
+  onIssueClick?: (issueId: string) => void;
+}) {
+  return (
+    <div className="p-3 flex flex-col gap-2 overflow-x-auto">
+      {tiers.map(({ tier, issues }) => (
+        <div key={tier} className="flex items-stretch gap-2">
+          <div className="shrink-0 w-16 flex items-center justify-center text-xs font-semibold text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-800/60 rounded">
+            Tier {tier}
           </div>
-        ) : (
-          <div className="divide-y divide-gray-100 dark:divide-gray-700/50">
-            {stalls.map((stall) => (
+          <div
+            className="grid gap-2 flex-1"
+            style={{ gridTemplateColumns: `repeat(${maxTierWidth}, minmax(120px, 1fr))` }}
+          >
+            {issues.map((issue) => (
               <button
-                key={stall.id}
-                onClick={() => onIssueClick?.(stall.id)}
-                className="w-full text-left flex flex-col gap-1 px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800/40"
+                key={issue.id}
+                onClick={() => onIssueClick?.(issue.id)}
+                className="text-left rounded border border-gray-200 dark:border-gray-700 px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors"
+                style={{ borderLeftWidth: 3, borderLeftColor: statusColor(issue.statusName) }}
+                title={issue.title}
               >
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs text-gray-400 shrink-0">
-                    {stall.issueNumber != null ? `#${stall.issueNumber}` : "—"}
-                  </span>
-                  <span className="text-sm text-gray-800 dark:text-gray-200 truncate">{stall.title}</span>
-                  <span
-                    className="ml-auto text-[10px] shrink-0"
-                    style={{ color: statusColor(stall.statusName) }}
-                  >
-                    {stall.statusName}
-                  </span>
+                <div className="text-[11px] font-mono text-gray-400">
+                  {issue.issueNumber != null ? `#${issue.issueNumber}` : "—"}
                 </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 pl-6">
-                  blocked by{" "}
-                  {stall.blockedBy.map((b, i) => (
-                    <span key={i}>
-                      {i > 0 && ", "}
-                      <span className="font-mono">
-                        {b.issueNumber != null ? `#${b.issueNumber}` : b.title}
-                      </span>
-                    </span>
-                  ))}
+                <div className="text-xs text-gray-800 dark:text-gray-200 line-clamp-2">
+                  {issue.title}
+                </div>
+                <div className="mt-0.5 text-[10px]" style={{ color: statusColor(issue.statusName) }}>
+                  {issue.statusName}
                 </div>
               </button>
             ))}
           </div>
-        )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Stalls / obstacle feed (extracted to keep `DriveDashboard` itself short). */
+function DriveStallList({
+  stalls,
+  onIssueClick,
+}: {
+  stalls: DriveDashboardData["stalls"];
+  onIssueClick?: (issueId: string) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700">
+        <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          Current stalls
+        </span>
+        <span className="ml-auto text-xs font-medium text-gray-400 dark:text-gray-500 bg-gray-200 dark:bg-gray-700 rounded-full px-2 py-0.5">
+          {stalls.length}
+        </span>
       </div>
+      {stalls.length === 0 ? (
+        <div className="px-3 py-6 text-sm text-center text-gray-400 dark:text-gray-500">
+          No stalls — every open issue is unblocked. 🎉
+        </div>
+      ) : (
+        <div className="divide-y divide-gray-100 dark:divide-gray-700/50">
+          {stalls.map((stall) => (
+            <button
+              key={stall.id}
+              onClick={() => onIssueClick?.(stall.id)}
+              className="w-full text-left flex flex-col gap-1 px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800/40"
+            >
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs text-gray-400 shrink-0">
+                  {stall.issueNumber != null ? `#${stall.issueNumber}` : "—"}
+                </span>
+                <span className="text-sm text-gray-800 dark:text-gray-200 truncate">{stall.title}</span>
+                <span
+                  className="ml-auto text-[10px] shrink-0"
+                  style={{ color: statusColor(stall.statusName) }}
+                >
+                  {stall.statusName}
+                </span>
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 pl-6">
+                blocked by{" "}
+                {stall.blockedBy.map((b, i) => (
+                  <span key={i}>
+                    {i > 0 && ", "}
+                    <span className="font-mono">
+                      {b.issueNumber != null ? `#${b.issueNumber}` : b.title}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -595,6 +686,94 @@ function StartDriveForm({
           style={{ backgroundColor: BRAND }}
         >
           {submitting ? "Starting…" : "Start drive"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={submitting}
+          className="px-3 py-1.5 text-sm rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * "Extend this drive" (#1132) — a one-line addendum appended to the epic as a new
+ * `## Increment N` section. Available on an active or completed drive; reactivation (if the
+ * drive was completed) happens server-side in `extendDrive`, not here.
+ */
+function ExtendDriveForm({
+  projectId,
+  driveId,
+  onExtended,
+  onCancel,
+}: {
+  projectId: string;
+  driveId: string;
+  onExtended: (result: DriveExtendResult) => void;
+  onCancel: () => void;
+}) {
+  const [addendum, setAddendum] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!addendum.trim()) {
+      setErr("An addendum is required.");
+      return;
+    }
+    setSubmitting(true);
+    setErr(null);
+    try {
+      const result = await apiPost<DriveExtendResult>(
+        `/api/projects/${projectId}/drives/${driveId}/extend`,
+        { addendum: addendum.trim() },
+      );
+      onExtended(result);
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : "Failed to extend drive");
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={submit}
+      className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40 p-4 flex flex-col gap-3"
+    >
+      <div className="flex items-center gap-2">
+        <Icon className="w-4 h-4" style={{ color: BRAND }} d="M13 10V3L4 14h7v7l9-11h-7z" />
+        <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">Extend this drive</span>
+      </div>
+
+      <label className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
+          What's next <span className="text-red-500">*</span>
+        </span>
+        <input
+          type="text"
+          value={addendum}
+          onChange={(e) => setAddendum(e.target.value)}
+          placeholder="e.g. Add OAuth support on top of the existing auth flow"
+          autoFocus
+          className="px-2 py-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+        />
+      </label>
+
+      {err && <span className="text-xs text-red-500">{err}</span>}
+
+      <div className="flex items-center gap-2">
+        <button
+          type="submit"
+          disabled={submitting || !addendum.trim()}
+          className="px-3 py-1.5 text-sm rounded-md font-medium text-white disabled:opacity-50"
+          style={{ backgroundColor: BRAND }}
+        >
+          {submitting ? "Extending…" : "Extend & decompose"}
         </button>
         <button
           type="button"
