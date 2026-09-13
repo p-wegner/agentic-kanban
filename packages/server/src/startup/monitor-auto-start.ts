@@ -46,6 +46,7 @@ import {
   countWipCapacity,
   type WipCapacitySnapshot,
 } from "../repositories/wip-capacity.repository.js";
+import { listRunningCreateJobIssueIds } from "../services/create-job.service.js";
 import { orderCandidatesByStartScore } from "./monitor-start-scoring.js";
 import { buildHarnessBudgetGate } from "./monitor-harness-budget.js";
 // #919: recording a PROJECT-WIDE hold — its per-project tally, the per-ticket attribution that
@@ -184,10 +185,10 @@ export interface AutoStartDeps {
 async function runInProgressBackfill(ctx: AutoStartCycle, inProgressSt: { id: string; projectId: string }): Promise<void> {
   const allowFeatureTypes = ctx.isAutoDrivenProject(inProgressSt.projectId);
   const wipLimit = ctx.wipLimitFor(inProgressSt.projectId);
-  const capacity = await countWipCapacity(db, inProgressSt.id);
+  const capacity = await countWipCapacity(db, inProgressSt.id, listRunningCreateJobIssueIds());
   let currentWip = capacity.active;
-  if (capacity.inactiveStale > 0) {
-    console.log(`[monitor] Auto-start capacity for project ${inProgressSt.projectId}: active=${capacity.active}/${wipLimit} inactiveStale=${capacity.inactiveStale}`);
+  if (capacity.inactiveStale > 0 || capacity.reserved > 0) {
+    console.log(`[monitor] Auto-start capacity for project ${inProgressSt.projectId}: active=${capacity.active}/${wipLimit} inactiveStale=${capacity.inactiveStale} reserved=${capacity.reserved}`);
   }
   // #1102: the slot arithmetic is `decideStartSlots`, shared with the pull loop and with
   // `GET /api/projects/:id/autopilot`. Asked twice so the async reads keep their order: the WIP
