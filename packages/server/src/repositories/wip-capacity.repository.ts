@@ -68,8 +68,9 @@ export interface WipCapacitySnapshot {
  * firing within seconds of each other each read a count that has not caught up with the
  * starts the previous cycles already made, and each spends the same free slot. Measured
  * live: five workspaces launched against a WIP limit of 2 in 89 seconds. Scoped to THIS
- * status's project below; a running job's workspace row does not exist yet, so it can never
- * double-count against the landed-row query.
+ * status's project below. A running job's workspace row CAN already be landed — the create
+ * job is only marked succeeded/failed after more work runs past the DB commit — so a landed
+ * reservation is excluded from the reservation count rather than assumed absent.
  */
 export async function countWipCapacity(
   database: Pick<typeof db, "select">,
@@ -85,11 +86,25 @@ export async function countWipCapacity(
   const legacyCount = (rows[0] as { count?: number } | undefined)?.count;
   const landedActive = Number(rows[0]?.active ?? legacyCount ?? 0);
 
+  // A reservation's issue is landed as soon as `createWorkspace`'s DB transaction commits
+  // (workspace row + In-Progress move), which happens BEFORE the create job is marked
+  // succeeded/failed — more work (hook install, event broadcast, deferred-launch scheduling)
+  // still runs between that commit and the `.then()` that calls `completeCreateJob` (see
+  // `routes/workspaces.ts`). So a reservation can already be landed, and counting both would
+  // double-count it. Landed issue ids are excluded from the reservation count below.
   let reserved = 0;
   if (reservedIssueIds.length > 0) {
-    const reservedRows = await database.select({ id: issues.id }).from(issues)
-      .where(sql`${issues.projectId} = (SELECT ${projectStatuses.projectId} FROM ${projectStatuses} WHERE ${projectStatuses.id} = ${inProgressStatusId}) AND ${inArray(issues.id, reservedIssueIds)}`);
-    reserved = reservedRows.length;
+    const landedIdRows = await database.select({ id: issues.id }).from(issues)
+      .innerJoin(workspaces, eq(workspaces.issueId, issues.id))
+      .where(sql`${issues.statusId} = ${inProgressStatusId} AND ${inArray(issues.id, reservedIssueIds)}`);
+    const landedIds = new Set(landedIdRows.map((r) => r.id));
+    const stillReservedIds = reservedIssueIds.filter((id) => !landedIds.has(id));
+
+    if (stillReservedIds.length > 0) {
+      const reservedRows = await database.select({ id: issues.id }).from(issues)
+        .where(sql`${issues.projectId} = (SELECT ${projectStatuses.projectId} FROM ${projectStatuses} WHERE ${projectStatuses.id} = ${inProgressStatusId}) AND ${inArray(issues.id, stillReservedIds)}`);
+      reserved = reservedRows.length;
+    }
   }
   return {
     active: landedActive + reserved,
