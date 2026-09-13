@@ -114,7 +114,10 @@ export interface DrivePlanProposalChild {
   tempId: string;
   title: string;
   description: string;
-  priority: "low" | "medium" | "high" | "urgent";
+  // Canonical vocabulary (`normalizeIssuePriority`), not the legacy "urgent" alias — see
+  // `lib/issue-priority.ts`. `decomposeEpic` normalizes before this shape is populated, so
+  // "urgent" never actually appears here.
+  priority: "low" | "medium" | "high" | "critical";
   targetRepo?: string | null;
 }
 
