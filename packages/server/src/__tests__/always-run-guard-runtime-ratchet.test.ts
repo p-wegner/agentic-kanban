@@ -180,7 +180,27 @@ import {
  * the whole of it — so an ordinary diff pays nothing for it, which, per this file's own doc
  * above, does not move THIS worst-case number.
  */
-const BASELINE_TOTAL_MS = 570_000;
+/*
+ * -- Eighth disclosed movement (2026-09-13, #1126) — 570,000 -> 576,000 ---------------------
+ *
+ * Two guards arrived with #1126, both at the ASSUMED 3,000 ms:
+ *   `pnpm-store-health.test.mjs`      — imports `scripts/pnpm-store-health.mjs`
+ *   `prune-worktree-husks.test.mjs`   — imports `scripts/prune-worktree-husks.mjs` (+ `safe-rmdir.mjs`)
+ *
+ * The argument for the seconds: both scripts live under `scripts/` and no package's `src/`
+ * import graph reaches them — exactly the shape `always-run-marker-ratchet` demands a marker
+ * for, the same reasoning `safe-rmdir.test.ts`/`check-arch-scoping.test.mjs` already carry.
+ * Each pins the pure link-counting / husk-detection core a store-health probe and a
+ * dead-worktree pruner need to stay correct, so leaving them unmarked would mean the guard
+ * scan silently drops them from every scoped run.
+ *
+ * Both carry a `when:scripts/*.mjs` territory naming exactly the script(s) they import, so an
+ * ordinary diff pays nothing for them — which, per this file's own doc above, does not move
+ * THIS worst-case number. Should shrink at the next `durations.json` capture: both suites run
+ * in well under 1s (measured via `pnpm exec vitest run` locally), against the 3,000 ms
+ * placeholder each carries until then.
+ */
+const BASELINE_TOTAL_MS = 576_000;
 
 /**
  * How far under the baseline is tolerated before it counts as stale.
