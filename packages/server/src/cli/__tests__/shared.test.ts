@@ -23,8 +23,10 @@ vi.mock("../../repositories/issue.repository.js", () => ({
 }));
 
 const getAllProjectsMock = vi.fn();
+const getProjectByIdMock = vi.fn();
 vi.mock("../../repositories/project.repository.js", () => ({
   getAllProjects: getAllProjectsMock,
+  getProjectById: getProjectByIdMock,
 }));
 
 const {
@@ -140,6 +142,8 @@ describe("resolveProjectIdArg", () => {
   beforeEach(() => {
     getPreferenceMock.mockReset();
     getAllProjectsMock.mockReset();
+    getProjectByIdMock.mockReset();
+    getProjectByIdMock.mockResolvedValue({ id: "active-id", name: "Active" });
   });
 
   it("falls back to the active project when no arg is given", async () => {
@@ -152,6 +156,15 @@ describe("resolveProjectIdArg", () => {
     getPreferenceMock.mockResolvedValue(null);
 
     await expect(getActiveProjectId()).rejects.toThrow("No active project");
+  });
+
+  it("throws an actionable message when the stored active project no longer exists", async () => {
+    getPreferenceMock.mockResolvedValue("deleted-id");
+    getProjectByIdMock.mockResolvedValue(undefined);
+
+    await expect(getActiveProjectId()).rejects.toThrow(
+      /no longer exists.*--project/s,
+    );
   });
 
   it("resolves an exact id match", async () => {
