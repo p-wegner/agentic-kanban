@@ -42,6 +42,8 @@ const ACTION_LABELS: Record<MonitorAction["action"], { label: string; colorClass
   // had a `?? {…}` fallback, so it degraded silently instead of crashing.
   auto_contract:         { label: "Auto-contracted",    colorClass: "text-teal-600 dark:text-teal-400", icon: "⇲" },
   auto_contract_suggest: { label: "Suggested contract", colorClass: "text-teal-600 dark:text-teal-400", icon: "⇲" },
+  auto_decompose:              { label: "Auto-decomposed epic",       colorClass: "text-purple-600 dark:text-purple-400", icon: "⚟" },
+  auto_decompose_right_sized:  { label: "Epic marked right-sized",    colorClass: "text-purple-600 dark:text-purple-400", icon: "⚟" },
 };
 
 function VerificationBadge({ result }: { result?: string }) {

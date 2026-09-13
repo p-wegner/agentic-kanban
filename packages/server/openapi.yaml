@@ -2194,6 +2194,43 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/issues/{id}/decompose/too-small:
+    post:
+      summary: being mistaken for a never-decomposed drive epic.
+      tags:
+        - issues
+      operationId: post_api_issues_id_decompose_too-small
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+              required:
+                - projectId
+              additionalProperties: true
+              x-unknown-keys: stripped
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/issues/{id}/dependencies:
     get:
       summary: GET /api/issues/:id/dependencies

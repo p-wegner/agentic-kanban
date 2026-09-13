@@ -3,6 +3,7 @@ import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, contractCoupledComponent, confirmContractComponent, analyzeTouchedFiles } from "../services/issue-ai.service.js";
+import { markTooSmallToDecompose } from "../services/decompose-verdict.service.js";
 import { scanForTicketGroups, scanTouchedFilesForTicketGroups } from "../services/ticket-group-scan.service.js";
 import type { DecomposeChildProposal, DecomposeDependencyProposal } from "../services/issue-ai.service.js";
 import { createIssueService } from "../services/issue.service.js";
@@ -245,6 +246,17 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     );
     options?.boardEvents?.broadcast(body.projectId, "issue_created");
     return c.json(result, 201);
+  });
+
+  // POST /api/issues/:id/decompose/too-small — persist the decomposer's "already right-sized,
+  // don't split" verdict (#1074/#1134) so the epic stays a valid start candidate instead of
+  // being mistaken for a never-decomposed drive epic.
+  router.post("/:id/decompose/too-small", async (c) => {
+    const issueId = c.req.param("id");
+    const body = await parseJsonBody(c, projectIdBody);
+    await markTooSmallToDecompose(issueId, database);
+    options?.boardEvents?.broadcast(body.projectId, "board_changed");
+    return c.json({ ok: true });
   });
 
   // POST /api/issues/contract — propose contracting coupled components into single tickets.
