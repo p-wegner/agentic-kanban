@@ -12,6 +12,7 @@ import { toExecutorProvider } from "../services/agent-settings.service.js";
 import { sessionOutputPath } from "../lib/session-paths.js";
 import { PREF_RECONCILER_STRANDED_PLAN_ENABLED } from "../constants/preference-keys.js";
 import { finalizePlanModeExit } from "../services/session-manager/plan-mode-exit.js";
+import { assertProjectNotQuiesced } from "../services/quiesce.service.js";
 import type { StartSessionOptions } from "../services/session-manager/types.js";
 import { toProfileSelection } from "@agentic-kanban/shared/lib/profile-selection";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
@@ -110,6 +111,10 @@ export async function reconcileStrandedPlanModeWorkspaces(deps: StrandedPlanReco
     if (planSession.length === 0) continue;
 
     try {
+      // #1113: a quiesced project must hold this recovery relaunch too — it is a
+      // direct `startSession` call, so it bypasses the create/launchSession chokepoints.
+      await assertProjectNotQuiesced(database, c.projectId, "stranded plan-mode recovery");
+
       const messages = readSessionOutputAsMessages(planSession[0].id);
       const plan = c.workingDir ? extractPlanFromMessages(messages) : null;
       const harness = narrowProviderName(c.provider ?? undefined);

@@ -25,6 +25,7 @@ import { buildMembersBlock, buildReviewPrompt, releaseReviewLaunch, tryReserveRe
 import { getLeadIssueForMembersBlock, listMemberIssues } from "../../repositories/workspace-issue-members.repository.js";
 import { resolveProjectReviewMode } from "../../services/review-mode-pref.js";
 import { formatPostureNote } from "../../services/risk-posture.service.js";
+import { assertProjectNotQuiesced } from "../../services/quiesce.service.js";
 import type { Database } from "../../db/index.js";
 import type { createBoardEvents } from "../../services/board-events.js";
 import type { createSessionManager } from "../../services/session.manager.js";
@@ -93,6 +94,9 @@ export function createReviewLauncher({ database: db, gitService, sessionManager,
     const { prompt, model } = await buildReviewPrompt(db, workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName, verifyAgent, precomputedContext, membersBlock);
     const reviewArgsWithModel = model && reviewProvider === "claude" ? `${reviewArgs ?? ""} --model ${model}`.trim() : reviewArgs;
     try {
+      // #1113: launchAutoReview is a direct `startSession` call, bypassing the
+      // create/launchSession quiesce chokepoints — hold it too.
+      await assertProjectNotQuiesced(db, projectId, "auto-review launch");
       await setWorkspaceStatus(db, workspaceId, "reviewing", { now });
       boardEvents.broadcast(projectId, "issue_updated");
       const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs: reviewArgsWithModel, provider: toExecutorProvider(reviewProvider), triggerType: "review", profile: profileSelection, extraEnv: { KANBAN_SESSION_TYPE: "review", KANBAN_AFTER_MERGE_VERIFY: verifyAgent } });

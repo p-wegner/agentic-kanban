@@ -473,7 +473,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       message: preMergeGate.message,
     };
     await armReadyForMerge(workspaceId, projectId, { ...evidence, trustworthy: !tipMovedDuringGate }, workspace.workingDir);
-    const learningAfterReview = getBool(prefMap, "learning_step_after_review") && workspace.workingDir ? launchLearningStep(learningStepDeps, workspace, prefMap, "after review", true) : Promise.resolve();
+    const learningAfterReview = getBool(prefMap, "learning_step_after_review") && workspace.workingDir ? launchLearningStep(learningStepDeps, workspace, prefMap, "after review", true, projectId) : Promise.resolve();
     if (autoMergeEnabled) {
       await learningAfterReview;
       // #797 synchronous foundational merge. A no-dependency scaffold/shell ticket that
@@ -619,7 +619,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now, RUN_GATE);
       return;
     }
-    if (getBool(prefMap, "learning_step_after_agent") && workspace.workingDir) await launchLearningStep(learningStepDeps, workspace, prefMap, "after agent");
+    if (getBool(prefMap, "learning_step_after_agent") && workspace.workingDir) await launchLearningStep(learningStepDeps, workspace, prefMap, "after agent", false, projectId);
     // #997/#757: skip the legacy auto-review only when the graph really owns the next stage.
     // Re-read the node — the In Review transition above just re-pointed it (see
     // graphOwnsWorkspaceReview). A stage the graph owns but has no machinery for would strand
