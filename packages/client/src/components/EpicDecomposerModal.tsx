@@ -68,6 +68,17 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
     }
   }
 
+  async function handleAcceptRightSized() {
+    try {
+      await apiPost(`/api/issues/${issue.id}/decompose/too-small`, { projectId: issue.projectId });
+      showToast("Marked right-sized — ticket stays startable as-is", "success");
+      onConfirmed();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to record right-sized verdict");
+    }
+  }
+
   async function handleRegenerate() {
     if (regenerating) return;
     setRegenerating(true);
@@ -178,11 +189,18 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
           {(stage === "preview" || stage === "confirming") && (
             <>
               {proposal?.tooSmallToDecompose && (
-                <div className="bg-sky-50 border border-sky-200 rounded-md px-3 py-2 text-xs text-sky-800">
-                  ✓ This ticket already looks right-sized for a single agent session — splitting it would add
-                  worktree/orientation overhead for little benefit. You can close this dialog and work the
-                  ticket as-is; if it's a drive's target, the drive already counts it as its one unit of work.
-                  You can still proceed below if you disagree.
+                <div className="bg-sky-50 border border-sky-200 rounded-md px-3 py-2 text-xs text-sky-800 space-y-2">
+                  <p>
+                    ✓ This ticket already looks right-sized for a single agent session — splitting it would add
+                    worktree/orientation overhead for little benefit. If it's a drive's target, the drive already
+                    counts it as its one unit of work. You can still proceed below if you disagree.
+                  </p>
+                  <button
+                    onClick={handleAcceptRightSized}
+                    className="text-xs font-medium text-sky-700 hover:text-sky-900 underline"
+                  >
+                    Keep as one ticket (mark right-sized)
+                  </button>
                 </div>
               )}
               {proposal?.coalescedTestOnly && proposal.coalescedTestOnly.length > 0 && (
