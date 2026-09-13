@@ -95,6 +95,18 @@ export function classifyQuotaBlock(
   const rawRetryAfter = usageLimit.retryAfter;
   const retryAfterMs = rawRetryAfter ? Date.parse(rawRetryAfter) : Number.NaN;
   if (Number.isFinite(retryAfterMs)) {
+    // #1139: a parseable retryAfter that is already in the PAST is evidence the value was
+    // never a real reset time (a stale example date the classifier scraped out of unrelated
+    // text) rather than something the provider actually reported for THIS block. It is still
+    // honoured as an immediate release (the safe direction — never a longer wait than
+    // reported), but reported so the log line is never mistaken for a genuine, still-pending
+    // quota reset.
+    if (retryAfterMs < nowMs) {
+      console.warn(
+        `[monitor] quota block retryAfter='${rawRetryAfter}' is already in the past (releasing immediately) — ` +
+        "likely a misclassified usage-limit stats blob rather than a real provider reset time",
+      );
+    }
     return {
       retryAfter: rawRetryAfter,
       releaseAt: new Date(retryAfterMs).toISOString(),
@@ -102,6 +114,9 @@ export function classifyQuotaBlock(
     };
   }
   // No usable reset time — fall back to a bounded probe window measured from the death.
+  if (rawRetryAfter) {
+    console.warn(`[monitor] quota block retryAfter='${rawRetryAfter}' did not parse as a time — falling back to the ${QUOTA_BLOCK_PROBE_FALLBACK_MS / 3_600_000}h probe window`);
+  }
   const startedMs = sess?.startedAt ? Date.parse(sess.startedAt) : Number.NaN;
   const anchorMs = Number.isFinite(startedMs) ? startedMs : nowMs;
   const releaseMs = anchorMs + QUOTA_BLOCK_PROBE_FALLBACK_MS;
