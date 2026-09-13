@@ -41,6 +41,7 @@ import { decideStartSlots } from "../services/start-slot-decision.js";
 import { shouldDeferForContention } from "./monitor-file-contention.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { countWipCapacity } from "../repositories/wip-capacity.repository.js";
+import { listRunningCreateJobIssueIds } from "../services/create-job.service.js";
 import { holdForHarnessBudget } from "./monitor-harness-budget.js";
 import { noteHeldCandidates, noteWipCapSkip } from "./monitor-skip-attribution.js";
 import { recordMachineSaturationHold as recordMachineSaturationHoldDetail } from "./monitor-start-holds.js";
@@ -157,10 +158,10 @@ async function handleTodoLaunchOutcome(
 export async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; projectId: string }): Promise<void> {
   const allowFeatureTypes = ctx.isAutoDrivenProject(inProgressSt.projectId);
   const wipLimit = ctx.wipLimitFor(inProgressSt.projectId);
-  const capacity = await countWipCapacity(ctx.database, inProgressSt.id);
+  const capacity = await countWipCapacity(ctx.database, inProgressSt.id, listRunningCreateJobIssueIds());
   const currentWip = capacity.active;
-  if (capacity.inactiveStale > 0) {
-    console.log(`[monitor] Auto-start pull capacity for project ${inProgressSt.projectId}: active=${capacity.active}/${wipLimit} inactiveStale=${capacity.inactiveStale}`);
+  if (capacity.inactiveStale > 0 || capacity.reserved > 0) {
+    console.log(`[monitor] Auto-start pull capacity for project ${inProgressSt.projectId}: active=${capacity.active}/${wipLimit} inactiveStale=${capacity.inactiveStale} reserved=${capacity.reserved}`);
   }
   // #1102: same shared slot arithmetic as the backfill loop, asked around the same async reads.
   const { maxNewStartsPerCycle } = ctx.tunablesFor(inProgressSt.projectId);

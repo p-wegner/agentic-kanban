@@ -12,7 +12,7 @@
  * Backlog with no workspace (#354), and after a UI approval it said nothing at all (#357). So every
  * outcome here is a distinct, falsifiable sentence — never one optimistic phrasing.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { projectStatuses, projects } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
@@ -179,6 +179,12 @@ describe("#351: the advance path starts the ticket it just planned", () => {
 
 describe("#366 round 8: the advance path READS the claim it writes", () => {
   beforeEach(() => resetCreateJobs());
+  // "holds the claim while its own launch provisions" below deliberately never resolves its
+  // `createWorkspace`, so its claim stays RUNNING forever unless something drains it — without
+  // this, that leaked entry survives into whatever suite runs next in the same worker process
+  // and silently inflates `listRunningCreateJobIssueIds()` there (#1137 uncovered this: it
+  // desynced an unrelated ordered-`db.select`-mock suite by adding a query it never expected).
+  afterEach(() => resetCreateJobs());
 
   it("declines to provision when another automatic starter already holds the claim", async () => {
     const { db } = createTestDb();

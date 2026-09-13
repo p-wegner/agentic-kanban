@@ -1,5 +1,5 @@
-import { issues, workspaces } from "@agentic-kanban/shared/schema";
-import { eq, sql } from "drizzle-orm";
+import { issues, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
+import { eq, inArray, sql } from "drizzle-orm";
 import type { db } from "../db/index.js";
 
 /**
@@ -47,12 +47,34 @@ export interface WipCapacitySnapshot {
    * blocking the next unblocked ticket — the #690 failure was exactly this being conflated.
    */
   inactiveStale: number;
+  /**
+   * Of `active`, how many are RESERVATIONS rather than a landed workspace row (#1137) — a
+   * create job is running for the issue, but provisioning has not yet reached the end-of-
+   * transaction insert that makes it visible to the query below. Reported separately so a
+   * diagnostic log can say why `active` moved without a corresponding workspace appearing.
+   */
+  reserved: number;
 }
 
-/** Capacity diagnostics for the auto-start gate. */
+/**
+ * Capacity diagnostics for the auto-start gate.
+ *
+ * `reservedIssueIds` (#1137) — issues with a create job RUNNING right now (see
+ * `services/create-job.service.ts`), passed in by the caller rather than read here: a
+ * repository may not import `services/` (`repositories-not-up-to-services`), and the
+ * registry this comes from is in-process state, not persistence. A create job claims its
+ * issue BEFORE the workspace row (and the issue's move to In Progress) land, so without this
+ * the WIP tally is blind for the whole provisioning window — a burst of monitor cycles
+ * firing within seconds of each other each read a count that has not caught up with the
+ * starts the previous cycles already made, and each spends the same free slot. Measured
+ * live: five workspaces launched against a WIP limit of 2 in 89 seconds. Scoped to THIS
+ * status's project below; a running job's workspace row does not exist yet, so it can never
+ * double-count against the landed-row query.
+ */
 export async function countWipCapacity(
   database: Pick<typeof db, "select">,
   inProgressStatusId: string,
+  reservedIssueIds: readonly string[] = [],
 ): Promise<WipCapacitySnapshot> {
   const rows = await database.select({
     active: sql<number>`count(distinct CASE WHEN ${activeWipPredicate} THEN ${issues.id} END)`,
@@ -61,9 +83,18 @@ export async function countWipCapacity(
     .innerJoin(workspaces, eq(workspaces.issueId, issues.id))
     .where(sql`${issues.statusId} = ${inProgressStatusId}`);
   const legacyCount = (rows[0] as { count?: number } | undefined)?.count;
+  const landedActive = Number(rows[0]?.active ?? legacyCount ?? 0);
+
+  let reserved = 0;
+  if (reservedIssueIds.length > 0) {
+    const reservedRows = await database.select({ id: issues.id }).from(issues)
+      .where(sql`${issues.projectId} = (SELECT ${projectStatuses.projectId} FROM ${projectStatuses} WHERE ${projectStatuses.id} = ${inProgressStatusId}) AND ${inArray(issues.id, reservedIssueIds)}`);
+    reserved = reservedRows.length;
+  }
   return {
-    active: Number(rows[0]?.active ?? legacyCount ?? 0),
+    active: landedActive + reserved,
     inactiveStale: Number(rows[0]?.inactiveStale ?? 0),
+    reserved,
   };
 }
 
