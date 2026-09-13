@@ -59,8 +59,8 @@ async function loadScopedIssues(
   database: Database,
   projectId: string,
   metaIssueId: string | null,
-): Promise<ScopedIssue[]> {
-  if (!metaIssueId) return [];
+): Promise<{ scoped: ScopedIssue[]; selfScoped: boolean }> {
+  if (!metaIssueId) return { scoped: [], selfScoped: false };
 
   const edges = await getMetaIssueDependencyEdges(metaIssueId, database);
   // The drive-epic seeder wires epic→child as `parent_of`. Prefer those; fall
@@ -77,14 +77,20 @@ async function loadScopedIssues(
   // stall list, and the meta can never satisfy reconcileDriveCompletion's "while any child
   // is open" check because there is no child to resolve. Fall back to scoping the meta
   // issue ITSELF so a one-ticket drive has somewhere to go (0/1 -> 1/1).
-  const finalIds = scopedIds.length > 0 ? scopedIds : [metaIssueId];
+  //
+  // #1130: that fallback is also what the Drive view must be able to tell apart from a
+  // genuinely decomposed one-ticket drive, since both render as one tier of one issue —
+  // report it explicitly rather than leaving the two indistinguishable to the caller.
+  const selfScoped = scopedIds.length === 0;
+  const finalIds = selfScoped ? [metaIssueId] : scopedIds;
 
   const rows = await getScopedIssueRows(finalIds, database);
   // Keep only same-project children with a resolved status (defensive — a drive's
   // children always belong to its project).
-  return rows
+  const scoped = rows
     .filter((r) => r.projectId === projectId && r.statusName != null)
     .map(({ projectId: _pid, ...rest }) => rest) as ScopedIssue[];
+  return { scoped, selfScoped };
 }
 
 /**
@@ -131,7 +137,7 @@ export async function buildDriveDashboard(
     throw new DriveError("Drive does not belong to this project", "FORBIDDEN");
   }
 
-  const scoped = await loadScopedIssues(database, projectId, drive.metaIssueId);
+  const { scoped, selfScoped } = await loadScopedIssues(database, projectId, drive.metaIssueId);
   const scopedById = new Map(scoped.map((i) => [i.id, i]));
 
   // --- dependency edges among scoped issues (for tiers + stalls) ---
@@ -255,6 +261,7 @@ export async function buildDriveDashboard(
     },
     progress: { total, done, inProgress, inReview, todo, percentDone },
     tiers,
+    selfScoped,
     stalls,
     lastCascade,
     buildClean: {
