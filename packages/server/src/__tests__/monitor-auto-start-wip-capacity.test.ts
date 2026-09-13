@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { issues, projects, projectStatuses, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { countActiveWip, countWipCapacity } from "../startup/monitor-auto-start.js";
+import { decideStartSlots } from "../services/start-slot-decision.js";
 
 /**
  * Regression for #690: provider usage-limit / zero-output launch failures must
@@ -153,6 +154,7 @@ describe("countActiveWip — launch failures do not occupy WIP (#690)", () => {
     await expect(countWipCapacity(db, inProgressId)).resolves.toEqual({
       active: 1,
       inactiveStale: 3,
+      reserved: 0,
     });
   });
 
@@ -265,5 +267,95 @@ describe("countActiveWip — launch failures do not occupy WIP (#690)", () => {
     await addWorkspace(db, issue2, "idle", now);
 
     expect(await countActiveWip(db, inProgressId)).toBe(0);
+  });
+});
+
+describe("countWipCapacity reservations prevent a consecutive-cycle WIP overshoot (#1137)", () => {
+  /**
+   * Regression for #1137: with WIP=2, five monitor cycles fired back-to-back launched five
+   * workspaces before the WIP tally caught up, because `countWipCapacity` only saw a start
+   * once its workspace row (and the issue's move to In Progress) landed at the END of
+   * provisioning — 80s to 8+ minutes after the launch. A burst of cycles within that window
+   * each read a stale `active` count and each spent the same free slot.
+   *
+   * This simulates that burst directly at the mechanism under test: N cycles run
+   * back-to-back against a WIP=2 project, each deciding to start via the real
+   * `decideStartSlots`, with the status transition to In Progress DELIBERATELY delayed (the
+   * launched issue's workspace row never lands during the simulated burst) — so each cycle's
+   * `countWipCapacity` reads the same landed-row count unless the reservation registry
+   * (`reservedIssueIds`, the create-job claim's stand-in here) is consulted.
+   */
+  it("never starts more than the WIP limit across a burst of cycles when the status transition is delayed", async () => {
+    const { db } = createTestDb();
+    const { projectId, inProgressId, now } = await seed(db);
+    const wipLimit = 2;
+
+    // Five candidate issues, none started yet, none with a workspace row — exactly the Todo
+    // pull loop's starting position for a burst of five independent tickets becoming eligible
+    // at once (the ak-1130..ak-1136 observation).
+    const candidateIssueIds = await Promise.all(
+      Array.from({ length: 5 }, () => addIssue(db, projectId, inProgressId, now)),
+    );
+
+    // The reservation registry: a `Set` standing in for the real process-wide create-job
+    // registry (`listRunningCreateJobIssueIds`) — deliberately never drained during the burst,
+    // simulating the status transition never landing within the simulated window.
+    const reserved = new Set<string>();
+
+    let started = 0;
+    for (const issueId of candidateIssueIds) {
+      // Each cycle re-reads capacity fresh, exactly as `runInProgressBackfill`/`runTodoPull` do.
+      const capacity = await countWipCapacity(db, inProgressId, Array.from(reserved));
+      const decision = decideStartSlots({
+        wipLimit,
+        active: capacity.active,
+        machineCapacity: { tier: "0", hold: false, reason: "test", freeGb: 99 },
+        maxNewStartsPerCycle: 1,
+        startedThisCycle: 0,
+        fleetOverflow: false,
+      });
+      if (decision.holdReason !== null) continue;
+      // A start: claim the issue (stand-in for `claimIssueForAutoStart`) — its workspace row
+      // does NOT land this cycle, simulating the 80s-8min provisioning window.
+      reserved.add(issueId);
+      started++;
+    }
+
+    expect(started).toBeLessThanOrEqual(wipLimit);
+    expect(started).toBe(wipLimit);
+  });
+
+  it("existing single-cycle maxNewStartsPerCycle behaviour is unchanged (no reservations in play)", async () => {
+    const { db } = createTestDb();
+    const { projectId, inProgressId, now } = await seed(db);
+    await addIssue(db, projectId, inProgressId, now);
+
+    const capacity = await countWipCapacity(db, inProgressId);
+    const decision = decideStartSlots({
+      wipLimit: 5,
+      active: capacity.active,
+      machineCapacity: { tier: "0", hold: false, reason: "test", freeGb: 99 },
+      maxNewStartsPerCycle: 1,
+      startedThisCycle: 1,
+      fleetOverflow: false,
+    });
+
+    expect(decision.holdReason).toBe("start_cap");
+    expect(decision.slots).toBe(0);
+  });
+
+  it("a ticket group's several member issues sharing one reservation still count as ONE against the limit", async () => {
+    // Ticket group (#661): the group's workspace is keyed by the LEAD issue only — a member
+    // never gets its own workspace row or its own create-job claim. So reserving just the
+    // lead's issue id (as the real launch path does) must not inflate `reserved` beyond 1
+    // even though the group covers several issues.
+    const { db } = createTestDb();
+    const { projectId, inProgressId, now } = await seed(db);
+    const leadIssueId = await addIssue(db, projectId, inProgressId, now);
+    await addIssue(db, projectId, inProgressId, now); // member — deliberately NOT reserved
+
+    const capacity = await countWipCapacity(db, inProgressId, [leadIssueId]);
+    expect(capacity.active).toBe(1);
+    expect(capacity.reserved).toBe(1);
   });
 });
