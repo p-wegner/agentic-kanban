@@ -5,7 +5,7 @@ import { showToast } from "../lib/toast.js";
 import { priorityLabel, priorityTraits, type IssuePriority } from "../lib/priorityTraits.js";
 import { Icon, Spinner } from "./Icon.js";
 
-interface ChildProposal {
+export interface ChildProposal {
   tempId: string;
   title: string;
   description: string;
@@ -16,13 +16,19 @@ interface ChildProposal {
   targetRepo?: string | null;
 }
 
-interface DependencyProposal {
+export interface DependencyProposal {
   fromTempId: string;
   toTempId: string;
   type: string;
 }
 
-interface DecomposeProposal {
+/**
+ * Exported so `DriveScopePlanner` (#1133) can type the proposal it gets back from
+ * `POST .../plan?decompose=1` and hand it straight to this modal via `initialProposal` —
+ * the one client-side shape for a decompose proposal, rather than a second declaration
+ * that could drift from this one.
+ */
+export interface DecomposeProposal {
   children: ChildProposal[];
   dependencies: DependencyProposal[];
   alreadyDecomposed: boolean;
@@ -41,14 +47,23 @@ interface EpicDecomposerModalProps {
   issue: DecomposableIssue;
   onClose: () => void;
   onConfirmed: () => void;
+  /**
+   * A proposal already fetched by the caller (#1133 — `POST .../plan?decompose=1` returns one
+   * alongside the seeded epic), so the modal opens straight at the editable preview instead of
+   * behind a second "Generate Decomposition" click. Omitted for every other opener, which is
+   * unchanged: it starts at `idle` and fetches on demand.
+   */
+  initialProposal?: DecomposeProposal;
 }
 
-export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecomposerModalProps) {
-  const [stage, setStage] = useState<"idle" | "loading" | "preview" | "confirming">("idle");
-  const [proposal, setProposal] = useState<DecomposeProposal | null>(null);
-  const [children, setChildren] = useState<ChildProposal[]>([]);
-  const [dependencies, setDependencies] = useState<DependencyProposal[]>([]);
-  const [repos, setRepos] = useState<string[]>([]);
+export function EpicDecomposerModal({ issue, onClose, onConfirmed, initialProposal }: EpicDecomposerModalProps) {
+  const [stage, setStage] = useState<"idle" | "loading" | "preview" | "confirming">(
+    initialProposal ? "preview" : "idle",
+  );
+  const [proposal, setProposal] = useState<DecomposeProposal | null>(initialProposal ?? null);
+  const [children, setChildren] = useState<ChildProposal[]>(initialProposal?.children ?? []);
+  const [dependencies, setDependencies] = useState<DependencyProposal[]>(initialProposal?.dependencies ?? []);
+  const [repos, setRepos] = useState<string[]>(initialProposal?.repos ?? []);
   const [error, setError] = useState<string | null>(null);
   const [regenerating, setRegenerating] = useState(false);
 

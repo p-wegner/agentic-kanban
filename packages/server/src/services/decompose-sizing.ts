@@ -11,24 +11,17 @@
  * failure was decomposing an atomic "add GET /api/version" ticket into ["add the route",
  * "add a test for the route"] — two workspaces for one line.
  */
-import type { DependencyType } from "@agentic-kanban/shared/schema";
-
-export interface DecomposeChildProposal {
-  tempId: string;
-  title: string;
-  description: string;
-  priority: "low" | "medium" | "high" | "urgent";
-  /** Repo-aware decomposition (#94): the repo this child should target in a multi-repo
-   *  project, carried onto the child as a `repo:<name>` tag on confirm. Omitted/undefined
-   *  for single-repo projects and children the AI didn't scope. Editable pre-confirm. */
-  targetRepo?: string | null;
-}
-
-export interface DecomposeDependencyProposal {
-  fromTempId: string;
-  toTempId: string;
-  type: DependencyType;
-}
+// #1133 / wire-dto-single-declaration guard: these two shapes are byte-identical to the
+// `DrivePlanProposalChild`/`DrivePlanProposalDependency` wire DTOs (a plan-with-decompose
+// response carries the very same proposal this module operates on), so they are declared
+// ONCE in shared and re-exported here under their established server-side names rather than
+// re-declared — the guard's own fix ("move the shape into packages/shared/src/types/api/ and
+// import it on both sides") without renaming every call site in this file.
+import type {
+  DrivePlanProposalChild as DecomposeChildProposal,
+  DrivePlanProposalDependency as DecomposeDependencyProposal,
+} from "@agentic-kanban/shared";
+export type { DecomposeChildProposal, DecomposeDependencyProposal };
 
 /** A child ticket whose ONLY job is to add tests for a sibling's code — no production code
  *  of its own. Splitting it into a separate ticket forces a second workspace (bootstrap +

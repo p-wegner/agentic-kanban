@@ -4,7 +4,7 @@
  * Before this, `metaIssueId` could only be set at creation time, so a target-only drive was a
  * permanent 0/0 whose dashboard told the operator to do something the board offered nowhere.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import * as schema from "@agentic-kanban/shared/schema";
@@ -16,6 +16,11 @@ import {
   planDrive,
 } from "../services/drive-planning.service.js";
 import { DriveError } from "../services/drive.service.js";
+import { invokeClaudePrompt } from "../services/claude-cli.service.js";
+
+vi.mock("../services/claude-cli.service.js", () => ({
+  invokeClaudePrompt: vi.fn(),
+}));
 
 type Db = ReturnType<typeof createTestDb>["db"];
 
@@ -141,6 +146,65 @@ describe("planDrive (#1072)", () => {
     const { db } = createTestDb();
     const projectId = await seedProject(db);
     await expect(planDrive(projectId, randomUUID(), db as never)).rejects.toThrow(/not found/i);
+  });
+
+  it("makes no model call by default (#1133)", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    const driveId = await seedDrive(db, projectId);
+
+    await planDrive(projectId, driveId, db as never);
+
+    expect(invokeClaudePrompt).not.toHaveBeenCalled();
+  });
+});
+
+describe("planDrive({ decompose: true }) (#1133)", () => {
+  it("returns the decompose proposal alongside a freshly seeded epic", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    const driveId = await seedDrive(db, projectId);
+    vi.mocked(invokeClaudePrompt).mockResolvedValue(JSON.stringify({
+      children: [{ tempId: "c1", title: "Do the thing", description: "…", priority: "medium" }],
+      dependencies: [],
+    }));
+
+    const result = await planDrive(projectId, driveId, db as never, { decompose: true });
+
+    expect(result.existing).toBe(false);
+    expect(result.proposal?.children).toHaveLength(1);
+    expect(result.proposal?.children[0].title).toBe("Do the thing");
+    // Decomposing is propose-only — no children are created by `plan` itself.
+    const issues = await db.select().from(schema.issues);
+    expect(issues).toHaveLength(1);
+  });
+
+  it("returns the proposal for an already-planned drive's existing epic", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    const driveId = await seedDrive(db, projectId);
+    await planDrive(projectId, driveId, db as never);
+    vi.mocked(invokeClaudePrompt).mockResolvedValue(JSON.stringify({
+      children: [{ tempId: "c1", title: "Another child", description: "…", priority: "low" }],
+      dependencies: [],
+    }));
+
+    const result = await planDrive(projectId, driveId, db as never, { decompose: true });
+
+    expect(result.existing).toBe(true);
+    expect(result.proposal?.children).toHaveLength(1);
+  });
+
+  it("still returns the created epic when decomposition itself fails", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    const driveId = await seedDrive(db, projectId);
+    vi.mocked(invokeClaudePrompt).mockRejectedValue(new Error("model unavailable"));
+
+    const result = await planDrive(projectId, driveId, db as never, { decompose: true });
+
+    expect(result.issue.title).toBe("Ship the jira sync plugin");
+    expect(result.proposal).toBeUndefined();
   });
 });
 
