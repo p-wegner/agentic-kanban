@@ -631,6 +631,22 @@ const drivePlanResult = looseObject({
   issue: nested(looseObject({ id: str, projectId: str, issueNumber: nullable(num), title: str })),
   existing: bool,
 });
+// #1132 — `POST .../drives/:id/extend`: bound to `DriveExtendResult` (shared/types/api/drive.ts).
+const driveExtendResult = looseObject({
+  drive: nested(looseObject({
+    id: str,
+    projectId: str,
+    metaIssueId: nullable(str),
+    target: str,
+    completionContract: nullable(str),
+    status: str,
+    startedAt: str,
+    finishedAt: nullable(str),
+  })),
+  issue: nested(looseObject({ id: str, projectId: str, issueNumber: nullable(num), title: str })),
+  increment: num,
+  reactivated: bool,
+});
 const drivePreflight = looseObject({
   ready: bool,
   repairable: bool,
@@ -724,6 +740,7 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
 
   // ── drives ──
   { method: "POST", template: "/api/projects/:projectId/drives/:id/plan", schema: drivePlanResult },
+  { method: "POST", template: "/api/projects/:projectId/drives/:id/extend", schema: driveExtendResult },
   { method: "GET", template: "/api/projects/:projectId/drive/preflight", schema: drivePreflight },
   // #1071: attaching an existing epic (`DriveScopePlanner`'s "Attach epic") — the call site
   // awaits the result only to know the request succeeded and reads no field off it, so this
