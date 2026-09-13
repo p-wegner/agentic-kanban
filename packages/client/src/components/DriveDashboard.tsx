@@ -376,6 +376,20 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
               onScoped={fetchDashboard}
             />
           </div>
+>>>>>>> b215c63ca2 (fix(#1130): Drive view offers Decompose once an epic exists)
+        )}
+        {tierGraphView.showDecomposeDoor && (
+          <div className="border-t border-gray-200 dark:border-gray-700">
+            <div className="px-3 pt-3 text-xs text-amber-700 dark:text-amber-400 font-medium">
+              This drive is planned but not yet decomposed — its epic has no child tickets yet.
+            </div>
+            <DriveScopePlanner
+              projectId={projectId}
+              driveId={drive.id}
+              hasMetaIssue={drive.metaIssueId != null}
+              onScoped={fetchDashboard}
+            />
+          </div>
         )}
       </div>
 
