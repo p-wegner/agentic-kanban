@@ -73,6 +73,45 @@ live `git worktree list`, and has NO `.git` entry. It uses `cmd /c rd /s /q` —
 than `Remove-Item -Recurse` over node_modules' tens of thousands of tiny files. Re-run it later
 to sweep dirs that were locked by a live process at delete time (it's safe to re-run).
 
+### TASK 1c — Worktree HUSKS: no git entry AND no `workspaces` DB row (#1126)
+
+Distinct from 1b: 1b only cross-checks `git worktree list`. A directory can ALSO be a husk
+when the board's `workspaces.working_dir` never pointed at it (or the row was deleted without
+the worktree ever being cleaned up) even though it still holds a `.git` file — 1b's guard 3
+would skip it. Each husk keeps its (untracked) `node_modules` alive, and every file in it holds
+a hard link open in the shared pnpm store — the NTFS 1024-link ceiling is exactly what running
+out of headroom there leads to (see the store-health probe below).
+
+Run the dedicated script — it cross-checks BOTH `git worktree list` and the `workspaces`
+table, and deletes only through `scripts/safe-rmdir.mjs` (refuses a tree holding a reparse
+point pointing outside itself, so a live checkout's borrowed `node_modules` can never be
+destroyed by mistake):
+
+```powershell
+node "$(git rev-parse --show-toplevel)\scripts\prune-worktree-husks.mjs" "<worktreesRoot>" --repo "$(git rev-parse --show-toplevel)" --dry-run --json
+```
+
+Run once with `--dry-run` first and report what it *would* delete; only drop `--dry-run` once
+the list looks right. `<worktreesRoot>` is the directory holding worktree leaf dirs directly
+(e.g. `C:\andrena\.worktrees\agentic-kanban`). Omit `--db` to use the default resolution
+(`<repo>/packages/server/kanban.db`, falling back to `~/.agentic-kanban/kanban.db`); pass it
+explicitly if the board's DB lives elsewhere.
+
+### Store-health probe (run alongside worktree cleanup, #1126)
+
+While cleaning worktrees, also check whether the shared pnpm store is approaching the NTFS
+1024-hard-link ceiling — a file at the ceiling makes the NEXT install that hard-links it fail
+with `errno=-4094 syscall=link`, easy to mistake for store corruption:
+
+```powershell
+node "$(git rev-parse --show-toplevel)\scripts\pnpm-store-health.mjs" --json
+```
+
+Report any offenders (files at/above ~900 links). If the ceiling keeps getting hit even after
+pruning husks, the escape hatch is `package-import-method=copy` in `.npmrc` (pnpm copies
+instead of hard-linking — removes the ceiling entirely at real disk/install-time cost). Hold
+that in reserve; pruning dead worktrees addresses the actual driver.
+
 ## TASK 2 — Stale Claude Code chat sessions [always run unless --worktrees or --e2e only]
 
 Session dirs: %USERPROFILE%\.claude\projects\ (i.e. the current user's home — do not hardcode a username)
@@ -109,6 +148,8 @@ Active project ID: 24c4b3f2-bab8-478c-9ce9-5f87478e20b6
 
 Print a final summary table:
   Worktrees removed:       N
+  Husk dirs pruned:        N
+  Store-health offenders:  N
   Session dirs deleted:    N  
   E2E issues deleted:      N
   E2E projects deleted:    N
