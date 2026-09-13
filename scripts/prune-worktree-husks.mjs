@@ -121,7 +121,14 @@ function main(argv) {
     console.error(`prune-worktree-husks: could not read git worktree list in ${repoDir}: ${err instanceof Error ? err.message : String(err)}`);
     return 1;
   }
-  const claimed = getWorkspaceWorkingDirs(dbPath);
+  let claimed = [];
+  try {
+    claimed = getWorkspaceWorkingDirs(dbPath);
+  } catch (err) {
+    console.error(`prune-worktree-husks: could not read workspaces from ${dbPath}: ${err instanceof Error ? err.message : String(err)}`);
+    console.error("Refusing to guess which worktrees are claimed while the board DB is unreadable (locked/corrupt) — see the db-doctor skill.");
+    return 1;
+  }
   const husks = findHuskDirs(candidates, live, claimed);
 
   const results = husks.map((dir) => ({ dir, ...safeRmdir(dir, { dryRun }) }));
