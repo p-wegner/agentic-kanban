@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { DriveScopePlanner } from "./DriveScopePlanner.js";
+import { resolveDriveTierGraphView } from "../lib/driveScopeView.js";
 import { useApiResource } from "../hooks/useApiResource.js";
 import { STATUS_COLORS, ACCENT, BRAND } from "../lib/chartColors.js";
 import { showToast } from "../lib/toast.js";
@@ -201,7 +202,8 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
 
   if (!data) return null;
 
-  const { drive, progress, tiers, stalls, lastCascade, buildClean } = data;
+  const { drive, progress, tiers, selfScoped, stalls, lastCascade, buildClean } = data;
+  const tierGraphView = resolveDriveTierGraphView(tiers.length, selfScoped);
   const statusBadge =
     drive.status === "active"
       ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
@@ -363,14 +365,15 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
             Dependency tier graph
           </span>
         </div>
-        {tiers.length === 0 ? (
+        {tierGraphView.showEmptyScopePlanner && (
           <DriveScopePlanner
             projectId={projectId}
             driveId={drive.id}
             hasMetaIssue={drive.metaIssueId != null}
             onScoped={fetchDashboard}
           />
-        ) : (
+        )}
+        {tierGraphView.showTierGraph && (
           <div className="p-3 flex flex-col gap-2 overflow-x-auto">
             {tiers.map(({ tier, issues }) => (
               <div key={tier} className="flex items-stretch gap-2">
@@ -403,6 +406,19 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
                 </div>
               </div>
             ))}
+          </div>
+        )}
+        {tierGraphView.showDecomposeDoor && (
+          <div className="border-t border-gray-200 dark:border-gray-700">
+            <div className="px-3 pt-3 text-xs text-amber-700 dark:text-amber-400 font-medium">
+              This drive is planned but not yet decomposed — its epic has no child tickets yet.
+            </div>
+            <DriveScopePlanner
+              projectId={projectId}
+              driveId={drive.id}
+              hasMetaIssue={drive.metaIssueId != null}
+              onScoped={fetchDashboard}
+            />
           </div>
         )}
       </div>
