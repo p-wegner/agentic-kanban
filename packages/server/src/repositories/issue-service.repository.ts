@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { issues, issueTags, issueDependencies, issueArtifacts, workspaces, projectStatuses, workflowTemplates, workflowNodes, sessions, tags } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { deleteIssueCascade as deleteIssueCascadeShared } from "@agentic-kanban/shared/lib/cascade-delete";
-import { eq, and, sql, inArray, desc } from "drizzle-orm";
+import { eq, and, sql, inArray, desc, asc } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
 import { hasPath } from "../lib/dependency-graph.js";
@@ -55,11 +55,16 @@ export async function getFirstProjectStatusId(
   projectId: string,
   database: DbOrTx = db,
 ): Promise<string | null> {
+  // Same ordering as `resolveNewIssueDefaults` (issue.repository.ts) — `limit(1)` with no
+  // ORDER BY returns whatever the query plan yields first, which is not stable (#1136: six
+  // batch-created tickets landed in "AI Reviewed" instead of "Backlog"). `is_default` names
+  // the intended column; `sort_order` breaks the tie leftmost-first.
   const row = await firstRow(
     database
       .select({ id: projectStatuses.id })
       .from(projectStatuses)
       .where(eq(projectStatuses.projectId, projectId))
+      .orderBy(desc(projectStatuses.isDefault), asc(projectStatuses.sortOrder))
       .limit(1)
   );
   return row?.id ?? null;
