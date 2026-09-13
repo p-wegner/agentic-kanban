@@ -9,6 +9,7 @@ interface BoardFilterMenuProps {
   statuses: { id: string; name: string }[];
   milestones: MilestoneResponse[];
   tags: { id: string; name: string; color?: string | null }[];
+  drives?: { id: string; target: string }[];
 }
 
 /**
@@ -25,6 +26,7 @@ export function BoardFilterMenu({
   statuses,
   milestones,
   tags,
+  drives = [],
 }: BoardFilterMenuProps) {
   const statusFilterId = useBoardFilterStore((s) => s.statusFilterId);
   const onStatusFilterChange = useBoardFilterStore((s) => s.setStatusFilterId);
@@ -34,6 +36,8 @@ export function BoardFilterMenu({
   const onPriorityFilterChange = useBoardFilterStore((s) => s.setPriorityFilter);
   const milestoneFilterId = useBoardFilterStore((s) => s.milestoneFilterId);
   const onMilestoneFilterChange = useBoardFilterStore((s) => s.setMilestoneFilterId);
+  const driveFilterId = useBoardFilterStore((s) => s.driveFilterId);
+  const onDriveFilterChange = useBoardFilterStore((s) => s.setDriveFilterId);
   const showBlocked = useBoardFilterStore((s) => s.showBlocked);
   const onToggleBlocked = useBoardFilterStore((s) => s.toggleShowBlocked);
   const showStaleOnly = useBoardFilterStore((s) => s.showStaleOnly);
@@ -51,6 +55,7 @@ export function BoardFilterMenu({
     (issueTypeFilter ? 1 : 0) +
     (priorityFilter ? 1 : 0) +
     (milestoneFilterId ? 1 : 0) +
+    (driveFilterId ? 1 : 0) +
     (showBlocked ? 1 : 0) +
     (showStaleOnly ? 1 : 0) +
     activeTagIds.size;
@@ -60,6 +65,7 @@ export function BoardFilterMenu({
     if (issueTypeFilter) onIssueTypeFilterChange(null);
     if (priorityFilter) onPriorityFilterChange(null);
     if (milestoneFilterId) onMilestoneFilterChange(null);
+    if (driveFilterId) onDriveFilterChange(null);
     if (showBlocked) onToggleBlocked();
     if (showStaleOnly) onToggleStaleOnly();
     if (activeTagIds.size > 0) onClearTagFilter();
@@ -154,6 +160,23 @@ export function BoardFilterMenu({
                 <option value="">All milestones</option>
                 {milestones.map((m) => (
                   <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {drives.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint dark:text-gray-500">Drive</label>
+              <select
+                value={driveFilterId ?? ""}
+                onChange={(e) => onDriveFilterChange(e.target.value || null)}
+                className="w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+                aria-label="Filter by drive"
+              >
+                <option value="">All drives</option>
+                {drives.map((d) => (
+                  <option key={d.id} value={d.id}>{d.target}</option>
                 ))}
               </select>
             </div>

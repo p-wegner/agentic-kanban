@@ -3,6 +3,7 @@ import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { apiPost } from "../lib/api.js";
 import { getBoardDragData } from "../lib/dragData.js";
+import { requestDriveFocus } from "../lib/navigateView.js";
 import { prefetchBundle } from "../lib/issueDetailBundleCache.js";
 import { showToast } from "../lib/toast.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
@@ -269,6 +270,20 @@ function IssueCardBody({
             {(issue as IssueWithStatus & { dependencyCount?: number }).dependencyCount}
           </Badge>
         ) : null}
+        {issue.drive && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              requestDriveFocus(issue.drive!.id);
+            }}
+            title={`In drive: ${issue.drive.target}`}
+            className={`inline-flex items-center gap-1 max-w-[10rem] truncate rounded-full px-1.5 py-0.5 text-xs font-medium ${badgeToneClass("accent")}`}
+          >
+            <Icon className="w-3 h-3 shrink-0" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            <span className="truncate">{issue.drive.target}</span>
+          </button>
+        )}
         {typeBadgeColor && (
           <Badge className={`capitalize ${typeBadgeColor}`}>{issueType}</Badge>
         )}
