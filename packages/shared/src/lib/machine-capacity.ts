@@ -312,6 +312,97 @@ export function deriveVerifyWorkers(input: DeriveVerifyWorkersInput): number {
   return Math.max(1, Math.min(derived, input.ceiling));
 }
 
+/**
+ * Host disk-health signal (#1127): bad-block and interrupted-write events from the Windows
+ * System event log, surfaced alongside CPU/RAM so a setup or gate failure with the same
+ * timestamp as a hardware event reads as "check the machine", not another phantom pnpm bug.
+ *
+ * Measured incident: `Provider: disk, Event ID 7` ("Fehlerhafter Block") logged 530 times over
+ * 60 days on one box, ~10-20/day, with `workspace_setup_run` failures landing in the same
+ * minutes — hours were spent chasing `ERR_PNPM_UNKNOWN` before anyone thought to check
+ * `Get-WinEvent`. Nothing in the board read the System log before this.
+ *
+ * Cheap and fail-open by construction, like Tier 0/1 above: non-Windows or an unreadable log
+ * returns `null` (no signal), never a thrown error and never a false "degraded".
+ */
+export interface DiskHealthSignal {
+  /** `disk` provider, Event ID 7 ("Fehlerhafter Block bei Gerät ..."), in the counted window. */
+  diskBadBlockEvents: number;
+  /** `Microsoft-Windows-Ntfs`, Event ID 7 (interrupted write), in the same window. */
+  ntfsInterruptedWriteEvents: number;
+  windowDays: number;
+  /** True once either count crosses the flag-worthy floor below. */
+  degraded: boolean;
+  /** One line naming the counts, for a log line or a hold message. */
+  reason: string;
+}
+
+/** Default lookback for the disk-health probe. */
+export const DEFAULT_DISK_HEALTH_WINDOW_DAYS = 7;
+
+/**
+ * Below this, a handful of bad-block events over a week is not worth flagging — the measured
+ * incident was ~10-20/day sustained, not a one-off. Any NTFS interrupted-write event is flagged
+ * regardless of count: it is rarer and more directly tied to an aborted write (#1033/#1037's
+ * "install aborted mid-relink" signature).
+ */
+export const DEFAULT_DISK_BAD_BLOCK_FLOOR = 5;
+
+/** Pure: fold raw event counts into a verdict. No spawn, no clock — easy to unit-test. */
+export function classifyDiskHealth(
+  counts: { diskBadBlockEvents: number; ntfsInterruptedWriteEvents: number },
+  windowDays: number = DEFAULT_DISK_HEALTH_WINDOW_DAYS,
+): DiskHealthSignal {
+  const degraded = counts.diskBadBlockEvents >= DEFAULT_DISK_BAD_BLOCK_FLOOR || counts.ntfsInterruptedWriteEvents > 0;
+  const reason = degraded
+    ? `host disk logged ${counts.diskBadBlockEvents} bad-block event(s) and ${counts.ntfsInterruptedWriteEvents} `
+      + `NTFS interrupted-write event(s) in the last ${windowDays}d — a setup/gate failure around the same `
+      + `time may be failing hardware, not the project (#1127)`
+    : `disk: ${counts.diskBadBlockEvents} bad-block event(s), ${counts.ntfsInterruptedWriteEvents} `
+      + `NTFS interrupted-write event(s) in the last ${windowDays}d`;
+  return { ...counts, windowDays, degraded, reason };
+}
+
+/** Kill timeout for the `Get-WinEvent` spawn (ms) — a slow/huge event log must not hang a cycle. */
+const DISK_HEALTH_TIMEOUT_MS = 5000;
+
+/**
+ * One spawn of `Get-WinEvent` against the System log, counting `disk` Event ID 7 and
+ * `Microsoft-Windows-Ntfs` Event ID 7 in the last `windowDays`. Returns `null` — never
+ * throws — on any non-Windows host, a missing/unreadable event log, a timed-out spawn, or
+ * output that doesn't parse: every one of those is "no signal available", exactly like Tier 1's
+ * `fleet` probe degrading to Tier 0 above.
+ */
+export function readDiskHealthEvents(opts: { windowDays?: number; timeoutMs?: number } = {}): Promise<DiskHealthSignal | null> {
+  if (process.platform !== "win32") return Promise.resolve(null);
+  const windowDays = opts.windowDays ?? DEFAULT_DISK_HEALTH_WINDOW_DAYS;
+  const script = [
+    `$start = (Get-Date).AddDays(-${windowDays})`,
+    "$disk = @(Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='disk'; Id=7; StartTime=$start} -ErrorAction SilentlyContinue).Count",
+    "$ntfs = @(Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Microsoft-Windows-Ntfs'; Id=7; StartTime=$start} -ErrorAction SilentlyContinue).Count",
+    "Write-Output (\"{0},{1}\" -f $disk, $ntfs)",
+  ].join("\n");
+  return new Promise((resolve) => {
+    execFile(
+      "powershell",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { timeout: opts.timeoutMs ?? DISK_HEALTH_TIMEOUT_MS, windowsHide: true },
+      (err, stdout) => {
+        if (err || !stdout) {
+          resolve(null);
+          return;
+        }
+        const match = /(\d+),(\d+)/.exec(stdout.toString());
+        if (!match) {
+          resolve(null);
+          return;
+        }
+        resolve(classifyDiskHealth({ diskBadBlockEvents: Number(match[1]), ntfsInterruptedWriteEvents: Number(match[2]) }, windowDays));
+      },
+    );
+  });
+}
+
 /** Sum of `os.cpus()` per-core times, for a busy-% delta between two samples. */
 function cpuTimesSnapshot(): { idle: number; total: number } | null {
   try {
