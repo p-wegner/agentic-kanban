@@ -155,3 +155,42 @@ describe("GET /api/projects/:id/monitor-tunables - capacity (#1029)", () => {
     expect(body.startPolicy.wip.activeAgentsTarget).toBe(body.tunables.activeAgentsTarget);
   });
 });
+
+// #1127: host disk-health signal carried alongside capacity, so a setup/gate failure with the
+// same timestamp as a hardware event reads as "check the machine", not another phantom bug.
+describe("GET /api/projects/:id/monitor-tunables - diskHealth (#1127)", () => {
+  it("passes through a degraded disk-health read from the injected probe", async () => {
+    const { db } = createTestDb();
+    const { projectId } = await seedProject(db);
+    const app = new Hono();
+    app.route("/api/projects", createBoardMonitorRoute(db as never, {
+      readMachineCapacity: async () => ({ tier: "0", hold: false, reason: "8.0GB free", freeGb: 8 }),
+      readDiskHealth: async () => ({
+        diskBadBlockEvents: 12,
+        ntfsInterruptedWriteEvents: 3,
+        windowDays: 7,
+        degraded: true,
+        reason: "host disk logged 12 bad-block event(s) and 3 NTFS interrupted-write event(s) in the last 7d — a setup/gate failure around the same time may be failing hardware, not the project (#1127)",
+      }),
+    }));
+    const res = await app.request(`/api/projects/${projectId}/monitor-tunables`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { diskHealth: { degraded: boolean; diskBadBlockEvents: number; ntfsInterruptedWriteEvents: number } };
+    expect(body.diskHealth.degraded).toBe(true);
+    expect(body.diskHealth.diskBadBlockEvents).toBe(12);
+    expect(body.diskHealth.ntfsInterruptedWriteEvents).toBe(3);
+  });
+
+  it("reports null when the probe finds no signal (non-Windows host, or an unreadable event log)", async () => {
+    const { db } = createTestDb();
+    const { projectId } = await seedProject(db);
+    const app = new Hono();
+    app.route("/api/projects", createBoardMonitorRoute(db as never, {
+      readMachineCapacity: async () => ({ tier: "0", hold: false, reason: "8.0GB free", freeGb: 8 }),
+      readDiskHealth: async () => null,
+    }));
+    const res = await app.request(`/api/projects/${projectId}/monitor-tunables`);
+    const body = await res.json() as { diskHealth: unknown };
+    expect(body.diskHealth).toBeNull();
+  });
+});
