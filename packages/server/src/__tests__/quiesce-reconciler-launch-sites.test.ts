@@ -1,4 +1,4 @@
-// @gate:always-run — walks `startup/`; reaches state (file text) outside its own import graph.
+// @gate:always-run when:packages/server/src/startup/** — walks `startup/`; reaches state (file text) outside its own import graph.
 /**
  * #1113 (follow-up to #1108) — every direct `startSession` call under `startup/` is either
  * quiesce-gated or consciously exempted, so a NEW one can't silently reopen the gap.
