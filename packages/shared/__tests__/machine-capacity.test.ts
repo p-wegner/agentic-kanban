@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_MIN_FREE_GB,
+  DEFAULT_DISK_BAD_BLOCK_FLOOR,
+  classifyDiskHealth,
   deriveCapacityHold,
   deriveVerifyWorkers,
   readCpuBusyPct,
+  readDiskHealthEvents,
   readTier0Capacity,
   resolveSpareCores,
   toWorkerCapacitySnapshot,
@@ -127,6 +130,49 @@ describe("deriveVerifyWorkers (#909)", () => {
   it("a low ceiling (1) always wins regardless of capacity", () => {
     expect(deriveVerifyWorkers({ cpuCount: 32, freeGb: 64, ceiling: 1 })).toBe(1);
   });
+});
+
+// #1127: host disk-health signal (bad-block / interrupted-write events) surfaced alongside
+// the CPU/RAM capacity check, so a setup/gate failure with the same timestamp reads as a
+// machine condition rather than another phantom pnpm bug.
+describe("classifyDiskHealth (#1127)", () => {
+  it("is not degraded when both counts are at/under their floors", () => {
+    const result = classifyDiskHealth({ diskBadBlockEvents: DEFAULT_DISK_BAD_BLOCK_FLOOR - 1, ntfsInterruptedWriteEvents: 0 });
+    expect(result.degraded).toBe(false);
+    expect(result.reason).not.toContain("may be failing hardware");
+  });
+
+  it("is degraded once bad-block events reach the flag-worthy floor", () => {
+    const result = classifyDiskHealth({ diskBadBlockEvents: DEFAULT_DISK_BAD_BLOCK_FLOOR, ntfsInterruptedWriteEvents: 0 }, 7);
+    expect(result.degraded).toBe(true);
+    expect(result.windowDays).toBe(7);
+    expect(result.reason).toContain("may be failing hardware, not the project (#1127)");
+  });
+
+  it("is degraded by even a single NTFS interrupted-write event, regardless of the bad-block count", () => {
+    const result = classifyDiskHealth({ diskBadBlockEvents: 0, ntfsInterruptedWriteEvents: 1 });
+    expect(result.degraded).toBe(true);
+  });
+
+  it("defaults to a 7-day window", () => {
+    expect(classifyDiskHealth({ diskBadBlockEvents: 0, ntfsInterruptedWriteEvents: 0 }).windowDays).toBe(7);
+  });
+});
+
+describe("readDiskHealthEvents (#1127)", () => {
+  it("never throws, and returns null on a non-Windows host", async () => {
+    if (process.platform === "win32") return;
+    await expect(readDiskHealthEvents()).resolves.toBeNull();
+  });
+
+  it("on Windows, resolves to null or a valid signal — never rejects, never hangs past its own budget", async () => {
+    if (process.platform !== "win32") return;
+    const result = await readDiskHealthEvents({ timeoutMs: 5000 });
+    if (result !== null) {
+      expect(result.diskBadBlockEvents).toBeGreaterThanOrEqual(0);
+      expect(result.ntfsInterruptedWriteEvents).toBeGreaterThanOrEqual(0);
+    }
+  }, 10_000);
 });
 
 describe("deriveCapacityHold (#1029) - the Conductor's projection of a snapshot", () => {
