@@ -41,6 +41,17 @@ export interface StartPolicy {
   wip: MonitorTunables;
   /** Whether the mode came from an explicit per-project `start_mode_<id>` or was derived. */
   source: "start_mode" | "derived";
+  /**
+   * Project-wide QUIESCE (#1108) — a maintenance-window hold distinct from Start Mode.
+   * `manual` deliberately still allows explicit relaunch (see `StartMode` docs); quiesce
+   * does not — it is enforced at the workspace-create/launch chokepoints themselves
+   * (`createWorkspace`, `launchSession`), not just at the monitor's own auto-start
+   * decision, so it holds regardless of *why* something tried to start a workspace
+   * (monitor, cron, conductor, or a human clicking relaunch).
+   */
+  quiesced: boolean;
+  /** Operator-supplied reason, shown on the maintenance banner. */
+  quiesceReason?: string;
 }
 
 export type RiskPostureLevel = (typeof RISK_POSTURES)[number];
