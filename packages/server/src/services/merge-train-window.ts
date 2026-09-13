@@ -34,8 +34,8 @@ export interface MergeTrainWindowConfig {
 }
 
 export type MergeTrainWindowVerdict =
-  | { release: true; reason: "max_size" | "max_wait" }
-  | { release: false; reason: "accumulating" };
+  | { release: true; reason: "max_size" | "max_wait" | "gate_busy_grace_elapsed" }
+  | { release: false; reason: "accumulating" | "gate_busy" };
 
 /**
  * The batching-window default size (#905's `standard` risk-posture row). `trainEligible`
@@ -49,10 +49,39 @@ export const DEFAULT_TRAIN_MAX_SIZE = 4;
 export const DEFAULT_TRAIN_MAX_WAIT_MS = 10 * 60 * 1000;
 
 /**
+ * How long a release may be held back for a sibling verify chain already in flight (#1138),
+ * on top of whatever `maxWaitMs` says. Independent of the posture's own train window: a
+ * `standard`/`iterate` project's `trainMaxWaitMs: 0` means "never artificially delay a merge
+ * for BATCHING purposes", which is a different question from "don't release a singleton
+ * straight into a gate slot another workspace's gate is about to hold for 20-40 minutes,
+ * guaranteeing the #243 discard once it finishes and the base has moved". Short enough that an
+ * idle box never notices it (the grace only ever engages while `gateBusy` is true, i.e. a real
+ * verify chain is already running) and short enough that it can never itself become the
+ * multi-hour livelock it exists to prevent — a released batch that misses this window merges
+ * anyway and simply risks the same discard it would have taken without the grace at all.
+ */
+export const DEFAULT_GATE_BUSY_GRACE_MS = 60 * 1000;
+
+/**
  * Should the batching window release its pending set as one train right now?
  *
  * `nowMs` is injected (not `Date.now()`) so this stays a pure, clock-independent decision —
  * see the root CLAUDE.md's time-injection convention.
+ *
+ * `gateBusy` (#1138) says whether a verify chain — this project's or another's, the semaphore
+ * is process-wide — is active RIGHT NOW. A release that would otherwise fire on `max_size`
+ * (most commonly a singleton batch under the `standard`/`iterate` default of `trainMaxSize: 1`)
+ * is held for up to {@link DEFAULT_GATE_BUSY_GRACE_MS} instead: releasing a lone ready
+ * workspace straight into an already-running 20-40 minute gate does not make it merge any
+ * sooner (the box has exactly one verify slot), it only guarantees that whatever finishes
+ * gating next has its verdict discarded the moment THIS release lands and moves the base
+ * (#243). Held back, the sibling gate has a chance to finish and either land first (so this
+ * release's own gate then runs against a settled base) or the grace elapses and this release
+ * goes ahead regardless — the grace can delay a merge by at most
+ * {@link DEFAULT_GATE_BUSY_GRACE_MS}, never withhold it indefinitely. A `max_wait` release
+ * (the batch has already waited past `maxWaitMs` for OTHER reasons) is not eligible for this
+ * hold — a batch that already timed out on its own accumulation window must not be held
+ * further on top of that.
  */
 /**
  * The batching window's config as a pure prefMap resolver (#937), routed through
@@ -121,11 +150,18 @@ export function decideMergeTrainRelease(
   state: MergeTrainWindowState,
   config: MergeTrainWindowConfig,
   nowMs: number,
+  opts?: { gateBusy?: boolean; gateBusyGraceMs?: number },
 ): MergeTrainWindowVerdict {
-  if (state.pendingIds.length >= config.maxSize) {
-    return { release: true, reason: "max_size" };
-  }
   const waitedMs = nowMs - new Date(state.firstSeenAt).getTime();
+  if (state.pendingIds.length >= config.maxSize) {
+    if (opts?.gateBusy && waitedMs < (opts.gateBusyGraceMs ?? DEFAULT_GATE_BUSY_GRACE_MS)) {
+      return { release: false, reason: "gate_busy" };
+    }
+    return {
+      release: true,
+      reason: opts?.gateBusy ? "gate_busy_grace_elapsed" : "max_size",
+    };
+  }
   if (waitedMs >= config.maxWaitMs) {
     return { release: true, reason: "max_wait" };
   }

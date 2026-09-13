@@ -19,6 +19,7 @@ import {
   resolveTrainWindowConfig,
   type MergeTrainWindowState,
 } from "../services/merge-train-window.js";
+import { verifyChainSemaphoreActive } from "../services/verify-chain-semaphore.js";
 import { formatPostureNote } from "../services/risk-posture.service.js";
 import { reconcileCompletionStates } from "./completion-state-reconciler.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
@@ -338,7 +339,13 @@ export function createAutoMergeOrchestrator(deps: {
         firstSeenAt: existing?.firstSeenAt ?? now,
       };
 
-      const verdict = decideMergeTrainRelease(windowState, config, nowMs);
+      // #1138 — hold a release for a short grace while a verify chain is already running:
+      // releasing a lone ready workspace straight into a gate the box is already busy with
+      // does not merge it any sooner (one verify slot, process-wide) and guarantees the #243
+      // discard for whichever sibling gate finishes next and finds the base has moved.
+      const verdict = decideMergeTrainRelease(windowState, config, nowMs, {
+        gateBusy: verifyChainSemaphoreActive() > 0,
+      });
       if (verdict.release) {
         console.log(`[auto-merge] train window closed for project ${projectId} (${verdict.reason}, size ${config.maxSize}/wait ${config.maxWaitMs}ms): releasing ${ids.length} workspace(s)${config.batchingFromPosture ? formatPostureNote(config.posture) : ""}`);
         released.push(...ids);
