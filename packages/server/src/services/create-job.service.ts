@@ -141,6 +141,25 @@ export function findRunningCreateJobForIssue(issueId: string): CreateJob | null 
   return newest;
 }
 
+/**
+ * Every issue with a create job currently RUNNING (#1137).
+ *
+ * A reservation the WIP tally can see before the workspace row lands. Without this, the WIP
+ * count reads `active` purely from `workspaces` INNER JOINed to `issues`, which is blind for
+ * the whole provisioning window (see `findRunningCreateJobForIssue` above) — so a burst of
+ * monitor cycles firing within seconds of each other (the mutation-driven monitor reacting to
+ * several board mutations at once) each read a WIP count that has not caught up with the
+ * starts the previous cycles already made, and each spends the same free slot. Measured live:
+ * five workspaces launched against a WIP limit of 2 in 89 seconds.
+ */
+export function listRunningCreateJobIssueIds(): string[] {
+  const ids: string[] = [];
+  for (const job of jobsById.values()) {
+    if (job.state === "running") ids.push(job.issueId);
+  }
+  return ids;
+}
+
 /** Test seam: drop all tracked jobs. */
 export function resetCreateJobs(): void {
   jobsById.clear();
