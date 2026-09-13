@@ -159,7 +159,28 @@ import {
  * worst-case number. Should shrink at the next `durations.json` capture: measured ~0.4s wall for
  * its four cases, against the 3,000 ms placeholder.
  */
-const BASELINE_TOTAL_MS = 567_000;
+/*
+ * -- Seventh disclosed movement (2026-09-13, #1113 follow-up) — 567,000 -> 570,000 ----------
+ *
+ * `quiesce-reconciler-launch-sites.test.ts`, the 185th guard, at the ASSUMED 3,000 ms.
+ *
+ * The argument for the seconds: #1108 wired the quiesce hold into the two chokepoints every
+ * workspace-creating/agent-launching path is SUPPOSED to funnel through, and a `git grep` for
+ * `.startSession(` under `startup/` then found FIVE call sites reaching the session manager
+ * directly, past both. What must hold is that no NEW direct caller appears — a statement about
+ * files this suite never imports, so it reads their text off disk. That is exactly the
+ * import-graph-invisible shape `always-run-marker-ratchet` demands a marker for: the choice was
+ * never "marker or no marker", only "declared or silently unrun".
+ *
+ * Its real cost is far under the assumption (4 ms of test time measured; the 3,000 ms is the
+ * placeholder every new guard carries until `durations.json` is next captured), so this movement
+ * should shrink at the next capture rather than persist.
+ *
+ * It carries a `when:packages/server/src/startup/**` territory — the single tree it walks, and
+ * the whole of it — so an ordinary diff pays nothing for it, which, per this file's own doc
+ * above, does not move THIS worst-case number.
+ */
+const BASELINE_TOTAL_MS = 570_000;
 
 /**
  * How far under the baseline is tolerated before it counts as stale.
