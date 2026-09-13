@@ -32,6 +32,9 @@ interface DecomposeProposal {
   tooSmallToDecompose?: boolean;
   /** #116: tempIds of test-only children folded back into their implementation sibling. */
   coalescedTestOnly?: string[];
+  /** #1131: the epic's existing `parent_of` children, so the operator can see what
+   *  already exists next to the new proposal instead of only a generic warning. */
+  existingChildren?: Array<{ issueNumber: number; title: string; statusName: string }>;
 }
 
 interface EpicDecomposerModalProps {
@@ -190,7 +193,16 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
               )}
               {proposal?.alreadyDecomposed && (
                 <div className="bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-xs text-amber-800">
-                  ⚠ This epic was previously decomposed. These will be additional children.
+                  <p className="font-medium">⚠ This epic was previously decomposed. These will be additional children.</p>
+                  {proposal.existingChildren && proposal.existingChildren.length > 0 && (
+                    <ul className="mt-1.5 space-y-0.5">
+                      {proposal.existingChildren.map((c) => (
+                        <li key={c.issueNumber} className="truncate">
+                          #{c.issueNumber} {c.title} <span className="text-amber-600">[{c.statusName}]</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
 
