@@ -33,6 +33,7 @@ import { startAgentSessionRegistryReaper, stopAgentSessionRegistryReaper, isMach
 import { startWorkerHealthProbe, stopWorkerHealthProbe } from "../services/worker-health-probe.service.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { DB_LOCATION } from "../db/data-dir.js";
+import { startStaleTempSweeper, stopStaleTempSweeper } from "./stale-temp-sweep.js";
 
 /**
  * Background-service (start/stop) plugin registry — the append target for periodic
@@ -346,6 +347,17 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start({ db }) {
       startWorkerHealthProbe(getWorkerFleet(db).health);
       return stopWorkerHealthProbe;
+    },
+  },
+  {
+    // #1110 — the boot-time-only temp sweep (`STARTUP_AUDIT_TASKS`, #1050) never re-runs on a
+    // long-lived server, so a probe root leaked mid-session (a killed process, a failed
+    // removal) sat on disk until the next restart. This re-runs the same ownership-safe sweep
+    // hourly so the gap is an hour, not "until whenever this board happens to restart".
+    name: "stale-temp-sweeper",
+    start() {
+      startStaleTempSweeper();
+      return stopStaleTempSweeper;
     },
   },
 ];

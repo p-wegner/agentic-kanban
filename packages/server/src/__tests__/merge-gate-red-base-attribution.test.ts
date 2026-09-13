@@ -94,6 +94,8 @@ describe("runPreLockGate attributes a gate failure to an already-red base (#491)
         durationMs: 1000,
         message: "master's own verify_script fails independent of any branch",
         failedSuites: null,
+        flaky: null,
+        contention: null,
         createdAt: new Date().toISOString(),
       },
     });
@@ -124,6 +126,8 @@ describe("runPreLockGate attributes a gate failure to an already-red base (#491)
         durationMs: 1000,
         message: null,
         failedSuites: null,
+        flaky: null,
+        contention: null,
         createdAt: new Date().toISOString(),
       },
     });
@@ -167,6 +171,8 @@ describe("runPreLockGate attributes a gate failure to an already-red base (#491)
         durationMs: 2_700_123,
         message: "verify_script timed out after 2700000ms (probe ran 2700123ms with KANBAN_TEST_MAX_WORKERS=4)",
         failedSuites: null,
+        flaky: null,
+        contention: null,
         createdAt: new Date().toISOString(),
       },
       recordedSha: "base-tip",
@@ -210,6 +216,8 @@ describe("runPreLockGate attributes a gate failure to an already-red base (#491)
         durationMs: 1000,
         message: "master is genuinely broken",
         failedSuites: null,
+        flaky: null,
+        contention: null,
         createdAt: new Date().toISOString(),
       },
     });

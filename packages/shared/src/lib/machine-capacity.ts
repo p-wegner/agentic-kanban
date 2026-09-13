@@ -311,3 +311,41 @@ export function deriveVerifyWorkers(input: DeriveVerifyWorkersInput): number {
   const derived = Math.min(cpuBudget, ramBudget);
   return Math.max(1, Math.min(derived, input.ceiling));
 }
+
+/** Sum of `os.cpus()` per-core times, for a busy-% delta between two samples. */
+function cpuTimesSnapshot(): { idle: number; total: number } | null {
+  try {
+    const cpus = os.cpus();
+    let idle = 0;
+    let total = 0;
+    for (const cpu of cpus) {
+      idle += cpu.times.idle;
+      total += cpu.times.user + cpu.times.nice + cpu.times.sys + cpu.times.idle + cpu.times.irq;
+    }
+    return { idle, total };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * CPU busy percentage over a short window (#1110), for recording box contention alongside a
+ * verdict — e.g. the base-health probe's "was this red because the box was on fire" question.
+ *
+ * `os.loadavg()` reads `[0,0,0]` on Windows (see the module header), so this samples
+ * `os.cpus()` per-core `times` twice, `sampleMs` apart, and reports the fraction of that window
+ * NOT spent idle, summed across all cores. No spawn; never throws — an unreadable `os.cpus()`
+ * or a non-positive elapsed delta (a suspended process, a clock oddity) returns `null` rather
+ * than a fabricated number.
+ */
+export async function readCpuBusyPct(sampleMs = 150): Promise<number | null> {
+  const before = cpuTimesSnapshot();
+  if (!before) return null;
+  await new Promise((resolve) => setTimeout(resolve, sampleMs));
+  const after = cpuTimesSnapshot();
+  if (!after) return null;
+  const idleDelta = after.idle - before.idle;
+  const totalDelta = after.total - before.total;
+  if (totalDelta <= 0) return null;
+  return Math.max(0, Math.min(100, 100 * (1 - idleDelta / totalDelta)));
+}

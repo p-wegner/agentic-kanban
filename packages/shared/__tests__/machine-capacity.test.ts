@@ -3,6 +3,7 @@ import {
   DEFAULT_MIN_FREE_GB,
   deriveCapacityHold,
   deriveVerifyWorkers,
+  readCpuBusyPct,
   readTier0Capacity,
   resolveSpareCores,
   toWorkerCapacitySnapshot,
@@ -53,6 +54,18 @@ describe("readTier0Capacity", () => {
   it("falls back to the default floor when minFreeGb is negative", () => {
     const result = readTier0Capacity({ minFreeGb: -5 });
     expect(result.reason.includes(`floor ${DEFAULT_MIN_FREE_GB}GB`) || result.reason.includes("GB free")).toBe(true);
+  });
+});
+
+// #1110: box contention for a base-health verdict. os.loadavg() reads [0,0,0] on Windows, so
+// this samples os.cpus() twice instead — assert only the shape, since the actual busy % is
+// whatever the box running the test happens to be doing.
+describe("readCpuBusyPct (#1110)", () => {
+  it("returns a percentage in [0, 100]", async () => {
+    const pct = await readCpuBusyPct(20);
+    expect(pct).not.toBeNull();
+    expect(pct as number).toBeGreaterThanOrEqual(0);
+    expect(pct as number).toBeLessThanOrEqual(100);
   });
 });
 

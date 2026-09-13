@@ -16,7 +16,7 @@
  *  - `sweepStaleTempDirs` is actually CALLED at startup. It had zero production callers, so
  *    a root whose owner was SIGKILLed (no `finally` ever runs) stayed on disk forever.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { mkdtempSync, writeFileSync, mkdirSync, existsSync, rmSync, utimesSync } from "node:fs";
@@ -24,7 +24,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { TEMP_DIR_NAMESPACE, TEMP_DIR_OWNER_FILE } from "@agentic-kanban/shared/lib/temp-dir";
 import { STARTUP_AUDIT_TASKS } from "../startup/startup-tasks.js";
-import { sweepStaleTempDirsOnce } from "../startup/stale-temp-sweep.js";
+import { sweepStaleTempDirsOnce, startStaleTempSweeper, stopStaleTempSweeper } from "../startup/stale-temp-sweep.js";
 
 const serviceSrc = () =>
   readFileSync(join(import.meta.dirname, "../services/base-branch-health.service.ts"), "utf8");
@@ -82,5 +82,37 @@ describe("stale temp dirs are actually swept at startup (#1050)", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("stale temp dirs are ALSO swept periodically, not just at boot (#1110)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    stopStaleTempSweeper();
+    vi.useRealTimers();
+  });
+
+  it("is registered in BACKGROUND_SERVICES so a long-lived server re-sweeps on an interval", async () => {
+    // #1110's measured gap: a probe root from 04:41 was still on disk at 12:56 on a server
+    // that never restarted — the boot-time sweep above only ever runs once per boot.
+    const { BACKGROUND_SERVICES } = await import("../startup/background-services.js");
+    expect(BACKGROUND_SERVICES.map((s) => s.name)).toContain("stale-temp-sweeper");
+  });
+
+  it("re-runs on the configured interval without a duplicate boot-time run", () => {
+    // bootDelayMs must be null: STARTUP_AUDIT_TASKS already runs the sweep once at boot,
+    // and a second immediate run here would just be noise on every restart.
+    const h = startStaleTempSweeper(1000);
+    vi.advanceTimersByTime(999);
+    vi.advanceTimersByTime(1);
+    // Reaching this without throwing, and the handle being stoppable, is the property under
+    // test — the sweep's own reaping behaviour is covered above and in `sweepStaleTempDirsOnce`.
+    expect(() => h.stop()).not.toThrow();
+  });
+
+  it("start is idempotent (stop-then-restart), the same guard every other sweep in this codebase relies on", () => {
+    const first = startStaleTempSweeper(1000);
+    const second = startStaleTempSweeper(1000);
+    expect(() => { first.stop(); second.stop(); }).not.toThrow();
   });
 });

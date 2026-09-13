@@ -35,6 +35,20 @@ export const baseBranchHealth = sqliteTable("base_branch_health", {
    * never looked is exactly the class of false verdict #681 exists to catch.
    */
   failedSuites: text("failed_suites"),
+  /**
+   * True when this row's `green` outcome was reached only after a targeted re-run of a small
+   * failed-suite set cleared on the second try (#1110) — the base-health twin of the pre-merge
+   * gate's #894 flake retry. `null`/false for every other row, including a first-try green: the
+   * absence of a retry is the common case and does not need marking.
+   */
+  flaky: integer("flaky", { mode: "boolean" }),
+  /**
+   * JSON snapshot of machine load around this probe (#1110) — CPU/RAM at start and end, plus how
+   * long this probe queued behind another verification. Answers the question a bare red/timeout
+   * verdict cannot: was the box starved, or is the base actually broken? Null for a row recorded
+   * before this column existed, or when the read itself failed (never blocks the probe).
+   */
+  contention: text("contention"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 }, (table) => ({
   projectShaIdx: index("idx_base_branch_health_project_sha").on(table.projectId, table.sha),
