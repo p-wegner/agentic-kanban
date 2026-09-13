@@ -4,11 +4,11 @@ import type { ZodType } from "zod";
 import type { Database } from "../db/index.js";
 import { createDriveService, DriveError } from "../services/drive.service.js";
 import { buildDriveDashboard } from "../services/drive-dashboard.service.js";
-import { planDrive } from "../services/drive-planning.service.js";
+import { planDrive, extendDrive } from "../services/drive-planning.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 import { queryFlag } from "../middleware/query-params.js";
-import { startDriveBody } from "./drive-body-schemas.js";
+import { startDriveBody, extendDriveBody } from "./drive-body-schemas.js";
 import {
   computeReviewEffectiveness,
   resolveDriveIssueIds,
@@ -115,6 +115,16 @@ export function createDrivesRoute(database: Database) {
   router.post("/:projectId/drives/:id/plan", async (c) => {
     const result = await planDrive(c.req.param("projectId"), c.req.param("id"), database);
     return c.json(result, result.existing ? 200 : 201);
+  });
+
+  // POST /api/projects/:projectId/drives/:id/extend
+  // Re-enter a drive (active or completed) with a one-line addendum (#1132): appends a new
+  // `## Increment N` section to the epic, reactivates the drive if it was completed, and
+  // returns the epic so the caller opens the extension-aware decomposer on it.
+  router.post("/:projectId/drives/:id/extend", async (c) => {
+    const body = await parseDriveBody(c, extendDriveBody);
+    const result = await extendDrive(c.req.param("projectId"), c.req.param("id"), body.addendum, database);
+    return c.json(result);
   });
 
   // PUT /api/projects/:projectId/drives/:id

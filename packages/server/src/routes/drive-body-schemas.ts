@@ -43,3 +43,14 @@ export const startDriveBody = z.object({
   target: required("target is required"),
   completionContract: unchecked<string | null>(),
 }).passthrough();
+
+/**
+ * `POST /api/projects/:projectId/drives/:id/extend` (#1132).
+ *
+ * `extendDrive`'s own first check is `if (!addendum.trim()) throw new DriveError("addendum is
+ * required", "BAD_REQUEST")` — same shape as `startDriveBody.target` above, so the same
+ * {@link required} helper applies (the service trims on write, so no transform here either).
+ */
+export const extendDriveBody = z.object({
+  addendum: required("addendum is required"),
+}).passthrough();

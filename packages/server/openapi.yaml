@@ -7539,6 +7539,57 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{projectId}/drives/{id}/extend:
+    post:
+      summary: returns the epic so the caller opens the extension-aware decomposer on it.
+      tags:
+        - drives
+      operationId: post_api_projects_projectId_drives_id_extend
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                addendum:
+                  type: string
+              required:
+                - addendum
+              additionalProperties: true
+              x-unknown-keys: passthrough
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "403":
+          description: Error (thrown FORBIDDEN, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{projectId}/drives/{id}/finish:
     post:
       summary: POST /api/projects/:projectId/drives/:id/finish
