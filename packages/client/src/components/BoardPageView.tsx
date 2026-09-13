@@ -102,6 +102,7 @@ interface BoardPageViewModel {
   backlogColumn: StatusWithIssues | undefined;
   boardStatusOptions: StatusOption[];
   boardTagOptions: StatusOption[];
+  boardDriveOptions: { id: string; target: string }[];
   bulk: ReturnType<typeof useBoardBulkSelection>;
   butlerInitialPrompt: string | null;
   canStartWorkspace: boolean;
@@ -193,7 +194,7 @@ type ProjectController = Pick<BoardPageViewModel,
 >;
 type BoardDataController = Pick<BoardPageViewModel,
   "activeAgentsTarget" | "activeColumns" | "allMentionIssues" | "allTags" | "archiveColumns" |
-  "backlogColumn" | "boardStatusOptions" | "boardTagOptions" | "bulk" |
+  "backlogColumn" | "boardStatusOptions" | "boardTagOptions" | "boardDriveOptions" | "bulk" |
   "canStartWorkspace" | "collapsedGroups" | "columnWidths" | "columns" | "columnsRef" |
   "creatingInColumnId" | "expandedCreatePanel" | "milestones" |
   "runQueueForecast" | "visibilityColumns" | "autopilot"
@@ -243,7 +244,7 @@ interface BoardPageViewProps {
 export function BoardPageView({ board, chrome, commands, filters, project, realtime, workspace }: BoardPageViewProps) {
   const {
     activeAgentsTarget, activeColumns, allMentionIssues, allTags, archiveColumns, backlogColumn,
-    boardStatusOptions, boardTagOptions, bulk, canStartWorkspace, collapsedGroups,
+    boardStatusOptions, boardTagOptions, boardDriveOptions, bulk, canStartWorkspace, collapsedGroups,
     columnWidths, columns, columnsRef, creatingInColumnId, expandedCreatePanel,
     milestones, runQueueForecast, visibilityColumns, autopilot,
   } = board;
@@ -656,6 +657,7 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
               statuses={boardStatusOptions}
               milestones={milestones}
               tags={allTags}
+              drives={boardDriveOptions}
             />
             <ExportImportMenu projectId={activeProjectId} />
           </>

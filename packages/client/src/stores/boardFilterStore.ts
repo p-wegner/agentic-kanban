@@ -54,6 +54,7 @@ export interface BoardFilterStoreState {
   focusMode: boolean;
   statusFilterId: string | null;
   milestoneFilterId: string | null;
+  driveFilterId: string | null;
   createdDateFilter: string | null;
   showBlocked: boolean;
   showStaleOnly: boolean;
@@ -70,6 +71,7 @@ export interface BoardFilterStoreState {
   toggleFocusMode: () => void;
   setStatusFilterId: (id: string | null) => void;
   setMilestoneFilterId: (id: string | null) => void;
+  setDriveFilterId: (id: string | null) => void;
   setCreatedDateFilter: (dateKey: string | null) => void;
   setShowBlocked: (value: boolean) => void;
   toggleShowBlocked: () => void;
@@ -94,6 +96,7 @@ export const useBoardFilterStore = create<BoardFilterStoreState>((set, get) => (
   focusMode: readInitialFocusMode(),
   statusFilterId: null,
   milestoneFilterId: null,
+  driveFilterId: null,
   createdDateFilter: null,
   showBlocked: false,
   showStaleOnly: false,
@@ -114,6 +117,7 @@ export const useBoardFilterStore = create<BoardFilterStoreState>((set, get) => (
   toggleFocusMode: () => get().setFocusMode(!get().focusMode),
   setStatusFilterId: (id) => set({ statusFilterId: id }),
   setMilestoneFilterId: (id) => set({ milestoneFilterId: id }),
+  setDriveFilterId: (id) => set({ driveFilterId: id }),
   setCreatedDateFilter: (dateKey) => set({ createdDateFilter: dateKey }),
   setShowBlocked: (value) => set({ showBlocked: value }),
   toggleShowBlocked: () => set((s) => ({ showBlocked: !s.showBlocked })),
