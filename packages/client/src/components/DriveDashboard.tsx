@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { DriveScopePlanner } from "./DriveScopePlanner.js";
 import { EpicDecomposerModal } from "./EpicDecomposerModal.js";
+import { resolveDriveTierGraphView } from "../lib/driveScopeView.js";
 import { useApiResource } from "../hooks/useApiResource.js";
 import { STATUS_COLORS, ACCENT, BRAND } from "../lib/chartColors.js";
 import { showToast } from "../lib/toast.js";
@@ -223,7 +224,8 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
 
   if (!data) return null;
 
-  const { drive, progress, tiers, stalls, lastCascade, buildClean } = data;
+  const { drive, progress, tiers, selfScoped, stalls, lastCascade, buildClean } = data;
+  const tierGraphView = resolveDriveTierGraphView(tiers.length, selfScoped);
   const statusBadge =
     drive.status === "active"
       ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
@@ -351,15 +353,61 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
             Dependency tier graph
           </span>
         </div>
-        {tiers.length === 0 ? (
+        {tierGraphView.showEmptyScopePlanner && (
           <DriveScopePlanner
             projectId={projectId}
             driveId={drive.id}
             hasMetaIssue={drive.metaIssueId != null}
             onScoped={fetchDashboard}
           />
-        ) : (
-          <DriveTierGraph tiers={tiers} maxTierWidth={maxTierWidth} onIssueClick={onIssueClick} />
+        )}
+        {tierGraphView.showTierGraph && (
+          <div className="p-3 flex flex-col gap-2 overflow-x-auto">
+            {tiers.map(({ tier, issues }) => (
+              <div key={tier} className="flex items-stretch gap-2">
+                <div className="shrink-0 w-16 flex items-center justify-center text-xs font-semibold text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-800/60 rounded">
+                  Tier {tier}
+                </div>
+                <div
+                  className="grid gap-2 flex-1"
+                  style={{ gridTemplateColumns: `repeat(${maxTierWidth}, minmax(120px, 1fr))` }}
+                >
+                  {issues.map((issue) => (
+                    <button
+                      key={issue.id}
+                      onClick={() => onIssueClick?.(issue.id)}
+                      className="text-left rounded border border-gray-200 dark:border-gray-700 px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors"
+                      style={{ borderLeftWidth: 3, borderLeftColor: statusColor(issue.statusName) }}
+                      title={issue.title}
+                    >
+                      <div className="text-[11px] font-mono text-gray-400">
+                        {issue.issueNumber != null ? `#${issue.issueNumber}` : "—"}
+                      </div>
+                      <div className="text-xs text-gray-800 dark:text-gray-200 line-clamp-2">
+                        {issue.title}
+                      </div>
+                      <div className="mt-0.5 text-[10px]" style={{ color: statusColor(issue.statusName) }}>
+                        {issue.statusName}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {tierGraphView.showDecomposeDoor && (
+          <div className="border-t border-gray-200 dark:border-gray-700">
+            <div className="px-3 pt-3 text-xs text-amber-700 dark:text-amber-400 font-medium">
+              This drive is planned but not yet decomposed — its epic has no child tickets yet.
+            </div>
+            <DriveScopePlanner
+              projectId={projectId}
+              driveId={drive.id}
+              hasMetaIssue={drive.metaIssueId != null}
+              onScoped={fetchDashboard}
+            />
+          </div>
         )}
       </div>
 
@@ -440,53 +488,6 @@ function DriveProgressCards({
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-/** Dependency tier graph body (extracted to keep `DriveDashboard` itself short). */
-function DriveTierGraph({
-  tiers,
-  maxTierWidth,
-  onIssueClick,
-}: {
-  tiers: DriveDashboardData["tiers"];
-  maxTierWidth: number;
-  onIssueClick?: (issueId: string) => void;
-}) {
-  return (
-    <div className="p-3 flex flex-col gap-2 overflow-x-auto">
-      {tiers.map(({ tier, issues }) => (
-        <div key={tier} className="flex items-stretch gap-2">
-          <div className="shrink-0 w-16 flex items-center justify-center text-xs font-semibold text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-800/60 rounded">
-            Tier {tier}
-          </div>
-          <div
-            className="grid gap-2 flex-1"
-            style={{ gridTemplateColumns: `repeat(${maxTierWidth}, minmax(120px, 1fr))` }}
-          >
-            {issues.map((issue) => (
-              <button
-                key={issue.id}
-                onClick={() => onIssueClick?.(issue.id)}
-                className="text-left rounded border border-gray-200 dark:border-gray-700 px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors"
-                style={{ borderLeftWidth: 3, borderLeftColor: statusColor(issue.statusName) }}
-                title={issue.title}
-              >
-                <div className="text-[11px] font-mono text-gray-400">
-                  {issue.issueNumber != null ? `#${issue.issueNumber}` : "—"}
-                </div>
-                <div className="text-xs text-gray-800 dark:text-gray-200 line-clamp-2">
-                  {issue.title}
-                </div>
-                <div className="mt-0.5 text-[10px]" style={{ color: statusColor(issue.statusName) }}>
-                  {issue.statusName}
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      ))}
     </div>
   );
 }

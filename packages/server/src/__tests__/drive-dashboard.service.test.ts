@@ -183,6 +183,32 @@ describe("drive dashboard service", () => {
     expect(dash.progress.done).toBe(0);
     expect(dash.progress.inProgress).toBe(1);
     expect(dash.tiers.flatMap((t) => t.issues).map((i) => i.issueNumber)).toEqual([300]);
+    // #1130: the fallback must be reported explicitly, so the Drive view can still offer
+    // a way to decompose the epic instead of reading this as "already decomposed".
+    expect(dash.selfScoped).toBe(true);
+  });
+
+  // #1130: a drive whose epic already has real children is decomposed, not merely planned —
+  // the tier graph should render with no lingering "decompose" door.
+  it("reports selfScoped=false once the epic has real children", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusIds } = await seedProject(db);
+    const epic = await insertIssue(db, { projectId, statusId: statusIds["In Progress"], title: "Epic", issueNumber: 400 });
+    const child = await insertIssue(db, { projectId, statusId: statusIds.Todo, title: "Child", issueNumber: 401 });
+    await insertDependency(db, epic, child, "parent_of");
+    const driveId = await createDriveRecord(db, projectId, epic);
+
+    const dash = await buildDriveDashboard(db, projectId, driveId);
+    expect(dash.selfScoped).toBe(false);
+    expect(dash.progress.total).toBe(1);
+  });
+
+  it("reports selfScoped=false when the drive has no meta issue at all", async () => {
+    const { db } = createTestDb();
+    const { projectId } = await seedProject(db);
+    const driveId = await createDriveRecord(db, projectId, null);
+    const dash = await buildDriveDashboard(db, projectId, driveId);
+    expect(dash.selfScoped).toBe(false);
   });
 
   it("rejects a drive from another project", async () => {
