@@ -15,11 +15,12 @@
  * `findProjectStatusIdByName` is now an internal call rather than a cross-repository import.
  */
 import { drives, issueDependencies, issues, issueTags, projectStatuses, tags } from "@agentic-kanban/shared/schema";
-import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, notInArray, sql, type SQL } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { firstRow } from "../lib/first-row.js";
 import { issueIdentityColumns } from "./projections.js";
 import { BLOCKING_DEPENDENCY_TYPES } from "@agentic-kanban/shared/lib/dependency-type-traits";
+import { TERMINAL_STATUS_NAMES } from "@agentic-kanban/shared/lib/status-view";
 
 /**
  * For every candidate id, how many OTHER open (non-terminal-status) issues in the same
@@ -150,17 +151,29 @@ export function notDriveOrEpicMetaSql(): SQL {
  * start scoring (#1134). The monitor's auto-decompose step reads this to find the undecomposed
  * drive epics it should advance via `decomposeEpic`/`confirmEpicDecomposition` instead of
  * leaving them to stall with nothing eligible to pick them up.
+ *
+ * Excludes epics already in a TERMINAL status (Done/Cancelled/AI Reviewed/Closed, per the
+ * shared `TERMINAL_STATUS_NAMES`) — every other candidate query in this file scopes to
+ * open/non-terminal statuses (see `resolveCandidateStatusIds`), and without the same scope
+ * here a manually-closed or never-decomposed-but-already-Done epic would be re-submitted to
+ * `decomposeEpic`/`confirmEpicDecomposition` on every monitor cycle forever, spawning stray
+ * child issues under a closed epic.
  */
 export async function selectUndecomposedEpics(
   projectId: string,
   database: Database,
 ): Promise<Array<{ id: string; issueNumber: number | null }>> {
+  const terminalStatusIds = await database.select({ id: projectStatuses.id }).from(projectStatuses)
+    .where(and(eq(projectStatuses.projectId, projectId), inArray(projectStatuses.name, [...TERMINAL_STATUS_NAMES])));
+  const terminalIds = terminalStatusIds.map((s) => s.id);
+
   return database.select({ id: issues.id, issueNumber: issues.issueNumber }).from(issues)
     .innerJoin(issueTags, eq(issueTags.issueId, issues.id))
     .innerJoin(tags, eq(issueTags.tagId, tags.id))
     .where(and(
       eq(issues.projectId, projectId),
       eq(tags.name, "epic"),
+      terminalIds.length > 0 ? notInArray(issues.statusId, terminalIds) : undefined,
       sql`NOT EXISTS (SELECT 1 FROM ${issueDependencies} WHERE (${issueDependencies.issueId} = ${issues.id} AND ${issueDependencies.type} = 'parent_of') OR (${issueDependencies.dependsOnId} = ${issues.id} AND ${issueDependencies.type} = 'child_of'))`,
       sql`NOT EXISTS (SELECT 1 FROM ${issueTags} it2 JOIN ${tags} t2 ON it2.tag_id = t2.id WHERE it2.issue_id = ${issues.id} AND t2.name = 'right-sized')`,
     ));
