@@ -279,4 +279,33 @@ describe("buildBoardColumns", () => {
     expect(b.isBlocked).toBe(true);
     expect(b.dependencyCount).toBe(2);
   });
+
+  it("attaches the owning drive when the issue is in a drive's scope", () => {
+    const cols = buildBoardColumns({
+      statuses: STATUSES,
+      visibleStatuses: STATUSES,
+      projectIssues: [
+        issue({ id: "a", statusId: "backlog" }),
+        issue({ id: "b", statusId: "backlog" }),
+      ],
+      workspaceSummaryMap: new Map(),
+      blockedMap: new Map(),
+      issueTagMap: new Map(),
+      driveMap: new Map([["a", { id: "drive-1", target: "Ship the thing" }]]),
+      now: NOW,
+      staleDays: 14,
+      inProgressStaleDays: 3,
+    });
+    const backlog = cols.find((c) => c.id === "backlog")!;
+    const a = backlog.issues.find((i) => i.id === "a") as Record<string, unknown>;
+    const b = backlog.issues.find((i) => i.id === "b") as Record<string, unknown>;
+    expect(a.drive).toEqual({ id: "drive-1", target: "Ship the thing" });
+    expect(b.drive).toBeNull();
+  });
+
+  it("sets drive to null for every issue when no driveMap is passed", () => {
+    const cols = build([issue({ id: "a", statusId: "backlog" })]);
+    const a = cols.find((c) => c.id === "backlog")!.issues[0] as Record<string, unknown>;
+    expect(a.drive).toBeNull();
+  });
 });

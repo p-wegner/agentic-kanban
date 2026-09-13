@@ -76,6 +76,27 @@ export async function getScopedIssueRows(
     .where(inArray(issues.id, scopedIds));
 }
 
+/**
+ * Every dependency edge in a project, typed (#1135) — used by `buildDriveMap` to derive
+ * every active drive's scope in ONE query rather than resolving each drive's meta-issue
+ * subtree with its own whole-DB BFS (`review-effectiveness.service.ts`'s
+ * `resolveDriveIssueIds`, which board-build cannot afford to call once per drive per issue).
+ */
+export async function getProjectDependencyEdgesTyped(
+  projectId: string,
+  database: Database = db,
+): Promise<{ issueId: string; dependsOnId: string; type: string }[]> {
+  return database
+    .select({
+      issueId: issueDependencies.issueId,
+      dependsOnId: issueDependencies.dependsOnId,
+      type: issueDependencies.type,
+    })
+    .from(issueDependencies)
+    .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
+    .where(eq(issues.projectId, projectId));
+}
+
 /** Dependency edges originating from any of the given scoped issue ids. */
 export async function getScopedDependencyEdges(
   scopedIds: string[],
