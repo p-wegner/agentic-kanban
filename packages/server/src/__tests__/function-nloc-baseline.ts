@@ -256,6 +256,17 @@
  * from the parsed request body into `issueService.createIssue(...)`, alongside the existing
  * `reposTouched` line they sit next to. See the entry's own comment below for the measured
  * combined total.
+ *
+ * -- Thirteenth disclosed movement (2026-09-13, #1134 undecomposed drive epic) --------
+ *
+ *   routes/issues.ts::createIssuesRoute   426 -> 433  (+7)
+ *
+ * A new `POST /:id/decompose/too-small` route persists the decomposer's "already right-sized,
+ * don't split" verdict (#1074) so a childless epic stays a valid start candidate instead of
+ * being mistaken for a never-decomposed drive epic (#1134's fix). Same shape as every other
+ * route in this factory — one more `router.post(...)` block — not extractable without pulling
+ * the whole per-route body out of the one factory that registers all of `/api/issues`, which is
+ * the `createXRoute` architecture this file's header already names rather than a tangle.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 718 -> 720, a DISCLOSED raise (#1107, landed 2026-09-12 in d90659d081). `issue get` gained
@@ -323,7 +334,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // (+2 lines), landing in the SAME factory #1107 already raised for the list route's tag
   // hydration -- both handlers live in this one `createIssuesRoute` body. Measured on the
   // rebased tree with the shared scanner, not guessed from either parent's delta.
-  "routes/issues.ts::createIssuesRoute": 426,
+  "routes/issues.ts::createIssuesRoute": 433,
   "services/workflow.service.ts::createWorkflowService": 456,
   // 418 -> 409, banked (#892): the skill-materialization body (resolveSkillFile +
   // materializeEnabledPluginSkills + the new materializeWorkspaceSkills) moved to
