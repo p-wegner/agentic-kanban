@@ -18,11 +18,12 @@
  * The interrupted-run case is the important half: a killed vitest worker never reaches its
  * `afterEach`, so only a sweep at the START of the NEXT run can recover from it.
  *
- * Safety: this mirrors the production `reapParentlessChildServers` guard exactly — a process is
- * killed only when its command line matches a known fixture-server marker AND its parent PID is
- * not live. A child whose parent is alive is someone's running plugin view, possibly in another
- * worktree, and is left strictly alone. It is deliberately self-contained (no DB, no server
- * imports) so `globalSetup` cannot drag the application graph into the test bootstrap.
+ * Safety: a process is killed only when its parent PID is not live, AND (its command line matches
+ * a known fixture-server marker OR it references a path inside a recognised fixture temp-dir
+ * namespace — see the note by `FIXTURE_SERVER_MARKERS` below). A child whose parent is alive is
+ * someone's running plugin view, possibly in another worktree, and is left strictly alone. It is
+ * deliberately self-contained (no DB, no server imports) so `globalSetup` cannot drag the
+ * application graph into the test bootstrap.
  */
 import { readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -78,7 +79,21 @@ export const SWEPT_TEMP_NAMESPACES: Array<{ prefixes: string[]; minAgeMs: number
   { minAgeMs: 2 * 60 * 60_000, prefixes: ["kanban-", "ak-"] },
 ];
 
-async function reapOrphanedFixtureServers(): Promise<number> {
+/**
+ * The reap-and-sweep is a two-step: kill orphans, then remove the (now-unheld) dir. But a dir's
+ * own OWNER process was only ever recognised by `FIXTURE_SERVER_MARKERS` above — so a fixture
+ * that spawns something else (a raw `node child.js`, a `listener-worker.js`, a
+ * `mock-agent-live-*.cjs`) never had its orphan reaped, its dir never released its handle, and
+ * `reapStaleFixtureTempDirs` silently counted it as `failed` forever (#1121: five
+ * `ak-setup-script-tree-*` trees, one `ak-verify-gate-test-*` listener and one
+ * `ak-mid-session-fixture-*` mock agent, the oldest two days old). Auditing every fixture's
+ * script name into `FIXTURE_SERVER_MARKERS` is 250 chances to miss the next one — the same
+ * reasoning that made `SWEPT_TEMP_NAMESPACES` a namespace instead of a prefix whitelist (#364).
+ * So `namespaceDirs` (every currently-present fixture temp dir the sweep already recognises,
+ * regardless of age) is a SECOND, name-independent way in: a process is also an orphan candidate
+ * when its command line references a path inside one of them.
+ */
+export async function reapOrphanedFixtureServers(namespaceDirs: string[] = []): Promise<number> {
   let procs: Awaited<ReturnType<typeof listOsProcesses>>;
   try {
     procs = await listOsProcesses();
@@ -89,7 +104,9 @@ async function reapOrphanedFixtureServers(): Promise<number> {
   const orphans = procs.filter((proc) => {
     if (proc.pid === process.pid) return false;
     const cmd = proc.commandLine || "";
-    if (!FIXTURE_SERVER_MARKERS.some((marker) => cmd.includes(marker))) return false;
+    const matchesKnownMarker = FIXTURE_SERVER_MARKERS.some((marker) => cmd.includes(marker));
+    const matchesFixtureNamespace = namespaceDirs.some((dir) => cmd.includes(dir));
+    if (!matchesKnownMarker && !matchesFixtureNamespace) return false;
     // ppid 0 means "unknown" from the enumerator, not "orphan" — never guess.
     if (!proc.ppid) return false;
     return !livePids.has(proc.ppid);
@@ -137,16 +154,8 @@ export function matchedNamespace(name: string): { minAgeMs: number } | null {
   return null;
 }
 
-async function reapStaleFixtureTempDirs(): Promise<number> {
+async function reapStaleFixtureTempDirs(entries: string[]): Promise<number> {
   const base = tmpdir();
-  let entries: string[];
-  try {
-    // ONE enumeration for every namespace. Splitting it per prefix family would pay the
-    // 120-second `%TEMP%` scan twice.
-    entries = await readdir(base);
-  } catch {
-    return 0;
-  }
   const now = Date.now();
   let removed = 0;
   let failed = 0;
@@ -211,10 +220,22 @@ async function reapStaleFixtureTempDirs(): Promise<number> {
 }
 
 async function sweep(): Promise<void> {
+  const base = tmpdir();
+  // ONE enumeration for every namespace and for the process-side match below. Splitting it per
+  // prefix family (or per caller) would pay the 120-second `%TEMP%` scan twice.
+  let entries: string[];
+  try {
+    entries = await readdir(base);
+  } catch {
+    entries = [];
+  }
+  const namespaceDirs = entries
+    .filter((name) => matchedNamespace(name) !== null)
+    .map((name) => join(base, name));
   // Processes first: an orphan holds its temp dir open, so removing the dir cannot succeed until
   // the process holding it is gone.
-  await reapOrphanedFixtureServers();
-  await reapStaleFixtureTempDirs();
+  await reapOrphanedFixtureServers(namespaceDirs);
+  await reapStaleFixtureTempDirs(entries);
 }
 
 export async function setup(): Promise<void> {
