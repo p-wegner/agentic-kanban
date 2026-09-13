@@ -161,3 +161,33 @@ export interface DrivePlanResult {
    */
   proposal?: DrivePlanProposal;
 }
+
+/**
+ * `POST /api/projects/:projectId/drives/:id/extend` (#1132) — re-enter a drive, active or
+ * completed, with a one-line addendum appended to the epic as a new `## Increment N` section.
+ *
+ * Reactivates a completed drive (status "active", `finishedAt` cleared); leaves an active
+ * drive's status untouched. The caller's next step is opening the extension-aware decomposer
+ * (`POST /api/issues/:id/decompose`, which already reads the epic's existing children — #1131)
+ * on the returned `issue`, so new children are proposed against what already exists rather
+ * than duplicating the increment that just closed.
+ */
+export interface DriveExtendResult {
+  /** The drive, reactivated if it was completed. */
+  drive: {
+    id: string;
+    projectId: string;
+    metaIssueId: string | null;
+    target: string;
+    completionContract: string | null;
+    status: "active" | "completed" | "abandoned";
+    startedAt: string;
+    finishedAt: string | null;
+  };
+  /** The epic that was extended — hand this to the decomposer. */
+  issue: DecomposableIssue;
+  /** The `## Increment N` number just added. */
+  increment: number;
+  /** True when the drive was completed and this call reactivated it. */
+  reactivated: boolean;
+}

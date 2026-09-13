@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { DrivePlanResult } from "@agentic-kanban/shared";
+import type { DrivePlanResult, DriveExtendResult } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { getDriveById, updateDrive } from "../repositories/drive.repository.js";
 import { nextIssueNumber } from "../repositories/issue-number.repository.js";
@@ -181,5 +181,78 @@ export async function planDrive(
     issue: { id, issueNumber, title, projectId },
     existing: false,
     ...(proposal ? { proposal } : {}),
+  };
+}
+
+/** Matches `## Increment <N>` headings already in an epic body, to number the next one. */
+const INCREMENT_HEADING_RE = /^## Increment (\d+)\s*$/gm;
+
+/** Next increment number for an epic body: one past the highest `## Increment N` found. */
+export function nextIncrementNumber(description: string | null): number {
+  let max = 0;
+  for (const match of (description ?? "").matchAll(INCREMENT_HEADING_RE)) {
+    const n = Number(match[1]);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return max + 1;
+}
+
+/**
+ * Extend a drive (#1132) — re-enter a drive, active or completed, with a one-line addendum.
+ *
+ * A drive is meant to be the consistent entry point for a feature dimension: come back and
+ * extend it, even when parts (or all) of it already shipped. Before this, a drive was
+ * one-shot — `reconcileDriveCompletion` marks it `completed` once its children close, and
+ * nothing reopened it. `driveService.update` already allows reactivation (status "active"
+ * clears `finishedAt`), so the state machine allowed it; there was just no action wired to it.
+ *
+ * This appends the addendum to the epic's description as a new `## Increment N` section (the
+ * epic stays the SINGLE scope record — never a rival epic, the same idempotence argument
+ * `planDrive` makes), reactivates the drive when it was completed, and leaves an active
+ * drive's status untouched. The retro written at finish time lives in a separate file
+ * (`generateDriveRetro`) and is untouched by this — extending a completed drive must not
+ * erase the record of the increment that closed it.
+ */
+export async function extendDrive(
+  projectId: string,
+  driveId: string,
+  addendum: string,
+  database: Database,
+): Promise<DriveExtendResult> {
+  const trimmed = addendum.trim();
+  if (!trimmed) throw new DriveError("addendum is required", "BAD_REQUEST");
+
+  const drive = await getDriveById(driveId, database);
+  if (!drive) throw new DriveError("Drive not found", "NOT_FOUND");
+  if (drive.projectId !== projectId) {
+    throw new DriveError("Drive does not belong to this project", "FORBIDDEN");
+  }
+  if (!drive.metaIssueId) {
+    throw new DriveError("Drive has no epic yet — plan it before extending", "BAD_REQUEST");
+  }
+
+  const epic = await repo.getIssueBasics(drive.metaIssueId, database);
+  if (!epic) {
+    throw new DriveError("Drive's epic issue no longer exists", "BAD_REQUEST");
+  }
+
+  const increment = nextIncrementNumber(epic.description);
+  const now = new Date().toISOString();
+  const newDescription = `${(epic.description ?? "").trimEnd()}\n\n## Increment ${increment}\n\n${trimmed}`;
+  await repo.updateIssueDescription(epic.id, newDescription, now, database);
+
+  const wasCompleted = drive.status !== "active";
+  if (wasCompleted) {
+    await updateDrive(driveId, { status: "active", finishedAt: null }, database);
+  }
+
+  const updatedDrive = await getDriveById(driveId, database);
+  if (!updatedDrive) throw new DriveError("Drive not found", "NOT_FOUND");
+
+  return {
+    drive: updatedDrive,
+    issue: { id: epic.id, issueNumber: epic.issueNumber, title: epic.title, projectId },
+    increment,
+    reactivated: wasCompleted,
   };
 }
