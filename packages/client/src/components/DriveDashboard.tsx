@@ -8,6 +8,7 @@ import { STATUS_COLORS, ACCENT, BRAND } from "../lib/chartColors.js";
 import { showToast } from "../lib/toast.js";
 import type { DriveDashboard as DriveDashboardData, DriveExtendResult, DecomposableIssue } from "@agentic-kanban/shared";
 import { startStaggeredPoll } from "../lib/pollScheduler.js";
+import { FOCUS_DRIVE_EVENT, type FocusDriveDetail } from "../lib/navigateView.js";
 import { Icon, Spinner } from "./Icon.js";
 
 /**
@@ -152,6 +153,17 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
     },
     [fetchDrives, fetchDashboard],
   );
+
+  // #1135: a drive badge elsewhere on the board (IssueCard) names a specific drive to
+  // jump to — select it once the list has loaded (or immediately if it already has).
+  useEffect(() => {
+    function handleFocusDrive(e: Event) {
+      const driveId = (e as CustomEvent<FocusDriveDetail>).detail?.driveId;
+      if (driveId) setSelectedDriveId(driveId);
+    }
+    window.addEventListener(FOCUS_DRIVE_EVENT, handleFocusDrive);
+    return () => window.removeEventListener(FOCUS_DRIVE_EVENT, handleFocusDrive);
+  }, []);
 
   const maxTierWidth = useMemo(() => {
     if (!data) return 0;

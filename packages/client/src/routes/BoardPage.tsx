@@ -154,6 +154,7 @@ export function BoardPage() {
   const focusMode = useBoardFilterStore((s) => s.focusMode);
   const statusFilterId = useBoardFilterStore((s) => s.statusFilterId);
   const milestoneFilterId = useBoardFilterStore((s) => s.milestoneFilterId);
+  const driveFilterId = useBoardFilterStore((s) => s.driveFilterId);
   const showBlocked = useBoardFilterStore((s) => s.showBlocked);
   const showStaleOnly = useBoardFilterStore((s) => s.showStaleOnly);
   const activeTagIds = useBoardFilterStore((s) => s.activeTagIds);
@@ -459,6 +460,18 @@ export function BoardPage() {
     () => allTags.map((tag) => ({ id: tag.id, name: tag.name })),
     [allTags],
   );
+  // #1135: the drive filter's options are the distinct drives actually present on the
+  // board right now — derived from the issues' own `drive` field rather than a second
+  // fetch, since the board already carries it.
+  const boardDriveOptions = useMemo(() => {
+    const byId = new Map<string, { id: string; target: string }>();
+    for (const col of columns) {
+      for (const issue of col.issues) {
+        if (issue.drive && !byId.has(issue.drive.id)) byId.set(issue.drive.id, issue.drive);
+      }
+    }
+    return [...byId.values()];
+  }, [columns]);
   const loadSavedViewTags = useCallback(async (): Promise<SavedViewReference[]> => {
     if (tagsLoaded) return boardTagOptions;
     const tags = await queryClient.fetchQuery({
@@ -493,12 +506,13 @@ export function BoardPage() {
     statusFilterId,
     activeTagIds,
     milestoneFilterId,
+    driveFilterId,
     issueTypeFilter,
     priorityFilter,
     showBlocked,
     showStaleOnly,
     searchQuery,
-  }), [focusMode, statusFilterId, activeTagIds, milestoneFilterId, issueTypeFilter, priorityFilter, showBlocked, showStaleOnly, searchQuery]);
+  }), [focusMode, statusFilterId, activeTagIds, milestoneFilterId, driveFilterId, issueTypeFilter, priorityFilter, showBlocked, showStaleOnly, searchQuery]);
 
   const filteredColumns = useMemo(
     () =>
@@ -740,6 +754,7 @@ export function BoardPage() {
         backlogColumn,
         boardStatusOptions,
         boardTagOptions,
+        boardDriveOptions,
         bulk,
         canStartWorkspace,
         collapsedGroups,
