@@ -266,6 +266,92 @@ describe("Drives API", () => {
     expect(res.status).toBe(403);
   });
 
+  it("extends an active drive: appends an increment section, leaves status alone (#1132)", async () => {
+    const created = await (await app.request(`/api/projects/${projectId}/drives`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ target: "Ship the auth epic" }),
+    })).json() as any;
+    await app.request(`/api/projects/${projectId}/drives/${created.id}/plan`, { method: "POST" });
+
+    const extendRes = await app.request(`/api/projects/${projectId}/drives/${created.id}/extend`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ addendum: "Add OAuth support on top of the existing auth flow" }),
+    });
+    expect(extendRes.status).toBe(200);
+    const extended = await extendRes.json() as any;
+    expect(extended.reactivated).toBe(false);
+    expect(extended.increment).toBe(1);
+    expect(extended.drive.status).toBe("active");
+
+    // Addendum visible in the epic body under its own heading.
+    const issueRes = await app.request(`/api/issues/${extended.issue.id}`);
+    const issue = await issueRes.json() as any;
+    expect(issue.description).toContain("## Increment 1");
+    expect(issue.description).toContain("Add OAuth support on top of the existing auth flow");
+
+    // Same epic — no rival meta issue minted.
+    const driveRes = await app.request(`/api/projects/${projectId}/drives/${created.id}`);
+    expect((await driveRes.json() as any).metaIssueId).toBe(extended.issue.id);
+  });
+
+  it("extends a completed drive: returns it to active with finishedAt cleared (#1132)", async () => {
+    const created = await (await app.request(`/api/projects/${projectId}/drives`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ target: "Ship the billing epic" }),
+    })).json() as any;
+    await app.request(`/api/projects/${projectId}/drives/${created.id}/plan`, { method: "POST" });
+    const finishRes = await app.request(`/api/projects/${projectId}/drives/${created.id}/finish`, { method: "POST" });
+    const finished = await finishRes.json() as any;
+    expect(finished.status).toBe("completed");
+    expect(finished.finishedAt).toBeTruthy();
+
+    const extendRes = await app.request(`/api/projects/${projectId}/drives/${created.id}/extend`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ addendum: "Add invoicing on top of the shipped billing flow" }),
+    });
+    expect(extendRes.status).toBe(200);
+    const extended = await extendRes.json() as any;
+    expect(extended.reactivated).toBe(true);
+    expect(extended.drive.status).toBe("active");
+    expect(extended.drive.finishedAt).toBeNull();
+
+    const driveRes = await app.request(`/api/projects/${projectId}/drives/${created.id}`);
+    const drive = await driveRes.json() as any;
+    expect(drive.status).toBe("active");
+    expect(drive.finishedAt).toBeNull();
+    // Same epic as before the reactivation.
+    expect(drive.metaIssueId).toBe(extended.issue.id);
+  });
+
+  it("rejects extending with a blank addendum", async () => {
+    const created = await (await app.request(`/api/projects/${projectId}/drives`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ target: "Blank addendum" }),
+    })).json() as any;
+    await app.request(`/api/projects/${projectId}/drives/${created.id}/plan`, { method: "POST" });
+
+    const res = await app.request(`/api/projects/${projectId}/drives/${created.id}/extend`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ addendum: "   " }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 extending an unknown drive", async () => {
+    const res = await app.request(`/api/projects/${projectId}/drives/${randomUUID()}/extend`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ addendum: "Add something" }),
+    });
+    expect(res.status).toBe(404);
+  });
+
   it("deletes a drive", async () => {
     const created = await (await app.request(`/api/projects/${projectId}/drives`, {
       method: "POST",

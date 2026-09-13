@@ -12,7 +12,9 @@ import { createTestDb } from "./helpers/test-db.js";
 import {
   buildEpicDescription,
   deriveEpicTitle,
+  extendDrive,
   MAX_EPIC_TITLE_LENGTH,
+  nextIncrementNumber,
   planDrive,
 } from "../services/drive-planning.service.js";
 import { DriveError } from "../services/drive.service.js";
@@ -162,6 +164,115 @@ describe("deriveEpicTitle", () => {
   it("hard-cuts a target with no early word boundary", () => {
     const title = deriveEpicTitle("a".repeat(200));
     expect(title).toBe(`${"a".repeat(MAX_EPIC_TITLE_LENGTH)}…`);
+  });
+});
+
+describe("extendDrive (#1132)", () => {
+  it("appends an addendum as ## Increment 1 to an active drive without touching status", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    const driveId = await seedDrive(db, projectId);
+    const { issue } = await planDrive(projectId, driveId, db as never);
+
+    const result = await extendDrive(projectId, driveId, "Add OAuth support", db as never);
+
+    expect(result.reactivated).toBe(false);
+    expect(result.increment).toBe(1);
+    expect(result.issue.id).toBe(issue.id);
+    expect(result.drive.status).toBe("active");
+
+    const [row] = await db.select().from(schema.issues).where(eq(schema.issues.id, issue.id));
+    expect(row.description).toContain("## Increment 1");
+    expect(row.description).toContain("Add OAuth support");
+    // The original epic body survives underneath the new section.
+    expect(row.description).toContain("## Drive target");
+
+    const [drive] = await db.select().from(schema.drives).where(eq(schema.drives.id, driveId));
+    expect(drive.status).toBe("active");
+    expect(drive.finishedAt).toBeNull();
+  });
+
+  it("reactivates a completed drive and clears finishedAt, without deleting the retro record", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    const driveId = await seedDrive(db, projectId);
+    await planDrive(projectId, driveId, db as never);
+    const finishedAt = new Date().toISOString();
+    await db.update(schema.drives).set({ status: "completed", finishedAt }).where(eq(schema.drives.id, driveId));
+
+    const result = await extendDrive(projectId, driveId, "Extend with billing", db as never);
+
+    expect(result.reactivated).toBe(true);
+    expect(result.drive.status).toBe("active");
+    expect(result.drive.finishedAt).toBeNull();
+
+    const [drive] = await db.select().from(schema.drives).where(eq(schema.drives.id, driveId));
+    expect(drive.status).toBe("active");
+    expect(drive.finishedAt).toBeNull();
+  });
+
+  it("numbers successive increments and attaches the SAME epic each time", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    const driveId = await seedDrive(db, projectId);
+    const { issue } = await planDrive(projectId, driveId, db as never);
+
+    const first = await extendDrive(projectId, driveId, "First addendum", db as never);
+    const second = await extendDrive(projectId, driveId, "Second addendum", db as never);
+
+    expect(first.increment).toBe(1);
+    expect(second.increment).toBe(2);
+    expect(first.issue.id).toBe(issue.id);
+    expect(second.issue.id).toBe(issue.id);
+
+    // One meta issue per drive, unchanged — no rival epic minted.
+    const issues = await db.select().from(schema.issues);
+    expect(issues).toHaveLength(1);
+
+    const [row] = await db.select().from(schema.issues).where(eq(schema.issues.id, issue.id));
+    expect(row.description).toContain("## Increment 1");
+    expect(row.description).toContain("First addendum");
+    expect(row.description).toContain("## Increment 2");
+    expect(row.description).toContain("Second addendum");
+  });
+
+  it("rejects a blank addendum", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    const driveId = await seedDrive(db, projectId);
+    await planDrive(projectId, driveId, db as never);
+
+    await expect(extendDrive(projectId, driveId, "   ", db as never)).rejects.toThrow(DriveError);
+  });
+
+  it("refuses a drive with no epic yet", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    const driveId = await seedDrive(db, projectId);
+
+    await expect(extendDrive(projectId, driveId, "Add OAuth", db as never)).rejects.toThrow(DriveError);
+  });
+
+  it("refuses a drive belonging to another project", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    const other = await seedProject(db);
+    const driveId = await seedDrive(db, projectId);
+    await planDrive(projectId, driveId, db as never);
+
+    await expect(extendDrive(other, driveId, "Add OAuth", db as never)).rejects.toThrow(DriveError);
+  });
+});
+
+describe("nextIncrementNumber", () => {
+  it("returns 1 for a body with no prior increments", () => {
+    expect(nextIncrementNumber("## Drive target\n\nShip it")).toBe(1);
+    expect(nextIncrementNumber(null)).toBe(1);
+  });
+
+  it("returns one past the highest existing increment heading", () => {
+    const body = "## Drive target\n\nShip it\n\n## Increment 1\n\nfoo\n\n## Increment 3\n\nbar";
+    expect(nextIncrementNumber(body)).toBe(4);
   });
 });
 
