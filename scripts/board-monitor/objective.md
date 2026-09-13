@@ -25,7 +25,7 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 ## TUNABLE TARGETS - generated from Strategy Bullseye
 <!-- STRATEGY_BULLSEYE_GENERATED_START -->
 > The loop re-reads this file at the START of every iteration, so changes here take effect on the next cycle with **NO restart**. This block is generated from the Strategy Bullseye preference; edit the bullseye in the board UI instead of hand-editing these values.
-- **ACTIVE_AGENTS_TARGET = 1** - keep this many workspaces actively In Progress at all times.
+- **ACTIVE_AGENTS_TARGET = 2** - keep this many workspaces actively In Progress at all times.
 - **BACKLOG_FLOOR = 0** - never let the backlog drop below this; refill before it does.
 - **MAX_NEW_STARTS_PER_CYCLE = 1** - cap on how many NEW workspaces to launch in a single cycle.
 - **REFILL_FOCUS = balanced** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
@@ -47,7 +47,7 @@ When selecting a provider for a new workspace, apply these rules in priority ord
 1. **FILL** profiles should always have capacity — start work on them first.
 2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.
 3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
-- **claude:andrena_team_5x** [claude:andrena_team_5x]: FILL — use aggressively, keep busy at all times (Primary harness - all new workspaces launch on claude:andrena_team_5x (sonnet). Single source of truth (set-provider-default skill).)
+- **claude:anth** [claude:anth]: FILL — use aggressively, keep busy at all times (Primary harness - all new workspaces launch on claude:anth. Single source of truth (set-provider-default skill).)
 
 ## CAPACITY HOLD (generated - do not hand-edit)
 The host's measured headroom is a brake on EVERY start, above every target in this file. Before any launch or relaunch, read the live snapshot once per cycle:
@@ -55,8 +55,8 @@ The host's measured headroom is a brake on EVERY start, above every target in th
 - If `capacity.hold` is **true**: start ZERO new builders and do not relaunch idle ones; let running sessions finish and keep at most ONE merge-gate run in flight. A gate run on a saturated box dies on fork-worker timeouts, so starting more work makes every lane lose.
 - Otherwise cap this cycle's new starts at `capacity.maxNewStarts` (never above MAX_NEW_STARTS_PER_CYCLE). `null` means the cheap tier could not measure headroom — the target applies unchanged.
 - Whatever you decide, write `capacity.reason` into this cycle's state.md line so the hold is auditable by its measured numbers, not by a token.
-- **CAPACITY_HOLD = false** - last measured when this block was generated (tier 0: 6.9GB free). Stale by definition: the live read above is authoritative.
-- **FREE_GB = 6.9** - MAX_NEW_STARTS this cycle would be 1.
+- **CAPACITY_HOLD = false** - last measured when this block was generated (tier 0: 5.8GB free). Stale by definition: the live read above is authoritative.
+- **FREE_GB = 5.8** - MAX_NEW_STARTS this cycle would be 1.
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
 ## FOCUS POLICY (operator directive 2026-09-06 - authoritative)
