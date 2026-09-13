@@ -1,3 +1,4 @@
+import type { DependencyType } from "../../schema/index.js";
 import type { DecomposableIssue } from "./issue.js";
 
 // Drive-dashboard wire-contract types (pure DTOs). See ../api.ts barrel.
@@ -54,6 +55,14 @@ export interface DriveDashboard {
     tier: number;
     issues: DriveDashboardIssue[];
   }>;
+  /**
+   * True when the meta/epic issue has no `parent_of` children and therefore scopes itself
+   * (#1074's fallback) — a drive that is PLANNED but not yet DECOMPOSED. Distinguishes that
+   * state from a genuinely single-ticket epic the decomposer declared `tooSmallToDecompose`,
+   * which also reads as a one-tier, one-issue dashboard but should not offer to decompose
+   * again. False whenever `metaIssueId` is null or the epic already has children (#1130).
+   */
+  selfScoped: boolean;
   /** Issues currently blocked by open upstream work — the obstacle list. */
   stalls: DriveDashboardStall[];
   /**
@@ -94,6 +103,44 @@ export interface DriveDashboard {
  * caller's next step is the ordinary `/decompose` -> `/decompose/confirm` pair, which is what
  * actually fills the backlog, and that is the input it wants.
  */
+/**
+ * A child ticket proposed by `/decompose`, carried on `DrivePlanResult` when planning was
+ * asked to decompose in the same gesture (#1133). Mirrors the server's
+ * `DecomposeChildProposal`/`DecomposeEpicResult` shapes — declared independently here
+ * because shared cannot import server code; kept in step by
+ * `drive-plan-decompose.test.ts`.
+ */
+export interface DrivePlanProposalChild {
+  tempId: string;
+  title: string;
+  description: string;
+  priority: "low" | "medium" | "high" | "urgent";
+  targetRepo?: string | null;
+}
+
+export interface DrivePlanProposalDependency {
+  fromTempId: string;
+  toTempId: string;
+  type: DependencyType;
+}
+
+export interface DrivePlanProposal {
+  children: DrivePlanProposalChild[];
+  dependencies: DrivePlanProposalDependency[];
+  alreadyDecomposed: boolean;
+  repos: string[];
+  tooSmallToDecompose?: boolean;
+  coalescedTestOnly?: string[];
+}
+
+/**
+ * `POST /api/projects/:projectId/drives/:id/plan` (#1072) — turn a target-only drive into a
+ * scopeable one by seeding the meta/epic issue from its target and linking the drive to it.
+ *
+ * The result carries a {@link DecomposableIssue} rather than a drive-specific shape: the
+ * caller's next step is the ordinary `/decompose` -> `/decompose/confirm` pair, which is what
+ * actually fills the backlog, and that is the input it wants.
+ */
 export interface DrivePlanResult {
   /** The epic that now scopes the drive. */
   issue: DecomposableIssue;
@@ -102,6 +149,14 @@ export interface DrivePlanResult {
    * Planning is idempotent: it never creates a second epic for the same drive.
    */
   existing: boolean;
+  /**
+   * Present only when the caller asked for `?decompose=1` (#1133) — the `/decompose`
+   * proposal for the epic returned above, so the UI can jump straight to the reviewable
+   * preview instead of a second model-free click. Absent for a plain `plan` call, which
+   * makes no model call. Also absent if decomposition itself failed — the created (or
+   * existing) epic is still returned rather than failing the whole request.
+   */
+  proposal?: DrivePlanProposal;
 }
 
 /**
