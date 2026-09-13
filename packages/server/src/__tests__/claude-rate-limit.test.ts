@@ -37,9 +37,31 @@ describe("detectClaudeUsageLimitMessages", () => {
     expect(info?.resetsAt).toBe("2026-06-07T17:00:00.000Z");
   });
 
-  it("detects a usage limit inside a result event's result string", () => {
-    const line = JSON.stringify({ type: "result", result: "Claude usage limit reached. reset at 9am" });
+  it("detects a usage limit inside a FAILED result event's result string", () => {
+    const line = JSON.stringify({ type: "result", subtype: "error", is_error: true, result: "Claude usage limit reached. reset at 9am" });
     expect(detectClaudeUsageLimitMessages([msg(line)])).not.toBeNull();
+  });
+
+  it("#1139: does NOT fire on a SUCCESSFUL result event's text, even when it quotes usage-limit wording", () => {
+    // Claude's `result` field also carries the CLI's final printed answer on a successful
+    // turn — arbitrary agent-authored prose. A builder working a ticket ABOUT usage-limit
+    // classification (this one) can legitimately discuss or quote that exact wording without
+    // having hit a real limit.
+    const line = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "Fixed the bug where 'Claude usage limit reached. Your limit will reset at 3pm.' was misclassified.",
+    });
+    expect(detectClaudeUsageLimitMessages([msg(line)])).toBeNull();
+  });
+
+  it("#1139: does NOT fire on assistant text discussing/quoting usage-limit wording", () => {
+    const line = JSON.stringify({
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "text", text: "The ticket says: Claude usage limit reached. Your limit will reset at 3pm." }] },
+    });
+    expect(detectClaudeUsageLimitMessages([msg(line)])).toBeNull();
   });
 
   it("ignores an allowed_warning rate_limit_event", () => {

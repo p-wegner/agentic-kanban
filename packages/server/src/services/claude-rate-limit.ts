@@ -98,23 +98,23 @@ function detectClaudeUsageLimitLine(line: string): ClaudeUsageLimitInfo | null {
     if (info) return info;
   }
 
-  // Claude's `result` event carries a `result` string on error turns.
-  if (typeof record.result === "string") {
+  // Claude's `result` event carries a `result` string on ERROR turns only (#1139): the same
+  // field also carries the CLI's final printed answer on a SUCCESSFUL turn, which is
+  // arbitrary agent-authored prose that can freely discuss or quote usage-limit wording (a
+  // builder working a ticket ABOUT usage-limit classification, such as this one, produces
+  // exactly that). Gating on the provider's own error signal keeps this a provider-reported
+  // failure rather than a text-heuristic over LLM output.
+  const isErrorResult = record.is_error === true || (typeof record.subtype === "string" && record.subtype !== "success");
+  if (isErrorResult && typeof record.result === "string") {
     const info = detectClaudeUsageLimitText(record.result);
     if (info) return info;
   }
 
-  // Assistant text blocks (`message.content[].type === "text"`) - bounded prose, safe.
-  const message = asRecord(record.message);
-  if (Array.isArray(message?.content)) {
-    for (const block of message.content as unknown[]) {
-      const blockRecord = asRecord(block);
-      if (blockRecord?.type === "text" && typeof blockRecord.text === "string") {
-        const info = detectClaudeUsageLimitText(blockRecord.text);
-        if (info) return info;
-      }
-    }
-  }
+  // Deliberately NOT matched: assistant text blocks (`message.content[].type === "text"`).
+  // That is unbounded, model-generated prose - the agent can legitimately discuss, quote, or
+  // work on a ticket about usage limits (again, exactly this one) without having hit one.
+  // A real usage-limit death is reported through the structured `rate_limit_event` or the
+  // provider's own error/result channel above, never through assistant commentary.
 
   return null;
 }

@@ -38,10 +38,17 @@ function frictionFromBuffer(messages: AgentOutputMessage[]): SessionFrictionStat
  * (e.g. codex/copilot launches). Only sets `friction` when it is not already
  * present, so it can never clobber the cost/token stats written on the result
  * event (which already include friction). Fire-and-forget.
+ *
+ * `usageLimit` detection is gated to codex sessions (#1139): this used to run
+ * UNCONDITIONALLY on every provider's messages, so a Claude session whose output
+ * happened to contain codex-shaped usage-limit prose (e.g. a builder quoting or
+ * discussing that wording — exactly what a ticket ABOUT usage-limit
+ * classification produces) was misfiled as a `codex-usage-limit` death with an
+ * unsanitized `retryAfter`, parking a healthy workspace `blocked` for hours.
  */
-async function persistFrictionFallback(sessionId: string, messages: AgentOutputMessage[]) {
+async function persistFrictionFallback(sessionId: string, messages: AgentOutputMessage[], provider: string | null) {
   const friction = frictionFromBuffer(messages);
-  const usageLimit = detectCodexUsageLimitMessages(messages);
+  const usageLimit = provider === "codex" ? detectCodexUsageLimitMessages(messages) : null;
   if (!friction && !usageLimit) return;
   // Read AND write inside the chain (#1002): this decides what to write from what the blob
   // already holds ("friction already persisted on the result-event write"), so reading it
@@ -585,7 +592,10 @@ export function createBroadcaster(
       // Fallback for sessions that never emitted a result/stats event (e.g.
       // codex/copilot). Safe: only sets `friction` when absent, so it can't
       // overwrite cost/token stats from the result-event path above.
-      void persistFrictionFallback(sessionId, state.messageBuffer.get(sessionId) ?? []).finally(
+      const fallbackProvider = state.sessionProviders.has(sessionId)
+        ? narrowProviderName(state.sessionProviders.get(sessionId))
+        : null;
+      void persistFrictionFallback(sessionId, state.messageBuffer.get(sessionId) ?? [], fallbackProvider).finally(
         () => releaseStatsWriteChain(sessionId),
       );
     }
