@@ -16,6 +16,7 @@ import type { Database } from "../db/index.js";
 import type { PreMergeGateResult, PreMergeGateWorkspace } from "./pre-merge-gate.types.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { describeOutstandingRepoInstalls } from "./pre-merge-gate-installs.js";
+import { describeFailedSetupRun } from "./pre-merge-gate-setup-failure.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { buildSmokeCheck, getStackProfile, resolveEffectiveVerify } from "./stack-profile.service.js";
 import { resolveDevServerPlan } from "./dev-server.service.js";
@@ -182,6 +183,23 @@ async function describeOutstandingInstallsForGate(
   return null;
 }
 
+/**
+ * #1123 — the first FAILED `workspace_setup_run` across a workspace train, or null when every
+ * member's latest recorded run is not `failed`. Same shape as
+ * {@link describeOutstandingInstallsForGate} and for the same reason: a train gates with a
+ * synthetic id that matches no real workspace, so every real member must be asked by name.
+ */
+async function describeFailedSetupForGate(
+  workspace: PreMergeGateWorkspace,
+  database: Database,
+): Promise<string | null> {
+  for (const setupCheckId of workspace.memberWorkspaceIds ?? [workspace.id]) {
+    const setupFailure = await describeFailedSetupRun(setupCheckId, database);
+    if (setupFailure) return setupFailure;
+  }
+  return null;
+}
+
 export async function runPreMergeGate(
   workspace: PreMergeGateWorkspace,
   projectId: string,
@@ -199,6 +217,17 @@ export async function runPreMergeGate(
   const installBlock = await describeOutstandingInstallsForGate(workspace, database);
   if (installBlock) {
     return { passed: false, skipped: false, stage: "none", message: installBlock };
+  }
+
+  // ---- #1123 non-blocking setup failure -----------------------------------------------------
+  // `setupFailedBlocking` (#169) refuses the LAUNCH, but only when `setup_blocking = 1`. With
+  // background installs a failed setup never blocked the launch and never gets retried by the
+  // born-blocked reconciler either (that recovery also requires `setup_blocking = 1`), so a
+  // FAILED verdict here is otherwise permanent and invisible to every other guard. Checked
+  // right after the install-outstanding check, before anything that assumes a working tree.
+  const setupFailureBlock = await describeFailedSetupForGate(workspace, database);
+  if (setupFailureBlock) {
+    return { passed: false, skipped: false, stage: "none", message: setupFailureBlock };
   }
 
   // What verification is CURRENTLY configured — resolved BEFORE the tree memo, and in
