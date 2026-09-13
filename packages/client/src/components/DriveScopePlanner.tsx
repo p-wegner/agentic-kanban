@@ -3,7 +3,7 @@ import type { DecomposableIssue, DrivePlanResult } from "@agentic-kanban/shared"
 import { apiPost, apiPut } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { BRAND } from "../lib/chartColors.js";
-import { EpicDecomposerModal } from "./EpicDecomposerModal.js";
+import { EpicDecomposerModal, type DecomposeProposal } from "./EpicDecomposerModal.js";
 import { useApiResource } from "../hooks/useApiResource.js";
 
 interface PickerIssue {
@@ -42,6 +42,11 @@ export interface DriveScopePlannerProps {
 
 export function DriveScopePlanner({ projectId, driveId, hasMetaIssue, onScoped }: DriveScopePlannerProps) {
   const [epic, setEpic] = useState<DecomposableIssue | null>(null);
+  // #1133: when `/plan?decompose=1` returns a proposal alongside the epic, the modal opens
+  // straight at the reviewable preview instead of behind a second "Generate Decomposition"
+  // click. Absent (undefined) when the endpoint made no model call (failed decomposition,
+  // or the caller didn't ask) — `EpicDecomposerModal` falls back to its own fetch-on-demand.
+  const [initialProposal, setInitialProposal] = useState<DecomposeProposal | undefined>(undefined);
   const [planning, setPlanning] = useState(false);
   const [selectedIssueId, setSelectedIssueId] = useState("");
   const [attaching, setAttaching] = useState(false);
@@ -54,10 +59,15 @@ export function DriveScopePlanner({ projectId, driveId, hasMetaIssue, onScoped }
     if (planning) return;
     setPlanning(true);
     try {
-      const result = await apiPost<DrivePlanResult>(
-        `/api/projects/${projectId}/drives/${driveId}/plan`,
+      // The wire contract is `DrivePlanResult` (`proposal?: DrivePlanProposal`); typed here
+      // with the client's own `DecomposeProposal` for `proposal` instead, since that is the
+      // shape `EpicDecomposerModal` already renders (its `priority` union carries the
+      // client-normalized `"critical"`, not the server's pre-normalization `"urgent"`).
+      const result = await apiPost<Omit<DrivePlanResult, "proposal"> & { proposal?: DecomposeProposal }>(
+        `/api/projects/${projectId}/drives/${driveId}/plan?decompose=1`,
         {},
       );
+      setInitialProposal(result.proposal);
       setEpic(result.issue);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to plan drive", "error");
@@ -82,6 +92,7 @@ export function DriveScopePlanner({ projectId, driveId, hasMetaIssue, onScoped }
 
   const handleConfirmed = useCallback(() => {
     setEpic(null);
+    setInitialProposal(undefined);
     showToast("Drive scoped — the backlog is filled", "success");
     onScoped();
   }, [onScoped]);
@@ -142,7 +153,12 @@ export function DriveScopePlanner({ projectId, driveId, hasMetaIssue, onScoped }
       )}
 
       {epic && (
-        <EpicDecomposerModal issue={epic} onClose={() => setEpic(null)} onConfirmed={handleConfirmed} />
+        <EpicDecomposerModal
+          issue={epic}
+          initialProposal={initialProposal}
+          onClose={() => { setEpic(null); setInitialProposal(undefined); }}
+          onConfirmed={handleConfirmed}
+        />
       )}
     </div>
   );

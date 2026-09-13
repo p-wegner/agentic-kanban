@@ -5,6 +5,7 @@ import { getDriveById, updateDrive } from "../repositories/drive.repository.js";
 import { nextIssueNumber } from "../repositories/issue-number.repository.js";
 import * as repo from "../repositories/issue-ai.repository.js";
 import { DriveError } from "./drive.service.js";
+import { decomposeEpic } from "./issue-ai.service.js";
 
 /**
  * Plan a drive from its TARGET (#1072).
@@ -18,10 +19,13 @@ import { DriveError } from "./drive.service.js";
  * "drive-epic seeder"; no such thing was ever written.
  *
  * This is that seeder, and it is deliberately the *smallest* thing that unblocks the flow: it
- * creates ONE issue from the target and links the drive to it. It generates no children and
- * calls no model — the caller's next step is the ordinary `/decompose` -> `/decompose/confirm`
- * pair, which is the reviewed propose->confirm path the rest of the board already uses. Nothing
- * here is a second way to fan out an epic.
+ * creates ONE issue from the target and links the drive to it. By default it generates no
+ * children and calls no model — the caller's next step is the ordinary `/decompose` ->
+ * `/decompose/confirm` pair, which is the reviewed propose->confirm path the rest of the board
+ * already uses. Nothing here is a second way to CREATE an epic's children; `decompose: true`
+ * (#1133) only fetches the SAME `/decompose` proposal in the same request, so the caller can
+ * land straight on the reviewable preview — confirming still goes through the unchanged
+ * `/decompose/confirm` endpoint, so nothing is created without a human pressing confirm.
  *
  * **Idempotent by design.** A drive has exactly one meta issue, and planning a drive that
  * already has one returns it with `existing: true` rather than creating a rival epic — a second
@@ -69,6 +73,23 @@ export function buildEpicDescription(target: string, completionContract: string 
 }
 
 /**
+ * Fetch the `/decompose` proposal for a just-(re)confirmed epic, folding any failure into
+ * `undefined` rather than throwing (#1133's acceptance: a failed decomposition still returns
+ * the created/existing epic, never fails the whole `plan` request).
+ */
+async function tryProposeDecomposition(
+  issueId: string,
+  projectId: string,
+  database: Database,
+): Promise<DrivePlanResult["proposal"] | undefined> {
+  try {
+    return await decomposeEpic(issueId, projectId, database);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Create (or return) the meta/epic issue that scopes a drive.
  *
  * The epic is created in the project's Backlog column so it is visible as unstarted work and
@@ -78,6 +99,7 @@ export async function planDrive(
   projectId: string,
   driveId: string,
   database: Database,
+  options: { decompose?: boolean } = {},
 ): Promise<DrivePlanResult> {
   const drive = await getDriveById(driveId, database);
   if (!drive) throw new DriveError("Drive not found", "NOT_FOUND");
@@ -91,6 +113,9 @@ export async function planDrive(
     // drive is plannable again by the ordinary path.
     const existing = await repo.getIssueBasics(drive.metaIssueId, database);
     if (existing) {
+      const proposal = options.decompose
+        ? await tryProposeDecomposition(existing.id, projectId, database)
+        : undefined;
       return {
         issue: {
           id: existing.id,
@@ -99,6 +124,7 @@ export async function planDrive(
           projectId,
         },
         existing: true,
+        ...(proposal ? { proposal } : {}),
       };
     }
   }
@@ -147,7 +173,15 @@ export async function planDrive(
 
   await updateDrive(driveId, { metaIssueId: id }, database);
 
-  return { issue: { id, issueNumber, title, projectId }, existing: false };
+  const proposal = options.decompose
+    ? await tryProposeDecomposition(id, projectId, database)
+    : undefined;
+
+  return {
+    issue: { id, issueNumber, title, projectId },
+    existing: false,
+    ...(proposal ? { proposal } : {}),
+  };
 }
 
 /** Matches `## Increment <N>` headings already in an epic body, to number the next one. */
