@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   issueDependencies,
   issues,
@@ -28,6 +28,32 @@ export async function getMetaIssueDependencyEdges(
     .select({ childId: issueDependencies.dependsOnId, type: issueDependencies.type })
     .from(issueDependencies)
     .where(eq(issueDependencies.issueId, metaIssueId));
+}
+
+/**
+ * The epic's existing children (parent_of edges: issueId = epic, dependsOnId = child),
+ * with their title and current status name — feeds the decompose prompt so a
+ * re-decomposition can see what already exists (#1131).
+ */
+export async function getEpicChildrenWithStatus(
+  issueId: string,
+  database: Database = db,
+): Promise<Array<{ issueNumber: number; title: string; statusName: string }>> {
+  const rows = await database
+    .select({
+      issueNumber: issues.issueNumber,
+      title: issues.title,
+      statusName: projectStatuses.name,
+    })
+    .from(issueDependencies)
+    .innerJoin(issues, eq(issues.id, issueDependencies.dependsOnId))
+    .innerJoin(projectStatuses, eq(projectStatuses.id, issues.statusId))
+    .where(and(eq(issueDependencies.issueId, issueId), eq(issueDependencies.type, "parent_of")))
+    .orderBy(issues.issueNumber);
+  // issueNumber is nullable in the schema but always assigned at creation time (see the
+  // root CLAUDE.md's "Issue numbers" note); a null here would mean corrupt data, so it is
+  // filtered out rather than surfaced as a fake number to the prompt.
+  return rows.filter((r): r is { issueNumber: number; title: string; statusName: string } => r.issueNumber != null);
 }
 
 /** Issue rows (with status + current workflow node type) for a set of ids. */
