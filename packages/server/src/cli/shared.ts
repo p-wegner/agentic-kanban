@@ -17,9 +17,29 @@ export function logDefaultBranch(defaultBranch: string | null | undefined, inden
   console.warn(`${indent}Set it manually in project settings before creating worktrees.`);
 }
 
+/**
+ * Resolve the stored active-project preference, validated against what is actually
+ * registered.
+ *
+ * The preference can go stale (project deleted/unregistered since it was set) without
+ * anything clearing it. Before this, every one of the ~10 callers below inherited a bare
+ * project id that no longer resolves to anything, so the failure showed up downstream as
+ * an unrelated 404 or a raw "Project '<uuid>' not found." with no explanation of why an id
+ * the user never typed appeared at all — the exact "wrong conclusion" #467 already fixed
+ * for cross-project issue numbers. Validating here, once, gives every caller the same
+ * actionable message instead of a fresh one at each call site.
+ */
 export async function getActiveProjectId(): Promise<string> {
   const value = await getPreference("activeProjectId");
   if (value === null) throw new Error("No active project. Run `pnpm cli -- register <path>` first.");
+  const { getProjectById } = await import("../repositories/project.repository.js");
+  const project = await getProjectById(value);
+  if (!project) {
+    throw new Error(
+      `The active project (${value}) no longer exists — it may have been unregistered or deleted.\n` +
+        "  Pass --project <name|id> to target a specific project, or run `pnpm cli -- list` to see what's registered.",
+    );
+  }
   return value;
 }
 
