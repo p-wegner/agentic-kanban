@@ -46,11 +46,40 @@ The marketplace (`GET /api/plugins/marketplace`) lists every installed plugin pl
 installable-but-not-installed entries. **Bundled plugins** ship inside the board itself —
 `packages/server/plugins/<slug>/` in a checkout, `plugins/<slug>/` in the npm package (the dir is
 in the server package's `files`) — and appear with `origin: "bundled"`; installing one is the
-normal local-directory install pointed at that path (today: `app-runner`). **Catalog entries**
+normal local-directory install pointed at that path (today: `app-runner`, `jira-sync` — see
+[Bundling a plugin with the board](#bundling-a-plugin-with-the-board)). **Catalog entries**
 come from a per-machine file, `<plugins home>/marketplace.json` — a JSON array of
 `{ name?, slug?, description?, gitUrl }` objects. There is no remote registry; the catalog is
 user-maintained. Entries of either kind matching an installed plugin (by slug, normalized git
 URL, or resolved local path) are absorbed into the installed listing.
+
+### Bundling a plugin with the board
+
+A plugin developed in this repo is only offered in the marketplace if it sits in the one
+directory the discovery walk can find: **`packages/server/plugins/<slug>/`**. Today that is
+`app-runner` and `jira-sync`.
+
+`bundledPluginsDir()` (`packages/server/src/services/plugin-marketplace.ts`) walks up from its
+own module to the first `package.json` named `agentic-kanban` that *also* has a `plugins/` dir,
+which is `packages/server` in a checkout and the package root when installed from npm. The repo
+ROOT is named `agentic-kanban` too, but the walk stops below it — so **a plugin at the repo-root
+`plugins/` is invisible**: never listed, never installable except by typing its absolute path.
+`jira-sync` sat there from #1077 until #1122 for exactly that reason.
+
+Checklist for adding one:
+
+- [ ] Directory is `packages/server/plugins/<slug>/` with `kanban-plugin.json` at its root.
+- [ ] It ships: `packages/server/package.json` `files[]` already contains `"plugins/"`, so
+      anything under it is published — keep the plugin dependency-free and small, it is part of
+      the npm package now.
+- [ ] Any `tools/**/*.mjs` is covered by the `.gitattributes` LF pin (it is, by the
+      `packages/server/plugins/**/tools/**/*.mjs` rule) — a CRLF shebang breaks both the guard
+      suite and execution.
+- [ ] A broken manifest is skipped silently by design, so confirm it actually appears:
+      `curl -s localhost:3001/api/plugins/marketplace` should list it with `origin: "bundled"`.
+
+Bundled is not installed: the entry appears under **Available** in the marketplace and the
+operator still installs it (one click, which posts its local path) and enables it per project.
 
 **Enable per project** (`POST /api/plugins/:id/enable`). This is where the fan-out happens:
 
