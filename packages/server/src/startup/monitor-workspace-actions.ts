@@ -4,6 +4,9 @@ import type { Database } from "../db/index.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
 import { RUN_GATE, type MergeGateToken } from "../services/pre-merge-gate.service.js";
 import { runUnderMergeJob } from "../services/merge-job.service.js";
+import { getWorkspaceById } from "../repositories/workspace.repository.js";
+import { hasSkipAutoStartTag } from "../repositories/auto-start.repository.js";
+import { SKIP_AUTO_START_TAG } from "../repositories/wip-capacity.repository.js";
 
 /**
  * The subset of workspace application-service operations the in-process board
@@ -78,6 +81,18 @@ export function createMonitorWorkspaceActions(deps: {
   });
   return {
     async launch(workspaceId) {
+      // #1106/#1108: `no-auto-start` guarded auto-START SELECTION only — a workspace that
+      // already exists and merely went idle never passed through that selection, so a
+      // tagged workspace still had its worktree recreated and flipped idle -> active by the
+      // monitor's own idle-relaunch branch. The tag's whole point is "leave this ticket
+      // alone"; honor it here, at the ONE place the monitor (as opposed to an explicit human
+      // relaunch or the `relaunch_workspace` MCP tool, neither of which go through this
+      // module) asks for a relaunch.
+      const ws = await getWorkspaceById(workspaceId, deps.database);
+      if (ws && await hasSkipAutoStartTag(ws.issueId, SKIP_AUTO_START_TAG, deps.database)) {
+        console.log(`[monitor] Skipping relaunch of workspace ${workspaceId}: issue carries the no-auto-start tag`);
+        return;
+      }
       await workspaceService.launchSession(workspaceId);
     },
     async merge(workspaceId, gate) {

@@ -4,6 +4,7 @@ import { resolveMonitorTunables } from "./strategy-objective.service.js";
 import { resolveWipLimit } from "./wip-limit.service.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { START_MODE_VALUES } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { getQuiesceReason, isProjectQuiesced } from "./quiesce.service.js";
 
 /**
  * Start Mode — the single per-project decision for HOW new tickets get auto-started.
@@ -72,10 +73,29 @@ export function resolveStartPolicy(prefMap: Map<string, string>, projectId: stri
   const followupOptIn = getBool(prefMap, "auto_start_followup");
   const refillOptIn = prefMap.get("backlog_empty_strategy") === "generate_tickets";
 
+  // #1108: quiesce is a maintenance-window HOLD, layered on top of whatever mode is
+  // configured — it does not change `mode`/`source` (so the UI still shows what Start
+  // Mode is set to), it just zeroes every action flag this resolver hands out. The real
+  // stop is enforced again at `createWorkspace`/`launchSession` (see quiesce.service.ts's
+  // header) so a caller that never consults this policy — a relaunch, a cron, the
+  // external Conductor loop's `POST /api/workspaces` — is held too.
+  const quiesced = isProjectQuiesced(prefMap, projectId);
+  const quiesceReason = quiesced ? getQuiesceReason(prefMap, projectId) : undefined;
+  if (quiesced) {
+    return {
+      mode, source, wip, quiesced, quiesceReason,
+      autoStartUnblocked: false,
+      postMergeCascade: false,
+      postMergeFollowups: false,
+      backlogRefill: false,
+      scheduledRuns: false,
+    };
+  }
+
   switch (mode) {
     case "monitor":
       return {
-        mode, source, wip,
+        mode, source, wip, quiesced: false,
         autoStartUnblocked: true,
         postMergeCascade: cascadeOptIn,
         postMergeFollowups: followupOptIn,
@@ -86,7 +106,7 @@ export function resolveStartPolicy(prefMap: Map<string, string>, projectId: stri
       // The external loop owns starts; keep all in-process auto-start OFF to avoid
       // double-driving. Scheduled crons are independent and still honored.
       return {
-        mode, source, wip,
+        mode, source, wip, quiesced: false,
         autoStartUnblocked: false,
         postMergeCascade: false,
         postMergeFollowups: false,
@@ -96,7 +116,7 @@ export function resolveStartPolicy(prefMap: Map<string, string>, projectId: stri
     case "manual":
     default:
       return {
-        mode: "manual", source, wip,
+        mode: "manual", source, wip, quiesced: false,
         autoStartUnblocked: false,
         postMergeCascade: false,
         postMergeFollowups: false,

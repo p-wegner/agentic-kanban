@@ -68,6 +68,10 @@ export const WORKSPACE_REFUSAL_CODES = [
   // for this workspace. The turn content was NOT delivered, and saying so is the whole point:
   // the observed failure was a 201 followed by a silent drop.
   "TRANSCRIPT_GONE",
+  // #1108: a project-wide maintenance hold (`quiesce.service.ts`). Same shape as the other
+  // entries here — the error's own `code` stays "CONFLICT" so the HTTP status is right, and
+  // this is the reason a caller (UI banner, `pnpm promote`) needs to branch on.
+  "PROJECT_QUIESCED",
 ] as const;
 
 export type WorkspaceRefusalCode = (typeof WORKSPACE_REFUSAL_CODES)[number];

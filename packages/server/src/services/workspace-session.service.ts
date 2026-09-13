@@ -42,6 +42,7 @@ import {
   type GitService,
 } from "./workspace-internals.js";
 import { stopBisectSession } from "./bisect.service.js";
+import { assertProjectNotQuiesced } from "./quiesce.service.js";
 import { findLiveAgentTrees, liveAgentRefusalMessage } from "./workspace-agent-liveness.service.js";
 import * as realGitService from "./git.service.js";
 import { resolveEffectiveModel } from "./effective-config.service.js";
@@ -147,6 +148,11 @@ export function createWorkspaceSessionService(deps: {
     if (!ws0) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
 
+    // #1108: the chokepoint EVERY relaunch path funnels through — the monitor's own
+    // `MonitorWorkspaceActions.launch`, `POST /api/workspaces/:id/launch`, and the
+    // `relaunch_workspace` MCP tool — none of which consult Start Mode at all (by design:
+    // `manual` deliberately still permits explicit relaunch). See quiesce.service.ts.
+    await assertProjectNotQuiesced(database, await resolveProjectId(id, database), "relaunch");
     await assertNoLiveAgentTree(id, body.force === true);
 
     // If workingDir is missing on a non-direct workspace, attempt to rebuild the worktree.
