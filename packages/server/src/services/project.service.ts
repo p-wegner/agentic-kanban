@@ -20,6 +20,7 @@ import { branchExists, detectRepoInfo, getProjectGitStatsAsync } from "./git-inf
 import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
 import { listBranches } from "./git.service.js";
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "./board-aggregation.service.js";
+import { buildDriveMap } from "./drive-membership.service.js";
 import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, setProjectArchived, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
 import { getProjectsBasePath, updateProjectFields, clearActiveProjectPreference, getProjectStatusIdsAndNames, getBoardIssueRows, getProjectStatusesOrdered, getBoardIssues, getGraphIssues, getCrossProjectIssues, getActiveWorkspaceCounts, getBoardSummaryRows } from "../repositories/project-service.repository.js";
 import { deriveSetupScriptFromProfile, deriveVerifyScriptFromProfile, getStackProfile } from "./stack-profile.service.js";
@@ -647,10 +648,11 @@ export function createProjectService(deps: { database: Database; workspaceSummar
 
     // G14a: the two staleness prefs ride the #402 short-TTL cached full scan
     // instead of two point-read round trips per board build.
-    const [workspaceSummaryMap, blockedMap, issueTagMap, prefRows] = await Promise.all([
+    const [workspaceSummaryMap, blockedMap, issueTagMap, driveMap, prefRows] = await Promise.all([
       summaryMapPromise,
       buildBlockedMap(issueIds, database),
       buildTagMap(issueIds, database),
+      buildDriveMap(projectId, database),
       getAllPreferencesCached(database),
     ]);
 
@@ -667,6 +669,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       workspaceSummaryMap,
       blockedMap,
       issueTagMap,
+      driveMap,
       now: new Date(nowOverride ?? new Date().toISOString()).getTime(),
       staleDays,
       inProgressStaleDays,
