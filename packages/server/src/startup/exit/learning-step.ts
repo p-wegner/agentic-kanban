@@ -15,6 +15,7 @@
 import { getSessionStatus } from "../../repositories/session.repository.js";
 import { buildLearningStepPrompt } from "../../services/merge-helpers.service.js";
 import { resolveWorkspaceLaunchSettings, toExecutorProvider } from "../../services/agent-settings.service.js";
+import { assertProjectNotQuiesced } from "../../services/quiesce.service.js";
 import type { Database } from "../../db/index.js";
 import type { createSessionManager } from "../../services/session.manager.js";
 
@@ -64,10 +65,15 @@ export async function launchLearningStep(
   prefMap: Map<string, string>,
   label: "after review" | "after agent",
   wait = false,
+  projectId: string | null = null,
 ): Promise<void> {
   const { database, sessionManager, learningSessionIds } = deps;
   const workspaceId = workspace.id;
   try {
+    // #1113: this is a direct `startSession` call, bypassing the create/launchSession
+    // quiesce chokepoints — hold it too, same as every other failure here (non-fatal).
+    await assertProjectNotQuiesced(database, projectId, "post-session learning step");
+
     // Run the learning step on the same provider/profile the workspace was built
     // with (e.g. its Codex OAuth license), not the global default which may have rotated.
     // #541: was an eight-line hand-rolled copy of resolveAgentSettings.

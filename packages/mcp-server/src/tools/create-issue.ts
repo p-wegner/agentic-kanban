@@ -66,21 +66,29 @@ export function registerCreateIssue(server: McpServer, deps: ToolDeps = prodDeps
           // Tag resolution mirrors `create_issues_batch`: case-insensitive match against
           // an existing tag, else create it. Applied before this function returns, so the
           // issue is never observable (by the monitor or anything else) without its tags.
-          const seenTagIds = new Set<string>();
-          for (const tagName of new Set(requestedTagNames)) {
-            const existing = await db.select({ id: schema.tags.id }).from(schema.tags)
-              .where(sql`lower(${schema.tags.name}) = lower(${tagName})`).limit(1);
-            let tagId: string;
-            if (existing.length > 0) {
-              tagId = existing[0].id;
-            } else {
-              tagId = randomUUID();
-              await db.insert(schema.tags).values({ id: tagId, name: tagName, color: null, createdAt: now });
+          //
+          // Unlike the batch tool, this insert isn't wrapped in `db.transaction` (it runs
+          // inside `withUniqueIssueNumber`'s retry, which only retries on an issue-number
+          // collision) — so a failure here (e.g. SQLITE_BUSY under concurrent writers) must
+          // not propagate and strand an already-inserted, untagged issue while reporting the
+          // whole call as failed. Best-effort, same as `reposTouched` tagging server-side.
+          try {
+            const seenTagIds = new Set<string>();
+            for (const tagName of new Set(requestedTagNames)) {
+              const existing = await db.select({ id: schema.tags.id }).from(schema.tags)
+                .where(sql`lower(${schema.tags.name}) = lower(${tagName})`).limit(1);
+              let tagId: string;
+              if (existing.length > 0) {
+                tagId = existing[0].id;
+              } else {
+                tagId = randomUUID();
+                await db.insert(schema.tags).values({ id: tagId, name: tagName, color: null, createdAt: now });
+              }
+              if (seenTagIds.has(tagId)) continue;
+              seenTagIds.add(tagId);
+              await db.insert(schema.issueTags).values({ id: randomUUID(), issueId: newId, tagId });
             }
-            if (seenTagIds.has(tagId)) continue;
-            seenTagIds.add(tagId);
-            await db.insert(schema.issueTags).values({ id: randomUUID(), issueId: newId, tagId });
-          }
+          } catch { /* tagging is best-effort; the issue itself must still be returned as created */ }
           return { id: newId, issueNumber: allocatedNumber };
         },
       );
