@@ -14,7 +14,7 @@
  * remove. Same slice, one file: `resolveCandidateStatusIds` calling
  * `findProjectStatusIdByName` is now an internal call rather than a cross-repository import.
  */
-import { drives, issueDependencies, issues, projectStatuses } from "@agentic-kanban/shared/schema";
+import { drives, issueDependencies, issues, issueTags, projectStatuses, tags } from "@agentic-kanban/shared/schema";
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { firstRow } from "../lib/first-row.js";
@@ -126,10 +126,51 @@ export function monitorEligibleIssueSql(allowFeatureTypes = false): SQL {
  * the in-query enforcement of the same rule `isDriveOrEpicMeta` (`monitor-auto-start.ts`) documents —
  * applied as a WHERE condition so a meta is never even a candidate (no per-issue query, no stray
  * builder workspace).
+ *
+ * #1134 — an epic-tagged issue with NO children (no `drives.metaIssueId` row either, e.g. seeded
+ * directly via `create_issue`/`create_issues_batch` rather than through `planDrive`) used to slip
+ * through both checks above and read as an ordinary startable candidate: the opposite of what a
+ * drive/epic is for — decomposition work handed to a single builder as a one-line target. It is
+ * therefore ALSO excluded when it carries the `epic` tag, UNLESS it also carries the `right-sized`
+ * tag: the decomposer's persisted "already single-session-sized, don't split" verdict (#1074),
+ * which is the one case where a childless epic must stay startable.
  */
 export function notDriveOrEpicMetaSql(): SQL {
   return sql`NOT EXISTS (SELECT 1 FROM ${drives} WHERE ${drives.metaIssueId} = ${issues.id})
-    AND NOT EXISTS (SELECT 1 FROM ${issueDependencies} WHERE (${issueDependencies.issueId} = ${issues.id} AND ${issueDependencies.type} = 'parent_of') OR (${issueDependencies.dependsOnId} = ${issues.id} AND ${issueDependencies.type} = 'child_of'))`;
+    AND NOT EXISTS (SELECT 1 FROM ${issueDependencies} WHERE (${issueDependencies.issueId} = ${issues.id} AND ${issueDependencies.type} = 'parent_of') OR (${issueDependencies.dependsOnId} = ${issues.id} AND ${issueDependencies.type} = 'child_of'))
+    AND (
+      NOT EXISTS (SELECT 1 FROM ${issueTags} JOIN ${tags} ON ${issueTags.tagId} = ${tags.id} WHERE ${issueTags.issueId} = ${issues.id} AND ${tags.name} = 'epic')
+      OR EXISTS (SELECT 1 FROM ${issueTags} JOIN ${tags} ON ${issueTags.tagId} = ${tags.id} WHERE ${issueTags.issueId} = ${issues.id} AND ${tags.name} = 'right-sized')
+    )`;
+}
+
+/**
+ * Epic-tagged issues in a project with NO children (no parent_of/child_of edge) and no
+ * `right-sized` verdict yet — exactly the candidates `notDriveOrEpicMetaSql` now excludes from
+ * start scoring (#1134). The monitor's auto-decompose step reads this to find the undecomposed
+ * drive epics it should advance via `decomposeEpic`/`confirmEpicDecomposition` instead of
+ * leaving them to stall with nothing eligible to pick them up.
+ */
+export async function selectUndecomposedEpics(
+  projectId: string,
+  database: Database,
+): Promise<Array<{ id: string; issueNumber: number | null }>> {
+  return database.select({ id: issues.id, issueNumber: issues.issueNumber }).from(issues)
+    .innerJoin(issueTags, eq(issueTags.issueId, issues.id))
+    .innerJoin(tags, eq(issueTags.tagId, tags.id))
+    .where(and(
+      eq(issues.projectId, projectId),
+      eq(tags.name, "epic"),
+      sql`NOT EXISTS (SELECT 1 FROM ${issueDependencies} WHERE (${issueDependencies.issueId} = ${issues.id} AND ${issueDependencies.type} = 'parent_of') OR (${issueDependencies.dependsOnId} = ${issues.id} AND ${issueDependencies.type} = 'child_of'))`,
+      sql`NOT EXISTS (SELECT 1 FROM ${issueTags} it2 JOIN ${tags} t2 ON it2.tag_id = t2.id WHERE it2.issue_id = ${issues.id} AND t2.name = 'right-sized')`,
+    ));
+}
+
+/** Does this project have any statuses at all — i.e. does it actually exist as a registered project? */
+export async function projectHasStatuses(projectId: string, database: Database): Promise<boolean> {
+  const rows = await database.select({ id: projectStatuses.id }).from(projectStatuses)
+    .where(eq(projectStatuses.projectId, projectId)).limit(1);
+  return rows.length > 0;
 }
 
 /**
