@@ -300,16 +300,122 @@ export interface DeriveVerifyWorkersInput {
   freeGb: number | null;
   /** The per-project pref (already clamped 1..32) — a hard CEILING, never exceeded. */
   ceiling: number;
+  /**
+   * How many verify CHAINS the box offers slots for at once (#1160) — the CPU budget is split
+   * evenly across them, so N chains running together can never claim more cores between them
+   * than one chain alone was allowed before slots existed. Omitted (or 1) = the whole budget,
+   * which is what every non-chain caller (the build semaphore, a builder's own test env) wants.
+   *
+   * The split is by the number of SLOTS, not by the number of chains currently running: a chain
+   * that started alone and took the whole budget cannot give cores back when a second one is
+   * admitted, so partitioning by "active" would let two chains together run at 1.5x the budget.
+   * The price is that a lone chain on an idle box runs at 1/N width — on a 16-core box that is
+   * 4 forks, the cap the operating conventions ask for on a shared machine anyway.
+   */
+  chainSlots?: number;
 }
 
 /** RAM budget per vitest fork, in GB — conservative (a Node worker + its own module graph). */
 const RAM_PER_WORKER_GB = 0.3;
 
+/** The core budget one verify run may draw on, before any chain partition: all but two cores. */
+function verifyCpuBudget(cpuCount: number): number {
+  return Math.max(1, cpuCount - 2);
+}
+
 export function deriveVerifyWorkers(input: DeriveVerifyWorkersInput): number {
-  const cpuBudget = Math.max(1, input.cpuCount - 2);
+  const slots = Math.max(1, Math.floor(input.chainSlots ?? 1));
+  const cpuBudget = Math.max(1, Math.floor(verifyCpuBudget(input.cpuCount) / slots));
+  // RAM is NOT partitioned: it is read LIVE at each chain's start, so a chain already running has
+  // already taken its share out of `freeGb`. Dividing it again would double-count.
   const ramBudget = input.freeGb == null ? cpuBudget : Math.max(1, Math.floor(input.freeGb / RAM_PER_WORKER_GB));
   const derived = Math.min(cpuBudget, ramBudget);
   return Math.max(1, Math.min(derived, input.ceiling));
+}
+
+/**
+ * How many whole verify CHAINS may run on one box at once (#1160), and how many more may be
+ * admitted right now.
+ *
+ * `verify-chain-semaphore.ts` serialized every chain at a hardcoded 1 since #903/#949 — correct
+ * against "N full suites at 1/N speed finish no sooner", and measured as a ~2-hour queue wait
+ * (`queued 7410s behind another verification`) once several builders were ready to merge at
+ * the same time. The premise only holds when one chain already saturates the box; when it does
+ * not, a second chain in the idle half of the machine lands a second merge for free. The
+ * number therefore comes from the same capacity read the per-chain worker count comes from,
+ * and the two are tied: {@link deriveVerifyWorkers} takes `chainSlots` so the sum of every
+ * concurrent chain's forks stays inside one chain's old core budget.
+ *
+ * Two independent bounds, both required:
+ *  - **CPU** — a hard partition, {@link deriveVerifyChainMaxSlots}: slots × at least
+ *    {@link MIN_WORKERS_PER_VERIFY_CHAIN} forks each must fit the core budget, capped at
+ *    {@link MAX_VERIFY_CHAIN_SLOTS}. A chain narrower than two forks gains nothing from a
+ *    neighbour, so a small box stays serial.
+ *  - **RAM** — live: each ADDITIONAL chain must leave {@link VERIFY_CHAIN_RESERVE_GB} free
+ *    (the same 2 GB floor `readTier0Capacity` holds new agent starts at) after its own
+ *    {@link RAM_PER_VERIFY_CHAIN_GB} (two `tsc` workers at ~1 GB, a vitest orchestrator and
+ *    two forks, the arch check). Chains already running have already taken their RAM out of
+ *    `freeGb`, so this is "how many more fit", added to `active`.
+ *
+ * The result is `active + admissible`, never below 1 when nothing is active: a tight box still
+ * makes progress, serialized, exactly as before — and the gate's own Tier-0 host admission
+ * (#1057) has already declined to start anything at all below the floor.
+ */
+export const MAX_VERIFY_CHAIN_SLOTS = 3;
+/** A chain that could not run at least this many forks is not worth a slot of its own. */
+export const MIN_WORKERS_PER_VERIFY_CHAIN = 2;
+/** RAM an additional verify chain is budgeted at, in GB (typecheck + tests + arch check). */
+export const RAM_PER_VERIFY_CHAIN_GB = 3;
+/** Free RAM that must remain after admitting another chain — the Tier-0 agent-start floor. */
+export const VERIFY_CHAIN_RESERVE_GB = DEFAULT_MIN_FREE_GB;
+
+/** The CPU-side partition: how many chain slots this core count can carry at all. */
+export function deriveVerifyChainMaxSlots(cpuCount: number): number {
+  const byCpu = Math.floor(verifyCpuBudget(cpuCount) / MIN_WORKERS_PER_VERIFY_CHAIN);
+  return Math.max(1, Math.min(MAX_VERIFY_CHAIN_SLOTS, byCpu));
+}
+
+export interface DeriveVerifyChainSlotsInput {
+  cpuCount: number;
+  /** Live free RAM in GB; `null` when unreadable (then only the CPU partition bounds). */
+  freeGb: number | null;
+  /** Chains running right now — they have already taken their RAM out of `freeGb`. */
+  active: number;
+  /** An operator pin (`KANBAN_VERIFY_CHAIN_CONCURRENCY`); when set, no derivation happens. */
+  pinned?: number | null;
+}
+
+export interface VerifyChainSlots {
+  /** How many chains may be running at once given the box right now (`>= 1`). */
+  slots: number;
+  /** The CPU partition every chain's worker share is divided by (stable per box, or the pin). */
+  maxSlots: number;
+  /** True when `slots` is the pin rather than a measurement. */
+  pinned: boolean;
+  /** The numbers in words, for the queue log line. */
+  reason: string;
+}
+
+export function deriveVerifyChainSlots(input: DeriveVerifyChainSlotsInput): VerifyChainSlots {
+  const active = Math.max(0, Math.floor(input.active));
+  if (input.pinned != null && Number.isFinite(input.pinned) && input.pinned >= 1) {
+    const pin = Math.floor(input.pinned);
+    return { slots: pin, maxSlots: pin, pinned: true, reason: `pinned to ${pin} by KANBAN_VERIFY_CHAIN_CONCURRENCY` };
+  }
+  const maxSlots = deriveVerifyChainMaxSlots(input.cpuCount);
+  const cpuRoom = Math.max(0, maxSlots - active);
+  const ramRoom = input.freeGb == null
+    ? cpuRoom
+    : Math.max(0, Math.floor((input.freeGb - VERIFY_CHAIN_RESERVE_GB) / RAM_PER_VERIFY_CHAIN_GB));
+  const admissible = Math.min(cpuRoom, ramRoom);
+  const slots = Math.max(1, active + admissible);
+  const ramWords = input.freeGb == null ? "free RAM unreadable" : `${input.freeGb.toFixed(1)} GB free`;
+  return {
+    slots,
+    maxSlots,
+    pinned: false,
+    reason: `${slots} slot(s): ${active} active, ${admissible} more fit (${ramWords}, ${RAM_PER_VERIFY_CHAIN_GB} GB per chain over a ${VERIFY_CHAIN_RESERVE_GB} GB reserve; CPU partition ${maxSlots} on ${input.cpuCount} cores)`,
+  };
 }
 
 /**

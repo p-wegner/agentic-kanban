@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,10 +7,12 @@ import {
   resetVerifyChainSemaphoreForTests,
   runUnderVerifyChainSemaphore,
   runUnderVerifyChainSemaphoreTimed,
+  verifyChainMaxSlots,
   verifyChainSemaphoreActive,
   verifyChainGateWaiting,
   verifyChainSemaphoreConcurrency,
   verifyChainSemaphoreQueueLength,
+  type VerifyChainCapacityReading,
 } from "../services/verify-chain-semaphore.js";
 import {
   MACHINE_LOCK_DIR_ENV,
@@ -34,7 +36,9 @@ describe("verify-chain-semaphore (#903)", () => {
     delete process.env.KANBAN_VERIFY_CHAIN_CONCURRENCY;
   });
 
-  it("defaults to concurrency 1", () => {
+  it("derives concurrency 1 on a box with no room for a second chain (the #903 behaviour, now the tight-box case)", () => {
+    // `resetVerifyChainSemaphoreForTests` installs the serial reading by default; the dynamic
+    // path is exercised in the #1160 block below.
     expect(verifyChainSemaphoreConcurrency()).toBe(1);
   });
 
@@ -107,6 +111,216 @@ describe("verify-chain-semaphore (#903)", () => {
     expect(verifyChainSemaphoreActive()).toBe(2);
     releaseAll();
     await Promise.all(chains);
+  });
+});
+
+/**
+ * #1160 — the width is DERIVED from the box, not fixed at 1. A gate was measured waiting 7410s
+ * behind another verification while the machine had cores and RAM idle; the fixed cap was the
+ * bottleneck, not the suites. These tests drive the derivation through the capacity seam so the
+ * box the suite runs on does not decide the outcome.
+ */
+describe("verify-chain-semaphore derives its width from live capacity (#1160)", () => {
+  const roomy: VerifyChainCapacityReading = { cpuCount: 16, freeGb: 20 };   // 3 slots
+  const twoWide: VerifyChainCapacityReading = { cpuCount: 16, freeGb: 9.4 }; // 2 slots (the measured box)
+  const tight: VerifyChainCapacityReading = { cpuCount: 16, freeGb: 3 };    // 1 slot
+
+  const tick = (ms = 10) => new Promise((resolve) => setTimeout(resolve, ms));
+  const held = () => {
+    let release: () => void = () => {};
+    const promise = new Promise<void>((resolve) => { release = resolve; });
+    return { promise, release: () => release() };
+  };
+
+  beforeEach(() => {
+    delete process.env.KANBAN_VERIFY_CHAIN_CONCURRENCY;
+  });
+  afterEach(() => {
+    resetVerifyChainSemaphoreForTests();
+    delete process.env.KANBAN_VERIFY_CHAIN_CONCURRENCY;
+  });
+
+  it("with plenty of free RAM, two chains run CONCURRENTLY and the third queues behind the CPU partition", async () => {
+    resetVerifyChainSemaphoreForTests({ capacity: roomy });
+    expect(verifyChainSemaphoreConcurrency()).toBe(3);
+
+    const gates = [held(), held(), held(), held()];
+    const started: number[] = [];
+    const chains = gates.map((g, i) =>
+      runUnderVerifyChainSemaphore(async () => { started.push(i); await g.promise; }, `chain-${i}`),
+    );
+    await tick();
+
+    // Three admitted at once — the partition's maximum — and the fourth waits.
+    expect(started).toEqual([0, 1, 2]);
+    expect(verifyChainSemaphoreActive()).toBe(3);
+    expect(verifyChainSemaphoreQueueLength()).toBe(1);
+
+    gates[0]!.release();
+    await tick();
+    expect(started).toEqual([0, 1, 2, 3]);
+    expect(verifyChainSemaphoreQueueLength()).toBe(0);
+
+    gates.slice(1).forEach((g) => g.release());
+    await Promise.all(chains);
+    expect(verifyChainSemaphoreActive()).toBe(0);
+  });
+
+  it("with tight free RAM, the SAME box clamps back to one chain at a time", async () => {
+    resetVerifyChainSemaphoreForTests({ capacity: tight });
+    expect(verifyChainSemaphoreConcurrency()).toBe(1);
+
+    const first = held();
+    const order: string[] = [];
+    const a = runUnderVerifyChainSemaphore(async () => { order.push("a-start"); await first.promise; order.push("a-end"); }, "a");
+    await tick();
+    const b = runUnderVerifyChainSemaphore(async () => { order.push("b-start"); }, "b");
+    await tick();
+
+    expect(order).toEqual(["a-start"]);
+    expect(verifyChainSemaphoreQueueLength()).toBe(1);
+
+    first.release();
+    await Promise.all([a, b]);
+    expect(order).toEqual(["a-start", "a-end", "b-start"]);
+  });
+
+  it("re-reads the box at each admission, so a chain that consumed the headroom closes the door behind it", async () => {
+    // The reading a live box would give: 9.4 GB free before anything runs (two slots), 4 GB once
+    // the first chain's typecheck + tests are resident (no room for another). Modelled as a
+    // reader that reports what is free NOW, which is what `os.freemem()` does.
+    let freeGb = 9.4;
+    resetVerifyChainSemaphoreForTests({ capacity: () => ({ cpuCount: 16, freeGb }) });
+    expect(verifyChainSemaphoreConcurrency()).toBe(2);
+
+    const first = held();
+    const a = runUnderVerifyChainSemaphore(async () => { freeGb = 4; await first.promise; }, "a");
+    await tick();
+    expect(verifyChainSemaphoreActive()).toBe(1);
+
+    // With 4 GB free and one chain running, `active + more that fit` is 1 + 0: b waits.
+    let bRan = false;
+    const b = runUnderVerifyChainSemaphore(async () => { bRan = true; }, "b");
+    await tick();
+    expect(bRan).toBe(false);
+    expect(verifyChainSemaphoreQueueLength()).toBe(1);
+
+    // a finishes and its RAM comes back: b is admitted on the release.
+    freeGb = 9.4;
+    first.release();
+    await Promise.all([a, b]);
+    expect(bRan).toBe(true);
+  });
+
+  it("admits a waiter without waiting for a release once free RAM opens a slot (the 30s re-check)", async () => {
+    vi.useFakeTimers();
+    try {
+      let freeGb = 4; // one chain running would leave no room
+      resetVerifyChainSemaphoreForTests({ capacity: () => ({ cpuCount: 16, freeGb }) });
+
+      const first = held();
+      const second = held();
+      const a = runUnderVerifyChainSemaphore(async () => { await first.promise; }, "a");
+      await vi.advanceTimersByTimeAsync(1);
+      let bRan = false;
+      const b = runUnderVerifyChainSemaphore(async () => { bRan = true; await second.promise; }, "b");
+      await vi.advanceTimersByTimeAsync(1);
+      expect(bRan).toBe(false);
+
+      // A builder elsewhere on the box exits; nothing in this process released anything.
+      freeGb = 9.4;
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(bRan).toBe(true);
+      expect(verifyChainSemaphoreActive()).toBe(2);
+
+      first.release();
+      second.release();
+      await vi.advanceTimersByTimeAsync(1);
+      await Promise.all([a, b]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a release admits AS MANY waiters as the box then has room for, not just one", async () => {
+    resetVerifyChainSemaphoreForTests({ capacity: roomy });
+    process.env.KANBAN_VERIFY_CHAIN_CONCURRENCY = "1";
+    const first = held();
+    const a = runUnderVerifyChainSemaphore(async () => { await first.promise; }, "a");
+    await tick();
+    const started: string[] = [];
+    const b = runUnderVerifyChainSemaphore(async () => { started.push("b"); }, "b");
+    const c = runUnderVerifyChainSemaphore(async () => { started.push("c"); }, "c");
+    await tick();
+    expect(verifyChainSemaphoreQueueLength()).toBe(2);
+
+    // The pin is lifted while both wait: the next release should let both through together.
+    delete process.env.KANBAN_VERIFY_CHAIN_CONCURRENCY;
+    first.release();
+    await tick();
+    expect(started.sort()).toEqual(["b", "c"]);
+    await Promise.all([a, b, c]);
+  });
+
+  it("KANBAN_VERIFY_CHAIN_CONCURRENCY pins the width in BOTH directions and becomes the partition", async () => {
+    resetVerifyChainSemaphoreForTests({ capacity: roomy });
+    process.env.KANBAN_VERIFY_CHAIN_CONCURRENCY = "1";
+    expect(verifyChainSemaphoreConcurrency()).toBe(1);
+    expect(verifyChainMaxSlots()).toBe(1);
+
+    resetVerifyChainSemaphoreForTests({ capacity: tight });
+    process.env.KANBAN_VERIFY_CHAIN_CONCURRENCY = "2";
+    expect(verifyChainSemaphoreConcurrency()).toBe(2);
+    expect(verifyChainMaxSlots()).toBe(2);
+  });
+
+  it("the partition is 1 under the cross-process machine lock — a mutex admits one chain whatever the box offers", () => {
+    resetVerifyChainSemaphoreForTests({ capacity: roomy });
+    process.env[MACHINE_LOCK_ENV] = "1";
+    try {
+      expect(verifyChainMaxSlots()).toBe(1);
+    } finally {
+      delete process.env[MACHINE_LOCK_ENV];
+    }
+    expect(verifyChainMaxSlots()).toBe(3);
+  });
+
+  it("the partition is the CPU-side maximum, stable across the RAM the box has right now", () => {
+    resetVerifyChainSemaphoreForTests({ capacity: twoWide });
+    // Two slots open right now by RAM, but every chain's worker share is divided by the
+    // partition (3), so that if RAM later opens the third slot the three shares still fit.
+    expect(verifyChainSemaphoreConcurrency()).toBe(2);
+    expect(verifyChainMaxSlots()).toBe(3);
+  });
+
+  it("#978's priority order still holds within a wider semaphore: a gate is admitted before a background waiter", async () => {
+    // Width 2 by PIN rather than by a static reading: a fixed 9.4 GB reader does not shrink as
+    // chains start (a real `os.freemem()` does), so with two chains running it would still find
+    // room for a third and nobody would queue. The property under test is the ORDER within a
+    // wider semaphore, and the pin is the honest way to hold the width still.
+    resetVerifyChainSemaphoreForTests({ capacity: twoWide });
+    process.env.KANBAN_VERIFY_CHAIN_CONCURRENCY = "2";
+    const holders = [held(), held()];
+    const a = runUnderVerifyChainSemaphore(async () => { await holders[0]!.promise; }, "a");
+    const b = runUnderVerifyChainSemaphore(async () => { await holders[1]!.promise; }, "b");
+    await tick();
+    expect(verifyChainSemaphoreActive()).toBe(2);
+
+    const admitted: string[] = [];
+    const probe = runUnderVerifyChainSemaphore(async () => { admitted.push("probe"); }, "probe", undefined, undefined, { priority: "background" });
+    const gate = runUnderVerifyChainSemaphore(async () => { admitted.push("gate"); }, "gate");
+    await tick();
+    expect(verifyChainGateWaiting()).toBe(true);
+
+    // One slot frees: the gate takes it although the probe queued first. (The gate's chain is
+    // instant, so its own release may already have admitted the probe by the time the tick
+    // returns — the ORDER is the claim, not the count.)
+    holders[0]!.release();
+    await tick();
+    expect(admitted[0]).toBe("gate");
+    holders[1]!.release();
+    await Promise.all([a, b, probe, gate]);
+    expect(admitted).toEqual(["gate", "probe"]);
   });
 });
 

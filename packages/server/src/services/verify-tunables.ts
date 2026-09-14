@@ -16,6 +16,7 @@ import { readTier0Capacity, deriveVerifyWorkers } from "@agentic-kanban/shared/l
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
+import { verifyChainMaxSlots, verifyChainSemaphoreActive } from "./verify-chain-semaphore.js";
 
 /**
  * Default verify-gate timeout (#192). The verify gate runs a full build+test suite in a
@@ -121,6 +122,14 @@ export interface ResolvedVerifyWorkers {
   derived: boolean;
   /** Free RAM (GB) observed at derivation time, when available. */
   hostFreeGb: number | null;
+  /**
+   * The verify-chain slot PARTITION the CPU share was divided by (#1160) — `verifyChainMaxSlots()`
+   * at derivation time — so a passing gate can say `2 of 3 verify chain slot(s) in use` next to a
+   * worker count that is a third of what a lone gate used to get. Null when not derived.
+   */
+  chainSlots: number | null;
+  /** Chains holding a slot at derivation time (this one included). Null when not derived. */
+  chainsInFlight: number | null;
 }
 
 /**
@@ -135,7 +144,7 @@ export async function resolveVerifyMaxWorkers(projectId: string, database: Datab
   // the build semaphore (jvm-build-semaphore.ts).
   const envOverride = Number.parseInt(process.env.KANBAN_VERIFY_MAX_WORKERS ?? "", 10);
   if (Number.isFinite(envOverride) && envOverride >= 1) {
-    return { workers: envOverride, derived: false, hostFreeGb: null };
+    return { workers: envOverride, derived: false, hostFreeGb: null, chainSlots: null, chainsInFlight: null };
   }
 
   const raw = await getPreference(verifyMaxWorkersPrefKey(projectId), database).catch(() => null);
@@ -144,12 +153,19 @@ export async function resolveVerifyMaxWorkers(projectId: string, database: Datab
 
   try {
     const tier0 = readTier0Capacity();
-    const workers = deriveVerifyWorkers({ cpuCount: os.cpus().length, freeGb: tier0.freeGb, ceiling });
-    return { workers, derived: true, hostFreeGb: tier0.freeGb };
+    // #1160 — the CPU share is ONE PARTITION of the box's verify budget, so that the chains the
+    // verify-chain semaphore may now run side by side never add up to more forks than a single
+    // chain was allowed before it had neighbours. Partitioned by the SLOT count, not by how many
+    // chains happen to be running: a chain that started alone cannot shed forks when a second one
+    // is admitted (see `DeriveVerifyWorkersInput.chainSlots`). RAM stays live and unpartitioned —
+    // a running chain has already taken its share out of `tier0.freeGb`.
+    const chainSlots = verifyChainMaxSlots();
+    const workers = deriveVerifyWorkers({ cpuCount: os.cpus().length, freeGb: tier0.freeGb, ceiling, chainSlots });
+    return { workers, derived: true, hostFreeGb: tier0.freeGb, chainSlots, chainsInFlight: verifyChainSemaphoreActive() };
   } catch {
     // Capacity read failed — fall back to the pref (or its shipped default) exactly as before
     // #909, rather than letting a diagnostic failure block or misreport the gate.
     const fallback = Number.isFinite(parsed) && parsed >= 1 && parsed <= MAX_VERIFY_WORKERS ? parsed : DEFAULT_VERIFY_MAX_WORKERS;
-    return { workers: fallback, derived: false, hostFreeGb: null };
+    return { workers: fallback, derived: false, hostFreeGb: null, chainSlots: null, chainsInFlight: null };
   }
 }

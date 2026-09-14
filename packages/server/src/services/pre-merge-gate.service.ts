@@ -550,6 +550,10 @@ export async function runPreMergeGate(
           maxWorkers: workers.workers,
           maxWorkersDerived: workers.derived,
           hostFreeGb: workers.hostFreeGb,
+          // #1160 — the slot partition the worker share came from, and the company this chain
+          // ran in. Read INSIDE the chain slot, so `chainsInFlight` counts this gate itself.
+          chainSlots: workers.chainSlots,
+          chainsInFlight: workers.chainsInFlight,
         });
         startedAt = Date.now();
         return runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv }).catch((e) => ({
