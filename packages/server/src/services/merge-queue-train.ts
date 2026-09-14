@@ -14,7 +14,7 @@ import { getMergeQueueIssueRows, getMergeTrainMaxSizePref } from "../repositorie
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { resolveTrainOptInSize } from "./merge-train-window.js";
 import { resolveRiskPosture, formatPostureNote, type RiskPosture } from "./risk-posture.service.js";
-import { createMergeTrain, getMergeTrain, listActiveMergeTrainsForProject, updateMergeTrainState } from "../repositories/merge-train.repository.js";
+import { createMergeTrain, findActiveMergeTrainForMembers, getMergeTrain, listActiveMergeTrainsForProject, updateMergeTrainState } from "../repositories/merge-train.repository.js";
 import { runMergeTrain } from "./merge-train.service.js";
 import { runPreMergeGate, looksLikeMissingDepsFailure } from "./pre-merge-gate.service.js";
 import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
@@ -116,6 +116,16 @@ export function trainEligible(order: MergeQueuePlan["order"]): boolean {
  * (#906), so a crash mid-assembly still leaves a row the startup reconciler can find. Returns
  * `null` when the project cannot be resolved — there is then no `verify_script` to gate with,
  * so the caller must fail closed rather than run a train with no gate.
+ *
+ * #1158: **reuses** an existing `assembling`/`gating` row for the SAME member set instead of
+ * always inserting a new one. Without this, every monitor cycle (or reconciler resume) that
+ * reaches this function for a batch already stuck behind the repo lock (`acquireQueueRepoLock`
+ * can wait up to 90 minutes) minted a fresh row before ever reaching the lock wait — a 5-minute
+ * cycle over a few hours produced dozens of `assembling` rows all naming the same 5 workspace
+ * ids, none of which ever resolved. Reusing means this attempt's gate work rides on the SAME
+ * train identity a concurrent/prior attempt for this exact batch already owns; it does not
+ * itself dedupe the concurrent WORK (the repo lock still serialises that) — it only stops the
+ * bookkeeping row from multiplying while that serialisation happens.
  */
 async function beginMergeTrain(
   first: { issueId: string },
@@ -129,11 +139,18 @@ async function beginMergeTrain(
   const projectId = issueRows[0]?.projectId ?? null;
   if (!projectId) return null;
 
+  // #1158: reuse an existing `assembling`/`gating` row for the SAME member set instead of
+  // minting a duplicate one when this attempt is racing a prior/concurrent attempt for the
+  // exact same batch.
+  const existing = await findActiveMergeTrainForMembers(projectId, memberWorkspaceIds, database).catch(() => undefined);
+  if (existing) return { trainId: existing.id, projectId };
+
   // #1153: refuse a SECOND train for a project that already has one unfinished
-  // (`assembling`/`gating`). This is the seam every caller goes through — the batching-window
-  // orchestrator also checks this before releasing (`auto-merge-orchestrator.ts`), but an
-  // explicit `strategy: "train"` request via `POST /api/merge-queue` reaches this function
-  // directly, so the invariant has to hold here too rather than only upstream.
+  // (`assembling`/`gating`) for a DIFFERENT member set. This is the seam every caller goes
+  // through — the batching-window orchestrator also checks this before releasing
+  // (`auto-merge-orchestrator.ts`), but an explicit `strategy: "train"` request via
+  // `POST /api/merge-queue` reaches this function directly, so the invariant has to hold here
+  // too rather than only upstream.
   const active = await listActiveMergeTrainsForProject(projectId, ["assembling", "gating"], database);
   if (active.length > 0) return "already_in_flight";
 
