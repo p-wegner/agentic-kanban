@@ -171,6 +171,12 @@ export function createPreferenceService({ database = db }: { database?: Database
     return ["default"];
   }
 
+  // Herdr has no per-profile config-dir discovery yet (#1144) — a single "default"
+  // profile, same shape as Copilot until Herdr grows its own profile mechanism.
+  function listHerdrProfiles(): string[] {
+    return ["default"];
+  }
+
   async function listPiProfiles(): Promise<string[]> {
     const profiles: string[] = ["default"];
     try {
@@ -199,6 +205,7 @@ export function createPreferenceService({ database = db }: { database?: Database
       codex: listCodexProfiles,
       copilot: listCopilotProfiles,
       pi: listPiProfiles,
+      herdr: listHerdrProfiles,
     };
     return listers[provider]();
   }
@@ -234,7 +241,7 @@ export function createPreferenceService({ database = db }: { database?: Database
     return result;
   }
 
-  return { getActiveProjectId, setActiveProjectId, getSettings, updateSettings, getProviderDivergence, listClaudeProfiles, listCodexProfiles, listCopilotProfiles, listPiProfiles, listProfilesForProvider };
+  return { getActiveProjectId, setActiveProjectId, getSettings, updateSettings, getProviderDivergence, listClaudeProfiles, listCodexProfiles, listCopilotProfiles, listPiProfiles, listHerdrProfiles, listProfilesForProvider };
 }
 
 // #604: the module singleton is gone — both consumers now build the service from their

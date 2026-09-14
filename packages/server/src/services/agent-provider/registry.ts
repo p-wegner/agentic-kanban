@@ -4,6 +4,7 @@ import { ClaudeProvider } from "./claude-provider.js";
 import { CodexProvider } from "./codex-provider.js";
 import { CopilotProvider } from "./copilot-provider.js";
 import { PiProvider } from "./pi-provider.js";
+import { HerdrProvider } from "./herdr-provider.js";
 
 const providers = new Map<string, AgentProvider>();
 
@@ -29,6 +30,7 @@ registerProvider(new ClaudeProvider());
 registerProvider(new CodexProvider());
 registerProvider(new CopilotProvider());
 registerProvider(new PiProvider());
+registerProvider(new HerdrProvider());
 
 /**
  * Construct a FRESH provider instance bound to `fs` instead of resolving the module
@@ -43,6 +45,7 @@ function createProvider(name: ProviderName, fs: FileSystem): AgentProvider {
     case "codex": return new CodexProvider(fs);
     case "copilot": return new CopilotProvider(fs);
     case "pi": return new PiProvider(fs);
+    case "herdr": return new HerdrProvider(fs);
   }
 }
 

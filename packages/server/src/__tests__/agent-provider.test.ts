@@ -20,7 +20,7 @@ vi.mock("node:fs", () => ({
   statSync: vi.fn(),
 }));
 
-import { ClaudeProvider, CodexProvider, CopilotProvider, PiProvider, getProvider, buildAgentLaunchConfig } from "../services/agent-provider.js";
+import { ClaudeProvider, CodexProvider, CopilotProvider, PiProvider, HerdrProvider, getProvider, buildAgentLaunchConfig } from "../services/agent-provider.js";
 import { commandCarriesArgs } from "../services/agent-provider/helpers.js";
 import type { ProviderId, ProviderName } from "../services/agent-provider.js";
 import { execSync as execSyncMock } from "node:child_process";
@@ -1220,6 +1220,51 @@ describe("PiProvider", () => {
 
   it("returns undefined for unrecognized and non-JSON lines", () => {
     expect(provider.parseStreamEvent("AK diagnostic stderr")).toBeUndefined();
+    expect(provider.parseStreamEvent(JSON.stringify({ type: "agent_start" }))).toBeUndefined();
+  });
+});
+
+describe("HerdrProvider (#1144)", () => {
+  const provider = new HerdrProvider();
+
+  it("returns provider name as 'herdr' with its own profile pref key", () => {
+    expect(provider.name).toBe("herdr");
+    expect(provider.profilePrefKey).toBe("herdr_profile");
+  });
+
+  it("builds a default Herdr launch config in structured mode", () => {
+    const config = provider.buildLaunchConfig({ prompt: "Fix the bug" });
+    expect(config.command).toBe("herdr");
+    expect(config.args).toEqual(expect.arrayContaining(["--mode", "json", "-p", "Fix the bug"]));
+    expect(config.suppressStdinPrompt).toBe(true);
+    expect(config.isMockAgent).toBe(false);
+  });
+
+  it("passes the resume session id and extra args", () => {
+    const config = provider.buildLaunchConfig({
+      prompt: "Continue",
+      providerSessionId: "session-123",
+      agentArgs: "--foo bar",
+    });
+    expect(config.args).toContain("--session");
+    expect(config.args[config.args.indexOf("--session") + 1]).toBe("session-123");
+    expect(config.args).toContain("--foo");
+    expect(config.args).toContain("bar");
+  });
+
+  it("prepends system instructions to the prompt", () => {
+    const config = provider.buildLaunchConfig({ prompt: "Go", systemInstructions: "Be careful" });
+    const promptArg = config.args[config.args.indexOf("-p") + 1];
+    expect(promptArg).toBe("Be careful\n\nGo");
+  });
+
+  it("routes through resolveMockLaunch for the mock agent", () => {
+    const config = provider.buildLaunchConfig({ prompt: "Go", agentCommand: "node mock-agent.cjs --mock" });
+    expect(config.isMockAgent).toBe(true);
+  });
+
+  it("returns undefined for unrecognized and non-JSON lines", () => {
+    expect(provider.parseStreamEvent("not json")).toBeUndefined();
     expect(provider.parseStreamEvent(JSON.stringify({ type: "agent_start" }))).toBeUndefined();
   });
 });

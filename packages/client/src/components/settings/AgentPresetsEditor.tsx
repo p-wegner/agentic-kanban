@@ -8,7 +8,6 @@ import {
   PI_DEFAULT_PROFILE,
   CollapsibleSection,
   Field,
-  type AgentProvider,
 } from "../SettingsPanel.shared.js";
 import {
   agentPresetsKey,
@@ -16,6 +15,7 @@ import {
   upsertAgentPreset,
   deleteAgentPreset,
   type AgentPreset,
+  type PresetProvider,
 } from "../../lib/agentPresets.js";
 
 type AgentPresetsEditorProps = {
@@ -26,7 +26,9 @@ type AgentPresetsEditorProps = {
   piProfiles: string[];
 };
 
-const EMPTY_DRAFT = { name: "", provider: "claude" as AgentProvider, profile: "", model: "" };
+// Agent Presets only offers claude/codex/copilot/pi (see the <select> below) — herdr
+// isn't wired in here (#1144 is scoped to Settings → Agent's own provider picker).
+const EMPTY_DRAFT = { name: "", provider: "claude" as PresetProvider, profile: "", model: "" };
 
 export function AgentPresetsEditor({ activeProjectId, profiles, codexProfiles, copilotProfiles, piProfiles }: AgentPresetsEditorProps) {
   const [presets, setPresets] = useState<AgentPreset[]>([]);
@@ -187,7 +189,7 @@ export function AgentPresetsEditor({ activeProjectId, profiles, codexProfiles, c
         <Field label="Provider">
           <select
             value={draft.provider}
-            onChange={(e) => setDraft((d) => ({ ...d, provider: e.target.value as AgentProvider, profile: "", model: "" }))}
+            onChange={(e) => setDraft((d) => ({ ...d, provider: e.target.value as PresetProvider, profile: "", model: "" }))}
             className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
           >
             <option value="claude">Claude</option>

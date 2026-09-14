@@ -1,4 +1,4 @@
-export type AgentStreamProvider = "claude" | "codex" | "copilot" | "pi";
+export type AgentStreamProvider = "claude" | "codex" | "copilot" | "pi" | "herdr";
 
 export interface AgentDisplayInitEvent {
   kind: "init";

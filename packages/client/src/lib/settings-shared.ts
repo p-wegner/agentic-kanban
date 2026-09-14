@@ -168,7 +168,7 @@ export function getProviderCapabilities(provider: AgentProvider, profileName: st
   // branch — NOT moved into PROVIDER_TRAITS, because claude's row below is dynamic
   // (it reads the profile's flags), so a static table cannot express it. The ticket
   // says to make this a table read; it cannot be one without losing that.
-  if (provider === "codex" || provider === "copilot" || provider === "pi") {
+  if (provider === "codex" || provider === "copilot" || provider === "pi" || provider === "herdr") {
     return { planMode: true, resume: true, mcpTools: true, visualVerify: true, permissionPrompts: false };
   }
   // claude

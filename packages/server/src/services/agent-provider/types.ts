@@ -11,9 +11,9 @@ export const PLAN_END_MARKER = "===PLAN END===";
  * so adding a 5th provider is a one-line change that cannot silently drift out of
  * sync with the registry.
  */
-export const PROVIDER_NAMES = ["claude", "codex", "copilot", "pi"] as const;
+export const PROVIDER_NAMES = ["claude", "codex", "copilot", "pi", "herdr"] as const;
 export type ProviderName = (typeof PROVIDER_NAMES)[number];
-export type ProviderId = "claude-code" | "codex" | "copilot" | "pi";
+export type ProviderId = "claude-code" | "codex" | "copilot" | "pi" | "herdr";
 
 export interface AgentLaunchConfig {
   command: string;

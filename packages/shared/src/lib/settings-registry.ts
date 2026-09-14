@@ -47,6 +47,10 @@ export const SETTINGS_REGISTRY = {
   codex_profile: { type: "string", default: "" },
   pi_profile: { type: "string", default: "" },
   copilot_profile: { type: "string", default: "" },
+  // Herdr profile selection (#1144). Availability-gated on the client (Settings →
+  // Agent only offers this once `detectHerdrAvailability()` reports available), same
+  // "always-registered, sometimes-offered" shape as the other provider profile keys.
+  herdr_profile: { type: "string", default: "" },
   provider: { type: "string", default: "claude" },
   default_model_claude: { type: "string", default: "" },
   default_model_codex: { type: "string", default: "" },

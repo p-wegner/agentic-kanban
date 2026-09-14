@@ -11,6 +11,9 @@ export const PREF_CODEX_LICENSE_ROTATION = "codex_license_rotation";
 export const PREF_CLAUDE_SUBSCRIPTION_RING = "claude_subscription_ring";
 export const PREF_CLAUDE_SUBSCRIPTION_ROTATION = "claude_subscription_rotation";
 export const PREF_COPILOT_PROFILE = "copilot_profile";
+// Herdr profile selection (#1144). Herdr availability is machine-dependent, so this
+// key is only ever written when `detectHerdrAvailability()` reports available.
+export const PREF_HERDR_PROFILE = "herdr_profile";
 export const PREF_PROVIDER = "provider";
 /**
  * @deprecated #902 — the global, provider-agnostic default model is GONE. A single
