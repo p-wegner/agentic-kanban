@@ -22,6 +22,16 @@ const IO_FAULT_SIGNATURE = /\bERR_PNPM_UNKNOWN\b|\berrno[:=]?\s*-?4094\b|\bUNKNO
 const OFFENDING_PATH_PATTERN = /\b(?:stat|lstat|unlink|open|read|rename)\s+'([^']+)'/i;
 /** Only delete a path the store itself owns — the store is content-addressed, nothing else is. */
 const PNPM_STORE_SEGMENT = /[\\/]\.?pnpm-store[\\/]/i;
+/**
+ * `describeSetupFailure` writes a `[io-fault: ...]` banner into the persisted `stderrTail`,
+ * and that same persisted tail is what the NEXT sweep passes back into `classifySetupFailure`
+ * to judge the prior run. The banner's own label text contains the literal signature
+ * (`ERR_PNPM_UNKNOWN`), so without stripping it first, a workspace classified once stays
+ * classified as an io-fault forever — every later cycle matches the banner it wrote last
+ * time, no matter what the real, current failure actually is. Strip any banner this module
+ * itself produced before testing the signature.
+ */
+const IO_FAULT_BANNER_PATTERN = /\[io-fault:[^\]]*\]/g;
 
 export type SetupFailureClassification =
   | { kind: "io-fault"; offendingPath: string | null; label: string }
@@ -36,7 +46,8 @@ export function classifySetupFailure(output: {
   stdout?: string | null;
   stderr?: string | null;
 }): SetupFailureClassification {
-  const combined = [output.stderr, output.stdout].filter((s): s is string => Boolean(s)).join("\n");
+  const combinedRaw = [output.stderr, output.stdout].filter((s): s is string => Boolean(s)).join("\n");
+  const combined = combinedRaw.replace(IO_FAULT_BANNER_PATTERN, "");
   if (!IO_FAULT_SIGNATURE.test(combined)) return { kind: "unclassified" };
   const match = combined.match(OFFENDING_PATH_PATTERN);
   const offendingPath = match && PNPM_STORE_SEGMENT.test(match[1]) ? match[1] : null;

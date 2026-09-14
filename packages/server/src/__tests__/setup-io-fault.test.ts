@@ -47,6 +47,19 @@ describe("classifySetupFailure (#1125)", () => {
   it("is unclassified with no output at all", () => {
     expect(classifySetupFailure({}).kind).toBe("unclassified");
   });
+
+  it("does not stay classified forever off its own persisted banner (#1125 regression)", () => {
+    // The banner `describeSetupFailure` writes gets persisted into `stderrTail` and fed back
+    // into `classifySetupFailure` on the next sweep. Its label text contains the literal
+    // signature, so without stripping the banner first, a workspace whose LATEST failure is
+    // completely unrelated (e.g. a 404) would still classify as an io-fault forever.
+    const banner = describeSetupFailure(
+      classifySetupFailure({ stdout: SAMPLE_OUTPUT("C:\\.pnpm-store\\v10\\files\\42\\x") }),
+      { attempted: true, repaired: true, reason: "deleted the corrupted store entry" },
+    );
+    const result = classifySetupFailure({ stderr: `${banner}\nERR_PNPM_FETCH_404 Not Found` });
+    expect(result.kind).toBe("unclassified");
+  });
 });
 
 describe("repairIoFault (#1125)", () => {
