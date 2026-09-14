@@ -165,36 +165,24 @@ export type { PreMergeGateWorkspace, PreMergeGateResult } from "./pre-merge-gate
  */
 
 /**
- * The first outstanding-install block across a workspace TRAIN, or null when every member's
- * dependencies are in place (#628).
+ * The first PRE-FLIGHT block across a workspace TRAIN — an outstanding/failed install (#628) or a
+ * FAILED setup script (#1123) — or null when every member clears both. One combined walk over
+ * `memberWorkspaceIds` rather than two, so `runPreMergeGate` keeps a single `if` for both checks
+ * (the #726 branch ceiling: each additional `if` in that function is its own branch, and the
+ * ceiling is shrink-only — see `scripts/check-god-modules.mjs`).
  *
- * Extracted from `runPreMergeGate` for the #726 branch ceiling: the loop plus its test cost that
- * function two branches, and the whole of the decision is "does any member still owe an install?",
- * which is one thing worth naming. The caller keeps one `if`.
+ * Extracted from `runPreMergeGate` for the same reason the #628 check originally was: a train
+ * gates with a SYNTHETIC id (`train:<label>`) that matches no real workspace, so every real
+ * member must be asked by name — see `memberWorkspaceIds`'s doc comment.
  */
-async function describeOutstandingInstallsForGate(
+async function describeBlockingPreflightForGate(
   workspace: PreMergeGateWorkspace,
   database: Database,
 ): Promise<string | null> {
-  for (const installCheckId of workspace.memberWorkspaceIds ?? [workspace.id]) {
-    const installBlock = await describeOutstandingRepoInstalls(installCheckId, database);
+  for (const checkId of workspace.memberWorkspaceIds ?? [workspace.id]) {
+    const installBlock = await describeOutstandingRepoInstalls(checkId, database);
     if (installBlock) return installBlock;
-  }
-  return null;
-}
-
-/**
- * #1123 — the first FAILED `workspace_setup_run` across a workspace train, or null when every
- * member's latest recorded run is not `failed`. Same shape as
- * {@link describeOutstandingInstallsForGate} and for the same reason: a train gates with a
- * synthetic id that matches no real workspace, so every real member must be asked by name.
- */
-async function describeFailedSetupForGate(
-  workspace: PreMergeGateWorkspace,
-  database: Database,
-): Promise<string | null> {
-  for (const setupCheckId of workspace.memberWorkspaceIds ?? [workspace.id]) {
-    const setupFailure = await describeFailedSetupRun(setupCheckId, database);
+    const setupFailure = await describeFailedSetupRun(checkId, database);
     if (setupFailure) return setupFailure;
   }
   return null;
@@ -214,20 +202,16 @@ export async function runPreMergeGate(
   // the inline install modes, where the column is NULL.
   // `memberWorkspaceIds` (the train) rather than `workspace.id`, because a synthetic gate id
   // matches no repo row and would pass this check vacuously — see the field's doc comment.
-  const installBlock = await describeOutstandingInstallsForGate(workspace, database);
-  if (installBlock) {
-    return { passed: false, skipped: false, stage: "none", message: installBlock };
-  }
-
-  // ---- #1123 non-blocking setup failure -----------------------------------------------------
+  //
+  // ---- #1123 non-blocking setup failure, same walk -------------------------------------------
   // `setupFailedBlocking` (#169) refuses the LAUNCH, but only when `setup_blocking = 1`. With
   // background installs a failed setup never blocked the launch and never gets retried by the
   // born-blocked reconciler either (that recovery also requires `setup_blocking = 1`), so a
-  // FAILED verdict here is otherwise permanent and invisible to every other guard. Checked
-  // right after the install-outstanding check, before anything that assumes a working tree.
-  const setupFailureBlock = await describeFailedSetupForGate(workspace, database);
-  if (setupFailureBlock) {
-    return { passed: false, skipped: false, stage: "none", message: setupFailureBlock };
+  // FAILED verdict here is otherwise permanent and invisible to every other guard — folded into
+  // the same pre-flight walk rather than a second `if`, per the branch-ceiling note above.
+  const preflightBlock = await describeBlockingPreflightForGate(workspace, database);
+  if (preflightBlock) {
+    return { passed: false, skipped: false, stage: "none", message: preflightBlock };
   }
 
   // What verification is CURRENTLY configured — resolved BEFORE the tree memo, and in
