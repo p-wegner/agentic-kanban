@@ -21,6 +21,7 @@ import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { requireProject } from "../services/require-project.js";
 import { previewNextStartCandidates } from "../services/start-score-preview.service.js";
 import { getAutopilotStatus, type AutopilotStatusDeps } from "../services/autopilot-status.service.js";
+import { getDeliveryStatus } from "../services/delivery-status.service.js";
 
 /**
  * #1102: the Autopilot chip re-reads on board events, and a Tier-1 capacity read spawns a
@@ -111,6 +112,15 @@ export function createBoardMonitorRoute(
       quiesceHostHeld: deps.quiesceHostHeld,
       nextCycleAt: deps.nextCycleAt,
     });
+    return c.json(status);
+  });
+
+  // #1155: one glance for the header chip — the EFFECTIVE risk posture plus the EFFECTIVE
+  // merge-train numbers, both server-resolved. Read-only; the panel behind it (#1156) writes
+  // through the existing `PUT /api/preferences/settings` chokepoint, not this route.
+  router.get("/:id/delivery", async (c) => {
+    const projectId = c.req.param("id");
+    const status = await getDeliveryStatus(projectId, database);
     return c.json(status);
   });
 
