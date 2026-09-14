@@ -58,7 +58,10 @@ export async function listTrackerWorkspaceRows(
         workspaces.status,
         // notInArray reads more naturally here, but the workspace-liveness module only
         // exports the terminal set — inverted below, in TS, keeps one source of truth.
-        ["active", "idle", "blocked", "reviewing", "fixing", "awaiting-plan-approval", "error"]
+        // Must list EVERY non-terminal WorkspaceStatus (incl. ready_for_merge, #1140 bug:
+        // that status was omitted, so a workspace ready to merge vanished from the
+        // snapshot entirely instead of showing in the review/merge queue).
+        ["active", "idle", "blocked", "reviewing", "fixing", "awaiting-plan-approval", "error", "ready_for_merge"]
           .filter((s) => !(TERMINAL_WORKSPACE_STATUSES as readonly string[]).includes(s)),
       ),
     ));
