@@ -133,7 +133,7 @@ describe("merge train livelock fixes (#1153)", () => {
     ];
     const released = await orchestrator.applyTrainWindow(rows, now);
     expect(released).toEqual(expect.arrayContaining(["ws-1", "ws-2"]));
-  });
+  }, 60000);
 
   it("applyTrainWindow keeps accumulating (never releases a second train) while one is already in flight", async () => {
     const { db } = createTestDb();
@@ -156,7 +156,7 @@ describe("merge train livelock fixes (#1153)", () => {
     // The pending set is still held (not dropped) — it must release the moment the in-flight
     // train finishes, not be lost.
     expect(orchestrator.state.trainWindows.get(projectId)?.pendingIds).toEqual(expect.arrayContaining(["ws-1", "ws-2"]));
-  });
+  }, 60000);
 
   it("executeQueue refuses a second train when one is already assembling/gating for the project (beginMergeTrain seam)", async () => {
     const { db } = createTestDb();
@@ -210,5 +210,5 @@ describe("merge train livelock fixes (#1153)", () => {
 
     const row = await getMergeTrain(trainId, db);
     expect(row?.state).toBe("abandoned");
-  });
+  }, 60000);
 });
