@@ -83,4 +83,11 @@ describe("the table is the single source (#493)", () => {
     expect(providerLabel("pi")).toBe("Pi");
     expect(providerLabel("copilot")).toBe("Copilot");
   });
+
+  it("includes herdr (#1144), with its own distinct profile pref key", () => {
+    expect(AGENT_PROVIDER_NAMES).toContain("herdr");
+    expect(providerLabel("herdr")).toBe("Herdr");
+    expect(PROVIDER_TRAITS.herdr.profilePrefKey).toBe("herdr_profile");
+    expect(narrowProvider("herdr")).toBe("herdr");
+  });
 });

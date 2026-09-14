@@ -62,6 +62,11 @@ export const CLI_VERSION_CONFIG: Record<ProviderName, CliVersionConfig> = {
   // Canonical breaking-change symptom lives here: Pi 0.73.1 rejects `--approve`.
   // We don't add that flag, but the lower bound documents the verified-good floor.
   pi: { versionArgs: ["--version"], minSupported: "0.70.0", maxKnown: "0.73.1" },
+  // Herdr is new (#1144) — no verified-good range yet; both bounds are
+  // placeholders, not measured ones. Bump both once a real launch has been
+  // verified end-to-end (see the maintenance note above). `maxKnown` may
+  // never be null — a null ceiling makes the above-known warning dead code.
+  herdr: { versionArgs: ["--version"], minSupported: "0.0.0", maxKnown: "999.0.0" },
 };
 
 export interface CliVersionResult {
