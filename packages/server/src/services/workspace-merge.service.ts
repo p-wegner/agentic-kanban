@@ -33,6 +33,7 @@ import {
   resolveRelaunchAgentSelection,
   requireBaseBranch,
   activeMerges,
+  activeMergeRequests,
   acquireRepoMergeLock,
   tryRecoverStaleMergeLock,
   describeMergeLock,
@@ -845,10 +846,15 @@ export function createWorkspaceMergeService(deps: {
    * Deduplicating entry point for HTTP merge requests: if a merge for this workspace is
    * already in-flight (e.g. a double-click or a monitor retry while the first request is
    * still pending), the caller receives the same promise instead of starting a second
-   * merge. The lock lives at the service level so tests can verify deduplication without
-   * spinning up an HTTP server.
+   * merge.
+   *
+   * Backed by the MODULE-LEVEL `activeMergeRequests` (#1157), not a Map private to this
+   * service instance: `createWorkspaceMergeService` is instantiated separately by the
+   * monitor, the auto-merge orchestrator and the merge-queue service, and a per-instance
+   * Map left those three blind to each other's in-flight gates — see the comment on
+   * `activeMergeRequests` in workspace-internals.ts for the observed failure.
    */
-  const activeRequests = new Map<string, Promise<Awaited<ReturnType<typeof mergeWorkspace>>>>();
+  const activeRequests = activeMergeRequests as Map<string, Promise<Awaited<ReturnType<typeof mergeWorkspace>>>>;
 
   function mergeWorkspaceDeduped(id: string, opts: MergeOptions = {}): Promise<Awaited<ReturnType<typeof mergeWorkspace>>> {
     const existing = activeRequests.get(id);
