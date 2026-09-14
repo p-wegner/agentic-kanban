@@ -181,12 +181,20 @@ const COMPLEXITY_BASELINE = {
 // typescript is the precise way to count behavioral exports. If it isn't
 // installed (e.g. a partially-provisioned worktree) fall back to a regex
 // heuristic so the gate still RUNS rather than silently no-opping.
+//
+// `KANBAN_GOD_MODULE_GATE_FORCE_NO_TS` is a TEST-ONLY escape hatch (#1149): a real
+// missing-typescript worktree can't be faked from outside, because `require("typescript")`
+// resolves relative to THIS script's own location regardless of `--root`, so a test can't just
+// point the gate at an isolated tree with no node_modules. Forcing the degraded path directly is
+// how `degraded-cohesion-exit.test.ts` exercises it without mutating the real install.
 let ts = null;
-try {
-  const require = createRequire(import.meta.url);
-  ts = require("typescript");
-} catch {
-  ts = null;
+if (!process.env.KANBAN_GOD_MODULE_GATE_FORCE_NO_TS) {
+  try {
+    const require = createRequire(import.meta.url);
+    ts = require("typescript");
+  } catch {
+    ts = null;
+  }
 }
 
 function isExcluded(absPath) {
@@ -384,6 +392,16 @@ for (const file of files) {
   }
 }
 
+// #1149: the cohesion count is the ONE signal that depends on `ts` being installed — without
+// it, `countInternalFunctions` falls back to a regex heuristic that can misjudge a file's
+// top-level declaration count (over OR under). Line count and branch complexity are unaffected
+// (complexity is SKIPPED outright when `!ts`, never approximated), so those stay real failures
+// regardless of degradation. A degraded cohesion finding must never read as an equally-certain
+// violation — it is reported separately and, when it is the ONLY reason the gate would fail,
+// the gate exits UNVERIFIED (distinct code) rather than FAILED, so a worktree missing its
+// `typescript` devDep cannot withhold a merge over a finding it cannot actually verify.
+const cohesionDegraded = !ts && cohesionOffenders.length > 0;
+
 let failed = false;
 if (lineOffenders.length > 0) {
   failed = true;
@@ -395,11 +413,11 @@ if (lineOffenders.length > 0) {
   );
 }
 if (cohesionOffenders.length > 0) {
-  failed = true;
+  if (!cohesionDegraded) failed = true;
   console.error(
     `\n[god-module gate] ${cohesionOffenders.length} module(s) declare more than ` +
       `${COHESION_MAX_FN_DECLS} top-level functions/classes (exported + internal) — a low-cohesion ` +
-      `god-module smell (#889).\n` +
+      `god-module smell (#889)${cohesionDegraded ? ", UNVERIFIED — typescript is not installed, so this count used a regex heuristic and cannot be trusted as a real violation" : ""}.\n` +
       `Split by responsibility into cohesive sub-modules re-exported through a facade barrel:\n  ` +
       cohesionOffenders.join("\n  "),
   );
@@ -420,6 +438,18 @@ if (complexityOffenders.length > 0) {
 if (failed) {
   console.error(`\n[god-module gate] FAILED${ts ? "" : " (typescript not installed — cohesion count used a regex heuristic)"}.`);
   process.exit(1);
+}
+
+if (cohesionDegraded) {
+  // Distinct from both a clean pass (0) and a real failure (1): the gate could not verify
+  // cohesion here, not that it verified and found nothing wrong. Callers (the pre-merge gate)
+  // must treat this as UNVERIFIED, never as evidence the branch is broken.
+  console.error(
+    `\n[god-module gate] UNVERIFIED — typescript is not installed in this worktree, so the ` +
+      `cohesion count above is a regex guess and cannot be treated as a real violation. Run ` +
+      `\`pnpm install -r\` in this worktree and re-run the gate for a trustworthy verdict.`,
+  );
+  process.exit(3);
 }
 
 if (complexityStale.length > 0) {
