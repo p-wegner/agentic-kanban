@@ -15,6 +15,18 @@ import type { RepoLockHandle, RepoLockWaitOptions } from "@agentic-kanban/shared
 export const MERGE_QUEUE_REPO_LOCK_TIMEOUT_MS = 90 * 60 * 1000;
 
 /**
+ * How long ONE release train may wait for the repo lock before it is abandoned rather than
+ * kept polling (#1153). A train is cheap to re-assemble (a few `--no-ff` merges onto a fresh,
+ * disposable ref — see `startup/merge-train-reconciler.ts`'s header), unlike a per-workspace
+ * queue member whose 90-minute budget must outlast a legitimate holder's own verify gate. Left
+ * at the shared 90-minute bound, a contended repo accumulated one 90-minute waiter per ~10-minute
+ * batching-window release — nine unfinished trains queued three hours deep with none ever timing
+ * out. Bounded shorter, an abandoned train is retried by the next window release (or the startup
+ * reconciler) instead of silently occupying a wait slot for the full 90 minutes.
+ */
+export const MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS = 15 * 60 * 1000;
+
+/**
  * Acquire the repo lock for a queue step: bounded, periodically logged, and failing FAST
  * when the path cannot be locked at all rather than polling a permanently-unlockable
  * repoPath as if it were merely busy (#230). Both queue sites go through this one helper
