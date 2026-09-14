@@ -34,6 +34,7 @@ import { startWorkerHealthProbe, stopWorkerHealthProbe } from "../services/worke
 import { getPreference } from "../repositories/preferences.repository.js";
 import { DB_LOCATION } from "../db/data-dir.js";
 import { startStaleTempSweeper, stopStaleTempSweeper } from "./stale-temp-sweep.js";
+import { startNonBlockingSetupRetryReconciler, stopNonBlockingSetupRetryReconciler } from "./non-blocking-setup-retry-reconciler.js";
 
 /**
  * Background-service (start/stop) plugin registry — the append target for periodic
@@ -358,6 +359,16 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start() {
       startStaleTempSweeper();
       return stopStaleTempSweeper;
+    },
+  },
+  {
+    // #1125 — the non-blocking setup-script path never blocks a workspace and so is never
+    // reached by born-blocked-reconciler; a failure classified as the pnpm-store I/O fault
+    // otherwise sat unretried forever with only a butler event to show for it.
+    name: "non-blocking-setup-retry-reconciler",
+    start() {
+      startNonBlockingSetupRetryReconciler();
+      return stopNonBlockingSetupRetryReconciler;
     },
   },
 ];

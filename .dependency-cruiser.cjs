@@ -242,7 +242,9 @@ module.exports = {
         "packages/server/src/__tests__/startup-persistence-boundary-ratchet.test.ts - so it now " +
         "fails on a 32nd offender, and fails again if a drain lands without lowering it here. " +
         "#942 drained monitor-eligibility.ts (its SQL fragments moved into " +
-        "repositories/start-scoring.repository.ts). Backlog: 29.",
+        "repositories/start-scoring.repository.ts). #1125 added " +
+        "non-blocking-setup-retry-reconciler.ts (same shape as born-blocked-reconciler.ts, " +
+        "which was already here). Backlog: 30.",
       severity: "warn",
       from: { path: "^packages/server/src/startup/" },
       to: { path: "drizzle-orm" },

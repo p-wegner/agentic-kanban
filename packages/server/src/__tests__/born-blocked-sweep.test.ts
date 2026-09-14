@@ -26,6 +26,8 @@ async function seed(opts: {
   setupState?: string | null;
   withSession?: boolean;
   setupScript?: string | null;
+  setupStdoutTail?: string | null;
+  setupStderrTail?: string | null;
 }) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
@@ -53,6 +55,8 @@ async function seed(opts: {
     workspaceId,
     state: opts.setupState === undefined ? "failed" : opts.setupState,
     endedAt: OLD,
+    stdoutTail: opts.setupStdoutTail ?? null,
+    stderrTail: opts.setupStderrTail ?? null,
   });
   if (opts.withSession) {
     await db.insert(sessions).values({
@@ -152,5 +156,54 @@ describe("reconcileBornBlockedWorkspaces (#394)", () => {
     expect(ranIn).not.toContain(`/repo/.worktrees/${workspaceId.slice(0, 8)}`);
     expect(result.released).toContain(workspaceId);
     expect(await statusOf(workspaceId)).toBe("idle");
+  });
+
+  // #1125 — repair-then-retry: a prior failure carrying the ERR_PNPM_UNKNOWN/errno -4094
+  // signature must repair the named pnpm-store file BEFORE the retry, and the restamped
+  // verdict must name the classification rather than a bare exit code.
+  it("repairs a classified I/O fault before retrying, and records the classification", async () => {
+    const { mkdtempSync, writeFileSync, existsSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const path = await import("node:path");
+    const dir = mkdtempSync(path.join(tmpdir(), "kanban-pnpm-store-"));
+    const storeDir = path.join(dir, ".pnpm-store", "v10", "files", "42");
+    const fs = await import("node:fs");
+    fs.mkdirSync(storeDir, { recursive: true });
+    const filePath = path.join(storeDir, "a81d86");
+    writeFileSync(filePath, "corrupt");
+
+    const { workspaceId } = await seed({
+      issueStatus: "In Progress",
+      setupStdoutTail: `ERR_PNPM_UNKNOWN  UNKNOWN: unknown error, stat '${filePath}'`,
+    });
+    const result = await reconcileBornBlockedWorkspaces({
+      database: db, log: () => {},
+      runSetup: async () => ({ exitCode: 0, stderr: "" }),
+    });
+
+    expect(existsSync(filePath)).toBe(false);
+    expect(result.retriedAndReleased).toContain(workspaceId);
+    const rows = await db.select({ tail: workspaceSetupRun.stderrTail })
+      .from(workspaceSetupRun).where(eq(workspaceSetupRun.workspaceId, workspaceId));
+    expect(rows[0].tail).toContain("io-fault");
+    expect(rows[0].tail).toContain("repaired");
+  });
+
+  it("reports the repair FAILED honestly when the store entry is still unreadable and stays held", async () => {
+    const { workspaceId } = await seed({
+      issueStatus: "In Progress",
+      // No real file at this path — repair cannot succeed, and must say so rather than
+      // silently proceeding as if nothing had gone wrong.
+      setupStdoutTail: "ERR_PNPM_UNKNOWN  UNKNOWN: unknown error, stat 'C:\\Users\\pwegner\\Documents\\secret.txt'",
+    });
+    const result = await reconcileBornBlockedWorkspaces({
+      database: db, log: () => {},
+      runSetup: async () => ({ exitCode: 1, stderr: "ERR_PNPM_UNKNOWN" }),
+    });
+    expect(result.held).toContain(workspaceId);
+    const rows = await db.select({ tail: workspaceSetupRun.stderrTail })
+      .from(workspaceSetupRun).where(eq(workspaceSetupRun.workspaceId, workspaceId));
+    expect(rows[0].tail).toContain("io-fault");
+    expect(rows[0].tail).toContain("no offending pnpm-store path");
   });
 });
