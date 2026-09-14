@@ -32,6 +32,9 @@ vi.mock("../services/git.service.js", () => ({
 vi.mock("../services/workspace-merge.service.js", () => ({
   createWorkspaceMergeService: () => ({
     mergeWorkspace: mocks.mergeWorkspace,
+    // The queue drain now calls mergeWorkspaceDeduped (#1157), so its own tests share the
+    // same mock — assertions here are about call args/outcomes, not which entry point.
+    mergeWorkspaceDeduped: mocks.mergeWorkspace,
   }),
 }));
 
