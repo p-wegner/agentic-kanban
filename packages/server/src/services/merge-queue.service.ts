@@ -13,7 +13,7 @@ import { getProjectsByIds } from "../repositories/project.repository.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { createWorkspaceMergeService } from "./workspace-merge.service.js";
 import { createWorkspaceSessionService } from "./workspace-session.service.js";
-import { isPreMergeGateFailure } from "./workspace-merge-gate.js";
+import { isPreMergeGateFailure, isLockContentionFailure } from "./workspace-merge-gate.js";
 import type { BoardEventSink } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 import { createMergeTrainRunner, pickQueueStrategy } from "./merge-queue-train.js";
@@ -691,6 +691,26 @@ export function createMergeQueueService(deps: {
             issueNumber: ws.issueNumber,
             issueTitle: ws.issueTitle,
             reason: `verify_failed: ${error}`,
+          };
+          continue;
+        }
+
+        // #1151: the merge never even STARTED — another job held the repo lock at that
+        // instant. That is not a conflict and nothing a reconciler agent can fix, so it must
+        // never enter the conflict->reconciler escalation path below (same reasoning as the
+        // pre-merge-gate carve-out above): the escalation would launch an agent and queue a
+        // full verify chain for a merge that was never attempted, and that chain then
+        // serializes behind the very lock that caused it (#949) — contention converting
+        // directly into queue depth. Skip it plainly; the next queue pass retries once the
+        // lock frees.
+        if (isLockContentionFailure(err)) {
+          skipped.push(ws.id);
+          yield {
+            type: "skipped",
+            workspaceId: ws.id,
+            issueNumber: ws.issueNumber,
+            issueTitle: ws.issueTitle,
+            reason: `lock_contention: ${error}`,
           };
           continue;
         }
