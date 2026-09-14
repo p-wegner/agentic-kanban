@@ -28,6 +28,16 @@ import { fileURLToPath } from "node:url";
  */
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
+// #1124: "ERROR: chalk.Instance is not a constructor" out of depcruise is INPUT-INDEPENDENT —
+// it fires before any file is cruised — and has been traced twice (2026-09-11, 2026-09-13,
+// see CONTINUE.md) to a corrupted shared pnpm store leaving a worktree's node_modules empty
+// or partially resolved. It is an environment defect, not a layering violation; surface it as
+// one so a red run here is not mistaken for a real rule regression.
+const CHALK_RESOLUTION_HINT =
+  "depcruise crashed inside its own chalk dependency (not a layering violation). " +
+  "This matches a known corrupted-pnpm-store symptom (see CONTINUE.md, #1124): reinstall " +
+  "node_modules for this worktree/package rather than treating it as a rule regression.";
+
 function runDepcruise(args: string[], cwd = REPO_ROOT): { code: number; output: string } {
   try {
     const output = execFileSync(
@@ -38,7 +48,11 @@ function runDepcruise(args: string[], cwd = REPO_ROOT): { code: number; output: 
     return { code: 0, output };
   } catch (e) {
     const err = e as { status?: number; stdout?: string; stderr?: string };
-    return { code: err.status ?? 1, output: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+    let output = `${err.stdout ?? ""}${err.stderr ?? ""}`;
+    if (output.includes("chalk.Instance is not a constructor")) {
+      output = `${output}\n\n${CHALK_RESOLUTION_HINT}`;
+    }
+    return { code: err.status ?? 1, output };
   }
 }
 
