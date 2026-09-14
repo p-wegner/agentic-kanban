@@ -108,6 +108,7 @@ describe("every background sweep is registered (#584)", () => {
       "agent-session-registry-reaper",
       "worker-health-probe",
       "stale-temp-sweeper",
+      "non-blocking-setup-retry-reconciler",
     ]);
   });
 
