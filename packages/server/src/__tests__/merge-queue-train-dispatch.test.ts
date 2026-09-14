@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -36,7 +36,7 @@ async function makeRepo(): Promise<string> {
   return repoPath;
 }
 
-async function seedProject(db: TestDb, repoPath: string) {
+async function seedProject(db: TestDb, repoPath: string, opts: { setupScript?: string } = {}) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
   const statusId = randomUUID();
@@ -46,6 +46,7 @@ async function seedProject(db: TestDb, repoPath: string) {
     repoPath,
     repoName: "repo",
     defaultBranch: "main",
+    setupScript: opts.setupScript ?? null,
     createdAt: now,
     updatedAt: now,
   });
@@ -271,5 +272,52 @@ describe("executeQueue train dispatch (#904)", () => {
     }
     const done = events.find((e) => e.type === "done");
     expect(done).toMatchObject({ merged: expect.arrayContaining([a.workspaceId, b.workspaceId]) });
+  }, 240000);
+
+  /**
+   * #1154 — a train's staging worktree (created fresh by `gitService.createWorktree` for the
+   * gate) must be provisioned with the project's setup script the same way a builder's worktree
+   * is, BEFORE the gate runs against it. Proven by having the setup script write a marker to a
+   * FIXED path outside any worktree (so it survives the staging worktree's teardown) and
+   * asserting it was written exactly once, during this run.
+   */
+  it("provisions the train's staging worktree with the project's setup script before gating", async () => {
+    const { db } = createTestDb();
+    const repoPath = await makeRepo();
+    const markerPath = join(tmpdir(), `ak-train-setup-marker-${randomUUID()}.txt`);
+    const isWindows = process.platform === "win32";
+    const setupScript = isWindows
+      ? `echo installed > "${markerPath}"`
+      : `touch "${markerPath}"`;
+    const { projectId, statusId } = await seedProject(db, repoPath, { setupScript });
+    await db.insert(preferences).values({
+      key: `train_max_size_${projectId}`,
+      value: "4",
+      updatedAt: new Date().toISOString(),
+    });
+
+    await git(repoPath, ["branch", "f1"]);
+    await git(repoPath, ["branch", "f2"]);
+    await commitOn(repoPath, "f1", "a.txt", "a\n");
+    await commitOn(repoPath, "f2", "b.txt", "b\n");
+    await git(repoPath, ["checkout", "-q", "main"]);
+
+    const a = await seedWorkspace(db, { projectId, statusId, issueNumber: 10, branch: "f1" });
+    const b = await seedWorkspace(db, { projectId, statusId, issueNumber: 11, branch: "f2" });
+
+    expect(existsSync(markerPath)).toBe(false);
+
+    const service = createMergeQueueService({ database: db });
+    const events = [];
+    for await (const event of service.executeQueue([a.workspaceId, b.workspaceId])) {
+      events.push(event);
+    }
+
+    const done = events.find((e) => e.type === "done");
+    expect(done).toMatchObject({ merged: expect.arrayContaining([a.workspaceId, b.workspaceId]) });
+    // The marker only exists if the setup script ran INSIDE the train's staging worktree before
+    // the gate — i.e. provisioning actually happened.
+    expect(existsSync(markerPath)).toBe(true);
+    try { rmSync(markerPath, { force: true }); } catch { /* best effort */ }
   }, 240000);
 });
