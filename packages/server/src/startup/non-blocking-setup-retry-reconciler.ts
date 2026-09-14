@@ -150,21 +150,27 @@ export async function reconcileNonBlockingSetupRetries(
     );
     let exitCode = 1;
     let stderr = "";
+    let stdout = "";
     try {
       const run = await runSetup(row.workingDir!, row.setupScript!);
       exitCode = run.exitCode;
       stderr = run.stderr;
+      stdout = run.stdout ?? "";
     } catch (err) {
       stderr = errorMessage(err);
     }
     const classificationLine = describeSetupFailure(classification, repairResult);
     const stderrTail = [classificationLine, stderr.slice(-2000)].filter(Boolean).join("\n");
     // Status is deliberately untouched (see file header) — only the run record is restamped.
+    // `stdoutTail` is restamped with THIS run's own output (not left stale) — otherwise a
+    // repeat failure against a DIFFERENT corrupt store entry would keep being classified off
+    // the original, already-repaired path forever.
     await restampWorkspaceSetupRun(row.workspaceId, {
       state: exitCode === 0 ? "succeeded" : "failed",
       endedAt: now,
       exitCode,
       stderrTail,
+      stdoutTail: stdout.slice(-2000),
     }, database);
     result.retried.push(row.workspaceId);
     recordActed(result, row.workspaceId, exitCode === 0 ? "retry-setup-succeeded" : "retry-setup-failed");
