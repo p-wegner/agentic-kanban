@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { workspaceSetupRun } from "@agentic-kanban/shared/schema";
+import { workspaceSetupRun, workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
 
@@ -85,5 +85,28 @@ export async function getWorkspaceSetupRun(
 ): Promise<typeof workspaceSetupRun.$inferSelect | undefined> {
   const [row] = await database.select().from(workspaceSetupRun)
     .where(eq(workspaceSetupRun.workspaceId, workspaceId)).limit(1);
+  return row;
+}
+
+/**
+ * #1123 — the fields the pre-merge gate's non-blocking-setup-failure check needs, in one read:
+ * the run's verdict plus the workspace's own `workingDir` (for the cheap `node_modules/.bin`
+ * corroboration). Joined here rather than making the gate do a second repository round trip.
+ */
+export async function getSetupRunForGate(
+  workspaceId: string,
+  database: Database = db,
+): Promise<{ state: string | null; command: string | null; stderrTail: string | null; workingDir: string | null } | undefined> {
+  const [row] = await database
+    .select({
+      state: workspaceSetupRun.state,
+      command: workspaceSetupRun.command,
+      stderrTail: workspaceSetupRun.stderrTail,
+      workingDir: workspaces.workingDir,
+    })
+    .from(workspaceSetupRun)
+    .innerJoin(workspaces, eq(workspaces.id, workspaceSetupRun.workspaceId))
+    .where(eq(workspaceSetupRun.workspaceId, workspaceId))
+    .limit(1);
   return row;
 }
