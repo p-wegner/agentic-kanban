@@ -62,16 +62,19 @@ export async function updateWorkspaceSetupRun(
 
 /**
  * The born-blocked reconciler's partial restamp: a fresh verdict for a retried setup, leaving
- * `command` / `startedAt` / `durationMs` / `stdoutTail` as they were.
+ * `command` / `startedAt` / `durationMs` as they were. `stdoutTail` is also left untouched
+ * UNLESS the caller passes a fresh one (#1125) — a retry that captured new output must be able
+ * to overwrite the stale tail, or a repair-then-retry loop stays classified off the ORIGINAL
+ * failure forever and never notices a later, different corrupt entry.
  *
  * Kept separate from `updateWorkspaceSetupRun` because it is genuinely a PARTIAL write — the
- * four columns it used to set are the four that make the verdict dated and readable, and
- * widening it to the full record would invent values for the other four. On a workspace with
- * no record at all it inserts one, which is what the four-column UPDATE effectively did.
+ * columns it sets are the ones that make the verdict dated and readable, and widening it to the
+ * full record would invent values for the rest. On a workspace with no record at all it inserts
+ * one, which is what the four-column UPDATE effectively did.
  */
 export async function restampWorkspaceSetupRun(
   workspaceId: string,
-  verdict: { state: string; endedAt: string; exitCode: number; stderrTail: string },
+  verdict: { state: string; endedAt: string; exitCode: number; stderrTail: string; stdoutTail?: string },
   database: Database | TransactionClient = db,
 ): Promise<void> {
   await database.insert(workspaceSetupRun).values({ workspaceId, ...verdict })
