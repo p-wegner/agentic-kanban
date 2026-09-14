@@ -668,7 +668,11 @@ export function createMergeQueueService(deps: {
         const featureSha = ws.isDirect
           ? null
           : await gitService.revParse(ws.repoPath, ws.branch).catch(() => null);
-        await mergeService.mergeWorkspace(ws.id);
+        // Deduped, not the raw `mergeWorkspace` (#1157): the queue drain and the
+        // deterministic monitor's own stale-base/ready-for-merge recovery can both reach
+        // the same workspace, and only the deduped entry point shares its in-flight-gate
+        // tracking (`activeMergeRequests`, module-level) with those other callers.
+        await mergeService.mergeWorkspaceDeduped(ws.id);
         await verifyWorkspaceMerged(ws, featureSha);
         merged.push(ws.id);
         yield {

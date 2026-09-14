@@ -647,6 +647,25 @@ export interface ActiveMergeLock {
 export const activeMerges = new Map<string, ActiveMergeLock>();
 
 /**
+ * In-flight `mergeWorkspace` calls, keyed by workspace id — the join-or-reuse map behind
+ * `mergeWorkspaceDeduped` (#1157).
+ *
+ * MODULE-LEVEL, not per-service-instance, because `createWorkspaceMergeService` is
+ * instantiated independently in at least three places (`monitor-setup.ts`'s workspace
+ * service, `auto-merge-orchestrator.ts`, and `createMergeQueueService`'s own internal
+ * instance) — each call used to get its OWN private `activeRequests` Map, so a workspace
+ * reachable from two of those paths (e.g. the deterministic monitor's stale-base recovery
+ * racing the merge-queue drain) had NO shared dedup: both sides independently reached
+ * `runPreLockGate` and each queued its own multi-hour verify-chain wait, live-observed as
+ * a queue depth (`verify-chain-semaphore.ts`'s "QUEUED behind N chains") that only grew —
+ * 20, 21, 22, ... 30 — because every abandoned/retried cycle added a fresh, undeduplicated
+ * waiter on top of ones still genuinely running. `activeMerges` above already solved this
+ * for the cheap post-gate git work by being a plain module export; this is the same fix for
+ * the expensive pre-gate phase `mergeWorkspaceDeduped` exists to dedupe.
+ */
+export const activeMergeRequests = new Map<string, Promise<unknown>>();
+
+/**
  * A `.git/index.lock` younger than this in the target repo means a git process
  * is very likely still running there — refuse stale-lock recovery (#970).
  */
