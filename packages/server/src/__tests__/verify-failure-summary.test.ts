@@ -134,3 +134,42 @@ describe("summarizeVerifyFailure — worker crash with zero failures (#490)", ()
     expect(summary).toContain("1 of 566 test file(s) never reported a result");
   });
 });
+
+// #1149: a worktree with no `typescript` installed made the god-module gate fall back to a
+// regex heuristic for its cohesion count, which reported a violation that did not exist — and
+// the resulting gate message read exactly like a real architecture-violation refusal, with
+// nothing pointing at the actual cause. `check-god-modules.mjs` now prints its own distinct
+// "UNVERIFIED" self-report when this happens; the summary must lead with it, ahead of the raw
+// gate output, rather than let it read as an ordinary red gate.
+const GOD_MODULE_DEGRADED_LOG = [
+  "[god-module gate] 1 module(s) declare more than 20 top-level functions/classes (exported + internal) — a low-cohesion god-module smell (#889), UNVERIFIED — typescript is not installed, so this count used a regex heuristic and cannot be trusted as a real violation.",
+  "Split by responsibility into cohesive sub-modules re-exported through a facade barrel:",
+  "  packages/shared/src/lib/__cohesion_probe__.ts  (21 lines, 21 functions/classes)",
+  "",
+  "[god-module gate] UNVERIFIED — typescript is not installed in this worktree, so the cohesion count above is a regex guess and cannot be treated as a real violation. Run `pnpm install -r` in this worktree and re-run the gate for a trustworthy verdict.",
+].join("\n");
+
+describe("summarizeVerifyFailure — god-module gate degraded to a regex heuristic (#1149)", () => {
+  it("leads with UNVERIFIED (degraded) instead of reading as an ordinary red gate", () => {
+    const summary = summarizeVerifyFailure(GOD_MODULE_DEGRADED_LOG, "", "ws-1149", () => null);
+    expect(summary.startsWith("UNVERIFIED (degraded):")).toBe(true);
+    expect(summary).toMatch(/typescript.*is not installed/i);
+    expect(summary).toContain("pnpm install -r");
+  });
+
+  it("still includes the raw gate output after the lead line, so a real co-occurring failure is visible", () => {
+    const summary = summarizeVerifyFailure(GOD_MODULE_DEGRADED_LOG, "", "ws-1149", () => null);
+    expect(summary).toContain("__cohesion_probe__.ts");
+  });
+
+  it("does not fire on an ordinary passing/failing gate with no degradation marker", () => {
+    const summary = summarizeVerifyFailure(VITEST_TAIL, "", "ws-221", () => null);
+    expect(summary.startsWith("UNVERIFIED (degraded):")).toBe(false);
+  });
+
+  it("takes precedence over the crash detector when both markers happen to be present", () => {
+    const combined = `${GOD_MODULE_DEGRADED_LOG}\n${CRASH_LOG}`;
+    const summary = summarizeVerifyFailure(combined, "", "ws-1149b", () => null);
+    expect(summary.startsWith("UNVERIFIED (degraded):")).toBe(true);
+  });
+});

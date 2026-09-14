@@ -147,6 +147,17 @@ export async function main() {
     const stepStartedAt = Date.now();
     const code = await step.run();
     timings.push({ label: step.label, durationMs: Date.now() - stepStartedAt, code });
+    // #1149: exit 3 from `god-modules` means "could not verify cohesion here" (no typescript
+    // in this worktree), NOT "a violation was found" — the script already printed its own
+    // UNVERIFIED explanation to stderr, which the gate's failure-message shaping picks up
+    // downstream. It must still stop the chain (later steps assume a clean tree) and it must
+    // still exit non-zero (a foreign caller has no third state to check for), but it is named
+    // here distinctly rather than folded into the same "FAILED at" wording as a real breach.
+    if (code === 3 && step.label === "god-modules") {
+      console.error(`[check:arch] UNVERIFIED at ${step.label} — see its own output above`);
+      process.exitCode = 3;
+      return;
+    }
     // Fail-fast, exactly like the `&&` chain it replaces: a broken layering rule makes the
     // parity test's verdict uninteresting, and running it anyway would only slow the red path.
     if (code !== 0) {
