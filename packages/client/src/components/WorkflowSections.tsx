@@ -74,6 +74,9 @@ export function WorkflowRiskPostureSection({
       <p className="mt-1.5 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
         {RISK_POSTURE_DESCRIPTIONS[current]}
       </p>
+      <p className="mt-1.5 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
+        Train size, train wait and red-base policy live in the board header's Delivery chip, next to the project selector.
+      </p>
     </div>
   );
 }
