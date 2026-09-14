@@ -16,11 +16,14 @@ import { resolveTrainOptInSize } from "./merge-train-window.js";
 import { resolveRiskPosture, formatPostureNote, type RiskPosture } from "./risk-posture.service.js";
 import { createMergeTrain, updateMergeTrainState } from "../repositories/merge-train.repository.js";
 import { runMergeTrain } from "./merge-train.service.js";
-import { runPreMergeGate } from "./pre-merge-gate.service.js";
+import { runPreMergeGate, looksLikeMissingDepsFailure } from "./pre-merge-gate.service.js";
 import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { randomUUID } from "node:crypto";
 import { acquireQueueRepoLock } from "./merge-queue-repo-lock.js";
 import type { MergeQueueEvent, MergeQueuePlan } from "./merge-queue.service.js";
+import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
+import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
+import { noteMergeGatePhase } from "./merge-job.service.js";
 
 /**
  * How many ready members a project wants batched onto one train before it opts into the
@@ -139,8 +142,21 @@ async function beginMergeTrain(
 async function finishMergeTrain(
   trainId: string,
   result: Awaited<ReturnType<typeof runMergeTrain>>,
+  members: Array<{ workspaceId: string }>,
   database: Database,
 ): Promise<void> {
+  // #1154: a red train whose failure was never attributed to any individual member (an
+  // environment failure — see `isEnvironmentFailure` — skips bisect on purpose) used to persist
+  // `landed: [], dropped: []` with nothing else, so the evidence named NONE of the members it
+  // held for the train's whole life. `unresolved` is every member that is neither landed, nor
+  // dropped during assembly, nor individually gate-rejected by a bisect — i.e. every member
+  // whose disposition is "the batch failed and this member shares that verdict, unattributed".
+  const accounted = new Set([
+    ...result.landed.map((m) => m.workspaceId),
+    ...result.dropped.map((d) => d.member.workspaceId),
+    ...result.gateRejected.map((r) => r.member.workspaceId),
+  ]);
+  const unresolved = members.filter((m) => !accounted.has(m.workspaceId)).map((m) => m.workspaceId);
   await updateMergeTrainState(trainId, {
     state: result.landed.length > 0 ? "landed" : "red",
     gateEvidence: {
@@ -149,6 +165,7 @@ async function finishMergeTrain(
       landed: result.landed.map((m) => m.workspaceId),
       dropped: result.dropped.map((d) => ({ workspaceId: d.member.workspaceId, reason: d.reason })),
       mergeSha: result.mergeSha ?? null,
+      ...(unresolved.length > 0 ? { unresolved } : {}),
     },
     bisectResult: result.gateRejected.length > 0
       ? { gateRejected: result.gateRejected.map((r) => ({ workspaceId: r.member.workspaceId, reason: r.reason })) }
@@ -222,6 +239,31 @@ export function createMergeTrainRunner(deps: {
               pathNamespace: "train",
               ...(await resolveWorktreeClaims(database, { label: "merge-train-gate" })),
             });
+            // #1154: a builder's worktree gets the project's setup/install script run against
+            // it before anything else touches it (`workspace-provision.service.ts`); this
+            // staging worktree is created fresh by `createWorktree` above with none of that —
+            // so on a project whose dependencies are per-worktree (install-per-worktree, not a
+            // symlink into main) the train verified a tree that was never actually installed.
+            // Provision it the same way a real workspace is, best-effort: a setup failure here
+            // is reported through the gate result below rather than thrown, since a project with
+            // no setup script configured (installMode "symlink", or none at all) must still gate
+            // normally.
+            const setupScript = await getProjectSetupScript(projectId, database).catch(() => null);
+            if (setupScript && setupScript.trim()) {
+              noteMergeGatePhase(`train:${label}`, "install", setupScript);
+              const setup = await runSetupScript(gateWorktree, setupScript, {
+                timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS,
+              }).catch((err) => ({ exitCode: 1, stdout: "", stderr: errorMessage(err), timedOut: false }));
+              if (setup.exitCode !== 0 && !setup.timedOut) {
+                return {
+                  passed: false,
+                  message:
+                    `train staging worktree setup failed (exit ${setup.exitCode}) before the gate could run — ` +
+                    `dependencies were never installed for this tree, so the gate could not verify anything: ` +
+                    `${(setup.stderr || setup.stdout || "no output").slice(0, 500)}`,
+                };
+              }
+            }
             // `memberWorkspaceIds`: the synthetic `train:<label>` id matches no `repos` row, so
             // without it the #628 deferred-install check passes vacuously for the whole train.
             const gate = await runPreMergeGate(
@@ -262,13 +304,18 @@ export function createMergeTrainRunner(deps: {
           // mergedAt/status/comment bookkeeping the reconcilers depend on.
           await reconcileAlreadyMerged(workspaceId);
         },
+        // #1154: a missing-module gate failure is the staging worktree's environment, not any
+        // member's code — bisecting it burns gate runs (observed: 9 runs, 3h23m, nothing
+        // landed) to reach the same verdict every time, and risks blaming an arbitrary member.
+        // Reuses the same signature the gate's own #169 install-retry already matches against.
+        isEnvironmentFailure: looksLikeMissingDepsFailure,
       });
     } finally {
       clearInterval(heartbeat);
       repoLock.release();
     }
 
-    await finishMergeTrain(trainId, result, database);
+    await finishMergeTrain(trainId, result, members, database);
 
     for (const d of result.dropped) {
       yield { type: "skipped", workspaceId: d.member.workspaceId, issueNumber: d.member.issueNumber ?? null, issueTitle: "", reason: `dropped from train: ${d.reason.slice(0, 200)}` };
