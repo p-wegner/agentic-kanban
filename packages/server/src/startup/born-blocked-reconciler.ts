@@ -60,6 +60,7 @@ import { emptyPassReport, formatPassReportBody, recordActed, recordSkipped, type
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
+import { classifySetupFailure, describeSetupFailure, repairIoFault, type RepairResult } from "../services/setup-io-fault.js";
 
 /** How long since the last setup attempt before this reconciler will try again. */
 export const SETUP_RETRY_INTERVAL_MS = 30 * 60 * 1000;
@@ -80,6 +81,9 @@ export interface BornBlockedRow {
   setupScript: string | null;
   setupState: string | null;
   setupEndedAt: string | null;
+  /** The prior run's output tails — read so a retry can classify the failure before repairing it. */
+  setupStdoutTail: string | null;
+  setupStderrTail: string | null;
 }
 
 /**
@@ -124,6 +128,8 @@ export async function listBornBlockedWorkspaces(database: Database = db): Promis
       // field names the sweep reads.
       setupState: workspaceSetupRun.state,
       setupEndedAt: workspaceSetupRun.endedAt,
+      setupStdoutTail: workspaceSetupRun.stdoutTail,
+      setupStderrTail: workspaceSetupRun.stderrTail,
     })
     .from(workspaces)
     // LEFT, not inner — a blocked workspace with no setup record must still be swept.
@@ -153,7 +159,7 @@ export async function reconcileBornBlockedWorkspaces(
     now?: number;
     retryIntervalMs?: number;
     /** Injected for tests — defaults to actually running the project's setup script. */
-    runSetup?: (worktreePath: string, script: string) => Promise<{ exitCode: number; stderr: string }>;
+    runSetup?: (worktreePath: string, script: string) => Promise<{ exitCode: number; stderr: string; stdout?: string }>;
     log?: (message: string) => void;
   } = {},
 ): Promise<BornBlockedSweepResult> {
@@ -163,7 +169,7 @@ export async function reconcileBornBlockedWorkspaces(
   const runSetup = opts.runSetup
     ?? (async (worktreePath: string, script: string) => {
       const result = await runSetupScript(worktreePath, script);
-      return { exitCode: result.exitCode, stderr: result.stderr };
+      return { exitCode: result.exitCode, stderr: result.stderr, stdout: result.stdout };
     });
 
   const rows = await listBornBlockedWorkspaces(database).catch(() => [] as BornBlockedRow[]);
@@ -196,6 +202,23 @@ export async function reconcileBornBlockedWorkspaces(
       continue;
     }
     // retry-setup
+    // #1125 — classify the PRIOR failure before touching anything: `ERR_PNPM_UNKNOWN` / errno
+    // -4094 is libuv's fallback for an unmapped Win32 error, and it means the pnpm-store file
+    // named in the output is genuinely unreadable. A blind retry fails identically against the
+    // same corrupt entry, so repair (delete the one content-addressed file; pnpm re-fetches it)
+    // runs before the retry, never after.
+    const priorClassification = classifySetupFailure({
+      stdout: row.setupStdoutTail,
+      stderr: row.setupStderrTail,
+    });
+    let repairResult: RepairResult | undefined;
+    if (priorClassification.kind === "io-fault") {
+      repairResult = await repairIoFault(priorClassification);
+      log(
+        `${ref}: prior setup failure classified as an I/O fault — `
+        + `${repairResult.repaired ? "repaired" : "could NOT repair"} (${repairResult.reason})`,
+      );
+    }
     log(`re-running the blocking setup script for ${ref} — ${reason}`);
     let exitCode = 1;
     let stderr = "";
@@ -211,11 +234,16 @@ export async function reconcileBornBlockedWorkspaces(
     // #815: the verdict lives in `workspace_setup_run` now. Still a PARTIAL write — the four
     // fields that make the verdict dated and readable — and an upsert, because the old
     // four-column UPDATE could never miss a row and this must not start missing one.
+    // #1125: when the PRIOR run was classified, prefix the classification + repair outcome onto
+    // the tail so the card reads "I/O fault, repaired" instead of a bare exit code — even when
+    // this retry succeeded, so the operator sees why it needed a retry at all.
+    const classificationLine = describeSetupFailure(priorClassification, repairResult);
+    const stderrTail = [classificationLine, stderr.slice(-2000)].filter(Boolean).join("\n");
     await restampWorkspaceSetupRun(row.workspaceId, {
       state: exitCode === 0 ? "succeeded" : "failed",
       endedAt: now,
       exitCode,
-      stderrTail: stderr.slice(-2000),
+      stderrTail,
     }, database);
     await database.update(workspaces).set({ updatedAt: now })
       .where(eq(workspaces.id, row.workspaceId));
