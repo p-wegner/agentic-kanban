@@ -66,6 +66,24 @@ export async function mergeWorkspaceWithFixFallback(
     });
   } catch (err) {
     const mergeError = err instanceof Error ? err.message : "merge failed";
+    // #1151: lock contention is checked, and returned on, BEFORE the backoff bookkeeping
+    // below. `recordMergeFailure` classifies by message signature with digits stripped, so
+    // repeated contention against the same holder class (e.g. a merge train) hashes to an
+    // IDENTICAL signature — recording it would ramp the exponential backoff and eventually
+    // fire a false `merge_retry_blocked` obstacle for a merge that never even started. The
+    // repo lock's own wait/retry loop already governs when this workspace tries again; the
+    // monitor-level backoff must not also throttle it.
+    if (isLockContentionFailure(err)) {
+      console.warn(
+        `[monitor] merge for workspace ${ws.wsId} was refused for lock contention — NOT routing to fix-and-merge (#1151): ${mergeError}`,
+      );
+      logAction("merge", ws.wsId, ws.issueId, {
+        endpoint: `POST /api/workspaces/${ws.wsId}/merge`,
+        responseSummary: `lock_contention (no fix-and-merge fallback): ${mergeError.slice(0, 160)}`,
+        verificationResult: "failed",
+      });
+      return;
+    }
     // Record the failure BEFORE launching the fix session, so an identical repeat backs
     // off the NEXT cycle even if the fix session itself dies. Never throws (telemetry).
     await recordMergeFailure(
@@ -90,23 +108,6 @@ export async function mergeWorkspaceWithFixFallback(
       logAction("merge", ws.wsId, ws.issueId, {
         endpoint: `POST /api/workspaces/${ws.wsId}/merge`,
         responseSummary: `verify_failed (no fix-and-merge fallback): ${mergeError.slice(0, 160)}`,
-        verificationResult: "failed",
-      });
-      return;
-    }
-    // #1151: the merge never even STARTED — another job held the repo lock at that instant.
-    // There is no conflict and nothing for an agent to fix, so routing this to fix-and-merge
-    // launches a session and queues a full verify chain for a merge that was never attempted,
-    // and that chain then serializes behind the very lock that caused it (#949) — contention
-    // converts directly into queue depth. The backoff recorded above already reschedules a
-    // retry once the holder releases the lock; that is the correct response here.
-    if (isLockContentionFailure(err)) {
-      console.warn(
-        `[monitor] merge for workspace ${ws.wsId} was refused for lock contention — NOT routing to fix-and-merge (#1151): ${mergeError}`,
-      );
-      logAction("merge", ws.wsId, ws.issueId, {
-        endpoint: `POST /api/workspaces/${ws.wsId}/merge`,
-        responseSummary: `lock_contention (no fix-and-merge fallback): ${mergeError.slice(0, 160)}`,
         verificationResult: "failed",
       });
       return;
