@@ -14,7 +14,7 @@ import { clearMergeBackoff, recordMergeFailure, type MergeBackoffDeps } from "..
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
-import { isPreMergeGateFailure } from "../services/workspace-merge-gate.js";
+import { isPreMergeGateFailure, isLockContentionFailure } from "../services/workspace-merge-gate.js";
 import {
   clearFailedGate,
   clearGateInFlight,
@@ -90,6 +90,23 @@ export async function mergeWorkspaceWithFixFallback(
       logAction("merge", ws.wsId, ws.issueId, {
         endpoint: `POST /api/workspaces/${ws.wsId}/merge`,
         responseSummary: `verify_failed (no fix-and-merge fallback): ${mergeError.slice(0, 160)}`,
+        verificationResult: "failed",
+      });
+      return;
+    }
+    // #1151: the merge never even STARTED — another job held the repo lock at that instant.
+    // There is no conflict and nothing for an agent to fix, so routing this to fix-and-merge
+    // launches a session and queues a full verify chain for a merge that was never attempted,
+    // and that chain then serializes behind the very lock that caused it (#949) — contention
+    // converts directly into queue depth. The backoff recorded above already reschedules a
+    // retry once the holder releases the lock; that is the correct response here.
+    if (isLockContentionFailure(err)) {
+      console.warn(
+        `[monitor] merge for workspace ${ws.wsId} was refused for lock contention — NOT routing to fix-and-merge (#1151): ${mergeError}`,
+      );
+      logAction("merge", ws.wsId, ws.issueId, {
+        endpoint: `POST /api/workspaces/${ws.wsId}/merge`,
+        responseSummary: `lock_contention (no fix-and-merge fallback): ${mergeError.slice(0, 160)}`,
         verificationResult: "failed",
       });
       return;
