@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 // @ts-ignore — scripts/ is .mjs, not in tsconfig
-import { parseNetstatListeners, commandLineBelongsToCheckout } from "../../../../scripts/dev-port-guard.mjs";
+import { parseNetstatListeners, commandLineBelongsToCheckout, planPortOwnerKill } from "../../../../scripts/dev-port-guard.mjs";
 
 const NETSTAT_SAMPLE = `
   Proto  Local Address           Foreign Address         State           PID
@@ -94,5 +94,94 @@ describe("commandLineBelongsToCheckout", () => {
       "node C:/andrena/.worktrees/feature_200-foo/scripts/dev.mjs",
       "C:/andrena/.worktrees/feature_355-other"
     )).toBe(false);
+  });
+
+  // #1159 — a process started with a RELATIVE script path carries none of the checkout root
+  // in its command line, so the substring match above can never find it even though the
+  // process genuinely belongs to that checkout.
+  it("returns true for a relative script path when the process's cwd matches the checkout root", () => {
+    expect(commandLineBelongsToCheckout(
+      "node packages/server/dist/cli/index.js dev --port 3001",
+      "C:/andrena/agentic-kanban-stable",
+      "C:/andrena/agentic-kanban-stable"
+    )).toBe(true);
+  });
+
+  it("returns false for a relative script path when the process's cwd is a different checkout", () => {
+    expect(commandLineBelongsToCheckout(
+      "node packages/server/dist/cli/index.js dev --port 3001",
+      "C:/andrena/agentic-kanban-stable",
+      "C:/andrena/.worktrees/feature_200-foo"
+    )).toBe(false);
+  });
+
+  it("ignores an absent cwd and falls back to the command-line-only check", () => {
+    expect(commandLineBelongsToCheckout(
+      "node packages/server/dist/cli/index.js dev --port 3001",
+      "C:/andrena/agentic-kanban-stable",
+      undefined
+    )).toBe(false);
+    expect(commandLineBelongsToCheckout(
+      "node packages/server/dist/cli/index.js dev --port 3001",
+      "C:/andrena/agentic-kanban-stable",
+      ""
+    )).toBe(false);
+  });
+
+  it("still accepts an absolute command line even when cwd is unrelated", () => {
+    expect(commandLineBelongsToCheckout(
+      "node C:/andrena/agentic-kanban-stable/packages/server/dist/cli/index.js dev",
+      "C:/andrena/agentic-kanban-stable",
+      "C:/somewhere/else"
+    )).toBe(true);
+  });
+});
+
+describe("planPortOwnerKill — cwd fallback (#1159)", () => {
+  it("allows the kill when getCommandLine is relative but getCwd matches the checkout", () => {
+    const decision = planPortOwnerKill({
+      pid: "6148",
+      port: 3001,
+      checkoutRoot: "C:/andrena/agentic-kanban-stable",
+      getCommandLine: () => "node packages/server/dist/cli/index.js dev --port 3001",
+      getCwd: () => "C:/andrena/agentic-kanban-stable",
+    });
+    expect(decision.allowed).toBe(true);
+  });
+
+  it("still refuses when neither the command line nor cwd matches the checkout", () => {
+    const decision = planPortOwnerKill({
+      pid: "6148",
+      port: 3001,
+      checkoutRoot: "C:/andrena/agentic-kanban-stable",
+      getCommandLine: () => "node packages/server/dist/cli/index.js dev --port 3001",
+      getCwd: () => "C:/somewhere/else",
+    });
+    expect(decision.allowed).toBe(false);
+    expect(decision.reason).toBe("outside-checkout");
+  });
+
+  it("degrades safely when getCwd throws", () => {
+    const decision = planPortOwnerKill({
+      pid: "6148",
+      port: 3001,
+      checkoutRoot: "C:/andrena/agentic-kanban-stable",
+      getCommandLine: () => "node packages/server/dist/cli/index.js dev --port 3001",
+      getCwd: () => {
+        throw new Error("boom");
+      },
+    });
+    expect(decision.allowed).toBe(false);
+    expect(decision.reason).toBe("outside-checkout");
+  });
+
+  it("works exactly as before when getCwd is not supplied at all", () => {
+    const decision = planPortOwnerKill({
+      pid: "6148",
+      port: 3001,
+      checkoutRoot: "C:/andrena/agentic-kanban-stable",
+      getCommandLine: () => "node C:/andrena/agentic-kanban-stable/packages/server/dist/cli/index.js dev",
+    });
+    expect(decision.allowed).toBe(true);
   });
 });
