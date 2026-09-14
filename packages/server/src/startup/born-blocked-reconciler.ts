@@ -222,10 +222,12 @@ export async function reconcileBornBlockedWorkspaces(
     log(`re-running the blocking setup script for ${ref} — ${reason}`);
     let exitCode = 1;
     let stderr = "";
+    let stdout = "";
     try {
       const run = await runSetup(row.workingDir!, row.setupScript!);
       exitCode = run.exitCode;
       stderr = run.stderr;
+      stdout = run.stdout ?? "";
     } catch (err) {
       stderr = errorMessage(err);
     }
@@ -236,7 +238,10 @@ export async function reconcileBornBlockedWorkspaces(
     // four-column UPDATE could never miss a row and this must not start missing one.
     // #1125: when the PRIOR run was classified, prefix the classification + repair outcome onto
     // the tail so the card reads "I/O fault, repaired" instead of a bare exit code — even when
-    // this retry succeeded, so the operator sees why it needed a retry at all.
+    // this retry succeeded, so the operator sees why it needed a retry at all. `stdoutTail` is
+    // ALSO restamped with THIS run's own output — otherwise a retry that fails again against a
+    // different corrupt store entry stays classified off the original (already-repaired) one
+    // forever, since a plain restamp leaves `stdoutTail` untouched.
     const classificationLine = describeSetupFailure(priorClassification, repairResult);
     const stderrTail = [classificationLine, stderr.slice(-2000)].filter(Boolean).join("\n");
     await restampWorkspaceSetupRun(row.workspaceId, {
@@ -244,6 +249,7 @@ export async function reconcileBornBlockedWorkspaces(
       endedAt: now,
       exitCode,
       stderrTail,
+      stdoutTail: stdout.slice(-2000),
     }, database);
     await database.update(workspaces).set({ updatedAt: now })
       .where(eq(workspaces.id, row.workspaceId));
