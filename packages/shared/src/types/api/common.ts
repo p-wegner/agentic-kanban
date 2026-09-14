@@ -3,6 +3,6 @@
 
 /** Tagged profile selection — provider-aware replacement for the bare claudeProfile string. */
 export interface ProfileSelection {
-  provider: "claude" | "codex" | "copilot" | "pi";
+  provider: "claude" | "codex" | "copilot" | "pi" | "herdr";
   name: string;
 }

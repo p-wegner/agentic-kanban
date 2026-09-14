@@ -36,6 +36,8 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
   const [codexProfiles, setCodexProfiles] = useState<string[]>([CODEX_DEFAULT_PROFILE]);
   const [copilotProfiles, setCopilotProfiles] = useState<string[]>([COPILOT_DEFAULT_PROFILE]);
   const [piProfiles, setPiProfiles] = useState<string[]>([PI_DEFAULT_PROFILE]);
+  const [herdrProfiles, setHerdrProfiles] = useState<string[]>([]);
+  const [herdrAvailable, setHerdrAvailable] = useState(false);
   const [profileHealth, setProfileHealth] = useState<AgentProfileHealth[]>([]);
   const [preflightingProfileId, setPreflightingProfileId] = useState<string | null>(null);
   const [mcpHealth, setMcpHealth] = useState<McpHealth | null>(null);
@@ -142,6 +144,8 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
           codexProfiles: string[];
           copilotProfiles: string[];
           piProfiles: string[];
+          herdrProfiles?: string[];
+          herdrAvailability?: { available: boolean };
           skills: { id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean }[];
           tags: { id: string; name: string; color: string | null; isBuiltin: boolean }[];
         }>("/api/preferences/settings-bootstrap");
@@ -152,6 +156,8 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
         setCodexProfiles(uniqueProfiles(boot.codexProfiles, CODEX_DEFAULT_PROFILE));
         setCopilotProfiles(uniqueProfiles(boot.copilotProfiles?.length ? boot.copilotProfiles : [COPILOT_DEFAULT_PROFILE], COPILOT_DEFAULT_PROFILE));
         setPiProfiles(uniqueProfiles(boot.piProfiles?.length ? boot.piProfiles : [PI_DEFAULT_PROFILE], PI_DEFAULT_PROFILE));
+        setHerdrAvailable(!!boot.herdrAvailability?.available);
+        setHerdrProfiles(boot.herdrAvailability?.available ? uniqueProfiles(boot.herdrProfiles?.length ? boot.herdrProfiles : ["default"], "default") : []);
         setSkills(boot.skills);
         setTagsList(boot.tags);
 
@@ -338,6 +344,8 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
                   codexProfiles={codexProfiles}
                   copilotProfiles={copilotProfiles}
                   piProfiles={piProfiles}
+                  herdrProfiles={herdrProfiles}
+                  herdrAvailable={herdrAvailable}
                   profileHealth={profileHealth}
                   preflightingProfileId={preflightingProfileId}
                   onProfilePreflight={handleProfilePreflight}

@@ -161,6 +161,7 @@ const EXIT_BEHAVIORS: Record<ProviderName, ProviderExitBehavior> = {
   claude: claudeExitBehavior,
   copilot: makeNoopBehavior("copilot"),
   pi: makeNoopBehavior("pi"),
+  herdr: makeNoopBehavior("herdr"),
 };
 
 /** The exit-time behavior bundle for a provider. */
