@@ -6727,6 +6727,29 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{id}/tracker-snapshot:
+    get:
+      summary: GET /api/projects/{id}/tracker-snapshot
+      tags:
+        - tracker-snapshot
+      operationId: get_api_projects_id_tracker-snapshot
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/unarchive:
     post:
       summary: POST /api/projects/:id/unarchive — restore an archived project
