@@ -1,4 +1,5 @@
 import { unlink } from "node:fs/promises";
+import path from "node:path";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
@@ -20,8 +21,25 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 const IO_FAULT_SIGNATURE = /\bERR_PNPM_UNKNOWN\b|\berrno[:=]?\s*-?4094\b|\bUNKNOWN:\s*unknown error\b/i;
 /** pnpm's own error names the syscall and the path: `stat 'C:\...\files\42\a81d86...'`. */
 const OFFENDING_PATH_PATTERN = /\b(?:stat|lstat|unlink|open|read|rename)\s+'([^']+)'/i;
-/** Only delete a path the store itself owns — the store is content-addressed, nothing else is. */
-const PNPM_STORE_SEGMENT = /[\\/]\.?pnpm-store[\\/]/i;
+
+/**
+ * Only delete a path the store itself owns — the store is content-addressed, nothing else
+ * is. The candidate path comes verbatim from setup-script output (stdout/stderr), which is
+ * NOT trusted input: a malicious dependency's `postinstall` script could print a crafted
+ * `ERR_PNPM_UNKNOWN ... stat '<path>'` line to trick this into deleting an arbitrary file.
+ * A plain substring test on the raw string (`.../pnpm-store/...`) is not enough — a path
+ * like `C:\x\.pnpm-store\..\..\..\Windows\System32\config\SAM` contains that substring but
+ * resolves, once the OS follows the `..` segments, to a file far outside the store. Resolve
+ * and normalize first, then require a literal `pnpm-store` path SEGMENT with no `..`
+ * remaining in the normalized form.
+ */
+function safeStorePath(candidate: string): string | null {
+  const normalized = path.normalize(candidate);
+  const segments = normalized.split(/[\\/]+/);
+  if (segments.some((segment) => segment === "..")) return null;
+  if (!segments.some((segment) => /^\.?pnpm-store$/i.test(segment))) return null;
+  return normalized;
+}
 /**
  * `describeSetupFailure` writes a `[io-fault: ...]` banner into the persisted `stderrTail`,
  * and that same persisted tail is what the NEXT sweep passes back into `classifySetupFailure`
@@ -50,7 +68,7 @@ export function classifySetupFailure(output: {
   const combined = combinedRaw.replace(IO_FAULT_BANNER_PATTERN, "");
   if (!IO_FAULT_SIGNATURE.test(combined)) return { kind: "unclassified" };
   const match = combined.match(OFFENDING_PATH_PATTERN);
-  const offendingPath = match && PNPM_STORE_SEGMENT.test(match[1]) ? match[1] : null;
+  const offendingPath = match ? safeStorePath(match[1]) : null;
   return {
     kind: "io-fault",
     offendingPath,
