@@ -196,6 +196,35 @@ export interface AutopilotStatusResponse {
   nextCycleAt: string | null;
 }
 
+/**
+ * The EFFECTIVE risk posture + merge-train read model for one project (#1155) — what the
+ * header chip reads instead of re-deriving the posture client-side (the old `RiskPostureChip`
+ * used the LEVEL-ONLY client resolver, `@agentic-kanban/shared/lib/risk-posture`, which cannot
+ * report anything the level implies or a per-project override changes). Modelled on
+ * `AutopilotStatusResponse`: the server does the resolving, the client only renders.
+ *
+ * `trainMaxSize`/`trainMaxWaitMs` are `resolveTrainOptInSize`'s and `resolveTrainWindowConfig`'s
+ * numbers respectively — deliberately NOT the same field, since the queue's opt-in default (1)
+ * and the window's collection default (`DEFAULT_TRAIN_MAX_SIZE`) differ (see
+ * `merge-train-window.ts`'s header comment). `trainSizeFromPosture`/`trainWaitFromPosture` say
+ * whether each number came from the posture (`batchingFromPosture`) or an explicit per-project
+ * override, so "why is this 1?" is answerable from the chip alone.
+ */
+export interface DeliveryStatusResponse {
+  projectId: string;
+  posture: RiskPosture;
+  /** Whether the effective train SIZE (the queue's opt-in) came from an explicit
+   *  `train_max_size_<projectId>` override rather than the posture. */
+  trainSizeFromOverride: boolean;
+  /** The merge-train WINDOW's effective size (`resolveTrainWindowConfig`) — when to stop
+   *  collecting, distinct from the queue's opt-in size above. */
+  trainWindowMaxSize: number;
+  trainWindowMaxWaitMs: number;
+  /** Did the train WINDOW pick up the posture's numbers, or stay on the shipped defaults? */
+  trainWindowFromPosture: boolean;
+  baseSweep: BaseSweepInfo;
+}
+
 export interface ConductorSchedule {
   enabled: boolean;
   cron: string;
