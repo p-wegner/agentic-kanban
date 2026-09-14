@@ -21,9 +21,16 @@
  * broken worktree to protect an agent from — the agent is already running in it. This only
  * repairs the store and re-runs the script so the environment is fixed for whatever the agent
  * (or a later merge-gate run) does next.
+ *
+ * A RUNNING session is excluded, the same way the born-blocked query requires zero sessions
+ * (just the opposite polarity): re-running `pnpm install -r` concurrently with an agent that
+ * is actively editing/building/testing in that exact worktree can race on the same files
+ * (node_modules rewritten mid-build, a watcher tripping over a half-installed tree) and would
+ * surface as a spurious failure in the AGENT's own session, wrongly blamed on its changes.
+ * Retrying is safe once the session is no longer running — the next sweep picks it up then.
  */
-import { and, eq, notInArray } from "drizzle-orm";
-import { issues, projects, workspaceSetupRun, workspaces } from "@agentic-kanban/shared/schema";
+import { and, eq, notExists, notInArray } from "drizzle-orm";
+import { issues, projects, sessions, workspaceSetupRun, workspaces } from "@agentic-kanban/shared/schema";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
@@ -97,6 +104,11 @@ export async function listFailedNonBlockingSetups(database: Database = db): Prom
       eq(workspaceSetupRun.state, "failed"),
       eq(projects.setupBlocking, false),
       notInArray(workspaces.status, TERMINAL_WORKSPACE_STATUSES),
+      // Never retry underneath a live agent — see the file header.
+      notExists(
+        database.select({ one: sessions.id }).from(sessions)
+          .where(and(eq(sessions.workspaceId, workspaces.id), eq(sessions.status, "running"))),
+      ),
     ));
 }
 
