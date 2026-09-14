@@ -441,6 +441,17 @@ export function createAutoMergeOrchestrator(deps: {
         continue;
       }
 
+      // #1153: never assemble a second train for a project that already has one in flight
+      // (`assembling`/`gating`) — a second batch over the same ready set can only contend with
+      // the first for the repo lock, which is what turned a queue into a livelock. Keep
+      // accumulating (don't drop the window) so the pending set is released the moment the
+      // in-flight train finishes.
+      const activeTrains = await listActiveMergeTrainsForProject(projectId, ["assembling", "gating"], database);
+      if (activeTrains.length > 0) {
+        state.trainWindows.set(projectId, { pendingIds: ids, firstSeenAt: existing?.firstSeenAt ?? now });
+        continue;
+      }
+
       // #937 / decision 017: the window's size+wait now come from the risk-posture dial, with
       // the explicit `train_max_size_<id>` / `train_max_wait_ms_<id>` prefs still winning per
       // field. `standard` keeps the shipped defaults — see `resolveTrainWindowConfig`.
