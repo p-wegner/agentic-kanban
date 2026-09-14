@@ -53,7 +53,10 @@ function resolveProviderFromProfile(
   fallbackProvider: "claude" | "codex" | "copilot" | "pi",
 ): "claude" | "codex" | "copilot" | "pi" {
   const profile = profileSelectionFromValue(profileValue);
-  return profile?.provider ?? fallbackProvider;
+  // This panel only ever offers claude/codex/copilot/pi profiles (herdr isn't wired
+  // into Quick Tasks yet), so a parsed herdr selection here would be an impossible
+  // value — fall back rather than widening every downstream consumer for it.
+  return profile && profile.provider !== "herdr" ? profile.provider : fallbackProvider;
 }
 
 export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPanelProps) {

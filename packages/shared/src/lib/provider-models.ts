@@ -44,7 +44,7 @@ export const CODEX_MODEL_OPTIONS: ReadonlyArray<{ value: string; label: string }
  */
 export function modelBelongsToProvider(
   model: string | undefined | null,
-  provider: "claude" | "codex" | "copilot" | "pi",
+  provider: "claude" | "codex" | "copilot" | "pi" | "herdr",
 ): boolean {
   const id = (model ?? "").trim().toLowerCase();
   if (!id) return true;
@@ -62,6 +62,6 @@ export function modelBelongsToProvider(
     // so both known Claude/Codex model families and custom ids are valid here.
     return true;
   }
-  // copilot has no model flag; nothing to validate.
+  // copilot and herdr have no model flag; nothing to validate.
   return true;
 }
