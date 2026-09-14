@@ -55,3 +55,4 @@ export type * from "./api/sprint.js";
 export type * from "./api/quota.js";
 export type * from "./api/profile-roster.js";
 export type * from "./api/runbook.js";
+export type * from "./api/tracker-snapshot.js";
