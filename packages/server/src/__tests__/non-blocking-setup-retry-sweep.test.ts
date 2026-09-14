@@ -17,7 +17,7 @@ vi.mock("../db/index.js", async () => {
 });
 
 import { eq } from "drizzle-orm";
-import { issues, projectStatuses, projects, workspaceSetupRun, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, projects, sessions, workspaceSetupRun, workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import {
   listFailedNonBlockingSetups,
@@ -86,6 +86,28 @@ describe("listFailedNonBlockingSetups (#1125)", () => {
     const { workspaceId } = await seed({ setupBlocking: false, setupState: "succeeded" });
     const found = await listFailedNonBlockingSetups(db);
     expect(found.map((r) => r.workspaceId)).not.toContain(workspaceId);
+  });
+
+  // #1125 regression — the agent is already running in a non-blocking workspace's worktree
+  // (unlike a born-blocked one, which requires zero sessions). Retrying `pnpm install -r`
+  // concurrently with the agent's own file operations races on the same directory, so a
+  // workspace with a currently RUNNING session must not be retried underneath it.
+  it("ignores a workspace with a currently running session — never race the live agent", async () => {
+    const { workspaceId } = await seed({ setupBlocking: false });
+    await db.insert(sessions).values({
+      id: randomUUID(), workspaceId, status: "running", startedAt: new Date().toISOString(),
+    });
+    const found = await listFailedNonBlockingSetups(db);
+    expect(found.map((r) => r.workspaceId)).not.toContain(workspaceId);
+  });
+
+  it("still finds it once the session has stopped", async () => {
+    const { workspaceId } = await seed({ setupBlocking: false });
+    await db.insert(sessions).values({
+      id: randomUUID(), workspaceId, status: "stopped", startedAt: new Date().toISOString(),
+    });
+    const found = await listFailedNonBlockingSetups(db);
+    expect(found.map((r) => r.workspaceId)).toContain(workspaceId);
   });
 });
 
