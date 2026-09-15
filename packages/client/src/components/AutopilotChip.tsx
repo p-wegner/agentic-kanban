@@ -195,7 +195,8 @@ function AutopilotPanelBody({ projectId, autopilot, orchestratorAvailable, nextR
 }
 
 function agentsHint(status: AutopilotStatusResponse): string {
-  const parts = [`${status.running} running`];
+  // "WIP", never "running": the header's agents chip owns that word (#1162).
+  const parts = [`WIP ${status.running} of ${status.limit} used`];
   if (status.effectiveLimit < status.limit) parts.push(`machine allows ${status.effectiveLimit}`);
   if (!status.limitConfigured) parts.push("default");
   return parts.join(" · ");

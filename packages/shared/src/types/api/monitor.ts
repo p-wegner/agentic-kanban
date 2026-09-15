@@ -183,11 +183,46 @@ export interface AutopilotStatusResponse {
   /** Tickets that pass the cheap start gates (counting stops at 25 per pass). */
   eligibleCount: number;
   eligibleCountCapped: boolean;
+  /**
+   * Todo/Backlog tickets that pass every cheap start gate EXCEPT the dependency gate — they wait
+   * only on a blocker that has not landed (#1162). Lets the chip say "backlog blocked" instead of
+   * "nothing ready" when the backlog is full but gated. Counted over the same capped scan.
+   */
+  blockedByDependencies: number;
   /** What the next cycle will start: 0 unless `autoStart`. */
   willStartNextCycle: number;
   holdReason: AutopilotHoldReason | null;
   autoMerge: { enabled: boolean; source: "project_disabled" | "global_off" | "direct_strategy" | "enabled" };
   nextCycleAt: string | null;
+}
+
+/**
+ * The EFFECTIVE risk posture + merge-train read model for one project (#1155) — what the
+ * header chip reads instead of re-deriving the posture client-side (the old `RiskPostureChip`
+ * used the LEVEL-ONLY client resolver, `@agentic-kanban/shared/lib/risk-posture`, which cannot
+ * report anything the level implies or a per-project override changes). Modelled on
+ * `AutopilotStatusResponse`: the server does the resolving, the client only renders.
+ *
+ * `trainMaxSize`/`trainMaxWaitMs` are `resolveTrainOptInSize`'s and `resolveTrainWindowConfig`'s
+ * numbers respectively — deliberately NOT the same field, since the queue's opt-in default (1)
+ * and the window's collection default (`DEFAULT_TRAIN_MAX_SIZE`) differ (see
+ * `merge-train-window.ts`'s header comment). `trainSizeFromPosture`/`trainWaitFromPosture` say
+ * whether each number came from the posture (`batchingFromPosture`) or an explicit per-project
+ * override, so "why is this 1?" is answerable from the chip alone.
+ */
+export interface DeliveryStatusResponse {
+  projectId: string;
+  posture: RiskPosture;
+  /** Whether the effective train SIZE (the queue's opt-in) came from an explicit
+   *  `train_max_size_<projectId>` override rather than the posture. */
+  trainSizeFromOverride: boolean;
+  /** The merge-train WINDOW's effective size (`resolveTrainWindowConfig`) — when to stop
+   *  collecting, distinct from the queue's opt-in size above. */
+  trainWindowMaxSize: number;
+  trainWindowMaxWaitMs: number;
+  /** Did the train WINDOW pick up the posture's numbers, or stay on the shipped defaults? */
+  trainWindowFromPosture: boolean;
+  baseSweep: BaseSweepInfo;
 }
 
 export interface ConductorSchedule {

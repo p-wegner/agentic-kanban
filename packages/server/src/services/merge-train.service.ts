@@ -251,9 +251,23 @@ export async function runMergeTrain(args: {
    * that made batching not worth having. Set false to restore the all-or-nothing behaviour.
    */
   bisectOnFailure?: boolean;
+  /**
+   * Does this gate failure message describe a BROKEN ENVIRONMENT (missing dependency, absent
+   * tool) rather than a real regression in the code (#1154)? Bisecting such a failure is worse
+   * than useless: every half of the split shares the same broken staging worktree, so each
+   * re-gate reproduces the identical verdict, and halving down to single members eventually
+   * blames an arbitrary branch for a problem that is not in its code at all — observed as a
+   * 9-gate-run, 3h23m train that landed nothing over a missing `packages/e2e` install.
+   *
+   * When this returns true, the whole subset is treated as attribution-free: `gateFailure` is
+   * kept, but nobody is added to `gateRejected` and no split is attempted. Optional so a caller
+   * that never classifies failures gets today's behaviour unchanged.
+   */
+  isEnvironmentFailure?: (message: string) => boolean;
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, runGate, closeMember } = args;
   const bisect = args.bisectOnFailure !== false;
+  const isEnvironmentFailure = args.isEnvironmentFailure ?? (() => false);
 
   /**
    * Land as much of `subset` as is green, splitting on failure.
@@ -271,6 +285,10 @@ export async function runMergeTrain(args: {
   async function landGreenest(subset: TrainMember[], subLabel: string): Promise<TrainRunResult> {
     const attempt = await runTrainAttempt({ ...args, members: subset, label: subLabel });
     if (attempt.landed.length > 0 || !attempt.gateFailure) return attempt;
+    // #1154: an environment failure fails the SAME way for every subset of the same staging
+    // worktree — splitting cannot learn anything a second run at the top level didn't already
+    // say, and it can only mislabel branches as individually red. Stop here, attribution-free.
+    if (isEnvironmentFailure(attempt.gateFailure)) return attempt;
     // Nothing landed and the gate is why. (An assembly-empty batch has no gate to blame and
     // must not be split — halving it would just re-discover the same conflicts.)
     if (!bisect || subset.length <= 1 || attempt.dropped.length === subset.length) {

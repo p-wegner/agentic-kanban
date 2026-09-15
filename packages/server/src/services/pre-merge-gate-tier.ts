@@ -558,6 +558,17 @@ export interface GateTierInfo {
   /** Free RAM (GB) observed when `maxWorkers` was derived; null when not derived or unread. */
   hostFreeGb?: number | null;
   /**
+   * The verify-chain slot partition `maxWorkers` was divided by, and how many chains held a slot
+   * when it was derived (#1160). A gate that ran BESIDE another chain produced its verdict under
+   * a different load than one that ran alone — the same "conditions are part of the verdict"
+   * rule as `buildersQuiesced` and `queueWaitMs` — and a worker count that is a third of what
+   * a lone gate used to get needs the partition named beside it or it reads as a regression.
+   * The message says nothing when the box offers one slot, which is every box that behaves as
+   * it did before #1160.
+   */
+  chainSlots?: number | null;
+  chainsInFlight?: number | null;
+  /**
    * Were new builder starts held for the duration of this gate (#581)? An operator reading
    * a merge comment has to be able to tell a result produced on a quiet box from one
    * produced while builders were competing for the same cores — the second kind is where
@@ -654,6 +665,20 @@ export interface GateTierInfo {
  * no narrowing at all and must say "full", never "package-scoped" (#538: a mislabeled tier is
  * exactly the "level weakens invisibly" failure this feature exists to prevent).
  */
+/**
+ * `workers N`, with its provenance when derived (#909) and the verify-chain slot partition when the
+ * box offers more than one (#1160). Its own function so `buildGateTierMessage` — already the
+ * branchiest thing in this file — pays no branch for the slot clause.
+ */
+export function buildWorkersLabel(tierInfo: Pick<GateTierInfo, "maxWorkers" | "maxWorkersDerived" | "hostFreeGb" | "chainSlots" | "chainsInFlight">): string {
+  if (!tierInfo.maxWorkersDerived) return `workers ${tierInfo.maxWorkers}`;
+  const slots = tierInfo.chainSlots ?? 1;
+  const slotNote = slots > 1
+    ? `, ${tierInfo.chainsInFlight ?? 1} of ${slots} verify chain slot(s) in use`
+    : "";
+  return `workers ${tierInfo.maxWorkers} (derived, host free ${(tierInfo.hostFreeGb ?? 0).toFixed(1)} GB${slotNote})`;
+}
+
 export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
   if (!tierInfo) return "pre-merge gate passed (smoke check only — no verify_script tier)";
   // #956 — the impact SELECTION outranks the package/file scoping for the tier NAME, because it
@@ -690,9 +715,7 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
     tierInfo.verifyRunMs,
     Boolean(tierInfo.flakeRetryNote),
   );
-  const workersLabel = tierInfo.maxWorkersDerived
-    ? `workers ${tierInfo.maxWorkers} (derived, host free ${(tierInfo.hostFreeGb ?? 0).toFixed(1)} GB)`
-    : `workers ${tierInfo.maxWorkers}`;
+  const workersLabel = buildWorkersLabel(tierInfo);
   const parts = [
     `tier: ${tier}`,
     // #962: only when it is NOT the default. A run whose suites were chosen by a ranked heuristic

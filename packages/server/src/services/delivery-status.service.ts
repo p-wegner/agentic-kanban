@@ -1,0 +1,41 @@
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+import type { DeliveryStatusResponse } from "@agentic-kanban/shared/types";
+import type { Database } from "../db/index.js";
+import { getAllPreferences } from "../repositories/preferences.repository.js";
+import { getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
+import { describeBaseSweep, resolveRiskPosture } from "./risk-posture.service.js";
+import { requireProject } from "./require-project.js";
+import { resolveTrainWindowConfig } from "./merge-train-window.js";
+
+const trainMaxSizePref = projectPref("train_max_size");
+
+/**
+ * `GET /api/projects/:id/delivery` — the resolved delivery-process read model (#1155) behind
+ * the header chip: EFFECTIVE risk posture plus EFFECTIVE merge-train numbers, server-resolved
+ * so the client never re-derives what the posture implies (the old `RiskPostureChip` used the
+ * client's level-only resolver and was blind to the per-project red-base-policy and train-size
+ * overrides). Modelled on `getAutopilotStatus`: read-only, one request, the numbers come
+ * straight from the same resolvers the gate/merge code paths use.
+ */
+export async function getDeliveryStatus(projectId: string, database: Database): Promise<DeliveryStatusResponse> {
+  await requireProject(projectId, database);
+
+  const prefMap = toPrefMap(await getAllPreferences(database));
+  const posture = resolveRiskPosture(prefMap, projectId);
+  const trainWindow = resolveTrainWindowConfig(prefMap, projectId);
+  const explicitTrainSize = Number.parseInt(prefMap.get(trainMaxSizePref.key(projectId)) ?? "", 10);
+  const trainSizeFromOverride = Number.isFinite(explicitTrainSize) && explicitTrainSize > 0;
+  const baseHealth = await getLatestBaseBranchHealth(projectId, database);
+  const lastProbeAt = baseHealth?.createdAt ?? null;
+
+  return {
+    projectId,
+    posture,
+    trainSizeFromOverride,
+    trainWindowMaxSize: trainWindow.maxSize,
+    trainWindowMaxWaitMs: trainWindow.maxWaitMs,
+    trainWindowFromPosture: trainWindow.batchingFromPosture,
+    baseSweep: describeBaseSweep(posture, lastProbeAt),
+  };
+}

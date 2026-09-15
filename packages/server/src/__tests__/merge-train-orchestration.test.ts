@@ -218,3 +218,48 @@ describe("runMergeTrain — bisect a red batch (#492)", () => {
     expect(result.gateFailure).toBeTruthy();
   }, 240000);
 });
+
+/**
+ * #1154 — an environment failure (a broken staging worktree, e.g. missing dependencies) fails
+ * identically for the whole batch and for every half a bisect would try, so bisecting it can
+ * only burn gate runs and mislabel an innocent branch as individually red. `isEnvironmentFailure`
+ * lets the caller say "this verdict is not about the code" and short-circuits the split.
+ */
+describe("runMergeTrain — environment failures skip bisect (#1154)", () => {
+  it("does not bisect, costs exactly one gate run, and blames nobody individually", async () => {
+    const runGate = vi.fn().mockResolvedValue({
+      passed: false,
+      message: "Cannot find module '@playwright/test' or its corresponding type declarations",
+    });
+    const result = await runMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members,
+      label: "env1",
+      runGate,
+      closeMember: vi.fn(),
+      isEnvironmentFailure: (message) => /cannot find module/i.test(message),
+    });
+
+    expect(runGate).toHaveBeenCalledTimes(1);
+    expect(result.gateRuns).toBe(1);
+    expect(result.landed).toEqual([]);
+    // Attribution-free: neither member is individually blamed for a problem that was never in
+    // their code.
+    expect(result.gateRejected).toEqual([]);
+    expect(result.dropped).toEqual([]);
+    expect(result.gateFailure).toContain("Cannot find module");
+  }, 240000);
+
+  it("still bisects normally when no classifier is supplied (today's behaviour, unchanged)", async () => {
+    const runGate = vi.fn().mockResolvedValue({
+      passed: false,
+      message: "Cannot find module '@playwright/test'",
+    });
+    const result = await runMergeTrain({
+      repoPath: repo, baseBranch: "main", members, label: "env2", runGate, closeMember: vi.fn(),
+    });
+    // No classifier passed → bisects as before, spending more than one gate run.
+    expect(result.gateRuns).toBeGreaterThan(1);
+  }, 240000);
+});
