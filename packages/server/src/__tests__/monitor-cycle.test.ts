@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 vi.mock("../db/index.js", () => ({
   db: {
@@ -24,6 +24,9 @@ import { db } from "../db/index.js";
 import { createMonitorProjectScheduler } from "../startup/monitor-project-scheduler.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { QUOTA_BLOCK_PROBE_FALLBACK_MS, orderCandidatesForWalk } from "../services/monitor-cycle-rules.js";
+import * as mergeGateEvidence from "../services/merge-gate-evidence.js";
+import * as preMergeGateService from "../services/pre-merge-gate.service.js";
+import { resetMonitorGateRecallForTests } from "../services/monitor-gate-recall.js";
 import {
   MAX_MONITOR_MERGES_PER_CYCLE,
   MAX_MONITOR_RELAUNCHES_PER_CYCLE,
@@ -132,6 +135,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(() => {
     throw new Error("monitor-cycle must not self-HTTP — use the injected workspaceActions port");
   }));
+  resetMonitorGateRecallForTests();
 });
 
 describe("processWorkspaceCandidates — idle + readyForMerge", () => {
@@ -953,7 +957,11 @@ describe("processWorkspaceCandidates — preemptive per-candidate timeout (#208 
     // The assertion IS that this await settles at all — before the fix it never did.
     const stats = await processWorkspaceCandidates([hungCandidate, healthyCandidate], deps);
 
-    expect(stats.deferredProjectIds).toContain("proj-hung");
+    // #1161: an abandoned candidate no longer defers its WHOLE project — the walk rotates past
+    // it instead, so with nothing else queued behind it `proj-hung`'s walk still runs to
+    // completion this cycle (the hung candidate itself is simply never actioned).
+    expect(stats.deferredProjectIds).not.toContain("proj-hung");
+    expect(stats.completedProjectIds).toContain("proj-hung");
     const launchedIds = vi.mocked(deps.workspaceActions.launch).mock.calls.map(([id]) => id);
     expect(launchedIds).toContain("healthy-1");
     expect(launchedIds).not.toContain("hung-1");
@@ -968,7 +976,7 @@ describe("processWorkspaceCandidates — preemptive per-candidate timeout (#208 
     const secondDeps = makeHangingDeps();
     const stats = await processWorkspaceCandidates([hungCandidate, healthyCandidate], secondDeps);
 
-    expect(stats.deferredProjectIds).toContain("proj-hung");
+    expect(stats.completedProjectIds).toContain("proj-hung");
     expect(vi.mocked(secondDeps.workspaceActions.launch).mock.calls.map(([id]) => id)).toContain("healthy-1");
   });
 });
@@ -1125,5 +1133,147 @@ describe("orderCandidatesForWalk", () => {
       { wsId: "b", wsStatus: "reviewing" },
     ];
     expect(orderCandidatesForWalk(input)).toBe(input);
+  });
+});
+
+// #1161: a red In-Review candidate at the head of the walk used to defer EVERY other
+// candidate, every cycle — it re-gated the same unchanged, already-failed sha, overran
+// `candidateTimeoutMs`, and the "abandon" deferred the whole rest of the project's walk
+// rather than just that one candidate. Measured live: 20 of 27 verify-chain lines over ~2h
+// were the same workspace, while 9 other candidates (including the fixes that would have
+// unstuck the board) never got a turn.
+describe("processWorkspaceCandidates — head-of-line blocking on a red gate (#1161)", () => {
+  let gateSpy: MockInstance<typeof mergeGateEvidence.runGateWithEvidence>;
+  let shasSpy: MockInstance<typeof preMergeGateService.resolveMergeGateShas>;
+
+  beforeEach(() => {
+    gateSpy = vi.spyOn(mergeGateEvidence, "runGateWithEvidence");
+    shasSpy = vi.spyOn(preMergeGateService, "resolveMergeGateShas");
+  });
+
+  afterEach(() => {
+    gateSpy.mockRestore();
+    shasSpy.mockRestore();
+  });
+
+  function queueSelectsForStoppedReviewing(n: number) {
+    vi.mocked(db.select).mockReset();
+    for (let i = 0; i < n; i++) {
+      vi.mocked(db.select)
+        .mockReturnValueOnce(makeSelectChain([{ id: `sess-${i}`, status: "stopped", startedAt: new Date().toISOString() }]))
+        .mockReturnValueOnce(makeSelectChain([{ count: 1 }]));
+    }
+    vi.mocked(db.select).mockReturnValue(makeSelectChain([]));
+  }
+
+  function makeCandidate(wsId: string, projectId: string): WorkspaceCandidate {
+    return {
+      ...baseCandidate,
+      wsId,
+      issueId: `issue-${wsId}`,
+      projectId,
+      wsStatus: "reviewing",
+      readyForMerge: false,
+    };
+  }
+
+  function redGateResult(branchSha: string): Awaited<ReturnType<typeof mergeGateEvidence.runGateWithEvidence>> {
+    return {
+      passed: false,
+      ran: true,
+      stage: "verify",
+      message: "verify failed: 3 tests red",
+      shasBefore: { branchSha, baseSha: "base-sha" },
+      moved: null,
+      movedDetail: null,
+      ranAt: new Date().toISOString(),
+      token: null,
+      durationMs: 1000,
+    };
+  }
+
+  it("does not re-gate a candidate whose gate already failed at its current (unchanged) sha", async () => {
+    queueSelectsForStoppedReviewing(1);
+    shasSpy.mockResolvedValue({ branchSha: "sha-red", baseSha: "base-sha" });
+    gateSpy.mockResolvedValue(redGateResult("sha-red"));
+
+    const redCandidate = makeCandidate("red-1", "proj-1");
+    const deps = { ...makeDeps(), autoMergeEnabled: true };
+
+    // Cycle 1: the gate genuinely runs and fails, and is remembered.
+    await processWorkspaceCandidates([redCandidate], deps);
+    expect(gateSpy).toHaveBeenCalledTimes(1);
+
+    // Cycle 2: same sha, so the monitor must not pay for another full gate run.
+    queueSelectsForStoppedReviewing(1);
+    await processWorkspaceCandidates([redCandidate], deps);
+    expect(gateSpy).toHaveBeenCalledTimes(1);
+    expectNoWorkspaceAction(deps);
+  });
+
+  it("re-gates once the branch sha changes (new commit / rebase)", async () => {
+    queueSelectsForStoppedReviewing(1);
+    shasSpy.mockResolvedValue({ branchSha: "sha-red", baseSha: "base-sha" });
+    gateSpy.mockResolvedValue(redGateResult("sha-red"));
+
+    const redCandidate = makeCandidate("red-1", "proj-1");
+    const deps = { ...makeDeps(), autoMergeEnabled: true };
+    await processWorkspaceCandidates([redCandidate], deps);
+    expect(gateSpy).toHaveBeenCalledTimes(1);
+
+    // The branch moved (new commit) — a fresh gate must run.
+    queueSelectsForStoppedReviewing(1);
+    shasSpy.mockResolvedValue({ branchSha: "sha-fixed", baseSha: "base-sha" });
+    gateSpy.mockResolvedValue(redGateResult("sha-fixed"));
+    await processWorkspaceCandidates([redCandidate], deps);
+    expect(gateSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("across two cycles, a second In-Review candidate is processed while the first (red, timed-out) gets no second verify chain", async () => {
+    const redCandidate = makeCandidate("red-1", "proj-1");
+    const otherCandidate = makeCandidate("other-1", "proj-1");
+
+    // The red candidate's gate overruns candidateTimeoutMs — the wait is abandoned, but the
+    // work (and its eventual failure) keeps running detached.
+    let resolveRedGate: (v: Awaited<ReturnType<typeof mergeGateEvidence.runGateWithEvidence>>) => void;
+    const hungGate = new Promise<Awaited<ReturnType<typeof mergeGateEvidence.runGateWithEvidence>>>((resolve) => {
+      resolveRedGate = resolve;
+    });
+    shasSpy.mockResolvedValue({ branchSha: "sha-red", baseSha: "base-sha" });
+    gateSpy.mockImplementation((args) => {
+      if (args.workspace.id === "red-1") return hungGate;
+      return Promise.resolve(redGateResult("sha-other")); // other-1 also fails, but promptly
+    });
+
+    queueSelectsForStoppedReviewing(2);
+    const deps = { ...makeDeps(), autoMergeEnabled: true, candidateTimeoutMs: 20, projectConcurrency: 1 };
+
+    // Cycle 1: red-1 is first (input order), times out and is abandoned; other-1 is still
+    // processed in the SAME cycle rather than being deferred behind it.
+    const stats1 = await processWorkspaceCandidates([redCandidate, otherCandidate], deps);
+    expect(stats1.completedProjectIds).toContain("proj-1");
+    expect(gateSpy).toHaveBeenCalledTimes(2); // red-1 (in flight) + other-1
+    expect(vi.mocked(deps.workspaceActions.merge)).not.toHaveBeenCalled();
+
+    // Cycle 2: red-1's abandoned gate is STILL running. The walk must not start a second
+    // chain for it — it should be skipped as in-flight, and other-1 re-processed once more.
+    queueSelectsForStoppedReviewing(2);
+    const stats2 = await processWorkspaceCandidates([redCandidate, otherCandidate], deps);
+    expect(stats2.completedProjectIds).toContain("proj-1");
+    // Only ONE more call — for other-1. red-1 must not get a second verify chain while its
+    // first is still in flight.
+    expect(gateSpy).toHaveBeenCalledTimes(3);
+
+    // Now let the abandoned gate finish (red) — it must be remembered so a THIRD cycle also
+    // skips it without calling the gate again.
+    resolveRedGate!(redGateResult("sha-red"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    queueSelectsForStoppedReviewing(2);
+    const stats3 = await processWorkspaceCandidates([redCandidate, otherCandidate], deps);
+    expect(stats3.completedProjectIds).toContain("proj-1");
+    // red-1 is now remembered as failed at sha-red and skipped; only other-1 gates again.
+    expect(gateSpy).toHaveBeenCalledTimes(4);
   });
 });
