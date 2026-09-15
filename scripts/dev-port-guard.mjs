@@ -6,8 +6,19 @@ function isCheckoutBoundary(char) {
   return char === undefined || /[\s"'/:=]/.test(char);
 }
 
-export function commandLineBelongsToCheckout(commandLine, checkoutRoot) {
+export function commandLineBelongsToCheckout(commandLine, checkoutRoot, processCwd) {
   if (!commandLine || !checkoutRoot) return false;
+
+  // The process's own command line only proves the checkout when the script path in it is
+  // ABSOLUTE. A process launched with a RELATIVE script path (e.g. someone typing
+  // `node packages/server/dist/cli/index.js dev` from inside the checkout during manual
+  // recovery, rather than promote.mjs's own spawn, which always uses an absolute path) carries
+  // none of the checkout root in its command line at all — the substring match below can never
+  // find it, and a genuinely-safe process gets refused (#1159). The process's ACTUAL working
+  // directory is the ground truth for "which checkout did this relative path resolve against",
+  // so when the caller can supply it, a cwd match is accepted on its own.
+  if (processCwd && normalizePath(processCwd) === normalizePath(checkoutRoot)) return true;
+
   const normalizedCommand = normalizePath(commandLine);
   const normalizedRoot = normalizePath(checkoutRoot);
   let index = normalizedCommand.indexOf(normalizedRoot);
@@ -62,7 +73,7 @@ export function parseNetstatListeners(netstatOutput, port) {
   )];
 }
 
-export function planPortOwnerKill({ pid, port, checkoutRoot, getCommandLine, audit }) {
+export function planPortOwnerKill({ pid, port, checkoutRoot, getCommandLine, getCwd, audit }) {
   const commandLine = getCommandLine(pid);
   if (!commandLine) {
     const event = { action: "dev-port-kill-blocked", port, pid, reason: "unknown-command-line" };
@@ -70,7 +81,16 @@ export function planPortOwnerKill({ pid, port, checkoutRoot, getCommandLine, aud
     return { allowed: false, reason: "unknown-command-line", commandLine };
   }
 
-  if (!commandLineBelongsToCheckout(commandLine, checkoutRoot)) {
+  // Best-effort only: a getCwd that throws or returns nothing just falls back to the
+  // command-line-only check, which is today's behaviour.
+  let processCwd;
+  try {
+    processCwd = getCwd?.(pid) || undefined;
+  } catch {
+    processCwd = undefined;
+  }
+
+  if (!commandLineBelongsToCheckout(commandLine, checkoutRoot, processCwd)) {
     const event = { action: "dev-port-kill-blocked", port, pid, reason: "outside-checkout", checkoutRoot, commandLine };
     audit?.(event);
     return { allowed: false, reason: "outside-checkout", commandLine };

@@ -372,12 +372,84 @@ function processCommandLine(pid) {
 }
 
 /**
+ * Best-effort actual working directory of `pid` — the ground truth `commandLineBelongsToCheckout`
+ * falls back to when the command line carries a RELATIVE script path (#1159): a process started
+ * with `cwd: stableCheckout` (as this script's own {@link startStableBoard} always does, and as a
+ * human running the same command by hand from inside the checkout also would) resolves a relative
+ * script arg against that directory regardless of how the command line spells it.
+ *
+ * `Win32_Process` (and every other WMI/CIM class, and every documented cmdlet) has NO working-
+ * -directory property for an arbitrary process — verified live against this project's own
+ * PowerShell 5.1 before writing this. The only place Windows actually stores it is the target
+ * process's PEB (`RTL_USER_PROCESS_PARAMETERS.CurrentDirectory`), reached here via a small
+ * PEB-reading snippet, x64-only (this project's supported Windows targets are all x64). ANY
+ * failure — 32-bit/ARM64 host, no query/VM-read permission, pid gone, a future Windows layout
+ * change — must degrade to "" so the caller falls back to the command-line-only check, i.e.
+ * today's (safe, fail-closed) behaviour; this function must never THROW past that boundary.
+ */
+function processCwd(pid) {
+  try {
+    if (process.platform === "win32") {
+      const script = `
+        try {
+          Add-Type -Language CSharp -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class KanbanCwdReader {
+  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool ReadProcessMemory(IntPtr h, IntPtr addr, byte[] buf, int size, out int read);
+  [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr h, int cls, ref PBI info, int size, out int retLen);
+  [StructLayout(LayoutKind.Sequential)] struct PBI { public IntPtr r1; public IntPtr Peb; public IntPtr r2; public IntPtr r3; public IntPtr Pid; public IntPtr r4; }
+  public static string GetCwd(int pid) {
+    IntPtr h = OpenProcess(0x0400 | 0x0010, false, pid);
+    if (h == IntPtr.Zero) return "";
+    try {
+      var pbi = new PBI();
+      int retLen;
+      if (NtQueryInformationProcess(h, 0, ref pbi, Marshal.SizeOf(pbi), out retLen) != 0) return "";
+      byte[] ptrBuf = new byte[8]; int read;
+      if (!ReadProcessMemory(h, IntPtr.Add(pbi.Peb, 0x20), ptrBuf, 8, out read)) return "";
+      IntPtr paramsAddr = (IntPtr)BitConverter.ToInt64(ptrBuf, 0);
+      byte[] cdBuf = new byte[16];
+      if (!ReadProcessMemory(h, IntPtr.Add(paramsAddr, 0x38), cdBuf, 16, out read)) return "";
+      short len = BitConverter.ToInt16(cdBuf, 0);
+      IntPtr bufAddr = (IntPtr)BitConverter.ToInt64(cdBuf, 8);
+      if (len <= 0 || len > 4096) return "";
+      byte[] strBuf = new byte[len];
+      if (!ReadProcessMemory(h, bufAddr, strBuf, len, out read)) return "";
+      return Encoding.Unicode.GetString(strBuf);
+    } finally { CloseHandle(h); }
+  }
+}
+'@ -ErrorAction Stop
+          [KanbanCwdReader]::GetCwd(${pid})
+        } catch { "" }
+      `;
+      return execFileSync("powershell.exe", ["-NoProfile", "-Command", script], {
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      }).trim();
+    }
+    return execFileSync("readlink", ["-f", `/proc/${pid}/cwd`], {
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Stop the stable board — BY SIGNATURE ONLY.
  *
  * `planPortOwnerKill` (shared with `scripts/dev.mjs`) refuses any pid whose command line does
- * not contain the stable checkout's path, so this can never take down another agent's worktree
- * server, another board, or an unrelated node process. There is no kill-all-node path here and
- * there must never be one.
+ * not contain the stable checkout's path — or whose actual working directory ({@link
+ * processCwd}) is not the stable checkout, for a process started with a relative script path
+ * (#1159) — so this can never take down another agent's worktree server, another board, or an
+ * unrelated node process. There is no kill-all-node path here and there must never be one.
  */
 function stopStableBoard() {
   const pids = listenerPidsOnPort(stablePort);
@@ -391,6 +463,7 @@ function stopStableBoard() {
       port: stablePort,
       checkoutRoot: stableCheckout,
       getCommandLine: processCommandLine,
+      getCwd: processCwd,
       audit: (e) => log(`[promote] ${JSON.stringify(e)}`),
     });
     if (!decision.allowed) {
