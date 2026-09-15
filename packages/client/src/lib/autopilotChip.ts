@@ -9,6 +9,7 @@
  * cycle" with the monitor's own slot arithmetic — nothing here estimates.
  */
 import type { AutopilotHoldReason, AutopilotStatusResponse } from "@agentic-kanban/shared/types";
+import { PULSE_TERMS } from "./boardStats.js";
 
 export type AutopilotChipTone = "active" | "held" | "idle";
 
@@ -16,11 +17,14 @@ export interface AutopilotChipView {
   /** Filled dot for a driven project, hollow for manual. */
   dot: "●" | "○";
   modeLabel: "Autopilot" | "Manual" | "Conductor";
-  /** Everything after the mode, in order: running, next cycle / hold, auto-merge. */
+  /** Everything after the mode, in order: WIP, next cycle / hold, auto-merge. */
   segments: string[];
-  /** The full one-line label: `● Autopilot · 2/4 running · +2 next cycle · auto-merge ✓`. */
+  /**
+   * The full one-line label: `● Autopilot · WIP 2/4 · +2 next cycle · auto-merge ✓`. Says `WIP`, never
+   * `running` (#1162): the header's agents chip owns "running", and the two count different things.
+   */
   label: string;
-  /** What fits a phone toolbar: `● 2/4`. */
+  /** What fits a phone toolbar: `● WIP 2/4`. */
   compactLabel: string;
   tone: AutopilotChipTone;
   /** Multi-line tooltip: the hold's remedy and the auto-merge source. */
@@ -61,11 +65,12 @@ export function buildAutopilotChipView(status: AutopilotStatusResponse): Autopil
   const dot = status.startMode === "manual" ? "○" : "●";
   const driven = status.startMode !== "manual";
 
-  const running = driven ? `${status.running}/${status.limit} running` : `${status.running} running`;
-  const segments = [running];
+  const wip = driven ? `WIP ${status.running}/${status.limit}` : `WIP ${status.running}`;
+  const segments = [wip];
+  const blocked = status.blockedByDependencies ?? 0;
   if (status.startMode === "monitor") {
     if (status.willStartNextCycle > 0) segments.push(`+${status.willStartNextCycle} next cycle`);
-    else if (status.holdReason === "no_ready_tickets" || status.holdReason === null) segments.push("nothing ready");
+    else if (status.holdReason === "no_ready_tickets" || status.holdReason === null) segments.push(blocked > 0 ? `${blocked} blocked by dependencies` : "nothing ready");
     else segments.push(`holding: ${HOLD_LABEL[status.holdReason]}`);
   }
   segments.push(status.autoMerge.enabled ? "auto-merge ✓" : "auto-merge ✗");
@@ -74,9 +79,11 @@ export function buildAutopilotChipView(status: AutopilotStatusResponse): Autopil
     && status.holdReason !== null && status.holdReason !== "no_ready_tickets";
   const tone: AutopilotChipTone = !driven ? "idle" : held ? "held" : "active";
 
-  const titleLines = [`${modeLabel}: ${running}${status.effectiveLimit < status.limit ? ` (machine headroom allows ${status.effectiveLimit})` : ""}.`];
+  const titleLines = [`${modeLabel}: ${wip}${status.effectiveLimit < status.limit ? ` (machine headroom allows ${status.effectiveLimit})` : ""}.`, PULSE_TERMS.wip];
   if (status.startMode === "monitor" && status.willStartNextCycle > 0) {
     titleLines.push(`Next cycle starts ${status.willStartNextCycle} of ${status.eligibleCount}${status.eligibleCountCapped ? "+" : ""} ready ticket(s).`);
+  } else if (status.startMode === "monitor" && status.holdReason === "no_ready_tickets" && blocked > 0) {
+    titleLines.push(`${blocked}${status.eligibleCountCapped ? "+" : ""} Todo ticket(s) would start but wait on a blocker that has not landed yet (typically a ticket still in review).`);
   } else if (status.holdReason) {
     titleLines.push(HOLD_DETAIL[status.holdReason]);
   }
@@ -88,7 +95,7 @@ export function buildAutopilotChipView(status: AutopilotStatusResponse): Autopil
     modeLabel,
     segments,
     label: [`${dot} ${modeLabel}`, ...segments].join(" · "),
-    compactLabel: driven ? `${dot} ${status.running}/${status.limit}` : `${dot} ${status.running}`,
+    compactLabel: driven ? `${dot} WIP ${status.running}/${status.limit}` : `${dot} WIP ${status.running}`,
     tone,
     title: titleLines.join("\n"),
   };

@@ -196,7 +196,7 @@ export function ProjectTabs({ projects, activeProjectId, onProjectChange }: Proj
           {overflowTabs.map((project) => (
             <option key={project.id} value={project.id}>
               {project.name}
-              {project.activeWorkspaceCount ? ` (${project.activeWorkspaceCount} active)` : ""}
+              {project.activeWorkspaceCount ? ` (${project.activeWorkspaceCount} running)` : ""}
             </option>
           ))}
         </select>
