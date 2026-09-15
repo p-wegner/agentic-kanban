@@ -6,13 +6,23 @@ import type { MonitorActionName } from "../services/monitor-nudge.js";
 import type { MonitorAction } from "./monitor-helpers.js";
 import type { WorkspaceCandidate } from "./monitor-cycle.js";
 import type { MonitorWorkspaceActions } from "./monitor-workspace-actions.js";
-import type { MergeGateToken } from "../services/pre-merge-gate.service.js";
+import { RUN_GATE, resolveMergeGateShas, type MergeGateToken } from "../services/pre-merge-gate.service.js";
+import { runGateWithEvidence } from "../services/merge-gate-evidence.js";
+import type { BoardEventType } from "../services/board-events.js";
 import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
 import { clearMergeBackoff, recordMergeFailure, type MergeBackoffDeps } from "../services/merge-backoff.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
 import { isPreMergeGateFailure } from "../services/workspace-merge-gate.js";
+import {
+  clearFailedGate,
+  clearGateInFlight,
+  getLastFailedGate,
+  isGateInFlight,
+  markGateInFlight,
+  recordFailedGate,
+} from "../services/monitor-gate-recall.js";
 
 export type LogMonitorActionFn = (action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => void;
 
@@ -118,4 +128,69 @@ export async function closeDirectWorkspaceAsDone(ws: WorkspaceCandidate, logActi
   // Ticket group (#661): a closing group workspace lands every member ticket too.
   await reconcileGroupMemberIssues({ database: db, workspaceId: ws.wsId, now, projectId: ws.projectId });
   logAction("merge", ws.wsId, ws.issueId, { verificationResult: "ok" });
+}
+
+/** Outcome of {@link resolveReviewingStoppedGateToken}. */
+export type ReviewingStoppedGateOutcome =
+  | { kind: "token"; token: MergeGateToken }
+  | { kind: "skip" };
+
+/**
+ * Decide the merge-gate token for a NOT-ready reviewing+stopped candidate (#1161), reusing
+ * the monitor's own memory of gate verdicts it produced (`monitor-gate-recall.ts`) instead of
+ * blindly re-running the gate every cycle.
+ *
+ * A candidate whose gate genuinely FAILED sits at the head of every later cycle's walk exactly
+ * as it did this one — nothing about it changed — so re-gating it is pure waste that starves
+ * every OTHER candidate behind it (measured: 20 of 27 verify-chain lines over ~2h were the same
+ * red workspace). Only the branch moving (new commit / rebase) earns it another run.
+ *
+ * A second guard covers the companion failure: an earlier cycle's gate for this SAME workspace
+ * may still be running — it was ABANDONED on `candidateTimeoutMs` (the wait gave up, not the
+ * work; a JS promise cannot be cancelled), so a naive re-walk would start a SECOND chain on top
+ * of the first. `{kind: "skip"}` covers both guards; the caller must take no further action.
+ */
+export async function resolveReviewingStoppedGateToken(
+  ws: WorkspaceCandidate,
+  projectId: string,
+  boardEventsBroadcast: (projectId: string, event: BoardEventType) => void,
+  emitMergeFailedEvent: (gate: { stage: string; message: string }) => void,
+): Promise<ReviewingStoppedGateOutcome> {
+  const gateWorkspace = { id: ws.wsId, workingDir: ws.workingDir, baseBranch: ws.baseBranch };
+
+  const currentShas = await resolveMergeGateShas(gateWorkspace).catch(() => ({}) as Awaited<ReturnType<typeof resolveMergeGateShas>>);
+  const remembered = getLastFailedGate(ws.wsId);
+  if (remembered && currentShas.branchSha && remembered.branchSha === currentShas.branchSha) {
+    console.log(`[monitor] Skipping re-gate for reviewing+stopped workspace ${ws.wsId}  gate already failed at this sha (${remembered.branchSha.slice(0, 8)}) on ${remembered.failedAt}; unchanged since`);
+    return { kind: "skip" };
+  }
+
+  if (isGateInFlight(ws.wsId)) {
+    console.log(`[monitor] Skipping reviewing+stopped workspace ${ws.wsId}  a monitor gate is already in flight for it (abandoned by a previous cycle's timeout, still running)`);
+    return { kind: "skip" };
+  }
+
+  markGateInFlight(ws.wsId);
+  let gate: Awaited<ReturnType<typeof runGateWithEvidence>>;
+  try {
+    gate = await runGateWithEvidence({
+      workspace: gateWorkspace,
+      projectId,
+      source: "monitor-cycle gate (reviewing+stopped)",
+      database: db,
+    });
+  } finally {
+    clearGateInFlight(ws.wsId);
+  }
+  if (!gate.passed) {
+    console.log(`[monitor] Withholding merge for reviewing+stopped workspace ${ws.wsId}  pre-merge gate failed (${gate.stage}): ${gate.message}`);
+    if (gate.shasBefore.branchSha) {
+      recordFailedGate(ws.wsId, { branchSha: gate.shasBefore.branchSha, failedAt: gate.ranAt, message: gate.message });
+    }
+    emitMergeFailedEvent({ stage: gate.stage, message: gate.message });
+    boardEventsBroadcast(projectId, "workflow_error");
+    return { kind: "skip" };
+  }
+  clearFailedGate(ws.wsId);
+  return { kind: "token", token: gate.token ?? RUN_GATE };
 }
