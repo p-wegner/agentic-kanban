@@ -781,6 +781,7 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
       startsPerCycle: num,
       willStartNextCycle: num,
       eligibleCount: num,
+      blockedByDependencies: num,
       holdReason: nullable(str),
       autoMerge: nested(looseObject({ enabled: bool, source: str })),
       nextCycleAt: nullable(str),

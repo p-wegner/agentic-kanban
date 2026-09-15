@@ -18,12 +18,18 @@ describe("BoardStats", () => {
     expect(html).not.toContain('data-testid="backlog-count-badge"');
   });
 
-  it("renders the open-work pulse count", () => {
+  it("renders the ticket flow per column and one agents-running count (#1162)", () => {
     const html = renderToStaticMarkup(
       <BoardStats activeColumns={[col("In Progress", 2), col("In Review", 1)]} archiveColumns={[col("Done", 1)]} />,
     );
     expect(html).toContain('data-testid="board-stats-bar"');
-    // 2 In Progress + 1 In Review = 3 open (active, non-archive) items.
-    expect(html).toContain(">3<");
+    expect(html).toContain('data-testid="board-stats-flow-In Progress"');
+    expect(html).toContain('data-testid="board-stats-flow-In Review"');
+    expect(html).toContain("in progress");
+    expect(html).toContain('data-testid="board-stats-agents"');
+    expect(html).toContain("no agents running");
+    // The old ambiguous words are gone from the pulse line.
+    expect(html).not.toMatch(/>open</);
+    expect(html).not.toMatch(/>active</);
   });
 });
