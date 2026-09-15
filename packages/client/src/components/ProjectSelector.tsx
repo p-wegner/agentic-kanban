@@ -24,11 +24,12 @@ interface ActiveAgentsBadgeProps {
  */
 export function ActiveAgentsBadge({ count, compact = false }: ActiveAgentsBadgeProps) {
   if (count <= 0) return null;
-  const label = compact ? String(count) : `${count} active agent${count === 1 ? "" : "s"}`;
+  // "agents running", the same words and statuses (active/reviewing/fixing) as the board header's agents chip (#1162).
+  const label = compact ? String(count) : `${count} agent${count === 1 ? "" : "s"} running`;
   return (
     <span
       className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
-      title={`${count} active agent${count === 1 ? "" : "s"}`}
+      title={`${count} agent${count === 1 ? "" : "s"} running`}
     >
       <span className="relative flex h-1.5 w-1.5 shrink-0" aria-hidden="true">
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />

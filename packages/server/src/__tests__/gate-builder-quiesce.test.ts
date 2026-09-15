@@ -188,4 +188,17 @@ describe("the gate message names a DERIVED worker count (#909)", () => {
     expect(message).toContain("workers 6");
     expect(message).not.toContain("derived");
   });
+
+  // #1160 — a worker count that is a third of what a lone gate used to get needs the partition
+  // named beside it, and a verdict produced beside another chain ran under a different load.
+  it("names the verify-chain slot partition and the company when the box offers more than one slot", () => {
+    const message = buildGateTierMessage({ ...base, maxWorkersDerived: true, hostFreeGb: 9.4, chainSlots: 3, chainsInFlight: 2 });
+    expect(message).toContain("workers 6 (derived, host free 9.4 GB, 2 of 3 verify chain slot(s) in use)");
+  });
+
+  it("says nothing about slots on a box that offers one — the pre-#1160 message, byte for byte", () => {
+    const message = buildGateTierMessage({ ...base, maxWorkersDerived: true, hostFreeGb: 12.3, chainSlots: 1, chainsInFlight: 1 });
+    expect(message).toContain("workers 6 (derived, host free 12.3 GB)");
+    expect(message).not.toContain("slot");
+  });
 });

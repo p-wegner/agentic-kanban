@@ -48,8 +48,38 @@
  * — see `lockNote`, which the gate puts in its tier message, per "a level may only weaken
  * verification VISIBLY".
  *
+ * WIDTH — #1160 made it capacity-derived instead of a hardcoded 1. "N full suites at 1/N speed
+ * finish no sooner" is true only when ONE suite already saturates the box, and it does not: the
+ * gate's own worker count is derived from live capacity (#909) and the box routinely has half its
+ * cores and several GB idle while one chain runs. Measured cost of the fixed 1: a gate logged
+ * `queued 7410s behind another verification` — two hours a code-complete ticket sat behind a
+ * neighbour's suite. Builders already run in parallel worktrees; the merge side was the cap.
+ *
+ * So the slot count now comes from the SAME capacity read the per-chain worker count comes from
+ * (`deriveVerifyChainSlots`, beside `deriveVerifyWorkers` in `machine-capacity.ts`), and the two
+ * are tied so N chains cannot together exceed what one chain alone was allowed: every chain's CPU
+ * worker share is the core budget divided by the slot partition (`verifyChainMaxSlots()`, which
+ * `verify-tunables.ts` passes as `chainSlots`). RAM is bounded live — a chain is admitted only
+ * while another 3 GB fits over the 2 GB Tier-0 reserve, read at the moment of admission, so a
+ * chain already running has already taken its share out of the number. A tight or small box
+ * derives 1 and behaves exactly as before. `KANBAN_VERIFY_CHAIN_CONCURRENCY` is still an
+ * unconditional pin, both ways (a pin of 1 restores serialization outright).
+ *
+ * Admission is re-evaluated on every release AND on a 30s tick while anything is queued, because
+ * free RAM can open a slot without any chain finishing (a builder exits). With the cross-process
+ * machine lock ON, that lock is a mutex and serializes chains regardless of the slot count — by
+ * design, since the lock exists for boxes where the verifiers the semaphore cannot see are the
+ * problem; the slot count then only orders this process's waiters.
+ *
  * Named a semaphore, not a gate (#611) — it refuses nothing, it only delays.
  */
+import * as os from "node:os";
+import {
+  deriveVerifyChainMaxSlots,
+  deriveVerifyChainSlots,
+  readTier0Capacity,
+  type VerifyChainSlots,
+} from "@agentic-kanban/shared/lib/machine-capacity";
 import {
   MACHINE_VERIFY_ROLES,
   machineVerifyLockEnabled,
@@ -126,10 +156,85 @@ export function chooseNextVerifyChainWaiter(
   return firstGate === -1 ? 0 : firstGate;
 }
 
-/** Max concurrent verify CHAINS across the whole process. Env-overridable; clamped to >= 1. */
-export function verifyChainSemaphoreConcurrency(): number {
+/** The operator pin, or null when the width is to be derived. Clamped to >= 1. */
+function verifyChainConcurrencyPin(): number | null {
   const raw = Number.parseInt(process.env.KANBAN_VERIFY_CHAIN_CONCURRENCY ?? "", 10);
-  return Number.isFinite(raw) && raw >= 1 ? raw : 1;
+  return Number.isFinite(raw) && raw >= 1 ? raw : null;
+}
+
+/** What the slot derivation reads off the box: core count and live free RAM. */
+export interface VerifyChainCapacityReading {
+  cpuCount: number;
+  freeGb: number | null;
+}
+
+function readLiveVerifyChainCapacity(): VerifyChainCapacityReading {
+  // Never throws — `readTier0Capacity` fails open with `freeGb: null`, and an unreadable
+  // `os.cpus()` degrades to "one core", i.e. one slot, the pre-#1160 behaviour.
+  let cpuCount = 1;
+  try {
+    cpuCount = os.cpus().length;
+  } catch {
+    cpuCount = 1;
+  }
+  return { cpuCount, freeGb: readTier0Capacity().freeGb };
+}
+
+/**
+ * The capacity a test wants the semaphore to believe (#1160). `null` = read the live box.
+ *
+ * Every test written against the fixed-1 semaphore asserts serialization, and on a roomy dev box
+ * the derivation would admit two chains and fail them for the wrong reason — so
+ * {@link resetVerifyChainSemaphoreForTests} installs a SERIAL reading by default and a test that
+ * wants the dynamic path passes its own reading. Never consulted outside tests: production code
+ * has no setter for it.
+ */
+let capacityReaderForTests: (() => VerifyChainCapacityReading) | null = null;
+
+/** A reading that derives exactly one slot on any box — the pre-#1160 behaviour. */
+export const SERIAL_VERIFY_CHAIN_CAPACITY: VerifyChainCapacityReading = { cpuCount: 3, freeGb: 1 };
+
+export function setVerifyChainCapacityReaderForTests(reader: (() => VerifyChainCapacityReading) | null): void {
+  capacityReaderForTests = reader;
+}
+
+function readVerifyChainCapacity(): VerifyChainCapacityReading {
+  return (capacityReaderForTests ?? readLiveVerifyChainCapacity)();
+}
+
+/**
+ * The slot PARTITION every concurrent chain's CPU worker share is divided by (#1160): the pin
+ * when set, else the CPU-side maximum for this box. Stable across a gate's lifetime (it depends on
+ * the core count only), which is what lets `verify-tunables.ts` hand every chain the same share
+ * and still keep the sum of shares inside one chain's former budget.
+ *
+ * `1` under the cross-process machine lock (#957): that lock is a mutex taken OUTSIDE this
+ * semaphore, so at most one chain runs on the box however many slots the derivation would offer,
+ * and dividing the lone chain's workers by three would give up width for nothing.
+ */
+export function verifyChainMaxSlots(): number {
+  if (machineVerifyLockEnabled()) return 1;
+  return verifyChainConcurrencyPin() ?? deriveVerifyChainMaxSlots(readVerifyChainCapacity().cpuCount);
+}
+
+/**
+ * How many verify CHAINS may be running at once RIGHT NOW (#1160): the pin when set, else
+ * `active + how many more fit` from live free RAM under the CPU partition. Always >= 1.
+ * See `deriveVerifyChainSlots` for the arithmetic; this only feeds it the box.
+ */
+export function resolveVerifyChainSlots(): VerifyChainSlots {
+  const reading = readVerifyChainCapacity();
+  return deriveVerifyChainSlots({
+    cpuCount: reading.cpuCount,
+    freeGb: reading.freeGb,
+    active,
+    pinned: verifyChainConcurrencyPin(),
+  });
+}
+
+/** Max concurrent verify CHAINS across the whole process, as of this call — see {@link resolveVerifyChainSlots}. */
+export function verifyChainSemaphoreConcurrency(): number {
+  return resolveVerifyChainSlots().slots;
 }
 
 /** Current number of in-flight verify chains (for diagnostics/tests). */
@@ -260,46 +365,109 @@ export async function runUnderVerifyChainSemaphore<T>(
   return outcome.result;
 }
 
-/** The pre-#957 body: this process's own FIFO slot, unchanged. */
+/**
+ * How often, while anything is queued, admission is re-checked without a release (#1160). Free
+ * RAM opens a slot when a builder or a base probe in another process exits, and nothing in this
+ * process would otherwise notice until a chain finished — for a 40-minute suite, that is the
+ * whole wait. Small against any chain's duration; the check is one `os.freemem()` read.
+ */
+const READMIT_INTERVAL_MS = 30_000;
+let readmitTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Admit as many waiters as the box has slots for right now (#1160). The slot is transferred by
+ * the ADMITTER (`active++` here, not in the waiter's continuation), so two waiters admitted in one
+ * pass cannot both read a stale `active` and both think they were the only one let in.
+ *
+ * #978 — a merge someone is waiting on goes ahead of a background measurement, with a starvation
+ * escape back to arrival order. `chooseNextVerifyChainWaiter` owns the policy; this loop only
+ * decides HOW MANY, and asks it WHICH one each time.
+ */
+function admitWaiters(): void {
+  while (waiters.length > 0) {
+    const capacity = resolveVerifyChainSlots();
+    if (active >= capacity.slots) break;
+    const index = chooseNextVerifyChainWaiter(waiters, Date.now());
+    if (index < 0) break;
+    const [next] = waiters.splice(index, 1);
+    if (!next) break;
+    active++;
+    next.resolve();
+  }
+  scheduleReadmission();
+}
+
+function scheduleReadmission(): void {
+  if (waiters.length === 0) {
+    if (readmitTimer) clearInterval(readmitTimer);
+    readmitTimer = null;
+    return;
+  }
+  if (readmitTimer) return;
+  readmitTimer = setInterval(admitWaiters, READMIT_INTERVAL_MS);
+  // Never keep the process alive for a queue: a server shutting down with waiters has bigger
+  // problems than a missed re-admission, and a test must not hang on it.
+  readmitTimer.unref?.();
+}
+
+/** The pre-#957 body: this process's own slot — FIFO within a class, width from the box (#1160). */
 async function runUnderInProcessSemaphore<T>(
   chain: () => Promise<T>,
   label: string,
   priority: VerifyChainPriority,
   onWaited?: (queueWaitMs: number) => void,
 ): Promise<T> {
-  if (active >= verifyChainSemaphoreConcurrency()) {
+  const capacity = resolveVerifyChainSlots();
+  if (active >= capacity.slots) {
     const queuedAt = Date.now();
     const ahead = waiters.length + active;
     console.log(
       `[verify-chain] ${label} is QUEUED (${priority}) behind ${ahead} in-flight/waiting chain(s) — `
-        + `serializing rather than running concurrently, because N full suites at 1/N speed finish no sooner `
-        + `and starve each other (#949)`,
+        + `the box has no free verify slot (${capacity.reason}); a chain admitted onto a saturated box `
+        + `runs at 1/N speed and starves its neighbour (#949), so it waits for a slot (#1160)`,
     );
-    await new Promise<void>((resolve) => waiters.push({ resolve, priority, queuedAtMs: queuedAt, label }));
+    // The admitter transfers the slot (`active++` in `admitWaiters`) before resolving, so nothing
+    // is incremented here on the way out of the wait.
+    await new Promise<void>((resolve) => {
+      waiters.push({ resolve, priority, queuedAtMs: queuedAt, label });
+      scheduleReadmission();
+    });
     const waited = Date.now() - queuedAt;
     onWaited?.(waited);
     console.log(`[verify-chain] ${label} acquired its slot after ${Math.round(waited / 1000)}s queued`);
   } else {
+    active++;
     onWaited?.(0);
+    if (active > 1) {
+      console.log(`[verify-chain] ${label} admitted as chain ${active} of ${capacity.slots} concurrent (${capacity.reason}) (#1160)`);
+    }
   }
-  active++;
   try {
     return await chain();
   } finally {
     active--;
-    // #978 — a merge someone is waiting on goes ahead of a background measurement, with a
-    // starvation escape back to arrival order. `chooseNextVerifyChainWaiter` owns the policy.
-    const index = chooseNextVerifyChainWaiter(waiters, Date.now());
-    if (index >= 0) {
-      const [next] = waiters.splice(index, 1);
-      next?.resolve();
-    }
+    admitWaiters();
   }
 }
 
-/** Test seam: reset the semaphore's in-memory state between tests. */
-export function resetVerifyChainSemaphoreForTests(): void {
+/**
+ * Test seam: reset the semaphore's in-memory state between tests.
+ *
+ * Installs the SERIAL capacity reading by default (#1160): every test written before the width
+ * was derived asserts that a second chain queues, and a live read on a roomy box would admit it.
+ * Pass `capacity: "live"` for the real box, or a reading (or reader) to drive the dynamic path.
+ */
+export function resetVerifyChainSemaphoreForTests(
+  opts: { capacity?: "serial" | "live" | VerifyChainCapacityReading | (() => VerifyChainCapacityReading) } = {},
+): void {
   active = 0;
   waiters.length = 0;
   foregroundDemands.clear();
+  if (readmitTimer) clearInterval(readmitTimer);
+  readmitTimer = null;
+  const capacity = opts.capacity ?? "serial";
+  if (capacity === "live") capacityReaderForTests = null;
+  else if (capacity === "serial") capacityReaderForTests = () => SERIAL_VERIFY_CHAIN_CAPACITY;
+  else if (typeof capacity === "function") capacityReaderForTests = capacity;
+  else capacityReaderForTests = () => capacity;
 }

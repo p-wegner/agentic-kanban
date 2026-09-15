@@ -107,8 +107,8 @@ describe("ProjectTabs", () => {
         <ProjectTabs projects={projectsWithActivity} activeProjectId="project-1" onProjectChange={() => undefined} />,
       );
 
-      expect(html).toContain("2 active agents");
-      expect(html).toContain("Six (3 active)");
+      expect(html).toContain("2 agents running");
+      expect(html).toContain("Six (3 running)");
     } finally {
       Object.defineProperty(globalThis, "localStorage", {
         value: originalLocalStorage,

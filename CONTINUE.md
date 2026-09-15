@@ -3,6 +3,44 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-15 — #1160: verify-chain slots derived from capacity (branch, not landed)
+
+**On `worktree-agent-a042194dae3f10a55`** (nested worktree `.claude/worktrees/agent-a042194dae3f10a55`),
+NOT on master and NOT pushed — a human decides how it lands, then `pnpm promote` decides when it
+goes live. What it is: `verify-chain-semaphore.ts` admitted ONE chain per process (hardcoded
+since #903/#949); a real gate logged `queued 7410s behind another verification`. Now
+`deriveVerifyChainSlots` (`shared/lib/machine-capacity.ts`, beside `deriveVerifyWorkers`) gives
+`active + how many more chains fit` — another chain fits while 3 GB stays free over the 2 GB
+Tier-0 reserve, under a CPU partition of at most 3 slots each worth 2 forks of the `cpus-2`
+budget. The semaphore re-admits on every release and on a 30s tick while anything is queued.
+`resolveVerifyMaxWorkers` divides the CPU share by `verifyChainMaxSlots()`, so N chains together
+never exceed one chain's former core budget (RAM stays live, not double-counted). Gate message:
+`workers 4 (derived, host free 9.4 GB, 2 of 3 verify chain slot(s) in use)`.
+`KANBAN_VERIFY_CHAIN_CONCURRENCY` is still an unconditional pin (a `1` restores serialization).
+
+**Verified by:** `pnpm typecheck` green (5 packages); `machine-capacity.test.ts` 44/44;
+`verify-chain-semaphore.test.ts` 32/32 (new #1160 block: 3 concurrent on a roomy reading, clamp
+to 1 on a tight one, door closes behind a chain that consumed the headroom, the 30s re-check,
+release admits several, pin both ways, #978 order under width 2); new
+`verify-chain-worker-budget.test.ts` (sum of shares <= one chain's budget, through the real
+`resolveVerifyMaxWorkers`); `gate-builder-quiesce.test.ts` (message). Change-scoped
+`pnpm test:mine -- --changed HEAD` and `pnpm check:arch` — see the commit message for their
+result; this line is written before they finished.
+
+**Not done, deliberately:** no live two-gate run on the operated board (that needs a promote);
+the machine lock (`KANBAN_MACHINE_VERIFY_LOCK=1`) is a mutex and still serializes across
+processes by design — widening it is a separate decision. `RAM_PER_VERIFY_CHAIN_GB = 3` and the
+3-slot cap are estimates, not measurements: the first live pass with two chains in flight should
+record peak RAM per chain (the `[gate:step]` lines plus `exit-record`'s `osFreeBytes`) and
+adjust. Every pre-#1160 test asserting serialization still passes because
+`resetVerifyChainSemaphoreForTests()` installs a SERIAL capacity reading by default — a test that
+wants the dynamic path passes `{ capacity: ... }`.
+
+**Also on this pass — the pnpm store lost two more shards.** `files/49`, `files/39` and
+`files/d1` each held ONE entry that `ls` lists and `stat` refuses (the #1092/09-13 signature);
+all three are parked as `files/<xx>.corrupt-20260915` next to `80.corrupt-20260913`. Fourth and
+fifth occurrence in five days. `chkdsk C: /f` is now overdue by any standard.
+
 ## 2026-09-13 — board at ZERO open; `stable-20260913` live at `3d2d681710`
 
 **The board is empty.** 1102 issues: 1092 Done, 10 Cancelled, **0 non-terminal**. The last to

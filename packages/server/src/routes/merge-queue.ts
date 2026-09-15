@@ -7,7 +7,7 @@ import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionLauncher } from "../services/session.manager.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { listMergeTrainsForProject } from "../repositories/merge-train.repository.js";
+import { getMergeTrain, listMergeTrainsForProject, updateMergeTrainState } from "../repositories/merge-train.repository.js";
 
 export function createMergeQueueRoute(
   database: Database,
@@ -103,6 +103,33 @@ export function createMergeQueueRoute(
     }
     const trains = await listMergeTrainsForProject(projectId, database);
     return c.json({ ok: true, trains });
+  });
+
+  /**
+   * POST /api/merge-queue/trains/:id/cancel
+   *
+   * #1153 — the only remedy an operator had for a stranded train was a full server restart
+   * (the reconciler resumes an `assembling`/`gating` row otherwise). Marks the row `abandoned`
+   * with a reason; the in-flight run (if the process holding it is still alive) is not
+   * interrupted — there is no cancellation token for it — but `finishMergeTrain` checks for
+   * `abandoned` before overwriting it, and no NEW train will be assembled for this project while
+   * one is in an unfinished state, so cancelling is what unblocks that.
+   */
+  router.post("/trains/:id/cancel", async (c) => {
+    const id = c.req.param("id");
+    const train = await getMergeTrain(id, database);
+    if (!train) {
+      return c.json({ ok: false, error: "train not found" }, 404);
+    }
+    if (train.state !== "assembling" && train.state !== "gating") {
+      return c.json({ ok: false, error: `train is already terminal (${train.state})` }, 409);
+    }
+    await updateMergeTrainState(id, {
+      state: "abandoned",
+      reconciledReason: "cancelled by operator",
+      finishedAt: new Date().toISOString(),
+    }, database);
+    return c.json({ ok: true });
   });
 
   return router;

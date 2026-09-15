@@ -14,13 +14,22 @@ import { getMergeQueueIssueRows, getMergeTrainMaxSizePref } from "../repositorie
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { resolveTrainOptInSize } from "./merge-train-window.js";
 import { resolveRiskPosture, formatPostureNote, type RiskPosture } from "./risk-posture.service.js";
-import { createMergeTrain, findActiveMergeTrainForMembers, updateMergeTrainState } from "../repositories/merge-train.repository.js";
+import {
+  createMergeTrain,
+  findActiveMergeTrainForMembers,
+  getMergeTrain,
+  listActiveMergeTrainsForProject,
+  updateMergeTrainState,
+} from "../repositories/merge-train.repository.js";
 import { runMergeTrain } from "./merge-train.service.js";
-import { runPreMergeGate } from "./pre-merge-gate.service.js";
+import { runPreMergeGate, looksLikeMissingDepsFailure } from "./pre-merge-gate.service.js";
 import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { randomUUID } from "node:crypto";
-import { acquireQueueRepoLock } from "./merge-queue-repo-lock.js";
+import { acquireQueueRepoLock, MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS } from "./merge-queue-repo-lock.js";
 import type { MergeQueueEvent, MergeQueuePlan } from "./merge-queue.service.js";
+import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
+import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
+import { noteMergeGatePhase } from "./merge-job.service.js";
 
 /**
  * How many ready members a project wants batched onto one train before it opts into the
@@ -129,15 +138,26 @@ async function beginMergeTrain(
   label: string,
   memberWorkspaceIds: string[],
   database: Database,
-): Promise<{ trainId: string; projectId: string } | null> {
+): Promise<{ trainId: string; projectId: string } | null | "already_in_flight"> {
   // The gate is per-PROJECT (it reads verify_script_<projectId>), and WorkspaceQueueInfo
   // carries only issueId — resolve the project the same way computePlan does.
   const issueRows = await getMergeQueueIssueRows([first.issueId], database);
   const projectId = issueRows[0]?.projectId ?? null;
   if (!projectId) return null;
 
+  // #1158: reuse an already-`assembling`/`gating` train for this EXACT member set instead of
+  // minting a duplicate row for a retry of the same batch.
   const existing = await findActiveMergeTrainForMembers(projectId, memberWorkspaceIds, database).catch(() => undefined);
   if (existing) return { trainId: existing.id, projectId };
+
+  // #1153: refuse a SECOND train for a project that already has one unfinished
+  // (`assembling`/`gating`) with a DIFFERENT member set. This is the seam every caller goes
+  // through — the batching-window orchestrator also checks this before releasing
+  // (`auto-merge-orchestrator.ts`), but an explicit `strategy: "train"` request via
+  // `POST /api/merge-queue` reaches this function directly, so the invariant has to hold here
+  // too rather than only upstream.
+  const active = await listActiveMergeTrainsForProject(projectId, ["assembling", "gating"], database);
+  if (active.length > 0) return "already_in_flight";
 
   const trainId = randomUUID();
   await createMergeTrain({ id: trainId, projectId, label, memberWorkspaceIds }, database);
@@ -152,8 +172,31 @@ async function beginMergeTrain(
 async function finishMergeTrain(
   trainId: string,
   result: Awaited<ReturnType<typeof runMergeTrain>>,
+  members: Array<{ workspaceId: string }>,
   database: Database,
 ): Promise<void> {
+  // #1153: an operator's cancel (POST /trains/:id/cancel) marks the row `abandoned` while this
+  // run may still be in flight — there is no cancellation token wired into `runMergeTrain`, so
+  // the run itself keeps going, but its eventual result must not overwrite the operator's
+  // verdict back to `landed`/`red`. The gate/land work already happened either way; only the
+  // BOOKKEEPING is skipped.
+  const current = await getMergeTrain(trainId, database).catch(() => undefined);
+  if (current?.state === "abandoned") {
+    console.log(`[merge-train] ${trainId} finished after being cancelled — leaving it abandoned`);
+    return;
+  }
+  // #1154: a red train whose failure was never attributed to any individual member (an
+  // environment failure — see `isEnvironmentFailure` — skips bisect on purpose) used to persist
+  // `landed: [], dropped: []` with nothing else, so the evidence named NONE of the members it
+  // held for the train's whole life. `unresolved` is every member that is neither landed, nor
+  // dropped during assembly, nor individually gate-rejected by a bisect — i.e. every member
+  // whose disposition is "the batch failed and this member shares that verdict, unattributed".
+  const accounted = new Set([
+    ...result.landed.map((m) => m.workspaceId),
+    ...result.dropped.map((d) => d.member.workspaceId),
+    ...result.gateRejected.map((r) => r.member.workspaceId),
+  ]);
+  const unresolved = members.filter((m) => !accounted.has(m.workspaceId)).map((m) => m.workspaceId);
   await updateMergeTrainState(trainId, {
     state: result.landed.length > 0 ? "landed" : "red",
     gateEvidence: {
@@ -162,6 +205,7 @@ async function finishMergeTrain(
       landed: result.landed.map((m) => m.workspaceId),
       dropped: result.dropped.map((d) => ({ workspaceId: d.member.workspaceId, reason: d.reason })),
       mergeSha: result.mergeSha ?? null,
+      ...(unresolved.length > 0 ? { unresolved } : {}),
     },
     bisectResult: result.gateRejected.length > 0
       ? { gateRejected: result.gateRejected.map((r) => ({ workspaceId: r.member.workspaceId, reason: r.reason })) }
@@ -204,6 +248,15 @@ export function createMergeTrainRunner(deps: {
     }));
 
     const trainStart = await beginMergeTrain(first, label, members.map((m) => m.workspaceId), database);
+    if (trainStart === "already_in_flight") {
+      // #1153: never assemble a second train while one is already unfinished — that is exactly
+      // what turned a queue into a livelock (each new train contends for the repo lock the
+      // first is holding). Leave these members as-is; the next window release (or an operator
+      // retry) picks them up once the in-flight train finishes.
+      yield { type: "skipped", workspaceId: first.id, issueNumber: first.issueNumber, issueTitle: first.issueTitle, reason: "a merge train is already in flight for this project — not assembling a second one" };
+      yield { type: "done", merged: [], failed: [], skipped: members.map((m) => m.workspaceId) };
+      return;
+    }
     if (!trainStart) {
       // Fail closed rather than gate-less: without a project there is no verify_script to run,
       // and a train that skips the gate is exactly what this feature must never become.
@@ -213,7 +266,21 @@ export function createMergeTrainRunner(deps: {
     }
     const { trainId, projectId } = trainStart;
 
-    const repoLock = await acquireQueueRepoLock(repoPath, `merge-train:${label}`);
+    // #1153: bounded shorter than the per-workspace queue's 90-minute budget — a train that
+    // cannot get the lock within this window is ABANDONED (not left polling), since re-assembly
+    // is cheap and a livelock is exactly nine 90-minute waiters queued behind one holder that
+    // itself can never catch up. Combined with `beginMergeTrain` now refusing a second train
+    // while one is already in flight (below), this is the only wait a train ever takes.
+    let repoLock: Awaited<ReturnType<typeof acquireQueueRepoLock>>;
+    try {
+      repoLock = await acquireQueueRepoLock(repoPath, `merge-train:${label}`, { timeoutMs: MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS });
+    } catch (err) {
+      const reason = `could not acquire the repo lock within ${Math.round(MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS / 60_000)}m: ${errorMessage(err)}`;
+      await updateMergeTrainState(trainId, { state: "abandoned", reconciledReason: reason, finishedAt: new Date().toISOString() }, database).catch(() => undefined);
+      yield { type: "error", workspaceId: first.id, issueNumber: first.issueNumber, issueTitle: first.issueTitle, error: `train abandoned: ${reason}` };
+      yield { type: "done", merged: [], failed: members.map((m) => m.workspaceId), skipped: [] };
+      return;
+    }
     const heartbeat = setInterval(() => repoLock.heartbeat(), 15_000);
 
     let result: Awaited<ReturnType<typeof runMergeTrain>> | null = null;
@@ -235,6 +302,31 @@ export function createMergeTrainRunner(deps: {
               pathNamespace: "train",
               ...(await resolveWorktreeClaims(database, { label: "merge-train-gate" })),
             });
+            // #1154: a builder's worktree gets the project's setup/install script run against
+            // it before anything else touches it (`workspace-provision.service.ts`); this
+            // staging worktree is created fresh by `createWorktree` above with none of that —
+            // so on a project whose dependencies are per-worktree (install-per-worktree, not a
+            // symlink into main) the train verified a tree that was never actually installed.
+            // Provision it the same way a real workspace is, best-effort: a setup failure here
+            // is reported through the gate result below rather than thrown, since a project with
+            // no setup script configured (installMode "symlink", or none at all) must still gate
+            // normally.
+            const setupScript = await getProjectSetupScript(projectId, database).catch(() => null);
+            if (setupScript && setupScript.trim()) {
+              noteMergeGatePhase(`train:${label}`, "install", setupScript);
+              const setup = await runSetupScript(gateWorktree, setupScript, {
+                timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS,
+              }).catch((err) => ({ exitCode: 1, stdout: "", stderr: errorMessage(err), timedOut: false }));
+              if (setup.exitCode !== 0 && !setup.timedOut) {
+                return {
+                  passed: false,
+                  message:
+                    `train staging worktree setup failed (exit ${setup.exitCode}) before the gate could run — ` +
+                    `dependencies were never installed for this tree, so the gate could not verify anything: ` +
+                    `${(setup.stderr || setup.stdout || "no output").slice(0, 500)}`,
+                };
+              }
+            }
             // `memberWorkspaceIds`: the synthetic `train:<label>` id matches no `repos` row, so
             // without it the #628 deferred-install check passes vacuously for the whole train.
             const gate = await runPreMergeGate(
@@ -275,13 +367,18 @@ export function createMergeTrainRunner(deps: {
           // mergedAt/status/comment bookkeeping the reconcilers depend on.
           await reconcileAlreadyMerged(workspaceId);
         },
+        // #1154: a missing-module gate failure is the staging worktree's environment, not any
+        // member's code — bisecting it burns gate runs (observed: 9 runs, 3h23m, nothing
+        // landed) to reach the same verdict every time, and risks blaming an arbitrary member.
+        // Reuses the same signature the gate's own #169 install-retry already matches against.
+        isEnvironmentFailure: looksLikeMissingDepsFailure,
       });
     } finally {
       clearInterval(heartbeat);
       repoLock.release();
     }
 
-    await finishMergeTrain(trainId, result, database);
+    await finishMergeTrain(trainId, result, members, database);
 
     for (const d of result.dropped) {
       yield { type: "skipped", workspaceId: d.member.workspaceId, issueNumber: d.member.issueNumber ?? null, issueTitle: "", reason: `dropped from train: ${d.reason.slice(0, 200)}` };
