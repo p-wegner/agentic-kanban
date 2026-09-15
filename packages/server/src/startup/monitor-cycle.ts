@@ -32,6 +32,7 @@ import {
   closeDirectWorkspaceAsDone,
   getProjectStatusIdByName,
   mergeWorkspaceWithFixFallback,
+  resolveReviewingStoppedGateToken,
   type LogMonitorActionFn,
 } from "./monitor-cycle-actions.js";
 import type { MonitorWorkspaceActions } from "./monitor-workspace-actions.js";
@@ -659,26 +660,25 @@ async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSess
       // auto_merge_in_review path above). `baseBranch` was also omitted here, which degrades
       // every diff-derived gate decision to its most expensive branch — the docs-only skip and
       // the test-package scoping can never fire without it.
-      const gateWorkspace = { id: ws.wsId, workingDir: ws.workingDir, baseBranch: ws.baseBranch };
-      const gate = await runGateWithEvidence({
-        workspace: gateWorkspace,
-        projectId: ws.projectId,
-        source: "monitor-cycle gate (reviewing+stopped)",
-        database: db,
-      });
-      if (!gate.passed) {
-        console.log(`[monitor] Withholding merge for reviewing+stopped workspace ${ws.wsId}  pre-merge gate failed (${gate.stage}): ${gate.message}`);
-        emitButlerSystemEvent({
+      //
+      // #1161: `resolveReviewingStoppedGateToken` also consults the monitor's own memory of
+      // gate verdicts it produced, so a candidate that already failed at this exact sha (or
+      // whose gate is still running from a timed-out earlier cycle) is skipped rather than
+      // re-gated — see its doc comment in monitor-cycle-actions.ts.
+      const outcome = await resolveReviewingStoppedGateToken(
+        ws,
+        ws.projectId,
+        (projectId, event) => deps.boardEvents.broadcast(projectId, event),
+        (gate) => emitButlerSystemEvent({
           projectId: ws.projectId,
           kind: "merge_failed",
           workspaceId: ws.wsId,
           issueNumber: ws.issueNumber ?? undefined,
           text: `Held reviewing+stopped workspace ${ws.wsId} (issue #${ws.issueNumber ?? "?"}): pre-merge gate failed (${gate.stage}). ${gate.message.slice(0, 300)}`,
-        });
-        deps.boardEvents.broadcast(ws.projectId, "workflow_error");
-        return;
-      }
-      gateToken = gate.token ?? RUN_GATE;
+        }),
+      );
+      if (outcome.kind === "skip") return;
+      gateToken = outcome.token;
     }
     if (!canStartMerge(ws)) return;
     // Deliberately NO fix-and-merge fallback on this path: a reviewing
@@ -914,10 +914,16 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
       // project's next cycle — from ever finishing.
       const abandoned = await raceCandidateTimeout(processCandidate(wsList[i]), candidateTimeoutMs);
       if (abandoned) {
-        const remaining = wsList.length - i;
-        console.warn(`[monitor] Workspace ${wsList[i].wsId} (project ${projectId}) did not finish within ${candidateTimeoutMs}ms  abandoning the wait and deferring ${remaining} remaining candidate(s) to the next cycle`);
-        deferredProjectIds.push(projectId);
-        return false;
+        // #1161 — ROTATE past it, don't defer everyone behind it. Deferring the whole
+        // remainder made the abandoned candidate the head of the walk again next cycle (nothing
+        // about its position changed), so ONE slow/red workspace could defer every other
+        // candidate forever — measured: 20 of 27 verify-chain lines over ~2h were the same
+        // workspace, while 9 other candidates (including the tickets that would have unstuck
+        // the board) never got a turn. The abandoned work keeps running detached (a JS promise
+        // cannot be cancelled) and is tracked by `monitor-gate-recall`'s in-flight set, so a
+        // later cycle skips starting a SECOND chain for it rather than losing track of it.
+        console.warn(`[monitor] Workspace ${wsList[i].wsId} (project ${projectId}) did not finish within ${candidateTimeoutMs}ms  abandoning the wait for it (it kept up to ${wsList.length - i - 1} other candidate(s) waiting behind it: ${wsList.slice(i + 1).map((c) => c.wsId).join(", ") || "none"}) and moving on to them this cycle instead of deferring them too`);
+        continue;
       }
     }
     return true;
