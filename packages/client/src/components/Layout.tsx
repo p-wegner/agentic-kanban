@@ -7,7 +7,7 @@ import { ProjectTabs } from "./ProjectTabs.js";
 import { ProjectSelector } from "./ProjectSelector.js";
 import { NotificationBell } from "./NotificationBell.js";
 import { WaitingOnYouChip } from "./WaitingOnYouChip.js";
-import { RiskPostureChip } from "./RiskPostureChip.js";
+import { DeliveryChip } from "./DeliveryChip.js";
 import { ProjectActionButtons } from "./ProjectActionButtons.js";
 import { useInboxCountsByProject } from "../hooks/useInbox.js";
 import type { NotificationEvent } from "../hooks/useActivityNotifications.js";
@@ -321,8 +321,8 @@ export function Layout({
             />
             {/* #411: what the ACTIVE project needs from a human, in every view. */}
             <WaitingOnYouChip activeProjectId={activeProjectId ?? null} />
-            {/* #912: which risk posture governs this project's review/gate/merge trade-offs. */}
-            <RiskPostureChip activeProjectId={activeProjectId ?? null} />
+            {/* #912/#1155/#1156: effective risk posture + merge-train size, editable via the Delivery popover. */}
+            <DeliveryChip activeProjectId={activeProjectId ?? null} />
             <ProjectActionButtons
               projects={projects}
               activeProjectId={activeProjectId ?? null}
