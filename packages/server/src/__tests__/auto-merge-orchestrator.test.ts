@@ -155,6 +155,24 @@ describe("auto-merge orchestrator", () => {
     await expect(orchestrator.findCompletedWorkspaceIds()).resolves.toHaveLength(0);
   });
 
+  it("excludes ONE held workspace without disabling the project's other candidates (#1164)", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusIds } = await seedProject(db);
+    const held = await seedWorkspace(db, { projectId, statusId: statusIds["In Review"], readyForMerge: true });
+    const notHeld = await seedWorkspace(db, { projectId, statusId: statusIds["In Review"], readyForMerge: true });
+    const { setMergeHold, clearMergeHold } = await import("../repositories/merge-hold.repository.js");
+    await setMergeHold(held, { reason: "red gate", heldAt: new Date().toISOString() }, db);
+
+    const orchestrator = createAutoMergeOrchestrator({ database: db });
+    const heldIds = await orchestrator.findCompletedWorkspaceIds();
+    expect(heldIds).not.toContain(held);
+    expect(heldIds).toContain(notHeld);
+
+    await clearMergeHold(held, db);
+    const releasedIds = await orchestrator.findCompletedWorkspaceIds();
+    expect(releasedIds).toContain(held);
+  });
+
   it("includes idle In Review workspaces only when auto_merge_in_review is enabled", async () => {
     const { db } = createTestDb();
     const { projectId, statusIds } = await seedProject(db);

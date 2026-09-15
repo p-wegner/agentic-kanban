@@ -13,7 +13,11 @@ import {
   workspaceTurnBody, rejectPlanBody, createWorkspaceCommentBody,
   updateWorkspaceCommentBody, resolveWorkspaceCommentBody,
 } from "./workspace-action-body-schemas.js";
-import { completeMergeJob, describeMergeJobAttempts, failMergeJob, getMergeJob, startMergeJob, type MergeJob } from "../services/merge-job.service.js";
+import { cancelMergeJob, completeMergeJob, describeMergeJobAttempts, failMergeJob, getMergeJob, startMergeJob, type MergeJob } from "../services/merge-job.service.js";
+import { requestMergeGateCancellation } from "../services/merge-cancellation.js";
+import { cancelQueuedVerifyChain } from "../services/verify-chain-semaphore.js";
+import { releaseMergeLockForWorkspace } from "../services/workspace-internals.js";
+import { clearMergeHold, getMergeHold, setMergeHold } from "../repositories/merge-hold.repository.js";
 import { describePersistedGateVerdict } from "../services/workspace-merge-gate.js";
 import { getMergeRun, type MergeRunRow } from "../repositories/merge-run.repository.js";
 import { listMergeGateDiscards, type MergeGateDiscardRow } from "../repositories/merge-gate-discard.repository.js";
@@ -694,6 +698,70 @@ export function createWorkspaceActionsRoute(
     const result = await clearWorkspaceMergeBackoff(id, database);
     if (!result) return c.json({ error: "Workspace not found" }, 404);
     return c.json(result);
+  });
+
+  // POST /api/workspaces/:id/merge/cancel — stop THIS workspace's merge job (#1164).
+  //
+  // Before this there was no targeted lever: a genuinely red gate held its verify slot
+  // indefinitely, and the only recourse was killing gate processes by hand (forbidden — has
+  // taken the stable board down before) or `auto_merge_disabled_<projectId>`, which freezes
+  // merging for the WHOLE project rather than the one stuck workspace. This does four things,
+  // each independently idempotent so calling it on a workspace with nothing running is a
+  // harmless 200 rather than an error:
+  //   - removes a QUEUED (not yet admitted) verify chain from the semaphore, freeing the slot
+  //     for the next waiter immediately, before it ever ran;
+  //   - aborts an IN-FLIGHT gate run via its `AbortSignal` — `runSetupScript` (#989) kills the
+  //     spawned process tree on abort and resolves rather than rejects, so no orphan survives;
+  //   - releases the in-process repo merge lock if this workspace holds it, so a genuinely
+  //     stuck merge does not also block every other workspace targeting the same repo;
+  //   - marks the tracked merge job `cancelled` so `GET /merge-status` reports the true outcome
+  //     instead of a job that silently stops updating.
+  router.post("/:id/merge/cancel", async (c) => {
+    const id = c.req.param("id");
+    const body = await parseOptionalJsonBody<{ reason?: string }>(c);
+    const reason = body?.reason?.trim() || "cancelled by operator";
+
+    const wasQueued = cancelQueuedVerifyChain(id);
+    const wasGating = requestMergeGateCancellation(id);
+    const heldLock = releaseMergeLockForWorkspace(id);
+    const hadJob = cancelMergeJob(id, reason);
+
+    return c.json({
+      workspaceId: id,
+      cancelled: wasQueued || wasGating || heldLock || hadJob,
+      wasQueued,
+      wasGating,
+      releasedLock: heldLock,
+      jobCancelled: hadJob,
+      reason,
+    });
+  });
+
+  // POST /api/workspaces/:id/merge-hold — park a workspace so the monitor walk, the auto-merge
+  // orchestrator, and the merge-train reconciler all skip it, WITHOUT disabling auto-merge for
+  // the rest of the project (#1164). Idempotent: re-holding an already-held workspace just
+  // updates the reason/timestamp.
+  router.post("/:id/merge-hold", async (c) => {
+    const id = c.req.param("id");
+    const body = await parseOptionalJsonBody<{ reason?: string }>(c);
+    const heldAt = new Date().toISOString();
+    await setMergeHold(id, { reason: body?.reason?.trim() || null, heldAt }, database);
+    return c.json({ workspaceId: id, held: true, reason: body?.reason?.trim() || null, heldAt });
+  });
+
+  // DELETE /api/workspaces/:id/merge-hold — release the hold. A no-op (not an error) when the
+  // workspace was not held.
+  router.delete("/:id/merge-hold", async (c) => {
+    const id = c.req.param("id");
+    await clearMergeHold(id, database);
+    return c.json({ workspaceId: id, held: false });
+  });
+
+  // GET /api/workspaces/:id/merge-hold — current hold state, for the UI panel.
+  router.get("/:id/merge-hold", async (c) => {
+    const id = c.req.param("id");
+    const row = await getMergeHold(id, database);
+    return c.json(row ? { workspaceId: id, held: true, reason: row.reason, heldAt: row.heldAt } : { workspaceId: id, held: false });
   });
 
   // GET /api/workspaces/:id/already-merged-status — check if branch is already merged without modifying state

@@ -647,6 +647,32 @@ export interface ActiveMergeLock {
 export const activeMerges = new Map<string, ActiveMergeLock>();
 
 /**
+ * Release the merge lock held by ONE workspace (#1164), if it currently holds one.
+ *
+ * `activeMerges` is keyed by `repoPath`, not `workspaceId` — a cancel route only knows the
+ * workspace it wants to stop, so this scans for the entry whose `workspaceId` matches rather
+ * than requiring the caller to already know the repo path. Guarded by identity, same shape as
+ * {@link tryRecoverStaleMergeLock}: only removes an entry that is genuinely this workspace's,
+ * never a newer lock that happens to share a repo path.
+ *
+ * This does NOT settle the lock's `promise` — a waiter genuinely blocked on it (a second merge
+ * queued for the same repo) would otherwise be handed a lock nobody is finishing. It only frees
+ * the SLOT so the next acquirer can take it; the cancelled workspace's own in-flight work is
+ * stopped separately via its `AbortSignal` (`merge-cancellation.ts`), and that abort is what lets
+ * `mergeWorkspace`'s own `finally` reach the code that would otherwise have cleared this entry.
+ */
+export function releaseMergeLockForWorkspace(workspaceId: string): boolean {
+  for (const [repoPath, lock] of activeMerges) {
+    if (lock.workspaceId === workspaceId) {
+      activeMerges.delete(repoPath);
+      console.warn(`[merge-lock] released repo lock for cancelled workspace ${workspaceId} (repoPath=${repoPath}) (#1164)`);
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * In-flight `mergeWorkspace` calls, keyed by workspace id — the join-or-reuse map behind
  * `mergeWorkspaceDeduped` (#1157).
  *
