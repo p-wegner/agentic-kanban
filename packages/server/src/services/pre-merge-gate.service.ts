@@ -43,6 +43,7 @@ import {
 } from "./pre-merge-gate-tier.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
+import { beginMergeGateRun, endMergeGateRun } from "./merge-cancellation.js";
 // #221/#490's failure-message shaping lives in its own module now (this file crossed the
 // 1000-line god-module ceiling). Re-exported below so its importers are unchanged.
 import { summarizeVerifyFailure } from "./verify-failure-summary.js";
@@ -193,6 +194,8 @@ export async function runPreMergeGate(
   projectId: string,
   database: Database,
 ): Promise<PreMergeGateResult> {
+  // #1164 — reachable from `POST /:id/merge/cancel`; `endMergeGateRun` below is its counterpart.
+  const cancelSignal = beginMergeGateRun(workspace.id);
   // ---- #628 deferred dependency installs ---------------------------------------------------
   // With install mode `background` the agent launches before its repos' dependencies exist, so
   // the protection `setupFailedBlocking` (#169) gave by refusing the LAUNCH has to be here
@@ -556,12 +559,8 @@ export async function runPreMergeGate(
           chainsInFlight: workers.chainsInFlight,
         });
         startedAt = Date.now();
-        return runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv }).catch((e) => ({
-          exitCode: 1,
-          stdout: "",
-          stderr: String(e),
-          timedOut: false,
-        }));
+        return runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv, signal: cancelSignal })
+          .catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false }));
       });
       lastVerifyRunMs = Date.now() - startedAt;
       // Total by construction (see `verify-step-timings.ts`): an unparseable or step-less run
@@ -613,6 +612,7 @@ export async function runPreMergeGate(
             runSetupScript(workingDir, verifyScript!, {
               timeoutMs: verifyTimeoutMs,
               env: { ...verifyEnv, KANBAN_RETRY_TEST_FILES: retryScope },
+              signal: cancelSignal,
             }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
           );
         },
@@ -623,6 +623,7 @@ export async function runPreMergeGate(
             runSetupScript(workingDir, command, {
               timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS,
               env: gradleEnv,
+              signal: cancelSignal,
             }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
           );
         },
@@ -690,6 +691,8 @@ export async function runPreMergeGate(
     // best-effort loop does not count against `runPreMergeGate`'s own god-module branch budget.
     await recordFlakySuitesAsRedDebt({ flakySuites: outcome.flakySuites, projectId, workingDir, database });
     } finally {
+      // #1164 — spent either way; drop it so a later cancel can't mistake this for a live gate.
+      endMergeGateRun(workspace.id);
       // Best-effort by design (#352's root cause): on Windows the directory cannot be removed
       // while any surviving grandchild of the verify run still holds it as its cwd. Log it so a
       // recurring failure is visible instead of silently accumulating again; never throw, because

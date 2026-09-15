@@ -18,6 +18,8 @@ import { registerStartWorkspace } from "./tools/start-workspace.js";
 import { registerGetWorkspaceDiff } from "./tools/get-workspace-diff.js";
 import { registerGetWorkspaceScorecard } from "./tools/get-workspace-scorecard.js";
 import { registerMergeWorkspace } from "./tools/merge-workspace.js";
+import { registerCancelMerge } from "./tools/cancel-merge.js";
+import { registerSetMergeHold, registerReleaseMergeHold } from "./tools/merge-hold.js";
 import { registerCloseWorkspace } from "./tools/close-workspace.js";
 import { registerReopenWorkspace } from "./tools/reopen-workspace.js";
 import { registerStopWorkspace } from "./tools/stop-workspace.js";
@@ -142,6 +144,9 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   get_workspace_diff: registerGetWorkspaceDiff,
   get_workspace_scorecard: registerGetWorkspaceScorecard,
   merge_workspace: registerMergeWorkspace,
+  cancel_merge: registerCancelMerge,
+  set_merge_hold: registerSetMergeHold,
+  release_merge_hold: registerReleaseMergeHold,
   close_workspace: registerCloseWorkspace,
   reopen_workspace: registerReopenWorkspace,
   stop_workspace: registerStopWorkspace,

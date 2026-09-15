@@ -100,3 +100,6 @@ export type { MergeTrainState } from "./merge-trains.js";
 export { workspaceMergeRun, workspaceMergeRunRelations } from "./workspace-merge-run.js";
 // #1030: one row per DISCARDED gate verdict (#243) — sha pair, base-move files, impact selection.
 export { mergeGateDiscards, mergeGateDiscardsRelations } from "./merge-gate-discards.js";
+// #1164: an operator-placed per-workspace hold, honored by the monitor walk, the auto-merge
+// orchestrator, and the merge-train reconciler — see the module header for why.
+export { workspaceMergeHold, workspaceMergeHoldRelations } from "./workspace-merge-hold.js";
