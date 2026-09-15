@@ -13,7 +13,7 @@ vi.mock("../db/index.js", async () => {
   return { db, writeDb: db };
 });
 
-import { issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
+import { issueDependencies, issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import type { MachineCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import type { AutopilotStatusResponse } from "@agentic-kanban/shared/types";
@@ -36,6 +36,8 @@ interface Seed {
   todo?: number;
   /** Todo tickets that already have an open workspace — never ready. */
   todoWithOpenWorkspace?: number;
+  /** Todo tickets that `depends_on` the first running ticket — blocked until it lands (#1162). */
+  todoBlockedOnRunning?: number;
 }
 
 let issueCounter = 0;
@@ -52,7 +54,7 @@ async function seed(opts: Seed): Promise<string> {
     statusIds[name] = randomUUID();
     await db.insert(projectStatuses).values({ id: statusIds[name], projectId, name, sortOrder: i, isDefault: i === 0, createdAt: now });
   }
-  const addIssue = async (status: string, workspaceStatus?: string) => {
+  const addIssue = async (status: string, workspaceStatus?: string): Promise<string> => {
     const id = randomUUID();
     issueCounter++;
     await db.insert(issues).values({
@@ -65,8 +67,14 @@ async function seed(opts: Seed): Promise<string> {
         baseBranch: "main", status: workspaceStatus, createdAt: now, updatedAt: now,
       });
     }
+    return id;
   };
-  for (let i = 0; i < (opts.running ?? 0); i++) await addIssue("In Progress", "active");
+  const runningIds: string[] = [];
+  for (let i = 0; i < (opts.running ?? 0); i++) runningIds.push(await addIssue("In Progress", "active"));
+  for (let i = 0; i < (opts.todoBlockedOnRunning ?? 0); i++) {
+    const id = await addIssue("Todo");
+    await db.insert(issueDependencies).values({ id: randomUUID(), issueId: id, dependsOnId: runningIds[0], type: "depends_on", createdAt: now });
+  }
   for (let i = 0; i < (opts.inProgressUnstarted ?? 0); i++) await addIssue("In Progress");
   for (let i = 0; i < (opts.todo ?? 0); i++) await addIssue("Todo");
   for (let i = 0; i < (opts.todoWithOpenWorkspace ?? 0); i++) await addIssue("Todo", "idle");
@@ -178,6 +186,20 @@ describe("GET /api/projects/:id/autopilot (#1102)", () => {
     const { body } = await readAutopilot(projectId, roomy);
     expect(body).toMatchObject({ eligibleCount: 0, willStartNextCycle: 0, holdReason: "no_ready_tickets" });
     expect(await monitorStarts(projectId, roomy)).toBe(0);
+  });
+
+  it("dependency-blocked backlog: holds as no_ready_tickets but COUNTS the blocked tickets (#1162)", async () => {
+    const projectId = await seed({ bullseye: { activeAgentsTarget: 3 }, running: 1, todoBlockedOnRunning: 2, todoWithOpenWorkspace: 1 });
+    const { body } = await readAutopilot(projectId, roomy);
+    // The open-workspace ticket is not ready for another reason, so it is not "blocked by dependencies".
+    expect(body).toMatchObject({ eligibleCount: 0, blockedByDependencies: 2, willStartNextCycle: 0, holdReason: "no_ready_tickets" });
+    expect(await monitorStarts(projectId, roomy)).toBe(0);
+  });
+
+  it("an empty backlog reports zero dependency-blocked tickets", async () => {
+    const projectId = await seed({ bullseye: { activeAgentsTarget: 3 }, todoWithOpenWorkspace: 1 });
+    const { body } = await readAutopilot(projectId, roomy);
+    expect(body.blockedByDependencies).toBe(0);
   });
 
   it("reports the default limit as not configured when the project has no Bullseye target", async () => {

@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
-import { computeBoardStats } from "../lib/boardStats.js";
+import {
+  AGENT_KIND_LABEL,
+  PULSE_TERMS,
+  computeBoardStats,
+  describeAgentActivity,
+  formatAgentsRunning,
+  formatTicketFlow,
+  type AgentActivity,
+  type AgentKind,
+} from "../lib/boardStats.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import { useDismissable } from "../hooks/useDismissable.js";
 import { Icon } from "./Icon.js";
@@ -40,14 +49,13 @@ export function BoardStats({
   const isFiltered = useBoardFilterStore((s) => !!s.searchQuery);
   const {
     allColumns,
-    totalActive,
     total,
     doneCount,
     cancelledCount,
     nonCancelledTotal,
     completionPct,
-    activeWorkspaces,
-    profileCounts,
+    ticketFlow,
+    agents,
   } = computeBoardStats(activeColumns, archiveColumns);
 
   const [commitCount, setCommitCount] = useState<number | null>(null);
@@ -127,7 +135,8 @@ export function BoardStats({
           onClick={() => setShowBreakdown((v) => !v)}
           aria-haspopup="dialog"
           aria-expanded={showBreakdown}
-          title={total > 0 ? `${doneCount} of ${nonCancelledTotal} done (${completionPct}%) — click for full breakdown` : "Board breakdown"}
+          data-testid="board-stats-tickets"
+          title={`${formatTicketFlow(ticketFlow)}${total > 0 ? `\n${doneCount} of ${nonCancelledTotal} done (${completionPct}%)` : ""}\n${PULSE_TERMS.tickets} Click for the full breakdown.`}
           className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
         >
           {total > 0 && (
@@ -156,12 +165,18 @@ export function BoardStats({
               <span className="text-xs font-medium text-gray-600 dark:text-gray-400">filtered</span>
             </>
           ) : (
-            <>
-              <span key={popKey} className={`text-sm font-bold text-gray-800 dark:text-gray-100 ${popKey > 0 ? "count-pop" : ""}`}>
-                {totalActive}
-              </span>
-              <span className="text-xs font-medium text-gray-600 dark:text-gray-400">open</span>{/* done count + % live in the ring popover */}
-            </>
+            // #1162: the per-column flow, not a bare "N open", which read as one more agent count next
+            // to "active" and the Autopilot's "running". Done count + % live in the popover.
+            <span key={popKey} className={`flex items-center gap-1 text-xs text-gray-600 dark:text-gray-400 ${popKey > 0 ? "count-pop" : ""}`}>
+              {ticketFlow.length === 0 ? (
+                <span className="font-medium">no open tickets</span>
+              ) : ticketFlow.map((c, i) => (
+                <span key={c.id} className="whitespace-nowrap" data-testid={`board-stats-flow-${c.name}`}>
+                  {i > 0 && <span className="text-gray-400 dark:text-gray-500 mr-1">·</span>}
+                  <span className="font-bold text-gray-800 dark:text-gray-100">{c.count}</span> {c.label}
+                </span>
+              ))}
+            </span>
           )}
           <Icon className={`w-2.5 h-2.5 text-gray-400 transition-transform ${showBreakdown ? "rotate-180" : ""}`} d="m19.5 8.25-7.5 7.5-7.5-7.5" />
         </button>
@@ -242,27 +257,107 @@ export function BoardStats({
           it shares the Board tab's inline activity-summary treatment — one
           consistent tab-header pattern instead of a standalone pill here. */}
 
-      {/* Active agents — live, changing signal stays on the pulse line */}
-      {activeWorkspaces > 0 && (
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800">
+      {/* Agents running (#1162): the ONE agent count in the header. Kind and profile split are
+          one click away, and per-profile counts include running agents only. */}
+      <AgentsRunningChip agents={agents} />
+    </div>
+  );
+}
+
+const KIND_DOT: Record<AgentKind, string> = {
+  building: "bg-indigo-500",
+  reviewing: "bg-accent-500",
+  fixing: "bg-amber-500",
+};
+
+function AgentsRunningChip({ agents }: { agents: AgentActivity }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useDismissable(ref, open, () => setOpen(false));
+  const live = agents.running > 0;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        data-testid="board-stats-agents"
+        data-running={agents.running}
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={describeAgentActivity(agents)}
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-colors whitespace-nowrap ${
+          live
+            ? "bg-indigo-50 dark:bg-indigo-950 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900"
+            : "bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:bg-gray-200 dark:hover:bg-gray-700"
+        }`}
+      >
+        {live ? (
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500" />
           </span>
-          <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">{activeWorkspaces}</span>
-          <span className="text-xs text-indigo-600 dark:text-indigo-400">active</span>
+        ) : (
+          <span className="w-1.5 h-1.5 rounded-full bg-gray-400 shrink-0" />
+        )}
+        <span className={`text-xs ${live ? "text-indigo-700 dark:text-indigo-300" : "text-gray-500 dark:text-gray-400"}`}>
+          {live ? (
+            <>
+              <span className="font-semibold">{agents.running}</span> agent{agents.running === 1 ? "" : "s"} running
+            </>
+          ) : "no agents running"}
+        </span>
+        <Icon className={`w-2.5 h-2.5 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+      </button>
+      {open && (
+        <div
+          role="dialog"
+          aria-label="Agents running"
+          data-testid="board-stats-agents-popover"
+          className="absolute top-full left-0 mt-1 z-30 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 shadow-lg flex flex-col gap-2 text-xs text-gray-700 dark:text-gray-300"
+        >
+          <div className="font-semibold text-gray-800 dark:text-gray-100">{formatAgentsRunning(agents.running)}</div>
+          {live && (
+            <>
+              <div className="flex flex-col gap-1">
+                {(Object.keys(AGENT_KIND_LABEL) as AgentKind[]).map((kind) => (
+                  <div key={kind} className="flex items-center justify-between" data-testid={`board-stats-agents-kind-${kind}`}>
+                    <span className="flex items-center gap-1.5">
+                      <span className={`w-1.5 h-1.5 rounded-full ${KIND_DOT[kind]}`} />
+                      {AGENT_KIND_LABEL[kind]}
+                    </span>
+                    <span className="font-semibold tabular-nums">{agents.byKind[kind]}</span>
+                  </div>
+                ))}
+              </div>
+              {agents.byProfile.length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-gray-100 dark:border-gray-800">
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400">By profile:</span>
+                  {agents.byProfile.map(({ profile, count }) => (
+                    <span
+                      key={profile}
+                      data-testid={`board-stats-agents-profile-${profile}`}
+                      title={`${count} running agent${count === 1 ? "" : "s"} on profile ${profile}`}
+                      className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-brand-50 dark:bg-brand-900/40 border border-brand-200 dark:border-brand-700 text-brand-700 dark:text-brand-300"
+                    >
+                      <span className="max-w-[120px] truncate">{profile}</span>
+                      <span className="font-semibold">{count}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {agents.outsideInProgress > 0 && (
+                <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                  {agents.outsideInProgress} of them on tickets outside In Progress, so not in WIP.
+                </div>
+              )}
+            </>
+          )}
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 leading-snug pt-2 border-t border-gray-100 dark:border-gray-800">
+            {PULSE_TERMS.agentsRunning}
+          </p>
         </div>
       )}
-
-      {/* Active agent profiles — live signal, always visible at every screen size */}
-      {[...profileCounts.entries()].map(([profile, count]) => (
-        <div key={profile} className="flex items-center gap-1 px-2 py-1 rounded-full bg-brand-50 dark:bg-brand-900/40 border border-brand-200 dark:border-brand-700" title={`${count} active ${profile} agent${count === 1 ? "" : "s"}`}>
-          <span className="w-1.5 h-1.5 rounded-full bg-brand-500 shrink-0" />
-          <span className="text-xs text-brand-700 dark:text-brand-300 max-w-[120px] truncate">{profile}</span>
-          <span className="text-xs font-semibold text-brand-700 dark:text-brand-300">{count}</span>
-        </div>
-      ))}
-
     </div>
   );
 }

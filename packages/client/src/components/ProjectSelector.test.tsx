@@ -50,16 +50,16 @@ describe("ActiveAgentsBadge", () => {
   });
 
   it("renders a pluralized label with the count", () => {
-    expect(renderToStaticMarkup(<ActiveAgentsBadge count={1} />)).toContain("1 active agent");
-    expect(renderToStaticMarkup(<ActiveAgentsBadge count={3} />)).toContain("3 active agents");
+    expect(renderToStaticMarkup(<ActiveAgentsBadge count={1} />)).toContain("1 agent running");
+    expect(renderToStaticMarkup(<ActiveAgentsBadge count={3} />)).toContain("3 agents running");
   });
 
   it("renders just the number in compact mode", () => {
     const html = renderToStaticMarkup(<ActiveAgentsBadge count={2} compact />);
     expect(html).toContain(">2<");
     // The spelled-out label appears only in the tooltip (title), never as visible text.
-    expect(html).not.toContain(">2 active agent");
-    expect(html).toContain('title="2 active agents"');
+    expect(html).not.toContain(">2 agents running");
+    expect(html).toContain('title="2 agents running"');
   });
 });
 
@@ -72,6 +72,6 @@ describe("ProjectSelector active agents", () => {
     const html = renderToStaticMarkup(
       <ProjectSelector projects={withCounts} activeProjectId="project-1" onProjectChange={() => undefined} />,
     );
-    expect(html).toContain('title="2 active agents"');
+    expect(html).toContain('title="2 agents running"');
   });
 });

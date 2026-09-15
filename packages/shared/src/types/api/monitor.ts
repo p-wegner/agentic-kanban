@@ -183,6 +183,12 @@ export interface AutopilotStatusResponse {
   /** Tickets that pass the cheap start gates (counting stops at 25 per pass). */
   eligibleCount: number;
   eligibleCountCapped: boolean;
+  /**
+   * Todo/Backlog tickets that pass every cheap start gate EXCEPT the dependency gate — they wait
+   * only on a blocker that has not landed (#1162). Lets the chip say "backlog blocked" instead of
+   * "nothing ready" when the backlog is full but gated. Counted over the same capped scan.
+   */
+  blockedByDependencies: number;
   /** What the next cycle will start: 0 unless `autoStart`. */
   willStartNextCycle: number;
   holdReason: AutopilotHoldReason | null;
