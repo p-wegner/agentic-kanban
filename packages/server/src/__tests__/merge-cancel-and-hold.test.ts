@@ -73,6 +73,35 @@ describe("merge cancel (#1164)", () => {
     expect(cancelQueuedVerifyChain("nothing-queued")).toBe(false);
   });
 
+  it("cancels a queued chain using the REAL label shape the gate/smoke/e2e callers use, not the bare workspace id", async () => {
+    // Regression for the #1164 route bug: `pre-merge-gate.service.ts` and `e2e-smoke-lane.ts`
+    // label their verify-chain waits `"<kind> for workspace <id>"`, never the bare id. A cancel
+    // that only tries the bare id silently never removes a real queued chain.
+    let releaseFirst: () => void = () => {};
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const first = runUnderVerifyChainSemaphore(async () => { await firstGate; }, "holder");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    let secondStarted = false;
+    const second = runUnderVerifyChainSemaphore(async () => {
+      secondStarted = true;
+    }, "verify chain for workspace ws-real-label");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(verifyChainSemaphoreQueueLength()).toBe(1);
+
+    const bareIdCancelled = cancelQueuedVerifyChain("ws-real-label");
+    expect(bareIdCancelled).toBe(false); // bare id never matches — proves the mismatch exists
+
+    const labelled = ["verify chain for workspace ws-real-label", "smoke check for workspace ws-real-label", "E2E smoke lane for workspace ws-real-label"]
+      .some((label) => cancelQueuedVerifyChain(label));
+    expect(labelled).toBe(true);
+    await expect(second).rejects.toThrow(/cancelled while queued/);
+    expect(secondStarted).toBe(false);
+
+    releaseFirst();
+    await first;
+  });
+
   it("aborts the in-flight gate's signal and clears the registry on end", () => {
     const signal = beginMergeGateRun("ws-inflight");
     expect(signal.aborted).toBe(false);

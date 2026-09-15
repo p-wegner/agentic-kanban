@@ -721,7 +721,18 @@ export function createWorkspaceActionsRoute(
     const body = await parseOptionalJsonBody<{ reason?: string }>(c);
     const reason = body?.reason?.trim() || "cancelled by operator";
 
-    const wasQueued = cancelQueuedVerifyChain(id);
+    // #1164 — the verify-chain semaphore's queue label is never the bare workspace id: the
+    // gate's three callers (verify, boot/render smoke, E2E smoke lane — pre-merge-gate.service.ts
+    // and e2e-smoke-lane.ts) each label their wait `"<kind> for workspace <id>"`, and
+    // `cancelQueuedVerifyChain` matches by exact label string. Passing the bare id here matched
+    // nothing, so a genuinely QUEUED chain was never actually removed from the semaphore —
+    // silently defeating the ticket's primary scenario. Try every label a queued wait for this
+    // workspace could carry; at most one is ever queued at a time, so at most one removal fires.
+    const wasQueued = [
+      `verify chain for workspace ${id}`,
+      `smoke check for workspace ${id}`,
+      `E2E smoke lane for workspace ${id}`,
+    ].some((label) => cancelQueuedVerifyChain(label));
     const wasGating = requestMergeGateCancellation(id);
     const heldLock = releaseMergeLockForWorkspace(id);
     const hadJob = cancelMergeJob(id, reason);
