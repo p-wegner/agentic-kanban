@@ -50,12 +50,12 @@ async function seedProject(db: TestDb) {
   return { projectId, statusIds };
 }
 
-async function seedIssue(db: TestDb, projectId: string, statusId: string, issueType = "bug") {
+async function seedIssue(db: TestDb, projectId: string, statusId: string, issueType = "bug", issueNumber = 1) {
   const id = randomUUID();
   const now = new Date().toISOString();
   await db.insert(schema.issues).values({
     id,
-    issueNumber: 1,
+    issueNumber,
     title: "Test issue",
     issueType,
     priority: "medium",
@@ -272,6 +272,36 @@ describe("workflow-engine", () => {
 
     const issue = await db.select().from(schema.issues).where(eq(schema.issues.id, issueId));
     expect(issue[0].statusId).toBe(statusIds["In Review"]);
+  });
+
+  it("cascades the lead's transition to a ticket-group member issue (#1163)", async () => {
+    const { projectId, statusIds } = await seedProject(db);
+    const leadIssueId = await seedIssue(db, projectId, statusIds["Todo"], "bug", 1);
+    const memberIssueId = await seedIssue(db, projectId, statusIds["Todo"], "bug", 2);
+    const wsId = await seedWorkspace(db, leadIssueId);
+    await db.insert(schema.workspaceIssueMembers).values({
+      workspaceId: wsId,
+      issueId: memberIssueId,
+      createdAt: new Date().toISOString(),
+    });
+    await initWorkspaceWorkflow(db as any, { workspaceId: wsId, issueId: leadIssueId });
+
+    const result = await proposeTransition(db as any, {
+      workspaceId: wsId,
+      toNodeName: "Review",
+      summary: "fix done",
+    });
+    expect(result.ok).toBe(true);
+
+    const [lead] = await db.select().from(schema.issues).where(eq(schema.issues.id, leadIssueId));
+    const [member] = await db.select().from(schema.issues).where(eq(schema.issues.id, memberIssueId));
+    expect(lead.statusId).toBe(statusIds["In Review"]);
+    // The member has no workspace row of its own — its card borrows the lead's
+    // workspace-summary (#661), but its OWN issue record (what the board column
+    // and the WIP count read) must follow the lead's transition too, not stay
+    // stuck at whatever status it had when the group started.
+    expect(member.statusId).toBe(statusIds["In Review"]);
+    expect(member.currentNodeId).toBe(lead.currentNodeId);
   });
 
   it("rejects an invalid transition", async () => {
