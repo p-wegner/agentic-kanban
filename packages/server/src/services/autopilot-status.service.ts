@@ -65,31 +65,39 @@ export interface AutopilotStatusDeps {
 interface Tally {
   count: number;
   capped: boolean;
+  /** Candidates that pass every other cheap gate and wait only on an unlanded blocker. */
+  blockedByDependencies: number;
 }
 
-async function countStartable<T>(candidates: readonly T[], isStartable: (candidate: T) => Promise<boolean>): Promise<Tally> {
+type StartVerdict = "ready" | "dependency_blocked" | "not_ready";
+
+async function countStartable<T>(candidates: readonly T[], verdictFor: (candidate: T) => Promise<StartVerdict>): Promise<Tally> {
   let count = 0;
+  let blockedByDependencies = 0;
   for (const candidate of candidates) {
-    if (count >= ELIGIBLE_SCAN_LIMIT) return { count, capped: true };
-    if (await isStartable(candidate)) count++;
+    if (count >= ELIGIBLE_SCAN_LIMIT) return { count, capped: true, blockedByDependencies };
+    const verdict = await verdictFor(candidate);
+    if (verdict === "ready") count++;
+    else if (verdict === "dependency_blocked") blockedByDependencies++;
   }
-  return { count, capped: false };
+  return { count, capped: false, blockedByDependencies };
 }
 
 /** The cheap per-issue gates `evaluateStartCandidate` applies, minus the contention snapshot. */
-async function isReadyToStart(
+async function startVerdict(
   issue: { id: string; title: string; issueType: string | null },
   allowFeatureTypes: boolean,
   database: Database,
   passesDependencyGate?: (issueId: string) => Promise<boolean>,
-): Promise<boolean> {
+): Promise<StartVerdict> {
   const workspaces = await selectIssueWorkspaceStates(issue.id, database);
-  if (workspaces.some((w) => w.status !== "closed")) return false;
-  if (workspaces.some((w) => w.mergedAt != null)) return false;
-  if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) return false;
-  if (await hasSkipAutoStartTag(issue.id, SKIP_AUTO_START_TAG, database)) return false;
-  if (passesDependencyGate && !(await passesDependencyGate(issue.id))) return false;
-  return true;
+  if (workspaces.some((w) => w.status !== "closed")) return "not_ready";
+  if (workspaces.some((w) => w.mergedAt != null)) return "not_ready";
+  if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) return "not_ready";
+  if (await hasSkipAutoStartTag(issue.id, SKIP_AUTO_START_TAG, database)) return "not_ready";
+  // Last, so a dependency-blocked ticket is one that would otherwise start (#1162).
+  if (passesDependencyGate && !(await passesDependencyGate(issue.id))) return "dependency_blocked";
+  return "ready";
 }
 
 /**
@@ -146,7 +154,7 @@ export async function getAutopilotStatus(projectId: string, deps: AutopilotStatu
   const backfillCandidates = inProgressStatusId
     ? await selectAutoStartCandidates([inProgressStatusId], [notDriveOrEpicMetaSql()], database)
     : [];
-  const backfillReady = await countStartable(backfillCandidates, (issue) => isReadyToStart(issue, allowFeatureTypes, database));
+  const backfillReady = await countStartable(backfillCandidates, (issue) => startVerdict(issue, allowFeatureTypes, database));
   const backfillStarts = inProgressStatusId && dispatch.available ? Math.min(backfill.slots, backfillReady.count) : 0;
 
   // Pass 2 — pull: Todo (and Backlog on an auto-driven project), dependency-gated.
@@ -157,12 +165,12 @@ export async function getAutopilotStatus(projectId: string, deps: AutopilotStatu
     fleetOverflowAvailable: hostHeld ? await overflowFn({ database, projectId, providerName }) : false,
   }).action === "skip";
   const pull = decideStartSlots({ ...slotInput, startedThisCycle: backfillStarts });
-  let pullReady: Tally = { count: 0, capped: false };
+  let pullReady: Tally = { count: 0, capped: false, blockedByDependencies: 0 };
   if (todoStatusId) {
     const statusIds = await resolveCandidateStatusIds(projectId, todoStatusId, allowFeatureTypes, database);
     const candidates = await selectAutoStartCandidates(statusIds, [monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()], database);
     const passesDependencyGate = buildDependencyGate(await findStatusIdsByNames(["Done", "Cancelled"], database), database);
-    pullReady = await countStartable(candidates, (issue) => isReadyToStart(issue, allowFeatureTypes, database, passesDependencyGate));
+    pullReady = await countStartable(candidates, (issue) => startVerdict(issue, allowFeatureTypes, database, passesDependencyGate));
   }
   const pullStarts = todoStatusId && !pullQuiesced ? Math.min(pull.slots, pullReady.count) : 0;
 
@@ -181,6 +189,7 @@ export async function getAutopilotStatus(projectId: string, deps: AutopilotStatu
     slots: backfill.slots,
     eligibleCount: backfillReady.count + pullReady.count,
     eligibleCountCapped: backfillReady.capped || pullReady.capped,
+    blockedByDependencies: pullReady.blockedByDependencies,
     willStartNextCycle: willStart,
     holdReason: decideAutopilotHoldReason({
       startMode: policy.mode,

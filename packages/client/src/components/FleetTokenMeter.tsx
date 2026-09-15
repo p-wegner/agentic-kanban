@@ -51,14 +51,14 @@ export function FleetTokenMeter({ liveStats, columns, sessionActivity }: FleetTo
       <div
         data-testid="fleet-token-meter"
         data-idle="true"
-        title="No active agents — fleet token meter idle"
+        title="No agent is reporting live context tokens right now"
         // Hidden below sm (#435): "fleet idle" is pure status with nothing to tap, and on a
         // phone it was padding out the toolbar row above the content. The ACTIVE state stays
         // visible at every width — that one is telling you agents are burning tokens.
         className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700"
       >
         <span className="w-1.5 h-1.5 rounded-full bg-gray-400 shrink-0" />
-        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">fleet idle</span>
+        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">0 tok</span>
       </div>
     );
   }
@@ -72,17 +72,15 @@ export function FleetTokenMeter({ liveStats, columns, sessionActivity }: FleetTo
         onClick={() => setExpanded((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={expanded}
-        title={`${fleet.activeAgentCount} active agent${fleet.activeAgentCount === 1 ? "" : "s"} · ${formatTokens(fleet.totalContextTokens)} context tokens · ~${formatCost(fleet.estimatedCostUsd)} est. — click for per-agent breakdown`}
+        // #1162: no agent COUNT on the headline — the header's agents chip owns that number, and this
+        // meter's population (sessions streaming token stats) is narrower, so two counts would disagree.
+        title={`${formatTokens(fleet.totalContextTokens)} context tokens · ~${formatCost(fleet.estimatedCostUsd)} est., from ${fleet.activeAgentCount} session${fleet.activeAgentCount === 1 ? "" : "s"} streaming token stats — click for per-session breakdown`}
         className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900 transition-colors"
       >
         <span className="relative flex h-2 w-2">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
           <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
         </span>
-        <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300" data-testid="fleet-agent-count">
-          {fleet.activeAgentCount}
-        </span>
-        <span className="text-xs text-emerald-600 dark:text-emerald-400">·</span>
         <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300" data-testid="fleet-context-tokens">
           {formatTokens(fleet.totalContextTokens)}
         </span>
@@ -104,7 +102,7 @@ export function FleetTokenMeter({ liveStats, columns, sessionActivity }: FleetTo
           {/* Fleet headline */}
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold text-gray-800 dark:text-gray-100">
-              {fleet.activeAgentCount} active agent{fleet.activeAgentCount === 1 ? "" : "s"}
+              <span data-testid="fleet-agent-count">{fleet.activeAgentCount}</span> session{fleet.activeAgentCount === 1 ? "" : "s"} streaming tokens
             </span>
             <span className="text-gray-500 dark:text-gray-400">
               {formatTokens(fleet.totalContextTokens)} tok · ~{formatCost(fleet.estimatedCostUsd)}
