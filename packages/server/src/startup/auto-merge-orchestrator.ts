@@ -12,6 +12,7 @@ import { buildStrandedBatch, pickIntegrationWorkspace } from "../services/reconc
 import type { SessionLauncher } from "../services/session.manager.js";
 import { resolveMergePolicy } from "./merge-strategy.js";
 import { resolveMergeGateConfig } from "../services/pre-merge-gate.service.js";
+import { listActiveMergeTrainsForProject } from "../repositories/merge-train.repository.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import type { StackProfile } from "@agentic-kanban/shared";
 import {
@@ -325,6 +326,17 @@ export function createAutoMergeOrchestrator(deps: {
         // Nothing ready for this project right now — the reconcile passes may have healed or
         // parked away everything that was pending. Nothing left to wait for.
         if (existing) state.trainWindows.delete(projectId);
+        continue;
+      }
+
+      // #1153: never assemble a second train for a project that already has one in flight
+      // (`assembling`/`gating`) — a second batch over the same ready set can only contend with
+      // the first for the repo lock, which is what turned a queue into a livelock. Keep
+      // accumulating (don't drop the window) so the pending set is released the moment the
+      // in-flight train finishes.
+      const activeTrains = await listActiveMergeTrainsForProject(projectId, ["assembling", "gating"], database);
+      if (activeTrains.length > 0) {
+        state.trainWindows.set(projectId, { pendingIds: ids, firstSeenAt: existing?.firstSeenAt ?? now });
         continue;
       }
 
