@@ -488,7 +488,7 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
                 workspace,
                 "merged",
                 `Merged ${workspace.branch} into ${targetBranch}${mergeCommitSha ? ` at ${mergeCommitSha}` : ""}.`,
-                { targetBranch, commitSha: mergeCommitSha || null, mergedAt: mergedNow, mergeOutput },
+                { targetBranch, commitSha: mergeCommitSha || null, mergedAt: mergedNow, mergeOutput, mergedVia: "autoMerge" },
                 mergedNow,
               );
 
@@ -634,7 +634,7 @@ Server: http://localhost:${serverPort}`;
         workspace,
         "conflict",
         `Auto-merge failed for ${workspace.branch}: ${msg}`,
-        { error: msg },
+        { error: msg, mergedVia: "autoMerge" },
       );
       emitButlerSystemEvent({ projectId, kind: "merge_failed", workspaceId: workspace.id, text: `Auto-merge failed for workspace ${workspace.id} (branch ${workspace.branch}): ${msg.slice(0, 200)}` });
     }
