@@ -28,13 +28,8 @@ type AgentSettingsProps = {
   codexProfiles: string[];
   copilotProfiles: string[];
   piProfiles: string[];
-  /**
-   * Herdr profiles — always empty when `herdrAvailable` is false, so herdr never
-   * shows up as a selectable provider on a machine that doesn't have it wired up
-   * (binary on PATH + HERDR_ENV/reachable server, see `herdr-availability.ts`). (#1144)
-   */
-  herdrProfiles?: string[];
-  herdrAvailable?: boolean;
+  /** Empty `profiles`/`false` `available` keeps herdr off the provider list on a machine that doesn't have it wired up (binary on PATH + HERDR_ENV/reachable server, see `herdr-availability.ts`). (#1144) */
+  herdr?: { available: boolean; profiles: string[] };
   profileHealth: AgentProfileHealth[];
   preflightingProfileId: string | null;
   onProfilePreflight: (profile: AgentProfileHealth) => void;
@@ -62,8 +57,8 @@ function projectProviderSelectValue(provider: string | null, profileName: string
   return profileName ? `${provider}:${profileName}` : `${provider}:`;
 }
 
-export function AgentSettings({ settings, set, setSettings, profiles, codexProfiles, copilotProfiles, piProfiles, herdrProfiles, herdrAvailable, profileHealth, preflightingProfileId, onProfilePreflight: handleProfilePreflight, activeProjectId, providerDivergence, onProjectProviderChange, savingProjectProvider, roster }: AgentSettingsProps) {
-  const herdrOptions = herdrAvailable ? (herdrProfiles ?? []) : [];
+export function AgentSettings({ settings, set, setSettings, profiles, codexProfiles, copilotProfiles, piProfiles, herdr, profileHealth, preflightingProfileId, onProfilePreflight: handleProfilePreflight, activeProjectId, providerDivergence, onProjectProviderChange, savingProjectProvider, roster }: AgentSettingsProps) {
+  const herdrOptions = herdr?.available ? herdr.profiles : [];
   // The roster read model owns its own fetch (a filesystem walk plus a quota call), so it
   // stays off the Settings bootstrap that every other tab waits on. `reloadKey` re-reads it
   // after a roster write, so the "would launch on…" line reflects what was just saved.
