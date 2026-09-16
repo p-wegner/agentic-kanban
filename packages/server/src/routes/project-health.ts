@@ -12,6 +12,7 @@ import { getProjectHealth } from "../services/project-health.service.js";
 import { listBaseBranchHealth, getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 import { inFlightBaseBranchProbeCount } from "../services/base-branch-health.service.js";
 import { requestBaseBranchReprobe, describeGateBusy } from "../services/base-branch-health-reprobe.service.js";
+import { readTier0Capacity, readCpuBusyPct } from "@agentic-kanban/shared/lib/machine-capacity";
 import { describeBaseSweep, resolveRiskPosture } from "../services/risk-posture.service.js";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
@@ -106,6 +107,11 @@ export function createProjectHealthRoute(database: Database) {
       // #1084 — "gate_running" alone gives no way to tell a legitimately busy gate from a stuck
       // one without reading source. Naming the holder count/age settles that from the response.
       gateBusy: !verdict.due && verdict.reason === "gate_running" ? describeGateBusy() : null,
+      // #1173 — same idea for "host_saturated": name the measured numbers rather than making
+      // the caller re-read the machine to explain a refusal it already caused.
+      machine: !verdict.due && verdict.reason === "host_saturated"
+        ? { freeGb: readTier0Capacity().freeGb, cpuPct: await readCpuBusyPct().catch(() => null) }
+        : null,
     });
   });
 
