@@ -15,7 +15,7 @@ import { createWorkspaceMergeService } from "./workspace-merge.service.js";
 import { isPreMergeGateFailure } from "./workspace-merge-gate.js";
 import type { BoardEventSink } from "./board-events.js";
 import type { SessionLauncher } from "./session.manager.js";
-import { createMergeTrainRunner, trainWantedForProject, trainEligible } from "./merge-queue-train.js";
+import { createMergeTrainRunner, pickQueueStrategy } from "./merge-queue-train.js";
 
 export interface WorkspaceConflictPreview {
   workspaceId: string;
@@ -481,23 +481,10 @@ export function createMergeQueueService(deps: {
     const plan = await computePlan(workspaceIds);
     yield { type: "planned", plan };
 
-    // Release train (#904): gate the assembled batch ONCE instead of once per member.
-    // Eligibility (`trainEligible`) is about SHAPE (one repo, one base, all branches) and is
-    // independent of the classifier — an overlap-free, fully independent batch is exactly as
-    // eligible as an `integration-union` cluster, and used to never take this path because
-    // nothing dispatched on it. `opts.strategy === "sequential"` is an explicit escape hatch
-    // that always wins; short of that, the train is taken when the caller asks for it, the
-    // classifier already recommends it, OR the project has opted in via `train_max_size`.
-    const eligible = trainEligible(plan.order);
-    let wantsTrain = opts.strategy === "train" || plan.recommendedStrategy === "integration-union";
-    if (!wantsTrain && eligible && opts.strategy !== "sequential") {
-      // #937: the opt-in falls back to the risk posture's `trainMaxSize` when no explicit
-      // `train_max_size_<projectId>` is set. The decision (and decision 017's posture-visibility
-      // log) lives in `trainWantedForProject` beside the resolver it wraps.
-      const issueRows = await getMergeQueueIssueRows([plan.order[0].issueId], database);
-      wantsTrain = await trainWantedForProject(issueRows[0]?.projectId ?? null, database, plan.order.length);
-    }
-    if (wantsTrain && opts.strategy !== "sequential" && eligible) {
+    // Release train (#904): gate the assembled batch ONCE instead of once per member. The
+    // dispatch decision (shape eligibility, caller/classifier/opt-in, and #1180's "why not"
+    // log line) lives in `pickQueueStrategy` beside the train runner it routes into.
+    if ((await pickQueueStrategy(plan, opts, database)) === "train") {
       yield* trainRunner.runTrainStrategy(plan);
       return;
     }

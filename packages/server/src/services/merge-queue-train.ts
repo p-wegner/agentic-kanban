@@ -29,6 +29,7 @@ import type { MergeQueueEvent, MergeQueuePlan } from "./merge-queue.service.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { noteMergeGatePhase } from "./merge-job.service.js";
+import { formatIneligibleNote, trainMemberIneligibility } from "./merge-release-partition.js";
 
 /**
  * How many ready members a project wants batched onto one train before it opts into the
@@ -108,12 +109,59 @@ export function trainEligible(order: MergeQueuePlan["order"]): boolean {
   const first = order[0];
   return order.every(
     (ws) =>
-      !ws.isDirect &&
-      ws.workingDir &&
-      ws.branch &&
+      trainMemberIneligibility(ws) === null &&
       ws.repoPath === first.repoPath &&
       ws.baseBranch === first.baseBranch,
   );
+}
+
+/**
+ * The train-vs-sequential dispatch decision for one `executeQueue` call (#904, #937, #1180).
+ *
+ * Eligibility (`trainEligible`) is about SHAPE (one repo, one base, all branches) and is
+ * independent of the classifier — an overlap-free, fully independent batch is exactly as
+ * eligible as an `integration-union` cluster. `opts.strategy === "sequential"` is an explicit
+ * escape hatch that always wins; short of that, the train is taken when the caller asks for it,
+ * the classifier already recommends it, OR the project has opted in via `train_max_size` (which
+ * falls back to the risk posture's `trainMaxSize`, #937).
+ *
+ * #1180: a batch of >= 2 that does NOT train says why, in one `[merge-queue]` line — the
+ * orchestrator used to log "train window closed … releasing 13" and then merge them one by one
+ * with nothing in between naming the ineligible member or the missing opt-in. Lives here rather
+ * than inline in `createMergeQueueService` because that function is on the shrink-only nloc ring.
+ */
+export async function pickQueueStrategy(
+  plan: MergeQueuePlan,
+  opts: { strategy?: "sequential" | "train" },
+  database: Database,
+): Promise<"train" | "sequential"> {
+  if (opts.strategy === "sequential") return "sequential";
+  const eligible = trainEligible(plan.order);
+  const wantsTrain = opts.strategy === "train" || plan.recommendedStrategy === "integration-union";
+  if (wantsTrain && eligible) return "train";
+  if (plan.order.length < 2) return "sequential";
+
+  const issueRows = await getMergeQueueIssueRows([plan.order[0].issueId], database);
+  const projectId = issueRows[0]?.projectId ?? null;
+  if (eligible && await trainWantedForProject(projectId, database, plan.order.length)) return "train";
+  console.log(`[merge-queue] no train for project ${projectId ?? "?"}: ${await describeNoTrain(plan, eligible, projectId, database)}, ${plan.order.length} ride sequentially`);
+  return "sequential";
+}
+
+/** The reason half of `pickQueueStrategy`'s log line: the ineligible members, or the opt-in that said no. */
+async function describeNoTrain(plan: MergeQueuePlan, eligible: boolean, projectId: string | null, database: Database): Promise<string> {
+  const ineligible = plan.order.flatMap((ws) => {
+    const reason = trainMemberIneligibility(ws);
+    return reason ? [{ workspaceId: ws.id, issueNumber: ws.issueNumber, reason }] : [];
+  });
+  if (ineligible.length > 0) return formatIneligibleNote(ineligible);
+  if (!eligible) {
+    const bases = new Set(plan.order.map((ws) => `${ws.repoPath}@${ws.baseBranch}`));
+    return `members span ${bases.size} repo/base pair(s) (${[...bases].join(", ")})`;
+  }
+  if (!projectId) return "project unresolved";
+  const optIn = await resolveTrainOptIn(projectId, database);
+  return `opt-in false (posture ${optIn.posture.level}, trainMaxSize ${optIn.maxSize}${optIn.fromPosture ? "" : ", explicit"})`;
 }
 
 /**
