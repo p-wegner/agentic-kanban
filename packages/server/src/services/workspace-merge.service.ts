@@ -281,8 +281,7 @@ export function createWorkspaceMergeService(deps: {
       projectId: project?.id ?? null,
       baseBranch: requireBaseBranch(workspace.baseBranch || defaultBranch),
       token: opts.gate ?? RUN_GATE,
-      database,
-      recordMergeAttempt,
+      database, recordMergeAttempt,
       // #1169 — a badly-stale branch is rebased by the board before the gate, not refused.
       rebaseOntoBase: (wsId) => updateBase(wsId, "rebase"),
     });

@@ -437,7 +437,10 @@ async function refuseIfBaseIsStale(args: {
 }): Promise<void> {
   const { workspaceId, workspace, baseBranch, database, recordMergeAttempt, rebaseOntoBase } = args;
   if (!workspace.workingDir) return;
-  const behindCount = await countBehindCommits(workspace.workingDir, "HEAD", baseBranch).catch((err) => {
+  // `Promise.resolve().then(...)`: a SYNCHRONOUS throw (a test's partial git mock, a missing
+  // export) must fail open exactly like a rejected promise does — this check may never mask the gate.
+  const workingDir = workspace.workingDir;
+  const behindCount = await Promise.resolve().then(() => countBehindCommits(workingDir, "HEAD", baseBranch)).catch((err) => {
     console.warn(
       "[workspace-merge] failed to determine base staleness before the pre-lock gate (non-fatal, #1169):",
       errorMessage(err),
@@ -452,17 +455,24 @@ async function refuseIfBaseIsStale(args: {
   // only when that fails, naming the conflict instead of the staleness.
   let rebaseFailure: string | null = null;
   if (rebaseOntoBase) {
-    const rebased: Awaited<ReturnType<RebaseOntoBase>> = await rebaseOntoBase(workspaceId)
-      .catch((err) => ({ success: false, error: errorMessage(err) }));
-    if (rebased.success) {
+    let rebased: Awaited<ReturnType<RebaseOntoBase>> | null = null;
+    try {
+      rebased = await rebaseOntoBase(workspaceId);
+    } catch (err) {
+      rebased = null;
+      rebaseFailure = ` The board tried update-base (rebase) first and it threw: ${errorMessage(err)}.`;
+    }
+    if (rebased?.success) {
       console.log(
         `[workspace-merge] rebased workspace ${workspaceId} onto '${baseBranch}' before the pre-lock gate `
           + `(was ${behindCount} commits behind, #1169) — the gate runs on the rebased tree`,
       );
       return;
     }
-    const files = rebased.conflictingFiles?.length ? ` conflicting: ${rebased.conflictingFiles.join(", ")}.` : "";
-    rebaseFailure = ` The board tried update-base (rebase) first and it failed: ${rebased.error ?? "conflict"}.${files}`;
+    if (rebased) {
+      const files = rebased.conflictingFiles?.length ? ` conflicting: ${rebased.conflictingFiles.join(", ")}.` : "";
+      rebaseFailure = ` The board tried update-base (rebase) first and it failed: ${rebased.error ?? "conflict"}.${files}`;
+    }
   }
   const staleRefusal =
     `branch is ${behindCount} commits stale against '${baseBranch}' (#1169) — rebase first `
