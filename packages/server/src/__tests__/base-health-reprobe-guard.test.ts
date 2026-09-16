@@ -243,3 +243,49 @@ describe("#978: an unchanged base sha is not due", () => {
     expect(isBaseHealthProbeDue({ ...base, currentSha: "abc123", lastResultSha: null }).reason).toBe("no_history");
   });
 });
+
+/**
+ * #1178 (tests for #1165's second half) — an explicit reprobe must reach the probe AS explicit.
+ * `requestBaseBranchReprobe` overriding `gate_running` was only half of #1165: the probe it
+ * launched still queued as `background` and still yielded its verify to every gate-class waiter,
+ * so `pnpm promote`'s sweep request reached the slot only to give it up again (measured
+ * 2026-09-16: two yields, no verdict in 40 min). The `explicit` flag is the wire between the two
+ * halves, and this is the test that the wire is connected on both ends.
+ */
+describe("requestBaseBranchReprobe hands `explicit` to the probe (#1178, #1165)", () => {
+  type ProbeCall = [string, unknown, string | undefined, { explicit?: boolean } | undefined];
+  const probeCall = (i = 0) => verifyBaseBranchHealth.mock.calls[i] as unknown as ProbeCall;
+
+  it("an `ignoreRecency` request launches the probe with { explicit: true }", async () => {
+    latestRow.mockResolvedValue({ createdAt: iso(-60_000), outcome: "green" });
+
+    const verdict = await requestBaseBranchReprobe("p1", {} as never, INTERVAL_MS, NOW, { ignoreRecency: true });
+
+    expect(verdict.due).toBe(true);
+    expect(verifyBaseBranchHealth).toHaveBeenCalledTimes(1);
+    const [projectId, , now, opts] = probeCall();
+    expect(projectId).toBe("p1");
+    // No `now` override: the probe stamps its own start, exactly as the sweep's call does.
+    expect(now).toBeUndefined();
+    expect(opts).toEqual({ explicit: true });
+  });
+
+  it("a plain (unattended) request launches the probe with { explicit: false } — background manners unchanged", async () => {
+    latestRow.mockResolvedValue(null); // no history -> due
+
+    const verdict = await requestBaseBranchReprobe("p1", {} as never, INTERVAL_MS, NOW);
+
+    expect(verdict).toEqual({ due: true, reason: "no_history" });
+    expect(verifyBaseBranchHealth).toHaveBeenCalledTimes(1);
+    // `false`, not absent: the flag is always stated, so a reader of the call sees the decision.
+    expect(probeCall()[3]).toEqual({ explicit: false });
+  });
+
+  it("an `ignoreRecency: false` request is the plain request, not a half-explicit one", async () => {
+    latestRow.mockResolvedValue(null);
+
+    await requestBaseBranchReprobe("p1", {} as never, INTERVAL_MS, NOW, { ignoreRecency: false });
+
+    expect(probeCall()[3]).toEqual({ explicit: false });
+  });
+});
