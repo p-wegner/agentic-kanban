@@ -298,17 +298,26 @@ export async function resolveBaseHealthProbeDue(
  * Ask for a fresh probe on demand, but only if one is actually DUE (#935).
  *
  * The gate and the reprobe route both want "the base's cached verdict is a non-answer, measure
- * it again". Calling `verifyBaseBranchHealth` straight from those sites bypasses BOTH guards
- * that keep this probe from being the thing it measures: the `gateBusy` yield (#931 — the probe
- * is the least urgent of the three test-spawning paths and is the one that gives way) and the
- * `timeout` back-off (#712 — a timed-out probe is not due again until it has had at least its
- * own runtime to breathe). Without them a project stuck on a sticky non-answer row re-spawns a
- * clone + install + 45-minute verify on EVERY failing gate, on the saturated box whose
- * saturation produced the non-answer in the first place.
+ * it again". Calling `verifyBaseBranchHealth` straight from those sites bypasses the guards that
+ * keep this probe from being the thing it measures: the `gateBusy` yield (#931 — the UNATTENDED
+ * sweep's probe is the least urgent of the three test-spawning paths and is the one that gives
+ * way) and the `timeout` back-off (#712 — a timed-out probe is not due again until it has had at
+ * least its own runtime to breathe). Without them a project stuck on a sticky non-answer row
+ * re-spawns a clone + install + 45-minute verify on EVERY failing gate, on the saturated box
+ * whose saturation produced the non-answer in the first place.
  *
  * The in-flight map in the probe service dedups two probes that overlap; it says nothing about
  * whether a probe should start at all. That decision is `isBaseHealthProbeDue`, and it lives
  * here — so every caller that wants a probe "if it makes sense" comes through this door.
+ *
+ * **`gate_running` is the one reason an EXPLICIT `ignoreRecency` request may override (#1165).**
+ * Back-to-back merge gates keep `resolveGateBusy()` true almost continuously — one ends, the next
+ * begins — so refusing the on-demand door on it too makes a stuck red verdict permanently
+ * unclearable: every gate that would benefit from a fresh probe is itself what keeps the probe
+ * from ever being asked for. The probe it starts still queues at the real resource (the
+ * verify-chain semaphore) as a `background`-priority waiter with its own starvation escape, so
+ * this override cannot reintroduce #931's two-full-verifies-at-once failure — it only lets an
+ * explicit, singular request reach the queue instead of being refused before it gets there.
  *
  * Never throws, and resolves on the DECISION rather than on the probe: a probe is minutes to
  * an hour, and both callers (a failing merge gate, an HTTP route) need to carry on immediately.
@@ -326,13 +335,27 @@ export async function requestBaseBranchReprobe(
     verdict = await resolveBaseHealthProbeDue(projectId, database, intervalMs, nowMs, { readCapacity: opts.readCapacity });
     // An EXPLICIT operator request ("that verdict was starved, measure again") is allowed to
     // override the recency/timeout back-off — overriding it is the whole point of the route,
-    // and the ticket asks for exactly that. It is NOT allowed to override the two guards that
-    // protect the machine: a probe already running (`probe_in_flight`) or a gate spending the
-    // cores right now (`gate_running`). Those are why the starved verdict exists.
+    // and the ticket asks for exactly that. It is NOT allowed to override the one guard that
+    // protects the machine from a REDUNDANT run: a probe already running for this project
+    // (`probe_in_flight`) is joined for free by the in-flight map, so a second explicit request
+    // would only pay for a second clone+install to learn nothing new.
     // `sha_unchanged` joins `recent_result` here (#978): both are "we already know the
-    // answer", and an operator pressing re-probe is saying they do not believe it. The two
-    // machine-protecting reasons below still stand.
-    if (opts.ignoreRecency && !verdict.due && (verdict.reason === "recent_result" || verdict.reason === "sha_unchanged")) {
+    // answer", and an operator pressing re-probe is saying they do not believe it.
+    //
+    // `gate_running` is DELIBERATELY overridable here (#1165). That reason exists to keep the
+    // unattended periodic sweep from piling an uncoordinated probe onto a box a gate is already
+    // using — it is not a promise that the box has a free verify slot. Back-to-back merge gates
+    // make `resolveGateBusy()` true almost continuously (one ends, the next begins), so refusing
+    // an explicit reprobe on it forever starves the one thing that could clear a stuck
+    // BASE BRANCH ALREADY RED verdict — the reprobe can never find a gap, and every gate keeps
+    // refusing against the same stale verdict it would have fixed. The probe itself still queues
+    // for the real resource, the verify-chain semaphore, as `priority: "background"`
+    // (`runBaseBranchProbe`) — which already has a starvation escape
+    // (`verifyChainBackgroundMaxWaitMs`, default 30 min) so it cannot be overtaken by gates
+    // forever. So overriding this pre-check does not restore #931's two-full-verifies-at-once
+    // failure: it only lets the probe reach the queue it was always going to wait in.
+    if (opts.ignoreRecency && !verdict.due
+      && (verdict.reason === "recent_result" || verdict.reason === "sha_unchanged" || verdict.reason === "gate_running")) {
       verdict = { due: true, reason: "interval_elapsed" };
     }
     if (!verdict.due) {
