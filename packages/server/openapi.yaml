@@ -4969,7 +4969,7 @@ paths:
               schema: {}
   /api/projects/{id}/base-branch-health/reprobe:
     post:
-      summary: The response says which of those happened instead of always claiming it started one.
+      summary: it started one.
       tags:
         - project-health
       operationId: post_api_projects_id_base-branch-health_reprobe
