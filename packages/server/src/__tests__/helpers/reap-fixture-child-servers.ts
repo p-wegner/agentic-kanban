@@ -134,6 +134,23 @@ export async function reapOrphanedFixtureServers(namespaceDirs: string[] = []): 
 const MAX_REMOVALS_PER_SWEEP = 500;
 
 /**
+ * #1176 — a fixed 500 stopped being a drain once the arrival rate overtook it: measured
+ * repeatedly at ~16,400 sweepable against the 500 cap, so every run reclaimed at most 3% of the
+ * backlog while new fixture dirs kept arriving, and the directory grew monotonically run over
+ * run while every one of those runs printed a healthy-looking "removed N" line. Once the backlog
+ * is an order of magnitude past the base cap, scale the per-run budget up proportionally (still
+ * bounded, so a single run can never regress into the multi-minute stall the cap exists to
+ * prevent) rather than silently losing ground forever at the fixed size.
+ */
+const ADAPTIVE_CAP_BACKLOG_MULTIPLE = 10;
+const MAX_ADAPTIVE_REMOVALS_PER_SWEEP = 5_000;
+
+export function removalCapFor(sweepable: number): number {
+  if (sweepable < MAX_REMOVALS_PER_SWEEP * ADAPTIVE_CAP_BACKLOG_MULTIPLE) return MAX_REMOVALS_PER_SWEEP;
+  return Math.min(MAX_ADAPTIVE_REMOVALS_PER_SWEEP, sweepable);
+}
+
+/**
  * Report the backlog even on a sweep that removed nothing, once it is this big (#1056). Below it
  * a leftover count is genuinely routine — a handful of dirs a concurrent suite still holds open.
  */
@@ -165,12 +182,18 @@ async function reapStaleFixtureTempDirs(entries: string[]): Promise<number> {
   // reads as routine housekeeping at a backlog of 10 and at a backlog of 510,000 alike; it was
   // skimmed past four times while `%TEMP%` grew to 707,242 entries. A reaper that cannot state
   // the size of its own queue cannot tell "draining" from "losing".
+  //
+  // Counted in a first pass, BEFORE removal, so the adaptive cap (#1176) can be sized from the
+  // true backlog rather than from whatever the fixed 500 already let through this loop.
   let sweepable = 0;
+  for (const name of entries) {
+    if (matchedNamespace(name)) sweepable++;
+  }
+  const cap = removalCapFor(sweepable);
   for (const name of entries) {
     const ns = matchedNamespace(name);
     if (!ns) continue;
-    sweepable++;
-    if (removed >= MAX_REMOVALS_PER_SWEEP) { truncated = true; continue; }
+    if (removed >= cap) { truncated = true; continue; }
     const full = join(base, name);
     try {
       const info = await stat(full);
@@ -185,14 +208,20 @@ async function reapStaleFixtureTempDirs(entries: string[]): Promise<number> {
       failed++;
     }
   }
+  // #1176 — the backlog is reported on EVERY sweep that found sweepable entries, not only when
+  // this run happened to hit its cap. "removed 36 stale fixture temp dir(s)" reads as done at a
+  // backlog of 36 and at a backlog of 16,359 alike; only the latter is losing, and the line must
+  // say which one this is.
   if (removed > 0 || failed > 0 || sweepable >= BACKLOG_ALARM) {
+    const remaining = Math.max(0, sweepable - removed);
     console.log(
-      `[test-reaper] removed ${removed} stale fixture temp dir(s)`
+      `[test-reaper] removed ${removed} of ${sweepable} sweepable stale fixture temp dir(s)`
       + (failed > 0 ? `, ${failed} could not be removed (still held open?)` : "")
       + (truncated
-        ? `, capped at ${MAX_REMOVALS_PER_SWEEP} of ${sweepable} sweepable — `
-          + `${Math.max(0, sweepable - removed)} still queued`
-        : ""),
+        ? `, capped at ${cap} this run — ${remaining} still queued`
+        : remaining > 0
+          ? `, ${remaining} not yet stale enough to remove`
+          : ""),
     );
   }
   // Escalate on SIZE, not on the fact that something was left over. `%TEMP%` holding six figures
@@ -205,7 +234,7 @@ async function reapStaleFixtureTempDirs(entries: string[]): Promise<number> {
   if (entries.length >= TEMP_ENUMERATION_ALARM) {
     console.warn(
       `[test-reaper] NOTICE: %TEMP% holds ${entries.length} entries (${sweepable} sweepable by `
-      + `this reaper, cap ${MAX_REMOVALS_PER_SWEEP}/run). This is an EARLY WARNING, not a merge `
+      + `this reaper, cap ${cap}/run). This is an EARLY WARNING, not a merge `
       + `blocker: the pre-merge gate's own temp-health floor is DEFAULT_TEMP_ENTRY_CAP (250,000, `
       + `a measurement — see lib/temp-health.ts), so the gate still admits here. Left to grow it `
       + `ends at the #1056 state, where enumeration alone stalls any process touching %TEMP% and `
