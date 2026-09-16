@@ -188,6 +188,22 @@ export async function proposeTransition(
       issueUpdate.statusChangedAt = now;
     }
     await db.update(schema.issues).set(issueUpdate).where(eq(schema.issues.id, issue.id));
+
+    // Ticket groups (#661): a member issue has no workspace row of its own — the
+    // board's workspace-summary aliases the lead's summary onto it (#1163) so its
+    // card shows the shared branch/agent, but that alias also carried the lead's
+    // WORKFLOW STAGE, leaving the member's own `issues.statusId` (what the board
+    // column and every WIP count read) stuck at whatever it was when the group
+    // started. Cascade the same status/node move to every live member issue so
+    // the member's own record — not just its card's borrowed display — follows
+    // the lead on every transition.
+    const memberRows = await db
+      .select({ issueId: schema.workspaceIssueMembers.issueId })
+      .from(schema.workspaceIssueMembers)
+      .where(eq(schema.workspaceIssueMembers.workspaceId, workspaceId));
+    for (const member of memberRows) {
+      await db.update(schema.issues).set(issueUpdate).where(eq(schema.issues.id, member.issueId));
+    }
   }
 
   const nextTransitions = await getOutgoingTransitions(db, toNode.id);
