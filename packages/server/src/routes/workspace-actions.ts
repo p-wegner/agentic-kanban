@@ -19,6 +19,8 @@ import { getMergeRun, type MergeRunRow } from "../repositories/merge-run.reposit
 import { listMergeGateDiscards, type MergeGateDiscardRow } from "../repositories/merge-gate-discard.repository.js";
 import { getWorkspaceMergeState } from "../repositories/merge-queue.repository.js";
 import { getLatestInterruptedMergeRecord, type InterruptedMergeRecord } from "../repositories/issue-comments.repository.js";
+import { clearMergeBackoff, failureClassFromSignature } from "../services/merge-backoff.service.js";
+import { getMergeBackoffState } from "../repositories/merge-backoff.repository.js";
 
 import { queryFlag } from "../middleware/query-params.js";
 import { ConflictError, UnprocessableError } from "../errors/index.js";
@@ -600,6 +602,39 @@ export function createWorkspaceActionsRoute(
     // was to watch the OS process tree. The job now carries its attempt history; summarise it
     // in one operator-readable line beside the raw list.
     return c.json(await describeLiveMergeJob(id, job));
+  });
+
+  // GET /api/workspaces/:id/merge-backoff — the persisted circuit-breaker state, so an
+  // operator can see WHY a workspace is being skipped before deciding to clear it.
+  router.get("/:id/merge-backoff", async (c) => {
+    const id = c.req.param("id");
+    const row = await getMergeBackoffState(id, database);
+    if (!row) return c.json({ error: "Workspace not found" }, 404);
+    const blocked = (row.failures ?? 0) > 0 && !!row.nextRetryAt;
+    return c.json({
+      blocked,
+      failures: row.failures ?? 0,
+      failureClass: blocked ? failureClassFromSignature(row.signature) : null,
+      nextRetryAt: row.nextRetryAt,
+      branchSha: row.branchSha,
+    });
+  });
+
+  // POST /api/workspaces/:id/merge-backoff/clear — an operator door onto
+  // `clearMergeBackoff` (#1167). Three workspaces sat permanently skipped every monitor
+  // cycle with "merge retries exhausted ... waiting no longer resumes them; new work on
+  // the branch does" — but the six identical failures were an ENVIRONMENTAL fault (a
+  // stale red base, a failed dependency install), not something the branch caused, so
+  // "push new work" was the wrong remedy. `clearMergeBackoff` already existed; nothing
+  // exposed it. This lets a human who fixed the environment resume without inventing a
+  // commit just to reset the breaker.
+  router.post("/:id/merge-backoff/clear", async (c) => {
+    const id = c.req.param("id");
+    const before = await getMergeBackoffState(id, database);
+    if (!before) return c.json({ error: "Workspace not found" }, 404);
+    const wasBlocked = (before.failures ?? 0) > 0 && !!before.nextRetryAt;
+    await clearMergeBackoff(database, id);
+    return c.json({ cleared: wasBlocked, previousFailures: before.failures ?? 0 });
   });
 
   // GET /api/workspaces/:id/already-merged-status — check if branch is already merged without modifying state
