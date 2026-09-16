@@ -38,6 +38,9 @@ const NOW = Date.parse("2026-09-03T12:00:00.000Z");
 const iso = (deltaMs: number) => new Date(NOW + deltaMs).toISOString();
 const saturated = () => ({ tier: "0" as const, hold: true, reason: "only 1.2GB free (floor 2GB)", freeGb: 1.2 });
 const roomy = () => ({ tier: "0" as const, hold: false, reason: "9.0GB free", freeGb: 9 });
+// #1173 — pin CPU to an idle reading by default so these RAM-focused cases stay deterministic
+// and don't pay for a real 150ms sample; the CPU-specific describe block below overrides it.
+const idleCpu = async () => 10;
 
 beforeEach(() => verifyBaseBranchHealth.mockClear());
 afterEach(() => vi.clearAllMocks());
@@ -81,18 +84,73 @@ describe("isBaseHealthProbeDue — the Tier-0 floor (#1009)", () => {
 
 describe("resolveBaseHealthProbeDue / requestBaseBranchReprobe read the live floor (#1009)", () => {
   it("reads Tier-0 capacity and defers when it holds", async () => {
-    const verdict = await resolveBaseHealthProbeDue("p", {} as never, INTERVAL_MS, NOW, { readCapacity: saturated });
+    const verdict = await resolveBaseHealthProbeDue("p", {} as never, INTERVAL_MS, NOW, {
+      readCapacity: saturated,
+      readCpuPct: idleCpu,
+    });
     expect(verdict).toEqual({ due: false, reason: "host_saturated" });
   });
 
   it("probes when the host has room", async () => {
-    const verdict = await resolveBaseHealthProbeDue("p", {} as never, INTERVAL_MS, NOW, { readCapacity: roomy });
+    const verdict = await resolveBaseHealthProbeDue("p", {} as never, INTERVAL_MS, NOW, {
+      readCapacity: roomy,
+      readCpuPct: idleCpu,
+    });
     expect(verdict.due).toBe(true);
   });
 
   it("an EXPLICIT operator re-probe request does not override the floor — it is a machine guard", async () => {
-    const verdict = await requestBaseBranchReprobe("p", {} as never, INTERVAL_MS, NOW, { ignoreRecency: true, readCapacity: saturated });
+    const verdict = await requestBaseBranchReprobe("p", {} as never, INTERVAL_MS, NOW, {
+      ignoreRecency: true,
+      readCapacity: saturated,
+      readCpuPct: idleCpu,
+    });
     expect(verdict).toEqual({ due: false, reason: "host_saturated" });
     expect(verifyBaseBranchHealth).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * #1173 — a base-health probe checked the merge GATE before starting but never the MACHINE's
+ * CPU: measured 2026-09-16, a probe ran at 100% CPU start-to-end with free RAM never below
+ * 3.1 GB (so the pre-existing RAM-only 2 GB floor never tripped) and burned its full
+ * 45-minute cap for a `timeout` — a non-answer, superseding a usable green row. The floor is
+ * now BOTH usable RAM (< 4 GB, wider than the 2 GB builder floor since a probe outweighs one
+ * agent) OR CPU (>= 85%), the same two thresholds the operating conventions ask a human to
+ * check before a parallel test/build run.
+ */
+describe("resolveBaseHealthProbeDue — the CPU half of the heavier probe floor (#1173)", () => {
+  const busyCpu = async () => 97;
+
+  it("defers on CPU saturation alone, even with RAM well above every floor", async () => {
+    const verdict = await resolveBaseHealthProbeDue("p", {} as never, INTERVAL_MS, NOW, {
+      readCapacity: () => ({ tier: "0" as const, hold: false, reason: "4.6GB free", freeGb: 4.6 }),
+      readCpuPct: busyCpu,
+    });
+    expect(verdict).toEqual({ due: false, reason: "host_saturated" });
+  });
+
+  it("probes when both CPU and RAM are comfortably under their floors", async () => {
+    const verdict = await resolveBaseHealthProbeDue("p", {} as never, INTERVAL_MS, NOW, {
+      readCapacity: roomy,
+      readCpuPct: idleCpu,
+    });
+    expect(verdict.due).toBe(true);
+  });
+
+  it("defers on the wider 4GB RAM floor even when the old 2GB builder floor would not have held", async () => {
+    const verdict = await resolveBaseHealthProbeDue("p", {} as never, INTERVAL_MS, NOW, {
+      readCapacity: () => ({ tier: "0" as const, hold: false, reason: "3.1GB free", freeGb: 3.1 }),
+      readCpuPct: idleCpu,
+    });
+    expect(verdict).toEqual({ due: false, reason: "host_saturated" });
+  });
+
+  it("an unreadable CPU sample fails open — RAM alone still decides", async () => {
+    const verdict = await resolveBaseHealthProbeDue("p", {} as never, INTERVAL_MS, NOW, {
+      readCapacity: roomy,
+      readCpuPct: async () => null,
+    });
+    expect(verdict.due).toBe(true);
   });
 });
