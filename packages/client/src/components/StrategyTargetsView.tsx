@@ -22,9 +22,9 @@ interface StrategyTargetsViewProps {
 }
 
 /** Available profile names per provider, populated from the preferences profile endpoints. */
-type ProfilesByProvider = Record<"claude" | "codex" | "copilot" | "pi", string[]>;
+type ProfilesByProvider = Record<"claude" | "codex" | "copilot" | "pi" | "herdr", string[]>;
 
-const EMPTY_PROFILES: ProfilesByProvider = { claude: [], codex: [], copilot: [], pi: [] };
+const EMPTY_PROFILES: ProfilesByProvider = { claude: [], codex: [], copilot: [], pi: [], herdr: [] };
 
 /**
  * The Monitor-policy number inputs, as DATA at module scope (#1034).
@@ -96,14 +96,10 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
       apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/pi-profiles").catch(() => ({ profiles: [] as string[] })),
-    ]).then(([claude, codex, copilot, pi]) => {
+      apiFetch<{ profiles: string[] }>("/api/preferences/herdr-profiles").catch(() => ({ profiles: [] as string[] })),
+    ]).then(([claude, codex, copilot, pi, herdr]) => {
       if (cancelled) return;
-      setProfilesByProvider({
-        claude: claude.profiles ?? [],
-        codex: codex.profiles ?? [],
-        copilot: copilot.profiles ?? [],
-        pi: pi.profiles ?? [],
-      });
+      setProfilesByProvider({ claude: claude.profiles ?? [], codex: codex.profiles ?? [], copilot: copilot.profiles ?? [], pi: pi.profiles ?? [], herdr: herdr.profiles ?? [] });
     }).catch(() => {});
     return () => { cancelled = true; };
   }, []);
@@ -434,13 +430,14 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
                             <span className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-gray-400">Provider</span>
                             <select
                               value={policy.provider}
-                              onChange={(event) => updateProviderPolicy(policy.id, { provider: event.target.value as "claude" | "codex" | "copilot" | "pi" })}
+                              onChange={(event) => updateProviderPolicy(policy.id, { provider: event.target.value as "claude" | "codex" | "copilot" | "pi" | "herdr" })}
                               className="w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                             >
                               <option value="claude">Claude</option>
                               <option value="codex">Codex</option>
                               <option value="copilot">Copilot</option>
                               <option value="pi">Pi</option>
+                              <option value="herdr">Herdr</option>
                             </select>
                           </label>
                           <ProviderPolicyProfileField

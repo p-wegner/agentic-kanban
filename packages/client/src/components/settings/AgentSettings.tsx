@@ -86,14 +86,12 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
       return;
     }
     const [prov, name] = val.split(":");
-    const provider = (prov === "codex" || prov === "copilot" || prov === "pi" ? prov : "claude") as ConcreteProvider;
-    const defaultProfile = provider === "codex" ? CODEX_DEFAULT_PROFILE : provider === "copilot" ? COPILOT_DEFAULT_PROFILE : provider === "pi" ? PI_DEFAULT_PROFILE : "";
+    const provider = (
+      prov === "codex" || prov === "copilot" || prov === "pi" || prov === "herdr" ? prov : "claude"
+    ) as ConcreteProvider;
+    const defaultProfile = provider === "codex" ? CODEX_DEFAULT_PROFILE : provider === "copilot" ? COPILOT_DEFAULT_PROFILE : provider === "pi" ? PI_DEFAULT_PROFILE : provider === "herdr" ? "default" : "";
     const profileName = !name || name === defaultProfile ? "" : name;
     onProjectProviderChange(provider, profileName);
-    // NOTE: herdr is intentionally excluded from `ConcreteProvider` / the per-project
-    // Strategy-Bullseye picker — that control assumes quota/rotation-ring concepts
-    // (headroom, throttle policies) herdr doesn't have yet. Herdr is only wired into
-    // the plain global "Agent Profile" select below (#1144).
   }
 
   // Every selectable profile across all four providers, carrying the role its ACCOUNT
@@ -108,6 +106,7 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
     ...codexProfiles.map((p) => ({ provider: "codex" as const, name: p })),
     ...copilotProfiles.map((p) => ({ provider: "copilot" as const, name: p })),
     ...piProfiles.map((p) => ({ provider: "pi" as const, name: p })),
+    ...herdrOptions.map((p) => ({ provider: "herdr" as const, name: p })),
   ].map((ref) => {
     const id = profileRefId(ref);
     return { id, provider: ref.provider, name: ref.name, globalRole: observedRole.get(id) ?? "pool" };
@@ -172,6 +171,13 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
                             <option key={`pp-pi:${p}`} value={`pi:${p}`}>{profileOptionLabel("pi", p)}</option>
                           ))}
                         </optgroup>
+                        {herdrOptions.length > 0 && (
+                          <optgroup label="Herdr">
+                            {herdrOptions.map((p) => (
+                              <option key={`pp-herdr:${p}`} value={`herdr:${p}`}>{profileOptionLabel("herdr", p)}</option>
+                            ))}
+                          </optgroup>
+                        )}
                       </select>
                       {providerDivergence?.hasBullseye && (
                         <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
