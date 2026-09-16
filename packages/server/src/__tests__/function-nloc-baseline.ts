@@ -344,7 +344,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 393 -> 407 (#1025) -> 409 (#1026), disclosed in the seventh and eighth movements above.
   "services/workspace-provision.service.ts::createWorkspaceProvisionService": 409,
   // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.
-  "routes/workspace-actions.ts::createWorkspaceActionsRoute": 403,
+  "routes/workspace-actions.ts::createWorkspaceActionsRoute": 384,
   // 349 -> 351 (#841): POSIX-only `detached: true` for a shell launch, closing the #836 gap.
   // 351 -> 358 (#1027), disclosed in the ninth movement above.
   "worker/worker-agent-runner.ts::createWorkerAgentRunner": 358,
