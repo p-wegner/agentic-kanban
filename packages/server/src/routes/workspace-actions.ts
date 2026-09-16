@@ -243,6 +243,124 @@ export async function describeLiveMergeJob(
   return { job, attemptSummary: describeMergeJobAttempts(job), gateDiscards };
 }
 
+/**
+ * The `GET /merge-backoff` body: the persisted circuit-breaker state, so an operator can see
+ * WHY a workspace is being skipped before deciding to clear it.
+ *
+ * Extracted for the same reason {@link describeAbsentMergeJob} is: `createWorkspaceActionsRoute`
+ * is on the `function-nloc-ratchet` (#800) shrink-only ring.
+ */
+export async function describeMergeBackoffState(
+  workspaceId: string,
+  database: Database,
+): Promise<{
+  blocked: boolean;
+  failures: number;
+  failureClass: ReturnType<typeof failureClassFromSignature> | null;
+  nextRetryAt: string | null;
+  branchSha: string | null;
+} | null> {
+  const row = await getMergeBackoffState(workspaceId, database);
+  if (!row) return null;
+  const blocked = (row.failures ?? 0) > 0 && !!row.nextRetryAt;
+  return {
+    blocked,
+    failures: row.failures ?? 0,
+    failureClass: blocked ? failureClassFromSignature(row.signature) : null,
+    nextRetryAt: row.nextRetryAt,
+    branchSha: row.branchSha,
+  };
+}
+
+/**
+ * `POST /merge-backoff/clear` (#1167) — an operator door onto `clearMergeBackoff`. See the
+ * route comment for why this exists: a workspace can be permanently skipped by an
+ * ENVIRONMENTAL failure (a stale red base, a failed dependency install) rather than one the
+ * branch caused, and "push new work" was the only way to resume it before this endpoint.
+ *
+ * Extracted for the same `function-nloc-ratchet` reason as its sibling above.
+ */
+export async function clearWorkspaceMergeBackoff(
+  workspaceId: string,
+  database: Database,
+): Promise<{ cleared: boolean; previousFailures: number } | null> {
+  const before = await getMergeBackoffState(workspaceId, database);
+  if (!before) return null;
+  const wasBlocked = (before.failures ?? 0) > 0 && !!before.nextRetryAt;
+  await clearMergeBackoff(database, workspaceId);
+  return { cleared: wasBlocked, previousFailures: before.failures ?? 0 };
+}
+
+/**
+ * The remote-session collaborators, or null when this process has no fleet at all.
+ *
+ * The cast is the same one `startup/remote-session-readoption.ts` makes: the facade types
+ * its member as the narrow `AgentExecutionService`, while the remote implementation is a
+ * documented superset. `RemoteRepoOpPort` is deliberately structural, so nothing here
+ * depends on the concrete service type.
+ *
+ * Extracted for the same `function-nloc-ratchet` (#800) reason as its siblings above.
+ */
+export function resolveRemoteFleet(
+  database: Database,
+  injectedFleet?: { ops: RemoteRepoOpPort; probeLiveness: ProbeLiveness },
+): { ops: RemoteRepoOpPort; probeLiveness: ProbeLiveness } | null {
+  if (injectedFleet) return injectedFleet;
+  try {
+    const ops = getWorkerFleet(database).remoteAgentService as unknown as RemoteRepoOpPort;
+    if (typeof ops.remoteSessionInfo !== "function" || typeof ops.requestRepoOp !== "function") return null;
+    return { ops, probeLiveness: (row) => probeRemoteSessionLiveness(row, database) };
+  } catch (err) {
+    console.error(`[workspace-actions] could not reach the worker fleet`, err);
+    return null;
+  }
+}
+
+/**
+ * Land a running remote session's committed work so the diff route can see it (#784).
+ *
+ * Returns null for every non-remote workspace, so the response shape is unchanged for host
+ * sessions. Never throws: a diff that cannot reach the worker still answers, with a
+ * `remoteMidSession` block that says what it is missing and why.
+ *
+ * `midSessionLandings` is the route factory's per-workspace memo, passed in rather than
+ * module-global so each `createWorkspaceActionsRoute` call keeps its own. Extracted for the
+ * same `function-nloc-ratchet` (#800) reason as its siblings above.
+ */
+export async function landMidSessionWork(
+  id: string,
+  database: Database,
+  fleet: { ops: RemoteRepoOpPort; probeLiveness: ProbeLiveness } | null,
+  midSessionLandings: Map<string, { at: number; landing: MidSessionLanding }>,
+): Promise<MidSessionLanding | null> {
+  if (!fleet) return null;
+  try {
+    const session = await findRunningSession(id, database);
+    if (!session?.workerId) {
+      midSessionLandings.delete(id);
+      return null;
+    }
+    const memo = midSessionLandings.get(id);
+    if (memo && Date.now() - memo.at < MID_SESSION_LAND_MIN_INTERVAL_MS) {
+      // Throttled: report the SAME landing with its real age rather than a fresh-looking
+      // repeat of it (#784 item 4).
+      return { ...memo.landing, ageMs: Date.now() - memo.at };
+    }
+    const landing = await landRemoteMidSessionWork({
+      session: { id: session.id, workerId: session.workerId, startedAt: session.startedAt },
+      ops: fleet.ops,
+      probeLiveness: fleet.probeLiveness,
+    });
+    if (!landing) return null;
+    midSessionLandings.set(id, { at: Date.now(), landing });
+    if (midSessionLandings.size > 2000) midSessionLandings.clear(); // crude cap; entries are tiny
+    return landing;
+  } catch (err) {
+    console.error(`[workspace-actions] mid-session remote landing failed: workspaceId=${id}`, err);
+    return null;
+  }
+}
+
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
   database: Database,
@@ -258,26 +376,6 @@ export function createWorkspaceActionsRoute(
   },
 ) {
   const router = createRouter();
-
-  /**
-   * The remote-session collaborators, or null when this process has no fleet at all.
-   *
-   * The cast is the same one `startup/remote-session-readoption.ts` makes: the facade types
-   * its member as the narrow `AgentExecutionService`, while the remote implementation is a
-   * documented superset. `RemoteRepoOpPort` is deliberately structural, so nothing here
-   * depends on the concrete service type.
-   */
-  function resolveRemoteFleet(): { ops: RemoteRepoOpPort; probeLiveness: ProbeLiveness } | null {
-    if (options?.remoteFleet) return options.remoteFleet;
-    try {
-      const ops = getWorkerFleet(database).remoteAgentService as unknown as RemoteRepoOpPort;
-      if (typeof ops.remoteSessionInfo !== "function" || typeof ops.requestRepoOp !== "function") return null;
-      return { ops, probeLiveness: (row) => probeRemoteSessionLiveness(row, database) };
-    } catch (err) {
-      console.error(`[workspace-actions] could not reach the worker fleet`, err);
-      return null;
-    }
-  }
 
   /** Per-workspace memo of the last mid-session landing (#784). See the interval constant. */
   const midSessionLandings = new Map<string, { at: number; landing: MidSessionLanding }>();
@@ -374,7 +472,7 @@ export function createWorkspaceActionsRoute(
   router.post("/:id/turn", async (c) => {
     const id = c.req.param("id");
     const body = await parseJsonBody(c, workspaceTurnBody);
-    const fleet = resolveRemoteFleet();
+    const fleet = resolveRemoteFleet(database, options?.remoteFleet);
     if (fleet) {
       const session = await findRunningSession(id, database);
       const gate = await gateRemoteTurn({
@@ -446,43 +544,6 @@ export function createWorkspaceActionsRoute(
     return c.json(await workspaceService.getLatestCommit(id));
   });
 
-  /**
-   * Land a running remote session's committed work so the diff below can see it (#784).
-   *
-   * Returns null for every non-remote workspace, so the response shape is unchanged for
-   * host sessions. Never throws: a diff that cannot reach the worker still answers, with a
-   * `remoteMidSession` block that says what it is missing and why.
-   */
-  async function landMidSessionWork(id: string): Promise<MidSessionLanding | null> {
-    const fleet = resolveRemoteFleet();
-    if (!fleet) return null;
-    try {
-      const session = await findRunningSession(id, database);
-      if (!session?.workerId) {
-        midSessionLandings.delete(id);
-        return null;
-      }
-      const memo = midSessionLandings.get(id);
-      if (memo && Date.now() - memo.at < MID_SESSION_LAND_MIN_INTERVAL_MS) {
-        // Throttled: report the SAME landing with its real age rather than a fresh-looking
-        // repeat of it (#784 item 4).
-        return { ...memo.landing, ageMs: Date.now() - memo.at };
-      }
-      const landing = await landRemoteMidSessionWork({
-        session: { id: session.id, workerId: session.workerId, startedAt: session.startedAt },
-        ops: fleet.ops,
-        probeLiveness: fleet.probeLiveness,
-      });
-      if (!landing) return null;
-      midSessionLandings.set(id, { at: Date.now(), landing });
-      if (midSessionLandings.size > 2000) midSessionLandings.clear(); // crude cap; entries are tiny
-      return landing;
-    } catch (err) {
-      console.error(`[workspace-actions] mid-session remote landing failed: workspaceId=${id}`, err);
-      return null;
-    }
-  }
-
   // GET /api/workspaces/:id/diff — full diff, or with `?stats=1` only the per-repo
   // shortstat numbers (#415: one spawn per repo instead of three, tiny payload).
   //
@@ -511,7 +572,12 @@ export function createWorkspaceActionsRoute(
     // preparation, the monitor's progress signals, "is it changing files at all") was blind
     // on remote placement while working on host placement. Ask the worker for its current
     // HEAD, land it fast-forward-only, and SAY how fresh the answer is.
-    const remoteMidSession = await landMidSessionWork(id);
+    const remoteMidSession = await landMidSessionWork(
+      id,
+      database,
+      resolveRemoteFleet(database, options?.remoteFleet),
+      midSessionLandings,
+    );
     const result = statsOnly
       ? await workspaceService.getWorkspaceDiffStats(id)
       : await workspaceService.getWorkspaceDiff(id);
@@ -608,33 +674,18 @@ export function createWorkspaceActionsRoute(
   // operator can see WHY a workspace is being skipped before deciding to clear it.
   router.get("/:id/merge-backoff", async (c) => {
     const id = c.req.param("id");
-    const row = await getMergeBackoffState(id, database);
-    if (!row) return c.json({ error: "Workspace not found" }, 404);
-    const blocked = (row.failures ?? 0) > 0 && !!row.nextRetryAt;
-    return c.json({
-      blocked,
-      failures: row.failures ?? 0,
-      failureClass: blocked ? failureClassFromSignature(row.signature) : null,
-      nextRetryAt: row.nextRetryAt,
-      branchSha: row.branchSha,
-    });
+    const state = await describeMergeBackoffState(id, database);
+    if (!state) return c.json({ error: "Workspace not found" }, 404);
+    return c.json(state);
   });
 
   // POST /api/workspaces/:id/merge-backoff/clear — an operator door onto
-  // `clearMergeBackoff` (#1167). Three workspaces sat permanently skipped every monitor
-  // cycle with "merge retries exhausted ... waiting no longer resumes them; new work on
-  // the branch does" — but the six identical failures were an ENVIRONMENTAL fault (a
-  // stale red base, a failed dependency install), not something the branch caused, so
-  // "push new work" was the wrong remedy. `clearMergeBackoff` already existed; nothing
-  // exposed it. This lets a human who fixed the environment resume without inventing a
-  // commit just to reset the breaker.
+  // `clearMergeBackoff` (#1167). See `clearWorkspaceMergeBackoff` for why this exists.
   router.post("/:id/merge-backoff/clear", async (c) => {
     const id = c.req.param("id");
-    const before = await getMergeBackoffState(id, database);
-    if (!before) return c.json({ error: "Workspace not found" }, 404);
-    const wasBlocked = (before.failures ?? 0) > 0 && !!before.nextRetryAt;
-    await clearMergeBackoff(database, id);
-    return c.json({ cleared: wasBlocked, previousFailures: before.failures ?? 0 });
+    const result = await clearWorkspaceMergeBackoff(id, database);
+    if (!result) return c.json({ error: "Workspace not found" }, 404);
+    return c.json(result);
   });
 
   // GET /api/workspaces/:id/already-merged-status — check if branch is already merged without modifying state
