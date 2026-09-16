@@ -92,3 +92,31 @@ export async function listActiveMergeTrainsForProject(
     .from(mergeTrains)
     .where(and(eq(mergeTrains.projectId, projectId), inArray(mergeTrains.state, states)));
 }
+
+/**
+ * Find an already-`assembling`/`gating` train for this EXACT member set (#1158) — so a caller
+ * about to start a new attempt for a batch can join the existing row instead of minting a
+ * duplicate one. Compared as a SET, not an ordered list: `computePlan`'s ordering is not a
+ * membership fact, and treating it as one would defeat the dedup on the most common retry
+ * shape (the same ids, reordered by a re-run classifier).
+ *
+ * Membership is stored as JSON text, not queryable in SQL, so this reads the project's active
+ * rows (already state-filtered and therefore few) and compares in memory.
+ */
+export async function findActiveMergeTrainForMembers(
+  projectId: string,
+  memberWorkspaceIds: string[],
+  database: Database = db,
+): Promise<MergeTrainRow | undefined> {
+  const wanted = new Set(memberWorkspaceIds);
+  const active = await listActiveMergeTrainsForProject(projectId, ["assembling", "gating"], database);
+  return active.find((row) => {
+    let members: string[];
+    try {
+      members = JSON.parse(row.memberWorkspaceIds) as string[];
+    } catch {
+      return false;
+    }
+    return members.length === wanted.size && members.every((id) => wanted.has(id));
+  });
+}
