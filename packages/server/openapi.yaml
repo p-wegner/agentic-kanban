@@ -10868,6 +10868,24 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/workspaces/{id}/retry-setup:
+    post:
+      summary: POST /api/workspaces/:id/retry-setup — re-run the project's setup script in the workspace's existing worktree and restamp the verdict
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_retry-setup
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
   /api/workspaces/{id}/retry-cleanup:
     post:
       summary: POST /api/workspaces/:id/retry-cleanup — retry worktree cleanup for a workspace with a pending warning
