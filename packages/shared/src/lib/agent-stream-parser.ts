@@ -143,11 +143,14 @@ export function parseAgentStreamLine(
     case "pi":
       return parsePiEvent(obj, context);
     case "herdr":
-      // Herdr's stream-json contract is unverified (#1144 adds the provider
-      // gated behind availability detection, not a verified wire format yet).
-      // Reuse Pi's parser as the closest known shape (`--mode json`, `-p`);
-      // revisit once a real Herdr session's output has been observed.
-      return parsePiEvent(obj, context);
+      // Herdr never runs a model itself — it drives an agent CLI (claude/codex/…)
+      // inside a managed pane and relays that CLI's own stream verbatim (#1145).
+      // So herdr's wire format IS whatever the driven agent emits, not a format of
+      // herdr's own. Claude is the default driven agent (and what the mock-agent
+      // test harness emits regardless of provider), so reuse Claude's parser as the
+      // baseline shape; a herdr session driving a non-Claude agent would need this
+      // dispatch to widen, but nothing in this codebase does that yet.
+      return parseClaudeEvent(obj, context);
   }
 }
 
