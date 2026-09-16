@@ -22,6 +22,11 @@ import {
 } from "../services/merge-train-window.js";
 import { verifyChainSemaphoreActive } from "../services/verify-chain-semaphore.js";
 import { formatPostureNote } from "../services/risk-posture.service.js";
+import {
+  describeReleasePartition,
+  partitionMergeRelease,
+  releaseBatches,
+} from "../services/merge-release-partition.js";
 import { reconcileCompletionStates } from "./completion-state-reconciler.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { reconcileDriveCompletion } from "./drive-completion-reconciler.js";
@@ -299,6 +304,10 @@ export function createAutoMergeOrchestrator(deps: {
    * already reaches `train_max_size`.
    *
    * Read once per tick with the same cached prefMap `findCompletedWorkspaceRows` reads.
+   *
+   * The returned ids are the UNION of every window that closed this tick, so they can span
+   * projects and therefore repos — `runOnce` partitions them by (repoPath, baseBranch) before
+   * the queue asks `trainEligible` (#1180).
    */
   async function applyTrainWindow(rows: { workspaceId: string; projectId: string }[], now: string): Promise<string[]> {
     const prefRows = await getAllPreferencesCached(database);
@@ -472,25 +481,36 @@ export function createAutoMergeOrchestrator(deps: {
       }
 
       // A window-released batch of >=2 is exactly what the batching window exists to gate ONCE
-      // as a train (`trainEligible` still applies its own repo/base/direct-workspace checks and
-      // falls back to sequential when they don't hold — this only expresses the PREFERENCE).
+      // as a train. #1180: every project window that closes on one tick lands in the SAME
+      // `workspaceIds` (see `applyTrainWindow`), so the release can span repos — and
+      // `trainEligible` judges a queue call as a whole, so one foreign, direct or branch-less
+      // member used to sink the train for all 13 with nothing logged. Partition by
+      // (repoPath, baseBranch) first, peel off the members that can never ride, and run one
+      // queue call per partition; `describeReleasePartition` is the one line saying why a
+      // release was not a single train.
+      const partition = partitionMergeRelease(plan.order);
+      const splitNote = describeReleasePartition(partition, plan.order.length);
+      if (splitNote) console.log(`[auto-merge] ${splitNote}`);
+
       const strandedIds: string[] = [];
-      for await (const event of queueService.executeQueue(workspaceIds, {
-        skipOnConflict: true,
-        strategy: workspaceIds.length >= 2 ? "train" : undefined,
-      })) {
-        if (event.type === "merged") {
-          state.lastMerged++;
-          console.log(`[auto-merge] merged workspace ${event.workspaceId} (#${event.issueNumber ?? "?"})`);
-        } else if (event.type === "conflict" || event.type === "error") {
-          state.lastFailed++;
-          console.warn(`[auto-merge] ${event.type} for workspace ${event.workspaceId}: ${event.error}`);
-          if (event.type === "conflict") strandedIds.push(event.workspaceId);
-        } else if (event.type === "skipped") {
-          state.lastSkipped++;
-          console.log(`[auto-merge] skipped workspace ${event.workspaceId}: ${event.reason}`);
-          if (event.reason.startsWith("rebase conflict") || event.reason.startsWith("merge conflict")) {
-            strandedIds.push(event.workspaceId);
+      for (const batch of releaseBatches(partition)) {
+        for await (const event of queueService.executeQueue(batch.workspaceIds, {
+          skipOnConflict: true,
+          strategy: batch.strategy,
+        })) {
+          if (event.type === "merged") {
+            state.lastMerged++;
+            console.log(`[auto-merge] merged workspace ${event.workspaceId} (#${event.issueNumber ?? "?"})`);
+          } else if (event.type === "conflict" || event.type === "error") {
+            state.lastFailed++;
+            console.warn(`[auto-merge] ${event.type} for workspace ${event.workspaceId}: ${event.error}`);
+            if (event.type === "conflict") strandedIds.push(event.workspaceId);
+          } else if (event.type === "skipped") {
+            state.lastSkipped++;
+            console.log(`[auto-merge] skipped workspace ${event.workspaceId}: ${event.reason}`);
+            if (event.reason.startsWith("rebase conflict") || event.reason.startsWith("merge conflict")) {
+              strandedIds.push(event.workspaceId);
+            }
           }
         }
       }
