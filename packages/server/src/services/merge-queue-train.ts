@@ -16,7 +16,6 @@ import { resolveTrainOptInSize } from "./merge-train-window.js";
 import { resolveRiskPosture, formatPostureNote, type RiskPosture } from "./risk-posture.service.js";
 import {
   createMergeTrain,
-  findActiveMergeTrainForMembers,
   getMergeTrain,
   listActiveMergeTrainsForProject,
   updateMergeTrainState,
@@ -123,15 +122,13 @@ export function trainEligible(order: MergeQueuePlan["order"]): boolean {
  * `null` when the project cannot be resolved — there is then no `verify_script` to gate with,
  * so the caller must fail closed rather than run a train with no gate.
  *
- * #1158: **reuses** an existing `assembling`/`gating` row for the SAME member set instead of
- * always inserting a new one. Without this, every monitor cycle (or reconciler resume) that
- * reaches this function for a batch already stuck behind the repo lock (`acquireQueueRepoLock`
- * can wait up to 90 minutes) minted a fresh row before ever reaching the lock wait — a 5-minute
- * cycle over a few hours produced dozens of `assembling` rows all naming the same 5 workspace
- * ids, none of which ever resolved. Reusing means this attempt's gate work rides on the SAME
- * train identity a concurrent/prior attempt for this exact batch already owns; it does not
- * itself dedupe the concurrent WORK (the repo lock still serialises that) — it only stops the
- * bookkeeping row from multiplying while that serialisation happens.
+ * #1158: a batch that is ALREADY represented by a live `assembling`/`gating` row — same member
+ * set or not — REFUSES here (see the `#1153`/`#1158` comment below) rather than minting a
+ * second row or joining the existing one. Without this, every monitor cycle (or reconciler
+ * resume) that reached this function for a batch already stuck behind the repo lock
+ * (`acquireQueueRepoLock` can wait up to 90 minutes) minted a fresh row before ever reaching the
+ * lock wait — a 5-minute cycle over a few hours produced dozens of `assembling` rows all naming
+ * the same 5 workspace ids, none of which ever resolved.
  */
 async function beginMergeTrain(
   first: { issueId: string },
@@ -145,17 +142,24 @@ async function beginMergeTrain(
   const projectId = issueRows[0]?.projectId ?? null;
   if (!projectId) return null;
 
-  // #1158: reuse an already-`assembling`/`gating` train for this EXACT member set instead of
-  // minting a duplicate row for a retry of the same batch.
-  const existing = await findActiveMergeTrainForMembers(projectId, memberWorkspaceIds, database).catch(() => undefined);
-  if (existing) return { trainId: existing.id, projectId };
-
   // #1153: refuse a SECOND train for a project that already has one unfinished
-  // (`assembling`/`gating`) with a DIFFERENT member set. This is the seam every caller goes
+  // (`assembling`/`gating`), same member set or not. This is the seam every caller goes
   // through — the batching-window orchestrator also checks this before releasing
   // (`auto-merge-orchestrator.ts`), but an explicit `strategy: "train"` request via
   // `POST /api/merge-queue` reaches this function directly, so the invariant has to hold here
   // too rather than only upstream.
+  //
+  // #1158: a SAME-member-set retry must ALSO refuse here rather than join the existing row.
+  // `findActiveMergeTrainForMembers` still exists so the STARTUP RECONCILER (the one caller
+  // that first abandons the stranded row it is about to resume, in `background-services.ts`)
+  // never finds its own now-terminal row and mistakes it for a live duplicate — but for any
+  // OTHER caller, joining a still-live row means two independent `runTrainStrategy` generators
+  // hold the same `trainId` and each later calls `finishMergeTrain`/`updateMergeTrainState`
+  // on it, serialized only by the repo lock: whichever finishes second silently overwrites the
+  // first's `gateEvidence`/`bisectResult`, and a lock-timeout abandon from either one can stomp
+  // a sibling attempt that is still mid-gate. Refusing (like the differing-member-set case
+  // already did) is what actually fixes #1158's duplicate-row bug without opening this race —
+  // the batch is picked up again once the one active train finishes.
   const active = await listActiveMergeTrainsForProject(projectId, ["assembling", "gating"], database);
   if (active.length > 0) return "already_in_flight";
 
