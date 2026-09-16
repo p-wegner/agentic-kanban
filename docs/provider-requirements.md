@@ -60,6 +60,89 @@ Provider handling:
 | Interactive approval prompts | All board launches | Unsupported by design; board sessions must run unattended or fail clearly. |
 | Cloud-hosted/multi-user auth flows | All | Out of scope for this local-first app. |
 
+## Herdr — an optional, machine-dependent fifth provider
+
+Herdr is a terminal multiplexer for coding agents (github.com/herdrdev/herdr): it does not run a
+model itself, it drives another agent CLI (Claude by default) inside a managed pane and relays
+that pane's own output. It is registered as a provider (`services/agent-provider/herdr-provider.ts`)
+unconditionally, but unlike Claude/Codex/Copilot/Pi it is **never assumed to be present** — nobody's
+machine has Herdr just by having agentic-kanban installed, so it must never be offered as a
+selectable provider unless this specific machine has it wired up.
+
+### Installing / enabling it
+
+1. Install Herdr and confirm `herdr` resolves on `PATH` (`herdr --version`).
+2. Run the board (or the launching process) from inside, or spawned from, a Herdr pane so
+   `HERDR_ENV=1` is set in its environment — this is the same signal the vendor `herdr` agent
+   skill checks before touching its own CLI.
+3. Open Settings → Agent. If Herdr is available, an "Herdr" optgroup appears in the profile
+   picker; if not, selecting `herdr` as the project's provider shows an inline warning and the
+   project falls back to the default agent (`AgentSettings.tsx`).
+
+There is no separate "enable Herdr" toggle or preference — availability is computed, not
+configured (see below). Herdr is deliberately **excluded** from the per-project Strategy
+Bullseye provider picker: that picker assumes quota/rotation-ring concepts (headroom, throttle
+policies) Herdr does not have. It is only reachable through the plain global "Agent Profile"
+select.
+
+### The exact detection rule
+
+`detectHerdrAvailability()` (`packages/server/src/services/agent-provider/herdr-availability.ts`)
+is the gate every "is Herdr available" check ultimately calls. It is **two conditions, both
+required**:
+
+1. The `herdr` binary resolves on `PATH` (via the same `resolveExecutable()` lookup
+   `agent-cli-version.service.ts` uses for every other provider, so this checks the identical
+   binary a real launch would use).
+2. `HERDR_ENV=1` or `HERDR_ENV=true` is set in the process environment (running inside, or
+   spawned from, a Herdr pane) — **or**, for the async variant only, a live reachability probe
+   against a Herdr server succeeds.
+
+A binary with no reachable server/env flag is a stale or uninstalled Herdr; a reachable server
+with no binary means nothing on *this* machine can actually drive it. Either half missing means
+`available: false`.
+
+Two call shapes exist for this rule:
+
+- **`detectHerdrAvailability(env, command)`** — synchronous, PATH-scan only, no network I/O.
+  Requires `HERDR_ENV` to already be set; never probes a server. Safe to call on any request
+  path.
+- **`detectHerdrAvailabilityLive(probe, env, command)`** — widens the same gate with an actual
+  server-reachability probe for callers that can afford the I/O (Settings panel bootstrap,
+  agent-profile-health listing). It skips the probe entirely when `HERDR_ENV` is already set or
+  the binary is missing, and treats a throwing probe as "unreachable" rather than propagating.
+
+Both report a `reason` string alongside `available`, `binaryFound`, `binaryPath`, `envFlagSet`,
+and `serverReachable`, for diagnostics/UI.
+
+### What degrades when Herdr is absent
+
+Nothing else on the board is affected — Herdr is purely additive:
+
+- Herdr never appears in `listAgentProfileHealth`'s candidate list unless the caller already
+  confirmed availability (an empty/omitted `herdrProfiles` list keeps it off the health
+  dashboard entirely).
+- The Settings UI's "Herdr" optgroup is empty and hidden (`herdrOptions.length === 0`); selecting
+  it anyway shows the fallback-to-default-agent warning above.
+- A project whose provider preference somehow resolves to `herdr` on a machine without it simply
+  cannot preflight successfully — the launch-config build fails the same way any other
+  missing-binary provider would, surfaced as a preflight error rather than a crash.
+
+### Hook and quota caveats
+
+- **No Stop-hook story yet.** Herdr relays whatever agent it drives (Claude by default), and the
+  board's stream parser (`agent-stream-parser.ts`'s `case "herdr"`) reuses **Claude's** parser for
+  that reason — but the commit-discipline `check-uncommitted` Stop-hook guard (see "Harness
+  Lifecycle Hook Requirements" below) has not been verified against a Herdr-driven session.
+  Confirm hook delivery before relying on Herdr for unattended/monitor-driven work.
+- **No usage-limit or auth-rotation awareness.** `provider-exit-behavior.ts` registers Herdr with
+  a no-op `ProviderExitBehavior` (`makeNoopBehavior("herdr")`): it detects no usage-limit
+  signature, resolves no OAuth config-dir rotation, and injects no builder counter-instructions.
+  Quota exhaustion on the agent Herdr is driving will surface as a plain launch failure, not as a
+  rotation-ring cooldown the way Claude/Codex usage limits do.
+- **Excluded from the Strategy Bullseye and the profile roster's quota-aware ordering** for the
+  same reason — those features assume a rotation ring Herdr does not participate in.
+
 ## Harness Lifecycle Hook Requirements
 
 The board's safety guardrails are enforced by harness **hooks**, so any harness used to run

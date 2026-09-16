@@ -1,16 +1,17 @@
 ---
 name: agentic-kanban
 description: Operate the agentic-kanban board — a kanban board where each card is an AI coding session in its own git worktree. Use when asked to work a ticket, drive a project hands-off, review or merge agent work, inspect what agents are doing, or wire the board into another tool. Covers the MCP tools, CLI, board views, statuses, and the review/merge gate.
-commit: 7858da2470
-generated: 2026-09-11
+commit: 26c2b62ff8
+generated: 2026-09-16
 ---
 
 # agentic-kanban
 
 A local-first kanban board for AI-driven coding. **Every card is a coding session**: moving an
 issue into work creates a *workspace* — a git worktree on `feature/ak-<issue-number>-<slug>` with an
-agent (Claude Code / Codex / Copilot / Pi) running inside it. The board owns the loop around that
-agent: launch, stream output, diff, review, gate, merge, close.
+agent (Claude Code / Codex / Copilot / Pi, or optionally Herdr — see `references/concepts.md`)
+running inside it. The board owns the loop around that agent: launch, stream output, diff,
+review, gate, merge, close.
 
 You reach it three ways, in this order of preference:
 
@@ -103,7 +104,7 @@ Depth on any of these lives in `references/` — load a file only when you actua
 
 | File | When |
 |---|---|
-| `references/concepts.md` | Agent roles, Start Modes, the pre-merge gate, worker fleet, plugins, ticket groups |
+| `references/concepts.md` | Agent roles, Start Modes, the pre-merge gate, worker fleet, plugins, ticket groups, the optional Herdr provider |
 | `references/workflows.md` | Step-by-step recipes: work a ticket, drive a project, unstick, review, merge |
 | `references/mcp-tools.md` | Full MCP tool list with descriptions, by category |
 | `references/cli.md` | Full CLI command list, by group |

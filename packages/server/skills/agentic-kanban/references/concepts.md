@@ -66,6 +66,24 @@ scheduled crons):
 
 Tag an issue `no-auto-start` to exempt it. Per-project Start Mode supersedes any global toggle.
 
+## Herdr — an optional fifth agent provider
+
+Claude Code, Codex, Copilot and Pi are always offered. **Herdr is different: it is only ever
+offered on a machine that actually has it wired up.** Herdr is a terminal multiplexer for coding
+agents — it drives another agent CLI (Claude by default) inside a managed pane and relays that
+pane's output rather than running a model itself.
+
+Availability is a two-part gate, both required: the `herdr` binary resolves on `PATH`, **and**
+either `HERDR_ENV=1`/`HERDR_ENV=true` is set (running inside/spawned from a Herdr pane) or a live
+Herdr server is reachable. Missing either half means Herdr is unavailable, and it then disappears
+from every profile picker and health listing rather than showing as broken.
+
+Nothing else on the board depends on Herdr being present — it degrades to simply not being
+offered. Two caveats if you do use it: it has no usage-limit/auth-rotation awareness (a no-op
+`ProviderExitBehavior`, so quota exhaustion on the driven agent surfaces as a plain launch
+failure, not a rotation cooldown), and it is excluded from the per-project Strategy Bullseye
+picker, which assumes rotation-ring concepts Herdr does not have.
+
 ## Agent roles — distinct mechanisms, do not conflate
 
 | Name | Role |
