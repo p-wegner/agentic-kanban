@@ -422,13 +422,20 @@ export const STALE_BASE_REFUSAL_THRESHOLD_COMMITS = 10;
  * never mask the real gate; it just means staleness could not be determined, so this returns
  * without throwing and the gate runs as before.
  */
+/** The board's `update-base` in rebase mode, handed to the gate so a stale branch is rebased, not refused. */
+export type RebaseOntoBase = (
+  workspaceId: string,
+) => Promise<{ success: boolean; conflictingFiles?: string[]; error?: string }>;
+
 async function refuseIfBaseIsStale(args: {
+  workspaceId: string;
   workspace: WorkspaceRow;
   baseBranch: string;
   database: Database;
   recordMergeAttempt: RecordMergeAttempt;
+  rebaseOntoBase?: RebaseOntoBase;
 }): Promise<void> {
-  const { workspace, baseBranch, database, recordMergeAttempt } = args;
+  const { workspaceId, workspace, baseBranch, database, recordMergeAttempt, rebaseOntoBase } = args;
   if (!workspace.workingDir) return;
   const behindCount = await countBehindCommits(workspace.workingDir, "HEAD", baseBranch).catch((err) => {
     console.warn(
@@ -438,11 +445,30 @@ async function refuseIfBaseIsStale(args: {
     return null;
   });
   if (behindCount === null || behindCount <= STALE_BASE_REFUSAL_THRESHOLD_COMMITS) return;
+  // A refusal only tells a human to press update-base; the merge attempt is what should press
+  // it. Measured 2026-09-16: four In-Review branches sat 12-23 commits behind for a day while
+  // nothing rebased them, and each cost a full gate run (or a refusal) per monitor cycle. So
+  // try the board's own rebase first — it aborts cleanly on a real conflict (#928) — and refuse
+  // only when that fails, naming the conflict instead of the staleness.
+  let rebaseFailure: string | null = null;
+  if (rebaseOntoBase) {
+    const rebased: Awaited<ReturnType<RebaseOntoBase>> = await rebaseOntoBase(workspaceId)
+      .catch((err) => ({ success: false, error: errorMessage(err) }));
+    if (rebased.success) {
+      console.log(
+        `[workspace-merge] rebased workspace ${workspaceId} onto '${baseBranch}' before the pre-lock gate `
+          + `(was ${behindCount} commits behind, #1169) — the gate runs on the rebased tree`,
+      );
+      return;
+    }
+    const files = rebased.conflictingFiles?.length ? ` conflicting: ${rebased.conflictingFiles.join(", ")}.` : "";
+    rebaseFailure = ` The board tried update-base (rebase) first and it failed: ${rebased.error ?? "conflict"}.${files}`;
+  }
   const staleRefusal =
     `branch is ${behindCount} commits stale against '${baseBranch}' (#1169) — rebase first `
     + `(update-base) rather than retrying the gate. A branch this far behind fails the gate on `
     + `a large reversion of everything the base gained meanwhile, misattributed to whichever `
-    + `base file that reversion happens to touch.`;
+    + `base file that reversion happens to touch.${rebaseFailure ?? ""}`;
   await recordGateFailureNote({
     workspace,
     stage: "none",
@@ -462,8 +488,10 @@ export async function runPreLockGate(args: {
   token: MergeGateToken;
   database: Database;
   recordMergeAttempt: RecordMergeAttempt;
+  /** When given, a badly-stale branch is rebased via the board before the gate instead of refused (#1169). */
+  rebaseOntoBase?: RebaseOntoBase;
 }): Promise<MergeGateToken> {
-  const { workspaceId, workspace, projectId, baseBranch, token, database, recordMergeAttempt } = args;
+  const { workspaceId, workspace, projectId, baseBranch, token, database, recordMergeAttempt, rebaseOntoBase } = args;
   if (!projectId || token.kind !== "run-gate") return token;
   // #276 — a DIRECT workspace's merge lands nothing. Its branch IS the default branch, and
   // `doMerge` short-circuits it to a plain close (handleWorkspaceMergeResolution →
@@ -501,7 +529,7 @@ export async function runPreLockGate(args: {
   // #1169 — before paying for the gate, refuse a badly-stale branch instead of running a gate
   // whose failure (a reversion of everything base gained meanwhile) is guaranteed and
   // misattributed to whichever base file the reversion touches.
-  await refuseIfBaseIsStale({ workspace, baseBranch, database, recordMergeAttempt });
+  await refuseIfBaseIsStale({ workspaceId, workspace, baseBranch, database, recordMergeAttempt, rebaseOntoBase });
 
   console.log(`[workspace-merge] pre-lock gate phase=start workspaceId=${workspaceId}`);
   const preGate = await runGateWithEvidence({

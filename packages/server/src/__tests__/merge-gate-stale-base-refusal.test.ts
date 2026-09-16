@@ -48,7 +48,9 @@ const workspace = {
 
 type RecordMergeAttempt = Parameters<typeof runPreLockGate>[0]["recordMergeAttempt"];
 
-async function callRunPreLockGate(recordMergeAttempt: RecordMergeAttempt) {
+type RebaseOntoBase = Parameters<typeof runPreLockGate>[0]["rebaseOntoBase"];
+
+async function callRunPreLockGate(recordMergeAttempt: RecordMergeAttempt, rebaseOntoBase?: RebaseOntoBase) {
   return runPreLockGate({
     workspaceId: "ws-1",
     workspace,
@@ -57,6 +59,7 @@ async function callRunPreLockGate(recordMergeAttempt: RecordMergeAttempt) {
     token: RUN_GATE_TOKEN,
     database: {} as Database,
     recordMergeAttempt,
+    rebaseOntoBase,
   });
 }
 
@@ -89,6 +92,40 @@ describe("runPreLockGate refuses a badly-stale branch before running the gate (#
 
     expect(resolveMergeGate).toHaveBeenCalled();
     expect(result.kind).not.toBe("run-gate");
+  });
+
+  it("rebases via the board first when a rebase door is given, then runs the gate", async () => {
+    vi.mocked(countBehindCommits).mockResolvedValue(15);
+    const rebaseOntoBase = vi.fn(async () => ({ success: true }));
+    const recordMergeAttempt = vi.fn(async () => {});
+
+    const result = await callRunPreLockGate(recordMergeAttempt, rebaseOntoBase);
+
+    expect(rebaseOntoBase).toHaveBeenCalledWith("ws-1");
+    expect(recordMergeAttempt).not.toHaveBeenCalled();
+    expect(resolveMergeGate).toHaveBeenCalled();
+    expect(result.kind).not.toBe("run-gate");
+  });
+
+  it("refuses naming the rebase failure when the board's rebase conflicts", async () => {
+    vi.mocked(countBehindCommits).mockResolvedValue(15);
+    const rebaseOntoBase = vi.fn(async () => ({
+      success: false,
+      conflictingFiles: ["packages/server/src/a.ts"],
+      error: "Merge conflicts detected",
+    }));
+    const recorded: string[] = [];
+    const recordMergeAttempt = vi.fn(async (_ws: unknown, _eventType: string, body: string) => {
+      recorded.push(body);
+    });
+
+    await expect(callRunPreLockGate(recordMergeAttempt, rebaseOntoBase)).rejects.toThrow(/Pre-merge gate failed/);
+
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toContain("15 commits stale");
+    expect(recorded[0]).toContain("update-base (rebase) first and it failed");
+    expect(recorded[0]).toContain("packages/server/src/a.ts");
+    expect(resolveMergeGate).not.toHaveBeenCalled();
   });
 
   it("falls through to the real gate when staleness cannot be determined (fail-open)", async () => {
