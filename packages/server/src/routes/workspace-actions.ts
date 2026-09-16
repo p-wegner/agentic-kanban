@@ -339,6 +339,14 @@ export function createWorkspaceActionsRoute(
     return c.json(await workspaceService.setupWorkspace(id));
   });
 
+  // POST /api/workspaces/:id/retry-setup (#1166) — re-runs the project's setup script in the
+  // workspace's EXISTING worktree and restamps the verdict, unlike `/setup` above which only
+  // recreates a missing worktree and no-ops when one is already there.
+  router.post("/:id/retry-setup", async (c) => {
+    const id = c.req.param("id");
+    return c.json(await workspaceService.retrySetup(id));
+  });
+
   // POST /api/workspaces/:id/terminal
   router.post("/:id/terminal", async (c) => {
     const id = c.req.param("id");

@@ -49,6 +49,7 @@ export function createWorkspaceService(deps: {
     closeWorkspace: crud.closeWorkspace,
     markReadyForMerge: crud.markReadyForMerge,
     setupWorkspace: crud.setupWorkspace,
+    retrySetup: crud.retrySetup,
     updateWorkspace: crud.updateWorkspace,
     getWorkspace: crud.getWorkspace,
     getWorkspaceDevServerPlan: crud.getWorkspaceDevServerPlan,

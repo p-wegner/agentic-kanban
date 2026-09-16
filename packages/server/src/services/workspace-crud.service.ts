@@ -25,6 +25,7 @@ import {
 import { createWorkspaceCleanupService } from "./workspace-cleanup.service.js";
 import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 import { createWorkspaceCreateService } from "./workspace-create.service.js";
+import { createWorkspaceSetupRetryService } from "./workspace-setup-retry.service.js";
 import { releaseWorkspaceResources } from "./workspace-resource-release.js";
 import { resolveProjectDevServerPlan } from "./dev-server.service.js";
 import { isSelfProjectRepo } from "./self-project.js";
@@ -48,6 +49,10 @@ export function createWorkspaceCrudService(deps: {
   // Workspace creation + launch-preview (worktree setup, agent config/skill/prompt,
   // DB insert, deferred launch) live in a sibling service sharing the same deps.
   const create = createWorkspaceCreateService({ database, getSessionManager, boardEvents, gitService });
+
+  // Re-runs a workspace's setup script and restamps the verdict — the recovery door
+  // `setupWorkspace` below does NOT provide once a worktree already exists (#1166).
+  const setupRetry = createWorkspaceSetupRetryService({ database, boardEvents });
 
   async function deleteWorkspace(workspaceId: string): Promise<void> {
     await stopAndKillWorkspaceSessions(workspaceId);
@@ -309,6 +314,7 @@ export function createWorkspaceCrudService(deps: {
     closeWorkspace,
     markReadyForMerge,
     setupWorkspace,
+    retrySetup: setupRetry.retrySetup,
     updateWorkspace,
     getWorkspace,
     getWorkspaceDevServerPlan,

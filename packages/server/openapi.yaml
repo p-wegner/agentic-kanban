@@ -10630,6 +10630,24 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/workspaces/{id}/retry-setup:
+    post:
+      summary: recreates a missing worktree and no-ops when one is already there.
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_retry-setup
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
   /api/workspaces/{id}/review:
     post:
       summary: Trigger a manual review session for a workspace.
