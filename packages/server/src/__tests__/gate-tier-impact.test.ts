@@ -399,6 +399,67 @@ describe("buildImpactSelectionNote", () => {
     expect(buildImpactSelectionNote({ ...baseTier, strategy: "scoped", selector: "related" })).toBeNull();
   });
 
+  describe("the runner fell back at RUN time, not at provisioning time (#1170)", () => {
+    // The state the ticket found: the tool IS in the worktree (so #1039's `impactSelectorAbsent`
+    // stays unset) and the message-side probe independently resolved a selection (so
+    // `impactSelection` is non-null) — but `scripts/test-mine.mjs`'s OWN spawn of the selector hit
+    // ENOENT at gate time and fell through to `vitest related`. Only the runner's own
+    // `[gate:step] name=tests ... scope=...` self-report carries that fact.
+    const fellBackTier: GateTierInfo = {
+      ...baseTier,
+      impactSelection: { selectedCount: 12, belowFloorCount: 151, stale: false },
+      stepTimings: [{ name: "tests", seconds: 40, scope: "file-scoped" }],
+    };
+
+    it("makes the impact note say RUNNER FELL BACK instead of the resolved selection", () => {
+      const note = buildImpactSelectionNote(fellBackTier);
+      expect(note).toContain("UNKNOWN");
+      expect(note).toContain("RUNNER FELL BACK");
+      expect(note).toContain("scope=file-scoped");
+      expect(note).not.toContain("selection kept 12");
+    });
+
+    it("never lets the passing message's tier: label claim impact ran", () => {
+      const message = buildGateTierMessage(fellBackTier);
+      expect(message).not.toContain("tier: impact-selected");
+      expect(message).not.toContain("tier: impact+related");
+      expect(message).toContain("RUNNER FELL BACK");
+    });
+
+    it("does not fire when the runner's own report confirms impact actually ran", () => {
+      const confirmed: GateTierInfo = {
+        ...baseTier,
+        impactSelection: { selectedCount: 12, belowFloorCount: 151, stale: false },
+        stepTimings: [{ name: "tests", seconds: 5, scope: "impact-selected" }],
+      };
+      expect(buildImpactSelectionNote(confirmed)).not.toContain("RUNNER FELL BACK");
+      expect(buildGateTierMessage(confirmed)).toContain("tier: impact-selected");
+    });
+
+    it("does not fire when there is no step self-report at all (a project with no [gate:step] contract)", () => {
+      // Absence of evidence is not evidence of a fallback — most projects emit no steps at all,
+      // and this must not newly claim a fallback for every one of them.
+      const noSteps: GateTierInfo = {
+        ...baseTier,
+        impactSelection: { selectedCount: 12, belowFloorCount: 151, stale: false },
+      };
+      expect(buildImpactSelectionNote(noSteps)).not.toContain("RUNNER FELL BACK");
+      expect(buildGateTierMessage(noSteps)).toContain("tier: impact-selected");
+    });
+
+    it("also fires for the impact+related union shape", () => {
+      const unioned: GateTierInfo = {
+        ...baseTier,
+        fileScoped: true,
+        impactSelection: { selectedCount: 12, belowFloorCount: 151, stale: false },
+        stepTimings: [{ name: "tests", seconds: 40, scope: "full" }],
+      };
+      const message = buildGateTierMessage(unioned);
+      expect(message).not.toContain("tier: impact+related");
+      expect(message).toContain("RUNNER FELL BACK");
+    });
+  });
+
   it("splits the provenance when the union's size is known (#967)", () => {
     // The ticket's own example message. A combined selector that reports one number cannot be
     // audited: `kept 155` hides whether `related` contributed anything, and therefore whether the
