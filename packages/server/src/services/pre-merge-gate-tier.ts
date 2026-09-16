@@ -18,6 +18,7 @@ import {
 import {
   buildGuardCostNote,
   buildImpactSelectionNote,
+  impactRunnerFellBack,
   type GateImpactSelection,
 } from "./impact-selection-note.js";
 
@@ -368,6 +369,7 @@ export {
   buildImpactSelectionNote,
   buildGuardCostNote,
   IMPACT_MAP_STALE_REMEDY,
+  impactRunnerFellBack,
 } from "./impact-selection-note.js";
 
 /** Matches the test-file extensions `scripts/test-mine.mjs` actually runs. */
@@ -688,22 +690,32 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
   // selector is ever consulted, so no selection happened at all.
   // #1008: a `.gitignore`/settings/`.code-metrics` diff is guards-only too, and calling it
   // "docs-only" would misdescribe what was merged.
+  // #1170 — the runner's own `[gate:step]` self-report outranks the REQUESTED selector for the
+  // tier NAME. `tierInfo.selector === "impact"` says the gate asked for the impact tier; it says
+  // nothing about whether the verify script's own spawn of the selector CLI actually succeeded.
+  // A silent ENOENT/non-zero-exit fallback inside `scripts/test-mine.mjs` leaves the tool on disk
+  // and the message-side probe (`resolveGateImpactTierFields`) free to succeed independently, so
+  // neither of the two existing checks below (`impactSelectorAbsent`, a null `impactSelection`)
+  // catches it — only the runner's own report of what `tests` actually ran does.
+  const runnerFellBack = impactRunnerFellBack(tierInfo);
   const tier = tierInfo.guardsOnly
     ? tierInfo.guardsOnlyReason === "docs-and-config"
       ? "guards-only (docs+config-only diff, #1008)"
       : "guards-only (docs-only diff)"
-    : tierInfo.selector === "impact"
-      // #967 — a run whose suites came from BOTH selectors is not the same claim as one that came
-      // from the ranking alone, and the ledger records it under its own `ran` name for exactly that
-      // reason. The tier label has to match, or the message and the row describe different runs.
-      ? tierInfo.fileScoped
-        ? "impact+related"
-        : "impact-selected"
-      : tierInfo.fileScoped
-        ? "file-scoped"
-        : tierInfo.packageScoped
-          ? "package-scoped"
-          : "full";
+    : runnerFellBack
+      ? "impact-REQUESTED-but-runner-fell-back"
+      : tierInfo.selector === "impact"
+        // #967 — a run whose suites came from BOTH selectors is not the same claim as one that came
+        // from the ranking alone, and the ledger records it under its own `ran` name for exactly that
+        // reason. The tier label has to match, or the message and the row describe different runs.
+        ? tierInfo.fileScoped
+          ? "impact+related"
+          : "impact-selected"
+        : tierInfo.fileScoped
+          ? "file-scoped"
+          : tierInfo.packageScoped
+            ? "package-scoped"
+            : "full";
   const impactNote = buildImpactSelectionNote(tierInfo);
   // #988 — when a flake retry produced the verdict, the steps describe the FULL run that failed,
   // not the narrow re-run that cleared it (the retry deliberately reports no steps of its own,
