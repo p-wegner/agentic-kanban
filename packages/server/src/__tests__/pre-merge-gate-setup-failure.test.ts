@@ -78,14 +78,13 @@ describe("describeFailedSetupRun (#1123)", () => {
     }
   });
 
-  it("does not claim corroboration when node_modules/.bin actually has entries", async () => {
+  it("is a no-op (#1172) when node_modules/.bin is actually populated, even on a failed row", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kanban-setup-failure-"));
     mkdirSync(join(dir, "node_modules", ".bin"), { recursive: true });
     writeFileSync(join(dir, "node_modules", ".bin", "vitest"), "");
     try {
       getSetupRunMock.mockResolvedValue({ state: "failed", command: null, stderrTail: null, workingDir: dir });
-      const msg = await describeFailedSetupRun("w1", db);
-      expect(msg).not.toContain("corroborated");
+      expect(await describeFailedSetupRun("w1", db)).toBeNull();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
