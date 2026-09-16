@@ -2,7 +2,7 @@
 // the live hook scripts and the live herdr adapter outside src/; imports nothing it checks (#538).
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -79,6 +79,14 @@ beforeAll(() => {
   seedRepo(mainCheckout);
   mkdirSync(join(root, ".worktrees", "repo"), { recursive: true });
   git(["worktree", "add", "-b", "feature/ak-1146", worktree], mainCheckout);
+  // The herdr adapter resolves the hook scripts relative to CLAUDE_PROJECT_DIR
+  // (.herdr/plugin/agentic-kanban-hooks.mjs: HOOKS_DIR = join(PROJECT_DIR, ".claude", "hooks")).
+  // The bridge tests below point CLAUDE_PROJECT_DIR at this synthetic worktree, so it needs its
+  // own .claude/hooks/ copy — mirroring what project scaffolding materializes into a real
+  // worktree — or the adapter's spawn fails with MODULE_NOT_FOUND, which reads as a false
+  // "block" (a spawn failure, not the guard refusing) and would mask the guard never running.
+  mkdirSync(join(worktree, ".claude", "hooks"), { recursive: true });
+  cpSync(CROSS_WORKTREE_HOOK, join(worktree, ".claude", "hooks", "prevent-cross-worktree-writes.js"));
 });
 
 afterAll(() => {
