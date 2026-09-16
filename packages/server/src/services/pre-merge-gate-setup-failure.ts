@@ -18,6 +18,15 @@ import { getSetupRunForGate } from "../repositories/workspace-setup-run.reposito
  * Deliberately never throws (mirrors `describeOutstandingRepoInstalls`): an unreadable row
  * means we cannot tell, and refusing every merge in the project on that would be worse than the
  * failure this guards against.
+ *
+ * #1172 — a `failed` row can go stale: nothing restamps it once the underlying cause (e.g. a
+ * corrupt pnpm store) is fixed by hand and a later install actually succeeds, because
+ * `POST /:id/setup` no-ops once `workingDir` is set and the born-blocked reconciler only
+ * retries workspaces BORN blocked. The corroboration check below is what tells a stale `failed`
+ * verdict apart from a live one — a `node_modules/.bin` that is actually populated is what the
+ * gate itself can see RIGHT NOW, and it must outrank a verdict it cannot corroborate. So a
+ * present dependency tree makes this a no-op rather than merely dropping the clause that used
+ * to (asymmetrically) announce the corroboration in the block message.
  */
 export async function describeFailedSetupRun(
   workspaceId: string,
@@ -26,31 +35,32 @@ export async function describeFailedSetupRun(
   const run = await getSetupRunForGate(workspaceId, database).catch(() => undefined);
   if (!run || run.state !== "failed") return null;
 
-  const corroboration = run.workingDir ? describeEmptyBinDir(run.workingDir) : null;
+  const corroboration = run.workingDir ? checkBinDir(run.workingDir) : null;
+  if (corroboration?.depsPresent) return null;
+
   return `pre-merge gate blocked: this workspace's dependency setup script FAILED`
     + `${run.command ? ` (${run.command})` : ""} and was never retried successfully — the`
     + ` branch was built without its dependencies and could not have run a single test.`
-    + `${corroboration ? ` ${corroboration}` : ""}`
+    + `${corroboration ? ` ${corroboration.description}` : ""}`
     + `${run.stderrTail ? ` Last error: ${run.stderrTail.slice(-500)}` : ""}`
     + ` Fix the install and relaunch before merging.`;
 }
 
 /**
- * A cheap corroborating check (#1123): an absent or empty `node_modules/.bin` confirms the
- * worktree really has no installed dependencies, rather than trusting the recorded verdict
- * alone. Never throws — an unreadable directory just means "no corroboration to add", not
- * "the failure didn't happen".
+ * A cheap corroborating check (#1123, widened #1172): does `node_modules/.bin` back up the
+ * recorded `failed` verdict, or contradict it? Never throws — an unreadable directory just
+ * means "no corroboration either way", not "the failure didn't happen".
  */
-function describeEmptyBinDir(workingDir: string): string | null {
+function checkBinDir(workingDir: string): { depsPresent: boolean; description: string } | null {
   try {
     const binDir = join(workingDir, "node_modules", ".bin");
     if (!existsSync(binDir)) {
-      return "(corroborated: node_modules/.bin is absent.)";
+      return { depsPresent: false, description: "(corroborated: node_modules/.bin is absent.)" };
     }
     if (readdirSync(binDir).length === 0) {
-      return "(corroborated: node_modules/.bin is empty.)";
+      return { depsPresent: false, description: "(corroborated: node_modules/.bin is empty.)" };
     }
-    return null;
+    return { depsPresent: true, description: "(node_modules/.bin is populated — the recorded failure is stale.)" };
   } catch {
     return null;
   }
