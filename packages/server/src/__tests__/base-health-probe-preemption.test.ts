@@ -69,6 +69,16 @@ describe("shouldProbeYield (#989)", () => {
     // ...and it wins over every other case, including "nobody is waiting".
     expect(shouldProbeYield({ gateWaiting: false, consecutiveYields: 9, maxConsecutiveYields: 0 }).reason)
       .toBe("disabled");
+    // #1178 — this is the exact input an EXPLICIT probe (#1165) feeds in on every poll tick: a
+    // gate IS waiting, no streak has been spent, and the bound is 0 because the request has a
+    // caller blocked on it. The answer has to be the silent `disabled`, never `gate_waiting` (that
+    // would kill the promotion's own verify) and never `yield_budget_exhausted` (that would log
+    // "already yielded 0 time(s)" once per run for a probe that was never allowed to yield).
+    // The same holds when an earlier, non-explicit probe left a streak behind.
+    expect(shouldProbeYield({ gateWaiting: true, consecutiveYields: 2, maxConsecutiveYields: 0 })).toEqual({
+      yield: false,
+      reason: "disabled",
+    });
   });
 });
 
