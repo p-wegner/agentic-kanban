@@ -14,7 +14,12 @@ import { getMergeQueueIssueRows, getMergeTrainMaxSizePref } from "../repositorie
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { resolveTrainOptInSize } from "./merge-train-window.js";
 import { resolveRiskPosture, formatPostureNote, type RiskPosture } from "./risk-posture.service.js";
-import { createMergeTrain, getMergeTrain, listActiveMergeTrainsForProject, updateMergeTrainState } from "../repositories/merge-train.repository.js";
+import {
+  createMergeTrain,
+  getMergeTrain,
+  listActiveMergeTrainsForProject,
+  updateMergeTrainState,
+} from "../repositories/merge-train.repository.js";
 import { runMergeTrain } from "./merge-train.service.js";
 import { runPreMergeGate, looksLikeMissingDepsFailure } from "./pre-merge-gate.service.js";
 import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
@@ -116,6 +121,14 @@ export function trainEligible(order: MergeQueuePlan["order"]): boolean {
  * (#906), so a crash mid-assembly still leaves a row the startup reconciler can find. Returns
  * `null` when the project cannot be resolved — there is then no `verify_script` to gate with,
  * so the caller must fail closed rather than run a train with no gate.
+ *
+ * #1158: a batch that is ALREADY represented by a live `assembling`/`gating` row — same member
+ * set or not — REFUSES here (see the `#1153`/`#1158` comment below) rather than minting a
+ * second row or joining the existing one. Without this, every monitor cycle (or reconciler
+ * resume) that reached this function for a batch already stuck behind the repo lock
+ * (`acquireQueueRepoLock` can wait up to 90 minutes) minted a fresh row before ever reaching the
+ * lock wait — a 5-minute cycle over a few hours produced dozens of `assembling` rows all naming
+ * the same 5 workspace ids, none of which ever resolved.
  */
 async function beginMergeTrain(
   first: { issueId: string },
@@ -130,10 +143,23 @@ async function beginMergeTrain(
   if (!projectId) return null;
 
   // #1153: refuse a SECOND train for a project that already has one unfinished
-  // (`assembling`/`gating`). This is the seam every caller goes through — the batching-window
-  // orchestrator also checks this before releasing (`auto-merge-orchestrator.ts`), but an
-  // explicit `strategy: "train"` request via `POST /api/merge-queue` reaches this function
-  // directly, so the invariant has to hold here too rather than only upstream.
+  // (`assembling`/`gating`), same member set or not. This is the seam every caller goes
+  // through — the batching-window orchestrator also checks this before releasing
+  // (`auto-merge-orchestrator.ts`), but an explicit `strategy: "train"` request via
+  // `POST /api/merge-queue` reaches this function directly, so the invariant has to hold here
+  // too rather than only upstream.
+  //
+  // #1158: a SAME-member-set retry must ALSO refuse here rather than join the existing row.
+  // `findActiveMergeTrainForMembers` still exists so the STARTUP RECONCILER (the one caller
+  // that first abandons the stranded row it is about to resume, in `background-services.ts`)
+  // never finds its own now-terminal row and mistakes it for a live duplicate — but for any
+  // OTHER caller, joining a still-live row means two independent `runTrainStrategy` generators
+  // hold the same `trainId` and each later calls `finishMergeTrain`/`updateMergeTrainState`
+  // on it, serialized only by the repo lock: whichever finishes second silently overwrites the
+  // first's `gateEvidence`/`bisectResult`, and a lock-timeout abandon from either one can stomp
+  // a sibling attempt that is still mid-gate. Refusing (like the differing-member-set case
+  // already did) is what actually fixes #1158's duplicate-row bug without opening this race —
+  // the batch is picked up again once the one active train finishes.
   const active = await listActiveMergeTrainsForProject(projectId, ["assembling", "gating"], database);
   if (active.length > 0) return "already_in_flight";
 
