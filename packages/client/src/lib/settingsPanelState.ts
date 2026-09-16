@@ -1,6 +1,7 @@
 import type { ServiceStackConfig } from "@agentic-kanban/shared";
 import { isValidTestImpactBudget, testImpactBudgetPrefKey } from "@agentic-kanban/shared/lib/test-impact-budget";
 import { buildServicesConfig, type ServicesConfigFormFields } from "./services-config.js";
+import { uniqueProfiles } from "./settings-shared.js";
 
 export { isValidTestImpactBudget, testImpactBudgetPrefKey } from "@agentic-kanban/shared/lib/test-impact-budget";
 
@@ -200,4 +201,19 @@ export function buildSettingsToSave<S extends Record<string, unknown>>(
     (out as Record<string, unknown>)[testImpactBudgetPrefKey(activeProjectId)] = projectSettings.testImpactBudget.trim();
   }
   return out;
+}
+
+/**
+ * Herdr availability + profile list is derived once from the bootstrap response (#1144).
+ * Herdr profiles are always empty when the machine doesn't have it available — the profile
+ * list is never shown as a choice on a machine that can't run it, whatever the bootstrap
+ * payload happened to include.
+ */
+export type HerdrBootstrap = { herdrProfiles?: string[]; herdrAvailability?: { available: boolean } };
+export type HerdrOptions = { available: boolean; profiles: string[] };
+export const EMPTY_HERDR_OPTIONS: HerdrOptions = { available: false, profiles: [] };
+
+export function deriveHerdrOptions(boot: HerdrBootstrap): HerdrOptions {
+  const available = !!boot.herdrAvailability?.available;
+  return { available, profiles: available ? uniqueProfiles(boot.herdrProfiles?.length ? boot.herdrProfiles : ["default"], "default") : [] };
 }
