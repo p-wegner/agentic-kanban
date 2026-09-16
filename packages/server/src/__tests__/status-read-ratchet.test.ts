@@ -42,7 +42,15 @@ const BASELINE: Record<string, number> = {
   "client/src/components/IssueMetadataGrid.tsx": 2,
   "client/src/components/MetricsView.tsx": 4,
   "client/src/components/MilestoneFilterBanner.tsx": 1,
-  "client/src/lib/boardStats.ts": 2,
+  // #1168 — all three of this file's matches read a COLUMN name (`col.name`,
+  // `archiveColumns.find((c) => c.name === …)`), never an issue's status string, so none of
+  // them is the decision-005 drift this ratchet exists to catch: a column called "Done" is a
+  // board column, and no workflow node can contradict it. Two were already grandfathered here
+  // for that reason; #1162 (9a84069c52) added the third — `col.name !== "In Progress"` in
+  // `computeAgentActivity`, counting agents on tickets outside WIP. `RAW_STATUS_READ` cannot
+  // tell a column name from a status string, so the entry covers the sibling rather than the
+  // file being refactored: this is the same read, counted once more, not a new raw comparison.
+  "client/src/lib/boardStats.ts": 3,
   "client/src/lib/issueCardDisplay.ts": 2,
   // #1102 MOVED this comparison out of `RunQueueForecastPanel.tsx` into the extracted
   // forecast lib (13e3ca2183) — `isStartableIssue`'s `=== "Backlog"`. The count is
