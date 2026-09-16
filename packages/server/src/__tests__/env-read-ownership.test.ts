@@ -159,6 +159,7 @@ const FOREIGN: Record<string, string> = {
   CODEX_HOME: "Codex CLI — its config/credential root; worker doctor consults it for provider login (#875)",
   CLAUDE_PROJECT_DIR: "Claude Code — the repo root it sets for hook execution; a scaffolded hook self-locates with it",
   PI_CODING_AGENT_DIR: "Pi — its config/credential root",
+  HERDR_ENV: "Herdr — the terminal multiplexer's own env flag set inside/near a pane; the herdr availability gate checks it (#1144)",
   // Other tools the board shells out to
   DOCKER_HOST: "Docker — the daemon endpoint; named on the doc page's third-party bullet",
   ACP_CLI: "the ACP blob CLI (a separate tool) — where `scripts/pack-worker.mjs` finds it",

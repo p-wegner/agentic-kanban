@@ -32,7 +32,9 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "components/WorkflowBuilder.tsx::WorkflowBuilder": 516,
   "components/WorkspacePanel.tsx::WorkspacePanel": 512,
   "components/StrategyTargetsView.tsx::StrategyTargetsView": 505,
-  "components/SettingsPanel.tsx::SettingsPanel": 426,
+  // 426 -> 370 (#1144): the settings-bootstrap fetch ladder (loadCore/loadDeferred) and the
+  // herdr availability/profile state moved into hooks/useSettingsBootstrap.ts.
+  "components/SettingsPanel.tsx::SettingsPanel": 370,
   "components/BoardToolbar.tsx::BoardToolbar": 472,
   "components/settings/ProjectSettings.tsx::ProjectSettings": 465,
   "components/AllWorkspacesPanel.tsx::AllWorkspacesPanel": 438,
