@@ -53,6 +53,7 @@ import { createWorkspaceMergeService } from "../services/workspace-merge.service
 import { createAutoMerge } from "../startup/merge-workflow.js";
 import { gateSkipExplicit } from "../services/pre-merge-gate.service.js";
 import { activeMerges } from "../services/workspace-internals.js";
+import { getLatestIssueCommentByKind } from "../repositories/issue-comments.repository.js";
 import type { createBoardEvents } from "../services/board-events.js";
 import type { createSessionManager } from "../services/session.manager.js";
 import { makeTempRepo } from "./helpers/temp-repo.js";
@@ -164,6 +165,13 @@ describe("#945: both merge entry paths route through the shared merge executor c
     // And the lock must already be gone by then (phase-1 release — the fix for the
     // "A merge is already in progress" starvation class).
     expect(activeMerges.size).toBe(0);
+
+    // #1174: the "Merged ... at" timeline note names which writer landed it, so two
+    // independent gate/merge paths recording a merge for the same workspace can be told
+    // apart after the fact instead of only by an out-of-band server log.
+    const note = await getLatestIssueCommentByKind(issueId, "merge-attempt", db);
+    expect(note?.body).toContain("Merged feature/ak-945-test into master");
+    expect(JSON.parse(note!.payload!)).toMatchObject({ mergedVia: "merge-job" });
   });
 
   it("autoMerge (review-exit / fix-and-merge retry path) calls the same runMergeCore", async () => {
@@ -195,5 +203,11 @@ describe("#945: both merge entry paths route through the shared merge executor c
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
     expect(issue.statusId).toBe(doneStatusId);
     expect(boardEvents.broadcast).toHaveBeenCalledWith(projectId, "workspace_merged");
+
+    // #1174: same "Merged ... at" note shape, but naming autoMerge as its writer — the
+    // two paths never coordinate, so distinguishing them after the fact needs this tag.
+    const note = await getLatestIssueCommentByKind(issueId, "merge-attempt", db);
+    expect(note?.body).toContain("Merged feature/ak-945-test into master");
+    expect(JSON.parse(note!.payload!)).toMatchObject({ mergedVia: "autoMerge" });
   });
 });
