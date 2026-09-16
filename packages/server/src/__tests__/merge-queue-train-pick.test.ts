@@ -44,8 +44,8 @@ function plan(order: WorkspaceQueueInfo[], recommendedStrategy: MergeQueuePlan["
   return { order, overlaps: [], totalOverlapScore: 0, migrationCollisions: [], conflictPreviews: [], clusters: [], recommendedStrategy, strategyReason: "test" };
 }
 
-const logged = (log: ReturnType<typeof vi.spyOn>) =>
-  log.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith("[merge-queue] no train"));
+const logged = (log: { mock: { calls: unknown[][] } }) =>
+  log.mock.calls.map((c: unknown[]) => String(c[0])).filter((l: string) => l.startsWith("[merge-queue] no train"));
 
 describe("pickQueueStrategy (#1180)", () => {
   afterEach(() => vi.restoreAllMocks());
