@@ -173,6 +173,18 @@ describe("per-project profile roster", () => {
     expect(runtime.provider.profileName).not.toBe("privat");
   });
 
+  it("REFUSES a forbidden herdr profile (ak-1147 — herdr is a first-class roster provider)", () => {
+    const runtime = resolve(
+      prefs({ [rosterPrefKey(PROJECT_ID)]: '["herdr:default:forbidden"]' }),
+      { profileOverride: { provider: "herdr", name: "default" } },
+    );
+    expect(runtime.provider.roster.entries).toMatchObject([
+      { provider: "herdr", name: "default", role: "forbidden" },
+    ]);
+    expect(runtime.provider.profileRefused).toBe(true);
+    expect(runtime.provider.profileHold).toContain("forbidden");
+  });
+
   it("reads an existing allowed_profiles value as an all-pool roster (the migration)", () => {
     const runtime = resolve(prefs({
       claude_profile: "personal",
