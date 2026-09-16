@@ -6,6 +6,7 @@ import {
   PREF_DEFAULT_MODEL_CLAUDE,
   PREF_DEFAULT_MODEL_CODEX,
   PREF_DEFAULT_MODEL_PI,
+  PREF_HERDR_PROFILE,
   PREF_PI_PROFILE,
   PREF_PROVIDER,
 } from "../constants/preference-keys.js";
@@ -23,6 +24,7 @@ const PROFILE_PREF_KEYS_BY_PROVIDER = {
   codex: PREF_CODEX_PROFILE,
   copilot: PREF_COPILOT_PROFILE,
   pi: PREF_PI_PROFILE,
+  herdr: PREF_HERDR_PROFILE,
 } as const satisfies Record<ProviderName, string>;
 
 export interface EffectiveProviderProfile {

@@ -47,6 +47,7 @@ const CAPABILITIES: Capability[] = [
     unsupported: {
       copilot: "no published usage-limit banner to match; `EXIT_BEHAVIORS` gives it the explicit no-op detector",
       pi: "same — the no-op detector in `EXIT_BEHAVIORS` is the declaration",
+      herdr: "no published usage-limit banner to match; `EXIT_BEHAVIORS` gives it the explicit no-op detector",
     },
   },
   {
@@ -55,14 +56,15 @@ const CAPABILITIES: Capability[] = [
     unsupported: {
       copilot: "authenticated through the GitHub CLI, not a board-spawned OAuth window",
       pi: "no interactive login flow of its own",
+      herdr: "no interactive login flow of its own — auth is Herdr-native (HERDR_ENV / server reachability)",
     },
   },
 ];
 
 describe("provider-pair parity (#593)", () => {
-  it("the registry still lists exactly the four providers this suite reasons about", () => {
-    // If a fifth is added, every table below must gain an entry — that is the point.
-    expect([...PROVIDER_NAMES].sort()).toEqual(["claude", "codex", "copilot", "pi"]);
+  it("the registry still lists exactly the five providers this suite reasons about", () => {
+    // If a sixth is added, every table below must gain an entry — that is the point.
+    expect([...PROVIDER_NAMES].sort()).toEqual(["claude", "codex", "copilot", "herdr", "pi"]);
   });
 
   for (const cap of CAPABILITIES) {

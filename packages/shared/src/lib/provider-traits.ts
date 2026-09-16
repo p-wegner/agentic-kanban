@@ -22,9 +22,9 @@
  * `barrel-client-safety`).
  */
 
-export type AgentProviderName = "claude" | "codex" | "copilot" | "pi";
+export type AgentProviderName = "claude" | "codex" | "copilot" | "pi" | "herdr";
 
-export const AGENT_PROVIDER_NAMES: readonly AgentProviderName[] = ["claude", "codex", "copilot", "pi"];
+export const AGENT_PROVIDER_NAMES: readonly AgentProviderName[] = ["claude", "codex", "copilot", "pi", "herdr"];
 
 export interface ProviderTraits {
   /** Human label used in dropdowns and "Will use:" lines. */
@@ -46,6 +46,7 @@ export const PROVIDER_TRAITS: Record<AgentProviderName, ProviderTraits> = {
   codex: { label: "Codex", defaultProfile: "default", profilePrefKey: "codex_profile" },
   copilot: { label: "Copilot", defaultProfile: "default", profilePrefKey: "copilot_profile" },
   pi: { label: "Pi", defaultProfile: "default", profilePrefKey: "pi_profile" },
+  herdr: { label: "Herdr", defaultProfile: "default", profilePrefKey: "herdr_profile" },
 };
 
 /** Narrow an arbitrary string to a known provider, falling back to claude. */

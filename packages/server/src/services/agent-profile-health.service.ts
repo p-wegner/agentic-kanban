@@ -29,6 +29,7 @@ import { parseCodexLicenseRing, codexHomeHasAuth, resolveCodexHomeForProfile } f
 import { parseClaudeSubscriptionRing, claudeConfigDirHasAuth, resolveClaudeConfigDirForProfile } from "./claude-subscription-ring.js";
 import { detectCliVersion, type CliVersionResult, type VersionRunner } from "./agent-cli-version.service.js";
 import { isMockAgentCommand } from "./agent-provider/helpers.js";
+import { detectHerdrAvailability } from "./agent-provider/herdr-availability.js";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export type ProfileHealthStatus = "ok" | "warning" | "error" | "unknown";
@@ -75,6 +76,7 @@ const DEFAULT_COMMAND_LABELS: Record<ProviderName, string> = {
   codex: "Codex",
   copilot: "Copilot",
   pi: "Pi",
+  herdr: "Herdr",
 };
 
 function profileKey(provider: ProviderName, profileName?: string | null): string {
@@ -373,6 +375,12 @@ export async function listAgentProfileHealth(
     codexProfiles: string[];
     copilotProfiles: string[];
     piProfiles: string[];
+    /**
+     * Herdr profiles are only ever listed when the caller already confirmed
+     * `detectHerdrAvailability().available` — omitted (or empty) on a machine
+     * without Herdr, so it never appears as a health candidate there (#1144).
+     */
+    herdrProfiles?: string[];
   },
   fs: FileSystem = nodeFileSystem,
 ): Promise<AgentProfileHealthRow[]> {
@@ -393,6 +401,12 @@ export async function listAgentProfileHealth(
     ...profileLists.copilotProfiles.filter((name) => name !== DEFAULT_PROFILE).map((name) => ({ provider: "copilot" as const, profileName: name })),
     { provider: "pi", profileName: DEFAULT_PROFILE },
     ...profileLists.piProfiles.filter((name) => name !== DEFAULT_PROFILE).map((name) => ({ provider: "pi" as const, profileName: name })),
+    ...(profileLists.herdrProfiles && profileLists.herdrProfiles.length > 0
+      ? [
+          { provider: "herdr" as const, profileName: DEFAULT_PROFILE },
+          ...profileLists.herdrProfiles.filter((name) => name !== DEFAULT_PROFILE).map((name) => ({ provider: "herdr" as const, profileName: name })),
+        ]
+      : []),
   ];
 
   const seen = new Set<string>();

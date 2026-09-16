@@ -32,6 +32,7 @@ describe("resolveProjectRuntimeConfig", () => {
         [harnessSettingKey("codex", "plan_auto_continue")]: "true",
         [harnessSettingKey("copilot", "plan_auto_continue")]: "true",
         [harnessSettingKey("pi", "plan_auto_continue")]: "true",
+        [harnessSettingKey("herdr", "plan_auto_continue")]: "true",
       }),
     });
 
@@ -84,6 +85,7 @@ describe("buildDriveRuntimePreferencePatch", () => {
       { key: harnessSettingKey("codex", "plan_auto_continue"), value: "true" },
       { key: harnessSettingKey("copilot", "plan_auto_continue"), value: "true" },
       { key: harnessSettingKey("pi", "plan_auto_continue"), value: "true" },
+      { key: harnessSettingKey("herdr", "plan_auto_continue"), value: "true" },
     ]);
   });
 

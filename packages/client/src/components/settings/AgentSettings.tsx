@@ -28,6 +28,8 @@ type AgentSettingsProps = {
   codexProfiles: string[];
   copilotProfiles: string[];
   piProfiles: string[];
+  /** Empty `profiles`/`false` `available` keeps herdr off the provider list on a machine that doesn't have it wired up (binary on PATH + HERDR_ENV/reachable server, see `herdr-availability.ts`). (#1144) */
+  herdr?: { available: boolean; profiles: string[] };
   profileHealth: AgentProfileHealth[];
   preflightingProfileId: string | null;
   onProfilePreflight: (profile: AgentProfileHealth) => void;
@@ -55,7 +57,8 @@ function projectProviderSelectValue(provider: string | null, profileName: string
   return profileName ? `${provider}:${profileName}` : `${provider}:`;
 }
 
-export function AgentSettings({ settings, set, setSettings, profiles, codexProfiles, copilotProfiles, piProfiles, profileHealth, preflightingProfileId, onProfilePreflight: handleProfilePreflight, activeProjectId, providerDivergence, onProjectProviderChange, savingProjectProvider, roster }: AgentSettingsProps) {
+export function AgentSettings({ settings, set, setSettings, profiles, codexProfiles, copilotProfiles, piProfiles, herdr, profileHealth, preflightingProfileId, onProfilePreflight: handleProfilePreflight, activeProjectId, providerDivergence, onProjectProviderChange, savingProjectProvider, roster }: AgentSettingsProps) {
+  const herdrOptions = herdr?.available ? herdr.profiles : [];
   // The roster read model owns its own fetch (a filesystem walk plus a quota call), so it
   // stays off the Settings bootstrap that every other tab waits on. `reloadKey` re-reads it
   // after a roster write, so the "would launch on…" line reflects what was just saved.
@@ -87,6 +90,10 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
     const defaultProfile = provider === "codex" ? CODEX_DEFAULT_PROFILE : provider === "copilot" ? COPILOT_DEFAULT_PROFILE : provider === "pi" ? PI_DEFAULT_PROFILE : "";
     const profileName = !name || name === defaultProfile ? "" : name;
     onProjectProviderChange(provider, profileName);
+    // NOTE: herdr is intentionally excluded from `ConcreteProvider` / the per-project
+    // Strategy-Bullseye picker — that control assumes quota/rotation-ring concepts
+    // (headroom, throttle policies) herdr doesn't have yet. Herdr is only wired into
+    // the plain global "Agent Profile" select below (#1144).
   }
 
   // Every selectable profile across all four providers, carrying the role its ACCOUNT
@@ -203,6 +210,8 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
                             setSettings((s) => ({ ...s, provider: "copilot", copilot_profile: name === COPILOT_DEFAULT_PROFILE ? "" : name, claude_profile: s.claude_profile, codex_profile: s.codex_profile, pi_profile: s.pi_profile }));
                           } else if (prov === "pi") {
                             setSettings((s) => ({ ...s, provider: "pi", pi_profile: name === PI_DEFAULT_PROFILE ? "" : name, claude_profile: s.claude_profile, codex_profile: s.codex_profile, copilot_profile: s.copilot_profile }));
+                          } else if (prov === "herdr" && herdrOptions.length > 0) {
+                            setSettings((s) => ({ ...s, provider: "herdr", herdr_profile: name === "default" ? "" : name, claude_profile: s.claude_profile, codex_profile: s.codex_profile, copilot_profile: s.copilot_profile, pi_profile: s.pi_profile }));
                           } else {
                             setSettings((s) => ({ ...s, provider: "claude", claude_profile: name, codex_profile: s.codex_profile, copilot_profile: s.copilot_profile, pi_profile: s.pi_profile }));
                           }
@@ -231,8 +240,20 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
                           <option key={`pi:${p}`} value={`pi:${p}`}>{profileOptionLabel("pi", p)}</option>
                         ))}
                       </optgroup>
+                      {herdrOptions.length > 0 && (
+                        <optgroup label="Herdr">
+                          {herdrOptions.map((p) => (
+                            <option key={`herdr:${p}`} value={`herdr:${p}`}>{profileOptionLabel("herdr", p)}</option>
+                          ))}
+                        </optgroup>
+                      )}
                     </select>
                   </Field>
+                  {settings.provider === "herdr" && herdrOptions.length === 0 && (
+                    <div className="px-3 py-2.5 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-xs text-amber-800 dark:text-amber-300">
+                      Herdr is not available on this machine (binary on PATH and HERDR_ENV/a reachable server are required). This project will fall back to the default agent.
+                    </div>
+                  )}
                   {settings.provider === "pi" && (
                     <div className="px-3 py-2.5 rounded-md bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-400">
                       Pi profiles resolve to isolated <span className="font-mono">PI_CODING_AGENT_DIR</span> roots. Non-default profile <span className="font-mono">local</span> maps to <span className="font-mono">~/.pi-local</span>; provider/model can also be selected with profile names like <span className="font-mono">anthropic/claude-sonnet-4-6</span>.

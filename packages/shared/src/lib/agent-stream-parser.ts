@@ -142,6 +142,12 @@ export function parseAgentStreamLine(
       return parseCopilotEvent(obj, line, context);
     case "pi":
       return parsePiEvent(obj, context);
+    case "herdr":
+      // Herdr's stream-json contract is unverified (#1144 adds the provider
+      // gated behind availability detection, not a verified wire format yet).
+      // Reuse Pi's parser as the closest known shape (`--mode json`, `-p`);
+      // revisit once a real Herdr session's output has been observed.
+      return parsePiEvent(obj, context);
   }
 }
 
