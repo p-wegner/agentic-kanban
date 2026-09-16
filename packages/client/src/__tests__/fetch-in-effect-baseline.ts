@@ -21,6 +21,8 @@ export const FETCH_IN_EFFECT_BASELINE: Record<string, number> = {
   // #513: THE sanctioned ladder. Every entry below is a hand-rolled copy waiting to be
   // migrated onto this hook; this one line is the destination, not another offender.
   "hooks/useApiResource.ts": 1,
+  // #1144: SettingsPanel's fetch-in-effect ladder moved here (was "components/SettingsPanel.tsx": 3).
+  "hooks/useSettingsBootstrap.ts": 2,
   "components/AllWorkspacesPanel.tsx": 1,
   "components/ArtifactViewer.tsx": 1,
   "components/BoardHealthNotificationCenter.tsx": 1,
@@ -62,7 +64,6 @@ export const FETCH_IN_EFFECT_BASELINE: Record<string, number> = {
   "components/RunbooksView.tsx": 2,
   "components/SessionReplay.tsx": 1,
   "components/SessionTranscriptPanel.tsx": 3,
-  "components/SettingsPanel.tsx": 3,
   "components/SlowRequestsPanel.tsx": 1,
   "components/SpecPhasePanel.tsx": 2,
   "components/SprintCapacityPlanner.tsx": 1,

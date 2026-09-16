@@ -4188,6 +4188,30 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/preferences/herdr-availability:
+    get:
+      summary: preference alone as proof it's usable on this machine.
+      tags:
+        - preferences
+      operationId: get_api_preferences_herdr-availability
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/herdr-profiles:
+    get:
+      summary: GET /api/preferences/herdr-profiles
+      tags:
+        - preferences
+      operationId: get_api_preferences_herdr-profiles
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
   /api/preferences/home-dir:
     get:
       summary: default CODEX_HOME (`<home>/.codex-<profile>`) without re-implementing path joins.

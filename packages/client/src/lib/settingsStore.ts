@@ -99,6 +99,29 @@ export function getQuotaUsage(): Promise<QuotaUsageResult> {
   return apiFetch<QuotaUsageResult>("/api/preferences/quota-usage");
 }
 
+/**
+ * Read-only pass-throughs for the Settings panel's bootstrap/status reads (#1144). Same
+ * reasoning as `getQuotaUsage`: none of these populate the settings cache above (the panel
+ * owns its own local state for them), but a raw `apiFetch("/api/preferences/…")` call site is
+ * indistinguishable, to `client-conventions-guard`'s bypass ratchet, from one that actually
+ * bypasses the cache — so every `/api/preferences` URL literal stays in this one module.
+ */
+export function getSettingsBootstrap<T>(): Promise<T> {
+  return apiFetch<T>("/api/preferences/settings-bootstrap");
+}
+
+export function getProviderDivergence<T>(projectId: string): Promise<T> {
+  return apiFetch<T>(`/api/preferences/provider-divergence?projectId=${projectId}`);
+}
+
+export function getAgentProfilesHealth<T>(): Promise<T> {
+  return apiFetch<T>("/api/preferences/agent-profiles/health");
+}
+
+export function getMcpHealth<T>(): Promise<T> {
+  return apiFetch<T>("/api/preferences/mcp/health");
+}
+
 type InvalidationListener = () => void;
 const invalidationListeners = new Set<InvalidationListener>();
 
