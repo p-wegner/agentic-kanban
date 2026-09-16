@@ -38,6 +38,7 @@ import {
 } from "./pre-merge-gate.service.js";
 import { resolveGateVerification } from "./pre-merge-gate-tier.js";
 import { runGateWithEvidence } from "./merge-gate-evidence.js";
+import { countBehindCommits } from "./git.service.js";
 
 // The #243 sha comparison moved next to the protocol that uses it (#540). Re-exported here
 // because this is the path callers and suites already import it from.
@@ -397,6 +398,62 @@ function throwWithheldPreMergeGate(
   );
 }
 
+/**
+ * How many commits a branch may sit behind its base before the gate refuses instead of running
+ * (#1169). Below this, an ordinary merge-base drift is not worth a refusal; measured failures
+ * all sat at 12+ commits behind, where the branch's diff against current base is dominated by
+ * REVERTING what base gained meanwhile rather than by the ticket's own change — so the gate's
+ * failure is guaranteed and misattributed to whatever file that reversion happens to touch.
+ */
+export const STALE_BASE_REFUSAL_THRESHOLD_COMMITS = 10;
+
+/**
+ * Refuse a merge attempt outright when the branch is badly stale against its base, before the
+ * gate ever runs (#1169). A branch this far behind is virtually guaranteed to fail on a large
+ * REVERSION diff of everything base gained meanwhile — the gate then blames whichever base file
+ * that reversion happens to touch, which is never the ticket's own change. Naming the staleness
+ * up front turns a guaranteed, misattributed gate failure into a message that says what to do:
+ * rebase (the board's `update-base`) rather than retry.
+ *
+ * Extracted rather than inlined for the same reason as {@link throwWithheldPreMergeGate}:
+ * `runPreLockGate` sits on the #726 branch ceiling, so the whole decision — check, note, throw
+ * — lives here as a single awaited call with no new branch in the caller. Best-effort —
+ * `countBehindCommits` throwing (no worktree, detached HEAD, a transient git failure) must
+ * never mask the real gate; it just means staleness could not be determined, so this returns
+ * without throwing and the gate runs as before.
+ */
+async function refuseIfBaseIsStale(args: {
+  workspace: WorkspaceRow;
+  baseBranch: string;
+  database: Database;
+  recordMergeAttempt: RecordMergeAttempt;
+}): Promise<void> {
+  const { workspace, baseBranch, database, recordMergeAttempt } = args;
+  if (!workspace.workingDir) return;
+  const behindCount = await countBehindCommits(workspace.workingDir, "HEAD", baseBranch).catch((err) => {
+    console.warn(
+      "[workspace-merge] failed to determine base staleness before the pre-lock gate (non-fatal, #1169):",
+      errorMessage(err),
+    );
+    return null;
+  });
+  if (behindCount === null || behindCount <= STALE_BASE_REFUSAL_THRESHOLD_COMMITS) return;
+  const staleRefusal =
+    `branch is ${behindCount} commits stale against '${baseBranch}' (#1169) — rebase first `
+    + `(update-base) rather than retrying the gate. A branch this far behind fails the gate on `
+    + `a large reversion of everything the base gained meanwhile, misattributed to whichever `
+    + `base file that reversion happens to touch.`;
+  await recordGateFailureNote({
+    workspace,
+    stage: "none",
+    gateMessage: staleRefusal,
+    targetBranch: baseBranch,
+    database,
+    recordMergeAttempt,
+  });
+  throwWithheldPreMergeGate({ stage: "none" }, staleRefusal);
+}
+
 export async function runPreLockGate(args: {
   workspaceId: string;
   workspace: WorkspaceRow;
@@ -440,6 +497,11 @@ export async function runPreLockGate(args: {
     );
     return reused;
   }
+
+  // #1169 — before paying for the gate, refuse a badly-stale branch instead of running a gate
+  // whose failure (a reversion of everything base gained meanwhile) is guaranteed and
+  // misattributed to whichever base file the reversion touches.
+  await refuseIfBaseIsStale({ workspace, baseBranch, database, recordMergeAttempt });
 
   console.log(`[workspace-merge] pre-lock gate phase=start workspaceId=${workspaceId}`);
   const preGate = await runGateWithEvidence({
