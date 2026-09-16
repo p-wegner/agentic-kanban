@@ -23,9 +23,9 @@ description: Set the board's default agent provider+profile (and optional model)
 > The hand-authored `## FOCUS POLICY` block in `objective.md` lives OUTSIDE the markers and is NOT touched by a Bullseye write — only the generated block between the markers is regenerated. Edit FOCUS POLICY by hand; edit everything provider-related through this skill.
 
 ## Inputs
-- **provider** (required): `claude` | `codex` | `copilot`
-- **profile** (required for claude/codex): the profile name (e.g. `anth`, `ki14`). For copilot use `default`.
-- **model** (optional): a model id VALID FOR THE CHOSEN PROVIDER. Omit to clear that provider's `default_model_<provider>` slot (recommended). Ignored for copilot (no scoped model key exists).
+- **provider** (required): `claude` | `codex` | `copilot` | `herdr`
+- **profile** (required for claude/codex): the profile name (e.g. `anth`, `ki14`). For copilot/herdr use `default`.
+- **model** (optional): a model id VALID FOR THE CHOSEN PROVIDER. Omit to clear that provider's `default_model_<provider>` slot (recommended). Ignored for copilot/herdr (no scoped model key exists for either — herdr has no `--model` flag).
 
 ## Procedure
 
@@ -42,9 +42,9 @@ echo "active project: $PID"
 Set the shell vars, then run. This reads the existing Bullseye JSON, replaces `providerPolicies` with a single `fill` policy for the chosen provider/profile, aligns each segment's `provider` hint, mirrors `provider`/`<x>_profile`, and scopes the CHOSEN provider's `default_model_<provider>` slot (claude/codex/pi only — copilot has none).
 
 ```bash
-PROVIDER=claude     # claude | codex | copilot
-PROFILE=anth        # profile name (ignored for copilot)
-MODEL=""            # "" to clear; or a model id valid for $PROVIDER
+PROVIDER=claude     # claude | codex | copilot | herdr
+PROFILE=anth        # profile name (ignored for copilot/herdr)
+MODEL=""            # "" to clear; or a model id valid for $PROVIDER (ignored for herdr — no model flag)
 
 curl -s http://127.0.0.1:3001/api/preferences/settings | PID="$PID" PROVIDER="$PROVIDER" PROFILE="$PROFILE" MODEL="$MODEL" python -c '
 import sys, json, os
@@ -73,7 +73,8 @@ patch["provider"] = provider                        # #2 mirror
 if provider == "claude":   patch["claude_profile"]  = profile
 elif provider == "codex":  patch["codex_profile"]   = profile
 elif provider == "copilot":patch["copilot_profile"] = profile or "default"
-# #3 scope/clear — provider-scoped model key only (#902); copilot has no model slot.
+elif provider == "herdr":  patch["herdr_profile"]   = profile or "default"
+# #3 scope/clear — provider-scoped model key only (#902); copilot/herdr have no model slot.
 if provider in ("claude", "codex", "pi"):
     patch[f"default_model_{provider}"] = model
 
@@ -101,7 +102,7 @@ s = json.load(sys.stdin); pid = os.environ["PID"]
 cfg = json.loads(s.get(f"board_strategy_{pid}") or "{}")
 fill = next((p for p in cfg.get("providerPolicies", []) if p.get("mode") == "fill"), None)
 print("Bullseye fill   :", (fill or {}).get("provider"), (fill or {}).get("profileName"))
-print("Settings provider:", s.get("provider"), "/ claude_profile:", s.get("claude_profile"), "/ codex_profile:", s.get("codex_profile"))
+print("Settings provider:", s.get("provider"), "/ claude_profile:", s.get("claude_profile"), "/ codex_profile:", s.get("codex_profile"), "/ herdr_profile:", s.get("herdr_profile"))
 print("default_model_claude:", repr(s.get("default_model_claude")), "/ default_model_codex:", repr(s.get("default_model_codex")), "/ default_model_pi:", repr(s.get("default_model_pi")))
 ok = fill and fill.get("provider") == s.get("provider")
 print("CONSISTENT      :", "YES" if ok else "NO — investigate")
