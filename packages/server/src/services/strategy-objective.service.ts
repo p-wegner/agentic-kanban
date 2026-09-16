@@ -155,7 +155,7 @@ export function selectProviderFromStrategy(
 
 /** What `selectProviderFromStrategy` answers, including who lost and by what reading. */
 export interface StrategyProviderChoice {
-  provider: "claude" | "codex" | "copilot" | "pi";
+  provider: "claude" | "codex" | "copilot" | "pi" | "herdr";
   profileName: string;
   policy: ProviderProfilePolicy;
   /** The chosen profile's 5-hour reading, or null when unmeasured (#1026). */
@@ -283,7 +283,7 @@ export async function resolveStrategyProviderSelection(
  * additive: every existing caller reads `provider`/`profileName`/`model` and is unchanged.
  */
 export interface StrategyProviderSelection {
-  provider: "claude" | "codex" | "copilot" | "pi";
+  provider: "claude" | "codex" | "copilot" | "pi" | "herdr";
   profileName: string;
   model?: string;
   /** The chosen profile's 5-hour reading, or null when unmeasured. */
