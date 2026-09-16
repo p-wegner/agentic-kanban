@@ -279,23 +279,27 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
         // every `assembling`/`gating` row found at boot was unconditionally abandoned and the
         // "or resumes" half of the acceptance criteria was unreachable.
         //
-        // `runTrainStrategy` always mints its OWN fresh `merge_trains` row (it has no notion
-        // of "resuming" one), so the stranded row this callback was handed never reaches a
-        // terminal state on its own — left alone it would sit in `assembling`/`gating` and
-        // get abandoned by a LATER sweep despite the resume having actually succeeded. Mirror
-        // the fresh train's outcome onto the stranded row explicitly so its own history entry
-        // (what `GET /api/merge-trains` shows for it) reflects what really happened.
+        // `runTrainStrategy` mints its OWN fresh `merge_trains` row for a member set with no
+        // existing `assembling`/`gating` row (#1158 taught it to instead REUSE one that already
+        // exists for the same members) — so the stranded row this callback was handed must be
+        // moved out of `assembling`/`gating` BEFORE re-entering `executeQueue`. Otherwise
+        // `beginMergeTrain`'s new dedup finds this very row (same member set, still active) and
+        // reuses it instead of minting a fresh one; the fresh train's own `finishMergeTrain`
+        // write then races this callback's write to the SAME row id, and whichever runs last
+        // clobbers the other's `gateEvidence`/`bisectResult`. Abandoning it first (superseded,
+        // not a failure verdict) keeps the two rows — and the two writes — separate: this row's
+        // history entry says it was superseded, and the fresh row's says what actually happened.
         async runTrain(row) {
-          const memberWorkspaceIds = JSON.parse(row.memberWorkspaceIds) as string[];
-          let landed = false;
-          for await (const event of queueService.executeQueue(memberWorkspaceIds, { strategy: "train" })) {
-            if (event.type === "done") landed = event.merged.length > 0;
-          }
           await updateMergeTrainState(row.id, {
-            state: landed ? "landed" : "red",
-            reconciledReason: "resumed via a freshly re-assembled train after a stranded boot-time recovery",
+            state: "abandoned",
+            reconciledReason: "superseded by a freshly re-assembled train after a stranded boot-time recovery",
             finishedAt: new Date().toISOString(),
           }, db);
+          const memberWorkspaceIds = JSON.parse(row.memberWorkspaceIds) as string[];
+          for await (const _event of queueService.executeQueue(memberWorkspaceIds, { strategy: "train" })) {
+            // The fresh train (a new `merge_trains` row) persists its own terminal state via
+            // `finishMergeTrain`; nothing here needs to mirror it onto the now-abandoned row.
+          }
         },
       });
       return stopMergeTrainReconciler;
