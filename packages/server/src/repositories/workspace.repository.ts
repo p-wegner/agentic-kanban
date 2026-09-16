@@ -23,6 +23,7 @@ export {
   getClosedWorkspaces,
   getWorkspaceIssueContext,
   findOpenUnmergedWorkspace,
+  getOpenNonDirectWorkspacesForProject,
 } from "./workspace-reads.repository.js";
 
 export {
