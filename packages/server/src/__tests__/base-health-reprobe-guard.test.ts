@@ -3,8 +3,9 @@
  *
  * The fix for #935 makes a failing merge gate (and an operator route) ask for a fresh base-health
  * probe whenever the recorded verdict is a non-answer. A probe is a clone + install + a full
- * verify run — on this repo, up to a 45-minute budget. Two guards already existed to keep that
- * from piling onto a loaded box, and BOTH live in `isBaseHealthProbeDue`, not in the probe:
+ * verify run — on this repo, up to a 45-minute budget. Two guards exist to keep the UNATTENDED
+ * periodic sweep from piling that onto a loaded box, and both live in `isBaseHealthProbeDue`, not
+ * in the probe:
  *
  *   - `gateBusy` (#931): a merge gate is spending the cores right now, so the probe — the least
  *     urgent of the three test-spawning paths — yields.
@@ -16,6 +17,14 @@
  * failing gate for as long as the sticky non-answer row stands — the exact machine saturation
  * that produced the false TIMEOUT verdict in the first place. Every "probe if it makes sense"
  * caller therefore goes through `requestBaseBranchReprobe`.
+ *
+ * **#1165 — an EXPLICIT (`ignoreRecency: true`) request also overrides `gate_running`.** Back-to-
+ * back merge gates keep `gateBusy` true almost continuously, so refusing an explicit reprobe on it
+ * too made a stuck red base verdict permanently unclearable: the deadlock was gates refuse on a
+ * stale base -> gates occupy the semaphore -> the probe that would refresh the base can never
+ * start. The `timeout` back-off and the `probe_in_flight` join are untouched, and the probe itself
+ * still queues at the real verify-chain semaphore as a background-priority (starvation-bounded)
+ * waiter, so this cannot restart the #931 two-full-verifies-at-once failure.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
@@ -120,19 +129,41 @@ describe("requestBaseBranchReprobe yields to the machine guards (#935)", () => {
     releaseProbe();
   });
 
-  it("an explicit operator request overrides RECENCY but never the machine guards", async () => {
+  it("an explicit operator request overrides RECENCY", async () => {
     // The route's reason to exist is "that verdict was starved, measure again now" — so a merely
-    // recent row must not block it...
+    // recent row must not block it.
     latestRow.mockResolvedValue({ createdAt: iso(-60_000), outcome: "green" });
     const forced = await requestBaseBranchReprobe("p1", {} as never, INTERVAL_MS, NOW, { ignoreRecency: true });
     expect(forced.due).toBe(true);
     expect(verifyBaseBranchHealth).toHaveBeenCalledTimes(1);
+  });
 
-    // ...but a busy gate still wins, because that is the load the starved verdict came from.
-    verifyBaseBranchHealth.mockClear();
+  it("an explicit operator request ALSO overrides gate_running (#1165) — back-to-back gates must not starve it forever", async () => {
+    // Back-to-back merge gates keep buildGateBusy() true almost continuously (one ends, the next
+    // begins), so a stuck non-answer row could never be re-probed if this pre-check refused an
+    // explicit request the same way it refuses the unattended periodic sweep. The probe itself
+    // still queues at the real verify-chain semaphore (background priority, its own starvation
+    // escape), so this does not reintroduce two full verifies running at once — it only lets the
+    // explicit request reach that queue instead of being turned away before it gets there.
+    latestRow.mockResolvedValue({ createdAt: iso(-24 * 60 * 60 * 1000), outcome: "red" });
     buildGateBusy.mockReturnValue(true);
-    const held = await requestBaseBranchReprobe("p1", {} as never, INTERVAL_MS, NOW, { ignoreRecency: true });
-    expect(held).toEqual({ due: false, reason: "gate_running" });
+
+    const forced = await requestBaseBranchReprobe("p1", {} as never, INTERVAL_MS, NOW, { ignoreRecency: true });
+
+    expect(forced.due).toBe(true);
+    expect(verifyBaseBranchHealth).toHaveBeenCalledTimes(1);
+  });
+
+  it("a non-explicit (unattended sweep) request is still refused on gate_running, unchanged", async () => {
+    // Only the EXPLICIT on-demand door gets the #1165 override — the periodic sweep must keep
+    // yielding to an active gate exactly as before, or #931's original failure mode (the sweep
+    // piling an uncoordinated probe onto a box a gate is already using) comes back.
+    buildGateBusy.mockReturnValue(true);
+    latestRow.mockResolvedValue({ createdAt: iso(-24 * 60 * 60 * 1000), outcome: "timeout" });
+
+    const verdict = await requestBaseBranchReprobe("p1", {} as never, INTERVAL_MS, NOW);
+
+    expect(verdict).toEqual({ due: false, reason: "gate_running" });
     expect(verifyBaseBranchHealth).not.toHaveBeenCalled();
   });
 });
