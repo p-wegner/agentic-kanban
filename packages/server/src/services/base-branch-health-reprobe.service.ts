@@ -366,7 +366,10 @@ export async function requestBaseBranchReprobe(
     }
     // Detached on purpose — see the doc comment. The probe's own errors are non-fatal to the
     // caller that asked for it.
-    void verifyBaseBranchHealth(projectId, database).catch((err) => {
+    // An `ignoreRecency` request is someone blocked on the answer (an operator, `pnpm promote`):
+    // it runs at gate priority and does not yield to gates, or #1165's override only lets it
+    // reach a slot it then hands back (see `BaseBranchProbeOptions`).
+    void verifyBaseBranchHealth(projectId, database, undefined, { explicit: opts.ignoreRecency === true }).catch((err) => {
       console.warn(
         `[base-branch-health] on-demand re-probe failed for project ${projectId} (non-fatal):`,
         err instanceof Error ? err.message : String(err),

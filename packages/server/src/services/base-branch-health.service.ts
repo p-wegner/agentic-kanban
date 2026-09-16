@@ -18,6 +18,7 @@ import {
   verifyChainGateWaiting,
   verifyChainSemaphoreActive,
   verifyChainSemaphoreQueueLength,
+  type VerifyChainPriority,
 } from "./verify-chain-semaphore.js";
 import { decideFlakeRetry, retryScopeEnvValue } from "./verify-flake-retry.js";
 import { isSelfProjectRepo } from "./self-project.js";
@@ -188,15 +189,29 @@ export function inFlightBaseBranchProbe(projectId: string): Promise<BaseBranchVe
  * `now` is the ISO start time — it is PERSISTED (the in-flight start stamp), hence the `now?:
  * string` spelling rather than `nowMs`.
  */
+export interface BaseBranchProbeOptions {
+  /**
+   * An EXPLICIT request — an operator's re-probe or `pnpm promote` asking for the sweep it
+   * needs — as opposed to the unattended periodic sweep. #1165 let such a request past the
+   * `gate_running` pre-check, but the probe it launched still queued as `background` and still
+   * yielded its verify to every gate-class waiter (#989), so on a board that merges continuously
+   * it reached the slot only to give it up again: measured 2026-09-16, a promotion waited 40 min
+   * and got no verdict. Explicit means: someone is blocked on THIS answer, so it queues at gate
+   * priority and runs to completion. The periodic sweep keeps its background manners unchanged.
+   */
+  explicit?: boolean;
+}
+
 export function verifyBaseBranchHealth(
   projectId: string,
   database: Database,
   now?: string,
+  opts?: BaseBranchProbeOptions,
 ): Promise<BaseBranchVerifyResult | null> {
   const running = inFlightProbes.get(projectId);
   if (running) return running;
 
-  const probe = runBaseBranchProbe(projectId, database, now).finally(() => {
+  const probe = runBaseBranchProbe(projectId, database, now, opts).finally(() => {
     inFlightProbes.delete(projectId);
   });
   inFlightProbes.set(projectId, probe);
@@ -291,7 +306,12 @@ async function runBaseBranchProbe(
   projectId: string,
   database: Database,
   now?: string,
+  opts?: BaseBranchProbeOptions,
 ): Promise<BaseBranchVerifyResult | null> {
+  const explicit = opts?.explicit === true;
+  // An explicit probe has a caller blocked on it, so it competes for the slot as a gate would
+  // and never yields; the unattended sweep stays the box's one background user (#978, #989).
+  const slotPriority: VerifyChainPriority = explicit ? "gate" : "background";
   const project = await getProjectById(projectId, database);
   if (!project?.repoPath || !project.defaultBranch) return null;
 
@@ -416,6 +436,9 @@ ${tail(combined)}`,
           const decision = shouldProbeYield({
             gateWaiting: verifyChainGateWaiting(),
             consecutiveYields: already,
+            // `disabled` (silent), not `exhausted`: an explicit probe not yielding is the
+            // configuration of that request, not a spent budget.
+            ...(explicit ? { maxConsecutiveYields: 0 } : {}),
           });
           if (decision.reason === "yield_budget_exhausted") {
             // Once per RUN, not once per tick — at 15s over a 45-minute verify this would
@@ -472,7 +495,7 @@ ${tail(combined)}`,
       // the monitor blocked behind it; this is a measurement whose answer keeps until the slot
       // is free. It is still bounded: a probe overtaken past the semaphore's background wait
       // ceiling is promoted back to arrival order, so this is a delay and never starvation.
-      { priority: "background" },
+      { priority: slotPriority },
     );
     // #989 — the child was killed for a waiting gate. Return BEFORE building any result, so
     // nothing is recorded; the `finally` still clears the temp dir and the in-flight stamp, and
@@ -524,7 +547,7 @@ ${tail(combined)}`,
           `base-branch health flake retry for project ${projectId}`,
           undefined,
           undefined,
-          { priority: "background" },
+          { priority: slotPriority },
         ),
       });
     } else {
