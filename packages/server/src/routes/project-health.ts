@@ -81,10 +81,13 @@ export function createProjectHealthRoute(database: Database) {
   //
   // Routed through `requestBaseBranchReprobe` rather than the probe directly. As an explicit
   // operator request it overrides the RECENCY back-off (that override is the route's reason to
-  // exist), but it still yields to the two machine guards — a probe already in flight, or a
-  // merge gate spending the cores right now. Bypassing those would start a second 45-minute
-  // verify on exactly the loaded box whose load produced the starved verdict being replaced.
-  // The response says which of those happened instead of always claiming it started one.
+  // exist) and, since #1165, the `gate_running` pre-check too — back-to-back merge gates keep
+  // that check permanently true, which otherwise makes a stuck red verdict unclearable. It still
+  // yields to a probe already in flight for this project (joined, not duplicated), and the probe
+  // it starts still queues at the real verify-chain semaphore as a background-priority waiter, so
+  // this cannot start a second full verify ALONGSIDE a running one — only reach the same queue a
+  // gate itself would use. The response says which of those happened instead of always claiming
+  // it started one.
   router.post("/:id/base-branch-health/reprobe", async (c) => {
     const projectId = c.req.param("id");
     const previous = await getLatestBaseBranchHealth(projectId, database).catch(() => null);
