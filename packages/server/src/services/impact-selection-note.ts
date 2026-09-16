@@ -1,6 +1,41 @@
 import type { GateTierInfo } from "./pre-merge-gate-tier.js";
 
 /**
+ * `scripts/test-mine.mjs`'s own `[gate:step]` self-report for its `tests` step, when it says the
+ * RUN fell back off the impact selector (#1170).
+ *
+ * The gate builds `tierInfo.selector === "impact"` from the ENV VAR the gate asked the runner to
+ * honour — a REQUEST, resolved before the verify script ever starts. `resolveGateImpactTierFields`
+ * separately probes `select --json` in a standalone spawn to describe what the selection WOULD
+ * pick, and #1039 already covers the case where that probe finds no tool on disk at all.
+ *
+ * Neither of those two calls is the actual run. The runner has its OWN spawn of the selector CLI
+ * (`runImpactSelector` in `scripts/test-mine.mjs`), inside the real verify script, and it can fail
+ * for reasons the two probes above never see — a transient ENOENT on the spawn, a non-zero exit, an
+ * empty selection — falling through to `vitest related` while logging only a `console.warn` buried
+ * in the verify output. When that happens the tool IS on disk (so `impactSelectorAbsent` stays
+ * unset) and the message-side probe can independently succeed (so `impactSelection` is non-null) —
+ * so nothing upstream of this function has any reason to doubt the tier. The gate would then print
+ * `tier: impact-selected` for a run that actually executed under `vitest related`, which is exactly
+ * the silent degradation CLAUDE.md forbids: "an unresolvable selection is supposed to print a loud
+ * `selection UNKNOWN`... because silence reads as nothing was dropped."
+ *
+ * The runner's own `[gate:step] name=tests ... scope=...` line is the one place that carries the
+ * TRUTH of what ran, because it is emitted from inside the same process that made the spawn. This
+ * reads it back off `tierInfo.stepTimings` (already parsed by `parseVerifyStepTimings`) and compares
+ * it against the claimed selector.
+ */
+export function impactRunnerFellBack(tierInfo: GateTierInfo): boolean {
+  if (tierInfo.selector !== "impact" || tierInfo.guardsOnly) return false;
+  const testsStep = (tierInfo.stepTimings ?? []).find((step) => step.name === "tests");
+  if (!testsStep?.scope) return false;
+  // The two scopes an impact-selected `tests` step reports for itself — see `stepScope` in
+  // `scripts/test-mine.mjs`. Anything else (`file-scoped`, `package-scoped`, `full`,
+  // `flake-retry`) means the runner never reached (or abandoned) the impact branch.
+  return testsStep.scope !== "impact-selected" && testsStep.scope !== "impact+related";
+}
+
+/**
  * The `impact`-tier gate message fragment: what the test-impact selection kept, dropped, and
  * whether its map was fresh — plus the guard-suite cost clause and the stale-map remedy string.
  *
@@ -120,6 +155,18 @@ export const IMPACT_MAP_STALE_REMEDY =
  */
 export function buildImpactSelectionNote(tierInfo: GateTierInfo): string | null {
   if (tierInfo.selector !== "impact" || tierInfo.guardsOnly) return null;
+  // #1170 — the runner's OWN self-report of what it ran outranks everything else this function
+  // knows: the tool being on disk and a standalone probe succeeding both describe a WOULD-run, not
+  // the run that produced this verdict. See `impactRunnerFellBack` for why the two upstream checks
+  // (#1039's `impactSelectorAbsent`, `impactSelection`'s own null case) both miss this.
+  if (impactRunnerFellBack(tierInfo)) {
+    const ranScope = (tierInfo.stepTimings ?? []).find((step) => step.name === "tests")?.scope;
+    return (
+      `selection UNKNOWN — RUNNER FELL BACK (the verify script reported tests ran ` +
+      `scope=${ranScope}, not impact-selected; check the verify log for ` +
+      "\"impact selector failed to start\" or \"exited N\" -- the tier below is what was REQUESTED, not what ran)"
+    );
+  }
   const selection = tierInfo.impactSelection;
   if (!selection) {
     // Silence here would read as "nothing was dropped". The tier narrowed the run by an amount
