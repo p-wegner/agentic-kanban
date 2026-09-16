@@ -52,7 +52,8 @@ Status glyphs:
         return;
       }
 
-      const intervalSec = Math.max(parseInt(options.interval ?? "5", 10), 2);
+      const parsedInterval = parseInt(options.interval ?? "5", 10);
+      const intervalSec = Math.max(Number.isFinite(parsedInterval) ? parsedInterval : 5, 2);
       let stopped = false;
       const shutdown = () => {
         if (stopped) return;
