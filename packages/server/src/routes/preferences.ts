@@ -13,6 +13,7 @@ import {
   preflightAgentProfile,
   type AgentProfilePreflightResult,
 } from "../services/agent-profile-health.service.js";
+import { detectHerdrAvailabilityLive } from "../services/agent-provider/herdr-availability.js";
 import { getMcpHealthSummary, probeMcpHealth } from "../services/mcp-health.service.js";
 import { fetchLiveQuotaUsage } from "../services/quota-usage.service.js";
 import { describeRosterWideningViolation, findRosterWidenings } from "../services/profile-roster-narrowing.service.js";
@@ -55,13 +56,14 @@ export function createPreferencesRoute(database: Database) {
   // ~1.2s). The heavy/secondary probes — agent-profile health (~600ms), mcp health,
   // install-status, branches — stay separate and are loaded deferred by the client.
   router.get("/settings-bootstrap", async (c) => {
-    const [settings, claudeProfiles, codexProfiles, piProfiles, skills, tags] = await Promise.all([
+    const [settings, claudeProfiles, codexProfiles, piProfiles, skills, tags, herdrAvailability] = await Promise.all([
       preferenceService.getSettings(),
       preferenceService.listClaudeProfiles(),
       preferenceService.listCodexProfiles(),
       preferenceService.listPiProfiles(),
       agentSkillService.listSkills(undefined, false),
       tagService.listTags(),
+      detectHerdrAvailabilityLive(),
     ]);
     return c.json({
       settings,
@@ -71,6 +73,8 @@ export function createPreferencesRoute(database: Database) {
       piProfiles,
       skills,
       tags,
+      herdrAvailability,
+      herdrProfiles: herdrAvailability.available ? preferenceService.listHerdrProfiles() : [],
     });
   });
 
@@ -154,6 +158,19 @@ export function createPreferencesRoute(database: Database) {
     return c.json({ profiles: await preferenceService.listPiProfiles() });
   });
 
+  // GET /api/preferences/herdr-availability — binary-on-PATH + HERDR_ENV/server
+  // reachability gate (#1144). The client uses this to decide whether Herdr may be
+  // OFFERED as a selectable provider at all; never trust a stored `provider=herdr`
+  // preference alone as proof it's usable on this machine.
+  router.get("/herdr-availability", async (c) => {
+    return c.json(await detectHerdrAvailabilityLive());
+  });
+
+  // GET /api/preferences/herdr-profiles
+  router.get("/herdr-profiles", (c) => {
+    return c.json({ profiles: preferenceService.listHerdrProfiles() });
+  });
+
   // GET /api/preferences/home-dir — so the client can infer a Codex license's
   // default CODEX_HOME (`<home>/.codex-<profile>`) without re-implementing path joins.
   router.get("/home-dir", (c) => {
@@ -210,12 +227,14 @@ export function createPreferencesRoute(database: Database) {
   });
 
   router.get("/agent-profiles/health", async (c) => {
+    const herdrAvailability = await detectHerdrAvailabilityLive();
     return c.json({
       profiles: await listAgentProfileHealth(database, {
         claudeProfiles: await preferenceService.listClaudeProfiles(),
         codexProfiles: await preferenceService.listCodexProfiles(),
         copilotProfiles: preferenceService.listCopilotProfiles(),
         piProfiles: await preferenceService.listPiProfiles(),
+        herdrProfiles: herdrAvailability.available ? preferenceService.listHerdrProfiles() : [],
       }),
     });
   });
@@ -270,6 +289,6 @@ export function createPreferencesRoute(database: Database) {
 }
 
 function parseProvider(provider: string | undefined): ProviderName | null {
-  if (provider === "claude" || provider === "codex" || provider === "copilot" || provider === "pi") return provider;
+  if (provider === "claude" || provider === "codex" || provider === "copilot" || provider === "pi" || provider === "herdr") return provider;
   return null;
 }

@@ -202,7 +202,7 @@ export function policyUsedPct(
  */
 export function applyProviderSelectionToPrefMap(
   prefMap: Map<string, string>,
-  selected: { provider: "claude" | "codex" | "copilot" | "pi"; profileName: string },
+  selected: { provider: "claude" | "codex" | "copilot" | "pi" | "herdr"; profileName: string },
 ): void {
   if (selected.profileName) prefMap.set(getProfilePrefKey(selected.provider), selected.profileName);
   prefMap.set("provider", selected.provider);

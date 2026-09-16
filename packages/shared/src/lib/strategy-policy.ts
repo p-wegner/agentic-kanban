@@ -210,7 +210,7 @@ export function strategyPrefKey(projectId: string): string {
  * so client-safe consumers don't hand-roll the claude/codex/copilot/pi ladder —
  * the hand-rolled MCP copy fell through copilot/pi to `claude_profile` (#984).
  */
-export function providerProfilePrefKey(provider: ProviderPolicyProvider): string {
+export function providerProfilePrefKey(provider: ProviderPolicyProvider | "herdr"): string {
   return `${provider}_profile`;
 }
 

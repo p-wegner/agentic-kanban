@@ -1,21 +1,22 @@
 import { useEffect, useState } from "react";
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
-import { apiFetch, apiPost, apiPut, apiPatch } from "../lib/api.js";
+import { apiPost, apiPut, apiPatch } from "../lib/api.js";
 import { invalidateClientSurfaceLocal } from "../lib/clientInvalidation.js";
 import { showToast } from "../lib/toast.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { useConfigImportExport } from "../hooks/useConfigImportExport.js";
-import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type ProjectSettingsState, type Settings, type SettingsPanelProps, type Tab } from "./SettingsPanel.shared.js";
+import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, type AgentProfileHealth, type McpHealth, type ProjectSettingsState, type Settings, type SettingsPanelProps, type Tab } from "./SettingsPanel.shared.js";
 // Pure core of this panel — the project-row projection, the PATCH body, the settings blob and
 // the default-branch rule (#782). This is the client's most-reworked file; those four were the
 // parts of it that never needed React, and they now have tests.
-import { buildProjectPatchBody, buildSettingsToSave, emptyProjectSettingsState, hydrateProjectSettings, isDefaultBranchInvalid, projectSettingsSaveError, type SettingsProjectRow } from "../lib/settingsPanelState.js";
+import { buildProjectPatchBody, buildSettingsToSave, emptyProjectSettingsState, isDefaultBranchInvalid, projectSettingsSaveError } from "../lib/settingsPanelState.js";
 import { parseDisabledTools, withToolDisabled } from "../lib/mcp-tool-toggle.js";
 import { useTagsEditor } from "../hooks/useTagsEditor.js";
 import { useTemplateEditorState } from "../hooks/useTemplateEditorState.js";
 import { useSkillsManager } from "../hooks/useSkillsManager.js";
 import { useMonitorControls } from "../hooks/useMonitorControls.js";
 import { useProjectProviderControls } from "../hooks/useProjectProviderControls.js";
+import { useSettingsBootstrap } from "../hooks/useSettingsBootstrap.js";
 
 import { AgentSettings } from "./settings/AgentSettings.js";
 import { WorkflowSettings } from "./settings/WorkflowSettings.js";
@@ -126,90 +127,11 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
     setSettings((s) => ({ ...s, disabled_mcp_tools: withToolDisabled(disabledTools, name, disabled) }));
   }
 
-  useEffect(() => {
-    let cancelled = false;
-
-    // --- Critical path: a single bootstrap round trip with everything needed for first
-    // paint (settings + profile lists + skills + tags). One request instead of six, so it
-    // grabs a connection immediately instead of queuing behind the browser's ~6-connection
-    // per-host cap. The heavy status probes (agent-profile health ~600ms, branches ~200ms)
-    // and the install-status batch are loaded deferred, after first paint. ---
-    async function loadCore() {
-      try {
-        const boot = await apiFetch<{
-          settings: Record<string, string>;
-          claudeProfiles: string[];
-          codexProfiles: string[];
-          copilotProfiles: string[];
-          piProfiles: string[];
-          skills: { id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean }[];
-          tags: { id: string; name: string; color: string | null; isBuiltin: boolean }[];
-        }>("/api/preferences/settings-bootstrap");
-        if (cancelled) return;
-        const data = boot.settings;
-        setSettings({ ...DEFAULT_SETTINGS, ...data });
-        setProfiles(boot.claudeProfiles);
-        setCodexProfiles(uniqueProfiles(boot.codexProfiles, CODEX_DEFAULT_PROFILE));
-        setCopilotProfiles(uniqueProfiles(boot.copilotProfiles?.length ? boot.copilotProfiles : [COPILOT_DEFAULT_PROFILE], COPILOT_DEFAULT_PROFILE));
-        setPiProfiles(uniqueProfiles(boot.piProfiles?.length ? boot.piProfiles : [PI_DEFAULT_PROFILE], PI_DEFAULT_PROFILE));
-        setSkills(boot.skills);
-        setTagsList(boot.tags);
-
-        // Project-scoped cheap reads — fire in parallel, don't block the spinner.
-        // (The Schedule tab self-fetches its own runs when opened.)
-        if (activeProjectId) {
-          apiFetch<{ hasBullseye: boolean; bullseyeProvider: string | null; bullseyeProfile: string | null; settingsProvider: string | null; settingsProfile: string | null; diverged: boolean }>(
-            `/api/preferences/provider-divergence?projectId=${activeProjectId}`,
-          )
-            .then((div) => { if (!cancelled) setProviderDivergence(div); })
-            .catch(() => { /* non-fatal */ });
-
-          apiFetch<SettingsProjectRow[]>("/api/projects")
-            .then((projects) => {
-              if (cancelled) return;
-              const project = projects.find((p) => p.id === activeProjectId);
-              if (project) {
-                setProjectSettings(hydrateProjectSettings(project, data, activeProjectId));
-              }
-            })
-            .catch(() => { /* use defaults for project settings */ });
-        }
-      } catch {
-        // Use defaults
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    // --- Deferred path: heavy / secondary status data. Streams in after the panel is
-    // interactive; each populates a status badge or a non-default tab that handles its
-    // empty/initial state gracefully. ---
-    function loadDeferred() {
-      apiFetch<{ profiles: AgentProfileHealth[] }>("/api/preferences/agent-profiles/health")
-        .then((d) => { if (!cancelled) setProfileHealth(d.profiles); })
-        .catch(() => { /* non-fatal */ });
-
-      apiFetch<McpHealth>("/api/preferences/mcp/health")
-        .then((d) => { if (!cancelled) setMcpHealth(d); })
-        .catch(() => { /* non-fatal */ });
-
-      // Single batched request replaces the per-skill install-status N+1.
-      apiFetch<Record<string, boolean>>("/api/agent-skills/install-status")
-        .then((map) => { if (!cancelled) setInstalledSkills(map); })
-        .catch(() => { /* non-fatal */ });
-
-      if (activeProjectId) {
-        apiFetch<{ local: string[]; remote: string[] }>(`/api/projects/${activeProjectId}/branches`)
-          .then((b) => { if (!cancelled) setProjectBranches(b); })
-          .catch(() => { if (!cancelled) setProjectBranches(null); });
-      }
-    }
-
-    // Run the deferred probes only after the critical bootstrap resolves, so the heavy
-    // status requests don't compete for the connection pool during first paint.
-    void loadCore().finally(() => { if (!cancelled) loadDeferred(); });
-    return () => { cancelled = true; };
-  }, []);
+  const herdr = useSettingsBootstrap({
+    activeProjectId, setSettings, setProfiles, setCodexProfiles, setCopilotProfiles, setPiProfiles,
+    setSkills, setTagsList, setProviderDivergence, setProjectSettings, setProfileHealth, setMcpHealth,
+    setInstalledSkills, setProjectBranches, setLoading,
+  });
 
   useEffect(() => {
     if (tab === "workflow") {
@@ -338,6 +260,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
                   codexProfiles={codexProfiles}
                   copilotProfiles={copilotProfiles}
                   piProfiles={piProfiles}
+                  herdr={herdr}
                   profileHealth={profileHealth}
                   preflightingProfileId={preflightingProfileId}
                   onProfilePreflight={handleProfilePreflight}
