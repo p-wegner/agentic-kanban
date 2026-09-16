@@ -308,6 +308,36 @@ export async function findLiveWorkspacesOnBranch(
 }
 
 /**
+ * Open (non-closed), non-direct workspaces of a project — the candidate set for
+ * classifying "unmerged" branch state (#1177). This is exactly the population
+ * `list_workspaces`/the board count as "unmerged" today (`status != 'closed'`), before
+ * anything checks whether the branch actually still exists or has unlanded commits.
+ */
+export async function getOpenNonDirectWorkspacesForProject(
+  projectId: string,
+  database: Database = db,
+) {
+  return database
+    .select({
+      wsId: workspaces.id,
+      branch: workspaces.branch,
+      baseBranch: workspaces.baseBranch,
+      workingDir: workspaces.workingDir,
+      issueId: issues.id,
+      issueNumber: issues.issueNumber,
+    })
+    .from(workspaces)
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(
+      and(
+        eq(issues.projectId, projectId),
+        eq(workspaces.isDirect, false),
+        ne(workspaces.status, "closed"),
+      ),
+    );
+}
+
+/**
  * Working directories still held by a NON-TERMINAL workspace (#699).
  *
  * This is the DB half of the answer `createWorktree` needs before it recursively deletes
