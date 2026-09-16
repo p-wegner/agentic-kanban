@@ -10418,6 +10418,52 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/workspaces/{id}/merge-backoff:
+    get:
+      summary: operator can see WHY a workspace is being skipped before deciding to clear it.
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_merge-backoff
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/merge-backoff/clear:
+    post:
+      summary: commit just to reset the breaker.
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_merge-backoff_clear
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/workspaces/{id}/merge-status:
     get:
       summary: '"the gate passed and only the transport died; a merge retry will reuse the verdict".'
