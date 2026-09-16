@@ -546,3 +546,51 @@ export async function readCpuBusyPct(sampleMs = 150): Promise<number | null> {
   if (totalDelta <= 0) return null;
   return Math.max(0, Math.min(100, 100 * (1 - idleDelta / totalDelta)));
 }
+
+/**
+ * A heavier-weight-than-a-builder precondition — CPU busy% OR usable RAM, the SAME two
+ * numbers the operating conventions ask a human to check before starting a parallel test/build
+ * run (`CpuPct >= ~85%` or `FreeGB < ~4`). #1173: a base-branch-health probe is a clone +
+ * install + full verify — heavier than a single agent start, so `readTier0Capacity`'s 2 GB
+ * builder floor let a probe start on a box that was already CPU-saturated (measured: 100% CPU
+ * start-to-end, free RAM crossing from 3.1 to 4.6 GB — never below the 2 GB floor — while the
+ * probe burned its full 45-minute cap and recorded a `timeout`, a non-answer that also
+ * superseded a usable green row).
+ *
+ * Pure given its two readings, so the decision itself needs no test double for `os`/CPU
+ * sampling — only the two numbers that feed it.
+ */
+export interface HeavyProbeSaturation {
+  hold: boolean;
+  /** One line naming whichever measurement tripped (or both), for a hold message. */
+  reason: string;
+  freeGb: number | null;
+  cpuPct: number | null;
+}
+
+/** CPU floor: `conventions.md`'s "CPU >= ~85%" capacity-check threshold. */
+export const DEFAULT_HEAVY_PROBE_CPU_FLOOR_PCT = 85;
+/** RAM floor: `conventions.md`'s "usable RAM < ~4 GB" capacity-check threshold — deliberately
+ *  higher than `DEFAULT_MIN_FREE_GB`'s 2 GB builder floor, since a probe outweighs one agent. */
+export const DEFAULT_HEAVY_PROBE_MIN_FREE_GB = 4;
+
+export function classifyHeavyProbeSaturation(
+  input: { freeGb: number | null; cpuPct: number | null },
+  opts: { minFreeGb?: number; cpuFloorPct?: number } = {},
+): HeavyProbeSaturation {
+  const minFreeGb = opts.minFreeGb ?? DEFAULT_HEAVY_PROBE_MIN_FREE_GB;
+  const cpuFloorPct = opts.cpuFloorPct ?? DEFAULT_HEAVY_PROBE_CPU_FLOOR_PCT;
+  const ramTight = input.freeGb != null && input.freeGb < minFreeGb;
+  const cpuTight = input.cpuPct != null && input.cpuPct >= cpuFloorPct;
+  if (!ramTight && !cpuTight) {
+    const words = [
+      input.freeGb != null ? `${input.freeGb.toFixed(1)}GB free` : "free RAM unreadable",
+      input.cpuPct != null ? `${input.cpuPct.toFixed(0)}% CPU` : "CPU unreadable",
+    ].join(", ");
+    return { hold: false, reason: words, freeGb: input.freeGb, cpuPct: input.cpuPct };
+  }
+  const parts: string[] = [];
+  if (cpuTight) parts.push(`CPU at ${(input.cpuPct as number).toFixed(0)}% (floor ${cpuFloorPct}%)`);
+  if (ramTight) parts.push(`only ${(input.freeGb as number).toFixed(1)}GB free (floor ${minFreeGb}GB)`);
+  return { hold: true, reason: parts.join(", "), freeGb: input.freeGb, cpuPct: input.cpuPct };
+}
