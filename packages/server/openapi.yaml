@@ -10443,7 +10443,7 @@ paths:
               schema: {}
   /api/workspaces/{id}/merge-backoff/clear:
     post:
-      summary: commit just to reset the breaker.
+      summary: "`clearMergeBackoff` (#1167). See `clearWorkspaceMergeBackoff` for why this exists."
       tags:
         - workspace-actions
       operationId: post_api_workspaces_id_merge-backoff_clear
