@@ -34,7 +34,13 @@ import {
   machineVerifyLockEnabled,
   describeHolder,
 } from "../lib/machine-verify-lock.js";
-import { readTier0Capacity, type Tier0Capacity } from "@agentic-kanban/shared/lib/machine-capacity";
+import {
+  readTier0Capacity,
+  readCpuBusyPct,
+  classifyHeavyProbeSaturation,
+  type Tier0Capacity,
+  type HeavyProbeSaturation,
+} from "@agentic-kanban/shared/lib/machine-capacity";
 
 /** Default cadence of the periodic sweep; also the recency window an on-demand ask is judged against. */
 export const BASE_HEALTH_DEFAULT_INTERVAL_MS = 30 * 60 * 1000;
@@ -270,16 +276,25 @@ export async function resolveBaseHealthProbeDue(
   opts: {
     /** Injected for tests; defaults to the live Tier-0 read (#1009). */
     readCapacity?: () => Tier0Capacity;
+    /** Injected for tests; defaults to the live CPU sample (#1173). */
+    readCpuPct?: () => Promise<number | null>;
   } = {},
 ): Promise<BaseHealthDueVerdict> {
   const latest = await getLatestBaseBranchHealth(projectId, database).catch(() => null);
   const probeStartedAt = await getPreference(baseHealthProbeStartPrefKey(projectId), database).catch(() => null);
-  // #1009 — the SAME signal `monitor-auto-start.ts` holds builder starts on (`tier 0: only X GB
-  // free (floor 2GB)`), so a base-health probe now counts against the floor the way a builder
-  // does. Fail-open by construction: an unreadable capacity is `hold: false`.
+  // #1009 / #1173 — the probe is heavier than a single builder start (a clone + install + full
+  // verify), so it is held below its OWN floor rather than the lighter builder one: usable RAM
+  // < 4 GB (vs the 2 GB `readTier0Capacity` default) OR CPU >= 85%, the same two thresholds the
+  // operating conventions ask a human to check before a parallel test/build run. Measured gap
+  // this closes: a probe that ran at 100% CPU start-to-end with free RAM never below 3.1 GB
+  // (so the old RAM-only 2 GB floor never tripped) burned its full 45-minute cap for a `timeout`
+  // — a non-answer that also superseded a usable green row. Fail-open by construction: either
+  // reading that cannot be taken contributes no hold.
   const capacity = (opts.readCapacity ?? readTier0Capacity)();
+  const cpuPct = await (opts.readCpuPct ?? readCpuBusyPct)().catch(() => null);
+  const saturation: HeavyProbeSaturation = classifyHeavyProbeSaturation({ freeGb: capacity.freeGb, cpuPct });
   return isBaseHealthProbeDue({
-    hostSaturated: capacity.hold ? capacity.reason : null,
+    hostSaturated: saturation.hold ? saturation.reason : null,
     nowMs,
     intervalMs,
     lastResultAt: latest?.createdAt ?? null,
@@ -328,11 +343,14 @@ export async function requestBaseBranchReprobe(
   database: Database = db,
   intervalMs = BASE_HEALTH_DEFAULT_INTERVAL_MS,
   nowMs: number = Date.now(),
-  opts: { ignoreRecency?: boolean; readCapacity?: () => Tier0Capacity } = {},
+  opts: { ignoreRecency?: boolean; readCapacity?: () => Tier0Capacity; readCpuPct?: () => Promise<number | null> } = {},
 ): Promise<BaseHealthDueVerdict> {
   let verdict: BaseHealthDueVerdict = { due: false, reason: "recent_result" };
   try {
-    verdict = await resolveBaseHealthProbeDue(projectId, database, intervalMs, nowMs, { readCapacity: opts.readCapacity });
+    verdict = await resolveBaseHealthProbeDue(projectId, database, intervalMs, nowMs, {
+      readCapacity: opts.readCapacity,
+      readCpuPct: opts.readCpuPct,
+    });
     // An EXPLICIT operator request ("that verdict was starved, measure again") is allowed to
     // override the recency/timeout back-off — overriding it is the whole point of the route,
     // and the ticket asks for exactly that. It is NOT allowed to override the one guard that

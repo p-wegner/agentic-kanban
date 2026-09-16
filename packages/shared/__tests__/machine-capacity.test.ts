@@ -3,6 +3,7 @@ import {
   DEFAULT_MIN_FREE_GB,
   DEFAULT_DISK_BAD_BLOCK_FLOOR,
   classifyDiskHealth,
+  classifyHeavyProbeSaturation,
   deriveCapacityHold,
   deriveVerifyChainMaxSlots,
   deriveVerifyChainSlots,
@@ -354,5 +355,49 @@ describe("deriveCapacityHold (#1029) - the Conductor's projection of a snapshot"
     expect(withCap.maxNewStarts).toBe(3);
     const noCap = deriveCapacityHold({ tier: "0", hold: false, reason: "8.0GB free", freeGb: 8 });
     expect(noCap.maxNewStarts).toBeNull();
+  });
+});
+
+describe("classifyHeavyProbeSaturation (#1173) — the base-health probe's own, heavier floor", () => {
+  it("does not hold when both readings are comfortably under their floors", () => {
+    const r = classifyHeavyProbeSaturation({ freeGb: 9, cpuPct: 20 });
+    expect(r).toEqual({ hold: false, reason: "9.0GB free, 20% CPU", freeGb: 9, cpuPct: 20 });
+  });
+
+  it("holds on CPU alone, even with RAM well above the floor", () => {
+    const r = classifyHeavyProbeSaturation({ freeGb: 9, cpuPct: 97 });
+    expect(r.hold).toBe(true);
+    expect(r.reason).toContain("CPU at 97% (floor 85%)");
+    expect(r.reason).not.toContain("GB free");
+  });
+
+  it("holds on RAM alone, wider than the 2GB builder floor — 3.1GB trips the 4GB probe floor", () => {
+    const r = classifyHeavyProbeSaturation({ freeGb: 3.1, cpuPct: 20 });
+    expect(r.hold).toBe(true);
+    expect(r.reason).toContain("only 3.1GB free (floor 4GB)");
+    expect(r.reason).not.toContain("CPU at");
+  });
+
+  it("names both measurements when both trip", () => {
+    const r = classifyHeavyProbeSaturation({ freeGb: 1.2, cpuPct: 100 });
+    expect(r.hold).toBe(true);
+    expect(r.reason).toContain("CPU at 100% (floor 85%)");
+    expect(r.reason).toContain("only 1.2GB free (floor 4GB)");
+  });
+
+  it("an unreadable reading contributes no hold — fail-open, like every other Tier-0 signal", () => {
+    const cpuUnreadable = classifyHeavyProbeSaturation({ freeGb: 9, cpuPct: null });
+    expect(cpuUnreadable.hold).toBe(false);
+    const ramUnreadable = classifyHeavyProbeSaturation({ freeGb: null, cpuPct: 20 });
+    expect(ramUnreadable.hold).toBe(false);
+    const bothUnreadable = classifyHeavyProbeSaturation({ freeGb: null, cpuPct: null });
+    expect(bothUnreadable.hold).toBe(false);
+  });
+
+  it("floors are overridable for a caller that wants a different threshold", () => {
+    const r = classifyHeavyProbeSaturation({ freeGb: 5, cpuPct: 50 }, { minFreeGb: 6, cpuFloorPct: 40 });
+    expect(r.hold).toBe(true);
+    expect(r.reason).toContain("CPU at 50% (floor 40%)");
+    expect(r.reason).toContain("only 5.0GB free (floor 6GB)");
   });
 });
