@@ -13,7 +13,7 @@
  * deep path `@agentic-kanban/shared/lib/strategy-policy`.
  */
 
-export const PROVIDER_POLICY_PROVIDERS = ["claude", "codex", "copilot", "pi"] as const;
+export const PROVIDER_POLICY_PROVIDERS = ["claude", "codex", "copilot", "pi", "herdr"] as const;
 export type ProviderPolicyProvider = (typeof PROVIDER_POLICY_PROVIDERS)[number];
 
 /**
@@ -207,10 +207,10 @@ export function strategyPrefKey(projectId: string): string {
  * Preference key holding the selected profile for a provider (e.g. "codex" →
  * "codex_profile"). Mirrors the server-side provider registry's `profilePrefKey`
  * (locked distinct + `${provider}_profile`-shaped by agent-provider-registry.test.ts)
- * so client-safe consumers don't hand-roll the claude/codex/copilot/pi ladder —
+ * so client-safe consumers don't hand-roll the claude/codex/copilot/pi/herdr ladder —
  * the hand-rolled MCP copy fell through copilot/pi to `claude_profile` (#984).
  */
-export function providerProfilePrefKey(provider: ProviderPolicyProvider | "herdr"): string {
+export function providerProfilePrefKey(provider: ProviderPolicyProvider): string {
   return `${provider}_profile`;
 }
 
@@ -333,6 +333,7 @@ export const PROVIDER_DIVERGENCE_KEYS: ReadonlySet<string> = new Set([
   "codex_profile",
   "copilot_profile",
   "pi_profile",
+  "herdr_profile",
 ]);
 
 export interface ProviderDivergenceResult {

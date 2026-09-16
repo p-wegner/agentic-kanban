@@ -14,7 +14,7 @@ export function ProviderPolicyProfileField({
   availableProfiles,
   onChange,
 }: {
-  provider: "claude" | "codex" | "copilot" | "pi";
+  provider: "claude" | "codex" | "copilot" | "pi" | "herdr";
   profileName: string;
   availableProfiles: string[];
   onChange: (name: string) => void;
