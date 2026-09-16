@@ -279,16 +279,14 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
         // every `assembling`/`gating` row found at boot was unconditionally abandoned and the
         // "or resumes" half of the acceptance criteria was unreachable.
         //
-        // `runTrainStrategy` mints its OWN fresh `merge_trains` row for a member set with no
-        // existing `assembling`/`gating` row (#1158 taught it to instead REUSE one that already
-        // exists for the same members) — so the stranded row this callback was handed must be
-        // moved out of `assembling`/`gating` BEFORE re-entering `executeQueue`. Otherwise
-        // `beginMergeTrain`'s new dedup finds this very row (same member set, still active) and
-        // reuses it instead of minting a fresh one; the fresh train's own `finishMergeTrain`
-        // write then races this callback's write to the SAME row id, and whichever runs last
-        // clobbers the other's `gateEvidence`/`bisectResult`. Abandoning it first (superseded,
-        // not a failure verdict) keeps the two rows — and the two writes — separate: this row's
-        // history entry says it was superseded, and the fresh row's says what actually happened.
+        // `beginMergeTrain` REFUSES to start a new train (returns `"already_in_flight"`) whenever
+        // any `assembling`/`gating` row already exists for the project, same member set or not
+        // (#1158) — so the stranded row this callback was handed must be moved out of
+        // `assembling`/`gating` BEFORE re-entering `executeQueue`, or the resume would refuse
+        // against its own row and silently no-op instead of re-running the batch. Abandoning it
+        // first (superseded, not a failure verdict) is also what keeps the two writes separate
+        // if the reconciler ever raced a fresh caller for the same batch: this row's history
+        // entry says it was superseded, and the freshly-minted row's says what actually happened.
         async runTrain(row) {
           await updateMergeTrainState(row.id, {
             state: "abandoned",
