@@ -112,7 +112,7 @@ export async function executeWorkspaceMerge(args: {
     workspace,
     "merged",
     `Merged ${workspace.branch} into ${targetBranch}${mergeCommitSha ? ` at ${mergeCommitSha}` : ""}.`,
-    { targetBranch, commitSha: mergeCommitSha || null, mergedAt: now, mergeOutput: mergeResult },
+    { targetBranch, commitSha: mergeCommitSha || null, mergedAt: now, mergeOutput: mergeResult, mergedVia: "merge-job" },
     now,
   );
 
