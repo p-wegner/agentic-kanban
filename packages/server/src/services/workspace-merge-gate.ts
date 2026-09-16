@@ -131,7 +131,7 @@ export async function recordGateFailureNote(args: {
     workspace,
     "gate-failed",
     `Merge withheld: pre-merge gate failed (${stage}). ${gateMessage}`,
-    { mergeReason: "pre_merge_gate_failed", gateStage: stage, gateMessage, targetBranch },
+    { mergeReason: "pre_merge_gate_failed", gateStage: stage, gateMessage, targetBranch, mergedVia: "merge-job" },
   );
 }
 

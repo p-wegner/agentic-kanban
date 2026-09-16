@@ -218,7 +218,7 @@ export function makeAgentBrief(config: StrategyConfig, issues: IssueWithStatus[]
  */
 export const PROVIDER_DEFAULT_POLICY_ID = "provider-default";
 
-export type ConcreteProvider = "claude" | "codex" | "copilot" | "pi";
+export type ConcreteProvider = "claude" | "codex" | "copilot" | "pi" | "herdr";
 
 /**
  * Read the effective provider+profile a config's provider policies would select.

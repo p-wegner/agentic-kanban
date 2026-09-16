@@ -115,6 +115,7 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "GET /api/preferences/claude-profiles",
   "GET /api/preferences/codex-profiles",
   "GET /api/preferences/copilot-profiles",
+  "GET /api/preferences/herdr-profiles",
   "GET /api/preferences/home-dir",
   "GET /api/preferences/mcp/health",
   "GET /api/preferences/pi-profiles",
