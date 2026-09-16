@@ -124,6 +124,64 @@ describe("gateRanScope", () => {
     expect(gateRanScope(tierInfo({ selector: undefined }))).toBe("full");
     expect(gateRanScope(tierInfo({ selector: "related", packageScoped: true }))).toBe("package-scoped");
   });
+
+  describe("a runner fallback is recorded under its TRUE scope, not the requested tier (#1171)", () => {
+    // The runner requested `impact` but its own `[gate:step]` self-report says `tests` actually
+    // ran under `vitest related` (#1170's `impactRunnerFellBack`) — an ENOENT/non-zero-exit/empty
+    // selection on the runner's spawn that neither `impactSelectorAbsent` nor a standalone
+    // `impactSelection` probe can see. Recording it as `impact-scoped`/`impact+related` would
+    // silently contaminate the #954 miss-rate corpus with a run the selector never narrowed.
+    it("falls through to file-scoped when the runner's own scope was file-scoped", () => {
+      const fellBack = tierInfo({
+        selector: "impact",
+        packageScoped: true,
+        fileScoped: true,
+        stepTimings: [{ name: "tests", seconds: 40, scope: "file-scoped" }],
+      });
+      expect(gateRanScope(fellBack)).toBe("file-scoped");
+    });
+
+    it("falls through to package-scoped when no file scope applied", () => {
+      const fellBack = tierInfo({
+        selector: "impact",
+        packageScoped: true,
+        stepTimings: [{ name: "tests", seconds: 40, scope: "package-scoped" }],
+      });
+      expect(gateRanScope(fellBack)).toBe("package-scoped");
+    });
+
+    it("falls through to full when neither package nor file scoping applied", () => {
+      const fellBack = tierInfo({
+        selector: "impact",
+        stepTimings: [{ name: "tests", seconds: 40, scope: "full" }],
+      });
+      expect(gateRanScope(fellBack)).toBe("full");
+    });
+
+    it("also catches the impact+related union shape falling back", () => {
+      const fellBack = tierInfo({
+        selector: "impact",
+        fileScoped: true,
+        stepTimings: [{ name: "tests", seconds: 40, scope: "full" }],
+      });
+      expect(gateRanScope(fellBack)).toBe("file-scoped");
+    });
+
+    it("still records impact-scoped when the runner's own report confirms impact actually ran", () => {
+      const confirmed = tierInfo({
+        selector: "impact",
+        stepTimings: [{ name: "tests", seconds: 5, scope: "impact-selected" }],
+      });
+      expect(gateRanScope(confirmed)).toBe("impact-scoped");
+    });
+
+    it("still records impact-scoped when there is no step self-report at all", () => {
+      // Absence of evidence is not evidence of a fallback — most projects emit no `[gate:step]`
+      // lines at all, and this must not newly treat every one of them as having fallen back.
+      const noSteps = tierInfo({ selector: "impact" });
+      expect(gateRanScope(noSteps)).toBe("impact-scoped");
+    });
+  });
 });
 
 describe("buildRecordArgs", () => {

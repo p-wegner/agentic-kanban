@@ -38,6 +38,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { GateImpactSelection, GateTierInfo } from "./pre-merge-gate-tier.js";
+// Imported from the leaf module, not from `pre-merge-gate-tier.js` (which re-exports it) — that
+// file imports `test-impact-selector-id.js`, which imports THIS file, so importing the re-export
+// here would be a cycle (`pre-merge-gate-tier -> test-impact-selector-id ->
+// test-impact-outcome.service -> pre-merge-gate-tier`), caught by the `no-circular` depcruise rule.
+import { impactRunnerFellBack } from "./impact-selection-note.js";
 
 /**
  * Path of `impact.mjs` relative to a repo root, as the board materializes the skill into a
@@ -126,12 +131,34 @@ export type GateRanScope =
  * `KANBAN_TEST_GUARDS_ONLY` branch runs the guards and EXITS before the selector is ever
  * consulted, so a docs-only diff genuinely ran no impact selection at all.
  *
+ * **#1171 — the impact selector's outranking is conditional on it having actually RUN.** A
+ * `KANBAN_TEST_SELECTOR=impact` request whose runner self-reports (`impactRunnerFellBack`, #1170)
+ * that it fell back to `vitest related` at run time did not execute the ranked selection at all —
+ * only the request survived, not the run — so it must not be recorded as `impact-scoped` /
+ * `impact+related`. This check runs BEFORE the `tierInfo.selector === "impact"` branch below for
+ * exactly that reason: the request alone is not enough evidence for the scope this row claims.
+ *
  * Absent selector reads as `related`, so every project that has not opted in records exactly as
  * it did before.
  */
 export function gateRanScope(tierInfo: GateTierInfo | null | undefined): GateRanScope {
   if (!tierInfo) return "full";
   if (tierInfo.guardsOnly) return "guards-only";
+  // #1171 — a run REQUESTED the impact selector but the runner's own self-report says it fell back
+  // to `vitest related` at run time (#1170's `impactRunnerFellBack`: an ENOENT/non-zero-exit/empty
+  // selection on the runner's spawn, invisible to both `impactSelectorAbsent` and a standalone
+  // `impactSelection` probe). Recording such a row under `impact-scoped`/`impact+related` would
+  // contaminate the #954 miss-rate corpus with a run the selector never actually narrowed — the
+  // same silent-degradation failure #1170 fixed for the human-facing message, but here in the
+  // ledger that decides whether the `impact` tier ever gets promoted to a default (#983). Record
+  // the TRUE executed scope instead, same precedence as the non-impact branch below: a file scope
+  // survives the fallback (the runner still unions `vitest related`'s own picks over the changed
+  // files), then package scope, then full.
+  if (tierInfo.selector === "impact" && impactRunnerFellBack(tierInfo)) {
+    if (tierInfo.fileScoped) return "file-scoped";
+    if (tierInfo.packageScoped) return "package-scoped";
+    return "full";
+  }
   // #967 — a file scope emitted ALONGSIDE the impact selector is the union, not a rival scope: the
   // runner derives `vitest related`'s suites from it and merges them into the selection. So the row
   // names the combined selector, which is what the setting ships and therefore what the corpus must
