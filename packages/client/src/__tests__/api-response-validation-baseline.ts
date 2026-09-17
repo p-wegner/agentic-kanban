@@ -83,6 +83,14 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   // ── /api/merge-queue ──
   "POST /api/merge-queue",
   "POST /api/merge-queue/preview/:param",
+  // #1187 depends on #1186 ("Persist and expose the merge-train batching window"), which was
+  // still in flight in a sibling worktree (uncommitted) when this landed — there is no merged
+  // server DTO yet to bind a schema to. Register real schemas once #1186 lands and its DTO is
+  // on master; until then this line documents the gap rather than pretending it is closed.
+  "GET /api/merge-queue/window",
+  "POST /api/merge-queue/trains/:param/cancel",
+  "POST /api/merge-queue/window/hold",
+  "POST /api/merge-queue/window/release",
   // ── /api/plugins ──
   "DELETE /api/plugins/:param",
   "GET /api/plugins",
