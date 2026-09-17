@@ -45,6 +45,15 @@ export const SERVER_BOARD_EVENT_REASONS = [
   // #1089 — the worker fleet is not project-scoped, so this reason is broadcast to every
   // subscribed project's channel (see `broadcastToAllProjects`) rather than one projectId.
   "workers_changed",
+  // #1186 — the merge-train batching window (`train_window_<projectId>`) changed: a member
+  // joined or left, the verdict flipped, an operator held or released it, or it departed.
+  // Broadcast by the auto-merge orchestrator and the window control routes so the departure
+  // board does not poll.
+  "merge_train_window_changed",
+  // #1186 — a persisted merge train row changed state (assembling → gating → merged/…).
+  // Vocabulary only in this wave; the emission point lives in the train service and is wired
+  // in the next one.
+  "merge_train_changed",
 ] as const;
 
 /**

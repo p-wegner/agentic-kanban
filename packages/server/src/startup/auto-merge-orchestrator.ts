@@ -18,9 +18,16 @@ import type { StackProfile } from "@agentic-kanban/shared";
 import {
   decideMergeTrainRelease,
   resolveTrainWindowConfig,
-  type MergeTrainWindowState,
+  type MergeTrainWindowVerdict,
 } from "../services/merge-train-window.js";
 import { verifyChainSemaphoreActive } from "../services/verify-chain-semaphore.js";
+import {
+  clearTrainWindow,
+  readTrainWindowsFromPrefMap,
+  sameTrainWindow,
+  writeTrainWindow,
+  type PersistedMergeTrainWindow,
+} from "../services/merge-train-window-state.js";
 import { formatPostureNote } from "../services/risk-posture.service.js";
 import {
   describeReleasePartition,
@@ -70,11 +77,13 @@ export interface AutoMergeOrchestratorState {
   reconcilerAttempts: Map<string, number>;
   /**
    * Merge-train batching window (#905): ready workspaces are held here, keyed per project,
-   * until `decideMergeTrainRelease` says the window has closed (max size or max wait). In
-   * memory only — a restart loses the accumulator and simply starts a fresh window, which is
-   * no worse than every workspace re-appearing as "just became ready" on the next tick.
+   * until `decideMergeTrainRelease` says the window has closed (max size or max wait). The
+   * in-memory mirror of the `train_window_<projectId>` preference (#1186): restored from the
+   * prefMap on the first tick, written back on every tick where it changes, cleared on release
+   * — so a restart keeps `firstSeenAt` instead of silently re-arming the max-wait clock, and
+   * the pref is what the operator routes (hold / release) write and the window API reads.
    */
-  trainWindows: Map<string, MergeTrainWindowState>;
+  trainWindows: Map<string, PersistedMergeTrainWindow>;
 }
 
 let activeAutoMergeSweep: PeriodicSweepHandle | null = null;
@@ -314,6 +323,15 @@ export function createAutoMergeOrchestrator(deps: {
     const prefMap = toPrefMap(prefRows);
     const nowMs = new Date(now).getTime();
 
+    // #1186 — the pref is the source of truth, this map its mirror. Re-reading EVERY tick (not
+    // just on boot) is what lets the hold/release routes reach the orchestrator: they write the
+    // pref, the next tick sees `heldUntil` / `releaseRequestedAt` here. A project the pref does
+    // not mention keeps its in-memory entry (a write may have failed), a project the pref does
+    // mention wins over memory.
+    for (const [projectId, persisted] of readTrainWindowsFromPrefMap(prefMap)) {
+      state.trainWindows.set(projectId, persisted);
+    }
+
     const byProject = new Map<string, string[]>();
     for (const row of rows) {
       const list = byProject.get(row.projectId) ?? [];
@@ -331,12 +349,36 @@ export function createAutoMergeOrchestrator(deps: {
     for (const projectId of projectIds) {
       const ids = byProject.get(projectId) ?? [];
       const existing = state.trainWindows.get(projectId);
+      // An empty pending set is a control-only record (a hold placed before anything was ready,
+      // see `holdTrainWindow`): its `firstSeenAt` must not start the wait clock.
+      const accumulating = existing !== undefined && existing.pendingIds.length > 0;
+      const heldUntilMs = existing?.heldUntil ? new Date(existing.heldUntil).getTime() : null;
+      const holdActive = heldUntilMs !== null && nowMs < heldUntilMs;
+
       if (ids.length === 0) {
         // Nothing ready for this project right now — the reconcile passes may have healed or
-        // parked away everything that was pending. Nothing left to wait for.
-        if (existing) state.trainWindows.delete(projectId);
+        // parked away everything that was pending. Nothing left to wait for; a still-active
+        // operator hold survives as a control-only record so it applies to the next arrival.
+        if (!existing) continue;
+        if (holdActive) {
+          await persistWindow(projectId, existing, {
+            pendingIds: [],
+            firstSeenAt: now,
+            lastVerdict: { release: false, reason: "held" },
+            lastEvaluatedAt: now,
+            heldUntil: existing.heldUntil,
+          });
+        } else {
+          await dropWindow(projectId, existing);
+        }
         continue;
       }
+
+      const firstSeenAt = accumulating ? existing.firstSeenAt : now;
+      const carry = {
+        ...(existing?.heldUntil ? { heldUntil: existing.heldUntil } : {}),
+        ...(existing?.releaseRequestedAt ? { releaseRequestedAt: existing.releaseRequestedAt } : {}),
+      };
 
       // #1153: never assemble a second train for a project that already has one in flight
       // (`assembling`/`gating`) — a second batch over the same ready set can only contend with
@@ -345,7 +387,13 @@ export function createAutoMergeOrchestrator(deps: {
       // in-flight train finishes.
       const activeTrains = await listActiveMergeTrainsForProject(projectId, ["assembling", "gating"], database);
       if (activeTrains.length > 0) {
-        state.trainWindows.set(projectId, { pendingIds: ids, firstSeenAt: existing?.firstSeenAt ?? now });
+        await persistWindow(projectId, existing, {
+          pendingIds: ids,
+          firstSeenAt,
+          lastVerdict: { release: false, reason: "live_train" },
+          lastEvaluatedAt: now,
+          ...carry,
+        });
         continue;
       }
 
@@ -353,30 +401,62 @@ export function createAutoMergeOrchestrator(deps: {
       // the explicit `train_max_size_<id>` / `train_max_wait_ms_<id>` prefs still winning per
       // field. `standard` keeps the shipped defaults — see `resolveTrainWindowConfig`.
       const config = resolveTrainWindowConfig(prefMap, projectId);
-      // Preserve the ORIGINAL firstSeenAt across ticks so the wait bound is measured from when
-      // the set first started accumulating, not re-armed every tick a new member joins.
-      const windowState: MergeTrainWindowState = {
-        pendingIds: ids,
-        firstSeenAt: existing?.firstSeenAt ?? now,
-      };
 
       // #1138 — hold a release for a short grace while a verify chain is already running:
       // releasing a lone ready workspace straight into a gate the box is already busy with
       // does not merge it any sooner (one verify slot, process-wide) and guarantees the #243
       // discard for whichever sibling gate finishes next and finds the base has moved.
-      const verdict = decideMergeTrainRelease(windowState, config, nowMs, {
+      // #1186 — the operator controls ride along: a live hold beats everything, a release
+      // request beats size/wait/gate.
+      // Preserve the ORIGINAL firstSeenAt across ticks so the wait bound is measured from when
+      // the set first started accumulating, not re-armed every tick a new member joins.
+      const verdict: MergeTrainWindowVerdict = decideMergeTrainRelease({ pendingIds: ids, firstSeenAt }, config, nowMs, {
         gateBusy: verifyChainSemaphoreActive() > 0,
+        heldUntilMs,
+        releaseRequested: existing?.releaseRequestedAt !== undefined,
       });
       if (verdict.release) {
         console.log(`[auto-merge] train window closed for project ${projectId} (${verdict.reason}, size ${config.maxSize}/wait ${config.maxWaitMs}ms): releasing ${ids.length} workspace(s)${config.batchingFromPosture ? formatPostureNote(config.posture) : ""}`);
         released.push(...ids);
-        state.trainWindows.delete(projectId);
+        await dropWindow(projectId, existing);
       } else {
-        state.trainWindows.set(projectId, windowState);
+        await persistWindow(projectId, existing, {
+          pendingIds: ids,
+          firstSeenAt,
+          lastVerdict: verdict,
+          lastEvaluatedAt: now,
+          ...carry,
+        });
       }
     }
 
     return released;
+  }
+
+  /**
+   * Write the window back only when something other than the evaluation timestamp moved —
+   * a 30 s tick that re-judges `accumulating` with the same members is not a change worth a
+   * pref write and a WebSocket broadcast. `lastEvaluatedAt` is still refreshed in memory.
+   */
+  async function persistWindow(projectId: string, previous: PersistedMergeTrainWindow | undefined, next: PersistedMergeTrainWindow): Promise<void> {
+    state.trainWindows.set(projectId, next);
+    if (previous && sameTrainWindow({ ...previous, lastEvaluatedAt: next.lastEvaluatedAt }, next)) return;
+    try {
+      await writeTrainWindow(projectId, next, database);
+    } catch (err) {
+      console.warn(`[auto-merge] train window persist failed for project ${projectId} (non-fatal, memory copy kept): ${errorMessage(err)}`);
+    }
+    boardEvents?.broadcast(projectId, "merge_train_window_changed");
+  }
+
+  async function dropWindow(projectId: string, previous: PersistedMergeTrainWindow | undefined): Promise<void> {
+    state.trainWindows.delete(projectId);
+    try {
+      await clearTrainWindow(projectId, database);
+    } catch (err) {
+      console.warn(`[auto-merge] train window clear failed for project ${projectId} (non-fatal): ${errorMessage(err)}`);
+    }
+    if (previous) boardEvents?.broadcast(projectId, "merge_train_window_changed");
   }
 
   async function runOnce(force = false): Promise<AutoMergeOrchestratorState> {

@@ -146,4 +146,66 @@ describe("decideMergeTrainRelease (#905)", () => {
       expect(verdict).toEqual({ release: true, reason: "max_size" });
     });
   });
+
+  describe("operator controls (#1186)", () => {
+    it("a live hold wins over max size", () => {
+      const verdict = decideMergeTrainRelease(
+        state(["a", "b", "c", "d"]),
+        { maxSize: 4, maxWaitMs: DEFAULT_TRAIN_MAX_WAIT_MS },
+        BASE_NOW_MS + 1000,
+        { heldUntilMs: BASE_NOW_MS + 60_000 },
+      );
+      expect(verdict).toEqual({ release: false, reason: "held" });
+    });
+
+    it("a live hold wins over max wait", () => {
+      const verdict = decideMergeTrainRelease(
+        state(["a"]),
+        { maxSize: 4, maxWaitMs: 60_000 },
+        BASE_NOW_MS + 61_000,
+        { heldUntilMs: BASE_NOW_MS + 120_000 },
+      );
+      expect(verdict).toEqual({ release: false, reason: "held" });
+    });
+
+    it("a live hold wins over a pending release request (the hold is the later, more conservative instruction)", () => {
+      const verdict = decideMergeTrainRelease(
+        state(["a"]),
+        { maxSize: 4, maxWaitMs: DEFAULT_TRAIN_MAX_WAIT_MS },
+        BASE_NOW_MS + 1000,
+        { heldUntilMs: BASE_NOW_MS + 60_000, releaseRequested: true },
+      );
+      expect(verdict).toEqual({ release: false, reason: "held" });
+    });
+
+    it("an expired hold no longer holds", () => {
+      const verdict = decideMergeTrainRelease(
+        state(["a", "b", "c", "d"]),
+        { maxSize: 4, maxWaitMs: DEFAULT_TRAIN_MAX_WAIT_MS },
+        BASE_NOW_MS + 61_000,
+        { heldUntilMs: BASE_NOW_MS + 60_000 },
+      );
+      expect(verdict).toEqual({ release: true, reason: "max_size" });
+    });
+
+    it("a release request departs a lone member below size and before wait, even with a busy gate", () => {
+      const verdict = decideMergeTrainRelease(
+        state(["a"]),
+        { maxSize: 4, maxWaitMs: DEFAULT_TRAIN_MAX_WAIT_MS },
+        BASE_NOW_MS + 1000,
+        { releaseRequested: true, gateBusy: true },
+      );
+      expect(verdict).toEqual({ release: true, reason: "operator_release" });
+    });
+
+    it("a null heldUntilMs is the same as no hold", () => {
+      const verdict = decideMergeTrainRelease(
+        state(["a", "b", "c", "d"]),
+        { maxSize: 4, maxWaitMs: DEFAULT_TRAIN_MAX_WAIT_MS },
+        BASE_NOW_MS + 1000,
+        { heldUntilMs: null },
+      );
+      expect(verdict).toEqual({ release: true, reason: "max_size" });
+    });
+  });
 });
