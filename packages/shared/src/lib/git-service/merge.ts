@@ -219,6 +219,13 @@ export async function mergeBranch(
      * ANY non-append (edited/overlapping) file still throws as before.
      */
     autoResolveAppendConflicts?: boolean;
+    /**
+     * Override the merge commit's message (subject + optional body) instead of the default
+     * `Merge branch '<featureBranch>'`. Used by the merge-train landing so the commit that
+     * actually lands on the base is self-describing (train label, members, gate evidence)
+     * rather than naming only the disposable `kanban/train/<label>` ref.
+     */
+    message?: string;
   },
 ): Promise<string> {
   const targetSha = (await execGit(["rev-parse", targetBranch], repoPath)).trim();
@@ -389,7 +396,7 @@ export async function mergeBranch(
 
   // Create the merge commit with two parents
   const newCommitSha = (await execGit(
-    ["commit-tree", treeSha, "-p", targetSha, "-p", featureSha, "-m", `Merge branch '${featureBranch}'`],
+    ["commit-tree", treeSha, "-p", targetSha, "-p", featureSha, "-m", options?.message ?? `Merge branch '${featureBranch}'`],
     repoPath,
   )).trim();
 
