@@ -7,11 +7,15 @@ import { useAgentActivityStore } from "../stores/agentActivityStore.js";
 import { detectAgentStall } from "../lib/detectAgentStall.js";
 import { useAgentStallThreshold } from "./AgentStallBadge.js";
 import { useCrossRepoActivity } from "../hooks/useCrossRepoActivity.js";
+import { apiFetch } from "../lib/api.js";
+import type { MergeTrainRowDto, MergeTrainState, MergeTrainWindowResponse, MergeTrainWindowVerdictDto } from "@agentic-kanban/shared";
 import {
   normalizeCrossRepoEntry,
   normalizeStallSignal,
   normalizeAgentQuestion,
   normalizeStatusTransition,
+  normalizeMergeTrainEvent,
+  normalizeTrainWindowVerdict,
   mergeFlightRecorderEvents,
   filterFlightRecorderEvents,
   collectFlightRecorderFacets,
@@ -94,7 +98,10 @@ function useFlightRecorderEvents(projectId: string | null, resolveIssue?: Resolv
   const [workspaces, setWorkspaces] = useState<SlimWorkspaceListItem[]>([]);
   const [questionEvents, setQuestionEvents] = useState<FlightRecorderEvent[]>([]);
   const [statusEvents, setStatusEvents] = useState<FlightRecorderEvent[]>([]);
+  const [trainEvents, setTrainEvents] = useState<FlightRecorderEvent[]>([]);
   const prevStatusRef = useRef<Map<string, string>>(new Map());
+  const prevTrainStatesRef = useRef<Map<string, MergeTrainState>>(new Map());
+  const prevWindowVerdictRef = useRef<MergeTrainWindowVerdictDto | null | undefined>(undefined);
   const resolveRef = useRef(resolveIssue);
   resolveRef.current = resolveIssue;
 
@@ -162,13 +169,61 @@ function useFlightRecorderEvents(projectId: string | null, resolveIssue?: Resolv
         if (fresh.length > 0) setStatusEvents((prev) => mergeFlightRecorderEvents([fresh, prev], 100));
       })
       .catch(() => { /* server down — keep prior snapshot */ });
+
+    // Merge trains (#1195) → a state-change event per train, diffed against the prior
+    // snapshot, so board-monitor/sentinel-facing consumers of this feed see a train land,
+    // go red, or get abandoned without polling the merge-queue panel themselves.
+    apiFetch<{ ok: boolean; trains: MergeTrainRowDto[] }>(`/api/merge-queue/trains?projectId=${encodeURIComponent(projectId)}`)
+      .then((result) => {
+        const now = new Date().toISOString();
+        const fresh: FlightRecorderEvent[] = [];
+        for (const t of result.trains) {
+          const from = prevTrainStatesRef.current.get(t.id) ?? null;
+          prevTrainStatesRef.current.set(t.id, t.state);
+          if (from === null) continue; // first observation seeds the baseline silently
+          let memberCount = 0;
+          try {
+            const parsed: unknown = JSON.parse(t.memberWorkspaceIds);
+            if (Array.isArray(parsed)) memberCount = parsed.length;
+          } catch {
+            // leave memberCount at 0
+          }
+          const ev = normalizeMergeTrainEvent({ trainId: t.id, from, to: t.state, memberCount, at: now });
+          if (ev) fresh.push(ev);
+        }
+        if (fresh.length > 0) setTrainEvents((prev) => mergeFlightRecorderEvents([fresh, prev], 100));
+      })
+      .catch(() => { /* server down — keep prior snapshot */ });
+
+    // The train's batching window (#1186) — a verdict-change event whenever the
+    // orchestrator's hold/release decision flips, so a stuck window (held/gate_busy) is
+    // visible on the same feed as a stalled agent.
+    apiFetch<MergeTrainWindowResponse>(`/api/merge-queue/window?projectId=${encodeURIComponent(projectId)}`)
+      .then((result) => {
+        const now = new Date().toISOString();
+        const to = result.window?.lastVerdict ?? null;
+        const from = prevWindowVerdictRef.current;
+        prevWindowVerdictRef.current = to;
+        if (from === undefined || to === null) return; // first observation, or nothing open
+        const ev = normalizeTrainWindowVerdict({
+          from,
+          to,
+          pendingCount: result.window?.pending.length ?? 0,
+          at: now,
+        });
+        if (ev) setTrainEvents((prev) => mergeFlightRecorderEvents([[ev], prev], 100));
+      })
+      .catch(() => { /* server down — keep prior snapshot */ });
   }, [projectId, queryClient]);
 
   useEffect(() => {
     if (!projectId) return;
     prevStatusRef.current = new Map();
+    prevTrainStatesRef.current = new Map();
+    prevWindowVerdictRef.current = undefined;
     setQuestionEvents([]);
     setStatusEvents([]);
+    setTrainEvents([]);
     void refresh();
     // Trailing debounce: a merge cascade emits bursts of qualifying events, and an
     // undebounced handler turned each into its own slow /api/workspaces request
@@ -219,8 +274,9 @@ function useFlightRecorderEvents(projectId: string | null, resolveIssue?: Resolv
         stallEvents,
         questionEvents,
         statusEvents,
+        trainEvents,
       ]),
-    [crossRepoEntries, stallEvents, questionEvents, statusEvents],
+    [crossRepoEntries, stallEvents, questionEvents, statusEvents, trainEvents],
   );
 
   return { events, refresh };

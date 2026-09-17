@@ -112,6 +112,42 @@ export function createMergeQueueRoute(
   });
 
   /**
+   * GET /api/merge-queue/trains/:id
+   *
+   * A single train row, with `gateEvidence`/`bisectResult` parsed and the bisect-tree
+   * `attempts` (#1189) lifted to the top level — the shape `pnpm cli -- train show` and the
+   * `get_merge_train` MCP tool render. 404 when the id names no train.
+   */
+  router.get("/trains/:id", async (c) => {
+    const id = c.req.param("id");
+    const train = await getMergeTrain(id, database);
+    if (!train) {
+      return c.json({ ok: false, error: "train not found" }, 404);
+    }
+    let gateEvidence: unknown = null;
+    try {
+      gateEvidence = train.gateEvidence ? JSON.parse(train.gateEvidence) : null;
+    } catch {
+      gateEvidence = null;
+    }
+    let bisectResult: unknown = null;
+    try {
+      bisectResult = train.bisectResult ? JSON.parse(train.bisectResult) : null;
+    } catch {
+      bisectResult = null;
+    }
+    return c.json({
+      ok: true,
+      train: {
+        ...train,
+        gateEvidence,
+        bisectResult,
+        attempts: (gateEvidence as { attempts?: unknown[] } | null)?.attempts ?? [],
+      },
+    });
+  });
+
+  /**
    * POST /api/merge-queue/trains/:id/cancel
    *
    * #1153 — the only remedy an operator had for a stranded train was a full server restart
