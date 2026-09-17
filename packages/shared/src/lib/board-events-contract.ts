@@ -42,6 +42,8 @@ export const SERVER_BOARD_EVENT_REASONS = [
   "drive_obstacle",
   "project_completed",
   "internal_notify",
+  // #1186 — the merge-train batching window's pending set, verdict, or operator hold changed.
+  "merge_train_window_changed",
   // #1089 — the worker fleet is not project-scoped, so this reason is broadcast to every
   // subscribed project's channel (see `broadcastToAllProjects`) rather than one projectId.
   "workers_changed",

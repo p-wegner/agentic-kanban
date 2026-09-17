@@ -18,8 +18,12 @@ import type { StackProfile } from "@agentic-kanban/shared";
 import {
   decideMergeTrainRelease,
   resolveTrainWindowConfig,
+  parsePersistedTrainWindow,
+  serializePersistedTrainWindow,
   type MergeTrainWindowState,
+  type MergeTrainWindowVerdict,
 } from "../services/merge-train-window.js";
+import { setPreference, deletePreferences } from "../repositories/preferences.repository.js";
 import { verifyChainSemaphoreActive } from "../services/verify-chain-semaphore.js";
 import { formatPostureNote } from "../services/risk-posture.service.js";
 import {
@@ -56,6 +60,10 @@ const verifyScriptPref = projectPref("verify_script");
 const stackProfilePref = projectPref("project_stack_profile");
 const devCommandPref = projectPref("dev_command");
 const healthUrlPref = projectPref("health_url");
+/** Persisted window state (#1186) — see `dynamic-preference-keys.ts` for why this is registered. */
+export const mergeTrainWindowPref = projectPref("merge_train_window");
+/** Operator "hold the door" override (#1186) — an ISO timestamp; cleared by an explicit release. */
+export const mergeTrainWindowHoldUntilPref = projectPref("merge_train_window_hold_until");
 
 export interface AutoMergeOrchestratorState {
   running: boolean;
@@ -70,14 +78,28 @@ export interface AutoMergeOrchestratorState {
   reconcilerAttempts: Map<string, number>;
   /**
    * Merge-train batching window (#905): ready workspaces are held here, keyed per project,
-   * until `decideMergeTrainRelease` says the window has closed (max size or max wait). In
-   * memory only — a restart loses the accumulator and simply starts a fresh window, which is
-   * no worse than every workspace re-appearing as "just became ready" on the next tick.
+   * until `decideMergeTrainRelease` says the window has closed (max size or max wait).
+   *
+   * Persisted on every tick that touches a window (#1186) as `merge_train_window_<projectId>`
+   * — a JSON `PersistedMergeTrainWindow` (pendingIds, firstSeenAt, lastVerdict, decidedAt) — and
+   * restored from that pref the first time `applyTrainWindow` runs after construction, so a
+   * server restart resumes the wait instead of silently re-arming `firstSeenAt`.
    */
   trainWindows: Map<string, MergeTrainWindowState>;
 }
 
 let activeAutoMergeSweep: PeriodicSweepHandle | null = null;
+/**
+ * The live orchestrator instance behind `activeAutoMergeSweep` (#1186) — routes need
+ * `releaseTrainWindowNow`/`holdTrainWindow`/`getTrainWindowVerdict`, none of which are on
+ * `AutoMergeOrchestratorState`, so `getActiveAutoMergeOrchestrator()` is the seam for
+ * `routes/merge-queue.ts` instead of duplicating the window logic there.
+ */
+let activeAutoMergeOrchestrator: ReturnType<typeof createAutoMergeOrchestrator> | null = null;
+
+export function getActiveAutoMergeOrchestrator(): ReturnType<typeof createAutoMergeOrchestrator> | null {
+  return activeAutoMergeOrchestrator;
+}
 
 /**
  * The per-project gate inputs, read out of the one prefMap scan this orchestrator already
@@ -125,6 +147,10 @@ export function createAutoMergeOrchestrator(deps: {
   const reconcileFallbackEveryTicks = deps.reconcileFallbackEveryTicks ?? RECONCILE_FALLBACK_EVERY_TICKS;
   /** Counts effective runOnce passes; drives the zero-candidate reconcile fallback. */
   let reconcileTick = 0;
+  /** Per-project last-computed verdict, kept alongside `state.trainWindows` for the departure-board API (#1186). */
+  const trainWindowVerdicts = new Map<string, { verdict: MergeTrainWindowVerdict; decidedAt: string }>();
+  /** Restore-from-prefs runs once, lazily, on the first `applyTrainWindow` call. */
+  let trainWindowsRestored = false;
   const state: AutoMergeOrchestratorState = {
     running: false,
     timer: null,
@@ -296,6 +322,40 @@ export function createAutoMergeOrchestrator(deps: {
   }
 
   /**
+   * Restore `state.trainWindows` from the `merge_train_window_<projectId>` prefs written by a
+   * prior process (#1186) — runs once, lazily, the first time `applyTrainWindow` ticks, so a
+   * restart resumes each project's wait (including `firstSeenAt`) instead of starting fresh.
+   * A pending id that no longer resolves to a ready workspace is dropped rather than trusted —
+   * the next tick's real `rows` argument is what re-validates the set; this only seeds it.
+   */
+  async function restoreTrainWindowsFromPrefsOnce(prefMap: Map<string, string>): Promise<void> {
+    if (trainWindowsRestored) return;
+    trainWindowsRestored = true;
+    for (const [key, value] of prefMap) {
+      const projectId = mergeTrainWindowPref.projectIdOf(key);
+      if (!projectId || !value) continue;
+      const persisted = parsePersistedTrainWindow(value);
+      if (!persisted || persisted.pendingIds.length === 0) continue;
+      state.trainWindows.set(projectId, { pendingIds: persisted.pendingIds, firstSeenAt: persisted.firstSeenAt });
+      trainWindowVerdicts.set(projectId, { verdict: persisted.lastVerdict, decidedAt: persisted.decidedAt });
+    }
+  }
+
+  /** Persist or clear one project's window pref, mirroring `state.trainWindows`/`trainWindowVerdicts`. */
+  async function persistTrainWindow(projectId: string, windowState: MergeTrainWindowState | null, verdict: MergeTrainWindowVerdict, decidedAt: string): Promise<void> {
+    trainWindowVerdicts.set(projectId, { verdict, decidedAt });
+    if (!windowState) {
+      await deletePreferences([mergeTrainWindowPref.key(projectId)], database);
+      return;
+    }
+    await setPreference(
+      mergeTrainWindowPref.key(projectId),
+      serializePersistedTrainWindow({ pendingIds: windowState.pendingIds, firstSeenAt: windowState.firstSeenAt, lastVerdict: verdict, decidedAt }),
+      database,
+    );
+  }
+
+  /**
    * The batching window (#905): partitions ready workspaces by project, folds each project's
    * ready set into its accumulator (`state.trainWindows`), and returns only the ids from
    * projects whose window has closed this tick — max size or max wait, whichever comes first.
@@ -308,10 +368,15 @@ export function createAutoMergeOrchestrator(deps: {
    * The returned ids are the UNION of every window that closed this tick, so they can span
    * projects and therefore repos — `runOnce` partitions them by (repoPath, baseBranch) before
    * the queue asks `trainEligible` (#1180).
+   *
+   * Persists every touched project's window (#1186) so a restart resumes the wait, and
+   * broadcasts `merge_train_window_changed` on the board WS so the departure-board UI does not
+   * need to poll.
    */
   async function applyTrainWindow(rows: { workspaceId: string; projectId: string }[], now: string): Promise<string[]> {
     const prefRows = await getAllPreferencesCached(database);
     const prefMap = toPrefMap(prefRows);
+    await restoreTrainWindowsFromPrefsOnce(prefMap);
     const nowMs = new Date(now).getTime();
 
     const byProject = new Map<string, string[]>();
@@ -334,7 +399,12 @@ export function createAutoMergeOrchestrator(deps: {
       if (ids.length === 0) {
         // Nothing ready for this project right now — the reconcile passes may have healed or
         // parked away everything that was pending. Nothing left to wait for.
-        if (existing) state.trainWindows.delete(projectId);
+        if (existing) {
+          state.trainWindows.delete(projectId);
+          trainWindowVerdicts.delete(projectId);
+          await deletePreferences([mergeTrainWindowPref.key(projectId)], database);
+          boardEvents?.broadcast(projectId, "merge_train_window_changed");
+        }
         continue;
       }
 
@@ -345,7 +415,9 @@ export function createAutoMergeOrchestrator(deps: {
       // in-flight train finishes.
       const activeTrains = await listActiveMergeTrainsForProject(projectId, ["assembling", "gating"], database);
       if (activeTrains.length > 0) {
-        state.trainWindows.set(projectId, { pendingIds: ids, firstSeenAt: existing?.firstSeenAt ?? now });
+        const windowState: MergeTrainWindowState = { pendingIds: ids, firstSeenAt: existing?.firstSeenAt ?? now };
+        state.trainWindows.set(projectId, windowState);
+        await persistTrainWindow(projectId, windowState, { release: false, reason: "gate_busy" }, now);
         continue;
       }
 
@@ -360,20 +432,30 @@ export function createAutoMergeOrchestrator(deps: {
         firstSeenAt: existing?.firstSeenAt ?? now,
       };
 
+      // Operator "hold the door" override (#1186) — `POST /api/merge-queue/window/hold` writes
+      // an ISO deadline; while it is in the future, `decideMergeTrainRelease` refuses to release
+      // regardless of max_size/max_wait.
+      const holdUntilRaw = prefMap.get(mergeTrainWindowHoldUntilPref.key(projectId));
+      const holdUntilMs = holdUntilRaw ? new Date(holdUntilRaw).getTime() : null;
+
       // #1138 — hold a release for a short grace while a verify chain is already running:
       // releasing a lone ready workspace straight into a gate the box is already busy with
       // does not merge it any sooner (one verify slot, process-wide) and guarantees the #243
       // discard for whichever sibling gate finishes next and finds the base has moved.
       const verdict = decideMergeTrainRelease(windowState, config, nowMs, {
         gateBusy: verifyChainSemaphoreActive() > 0,
+        holdUntilMs: Number.isFinite(holdUntilMs) ? holdUntilMs : null,
       });
       if (verdict.release) {
         console.log(`[auto-merge] train window closed for project ${projectId} (${verdict.reason}, size ${config.maxSize}/wait ${config.maxWaitMs}ms): releasing ${ids.length} workspace(s)${config.batchingFromPosture ? formatPostureNote(config.posture) : ""}`);
         released.push(...ids);
         state.trainWindows.delete(projectId);
+        await persistTrainWindow(projectId, null, verdict, now);
       } else {
         state.trainWindows.set(projectId, windowState);
+        await persistTrainWindow(projectId, windowState, verdict, now);
       }
+      boardEvents?.broadcast(projectId, "merge_train_window_changed");
     }
 
     return released;
@@ -532,12 +614,50 @@ export function createAutoMergeOrchestrator(deps: {
     return state;
   }
 
+  /**
+   * The last verdict computed for a project's window, or null if it has never ticked in this
+   * process (before the first restore/tick — the departure-board API falls back accordingly).
+   */
+  function getTrainWindowVerdict(projectId: string): { verdict: MergeTrainWindowVerdict; decidedAt: string } | null {
+    return trainWindowVerdicts.get(projectId) ?? null;
+  }
+
+  /**
+   * Operator control: depart now (#1186, `POST /api/merge-queue/window/release`). Clears any
+   * hold and returns the currently pending workspace ids so the ROUTE can hand them straight to
+   * `queueService`/`runOnce`'s release path — this function only clears the accumulator and
+   * persists the "released" verdict; it does not itself run the merge, so a caller MUST act on
+   * the returned ids (empty means nothing was pending).
+   */
+  async function releaseTrainWindowNow(projectId: string): Promise<string[]> {
+    await deletePreferences([mergeTrainWindowHoldUntilPref.key(projectId)], database);
+    const existing = state.trainWindows.get(projectId);
+    const ids = existing?.pendingIds ?? [];
+    state.trainWindows.delete(projectId);
+    await persistTrainWindow(projectId, null, { release: true, reason: "max_size" }, new Date().toISOString());
+    boardEvents?.broadcast(projectId, "merge_train_window_changed");
+    console.log(`[auto-merge] operator released train window for project ${projectId} (${ids.length} workspace(s))`);
+    return ids;
+  }
+
+  /** Operator control: hold the door for N minutes (#1186, `POST /api/merge-queue/window/hold`). */
+  async function holdTrainWindow(projectId: string, minutes: number): Promise<string> {
+    const holdUntil = new Date(Date.now() + minutes * 60_000).toISOString();
+    await setPreference(mergeTrainWindowHoldUntilPref.key(projectId), holdUntil, database);
+    boardEvents?.broadcast(projectId, "merge_train_window_changed");
+    console.log(`[auto-merge] operator held train window for project ${projectId} until ${holdUntil}`);
+    return holdUntil;
+  }
+
   return {
     state,
     findCompletedWorkspaceIds,
     findCompletedWorkspaceRows,
     applyTrainWindow,
     runOnce,
+    getTrainWindowVerdict,
+    releaseTrainWindowNow,
+    holdTrainWindow,
   };
 }
 
@@ -550,6 +670,7 @@ export function startAutoMergeOrchestrator(deps: {
   stopAutoMergeOrchestrator();
 
   const orchestrator = createAutoMergeOrchestrator(deps);
+  activeAutoMergeOrchestrator = orchestrator;
   const intervalMs = deps.intervalMs ?? DEFAULT_INTERVAL_MS;
 
   const tick = () => {
@@ -574,4 +695,5 @@ export function startAutoMergeOrchestrator(deps: {
 export function stopAutoMergeOrchestrator(): void {
   activeAutoMergeSweep?.stop();
   activeAutoMergeSweep = null;
+  activeAutoMergeOrchestrator = null;
 }

@@ -183,6 +183,17 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // one would let an operator set a size cap with no wait bound (or vice versa) with no error.
   "train_max_size",
   "train_max_wait_ms",
+  // Merge train batching window PERSISTENCE (#1186): `merge_train_window_<id>` is the
+  // JSON-encoded `MergeTrainWindowState` + last verdict the orchestrator writes on every tick
+  // it accumulates or releases, so a restart restores `pendingIds`/`firstSeenAt` instead of
+  // silently restarting the wait. Internal orchestrator state, not a user-facing setting —
+  // registered so `getSettings()`/config export don't 422 on it and the departure-board API
+  // can read it through the normal preference path, same shape as `onboarding_state`.
+  "merge_train_window",
+  // Operator override for the window above (#1186): `merge_train_window_hold_until_<id>` is an
+  // ISO timestamp — while `now < holdUntil`, `decideMergeTrainRelease` must not fire even if
+  // max_size/max_wait would otherwise release, and `.../release` (below) clears it early.
+  "merge_train_window_hold_until",
   // Merge train review (#907): `review_mode_<id>` is `per-ticket` (default) | `per-train` —
   // was a stand-in for the risk-posture resolver before it landed. `per-train` reviews a
   // ticket-group workspace's assembled diff once, with every member's acceptance criteria,

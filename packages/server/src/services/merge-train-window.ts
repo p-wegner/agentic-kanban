@@ -26,6 +26,41 @@ export interface MergeTrainWindowState {
   firstSeenAt: string;
 }
 
+/**
+ * The record persisted per project (#1186) — `MergeTrainWindowState` plus the last verdict the
+ * orchestrator computed for it, so a restart restores both "what is pending" and "why it hasn't
+ * left yet" instead of only the accumulator. `decidedAt` is the tick's `now`, not `Date.now()`,
+ * so it stays reproducible in tests.
+ */
+export interface PersistedMergeTrainWindow {
+  pendingIds: string[];
+  firstSeenAt: string;
+  lastVerdict: MergeTrainWindowVerdict;
+  decidedAt: string;
+}
+
+/** Parse a `merge_train_window_<projectId>` pref value; null for absent/corrupt input (fail open — never throw into a tick). */
+export function parsePersistedTrainWindow(raw: string | null | undefined): PersistedMergeTrainWindow | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<PersistedMergeTrainWindow>;
+    if (!Array.isArray(parsed.pendingIds) || typeof parsed.firstSeenAt !== "string") return null;
+    if (!parsed.lastVerdict || typeof parsed.lastVerdict !== "object" || typeof (parsed.lastVerdict as { release?: unknown }).release !== "boolean") return null;
+    return {
+      pendingIds: parsed.pendingIds,
+      firstSeenAt: parsed.firstSeenAt,
+      lastVerdict: parsed.lastVerdict as MergeTrainWindowVerdict,
+      decidedAt: typeof parsed.decidedAt === "string" ? parsed.decidedAt : parsed.firstSeenAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function serializePersistedTrainWindow(record: PersistedMergeTrainWindow): string {
+  return JSON.stringify(record);
+}
+
 export interface MergeTrainWindowConfig {
   /** `train_max_size_<projectId>` — release as soon as the pending set reaches this size. */
   maxSize: number;
@@ -35,7 +70,7 @@ export interface MergeTrainWindowConfig {
 
 export type MergeTrainWindowVerdict =
   | { release: true; reason: "max_size" | "max_wait" | "gate_busy_grace_elapsed" }
-  | { release: false; reason: "accumulating" | "gate_busy" };
+  | { release: false; reason: "accumulating" | "gate_busy" | "operator_hold" };
 
 /**
  * The batching-window default size (#905's `standard` risk-posture row). `trainEligible`
@@ -150,8 +185,14 @@ export function decideMergeTrainRelease(
   state: MergeTrainWindowState,
   config: MergeTrainWindowConfig,
   nowMs: number,
-  opts?: { gateBusy?: boolean; gateBusyGraceMs?: number },
+  opts?: { gateBusy?: boolean; gateBusyGraceMs?: number; holdUntilMs?: number | null },
 ): MergeTrainWindowVerdict {
+  // Operator hold (#1186, `POST /api/merge-queue/window/hold`) wins over every other signal —
+  // an explicit "hold the door" must not be overridden by max_size/max_wait firing on the same
+  // tick, or the control would be decorative.
+  if (opts?.holdUntilMs != null && nowMs < opts.holdUntilMs) {
+    return { release: false, reason: "operator_hold" };
+  }
   const waitedMs = nowMs - new Date(state.firstSeenAt).getTime();
   if (state.pendingIds.length >= config.maxSize) {
     if (opts?.gateBusy && waitedMs < (opts.gateBusyGraceMs ?? DEFAULT_GATE_BUSY_GRACE_MS)) {

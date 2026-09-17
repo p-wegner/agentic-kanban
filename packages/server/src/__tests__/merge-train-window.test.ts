@@ -4,7 +4,10 @@ import {
   DEFAULT_GATE_BUSY_GRACE_MS,
   DEFAULT_TRAIN_MAX_SIZE,
   DEFAULT_TRAIN_MAX_WAIT_MS,
+  parsePersistedTrainWindow,
+  serializePersistedTrainWindow,
   type MergeTrainWindowState,
+  type PersistedMergeTrainWindow,
 } from "../services/merge-train-window.js";
 
 const BASE_NOW_MS = new Date("2026-08-26T12:00:00.000Z").getTime();
@@ -144,6 +147,94 @@ describe("decideMergeTrainRelease (#905)", () => {
         BASE_NOW_MS + 1,
       );
       expect(verdict).toEqual({ release: true, reason: "max_size" });
+    });
+  });
+
+  describe("operator hold (#1186)", () => {
+    it("holds a max_size release while now < holdUntilMs", () => {
+      const verdict = decideMergeTrainRelease(
+        state(["a", "b", "c", "d"], new Date(BASE_NOW_MS).toISOString()),
+        { maxSize: 4, maxWaitMs: DEFAULT_TRAIN_MAX_WAIT_MS },
+        BASE_NOW_MS + 1,
+        { holdUntilMs: BASE_NOW_MS + 10_000 },
+      );
+      expect(verdict).toEqual({ release: false, reason: "operator_hold" });
+    });
+
+    it("holds a max_wait release while now < holdUntilMs", () => {
+      const verdict = decideMergeTrainRelease(
+        state(["a"], new Date(BASE_NOW_MS).toISOString()),
+        { maxSize: 4, maxWaitMs: 5 * 60_000 },
+        BASE_NOW_MS + 5 * 60_000 + 1,
+        { holdUntilMs: BASE_NOW_MS + 6 * 60_000 },
+      );
+      expect(verdict).toEqual({ release: false, reason: "operator_hold" });
+    });
+
+    it("releases normally once now reaches holdUntilMs", () => {
+      const verdict = decideMergeTrainRelease(
+        state(["a", "b", "c", "d"], new Date(BASE_NOW_MS).toISOString()),
+        { maxSize: 4, maxWaitMs: DEFAULT_TRAIN_MAX_WAIT_MS },
+        BASE_NOW_MS + 10_000,
+        { holdUntilMs: BASE_NOW_MS + 10_000 },
+      );
+      expect(verdict).toEqual({ release: true, reason: "max_size" });
+    });
+
+    it("a null/absent holdUntilMs never holds (existing callers unaffected)", () => {
+      const verdict = decideMergeTrainRelease(
+        state(["a", "b", "c", "d"], new Date(BASE_NOW_MS).toISOString()),
+        { maxSize: 4, maxWaitMs: DEFAULT_TRAIN_MAX_WAIT_MS },
+        BASE_NOW_MS + 1,
+        { holdUntilMs: null },
+      );
+      expect(verdict).toEqual({ release: true, reason: "max_size" });
+    });
+  });
+});
+
+describe("persisted train window codec (#1186)", () => {
+  const record: PersistedMergeTrainWindow = {
+    pendingIds: ["ws-1", "ws-2"],
+    firstSeenAt: new Date(BASE_NOW_MS).toISOString(),
+    lastVerdict: { release: false, reason: "accumulating" },
+    decidedAt: new Date(BASE_NOW_MS + 1000).toISOString(),
+  };
+
+  it("round-trips a valid record", () => {
+    const raw = serializePersistedTrainWindow(record);
+    expect(parsePersistedTrainWindow(raw)).toEqual(record);
+  });
+
+  it("returns null for absent/empty input", () => {
+    expect(parsePersistedTrainWindow(null)).toBeNull();
+    expect(parsePersistedTrainWindow(undefined)).toBeNull();
+    expect(parsePersistedTrainWindow("")).toBeNull();
+  });
+
+  it("returns null for corrupt JSON rather than throwing", () => {
+    expect(parsePersistedTrainWindow("{not json")).toBeNull();
+  });
+
+  it("returns null when required fields are missing or wrong-shaped", () => {
+    expect(parsePersistedTrainWindow(JSON.stringify({ firstSeenAt: record.firstSeenAt }))).toBeNull();
+    expect(parsePersistedTrainWindow(JSON.stringify({ pendingIds: "not-an-array", firstSeenAt: record.firstSeenAt }))).toBeNull();
+    // pendingIds/firstSeenAt present but no lastVerdict — still invalid, since a caller reading
+    // `.lastVerdict.reason` must never see undefined.
+    expect(parsePersistedTrainWindow(JSON.stringify({ pendingIds: [], firstSeenAt: record.firstSeenAt }))).toBeNull();
+  });
+
+  it("falls back decidedAt to firstSeenAt when decidedAt is absent", () => {
+    const raw = JSON.stringify({
+      pendingIds: ["ws-1"],
+      firstSeenAt: record.firstSeenAt,
+      lastVerdict: { release: false, reason: "accumulating" },
+    });
+    expect(parsePersistedTrainWindow(raw)).toEqual({
+      pendingIds: ["ws-1"],
+      firstSeenAt: record.firstSeenAt,
+      lastVerdict: { release: false, reason: "accumulating" },
+      decidedAt: record.firstSeenAt,
     });
   });
 });

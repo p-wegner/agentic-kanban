@@ -46,6 +46,7 @@ import type {
  * | drive_obstacle            | drive-obstacles.service (friction telemetry)|
  * | project_completed         | project-completion-reconciler (#848)        |
  * | internal_notify           | routes/index internal endpoint              |
+ * | merge_train_window_changed| auto-merge-orchestrator (#1186)             |
  * | projects_changed          | projects route emits a separate WS message  |
  */
 /**
