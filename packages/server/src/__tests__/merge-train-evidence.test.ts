@@ -19,6 +19,7 @@ function result(over: Partial<TrainRunResult>): TrainRunResult {
     gateRejected: [],
     closeFailures: [],
     gateRuns: 0,
+    attempts: [],
     ...over,
   };
 }

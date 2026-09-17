@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { projects } from "@agentic-kanban/shared/schema";
+import { mergeTrains, projects } from "@agentic-kanban/shared/schema";
+import { eq } from "drizzle-orm";
 import { createTestDb } from "./helpers/test-db.js";
 import {
+  appendMergeTrainAttempt,
   createMergeTrain,
   findActiveMergeTrainForMembers,
+  getMergeTrain,
   updateMergeTrainState,
 } from "../repositories/merge-train.repository.js";
 
@@ -85,5 +88,57 @@ describe("findActiveMergeTrainForMembers (#1158)", () => {
 
     const found = await findActiveMergeTrainForMembers(projectId, ["ws-a", "ws-b"], db);
     expect(found).toBeUndefined();
+  });
+});
+
+/**
+ * #1189 — bisect nodes are appended to a LIVE row's `gateEvidence.attempts` as they finish,
+ * touching only that column: the state belongs to the gate and to an operator's cancel.
+ */
+describe("appendMergeTrainAttempt (#1189)", () => {
+  const node = (label: string) => ({ label, members: ["ws-a"], included: ["ws-a"], dropped: [], gateStartedAt: null, gateFinishedAt: null, gateRuns: 1, verdict: "red" });
+
+  it("appends in order and leaves the state alone", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    const trainId = randomUUID();
+    await createMergeTrain({ id: trainId, projectId, label: "q1", memberWorkspaceIds: ["ws-a"] }, db);
+    await updateMergeTrainState(trainId, { state: "gating" }, db);
+
+    await appendMergeTrainAttempt(trainId, node("q1"), db);
+    await appendMergeTrainAttempt(trainId, node("q1a"), db);
+
+    const row = await getMergeTrain(trainId, db);
+    expect(row?.state).toBe("gating");
+    const evidence = JSON.parse(row!.gateEvidence!) as { attempts: Array<{ label: string }> };
+    expect(evidence.attempts.map((a) => a.label)).toEqual(["q1", "q1a"]);
+  });
+
+  it("does not resurrect an abandoned row, and keeps other evidence keys", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    const trainId = randomUUID();
+    await createMergeTrain({ id: trainId, projectId, label: "q1", memberWorkspaceIds: ["ws-a"] }, db);
+    await updateMergeTrainState(trainId, { state: "abandoned", reconciledReason: "operator cancel", gateEvidence: { note: "kept" } }, db);
+
+    await appendMergeTrainAttempt(trainId, node("q1"), db);
+
+    const row = await getMergeTrain(trainId, db);
+    expect(row?.state).toBe("abandoned");
+    expect(row?.reconciledReason).toBe("operator cancel");
+    expect(JSON.parse(row!.gateEvidence!)).toMatchObject({ note: "kept", attempts: [expect.objectContaining({ label: "q1" })] });
+  });
+
+  it("is a no-op for a row that does not exist, and replaces unparseable prior evidence", async () => {
+    const { db } = createTestDb();
+    await expect(appendMergeTrainAttempt(randomUUID(), node("q1"), db)).resolves.toBeUndefined();
+
+    const projectId = await seedProject(db);
+    const trainId = randomUUID();
+    await createMergeTrain({ id: trainId, projectId, label: "q1", memberWorkspaceIds: ["ws-a"] }, db);
+    await db.update(mergeTrains).set({ gateEvidence: "{not json" }).where(eq(mergeTrains.id, trainId));
+    await appendMergeTrainAttempt(trainId, node("q1"), db);
+    const row = await getMergeTrain(trainId, db);
+    expect(JSON.parse(row!.gateEvidence!)).toEqual({ attempts: [node("q1")] });
   });
 });
