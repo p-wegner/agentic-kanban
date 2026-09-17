@@ -263,3 +263,124 @@ describe("runMergeTrain — environment failures skip bisect (#1154)", () => {
     expect(result.gateRuns).toBeGreaterThan(1);
   }, 240000);
 });
+
+/**
+ * #1193 — with two free verify slots, a bisect's two halves gate concurrently instead of one
+ * after another, and still land in the original left-to-right order.
+ */
+describe("runMergeTrain — speculative bisect gates concurrently when slots allow (#1193)", () => {
+  async function setUpFourMembers() {
+    await git(["branch", "f3", "main"]);
+    await git(["branch", "f4", "main"]);
+    await commitOn("f3", "c.txt", "c\n");
+    await commitOn("f4", "d.txt", "d\n");
+    await git(["checkout", "-q", "main"]);
+    return [
+      { workspaceId: "w1", branch: "f1", issueNumber: 1 },
+      { workspaceId: "w2", branch: "f2", issueNumber: 2 },
+      { workspaceId: "w3", branch: "f3", issueNumber: 3 },
+      { workspaceId: "w4", branch: "f4", issueNumber: 4 },
+    ];
+  }
+
+  /** f1/f3 are good; f2/f4 are bad. Records how many gates were IN FLIGHT at once. */
+  function trackingGate() {
+    let concurrent = 0;
+    let maxConcurrent = 0;
+    const runGate = vi.fn(async ({ trainRef }: { trainRef: string }) => {
+      concurrent++;
+      maxConcurrent = Math.max(maxConcurrent, concurrent);
+      const tree = await gitExecOrThrow(["ls-tree", "-r", "--name-only", trainRef], { cwd: repo });
+      const files = tree.split(/\r?\n/);
+      // Long enough that two concurrently-admitted gates are actually in flight together.
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      concurrent--;
+      const bad = files.includes("b.txt") || files.includes("d.txt");
+      return bad
+        ? { passed: false, message: "verify failed: a bad branch is in this half" }
+        : { passed: true, message: "ok" };
+    });
+    return { runGate, maxConcurrent: () => maxConcurrent };
+  }
+
+  it("gates two bisect halves in parallel when freeVerifySlots reports 2, and lands only the good branches", async () => {
+    const allMembers = await setUpFourMembers();
+    const { runGate, maxConcurrent } = trackingGate();
+
+    const result = await runMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members: allMembers,
+      label: "par1",
+      runGate,
+      closeMember: vi.fn().mockResolvedValue(undefined),
+      freeVerifySlots: () => 2,
+    });
+
+    expect(maxConcurrent()).toBeGreaterThan(1);
+    expect(result.landed.map((m) => m.branch).sort()).toEqual(["f1", "f3"]);
+    expect(result.gateRejected.map((r) => r.member.branch).sort()).toEqual(["f2", "f4"]);
+    for (const branch of ["f1", "f3"]) {
+      expect(await isAncestor(repo, await revParse(repo, branch), "main")).toBe(true);
+    }
+    for (const branch of ["f2", "f4"]) {
+      expect(await isAncestor(repo, await revParse(repo, branch), "main")).toBe(false);
+    }
+  }, 240000);
+
+  it("falls back to sequential gating when only one verify slot is free (capacity gate)", async () => {
+    const allMembers = await setUpFourMembers();
+    const { runGate, maxConcurrent } = trackingGate();
+
+    const result = await runMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members: allMembers,
+      label: "par2",
+      runGate,
+      closeMember: vi.fn().mockResolvedValue(undefined),
+      freeVerifySlots: () => 1,
+    });
+
+    expect(maxConcurrent()).toBe(1);
+    expect(result.landed.map((m) => m.branch).sort()).toEqual(["f1", "f3"]);
+    expect(result.gateRejected.map((r) => r.member.branch).sort()).toEqual(["f2", "f4"]);
+  }, 240000);
+
+  it("still refuses to land a half whose base moved under it, even when gated in parallel", async () => {
+    // Both halves are green, so both want to land — the second must wait for the first's
+    // landing rather than racing it onto the same base.
+    await git(["branch", "f3", "main"]);
+    await commitOn("f3", "c.txt", "c\n");
+    await git(["checkout", "-q", "main"]);
+    const allMembers = [
+      { workspaceId: "w1", branch: "f1", issueNumber: 1 },
+      { workspaceId: "w2", branch: "f2", issueNumber: 2 },
+      { workspaceId: "w3", branch: "f3", issueNumber: 3 },
+    ];
+    // Force a split even though the whole batch would gate green, by failing the FULL-batch
+    // gate once and passing every half after.
+    const runGate = vi.fn(async ({ included }: { included: { branch: string }[] }) => {
+      if (included.length === allMembers.length) return { passed: false, message: "verify failed: flaked on the full batch" };
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return { passed: true, message: "ok" };
+    });
+    const closeMember = vi.fn().mockResolvedValue(undefined);
+
+    const result = await runMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members: allMembers,
+      label: "par3",
+      runGate,
+      closeMember,
+      freeVerifySlots: () => 2,
+    });
+
+    // All three land, and no base-moved throw escaped runMergeTrain.
+    expect(result.landed.map((m) => m.branch).sort()).toEqual(["f1", "f2", "f3"]);
+    for (const branch of ["f1", "f2", "f3"]) {
+      expect(await isAncestor(repo, await revParse(repo, branch), "main")).toBe(true);
+    }
+  }, 240000);
+});
