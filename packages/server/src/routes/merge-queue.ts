@@ -1,13 +1,19 @@
 import { streamSSE } from "hono/streaming";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
-import { mergeQueueBody } from "./merge-queue-body-schemas.js";
+import { mergeQueueBody, mergeQueueWindowHoldBody, mergeQueueWindowReleaseBody } from "./merge-queue-body-schemas.js";
 import { createMergeQueueService } from "../services/merge-queue.service.js";
 import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionLauncher } from "../services/session.manager.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { getMergeTrain, listMergeTrainsForProject, updateMergeTrainState } from "../repositories/merge-train.repository.js";
+import { getMergeTrain, listActiveMergeTrainsForProject, listMergeTrainsForProject, updateMergeTrainState } from "../repositories/merge-train.repository.js";
+import { getMergeQueueIssueRows, getMergeQueueWorkspaceRows } from "../repositories/merge-queue.repository.js";
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+import type { MergeTrainWindowDto, MergeTrainWindowPendingMemberDto, MergeTrainWindowResponse } from "@agentic-kanban/shared";
+import { resolveTrainWindowConfig } from "../services/merge-train-window.js";
+import { holdTrainWindow, readTrainWindow, requestTrainWindowRelease } from "../services/merge-train-window-state.js";
 
 export function createMergeQueueRoute(
   database: Database,
@@ -131,6 +137,120 @@ export function createMergeQueueRoute(
     }, database);
     return c.json({ ok: true });
   });
+
+  /**
+   * GET /api/merge-queue/window?projectId=
+   *
+   * The departure board (#1186): the project's merge-train batching window as the orchestrator
+   * persisted it on its last tick (`train_window_<projectId>`) — who is waiting, since when,
+   * the last verdict + reason, the size/wait config in force and the projected departure — or
+   * `window: null` when nothing is being held. Read-only; one source with the log line.
+   */
+  router.get("/window", async (c) => {
+    const projectId = c.req.query("projectId");
+    if (!projectId) {
+      return c.json({ ok: false, error: "projectId query parameter is required" }, 400);
+    }
+    const persisted = await readTrainWindow(projectId, database);
+    if (!persisted) {
+      const empty: MergeTrainWindowResponse = { ok: true, window: null };
+      return c.json(empty);
+    }
+
+    const prefMap = toPrefMap(await getAllPreferencesCached(database));
+    const config = resolveTrainWindowConfig(prefMap, projectId);
+    const [pending, activeTrains] = await Promise.all([
+      resolvePendingMembers(persisted.pendingIds),
+      listActiveMergeTrainsForProject(projectId, ["assembling", "gating"], database),
+    ]);
+    const window: MergeTrainWindowDto = {
+      projectId,
+      pending,
+      firstSeenAt: persisted.firstSeenAt,
+      config: {
+        maxSize: config.maxSize,
+        maxWaitMs: config.maxWaitMs,
+        fromPosture: config.batchingFromPosture,
+        postureLevel: config.posture.level,
+      },
+      lastVerdict: persisted.lastVerdict,
+      lastEvaluatedAt: persisted.lastEvaluatedAt,
+      projectedDepartureAt: config.maxWaitMs > 0 && persisted.pendingIds.length > 0
+        ? new Date(new Date(persisted.firstSeenAt).getTime() + config.maxWaitMs).toISOString()
+        : null,
+      heldUntil: persisted.heldUntil ?? null,
+      releaseRequestedAt: persisted.releaseRequestedAt ?? null,
+      liveTrainId: activeTrains[0]?.id ?? null,
+    };
+    const response: MergeTrainWindowResponse = { ok: true, window };
+    return c.json(response);
+  });
+
+  /**
+   * POST /api/merge-queue/window/release
+   *
+   * body: { projectId }
+   *
+   * Operator "depart now" (#1186): stamps `releaseRequestedAt`; the orchestrator's next tick
+   * releases the pending set as one train with reason `operator_release`, regardless of size,
+   * wait or a busy gate (a live hold still wins until it expires). 409 when the project has no
+   * open window.
+   */
+  router.post("/window/release", async (c) => {
+    const body = await parseJsonBody(c, mergeQueueWindowReleaseBody);
+    const window = await requestTrainWindowRelease(body.projectId, database);
+    if (!window) {
+      return c.json({ ok: false, error: "no open merge-train window for this project" }, 409);
+    }
+    console.log(`[merge-queue] window release requested by operator for project ${body.projectId} (${window.pendingIds.length} pending)`);
+    options?.boardEvents?.broadcast(body.projectId, "merge_train_window_changed");
+    return c.json({ ok: true, window });
+  });
+
+  /**
+   * POST /api/merge-queue/window/hold
+   *
+   * body: { projectId, minutes }
+   *
+   * Operator "hold the door" (#1186): no release before `now + minutes`, whatever the size or
+   * wait say; `minutes: 0` clears the hold. A hold placed before anything is ready is kept as a
+   * control-only record and applies to the first arrival.
+   */
+  router.post("/window/hold", async (c) => {
+    const body = await parseJsonBody(c, mergeQueueWindowHoldBody);
+    const window = await holdTrainWindow(body.projectId, body.minutes, database);
+    console.log(
+      body.minutes > 0
+        ? `[merge-queue] window held by operator for project ${body.projectId} for ${body.minutes} min (until ${window?.heldUntil})`
+        : `[merge-queue] window hold cleared by operator for project ${body.projectId}`,
+    );
+    options?.boardEvents?.broadcast(body.projectId, "merge_train_window_changed");
+    return c.json({ ok: true, window });
+  });
+
+  /**
+   * Issue number/title per pending workspace, through the queue's own repository functions.
+   * A workspace row that has since vanished still appears (the window said it was pending)
+   * with nulls, so the board never hides a member it cannot name.
+   */
+  async function resolvePendingMembers(workspaceIds: string[]): Promise<MergeTrainWindowPendingMemberDto[]> {
+    if (workspaceIds.length === 0) return [];
+    const workspaceRows = await getMergeQueueWorkspaceRows(workspaceIds, database);
+    const issueIds = [...new Set(workspaceRows.map((w) => w.issueId))];
+    const issueRows = issueIds.length > 0 ? await getMergeQueueIssueRows(issueIds, database) : [];
+    const issueById = new Map(issueRows.map((i) => [i.id, i]));
+    const workspaceById = new Map(workspaceRows.map((w) => [w.id, w]));
+    return workspaceIds.map((workspaceId) => {
+      const workspace = workspaceById.get(workspaceId);
+      const issue = workspace ? issueById.get(workspace.issueId) : undefined;
+      return {
+        workspaceId,
+        issueNumber: issue?.issueNumber ?? null,
+        issueTitle: issue?.title ?? null,
+        readySince: workspace?.updatedAt ?? null,
+      };
+    });
+  }
 
   return router;
 }
