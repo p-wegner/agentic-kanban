@@ -25,6 +25,7 @@ import {
 } from "../lib/departureBoard.js";
 import type { IssueWithStatus, MainWorkspaceInfo, StatusWithIssues } from "@agentic-kanban/shared";
 import { Icon } from "./Icon.js";
+import { MergeTrainDetailDrawer } from "./MergeTrainDetailDrawer.js";
 
 interface ConflictPreview {
   workspaceId: string;
@@ -148,6 +149,16 @@ function formatDuration(ms: number | null): string {
   return min > 0 ? `${min}m ${sec}s` : `${sec}s`;
 }
 
+/**
+ * "Merge train" panel (#906) — aboard / waiting / last gate / red-debt delta, reachable from
+ * the merge-queue view. Reads the persisted `merge_trains` history instead of the old
+ * per-request scratch state, so it survives a server restart mid-train.
+ *
+ * The last-gate figure (#1189) opens the train detail drawer — the most recent train is the
+ * one whose bisect a reader is trying to understand; older trains are one click away via the
+ * drawer's own history, which is a follow-up (the "departure board" the ticket depends on
+ * does not exist yet).
+ */
 /** What a member chip says beside its label (#1197); `title` carries the full reason. */
 function trainOutcomeLabel(outcome: TrainMemberOutcome): string {
   switch (outcome) {
@@ -198,7 +209,15 @@ function ordinal(n: number): string {
 /** The train-conflicts group scan's answer, as the panel shows it (#1197). Inline shape: the server's `TicketGroupScanResult` is the one declaration. */
 type GroupScanView = { proposals: Array<{ issueNumbers: number[]; rationale: string }>; rejected: Array<{ issueNumbers: number[]; reason: string }>; scannedCount: number; createdEdges?: number };
 
-function MergeTrainSummaryBar({ projectId, memberLabel, onOpenTrain }: { projectId: string; memberLabel: (workspaceId: string) => string; onOpenTrain: (trainId: string) => void }) {
+function MergeTrainSummaryBar({
+  projectId,
+  memberLabel,
+  onOpenTrain,
+}: {
+  projectId: string;
+  memberLabel: (workspaceId: string) => string;
+  onOpenTrain: (trainId: string) => void;
+}) {
   const [trains, setTrains] = useState<MergeTrainRowDto[] | null>(null);
   // #1198: the project's live sidings (#1192), delivered beside the history by the same call.
   const [sidings, setSidings] = useState<MergeTrainSidingDto[]>([]);
@@ -679,9 +698,7 @@ export function MergeQueuePanel({ columns, projectId, onClose, onIssueClick, onM
   // or the project's train_max_size opt-in); the other two are explicit overrides.
   const [strategy, setStrategy] = useState<MergeQueueStrategy>("auto");
   // #1187 — both the departure-board history tiles and the merge-train summary's "Last gate"
-  // figure open the same lightweight inline detail block, keyed by train id. The full "train
-  // detail drawer with a live bisect tree" is a separate, not-yet-landed ticket; this is a thin
-  // stand-in wired the same way (train id) so swapping it out later is a one-line change.
+  // figure open the train detail drawer (#1189), keyed by train id.
   const [openTrainId, setOpenTrainId] = useState<string | null>(null);
 
   async function handleMerge(workspaceId: string) {
@@ -931,17 +948,11 @@ export function MergeQueuePanel({ columns, projectId, onClose, onIssueClick, onM
       </div>
 
       {openTrainId && (
-        <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
-          <span>Train detail: <span className="font-mono">{openTrainId}</span> (full drawer tracked separately)</span>
-          <button
-            type="button"
-            onClick={() => setOpenTrainId(null)}
-            className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
-            aria-label="Close train detail"
-          >
-            &times;
-          </button>
-        </div>
+        <MergeTrainDetailDrawer
+          projectId={projectId}
+          trainId={openTrainId}
+          onClose={() => setOpenTrainId(null)}
+        />
       )}
     </div>
   );
