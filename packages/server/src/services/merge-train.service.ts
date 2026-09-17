@@ -48,6 +48,8 @@ export interface TrainMember {
   branch: string;
   /** For logs and the dropped-member report. */
   issueNumber?: number | null;
+  /** The branch tip sha at landing time, for the merge commit body (#1190). Not set until then. */
+  tipSha?: string;
 }
 
 /**
@@ -103,6 +105,35 @@ function dedupeConflictClusters(clusters: ConflictCluster[]): ConflictCluster[] 
 /** Name of the integration ref for a train. Kept under a `kanban/` namespace to be obviously ours. */
 export function trainRefName(label: string): string {
   return `kanban/train/${label}`;
+}
+
+/**
+ * A train's label identifies the ROW/ref across every bisect sub-attempt, e.g. `train/2026-09-17-03`.
+ * A bisect child extends its parent's label with a lowercase letter (`train/2026-09-17-03a`,
+ * `…03ab`, …, see `landGreenest`'s `${subLabel}a`/`${subLabel}b`) — so the parent train's label is
+ * whatever remains after stripping every trailing bisect letter. The landing merge commit names
+ * THIS, never the sub-attempt label, so the history reads as one train regardless of which
+ * bisect half actually landed.
+ */
+export function parentTrainLabel(label: string): string {
+  return label.replace(/[a-z]+$/, "");
+}
+
+/**
+ * Per-project, per-day sequence label (#1190): `train/YYYY-MM-DD-NN`, replacing the old
+ * `q<base36 timestamp>` scratch label that carried no information a reader could use — a
+ * `git log --first-parent` full of `Merge branch 'kanban/train/qmu4t981aba'` explains nothing
+ * about which tickets rode together. `seq` is 1-based and left-padded to 2 digits (`01`..`99`,
+ * unpadded beyond that — a project running 100 trains in one day is not a formatting problem).
+ */
+export function formatTrainLabel(dateStamp: string, seq: number): string {
+  const padded = seq < 10 ? `0${seq}` : `${seq}`;
+  return `train/${dateStamp}-${padded}`;
+}
+
+/** `YYYY-MM-DD` from an ISO instant, in UTC — the calendar day a train's sequence counts against. */
+export function trainDateStamp(now: Date = new Date()): string {
+  return now.toISOString().slice(0, 10);
 }
 
 /**
@@ -226,6 +257,78 @@ export async function assertTrainPreservesAncestry(
   }
 }
 
+/** The structural trailer a landed train's merge commit carries — see {@link buildMergeTrainCommitMessage}. */
+export const MERGE_TRAIN_TRAILER_KEY = "Merge-Train";
+
+/** Parse a `Merge-Train: <id>` trailer out of a commit message/subject. Null when absent. */
+export function parseMergeTrainTrailer(message: string): string | null {
+  const m = message.match(/^Merge-Train:\s*(\S+)\s*$/m);
+  return m ? m[1] : null;
+}
+
+export interface TrainGateEvidenceForMessage {
+  /** The train row id (`merge_trains.id`) — carried in the trailer for structural matching. */
+  trainId: string;
+  /**
+   * The label of the attempt that actually landed, when it is a bisect sub-attempt
+   * (`train/2026-09-17-03a`). Absent (or equal to the parent) for a whole-train landing.
+   */
+  attemptLabel?: string;
+  trainSha: string;
+  baseSha: string;
+  gateRuns: number;
+  /** The gate's own message, e.g. a tier line ("pre-merge gate passed (tier: file-scoped, …)"). */
+  gateMessage: string;
+}
+
+/**
+ * Compose the landing merge commit's subject + body (#1190).
+ *
+ * Subject names the PARENT train label and every member's issue number, e.g.
+ * `Merge train 2026-09-17-03: #1176 #1177` — readable in `git log --oneline` without opening the
+ * commit. The body lists each member (issue, branch, tip sha) plus the gate evidence (train sha,
+ * base sha, gate run count, the gate's own tier message) and ends with a `Merge-Train: <row id>`
+ * trailer so a reconciler can match this commit to its `merge_trains` row structurally — by the
+ * trailer, not by re-parsing the human-readable label text.
+ */
+export function buildMergeTrainCommitMessage(args: {
+  parentLabel: string;
+  included: TrainMember[];
+  evidence: TrainGateEvidenceForMessage;
+}): string {
+  const { parentLabel, included, evidence } = args;
+  // `parentLabel` still carries the `train/` prefix (see `trainRefName`) — the subject reads
+  // better without repeating "train train/...", so strip it once here.
+  const displayLabel = parentLabel.startsWith("train/") ? parentLabel.slice("train/".length) : parentLabel;
+  const issueRefs = included
+    .filter((m) => m.issueNumber != null)
+    .map((m) => `#${m.issueNumber}`)
+    .join(" ");
+  const subject = `Merge train ${displayLabel}${issueRefs ? `: ${issueRefs}` : ""}`;
+
+  const memberLines = included.map((m) => {
+    const issue = m.issueNumber != null ? `#${m.issueNumber}` : "(no issue)";
+    return `- ${issue} ${m.branch} @ ${m.tipSha?.slice(0, 12) ?? "?"}`;
+  });
+
+  const attemptLine =
+    evidence.attemptLabel && evidence.attemptLabel !== parentLabel ? [`Attempt: ${evidence.attemptLabel}`] : [];
+
+  const body = [
+    "",
+    ...memberLines,
+    "",
+    ...attemptLine,
+    `Gate: ${evidence.gateRuns} run(s) — ${evidence.gateMessage}`,
+    `Train sha: ${evidence.trainSha}`,
+    `Base sha: ${evidence.baseSha}`,
+    "",
+    `${MERGE_TRAIN_TRAILER_KEY}: ${evidence.trainId}`,
+  ];
+
+  return [subject, ...body].join("\n");
+}
+
 /**
  * Land an assembled, GATED train onto the base branch.
  *
@@ -233,6 +336,11 @@ export async function assertTrainPreservesAncestry(
  * re-checks the ancestry invariant and refuses to land a train whose base moved underneath it
  * (that would land a tree nobody verified) — it does NOT re-run the gate itself, because
  * deciding that belongs to the caller that owns the gate token.
+ *
+ * `evidence` is optional so existing callers/tests that don't need a self-describing commit
+ * (e.g. asserting only on `mergeSha`) keep working unchanged; when present, the merge commit's
+ * message is composed by {@link buildMergeTrainCommitMessage} instead of `mergeBranch`'s default
+ * `Merge branch '<trainRef>'`.
  */
 export async function landMergeTrain(args: {
   repoPath: string;
@@ -241,8 +349,11 @@ export async function landMergeTrain(args: {
   trainSha: string;
   baseSha: string;
   included: TrainMember[];
+  /** The train's own label (parent or sub-attempt) — used to derive the parent label for the subject. */
+  label?: string;
+  evidence?: Omit<TrainGateEvidenceForMessage, "trainSha" | "baseSha">;
 }): Promise<{ mergeSha: string; mergeMessage: string }> {
-  const { repoPath, baseBranch, trainRef, trainSha, baseSha, included } = args;
+  const { repoPath, baseBranch, trainRef, trainSha, baseSha, included, label, evidence } = args;
   if (included.length === 0) throw new Error(`[merge-train] refusing to land empty train ${trainRef}`);
 
   const currentBase = await revParse(repoPath, baseBranch);
@@ -260,9 +371,24 @@ export async function landMergeTrain(args: {
   }
 
   await assertTrainPreservesAncestry(repoPath, trainRef, included);
+
+  const includedWithTips: TrainMember[] = [];
+  for (const member of included) {
+    const tipSha = await revParse(repoPath, member.branch).catch(() => null);
+    includedWithTips.push({ ...member, tipSha: tipSha ?? undefined });
+  }
+
+  const message = label && evidence
+    ? buildMergeTrainCommitMessage({
+        parentLabel: parentTrainLabel(label),
+        included: includedWithTips,
+        evidence: { ...evidence, trainSha, baseSha, attemptLabel: label },
+      })
+    : undefined;
+
   // `mergeBranch` resolves with a human-readable MESSAGE, not a SHA, so read the resulting
   // base tip explicitly — callers want the commit that landed, for stamping and for logs.
-  const mergeMessage = await mergeBranch(repoPath, trainRef, baseBranch);
+  const mergeMessage = await mergeBranch(repoPath, trainRef, baseBranch, message ? { message } : undefined);
   const mergeSha = await revParse(repoPath, baseBranch);
   // Post-condition: every member is now reachable from the base. This is what lets each
   // member be stamped as merged and keeps the reconcilers from treating them as lost work.
@@ -377,6 +503,12 @@ export async function runMergeTrain(args: {
   baseBranch: string;
   members: TrainMember[];
   label: string;
+  /**
+   * #1190 — the persisted `merge_trains.id`, carried into the landing merge commit's
+   * `Merge-Train:` trailer so a reconciler can match structurally. Optional: a caller with no
+   * persisted row (a test, or a future non-DB-backed use) gets today's default commit message.
+   */
+  trainId?: string;
   runGate: TrainGate;
   closeMember: (workspaceId: string) => Promise<void>;
   /**
@@ -557,6 +689,7 @@ async function runTrainAttempt(args: {
   baseBranch: string;
   members: TrainMember[];
   label: string;
+  trainId?: string;
   runGate: TrainGate;
   closeMember: (workspaceId: string) => Promise<void>;
   shouldLand?: () => Promise<string | null>;
@@ -570,7 +703,7 @@ async function runTrainAttempt(args: {
    */
   waitForLandTurn?: Promise<void>;
 }): Promise<TrainRunResult> {
-  const { repoPath, baseBranch, members, label, runGate, closeMember } = args;
+  const { repoPath, baseBranch, members, label, trainId, runGate, closeMember } = args;
 
   const asm = await assembleMergeTrain({ repoPath, baseBranch, members, label });
   const closeFailures: TrainRunResult["closeFailures"] = [];
@@ -660,6 +793,10 @@ async function runTrainAttempt(args: {
     const sidedMembers: TrainRunResult["sided"] = asm.included
       .filter((m) => sidedIds.has(m.workspaceId))
       .map((member) => ({ member, reason: gate.sided!.find((s) => s.workspaceId === member.workspaceId)!.reason }));
+    // #1190: the self-describing landing commit (subject names the parent train + members, body
+    // carries the gate evidence, `Merge-Train:` trailer names the row). Same for every landing
+    // path below, since each of them lands the same gated evidence.
+    const commitEvidence = trainId ? { evidence: { trainId, gateRuns: 1, gateMessage: gate.message } } : {};
 
     if (sidedIds.size === 0) {
       // #1193: when this attempt was coordinated as part of a concurrent bisect split (it was
@@ -712,6 +849,8 @@ async function runTrainAttempt(args: {
         trainSha: landAsm.trainSha!,
         baseSha: landAsm.baseSha,
         included: landAsm.included,
+        label,
+        ...commitEvidence,
       });
       // Bookkeeping AFTER the work is safely on the base. A failure here leaves a member merged
       // but not marked — recoverable by the existing done-unmerged/already-merged reconcilers,
@@ -748,6 +887,7 @@ async function runTrainAttempt(args: {
       const { mergeSha } = await landMergeTrain({
         repoPath, baseBranch, trainRef: reassembled.trainRef, trainSha: reassembled.trainSha,
         baseSha: reassembled.baseSha, included: reassembled.included,
+        label, ...commitEvidence,
       });
 
       // Bookkeeping AFTER the work is safely on the base. A failure here leaves a member merged
