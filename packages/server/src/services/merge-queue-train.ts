@@ -28,7 +28,7 @@ import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanb
 import { randomUUID } from "node:crypto";
 import { acquireQueueRepoLock, MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS } from "./merge-queue-repo-lock.js";
 import type { MergeQueueEvent, MergeQueuePlan } from "./merge-queue.service.js";
-import type { MergeTrainGateEvidenceDto } from "@agentic-kanban/shared/types";
+import type { MergeTrainAttemptDto, MergeTrainGateEvidenceDto } from "@agentic-kanban/shared/types";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { noteMergeGatePhase } from "./merge-job.service.js";
@@ -313,6 +313,7 @@ export function buildTrainGateEvidence(
     ...sided.map((sd) => sd.workspaceId),
   ]);
   const unresolved = members.filter((m) => !accounted.has(m.workspaceId)).map((m) => m.workspaceId);
+  const { attempts, concurrentGateSavedMs } = annotateConcurrentGates(result.attempts);
   return {
     gateEvidence: {
       gateRuns: result.gateRuns,
@@ -328,7 +329,9 @@ export function buildTrainGateEvidence(
       ...(sided.length > 0 ? { sided, sidedCount: sided.length } : {}),
       ...(review ? { review } : {}),
       // #1189: the complete bisect tree, replacing the live appends made as each node finished.
-      attempts: result.attempts,
+      // #1193: each node now names the siblings it gated concurrently with.
+      attempts,
+      concurrentGateSavedMs,
       // #1191: member-vs-member conflict clusters, the input to `group-scan` mode `train-conflicts`.
       ...(result.conflictClusters && result.conflictClusters.length > 0
         ? { conflictClusters: result.conflictClusters.map((c) => ({ workspaceIds: [...c.workspaceIds] })) }
@@ -336,6 +339,56 @@ export function buildTrainGateEvidence(
     },
     gateRejected,
   };
+}
+
+/**
+ * #1193 — make the saving from concurrent bisect halves VISIBLE in the persisted tree: mark
+ * every node with the labels of the other nodes whose gate window overlapped its own, and
+ * total the wall-clock saved (sum of gate durations minus the union of their windows). A tree
+ * whose gates all ran one after another gets no `concurrentWith` and a saving of 0 — so a
+ * reader of train qmu4t981a's successor can tell at a glance whether the second slot was used.
+ *
+ * Pure and computed here rather than inside `runMergeTrain` because the overlap of two halves
+ * is only known once BOTH have finished, and the live `onAttempt` append happens as EACH one
+ * does — the final evidence write is the first moment the whole tree is in hand.
+ */
+export function annotateConcurrentGates(
+  attempts: MergeTrainAttemptDto[],
+): { attempts: MergeTrainAttemptDto[]; concurrentGateSavedMs: number } {
+  const windows = attempts.map((a) => {
+    const start = a.gateStartedAt ? Date.parse(a.gateStartedAt) : NaN;
+    const end = a.gateFinishedAt ? Date.parse(a.gateFinishedAt) : NaN;
+    return Number.isFinite(start) && Number.isFinite(end) && end >= start ? { start, end } : null;
+  });
+  const annotated = attempts.map((a, i) => {
+    const w = windows[i];
+    if (!w) return a;
+    const concurrentWith = attempts
+      .filter((_, j) => {
+        const o = windows[j];
+        // Strict overlap: a gate that starts the instant another ends was sequential.
+        return j !== i && o !== null && o.start < w.end && w.start < o.end;
+      })
+      .map((b) => b.label);
+    return concurrentWith.length > 0 ? { ...a, concurrentWith } : a;
+  });
+  // Sum of durations minus the union of the windows — the time a sequential run would have
+  // spent that this one did not.
+  const sorted = windows.filter((w): w is { start: number; end: number } => w !== null).sort((x, y) => x.start - y.start);
+  let sum = 0;
+  let union = 0;
+  let cursorEnd = -Infinity;
+  for (const w of sorted) {
+    sum += w.end - w.start;
+    if (w.start >= cursorEnd) {
+      union += w.end - w.start;
+      cursorEnd = w.end;
+    } else if (w.end > cursorEnd) {
+      union += w.end - cursorEnd;
+      cursorEnd = w.end;
+    }
+  }
+  return { attempts: annotated, concurrentGateSavedMs: Math.max(0, sum - union) };
 }
 
 /**
@@ -458,9 +511,14 @@ export function createMergeTrainRunner(deps: {
         // LAND — nobody is going to account for that merge. Checked at the last moment before
         // `landMergeTrain`, on a fresh read, never on the row captured at start.
         shouldLand: () => vetoLandingIfAbandoned(trainId, database),
-        runGate: async ({ trainRef, included }) => {
+        runGate: async ({ trainRef, included, label: attemptLabel }) => {
           // Gate the TREE THAT LANDS. A per-member gate never tests the merge commit, which is
           // how two individually-green branches can produce a red base with no conflict.
+          //
+          // #1193: keyed by the ATTEMPT's label (`q1a`, `q1b`), not the train's — two bisect
+          // halves may be gating at the same moment, each in its own staging worktree (the
+          // leaf is derived from `trainRef`, which already differs per half), and their log
+          // lines and synthetic gate ids must tell them apart.
           let gateWorktree: string | null = null;
           try {
             await updateMergeTrainState(trainId, { state: "gating" }, database).catch(() => undefined);
@@ -481,7 +539,7 @@ export function createMergeTrainRunner(deps: {
             // normally.
             const setupScript = await getProjectSetupScript(projectId, database).catch(() => null);
             if (setupScript && setupScript.trim()) {
-              noteMergeGatePhase(`train:${label}`, "install", setupScript);
+              noteMergeGatePhase(`train:${attemptLabel}`, "install", setupScript);
               const setup = await runSetupScript(gateWorktree, setupScript, {
                 timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS,
               }).catch((err) => ({ exitCode: 1, stdout: "", stderr: errorMessage(err), timedOut: false }));
@@ -499,7 +557,7 @@ export function createMergeTrainRunner(deps: {
             // without it the #628 deferred-install check passes vacuously for the whole train.
             const gate = await runPreMergeGate(
               {
-                id: `train:${label}`,
+                id: `train:${attemptLabel}`,
                 workingDir: gateWorktree,
                 baseBranch,
                 // The INCLUDED members (#676) — a member dropped during assembly is not in this

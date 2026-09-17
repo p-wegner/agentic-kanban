@@ -135,6 +135,46 @@ Follow-ups found while finishing the branch, not ticketed yet:
   until something filters by kind.
 - Time injection: `TrainSidingDeps.now` was `() => Date` in the first commit and tripped
   `time-injection-spelling-ratchet` (5 > baseline 4); now `now?: string`.
+## 2026-09-17 — #1193: speculative bisect gates both halves concurrently (branch, not landed)
+
+**On `feature/ak-1193-speculative-bisect-gate-both-halves-conc`**, worktree
+`.worktrees/agentic-kanban/ak-1193`, NOT on master and NOT pushed. What it is: `landGreenest`
+(`merge-train.service.ts`) used to gate a red bisect's halves one after another (train
+qmu4t981a: 13 gate runs, 149 min). Now, when `freeVerifySlots()` (default: semaphore
+concurrency minus active, from `verify-chain-semaphore.ts` / #1160) reports 2+, both halves
+are assembled and gated at once from the same base sha, each on its own train ref and so in its
+own `train` staging worktree; landing stays left-to-right (`waitForLandTurn`), and a half whose
+base moved because its sibling landed is re-assembled from the already-gated members onto the
+new base without a re-gate (a member that no longer assembles cleanly is dropped, not landed
+unverified). Fewer than 2 free slots: sequential, exactly as before. The gates themselves still
+each take a semaphore slot inside `runPreMergeGate`, so the capacity gate is never exceeded —
+the slot count only decides whether the second half's assembly/worktree is worth starting.
+The three commits: `04ecf435` (the feature), `180e369e` (`allSettled`, so one half's throw
+never leaves the sibling's landing unsupervised), and this pass: `runGate` now receives the
+ATTEMPT's label so the two halves' synthetic gate ids and log lines (`train:q1a` / `train:q1b`)
+are distinguishable, and `buildTrainGateEvidence` (`merge-queue-train.ts`) annotates the
+persisted bisect tree — each node gets `concurrentWith` (sibling labels whose gate window
+overlapped its own) and the evidence gets `concurrentGateSavedMs` (sum of gate durations minus
+their union), so the saving is visible on the row.
+
+**Verified by:** `pnpm typecheck` green (5 packages); `merge-train-orchestration.test.ts`
+(parallel run with two slots, sequential fallback with one, ordered landing when both halves are
+green, and the halves' gate windows overlap in `result.attempts`); `merge-train-evidence.test.ts`
+(new `annotateConcurrentGates` block: overlapping halves annotated + 8 min saved, sequential
+tree = 0, ungated nodes ignored); `merge-train-attempts.test.ts` (pins `freeVerifySlots: () => 1`
+because it asserts the tree's finish order); `merge-train.test.ts`. All from the worktree with
+`--maxWorkers=2`.
+
+**Not done, deliberately:** no live two-half run on the operated board (needs a promote, and
+the first one should confirm two concurrent `git worktree add` calls on one repo behave — they
+target distinct leaves, but that has only been exercised in tests where `runGate` is a mock).
+The client has NO bisect-tree renderer at all (#1189 persisted the tree, nothing draws it;
+`mergeTrainSummary.ts` reads only `gateRuns`), so `concurrentWith` / `concurrentGateSavedMs` are
+visible in the row's `gateEvidence` JSON and nowhere in the UI — drawing the tree is its own
+ticket. The live `onAttempt` appends carry no `concurrentWith` (the overlap is only known when
+both halves are done); only the final evidence write does. Nested splits (a red half splitting
+again) parallelize recursively under the same slot check, each level reading the semaphore
+afresh; that is intended but only the two-level case is covered by a test.
 
 ## 2026-09-15 — #1160: verify-chain slots derived from capacity (branch, not landed)
 

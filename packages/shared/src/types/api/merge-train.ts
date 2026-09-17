@@ -65,6 +65,12 @@ export interface MergeTrainGateEvidenceDto {
    * candidate `coupled_with` groups. Absent when no two members conflicted.
    */
   conflictClusters?: Array<{ workspaceIds: string[] }>;
+  /**
+   * #1193 — wall-clock milliseconds the train SAVED by gating bisect halves concurrently: the
+   * sum of every attempt's gate duration minus the span those gates actually occupied together.
+   * 0 (or absent, on rows written before #1193) when every gate ran one after another.
+   */
+  concurrentGateSavedMs?: number;
 }
 
 /**
@@ -96,6 +102,13 @@ export interface MergeTrainAttemptDto {
   mergeSha?: string;
   /** #1194 — members this attempt's train review sided, with the blocking finding (first 300 chars). */
   sided?: Array<{ workspaceId: string; reason: string }>;
+  /**
+   * #1193 — labels of the sibling attempts whose gate window overlapped this one's in time,
+   * i.e. the halves this node was gated CONCURRENTLY with. Absent when it gated alone. Set on
+   * the final evidence write only (`buildTrainGateEvidence`), since the overlap is only known
+   * once both halves have finished — a live row's appended nodes do not carry it yet.
+   */
+  concurrentWith?: string[];
 }
 
 /**

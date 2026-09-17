@@ -8,6 +8,7 @@ import {
   orderByLeastOverlap,
   pickConflictFreeSet,
 } from "./merge-train-conflict-graph.js";
+import { verifyChainSemaphoreActive, verifyChainSemaphoreConcurrency } from "./verify-chain-semaphore.js";
 
 /**
  * Release trains: gate N tickets ONCE instead of N times.
@@ -355,7 +356,17 @@ export interface TrainRunResult {
  * attributed a blocking finding to specific members. Only meaningful when `passed` is true: a
  * review finding pulls its member into a siding, it does not fail the gate for everyone else.
  */
-export type TrainGate = (ctx: { trainRef: string; trainSha: string; included: TrainMember[] }) => Promise<{
+export type TrainGate = (ctx: {
+  trainRef: string;
+  trainSha: string;
+  included: TrainMember[];
+  /**
+   * The ATTEMPT's label (`q1`, `q1a`, `q1b`, …), not the train's — #1193 gates two bisect
+   * halves at once, so a caller keying anything per gate (its synthetic workspace id, log
+   * lines) must key it per half or the two runs become indistinguishable.
+   */
+  label: string;
+}) => Promise<{
   passed: boolean;
   message: string;
   sided?: Array<{ workspaceId: string; reason: string }>;
@@ -401,10 +412,28 @@ export async function runMergeTrain(args: {
    * fails the train — the merge already happened (or did not) regardless of the bookkeeping.
    */
   onAttempt?: (attempt: MergeTrainAttemptDto) => Promise<void>;
+  /**
+   * #1193 — how many verify-chain slots are free RIGHT NOW, so a red bisect can gate both
+   * halves of a split at once instead of one after another. Defaults to a live read of the
+   * verify-chain semaphore (`verifyChainSemaphoreConcurrency() - verifyChainSemaphoreActive()`);
+   * a test overrides it rather than depending on that module's process-global state.
+   */
+  freeVerifySlots?: () => number;
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, runGate, closeMember } = args;
   const bisect = args.bisectOnFailure !== false;
   const isEnvironmentFailure = args.isEnvironmentFailure ?? (() => false);
+  const freeVerifySlots = args.freeVerifySlots ?? defaultFreeVerifySlots;
+
+  /**
+   * Wait for `a`, then `b` (either may be absent) — used to chain a child's landing behind
+   * both its outer predecessor and, when running in parallel, its sibling's completion.
+   */
+  function afterBoth(a?: Promise<void>, b?: Promise<void>): Promise<void> | undefined {
+    if (!a) return b;
+    if (!b) return a;
+    return Promise.all([a, b]).then(() => undefined);
+  }
 
   /**
    * Land as much of `subset` as is green, splitting on failure.
@@ -418,63 +447,108 @@ export async function runMergeTrain(args: {
    * Cost: 1 gate run when the batch is green (the case this feature exists for). With k bad
    * branches out of n it is bounded by O(k log n) runs — worse than n only when nearly
    * everything is red, and in that case the queue was never going to land in one run anyway.
+   *
+   * #1193 — `waitForPredecessor` (resolved before this subset may LAND, never before it may be
+   * assembled or gated) and `notifyDone` (called once this subset's own landing — including any
+   * further nested splits — is fully settled) let a caller run two halves' assemble+gate
+   * CONCURRENTLY while keeping their LANDING in the original left-to-right order, which is what
+   * keeps `landMergeTrain`'s base-moved refusal meaningful (the base only ever moves under a
+   * half that has already had its turn).
    */
-  async function landGreenest(subset: TrainMember[], subLabel: string): Promise<TrainRunResult> {
-    const attempt = await runTrainAttempt({ ...args, members: subset, label: subLabel, isEnvironmentFailure });
-    if (attempt.landed.length > 0 || !attempt.gateFailure) return attempt;
-    // #1181: a refused landing is not a red gate — splitting would re-gate green code twice
-    // and then refuse again. Stop here, attribution-free.
-    if (attempt.landRefused) return attempt;
-    // #1154: an environment failure fails the SAME way for every subset of the same staging
-    // worktree — splitting cannot learn anything a second run at the top level didn't already
-    // say, and it can only mislabel branches as individually red. Stop here, attribution-free.
-    if (isEnvironmentFailure(attempt.gateFailure)) return attempt;
-    // #1185: an assembly-empty subset has NO gate to blame — every member conflicted during
-    // assembly and is already under `dropped` with its conflict reason. It must not be split
-    // (halving would just re-discover the same conflicts) and, for a singleton, it must NOT be
-    // promoted to `gateRejected`: that told the author to FIX a gate failure when the only
-    // thing wrong was a conflict to REBASE (observed on trains qmu4t981a / qmu4ymqjx, whose
-    // bisectResult named conflicting members with "no members could be assembled").
-    if (attempt.dropped.length === subset.length) return attempt;
-    // #1194: a siding only ever happens on a GREEN gate — the review attributed a finding to a
-    // member, the rest were re-assembled and either landed or conflicted (both attributed). There
-    // is nothing red left to search for, so splitting would only re-gate green code.
-    if (attempt.sided.length > 0) return attempt;
-    // Nothing landed and the gate is why. A red singleton IS attribution.
-    if (!bisect || subset.length <= 1) {
+  async function landGreenest(
+    subset: TrainMember[],
+    subLabel: string,
+    waitForPredecessor?: Promise<void>,
+    notifyDone?: () => void,
+  ): Promise<TrainRunResult> {
+    try {
+      const attempt = await runTrainAttempt({ ...args, members: subset, label: subLabel, isEnvironmentFailure, waitForLandTurn: waitForPredecessor });
+      if (attempt.landed.length > 0 || !attempt.gateFailure) return attempt;
+      // #1181: a refused landing is not a red gate — splitting would re-gate green code twice
+      // and then refuse again. Stop here, attribution-free.
+      if (attempt.landRefused) return attempt;
+      // #1154: an environment failure fails the SAME way for every subset of the same staging
+      // worktree — splitting cannot learn anything a second run at the top level didn't already
+      // say, and it can only mislabel branches as individually red. Stop here, attribution-free.
+      if (isEnvironmentFailure(attempt.gateFailure)) return attempt;
+      // #1185: an assembly-empty subset has NO gate to blame — every member conflicted during
+      // assembly and is already under `dropped` with its conflict reason. It must not be split
+      // (halving would just re-discover the same conflicts) and, for a singleton, it must NOT be
+      // promoted to `gateRejected`: that told the author to FIX a gate failure when the only
+      // thing wrong was a conflict to REBASE (observed on trains qmu4t981a / qmu4ymqjx, whose
+      // bisectResult named conflicting members with "no members could be assembled").
+      if (attempt.dropped.length === subset.length) return attempt;
+      // #1194: a siding only ever happens on a GREEN gate — the review attributed a finding to a
+      // member, the rest were re-assembled and either landed or conflicted (both attributed). There
+      // is nothing red left to search for, so splitting would only re-gate green code.
+      if (attempt.sided.length > 0) return attempt;
+      // Nothing landed and the gate is why. A red singleton IS attribution.
+      if (!bisect || subset.length <= 1) {
+        return {
+          ...attempt,
+          gateRejected: subset.length === 1
+            ? [{ member: subset[0], reason: attempt.gateFailure }]
+            : attempt.gateRejected,
+        };
+      }
+      const mid = Math.floor(subset.length / 2);
+      // #1193: only run both halves' assemble+gate at once when the box actually has room for a
+      // second full verify chain right now — otherwise the second half's staging worktree and
+      // install are pure overhead, since the semaphore would queue its gate behind the first's
+      // anyway (capacity gate: CLAUDE.md).
+      const canParallelize = freeVerifySlots() >= 2;
+      let first: TrainRunResult;
+      let second: TrainRunResult;
+      if (canParallelize) {
+        let releaseFirst!: () => void;
+        const firstDone = new Promise<void>((resolve) => { releaseFirst = resolve; });
+        // #1193: `allSettled`, not `all` — `all` rejects as soon as EITHER half throws while
+        // the other's async work (already started, up to and including landing onto the base)
+        // keeps running unobserved. That would let one half's landing complete after this
+        // function has already thrown to its caller, with nothing recording or waiting on it.
+        // Settling both first means a throw here always means BOTH halves' git work is done.
+        const settled = await Promise.allSettled([
+          landGreenest(subset.slice(0, mid), `${subLabel}a`, waitForPredecessor, releaseFirst),
+          landGreenest(subset.slice(mid), `${subLabel}b`, afterBoth(waitForPredecessor, firstDone)),
+        ]);
+        const rejected = settled.find((s): s is PromiseRejectedResult => s.status === "rejected");
+        if (rejected) throw rejected.reason;
+        [first, second] = (settled as PromiseFulfilledResult<TrainRunResult>[]).map((s) => s.value);
+      } else {
+        first = await landGreenest(subset.slice(0, mid), `${subLabel}a`, waitForPredecessor);
+        second = await landGreenest(subset.slice(mid), `${subLabel}b`, waitForPredecessor);
+      }
       return {
-        ...attempt,
-        gateRejected: subset.length === 1
-          ? [{ member: subset[0], reason: attempt.gateFailure }]
-          : attempt.gateRejected,
+        trainRef: attempt.trainRef,
+        landed: [...first.landed, ...second.landed],
+        dropped: [...attempt.dropped, ...first.dropped, ...second.dropped],
+        gateRejected: [...first.gateRejected, ...second.gateRejected],
+        sided: [...first.sided, ...second.sided],
+        closeFailures: [...first.closeFailures, ...second.closeFailures],
+        gateRuns: attempt.gateRuns + first.gateRuns + second.gateRuns,
+        attempts: [...attempt.attempts, ...first.attempts, ...second.attempts],
+        mergeSha: second.mergeSha ?? first.mergeSha,
+        conflictClusters: dedupeConflictClusters([
+          ...(attempt.conflictClusters ?? []),
+          ...(first.conflictClusters ?? []),
+          ...(second.conflictClusters ?? []),
+        ]),
+        // Only still a whole-batch failure if neither half landed anything.
+        ...(first.landed.length + second.landed.length === 0
+          ? { gateFailure: attempt.gateFailure }
+          : {}),
       };
+    } finally {
+      notifyDone?.();
     }
-    const mid = Math.floor(subset.length / 2);
-    const first = await landGreenest(subset.slice(0, mid), `${subLabel}a`);
-    const second = await landGreenest(subset.slice(mid), `${subLabel}b`);
-    return {
-      trainRef: attempt.trainRef,
-      landed: [...first.landed, ...second.landed],
-      dropped: [...attempt.dropped, ...first.dropped, ...second.dropped],
-      gateRejected: [...first.gateRejected, ...second.gateRejected],
-      sided: [...first.sided, ...second.sided],
-      closeFailures: [...first.closeFailures, ...second.closeFailures],
-      gateRuns: attempt.gateRuns + first.gateRuns + second.gateRuns,
-      attempts: [...attempt.attempts, ...first.attempts, ...second.attempts],
-      mergeSha: second.mergeSha ?? first.mergeSha,
-      conflictClusters: dedupeConflictClusters([
-        ...(attempt.conflictClusters ?? []),
-        ...(first.conflictClusters ?? []),
-        ...(second.conflictClusters ?? []),
-      ]),
-      // Only still a whole-batch failure if neither half landed anything.
-      ...(first.landed.length + second.landed.length === 0
-        ? { gateFailure: attempt.gateFailure }
-        : {}),
-    };
   }
 
   return await landGreenest(members, label);
+}
+
+/** The live default for `freeVerifySlots` — how many verify chains could start on this box right now. */
+function defaultFreeVerifySlots(): number {
+  return Math.max(0, verifyChainSemaphoreConcurrency() - verifyChainSemaphoreActive());
 }
 
 /** ONE assemble → gate → land → close cycle. The bisect driver above composes these. */
@@ -488,6 +562,13 @@ async function runTrainAttempt(args: {
   shouldLand?: () => Promise<string | null>;
   isEnvironmentFailure: (message: string) => boolean;
   onAttempt?: (attempt: MergeTrainAttemptDto) => Promise<void>;
+  /**
+   * #1193 — resolved once it is this attempt's turn to LAND (a no-op when absent, i.e. every
+   * caller before #1193). Awaited only immediately before `landMergeTrain`, never before
+   * assembly or the gate, so two concurrently-gated halves still verify at the same time —
+   * only the git-level landing is serialized.
+   */
+  waitForLandTurn?: Promise<void>;
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, runGate, closeMember } = args;
 
@@ -508,7 +589,9 @@ async function runTrainAttempt(args: {
       label,
       members: members.map((m) => m.workspaceId),
       included: asm.included.map((m) => m.workspaceId),
-      dropped: asm.dropped.map((d) => ({ workspaceId: d.member.workspaceId, reason: d.reason })),
+      // #1193: `result.dropped` (not `asm.dropped`) so a member dropped during the speculative
+      // re-assembly after a base move (see below) is still visible on this attempt's node.
+      dropped: result.dropped.map((d) => ({ workspaceId: d.member.workspaceId, reason: d.reason })),
       gateStartedAt,
       gateFinishedAt,
       gateRuns: result.gateRuns > 0 ? 1 : 0,
@@ -547,13 +630,19 @@ async function runTrainAttempt(args: {
     // deferred-install check on the requested set would block the train on a workspace whose
     // code is not in it.
     gateStartedAt = new Date().toISOString();
-    const gate = await runGate({ trainRef: asm.trainRef, trainSha: asm.trainSha, included: asm.included });
+    const gate = await runGate({ trainRef: asm.trainRef, trainSha: asm.trainSha, included: asm.included, label });
     gateFinishedAt = new Date().toISOString();
     if (!gate.passed) {
       // #1154/#1189: an environment failure is the train's, not a member's — its own leaf kind.
       const verdict: MergeTrainAttemptVerdict = args.isEnvironmentFailure(gate.message) ? "env_failure" : "red";
       return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], sided: [], gateRuns: 1, gateFailure: gate.message }, verdict);
     }
+
+    // #1193: wait for an earlier concurrently-gated half to finish its own landing (or decide
+    // not to land) before this one so much as re-reads the row — the base only moves under a
+    // half that has already had its turn, which is what keeps the #1181 check below and
+    // `landMergeTrain`'s base-moved refusal meaningful.
+    if (args.waitForLandTurn) await args.waitForLandTurn;
 
     // #1181: last look before the base changes — a row abandoned during the gate must not land.
     const landRefused = args.shouldLand ? await args.shouldLand() : null;
@@ -573,10 +662,61 @@ async function runTrainAttempt(args: {
       .map((member) => ({ member, reason: gate.sided!.find((s) => s.workspaceId === member.workspaceId)!.reason }));
 
     if (sidedIds.size === 0) {
+      // #1193: when this attempt was coordinated as part of a concurrent bisect split (it was
+      // handed a `waitForLandTurn`), an earlier sibling landing while we waited is an EXPECTED,
+      // self-inflicted base move, not the external interference `landMergeTrain`'s throw exists
+      // to catch — so speculatively recover from it rather than let the whole train throw.
+      // Outside that (no `waitForLandTurn`: a lone attempt, or the ordinary sequential path,
+      // where `assembleMergeTrain` always runs against the freshly-current base already), a base
+      // move is exactly the anomaly it always was, and falls through to `landMergeTrain`'s own
+      // check unchanged.
+      //
+      // The gate verified `asm.trainSha` (the base sha AT GATE TIME plus these members), not the
+      // tree a --no-ff merge into the NEW base would produce, so recovering means re-assembling
+      // the SAME already-gated members onto the CURRENT base — deliberately no re-gate, since
+      // gating a second time would erase exactly the wall-clock saving this feature exists for —
+      // and landing THAT. This is the "speculative" half of speculative bisect: a member that no
+      // longer assembles cleanly (a genuine conflict with what just landed) is dropped exactly as
+      // an ordinary assembly conflict, falling back to the per-ticket path, rather than landed
+      // unverified. (The sided path below re-assembles onto the current base anyway, so it
+      // needs no such recovery.)
+      let landAsm = asm;
+      const additionalDropped: TrainRunResult["dropped"] = [];
+      if (args.waitForLandTurn && (await revParse(repoPath, baseBranch)) !== asm.baseSha) {
+        landAsm = await assembleMergeTrain({ repoPath, baseBranch, members: asm.included, label });
+        additionalDropped.push(...landAsm.dropped);
+        if (landAsm.included.length === 0 || !landAsm.trainSha) {
+          return await finish(
+            {
+              trainRef: landAsm.trainRef,
+              landed: [],
+              dropped: [...asm.dropped, ...additionalDropped],
+              closeFailures,
+              gateRejected: [],
+              sided: [],
+              gateRuns: 1,
+              gateFailure: "base moved after gating and no member could be re-assembled onto the new base",
+            },
+            "assembly_empty",
+          );
+        }
+        await assertTrainPreservesAncestry(repoPath, landAsm.trainRef, landAsm.included);
+      }
+
       const { mergeSha } = await landMergeTrain({
-        repoPath, baseBranch, trainRef: asm.trainRef, trainSha: asm.trainSha, baseSha: asm.baseSha, included: asm.included,
+        repoPath,
+        baseBranch,
+        trainRef: landAsm.trainRef,
+        // Guaranteed non-null: either `asm.trainSha` (checked at the top of this function) when
+        // the base never moved, or `landAsm.trainSha` (checked just above) when it did.
+        trainSha: landAsm.trainSha!,
+        baseSha: landAsm.baseSha,
+        included: landAsm.included,
       });
-      for (const member of asm.included) {
+      // Bookkeeping AFTER the work is safely on the base. A failure here leaves a member merged
+      // but not marked — recoverable by the existing done-unmerged/already-merged reconcilers,
+      // and reported rather than swallowed.
+      for (const member of landAsm.included) {
         try {
           await closeMember(member.workspaceId);
         } catch (err) {
@@ -585,7 +725,7 @@ async function runTrainAttempt(args: {
           console.warn(`[merge-train] landed ${member.branch} but could not close its workspace: ${reason.slice(0, 200)}`);
         }
       }
-      return await finish({ trainRef: asm.trainRef, landed: asm.included, dropped: asm.dropped, mergeSha, closeFailures, gateRejected: [], sided: [], gateRuns: 1 }, "landed");
+      return await finish({ trainRef: landAsm.trainRef, landed: landAsm.included, dropped: [...asm.dropped, ...additionalDropped], mergeSha, closeFailures, gateRejected: [], sided: [], gateRuns: 1 }, "landed");
     }
 
     const toLand = asm.included.filter((m) => !sidedIds.has(m.workspaceId));
