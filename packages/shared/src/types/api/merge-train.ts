@@ -21,3 +21,28 @@ export interface MergeTrainRowDto {
   startedAt: string;
   finishedAt: string | null;
 }
+
+/**
+ * The parsed shape of `MergeTrainRowDto.gateEvidence` (#906, #1184) — what `finishMergeTrain`
+ * writes and what the client's "Merge train" panel derives its numbers from. Every list is
+ * deduplicated by workspace id (#1184: a bisect re-assembles each sub-attempt from scratch and
+ * used to re-record the same conflict per attempt — 13 members, 17 drops on train qmu4t981a),
+ * and the counts are precomputed so a reader gets "gate runs per landed member" without
+ * re-parsing the lists. All fields optional: rows written before #1184 carry only the first five.
+ */
+export interface MergeTrainGateEvidenceDto {
+  gateRuns?: number;
+  gateFailure?: string | null;
+  landed?: string[];
+  dropped?: Array<{ workspaceId: string; reason: string }>;
+  mergeSha?: string | null;
+  /** #1154 — members neither landed, dropped nor individually gate-rejected (an unattributed red batch). */
+  unresolved?: string[];
+  /** Members the train was asked to carry. */
+  memberCount?: number;
+  landedCount?: number;
+  /** Distinct members dropped during assembly, however many attempts re-dropped them. */
+  uniqueDroppedCount?: number;
+  /** Distinct members a bisect individually proved red. */
+  gateRejectedCount?: number;
+}
