@@ -1,6 +1,7 @@
 import { mergeBranch, isAncestor, revParse } from "@agentic-kanban/shared/lib/git-service";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import type { MergeTrainAttemptDto, MergeTrainAttemptVerdict } from "@agentic-kanban/shared/types";
 
 /**
  * Release trains: gate N tickets ONCE instead of N times.
@@ -242,6 +243,12 @@ export interface TrainRunResult {
    * the bisect driver must not split on it and no member may be blamed for it.
    */
   landRefused?: string;
+  /**
+   * #1189 — one node per assemble → gate → land cycle, in the order they finished (a bisect's
+   * root first, then its halves depth-first). The tree the panel renders; the sum of the nodes'
+   * `gateRuns` is `gateRuns` above.
+   */
+  attempts: MergeTrainAttemptDto[];
 }
 
 export async function runMergeTrain(args: {
@@ -277,6 +284,13 @@ export async function runMergeTrain(args: {
    * it to re-read the train's row: a row marked `abandoned` mid-gate must not land.
    */
   shouldLand?: () => Promise<string | null>;
+  /**
+   * #1189 — called once per attempt, AS IT FINISHES, with the node that also lands in the
+   * result's `attempts`. The caller persists it so a live train shows partial progress rather
+   * than a tree that appears whole at the end. Best-effort: a throw here is logged and never
+   * fails the train — the merge already happened (or did not) regardless of the bookkeeping.
+   */
+  onAttempt?: (attempt: MergeTrainAttemptDto) => Promise<void>;
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, runGate, closeMember } = args;
   const bisect = args.bisectOnFailure !== false;
@@ -296,7 +310,7 @@ export async function runMergeTrain(args: {
    * everything is red, and in that case the queue was never going to land in one run anyway.
    */
   async function landGreenest(subset: TrainMember[], subLabel: string): Promise<TrainRunResult> {
-    const attempt = await runTrainAttempt({ ...args, members: subset, label: subLabel });
+    const attempt = await runTrainAttempt({ ...args, members: subset, label: subLabel, isEnvironmentFailure });
     if (attempt.landed.length > 0 || !attempt.gateFailure) return attempt;
     // #1181: a refused landing is not a red gate — splitting would re-gate green code twice
     // and then refuse again. Stop here, attribution-free.
@@ -331,6 +345,7 @@ export async function runMergeTrain(args: {
       gateRejected: [...first.gateRejected, ...second.gateRejected],
       closeFailures: [...first.closeFailures, ...second.closeFailures],
       gateRuns: attempt.gateRuns + first.gateRuns + second.gateRuns,
+      attempts: [...attempt.attempts, ...first.attempts, ...second.attempts],
       mergeSha: second.mergeSha ?? first.mergeSha,
       // Only still a whole-batch failure if neither half landed anything.
       ...(first.landed.length + second.landed.length === 0
@@ -351,11 +366,45 @@ async function runTrainAttempt(args: {
   runGate: (ctx: { trainRef: string; trainSha: string; included: TrainMember[] }) => Promise<{ passed: boolean; message: string }>;
   closeMember: (workspaceId: string) => Promise<void>;
   shouldLand?: () => Promise<string | null>;
+  isEnvironmentFailure: (message: string) => boolean;
+  onAttempt?: (attempt: MergeTrainAttemptDto) => Promise<void>;
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, runGate, closeMember } = args;
 
   const asm = await assembleMergeTrain({ repoPath, baseBranch, members, label });
   const closeFailures: TrainRunResult["closeFailures"] = [];
+  let gateStartedAt: string | null = null;
+  let gateFinishedAt: string | null = null;
+
+  /**
+   * #1189: stamp this attempt as one node of the bisect tree and hand it to `onAttempt`
+   * BEFORE returning, so the caller can persist it while the driver is still deciding whether
+   * to split. Each exit below goes through here; a THROW (base moved, ancestry violation) does
+   * not, and the whole train throws with it — there is no verdict to record for that.
+   */
+  async function finish(result: Omit<TrainRunResult, "attempts">, verdict: MergeTrainAttemptVerdict): Promise<TrainRunResult> {
+    const failure = result.landRefused ?? result.gateFailure;
+    const record: MergeTrainAttemptDto = {
+      label,
+      members: members.map((m) => m.workspaceId),
+      included: asm.included.map((m) => m.workspaceId),
+      dropped: asm.dropped.map((d) => ({ workspaceId: d.member.workspaceId, reason: d.reason })),
+      gateStartedAt,
+      gateFinishedAt,
+      gateRuns: result.gateRuns > 0 ? 1 : 0,
+      verdict,
+      ...(verdict !== "landed" && failure ? { failureHead: failure.slice(0, 300) } : {}),
+      ...(result.mergeSha ? { mergeSha: result.mergeSha } : {}),
+    };
+    if (args.onAttempt) {
+      try {
+        await args.onAttempt(record);
+      } catch (err) {
+        console.warn(`[merge-train] could not record attempt ${label} (non-fatal): ${errorMessage(err).slice(0, 200)}`);
+      }
+    }
+    return { ...result, attempts: [record] };
+  }
 
   // The train ref is scratch state, so its cleanup belongs in a `finally` rather than at each
   // of the three exits. `deleteTrainRef` used to be called on assembly-empty, gate-fail and
@@ -365,7 +414,7 @@ async function runTrainAttempt(args: {
   // `deleteTrainRef` is itself best-effort and never throws, so it cannot mask a real error.
   try {
     if (asm.included.length === 0 || !asm.trainSha) {
-      return { trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], gateRuns: 0, gateFailure: "no members could be assembled onto the train" };
+      return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], gateRuns: 0, gateFailure: "no members could be assembled onto the train" }, "assembly_empty");
     }
 
     // Cheap insurance before spending a gate on it: if assembly somehow produced a train that
@@ -376,15 +425,19 @@ async function runTrainAttempt(args: {
     // requested. A member dropped during assembly (conflict) is not landing, so keying the
     // deferred-install check on the requested set would block the train on a workspace whose
     // code is not in it.
+    gateStartedAt = new Date().toISOString();
     const gate = await runGate({ trainRef: asm.trainRef, trainSha: asm.trainSha, included: asm.included });
+    gateFinishedAt = new Date().toISOString();
     if (!gate.passed) {
-      return { trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], gateRuns: 1, gateFailure: gate.message };
+      // #1154/#1189: an environment failure is the train's, not a member's — its own leaf kind.
+      const verdict: MergeTrainAttemptVerdict = args.isEnvironmentFailure(gate.message) ? "env_failure" : "red";
+      return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], gateRuns: 1, gateFailure: gate.message }, verdict);
     }
 
     // #1181: last look before the base changes — a row abandoned during the gate must not land.
     const landRefused = args.shouldLand ? await args.shouldLand() : null;
     if (landRefused) {
-      return { trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], gateRuns: 1, gateFailure: landRefused, landRefused };
+      return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], gateRuns: 1, gateFailure: landRefused, landRefused }, "land_refused");
     }
 
     const { mergeSha } = await landMergeTrain({
@@ -409,7 +462,7 @@ async function runTrainAttempt(args: {
       }
     }
 
-    return { trainRef: asm.trainRef, landed: asm.included, dropped: asm.dropped, mergeSha, closeFailures, gateRejected: [], gateRuns: 1 };
+    return await finish({ trainRef: asm.trainRef, landed: asm.included, dropped: asm.dropped, mergeSha, closeFailures, gateRejected: [], gateRuns: 1 }, "landed");
   } finally {
     await deleteTrainRef(repoPath, asm.trainRef);
   }

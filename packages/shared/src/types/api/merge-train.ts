@@ -45,4 +45,36 @@ export interface MergeTrainGateEvidenceDto {
   uniqueDroppedCount?: number;
   /** Distinct members a bisect individually proved red. */
   gateRejectedCount?: number;
+  /**
+   * #1189 — every assemble → gate → land cycle the train ran, in the order they finished. The
+   * bisect tree: `label` is the sub-label (`q1`, `q1a`, `q1ab`, …), so a child's label extends
+   * its parent's by one letter. Appended AS EACH ATTEMPT FINISHES, so a live `gating` row
+   * exposes partial progress; the final write carries the complete list.
+   */
+  attempts?: MergeTrainAttemptDto[];
+}
+
+/** How one train attempt (#1189) ended. Only `red` blames code; the other failures are the train's. */
+export type MergeTrainAttemptVerdict = "landed" | "red" | "assembly_empty" | "land_refused" | "env_failure";
+
+/** One node of a train's bisect tree (#1189) — one `runTrainAttempt`. */
+export interface MergeTrainAttemptDto {
+  /** The attempt's train label; a bisect child's label is its parent's plus `a`/`b`. */
+  label: string;
+  /** Workspace ids this attempt was asked to assemble. */
+  members: string[];
+  /** Workspace ids that assembled onto the train and were gated. */
+  included: string[];
+  /** Members that conflicted during assembly, with the conflict reason. */
+  dropped: Array<{ workspaceId: string; reason: string }>;
+  /** Null when no gate ran (`assembly_empty`). */
+  gateStartedAt: string | null;
+  gateFinishedAt: string | null;
+  /** 0 or 1 — an attempt gates at most once; the tree's sum is the train's `gateRuns`. */
+  gateRuns: 0 | 1;
+  verdict: MergeTrainAttemptVerdict;
+  /** The first 300 chars of the gate failure / refusal text, for any verdict but `landed`. */
+  failureHead?: string;
+  /** The base tip after landing, for `landed` only. */
+  mergeSha?: string;
 }
