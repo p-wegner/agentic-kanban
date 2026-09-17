@@ -1664,6 +1664,7 @@ paths:
                   enum:
                     - llm
                     - touched-files
+                    - train-conflicts
                 minSharedFiles:
                   type: integer
                   exclusiveMinimum: 0
