@@ -266,9 +266,11 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
   },
   {
     // #906 — a `merge_trains` row left `assembling`/`gating` when the process running it died
-    // (tsx-watch reload, crash, restart mid-gate). No live-job check is needed: the row's
-    // whole lifecycle is one in-process request, so anything found at boot is orphaned by
-    // construction. Resumed or marked `abandoned` with a reason — never silently dropped.
+    // (tsx-watch reload, crash, restart mid-gate). At BOOT no live-job check is needed: the
+    // row's whole lifecycle is one in-process request, so anything found then is orphaned by
+    // construction. The PERIODIC sweep is different (#1181): it consults the in-process live
+    // registry (`services/merge-train-live-registry.ts`) and skips rows this process is still
+    // running. Resumed or marked `abandoned` with a reason — never silently dropped.
     name: "merge-train-reconciler",
     start({ db, boardEvents, getSessionManager }) {
       const queueService = createMergeQueueService({ database: db, boardEvents, getSessionManager });

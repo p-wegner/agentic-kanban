@@ -12,6 +12,12 @@
  * must distinguish a live runner from a dead one — a merge train has no live-runner case to
  * distinguish AT BOOT, since boot is the one moment nothing has started yet.
  *
+ * #1181: that argument holds ONLY at boot. The same sweep also runs every ten minutes, and
+ * there a `gating` row may well have a live job in this very process — so the periodic pass
+ * consults the in-process registry (`services/merge-train-live-registry.ts`) and skips any row
+ * whose job is registered, or whose project already has a registered train. The registry is
+ * empty at boot by construction, which is what keeps the boot rule intact without a flag.
+ *
  * The decision is therefore just: can the batch still be resumed cheaply, or must it be
  * abandoned with a reason? A train ref (`kanban/train/<label>`) is scratch and is always
  * deleted in `runTrainAttempt`'s `finally` — but that `finally` only runs if the process lives
@@ -37,14 +43,50 @@ import {
   updateMergeTrainState,
   type MergeTrainRow,
 } from "../repositories/merge-train.repository.js";
-import { emptyPassReport, formatPassReportBody, recordActed, type PassReport } from "../lib/pass-report.js";
+import { emptyPassReport, formatPassReportBody, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import {
+  findLiveMergeTrainForProject,
+  snapshotLiveMergeTrains,
+  type LiveMergeTrainSnapshot,
+} from "../services/merge-train-live-registry.js";
 
 /** How often the reconciler sweeps for stranded trains (defence in depth beyond the boot pass). */
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 
 export type MergeTrainReconcileAction = "resume" | "abandon";
+
+/**
+ * #1181 — is this `assembling`/`gating` row one the sweep must leave alone because THIS
+ * process is still running it (or running another train for the same project)? Pure over the
+ * registry snapshot, so the "boot rule" and the "live rule" are testable side by side.
+ *
+ * The boot pass needs no special case: the registry is empty when the process starts, so
+ * every row is stranded there by construction — which is exactly the #906 header's argument,
+ * now scoped to the one moment it is true. On a PERIODIC sweep the same rule abandoned a live
+ * train mid-gate (measured 2026-09-16: a 28-minute gate discarded at minute 8, and the
+ * re-assembly then died waiting on the repo lock the live job still held).
+ *
+ * A same-project sibling is skipped too: resuming it would abandon it and mint a new train for
+ * a project that already has one in flight — which `beginMergeTrain` would refuse anyway, but
+ * only AFTER the reconciler had already written the "superseded" verdict onto the row.
+ */
+export function decideMergeTrainLiveSkip(
+  row: Pick<MergeTrainRow, "id" | "projectId" | "startedAt">,
+  live: LiveMergeTrainSnapshot,
+  nowMs: number,
+): { reason: string } | null {
+  const ageMinutes = Math.max(0, Math.round((nowMs - Date.parse(row.startedAt)) / 60_000));
+  if (live.has(row.id)) {
+    return { reason: `live in this process (age ${ageMinutes}m)` };
+  }
+  const sibling = findLiveMergeTrainForProject(live, row.projectId);
+  if (sibling) {
+    return { reason: `another train (${sibling.trainId}, ${sibling.label}) for project ${row.projectId} is live in this process — not resuming a second one` };
+  }
+  return null;
+}
 
 /**
  * Decide what to do with one stranded train row. Pure — no DB, no git — so the policy is
@@ -70,7 +112,7 @@ export function decideMergeTrainReconcileAction(
     action: "resume",
     reason: priorAttempts > 0
       ? `retrying (attempt ${priorAttempts + 1}) after a previous resume also left it stranded`
-      : "no live job can exist for a row found at server boot — re-running the batch from its member set",
+      : "no live job for this row is registered in this process — re-running the batch from its member set",
   };
 }
 
@@ -85,6 +127,27 @@ function countPriorResumeAttempts(reconciledReason: string | null | undefined): 
 export interface MergeTrainSweepResult extends PassReport {
   resumed: string[];
   abandoned: string[];
+  /** #1181 — rows left untouched because this process is still running them (or a same-project sibling). */
+  skippedLive: string[];
+}
+
+/**
+ * #1181 — apply {@link decideMergeTrainLiveSkip} to one row and book the outcome. Returns true
+ * when the row must be left alone. Split out so the sweep loop itself does not grow.
+ */
+function skipIfLive(
+  row: MergeTrainRow,
+  live: LiveMergeTrainSnapshot,
+  nowMs: number,
+  result: MergeTrainSweepResult,
+  log: (message: string) => void,
+): boolean {
+  const skip = decideMergeTrainLiveSkip(row, live, nowMs);
+  if (!skip) return false;
+  result.skippedLive.push(row.id);
+  recordSkipped(result, row.id, "live-in-process");
+  log(`skipping train ${row.id} (${row.label}, project ${row.projectId}) — ${skip.reason}`);
+  return true;
 }
 
 /**
@@ -105,16 +168,24 @@ export async function reconcileStrandedMergeTrains(
     log?: (message: string) => void;
     /** Re-run the batch for a stranded row's member set. Returning normally means "resumed". */
     runTrain?: (row: MergeTrainRow) => Promise<void>;
+    /**
+     * #1181 — the train jobs live in THIS process. Defaults to the real registry; a test passes
+     * an empty map to simulate a fresh process (the boot pass) or a populated one for a sweep.
+     */
+    liveTrains?: LiveMergeTrainSnapshot;
   } = {},
 ): Promise<MergeTrainSweepResult> {
   const database = opts.database;
   const now = opts.now ?? new Date().toISOString();
+  const nowMs = Date.parse(now);
+  const live = opts.liveTrains ?? snapshotLiveMergeTrains();
   const log = opts.log ?? ((message: string) => console.log(`[merge-train-reconciler] ${message}`));
 
   const rows = await listMergeTrainsInStates(["assembling", "gating"], database).catch(() => [] as MergeTrainRow[]);
-  const result: MergeTrainSweepResult = { ...emptyPassReport(rows.length), resumed: [], abandoned: [] };
+  const result: MergeTrainSweepResult = { ...emptyPassReport(rows.length), resumed: [], abandoned: [], skippedLive: [] };
 
   for (const row of rows) {
+    if (skipIfLive(row, live, nowMs, result, log)) continue;
     const { action, reason } = decideMergeTrainReconcileAction(row, opts.maxResumeAttempts);
     const ref = `train ${row.id} (${row.label}, project ${row.projectId})`;
 
