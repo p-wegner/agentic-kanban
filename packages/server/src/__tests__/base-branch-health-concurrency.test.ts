@@ -796,6 +796,87 @@ describe("a running base-health probe YIELDS the verify slot to a waiting gate (
     expect(probeConsecutiveYields(projectId)).toBe(0);
   }, 30000);
 
+  /**
+   * #1178 — follow-up to #1165. That fix made `verifyBaseBranchHealth({ explicit: true })`
+   * acquire its verify-chain slot at `gate` priority (instead of `background`) and disabled its
+   * mid-verify yield (`shouldProbeYield({ ..., maxConsecutiveYields: 0 })` when explicit), so an
+   * operator/`pnpm promote` re-probe can no longer be starved by back-to-back merge gates the way
+   * #1165's own measurement showed (a promotion waited 40 min behind two yields and got nothing).
+   * Nothing before this pinned that EITHER half actually fires, only that `requestBaseBranchReprobe`
+   * forwards `explicit` into the probe (`base-health-reprobe-guard.test.ts`) and that the periodic
+   * sweep yields at all (`base-health-probe-preemption.test.ts`, `shouldProbeYield` in isolation).
+   */
+  it("an EXPLICIT probe acquires its verify-chain slot at 'gate' priority, not 'background' (#1178)", async () => {
+    const semaphoreModule = await import("../services/verify-chain-semaphore.js");
+    const spy = vi.spyOn(semaphoreModule, "runUnderVerifyChainSemaphore");
+    const projectId = await seedProject(db);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "", timedOut: false });
+
+    await verifyBaseBranchHealth(projectId, db, undefined, { explicit: true });
+
+    // The FIRST call is the verify run itself (a retry call, if any, would be a later one).
+    expect(spy).toHaveBeenCalled();
+    const verifyCallOpts = spy.mock.calls[0]?.[4] as { priority?: string } | undefined;
+    expect(verifyCallOpts?.priority).toBe("gate");
+    spy.mockRestore();
+  });
+
+  it("a PERIODIC (non-explicit) probe still acquires at 'background' priority (#1178)", async () => {
+    const semaphoreModule = await import("../services/verify-chain-semaphore.js");
+    const spy = vi.spyOn(semaphoreModule, "runUnderVerifyChainSemaphore");
+    const projectId = await seedProject(db);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "", timedOut: false });
+
+    await verifyBaseBranchHealth(projectId, db);
+
+    expect(spy).toHaveBeenCalled();
+    const verifyCallOpts = spy.mock.calls[0]?.[4] as { priority?: string } | undefined;
+    expect(verifyCallOpts?.priority).toBe("background");
+    spy.mockRestore();
+  });
+
+  it("an EXPLICIT probe does NOT yield when a gate-class waiter is queued (#1178)", async () => {
+    const { probeConsecutiveYields } = await import("../services/base-health-probe-preemption.js");
+    const projectId = await seedProject(db);
+
+    let verifyRunning: () => void = () => {};
+    const verifyHasStarted = new Promise<void>((resolve) => { verifyRunning = resolve; });
+    let finishVerify: () => void = () => {};
+    runSetupScript.mockImplementation((_cwd: string, _script: string, opts?: { signal?: AbortSignal }) =>
+      new Promise((resolve) => {
+        finishVerify = () => resolve({ exitCode: 0, stdout: "ok", stderr: "", timedOut: false });
+        opts?.signal?.addEventListener(
+          "abort",
+          () => resolve({ exitCode: 130, stdout: "", stderr: "", aborted: true }),
+          { once: true },
+        );
+        verifyRunning();
+      }),
+    );
+
+    const probe = verifyBaseBranchHealth(projectId, db, undefined, { explicit: true });
+    await verifyHasStarted;
+
+    // A gate-class waiter queues behind the EXPLICIT probe's own slot — but the explicit probe
+    // already HOLDS the slot at `gate` priority (asserted above), so nothing can actually queue
+    // ahead of it; this second gate queues FIFO behind it instead. The mid-verify poll must still
+    // see `verifyChainGateWaiting()` — it does, since the queue itself (not admission order) is
+    // what the flag reports — and must NOT abort for it, because `explicit` disables the yield
+    // (`maxConsecutiveYields: 0`) regardless of what is waiting.
+    const gate = await queueGate();
+
+    // Give the poll interval room to fire (and NOT abort) before letting the verify finish.
+    await new Promise((r) => setTimeout(r, PROBE_GATE_POLL_INTERVAL_MS_TEST));
+    finishVerify();
+
+    const result = await probe;
+    await gate.done;
+
+    expect(result?.outcome).toBe("green");
+    // Ran to completion rather than yielding — nothing was thrown away or counted.
+    expect(probeConsecutiveYields(projectId)).toBe(0);
+  }, 30000);
+
   it("does not yield when only a BACKGROUND chain is queued — a probe does not preempt a probe", async () => {
     const { runUnderVerifyChainSemaphore } = await import("../services/verify-chain-semaphore.js");
     const { probeConsecutiveYields } = await import("../services/base-health-probe-preemption.js");
