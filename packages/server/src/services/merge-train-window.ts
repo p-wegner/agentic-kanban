@@ -14,6 +14,7 @@
  * this function only judges it.
  */
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import type { MergeTrainWindowVerdictDto } from "@agentic-kanban/shared";
 import { resolveRiskPosture, type RiskPosture } from "./risk-posture.service.js";
 
 const trainMaxSizePref = projectPref("train_max_size");
@@ -33,9 +34,14 @@ export interface MergeTrainWindowConfig {
   maxWaitMs: number;
 }
 
-export type MergeTrainWindowVerdict =
-  | { release: true; reason: "max_size" | "max_wait" | "gate_busy_grace_elapsed" }
-  | { release: false; reason: "accumulating" | "gate_busy" };
+/**
+ * The verdict is the SAME struct the API returns and the orchestrator persists (#1186) — one
+ * source, so the departure board shows exactly the reason the log line printed. The reason
+ * unions are declared in `shared/types/api/merge-train-window.ts` for that reason; the two
+ * operator reasons (`held`, `operator_release`) are judged here, `live_train` is set by the
+ * orchestrator before it ever asks this function.
+ */
+export type MergeTrainWindowVerdict = MergeTrainWindowVerdictDto;
 
 /**
  * The batching-window default size (#905's `standard` risk-posture row). `trainEligible`
@@ -146,12 +152,28 @@ function readNonNegativeInt(raw: string | undefined): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
+/**
+ * Operator controls (#1186), judged ahead of size/wait:
+ *
+ *  - `heldUntilMs` — "hold the door": while `nowMs < heldUntilMs` the verdict is
+ *    `{ release: false, reason: "held" }` whatever the size or wait say, INCLUDING a pending
+ *    `releaseRequested` — a hold placed after a release request wins until it expires, since
+ *    the hold is the more recent and the more conservative instruction.
+ *  - `releaseRequested` — "depart now": `{ release: true, reason: "operator_release" }` on the
+ *    next tick regardless of size, wait or a busy gate.
+ */
 export function decideMergeTrainRelease(
   state: MergeTrainWindowState,
   config: MergeTrainWindowConfig,
   nowMs: number,
-  opts?: { gateBusy?: boolean; gateBusyGraceMs?: number },
+  opts?: { gateBusy?: boolean; gateBusyGraceMs?: number; heldUntilMs?: number | null; releaseRequested?: boolean },
 ): MergeTrainWindowVerdict {
+  if (opts?.heldUntilMs != null && Number.isFinite(opts.heldUntilMs) && nowMs < opts.heldUntilMs) {
+    return { release: false, reason: "held" };
+  }
+  if (opts?.releaseRequested) {
+    return { release: true, reason: "operator_release" };
+  }
   const waitedMs = nowMs - new Date(state.firstSeenAt).getTime();
   if (state.pendingIds.length >= config.maxSize) {
     if (opts?.gateBusy && waitedMs < (opts.gateBusyGraceMs ?? DEFAULT_GATE_BUSY_GRACE_MS)) {

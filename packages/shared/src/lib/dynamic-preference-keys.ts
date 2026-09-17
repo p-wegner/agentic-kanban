@@ -183,6 +183,14 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // one would let an operator set a size cap with no wait bound (or vice versa) with no error.
   "train_max_size",
   "train_max_wait_ms",
+  // Merge-train batching window STATE (#1186): `train_window_<id>` is the JSON record of the
+  // per-project accumulator the auto-merge orchestrator used to keep in memory only — pending
+  // workspace ids, `firstSeenAt`, the last verdict + reason, and the operator controls
+  // (`heldUntil`, `releaseRequestedAt`). Persisted as a pref rather than a table so a restart
+  // no longer silently re-arms the max-wait clock, and so `GET /api/merge-queue/window` can
+  // answer from the same record the orchestrator judges. Read/written ONLY through
+  // server/services/merge-train-window-state.ts.
+  "train_window",
   // Merge train review (#907): `review_mode_<id>` is `per-ticket` (default) | `per-train` —
   // was a stand-in for the risk-posture resolver before it landed. `per-train` reviews a
   // ticket-group workspace's assembled diff once, with every member's acceptance criteria,
