@@ -234,6 +234,7 @@ export function createMergeQueueService(deps: {
   const trainRunner = createMergeTrainRunner({
     database,
     reconcileAlreadyMerged: (workspaceId) => mergeService.reconcileAlreadyMerged(workspaceId),
+    boardEvents,
   });
 
   async function getWorkspaceQueueInfos(workspaceIds: string[]): Promise<WorkspaceQueueInfo[]> {

@@ -316,7 +316,10 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // past the 1000-line hard ceiling. The factory still holds the sequential path in full.
   // 427 -> 421 (#1180): the train-vs-sequential dispatch decision moved to
   // `pickQueueStrategy` in `merge-queue-train.ts`, where the "why no train" log line lives.
-  "services/merge-queue.service.ts::createMergeQueueService": 421,
+  // 421 -> 422, a DISCLOSED raise (#1186): the train runner now takes `boardEvents` so a
+  // merge-train state change (assembling/gating/landed/red/abandoned) can broadcast
+  // `merge_train_state_changed` for the departure-board UI. +1 line, passed straight through.
+  "services/merge-queue.service.ts::createMergeQueueService": 422,
   // 506 -> 474 in #806 batch 3: ten handlers dropped their inline type literal and guard
   // ladder for a `parseJsonBody(c, schema)` call.
   // 421 -> 424, a DISCLOSED raise (#1107, landed 2026-09-12 in d90659d081). The list route now

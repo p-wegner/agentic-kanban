@@ -7,6 +7,7 @@
  * it when `trainEligible` + the caller/classifier/pref opt in.
  */
 import type { Database } from "../db/index.js";
+import type { BoardEventSink } from "./board-events.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import * as gitService from "./git.service.js";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
@@ -186,6 +187,7 @@ async function beginMergeTrain(
   label: string,
   memberWorkspaceIds: string[],
   database: Database,
+  boardEvents?: BoardEventSink,
 ): Promise<{ trainId: string; projectId: string } | null | "already_in_flight"> {
   // The gate is per-PROJECT (it reads verify_script_<projectId>), and WorkspaceQueueInfo
   // carries only issueId — resolve the project the same way computePlan does.
@@ -216,6 +218,7 @@ async function beginMergeTrain(
 
   const trainId = randomUUID();
   await createMergeTrain({ id: trainId, projectId, label, memberWorkspaceIds }, database);
+  boardEvents?.broadcast(projectId, "merge_train_state_changed");
   return { trainId, projectId };
 }
 
@@ -239,9 +242,11 @@ async function vetoLandingIfAbandoned(trainId: string, database: Database): Prom
  */
 async function finishMergeTrain(
   trainId: string,
+  projectId: string,
   result: Awaited<ReturnType<typeof runMergeTrain>>,
   members: Array<{ workspaceId: string }>,
   database: Database,
+  boardEvents?: BoardEventSink,
 ): Promise<void> {
   // #1153: an operator's cancel (POST /trains/:id/cancel) marks the row `abandoned` while this
   // run may still be in flight — there is no cancellation token wired into `runMergeTrain`, so
@@ -266,6 +271,7 @@ async function finishMergeTrain(
     bisectResult: gateRejected.length > 0 ? { gateRejected } : null,
     finishedAt: new Date().toISOString(),
   }, database).catch((err) => console.warn(`[merge-train] failed to persist final state for ${trainId} (non-fatal):`, errorMessage(err)));
+  boardEvents?.broadcast(projectId, "merge_train_state_changed");
 }
 
 /**
@@ -333,8 +339,9 @@ export function buildTrainGateEvidence(
 export function createMergeTrainRunner(deps: {
   database: Database;
   reconcileAlreadyMerged: (workspaceId: string) => Promise<unknown>;
+  boardEvents?: BoardEventSink;
 }) {
-  const { database, reconcileAlreadyMerged } = deps;
+  const { database, reconcileAlreadyMerged, boardEvents } = deps;
 
   /**
    * Run the whole batch as one release train: assemble → gate ONCE → land → close each member.
@@ -358,7 +365,7 @@ export function createMergeTrainRunner(deps: {
       issueNumber: ws.issueNumber,
     }));
 
-    const trainStart = await beginMergeTrain(first, label, members.map((m) => m.workspaceId), database);
+    const trainStart = await beginMergeTrain(first, label, members.map((m) => m.workspaceId), database, boardEvents);
     if (trainStart === "already_in_flight") {
       // #1153: never assemble a second train while one is already unfinished — that is exactly
       // what turned a queue into a livelock (each new train contends for the repo lock the
@@ -393,6 +400,7 @@ export function createMergeTrainRunner(deps: {
       const reason = `could not acquire the repo lock within ${Math.round(MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS / 60_000)}m: ${errorMessage(err)}`;
       unregisterLiveMergeTrain(trainId);
       await updateMergeTrainState(trainId, { state: "abandoned", reconciledReason: reason, finishedAt: new Date().toISOString() }, database).catch(() => undefined);
+      boardEvents?.broadcast(projectId, "merge_train_state_changed");
       yield { type: "error", workspaceId: first.id, issueNumber: first.issueNumber, issueTitle: first.issueTitle, error: `train abandoned: ${reason}` };
       yield { type: "done", merged: [], failed: members.map((m) => m.workspaceId), skipped: [] };
       return;
@@ -418,6 +426,7 @@ export function createMergeTrainRunner(deps: {
           let gateWorktree: string | null = null;
           try {
             await updateMergeTrainState(trainId, { state: "gating" }, database).catch(() => undefined);
+            boardEvents?.broadcast(projectId, "merge_train_state_changed");
             // #713: DB-backed claim guard alongside the namespace — the train leaf lives
             // under the same `.worktrees` root as every live workspace's.
             gateWorktree = await gitService.createWorktree(repoPath, trainRef, undefined, {
@@ -504,7 +513,7 @@ export function createMergeTrainRunner(deps: {
     }
 
     try {
-      await finishMergeTrain(trainId, result, members, database);
+      await finishMergeTrain(trainId, projectId, result, members, database, boardEvents);
     } finally {
       // #1181: the row's terminal state is persisted (or deliberately left `abandoned`) — only
       // now may a sweep treat it as it finds it. Idempotent with the lock-failure clear above.
