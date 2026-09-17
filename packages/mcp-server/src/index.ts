@@ -119,6 +119,12 @@ import { registerGetButlerSkill, registerSetButlerSkill } from "./tools/butler-s
 import { registerLaunchWorkspace } from "./tools/launch-workspace.js";
 import { registerWaitWorkspace } from "./tools/wait-workspace.js";
 import { registerDriveReviewEffectiveness } from "./tools/drive-review-effectiveness.js";
+import {
+  registerListMergeTrains,
+  registerGetMergeTrain,
+  registerCancelMergeTrain,
+  registerReleaseTrainWindow,
+} from "./tools/merge-trains.js";
 
 const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   get_context: registerGetContext,
@@ -210,6 +216,10 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   get_drive: registerGetDrive,
   finish_drive: registerFinishDrive,
   drive_review_effectiveness: registerDriveReviewEffectiveness,
+  list_merge_trains: registerListMergeTrains,
+  get_merge_train: registerGetMergeTrain,
+  cancel_merge_train: registerCancelMergeTrain,
+  release_train_window: registerReleaseTrainWindow,
   register_project: registerRegisterProject,
   create_project: registerCreateProject,
   list_projects: registerListProjects,

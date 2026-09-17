@@ -17,7 +17,11 @@ export type McpToolCategory =
   // #774 — the worker fleet. Deliberately its own category rather than folded into
   // "sessions": these are about worker MACHINES, and `get_fleet_friction` (agent tool-call
   // friction, a "sessions" tool) already collides with them by name.
-  | "fleet";
+  | "fleet"
+  // #1195 — merge trains: a persisted release train (batched merge + gate run) and its
+  // batching window. Distinct from "workspaces" (a train spans several workspaces) and from
+  // "review" (a train's gate is not a code review).
+  | "merge-trains";
 
 export interface McpToolDefinition {
   name: string;
@@ -42,6 +46,7 @@ export const MCP_TOOL_CATEGORIES: { id: McpToolCategory; label: string }[] = [
   { id: "butler", label: "Butler" },
   { id: "plugins", label: "Plugin Loops & Gates" },
   { id: "fleet", label: "Worker Fleet" },
+  { id: "merge-trains", label: "Merge Trains" },
 ];
 
 export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
@@ -185,4 +190,9 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   { name: "set_plugin_output_location", description: "Set where a plugin writes its output for one project: \"leading\" (the product repo) or \"sidecar\" (a separate <slug>-requirements repo). Prefer passing `location` to enable_plugin instead — enabling scaffolds, so changing the location afterwards does not move what was already written.", category: "plugins" },
   { name: "get_plugin_scaffold", description: "Read the plugin's scaffolded profile as an INTERVIEW: the unresolved TODO markers, each with its index and the question it asks. Ask the USER these questions — the answers are project facts, not things to invent — then submit them with fill_plugin_scaffold.", category: "plugins" },
   { name: "fill_plugin_scaffold", description: "Answer the plugin profile's TODO markers by INDEX (from get_plugin_scaffold). Only call this with answers the user actually gave: the profile drives what the plugin's loops generate, so an invented answer silently becomes a wrong requirement register.", category: "plugins" },
+  // merge-trains (#1195)
+  { name: "list_merge_trains", description: "List merge trains for a project (newest first): persisted release-train rows covering in-flight (assembling/gating/landing) and terminal (landed/red/abandoned) history. Optionally filter by state.", category: "merge-trains" },
+  { name: "get_merge_train", description: "Get a single merge train by ID: the row plus its parsed gate evidence (landed/dropped/unresolved members, gate-run counts, mergeSha) and the full bisect-tree attempt list (#1189, one entry per assemble/gate/land cycle) in the order attempts finished.", category: "merge-trains" },
+  { name: "cancel_merge_train", description: "Cancel a merge train (#1153): the only remedy an operator had for a stranded train besides a full server restart. Marks the row abandoned with a reason. Fails with 409 when the train is already terminal (landed/red/abandoned). Delegates to the board server's cancel route so the state check and board-event broadcast run exactly once.", category: "merge-trains" },
+  { name: "release_train_window", description: "Operator 'depart now' for a project's merge-train batching window (#1186): requests an immediate release of the pending set as one train, regardless of size, wait, or a busy gate (a live hold still wins until it expires). Fails with 409 when the project has no open window. Delegates to the board server's window-release route.", category: "merge-trains" },
 ];

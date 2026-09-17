@@ -6,6 +6,8 @@ import {
   normalizeStallSignal,
   normalizeAgentQuestion,
   normalizeStatusTransition,
+  normalizeMergeTrainEvent,
+  normalizeTrainWindowVerdict,
   mergeFlightRecorderEvents,
   filterFlightRecorderEvents,
   collectFlightRecorderFacets,
@@ -156,6 +158,54 @@ describe("normalizeStatusTransition", () => {
     expect(
       normalizeStatusTransition({ workspaceId: "ws1", issueId: null, issueNumber: null, from: "active", to: "reviewing", at: at(1) }),
     ).toMatchObject({ kind: "status_transition", severity: "info" });
+  });
+});
+
+describe("normalizeMergeTrainEvent (#1195)", () => {
+  it("returns null when the state did not change", () => {
+    expect(normalizeMergeTrainEvent({ trainId: "t1", from: "gating", to: "gating", memberCount: 2, at: at(1) })).toBeNull();
+  });
+
+  it("maps landed to an info 'merge' and red/abandoned to a warn 'merge_failure', project-wide", () => {
+    const landed = normalizeMergeTrainEvent({ trainId: "t1", from: "landing", to: "landed", memberCount: 2, at: at(1) });
+    expect(landed).toMatchObject({ id: "train:t1:landed", kind: "merge", severity: "info", workspaceId: null, repo: null });
+    expect(landed?.summary).toBe("merge train (2 members): landing → landed");
+
+    const red = normalizeMergeTrainEvent({ trainId: "t1", from: "gating", to: "red", memberCount: 1, at: at(2) });
+    expect(red).toMatchObject({ kind: "merge_failure", severity: "warn" });
+    expect(red?.summary).toBe("merge train (1 member): gating → red");
+
+    const abandoned = normalizeMergeTrainEvent({ trainId: "t1", from: "assembling", to: "abandoned", memberCount: 3, at: at(3) });
+    expect(abandoned).toMatchObject({ kind: "merge_failure", severity: "warn" });
+  });
+
+  it("reports an in-flight transition as an info status_transition and a first sighting as 'entered'", () => {
+    const gating = normalizeMergeTrainEvent({ trainId: "t1", from: "assembling", to: "gating", memberCount: 2, at: at(1) });
+    expect(gating).toMatchObject({ kind: "status_transition", severity: "info" });
+    const first = normalizeMergeTrainEvent({ trainId: "t1", from: null, to: "assembling", memberCount: 2, at: at(1) });
+    expect(first?.summary).toBe("merge train (2 members) entered assembling");
+  });
+});
+
+describe("normalizeTrainWindowVerdict (#1195)", () => {
+  it("returns null when neither release nor reason changed", () => {
+    const v = { release: false as const, reason: "accumulating" as const };
+    expect(normalizeTrainWindowVerdict({ from: v, to: { ...v }, pendingCount: 1, at: at(1) })).toBeNull();
+  });
+
+  it("emits a holding/departing summary carrying the reason and pending count", () => {
+    const hold = normalizeTrainWindowVerdict({ from: null, to: { release: false, reason: "gate_busy" }, pendingCount: 2, at: at(1) });
+    expect(hold).toMatchObject({ kind: "status_transition", severity: "info", workspaceId: null });
+    expect(hold?.summary).toBe("merge-train window holding (2 pending) — gate_busy");
+
+    const depart = normalizeTrainWindowVerdict({
+      from: { release: false, reason: "gate_busy" },
+      to: { release: true, reason: "operator_release" },
+      pendingCount: 2,
+      at: at(2),
+    });
+    expect(depart?.summary).toBe("merge-train window departing (2 pending) — operator_release");
+    expect(depart?.id).not.toBe(hold?.id);
   });
 });
 

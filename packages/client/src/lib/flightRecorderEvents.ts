@@ -15,6 +15,7 @@
 
 import type { CrossRepoActivityEntry, CrossRepoActivityKind } from "./crossRepoActivity.js";
 import type { AgentStallSignal } from "./detectAgentStall.js";
+import type { MergeTrainState, MergeTrainWindowVerdictDto } from "@agentic-kanban/shared";
 
 export type FlightRecorderSeverity = "error" | "warn" | "info";
 
@@ -269,6 +270,86 @@ export function normalizeStatusTransition(input: StatusTransitionInput): FlightR
       issueId: input.issueId,
       sessionId: input.sessionId ?? null,
     },
+  };
+}
+
+// ── Merge trains (#1195) ────────────────────────────────────────────────────────
+
+export interface MergeTrainStateInput {
+  trainId: string;
+  /** Prior state (null = first observation); no event is emitted when from === to. */
+  from: MergeTrainState | null;
+  to: MergeTrainState;
+  memberCount: number;
+  at: string;
+}
+
+/** Train states that read as the release actually failing (as opposed to landing). */
+const TRAIN_FAILURE_STATES: ReadonlySet<MergeTrainState> = new Set(["red", "abandoned"]);
+
+/**
+ * Normalize a merge-train row's state change (#1195) into a flight-recorder event, or null
+ * when the state didn't actually change. This is a project-wide event — a train spans several
+ * workspaces, so it carries no single `workspaceId`/transcript target, unlike a per-workspace
+ * status transition.
+ */
+export function normalizeMergeTrainEvent(input: MergeTrainStateInput): FlightRecorderEvent | null {
+  if (input.from === input.to) return null;
+  const members = `${input.memberCount} member${input.memberCount === 1 ? "" : "s"}`;
+  const isFailure = TRAIN_FAILURE_STATES.has(input.to);
+  const isLanded = input.to === "landed";
+  const kind: FlightRecorderEventKind = isLanded ? "merge" : isFailure ? "merge_failure" : "status_transition";
+  const summary = input.from
+    ? `merge train (${members}): ${input.from} → ${input.to}`
+    : `merge train (${members}) entered ${input.to}`;
+  return {
+    id: `train:${input.trainId}:${input.to}`,
+    timestamp: input.at,
+    workspaceId: null,
+    workspaceLabel: null,
+    repo: null,
+    severity: isFailure ? "warn" : "info",
+    kind,
+    summary,
+    issueId: null,
+    issueNumber: null,
+    transcript: null,
+  };
+}
+
+export interface TrainWindowVerdictInput {
+  /** Prior verdict (null = first observation); no event is emitted when it didn't change. */
+  from: MergeTrainWindowVerdictDto | null;
+  to: MergeTrainWindowVerdictDto;
+  pendingCount: number;
+  at: string;
+}
+
+/**
+ * Normalize a merge-train batching window's verdict change (#1186) into a flight-recorder
+ * event — a member joined/left the window, the verdict flipped hold↔release, or an operator
+ * held/released it. Project-wide, like {@link normalizeMergeTrainEvent}.
+ */
+export function normalizeTrainWindowVerdict(input: TrainWindowVerdictInput): FlightRecorderEvent | null {
+  if (input.from && input.from.release === input.to.release && input.from.reason === input.to.reason) {
+    return null;
+  }
+  const pending = `${input.pendingCount} pending`;
+  const summary = input.to.release
+    ? `merge-train window departing (${pending}) — ${input.to.reason}`
+    : `merge-train window holding (${pending}) — ${input.to.reason}`;
+  return {
+    id: `train-window:${input.to.release}:${input.to.reason}:${input.at}`,
+    timestamp: input.at,
+    workspaceId: null,
+    workspaceLabel: null,
+    repo: null,
+    severity: "info",
+    kind: "status_transition",
+    summary,
+    issueId: null,
+    issueNumber: null,
+    transcript: null,
   };
 }
 
