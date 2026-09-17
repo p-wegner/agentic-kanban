@@ -148,7 +148,7 @@ describe("runTrainReview (#1194)", () => {
       return `\`\`\`json\n{"summary":"s","findings":[{"member":"#2","severity":"CRITICAL","file":"src/2.ts","message":"unchecked null"}]}\n\`\`\``;
     });
     const res = await runTrainReview(
-      { projectId, trainLabel: "q1", trainRef: "kanban/train/q1", baseBranch: "main", gateWorktree: "C:/nope/wt", members, blocking: true, thorough: false },
+      { projectId, trainLabel: "q1", trainRef: "kanban/train/q1", baseBranch: "main", gateWorktree: "C:/nope/wt", repoPath: "C:/nope", members, blocking: true, thorough: false },
       { database: db, invoke, buildContext: async () => "INJECTED DIFF" },
     );
     expect(invoke).toHaveBeenCalledTimes(1);
@@ -169,7 +169,7 @@ describe("runTrainReview (#1194)", () => {
     disposers.push(dispose);
     const { projectId, members } = await seed(db);
     const res = await runTrainReview(
-      { projectId, trainLabel: "q2", trainRef: "kanban/train/q2", baseBranch: "main", gateWorktree: "C:/nope/wt", members, blocking: false, thorough: false },
+      { projectId, trainLabel: "q2", trainRef: "kanban/train/q2", baseBranch: "main", gateWorktree: "C:/nope/wt", repoPath: "C:/nope", members, blocking: false, thorough: false },
       {
         database: db,
         invoke: async () => `{"findings":[{"member":"#1","severity":"MAJOR","message":"leaky abstraction"}]}`,
@@ -188,7 +188,7 @@ describe("runTrainReview (#1194)", () => {
     disposers.push(dispose);
     const { projectId, members } = await seed(db);
     const res = await runTrainReview(
-      { projectId, trainLabel: "q3", trainRef: "kanban/train/q3", baseBranch: "main", gateWorktree: "C:/nope/wt", members, blocking: true, thorough: false },
+      { projectId, trainLabel: "q3", trainRef: "kanban/train/q3", baseBranch: "main", gateWorktree: "C:/nope/wt", repoPath: "C:/nope", members, blocking: true, thorough: false },
       { database: db, invoke: async () => { throw new Error("claude.exe timed out after 5ms"); }, buildContext: async () => null },
     );
     expect(res.sided).toEqual([]);

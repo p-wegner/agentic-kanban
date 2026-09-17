@@ -27,16 +27,18 @@
  *    `review: { status: "failed" }` and the log names it; an operator who wants a reviewer outage
  *    to block landings puts the project on `standard`, where every ticket is reviewed on exit.
  *
- * The siding itself — the ticket comment, the `train-siding` tag, the `/turn` nudge and the
- * branch-tip re-admission — is #1192's `merge-train-siding.service.ts`. That branch is not in
- * this tree yet, so `recordTrainReviewSiding` below is the seam: it posts the finding as a
- * `merge-attempt` comment on the member ticket (the part a reviewer of the ticket needs
- * regardless) and is where `recordTrainSidingDrop` plugs in once #1192 lands.
+ * The siding itself — the `train-siding` tag, the `/turn` nudge, the attempt cap and the
+ * branch-tip re-admission — is #1192's `merge-train-siding.service.ts`. `recordTrainReviewSiding`
+ * below posts the findings as a `merge-attempt` comment on the member ticket (the part the
+ * author needs whatever else happens) and, for a member the review actually sided, records the
+ * siding through `recordTrainSidingDrop` — the same row, tag and sha-keyed hold a conflict drop
+ * gets, so the member is withheld from the next window until its tip moves.
  */
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { extractModelJson } from "@agentic-kanban/shared/lib/model-json";
+import { revParse } from "@agentic-kanban/shared/lib/git-service";
 import type { MergeTrainReviewEvidenceDto } from "@agentic-kanban/shared/types";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import { getLeadIssueForMembersBlock } from "../repositories/workspace-issue-members.repository.js";
@@ -45,6 +47,7 @@ import { buildReviewContext } from "./phase-context.service.js";
 import { buildMembersBlock, buildReviewPrompt } from "./review.service.js";
 import { resolveProjectReviewMode } from "./review-mode-pref.js";
 import type { RiskPosture } from "./risk-posture.service.js";
+import { recordTrainSidingDrop, type TrainSidingDeps } from "./merge-train-siding.service.js";
 
 /** A generous budget: the review is the whole train's, and one is run per train, not per member. */
 export const TRAIN_REVIEW_TIMEOUT_MS = 20 * 60 * 1000;
@@ -257,7 +260,20 @@ export interface TrainReviewDeps {
   /** Injected for tests; defaults to the real diff builder against the staging worktree. */
   buildContext?: (args: { workingDir: string; baseRef: string }) => Promise<string | null>;
   now?: () => Date;
+  /**
+   * #1192: the port a sided member's agent is nudged through (409-safe — a busy agent is not an
+   * error). When the caller has no session port, the siding is still RECORDED (the hold is the
+   * part that matters; the nudge is best-effort) and the missing nudge is logged.
+   */
+  sendTurn?: TrainSidingDeps["sendTurn"];
+  /** Injected for tests; resolves a member's branch tip and the train ref. Defaults to `git rev-parse`. */
+  getBranchHeadSha?: TrainSidingDeps["getBranchHeadSha"];
 }
+
+/** The `sendTurn` a caller without a session port gets: the siding row lands, the nudge is logged as undelivered. */
+const noSessionPort: TrainSidingDeps["sendTurn"] = async (workspaceId) => {
+  throw new Error(`no session port wired into the train review — ${workspaceId} was sided but not nudged`);
+};
 
 export interface TrainReviewRunResult {
   /** Members to pull into a siding — empty when the review is advisory (`sprint`) or clean. */
@@ -267,18 +283,34 @@ export interface TrainReviewRunResult {
 }
 
 /**
- * #1192 seam. Record that the train review sided `member`: today a `merge-attempt` comment on
- * the ticket carrying the findings (which the author needs whatever else happens). Once
- * `merge-train-siding.service.ts` (#1192) is in this tree, the call to add here is
- * `recordTrainSidingDrop(member, { reason, baseBranch, trainTipSha, repoPath }, { database, sendTurn })`
- * — its branch-tip re-admission rule is exactly right for a review finding too: the member is
- * withheld until its tip moves, then rejoins the next window. TODO(#1192).
+ * Record what the train review found about `member`: a `merge-attempt` comment on the ticket
+ * carrying the findings (which the author needs whatever else happens), and — when the review
+ * SIDED the member — the #1192 siding itself via `recordTrainSidingDrop`: the
+ * `workspace_train_siding` row keyed on the member's current branch tip, the `train-siding` tag,
+ * the `/turn` nudge, and the attempt cap. Its branch-tip re-admission rule is exactly right for
+ * a review finding too: the member is withheld until its tip moves, then rejoins the next window.
+ *
+ * The comment is written first and independently: a siding-record failure (which
+ * `recordTrainSidingDrop` swallows and logs) must not lose the findings.
  */
 export async function recordTrainReviewSiding(
-  member: Pick<TrainReviewMember, "workspaceId" | "issueId">,
-  args: { trainLabel: string; findings: TrainReviewFinding[]; blocking: boolean; sided: boolean; now: string },
-  database: Database,
+  member: Pick<TrainReviewMember, "workspaceId" | "issueId" | "branch" | "issueNumber">,
+  args: {
+    trainLabel: string;
+    findings: TrainReviewFinding[];
+    blocking: boolean;
+    sided: boolean;
+    now: string;
+    /** The blocking reason `parseTrainReviewVerdict` built for this member; only read when `sided`. */
+    reason?: string;
+    baseBranch: string;
+    /** The assembled train's tip (a sha where resolvable, else the train ref) — what the member was reviewed against. */
+    trainTipSha: string;
+    repoPath: string;
+  },
+  deps: Pick<TrainSidingDeps, "database" | "getBranchHeadSha"> & { sendTurn?: TrainSidingDeps["sendTurn"] },
 ): Promise<void> {
+  const database = deps.database ?? db;
   await insertIssueComment({
     issueId: member.issueId,
     workspaceId: member.workspaceId,
@@ -288,6 +320,12 @@ export async function recordTrainReviewSiding(
     payload: { eventType: "train-review", trainLabel: args.trainLabel, sided: args.sided, findings: args.findings },
     createdAt: args.now,
   }, database);
+  if (!args.sided) return;
+  await recordTrainSidingDrop(
+    { workspaceId: member.workspaceId, issueId: member.issueId, issueNumber: member.issueNumber, branch: member.branch },
+    { reason: args.reason ?? `train review (#1194): ${args.findings.length} blocking finding(s)`, baseBranch: args.baseBranch, trainTipSha: args.trainTipSha, repoPath: args.repoPath },
+    { database, sendTurn: deps.sendTurn ?? noSessionPort, getBranchHeadSha: deps.getBranchHeadSha, now: args.now },
+  );
 }
 
 /**
@@ -303,6 +341,8 @@ export async function runTrainReview(
     trainRef: string;
     baseBranch: string;
     gateWorktree: string;
+    /** The project's repo (NOT the staging worktree) — where a sided member's branch tip is read and re-checked (#1192). */
+    repoPath: string;
     members: TrainReviewMember[];
     blocking: boolean;
     thorough: boolean;
@@ -310,6 +350,9 @@ export async function runTrainReview(
   deps: TrainReviewDeps = {},
 ): Promise<TrainReviewRunResult> {
   const database = deps.database ?? db;
+  const getBranchHeadSha = deps.getBranchHeadSha ?? (async (repo: string, ref: string) => {
+    try { return (await revParse(repo, ref)).trim() || null; } catch { return null; }
+  });
   const invoke = deps.invoke ?? ((prompt, opts) => invokeClaudePrompt(prompt, opts));
   const buildContext = deps.buildContext ?? (({ workingDir, baseRef }) => buildReviewContext({ workingDir, baseRef, isDirect: false }));
   const now = (deps.now ?? (() => new Date()))().toISOString();
@@ -331,12 +374,17 @@ export async function runTrainReview(
   }
 
   const sidedIds = new Set(args.blocking ? verdict.blocking.map((b) => b.workspaceId) : []);
+  // #1192: the sha the sided members were reviewed against — the assembled train, which still
+  // exists at this point (the review runs inside the gate). Resolved once, only when needed.
+  const trainTipSha = sidedIds.size > 0 ? (await getBranchHeadSha(args.repoPath, args.trainRef)) ?? args.trainRef : args.trainRef;
   for (const m of args.members) {
     const mine = verdict.findings.filter((f) => f.workspaceId === m.workspaceId);
     if (mine.length === 0) continue;
     await recordTrainReviewSiding(m, {
       trainLabel: args.trainLabel, findings: mine, blocking: args.blocking, sided: sidedIds.has(m.workspaceId), now,
-    }, database).catch((err) => console.warn(`${tag}: could not comment on ${m.workspaceId} (non-fatal): ${errorMessage(err).slice(0, 200)}`));
+      reason: verdict.blocking.find((b) => b.workspaceId === m.workspaceId)?.reason,
+      baseBranch: args.baseBranch, trainTipSha, repoPath: args.repoPath,
+    }, { database, sendTurn: deps.sendTurn, getBranchHeadSha }).catch((err) => console.warn(`${tag}: could not comment on ${m.workspaceId} (non-fatal): ${errorMessage(err).slice(0, 200)}`));
   }
   const unattributed = verdict.findings.filter((f) => f.workspaceId === null);
   if (unattributed.length > 0) {
