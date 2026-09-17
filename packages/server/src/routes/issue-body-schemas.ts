@@ -56,8 +56,9 @@ export const groupScanBody = z.object({
   projectId: requiredRaw("projectId is required"),
   apply: z.boolean().optional(),
   // #918: "touched-files" is the deterministic (no LLM call) seed over `touchedFilesJson`;
+  // #1191: "train-conflicts" reads the merge trains' member-vs-member conflict clusters;
   // default "llm" keeps the existing AI-consolidation behaviour unchanged.
-  mode: z.enum(["llm", "touched-files"]).optional(),
+  mode: z.enum(["llm", "touched-files", "train-conflicts"]).optional(),
   minSharedFiles: z.number().int().positive().optional(),
 });
 

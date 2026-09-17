@@ -320,6 +320,10 @@ export function buildTrainGateEvidence(
       gateRejectedCount: gateRejected.length,
       // #1189: the complete bisect tree, replacing the live appends made as each node finished.
       attempts: result.attempts,
+      // #1191: member-vs-member conflict clusters, the input to `group-scan` mode `train-conflicts`.
+      ...(result.conflictClusters && result.conflictClusters.length > 0
+        ? { conflictClusters: result.conflictClusters.map((c) => ({ workspaceIds: [...c.workspaceIds] })) }
+        : {}),
     },
     gateRejected,
   };
@@ -509,6 +513,15 @@ export function createMergeTrainRunner(deps: {
       // #1181: the row's terminal state is persisted (or deliberately left `abandoned`) — only
       // now may a sweep treat it as it finds it. Idempotent with the lock-failure clear above.
       unregisterLiveMergeTrain(trainId);
+    }
+
+    // #1191: the member-vs-member conflict clusters are persisted in the evidence above; the
+    // deterministic `group-scan` mode `train-conflicts` (`propose_ticket_groups`) reads them
+    // back as candidate `coupled_with` groups — proposed, never auto-applied, since coupling
+    // two tickets is an operator's call (decision 015).
+    if (result.conflictClusters && result.conflictClusters.length > 0) {
+      console.log(`[merge-train] ${label}: ${result.conflictClusters.length} member-vs-member conflict cluster(s) recorded — ` +
+        `run propose_ticket_groups mode=train-conflicts to review them as candidate ticket groups`);
     }
 
     // #1184: one event per member — a bisect re-drops a base-conflicting member in every

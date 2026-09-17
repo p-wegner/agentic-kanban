@@ -3,6 +3,55 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-17 — #1191: conflict-aware train assembly (branch, not landed)
+
+**On `feature/ak-1191-conflict-aware-assembly-overlap-graph-di`**, NOT on master and NOT pushed.
+What it is: `assembleMergeTrain` no longer stacks members in plan order and drops whoever
+happens to collide with an earlier sibling. For 2+ members it first builds a pairwise
+member-vs-member conflict graph (`services/merge-train-conflict-graph.ts`: read-only
+`git merge-tree` per pair, verdict cached per sorted tip pair in a bounded module cache, so a
+bisect's sub-attempts over the same tips pay for no pair twice), keeps a maximum conflict-free
+set (`pickConflictFreeSet`, greedy min-degree — a heuristic, exact MIS is NP-hard and a train
+has ~4–13 members), stacks the kept set in least-overlap order (`orderByLeastOverlap`: fewest
+remaining conflicts, ties by total degree, then caller order), and reports the connected
+components as `conflictClusters`. A graph-excluded member is dropped as
+`conflicts with <branch> (#N) — deferred to the next train` with `deferred: true`; it stays
+ready, so the #905 window collects it on the next tick — that IS "train 2", no new orchestrator
+queue. A base-only conflict is still dropped by the merge itself, not deferred. `--no-ff` and
+`assertTrainPreservesAncestry` are untouched; nothing rebases a member branch.
+
+Clusters reach ticket groups (decision 015) as **candidates**, never as auto-written edges: the
+runner persists them in `merge_trains.gate_evidence.conflictClusters`
+(`MergeTrainGateEvidenceDto`), and `propose_ticket_groups mode=train-conflicts` /
+`POST /api/issues/group-scan {mode:"train-conflicts"}` (`scanMergeTrainConflictsForTicketGroups`)
+reads the last 20 trains back, maps workspaces to live, non-terminal issues, excludes sequential
+pairs, and proposes one group per component with the train labels in the rationale;
+`apply=true` writes `coupled_with` through the existing `applyTicketGroupProposals`.
+
+**Verified by:** `pnpm typecheck` green (5 packages); `pnpm check:arch` 0 errors (the 30
+`startup-bypasses-repositories` warnings pre-exist); worktree vitest on the eight touched files
+66/66 (`merge-train-conflict-graph` 16 incl. the cache block with an injected fake git;
+`merge-train` real-repo: sibling conflict names the kept member + deferred, plan-order clash
+`[clash, a, b]` now lands `a, b` and defers `clash`, base-only drop not deferred;
+`merge-train-evidence` carries/omits clusters; new `ticket-group-scan-train-conflicts` 6/6:
+propose, union across trains, terminal-member rejection, sequential exclusion, empty scan,
+apply once); the four openapi tests 19/19 after `pnpm openapi:generate`; `bundled-skill-freshness`
+after `pnpm skill:generate`. `pnpm test:mine -- --changed HEAD` ran at scope=full: shared
+1240, mcp-server 197, client 1901 all green; server 9171 green with 4 failures, two of them this
+change (both fixed — the skill regeneration, and `merge-train-orchestration` now pins the
+least-overlap landing order `[f2, f1]` since f1 collided with the deferred f3) and two
+load-flaky timing tests this diff does not touch (`base-branch-health-recency`,
+`base-health-reprobe-guard`: 22/22 re-run alone, on a box that was swapping — a finding, not
+this ticket's).
+
+**Not done, deliberately:** `computePlan` (`merge-train-window.ts`) is not extended — the
+pairwise cost lives in `assembleMergeTrain` so the sequential path never pays it. The prior
+uncommitted draft auto-wrote `coupled_with` edges after every train; replaced by evidence + scan,
+because decision 015 makes coupling an operator's call. No UI for the clusters yet (the
+"Merge train" panel reads `gateEvidence` and could list them — backlog). A deferred member will
+usually conflict with the BASE once its sibling lands and then take the per-ticket rebase path;
+the deferral pays off when the sibling itself fails the gate.
+
 ## 2026-09-15 — #1160: verify-chain slots derived from capacity (branch, not landed)
 
 **On `worktree-agent-a042194dae3f10a55`** (nested worktree `.claude/worktrees/agent-a042194dae3f10a55`),

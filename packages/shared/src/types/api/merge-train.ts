@@ -52,6 +52,13 @@ export interface MergeTrainGateEvidenceDto {
    * exposes partial progress; the final write carries the complete list.
    */
   attempts?: MergeTrainAttemptDto[];
+  /**
+   * #1191 — connected components of the member-vs-member conflict graph computed while
+   * assembling (deduped across bisect attempts). Members of one cluster collided with EACH
+   * OTHER, not merely with the base: the input `group-scan` mode `train-conflicts` turns into
+   * candidate `coupled_with` groups. Absent when no two members conflicted.
+   */
+  conflictClusters?: Array<{ workspaceIds: string[] }>;
 }
 
 /** How one train attempt (#1189) ended. Only `red` blames code; the other failures are the train's. */
