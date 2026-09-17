@@ -285,15 +285,17 @@ async function finishMergeTrain(
  * members, and the panel's red-debt (dropped minus landed) was wrong in sign and size. The
  * first reason is kept because it is the top-level attempt's, recorded against the full batch.
  */
-function uniqueByWorkspace<T extends { member: { workspaceId: string }; reason: string }>(
+function uniqueByWorkspace<T extends { member: { workspaceId: string }; reason: string; deferred?: true }>(
   entries: T[],
-): Array<{ workspaceId: string; reason: string }> {
+): Array<{ workspaceId: string; reason: string; deferred?: true }> {
   const seen = new Set<string>();
-  const out: Array<{ workspaceId: string; reason: string }> = [];
+  const out: Array<{ workspaceId: string; reason: string; deferred?: true }> = [];
   for (const e of entries) {
     if (seen.has(e.member.workspaceId)) continue;
     seen.add(e.member.workspaceId);
-    out.push({ workspaceId: e.member.workspaceId, reason: e.reason });
+    // #1197: a `deferred` (member-vs-member, #1191) drop keeps its mark on the wire, so the
+    // panel can say "waits for the next train" instead of showing a bare conflict reason.
+    out.push({ workspaceId: e.member.workspaceId, reason: e.reason, ...(e.deferred ? { deferred: true as const } : {}) });
   }
   return out;
 }

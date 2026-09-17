@@ -724,7 +724,11 @@ async function runTrainAttempt(args: {
       included: asm.included.map((m) => m.workspaceId),
       // #1193: `result.dropped` (not `asm.dropped`) so a member dropped during the speculative
       // re-assembly after a base move (see below) is still visible on this attempt's node.
-      dropped: result.dropped.map((d) => ({ workspaceId: d.member.workspaceId, reason: d.reason })),
+      dropped: result.dropped.map((d) => ({
+        workspaceId: d.member.workspaceId,
+        reason: d.reason,
+        ...(d.deferred ? { deferred: true as const } : {}),
+      })),
       gateStartedAt,
       gateFinishedAt,
       gateRuns: result.gateRuns > 0 ? 1 : 0,

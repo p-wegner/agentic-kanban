@@ -134,7 +134,20 @@ describe("buildTrainGateEvidence (#1184)", () => {
       members,
     );
     expect(gateEvidence.conflictClusters).toEqual([{ workspaceIds: ["a", "b"] }]);
-    expect(gateEvidence.dropped).toEqual([{ workspaceId: "b", reason: "conflicts with f-a — deferred to the next train" }]);
+    // #1197: the `deferred` mark reaches the wire, so the panel can tell "waits for the next
+    // train" from a base conflict the author has to rebase out of.
+    expect(gateEvidence.dropped).toEqual([
+      { workspaceId: "b", reason: "conflicts with f-a — deferred to the next train", deferred: true },
+    ]);
+  });
+
+  it("#1197: a plain (base) conflict drop carries NO `deferred` key, so older readers see the old shape", () => {
+    const { gateEvidence } = buildTrainGateEvidence(
+      result({ dropped: [{ member: m("b"), reason: "conflict in shared.txt" }], gateRuns: 0 }),
+      [m("b")],
+    );
+    expect(gateEvidence.dropped).toEqual([{ workspaceId: "b", reason: "conflict in shared.txt" }]);
+    expect("deferred" in gateEvidence.dropped![0]).toBe(false);
   });
 });
 
