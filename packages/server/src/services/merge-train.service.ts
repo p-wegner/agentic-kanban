@@ -234,6 +234,15 @@ export interface TrainRunResult {
    * sends them to the wrong place.
    */
   gateRejected: Array<{ member: TrainMember; reason: string }>;
+  /**
+   * #1194 — members a TRAIN REVIEW attributed a blocking finding to (`runGate`'s `sided`).
+   * Neither `dropped` (a conflict) nor `gateRejected` (the code itself failed the gate): the
+   * assembled tree passed the gate fine, but the reviewer found a problem specific to this
+   * member's ticket. Pulled from `included` and re-landed without them — same "don't fail the
+   * whole train for one member" shape as `dropped`/`gateRejected`, a third reason a member can
+   * leave a train before landing.
+   */
+  sided: Array<{ member: TrainMember; reason: string }>;
   mergeSha?: string;
   /** Members that landed but could not be closed out — they ARE merged; only bookkeeping lags. */
   closeFailures: Array<{ member: TrainMember; reason: string }>;
@@ -251,12 +260,23 @@ export interface TrainRunResult {
   attempts: MergeTrainAttemptDto[];
 }
 
+/**
+ * The gate port. `sided` (#1194) is set when a train-scoped review ran beside the gate and
+ * attributed a blocking finding to specific members. Only meaningful when `passed` is true: a
+ * review finding pulls its member into a siding, it does not fail the gate for everyone else.
+ */
+export type TrainGate = (ctx: { trainRef: string; trainSha: string; included: TrainMember[] }) => Promise<{
+  passed: boolean;
+  message: string;
+  sided?: Array<{ workspaceId: string; reason: string }>;
+}>;
+
 export async function runMergeTrain(args: {
   repoPath: string;
   baseBranch: string;
   members: TrainMember[];
   label: string;
-  runGate: (ctx: { trainRef: string; trainSha: string; included: TrainMember[] }) => Promise<{ passed: boolean; message: string }>;
+  runGate: TrainGate;
   closeMember: (workspaceId: string) => Promise<void>;
   /**
    * Bisect a red batch instead of rejecting it whole (#492). Default ON: without it, one bad
@@ -326,6 +346,10 @@ export async function runMergeTrain(args: {
     // thing wrong was a conflict to REBASE (observed on trains qmu4t981a / qmu4ymqjx, whose
     // bisectResult named conflicting members with "no members could be assembled").
     if (attempt.dropped.length === subset.length) return attempt;
+    // #1194: a siding only ever happens on a GREEN gate — the review attributed a finding to a
+    // member, the rest were re-assembled and either landed or conflicted (both attributed). There
+    // is nothing red left to search for, so splitting would only re-gate green code.
+    if (attempt.sided.length > 0) return attempt;
     // Nothing landed and the gate is why. A red singleton IS attribution.
     if (!bisect || subset.length <= 1) {
       return {
@@ -343,6 +367,7 @@ export async function runMergeTrain(args: {
       landed: [...first.landed, ...second.landed],
       dropped: [...attempt.dropped, ...first.dropped, ...second.dropped],
       gateRejected: [...first.gateRejected, ...second.gateRejected],
+      sided: [...first.sided, ...second.sided],
       closeFailures: [...first.closeFailures, ...second.closeFailures],
       gateRuns: attempt.gateRuns + first.gateRuns + second.gateRuns,
       attempts: [...attempt.attempts, ...first.attempts, ...second.attempts],
@@ -363,7 +388,7 @@ async function runTrainAttempt(args: {
   baseBranch: string;
   members: TrainMember[];
   label: string;
-  runGate: (ctx: { trainRef: string; trainSha: string; included: TrainMember[] }) => Promise<{ passed: boolean; message: string }>;
+  runGate: TrainGate;
   closeMember: (workspaceId: string) => Promise<void>;
   shouldLand?: () => Promise<string | null>;
   isEnvironmentFailure: (message: string) => boolean;
@@ -395,6 +420,7 @@ async function runTrainAttempt(args: {
       verdict,
       ...(verdict !== "landed" && failure ? { failureHead: failure.slice(0, 300) } : {}),
       ...(result.mergeSha ? { mergeSha: result.mergeSha } : {}),
+      ...(result.sided.length > 0 ? { sided: result.sided.map((s) => ({ workspaceId: s.member.workspaceId, reason: s.reason.slice(0, 300) })) } : {}),
     };
     if (args.onAttempt) {
       try {
@@ -414,7 +440,7 @@ async function runTrainAttempt(args: {
   // `deleteTrainRef` is itself best-effort and never throws, so it cannot mask a real error.
   try {
     if (asm.included.length === 0 || !asm.trainSha) {
-      return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], gateRuns: 0, gateFailure: "no members could be assembled onto the train" }, "assembly_empty");
+      return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], sided: [], gateRuns: 0, gateFailure: "no members could be assembled onto the train" }, "assembly_empty");
     }
 
     // Cheap insurance before spending a gate on it: if assembly somehow produced a train that
@@ -431,38 +457,84 @@ async function runTrainAttempt(args: {
     if (!gate.passed) {
       // #1154/#1189: an environment failure is the train's, not a member's — its own leaf kind.
       const verdict: MergeTrainAttemptVerdict = args.isEnvironmentFailure(gate.message) ? "env_failure" : "red";
-      return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], gateRuns: 1, gateFailure: gate.message }, verdict);
+      return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], sided: [], gateRuns: 1, gateFailure: gate.message }, verdict);
     }
 
     // #1181: last look before the base changes — a row abandoned during the gate must not land.
     const landRefused = args.shouldLand ? await args.shouldLand() : null;
     if (landRefused) {
-      return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], gateRuns: 1, gateFailure: landRefused, landRefused }, "land_refused");
+      return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], sided: [], gateRuns: 1, gateFailure: landRefused, landRefused }, "land_refused");
     }
 
-    const { mergeSha } = await landMergeTrain({
-      repoPath,
-      baseBranch,
-      trainRef: asm.trainRef,
-      trainSha: asm.trainSha,
-      baseSha: asm.baseSha,
-      included: asm.included,
-    });
+    // #1194: a train review may have attributed a blocking finding to specific members. The
+    // assembled ref that was just gated still carries their commits, so it cannot be landed
+    // as-is — it must be re-assembled WITHOUT them onto a fresh ref before landing. No re-gate:
+    // the combined tree already proved out, and removing a branch's changes is not something
+    // the gate needs to re-verify — re-gating would cost exactly the "review once" thrift this
+    // feature exists for.
+    const sidedIds = new Set((gate.sided ?? []).map((s) => s.workspaceId));
+    const sidedMembers: TrainRunResult["sided"] = asm.included
+      .filter((m) => sidedIds.has(m.workspaceId))
+      .map((member) => ({ member, reason: gate.sided!.find((s) => s.workspaceId === member.workspaceId)!.reason }));
 
-    // Bookkeeping AFTER the work is safely on the base. A failure here leaves a member merged
-    // but not marked — recoverable by the existing done-unmerged/already-merged reconcilers,
-    // and reported rather than swallowed.
-    for (const member of asm.included) {
-      try {
-        await closeMember(member.workspaceId);
-      } catch (err) {
-        const reason = errorMessage(err);
-        closeFailures.push({ member, reason });
-        console.warn(`[merge-train] landed ${member.branch} but could not close its workspace: ${reason.slice(0, 200)}`);
+    if (sidedIds.size === 0) {
+      const { mergeSha } = await landMergeTrain({
+        repoPath, baseBranch, trainRef: asm.trainRef, trainSha: asm.trainSha, baseSha: asm.baseSha, included: asm.included,
+      });
+      for (const member of asm.included) {
+        try {
+          await closeMember(member.workspaceId);
+        } catch (err) {
+          const reason = errorMessage(err);
+          closeFailures.push({ member, reason });
+          console.warn(`[merge-train] landed ${member.branch} but could not close its workspace: ${reason.slice(0, 200)}`);
+        }
       }
+      return await finish({ trainRef: asm.trainRef, landed: asm.included, dropped: asm.dropped, mergeSha, closeFailures, gateRejected: [], sided: [], gateRuns: 1 }, "landed");
     }
 
-    return await finish({ trainRef: asm.trainRef, landed: asm.included, dropped: asm.dropped, mergeSha, closeFailures, gateRejected: [], gateRuns: 1 }, "landed");
+    const toLand = asm.included.filter((m) => !sidedIds.has(m.workspaceId));
+    if (toLand.length === 0) {
+      // Everyone left in this attempt was sided — nothing to land, but every member is
+      // attributed, so there is no batch-level failure to blame on anyone else.
+      return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], sided: sidedMembers, gateRuns: 1, gateFailure: "every remaining member was sided by the train review" }, "sided");
+    }
+
+    const reassembled = await assembleMergeTrain({ repoPath, baseBranch, members: toLand, label: `${label}-sided` });
+    try {
+      if (reassembled.included.length === 0 || !reassembled.trainSha) {
+        return await finish({
+          trainRef: asm.trainRef, landed: [], dropped: [...asm.dropped, ...reassembled.dropped], closeFailures,
+          gateRejected: [], sided: sidedMembers, gateRuns: 1,
+          gateFailure: "no members could be re-assembled after removing the sided member(s)",
+        }, "sided");
+      }
+      await assertTrainPreservesAncestry(repoPath, reassembled.trainRef, reassembled.included);
+      const { mergeSha } = await landMergeTrain({
+        repoPath, baseBranch, trainRef: reassembled.trainRef, trainSha: reassembled.trainSha,
+        baseSha: reassembled.baseSha, included: reassembled.included,
+      });
+
+      // Bookkeeping AFTER the work is safely on the base. A failure here leaves a member merged
+      // but not marked — recoverable by the existing done-unmerged/already-merged reconcilers,
+      // and reported rather than swallowed.
+      for (const member of reassembled.included) {
+        try {
+          await closeMember(member.workspaceId);
+        } catch (err) {
+          const reason = errorMessage(err);
+          closeFailures.push({ member, reason });
+          console.warn(`[merge-train] landed ${member.branch} but could not close its workspace: ${reason.slice(0, 200)}`);
+        }
+      }
+
+      return await finish({
+        trainRef: asm.trainRef, landed: reassembled.included, dropped: [...asm.dropped, ...reassembled.dropped],
+        mergeSha, closeFailures, gateRejected: [], sided: sidedMembers, gateRuns: 1,
+      }, "landed");
+    } finally {
+      await deleteTrainRef(repoPath, reassembled.trainRef);
+    }
   } finally {
     await deleteTrainRef(repoPath, asm.trainRef);
   }
