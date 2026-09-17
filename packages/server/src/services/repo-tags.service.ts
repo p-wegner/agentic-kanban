@@ -53,6 +53,22 @@ export async function applyIssueTag(
 }
 
 /**
+ * Unlink ONE tag, by name, from an issue — the removal half of {@link applyIssueTag}. No-op
+ * when the issue never had this tag (unknown tag name, or a link that was already removed).
+ */
+export async function removeIssueTag(
+  issueId: string,
+  tagName: string,
+  database: Database = db,
+): Promise<void> {
+  const name = tagName.trim();
+  if (!name) return;
+  const existing = await getTagByName(name, database);
+  if (existing.length === 0) return;
+  await deleteIssueTagLinks(issueId, [existing[0].id], database);
+}
+
+/**
  * Apply `repo:<name>` tags to an issue, creating tags and links as needed. No-op for an
  * empty/blank list. Idempotent — re-applying an already-linked repo does nothing. Blank
  * entries are skipped so a stray "" never yields a `repo:` tag.

@@ -9,7 +9,7 @@ import type { BoardEventSink } from "../services/board-events.js";
 import { createMergeQueueService } from "../services/merge-queue.service.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { buildStrandedBatch, pickIntegrationWorkspace } from "../services/reconciler.service.js";
-import type { SessionLauncher } from "../services/session.manager.js";
+import type { SessionManager } from "../services/session.manager.js";
 import { resolveMergePolicy } from "./merge-strategy.js";
 import { resolveMergeGateConfig } from "../services/pre-merge-gate.service.js";
 import { listActiveMergeTrainsForProject } from "../repositories/merge-train.repository.js";
@@ -126,7 +126,9 @@ function collectGatedProjectIds(prefMap: Map<string, string>): Set<string> {
 export function createAutoMergeOrchestrator(deps: {
   database: Database;
   boardEvents?: BoardEventSink;
-  getSessionManager?: () => SessionLauncher;
+  // #1192: widened from SessionLauncher — createMergeQueueService now needs the full manager
+  // for a siding drop's `/turn` nudge. Every real caller already passes it.
+  getSessionManager?: () => SessionManager;
   /** Test override for the zero-candidate reconcile fallback cadence (default 10 ticks). */
   reconcileFallbackEveryTicks?: number;
 }) {
@@ -624,7 +626,7 @@ export function createAutoMergeOrchestrator(deps: {
 export function startAutoMergeOrchestrator(deps: {
   database: Database;
   boardEvents?: BoardEventSink;
-  getSessionManager?: () => SessionLauncher;
+  getSessionManager?: () => SessionManager;
   intervalMs?: number;
 }): AutoMergeOrchestratorState {
   stopAutoMergeOrchestrator();
