@@ -393,3 +393,116 @@ describe("runMergeTrain — a conflict-only member is dropped, never gate-reject
     expect(result.gateRuns).toBe(2);
   });
 }, 240000);
+
+describe("runMergeTrain — a member sided by the train review is withheld, the rest land (#1194)", () => {
+  async function seedTwoGreen() {
+    await git(["branch", "f1"]);
+    await git(["branch", "f2"]);
+    await commitFile("f1", "a.txt", "a\n");
+    await commitFile("f2", "b.txt", "b\n");
+    await git(["checkout", "-q", "main"]);
+  }
+
+  it("gate once, review once: w2 sided → w1 lands, w2's branch is untouched and NOT on main", async () => {
+    await seedTwoGreen();
+    const w2TipBefore = await revParse(repo, "f2");
+    const closed: string[] = [];
+    const runGate = vi.fn().mockResolvedValue({
+      passed: true, message: "ok",
+      sided: [{ workspaceId: "w2", reason: "train review (#1194): CRITICAL b.txt: unchecked null" }],
+    });
+
+    const result = await runMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members: [{ workspaceId: "w1", branch: "f1", issueNumber: 1 }, { workspaceId: "w2", branch: "f2", issueNumber: 2 }],
+      label: "t-1194",
+      runGate,
+      closeMember: async (id) => { closed.push(id); },
+    });
+
+    // ONE gate run (and so one review) for the whole train — no re-gate of the sided-off tree.
+    expect(runGate).toHaveBeenCalledTimes(1);
+    expect(result.gateRuns).toBe(1);
+    expect(result.landed.map((m) => m.workspaceId)).toEqual(["w1"]);
+    expect(result.sided.map((s) => [s.member.workspaceId, s.reason])).toEqual([["w2", "train review (#1194): CRITICAL b.txt: unchecked null"]]);
+    expect(result.gateRejected).toEqual([]);
+    expect(result.dropped).toEqual([]);
+    expect(closed).toEqual(["w1"]);
+
+    // The ancestry facts the rest of the merge subsystem keys off.
+    expect(await isAncestor(repo, await revParse(repo, "f1"), "main")).toBe(true);
+    expect(await isAncestor(repo, w2TipBefore, "main")).toBe(false);
+    expect(await revParse(repo, "f2")).toBe(w2TipBefore);
+    // The train ref and its re-assembled sibling are both gone.
+    await expect(revParse(repo, trainRefName("t-1194"))).rejects.toThrow();
+    await expect(revParse(repo, trainRefName("t-1194-sided"))).rejects.toThrow();
+
+    // The attempt record carries the siding, and the verdict is still `landed` (w1 did).
+    expect(result.attempts).toHaveLength(1);
+    expect(result.attempts[0]).toMatchObject({ verdict: "landed", gateRuns: 1, sided: [{ workspaceId: "w2" }] });
+    expect(result.attempts[0].mergeSha).toBe(result.mergeSha);
+  });
+
+  it("every member sided → verdict `sided`, nothing lands, nothing is blamed on the batch", async () => {
+    await seedTwoGreen();
+    const mainBefore = await revParse(repo, "main");
+    const runGate = vi.fn().mockResolvedValue({
+      passed: true, message: "ok",
+      sided: [{ workspaceId: "w1", reason: "r1" }, { workspaceId: "w2", reason: "r2" }],
+    });
+
+    const result = await runMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members: [{ workspaceId: "w1", branch: "f1" }, { workspaceId: "w2", branch: "f2" }],
+      label: "t-1194-all",
+      runGate,
+      closeMember: async () => { throw new Error("must not close anyone"); },
+    });
+
+    expect(runGate).toHaveBeenCalledTimes(1);
+    expect(result.landed).toEqual([]);
+    expect(result.gateRejected).toEqual([]);
+    expect(result.sided.map((s) => s.member.workspaceId)).toEqual(["w1", "w2"]);
+    expect(result.gateFailure).toContain("sided by the train review");
+    expect(result.attempts[0].verdict).toBe("sided");
+    expect(await revParse(repo, "main")).toBe(mainBefore);
+    await expect(revParse(repo, trainRefName("t-1194-all"))).rejects.toThrow();
+  });
+
+  it("a sided member on a bisected sub-train: the red one is gate-rejected, the sided one withheld, the green one lands", async () => {
+    await seedTwoGreen();
+    await git(["branch", "f-red"]);
+    await commitFile("f-red", "red.txt", "red\n");
+    await git(["checkout", "-q", "main"]);
+    const runGate = vi.fn(async ({ trainRef, included }: { trainRef: string; included: Array<{ workspaceId: string }> }) => {
+      const tree = await gitExecOrThrow(["ls-tree", "-r", "--name-only", trainRef], { cwd: repo });
+      if (tree.split(/\r?\n/).includes("red.txt")) return { passed: false, message: "verify failed: red.txt is red" };
+      // A green sub-train gets its own review; it sides w2 whenever w2 is aboard.
+      return included.some((m) => m.workspaceId === "w2")
+        ? { passed: true, message: "ok", sided: [{ workspaceId: "w2", reason: "train review (#1194): MAJOR b.txt: x" }] }
+        : { passed: true, message: "ok" };
+    });
+
+    const result = await runMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members: [
+        { workspaceId: "w1", branch: "f1" },
+        { workspaceId: "w2", branch: "f2" },
+        { workspaceId: "w-red", branch: "f-red" },
+      ],
+      label: "t-1194-bisect",
+      runGate,
+      closeMember: async () => {},
+    });
+
+    expect(result.landed.map((m) => m.workspaceId)).toEqual(["w1"]);
+    expect(result.gateRejected.map((r) => r.member.workspaceId)).toEqual(["w-red"]);
+    expect(result.sided.map((s) => s.member.workspaceId)).toEqual(["w2"]);
+    expect(await isAncestor(repo, await revParse(repo, "f1"), "main")).toBe(true);
+    expect(await isAncestor(repo, await revParse(repo, "f2"), "main")).toBe(false);
+    expect(await isAncestor(repo, await revParse(repo, "f-red"), "main")).toBe(false);
+  });
+}, 240000);

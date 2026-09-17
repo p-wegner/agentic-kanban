@@ -12,9 +12,10 @@ import {
 import { getProjectsByIds } from "../repositories/project.repository.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { createWorkspaceMergeService } from "./workspace-merge.service.js";
+import { createWorkspaceSessionService } from "./workspace-session.service.js";
 import { isPreMergeGateFailure } from "./workspace-merge-gate.js";
 import type { BoardEventSink } from "./board-events.js";
-import type { SessionLauncher } from "./session.manager.js";
+import type { SessionManager } from "./session.manager.js";
 import { createMergeTrainRunner, pickQueueStrategy } from "./merge-queue-train.js";
 
 export interface WorkspaceConflictPreview {
@@ -223,7 +224,11 @@ export type MergeQueueEvent =
 export function createMergeQueueService(deps: {
   database: Database;
   boardEvents?: BoardEventSink;
-  getSessionManager?: () => SessionLauncher;
+  // #1192: widened from SessionLauncher to SessionManager — a siding drop needs the port
+  // `sendTurn` uses (`workspace-session.service.ts`'s `createWorkspaceSessionService`), which
+  // reaches beyond startSession/stopSession. Every real caller already passes the full manager;
+  // only the type here was narrower than what it actually receives.
+  getSessionManager?: () => SessionManager;
 }) {
   const { database, boardEvents, getSessionManager } = deps;
   const mergeService = createWorkspaceMergeService({
@@ -231,9 +236,13 @@ export function createMergeQueueService(deps: {
     boardEvents,
     getSessionManager,
   });
+  // #1192: the port a siding drop nudges through, via the same sanctioned 409-safe path
+  // `POST /:id/turn` uses (`WorkspaceError("...", "CONFLICT")` on a busy agent).
+  const sessionService = createWorkspaceSessionService({ database, boardEvents, getSessionManager });
   const trainRunner = createMergeTrainRunner({
     database,
     reconcileAlreadyMerged: (workspaceId) => mergeService.reconcileAlreadyMerged(workspaceId),
+    sendTurn: (workspaceId, content) => sessionService.sendTurn(workspaceId, content),
   });
 
   async function getWorkspaceQueueInfos(workspaceIds: string[]): Promise<WorkspaceQueueInfo[]> {
