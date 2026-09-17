@@ -305,9 +305,15 @@ export async function runMergeTrain(args: {
     // worktree — splitting cannot learn anything a second run at the top level didn't already
     // say, and it can only mislabel branches as individually red. Stop here, attribution-free.
     if (isEnvironmentFailure(attempt.gateFailure)) return attempt;
-    // Nothing landed and the gate is why. (An assembly-empty batch has no gate to blame and
-    // must not be split — halving it would just re-discover the same conflicts.)
-    if (!bisect || subset.length <= 1 || attempt.dropped.length === subset.length) {
+    // #1185: an assembly-empty subset has NO gate to blame — every member conflicted during
+    // assembly and is already under `dropped` with its conflict reason. It must not be split
+    // (halving would just re-discover the same conflicts) and, for a singleton, it must NOT be
+    // promoted to `gateRejected`: that told the author to FIX a gate failure when the only
+    // thing wrong was a conflict to REBASE (observed on trains qmu4t981a / qmu4ymqjx, whose
+    // bisectResult named conflicting members with "no members could be assembled").
+    if (attempt.dropped.length === subset.length) return attempt;
+    // Nothing landed and the gate is why. A red singleton IS attribution.
+    if (!bisect || subset.length <= 1) {
       return {
         ...attempt,
         gateRejected: subset.length === 1
