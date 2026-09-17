@@ -391,6 +391,42 @@ describe("merge train assembly", () => {
     expect(body).toContain("Attempt: train/2026-09-17-03a");
     expect(parseMergeTrainTrailer(body)).toBe("row-xyz");
   });
+
+  /**
+   * #1185 — a lone member that CONFLICTS during assembly (never reaches the gate at all) must
+   * be reported as `dropped` with its conflict reason, not `gateRejected`. Before the fix, a
+   * bisect that halved down to this single member saw `attempt.gateFailure ===
+   * "no members could be assembled onto the train"` and, because `subset.length === 1`, filed
+   * it under `gateRejected` — telling the author to fix a gate that never ran instead of
+   * rebasing the conflict.
+   */
+  it("attributes a conflict-only singleton to dropped, not gateRejected, when bisected down to it (#1185)", async () => {
+    await git(["branch", "f1"]);
+    await git(["branch", "f2"]);
+    // f1 and f2 both touch shared.txt — f2 will conflict when merged onto a train that already
+    // has f1's change, so bisecting a red batch down to {f2} alone reproduces the same conflict.
+    await commitFile("f1", "shared.txt", "from f1\n");
+    await commitFile("f2", "shared.txt", "from f2\n");
+    await git(["checkout", "-q", "main"]);
+
+    const result = await runMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members: [
+        { workspaceId: "w1", branch: "f1" },
+        { workspaceId: "w2", branch: "f2", issueNumber: 42 },
+      ],
+      label: "t1185",
+      // The gate never runs for a member whose assembly fails — this asserts that.
+      runGate: async () => ({ passed: true, message: "ok" }),
+      closeMember: async () => {},
+    });
+
+    // f1 lands (no conflict); f2 conflicts against the train and must show up as dropped.
+    expect(result.landed.map((m) => m.workspaceId)).toEqual(["w1"]);
+    expect(result.gateRejected).toEqual([]);
+    expect(result.dropped.some((d) => d.member.workspaceId === "w2")).toBe(true);
+  });
 }, 240000);
 
 describe("train label formatting (#1190)", () => {
