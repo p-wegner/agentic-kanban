@@ -1,7 +1,8 @@
 /**
- * Pure view-model for the "Merge train" summary (#906) — aboard / waiting / last gate /
- * red-debt delta, derived from `GET /api/merge-queue/trains?projectId=` history. Kept pure
- * per `lib/<feature>.ts` (#589) so the derivation is testable without a component.
+ * Pure view-model for the "Merge train" summary (#906, headline metric #1184) — aboard /
+ * finished / last gate / red-debt delta / gate-runs-per-landed, derived from
+ * `GET /api/merge-queue/trains?projectId=` history. Kept pure per `lib/<feature>.ts` (#589) so
+ * the derivation is testable without a component.
  */
 
 import type {
@@ -27,21 +28,40 @@ export interface MergeTrainSummary {
   aboard: MergeTrainRowDto[];
   /** Member count of the currently-aboard train, if any. */
   aboardMemberCount: number;
-  /** Terminal rows (landed/red/abandoned) still in the fetched history. */
-  waitingCount: number;
+  /** Terminal rows (landed/red/abandoned) in the fetched history. Replaces the old "waiting" — nothing in this count is waiting. */
+  finishedCount: number;
   /** The most recently finished (or currently running) train's gate outcome, if any. */
   lastGate: {
     trainId: string;
     state: MergeTrainState;
     gateRuns: number | null;
     finishedAt: string | null;
+    /** Unresolved (unattributed) member count for THIS train — see `MergeTrainGateEvidence.unresolved`. */
+    unresolvedCount: number;
   } | null;
   /**
-   * Red-debt delta: members dropped or gate-rejected across the most recent trains, minus
-   * members that landed — a rough measure of whether the train is bleeding members or
-   * clearing them. Positive means debt is growing.
+   * Red-debt delta: unique members dropped or gate-rejected across the most recent trains,
+   * minus unique members that landed — a rough measure of whether the train is bleeding
+   * members or clearing them. Positive means debt is growing. Deduplicated by workspace id
+   * (see `gateRunsPerLanded`'s doc) so a bisect's repeated re-recording of the same conflict
+   * does not inflate it.
    */
   redDebtDelta: number;
+  /**
+   * The amortization headline (#1184): total gate runs spent, and how many members actually
+   * landed, over the last `windowSize` FINISHED (landed/red) trains. A train exists to gate N
+   * tickets once instead of N times — this is whether that promise held. `gateRuns` sums each
+   * train's own `gateRuns` (including bisect re-gates); `landedMembers` counts UNIQUE landed
+   * workspace ids across the window (a workspace cannot land twice, so this needs no dedup,
+   * but is named for symmetry with the ratio).
+   */
+  gateRunsPerLanded: {
+    gateRuns: number;
+    landedMembers: number;
+    /** `gateRuns / landedMembers`, or null when nothing landed in the window (division by zero). */
+    ratio: number | null;
+    windowSize: number;
+  };
 }
 
 function parseMemberIds(row: MergeTrainRowDto): string[] {
@@ -78,6 +98,25 @@ function parseGateRejected(row: MergeTrainRowDto): Array<{ workspaceId: string; 
 }
 
 const ABOARD_STATES: readonly MergeTrainState[] = ["assembling", "gating", "landing"];
+
+/** How many finished trains the rolling headline/red-debt metrics look back over. */
+const TRAIN_WINDOW_SIZE = 10;
+
+/**
+ * Unique workspace ids across a train's `dropped` and `gateRejected` evidence (#1184's fix for
+ * the bisect-inflation defect: every sub-attempt re-assembles from scratch and re-records the
+ * SAME conflict for a member that never moved between halves, so summing array lengths counts
+ * one dropped member several times).
+ */
+function uniqueDroppedOrRejectedIds(
+  evidence: MergeTrainGateEvidence | null,
+  bisect: Array<{ workspaceId: string; reason: string }>,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const d of evidence?.dropped ?? []) ids.add(d.workspaceId);
+  for (const r of bisect) ids.add(r.workspaceId);
+  return ids;
+}
 
 /**
  * How one member fared on one train (#1197). `deferred` is the member-vs-member case (#1191):
@@ -234,7 +273,7 @@ export function collectConflictClusters(rows: MergeTrainRowDto[], limit = 10): T
         ? cluster.workspaceIds.filter((id): id is string => typeof id === "string")
         : [];
       if (workspaceIds.length < 2) continue;
-      const key = [...workspaceIds].sort().join(" ");
+      const key = [...workspaceIds].sort().join(" ");
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({ trainId: row.id, trainLabel: row.label, workspaceIds });
@@ -248,7 +287,7 @@ export function summarizeMergeTrains(rows: MergeTrainRowDto[]): MergeTrainSummar
 
   const aboard = sorted.filter((row) => ABOARD_STATES.includes(row.state));
   const aboardMemberCount = aboard.reduce((sum, row) => sum + parseMemberIds(row).length, 0);
-  const waitingCount = sorted.filter((row) => !ABOARD_STATES.includes(row.state)).length;
+  const finishedCount = sorted.filter((row) => !ABOARD_STATES.includes(row.state)).length;
 
   const mostRecent = sorted[0] ?? null;
   const lastGate = mostRecent
@@ -257,18 +296,36 @@ export function summarizeMergeTrains(rows: MergeTrainRowDto[]): MergeTrainSummar
         state: mostRecent.state,
         gateRuns: parseGateEvidence(mostRecent)?.gateRuns ?? null,
         finishedAt: mostRecent.finishedAt,
+        unresolvedCount: parseGateEvidence(mostRecent)?.unresolved?.length ?? 0,
       }
     : null;
 
-  // Look at the last 10 terminal trains for the red-debt trend.
-  const recentTerminal = sorted.filter((row) => row.state === "landed" || row.state === "red").slice(0, 10);
+  // Look at the last N terminal trains for the red-debt trend and the amortization headline.
+  const recentTerminal = sorted.filter((row) => row.state === "landed" || row.state === "red").slice(0, TRAIN_WINDOW_SIZE);
   let redDebtDelta = 0;
+  let gateRuns = 0;
+  let landedMembers = 0;
   for (const row of recentTerminal) {
     const evidence = parseGateEvidence(row);
-    const dropped = evidence?.dropped?.length ?? 0;
+    const bisectRejected = parseGateRejected(row);
+    const droppedOrRejected = uniqueDroppedOrRejectedIds(evidence, bisectRejected);
     const landed = evidence?.landed?.length ?? 0;
-    redDebtDelta += dropped - landed;
+    redDebtDelta += droppedOrRejected.size - landed;
+    gateRuns += evidence?.gateRuns ?? 0;
+    landedMembers += landed;
   }
 
-  return { aboard, aboardMemberCount, waitingCount, lastGate, redDebtDelta };
+  return {
+    aboard,
+    aboardMemberCount,
+    finishedCount,
+    lastGate,
+    redDebtDelta,
+    gateRunsPerLanded: {
+      gateRuns,
+      landedMembers,
+      ratio: landedMembers > 0 ? gateRuns / landedMembers : null,
+      windowSize: recentTerminal.length,
+    },
+  };
 }
