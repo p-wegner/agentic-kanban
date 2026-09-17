@@ -17,6 +17,7 @@ function result(over: Partial<TrainRunResult>): TrainRunResult {
     landed: [],
     dropped: [],
     gateRejected: [],
+    sided: [],
     closeFailures: [],
     gateRuns: 0,
     attempts: [],
@@ -75,6 +76,36 @@ describe("buildTrainGateEvidence (#1184)", () => {
     expect(gateEvidence.unresolved).toEqual(["a", "b"]);
     expect(gateEvidence).toMatchObject({ memberCount: 3, landedCount: 0, uniqueDroppedCount: 1, gateRejectedCount: 0 });
     expect(gateEvidence.gateFailure).toContain("Cannot find module");
+  });
+
+  it("#1194: a member sided by the train review is attributed, deduplicated, and the review evidence rides along", () => {
+    const members = [m("a"), m("b"), m("c")];
+    const review = { status: "ran" as const, findingCount: 2, blockingCount: 1, sidedWorkspaceIds: ["c"], blocking: true };
+    const { gateEvidence } = buildTrainGateEvidence(
+      result({
+        landed: [m("a"), m("b")],
+        // Sided by the top attempt and again by a sub-attempt that carried it.
+        sided: [
+          { member: m("c"), reason: "train review (#1194): CRITICAL c.txt: first" },
+          { member: m("c"), reason: "train review (#1194): CRITICAL c.txt: again" },
+        ],
+        gateRuns: 1,
+        mergeSha: "abc",
+      }),
+      members,
+      review,
+    );
+    expect(gateEvidence.sided).toEqual([{ workspaceId: "c", reason: "train review (#1194): CRITICAL c.txt: first" }]);
+    expect(gateEvidence).toMatchObject({ sidedCount: 1, landedCount: 2, gateRejectedCount: 0, review });
+    // Sided is an attribution, not a gap.
+    expect(gateEvidence.unresolved).toBeUndefined();
+  });
+
+  it("#1194: with no review the evidence carries neither `sided` nor `review`, so older readers see the old shape", () => {
+    const { gateEvidence } = buildTrainGateEvidence(result({ landed: [m("a")], gateRuns: 1 }), [m("a")]);
+    expect(gateEvidence.sided).toBeUndefined();
+    expect(gateEvidence.sidedCount).toBeUndefined();
+    expect(gateEvidence.review).toBeUndefined();
   });
 
   it("a fully green train: N members, N landed, one gate run, no drops", () => {

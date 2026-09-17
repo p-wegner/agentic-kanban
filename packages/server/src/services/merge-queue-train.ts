@@ -33,6 +33,8 @@ import { getProjectSetupScript } from "../repositories/stack-profile.repository.
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { noteMergeGatePhase } from "./merge-job.service.js";
 import { formatIneligibleNote, trainMemberIneligibility } from "./merge-release-partition.js";
+import { resolveTrainReviewDecision, runTrainReview, type TrainReviewMember } from "./merge-train-review.service.js";
+import { clearTrainSiding, isSidingDrop, partitionSidedMembers, recordTrainSidingDrop } from "./merge-train-siding.service.js";
 
 /**
  * How many ready members a project wants batched onto one train before it opts into the
@@ -242,6 +244,7 @@ async function finishMergeTrain(
   result: Awaited<ReturnType<typeof runMergeTrain>>,
   members: Array<{ workspaceId: string }>,
   database: Database,
+  review?: MergeTrainGateEvidenceDto["review"],
 ): Promise<void> {
   // #1153: an operator's cancel (POST /trains/:id/cancel) marks the row `abandoned` while this
   // run may still be in flight — there is no cancellation token wired into `runMergeTrain`, so
@@ -259,7 +262,7 @@ async function finishMergeTrain(
   // held for the train's whole life. `unresolved` is every member that is neither landed, nor
   // dropped during assembly, nor individually gate-rejected by a bisect — i.e. every member
   // whose disposition is "the batch failed and this member shares that verdict, unattributed".
-  const { gateEvidence, gateRejected } = buildTrainGateEvidence(result, members);
+  const { gateEvidence, gateRejected } = buildTrainGateEvidence(result, members, review);
   await updateMergeTrainState(trainId, {
     state: result.landed.length > 0 ? "landed" : "red",
     gateEvidence: { ...gateEvidence },
@@ -296,14 +299,18 @@ function uniqueByWorkspace<T extends { member: { workspaceId: string }; reason: 
 export function buildTrainGateEvidence(
   result: Awaited<ReturnType<typeof runMergeTrain>>,
   members: Array<{ workspaceId: string }>,
+  review?: MergeTrainGateEvidenceDto["review"],
 ): { gateEvidence: MergeTrainGateEvidenceDto; gateRejected: Array<{ workspaceId: string; reason: string }> } {
   const dropped = uniqueByWorkspace(result.dropped);
   const gateRejected = uniqueByWorkspace(result.gateRejected);
+  // #1194: a member the train review sided is attributed (to its own ticket), not unresolved.
+  const sided = uniqueByWorkspace(result.sided);
   const landed = result.landed.map((m) => m.workspaceId);
   const accounted = new Set([
     ...landed,
     ...dropped.map((d) => d.workspaceId),
     ...gateRejected.map((r) => r.workspaceId),
+    ...sided.map((sd) => sd.workspaceId),
   ]);
   const unresolved = members.filter((m) => !accounted.has(m.workspaceId)).map((m) => m.workspaceId);
   return {
@@ -318,6 +325,8 @@ export function buildTrainGateEvidence(
       landedCount: landed.length,
       uniqueDroppedCount: dropped.length,
       gateRejectedCount: gateRejected.length,
+      ...(sided.length > 0 ? { sided, sidedCount: sided.length } : {}),
+      ...(review ? { review } : {}),
       // #1189: the complete bisect tree, replacing the live appends made as each node finished.
       attempts: result.attempts,
       // #1191: member-vs-member conflict clusters, the input to `group-scan` mode `train-conflicts`.
@@ -337,8 +346,17 @@ export function buildTrainGateEvidence(
 export function createMergeTrainRunner(deps: {
   database: Database;
   reconcileAlreadyMerged: (workspaceId: string) => Promise<unknown>;
+  /**
+   * #1194 - the train-scoped reviewer, run inside the gate worktree after a green gate. Injected
+   * so the dispatch tests can stand in a canned verdict instead of spawning an agent; the
+   * default is the real one-shot review.
+   */
+  reviewTrain?: typeof runTrainReview;
+  /** #1192 — the port a siding drop nudges through. 409-safe: a busy agent is not an error. */
+  sendTurn: (workspaceId: string, content: string) => Promise<unknown>;
 }) {
-  const { database, reconcileAlreadyMerged } = deps;
+  const { database, reconcileAlreadyMerged, sendTurn } = deps;
+  const reviewTrain = deps.reviewTrain ?? runTrainReview;
 
   /**
    * Run the whole batch as one release train: assemble → gate ONCE → land → close each member.
@@ -352,15 +370,39 @@ export function createMergeTrainRunner(deps: {
    * between assembly and landing, and `landMergeTrain` refuses (correctly) if it does.
    */
   async function* runTrainStrategy(plan: MergeQueuePlan): AsyncGenerator<MergeQueueEvent> {
-    const first = plan.order[0];
-    const repoPath = first.repoPath;
-    const baseBranch = first.baseBranch as string;
+    const repoPath = plan.order[0].repoPath;
+    const baseBranch = plan.order[0].baseBranch as string;
     const label = `q${Date.now().toString(36)}`;
-    const members = plan.order.map((ws) => ({
+    const allMembers = plan.order.map((ws) => ({
       workspaceId: ws.id,
       branch: ws.branch as string,
       issueNumber: ws.issueNumber,
+      // #1194: what the train review needs to attach a finding to the right ticket.
+      issueId: ws.issueId,
+      changedFiles: ws.changedFiles,
     }));
+    // #1194: what the train review did on the first green gate, for the persisted evidence.
+    let reviewEvidence: MergeTrainGateEvidenceDto["review"];
+
+    // #1192: hold back any member still on a siding from a prior drop — its branch tip has
+    // not moved since it was asked to rebase, so re-assembling it would just reproduce the
+    // same conflict. Re-admission (the tip moving) is checked and cleared as a side effect.
+    const { admitted, held } = await partitionSidedMembers(allMembers, repoPath, { database, sendTurn });
+    for (const h of held) {
+      yield {
+        type: "skipped",
+        workspaceId: h.member.workspaceId,
+        issueNumber: h.member.issueNumber ?? null,
+        issueTitle: "",
+        reason: `train siding: ${h.reason}`,
+      };
+    }
+    if (admitted.length === 0) {
+      yield { type: "done", merged: [], failed: [], skipped: held.map((h) => h.member.workspaceId) };
+      return;
+    }
+    const members = admitted;
+    const first = plan.order.find((ws) => ws.id === members[0].workspaceId) ?? plan.order[0];
 
     const trainStart = await beginMergeTrain(first, label, members.map((m) => m.workspaceId), database);
     if (trainStart === "already_in_flight") {
@@ -467,7 +509,28 @@ export function createMergeTrainRunner(deps: {
               projectId,
               database,
             );
-            return { passed: gate.passed, message: gate.message };
+            if (!gate.passed) return { passed: false, message: gate.message };
+            // #1194: review ONCE, on the tree that just proved green - the assembled diff vs the
+            // base, one reviewer, every member's criteria in `{{members}}`. A blocking finding
+            // names its member in `sided`; `runMergeTrain` re-lands the rest without it.
+            const decision = resolveTrainReviewDecision(toPrefMap(await getAllPreferencesCached(database).catch(() => [])), projectId);
+            if (!decision.run) {
+              reviewEvidence ??= { status: "skipped", reason: decision.reason };
+              return { passed: true, message: gate.message };
+            }
+            const reviewMembers: TrainReviewMember[] = included.flatMap((m) => {
+              const full = members.find((x) => x.workspaceId === m.workspaceId);
+              return full ? [{ workspaceId: full.workspaceId, branch: full.branch, issueId: full.issueId, issueNumber: full.issueNumber ?? null, changedFiles: full.changedFiles }] : [];
+            });
+            // #1192: `repoPath` + `sendTurn` are what a sided member's siding record needs — the
+            // same row, tag and sha-keyed hold a conflict drop gets (`partitionSidedMembers`
+            // above then withholds it from the next window until its tip moves).
+            const review = await reviewTrain({
+              projectId, trainLabel: label, trainRef, baseBranch, gateWorktree, repoPath,
+              members: reviewMembers, blocking: decision.blocking, thorough: decision.thorough,
+            }, { database, sendTurn });
+            reviewEvidence ??= review.evidence;
+            return { passed: true, message: gate.message, ...(review.sided.length > 0 ? { sided: review.sided } : {}) };
           } catch (err) {
             // Fail CLOSED: a gate we could not run is not a gate that passed.
             return { passed: false, message: `train gate could not run: ${errorMessage(err)}` };
@@ -492,6 +555,10 @@ export function createMergeTrainRunner(deps: {
           // Reuse the sanctioned already-merged path rather than reimplementing the
           // mergedAt/status/comment bookkeeping the reconcilers depend on.
           await reconcileAlreadyMerged(workspaceId);
+          // #1192: a member that lands has nothing left to be sided about — drop any leftover
+          // record from an earlier drop-then-rebase cycle rather than leaving a stale row.
+          const landedMember = members.find((m) => m.workspaceId === workspaceId);
+          if (landedMember) await clearTrainSiding(landedMember, { database, sendTurn });
         },
         // #1154: a missing-module gate failure is the staging worktree's environment, not any
         // member's code — bisecting it burns gate runs (observed: 9 runs, 3h23m, nothing
@@ -508,7 +575,7 @@ export function createMergeTrainRunner(deps: {
     }
 
     try {
-      await finishMergeTrain(trainId, result, members, database);
+      await finishMergeTrain(trainId, result, members, database, reviewEvidence);
     } finally {
       // #1181: the row's terminal state is persisted (or deliberately left `abandoned`) — only
       // now may a sweep treat it as it finds it. Idempotent with the lock-failure clear above.
@@ -527,6 +594,23 @@ export function createMergeTrainRunner(deps: {
     // #1184: one event per member — a bisect re-drops a base-conflicting member in every
     // sub-attempt that contains it, and the queue must not hear "skipped" N times for one ticket.
     const seenEvent = new Set<string>();
+    if (result.dropped.length > 0) {
+      // #1192: the sha a conflicting member was dropped against, for the /turn message and the
+      // ticket comment. `result.mergeSha` (what actually landed) is the truest "train tip" when
+      // something did land; otherwise fall back to the base as it stood for this run — best
+      // effort, since naming the exact sha is for a human/agent reading the message, not a
+      // correctness dependency of the siding mechanism itself (which keys on the MEMBER's own
+      // branch tip, not this one).
+      const trainTipSha = result.mergeSha ?? (await gitService.revParse(repoPath, baseBranch).catch(() => baseBranch));
+      // Only a drop the author must rebase out of gets a siding. A `deferred` drop (#1191:
+      // member-vs-member overlap, re-collected untouched by the next window) is not sided —
+      // its tip was never asked to move, so the sha-gate would just hold it for nothing.
+      const uniqueDrops = uniqueByWorkspace(result.dropped.filter(isSidingDrop));
+      for (const d of uniqueDrops) {
+        const member = members.find((m) => m.workspaceId === d.workspaceId);
+        if (member) await recordTrainSidingDrop(member, { reason: d.reason, baseBranch, trainTipSha, repoPath }, { database, sendTurn });
+      }
+    }
     for (const d of result.dropped) {
       if (seenEvent.has(d.member.workspaceId)) continue;
       seenEvent.add(d.member.workspaceId);
@@ -540,17 +624,28 @@ export function createMergeTrainRunner(deps: {
       seenEvent.add(r.member.workspaceId);
       yield { type: "error", workspaceId: r.member.workspaceId, issueNumber: r.member.issueNumber ?? null, issueTitle: "", error: `gate failed for this branch alone (bisected out of the train): ${r.reason.slice(0, 300)}` };
     }
+    // #1194 - a member the train review sided did NOT land, but its train did (or would have):
+    // the findings are already on its ticket, and its branch is untouched. `skipped`, like a
+    // conflict drop: this is the author's to fix and re-push, not a batch failure.
+    for (const sd of result.sided) {
+      if (seenEvent.has(sd.member.workspaceId)) continue;
+      seenEvent.add(sd.member.workspaceId);
+      yield { type: "skipped", workspaceId: sd.member.workspaceId, issueNumber: sd.member.issueNumber ?? null, issueTitle: "", reason: `sided by the train review: ${sd.reason.slice(0, 300)}` };
+    }
     if (result.landed.length === 0) {
       for (const m of members) {
         if (result.dropped.some((d) => d.member.workspaceId === m.workspaceId)) continue;
         if (result.gateRejected.some((r) => r.member.workspaceId === m.workspaceId)) continue;
+        if (result.sided.some((sd) => sd.member.workspaceId === m.workspaceId)) continue;
         yield { type: "error", workspaceId: m.workspaceId, issueNumber: m.issueNumber ?? null, issueTitle: "", error: `train gate failed — nothing landed: ${(result.gateFailure ?? "").slice(0, 300)}` };
       }
-      yield { type: "done", merged: [], failed: members.map((m) => m.workspaceId), skipped: [] };
+      const sidedIds = new Set(result.sided.map((sd) => sd.member.workspaceId));
+      yield { type: "done", merged: [], failed: members.filter((m) => !sidedIds.has(m.workspaceId)).map((m) => m.workspaceId), skipped: [...sidedIds] };
       return;
     }
     console.log(`[merge-train] ${label}: ${result.landed.length}/${members.length} landed in ${result.gateRuns} gate run(s)` +
-      `${result.gateRejected.length > 0 ? `, ${result.gateRejected.length} bisected out` : ""}`);
+      `${result.gateRejected.length > 0 ? `, ${result.gateRejected.length} bisected out` : ""}` +
+      `${result.sided.length > 0 ? `, ${result.sided.length} sided by the train review` : ""}`);
     for (const m of result.landed) {
       const closeFailure = result.closeFailures.find((c) => c.member.workspaceId === m.workspaceId);
       // A close-out failure is NOT a merge failure — the work IS on the base branch, only the
@@ -567,7 +662,7 @@ export function createMergeTrainRunner(deps: {
       // A bisected-out member did NOT land, so reporting it as anything but failed would tell
       // the queue its work is on the base when it is not.
       failed: result.gateRejected.map((r) => r.member.workspaceId),
-      skipped: result.dropped.map((d) => d.member.workspaceId),
+      skipped: [...result.dropped.map((d) => d.member.workspaceId), ...result.sided.map((sd) => sd.member.workspaceId)],
     };
   }
 

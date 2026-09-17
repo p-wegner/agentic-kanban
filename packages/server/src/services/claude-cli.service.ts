@@ -11,6 +11,12 @@ export interface ClaudeCliOptions {
   database?: Database;
   /** Optional model override, e.g. "haiku" */
   model?: string;
+  /**
+   * Working directory for the one-shot process (#1194). A reviewer handed a diff that exceeded
+   * the inline budget reads the rest with `git diff` itself, which only works from inside the
+   * tree being reviewed. Default: the server's own cwd, as before.
+   */
+  cwd?: string;
 }
 
 /**
@@ -27,7 +33,7 @@ export async function invokeClaudePrompt(
   prompt: string,
   opts: ClaudeCliOptions = {}
 ): Promise<string> {
-  const { timeout = 60000, database = db, model } = opts;
+  const { timeout = 60000, database = db, model, cwd } = opts;
 
   let agentCommand: string | undefined;
   let providerPref: string | undefined;
@@ -59,6 +65,7 @@ export async function invokeClaudePrompt(
       windowsHide: true,
       maxBuffer: 1024 * 1024,
       env,
+      ...(cwd ? { cwd } : {}),
     }, (err, stdout, stderr) => {
       if (err) reject(describeCliFailure(err, stderr, timeout));
       else resolve(stdout ?? "");
