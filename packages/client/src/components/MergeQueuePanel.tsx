@@ -446,23 +446,24 @@ function DepartureBoard({ projectId, memberLabel, onOpenTrain }: { projectId: st
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState<"depart" | "hold" | "cancel" | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([
+  async function refresh() {
+    const [windowResult, trainsResult] = await Promise.all([
       apiFetch<{ ok: boolean; window: DepartureBoardWindowDto }>(`/api/merge-queue/window?projectId=${encodeURIComponent(projectId)}`),
       apiFetch<{ ok: boolean; trains: MergeTrainRowDto[] }>(`/api/merge-queue/trains?projectId=${encodeURIComponent(projectId)}`),
-    ])
-      .then(([windowResult, trainsResult]) => {
-        if (cancelled) return;
-        setWindowDto(windowResult.window);
-        setTrains(trainsResult.trains);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load departure board");
-      });
+    ]);
+    setWindowDto(windowResult.window);
+    setTrains(trainsResult.trains);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    refresh().catch((err) => {
+      if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load departure board");
+    });
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   useEffect(() => {
@@ -475,6 +476,7 @@ function DepartureBoard({ projectId, memberLabel, onOpenTrain }: { projectId: st
     setActionError(null);
     try {
       await apiPost(`/api/merge-queue/window/release?projectId=${encodeURIComponent(projectId)}`);
+      await refresh();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Depart now failed");
     } finally {
@@ -487,6 +489,7 @@ function DepartureBoard({ projectId, memberLabel, onOpenTrain }: { projectId: st
     setActionError(null);
     try {
       await apiPost(`/api/merge-queue/window/hold?projectId=${encodeURIComponent(projectId)}`);
+      await refresh();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Hold failed");
     } finally {
@@ -499,6 +502,7 @@ function DepartureBoard({ projectId, memberLabel, onOpenTrain }: { projectId: st
     setActionError(null);
     try {
       await apiPost(`/api/merge-queue/trains/${trainId}/cancel`);
+      await refresh();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Cancel failed");
     } finally {
