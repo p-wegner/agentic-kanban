@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchedNamespace, SWEPT_TEMP_NAMESPACES } from "./helpers/reap-fixture-child-servers.js";
+import { matchedNamespace, removalCapFor, SWEPT_TEMP_NAMESPACES } from "./helpers/reap-fixture-child-servers.js";
 
 /**
  * #364 — the sweep must own the NAMESPACE, not a whitelist of prefixes.
@@ -58,5 +58,36 @@ describe("fixture temp-dir sweep namespaces (#364)", () => {
     // `matchedNamespace` returns the FIRST match; if the broad entry came first, a
     // hypothetical `kanban-`-prefixed plugin fixture would silently inherit the 2h age.
     expect(SWEPT_TEMP_NAMESPACES[0].minAgeMs).toBeLessThan(SWEPT_TEMP_NAMESPACES[1].minAgeMs);
+  });
+});
+
+/**
+ * #1176 — the fixed 500-per-run cap stayed put while the measured backlog sat at ~16,400
+ * sweepable dirs, so every gate run reclaimed at most ~3% of it and the directory grew
+ * monotonically while each run's own log line looked healthy ("removed 36 stale fixture temp
+ * dir(s)"). `removalCapFor` is the fix: it scales the per-run budget with the backlog instead of
+ * staying flat forever.
+ */
+describe("adaptive removal cap (#1176)", () => {
+  it("keeps the steady-state cap when the backlog is small", () => {
+    expect(removalCapFor(0)).toBe(500);
+    expect(removalCapFor(36)).toBe(500);
+    expect(removalCapFor(4_999)).toBe(500);
+  });
+
+  it("scales up once the backlog is an order of magnitude past the base cap", () => {
+    // This is the exact shape observed on 2026-09-16: ~16,400 sweepable against a 500 cap.
+    expect(removalCapFor(16_400)).toBeGreaterThan(500);
+  });
+
+  it("never exceeds the adaptive ceiling, however large the backlog gets", () => {
+    expect(removalCapFor(1_000_000)).toBe(5_000);
+  });
+
+  it("never asks for more removals than the backlog actually holds, even under the ceiling", () => {
+    // A backlog of 6,000 is in the adaptive tier and below the 5,000 ceiling, so the cap must be
+    // bounded by the backlog itself (6,000) rather than blindly returning the ceiling constant.
+    expect(removalCapFor(6_000)).toBeLessThanOrEqual(6_000);
+    expect(removalCapFor(6_000)).toBeGreaterThan(500);
   });
 });
