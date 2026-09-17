@@ -2,6 +2,12 @@ import { mergeBranch, isAncestor, revParse } from "@agentic-kanban/shared/lib/gi
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { MergeTrainAttemptDto, MergeTrainAttemptVerdict } from "@agentic-kanban/shared/types";
+import {
+  computeConflictGraph,
+  conflictClusters,
+  orderByLeastOverlap,
+  pickConflictFreeSet,
+} from "./merge-train-conflict-graph.js";
 
 /**
  * Release trains: gate N tickets ONCE instead of N times.
@@ -43,17 +49,54 @@ export interface TrainMember {
   issueNumber?: number | null;
 }
 
+/**
+ * A member left out of a train, with why. `deferred` (#1191) marks the member-vs-member case:
+ * the branch is clean against the base and collides only with a sibling that IS riding this
+ * train, so it is queued for the next train window (#905) rather than sent to the rebase path
+ * — once the sibling has landed, the next assembly decides afresh. A drop without `deferred`
+ * conflicts with the train ref itself (a base conflict, or an unresolvable branch) and stays
+ * the author's to rebase.
+ */
+export interface DroppedTrainMember {
+  member: TrainMember;
+  reason: string;
+  deferred?: true;
+}
+
 export interface TrainAssemblyResult {
   /** The integration ref the members were assembled onto. */
   trainRef: string;
   /** Members successfully merged into the train, in the order they landed. */
   included: TrainMember[];
   /** Members left out, with why — a conflict against the train, or an unresolvable branch. */
-  dropped: Array<{ member: TrainMember; reason: string }>;
+  dropped: DroppedTrainMember[];
   /** The train tip after assembly, or null when nothing was included. */
   trainSha: string | null;
   /** The base tip the train was built from — the gate's evidence baseSha for the batch. */
   baseSha: string;
+}
+
+/**
+ * #1191 — one connected component of the member-vs-member conflict graph computed for THIS
+ * assembly, restricted to members that were actually requested. Emitted so the caller can feed
+ * it to `propose_ticket_groups`/`group-scan` as a candidate `coupled_with` group: tickets that
+ * collide on every train attempt are coupled tickets in disguise (decision 015).
+ */
+export interface ConflictCluster {
+  workspaceIds: string[];
+}
+
+/** Dedupe clusters by their member SET — a bisect re-discovers the same cluster at every level. */
+function dedupeConflictClusters(clusters: ConflictCluster[]): ConflictCluster[] {
+  const seen = new Set<string>();
+  const out: ConflictCluster[] = [];
+  for (const c of clusters) {
+    const key = [...c.workspaceIds].sort().join(",");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(c);
+  }
+  return out;
 }
 
 /** Name of the integration ref for a train. Kept under a `kanban/` namespace to be obviously ours. */
@@ -79,30 +122,67 @@ async function resetTrainRef(repoPath: string, trainRef: string, baseBranch: str
 /**
  * Assemble members onto a fresh train ref with `--no-ff` merges.
  *
- * A member that conflicts with the train is DROPPED rather than failing the batch: one bad
- * member must not deny the whole wave the amortized gate. Dropped members keep their branches
- * untouched and fall back to the normal per-ticket path.
+ * #1191 — conflict-aware: before touching any ref, every PAIR of members is checked for a
+ * member-vs-member conflict via read-only `merge-tree` (`computeConflictGraph`). A maximum
+ * conflict-free SET is picked from that graph (`pickConflictFreeSet`) and stacked onto the train
+ * in LEAST-OVERLAP order (`orderByLeastOverlap`, proposal 2026-08-25 §4.3) rather than the
+ * caller's plan order — so a member is no longer dropped merely because of where it sat in the
+ * list, and the members most likely to still collide (with the base, or with something the set
+ * had to exclude) are merged last, closest to the point where a genuine problem shows up.
+ *
+ * A member excluded by the conflict-free-set pass is reported as dropped with the SPECIFIC
+ * member it conflicts with named in the reason — not just "conflict" — and marked `deferred`:
+ * its branch is clean against the base, so it is left in the queue for the next train window
+ * (#905) rather than sent to the rebase path. Assembly against the train ref can still
+ * additionally drop a member for a base-only conflict (the member is clean against every
+ * sibling but not against the base itself); that case keeps the original per-member reason.
+ *
+ * One bad member must not deny the whole wave the amortized gate — every excluded/dropped member
+ * keeps its branch untouched. Stacking is `--no-ff` onto the tip in the chosen order; no member
+ * branch is ever rebased, so the ancestry invariant in the module docstring is unchanged.
  */
 export async function assembleMergeTrain(args: {
   repoPath: string;
   baseBranch: string;
   members: TrainMember[];
   label: string;
-}): Promise<TrainAssemblyResult> {
+}): Promise<TrainAssemblyResult & { conflictClusters: ConflictCluster[] }> {
   const { repoPath, baseBranch, members, label } = args;
   const trainRef = trainRefName(label);
   const baseSha = await resetTrainRef(repoPath, trainRef, baseBranch);
 
   const included: TrainMember[] = [];
-  const dropped: Array<{ member: TrainMember; reason: string }> = [];
+  const dropped: DroppedTrainMember[] = [];
 
-  for (const member of members) {
+  let orderedForAssembly = members;
+  let clusters: ConflictCluster[] = [];
+  if (members.length >= 2) {
+    const graph = await computeConflictGraph(repoPath, members);
+    const { kept, excluded } = pickConflictFreeSet(members, graph);
+    for (const e of excluded) {
+      const reason =
+        `conflicts with ${e.conflictsWith.branch}` +
+        (e.conflictsWith.issueNumber ? ` (#${e.conflictsWith.issueNumber})` : "") +
+        " — deferred to the next train";
+      dropped.push({ member: e.member, reason, deferred: true });
+      console.warn(
+        `[merge-train] deferred ${e.member.branch}${e.member.issueNumber ? ` (#${e.member.issueNumber})` : ""} from train ${trainRef}: ${reason}`,
+      );
+    }
+    orderedForAssembly = orderByLeastOverlap(kept, graph);
+    clusters = conflictClusters(members.map((m) => m.workspaceId), graph).map((workspaceIds) => ({ workspaceIds }));
+  }
+
+  for (const member of orderedForAssembly) {
     try {
       // mergeBranch never touches a working tree when the target is not checked out (the train
       // ref never is), so this is pure ref/object plumbing: merge-tree -> commit-tree -> CAS.
       await mergeBranch(repoPath, member.branch, trainRef);
       included.push(member);
     } catch (err) {
+      // A member the conflict-free-set pass judged clean against every sibling can still fail
+      // here: that check is member-vs-member, never against the BASE, so this is a base-only
+      // conflict (or the rare TOCTOU where a sibling branch moved between the two checks).
       const reason = errorMessage(err);
       dropped.push({ member, reason });
       console.warn(
@@ -112,7 +192,7 @@ export async function assembleMergeTrain(args: {
   }
 
   const trainSha = included.length > 0 ? await revParse(repoPath, trainRef) : null;
-  return { trainRef, included, dropped, trainSha, baseSha };
+  return { trainRef, included, dropped, trainSha, baseSha, conflictClusters: clusters };
 }
 
 /**
@@ -217,7 +297,8 @@ export async function landMergeTrain(args: {
 export interface TrainRunResult {
   trainRef: string;
   landed: TrainMember[];
-  dropped: Array<{ member: TrainMember; reason: string }>;
+  /** Could not be assembled — `deferred` ones wait for the next train, the rest need a rebase. */
+  dropped: DroppedTrainMember[];
   /** Set when the batch did not land; the members remain unmerged. */
   gateFailure?: string;
   /**
@@ -249,6 +330,15 @@ export interface TrainRunResult {
    * `gateRuns` is `gateRuns` above.
    */
   attempts: MergeTrainAttemptDto[];
+  /**
+   * #1191 — every member-vs-member conflict cluster found across every attempt (deduped by
+   * member set), for the caller to feed to `propose_ticket_groups`/`group-scan`. A cluster here
+   * means those tickets collided on THIS train's conflict graph — nothing here is written
+   * anywhere by this module; the caller decides whether/how to propose it. Optional (defaults to
+   * empty) so a hand-built result in a test — this module's own included — doesn't have to name
+   * it every time.
+   */
+  conflictClusters?: ConflictCluster[];
 }
 
 export async function runMergeTrain(args: {
@@ -347,6 +437,11 @@ export async function runMergeTrain(args: {
       gateRuns: attempt.gateRuns + first.gateRuns + second.gateRuns,
       attempts: [...attempt.attempts, ...first.attempts, ...second.attempts],
       mergeSha: second.mergeSha ?? first.mergeSha,
+      conflictClusters: dedupeConflictClusters([
+        ...(attempt.conflictClusters ?? []),
+        ...(first.conflictClusters ?? []),
+        ...(second.conflictClusters ?? []),
+      ]),
       // Only still a whole-batch failure if neither half landed anything.
       ...(first.landed.length + second.landed.length === 0
         ? { gateFailure: attempt.gateFailure }
@@ -382,7 +477,7 @@ async function runTrainAttempt(args: {
    * to split. Each exit below goes through here; a THROW (base moved, ancestry violation) does
    * not, and the whole train throws with it — there is no verdict to record for that.
    */
-  async function finish(result: Omit<TrainRunResult, "attempts">, verdict: MergeTrainAttemptVerdict): Promise<TrainRunResult> {
+  async function finish(result: Omit<TrainRunResult, "attempts" | "conflictClusters">, verdict: MergeTrainAttemptVerdict): Promise<TrainRunResult> {
     const failure = result.landRefused ?? result.gateFailure;
     const record: MergeTrainAttemptDto = {
       label,
@@ -403,7 +498,7 @@ async function runTrainAttempt(args: {
         console.warn(`[merge-train] could not record attempt ${label} (non-fatal): ${errorMessage(err).slice(0, 200)}`);
       }
     }
-    return { ...result, attempts: [record] };
+    return { ...result, attempts: [record], conflictClusters: asm.conflictClusters };
   }
 
   // The train ref is scratch state, so its cleanup belongs in a `finally` rather than at each

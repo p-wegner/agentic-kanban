@@ -4,7 +4,7 @@ import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, contractCoupledComponent, confirmContractComponent, analyzeTouchedFiles } from "../services/issue-ai.service.js";
 import { markTooSmallToDecompose } from "../services/decompose-verdict.service.js";
-import { scanForTicketGroups, scanTouchedFilesForTicketGroups } from "../services/ticket-group-scan.service.js";
+import { scanForTicketGroups, scanMergeTrainConflictsForTicketGroups, scanTouchedFilesForTicketGroups } from "../services/ticket-group-scan.service.js";
 import type { DecomposeChildProposal, DecomposeDependencyProposal } from "../services/issue-ai.service.js";
 import { createIssueService } from "../services/issue.service.js";
 import {
@@ -67,9 +67,10 @@ import { getIssueById } from "../repositories/followup-workspace.repository.js";
  */
 function runGroupScan(projectId: string, database: Database, body: { mode?: string; apply?: boolean; minSharedFiles?: number }) {
   const apply = body.apply === true;
-  return body.mode === "touched-files"
-    ? scanTouchedFilesForTicketGroups(projectId, database, { apply, minSharedFiles: body.minSharedFiles })
-    : wrapAiOperation("group-scan", () => scanForTicketGroups(projectId, database, { apply }));
+  if (body.mode === "touched-files") return scanTouchedFilesForTicketGroups(projectId, database, { apply, minSharedFiles: body.minSharedFiles });
+  // #1191: the merge train's own member-vs-member conflict clusters, read back as candidates.
+  if (body.mode === "train-conflicts") return scanMergeTrainConflictsForTicketGroups(projectId, database, { apply });
+  return wrapAiOperation("group-scan", () => scanForTicketGroups(projectId, database, { apply }));
 }
 
 /**

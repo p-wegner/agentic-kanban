@@ -87,8 +87,67 @@ describe("merge train assembly", () => {
     expect(result.included.map((m) => m.branch)).toEqual(["f1"]);
     expect(result.dropped).toHaveLength(1);
     expect(result.dropped[0].member.branch).toBe("f2");
+    // #1191: a member-vs-member conflict names the member it collides WITH and is deferred to
+    // the next train (its branch is clean against the base), not sent to the rebase path.
+    expect(result.dropped[0].reason).toContain("conflicts with f1");
+    expect(result.dropped[0].deferred).toBe(true);
+    expect(result.conflictClusters.map((c) => [...c.workspaceIds].sort())).toEqual([["w1", "w2"]]);
     // The dropped member's branch is untouched, so the per-ticket path can still land it.
     await expect(revParse(repo, "f2")).resolves.toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it("#1191: stacks in least-overlap order, so a member is no longer dropped for its PLACE in the list", async () => {
+    // Plan order is [clash, a, b]: `clash` collides with both a and b, which are clean with each
+    // other. In plan order clash would ride alone and a + b would both be dropped; the graph
+    // keeps the larger conflict-free set {a, b} and defers clash, naming a kept member.
+    for (const b of ["clash", "a", "b"]) await git(["branch", b]);
+    await commitFile("clash", "x.txt", "clash x\n");
+    await commitFile("clash", "y.txt", "clash y\n");
+    await commitFile("a", "x.txt", "a x\n");
+    await commitFile("b", "y.txt", "b y\n");
+    await git(["checkout", "-q", "main"]);
+
+    const result = await assembleMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members: [
+        { workspaceId: "w-clash", branch: "clash", issueNumber: 9 },
+        { workspaceId: "w-a", branch: "a", issueNumber: 1 },
+        { workspaceId: "w-b", branch: "b", issueNumber: 2 },
+      ],
+      label: "t-overlap",
+    });
+
+    expect(result.included.map((m) => m.branch)).toEqual(["a", "b"]);
+    expect(result.dropped.map((d) => d.member.branch)).toEqual(["clash"]);
+    expect(result.dropped[0].reason).toMatch(/conflicts with (a \(#1\)|b \(#2\))/);
+    expect(result.dropped[0].deferred).toBe(true);
+    // No member branch was rebased: every included tip is still an ancestor of the train.
+    await expect(assertTrainPreservesAncestry(repo, result.trainRef, result.included)).resolves.toBeUndefined();
+    // One cluster: everyone who collided with anyone, for the group-scan to read back.
+    expect(result.conflictClusters.map((c) => [...c.workspaceIds].sort())).toEqual([["w-a", "w-b", "w-clash"]]);
+  });
+
+  it("#1191: a base-only conflict is still dropped by assembly, and is NOT deferred", async () => {
+    // f-stale edits shared.txt, and main moves on shared.txt after the branch: no sibling
+    // collides with it, so the graph keeps it, and the merge onto the train ref is what fails.
+    await git(["branch", "f-stale"]);
+    await git(["branch", "f-clean"]);
+    await commitFile("f-stale", "shared.txt", "from branch\n");
+    await commitFile("f-clean", "other.txt", "clean\n");
+    await commitFile("main", "shared.txt", "from main\n");
+
+    const result = await assembleMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members: [{ workspaceId: "w-stale", branch: "f-stale" }, { workspaceId: "w-clean", branch: "f-clean" }],
+      label: "t-base",
+    });
+
+    expect(result.included.map((m) => m.branch)).toEqual(["f-clean"]);
+    expect(result.dropped.map((d) => d.member.branch)).toEqual(["f-stale"]);
+    expect(result.dropped[0].deferred).toBeUndefined();
+    expect(result.conflictClusters).toEqual([]);
   });
 
   it("lands the train so that EVERY member becomes an ancestor of the base (one gate, N tickets)", async () => {

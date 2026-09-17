@@ -100,7 +100,11 @@ describe("runMergeTrain", () => {
     });
 
     expect(result.dropped.map((d) => d.member.branch)).toEqual(["f3"]);
-    expect(result.landed.map((m) => m.branch)).toEqual(["f1", "f2"]);
+    // #1191: least-overlap stacking — f1 collided with a (deferred) sibling, so it is merged
+    // LAST; f2, clean against everyone, goes first. Before #1191 this was plan order.
+    expect(result.landed.map((m) => m.branch)).toEqual(["f2", "f1"]);
+    expect(result.dropped[0].reason).toContain("conflicts with f1");
+    expect(result.dropped[0].deferred).toBe(true);
     // The dropped member is untouched and still unmerged — the per-ticket path can handle it.
     expect(await isAncestor(repo, await revParse(repo, "f3"), "main")).toBe(false);
   }, 240000);
