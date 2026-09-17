@@ -16,12 +16,13 @@ import { resolveTrainOptInSize } from "./merge-train-window.js";
 import { resolveRiskPosture, formatPostureNote, type RiskPosture } from "./risk-posture.service.js";
 import {
   appendMergeTrainAttempt,
+  countTrainsForProjectOnDate,
   createMergeTrain,
   getMergeTrain,
   listActiveMergeTrainsForProject,
   updateMergeTrainState,
 } from "../repositories/merge-train.repository.js";
-import { runMergeTrain } from "./merge-train.service.js";
+import { runMergeTrain, formatTrainLabel, trainDateStamp } from "./merge-train.service.js";
 import { registerLiveMergeTrain, unregisterLiveMergeTrain } from "./merge-train-live-registry.js";
 import { runPreMergeGate, looksLikeMissingDepsFailure } from "./pre-merge-gate.service.js";
 import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
@@ -185,10 +186,9 @@ async function describeNoTrain(plan: MergeQueuePlan, eligible: boolean, projectI
  */
 async function beginMergeTrain(
   first: { issueId: string },
-  label: string,
   memberWorkspaceIds: string[],
   database: Database,
-): Promise<{ trainId: string; projectId: string } | null | "already_in_flight"> {
+): Promise<{ trainId: string; projectId: string; label: string } | null | "already_in_flight"> {
   // The gate is per-PROJECT (it reads verify_script_<projectId>), and WorkspaceQueueInfo
   // carries only issueId — resolve the project the same way computePlan does.
   const issueRows = await getMergeQueueIssueRows([first.issueId], database);
@@ -216,9 +216,16 @@ async function beginMergeTrain(
   const active = await listActiveMergeTrainsForProject(projectId, ["assembling", "gating"], database);
   if (active.length > 0) return "already_in_flight";
 
+  // #1190: `train/<today>-<NN>`, minted from how many this project has already started today —
+  // readable in `git log --first-parent` in place of the old `q<base36 timestamp>` scratch
+  // label, which explained nothing about which tickets rode together.
+  const dateStamp = trainDateStamp();
+  const seq = (await countTrainsForProjectOnDate(projectId, dateStamp, database).catch(() => 0)) + 1;
+  const label = formatTrainLabel(dateStamp, seq);
+
   const trainId = randomUUID();
   await createMergeTrain({ id: trainId, projectId, label, memberWorkspaceIds }, database);
-  return { trainId, projectId };
+  return { trainId, projectId, label };
 }
 
 /**
@@ -425,7 +432,7 @@ export function createMergeTrainRunner(deps: {
   async function* runTrainStrategy(plan: MergeQueuePlan): AsyncGenerator<MergeQueueEvent> {
     const repoPath = plan.order[0].repoPath;
     const baseBranch = plan.order[0].baseBranch as string;
-    const label = `q${Date.now().toString(36)}`;
+    // #1190: the label is minted by `beginMergeTrain` (`train/<today>-<NN>`), not here.
     const allMembers = plan.order.map((ws) => ({
       workspaceId: ws.id,
       branch: ws.branch as string,
@@ -457,7 +464,7 @@ export function createMergeTrainRunner(deps: {
     const members = admitted;
     const first = plan.order.find((ws) => ws.id === members[0].workspaceId) ?? plan.order[0];
 
-    const trainStart = await beginMergeTrain(first, label, members.map((m) => m.workspaceId), database);
+    const trainStart = await beginMergeTrain(first, members.map((m) => m.workspaceId), database);
     if (trainStart === "already_in_flight") {
       // #1153: never assemble a second train while one is already unfinished — that is exactly
       // what turned a queue into a livelock (each new train contends for the repo lock the
@@ -474,7 +481,7 @@ export function createMergeTrainRunner(deps: {
       yield { type: "done", merged: [], failed: members.map((m) => m.workspaceId), skipped: [] };
       return;
     }
-    const { trainId, projectId } = trainStart;
+    const { trainId, projectId, label } = trainStart;
     // #1181: from here until `finishMergeTrain` this row has a live job in THIS process. The
     // reconciler's periodic sweep reads the registry and leaves registered rows alone; without
     // it the sweep applied its boot-time "nothing can be live" rule to a train mid-gate.
@@ -505,6 +512,7 @@ export function createMergeTrainRunner(deps: {
         baseBranch,
         members,
         label,
+        trainId,
         // #1181: an operator cancel or a reconciler verdict can mark this row `abandoned` while
         // the job is still gating (there is no cancellation token into `runMergeTrain`). The
         // gate work is sunk cost either way, but a train whose row says abandoned must not
