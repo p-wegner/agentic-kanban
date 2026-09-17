@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
-import { summarizeMergeTrains, type MergeTrainRowDto } from "../lib/mergeTrainSummary.js";
+import {
+  collectConflictClusters,
+  describeTrainMembers,
+  summarizeMergeTrains,
+  type MergeTrainRowDto,
+  type TrainMemberOutcome,
+} from "../lib/mergeTrainSummary.js";
 import type { IssueWithStatus, MainWorkspaceInfo, StatusWithIssues } from "@agentic-kanban/shared";
 import { Icon } from "./Icon.js";
 
@@ -108,9 +114,57 @@ type MergeQueueStrategy = "auto" | "sequential" | "train";
  * the merge-queue view. Reads the persisted `merge_trains` history instead of the old
  * per-request scratch state, so it survives a server restart mid-train.
  */
-function MergeTrainSummaryBar({ projectId }: { projectId: string }) {
+/** What a member chip says beside its label (#1197); `title` carries the full reason. */
+function trainOutcomeLabel(outcome: TrainMemberOutcome): string {
+  switch (outcome) {
+    case "landed": return "landed";
+    case "deferred": return "deferred → next train";
+    case "dropped": return "dropped · rebase needed";
+    case "gate_rejected": return "gate red";
+    case "sided": return "sent back for review";
+    case "aboard": return "aboard";
+    case "unresolved":
+    default: return "unresolved";
+  }
+}
+
+function trainOutcomeClasses(outcome: TrainMemberOutcome): string {
+  switch (outcome) {
+    case "landed": return "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300";
+    case "deferred": return "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300";
+    case "dropped":
+    case "gate_rejected": return "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300";
+    case "sided": return "bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300";
+    case "aboard": return "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300";
+    case "unresolved":
+    default: return "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300";
+  }
+}
+
+/** The train-conflicts group scan's answer, as the panel shows it (#1197). Inline shape: the server's `TicketGroupScanResult` is the one declaration. */
+type GroupScanView = { proposals: Array<{ issueNumbers: number[]; rationale: string }>; rejected: Array<{ issueNumbers: number[]; reason: string }>; scannedCount: number; createdEdges?: number };
+
+function MergeTrainSummaryBar({ projectId, memberLabel }: { projectId: string; memberLabel: (workspaceId: string) => string }) {
   const [trains, setTrains] = useState<MergeTrainRowDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // #1197: the train-conflicts group scan, previewed first and applied on a second click —
+  // `apply` writes `coupled_with` edges, which is an operator's call, not a side effect of looking.
+  const [scan, setScan] = useState<{ result: GroupScanView; applied: boolean } | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+
+  const runScan = async (apply: boolean) => {
+    setScanning(true);
+    setScanError(null);
+    try {
+      const result = await apiPost<GroupScanView>("/api/issues/group-scan", { projectId, mode: "train-conflicts", apply });
+      setScan({ result, applied: apply });
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : "Group scan failed");
+    } finally {
+      setScanning(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -150,24 +204,108 @@ function MergeTrainSummaryBar({ projectId }: { projectId: string }) {
     ? `${summary.lastGate.state}${summary.lastGate.gateRuns != null ? ` (${summary.lastGate.gateRuns} run${summary.lastGate.gateRuns === 1 ? "" : "s"})` : ""}`
     : "none yet";
 
+  // #1197: the newest train's members with how each fared, and the member-vs-member conflict
+  // clusters (#1191) the train-conflicts group scan would turn into coupled_with proposals.
+  const latest = summary.lastGate ? trains.find((t) => t.id === summary.lastGate?.trainId) ?? null : null;
+  const members = latest ? describeTrainMembers(latest) : [];
+  const clusters = collectConflictClusters(trains);
+
   return (
-    <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
-      <span className="font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[11px]">Merge train</span>
-      <span>Aboard: <strong className="font-medium text-gray-800 dark:text-gray-100">{aboardLabel}</strong></span>
-      <span>Waiting: <strong className="font-medium text-gray-800 dark:text-gray-100">{summary.waitingCount}</strong></span>
-      <span>Last gate: <strong className="font-medium text-gray-800 dark:text-gray-100">{lastGateLabel}</strong></span>
-      <span
-        className={summary.redDebtDelta > 0 ? "text-red-600 dark:text-red-400" : "text-gray-600 dark:text-gray-300"}
-        title="Members dropped or gate-rejected minus members landed, across the last 10 finished trains"
-      >
-        Red-debt Δ: <strong className="font-medium">{summary.redDebtDelta > 0 ? `+${summary.redDebtDelta}` : summary.redDebtDelta}</strong>
-      </span>
+    <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 space-y-1 text-xs text-gray-600 dark:text-gray-300">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span className="font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[11px]">Merge train</span>
+        <span>Aboard: <strong className="font-medium text-gray-800 dark:text-gray-100">{aboardLabel}</strong></span>
+        <span>Waiting: <strong className="font-medium text-gray-800 dark:text-gray-100">{summary.waitingCount}</strong></span>
+        <span>Last gate: <strong className="font-medium text-gray-800 dark:text-gray-100">{lastGateLabel}</strong></span>
+        <span
+          className={summary.redDebtDelta > 0 ? "text-red-600 dark:text-red-400" : "text-gray-600 dark:text-gray-300"}
+          title="Members dropped or gate-rejected minus members landed, across the last 10 finished trains"
+        >
+          Red-debt Δ: <strong className="font-medium">{summary.redDebtDelta > 0 ? `+${summary.redDebtDelta}` : summary.redDebtDelta}</strong>
+        </span>
+      </div>
+
+      {latest && members.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5" data-testid="merge-train-members">
+          <span className="text-gray-500 dark:text-gray-400">Latest <span className="font-mono">{latest.label}</span> ({latest.state}):</span>
+          {members.map((m) => (
+            <span
+              key={m.workspaceId}
+              title={m.reason ?? undefined}
+              className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 ${trainOutcomeClasses(m.outcome)}`}
+            >
+              <span className="font-medium">{memberLabel(m.workspaceId)}</span>
+              <span className="opacity-80">{trainOutcomeLabel(m.outcome)}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {clusters.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="merge-train-conflict-clusters">
+          <span className="text-gray-500 dark:text-gray-400" title="Members that conflicted with EACH OTHER (not with the base) on recent trains — the input to the train-conflicts group scan">
+            Conflict clusters (last 10 trains):
+          </span>
+          {clusters.map((c) => (
+            <span key={`${c.trainId}:${c.workspaceIds.join(",")}`} title={`recorded on ${c.trainLabel}`} className="font-medium text-gray-800 dark:text-gray-100">
+              {c.workspaceIds.map(memberLabel).join(" ↔ ")}
+            </span>
+          ))}
+          {scan === null || scan.applied ? (
+            <button
+              type="button"
+              onClick={() => void runScan(false)}
+              disabled={scanning}
+              className="rounded border border-gray-300 dark:border-gray-600 px-2 py-0.5 text-[11px] hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+              title="Preview the coupled_with groups these clusters would propose (nothing is written)"
+            >
+              {scanning ? "Scanning…" : "Propose coupled groups"}
+            </button>
+          ) : (
+            <>
+              <span>
+                {scan.result.proposals.length} proposal{scan.result.proposals.length === 1 ? "" : "s"}
+                {scan.result.proposals.length > 0 && (
+                  <>: {scan.result.proposals.map((p) => p.issueNumbers.map((n) => `#${n}`).join(" + ")).join(", ")}</>
+                )}
+                {scan.result.rejected.length > 0 && ` (${scan.result.rejected.length} rejected)`}
+              </span>
+              {scan.result.proposals.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void runScan(true)}
+                  disabled={scanning}
+                  className="rounded border border-blue-300 dark:border-blue-700 px-2 py-0.5 text-[11px] text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40 disabled:opacity-50"
+                  title="Write these as coupled_with edges"
+                >
+                  {scanning ? "Applying…" : "Apply"}
+                </button>
+              )}
+            </>
+          )}
+          {scan?.applied && (
+            <span className="text-green-700 dark:text-green-300">
+              {scan.result.createdEdges ?? 0} coupled_with edge{(scan.result.createdEdges ?? 0) === 1 ? "" : "s"} created
+            </span>
+          )}
+          {scanError && <span className="text-red-600 dark:text-red-400">{scanError}</span>}
+        </div>
+      )}
     </div>
   );
 }
 
 export function MergeQueuePanel({ columns, projectId, onClose, onIssueClick, onMerged }: MergeQueuePanelProps) {
   const items = useMemo(() => buildMergeQueueItems(columns), [columns]);
+  // #1197: the train evidence names members by WORKSPACE id; the board knows them by ticket.
+  // A member that has since landed is no longer in the queue, so its id is shown shortened.
+  const memberLabel = useMemo(() => {
+    const byWorkspace = new Map(items.map((item) => [
+      item.workspace.id,
+      item.issue.issueNumber != null ? `#${item.issue.issueNumber}` : item.issue.title.slice(0, 24),
+    ]));
+    return (workspaceId: string) => byWorkspace.get(workspaceId) ?? workspaceId.slice(0, 8);
+  }, [items]);
   const [mergingId, setMergingId] = useState<string | null>(null);
   const [errorByWorkspace, setErrorByWorkspace] = useState<Record<string, string>>({});
   const [previewByWorkspace, setPreviewByWorkspace] = useState<Record<string, ConflictPreview>>({});
@@ -292,7 +430,7 @@ export function MergeQueuePanel({ columns, projectId, onClose, onIssueClick, onM
           </div>
         </div>
 
-        <MergeTrainSummaryBar projectId={projectId} />
+        <MergeTrainSummaryBar projectId={projectId} memberLabel={memberLabel} />
 
         <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 grid grid-cols-[1fr_auto_auto_auto] gap-3 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
           <span>Workspace</span>

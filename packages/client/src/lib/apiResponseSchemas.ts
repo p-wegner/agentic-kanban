@@ -624,6 +624,31 @@ const mergeTrainRow = dtoObject<MergeTrainRowDto>({
 });
 const mergeTrainsResult = looseObject({ ok: bool, trains: arrayOf(nested(mergeTrainRow)) });
 
+/**
+ * `GET /api/merge-queue/window` (#1186) → `MergeTrainWindowResponse`. The flight recorder
+ * (#1195) reads `window.lastVerdict` off it; `window` is null when nothing is held.
+ */
+const mergeTrainWindowResponse = looseObject({
+  ok: bool,
+  window: nullable(nested(looseObject({
+    projectId: str,
+    pending: arrayOf(nested(looseObject({ workspaceId: str }))),
+    lastVerdict: nested(looseObject({ release: bool, reason: str })),
+    lastEvaluatedAt: str,
+  }))),
+});
+
+/**
+ * `POST /api/issues/group-scan` (#661/#918/#1191) → `TicketGroupScanResult`. The Merge Queue
+ * panel calls it in mode `train-conflicts` (#1197) and reads the proposals' issue numbers,
+ * the rejected count, and `createdEdges` after an apply.
+ */
+const groupScanResult = looseObject({
+  proposals: arrayOf(nested(looseObject({ issueNumbers: arrayOf(num), rationale: str }))),
+  rejected: arrayOf(nested(looseObject({ issueNumbers: arrayOf(num), reason: str }))),
+  scannedCount: num,
+});
+
 // #1072/#1073 — the two drive endpoints the Drive Dashboard calls. Both shapes are bound to
 // a real server DTO: `DrivePlanResult` (shared/types/api/drive.ts) and `DrivePreflightResult`
 // (services/drive-preflight.service.ts).
@@ -847,6 +872,10 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
 
   // ── #906 ──
   { method: "GET", template: "/api/merge-queue/trains", schema: mergeTrainsResult },
+  // ── #1186/#1195: the batching window the flight recorder polls ──
+  { method: "GET", template: "/api/merge-queue/window", schema: mergeTrainWindowResponse },
+  // ── #1197: the train-conflicts group scan, called from the Merge Queue panel ──
+  { method: "POST", template: "/api/issues/group-scan", schema: groupScanResult },
 
   // ── #1089: the Runners view ──
   { method: "GET", template: "/api/workers/connect-info", schema: workerConnectInfo },
