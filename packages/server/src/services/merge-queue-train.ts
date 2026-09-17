@@ -27,6 +27,7 @@ import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanb
 import { randomUUID } from "node:crypto";
 import { acquireQueueRepoLock, MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS } from "./merge-queue-repo-lock.js";
 import type { MergeQueueEvent, MergeQueuePlan } from "./merge-queue.service.js";
+import type { MergeTrainGateEvidenceDto } from "@agentic-kanban/shared/types";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { noteMergeGatePhase } from "./merge-job.service.js";
@@ -257,27 +258,68 @@ async function finishMergeTrain(
   // held for the train's whole life. `unresolved` is every member that is neither landed, nor
   // dropped during assembly, nor individually gate-rejected by a bisect — i.e. every member
   // whose disposition is "the batch failed and this member shares that verdict, unattributed".
-  const accounted = new Set([
-    ...result.landed.map((m) => m.workspaceId),
-    ...result.dropped.map((d) => d.member.workspaceId),
-    ...result.gateRejected.map((r) => r.member.workspaceId),
-  ]);
-  const unresolved = members.filter((m) => !accounted.has(m.workspaceId)).map((m) => m.workspaceId);
+  const { gateEvidence, gateRejected } = buildTrainGateEvidence(result, members);
   await updateMergeTrainState(trainId, {
     state: result.landed.length > 0 ? "landed" : "red",
+    gateEvidence: { ...gateEvidence },
+    bisectResult: gateRejected.length > 0 ? { gateRejected } : null,
+    finishedAt: new Date().toISOString(),
+  }, database).catch((err) => console.warn(`[merge-train] failed to persist final state for ${trainId} (non-fatal):`, errorMessage(err)));
+}
+
+/**
+ * One entry per workspace id, first reason wins (#1184). A bisect re-assembles every
+ * sub-attempt from scratch against the base, so a member that conflicts with the BASE is
+ * re-dropped by every attempt that contains it — train qmu4t981a persisted 17 drops for 13
+ * members, and the panel's red-debt (dropped minus landed) was wrong in sign and size. The
+ * first reason is kept because it is the top-level attempt's, recorded against the full batch.
+ */
+function uniqueByWorkspace<T extends { member: { workspaceId: string }; reason: string }>(
+  entries: T[],
+): Array<{ workspaceId: string; reason: string }> {
+  const seen = new Set<string>();
+  const out: Array<{ workspaceId: string; reason: string }> = [];
+  for (const e of entries) {
+    if (seen.has(e.member.workspaceId)) continue;
+    seen.add(e.member.workspaceId);
+    out.push({ workspaceId: e.member.workspaceId, reason: e.reason });
+  }
+  return out;
+}
+
+/**
+ * The persisted evidence for a finished train (#906, #1154, #1184), as a pure function of the
+ * run result so the shape is testable without a DB. `gateRejected` is returned beside the
+ * evidence because it is persisted in its own column (`bisectResult`), not inside it.
+ */
+export function buildTrainGateEvidence(
+  result: Awaited<ReturnType<typeof runMergeTrain>>,
+  members: Array<{ workspaceId: string }>,
+): { gateEvidence: MergeTrainGateEvidenceDto; gateRejected: Array<{ workspaceId: string; reason: string }> } {
+  const dropped = uniqueByWorkspace(result.dropped);
+  const gateRejected = uniqueByWorkspace(result.gateRejected);
+  const landed = result.landed.map((m) => m.workspaceId);
+  const accounted = new Set([
+    ...landed,
+    ...dropped.map((d) => d.workspaceId),
+    ...gateRejected.map((r) => r.workspaceId),
+  ]);
+  const unresolved = members.filter((m) => !accounted.has(m.workspaceId)).map((m) => m.workspaceId);
+  return {
     gateEvidence: {
       gateRuns: result.gateRuns,
       gateFailure: result.gateFailure ?? null,
-      landed: result.landed.map((m) => m.workspaceId),
-      dropped: result.dropped.map((d) => ({ workspaceId: d.member.workspaceId, reason: d.reason })),
+      landed,
+      dropped,
       mergeSha: result.mergeSha ?? null,
       ...(unresolved.length > 0 ? { unresolved } : {}),
+      memberCount: members.length,
+      landedCount: landed.length,
+      uniqueDroppedCount: dropped.length,
+      gateRejectedCount: gateRejected.length,
     },
-    bisectResult: result.gateRejected.length > 0
-      ? { gateRejected: result.gateRejected.map((r) => ({ workspaceId: r.member.workspaceId, reason: r.reason })) }
-      : null,
-    finishedAt: new Date().toISOString(),
-  }, database).catch((err) => console.warn(`[merge-train] failed to persist final state for ${trainId} (non-fatal):`, errorMessage(err)));
+    gateRejected,
+  };
 }
 
 /**
@@ -463,13 +505,20 @@ export function createMergeTrainRunner(deps: {
       unregisterLiveMergeTrain(trainId);
     }
 
+    // #1184: one event per member — a bisect re-drops a base-conflicting member in every
+    // sub-attempt that contains it, and the queue must not hear "skipped" N times for one ticket.
+    const seenEvent = new Set<string>();
     for (const d of result.dropped) {
+      if (seenEvent.has(d.member.workspaceId)) continue;
+      seenEvent.add(d.member.workspaceId);
       yield { type: "skipped", workspaceId: d.member.workspaceId, issueNumber: d.member.issueNumber ?? null, issueTitle: "", reason: `dropped from train: ${d.reason.slice(0, 200)}` };
     }
     // #492 — a member the bisect individually proved red is attributed to ITSELF, not blamed
     // on the batch. This is the difference between "your branch broke the gate" and "someone
     // in a batch you were in broke the gate", and only the first is actionable by its author.
     for (const r of result.gateRejected) {
+      if (seenEvent.has(r.member.workspaceId)) continue;
+      seenEvent.add(r.member.workspaceId);
       yield { type: "error", workspaceId: r.member.workspaceId, issueNumber: r.member.issueNumber ?? null, issueTitle: "", error: `gate failed for this branch alone (bisected out of the train): ${r.reason.slice(0, 300)}` };
     }
     if (result.landed.length === 0) {
