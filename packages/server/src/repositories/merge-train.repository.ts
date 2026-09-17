@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, like } from "drizzle-orm";
-import { mergeTrains, type MergeTrainState } from "@agentic-kanban/shared/schema";
+import { issues, mergeTrains, workspaces, type MergeTrainState } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -147,6 +147,105 @@ export async function countTrainsForProjectOnDate(
     .from(mergeTrains)
     .where(and(eq(mergeTrains.projectId, projectId), like(mergeTrains.label, `train/${dateStamp}-%`)));
   return rows.length;
+}
+
+/**
+ * The trains a set of workspaces are aboard or were most recently a member of (#1188) — the
+ * per-workspace lookup the card's "boarding pass" chip needs. Membership is JSON text, not
+ * queryable in SQL (same limitation as `findActiveMergeTrainForMembers`), so this reads a
+ * bounded recent slice per project and matches in memory.
+ *
+ * Returns at most ONE train per workspace id: an active (`assembling`/`gating`/`landing`) train
+ * wins over a terminal one, and among terminal trains the most recently finished wins — a
+ * workspace does not appear twice even if it rode two trains in its history (it cannot be
+ * aboard two at once, and only the LATEST outcome is what a card should show).
+ */
+export async function findRecentMergeTrainsForWorkspaces(
+  projectId: string,
+  workspaceIds: string[],
+  database: Database = db,
+): Promise<Map<string, MergeTrainRow>> {
+  const wanted = new Set(workspaceIds);
+  const result = new Map<string, MergeTrainRow>();
+  if (wanted.size === 0) return result;
+
+  // Newest first (see listMergeTrainsForProject) — bounded to a recent slice so a long-lived
+  // project's full train history is never read just to paint today's cards. 50 trains is far
+  // beyond how many a card would ever still care about (a terminal train's chip is a one-cycle
+  // "just happened" courtesy, not a permanent record — the issue comment is that record).
+  const recent = (await listMergeTrainsForProject(projectId, database)).slice(0, 50);
+
+  for (const row of recent) {
+    let members: string[];
+    try {
+      members = JSON.parse(row.memberWorkspaceIds) as string[];
+    } catch {
+      continue;
+    }
+    for (const workspaceId of members) {
+      if (!wanted.has(workspaceId)) continue;
+      const existing = result.get(workspaceId);
+      if (!existing) {
+        result.set(workspaceId, row);
+        continue;
+      }
+      // Newest-first iteration means `existing` is already the most recent train seen for this
+      // workspace; an active train still wins over an older one even if a still-more-recent
+      // terminal train also named this workspace (a re-ride after a drop), since "aboard right
+      // now" is the more useful fact for a live card.
+      const existingActive = existing.state === "assembling" || existing.state === "gating" || existing.state === "landing";
+      if (!existingActive && (row.state === "assembling" || row.state === "gating" || row.state === "landing")) {
+        result.set(workspaceId, row);
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * `(workspaceId -> issueNumber)` for a set of workspaces (#1188) — the co-member issue numbers
+ * a "landed with #N #M" boarding-pass chip needs. A workspace absent from the DB (or whose
+ * issue has no number) is simply absent from the returned map.
+ */
+export async function getIssueNumbersByWorkspaceIds(
+  workspaceIds: string[],
+  database: Database = db,
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  if (workspaceIds.length === 0) return result;
+  const rows = await database
+    .select({ workspaceId: workspaces.id, issueNumber: issues.issueNumber })
+    .from(workspaces)
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(inArray(workspaces.id, workspaceIds));
+  for (const r of rows) {
+    if (r.issueNumber !== null) result.set(r.workspaceId, r.issueNumber);
+  }
+  return result;
+}
+
+/**
+ * `(workspaceId -> projectId)` for a set of workspaces (#1188) — resolves the project a main
+ * workspace belongs to, which `buildWorkspaceSummaryMap`'s issue-keyed summary map does not
+ * carry, so the boarding-pass lookup (per-PROJECT, like every other train query) knows where
+ * to look for each workspace.
+ */
+export async function getProjectIdsByWorkspaceIds(
+  workspaceIds: string[],
+  database: Database = db,
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  if (workspaceIds.length === 0) return result;
+  const rows = await database
+    .select({ workspaceId: workspaces.id, projectId: issues.projectId })
+    .from(workspaces)
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(inArray(workspaces.id, workspaceIds));
+  for (const r of rows) {
+    if (r.projectId) result.set(r.workspaceId, r.projectId);
+  }
+  return result;
 }
 
 /**

@@ -38,6 +38,8 @@ import { noteMergeGatePhase } from "./merge-job.service.js";
 import { formatIneligibleNote, trainMemberIneligibility } from "./merge-release-partition.js";
 import { resolveTrainReviewDecision, runTrainReview, type TrainReviewMember } from "./merge-train-review.service.js";
 import { clearTrainSiding, isSidingDrop, partitionSidedMembers, recordTrainSidingDrop } from "./merge-train-siding.service.js";
+import { insertIssueComment } from "../repositories/issue-comments.repository.js";
+import { getWorkspaceById } from "../repositories/workspace-reads.repository.js";
 
 /**
  * How many ready members a project wants batched onto one train before it opts into the
@@ -227,7 +229,103 @@ async function beginMergeTrain(
 
   const trainId = randomUUID();
   await createMergeTrain({ id: trainId, projectId, label, memberWorkspaceIds }, database);
+  await recordBoardingComments(trainId, label, memberWorkspaceIds, database);
   return { trainId, projectId, label };
+}
+
+/**
+ * One issue comment per member at boarding time (#1188) — reusing `insertIssueComment` (the
+ * single write path, #737/#738) rather than a second comment-writing mechanism. Best effort:
+ * a comment-write failure must never abort assembling the train.
+ */
+async function recordBoardingComments(
+  trainId: string,
+  label: string,
+  memberWorkspaceIds: string[],
+  database: Database,
+): Promise<void> {
+  for (const workspaceId of memberWorkspaceIds) {
+    try {
+      const workspace = await getWorkspaceById(workspaceId, database);
+      if (!workspace) continue;
+      await insertIssueComment({
+        issueId: workspace.issueId,
+        workspaceId,
+        kind: "merge-attempt",
+        author: "system",
+        body: `Boarded release train ${label} (${memberWorkspaceIds.length} member(s)).`,
+        payload: { eventType: "train-boarded", trainId, label, memberCount: memberWorkspaceIds.length },
+      }, database);
+    } catch (err) {
+      console.warn(`[merge-train] failed to record boarding comment for ${workspaceId} (non-fatal):`, errorMessage(err));
+    }
+  }
+}
+
+/**
+ * One issue comment per member at train finish (#1188): landed (naming co-members), dropped
+ * (with the conflict reason), bisected out (with the gate failure), or unresolved. Mirrors the
+ * event vocabulary `finishMergeTrain`'s caller already yields as `MergeQueueEvent`s, but as a
+ * PERSISTED, per-ticket record — those events are transient SSE, not stored anywhere per-issue.
+ */
+async function recordFinishComments(
+  trainId: string,
+  label: string,
+  result: Awaited<ReturnType<typeof runMergeTrain>>,
+  members: Array<{ workspaceId: string; issueNumber?: number | null }>,
+  database: Database,
+): Promise<void> {
+  const landedIds = new Set(result.landed.map((m) => m.workspaceId));
+  const droppedByWorkspace = new Map(result.dropped.map((d) => [d.member.workspaceId, d.reason]));
+  const gateRejectedByWorkspace = new Map(result.gateRejected.map((r) => [r.member.workspaceId, r.reason]));
+  const issueNumberByWorkspace = new Map(members.map((m) => [m.workspaceId, m.issueNumber ?? null]));
+
+  for (const member of members) {
+    const { workspaceId } = member;
+    try {
+      const workspace = await getWorkspaceById(workspaceId, database);
+      if (!workspace) continue;
+
+      let body: string;
+      let eventType: string;
+      let extra: Record<string, unknown> = {};
+      if (landedIds.has(workspaceId)) {
+        const coMembers = members
+          .filter((m) => m.workspaceId !== workspaceId && landedIds.has(m.workspaceId))
+          .map((m) => issueNumberByWorkspace.get(m.workspaceId))
+          .filter((n): n is number => n !== null && n !== undefined);
+        eventType = "train-landed";
+        body = coMembers.length > 0
+          ? `Landed via release train ${label}, together with ${coMembers.map((n) => `#${n}`).join(", ")}.`
+          : `Landed via release train ${label}.`;
+        extra = { coMemberIssueNumbers: coMembers };
+      } else if (droppedByWorkspace.has(workspaceId)) {
+        const reason = droppedByWorkspace.get(workspaceId)!;
+        eventType = "train-dropped";
+        body = `Dropped from release train ${label}: ${reason.slice(0, 300)}`;
+        extra = { reason };
+      } else if (gateRejectedByWorkspace.has(workspaceId)) {
+        const reason = gateRejectedByWorkspace.get(workspaceId)!;
+        eventType = "train-bisected-out";
+        body = `Bisected out of release train ${label} — the gate failed for this branch alone: ${reason.slice(0, 300)}`;
+        extra = { reason };
+      } else {
+        eventType = "train-unresolved";
+        body = `Release train ${label} failed and this ticket's disposition was never individually attributed.`;
+      }
+
+      await insertIssueComment({
+        issueId: workspace.issueId,
+        workspaceId,
+        kind: "merge-attempt",
+        author: "system",
+        body,
+        payload: { eventType, trainId, label, ...extra },
+      }, database);
+    } catch (err) {
+      console.warn(`[merge-train] failed to record finish comment for ${workspaceId} (non-fatal):`, errorMessage(err));
+    }
+  }
 }
 
 /**
@@ -250,8 +348,9 @@ async function vetoLandingIfAbandoned(trainId: string, database: Database): Prom
  */
 async function finishMergeTrain(
   trainId: string,
+  label: string,
   result: Awaited<ReturnType<typeof runMergeTrain>>,
-  members: Array<{ workspaceId: string }>,
+  members: Array<{ workspaceId: string; issueNumber?: number | null }>,
   database: Database,
   review?: MergeTrainGateEvidenceDto["review"],
 ): Promise<void> {
@@ -278,6 +377,11 @@ async function finishMergeTrain(
     bisectResult: gateRejected.length > 0 ? { gateRejected } : null,
     finishedAt: new Date().toISOString(),
   }, database).catch((err) => console.warn(`[merge-train] failed to persist final state for ${trainId} (non-fatal):`, errorMessage(err)));
+
+  // #1188 — one issue comment per member describing what the train did with it. Reuses
+  // `insertIssueComment` (the sanctioned single write path) rather than a second mechanism;
+  // best-effort per member, and never blocks the bookkeeping above.
+  await recordFinishComments(trainId, label, result, members, database);
 }
 
 /**
@@ -742,7 +846,7 @@ export function createMergeTrainRunner(deps: {
     }
 
     try {
-      await finishMergeTrain(trainId, result, members, database, reviewEvidence);
+      await finishMergeTrain(trainId, label, result, members, database, reviewEvidence);
     } finally {
       // #1181: the row's terminal state is persisted (or deliberately left `abandoned`) — only
       // now may a sweep treat it as it finds it. Idempotent with the lock-failure clear above.

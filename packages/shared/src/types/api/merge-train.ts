@@ -162,3 +162,32 @@ export type MergeTrainReviewEvidenceDto =
   | { status: "skipped"; reason: string }
   | { status: "failed"; error: string }
   | { status: "ran"; findingCount: number; blockingCount: number; sidedWorkspaceIds: string[]; blocking: boolean };
+
+/**
+ * The structural facts a workspace card's "boarding pass" chip needs (#1188) — attached to
+ * `MainWorkspaceInfo.trainBoardingPass` by `buildWorkspaceSummaryMap`. Chip TEXT is derived from
+ * this by the pure `client/src/lib/trainBoardingPass.ts` (the client's copy of the structural
+ * type is kept in sync by `wire-dto-single-declaration.test.ts`), so this module only carries
+ * the facts, never formatted strings.
+ */
+export type TrainBoardingPassPhase = "assembling" | "gating" | "landing";
+
+export type TrainBoardingPassOutcomeDto =
+  | { kind: "landed"; withIssueNumbers: number[] }
+  | { kind: "dropped"; reason: string }
+  | { kind: "bisected-out"; reason: string }
+  | { kind: "unresolved" };
+
+export interface TrainBoardingPassDto {
+  trainId: string;
+  label: string;
+  /** 1-based position of this workspace among the train's members, in boarding order. */
+  carPosition: number;
+  memberCount: number;
+  /** Present while the train is still running; null once `outcome` is set. */
+  phase: TrainBoardingPassPhase | null;
+  /** ISO timestamp of when this workspace boarded (the train's `startedAt`). */
+  boardedAt: string;
+  /** Set once the train reached a terminal state for this member. */
+  outcome: TrainBoardingPassOutcomeDto | null;
+}
