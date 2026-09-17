@@ -32,6 +32,25 @@ vi.mock("../services/base-branch-health.service.js", async (importOriginal) => {
   };
 });
 
+// #1196 — the sweep's due-decision reads the HOST before it reads the clock: `resolveBaseHealthProbeDue`
+// samples free RAM and 150 ms of CPU (#1009/#1173) and asks the machine verify lock (#957), and
+// any of them can answer "hold" on a box that is running the rest of this suite beside us. Then
+// "verifies a project that has never been checked" fails with `host_saturated`/`gate_running` —
+// not a timing margin, a live reading. These cases are about RECENCY, so the host is pinned roomy
+// and the lock switched off; `base-health-host-floor.test.ts` covers the saturation branch itself.
+vi.mock("@agentic-kanban/shared/lib/machine-capacity", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    readTier0Capacity: () => ({ tier: "0", hold: false, reason: "test: pinned roomy", freeGb: 16 }),
+    readCpuBusyPct: async () => 0,
+  };
+});
+vi.mock("../lib/machine-verify-lock.js", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, machineVerifyLockEnabled: () => false };
+});
+
 const { runBaseBranchHealthCheckOnce } = await import("../startup/base-branch-health-reconciler.js");
 
 // #1031: the posture the seeded project opts in with is `standard`, so this is `standard`'s

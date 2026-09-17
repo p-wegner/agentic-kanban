@@ -53,6 +53,25 @@ vi.mock("../repositories/preferences.repository.js", async (importOriginal) => {
   return { ...actual, getPreference: () => probeStartedAt() };
 });
 
+// #1196 — `resolveBaseHealthProbeDue` reads the HOST before the clock: free RAM, a 150 ms CPU
+// sample (#1009/#1173) and the machine verify lock (#957). Every "DOES probe" case below assumed
+// those say "room", which is exactly what a box running the rest of the suite beside this file
+// cannot promise — measured as `host_saturated` under `--maxWorkers=2` with the box swapping.
+// The guards under test here are gateBusy and the timeout back-off, so the host is pinned roomy
+// and the lock switched off; the saturation branch has its own file (`base-health-host-floor`).
+vi.mock("@agentic-kanban/shared/lib/machine-capacity", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    readTier0Capacity: () => ({ tier: "0", hold: false, reason: "test: pinned roomy", freeGb: 16 }),
+    readCpuBusyPct: async () => 0,
+  };
+});
+vi.mock("../lib/machine-verify-lock.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return { ...actual, machineVerifyLockEnabled: () => false };
+});
+
 const { requestBaseBranchReprobe, isBaseHealthProbeDue } = await import("../services/base-branch-health-reprobe.service.js");
 const { PROBE_MAX_DURATION_MS } = await import("../services/base-branch-health.service.js");
 
