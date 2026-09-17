@@ -185,6 +185,17 @@ Manage tags (labels) for categorizing issues.
 | `tag list` | List all available tags |
 | `tag create <name>` | Create a new tag |
 
+## train
+
+Inspect and manage merge trains (batched, gated release trains).
+
+| Command | Does |
+|---|---|
+| `train list` | List merge trains for a project (newest first) |
+| `train show <train-id>` | Show a single merge train: state, members, gate evidence, and its bisect-tree attempts |
+| `train cancel <train-id>` | Cancel a merge train (#1153) |
+| `train depart <project>` | Operator 'depart now' (#1186): release a project's merge-train batching window immediately, regardless of size, wait, or a busy gate |
+
 ## worker
 
 Fleet worker: connect this machine to a board and execute assigned agent sessions.

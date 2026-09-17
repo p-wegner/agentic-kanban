@@ -2,7 +2,7 @@
 
 # MCP tools
 
-All 114 tools exposed by the `agentic-kanban` MCP server. Call them as `mcp__agentic-kanban__<name>`.
+All 118 tools exposed by the `agentic-kanban` MCP server. Call them as `mcp__agentic-kanban__<name>`.
 
 ## Board Overview
 
@@ -197,3 +197,12 @@ All 114 tools exposed by the `agentic-kanban` MCP server. Call them as `mcp__age
 | `mint_worker_pairing_token` | Mint a single-use, expiring pairing token so another machine can register as a fleet worker. Returns the token and its expiry, plus the command to run on the worker machine. The token is the ONLY credential in the flow — the board never sends agent credentials to a worker (decision 012), so the worker authenticates its own agent with its own local login. |
 | `revoke_worker` | Revoke a fleet worker: its bearer token stops working immediately, its live socket is closed, its per-assignment git tokens are deleted and its event timeline is dropped. Takes the worker ID from list_workers. Does NOT touch sessions that already ran on it — sessions keep their worker_id so past placements stay attributable. |
 | `list_incoming_refs` | List the incoming-ref staging namespace: branches a fleet worker pushed to refs/kanban/incoming/* that the board has not fast-forwarded onto a real branch, each with why it is held (no worker assignment, diverged, already landed, invalid ref name) and whether it is stale. This is where a remote worker's work sits when a landing was refused — the board is fast-forward-only and never forces, so a held ref needs a deliberate land or discard. |
+
+## Merge Trains
+
+| Tool | Does |
+|---|---|
+| `list_merge_trains` | List merge trains for a project (newest first): persisted release-train rows covering in-flight (assembling/gating/landing) and terminal (landed/red/abandoned) history. Optionally filter by state. |
+| `get_merge_train` | Get a single merge train by ID: the row plus its parsed gate evidence (landed/dropped/unresolved members, gate-run counts, mergeSha) and the full bisect-tree attempt list (#1189, one entry per assemble/gate/land cycle) in the order attempts finished. |
+| `cancel_merge_train` | Cancel a merge train (#1153): the only remedy an operator had for a stranded train besides a full server restart. Marks the row abandoned with a reason. Fails with 409 when the train is already terminal (landed/red/abandoned). Delegates to the board server's cancel route so the state check and board-event broadcast run exactly once. |
+| `release_train_window` | Operator 'depart now' for a project's merge-train batching window (#1186): requests an immediate release of the pending set as one train, regardless of size, wait, or a busy gate (a live hold still wins until it expires). Fails with 409 when the project has no open window. Delegates to the board server's window-release route. |

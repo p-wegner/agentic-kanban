@@ -5,7 +5,7 @@ import { issues, preferences, projectStatuses, projects, workspaces } from "@age
 import type { MergeTrainWindowResponse } from "@agentic-kanban/shared";
 import { createTestDb } from "./helpers/test-db.js";
 import { createMergeQueueRoute } from "../routes/merge-queue.js";
-import { createMergeTrain } from "../repositories/merge-train.repository.js";
+import { createMergeTrain, updateMergeTrainState } from "../repositories/merge-train.repository.js";
 import { invalidatePreferencesCache } from "../repositories/preferences.repository.js";
 import { readTrainWindow, writeTrainWindow } from "../services/merge-train-window-state.js";
 
@@ -198,5 +198,48 @@ describe("merge-queue window routes (#1186)", () => {
       });
       expect(res.status).toBe(400);
     }
+  });
+});
+
+describe("GET /api/merge-queue/trains/:id (#1195)", () => {
+  it("returns the row with parsed evidence and the attempts lifted to the top level", async () => {
+    const { db } = createTestDb();
+    const { projectId } = await seedProject(db);
+    const trainId = randomUUID();
+    await createMergeTrain({ id: trainId, projectId, label: "train", memberWorkspaceIds: ["a", "b"] }, db);
+    await updateMergeTrainState(trainId, {
+      state: "red",
+      gateEvidence: { gateRuns: 2, landed: [], dropped: ["b"], attempts: [{ n: 1 }, { n: 2 }] },
+      bisectResult: { culprits: ["b"] },
+      finishedAt: T0,
+    }, db);
+
+    const { app } = makeApp(db);
+    const res = await app.request(`/api/merge-queue/trains/${trainId}`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; train: Record<string, unknown> };
+    expect(body.ok).toBe(true);
+    expect(body.train.id).toBe(trainId);
+    expect(body.train.state).toBe("red");
+    expect(body.train.gateEvidence).toMatchObject({ gateRuns: 2, dropped: ["b"] });
+    expect(body.train.bisectResult).toEqual({ culprits: ["b"] });
+    expect(body.train.attempts).toEqual([{ n: 1 }, { n: 2 }]);
+  });
+
+  it("answers an empty attempts list for a train with no evidence yet, and 404 for an unknown id", async () => {
+    const { db } = createTestDb();
+    const { projectId } = await seedProject(db);
+    const trainId = randomUUID();
+    await createMergeTrain({ id: trainId, projectId, label: "train", memberWorkspaceIds: ["a"] }, db);
+
+    const { app } = makeApp(db);
+    const fresh = await app.request(`/api/merge-queue/trains/${trainId}`);
+    expect(fresh.status).toBe(200);
+    const body = await fresh.json() as { train: { gateEvidence: unknown; attempts: unknown[] } };
+    expect(body.train.gateEvidence).toBeNull();
+    expect(body.train.attempts).toEqual([]);
+
+    const missing = await app.request("/api/merge-queue/trains/nope");
+    expect(missing.status).toBe(404);
   });
 });
