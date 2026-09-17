@@ -33,7 +33,7 @@ import { getProjectSetupScript } from "../repositories/stack-profile.repository.
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { noteMergeGatePhase } from "./merge-job.service.js";
 import { formatIneligibleNote, trainMemberIneligibility } from "./merge-release-partition.js";
-import { clearTrainSiding, partitionSidedMembers, recordTrainSidingDrop } from "./merge-train-siding.service.js";
+import { clearTrainSiding, isSidingDrop, partitionSidedMembers, recordTrainSidingDrop } from "./merge-train-siding.service.js";
 
 /**
  * How many ready members a project wants batched onto one train before it opts into the
@@ -549,7 +549,10 @@ export function createMergeTrainRunner(deps: {
       // correctness dependency of the siding mechanism itself (which keys on the MEMBER's own
       // branch tip, not this one).
       const trainTipSha = result.mergeSha ?? (await gitService.revParse(repoPath, baseBranch).catch(() => baseBranch));
-      const uniqueDrops = uniqueByWorkspace(result.dropped);
+      // Only a drop the author must rebase out of gets a siding. A `deferred` drop (#1191:
+      // member-vs-member overlap, re-collected untouched by the next window) is not sided —
+      // its tip was never asked to move, so the sha-gate would just hold it for nothing.
+      const uniqueDrops = uniqueByWorkspace(result.dropped.filter(isSidingDrop));
       for (const d of uniqueDrops) {
         const member = members.find((m) => m.workspaceId === d.workspaceId);
         if (member) await recordTrainSidingDrop(member, { reason: d.reason, baseBranch, trainTipSha, repoPath }, { database, sendTurn });

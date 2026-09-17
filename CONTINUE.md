@@ -3,6 +3,23 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-17 — #1192: train sidings (branch `feature/ak-1192-…`, not landed)
+
+Follow-ups found while finishing the branch, not ticketed yet:
+
+- **Overlap with #1191 (`feature/ak-1191-…`, sibling branch, not merged).** #1191 adds
+  `DroppedTrainMember.deferred` for a member-vs-member conflict that the next window
+  re-collects untouched. #1192's runner sides every drop, which would hold a deferred member at
+  a tip nobody asked to move. Guarded structurally (`isSidingDrop`, skips `deferred: true`), so
+  the two branches compose without a merge. **After both land**: add a runner test that a
+  deferred drop produces no siding row — it cannot be written on either branch alone.
+- **No UI** for the `train-siding` tag beyond the tag itself; the held-out reason only reaches
+  the queue as a `skipped` event. A departure-board column (#1186) could show "on siding N/3".
+- **The cap comment lands under kind `merge-attempt`** — reuse, not a dedicated kind; fine
+  until something filters by kind.
+- Time injection: `TrainSidingDeps.now` was `() => Date` in the first commit and tripped
+  `time-injection-spelling-ratchet` (5 > baseline 4); now `now?: string`.
+
 ## 2026-09-15 — #1160: verify-chain slots derived from capacity (branch, not landed)
 
 **On `worktree-agent-a042194dae3f10a55`** (nested worktree `.claude/worktrees/agent-a042194dae3f10a55`),
