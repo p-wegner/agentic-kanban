@@ -6,9 +6,14 @@ import {
   describeTrainMembers,
   summarizeMergeTrains,
   type MergeTrainRowDto,
+  type MergeTrainSidingDto,
+  type TrainAttemptView,
+  describeTrainAttempts,
+  describeTrainReview,
+  formatDurationShort,
   type TrainMemberOutcome,
 } from "../lib/mergeTrainSummary.js";
-import type { IssueWithStatus, MainWorkspaceInfo, StatusWithIssues } from "@agentic-kanban/shared";
+import type { IssueWithStatus, MainWorkspaceInfo, MergeTrainsResponse, StatusWithIssues } from "@agentic-kanban/shared";
 import { Icon } from "./Icon.js";
 
 interface ConflictPreview {
@@ -141,11 +146,33 @@ function trainOutcomeClasses(outcome: TrainMemberOutcome): string {
   }
 }
 
+/** #1198: a bisect node's colour by verdict; `sided` is the review's call (#1194), not a red gate. */
+function trainAttemptClasses(verdict: TrainAttemptView["verdict"]): string {
+  switch (verdict) {
+    case "landed": return "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300";
+    case "red": return "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300";
+    case "sided": return "bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300";
+    case "assembly_empty":
+    case "land_refused":
+    case "env_failure":
+    default: return "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300";
+  }
+}
+
+function ordinal(n: number): string {
+  const rem10 = n % 10;
+  const rem100 = n % 100;
+  const suffix = rem10 === 1 && rem100 !== 11 ? "st" : rem10 === 2 && rem100 !== 12 ? "nd" : rem10 === 3 && rem100 !== 13 ? "rd" : "th";
+  return `${n}${suffix}`;
+}
+
 /** The train-conflicts group scan's answer, as the panel shows it (#1197). Inline shape: the server's `TicketGroupScanResult` is the one declaration. */
 type GroupScanView = { proposals: Array<{ issueNumbers: number[]; rationale: string }>; rejected: Array<{ issueNumbers: number[]; reason: string }>; scannedCount: number; createdEdges?: number };
 
 function MergeTrainSummaryBar({ projectId, memberLabel }: { projectId: string; memberLabel: (workspaceId: string) => string }) {
   const [trains, setTrains] = useState<MergeTrainRowDto[] | null>(null);
+  // #1198: the project's live sidings (#1192), delivered beside the history by the same call.
+  const [sidings, setSidings] = useState<MergeTrainSidingDto[]>([]);
   const [error, setError] = useState<string | null>(null);
   // #1197: the train-conflicts group scan, previewed first and applied on a second click —
   // `apply` writes `coupled_with` edges, which is an operator's call, not a side effect of looking.
@@ -168,9 +195,11 @@ function MergeTrainSummaryBar({ projectId, memberLabel }: { projectId: string; m
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch<{ ok: boolean; trains: MergeTrainRowDto[] }>(`/api/merge-queue/trains?projectId=${encodeURIComponent(projectId)}`)
+    apiFetch<MergeTrainsResponse>(`/api/merge-queue/trains?projectId=${encodeURIComponent(projectId)}`)
       .then((result) => {
-        if (!cancelled) setTrains(result.trains);
+        if (cancelled) return;
+        setTrains(result.trains);
+        setSidings(Array.isArray(result.sidings) ? result.sidings : []);
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load merge train history");
@@ -207,8 +236,14 @@ function MergeTrainSummaryBar({ projectId, memberLabel }: { projectId: string; m
   // #1197: the newest train's members with how each fared, and the member-vs-member conflict
   // clusters (#1191) the train-conflicts group scan would turn into coupled_with proposals.
   const latest = summary.lastGate ? trains.find((t) => t.id === summary.lastGate?.trainId) ?? null : null;
-  const members = latest ? describeTrainMembers(latest) : [];
+  const members = latest ? describeTrainMembers(latest, sidings) : [];
   const clusters = collectConflictClusters(trains);
+  // #1198: the train review's verdict (#1194) and the bisect tree with its concurrent-gate
+  // overlap (#1193) — data three branches persisted that nothing drew.
+  const review = latest ? describeTrainReview(latest) : null;
+  const { attempts, savedMs } = latest ? describeTrainAttempts(latest) : { attempts: [], savedMs: 0 };
+  // Members on a siding that the latest train did not carry at all (held out of its candidate set).
+  const heldOut = sidings.filter((s) => !members.some((m) => m.workspaceId === s.workspaceId));
 
   return (
     <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 space-y-1 text-xs text-gray-600 dark:text-gray-300">
@@ -236,6 +271,56 @@ function MergeTrainSummaryBar({ projectId, memberLabel }: { projectId: string; m
             >
               <span className="font-medium">{memberLabel(m.workspaceId)}</span>
               <span className="opacity-80">{trainOutcomeLabel(m.outcome)}</span>
+              {m.siding && (
+                <span
+                  className="rounded bg-white/60 dark:bg-black/30 px-1 font-medium"
+                  title={m.siding.capped
+                    ? `Rebase siding capped after ${m.siding.attempts} attempts — withheld from trains until the branch moves (#1192)`
+                    : `On its ${ordinal(m.siding.attempts)} rebase siding — held out of trains until the branch tip moves (#1192)`}
+                >
+                  {m.siding.capped ? `siding capped (${m.siding.attempts})` : `siding ${m.siding.attempts}`}
+                </span>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {latest && review && (
+        <div className="flex flex-wrap items-center gap-x-2" data-testid="merge-train-review">
+          <span className="text-gray-500 dark:text-gray-400">Train review:</span>
+          <span className={review.blocking ? "font-medium text-purple-700 dark:text-purple-300" : "text-gray-800 dark:text-gray-100"}>
+            {review.text}{review.blocking ? " (blocking)" : ""}
+          </span>
+        </div>
+      )}
+
+      {latest && attempts.length > 1 && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1" data-testid="merge-train-attempts">
+          <span className="text-gray-500 dark:text-gray-400" title="Each assemble → gate → land cycle; ∥ marks halves whose gates ran at the same time (#1193)">
+            Bisect ({attempts.length} attempts{savedMs > 0 ? `, gated concurrently saved ${formatDurationShort(savedMs)}` : ""}):
+          </span>
+          {attempts.map((a) => (
+            <span
+              key={a.label}
+              title={[a.failureHead, a.gateMs != null ? `gate ${formatDurationShort(a.gateMs)}` : null].filter(Boolean).join(" · ") || undefined}
+              className={`rounded px-1.5 py-0.5 font-mono ${trainAttemptClasses(a.verdict)}`}
+            >
+              {a.label} {a.verdict}{a.includedCount > 0 ? ` ×${a.includedCount}` : ""}{a.concurrentWith.length > 0 ? ` ∥ ${a.concurrentWith.join(", ")}` : ""}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {heldOut.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5" data-testid="merge-train-held-out">
+          <span className="text-gray-500 dark:text-gray-400" title="Members on a rebase siding (#1192): dropped for a base conflict earlier, held out of trains until their branch tip moves">
+            Held out on sidings:
+          </span>
+          {heldOut.map((s) => (
+            <span key={s.workspaceId} className={`rounded px-1.5 py-0.5 ${s.cappedAt ? "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300" : "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"}`}>
+              <span className="font-medium">{memberLabel(s.workspaceId)}</span>{" "}
+              {s.cappedAt ? `capped after ${s.sidings}` : `siding ${s.sidings}`}
             </span>
           ))}
         </div>

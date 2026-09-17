@@ -9,9 +9,10 @@ import type { SessionManager } from "../services/session.manager.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { getMergeTrain, listActiveMergeTrainsForProject, listMergeTrainsForProject, updateMergeTrainState } from "../repositories/merge-train.repository.js";
 import { getMergeQueueIssueRows, getMergeQueueWorkspaceRows } from "../repositories/merge-queue.repository.js";
+import { listTrainSidingStatesForProject } from "../repositories/merge-train-siding.repository.js";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
-import type { MergeTrainWindowDto, MergeTrainWindowPendingMemberDto, MergeTrainWindowResponse } from "@agentic-kanban/shared";
+import type { MergeTrainWindowDto, MergeTrainWindowPendingMemberDto, MergeTrainWindowResponse, MergeTrainsResponse } from "@agentic-kanban/shared";
 import { resolveTrainWindowConfig } from "../services/merge-train-window.js";
 import { holdTrainWindow, readTrainWindow, requestTrainWindowRelease } from "../services/merge-train-window-state.js";
 
@@ -103,14 +104,20 @@ export function createMergeQueueRoute(
    *
    * History of persisted release trains for a project (#906) — newest first, including
    * `abandoned` rows the startup reconciler left behind. What a "Merge train" panel reads.
+   * #1198: also the project's live sidings (#1192), so the panel can tell "on its 2nd siding"
+   * from a fresh drop — the siding table is keyed by workspace and had no read surface.
    */
   router.get("/trains", async (c) => {
     const projectId = c.req.query("projectId");
     if (!projectId) {
       return c.json({ ok: false, error: "projectId query parameter is required" }, 400);
     }
-    const trains = await listMergeTrainsForProject(projectId, database);
-    return c.json({ ok: true, trains });
+    const [trains, sidings] = await Promise.all([
+      listMergeTrainsForProject(projectId, database),
+      listTrainSidingStatesForProject(projectId, database),
+    ]);
+    const body: MergeTrainsResponse = { ok: true, trains, sidings };
+    return c.json(body);
   });
 
   /**
