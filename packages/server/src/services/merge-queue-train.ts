@@ -15,6 +15,7 @@ import { getAllPreferencesCached } from "../repositories/preferences.repository.
 import { resolveTrainOptInSize } from "./merge-train-window.js";
 import { resolveRiskPosture, formatPostureNote, type RiskPosture } from "./risk-posture.service.js";
 import {
+  appendMergeTrainAttempt,
   createMergeTrain,
   getMergeTrain,
   listActiveMergeTrainsForProject,
@@ -317,6 +318,8 @@ export function buildTrainGateEvidence(
       landedCount: landed.length,
       uniqueDroppedCount: dropped.length,
       gateRejectedCount: gateRejected.length,
+      // #1189: the complete bisect tree, replacing the live appends made as each node finished.
+      attempts: result.attempts,
     },
     gateRejected,
   };
@@ -491,6 +494,9 @@ export function createMergeTrainRunner(deps: {
         // landed) to reach the same verdict every time, and risks blaming an arbitrary member.
         // Reuses the same signature the gate's own #169 install-retry already matches against.
         isEnvironmentFailure: looksLikeMissingDepsFailure,
+        // #1189: persist each bisect node as it finishes, so the row shows partial progress
+        // while the train is still gating. Evidence column only — never the state (#1153).
+        onAttempt: (attempt) => appendMergeTrainAttempt(trainId, { ...attempt }, database),
       });
     } finally {
       clearInterval(heartbeat);

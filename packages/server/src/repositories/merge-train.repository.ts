@@ -55,6 +55,41 @@ export async function updateMergeTrainState(
 
 export type MergeTrainRow = typeof mergeTrains.$inferSelect;
 
+/**
+ * Append one bisect-tree node to a LIVE train's `gateEvidence.attempts` (#1189), as the
+ * attempt finishes. Touches ONLY the `gateEvidence` column: the row's `state` is owned by the
+ * gate (`gating`) and by the operator/reconciler (`abandoned`), and a write that also set the
+ * state would race an operator's cancel back to a live state — the #1153 failure again. No
+ * migration: the list rides inside the existing JSON column; `finishMergeTrain` rewrites the
+ * whole evidence at the end with the complete list from the run result, so nothing here needs
+ * to be authoritative beyond "what has finished so far".
+ *
+ * A row that no longer exists is a no-op, and unparseable prior evidence is replaced rather
+ * than thrown on — this is progress reporting, never the source of truth for the outcome.
+ */
+export async function appendMergeTrainAttempt(
+  id: string,
+  attempt: Record<string, unknown>,
+  database: Database = db,
+): Promise<void> {
+  const row = await getMergeTrain(id, database);
+  if (!row) return;
+  let evidence: Record<string, unknown> = {};
+  if (row.gateEvidence) {
+    try {
+      const parsed: unknown = JSON.parse(row.gateEvidence);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) evidence = parsed as Record<string, unknown>;
+    } catch {
+      evidence = {};
+    }
+  }
+  const prior = Array.isArray(evidence.attempts) ? (evidence.attempts as unknown[]) : [];
+  await database
+    .update(mergeTrains)
+    .set({ gateEvidence: JSON.stringify({ ...evidence, attempts: [...prior, attempt] }) })
+    .where(eq(mergeTrains.id, id));
+}
+
 /** One train by id, or undefined. */
 export async function getMergeTrain(id: string, database: Database = db): Promise<MergeTrainRow | undefined> {
   const [row] = await database.select().from(mergeTrains).where(eq(mergeTrains.id, id)).limit(1);
