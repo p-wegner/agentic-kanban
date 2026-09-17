@@ -33,6 +33,7 @@ import { getProjectSetupScript } from "../repositories/stack-profile.repository.
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { noteMergeGatePhase } from "./merge-job.service.js";
 import { formatIneligibleNote, trainMemberIneligibility } from "./merge-release-partition.js";
+import { clearTrainSiding, partitionSidedMembers, recordTrainSidingDrop } from "./merge-train-siding.service.js";
 
 /**
  * How many ready members a project wants batched onto one train before it opts into the
@@ -333,8 +334,10 @@ export function buildTrainGateEvidence(
 export function createMergeTrainRunner(deps: {
   database: Database;
   reconcileAlreadyMerged: (workspaceId: string) => Promise<unknown>;
+  /** #1192 — the port a siding drop nudges through. 409-safe: a busy agent is not an error. */
+  sendTurn: (workspaceId: string, content: string) => Promise<unknown>;
 }) {
-  const { database, reconcileAlreadyMerged } = deps;
+  const { database, reconcileAlreadyMerged, sendTurn } = deps;
 
   /**
    * Run the whole batch as one release train: assemble → gate ONCE → land → close each member.
@@ -348,15 +351,35 @@ export function createMergeTrainRunner(deps: {
    * between assembly and landing, and `landMergeTrain` refuses (correctly) if it does.
    */
   async function* runTrainStrategy(plan: MergeQueuePlan): AsyncGenerator<MergeQueueEvent> {
-    const first = plan.order[0];
-    const repoPath = first.repoPath;
-    const baseBranch = first.baseBranch as string;
+    const repoPath = plan.order[0].repoPath;
+    const baseBranch = plan.order[0].baseBranch as string;
     const label = `q${Date.now().toString(36)}`;
-    const members = plan.order.map((ws) => ({
+    const allMembers = plan.order.map((ws) => ({
       workspaceId: ws.id,
       branch: ws.branch as string,
       issueNumber: ws.issueNumber,
+      issueId: ws.issueId,
     }));
+
+    // #1192: hold back any member still on a siding from a prior drop — its branch tip has
+    // not moved since it was asked to rebase, so re-assembling it would just reproduce the
+    // same conflict. Re-admission (the tip moving) is checked and cleared as a side effect.
+    const { admitted, held } = await partitionSidedMembers(allMembers, repoPath, { database, sendTurn });
+    for (const h of held) {
+      yield {
+        type: "skipped",
+        workspaceId: h.member.workspaceId,
+        issueNumber: h.member.issueNumber ?? null,
+        issueTitle: "",
+        reason: `train siding: ${h.reason}`,
+      };
+    }
+    if (admitted.length === 0) {
+      yield { type: "done", merged: [], failed: [], skipped: held.map((h) => h.member.workspaceId) };
+      return;
+    }
+    const members = admitted;
+    const first = plan.order.find((ws) => ws.id === members[0].workspaceId) ?? plan.order[0];
 
     const trainStart = await beginMergeTrain(first, label, members.map((m) => m.workspaceId), database);
     if (trainStart === "already_in_flight") {
@@ -488,6 +511,10 @@ export function createMergeTrainRunner(deps: {
           // Reuse the sanctioned already-merged path rather than reimplementing the
           // mergedAt/status/comment bookkeeping the reconcilers depend on.
           await reconcileAlreadyMerged(workspaceId);
+          // #1192: a member that lands has nothing left to be sided about — drop any leftover
+          // record from an earlier drop-then-rebase cycle rather than leaving a stale row.
+          const landedMember = members.find((m) => m.workspaceId === workspaceId);
+          if (landedMember) await clearTrainSiding(landedMember, { database, sendTurn });
         },
         // #1154: a missing-module gate failure is the staging worktree's environment, not any
         // member's code — bisecting it burns gate runs (observed: 9 runs, 3h23m, nothing
@@ -514,6 +541,20 @@ export function createMergeTrainRunner(deps: {
     // #1184: one event per member — a bisect re-drops a base-conflicting member in every
     // sub-attempt that contains it, and the queue must not hear "skipped" N times for one ticket.
     const seenEvent = new Set<string>();
+    if (result.dropped.length > 0) {
+      // #1192: the sha a conflicting member was dropped against, for the /turn message and the
+      // ticket comment. `result.mergeSha` (what actually landed) is the truest "train tip" when
+      // something did land; otherwise fall back to the base as it stood for this run — best
+      // effort, since naming the exact sha is for a human/agent reading the message, not a
+      // correctness dependency of the siding mechanism itself (which keys on the MEMBER's own
+      // branch tip, not this one).
+      const trainTipSha = result.mergeSha ?? (await gitService.revParse(repoPath, baseBranch).catch(() => baseBranch));
+      const uniqueDrops = uniqueByWorkspace(result.dropped);
+      for (const d of uniqueDrops) {
+        const member = members.find((m) => m.workspaceId === d.workspaceId);
+        if (member) await recordTrainSidingDrop(member, { reason: d.reason, baseBranch, trainTipSha, repoPath }, { database, sendTurn });
+      }
+    }
     for (const d of result.dropped) {
       if (seenEvent.has(d.member.workspaceId)) continue;
       seenEvent.add(d.member.workspaceId);
