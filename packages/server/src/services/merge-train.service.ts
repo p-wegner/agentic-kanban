@@ -378,10 +378,18 @@ export async function runMergeTrain(args: {
       if (canParallelize) {
         let releaseFirst!: () => void;
         const firstDone = new Promise<void>((resolve) => { releaseFirst = resolve; });
-        [first, second] = await Promise.all([
+        // #1193: `allSettled`, not `all` — `all` rejects as soon as EITHER half throws while
+        // the other's async work (already started, up to and including landing onto the base)
+        // keeps running unobserved. That would let one half's landing complete after this
+        // function has already thrown to its caller, with nothing recording or waiting on it.
+        // Settling both first means a throw here always means BOTH halves' git work is done.
+        const settled = await Promise.allSettled([
           landGreenest(subset.slice(0, mid), `${subLabel}a`, waitForPredecessor, releaseFirst),
           landGreenest(subset.slice(mid), `${subLabel}b`, afterBoth(waitForPredecessor, firstDone)),
         ]);
+        const rejected = settled.find((s): s is PromiseRejectedResult => s.status === "rejected");
+        if (rejected) throw rejected.reason;
+        [first, second] = (settled as PromiseFulfilledResult<TrainRunResult>[]).map((s) => s.value);
       } else {
         first = await landGreenest(subset.slice(0, mid), `${subLabel}a`, waitForPredecessor);
         second = await landGreenest(subset.slice(mid), `${subLabel}b`, waitForPredecessor);
