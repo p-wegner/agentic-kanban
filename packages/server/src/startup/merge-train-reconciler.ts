@@ -29,6 +29,19 @@
  * unrecoverable state: a NAMED terminal outcome with a reason, never a silent drop. The row
  * stays in the table (readable by `GET /api/merge-trains`) rather than being deleted, so the
  * history a "Merge train" panel shows includes the abandonment.
+ *
+ * #1181 — the "definitionally orphaned" reasoning above is true ONLY of the BOOT pass. This
+ * sweep runs on BOTH a boot-delay timer and a steady 10-minute interval (`startPeriodicSweep`),
+ * and for a long-running gate it is entirely normal for a row to still be `assembling`/`gating`
+ * ten, twenty, even forty minutes later — with the job that owns it very much alive in THIS
+ * process. The periodic tick used to reason "found at server boot" regardless, abandon the
+ * live row as "superseded", and re-assemble a fresh train for the same member set — which then
+ * fought the still-running original for the repo lock and died on that lock's own timeout 15
+ * minutes later (`MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS`), over and over, discarding a real in-flight
+ * gate every cycle. `merge-train-live-registry.ts` is what tells the two situations apart: a
+ * row whose id is in that in-process registry has a live job and must be left alone by the
+ * periodic sweep. The boot pass keeps its old unconditional behaviour — the registry is empty
+ * by construction at boot, so "nothing can be live" still holds there.
  */
 import type { Database } from "../db/index.js";
 import {
@@ -37,9 +50,10 @@ import {
   updateMergeTrainState,
   type MergeTrainRow,
 } from "../repositories/merge-train.repository.js";
-import { emptyPassReport, formatPassReportBody, recordActed, type PassReport } from "../lib/pass-report.js";
+import { emptyPassReport, formatPassReportBody, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { isMergeTrainLive } from "../services/merge-train-live-registry.js";
 
 /** How often the reconciler sweeps for stranded trains (defence in depth beyond the boot pass). */
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
@@ -96,6 +110,15 @@ export interface MergeTrainSweepResult extends PassReport {
  * `getSessionManager` wiring this sweep does not otherwise need, exactly the shape
  * `born-blocked-reconciler.ts` uses `runSetup` for. Absent (the default), a stranded row is
  * marked `abandoned` outright — resuming is a caller opt-in, never assumed.
+ *
+ * #1181: `isBootPass` is what lets one function serve both the boot-delay run and the
+ * steady-state timer without the "nothing can be live at boot" reasoning leaking into the
+ * timer. At boot (the default — every existing caller that never passed this ran as the boot
+ * pass) EVERY `assembling`/`gating` row is definitionally orphaned, so it is decided exactly
+ * as before. On a periodic tick (`isBootPass: false`) a row whose id `isLive` reports as
+ * currently running in this process is left alone entirely — recorded as `skipped`, never
+ * resumed or abandoned — since it is neither stranded nor a candidate for anything this sweep
+ * should touch.
  */
 export async function reconcileStrandedMergeTrains(
   opts: {
@@ -105,16 +128,29 @@ export async function reconcileStrandedMergeTrains(
     log?: (message: string) => void;
     /** Re-run the batch for a stranded row's member set. Returning normally means "resumed". */
     runTrain?: (row: MergeTrainRow) => Promise<void>;
+    /** `false` for a periodic tick — see the header comment. Default `true` (boot semantics). */
+    isBootPass?: boolean;
+    /** Does this train id have a live in-process job right now? Defaults to the shared registry. */
+    isLive?: (trainId: string) => boolean;
   } = {},
 ): Promise<MergeTrainSweepResult> {
   const database = opts.database;
   const now = opts.now ?? new Date().toISOString();
   const log = opts.log ?? ((message: string) => console.log(`[merge-train-reconciler] ${message}`));
+  const isBootPass = opts.isBootPass ?? true;
+  const isLive = opts.isLive ?? isMergeTrainLive;
 
   const rows = await listMergeTrainsInStates(["assembling", "gating"], database).catch(() => [] as MergeTrainRow[]);
   const result: MergeTrainSweepResult = { ...emptyPassReport(rows.length), resumed: [], abandoned: [] };
 
   for (const row of rows) {
+    if (!isBootPass && isLive(row.id)) {
+      const ref = `train ${row.id} (${row.label}, project ${row.projectId})`;
+      recordSkipped(result, row.id, "live job still running in this process — left alone");
+      log(`skipping ${ref} — a live job for it is still running in this process`);
+      continue;
+    }
+
     const { action, reason } = decideMergeTrainReconcileAction(row, opts.maxResumeAttempts);
     const ref = `train ${row.id} (${row.label}, project ${row.projectId})`;
 
@@ -174,10 +210,20 @@ export function startMergeTrainReconciler(
   opts: { intervalMs?: number; runTrain?: (row: MergeTrainRow) => Promise<void> } = {},
 ): void {
   stopMergeTrainReconciler();
+  // #1181: `startPeriodicSweep` runs `tick` once after its boot delay and then on every
+  // interval thereafter, with no distinction between the two passed to the callback — so this
+  // flag is what tells `reconcileStrandedMergeTrains` which pass it is. `false` from the
+  // second call onward, forever: a later restart re-runs this whole function (`stopThenStart`
+  // semantics), which resets it to `true` again exactly when boot semantics are correct again.
+  let isBootPass = true;
   sweep = startPeriodicSweep({
     name: "merge-train-reconciler",
     intervalMs: opts.intervalMs ?? SWEEP_INTERVAL_MS,
-    tick: () => reconcileStrandedMergeTrains({ runTrain: opts.runTrain }),
+    tick: () => {
+      const pass = isBootPass;
+      isBootPass = false;
+      return reconcileStrandedMergeTrains({ runTrain: opts.runTrain, isBootPass: pass });
+    },
   });
 }
 

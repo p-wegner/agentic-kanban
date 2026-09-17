@@ -25,6 +25,7 @@ import { runPreMergeGate, looksLikeMissingDepsFailure } from "./pre-merge-gate.s
 import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { randomUUID } from "node:crypto";
 import { acquireQueueRepoLock, MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS } from "./merge-queue-repo-lock.js";
+import { registerLiveMergeTrain, unregisterLiveMergeTrain } from "./merge-train-live-registry.js";
 import type { MergeQueueEvent, MergeQueuePlan } from "./merge-queue.service.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
@@ -318,6 +319,13 @@ export function createMergeTrainRunner(deps: {
     }
     const { trainId, projectId } = trainStart;
 
+    // #1181: from here on this trainId has a LIVE job in THIS process — the reconciler's
+    // periodic sweep must not treat it as a stranded boot-time row and re-assemble a
+    // competing train that then fights this one for the repo lock. Registered as soon as the
+    // row exists (assembly can itself take a while) and always cleared in the `finally` at the
+    // bottom of this function, win or lose.
+    registerLiveMergeTrain(trainId);
+
     // #1153: bounded shorter than the per-workspace queue's 90-minute budget — a train that
     // cannot get the lock within this window is ABANDONED (not left polling), since re-assembly
     // is cheap and a livelock is exactly nine 90-minute waiters queued behind one holder that
@@ -329,6 +337,7 @@ export function createMergeTrainRunner(deps: {
     } catch (err) {
       const reason = `could not acquire the repo lock within ${Math.round(MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS / 60_000)}m: ${errorMessage(err)}`;
       await updateMergeTrainState(trainId, { state: "abandoned", reconciledReason: reason, finishedAt: new Date().toISOString() }, database).catch(() => undefined);
+      unregisterLiveMergeTrain(trainId);
       yield { type: "error", workspaceId: first.id, issueNumber: first.issueNumber, issueTitle: first.issueTitle, error: `train abandoned: ${reason}` };
       yield { type: "done", merged: [], failed: members.map((m) => m.workspaceId), skipped: [] };
       return;
@@ -428,6 +437,7 @@ export function createMergeTrainRunner(deps: {
     } finally {
       clearInterval(heartbeat);
       repoLock.release();
+      unregisterLiveMergeTrain(trainId);
     }
 
     await finishMergeTrain(trainId, result, members, database);

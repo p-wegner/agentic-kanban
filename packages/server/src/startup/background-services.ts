@@ -266,9 +266,17 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
   },
   {
     // #906 — a `merge_trains` row left `assembling`/`gating` when the process running it died
-    // (tsx-watch reload, crash, restart mid-gate). No live-job check is needed: the row's
-    // whole lifecycle is one in-process request, so anything found at boot is orphaned by
-    // construction. Resumed or marked `abandoned` with a reason — never silently dropped.
+    // (tsx-watch reload, crash, restart mid-gate). At BOOT no live-job check is needed: the
+    // row's whole lifecycle is one in-process request, so anything found at boot is orphaned
+    // by construction. Resumed or marked `abandoned` with a reason — never silently dropped.
+    //
+    // #1181: that "no live-job check needed" reasoning is boot-only. The reconciler also
+    // sweeps every `SWEEP_INTERVAL_MS` as defence in depth, and on THAT pass a row can easily
+    // still be `assembling`/`gating` because its job is genuinely still running in this same
+    // process — `startMergeTrainReconciler`/`reconcileStrandedMergeTrains` now tell the two
+    // passes apart and skip a row with a live in-process job (`merge-train-live-registry.ts`)
+    // on every pass but the first, so `runTrain` below is only ever called for a row this
+    // process is NOT currently running.
     name: "merge-train-reconciler",
     start({ db, boardEvents, getSessionManager }) {
       const queueService = createMergeQueueService({ database: db, boardEvents, getSessionManager });
