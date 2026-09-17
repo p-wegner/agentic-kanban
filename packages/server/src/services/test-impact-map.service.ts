@@ -313,6 +313,15 @@ export async function runTestImpactMapPass(
     return { outcome: "lock_busy", detail: err instanceof Error ? err.message : String(err) };
   }
 
+  // #1182: the build can run up to IMPACT_CLI_TIMEOUT_MS (180s), well past REPO_LOCK_STALE_MS
+  // (60s) — and `acquireQueueRepoLock` hands back a bare handle whose heartbeat nobody was
+  // calling. A merge train waiting on this same repo lock then saw a heartbeat stuck at 90-100s
+  // while the holder pid was very much alive and simply hadn't refreshed the file, and
+  // `probeHolderProcess` correctly refuses to steal a live lock — so the train waited out its
+  // own 15-minute bound instead of failing fast or proceeding. `merge-queue.service.ts` already
+  // pairs every long hold of this lock with a 15s heartbeat interval in a try/finally; this is
+  // the same pattern, applied here for the first time.
+  const repoLockHeartbeat = setInterval(() => lock.heartbeat(), 15_000);
   try {
     // Named for the log line and for the gate's `map fresh` clause: the sha the map was built AT.
     // A detached HEAD is fine now — there is no branch to commit onto, because nothing is
@@ -326,6 +335,7 @@ export async function runTestImpactMapPass(
   } catch (err) {
     return { outcome: "build_failed", detail: err instanceof Error ? err.message : String(err) };
   } finally {
+    clearInterval(repoLockHeartbeat);
     lock.release();
   }
 }

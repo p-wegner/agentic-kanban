@@ -8,7 +8,7 @@
  * doing so WOULD dirty the tree. The `impact.mjs` CLI itself is injected — spawning the real 7.4s
  * build would make this suite the slowest in the repo and would test the skill, not the pass.
  */
-import { describe, it, expect, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, beforeEach, afterAll, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -296,6 +296,64 @@ describe("runTestImpactMapPass", () => {
     expect(res.outcome).toBe("lock_busy");
     expect(runner.calls.some((c) => c.args[0] === "build")).toBe(false);
     expect(dirtyFiles(repo)).toBe("");
+  });
+
+  it("heartbeats the lock every 15s while the build runs, not just at acquisition (#1182)", async () => {
+    // The build can run up to IMPACT_CLI_TIMEOUT_MS (180s), well past the 60s repo-lock staleness
+    // window. Without a periodic heartbeat, a merge train waiting on the same repo lock sees a
+    // heartbeat frozen at acquisition time while this holder's pid is provably alive — so
+    // `probeHolderProcess` correctly refuses to steal it, and the train waits out its own 15-minute
+    // bound instead of the map finishing in seconds. Fake timers drive the interval without a real
+    // multi-minute build.
+    vi.useFakeTimers();
+    try {
+      let heartbeats = 0;
+      let resolveBuild!: () => void;
+      const buildGate = new Promise<void>((r) => { resolveBuild = r; });
+
+      const pending = runTestImpactMapPass(repo, {
+        runner: async (_tool, args, cwd) => {
+          if (args[0] === "check") return { code: 1, stdout: "", stderr: "", error: null };
+          await buildGate;
+          writeFileSync(join(cwd, IMPACT_MAP_PATH), '{"commit":"new"}\n');
+          return { code: 0, stdout: "", stderr: "", error: null };
+        },
+        acquireLock: async () => ({
+          path: "",
+          contents: {} as never,
+          heartbeat: () => { heartbeats++; },
+          release: () => {},
+        }),
+      });
+
+      // Let the pass reach `check`, acquire the lock, and register the heartbeat interval before
+      // asserting on it. `rev-parse --short HEAD` inside the pass is a REAL child process (fake
+      // timers don't affect it), so poll with real waits until the interval exists rather than
+      // assuming a fixed number of fake-timer ticks gets us there.
+      await vi.waitFor(
+        () => {
+          expect(vi.getTimerCount()).toBeGreaterThan(0);
+        },
+        { timeout: 5_000, interval: 10 },
+      );
+      expect(heartbeats).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(heartbeats).toBe(1);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(heartbeats).toBe(3);
+
+      resolveBuild();
+      const res = await pending;
+      expect(res.outcome).toBe("rebuilt");
+
+      // The interval must be cleared on completion — no heartbeat fires after release.
+      const afterCompletion = heartbeats;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(heartbeats).toBe(afterCompletion);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("releases the lock even when the build throws", async () => {
