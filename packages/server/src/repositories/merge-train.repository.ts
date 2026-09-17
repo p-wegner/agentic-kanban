@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, like } from "drizzle-orm";
 import { mergeTrains, type MergeTrainState } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -126,6 +126,27 @@ export async function listActiveMergeTrainsForProject(
     .select()
     .from(mergeTrains)
     .where(and(eq(mergeTrains.projectId, projectId), inArray(mergeTrains.state, states)));
+}
+
+/**
+ * #1190 — how many trains this project has already started TODAY (`dateStamp` = `YYYY-MM-DD`,
+ * the caller's clock), so the caller can mint the next `train/<dateStamp>-NN` label. Counts
+ * rows whose label carries today's date stamp regardless of state, so a resumed/abandoned row
+ * still reserves its sequence number — two live trains for one project never happens (see
+ * `beginMergeTrain`'s in-flight refusal), but a same-day retry after an abandon must not reuse
+ * a label that a stranded row (and its now-orphaned but possibly still-lingering
+ * `kanban/train/<label>` ref) already claimed.
+ */
+export async function countTrainsForProjectOnDate(
+  projectId: string,
+  dateStamp: string,
+  database: Database = db,
+): Promise<number> {
+  const rows = await database
+    .select({ label: mergeTrains.label })
+    .from(mergeTrains)
+    .where(and(eq(mergeTrains.projectId, projectId), like(mergeTrains.label, `train/${dateStamp}-%`)));
+  return rows.length;
 }
 
 /**

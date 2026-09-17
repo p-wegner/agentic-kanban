@@ -11,6 +11,10 @@ import {
   deleteTrainRef,
   runMergeTrain,
   trainRefName,
+  formatTrainLabel,
+  parentTrainLabel,
+  buildMergeTrainCommitMessage,
+  parseMergeTrainTrailer,
 } from "../services/merge-train.service.js";
 
 /**
@@ -258,7 +262,119 @@ describe("merge train assembly", () => {
     await deleteTrainRef(repo, asm.trainRef);
     await expect(revParse(repo, asm.trainRef)).rejects.toBeTruthy();
   });
+
+  /**
+   * #1190 — the landing merge commit is self-describing: subject names the PARENT train label
+   * and every member's issue number, and the body carries the gate evidence plus a
+   * `Merge-Train:` trailer a reconciler can match structurally.
+   */
+  it("lands a train with a self-describing subject, body and Merge-Train trailer", async () => {
+    await git(["branch", "f1"]);
+    await git(["branch", "f2"]);
+    await commitFile("f1", "a.txt", "a\n");
+    await commitFile("f2", "b.txt", "b\n");
+    await git(["checkout", "-q", "main"]);
+
+    const members = [
+      { workspaceId: "w1", branch: "f1", issueNumber: 1176 },
+      { workspaceId: "w2", branch: "f2", issueNumber: 1177 },
+    ];
+    const asm = await assembleMergeTrain({ repoPath: repo, baseBranch: "main", members, label: "train/2026-09-17-03" });
+    expect(asm.included).toHaveLength(2);
+
+    const { mergeSha } = await landMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      trainRef: asm.trainRef,
+      trainSha: asm.trainSha!,
+      baseSha: asm.baseSha,
+      included: asm.included,
+      label: "train/2026-09-17-03",
+      evidence: { trainId: "row-abc", gateRuns: 1, gateMessage: "pre-merge gate passed (tier: file-scoped)" },
+    });
+
+    expect(mergeSha).toMatch(/^[0-9a-f]{40}$/);
+
+    // `mergeBranch`'s return value is a status STRING, not the commit message — the composed
+    // message is what actually lands as the commit's subject+body, so assert on git itself.
+    const actualSubject = (await gitExecOrThrow(["log", "-1", "--format=%s", "main"], { cwd: repo })).trim();
+    expect(actualSubject).toBe("Merge train 2026-09-17-03: #1176 #1177");
+    const actualBody = (await gitExecOrThrow(["log", "-1", "--format=%B", "main"], { cwd: repo })).trim();
+    expect(actualBody).toContain("- #1176 f1 @");
+    expect(actualBody).toContain("- #1177 f2 @");
+    expect(actualBody).toContain("Gate: 1 run(s) — pre-merge gate passed (tier: file-scoped)");
+    expect(actualBody).toContain(`Train sha: ${asm.trainSha}`);
+    expect(actualBody).toContain(`Base sha: ${asm.baseSha}`);
+    expect(actualBody).not.toContain("Attempt:");
+    expect(parseMergeTrainTrailer(actualBody)).toBe("row-abc");
+  });
+
+  it("bisect sub-attempts land under the PARENT train's label, not the sub-attempt suffix", async () => {
+    await git(["branch", "f-good"]);
+    await commitFile("f-good", "good.txt", "good\n");
+    await git(["checkout", "-q", "main"]);
+
+    const result = await runMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members: [{ workspaceId: "w-good", branch: "f-good", issueNumber: 42 }],
+      label: "train/2026-09-17-03a",
+      trainId: "row-xyz",
+      runGate: async () => ({ passed: true, message: "ok" }),
+      closeMember: async () => {},
+    });
+
+    expect(result.landed.map((m) => m.workspaceId)).toEqual(["w-good"]);
+    const subject = (await gitExecOrThrow(["log", "-1", "--format=%s", "main"], { cwd: repo })).trim();
+    expect(subject).toBe("Merge train 2026-09-17-03: #42");
+    // The body still says WHICH sub-attempt landed, so a bisected train is traceable.
+    const body = (await gitExecOrThrow(["log", "-1", "--format=%B", "main"], { cwd: repo })).trim();
+    expect(body).toContain("Attempt: train/2026-09-17-03a");
+    expect(parseMergeTrainTrailer(body)).toBe("row-xyz");
+  });
 }, 240000);
+
+describe("train label formatting (#1190)", () => {
+  it("formats a date-stamped, zero-padded per-day sequence label", () => {
+    expect(formatTrainLabel("2026-09-17", 3)).toBe("train/2026-09-17-03");
+    expect(formatTrainLabel("2026-09-17", 1)).toBe("train/2026-09-17-01");
+    expect(formatTrainLabel("2026-09-17", 42)).toBe("train/2026-09-17-42");
+  });
+
+  it("derives the parent label by stripping trailing bisect letters", () => {
+    expect(parentTrainLabel("train/2026-09-17-03")).toBe("train/2026-09-17-03");
+    expect(parentTrainLabel("train/2026-09-17-03a")).toBe("train/2026-09-17-03");
+    expect(parentTrainLabel("train/2026-09-17-03ab")).toBe("train/2026-09-17-03");
+  });
+});
+
+describe("buildMergeTrainCommitMessage / parseMergeTrainTrailer (#1190)", () => {
+  it("composes a subject naming the label and member issues, plus a matchable trailer", () => {
+    const message = buildMergeTrainCommitMessage({
+      parentLabel: "train/2026-09-17-03",
+      included: [
+        { workspaceId: "w1", branch: "feature/ak-1176-x", issueNumber: 1176, tipSha: "a".repeat(40) },
+        { workspaceId: "w2", branch: "feature/ak-1177-y", issueNumber: 1177, tipSha: "b".repeat(40) },
+      ],
+      evidence: { trainId: "row-1", trainSha: "c".repeat(40), baseSha: "d".repeat(40), gateRuns: 1, gateMessage: "ok" },
+    });
+    expect(message.split("\n")[0]).toBe("Merge train 2026-09-17-03: #1176 #1177");
+    expect(parseMergeTrainTrailer(message)).toBe("row-1");
+  });
+
+  it("omits the issue-number suffix when no member carries one", () => {
+    const message = buildMergeTrainCommitMessage({
+      parentLabel: "train/2026-09-17-01",
+      included: [{ workspaceId: "w1", branch: "direct-work", tipSha: "a".repeat(40) }],
+      evidence: { trainId: "row-2", trainSha: "c".repeat(40), baseSha: "d".repeat(40), gateRuns: 1, gateMessage: "ok" },
+    });
+    expect(message.split("\n")[0]).toBe("Merge train 2026-09-17-01");
+  });
+
+  it("returns null when no trailer is present", () => {
+    expect(parseMergeTrainTrailer("Merge branch 'kanban/train/qmu4t981aba'")).toBeNull();
+  });
+});
 
 /**
  * #1185 — a member whose ONLY problem is a conflict must stay under `dropped`. The module

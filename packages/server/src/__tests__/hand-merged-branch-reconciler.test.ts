@@ -47,6 +47,16 @@ describe("parseMergedIssueNumbers (#113)", () => {
     const nums = parseMergedIssueNumbers(["Merge branch 'feature/ak-105-fix-ak-104-regression'"]);
     expect([...nums]).toEqual([105]);
   });
+
+  it("#1190: extracts every member's issue number from a landed release train's subject", () => {
+    const nums = parseMergedIssueNumbers(["Merge train 2026-09-17-03: #1176 #1177"]);
+    expect([...nums].sort((a, b) => a - b)).toEqual([1176, 1177]);
+  });
+
+  it("#1190: does not mistake an ordinary '#N' subject for a train (train subjects are anchored to 'Merge train ')", () => {
+    const nums = parseMergedIssueNumbers(["Merge #112: warn on CLI home-fallback DB split-brain"]);
+    expect(nums.size).toBe(0);
+  });
 });
 
 let db: TestDb;

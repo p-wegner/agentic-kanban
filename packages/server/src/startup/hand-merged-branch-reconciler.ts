@@ -34,6 +34,20 @@ function firstBranchIssueNumber(subject: string): number | null {
 }
 
 /**
+ * #1190 — a landed release train's subject is `Merge train <label>: #<N> #<M> …` (see
+ * `buildMergeTrainCommitMessage`), one `#N` per member — a different shape from the
+ * single-branch `ak-<N>` subjects the rest of this file matches. `closeMember` already
+ * reconciles a train's members through the normal path, so this is a backstop: if that
+ * bookkeeping lagged (`closeFailures`) the git history itself still proves every member
+ * landed, and this sweep is what closes the gap the same way it does for any other
+ * out-of-band merge.
+ */
+function trainIssueNumbers(subject: string): number[] {
+  if (!/^Merge train /.test(subject)) return [];
+  return [...subject.matchAll(/#(\d+)/g)].map((m) => Number(m[1])).filter((n) => n > 0);
+}
+
+/**
  * Extract the set of issue numbers whose `feature/ak-<N>` branch appears merged, from a
  * list of MERGE-commit subjects. Exported standalone for unit testing the extraction logic.
  */
@@ -42,6 +56,7 @@ export function parseMergedIssueNumbers(subjects: string[]): Set<number> {
   for (const subject of subjects) {
     const n = firstBranchIssueNumber(subject);
     if (n != null) nums.add(n);
+    for (const trainNum of trainIssueNumbers(subject)) nums.add(trainNum);
   }
   return nums;
 }
@@ -53,9 +68,13 @@ export function parseMergedIssueNumbers(subjects: string[]): Set<number> {
 function parseMergedBranchDates(commits: MergeCommitSubject[]): Map<number, string> {
   const dates = new Map<number, string>();
   for (const commit of commits) {
-    const n = firstBranchIssueNumber(commit.subject);
-    if (n == null || dates.has(n)) continue;
-    dates.set(n, commit.date);
+    const numbers = [firstBranchIssueNumber(commit.subject), ...trainIssueNumbers(commit.subject)].filter(
+      (n): n is number => n != null,
+    );
+    for (const n of numbers) {
+      if (dates.has(n)) continue;
+      dates.set(n, commit.date);
+    }
   }
   return dates;
 }
