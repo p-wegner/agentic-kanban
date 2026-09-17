@@ -97,3 +97,20 @@ Ordered by expected effect on merges per day, cheapest first:
    peak has been measured on this box (not done here).
 
 None of these is filed yet; §6 is the proposed ticket set.
+
+## 7. What landed — addendum 2026-09-17
+
+All of §6 items 1 to 4 are on master and live on the operated board (`stable-20260917-2`,
+master `bdba072b7a`), via four promotions on 2026-09-16/17:
+
+| Item | Landed as | Live evidence |
+|---|---|---|
+| Sweep wins over gates | #1165 (explicit reprobe overrides `gate_running`) + explicit probe at gate priority, no yield; test #1178 | run 3 sweep green in 21 min on a box with holds; run 5 sweep green with gates running |
+| Rebase before gating | #1169 refusal + rebase-first through `update-base` | queue refused #1166 only after a real conflict |
+| Un-latch setup failures | #1172 (deps present overrides stale verdict); #1166 `retry-setup` was already on master | — |
+| Train reachable | `merge_strategy = merge_queue`; #1180 per-repo partition of a release; #1181 live-train registry + land veto | 01:20Z: `Merge branch 'kanban/train/qmu4t981aab'` landed #1176 + #1177 after bisect; reconciler logged `skipping train … live in this process` at 9/19/29/39 min instead of superseding |
+
+Still open: #1182 (impact-map rebuild holds the shared merge lock), #1183 (boot pass drops
+members when two stranded rows share a project), §6 item 5 (slot derivation, needs a measured
+gate peak). The 09-14 train deaths are explained by #1181: the reconciler's own resume path
+abandoned the live row before re-assembling, every 10 minutes.
