@@ -4,12 +4,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { issueComments, issueTags, projects, projectStatuses, issues, workspaces, workspaceTrainSiding } from "@agentic-kanban/shared/schema";
+import { issueComments, issueTags, projects, projectStatuses, issues, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import {
   TRAIN_SIDING_MAX_ATTEMPTS,
   TRAIN_SIDING_TAG,
   clearTrainSiding,
+  isSidingDrop,
   isStillSided,
   isSidingCapped,
   partitionSidedMembers,
@@ -54,6 +55,13 @@ describe("isStillSided (#1192)", () => {
   it("is true only when the recorded sha still matches the current tip", () => {
     expect(isStillSided({ sidedBranchSha: "sha1" }, "sha1")).toBe(true);
     expect(isStillSided({ sidedBranchSha: "sha1" }, "sha2")).toBe(false);
+  });
+});
+
+describe("isSidingDrop", () => {
+  it("sides a rebase-needed drop but never a deferred (#1191 member-vs-member) one", () => {
+    expect(isSidingDrop({ reason: "Merge conflict in: src/foo.ts" })).toBe(true);
+    expect(isSidingDrop({ reason: "conflicts with feature/ak-2 (#2) — deferred to the next train", deferred: true })).toBe(false);
   });
 });
 
@@ -172,7 +180,7 @@ describe("partitionSidedMembers (#1192)", () => {
     expect(held[0].member).toEqual(member);
   });
 
-  it("re-admits and clears the record once the branch tip moves", async () => {
+  it("re-admits once the branch tip moves, clearing the tag but keeping the sidings count", async () => {
     const { db } = createTestDb();
     const { workspaceId, issueId } = await seedMember(db);
     const sendTurn = vi.fn().mockResolvedValue({ type: "sent" });
@@ -191,10 +199,41 @@ describe("partitionSidedMembers (#1192)", () => {
     expect(admitted).toEqual([member]);
     expect(held).toEqual([]);
 
-    const row = await db.select().from(workspaceTrainSiding).where(eq(workspaceTrainSiding.workspaceId, workspaceId));
-    expect(row).toEqual([]);
+    // The branch-sha GATE is cleared (so the member is no longer held) but the row itself, and
+    // its sidings count, survive — a full reset happens only on landing (clearTrainSiding).
+    // Otherwise a branch that keeps rebasing into a NEW conflict every window would reset its
+    // own counter every time and never reach the cap (#1192 follow-up fix).
+    const row = await getTrainSidingState(workspaceId, db);
+    expect(row?.sidings).toBe(1);
+    expect(row?.sidedBranchSha).toBeNull();
     const tagRows = await db.select().from(issueTags).where(eq(issueTags.issueId, issueId));
     expect(tagRows).toEqual([]);
+  });
+
+  it("accumulates sidings toward the cap across repeated rebase-then-reconflict cycles", async () => {
+    const { db } = createTestDb();
+    const { workspaceId, issueId } = await seedMember(db);
+    const sendTurn = vi.fn().mockResolvedValue({ type: "sent" });
+    const member = { workspaceId, issueId, branch: "feature/ak-1" };
+
+    // Each cycle: dropped at a sha, then the agent rebases (tip moves) before the next window —
+    // a genuine, repeated conflict, never a stuck/untouched branch.
+    for (let i = 0; i < TRAIN_SIDING_MAX_ATTEMPTS; i++) {
+      await recordTrainSidingDrop(
+        member,
+        { reason: `Merge conflict in: src/foo${i}.ts`, baseBranch: "master", trainTipSha: `tip${i}`, repoPath: "/repo" },
+        { database: db, sendTurn, getBranchHeadSha: async () => `sha-${i}` },
+      );
+      await partitionSidedMembers([member], "/repo", {
+        database: db,
+        sendTurn,
+        getBranchHeadSha: async () => `sha-${i}-rebased`,
+      });
+    }
+
+    const row = await getTrainSidingState(workspaceId, db);
+    expect(row?.sidings).toBe(TRAIN_SIDING_MAX_ATTEMPTS);
+    expect(row?.cappedAt).not.toBeNull();
   });
 });
 

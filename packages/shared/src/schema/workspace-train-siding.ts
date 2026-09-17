@@ -10,11 +10,14 @@ import { workspaces } from "./workspaces.js";
  * what lets the train tell the difference between "never tried" and "already asked to rebase,
  * still waiting" for one member, across ticks and server restarts.
  *
- * ONE row per workspace, written on the first drop and cleared once the branch tip moves (a
- * rebase landed) or the member finally lands on the train. `sidedBranchSha` is the re-admission
- * key: a member is held out of the next window's assembly for as long as its branch tip is
- * still the sha recorded here — the same shape `monitor-gate-recall` uses to gate the
- * sequential review path, applied here to the train's candidate set instead.
+ * ONE row per workspace, written on the first drop and fully cleared only once the member
+ * finally lands on the train. `sidedBranchSha` is the re-admission key: a member is held out
+ * of the next window's assembly for as long as its branch tip is still the sha recorded here
+ * — the same shape `monitor-gate-recall` uses to gate the sequential review path, applied here
+ * to the train's candidate set instead. A rebase (the tip moving) clears `sidedBranchSha` alone
+ * so the member is re-admitted — `sidings`/`cappedAt` are NOT reset by that, only by landing,
+ * so a branch that keeps rebasing into a new conflict every window still accumulates toward
+ * the cap instead of resetting it on every attempt.
  */
 export const workspaceTrainSiding = sqliteTable("workspace_train_siding", {
   /** The member this siding state belongs to. PK: at most one live siding per workspace. */

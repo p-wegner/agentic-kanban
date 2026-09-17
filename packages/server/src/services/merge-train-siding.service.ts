@@ -15,8 +15,11 @@
  *    workspace `train-siding` while a rebase is presumably in flight, for visibility.
  *  - **Re-admission is keyed on the branch tip**, the same shape `monitor-gate-recall` uses for
  *    the sequential review gate: a member is held out of assembly for as long as its branch tip
- *    is still the sha recorded at the last siding. The record is deleted the moment the tip
- *    moves — that IS "re-admitted", nothing else has to notice.
+ *    is still the sha recorded at the last siding. The branch-sha gate is cleared the moment the
+ *    tip moves — that IS "re-admitted", nothing else has to notice — but the `sidings`/`cappedAt`
+ *    counters are NOT reset by a re-admission: only landing (`clearTrainSiding`) is a full reset.
+ *    Otherwise every successful rebase would silently zero the cap, and a branch that keeps
+ *    genuinely rebasing into a new conflict every window would never reach the cap.
  *  - **A cap** (`TRAIN_SIDING_MAX_ATTEMPTS`) stops the nudging once it has clearly stopped
  *    working: past the cap the member stays withheld (same sha-gate) but is left alone rather
  *    than nudged again, and ONE issue comment (edge-triggered, like `merge-backoff`'s ceiling
@@ -60,6 +63,19 @@ export function isStillSided(row: Pick<TrainSidingRow, "sidedBranchSha"> | undef
   return row.sidedBranchSha === currentSha;
 }
 
+/**
+ * Is this drop one a siding is FOR? Only a drop the author has to rebase out of — a conflict
+ * against what is already on the train / the base. A drop marked `deferred` (#1191: the member
+ * conflicts with a SIBLING member, so the assembly left it for the next train, where it is
+ * collected again untouched) needs no rebase, and siding it would hold a branch at an unchanged
+ * tip that was never asked to move — until the cap, for nothing. Structural `deferred?` so this
+ * typechecks against a `DroppedTrainMember` with or without that field; a drop that does not
+ * carry it is a rebase case, which is every drop this branch itself produces.
+ */
+export function isSidingDrop(drop: { reason: string; deferred?: boolean }): boolean {
+  return !drop.deferred;
+}
+
 /** Has this member burned its siding cap and been left withheld rather than nudged again? */
 export function isSidingCapped(row: Pick<TrainSidingRow, "cappedAt"> | undefined): boolean {
   return Boolean(row?.cappedAt);
@@ -82,7 +98,8 @@ export function formatSidingTurnPrompt(args: {
 
 export interface TrainSidingDeps {
   database?: Database;
-  now?: () => Date;
+  /** ISO — the value lands in `lastSidedAt`/`cappedAt` (the persisted-value spelling, #614). */
+  now?: string;
   /** Injected so this module never spawns git directly (@agentic-kanban/shared/lib/git-exec convention). */
   getBranchHeadSha?: (repoPath: string, branch: string) => Promise<string | null>;
   /** 409-safe: a busy agent is expected, not an error — see `sendTurn` on `workspace-session.service.ts`. */
@@ -99,9 +116,10 @@ async function defaultGetBranchHeadSha(repoPath: string, branch: string): Promis
 
 /**
  * Partition candidate members into those the train should try to assemble this window and
- * those still on a siding — and, as a side effect, CLEAR the siding record for any member
- * whose branch tip has moved since it was recorded (that IS re-admission; nothing else has to
- * notice). Called once per window, before `assembleMergeTrain` ever touches these branches.
+ * those still on a siding — and, as a side effect, CLEAR the branch-sha gate (not the sidings
+ * counter) for any member whose branch tip has moved since it was recorded (that IS
+ * re-admission; nothing else has to notice). Called once per window, before
+ * `assembleMergeTrain` ever touches these branches.
  */
 export async function partitionSidedMembers<M extends SidingMember>(
   members: M[],
@@ -127,10 +145,20 @@ export async function partitionSidedMembers<M extends SidingMember>(
       held.push({ member, reason });
       continue;
     }
-    // The tip moved (or we could not tell — fail open, admit it). Either way the recorded
-    // siding no longer describes the branch as it stands, so it is cleared rather than
-    // carried forward stale.
-    await clearTrainSidingState(member.workspaceId, database).catch(() => undefined);
+    // The tip moved (or we could not tell — fail open, admit it). Clear the branch-sha GATE
+    // so the member is no longer held — but keep `sidings`/`cappedAt`. Deleting the whole row
+    // here would reset the cap counter to zero on every successful rebase, so a branch that
+    // genuinely rebases each time but keeps landing on a NEW conflict with the train would
+    // nudge forever and never reach `TRAIN_SIDING_MAX_ATTEMPTS` — exactly the repeated-futile-
+    // cycle case the cap exists to catch. `clearTrainSiding` (called on landing) is still the
+    // full reset, for the case that actually resolves the siding.
+    await setTrainSidingState(member.workspaceId, {
+      sidings: row.sidings,
+      sidedBranchSha: null,
+      conflictTrainTipSha: row.conflictTrainTipSha,
+      lastSidedAt: row.lastSidedAt ?? new Date(0).toISOString(),
+      cappedAt: row.cappedAt,
+    }, database).catch(() => undefined);
     await removeIssueTag(member.issueId, TRAIN_SIDING_TAG, database).catch(() => undefined);
     admitted.push(member);
   }
@@ -149,7 +177,7 @@ export async function recordTrainSidingDrop(
   deps: TrainSidingDeps,
 ): Promise<void> {
   const database = deps.database ?? db;
-  const now = (deps.now ?? (() => new Date()))();
+  const nowIso = deps.now ?? new Date().toISOString();
   try {
     const existing = await getTrainSidingState(member.workspaceId, database);
     const sidings = (existing?.sidings ?? 0) + 1;
@@ -164,8 +192,8 @@ export async function recordTrainSidingDrop(
       sidings,
       sidedBranchSha: currentSha,
       conflictTrainTipSha: args.trainTipSha,
-      lastSidedAt: now.toISOString(),
-      cappedAt: capped ? (existing?.cappedAt ?? now.toISOString()) : null,
+      lastSidedAt: nowIso,
+      cappedAt: capped ? (existing?.cappedAt ?? nowIso) : null,
     }, database);
 
     await applyIssueTag(member.issueId, TRAIN_SIDING_TAG, TRAIN_SIDING_TAG_COLOR, database).catch(() => undefined);
