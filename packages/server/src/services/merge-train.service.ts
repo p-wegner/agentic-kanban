@@ -257,7 +257,12 @@ export async function runMergeTrain(args: {
   baseBranch: string;
   members: TrainMember[];
   label: string;
-  runGate: (ctx: { trainRef: string; trainSha: string; included: TrainMember[] }) => Promise<{ passed: boolean; message: string }>;
+  /**
+   * `label` is the ATTEMPT's label (`q1`, `q1a`, `q1b`, …), not the train's — #1193 gates two
+   * bisect halves at once, so a caller keying anything per gate (its synthetic workspace id,
+   * log lines) must key it per half or the two runs become indistinguishable.
+   */
+  runGate: (ctx: { trainRef: string; trainSha: string; included: TrainMember[]; label: string }) => Promise<{ passed: boolean; message: string }>;
   closeMember: (workspaceId: string) => Promise<void>;
   /**
    * Bisect a red batch instead of rejecting it whole (#492). Default ON: without it, one bad
@@ -427,7 +432,7 @@ async function runTrainAttempt(args: {
   baseBranch: string;
   members: TrainMember[];
   label: string;
-  runGate: (ctx: { trainRef: string; trainSha: string; included: TrainMember[] }) => Promise<{ passed: boolean; message: string }>;
+  runGate: (ctx: { trainRef: string; trainSha: string; included: TrainMember[]; label: string }) => Promise<{ passed: boolean; message: string }>;
   closeMember: (workspaceId: string) => Promise<void>;
   shouldLand?: () => Promise<string | null>;
   isEnvironmentFailure: (message: string) => boolean;
@@ -499,7 +504,7 @@ async function runTrainAttempt(args: {
     // deferred-install check on the requested set would block the train on a workspace whose
     // code is not in it.
     gateStartedAt = new Date().toISOString();
-    const gate = await runGate({ trainRef: asm.trainRef, trainSha: asm.trainSha, included: asm.included });
+    const gate = await runGate({ trainRef: asm.trainRef, trainSha: asm.trainSha, included: asm.included, label });
     gateFinishedAt = new Date().toISOString();
     if (!gate.passed) {
       // #1154/#1189: an environment failure is the train's, not a member's — its own leaf kind.

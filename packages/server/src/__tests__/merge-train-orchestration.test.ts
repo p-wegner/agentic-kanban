@@ -287,7 +287,7 @@ describe("runMergeTrain — speculative bisect gates concurrently when slots all
   function trackingGate() {
     let concurrent = 0;
     let maxConcurrent = 0;
-    const runGate = vi.fn(async ({ trainRef }: { trainRef: string }) => {
+    const runGate = vi.fn(async ({ trainRef }: { trainRef: string; label: string }) => {
       concurrent++;
       maxConcurrent = Math.max(maxConcurrent, concurrent);
       const tree = await gitExecOrThrow(["ls-tree", "-r", "--name-only", trainRef], { cwd: repo });
@@ -320,6 +320,13 @@ describe("runMergeTrain — speculative bisect gates concurrently when slots all
     expect(maxConcurrent()).toBeGreaterThan(1);
     expect(result.landed.map((m) => m.branch).sort()).toEqual(["f1", "f3"]);
     expect(result.gateRejected.map((r) => r.member.branch).sort()).toEqual(["f2", "f4"]);
+    // The bisect tree records the overlap: the two halves' gate windows intersect in time, and
+    // each gate was keyed by its OWN label, so a caller can tell the runs apart.
+    const half = (label: string) => result.attempts.find((a) => a.label === label)!;
+    const [a, b] = [half("par1a"), half("par1b")];
+    expect(Date.parse(a.gateStartedAt!)).toBeLessThan(Date.parse(b.gateFinishedAt!));
+    expect(Date.parse(b.gateStartedAt!)).toBeLessThan(Date.parse(a.gateFinishedAt!));
+    expect(runGate.mock.calls.map((c) => c[0].label).sort()).toEqual(["par1", "par1a", "par1aa", "par1ab", "par1b", "par1ba", "par1bb"]);
     for (const branch of ["f1", "f3"]) {
       expect(await isAncestor(repo, await revParse(repo, branch), "main")).toBe(true);
     }
