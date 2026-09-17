@@ -70,7 +70,7 @@ import type { RepoMergeStatusResponse } from "@agentic-kanban/shared/types";
 import type { StatusWithIssues, IssueWithStatus } from "@agentic-kanban/shared/types";
 import type { DiffResponse, DiffStatsResponse } from "@agentic-kanban/shared/types";
 import type { ScorecardResult } from "@agentic-kanban/shared/types";
-import type { MergeTrainRowDto } from "@agentic-kanban/shared/types";
+import type { MergeTrainRowDto, MergeTrainSidingDto, MergeTrainsResponse } from "@agentic-kanban/shared/types";
 
 export type ApiMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -622,7 +622,13 @@ const mergeTrainRow = dtoObject<MergeTrainRowDto>({
   startedAt: str,
   finishedAt: nullable(str),
 });
-const mergeTrainsResult = looseObject({ ok: bool, trains: arrayOf(nested(mergeTrainRow)) });
+/** #1198: the project's live sidings (#1192) ride along; the panel reads `sidings`/`cappedAt` per member. */
+const mergeTrainSiding = dtoObject<MergeTrainSidingDto>({ workspaceId: str, sidings: num, cappedAt: nullable(str) });
+const mergeTrainsResult = dtoObject<MergeTrainsResponse>({
+  ok: trueLiteral,
+  trains: arrayOf(nested(mergeTrainRow)),
+  sidings: arrayOf(nested(mergeTrainSiding)),
+});
 
 /**
  * `GET /api/merge-queue/window` (#1186) → `MergeTrainWindowResponse`. The flight recorder

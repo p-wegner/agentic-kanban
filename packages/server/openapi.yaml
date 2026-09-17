@@ -2736,6 +2736,8 @@ paths:
            *
            * History of persisted release trains for a project (#906) — newest first, including
            * `abandoned` rows the startup reconciler left behind. What a "Merge train" panel reads.
+           * #1198: also the project's live sidings (#1192), so the panel can tell "on its 2nd siding"
+           * from a fresh drop — the siding table is keyed by workspace and had no read surface.
       tags:
         - merge-queue
       operationId: get_api_merge-queue_trains
