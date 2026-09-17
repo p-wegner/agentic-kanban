@@ -3,6 +3,32 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-18 — #1194 + #1192 integration proof (throwaway branch `integration/ak-1194-plus-ak-1192`)
+
+**Throwaway.** A merge of both feature branches to prove they compose, plus the one seam each
+left for the other: `recordTrainReviewSiding` (#1194) now calls `recordTrainSidingDrop` (#1192)
+for a member the review SIDED, so a blocking finding gets the same `workspace_train_siding` row,
+`train-siding` tag, 409-safe nudge, cap and branch-tip re-admission as a conflict drop.
+`runTrainReview` gained `repoPath` (arg) and `sendTurn`/`getBranchHeadSha` (deps); the runner
+passes `repoPath` + its `sendTurn` through. The train tip recorded is the assembled `trainRef`
+resolved to a sha at review time. Merge conflicts were `CONTINUE.md` and three keep-both hunks
+in `merge-queue-train.ts` (import, `createMergeTrainRunner` deps, member fields).
+
+**Verified by:** `pnpm typecheck` green; from `packages/server`, `pnpm exec vitest run
+merge-train-review merge-train-siding merge-train-orchestration merge-queue-train --maxWorkers=2`
+— 53/53, including the new `merge-train-review-siding.test.ts`: service layer (row/tag/nudge
+land on the sided member only; held while the tip is unchanged; re-admitted with the count kept
+once it moves; advisory and failed reviews write no row; no session port still records the row)
+and a runner layer against real git with only the reviewer's reply canned, over three windows
+(side → held before assembly, no review, no nudge → tip moves, re-admitted, lands, row and tag
+cleared). `isSidingDrop` needs no change: it filters `result.dropped` (assembly conflicts) and a
+review siding travels in `result.sided`, which never passes through it.
+
+**Not on either feature branch, by design.** Known wording gap: the `/turn` prompt a review-sided
+member receives is #1192's conflict text ("conflicts with work already on the train … run
+`update-base`") with the review reason embedded; the ticket comment (#1194) has the right words.
+An optional prompt override on `recordTrainSidingDrop` would fix it once both land.
+
 ## 2026-09-17 — #1194: train-scoped review, one reviewer per train (branch, not landed)
 
 **On `feature/ak-1194-train-scoped-review-one-reviewer-per-tra`**, NOT on master and NOT pushed.

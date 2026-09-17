@@ -518,10 +518,13 @@ export function createMergeTrainRunner(deps: {
               const full = members.find((x) => x.workspaceId === m.workspaceId);
               return full ? [{ workspaceId: full.workspaceId, branch: full.branch, issueId: full.issueId, issueNumber: full.issueNumber ?? null, changedFiles: full.changedFiles }] : [];
             });
+            // #1192: `repoPath` + `sendTurn` are what a sided member's siding record needs — the
+            // same row, tag and sha-keyed hold a conflict drop gets (`partitionSidedMembers`
+            // above then withholds it from the next window until its tip moves).
             const review = await reviewTrain({
-              projectId, trainLabel: label, trainRef, baseBranch, gateWorktree,
+              projectId, trainLabel: label, trainRef, baseBranch, gateWorktree, repoPath,
               members: reviewMembers, blocking: decision.blocking, thorough: decision.thorough,
-            }, { database });
+            }, { database, sendTurn });
             reviewEvidence ??= review.evidence;
             return { passed: true, message: gate.message, ...(review.sided.length > 0 ? { sided: review.sided } : {}) };
           } catch (err) {
