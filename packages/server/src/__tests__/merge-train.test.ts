@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -257,5 +257,80 @@ describe("merge train assembly", () => {
     const asm = await assembleMergeTrain({ repoPath: repo, baseBranch: "main", members: [{ workspaceId: "w1", branch: "f1" }], label: "t5" });
     await deleteTrainRef(repo, asm.trainRef);
     await expect(revParse(repo, asm.trainRef)).rejects.toBeTruthy();
+  });
+}, 240000);
+
+/**
+ * #1185 — a member whose ONLY problem is a conflict must stay under `dropped`. The module
+ * docstring is explicit: a conflict is the author's to REBASE, a gate failure the author's to
+ * FIX, and reporting one as the other sends them to the wrong place. `landGreenest` used to
+ * promote every red singleton to `gateRejected`, including one whose "gate failure" was
+ * "no members could be assembled onto the train" — no gate ever ran on it.
+ */
+describe("runMergeTrain — a conflict-only member is dropped, never gate-rejected (#1185)", () => {
+  /** `f-conflict` edits a file that main ALSO changes after branching, so it conflicts with the base itself. */
+  async function seedBaseConflict() {
+    await git(["branch", "f-conflict"]);
+    await commitFile("f-conflict", "shared.txt", "from branch\n");
+    await commitFile("main", "shared.txt", "from main\n");
+  }
+
+  it("a singleton batch that cannot be assembled is reported as dropped, with its conflict reason", async () => {
+    await seedBaseConflict();
+    const runGate = vi.fn().mockResolvedValue({ passed: true, message: "ok" });
+
+    const result = await runMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members: [{ workspaceId: "w-conflict", branch: "f-conflict", issueNumber: 7 }],
+      label: "t-1185-single",
+      runGate,
+      closeMember: async () => {},
+    });
+
+    expect(runGate).not.toHaveBeenCalled();
+    expect(result.landed).toEqual([]);
+    expect(result.gateRejected).toEqual([]);
+    expect(result.dropped.map((d) => d.member.workspaceId)).toEqual(["w-conflict"]);
+    expect(result.dropped[0].reason).not.toContain("no members could be assembled");
+    expect(result.gateFailure).toContain("no members could be assembled");
+  });
+
+  it("a bisect that isolates a base-conflicting member keeps it under dropped and blames only the red one", async () => {
+    await seedBaseConflict();
+    await git(["branch", "f-red"]);
+    await commitFile("f-red", "red.txt", "red\n");
+    await git(["checkout", "-q", "main"]);
+    // Red whenever f-red's file is in the assembled tree — so the top-level attempt (f-red
+    // assembled, f-conflict dropped) is red and the driver splits into two singletons.
+    const runGate = vi.fn(async ({ trainRef }: { trainRef: string }) => {
+      const tree = await gitExecOrThrow(["ls-tree", "-r", "--name-only", trainRef], { cwd: repo });
+      return tree.split(/\r?\n/).includes("red.txt")
+        ? { passed: false, message: "verify failed: red.txt is red" }
+        : { passed: true, message: "ok" };
+    });
+
+    const result = await runMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members: [
+        { workspaceId: "w-red", branch: "f-red", issueNumber: 8 },
+        { workspaceId: "w-conflict", branch: "f-conflict", issueNumber: 7 },
+      ],
+      label: "t-1185-bisect",
+      runGate,
+      closeMember: async () => {},
+    });
+
+    expect(result.landed).toEqual([]);
+    // Exactly one culprit, and it is the branch the gate is red on.
+    expect(result.gateRejected.map((r) => r.member.workspaceId)).toEqual(["w-red"]);
+    expect(result.gateRejected[0].reason).toContain("red.txt is red");
+    // The conflicting member appears ONLY under dropped, every time with its conflict reason.
+    const droppedIds = new Set(result.dropped.map((d) => d.member.workspaceId));
+    expect([...droppedIds]).toEqual(["w-conflict"]);
+    for (const d of result.dropped) expect(d.reason).not.toContain("no members could be assembled");
+    // Top-level attempt + the red singleton; the conflict-only singleton never reached a gate.
+    expect(result.gateRuns).toBe(2);
   });
 }, 240000);
