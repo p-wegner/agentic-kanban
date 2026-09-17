@@ -15,6 +15,7 @@ import {
 } from "../lib/mergeTrainSummary.js";
 import type { IssueWithStatus, MainWorkspaceInfo, MergeTrainsResponse, StatusWithIssues } from "@agentic-kanban/shared";
 import { Icon } from "./Icon.js";
+import { MergeTrainDetailDrawer } from "./MergeTrainDetailDrawer.js";
 
 interface ConflictPreview {
   workspaceId: string;
@@ -118,6 +119,11 @@ type MergeQueueStrategy = "auto" | "sequential" | "train";
  * "Merge train" panel (#906) — aboard / waiting / last gate / red-debt delta, reachable from
  * the merge-queue view. Reads the persisted `merge_trains` history instead of the old
  * per-request scratch state, so it survives a server restart mid-train.
+ *
+ * The last-gate figure (#1189) opens the train detail drawer — the most recent train is the
+ * one whose bisect a reader is trying to understand; older trains are one click away via the
+ * drawer's own history, which is a follow-up (the "departure board" the ticket depends on
+ * does not exist yet).
  */
 /** What a member chip says beside its label (#1197); `title` carries the full reason. */
 function trainOutcomeLabel(outcome: TrainMemberOutcome): string {
@@ -169,7 +175,15 @@ function ordinal(n: number): string {
 /** The train-conflicts group scan's answer, as the panel shows it (#1197). Inline shape: the server's `TicketGroupScanResult` is the one declaration. */
 type GroupScanView = { proposals: Array<{ issueNumbers: number[]; rationale: string }>; rejected: Array<{ issueNumbers: number[]; reason: string }>; scannedCount: number; createdEdges?: number };
 
-function MergeTrainSummaryBar({ projectId, memberLabel }: { projectId: string; memberLabel: (workspaceId: string) => string }) {
+function MergeTrainSummaryBar({
+  projectId,
+  memberLabel,
+  onOpenTrain,
+}: {
+  projectId: string;
+  memberLabel: (workspaceId: string) => string;
+  onOpenTrain: (trainId: string) => void;
+}) {
   const [trains, setTrains] = useState<MergeTrainRowDto[] | null>(null);
   // #1198: the project's live sidings (#1192), delivered beside the history by the same call.
   const [sidings, setSidings] = useState<MergeTrainSidingDto[]>([]);
@@ -251,7 +265,21 @@ function MergeTrainSummaryBar({ projectId, memberLabel }: { projectId: string; m
         <span className="font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[11px]">Merge train</span>
         <span>Aboard: <strong className="font-medium text-gray-800 dark:text-gray-100">{aboardLabel}</strong></span>
         <span>Waiting: <strong className="font-medium text-gray-800 dark:text-gray-100">{summary.waitingCount}</strong></span>
-        <span>Last gate: <strong className="font-medium text-gray-800 dark:text-gray-100">{lastGateLabel}</strong></span>
+        <span>
+          Last gate:{" "}
+          {summary.lastGate ? (
+            <button
+              type="button"
+              onClick={() => onOpenTrain(summary.lastGate!.trainId)}
+              className="font-medium text-blue-700 dark:text-blue-300 underline decoration-dotted hover:decoration-solid"
+              title="Open the bisect tree for this train"
+            >
+              {lastGateLabel}
+            </button>
+          ) : (
+            <strong className="font-medium text-gray-800 dark:text-gray-100">{lastGateLabel}</strong>
+          )}
+        </span>
         <span
           className={summary.redDebtDelta > 0 ? "text-red-600 dark:text-red-400" : "text-gray-600 dark:text-gray-300"}
           title="Members dropped or gate-rejected minus members landed, across the last 10 finished trains"
@@ -399,6 +427,7 @@ export function MergeQueuePanel({ columns, projectId, onClose, onIssueClick, onM
   // #904 — "auto" omits `strategy` on the wire so the server decides (classifier recommendation
   // or the project's train_max_size opt-in); the other two are explicit overrides.
   const [strategy, setStrategy] = useState<MergeQueueStrategy>("auto");
+  const [openTrainId, setOpenTrainId] = useState<string | null>(null);
 
   async function handleMerge(workspaceId: string) {
     const confirmed = window.confirm("Trigger merge for this workspace?");
@@ -515,7 +544,7 @@ export function MergeQueuePanel({ columns, projectId, onClose, onIssueClick, onM
           </div>
         </div>
 
-        <MergeTrainSummaryBar projectId={projectId} memberLabel={memberLabel} />
+        <MergeTrainSummaryBar projectId={projectId} memberLabel={memberLabel} onOpenTrain={setOpenTrainId} />
 
         <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 grid grid-cols-[1fr_auto_auto_auto] gap-3 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
           <span>Workspace</span>
@@ -645,6 +674,14 @@ export function MergeQueuePanel({ columns, projectId, onClose, onIssueClick, onM
           )}
         </div>
       </div>
+
+      {openTrainId && (
+        <MergeTrainDetailDrawer
+          projectId={projectId}
+          trainId={openTrainId}
+          onClose={() => setOpenTrainId(null)}
+        />
+      )}
     </div>
   );
 }
