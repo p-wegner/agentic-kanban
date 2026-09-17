@@ -34,7 +34,13 @@ export interface MergeTrainGateEvidenceDto {
   gateRuns?: number;
   gateFailure?: string | null;
   landed?: string[];
-  dropped?: Array<{ workspaceId: string; reason: string }>;
+  /**
+   * Members that could not be assembled. `deferred` (#1191, exposed #1197) marks the
+   * member-vs-member case: the member collided with ANOTHER member, not with the base, and
+   * waits for the next train rather than needing a rebase — the panel says so instead of
+   * showing a bare drop reason. Absent on rows written before #1197.
+   */
+  dropped?: Array<{ workspaceId: string; reason: string; deferred?: true }>;
   mergeSha?: string | null;
   /** #1154 — members neither landed, dropped nor individually gate-rejected (an unattributed red batch). */
   unresolved?: string[];
@@ -88,8 +94,8 @@ export interface MergeTrainAttemptDto {
   members: string[];
   /** Workspace ids that assembled onto the train and were gated. */
   included: string[];
-  /** Members that conflicted during assembly, with the conflict reason. */
-  dropped: Array<{ workspaceId: string; reason: string }>;
+  /** Members that conflicted during assembly, with the conflict reason; `deferred` as on the evidence. */
+  dropped: Array<{ workspaceId: string; reason: string; deferred?: true }>;
   /** Null when no gate ran (`assembly_empty`). */
   gateStartedAt: string | null;
   gateFinishedAt: string | null;
