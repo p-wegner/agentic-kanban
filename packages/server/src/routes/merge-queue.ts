@@ -5,7 +5,7 @@ import { mergeQueueBody, mergeQueueWindowHoldBody, mergeQueueWindowReleaseBody }
 import { createMergeQueueService } from "../services/merge-queue.service.js";
 import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "../services/board-events.js";
-import type { SessionLauncher } from "../services/session.manager.js";
+import type { SessionManager } from "../services/session.manager.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { getMergeTrain, listActiveMergeTrainsForProject, listMergeTrainsForProject, updateMergeTrainState } from "../repositories/merge-train.repository.js";
 import { getMergeQueueIssueRows, getMergeQueueWorkspaceRows } from "../repositories/merge-queue.repository.js";
@@ -17,7 +17,9 @@ import { holdTrainWindow, readTrainWindow, requestTrainWindowRelease } from "../
 
 export function createMergeQueueRoute(
   database: Database,
-  getSessionManager: () => SessionLauncher,
+  // #1192: widened from SessionLauncher — createMergeQueueService now needs the full manager
+  // for a siding drop's `/turn` nudge. Every real caller already passes it.
+  getSessionManager: () => SessionManager,
   options?: { boardEvents?: BoardEventSink },
 ) {
   const router = createRouter();
