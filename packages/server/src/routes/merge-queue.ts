@@ -18,6 +18,7 @@ import { resolveTrainWindowConfig } from "../services/merge-train-window.js";
 import { getAllPreferencesCached, getPreference } from "../repositories/preferences.repository.js";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { formatPostureNote } from "../services/risk-posture.service.js";
+import { describeReleasePartition, partitionMergeRelease, releaseBatches } from "../services/merge-release-partition.js";
 
 export function createMergeQueueRoute(
   database: Database,
@@ -241,8 +242,21 @@ export function createMergeQueueRoute(
     if (ids.length === 0) {
       return c.json({ ok: true, released: [] });
     }
-    for await (const event of queueService.executeQueue(ids, { skipOnConflict: true })) {
-      if (event.type === "done") break;
+    // Same partitioning as a normal tick's release (#1180, `runOnce` in auto-merge-orchestrator.ts):
+    // an operator-released batch can span repos/base branches just like an automatic one, and
+    // `trainEligible` judges a queue call as a whole — one foreign/direct/branch-less member must
+    // not sink the whole release into a silent fallback.
+    const plan = await queueService.computePlan(ids);
+    const partition = partitionMergeRelease(plan.order);
+    const splitNote = describeReleasePartition(partition, plan.order.length);
+    if (splitNote) console.log(`[merge-queue] window/release ${projectId}: ${splitNote}`);
+    for (const batch of releaseBatches(partition)) {
+      for await (const event of queueService.executeQueue(batch.workspaceIds, {
+        skipOnConflict: true,
+        strategy: batch.strategy,
+      })) {
+        if (event.type === "done") break;
+      }
     }
     return c.json({ ok: true, released: ids });
   });
