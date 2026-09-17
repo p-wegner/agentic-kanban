@@ -3,6 +3,49 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-17 — #1194: train-scoped review, one reviewer per train (branch, not landed)
+
+**On `feature/ak-1194-train-scoped-review-one-reviewer-per-tra`**, NOT on master and NOT pushed.
+What it is: under `fast` (`reviewMode: "train-only"`), `sprint`, or an explicit
+`review_mode_<project>=per-train`, the train runner no longer relies on N per-branch reviews.
+After a GREEN pre-merge gate it runs ONE one-shot `code-review` (`invokeClaudePrompt`, cwd = the
+gate's staging worktree, diff = assembled train vs base via `buildReviewContext`, every member's
+criteria in the `{{members}}` block) — `merge-train-review.service.ts`. The reviewer answers with
+a JSON `findings` list; each finding is attributed to a member (explicit `member` ref first, then
+the unique owner of `file` among the members' `changedFiles`, else unattributed) and posted as a
+`merge-attempt` system comment on THAT ticket. A CRITICAL/MAJOR finding under `fast` puts its
+member in `sided`; `runTrainAttempt` then re-assembles the rest onto `<label>-sided` and lands
+them WITHOUT re-gating (the combined tree already proved out). `sprint` runs the same review
+advisory: comments only, nobody sided. Standard/strict/iterate skip it (per-ticket review runs).
+Evidence: `gateEvidence.review` (`skipped`/`failed`/`ran`), `sided`/`sidedCount`, per-attempt
+`sided`, verdict `sided` when every remaining member was withheld; the dispatch events report a
+sided member as `skipped` ("sided by the train review: …"), not `failed`.
+
+**Verified by:** `pnpm typecheck` green (5 packages). From `packages/server`,
+`pnpm exec vitest run src/__tests__/merge-train-review.test.ts src/__tests__/merge-train.test.ts
+src/__tests__/merge-train-evidence.test.ts --maxWorkers=2` — 32/32: decision per posture, parse +
+attribution (explicit ref beats file owner, ambiguous file → null, MINOR not blocking, malformed
+entry dropped, no JSON throws), `runTrainReview` against a real test DB with the agent injected
+(comment lands on the sided ticket only; advisory sides nobody; a throwing reviewer → `failed`
+and nobody sided); real-git `runMergeTrain`: w2 sided → w1 lands, w2 tip untouched and not on
+main, ONE gate call, both train refs deleted; all sided → verdict `sided`, main unmoved; sided
+inside a bisected sub-train. Dispatch/review neighbours (`merge-queue-train*`, `review*`, 12
+files, 119 tests) still green.
+
+**Deferred, deliberately — #1192.** Its `merge-train-siding.service.ts` (`recordTrainSidingDrop`,
+tag `train-siding`, re-admission on branch-tip sha) lives on
+`feature/ak-1192-sidings-a-conflict-dropped-member-gets-a` and is not in this tree. The seam is
+`recordTrainReviewSiding` (TODO(#1192) in its doc comment): today it posts the findings comment;
+once #1192 lands, add the `recordTrainSidingDrop` call there so a review-sided member is also
+withheld from the next window until its tip moves. Until then a sided member is simply not landed
+and re-enters the next window unchanged — it will be reviewed and sided again with the same
+finding, which is loud rather than wrong. **Fail-open by decision:** a reviewer that cannot run
+(CLI missing, timeout, no JSON) lands the train unreviewed and records `review.status = "failed"`;
+the gate already proved the tree green, and a reviewer outage blocking every train is the failure
+#1194 was raised to avoid. No `MergeGatePhase` for the review (the enum has no `review`; adding
+one touches the client's phase rendering — separate change). Not yet done: the client "Merge
+train" panel does not render `review`/`sided` (data is persisted, UI reads the old fields).
+
 ## 2026-09-15 — #1160: verify-chain slots derived from capacity (branch, not landed)
 
 **On `worktree-agent-a042194dae3f10a55`** (nested worktree `.claude/worktrees/agent-a042194dae3f10a55`),

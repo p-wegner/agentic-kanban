@@ -45,6 +45,12 @@ export interface MergeTrainGateEvidenceDto {
   uniqueDroppedCount?: number;
   /** Distinct members a bisect individually proved red. */
   gateRejectedCount?: number;
+  /** #1194 — members a train-scoped review attributed a blocking finding to. */
+  sided?: Array<{ workspaceId: string; reason: string }>;
+  /** Distinct members sided by a train review. */
+  sidedCount?: number;
+  /** #1194 — whether/how the train-scoped review ran on the top-level attempt. */
+  review?: MergeTrainReviewEvidenceDto;
   /**
    * #1189 — every assemble → gate → land cycle the train ran, in the order they finished. The
    * bisect tree: `label` is the sub-label (`q1`, `q1a`, `q1ab`, …), so a child's label extends
@@ -54,8 +60,12 @@ export interface MergeTrainGateEvidenceDto {
   attempts?: MergeTrainAttemptDto[];
 }
 
-/** How one train attempt (#1189) ended. Only `red` blames code; the other failures are the train's. */
-export type MergeTrainAttemptVerdict = "landed" | "red" | "assembly_empty" | "land_refused" | "env_failure";
+/**
+ * How one train attempt (#1189) ended. Only `red` blames code; `sided` blames a SPECIFIC
+ * member's ticket (a train review's finding, #1194), not the batch; the other failures are
+ * the train's.
+ */
+export type MergeTrainAttemptVerdict = "landed" | "red" | "assembly_empty" | "land_refused" | "env_failure" | "sided";
 
 /** One node of a train's bisect tree (#1189) — one `runTrainAttempt`. */
 export interface MergeTrainAttemptDto {
@@ -77,4 +87,17 @@ export interface MergeTrainAttemptDto {
   failureHead?: string;
   /** The base tip after landing, for `landed` only. */
   mergeSha?: string;
+  /** #1194 — members this attempt's train review sided, with the blocking finding (first 300 chars). */
+  sided?: Array<{ workspaceId: string; reason: string }>;
 }
+
+/**
+ * #1194 — what the train-scoped review did on a finished train, persisted beside the gate
+ * evidence. `skipped` names the posture that did not ask for one; `failed` is a review that
+ * could not run (the train landed unreviewed and says so, rather than failing the gate for a
+ * reviewer outage); `ran` carries the counts the panel shows.
+ */
+export type MergeTrainReviewEvidenceDto =
+  | { status: "skipped"; reason: string }
+  | { status: "failed"; error: string }
+  | { status: "ran"; findingCount: number; blockingCount: number; sidedWorkspaceIds: string[]; blocking: boolean };
