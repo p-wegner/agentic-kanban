@@ -8,6 +8,7 @@ import { MultirepoHealthPill } from "./MultirepoHealthPill.js";
 import { useNow } from "../hooks/usePoll.js";
 import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 import { deriveWorkspaceCardState } from "../lib/workspaceCardState.js";
+import { deriveTrainBoardingPass } from "../lib/trainBoardingPass.js";
 import { Icon } from "./Icon.js";
 
 function RelativeTime({ timestamp, prefix = "" }: { timestamp: string; prefix?: string }) {
@@ -31,6 +32,9 @@ export function WorkspaceSummarySection(props: {
   // stay in the same order to agree. They are one pure decision now; precedence (a running
   // merge gate outranks everything) lives with it. See lib/workspaceCardState.ts.
   const cardState = ws?.main ? deriveWorkspaceCardState(ws.main) : null;
+  // #1188 — a "boarding pass" chip for a workspace aboard, or recently a member of, a release
+  // train: otherwise a ticket sitting in a gating train looks identical to one nobody touched.
+  const boardingPass = ws?.main ? deriveTrainBoardingPass(ws.main.trainBoardingPass) : null;
   return (
     <>
       {!compact && ws && ws.main && cardState && (
@@ -151,6 +155,14 @@ export function WorkspaceSummarySection(props: {
               title={`This branch has committed work that exists only on fleet worker ${ws.main.remoteUnlanded.workerId} right now, so the counts here are the base tip. Open the diff to land it and see the real changes.`}
             >
               {ws.main.remoteUnlanded.label}
+            </span>
+          )}
+          {boardingPass && (
+            <span
+              className="order-last inline-flex max-w-full items-center truncate px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 text-[10px] font-medium shrink"
+              title={boardingPass.tooltip}
+            >
+              {boardingPass.label}
             </span>
           )}
           {ws.main.planOnlyWarning && (
