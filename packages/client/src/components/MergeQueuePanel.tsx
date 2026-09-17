@@ -13,8 +13,16 @@ import {
   formatDurationShort,
   type TrainMemberOutcome,
 } from "../lib/mergeTrainSummary.js";
+import {
+  buildDepartureBoardRow,
+  buildHistoryStrip,
+  formatCountdown,
+  holdReasonLabel,
+  type DepartureBoardWindowDto,
+} from "../lib/departureBoard.js";
 import type { IssueWithStatus, MainWorkspaceInfo, MergeTrainsResponse, StatusWithIssues } from "@agentic-kanban/shared";
 import { Icon } from "./Icon.js";
+import { MergeTrainDetailDrawer } from "./MergeTrainDetailDrawer.js";
 
 interface ConflictPreview {
   workspaceId: string;
@@ -114,10 +122,35 @@ function riskClasses(label: MergeQueueItem["riskLabel"]): string {
 
 type MergeQueueStrategy = "auto" | "sequential" | "train";
 
+function trainStateBadgeClasses(state: string): string {
+  switch (state) {
+    case "landed":
+      return "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300";
+    case "red":
+      return "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300";
+    case "abandoned":
+      return "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400";
+    default:
+      return "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300";
+  }
+}
+
+function formatDuration(ms: number | null): string {
+  if (ms === null) return "—";
+  const totalSec = Math.round(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return min > 0 ? `${min}m ${sec}s` : `${sec}s`;
+}
+
 /**
- * "Merge train" panel (#906) — aboard / waiting / last gate / red-debt delta, reachable from
- * the merge-queue view. Reads the persisted `merge_trains` history instead of the old
- * per-request scratch state, so it survives a server restart mid-train.
+ * "Departure board" (#1187) — replaces the old one-line "Merge train" summary bar with a
+ * platform view: boarding cars, why-held reason, the live train (with Cancel), Depart
+ * now/Hold, and a history strip. Reads `GET /api/merge-queue/window` (added by #1186, "Persist
+ * and expose the merge-train batching window") for the live window plus the existing
+ * `GET /api/merge-queue/trains` history for the strip. Polls on the same generic board refresh
+ * cadence as the rest of this panel — no dedicated WebSocket event exists yet (#1186 tracks
+ * adding one; this reads a fresh snapshot every visit/interval instead of pushing).
  */
 /** What a member chip says beside its label (#1197); `title` carries the full reason. */
 function trainOutcomeLabel(outcome: TrainMemberOutcome): string {
@@ -169,7 +202,7 @@ function ordinal(n: number): string {
 /** The train-conflicts group scan's answer, as the panel shows it (#1197). Inline shape: the server's `TicketGroupScanResult` is the one declaration. */
 type GroupScanView = { proposals: Array<{ issueNumbers: number[]; rationale: string }>; rejected: Array<{ issueNumbers: number[]; reason: string }>; scannedCount: number; createdEdges?: number };
 
-function MergeTrainSummaryBar({ projectId, memberLabel }: { projectId: string; memberLabel: (workspaceId: string) => string }) {
+function MergeTrainSummaryBar({ projectId, memberLabel, onOpenTrain }: { projectId: string; memberLabel: (workspaceId: string) => string; onOpenTrain: (trainId: string) => void }) {
   const [trains, setTrains] = useState<MergeTrainRowDto[] | null>(null);
   // #1198: the project's live sidings (#1192), delivered beside the history by the same call.
   const [sidings, setSidings] = useState<MergeTrainSidingDto[]>([]);
@@ -202,7 +235,7 @@ function MergeTrainSummaryBar({ projectId, memberLabel }: { projectId: string; m
         setSidings(Array.isArray(result.sidings) ? result.sidings : []);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load merge train history");
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load merge train summary");
       });
     return () => {
       cancelled = true;
@@ -251,7 +284,21 @@ function MergeTrainSummaryBar({ projectId, memberLabel }: { projectId: string; m
         <span className="font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[11px]">Merge train</span>
         <span>Aboard: <strong className="font-medium text-gray-800 dark:text-gray-100">{aboardLabel}</strong></span>
         <span>Waiting: <strong className="font-medium text-gray-800 dark:text-gray-100">{summary.waitingCount}</strong></span>
-        <span>Last gate: <strong className="font-medium text-gray-800 dark:text-gray-100">{lastGateLabel}</strong></span>
+        <span>
+          Last gate:{" "}
+          {summary.lastGate ? (
+            <button
+              type="button"
+              onClick={() => onOpenTrain(summary.lastGate!.trainId)}
+              className="font-medium text-blue-700 dark:text-blue-300 underline decoration-dotted hover:decoration-solid"
+              title="Open the bisect tree for this train"
+            >
+              {lastGateLabel}
+            </button>
+          ) : (
+            <strong className="font-medium text-gray-800 dark:text-gray-100">{lastGateLabel}</strong>
+          )}
+        </span>
         <span
           className={summary.redDebtDelta > 0 ? "text-red-600 dark:text-red-400" : "text-gray-600 dark:text-gray-300"}
           title="Members dropped or gate-rejected minus members landed, across the last 10 finished trains"
@@ -380,6 +427,201 @@ function MergeTrainSummaryBar({ projectId, memberLabel }: { projectId: string; m
   );
 }
 
+/**
+ * "Departure board" (#1187) — replaces the old one-line "Merge train" summary bar with a
+ * platform view: boarding cars, why-held reason, the live train (with Cancel), Depart
+ * now/Hold, and a history strip. Reads `GET /api/merge-queue/window` (added by #1186, "Persist
+ * and expose the merge-train batching window") for the live window plus the existing
+ * `GET /api/merge-queue/trains` history for the strip. Polls on the same generic board refresh
+ * cadence as the rest of this panel — no dedicated WebSocket event exists yet (#1186 tracks
+ * adding one; this reads a fresh snapshot every visit/interval instead of pushing). The richer
+ * per-train evidence (#1197/#1198: members, review, bisect, conflict clusters) stays in
+ * `MergeTrainSummaryBar`, rendered below the platform so neither loses detail.
+ */
+function DepartureBoard({ projectId, memberLabel, onOpenTrain }: { projectId: string; memberLabel: (workspaceId: string) => string; onOpenTrain: (trainId: string) => void }) {
+  const [windowDto, setWindowDto] = useState<DepartureBoardWindowDto | null>(null);
+  const [trains, setTrains] = useState<MergeTrainRowDto[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionPending, setActionPending] = useState<"depart" | "hold" | "cancel" | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      apiFetch<{ ok: boolean; window: DepartureBoardWindowDto }>(`/api/merge-queue/window?projectId=${encodeURIComponent(projectId)}`),
+      apiFetch<{ ok: boolean; trains: MergeTrainRowDto[] }>(`/api/merge-queue/trains?projectId=${encodeURIComponent(projectId)}`),
+    ])
+      .then(([windowResult, trainsResult]) => {
+        if (cancelled) return;
+        setWindowDto(windowResult.window);
+        setTrains(trainsResult.trains);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load departure board");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    const interval = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  async function handleDepartNow() {
+    setActionPending("depart");
+    setActionError(null);
+    try {
+      await apiPost(`/api/merge-queue/window/release?projectId=${encodeURIComponent(projectId)}`);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Depart now failed");
+    } finally {
+      setActionPending(null);
+    }
+  }
+
+  async function handleHold() {
+    setActionPending("hold");
+    setActionError(null);
+    try {
+      await apiPost(`/api/merge-queue/window/hold?projectId=${encodeURIComponent(projectId)}`);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Hold failed");
+    } finally {
+      setActionPending(null);
+    }
+  }
+
+  async function handleCancelTrain(trainId: string) {
+    setActionPending("cancel");
+    setActionError(null);
+    try {
+      await apiPost(`/api/merge-queue/trains/${trainId}/cancel`);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Cancel failed");
+    } finally {
+      setActionPending(null);
+    }
+  }
+
+  if (error) {
+    return (
+      <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 text-xs text-red-600 dark:text-red-400">
+        Departure board: {error}
+      </div>
+    );
+  }
+
+  if (!windowDto || !trains) {
+    return (
+      <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 text-xs text-gray-400 dark:text-gray-500">
+        Departure board: loading…
+      </div>
+    );
+  }
+
+  const row = buildDepartureBoardRow(windowDto, nowMs);
+  const history = buildHistoryStrip(trains);
+
+  return (
+    <div className="border-b border-gray-100 dark:border-gray-800">
+      <div className="px-4 py-2 flex items-center justify-between">
+        <span className="font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[11px]">Departure board</span>
+        {row.trigger && !row.liveTrain && (
+          <span className="text-xs text-gray-500 dark:text-gray-400">
+            Departs on <strong className="font-medium text-gray-800 dark:text-gray-100">{row.trigger === "max_size" ? "size" : "max wait"}</strong>{" "}
+            in <strong className="font-mono text-gray-800 dark:text-gray-100">{formatCountdown(row.msUntilDeparture)}</strong>
+          </span>
+        )}
+      </div>
+
+      {actionError && (
+        <div className="px-4 pb-2 text-xs text-red-600 dark:text-red-400">{actionError}</div>
+      )}
+
+      {row.liveTrain ? (
+        <div className="px-4 pb-3">
+          <div className="rounded border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20 px-3 py-2 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-blue-800 dark:text-blue-200">
+                Live train: {row.liveTrain.label} — {row.liveTrain.state}
+              </div>
+              <div className="text-xs text-blue-700 dark:text-blue-300 mt-0.5">
+                Elapsed {formatRelativeTime(row.liveTrain.startedAt)} · {row.liveTrain.memberCount} member{row.liveTrain.memberCount === 1 ? "" : "s"} · {row.liveTrain.gateRuns} gate run{row.liveTrain.gateRuns === 1 ? "" : "s"}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleCancelTrain(row.liveTrain!.id)}
+              disabled={actionPending !== null}
+              className="text-xs px-2.5 py-1 rounded border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+            >
+              {actionPending === "cancel" ? "Cancelling..." : "Cancel"}
+            </button>
+          </div>
+        </div>
+      ) : row.boarding.length > 0 ? (
+        <div className="px-4 pb-3 space-y-2">
+          <div className="text-xs text-gray-500 dark:text-gray-400">
+            Why held: <strong className="font-medium text-gray-800 dark:text-gray-100">{holdReasonLabel(row.holdReason, row.liveTrain)}</strong>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {row.boarding.map((car) => (
+              <span
+                key={car.workspaceId}
+                className="text-xs px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-mono"
+                title={`Ready since ${formatRelativeTime(car.readySince)}`}
+              >
+                #{car.issueNumber} {car.title}
+              </span>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handleDepartNow()}
+              disabled={actionPending !== null}
+              className="text-xs px-2.5 py-1 rounded bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {actionPending === "depart" ? "Departing..." : "Depart now"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleHold()}
+              disabled={actionPending !== null}
+              className="text-xs px-2.5 py-1 rounded border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {actionPending === "hold" ? "Holding..." : "Hold"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="px-4 pb-3 text-xs text-gray-400 dark:text-gray-500">No tickets are boarding.</div>
+      )}
+
+      {history.length > 0 && (
+        <div className="px-4 pb-2 flex gap-1.5 overflow-x-auto">
+          {history.map((tile) => (
+            <button
+              key={tile.id}
+              type="button"
+              onClick={() => onOpenTrain(tile.id)}
+              title={`${tile.state} · ${tile.memberCount} member${tile.memberCount === 1 ? "" : "s"} · ${tile.gateRuns ?? "?"} gate run${tile.gateRuns === 1 ? "" : "s"} · ${formatDuration(tile.durationMs)}`}
+              className={`shrink-0 text-[11px] px-2 py-1 rounded font-medium ${trainStateBadgeClasses(tile.state)} hover:opacity-80`}
+            >
+              {tile.state} · {tile.memberCount}m
+            </button>
+          ))}
+        </div>
+      )}
+
+      <MergeTrainSummaryBar projectId={projectId} memberLabel={memberLabel} onOpenTrain={onOpenTrain} />
+    </div>
+  );
+}
+
 export function MergeQueuePanel({ columns, projectId, onClose, onIssueClick, onMerged }: MergeQueuePanelProps) {
   const items = useMemo(() => buildMergeQueueItems(columns), [columns]);
   // #1197: the train evidence names members by WORKSPACE id; the board knows them by ticket.
@@ -399,6 +641,9 @@ export function MergeQueuePanel({ columns, projectId, onClose, onIssueClick, onM
   // #904 — "auto" omits `strategy` on the wire so the server decides (classifier recommendation
   // or the project's train_max_size opt-in); the other two are explicit overrides.
   const [strategy, setStrategy] = useState<MergeQueueStrategy>("auto");
+  // #1187/#1189 — both the departure-board history tiles and the merge-train summary's
+  // "Last gate" figure open the same drawer, keyed by train id.
+  const [openTrainId, setOpenTrainId] = useState<string | null>(null);
 
   async function handleMerge(workspaceId: string) {
     const confirmed = window.confirm("Trigger merge for this workspace?");
@@ -515,7 +760,7 @@ export function MergeQueuePanel({ columns, projectId, onClose, onIssueClick, onM
           </div>
         </div>
 
-        <MergeTrainSummaryBar projectId={projectId} memberLabel={memberLabel} />
+        <DepartureBoard projectId={projectId} memberLabel={memberLabel} onOpenTrain={setOpenTrainId} />
 
         <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 grid grid-cols-[1fr_auto_auto_auto] gap-3 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
           <span>Workspace</span>
@@ -645,6 +890,14 @@ export function MergeQueuePanel({ columns, projectId, onClose, onIssueClick, onM
           )}
         </div>
       </div>
+
+      {openTrainId && (
+        <MergeTrainDetailDrawer
+          projectId={projectId}
+          trainId={openTrainId}
+          onClose={() => setOpenTrainId(null)}
+        />
+      )}
     </div>
   );
 }
