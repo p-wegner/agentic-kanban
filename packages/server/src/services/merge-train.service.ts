@@ -132,8 +132,8 @@ export function formatTrainLabel(dateStamp: string, seq: number): string {
 }
 
 /** `YYYY-MM-DD` from an ISO instant, in UTC — the calendar day a train's sequence counts against. */
-export function trainDateStamp(now: Date = new Date()): string {
-  return now.toISOString().slice(0, 10);
+export function trainDateStamp(now?: string): string {
+  return (now ?? new Date().toISOString()).slice(0, 10);
 }
 
 /**

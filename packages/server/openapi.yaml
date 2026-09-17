@@ -2756,6 +2756,34 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/merge-queue/trains/{id}:
+    get:
+      summary: |-
+        * GET /api/merge-queue/trains/:id
+           *
+           * A single train row, with `gateEvidence`/`bisectResult` parsed and the bisect-tree
+           * `attempts` (#1189) lifted to the top level — the shape `pnpm cli -- train show` and the
+           * `get_merge_train` MCP tool render. 404 when the id names no train.
+      tags:
+        - merge-queue
+      operationId: get_api_merge-queue_trains_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/merge-queue/trains/{id}/cancel:
     post:
       summary: |-

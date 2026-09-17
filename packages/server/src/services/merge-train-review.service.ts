@@ -259,7 +259,8 @@ export interface TrainReviewDeps {
   invoke?: (prompt: string, opts: { timeout: number; cwd: string; model?: string; database: Database }) => Promise<string>;
   /** Injected for tests; defaults to the real diff builder against the staging worktree. */
   buildContext?: (args: { workingDir: string; baseRef: string }) => Promise<string | null>;
-  now?: () => Date;
+  /** ISO instant the review's comments are stamped with (the persisted value) — injected for tests. */
+  now?: string;
   /**
    * #1192: the port a sided member's agent is nudged through (409-safe — a busy agent is not an
    * error). When the caller has no session port, the siding is still RECORDED (the hold is the
@@ -355,7 +356,7 @@ export async function runTrainReview(
   });
   const invoke = deps.invoke ?? ((prompt, opts) => invokeClaudePrompt(prompt, opts));
   const buildContext = deps.buildContext ?? (({ workingDir, baseRef }) => buildReviewContext({ workingDir, baseRef, isDirect: false }));
-  const now = (deps.now ?? (() => new Date()))().toISOString();
+  const now = deps.now ?? new Date().toISOString();
   const tag = `[merge-train-review] ${args.trainLabel}`;
 
   let verdict: TrainReviewVerdict;
