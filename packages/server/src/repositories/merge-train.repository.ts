@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { mergeTrains, type MergeTrainState } from "@agentic-kanban/shared/schema";
+import { issues, mergeTrains, workspaces, type MergeTrainState } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -138,6 +138,30 @@ export async function listActiveMergeTrainsForProject(
  * Membership is stored as JSON text, not queryable in SQL, so this reads the project's active
  * rows (already state-filtered and therefore few) and compares in memory.
  */
+export interface TrainWindowMemberSummary {
+  workspaceId: string;
+  issueNumber: number | null;
+  title: string | null;
+}
+
+/**
+ * Issue number + title for a set of workspace ids, keyed back by id (#1186 — what the
+ * departure-board API shows for each pending member). A workspace id with no matching row
+ * (deleted between the tick and the request) is simply absent from the result; the caller fills
+ * the gap.
+ */
+export async function getTrainWindowMemberSummaries(
+  workspaceIds: string[],
+  database: Database = db,
+): Promise<TrainWindowMemberSummary[]> {
+  if (workspaceIds.length === 0) return [];
+  return database
+    .select({ workspaceId: workspaces.id, issueNumber: issues.issueNumber, title: issues.title })
+    .from(workspaces)
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(inArray(workspaces.id, workspaceIds));
+}
+
 export async function findActiveMergeTrainForMembers(
   projectId: string,
   memberWorkspaceIds: string[],

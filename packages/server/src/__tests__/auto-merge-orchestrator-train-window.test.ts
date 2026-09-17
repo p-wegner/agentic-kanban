@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { issues, projectStatuses, projects, workspaces, preferences } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
-import { createAutoMergeOrchestrator } from "../startup/auto-merge-orchestrator.js";
-import { invalidatePreferencesCache } from "../repositories/preferences.repository.js";
+import { createAutoMergeOrchestrator, mergeTrainWindowPref, mergeTrainWindowHoldUntilPref } from "../startup/auto-merge-orchestrator.js";
+import { getPreference, invalidatePreferencesCache } from "../repositories/preferences.repository.js";
 import { runUnderVerifyChainSemaphore } from "../services/verify-chain-semaphore.js";
+import { parsePersistedTrainWindow } from "../services/merge-train-window.js";
 
 async function seedProject(db: ReturnType<typeof createTestDb>["db"]) {
   const now = new Date().toISOString();
@@ -241,6 +242,150 @@ describe("auto-merge orchestrator train batching window (#905)", () => {
       // No verify chain running — must release exactly as before (#905's original behaviour).
       const released = await orchestrator.applyTrainWindow(rows, new Date().toISOString());
       expect(released).toEqual([ws]);
+    });
+  });
+
+  describe("persistence (#1186)", () => {
+    it("persists the accumulator to merge_train_window_<projectId> while it accumulates", async () => {
+      const { db } = createTestDb();
+      const { projectId, statusId } = await seedProject(db);
+      const ws = await seedReadyWorkspace(db, projectId, statusId);
+
+      const orchestrator = createAutoMergeOrchestrator({ database: db });
+      const now = new Date("2026-08-26T12:00:00.000Z").toISOString();
+      await orchestrator.applyTrainWindow(await orchestrator.findCompletedWorkspaceRows(), now);
+
+      const raw = await getPreference(mergeTrainWindowPref.key(projectId), db);
+      const persisted = parsePersistedTrainWindow(raw);
+      expect(persisted).not.toBeNull();
+      expect(persisted?.pendingIds).toEqual([ws]);
+      expect(persisted?.firstSeenAt).toBe(now);
+      expect(persisted?.lastVerdict).toEqual({ release: false, reason: "accumulating" });
+    });
+
+    it("clears the persisted pref once the window releases", async () => {
+      const { db } = createTestDb();
+      const { projectId, statusId } = await seedProject(db);
+      await db.insert(preferences).values({ key: `train_max_size_${projectId}`, value: "1", updatedAt: new Date().toISOString() });
+      invalidatePreferencesCache();
+      await seedReadyWorkspace(db, projectId, statusId);
+
+      const orchestrator = createAutoMergeOrchestrator({ database: db });
+      await orchestrator.applyTrainWindow(await orchestrator.findCompletedWorkspaceRows(), new Date().toISOString());
+
+      expect(await getPreference(mergeTrainWindowPref.key(projectId), db)).toBeNull();
+    });
+
+    it("clears the persisted pref once the pending set disappears", async () => {
+      const { db } = createTestDb();
+      const { projectId, statusId } = await seedProject(db);
+      await seedReadyWorkspace(db, projectId, statusId);
+
+      const orchestrator = createAutoMergeOrchestrator({ database: db });
+      const t0 = new Date("2026-08-26T12:00:00.000Z").toISOString();
+      await orchestrator.applyTrainWindow(await orchestrator.findCompletedWorkspaceRows(), t0);
+      expect(await getPreference(mergeTrainWindowPref.key(projectId), db)).not.toBeNull();
+
+      await orchestrator.applyTrainWindow([], new Date(new Date(t0).getTime() + 1000).toISOString());
+      expect(await getPreference(mergeTrainWindowPref.key(projectId), db)).toBeNull();
+    });
+
+    it("restores pendingIds/firstSeenAt from a prior process's persisted pref on the first tick", async () => {
+      const { db } = createTestDb();
+      const { projectId, statusId } = await seedProject(db);
+      await db.insert(preferences).values({ key: `train_max_size_${projectId}`, value: "3", updatedAt: new Date().toISOString() });
+      const ws1 = await seedReadyWorkspace(db, projectId, statusId);
+      const t0 = new Date("2026-08-26T12:00:00.000Z").toISOString();
+      await db.insert(preferences).values({
+        key: mergeTrainWindowPref.key(projectId),
+        value: JSON.stringify({
+          pendingIds: [ws1],
+          firstSeenAt: t0,
+          lastVerdict: { release: false, reason: "accumulating" },
+          decidedAt: t0,
+        }),
+        updatedAt: t0,
+      });
+      invalidatePreferencesCache();
+
+      // A brand-new orchestrator instance, simulating a server restart.
+      const orchestrator = createAutoMergeOrchestrator({ database: db });
+      const ws2 = await seedReadyWorkspace(db, projectId, statusId);
+      const t1 = new Date(new Date(t0).getTime() + 1000).toISOString();
+      const released = await orchestrator.applyTrainWindow(await orchestrator.findCompletedWorkspaceRows(), t1);
+
+      // ws1's original firstSeenAt (t0) must have been restored, not re-armed to t1 — so a
+      // second member joining still measures the wait from the ORIGINAL first-seen moment.
+      expect(orchestrator.state.trainWindows.get(projectId)?.firstSeenAt).toBe(t0);
+      expect(released).toEqual([]); // below max size 3, still accumulating
+    });
+
+    it("getTrainWindowVerdict reflects the restored verdict before any tick runs against it again", async () => {
+      const { db } = createTestDb();
+      const { projectId, statusId } = await seedProject(db);
+      await db.insert(preferences).values({ key: `train_max_size_${projectId}`, value: "3", updatedAt: new Date().toISOString() });
+      const ws = await seedReadyWorkspace(db, projectId, statusId);
+      const t0 = new Date("2026-08-26T12:00:00.000Z").toISOString();
+      await db.insert(preferences).values({
+        key: mergeTrainWindowPref.key(projectId),
+        value: JSON.stringify({
+          pendingIds: [ws],
+          firstSeenAt: t0,
+          lastVerdict: { release: false, reason: "gate_busy" },
+          decidedAt: t0,
+        }),
+        updatedAt: t0,
+      });
+      invalidatePreferencesCache();
+
+      const orchestrator = createAutoMergeOrchestrator({ database: db });
+      expect(orchestrator.getTrainWindowVerdict(projectId)).toBeNull(); // restore is lazy, hasn't ticked yet
+      // ws is still genuinely ready this tick, so the restored entry is confirmed rather than dropped.
+      await orchestrator.applyTrainWindow(await orchestrator.findCompletedWorkspaceRows(), t0);
+      expect(orchestrator.getTrainWindowVerdict(projectId)?.verdict).toEqual({ release: false, reason: "accumulating" });
+    });
+  });
+
+  describe("operator controls (#1186)", () => {
+    it("holdTrainWindow writes an ISO deadline that decideMergeTrainRelease then honours", async () => {
+      const { db } = createTestDb();
+      const { projectId, statusId } = await seedProject(db);
+      await db.insert(preferences).values({ key: `train_max_size_${projectId}`, value: "1", updatedAt: new Date().toISOString() });
+      invalidatePreferencesCache();
+      const ws = await seedReadyWorkspace(db, projectId, statusId);
+
+      const orchestrator = createAutoMergeOrchestrator({ database: db });
+      await orchestrator.holdTrainWindow(projectId, 5);
+
+      const rows = await orchestrator.findCompletedWorkspaceRows();
+      const released = await orchestrator.applyTrainWindow(rows, new Date().toISOString());
+      expect(released).toEqual([]); // held despite max_size=1 being met
+      void ws;
+    });
+
+    it("releaseTrainWindowNow clears the hold and empties the accumulator, returning the pending ids", async () => {
+      const { db } = createTestDb();
+      const { projectId, statusId } = await seedProject(db);
+      const ws = await seedReadyWorkspace(db, projectId, statusId);
+
+      const orchestrator = createAutoMergeOrchestrator({ database: db });
+      await orchestrator.applyTrainWindow(await orchestrator.findCompletedWorkspaceRows(), new Date().toISOString());
+      expect(orchestrator.state.trainWindows.has(projectId)).toBe(true);
+
+      await orchestrator.holdTrainWindow(projectId, 30);
+      const released = await orchestrator.releaseTrainWindowNow(projectId);
+
+      expect(released).toEqual([ws]);
+      expect(orchestrator.state.trainWindows.has(projectId)).toBe(false);
+      expect(await getPreference(mergeTrainWindowHoldUntilPref.key(projectId), db)).toBeNull();
+      expect(await getPreference(mergeTrainWindowPref.key(projectId), db)).toBeNull();
+    });
+
+    it("releaseTrainWindowNow on a project with nothing pending returns an empty array", async () => {
+      const { db } = createTestDb();
+      const { projectId } = await seedProject(db);
+      const orchestrator = createAutoMergeOrchestrator({ database: db });
+      expect(await orchestrator.releaseTrainWindowNow(projectId)).toEqual([]);
     });
   });
 });

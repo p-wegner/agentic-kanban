@@ -1,13 +1,23 @@
 import { streamSSE } from "hono/streaming";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
-import { mergeQueueBody } from "./merge-queue-body-schemas.js";
+import { mergeQueueBody, mergeQueueWindowHoldBody, mergeQueueWindowReleaseBody } from "./merge-queue-body-schemas.js";
 import { createMergeQueueService } from "../services/merge-queue.service.js";
 import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionLauncher } from "../services/session.manager.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { getMergeTrain, listMergeTrainsForProject, updateMergeTrainState } from "../repositories/merge-train.repository.js";
+import {
+  getMergeTrain,
+  getTrainWindowMemberSummaries,
+  listMergeTrainsForProject,
+  updateMergeTrainState,
+} from "../repositories/merge-train.repository.js";
+import { getActiveAutoMergeOrchestrator, mergeTrainWindowHoldUntilPref, mergeTrainWindowPref } from "../startup/auto-merge-orchestrator.js";
+import { resolveTrainWindowConfig } from "../services/merge-train-window.js";
+import { getAllPreferencesCached, getPreference } from "../repositories/preferences.repository.js";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+import { formatPostureNote } from "../services/risk-posture.service.js";
 
 export function createMergeQueueRoute(
   database: Database,
@@ -130,6 +140,130 @@ export function createMergeQueueRoute(
       finishedAt: new Date().toISOString(),
     }, database);
     return c.json({ ok: true });
+  });
+
+  /**
+   * GET /api/merge-queue/window?projectId=
+   *
+   * The departure-board API (#1186): what the batching window (`merge-train-window.ts`,
+   * `auto-merge-orchestrator.ts`) is holding for this project right now, why, and when it is
+   * projected to leave. Reads live orchestrator state when the process holds one (the normal
+   * case), falling back to the persisted pref (a restart before the first tick, or this route
+   * being hit from a different process) — the two are kept in the same shape on purpose.
+   */
+  router.get("/window", async (c) => {
+    const projectId = c.req.query("projectId");
+    if (!projectId) {
+      return c.json({ ok: false, error: "projectId query parameter is required" }, 400);
+    }
+
+    const orchestrator = getActiveAutoMergeOrchestrator();
+    const liveWindow = orchestrator?.state.trainWindows.get(projectId) ?? null;
+    const liveVerdict = orchestrator?.getTrainWindowVerdict(projectId) ?? null;
+
+    let pendingIds = liveWindow?.pendingIds ?? [];
+    let firstSeenAt = liveWindow?.firstSeenAt ?? null;
+    let lastVerdict = liveVerdict?.verdict ?? null;
+    let decidedAt = liveVerdict?.decidedAt ?? null;
+
+    if (!liveWindow && !liveVerdict) {
+      // No live orchestrator state for this project (never ticked here, or this process has no
+      // orchestrator at all) — fall back to what was last persisted.
+      const persistedRaw = await getPreference(mergeTrainWindowPref.key(projectId), database);
+      if (persistedRaw) {
+        try {
+          const persisted = JSON.parse(persistedRaw) as { pendingIds?: string[]; firstSeenAt?: string; lastVerdict?: unknown; decidedAt?: string };
+          pendingIds = Array.isArray(persisted.pendingIds) ? persisted.pendingIds : [];
+          firstSeenAt = persisted.firstSeenAt ?? null;
+          lastVerdict = (persisted.lastVerdict as typeof lastVerdict) ?? null;
+          decidedAt = persisted.decidedAt ?? null;
+        } catch {
+          // corrupt/absent — report an empty window rather than failing the request
+        }
+      }
+    }
+
+    const prefRows = await getAllPreferencesCached(database);
+    const prefMap = toPrefMap(prefRows);
+    const config = resolveTrainWindowConfig(prefMap, projectId);
+    const holdUntil = prefMap.get(mergeTrainWindowHoldUntilPref.key(projectId)) ?? null;
+
+    let members: { workspaceId: string; issueNumber: number | null; title: string | null }[] = [];
+    if (pendingIds.length > 0) {
+      const rows = await getTrainWindowMemberSummaries(pendingIds, database);
+      const byId = new Map(rows.map((r) => [r.workspaceId, r]));
+      members = pendingIds.map((id) => byId.get(id) ?? { workspaceId: id, issueNumber: null, title: null });
+    }
+
+    let projectedDepartureAt: string | null = null;
+    if (firstSeenAt !== null) {
+      const firstSeenAtMs = new Date(firstSeenAt).getTime();
+      projectedDepartureAt = new Date(firstSeenAtMs + config.maxWaitMs).toISOString();
+    }
+
+    return c.json({
+      ok: true,
+      window: {
+        projectId,
+        pending: members.map((m) => ({ ...m, readySince: firstSeenAt })),
+        config: {
+          maxSize: config.maxSize,
+          maxWaitMs: config.maxWaitMs,
+          posture: config.posture,
+          batchingFromPosture: config.batchingFromPosture,
+          postureNote: config.batchingFromPosture ? formatPostureNote(config.posture) : null,
+        },
+        lastVerdict,
+        decidedAt,
+        firstSeenAt,
+        projectedDepartureAt,
+        holdUntil,
+      },
+    });
+  });
+
+  /**
+   * POST /api/merge-queue/window/release
+   *
+   * body: { projectId: string }
+   *
+   * Operator control (#1186): depart now. Clears any operator hold, empties the accumulator,
+   * and immediately runs the currently-pending ids through the queue (train strategy when
+   * there are >= 2, same as a normal window closing). Logged either way.
+   */
+  router.post("/window/release", async (c) => {
+    const { projectId } = await parseJsonBody(c, mergeQueueWindowReleaseBody);
+    const orchestrator = getActiveAutoMergeOrchestrator();
+    if (!orchestrator) {
+      return c.json({ ok: false, error: "auto-merge orchestrator is not running in this process" }, 409);
+    }
+    const ids = await orchestrator.releaseTrainWindowNow(projectId);
+    if (ids.length === 0) {
+      return c.json({ ok: true, released: [] });
+    }
+    for await (const event of queueService.executeQueue(ids, { skipOnConflict: true })) {
+      if (event.type === "done") break;
+    }
+    return c.json({ ok: true, released: ids });
+  });
+
+  /**
+   * POST /api/merge-queue/window/hold
+   *
+   * body: { projectId: string, minutes: number }
+   *
+   * Operator control (#1186): hold the door for N minutes — `decideMergeTrainRelease` refuses
+   * to release (`operator_hold`) even past max_size/max_wait until the deadline passes or
+   * `/window/release` clears it early. Logged.
+   */
+  router.post("/window/hold", async (c) => {
+    const body = await parseJsonBody(c, mergeQueueWindowHoldBody);
+    const orchestrator = getActiveAutoMergeOrchestrator();
+    if (!orchestrator) {
+      return c.json({ ok: false, error: "auto-merge orchestrator is not running in this process" }, 409);
+    }
+    const holdUntil = await orchestrator.holdTrainWindow(body.projectId, body.minutes);
+    return c.json({ ok: true, holdUntil });
   });
 
   return router;

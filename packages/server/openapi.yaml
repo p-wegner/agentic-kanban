@@ -2791,6 +2791,126 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/merge-queue/window:
+    get:
+      summary: |-
+        * GET /api/merge-queue/window?projectId=
+           *
+           * The departure-board API (#1186): what the batching window (`merge-train-window.ts`,
+           * `auto-merge-orchestrator.ts`) is holding for this project right now, why, and when it is
+           * projected to leave. Reads live orchestrator state when the process holds one (the normal
+           * case), falling back to the persisted pref (a restart before the first tick, or this route
+           * being hit from a different process) — the two are kept in the same shape on purpose.
+      tags:
+        - merge-queue
+      operationId: get_api_merge-queue_window
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/merge-queue/window/hold:
+    post:
+      summary: |-
+        * POST /api/merge-queue/window/hold
+           *
+           * body: { projectId: string, minutes: number }
+           *
+           * Operator control (#1186): hold the door for N minutes — `decideMergeTrainRelease` refuses
+           * to release (`operator_hold`) even past max_size/max_wait until the deadline passes or
+           * `/window/release` clears it early. Logged.
+      tags:
+        - merge-queue
+      operationId: post_api_merge-queue_window_hold
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+                minutes:
+                  type: number
+                  exclusiveMinimum: 0
+              required:
+                - projectId
+                - minutes
+              additionalProperties: true
+              x-unknown-keys: stripped
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/merge-queue/window/release:
+    post:
+      summary: |-
+        * POST /api/merge-queue/window/release
+           *
+           * body: { projectId: string }
+           *
+           * Operator control (#1186): depart now. Clears any operator hold, empties the accumulator,
+           * and immediately runs the currently-pending ids through the queue (train strategy when
+           * there are >= 2, same as a normal window closing). Logged either way.
+      tags:
+        - merge-queue
+      operationId: post_api_merge-queue_window_release
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+              required:
+                - projectId
+              additionalProperties: true
+              x-unknown-keys: stripped
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/metrics/loop-lag:
     get:
       summary: GET /api/metrics/loop-lag

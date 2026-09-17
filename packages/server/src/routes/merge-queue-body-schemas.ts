@@ -25,3 +25,18 @@ export const mergeQueueBody = z.object({
   // `unchecked`: an invalid value should 400 rather than silently reach `executeQueue`.
   strategy: z.enum(["sequential", "train"]).optional(),
 }).passthrough();
+
+/**
+ * `POST /api/merge-queue/window/hold` (#1186) — hold the batching window's door for N minutes.
+ */
+export const mergeQueueWindowHoldBody = z.object({
+  projectId: z.string().min(1, "projectId is required"),
+  minutes: z.number().positive("minutes must be a positive number"),
+});
+
+/**
+ * `POST /api/merge-queue/window/release` (#1186) — depart now.
+ */
+export const mergeQueueWindowReleaseBody = z.object({
+  projectId: z.string().min(1, "projectId is required"),
+});
