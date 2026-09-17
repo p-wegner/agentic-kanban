@@ -236,6 +236,12 @@ export interface TrainRunResult {
   mergeSha?: string;
   /** Members that landed but could not be closed out — they ARE merged; only bookkeeping lags. */
   closeFailures: Array<{ member: TrainMember; reason: string }>;
+  /**
+   * #1181 — set when the gate PASSED but `shouldLand` refused the landing (the train's row was
+   * abandoned while it ran). Distinct from `gateFailure`: nothing about the code is red, so
+   * the bisect driver must not split on it and no member may be blamed for it.
+   */
+  landRefused?: string;
 }
 
 export async function runMergeTrain(args: {
@@ -264,6 +270,13 @@ export async function runMergeTrain(args: {
    * that never classifies failures gets today's behaviour unchanged.
    */
   isEnvironmentFailure?: (message: string) => boolean;
+  /**
+   * #1181 — asked ONCE, after a green gate and immediately before `landMergeTrain`. Return a
+   * refusal reason to leave the base untouched (the result then carries `landRefused` and the
+   * gate failure text, lands nothing, and is not bisected), or null to land. The caller uses
+   * it to re-read the train's row: a row marked `abandoned` mid-gate must not land.
+   */
+  shouldLand?: () => Promise<string | null>;
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, runGate, closeMember } = args;
   const bisect = args.bisectOnFailure !== false;
@@ -285,6 +298,9 @@ export async function runMergeTrain(args: {
   async function landGreenest(subset: TrainMember[], subLabel: string): Promise<TrainRunResult> {
     const attempt = await runTrainAttempt({ ...args, members: subset, label: subLabel });
     if (attempt.landed.length > 0 || !attempt.gateFailure) return attempt;
+    // #1181: a refused landing is not a red gate — splitting would re-gate green code twice
+    // and then refuse again. Stop here, attribution-free.
+    if (attempt.landRefused) return attempt;
     // #1154: an environment failure fails the SAME way for every subset of the same staging
     // worktree — splitting cannot learn anything a second run at the top level didn't already
     // say, and it can only mislabel branches as individually red. Stop here, attribution-free.
@@ -328,6 +344,7 @@ async function runTrainAttempt(args: {
   label: string;
   runGate: (ctx: { trainRef: string; trainSha: string; included: TrainMember[] }) => Promise<{ passed: boolean; message: string }>;
   closeMember: (workspaceId: string) => Promise<void>;
+  shouldLand?: () => Promise<string | null>;
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, runGate, closeMember } = args;
 
@@ -356,6 +373,12 @@ async function runTrainAttempt(args: {
     const gate = await runGate({ trainRef: asm.trainRef, trainSha: asm.trainSha, included: asm.included });
     if (!gate.passed) {
       return { trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], gateRuns: 1, gateFailure: gate.message };
+    }
+
+    // #1181: last look before the base changes — a row abandoned during the gate must not land.
+    const landRefused = args.shouldLand ? await args.shouldLand() : null;
+    if (landRefused) {
+      return { trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], gateRuns: 1, gateFailure: landRefused, landRefused };
     }
 
     const { mergeSha } = await landMergeTrain({

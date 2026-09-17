@@ -21,6 +21,7 @@ import {
   updateMergeTrainState,
 } from "../repositories/merge-train.repository.js";
 import { runMergeTrain } from "./merge-train.service.js";
+import { registerLiveMergeTrain, unregisterLiveMergeTrain } from "./merge-train-live-registry.js";
 import { runPreMergeGate, looksLikeMissingDepsFailure } from "./pre-merge-gate.service.js";
 import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { randomUUID } from "node:crypto";
@@ -217,6 +218,19 @@ async function beginMergeTrain(
 }
 
 /**
+ * #1181 — the `shouldLand` port for `runMergeTrain`: a fresh read of the row right before
+ * landing. Returns the refusal reason when the row was marked `abandoned` while the job ran
+ * (operator cancel, or a reconciler verdict on a row this process was still gating), else
+ * null. A read failure lands: the row's state is bookkeeping, and refusing to land on an
+ * unreadable row would turn a transient DB hiccup into a discarded green gate.
+ */
+async function vetoLandingIfAbandoned(trainId: string, database: Database): Promise<string | null> {
+  const current = await getMergeTrain(trainId, database).catch(() => undefined);
+  if (current?.state !== "abandoned") return null;
+  return `train row ${trainId} was marked abandoned while the gate ran (${current.reconciledReason ?? "no reason recorded"}) — not landing a train nobody will account for`;
+}
+
+/**
  * Persist a train's final state and the evidence a "Merge train" panel/history view reads
  * (#906). Best effort — a bookkeeping failure here must never be reported as the train itself
  * failing; the git-level outcome already happened and is what the caller's events describe.
@@ -317,6 +331,10 @@ export function createMergeTrainRunner(deps: {
       return;
     }
     const { trainId, projectId } = trainStart;
+    // #1181: from here until `finishMergeTrain` this row has a live job in THIS process. The
+    // reconciler's periodic sweep reads the registry and leaves registered rows alone; without
+    // it the sweep applied its boot-time "nothing can be live" rule to a train mid-gate.
+    registerLiveMergeTrain({ trainId, label, projectId });
 
     // #1153: bounded shorter than the per-workspace queue's 90-minute budget — a train that
     // cannot get the lock within this window is ABANDONED (not left polling), since re-assembly
@@ -328,6 +346,7 @@ export function createMergeTrainRunner(deps: {
       repoLock = await acquireQueueRepoLock(repoPath, `merge-train:${label}`, { timeoutMs: MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS });
     } catch (err) {
       const reason = `could not acquire the repo lock within ${Math.round(MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS / 60_000)}m: ${errorMessage(err)}`;
+      unregisterLiveMergeTrain(trainId);
       await updateMergeTrainState(trainId, { state: "abandoned", reconciledReason: reason, finishedAt: new Date().toISOString() }, database).catch(() => undefined);
       yield { type: "error", workspaceId: first.id, issueNumber: first.issueNumber, issueTitle: first.issueTitle, error: `train abandoned: ${reason}` };
       yield { type: "done", merged: [], failed: members.map((m) => m.workspaceId), skipped: [] };
@@ -342,6 +361,12 @@ export function createMergeTrainRunner(deps: {
         baseBranch,
         members,
         label,
+        // #1181: an operator cancel or a reconciler verdict can mark this row `abandoned` while
+        // the job is still gating (there is no cancellation token into `runMergeTrain`). The
+        // gate work is sunk cost either way, but a train whose row says abandoned must not
+        // LAND — nobody is going to account for that merge. Checked at the last moment before
+        // `landMergeTrain`, on a fresh read, never on the row captured at start.
+        shouldLand: () => vetoLandingIfAbandoned(trainId, database),
         runGate: async ({ trainRef, included }) => {
           // Gate the TREE THAT LANDS. A per-member gate never tests the merge commit, which is
           // how two individually-green branches can produce a red base with no conflict.
@@ -430,7 +455,13 @@ export function createMergeTrainRunner(deps: {
       repoLock.release();
     }
 
-    await finishMergeTrain(trainId, result, members, database);
+    try {
+      await finishMergeTrain(trainId, result, members, database);
+    } finally {
+      // #1181: the row's terminal state is persisted (or deliberately left `abandoned`) — only
+      // now may a sweep treat it as it finds it. Idempotent with the lock-failure clear above.
+      unregisterLiveMergeTrain(trainId);
+    }
 
     for (const d of result.dropped) {
       yield { type: "skipped", workspaceId: d.member.workspaceId, issueNumber: d.member.issueNumber ?? null, issueTitle: "", reason: `dropped from train: ${d.reason.slice(0, 200)}` };
