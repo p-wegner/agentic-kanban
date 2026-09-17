@@ -85,5 +85,23 @@ describe("buildTrainGateEvidence (#1184)", () => {
     );
     expect(gateEvidence).toMatchObject({ memberCount: 2, landedCount: 2, uniqueDroppedCount: 0, gateRejectedCount: 0, gateRuns: 1 });
     expect(gateRejected).toEqual([]);
+    // #1191: no member-vs-member conflicts, so the key is absent rather than an empty list.
+    expect(gateEvidence.conflictClusters).toBeUndefined();
+  });
+
+  it("#1191: carries the member-vs-member conflict clusters so the train-conflicts group scan can read them back", () => {
+    const members = [m("a"), m("b"), m("c")];
+    const { gateEvidence } = buildTrainGateEvidence(
+      result({
+        landed: [m("a"), m("c")],
+        dropped: [{ member: m("b"), reason: "conflicts with f-a — deferred to the next train", deferred: true }],
+        gateRuns: 1,
+        mergeSha: "ghi",
+        conflictClusters: [{ workspaceIds: ["a", "b"] }],
+      }),
+      members,
+    );
+    expect(gateEvidence.conflictClusters).toEqual([{ workspaceIds: ["a", "b"] }]);
+    expect(gateEvidence.dropped).toEqual([{ workspaceId: "b", reason: "conflicts with f-a — deferred to the next train" }]);
   });
 });
