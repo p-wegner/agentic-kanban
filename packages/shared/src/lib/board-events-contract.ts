@@ -44,6 +44,9 @@ export const SERVER_BOARD_EVENT_REASONS = [
   "internal_notify",
   // #1186 — the merge-train batching window's pending set, verdict, or operator hold changed.
   "merge_train_window_changed",
+  // #1186 — a merge_trains row changed state (assembling/gating/landed/red/abandoned), so the
+  // departure-board UI's live train card does not need to poll.
+  "merge_train_state_changed",
   // #1089 — the worker fleet is not project-scoped, so this reason is broadcast to every
   // subscribed project's channel (see `broadcastToAllProjects`) rather than one projectId.
   "workers_changed",

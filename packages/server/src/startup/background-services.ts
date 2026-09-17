@@ -295,12 +295,14 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
             reconciledReason: "superseded by a freshly re-assembled train after a stranded boot-time recovery",
             finishedAt: new Date().toISOString(),
           }, db);
+          boardEvents?.broadcast(row.projectId, "merge_train_state_changed");
           const memberWorkspaceIds = JSON.parse(row.memberWorkspaceIds) as string[];
           for await (const _event of queueService.executeQueue(memberWorkspaceIds, { strategy: "train" })) {
             // The fresh train (a new `merge_trains` row) persists its own terminal state via
             // `finishMergeTrain`; nothing here needs to mirror it onto the now-abandoned row.
           }
         },
+        boardEvents,
       });
       return stopMergeTrainReconciler;
     },
