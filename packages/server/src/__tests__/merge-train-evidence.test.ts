@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildTrainGateEvidence } from "../services/merge-queue-train.js";
+import { annotateConcurrentGates, buildTrainGateEvidence } from "../services/merge-queue-train.js";
 import type { TrainMember, TrainRunResult } from "../services/merge-train.service.js";
+import type { MergeTrainAttemptDto } from "@agentic-kanban/shared/types";
 
 /**
  * #1184 — the evidence `finishMergeTrain` persists is what the "Merge train" panel computes
@@ -134,5 +135,59 @@ describe("buildTrainGateEvidence (#1184)", () => {
     );
     expect(gateEvidence.conflictClusters).toEqual([{ workspaceIds: ["a", "b"] }]);
     expect(gateEvidence.dropped).toEqual([{ workspaceId: "b", reason: "conflicts with f-a — deferred to the next train" }]);
+  });
+});
+
+/**
+ * #1193 — the bisect tree must SHOW when two halves gated at once, or the second verify slot
+ * could be silently unused (13 sequential gate runs, 149 min, on train qmu4t981a) with nothing
+ * in the persisted evidence to say so.
+ */
+describe("annotateConcurrentGates (#1193)", () => {
+  const t = (minutes: number) => new Date(Date.UTC(2026, 8, 17, 12, minutes)).toISOString();
+  const node = (label: string, startMin: number | null, endMin: number | null): MergeTrainAttemptDto => ({
+    label,
+    members: ["a"],
+    included: ["a"],
+    dropped: [],
+    gateStartedAt: startMin === null ? null : t(startMin),
+    gateFinishedAt: endMin === null ? null : t(endMin),
+    gateRuns: startMin === null ? 0 : 1,
+    verdict: "red",
+  });
+
+  it("marks two overlapping halves as concurrent with each other and totals the saving", () => {
+    // Root gated 0-10, then both halves 10-20 and 10-18 at once: sequentially that is 28 min
+    // of gating, concurrently it occupied 20 — 8 min saved.
+    const { attempts, concurrentGateSavedMs } = annotateConcurrentGates([
+      node("q1", 0, 10),
+      node("q1a", 10, 20),
+      node("q1b", 10, 18),
+    ]);
+    expect(attempts[0].concurrentWith).toBeUndefined();
+    expect(attempts[1].concurrentWith).toEqual(["q1b"]);
+    expect(attempts[2].concurrentWith).toEqual(["q1a"]);
+    expect(concurrentGateSavedMs).toBe(8 * 60_000);
+  });
+
+  it("a sequential tree carries no annotation and a saving of 0 — a gate starting the instant another ends is sequential", () => {
+    const { attempts, concurrentGateSavedMs } = annotateConcurrentGates([
+      node("q1", 0, 10),
+      node("q1a", 10, 20),
+      node("q1b", 20, 30),
+    ]);
+    expect(attempts.every((a) => a.concurrentWith === undefined)).toBe(true);
+    expect(concurrentGateSavedMs).toBe(0);
+  });
+
+  it("ignores nodes that never gated (assembly_empty), and reaches the persisted evidence", () => {
+    const empty = { ...node("q1b", null, null), verdict: "assembly_empty" as const };
+    const members = [m("a")];
+    const { gateEvidence } = buildTrainGateEvidence(
+      result({ gateRuns: 2, attempts: [node("q1", 0, 10), node("q1a", 10, 15), empty] }),
+      members,
+    );
+    expect(gateEvidence.concurrentGateSavedMs).toBe(0);
+    expect(gateEvidence.attempts?.map((a) => a.concurrentWith)).toEqual([undefined, undefined, undefined]);
   });
 });

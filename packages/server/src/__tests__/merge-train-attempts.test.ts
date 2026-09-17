@@ -71,6 +71,10 @@ describe("runMergeTrain — attempts form a bisect tree (#1189)", () => {
         log.push(`attempt:${attempt.label}:${attempt.verdict}`);
         seen.push(attempt);
       },
+      // This test asserts the bisect TREE's finish order, which only holds when the two halves
+      // of a split gate sequentially (#1193 parallelizes them whenever 2+ verify slots are free
+      // on the box, which would otherwise make this order machine-dependent).
+      freeVerifySlots: () => 1,
     });
 
     // The tree, in finish order: root (red) → first half lands → second half red → its leaves.
