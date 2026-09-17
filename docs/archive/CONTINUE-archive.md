@@ -11,6 +11,180 @@ First archive pass: 2026-08-27, cutting at the 2026-08-24 boundary (`CONTINUE.md
 
 ---
 
+## 2026-09-17 — #1191: conflict-aware train assembly (branch, not landed)
+
+**On `feature/ak-1191-conflict-aware-assembly-overlap-graph-di`**, NOT on master and NOT pushed.
+What it is: `assembleMergeTrain` no longer stacks members in plan order and drops whoever
+happens to collide with an earlier sibling. For 2+ members it first builds a pairwise
+member-vs-member conflict graph (`services/merge-train-conflict-graph.ts`: read-only
+`git merge-tree` per pair, verdict cached per sorted tip pair in a bounded module cache, so a
+bisect's sub-attempts over the same tips pay for no pair twice), keeps a maximum conflict-free
+set (`pickConflictFreeSet`, greedy min-degree — a heuristic, exact MIS is NP-hard and a train
+has ~4–13 members), stacks the kept set in least-overlap order (`orderByLeastOverlap`: fewest
+remaining conflicts, ties by total degree, then caller order), and reports the connected
+components as `conflictClusters`. A graph-excluded member is dropped as
+`conflicts with <branch> (#N) — deferred to the next train` with `deferred: true`; it stays
+ready, so the #905 window collects it on the next tick — that IS "train 2", no new orchestrator
+queue. A base-only conflict is still dropped by the merge itself, not deferred. `--no-ff` and
+`assertTrainPreservesAncestry` are untouched; nothing rebases a member branch.
+
+Clusters reach ticket groups (decision 015) as **candidates**, never as auto-written edges: the
+runner persists them in `merge_trains.gate_evidence.conflictClusters`
+(`MergeTrainGateEvidenceDto`), and `propose_ticket_groups mode=train-conflicts` /
+`POST /api/issues/group-scan {mode:"train-conflicts"}` (`scanMergeTrainConflictsForTicketGroups`)
+reads the last 20 trains back, maps workspaces to live, non-terminal issues, excludes sequential
+pairs, and proposes one group per component with the train labels in the rationale;
+`apply=true` writes `coupled_with` through the existing `applyTicketGroupProposals`.
+
+**Verified by:** `pnpm typecheck` green (5 packages); `pnpm check:arch` 0 errors (the 30
+`startup-bypasses-repositories` warnings pre-exist); worktree vitest on the eight touched files
+66/66 (`merge-train-conflict-graph` 16 incl. the cache block with an injected fake git;
+`merge-train` real-repo: sibling conflict names the kept member + deferred, plan-order clash
+`[clash, a, b]` now lands `a, b` and defers `clash`, base-only drop not deferred;
+`merge-train-evidence` carries/omits clusters; new `ticket-group-scan-train-conflicts` 6/6:
+propose, union across trains, terminal-member rejection, sequential exclusion, empty scan,
+apply once); the four openapi tests 19/19 after `pnpm openapi:generate`; `bundled-skill-freshness`
+after `pnpm skill:generate`. `pnpm test:mine -- --changed HEAD` ran at scope=full: shared
+1240, mcp-server 197, client 1901 all green; server 9171 green with 4 failures, two of them this
+change (both fixed — the skill regeneration, and `merge-train-orchestration` now pins the
+least-overlap landing order `[f2, f1]` since f1 collided with the deferred f3) and two
+load-flaky timing tests this diff does not touch (`base-branch-health-recency`,
+`base-health-reprobe-guard`: 22/22 re-run alone, on a box that was swapping — a finding, not
+this ticket's).
+
+**Not done, deliberately:** `computePlan` (`merge-train-window.ts`) is not extended — the
+pairwise cost lives in `assembleMergeTrain` so the sequential path never pays it. The prior
+uncommitted draft auto-wrote `coupled_with` edges after every train; replaced by evidence + scan,
+because decision 015 makes coupling an operator's call. No UI for the clusters yet (the
+"Merge train" panel reads `gateEvidence` and could list them — backlog). A deferred member will
+usually conflict with the BASE once its sibling lands and then take the per-ticket rebase path;
+the deferral pays off when the sibling itself fails the gate.
+## 2026-09-18 — #1194 + #1192 integration proof (throwaway branch `integration/ak-1194-plus-ak-1192`)
+
+**Throwaway.** A merge of both feature branches to prove they compose, plus the one seam each
+left for the other: `recordTrainReviewSiding` (#1194) now calls `recordTrainSidingDrop` (#1192)
+for a member the review SIDED, so a blocking finding gets the same `workspace_train_siding` row,
+`train-siding` tag, 409-safe nudge, cap and branch-tip re-admission as a conflict drop.
+`runTrainReview` gained `repoPath` (arg) and `sendTurn`/`getBranchHeadSha` (deps); the runner
+passes `repoPath` + its `sendTurn` through. The train tip recorded is the assembled `trainRef`
+resolved to a sha at review time. Merge conflicts were `CONTINUE.md` and three keep-both hunks
+in `merge-queue-train.ts` (import, `createMergeTrainRunner` deps, member fields).
+
+**Verified by:** `pnpm typecheck` green; from `packages/server`, `pnpm exec vitest run
+merge-train-review merge-train-siding merge-train-orchestration merge-queue-train --maxWorkers=2`
+— 53/53, including the new `merge-train-review-siding.test.ts`: service layer (row/tag/nudge
+land on the sided member only; held while the tip is unchanged; re-admitted with the count kept
+once it moves; advisory and failed reviews write no row; no session port still records the row)
+and a runner layer against real git with only the reviewer's reply canned, over three windows
+(side → held before assembly, no review, no nudge → tip moves, re-admitted, lands, row and tag
+cleared). `isSidingDrop` needs no change: it filters `result.dropped` (assembly conflicts) and a
+review siding travels in `result.sided`, which never passes through it.
+
+**Not on either feature branch, by design.** Known wording gap: the `/turn` prompt a review-sided
+member receives is #1192's conflict text ("conflicts with work already on the train … run
+`update-base`") with the review reason embedded; the ticket comment (#1194) has the right words.
+An optional prompt override on `recordTrainSidingDrop` would fix it once both land.
+
+## 2026-09-17 — #1194: train-scoped review, one reviewer per train (branch, not landed)
+
+**On `feature/ak-1194-train-scoped-review-one-reviewer-per-tra`**, NOT on master and NOT pushed.
+What it is: under `fast` (`reviewMode: "train-only"`), `sprint`, or an explicit
+`review_mode_<project>=per-train`, the train runner no longer relies on N per-branch reviews.
+After a GREEN pre-merge gate it runs ONE one-shot `code-review` (`invokeClaudePrompt`, cwd = the
+gate's staging worktree, diff = assembled train vs base via `buildReviewContext`, every member's
+criteria in the `{{members}}` block) — `merge-train-review.service.ts`. The reviewer answers with
+a JSON `findings` list; each finding is attributed to a member (explicit `member` ref first, then
+the unique owner of `file` among the members' `changedFiles`, else unattributed) and posted as a
+`merge-attempt` system comment on THAT ticket. A CRITICAL/MAJOR finding under `fast` puts its
+member in `sided`; `runTrainAttempt` then re-assembles the rest onto `<label>-sided` and lands
+them WITHOUT re-gating (the combined tree already proved out). `sprint` runs the same review
+advisory: comments only, nobody sided. Standard/strict/iterate skip it (per-ticket review runs).
+Evidence: `gateEvidence.review` (`skipped`/`failed`/`ran`), `sided`/`sidedCount`, per-attempt
+`sided`, verdict `sided` when every remaining member was withheld; the dispatch events report a
+sided member as `skipped` ("sided by the train review: …"), not `failed`.
+
+**Verified by:** `pnpm typecheck` green (5 packages). From `packages/server`,
+`pnpm exec vitest run src/__tests__/merge-train-review.test.ts src/__tests__/merge-train.test.ts
+src/__tests__/merge-train-evidence.test.ts --maxWorkers=2` — 32/32: decision per posture, parse +
+attribution (explicit ref beats file owner, ambiguous file → null, MINOR not blocking, malformed
+entry dropped, no JSON throws), `runTrainReview` against a real test DB with the agent injected
+(comment lands on the sided ticket only; advisory sides nobody; a throwing reviewer → `failed`
+and nobody sided); real-git `runMergeTrain`: w2 sided → w1 lands, w2 tip untouched and not on
+main, ONE gate call, both train refs deleted; all sided → verdict `sided`, main unmoved; sided
+inside a bisected sub-train. Dispatch/review neighbours (`merge-queue-train*`, `review*`, 12
+files, 119 tests) still green.
+
+**Deferred, deliberately — #1192.** Its `merge-train-siding.service.ts` (`recordTrainSidingDrop`,
+tag `train-siding`, re-admission on branch-tip sha) lives on
+`feature/ak-1192-sidings-a-conflict-dropped-member-gets-a` and is not in this tree. The seam is
+`recordTrainReviewSiding` (TODO(#1192) in its doc comment): today it posts the findings comment;
+once #1192 lands, add the `recordTrainSidingDrop` call there so a review-sided member is also
+withheld from the next window until its tip moves. Until then a sided member is simply not landed
+and re-enters the next window unchanged — it will be reviewed and sided again with the same
+finding, which is loud rather than wrong. **Fail-open by decision:** a reviewer that cannot run
+(CLI missing, timeout, no JSON) lands the train unreviewed and records `review.status = "failed"`;
+the gate already proved the tree green, and a reviewer outage blocking every train is the failure
+#1194 was raised to avoid. No `MergeGatePhase` for the review (the enum has no `review`; adding
+one touches the client's phase rendering — separate change). Not yet done: the client "Merge
+train" panel does not render `review`/`sided` (data is persisted, UI reads the old fields).
+## 2026-09-17 — #1192: train sidings (branch `feature/ak-1192-…`, not landed)
+
+Follow-ups found while finishing the branch, not ticketed yet:
+
+- **Overlap with #1191 (`feature/ak-1191-…`, sibling branch, not merged).** #1191 adds
+  `DroppedTrainMember.deferred` for a member-vs-member conflict that the next window
+  re-collects untouched. #1192's runner sides every drop, which would hold a deferred member at
+  a tip nobody asked to move. Guarded structurally (`isSidingDrop`, skips `deferred: true`), so
+  the two branches compose without a merge. **After both land**: add a runner test that a
+  deferred drop produces no siding row — it cannot be written on either branch alone.
+- **No UI** for the `train-siding` tag beyond the tag itself; the held-out reason only reaches
+  the queue as a `skipped` event. A departure-board column (#1186) could show "on siding N/3".
+- **The cap comment lands under kind `merge-attempt`** — reuse, not a dedicated kind; fine
+  until something filters by kind.
+- Time injection: `TrainSidingDeps.now` was `() => Date` in the first commit and tripped
+  `time-injection-spelling-ratchet` (5 > baseline 4); now `now?: string`.
+## 2026-09-17 — #1193: speculative bisect gates both halves concurrently (branch, not landed)
+
+**On `feature/ak-1193-speculative-bisect-gate-both-halves-conc`**, worktree
+`.worktrees/agentic-kanban/ak-1193`, NOT on master and NOT pushed. What it is: `landGreenest`
+(`merge-train.service.ts`) used to gate a red bisect's halves one after another (train
+qmu4t981a: 13 gate runs, 149 min). Now, when `freeVerifySlots()` (default: semaphore
+concurrency minus active, from `verify-chain-semaphore.ts` / #1160) reports 2+, both halves
+are assembled and gated at once from the same base sha, each on its own train ref and so in its
+own `train` staging worktree; landing stays left-to-right (`waitForLandTurn`), and a half whose
+base moved because its sibling landed is re-assembled from the already-gated members onto the
+new base without a re-gate (a member that no longer assembles cleanly is dropped, not landed
+unverified). Fewer than 2 free slots: sequential, exactly as before. The gates themselves still
+each take a semaphore slot inside `runPreMergeGate`, so the capacity gate is never exceeded —
+the slot count only decides whether the second half's assembly/worktree is worth starting.
+The three commits: `04ecf435` (the feature), `180e369e` (`allSettled`, so one half's throw
+never leaves the sibling's landing unsupervised), and this pass: `runGate` now receives the
+ATTEMPT's label so the two halves' synthetic gate ids and log lines (`train:q1a` / `train:q1b`)
+are distinguishable, and `buildTrainGateEvidence` (`merge-queue-train.ts`) annotates the
+persisted bisect tree — each node gets `concurrentWith` (sibling labels whose gate window
+overlapped its own) and the evidence gets `concurrentGateSavedMs` (sum of gate durations minus
+their union), so the saving is visible on the row.
+
+**Verified by:** `pnpm typecheck` green (5 packages); `merge-train-orchestration.test.ts`
+(parallel run with two slots, sequential fallback with one, ordered landing when both halves are
+green, and the halves' gate windows overlap in `result.attempts`); `merge-train-evidence.test.ts`
+(new `annotateConcurrentGates` block: overlapping halves annotated + 8 min saved, sequential
+tree = 0, ungated nodes ignored); `merge-train-attempts.test.ts` (pins `freeVerifySlots: () => 1`
+because it asserts the tree's finish order); `merge-train.test.ts`. All from the worktree with
+`--maxWorkers=2`.
+
+**Not done, deliberately:** no live two-half run on the operated board (needs a promote, and
+the first one should confirm two concurrent `git worktree add` calls on one repo behave — they
+target distinct leaves, but that has only been exercised in tests where `runGate` is a mock).
+The client has NO bisect-tree renderer at all (#1189 persisted the tree, nothing draws it;
+`mergeTrainSummary.ts` reads only `gateRuns`), so `concurrentWith` / `concurrentGateSavedMs` are
+visible in the row's `gateEvidence` JSON and nowhere in the UI — drawing the tree is its own
+ticket. The live `onAttempt` appends carry no `concurrentWith` (the overlap is only known when
+both halves are done); only the final evidence write does. Nested splits (a red half splitting
+again) parallelize recursively under the same slot check, each level reading the semaphore
+afresh; that is intended but only the two-level case is covered by a test.
+
+
 Second archive pass: 2026-09-04, moving the 2026-09-01..09-02 passes (nine sections, #986/#992/#994/#995/#996/#997/#998/#999 and the verification-cadence pass) out of the live file, which had reached 543 lines with a top pass two days old.
 
 ---
