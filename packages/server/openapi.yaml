@@ -2791,6 +2791,120 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/merge-queue/window:
+    get:
+      summary: |-
+        * GET /api/merge-queue/window?projectId=
+           *
+           * The departure board (#1186): the project's merge-train batching window as the orchestrator
+           * persisted it on its last tick (`train_window_<projectId>`) — who is waiting, since when,
+           * the last verdict + reason, the size/wait config in force and the projected departure — or
+           * `window: null` when nothing is being held. Read-only; one source with the log line.
+      tags:
+        - merge-queue
+      operationId: get_api_merge-queue_window
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/merge-queue/window/hold:
+    post:
+      summary: |-
+        * POST /api/merge-queue/window/hold
+           *
+           * body: { projectId, minutes }
+           *
+           * Operator "hold the door" (#1186): no release before `now + minutes`, whatever the size or
+           * wait say; `minutes: 0` clears the hold. A hold placed before anything is ready is kept as a
+           * control-only record and applies to the first arrival.
+      tags:
+        - merge-queue
+      operationId: post_api_merge-queue_window_hold
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+                minutes:
+                  type: integer
+              required:
+                - projectId
+                - minutes
+              additionalProperties: true
+              x-unknown-keys: passthrough
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+  /api/merge-queue/window/release:
+    post:
+      summary: |-
+        * POST /api/merge-queue/window/release
+           *
+           * body: { projectId }
+           *
+           * Operator "depart now" (#1186): stamps `releaseRequestedAt`; the orchestrator's next tick
+           * releases the pending set as one train with reason `operator_release`, regardless of size,
+           * wait or a busy gate (a live hold still wins until it expires). 409 when the project has no
+           * open window.
+      tags:
+        - merge-queue
+      operationId: post_api_merge-queue_window_release
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+              required:
+                - projectId
+              additionalProperties: true
+              x-unknown-keys: passthrough
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/metrics/loop-lag:
     get:
       summary: GET /api/metrics/loop-lag

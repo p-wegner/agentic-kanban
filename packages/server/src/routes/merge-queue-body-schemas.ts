@@ -25,3 +25,20 @@ export const mergeQueueBody = z.object({
   // `unchecked`: an invalid value should 400 rather than silently reach `executeQueue`.
   strategy: z.enum(["sequential", "train"]).optional(),
 }).passthrough();
+
+/**
+ * `POST /api/merge-queue/window/release` (#1186) — "depart now" for the project's batching
+ * window. New route, so a real predicate rather than `unchecked`.
+ */
+export const mergeQueueWindowReleaseBody = z.object({
+  projectId: z.string().min(1, "projectId is required"),
+}).passthrough();
+
+/**
+ * `POST /api/merge-queue/window/hold` (#1186) — hold the door for `minutes`; `0` clears the
+ * hold. Bounded above so a typo cannot park a project for a year.
+ */
+export const mergeQueueWindowHoldBody = z.object({
+  projectId: z.string().min(1, "projectId is required"),
+  minutes: z.number().int().min(0, "minutes must be >= 0").max(24 * 60, "minutes must be <= 1440"),
+}).passthrough();
