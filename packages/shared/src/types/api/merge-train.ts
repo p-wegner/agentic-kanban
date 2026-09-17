@@ -23,6 +23,30 @@ export interface MergeTrainRowDto {
 }
 
 /**
+ * #1192 — a member's siding state (`workspace_train_siding`): how many times it was dropped
+ * for a base conflict and sent a rebase turn, and whether it burned the cap and is now left
+ * withheld. One row per workspace, gone once the branch moves or the member lands. Exposed
+ * #1198 so the panel can say "on its 2nd siding" or "capped, withheld" instead of a bare
+ * drop reason; the server's `TrainSidingRow` is an alias of this.
+ */
+export interface MergeTrainSidingDto {
+  workspaceId: string;
+  sidings: number;
+  sidedBranchSha: string | null;
+  conflictTrainTipSha: string | null;
+  lastSidedAt: string | null;
+  cappedAt: string | null;
+}
+
+/** `GET /api/merge-queue/trains?projectId=` — the project's train history plus its live sidings (#1198). */
+export interface MergeTrainsResponse {
+  ok: true;
+  trains: MergeTrainRowDto[];
+  /** Every member of this project currently on a siding (#1192). Empty when none is. */
+  sidings: MergeTrainSidingDto[];
+}
+
+/**
  * The parsed shape of `MergeTrainRowDto.gateEvidence` (#906, #1184) — what `finishMergeTrain`
  * writes and what the client's "Merge train" panel derives its numbers from. Every list is
  * deduplicated by workspace id (#1184: a bisect re-assembles each sub-attempt from scratch and

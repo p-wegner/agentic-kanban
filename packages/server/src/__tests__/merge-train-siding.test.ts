@@ -16,13 +16,13 @@ import {
   partitionSidedMembers,
   recordTrainSidingDrop,
 } from "../services/merge-train-siding.service.js";
-import { getTrainSidingState } from "../repositories/merge-train-siding.repository.js";
+import { getTrainSidingState, listTrainSidingStatesForProject, setTrainSidingState } from "../repositories/merge-train-siding.repository.js";
 
 const T0 = "2026-09-17T00:00:00.000Z";
 
 type Db = ReturnType<typeof createTestDb>["db"];
 
-async function seedMember(db: Db, branch = "feature/ak-1"): Promise<{ workspaceId: string; issueId: string }> {
+async function seedMember(db: Db, branch = "feature/ak-1"): Promise<{ workspaceId: string; issueId: string; projectId: string }> {
   const projectId = randomUUID();
   const statusId = randomUUID();
   const issueId = randomUUID();
@@ -42,7 +42,7 @@ async function seedMember(db: Db, branch = "feature/ak-1"): Promise<{ workspaceI
     id: workspaceId, issueId, branch, workingDir: "/repo/.worktrees/ws",
     baseBranch: "master", status: "idle", provider: "claude", createdAt: T0, updatedAt: T0,
   });
-  return { workspaceId, issueId };
+  return { workspaceId, issueId, projectId };
 }
 
 describe("isStillSided (#1192)", () => {
@@ -260,5 +260,29 @@ describe("clearTrainSiding", () => {
 describe("TRAIN_SIDING_TAG", () => {
   it("is the tag name the ticket asks for", () => {
     expect(TRAIN_SIDING_TAG).toBe("train-siding");
+  });
+});
+
+describe("listTrainSidingStatesForProject (#1198)", () => {
+  it("lists a project's live sidings and nobody else's, oldest siding first", async () => {
+    const { db } = createTestDb();
+    const older = await seedMember(db, "feature/ak-1");
+    const newer = await seedMember(db, "feature/ak-2");
+    const fresh = await seedMember(db, "feature/ak-3");
+    await setTrainSidingState(newer.workspaceId, {
+      sidings: 3, sidedBranchSha: "sha-2", conflictTrainTipSha: "tip", lastSidedAt: "2026-09-18T02:00:00.000Z", cappedAt: "2026-09-18T02:00:00.000Z",
+    }, db);
+    await setTrainSidingState(older.workspaceId, {
+      sidings: 1, sidedBranchSha: "sha-1", conflictTrainTipSha: "tip", lastSidedAt: "2026-09-18T01:00:00.000Z", cappedAt: null,
+    }, db);
+    // `fresh` was never sided: no row, so it must not appear either.
+
+    // seedMember creates a project per member, so each project sees exactly its own siding.
+    expect(await listTrainSidingStatesForProject(older.projectId, db)).toEqual([
+      { workspaceId: older.workspaceId, sidings: 1, sidedBranchSha: "sha-1", conflictTrainTipSha: "tip", lastSidedAt: "2026-09-18T01:00:00.000Z", cappedAt: null },
+    ]);
+    expect((await listTrainSidingStatesForProject(newer.projectId, db)).map((r) => [r.workspaceId, r.sidings, Boolean(r.cappedAt)]))
+      .toEqual([[newer.workspaceId, 3, true]]);
+    expect(await listTrainSidingStatesForProject(fresh.projectId, db)).toEqual([]);
   });
 });
