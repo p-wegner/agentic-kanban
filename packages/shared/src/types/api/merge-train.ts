@@ -52,6 +52,12 @@ export interface MergeTrainGateEvidenceDto {
    * exposes partial progress; the final write carries the complete list.
    */
   attempts?: MergeTrainAttemptDto[];
+  /**
+   * #1193 — wall-clock milliseconds the train SAVED by gating bisect halves concurrently: the
+   * sum of every attempt's gate duration minus the span those gates actually occupied together.
+   * 0 (or absent, on rows written before #1193) when every gate ran one after another.
+   */
+  concurrentGateSavedMs?: number;
 }
 
 /** How one train attempt (#1189) ended. Only `red` blames code; the other failures are the train's. */
@@ -77,4 +83,11 @@ export interface MergeTrainAttemptDto {
   failureHead?: string;
   /** The base tip after landing, for `landed` only. */
   mergeSha?: string;
+  /**
+   * #1193 — labels of the sibling attempts whose gate window overlapped this one's in time,
+   * i.e. the halves this node was gated CONCURRENTLY with. Absent when it gated alone. Set on
+   * the final evidence write only (`buildTrainGateEvidence`), since the overlap is only known
+   * once both halves have finished — a live row's appended nodes do not carry it yet.
+   */
+  concurrentWith?: string[];
 }
