@@ -329,3 +329,27 @@ export function summarizeMergeTrains(rows: MergeTrainRowDto[]): MergeTrainSummar
     },
   };
 }
+
+/**
+ * The three headline strings the summary bar renders, as a pure function of the summary —
+ * pulled out of the component (#726's branch-count ceiling) so the label formatting is
+ * testable without rendering.
+ */
+export function formatMergeTrainSummaryLabels(summary: MergeTrainSummary): { aboardLabel: string; lastGateLabel: string; headlineLabel: string } {
+  const aboardLabel = summary.aboard.length === 0
+    ? "none"
+    : `${summary.aboard.length} (${summary.aboardMemberCount} member${summary.aboardMemberCount === 1 ? "" : "s"})`;
+
+  const lastGateLabel = summary.lastGate
+    ? `${summary.lastGate.state}${summary.lastGate.gateRuns != null ? ` (${summary.lastGate.gateRuns} run${summary.lastGate.gateRuns === 1 ? "" : "s"})` : ""}` +
+      (summary.lastGate.unresolvedCount > 0 ? `, ${summary.lastGate.unresolvedCount} unresolved` : "")
+    : "none yet";
+
+  const { gateRunsPerLanded } = summary;
+  const headlineLabel = gateRunsPerLanded.windowSize === 0
+    ? "no finished trains yet"
+    : `${gateRunsPerLanded.gateRuns} run${gateRunsPerLanded.gateRuns === 1 ? "" : "s"} / ${gateRunsPerLanded.landedMembers} landed` +
+      (gateRunsPerLanded.ratio != null ? ` (${gateRunsPerLanded.ratio.toFixed(1)}x)` : "");
+
+  return { aboardLabel, lastGateLabel, headlineLabel };
+}
