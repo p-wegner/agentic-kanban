@@ -12,12 +12,14 @@ function window(overrides: Partial<DepartureBoardWindowDto>): DepartureBoardWind
   return {
     projectId: "project-1",
     pending: [],
-    maxSize: 5,
-    maxWaitMs: 10 * 60 * 1000,
-    firstSeenAt: null,
-    holdReason: null,
-    liveTrain: null,
+    firstSeenAt: new Date().toISOString(),
+    config: { maxSize: 5, maxWaitMs: 10 * 60 * 1000, fromPosture: false, postureLevel: "iterate" },
+    lastVerdict: { release: false, reason: "accumulating" },
+    lastEvaluatedAt: new Date().toISOString(),
     projectedDepartureAt: null,
+    heldUntil: null,
+    releaseRequestedAt: null,
+    liveTrainId: null,
     ...overrides,
   };
 }
@@ -26,7 +28,7 @@ function member(overrides: Partial<DepartureBoardWindowDto["pending"][number]>) 
   return {
     workspaceId: "ws-1",
     issueNumber: 42,
-    title: "Some ticket",
+    issueTitle: "Some ticket",
     readySince: new Date().toISOString(),
     ...overrides,
   };
@@ -62,9 +64,9 @@ describe("buildDepartureBoardRow", () => {
     const now = 1_000_000;
     const row = buildDepartureBoardRow(
       window({
-        maxSize: 2,
+        config: { maxSize: 2, maxWaitMs: 10 * 60 * 1000, fromPosture: false, postureLevel: "iterate" },
         pending: [member({ workspaceId: "ws-1" }), member({ workspaceId: "ws-2" })],
-        holdReason: "accumulating",
+        lastVerdict: { release: false, reason: "accumulating" },
       }),
       now,
     );
@@ -78,11 +80,10 @@ describe("buildDepartureBoardRow", () => {
     const firstSeenAt = new Date(now - 60_000).toISOString();
     const row = buildDepartureBoardRow(
       window({
-        maxSize: 10,
-        maxWaitMs: 5 * 60 * 1000,
+        config: { maxSize: 10, maxWaitMs: 5 * 60 * 1000, fromPosture: false, postureLevel: "iterate" },
         firstSeenAt,
         pending: [member({})],
-        holdReason: "accumulating",
+        lastVerdict: { release: false, reason: "accumulating" },
       }),
       now,
     );
@@ -94,7 +95,11 @@ describe("buildDepartureBoardRow", () => {
     const now = 1_000_000;
     const firstSeenAt = new Date(now - 10 * 60 * 1000).toISOString();
     const row = buildDepartureBoardRow(
-      window({ maxWaitMs: 5 * 60 * 1000, firstSeenAt, pending: [member({})] }),
+      window({
+        config: { maxSize: 5, maxWaitMs: 5 * 60 * 1000, fromPosture: false, postureLevel: "iterate" },
+        firstSeenAt,
+        pending: [member({})],
+      }),
       now,
     );
     expect(row.msUntilDeparture).toBe(0);
@@ -105,8 +110,7 @@ describe("buildDepartureBoardRow", () => {
     const firstSeenAt = new Date(now - 60_000).toISOString();
     const row = buildDepartureBoardRow(
       window({
-        maxSize: 1,
-        maxWaitMs: 5 * 60 * 1000,
+        config: { maxSize: 1, maxWaitMs: 5 * 60 * 1000, fromPosture: false, postureLevel: "iterate" },
         firstSeenAt,
         pending: [member({})],
       }),
@@ -116,15 +120,24 @@ describe("buildDepartureBoardRow", () => {
   });
 
   it("suppresses the hold reason when nothing is boarding", () => {
-    const row = buildDepartureBoardRow(window({ holdReason: "gate_busy", pending: [] }));
+    const row = buildDepartureBoardRow(window({ lastVerdict: { release: false, reason: "gate_busy" }, pending: [] }));
     expect(row.holdReason).toBeNull();
   });
 
-  it("carries the live train through unchanged", () => {
-    const liveTrain = { id: "t1", label: "q1", state: "gating" as const, memberCount: 3, gateRuns: 2, startedAt: new Date().toISOString() };
-    const row = buildDepartureBoardRow(window({ liveTrain, holdReason: "train_live", pending: [member({})] }));
-    expect(row.liveTrain).toEqual(liveTrain);
-    expect(row.holdReason).toBe("train_live");
+  it("resolves the live train from the trains list via liveTrainId", () => {
+    const liveRow = train({ id: "t1", label: "q1", state: "gating", gateEvidence: JSON.stringify({ gateRuns: 2 }), memberWorkspaceIds: JSON.stringify(["ws-1", "ws-2", "ws-3"]) });
+    const row = buildDepartureBoardRow(
+      window({ liveTrainId: "t1", lastVerdict: { release: false, reason: "live_train" }, pending: [member({})] }),
+      Date.now(),
+      [liveRow],
+    );
+    expect(row.liveTrain).toEqual({ id: "t1", label: "q1", state: "gating", memberCount: 3, gateRuns: 2, startedAt: liveRow.startedAt });
+    expect(row.holdReason).toBe("live_train");
+  });
+
+  it("reports no live train when liveTrainId does not match any fetched train", () => {
+    const row = buildDepartureBoardRow(window({ liveTrainId: "missing", pending: [member({})] }), Date.now(), []);
+    expect(row.liveTrain).toBeNull();
   });
 });
 
@@ -153,9 +166,9 @@ describe("holdReasonLabel", () => {
     expect(holdReasonLabel("gate_busy", null)).toBe("gate_busy grace");
   });
 
-  it("labels train_live with the live train's details", () => {
+  it("labels live_train with the live train's details", () => {
     const liveTrain = { id: "t1", label: "q9", state: "landing" as const, memberCount: 4, gateRuns: 3, startedAt: "2026-09-17T12:00:00.000Z" };
-    expect(holdReasonLabel("train_live", liveTrain)).toBe("a train is live (q9, landing, since 2026-09-17T12:00:00.000Z)");
+    expect(holdReasonLabel("live_train", liveTrain)).toBe("a train is live (q9, landing, since 2026-09-17T12:00:00.000Z)");
   });
 
   it("labels null as an em dash", () => {

@@ -5,13 +5,20 @@
  * `GET /api/merge-queue/trains?projectId=` history this panel already reads via
  * `mergeTrainSummary.ts`.
  *
- * The window DTO shape mirrors #1186's own ticket description exactly (pending members with
- * issue number/title/ready-since, `maxSize`/`maxWaitMs` config, last verdict + reason, projected
- * departure time) since that ticket is the sole source of truth for the wire contract and had
- * not landed on master at the time this was written — see CONTINUE.md if the two ever disagree.
+ * The window DTO is `MergeTrainWindowDto` (`@agentic-kanban/shared`), #1186's actual wire
+ * contract: `pending[].issueTitle` (nullable), `config.maxSize`/`config.maxWaitMs`,
+ * `lastVerdict.reason`, and `liveTrainId` — a bare id, not a rich train object. This module
+ * resolves that id against the `MergeTrainRowDto[]` history the panel already fetches, so the
+ * "live train" shown here always agrees with the same row the history strip and cancel button
+ * act on.
  */
 
-import type { MergeTrainRowDto, MergeTrainState } from "@agentic-kanban/shared";
+import type {
+  MergeTrainRowDto,
+  MergeTrainState,
+  MergeTrainWindowDto,
+  MergeTrainWindowHoldReason,
+} from "@agentic-kanban/shared";
 
 export type { MergeTrainRowDto, MergeTrainState };
 
@@ -24,7 +31,7 @@ export interface DepartureBoardPendingMember {
   readySince: string;
 }
 
-export type DepartureBoardHoldReason = "accumulating" | "gate_busy" | "train_live";
+export type DepartureBoardHoldReason = MergeTrainWindowHoldReason;
 
 /** A live (non-terminal) train, if one is currently assembling/gating/landing. */
 export interface DepartureBoardLiveTrain {
@@ -37,19 +44,8 @@ export interface DepartureBoardLiveTrain {
   startedAt: string;
 }
 
-/** `GET /api/merge-queue/window?projectId=` response, per #1186. */
-export interface DepartureBoardWindowDto {
-  projectId: string;
-  pending: DepartureBoardPendingMember[];
-  maxSize: number;
-  maxWaitMs: number;
-  /** ISO timestamp of the oldest pending member, or null when nothing is waiting. */
-  firstSeenAt: string | null;
-  holdReason: DepartureBoardHoldReason | null;
-  liveTrain: DepartureBoardLiveTrain | null;
-  /** ISO timestamp of the projected departure if nothing changes, or null when not computable. */
-  projectedDepartureAt: string | null;
-}
+/** The actual `GET /api/merge-queue/window?projectId=` response shape (#1186, landed on master). */
+export type DepartureBoardWindowDto = MergeTrainWindowDto;
 
 export type DepartureTrigger = "max_size" | "max_wait" | null;
 
@@ -73,23 +69,58 @@ export interface DepartureBoardRow {
   atMaxSize: boolean;
 }
 
+function parseGateRunsFromRow(row: MergeTrainRowDto): number {
+  if (!row.gateEvidence) return 0;
+  try {
+    const parsed = JSON.parse(row.gateEvidence) as { gateRuns?: number };
+    return typeof parsed.gateRuns === "number" ? parsed.gateRuns : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Resolves `window.liveTrainId` against the fetched train history into a display-ready shape. */
+function resolveLiveTrain(liveTrainId: string | null, trains: MergeTrainRowDto[]): DepartureBoardLiveTrain | null {
+  if (!liveTrainId) return null;
+  const row = trains.find((t) => t.id === liveTrainId);
+  if (!row) return null;
+  return {
+    id: row.id,
+    label: row.label,
+    state: row.state,
+    memberCount: parseMemberIds(row).length,
+    gateRuns: parseGateRunsFromRow(row),
+    startedAt: row.startedAt,
+  };
+}
+
 /**
  * Derives the departure-board row for one project window. `nowMs` is injectable (per the root
  * CLAUDE.md time-injection convention) so the countdown is testable without real timers.
+ * `trains` is the same history list the panel already fetches, used only to resolve
+ * `window.liveTrainId` into a displayable train.
  */
-export function buildDepartureBoardRow(window: DepartureBoardWindowDto, nowMs: number = Date.now()): DepartureBoardRow {
+export function buildDepartureBoardRow(
+  window: DepartureBoardWindowDto,
+  nowMs: number = Date.now(),
+  trains: MergeTrainRowDto[] = [],
+): DepartureBoardRow {
   const boarding: BoardingCar[] = window.pending.map((member) => ({
     workspaceId: member.workspaceId,
-    issueNumber: member.issueNumber,
-    title: member.title,
-    readySince: member.readySince,
+    issueNumber: member.issueNumber ?? 0,
+    title: member.issueTitle ?? "(unknown ticket)",
+    readySince: member.readySince ?? window.firstSeenAt,
   }));
 
-  const atMaxSize = window.maxSize > 0 && boarding.length >= window.maxSize;
+  const { maxSize, maxWaitMs } = window.config;
+  const atMaxSize = maxSize > 0 && boarding.length >= maxSize;
 
+  // `firstSeenAt` only marks a real max-wait clock when something is actually boarding — a
+  // control-only hold record (or the empty/idle window) carries a `firstSeenAt` that means
+  // nothing, and computing a countdown from it would show a bogus trigger.
   let msUntilWait: number | null = null;
-  if (window.firstSeenAt && window.maxWaitMs > 0) {
-    const deadline = new Date(window.firstSeenAt).getTime() + window.maxWaitMs;
+  if (boarding.length > 0 && maxWaitMs > 0) {
+    const deadline = new Date(window.firstSeenAt).getTime() + maxWaitMs;
     msUntilWait = Math.max(0, deadline - nowMs);
   }
 
@@ -104,11 +135,14 @@ export function buildDepartureBoardRow(window: DepartureBoardWindowDto, nowMs: n
     msUntilDeparture = msUntilWait;
   }
 
+  const holdReason: DepartureBoardHoldReason | null = window.lastVerdict.release ? null : window.lastVerdict.reason;
+  const liveTrain = resolveLiveTrain(window.liveTrainId, trains);
+
   return {
     projectId: window.projectId,
     boarding,
-    holdReason: boarding.length > 0 ? window.holdReason : null,
-    liveTrain: window.liveTrain,
+    holdReason: boarding.length > 0 ? holdReason : null,
+    liveTrain,
     trigger,
     msUntilDeparture,
     projectedDepartureAt: window.projectedDepartureAt,
@@ -128,11 +162,12 @@ export function formatCountdown(ms: number | null): string {
 }
 
 export function holdReasonLabel(reason: DepartureBoardHoldReason | null, liveTrain: DepartureBoardLiveTrain | null): string {
-  if (reason === "train_live" && liveTrain) {
+  if (reason === "live_train" && liveTrain) {
     return `a train is live (${liveTrain.label}, ${liveTrain.state}, since ${liveTrain.startedAt})`;
   }
   if (reason === "gate_busy") return "gate_busy grace";
   if (reason === "accumulating") return "accumulating";
+  if (reason === "held") return "held by operator";
   return "—";
 }
 
