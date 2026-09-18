@@ -4,6 +4,7 @@ import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import {
   collectConflictClusters,
   describeTrainMembers,
+  formatMergeTrainSummaryLabels,
   summarizeMergeTrains,
   type MergeTrainRowDto,
   type MergeTrainSidingDto,
@@ -240,18 +241,8 @@ function MergeTrainSummaryBar({ projectId, memberLabel }: { projectId: string; m
   }
 
   const summary = summarizeMergeTrains(trains);
-  const aboardLabel = summary.aboard.length === 0
-    ? "none"
-    : `${summary.aboard.length} (${summary.aboardMemberCount} member${summary.aboardMemberCount === 1 ? "" : "s"})`;
-  const lastGateLabel = summary.lastGate
-    ? `${summary.lastGate.state}${summary.lastGate.gateRuns != null ? ` (${summary.lastGate.gateRuns} run${summary.lastGate.gateRuns === 1 ? "" : "s"})` : ""}` +
-      (summary.lastGate.unresolvedCount > 0 ? `, ${summary.lastGate.unresolvedCount} unresolved` : "")
-    : "none yet";
+  const { aboardLabel, lastGateLabel, headlineLabel } = formatMergeTrainSummaryLabels(summary);
   const { gateRunsPerLanded } = summary;
-  const headlineLabel = gateRunsPerLanded.windowSize === 0
-    ? "no finished trains yet"
-    : `${gateRunsPerLanded.gateRuns} run${gateRunsPerLanded.gateRuns === 1 ? "" : "s"} / ${gateRunsPerLanded.landedMembers} landed` +
-      (gateRunsPerLanded.ratio != null ? ` (${gateRunsPerLanded.ratio.toFixed(1)}x)` : "");
 
   // #1197: the newest train's members with how each fared, and the member-vs-member conflict
   // clusters (#1191) the train-conflicts group scan would turn into coupled_with proposals.
