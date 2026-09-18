@@ -25,7 +25,6 @@ import {
 } from "../lib/departureBoard.js";
 import type { IssueWithStatus, MainWorkspaceInfo, StatusWithIssues } from "@agentic-kanban/shared";
 import { Icon } from "./Icon.js";
-import { MergeTrainDetailDrawer } from "./MergeTrainDetailDrawer.js";
 
 interface ConflictPreview {
   workspaceId: string;
@@ -652,8 +651,10 @@ export function MergeQueuePanel({ columns, projectId, onClose, onIssueClick, onM
   // #904 — "auto" omits `strategy` on the wire so the server decides (classifier recommendation
   // or the project's train_max_size opt-in); the other two are explicit overrides.
   const [strategy, setStrategy] = useState<MergeQueueStrategy>("auto");
-  // #1187/#1189 — both the departure-board history tiles and the merge-train summary's
-  // "Last gate" figure open the same drawer, keyed by train id.
+  // #1187 — both the departure-board history tiles and the merge-train summary's "Last gate"
+  // figure open the same lightweight inline detail block, keyed by train id. The full "train
+  // detail drawer with a live bisect tree" is a separate, not-yet-landed ticket; this is a thin
+  // stand-in wired the same way (train id) so swapping it out later is a one-line change.
   const [openTrainId, setOpenTrainId] = useState<string | null>(null);
 
   async function handleMerge(workspaceId: string) {
@@ -903,11 +904,17 @@ export function MergeQueuePanel({ columns, projectId, onClose, onIssueClick, onM
       </div>
 
       {openTrainId && (
-        <MergeTrainDetailDrawer
-          projectId={projectId}
-          trainId={openTrainId}
-          onClose={() => setOpenTrainId(null)}
-        />
+        <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
+          <span>Train detail: <span className="font-mono">{openTrainId}</span> (full drawer tracked separately)</span>
+          <button
+            type="button"
+            onClick={() => setOpenTrainId(null)}
+            className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+            aria-label="Close train detail"
+          >
+            &times;
+          </button>
+        </div>
       )}
     </div>
   );
