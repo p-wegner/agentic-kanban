@@ -149,13 +149,6 @@ function formatDuration(ms: number | null): string {
   return min > 0 ? `${min}m ${sec}s` : `${sec}s`;
 }
 
-/**
- * "Merge train" panel (#906, headline metric #1184) — gate-runs-per-landed / aboard / finished /
- * last gate / red-debt delta, reachable from the merge-queue view. Reads the persisted
- * `merge_trains` history instead of the old per-request scratch state, so it survives a server
- * restart mid-train. Polls while a train is assembling/gating/landing so the bar does not go
- * stale for the whole run (#1184).
- */
 /** What a member chip says beside its label (#1197); `title` carries the full reason. */
 function trainOutcomeLabel(outcome: TrainMemberOutcome): string {
   switch (outcome) {
