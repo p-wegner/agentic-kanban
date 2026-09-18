@@ -276,8 +276,18 @@ async function recordFinishComments(
   database: Database,
 ): Promise<void> {
   const landedIds = new Set(result.landed.map((m) => m.workspaceId));
-  const droppedByWorkspace = new Map(result.dropped.map((d) => [d.member.workspaceId, d.reason]));
-  const gateRejectedByWorkspace = new Map(result.gateRejected.map((r) => [r.member.workspaceId, r.reason]));
+  // Same FIRST-reason-wins de-dup `buildTrainGateEvidence` uses (`uniqueByWorkspace`) — a
+  // bisect re-assembles every sub-attempt from scratch against the base, so a member that
+  // conflicts with the base is re-dropped by every attempt that contains it (train qmu4t981a:
+  // 17 drops for 13 members). Building the lookup straight from `result.dropped`/`gateRejected`
+  // would let the LAST attempt's reason win, diverging from what `gate_evidence` (and the
+  // card's own boarding-pass chip, which reads that evidence) records for the same member.
+  const dropped = uniqueByWorkspace(result.dropped);
+  const gateRejected = uniqueByWorkspace(result.gateRejected);
+  const sided = uniqueByWorkspace(result.sided);
+  const droppedByWorkspace = new Map(dropped.map((d) => [d.workspaceId, d.reason]));
+  const gateRejectedByWorkspace = new Map(gateRejected.map((r) => [r.workspaceId, r.reason]));
+  const sidedByWorkspace = new Map(sided.map((s) => [s.workspaceId, s.reason]));
   const issueNumberByWorkspace = new Map(members.map((m) => [m.workspaceId, m.issueNumber ?? null]));
 
   for (const member of members) {
@@ -308,6 +318,13 @@ async function recordFinishComments(
         const reason = gateRejectedByWorkspace.get(workspaceId)!;
         eventType = "train-bisected-out";
         body = `Bisected out of release train ${label} — the gate failed for this branch alone: ${reason.slice(0, 300)}`;
+        extra = { reason };
+      } else if (sidedByWorkspace.has(workspaceId)) {
+        // #1194: a member the train review sided is attributed (to its own ticket), not
+        // unresolved — the same distinction `buildTrainGateEvidence`'s `accounted` set draws.
+        const reason = sidedByWorkspace.get(workspaceId)!;
+        eventType = "train-sided";
+        body = `Sided out of release train ${label} by review: ${reason.slice(0, 300)}`;
         extra = { reason };
       } else {
         eventType = "train-unresolved";

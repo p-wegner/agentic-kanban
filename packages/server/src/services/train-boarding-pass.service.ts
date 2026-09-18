@@ -58,6 +58,12 @@ function deriveOutcome(
   }
   const dropped = evidence.dropped?.find((d) => d.workspaceId === workspaceId);
   if (dropped) return { kind: "dropped", reason: dropped.reason };
+  // #1194: a member the train review sided is attributed (to its own ticket), not
+  // unresolved/bisected-out — same distinction `buildTrainGateEvidence`'s `accounted` set
+  // draws. Checked before the bisected-out fallback below, since a sided member is also
+  // absent from `landed`/`dropped`/`unresolved` and would otherwise be misread as bisected.
+  const sided = evidence.sided?.find((s) => s.workspaceId === workspaceId);
+  if (sided) return { kind: "dropped", reason: `sided by review: ${sided.reason}` };
   // gateRejected members are NOT in `landed`/`dropped` — buildTrainGateEvidence records them
   // only in the `bisectResult` column, which this projection does not read (the row's own
   // gateEvidence has no rejected-reason list); the card still needs a distinct label for that
