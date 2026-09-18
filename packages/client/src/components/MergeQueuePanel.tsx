@@ -445,8 +445,11 @@ function MergeTrainSummaryBar({ projectId, memberLabel, onOpenTrain }: { project
  * `MergeTrainSummaryBar`, rendered below the platform so neither loses detail.
  */
 function DepartureBoard({ projectId, memberLabel, onOpenTrain }: { projectId: string; memberLabel: (workspaceId: string) => string; onOpenTrain: (trainId: string) => void }) {
+  // `windowDto` is legitimately `null` for "no open window" (nothing pending or held) — the
+  // common idle state — so loading is tracked separately rather than inferred from nullness.
   const [windowDto, setWindowDto] = useState<DepartureBoardWindowDto | null>(null);
   const [trains, setTrains] = useState<MergeTrainRowDto[] | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [actionError, setActionError] = useState<string | null>(null);
@@ -457,8 +460,9 @@ function DepartureBoard({ projectId, memberLabel, onOpenTrain }: { projectId: st
       fetchMergeTrainWindow(projectId),
       fetchMergeTrains(projectId),
     ]);
-    setWindowDto(windowResult.window as unknown as DepartureBoardWindowDto | null);
+    setWindowDto(windowResult.window);
     setTrains(trainsResult.trains);
+    setLoaded(true);
   }
 
   useEffect(() => {
@@ -481,7 +485,7 @@ function DepartureBoard({ projectId, memberLabel, onOpenTrain }: { projectId: st
     setActionPending("depart");
     setActionError(null);
     try {
-      await apiPost(`/api/merge-queue/window/release?projectId=${encodeURIComponent(projectId)}`);
+      await apiPost(`/api/merge-queue/window/release`, { projectId });
       await refresh();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Depart now failed");
@@ -490,11 +494,15 @@ function DepartureBoard({ projectId, memberLabel, onOpenTrain }: { projectId: st
     }
   }
 
+  // #1186's body schema requires an explicit `minutes`; the button offers one fixed grace
+  // period rather than a duration picker, matching the ticket's plain "Hold" button.
+  const HOLD_MINUTES = 15;
+
   async function handleHold() {
     setActionPending("hold");
     setActionError(null);
     try {
-      await apiPost(`/api/merge-queue/window/hold?projectId=${encodeURIComponent(projectId)}`);
+      await apiPost(`/api/merge-queue/window/hold`, { projectId, minutes: HOLD_MINUTES });
       await refresh();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Hold failed");
@@ -524,7 +532,7 @@ function DepartureBoard({ projectId, memberLabel, onOpenTrain }: { projectId: st
     );
   }
 
-  if (!windowDto || !trains) {
+  if (!loaded || !trains) {
     return (
       <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 text-xs text-gray-400 dark:text-gray-500">
         Departure board: loading…
@@ -532,7 +540,9 @@ function DepartureBoard({ projectId, memberLabel, onOpenTrain }: { projectId: st
     );
   }
 
-  const row = buildDepartureBoardRow(windowDto, nowMs);
+  const row = windowDto
+    ? buildDepartureBoardRow(windowDto, nowMs, trains)
+    : { projectId, boarding: [], holdReason: null, liveTrain: null, trigger: null, msUntilDeparture: null, projectedDepartureAt: null, atMaxSize: false };
   const history = buildHistoryStrip(trains);
 
   return (
