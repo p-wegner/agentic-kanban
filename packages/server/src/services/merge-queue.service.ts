@@ -239,6 +239,7 @@ export function createMergeQueueService(deps: {
     database,
     reconcileAlreadyMerged: (workspaceId) => mergeService.reconcileAlreadyMerged(workspaceId),
     sendTurn: (workspaceId, content) => sessionService.sendTurn(workspaceId, content),
+    boardEvents,
   });
 
   async function getWorkspaceQueueInfos(workspaceIds: string[]): Promise<WorkspaceQueueInfo[]> {

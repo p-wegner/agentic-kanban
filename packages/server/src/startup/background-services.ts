@@ -279,6 +279,7 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start({ db, boardEvents, getSessionManager }) {
       const queueService = createMergeQueueService({ database: db, boardEvents, getSessionManager });
       startMergeTrainReconciler({
+        boardEvents,
         // Re-run the batch for the stranded row's member set. `executeQueue` re-derives the
         // plan from the workspace ids and re-enters `runTrainStrategy` via the normal
         // `strategy: "train"` dispatch — the same path a fresh request takes. Without this,
@@ -299,6 +300,7 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
             reconciledReason: "superseded by a freshly re-assembled train after a stranded boot-time recovery",
             finishedAt: new Date().toISOString(),
           }, db);
+          boardEvents?.broadcast(row.projectId, "merge_train_changed");
           const memberWorkspaceIds = JSON.parse(row.memberWorkspaceIds) as string[];
           for await (const _event of queueService.executeQueue(memberWorkspaceIds, { strategy: "train" })) {
             // The fresh train (a new `merge_trains` row) persists its own terminal state via
