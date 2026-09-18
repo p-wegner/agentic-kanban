@@ -37,6 +37,7 @@
  * history a "Merge train" panel shows includes the abandonment.
  */
 import type { Database } from "../db/index.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import {
   getMergeTrain,
   listMergeTrainsInStates,
@@ -173,6 +174,8 @@ export async function reconcileStrandedMergeTrains(
      * an empty map to simulate a fresh process (the boot pass) or a populated one for a sweep.
      */
     liveTrains?: LiveMergeTrainSnapshot;
+    /** #1186 — broadcasts `merge_train_changed` when a stranded row is abandoned here. */
+    boardEvents?: BoardEventSink;
   } = {},
 ): Promise<MergeTrainSweepResult> {
   const database = opts.database;
@@ -198,6 +201,7 @@ export async function reconcileStrandedMergeTrains(
         reconciledReason: abandonReason,
         finishedAt: now,
       }, database);
+      opts.boardEvents?.broadcast(row.projectId, "merge_train_changed");
       result.abandoned.push(row.id);
       recordActed(result, row.id, "abandoned");
       log(`abandoned ${ref} — ${abandonReason}`);
@@ -229,6 +233,7 @@ export async function reconcileStrandedMergeTrains(
         reconciledReason: failReason,
         finishedAt: now,
       }, database).catch(() => undefined);
+      opts.boardEvents?.broadcast(row.projectId, "merge_train_changed");
       result.abandoned.push(row.id);
       recordActed(result, row.id, "abandoned-after-resume-error");
       log(`abandoned ${ref} — ${failReason}`);
@@ -242,13 +247,17 @@ export async function reconcileStrandedMergeTrains(
 let sweep: PeriodicSweepHandle | null = null;
 
 export function startMergeTrainReconciler(
-  opts: { intervalMs?: number; runTrain?: (row: MergeTrainRow) => Promise<void> } = {},
+  opts: {
+    intervalMs?: number;
+    runTrain?: (row: MergeTrainRow) => Promise<void>;
+    boardEvents?: BoardEventSink;
+  } = {},
 ): void {
   stopMergeTrainReconciler();
   sweep = startPeriodicSweep({
     name: "merge-train-reconciler",
     intervalMs: opts.intervalMs ?? SWEEP_INTERVAL_MS,
-    tick: () => reconcileStrandedMergeTrains({ runTrain: opts.runTrain }),
+    tick: () => reconcileStrandedMergeTrains({ runTrain: opts.runTrain, boardEvents: opts.boardEvents }),
   });
 }
 
