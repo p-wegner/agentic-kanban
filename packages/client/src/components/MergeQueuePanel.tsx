@@ -143,15 +143,6 @@ function formatDuration(ms: number | null): string {
   return min > 0 ? `${min}m ${sec}s` : `${sec}s`;
 }
 
-/**
- * "Departure board" (#1187) — replaces the old one-line "Merge train" summary bar with a
- * platform view: boarding cars, why-held reason, the live train (with Cancel), Depart
- * now/Hold, and a history strip. Reads `GET /api/merge-queue/window` (added by #1186, "Persist
- * and expose the merge-train batching window") for the live window plus the existing
- * `GET /api/merge-queue/trains` history for the strip. Polls on the same generic board refresh
- * cadence as the rest of this panel — no dedicated WebSocket event exists yet (#1186 tracks
- * adding one; this reads a fresh snapshot every visit/interval instead of pushing).
- */
 /** What a member chip says beside its label (#1197); `title` carries the full reason. */
 function trainOutcomeLabel(outcome: TrainMemberOutcome): string {
   switch (outcome) {
