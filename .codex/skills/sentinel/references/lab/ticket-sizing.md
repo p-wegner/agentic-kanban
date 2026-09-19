@@ -31,7 +31,7 @@ single run.
 A single coherent feature with **natural internal seams** (e.g. "add a tagging
 system": model + migration + API + UI + validation + tests) so it can be honestly
 carved at three granularities without changing the total work. Dependency-free
-build per `references/multirepo.md` rules.
+build per `references/lab/multirepo.md` rules.
 
 ## Seed the mix (three carvings of ONE feature)
 

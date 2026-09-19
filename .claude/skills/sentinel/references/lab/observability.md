@@ -18,7 +18,7 @@ with `snapshot.py` to know the true state the UI *should* be showing.
 
 ## Fixture
 
-Reuse the multi-repo fixture (`references/multirepo.md`) — observability only
+Reuse the multi-repo fixture (`references/lab/multirepo.md`) — observability only
 matters when there's enough going on to lose track. Then **manufacture the
 conditions worth surfacing**, one per probe:
 

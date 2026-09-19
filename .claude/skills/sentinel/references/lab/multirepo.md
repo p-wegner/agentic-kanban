@@ -14,7 +14,7 @@ spots**. This is the original, deepest-worked dimension — distilled from two
 
 ## Instrument
 
-`scripts/snapshot.py <projectId> [boardPort]` — for every non-closed workspace,
+`.claude/skills/sentinel/scripts/snapshot.py <projectId> [boardPort]` — for every non-closed workspace,
 prints ws/session status, `readyForMerge`, and **which repos (leading + siblings)
 have commits ahead of their base**. That per-repo view is the ground truth the
 board summary hides: sibling-only work stranded on a branch reads as "Done" on
