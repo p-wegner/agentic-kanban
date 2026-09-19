@@ -31,7 +31,7 @@ for equivalent work.
 
 ## Fixture
 
-A small, dependency-free single- or few-repo fixture (per `references/multirepo.md`
+A small, dependency-free single- or few-repo fixture (per `references/lab/multirepo.md`
 build rules) with a handful of **well-specified, equivalent-difficulty tickets**
 so per-ticket token deltas are comparable across the baseline/after runs. Keep
 the actual coding trivial — you're measuring the *overhead* the board adds, not

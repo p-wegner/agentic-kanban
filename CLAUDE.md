@@ -533,7 +533,7 @@ A plugin is a repo with a `kanban-plugin.json` manifest (`packages/shared/src/li
 | Clean up stale worktrees/sessions/artifacts | `cleanup` |
 | Publish/release npm package | `publish`, `release` |
 | Change directly on master | `direct-master` |
-| Tune the board along a dimension (docker/multi-repo, observability, token-efficiency, ticket-sizing) — build fixture → drive → measure → file gaps → fix | `board-tuning-lab` |
+| Tune the board along a dimension (docker/multi-repo, observability, token-efficiency, ticket-sizing, devcontainer) — build fixture → drive → measure → file gaps → fix; or lab the Sentinel itself | `sentinel` lab: read `.claude/skills/sentinel/references/lab.md` (never on a watch wakeup) |
 
 ## Clean-clone / first-start blockers (Windows)
 Full symptom→cause→fix in `docs/install.md` (“Clean-clone / first-start gotchas”). The `dev-server` skill Step 0 handles bootstrap automatically (no DB → `pnpm db:setup`; 0 projects → register). Key facts for triage:

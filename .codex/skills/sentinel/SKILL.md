@@ -76,3 +76,7 @@ Never poll in a tight loop or hold a session open sleeping. Each wakeup does one
 
 Healthy: one line — `loop ALIVE(pid) · cycles clean · profile=anth · In Progress N · In Review N · Backlog N · strategy: target 3/floor 10/balanced · pulling: yes`.
 Problem: lead with `⚠️`, state what failed, what you did (or why you deliberately did nothing), and current state.
+
+## Lab (not part of a watch pass)
+
+Only when someone explicitly asks to tune the board along a dimension ("run the board-tuning lab", "tune the board for observability") or to lab the Sentinel itself: read `references/lab.md`. A wakeup never opens it and never runs a lab step.

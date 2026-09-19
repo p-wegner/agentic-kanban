@@ -3,6 +3,22 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-19 — board-tuning-lab folded into `sentinel` as an integrated lab
+
+The standalone `board-tuning-lab` skill is gone. Its loop, the five dimension playbooks and
+`snapshot.py` now live under `.claude/skills/sentinel/` (`references/lab.md`,
+`references/lab/<dim>.md`, `scripts/snapshot.py`), mirrored into `.codex/skills/sentinel/`.
+Sentinel's `SKILL.md` names the lab in one closing section, scoped to explicit lab requests;
+a watch wakeup never opens it. The old `allowed-tools` pre-approval was deliberately not carried
+over (a lab session now gets normal permission prompts), and the lab is not in sentinel's
+description; the CLAUDE.md Skill Map row is its entry point.
+- **New target, unrun:** a Sentinel target card (eval rounds over recorded wakeups, default form
+  with no recorded run) in `references/lab.md` § Sentinel target card. Round 1 not started.
+- **Open, found on the way:** `scripts/board-monitor/README.md` says the Sentinel prompts for
+  the weekly planning pass; its `SKILL.md` has no such step. The card carries it as a trap.
+- **Verified by:** the `.codex` mirror is byte-identical (`diff -r`), and the staged tree passes
+  `codex-skills-parity` + `claude-md-skill-and-feedback-invariants` (2 files, 10 tests).
+
 ## 2026-09-18 — #1196 #1197 #1198 on master; the six train tickets are still In Progress
 
 **On local `master`, not pushed.** Three follow-ups to the train merge, each its own worktree +
