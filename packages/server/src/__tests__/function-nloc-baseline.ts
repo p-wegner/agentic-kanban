@@ -309,7 +309,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // returning an empty merge body). +5 nloc bought a typed return for every caller and took
   // 71 -> 65 grandfathered test files with it. Raised rather than worked around: the ring
   // exists to stop unmanaged growth, not to make a sanctioned typing fix unlandable.
-  "services/workspace-merge.service.ts::createWorkspaceMergeService": 541,
+  "services/workspace-merge.service.ts::createWorkspaceMergeService": 522,
   // 529 -> 430 (#906 fix-and-merge, god-module split): the whole train-strategy generator
   // (`runTrainStrategy` plus its `beginMergeTrain`/`finishMergeTrain`/`trainEligible` helpers)
   // moved to `services/merge-queue-train.ts` once the train-persistence work pushed this file
