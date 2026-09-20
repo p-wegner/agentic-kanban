@@ -349,12 +349,20 @@ export async function getResolveConflictsLaunchSnapshot(
   sessionId: string,
   database: Database = db,
 ): Promise<{ headShaBeforeSession: string | null } | null> {
+  // #1209 fix: `merge-attempt` is the shared kind for EVERY merge-timeline event on a
+  // workspace (conflict, gate-failed, already-merged, ...), written from 7+ call sites across
+  // the merge/gate/prevalidation services — not just this launch note. A capped `limit(20)`
+  // here silently drops the launch snapshot once a workspace accumulates that many
+  // merge-attempt comments (a handful of gate-failed/auto-merge retries is enough), which
+  // reproduces the exact #1199/#1186 miss this function exists to prevent (falls through to
+  // "not a no-op" instead of ever seeing the launch's pinned headShaBeforeSession). The
+  // session id is unique, so scanning unbounded and stopping at the first match is safe and
+  // correct rather than a guess bounded by an arbitrary row count.
   const rows = await database
     .select({ payload: issueComments.payload })
     .from(issueComments)
     .where(and(eq(issueComments.workspaceId, workspaceId), eq(issueComments.kind, "merge-attempt")))
-    .orderBy(desc(issueComments.createdAt), desc(issueComments.id))
-    .limit(20);
+    .orderBy(desc(issueComments.createdAt), desc(issueComments.id));
 
   for (const row of rows) {
     if (!row.payload) continue;
