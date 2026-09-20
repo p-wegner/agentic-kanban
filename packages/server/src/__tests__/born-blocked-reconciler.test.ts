@@ -28,6 +28,8 @@ function row(overrides: Partial<BornBlockedRow> = {}): BornBlockedRow {
     setupScript: "pnpm install -r",
     setupState: "failed",
     setupEndedAt: new Date(NOW - 5 * 24 * 60 * 60 * 1000).toISOString(),
+    setupStdoutTail: null,
+    setupStderrTail: null,
     ...overrides,
   };
 }
