@@ -31,6 +31,11 @@
  *   node scripts/promote.mjs --no-await-sweep # never trigger one; refuse when the recorded verdict is unusable
  *   node scripts/promote.mjs --recover --reason "fix the leak"   # FAST LANE: no sweep (#1054)
  *   node scripts/promote.mjs --force-sweep    # promote WITHOUT a green sweep (loud warning)
+ *   node scripts/promote.mjs --restart-stable # RESTART-ONLY (#1202): after a reboot, start the
+ *                                              # already-deployed tag if the port is free; refuse
+ *                                              # (exit 2) without spawning if it is already held.
+ *                                              # No tag, no fast-forward, no build, no sweep. Also
+ *                                              # `pnpm stable:start`.
  *
  * The RECOVERY lane (`--recover`, #1054) exists because the full lane's precondition — a fresh
  * green full sweep, which is a clone + install + full verify with a 45-minute ceiling — is the
@@ -78,6 +83,7 @@ import {
   nextStableTag,
   parseSweepVerdict,
   planSweepAcquisition,
+  planRestartOnly,
   planRecoveryLane,
   classifyRecoveryDelta,
   buildRecoveryRecord,
@@ -114,6 +120,10 @@ const opts = {
   recover: args.includes("--recover"),
   // The one ack the lane asks for: a migration is the only change a rollback cannot reverse.
   withMigration: args.includes("--with-migration"),
+  // #1202: a restart-only door for after a reboot — reuses startStableBoard()/smoke() and the
+  // same port-owner signature check the stop step uses, but never tags, builds, migrates or
+  // kills. A separate lane from promotion, not another flavour of it.
+  restartStable: args.includes("--restart-stable"),
   reason: (() => {
     const i = args.indexOf("--reason");
     return i >= 0 && args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : null;
@@ -691,7 +701,90 @@ function directionFor(sha, stableHead) {
   });
 }
 
+// --- restart-only door (#1202) --------------------------------------------------------------
+
+/** The tag the stable checkout is currently on, for the restart-only header/log lines. */
+function describeStableTag() {
+  const exact = git(["describe", "--tags", "--exact-match"], stableCheckout);
+  if (exact.code === 0 && exact.stdout) return exact.stdout;
+  const nearest = git(["describe", "--tags"], stableCheckout);
+  return nearest.code === 0 && nearest.stdout ? nearest.stdout : "<untagged>";
+}
+
+/**
+ * `--restart-stable` / `pnpm stable:start` (#1202) — start the ALREADY-DEPLOYED stable board
+ * after it did not come back on its own (a reboot). Resolves the same checkout/port/DB a
+ * promotion would, but does none of promotion's work: no sweep is read, no tag is minted, no
+ * fetch/fast-forward/build/migrate runs. It only ever does one of two things — refuse because the
+ * port is already held (never killing whatever holds it), or start + smoke the board that is
+ * already checked out.
+ */
+async function runRestartOnly() {
+  if (opts.recover || opts.forceSweep || opts.withMigration) {
+    fail("--restart-stable is a separate door from a promotion — drop --recover/--force-sweep/--with-migration and run it alone (add --dry-run to preview).");
+  }
+  if (!existsSync(stableCheckout)) {
+    fail(`stable checkout ${stableCheckout} does not exist. Create it per docs/two-boards.md §7, or set KANBAN_STABLE_CHECKOUT.`);
+  }
+
+  const tagLabel = describeStableTag();
+  log(`[promote] === restart-only: ${stableCheckout} @ ${tagLabel} (port ${stablePort}) ===`);
+
+  // Same listener lookup + signature logic `stopStableBoard` uses — but this door never kills,
+  // so the ownership check only shapes the log line, never the decision: any pid on the port is
+  // a refusal either way.
+  const pids = listenerPidsOnPort(stablePort);
+  const owners = pids.map((pid) => {
+    const decision = planPortOwnerKill({
+      pid,
+      port: stablePort,
+      checkoutRoot: stableCheckout,
+      getCommandLine: processCommandLine,
+      getCwd: processCwd,
+      audit: (e) => log(`[promote] ${JSON.stringify(e)}`),
+    });
+    return { pid, commandLine: decision.commandLine };
+  });
+  const decision = planRestartOnly({ port: stablePort, owners });
+
+  if (!decision.ok) {
+    for (const line of decision.lines) log(`[promote] restart-only: ${line}`);
+    if (opts.dryRun) {
+      console.log(`[promote] DRY RUN — restart-only would REFUSE (exit 2) without spawning: ${decision.detail}`);
+      return;
+    }
+    process.exit(decision.code);
+  }
+
+  if (opts.dryRun) {
+    console.log("[promote] DRY RUN — restart-only would start the stable board and smoke it. Nothing is spawned.");
+    console.log(`  stable checkout  ${stableCheckout}`);
+    console.log(`  tag              ${tagLabel}`);
+    console.log(`  port             ${stablePort}`);
+    console.log(`  stable DB pin    ${dbUrl}`);
+    console.log(`  board URL        ${boardUrl}`);
+    console.log(`  log file         ${logPath}`);
+    return;
+  }
+
+  startStableBoard();
+  const result = await smoke();
+  if (result.ok) {
+    log(`[promote] restart-only: SMOKE PASSED — ${result.detail}`);
+    log(`[promote] === restart-only: ${tagLabel} is live on ${boardUrl} ===`);
+    return;
+  }
+  log(`[promote] !!! restart-only SMOKE FAILED at ${result.failed}: ${result.detail} — the stable board needs a human (this door does not roll back).`);
+  // Not process.exit(1): a detached child was just spawned above (see the note on the same
+  // pattern in the promotion path) — set the exit code and let the loop drain.
+  process.exitCode = 1;
+}
+
 async function main() {
+  if (opts.restartStable) {
+    return await runRestartOnly();
+  }
+
   // An UNREADABLE source is not the same as "no sweep has ever run" — one is a broken read
   // path, the other a verdict about the board — and reporting the second for the first sends
   // the operator looking in the wrong place.

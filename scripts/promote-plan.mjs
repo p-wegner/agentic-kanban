@@ -455,6 +455,46 @@ export function checkPromoteDirection({ stableHead, sha, shaIsDescendant }) {
   };
 }
 
+// --- the restart-only door (#1202) ------------------------------------------------------------
+
+/**
+ * One refusal line for the restart-only door: `refused: <pid> already serves <port>
+ * (<command-line excerpt>)`. Used whether or not the pid turns out to belong to the stable
+ * checkout — this door never kills, so ownership only changes what gets logged, never the
+ * outcome.
+ */
+export function formatRestartRefusal({ pid, port, commandLine, maxLen = 160 }) {
+  const excerpt = commandLine
+    ? commandLine.length > maxLen
+      ? `${commandLine.slice(0, maxLen)}...`
+      : commandLine
+    : "<command line unavailable>";
+  return `refused: ${pid} already serves ${port} (${excerpt})`;
+}
+
+/**
+ * Restart-only decision (#1202) — the pure half of `pnpm stable:start` / `promote.mjs
+ * --restart-stable`.
+ *
+ * The door has exactly two things it may do: leave an already-served port alone, or start a
+ * fresh stable board on a free one. It never kills a listener, so unlike {@link
+ * checkPromoteDirection}'s or `stopStableBoard`'s use of `planPortOwnerKill`, ownership does not
+ * change the OUTCOME here — any pid already on the port is a refusal, whether it is the stable
+ * board itself (already up, nothing to do) or something foreign (the board can't bind anyway).
+ * It only changes what the refusal line says, via `commandLine`.
+ *
+ * @param {number} p.port    the stable port being checked
+ * @param {{pid: string, commandLine?: string}[]} p.owners  every pid currently listening on it,
+ *   as returned by the same listener lookup `stopStableBoard` uses — empty means free
+ */
+export function planRestartOnly({ port, owners = [] } = {}) {
+  if (owners.length === 0) {
+    return { ok: true, code: 0, detail: `nothing listens on ${port} — safe to start`, lines: [] };
+  }
+  const lines = owners.map(({ pid, commandLine }) => formatRestartRefusal({ pid, port, commandLine }));
+  return { ok: false, code: 2, detail: lines.join("; "), lines };
+}
+
 // --- the recovery lane (#1054) ---------------------------------------------------------------
 
 /**
