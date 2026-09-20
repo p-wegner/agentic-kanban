@@ -49,17 +49,17 @@ export function isForkVersion(version: string | undefined): boolean {
  * the caching/shaping logic without shelling out.
  */
 export async function getHerdrAvailability(
-  now: number = Date.now(),
+  nowMs: number = Date.now(),
   probe: () => Promise<{ available: boolean; version?: string }> = probeHerdr,
 ): Promise<HerdrAvailability> {
-  if (cached && now - cached.checkedAt < CACHE_TTL_MS) return cached;
+  if (cached && nowMs - cached.checkedAt < CACHE_TTL_MS) return cached;
 
   const result = await probe();
   cached = {
     available: result.available,
     version: result.version,
     isFork: isForkVersion(result.version),
-    checkedAt: now,
+    checkedAt: nowMs,
   };
   return cached;
 }
