@@ -9,6 +9,7 @@
 import type { Database } from "../db/index.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import * as gitService from "./git.service.js";
+import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { getMergeQueueIssueRows, getMergeTrainMaxSizePref } from "../repositories/merge-queue.repository.js";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
@@ -22,14 +23,15 @@ import {
   listActiveMergeTrainsForProject,
   updateMergeTrainState,
 } from "../repositories/merge-train.repository.js";
-import { runMergeTrain, formatTrainLabel, trainDateStamp } from "./merge-train.service.js";
+import { runMergeTrain, formatTrainLabel, trainDateStamp, trainRefName } from "./merge-train.service.js";
 import { registerLiveMergeTrain, unregisterLiveMergeTrain } from "./merge-train-live-registry.js";
 import { runPreMergeGate, looksLikeMissingDepsFailure } from "./pre-merge-gate.service.js";
 import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { randomUUID } from "node:crypto";
 import { acquireQueueRepoLock, MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS } from "./merge-queue-repo-lock.js";
 import type { MergeQueueEvent, MergeQueuePlan } from "./merge-queue.service.js";
-import type { MergeTrainAttemptDto, MergeTrainGateEvidenceDto } from "@agentic-kanban/shared/types";
+import type { MergeTrainAttemptDto, MergeTrainBaseVerdict, MergeTrainGateEvidenceDto } from "@agentic-kanban/shared/types";
+import { getBaseBranchHealthForSha, isBaseHealthAnswer } from "../repositories/base-branch-health.repository.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { noteMergeGatePhase } from "./merge-job.service.js";
@@ -345,6 +347,9 @@ export function buildTrainGateEvidence(
       ...(result.conflictClusters && result.conflictClusters.length > 0
         ? { conflictClusters: result.conflictClusters.map((c) => ({ workspaceIds: [...c.workspaceIds] })) }
         : {}),
+      // #1204: the control arm's verdict on the bare base, so the panel can render "base red,
+      // nothing attributable to members" instead of an unexplained red train with no rejections.
+      ...(result.baseVerdict ? { baseVerdict: result.baseVerdict } : {}),
     },
     gateRejected,
   };
@@ -398,6 +403,153 @@ export function annotateConcurrentGates(
     }
   }
   return { attempts: annotated, concurrentGateSavedMs: Math.max(0, sum - union) };
+}
+
+/**
+ * ONE staging gate: a fresh worktree at `ref`, the project's setup script run against it the way
+ * a real workspace's is, then `runPreMergeGate`. Extracted to module scope (#1204) because the
+ * CONTROL ARM needs exactly this against the BARE BASE, and a second copy of a gate is the last
+ * thing this area needs - the train's own `runGate` is now a thin wrapper around it plus the
+ * train-scoped review.
+ *
+ * `afterGreen` runs INSIDE the worktree's lifetime, before teardown, and is where the review
+ * lives; a control-arm gate passes none. Fails CLOSED on a throw: a gate we could not run is not
+ * a gate that passed.
+ */
+async function runTrainStagingGate(args: {
+  database: Database;
+  repoPath: string;
+  baseBranch: string;
+  projectId: string;
+  ref: string;
+  attemptLabel: string;
+  /** The REAL workspaces whose deferred installs this gate must clear; empty for a control arm. */
+  includedWorkspaceIds: string[];
+  afterGreen?: (ctx: { gateWorktree: string; gateMessage: string }) => Promise<{ sided?: Array<{ workspaceId: string; reason: string }> }>;
+}): Promise<{ passed: boolean; message: string; sided?: Array<{ workspaceId: string; reason: string }> }> {
+  const { database, repoPath, baseBranch, projectId, ref, attemptLabel } = args;
+  let gateWorktree: string | null = null;
+  try {
+    // #713: DB-backed claim guard alongside the namespace - the train leaf lives
+    // under the same `.worktrees` root as every live workspace's.
+    gateWorktree = await gitService.createWorktree(repoPath, ref, undefined, {
+      pathNamespace: "train",
+      ...(await resolveWorktreeClaims(database, { label: "merge-train-gate" })),
+    });
+    // #1154: a builder's worktree gets the project's setup/install script run against
+    // it before anything else touches it (`workspace-provision.service.ts`); this
+    // staging worktree is created fresh by `createWorktree` above with none of that -
+    // so on a project whose dependencies are per-worktree (install-per-worktree, not a
+    // symlink into main) the train verified a tree that was never actually installed.
+    // Provision it the same way a real workspace is, best-effort: a setup failure here
+    // is reported through the gate result below rather than thrown, since a project with
+    // no setup script configured (installMode "symlink", or none at all) must still gate
+    // normally.
+    const setupScript = await getProjectSetupScript(projectId, database).catch(() => null);
+    if (setupScript && setupScript.trim()) {
+      noteMergeGatePhase(`train:${attemptLabel}`, "install", setupScript);
+      const setup = await runSetupScript(gateWorktree, setupScript, {
+        timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS,
+      }).catch((err) => ({ exitCode: 1, stdout: "", stderr: errorMessage(err), timedOut: false }));
+      if (setup.exitCode !== 0 && !setup.timedOut) {
+        return {
+          passed: false,
+          message:
+            `train staging worktree setup failed (exit ${setup.exitCode}) before the gate could run - ` +
+            `dependencies were never installed for this tree, so the gate could not verify anything: ` +
+            `${(setup.stderr || setup.stdout || "no output").slice(0, 500)}`,
+        };
+      }
+    }
+    // `memberWorkspaceIds`: the synthetic `train:<label>` id matches no `repos` row, so
+    // without it the #628 deferred-install check passes vacuously for the whole train.
+    const gate = await runPreMergeGate(
+      {
+        id: `train:${attemptLabel}`,
+        workingDir: gateWorktree,
+        baseBranch,
+        // The INCLUDED members (#676) - a member dropped during assembly is not in this
+        // tree, so its outstanding install must not withhold the train.
+        memberWorkspaceIds: args.includedWorkspaceIds,
+      },
+      projectId,
+      database,
+    );
+    if (!gate.passed) return { passed: false, message: gate.message };
+    const extra = await args.afterGreen?.({ gateWorktree, gateMessage: gate.message });
+    return { passed: true, message: gate.message, ...(extra?.sided && extra.sided.length > 0 ? { sided: extra.sided } : {}) };
+  } catch (err) {
+    // Fail CLOSED: a gate we could not run is not a gate that passed.
+    return { passed: false, message: `train gate could not run: ${errorMessage(err)}` };
+  } finally {
+    // Route the teardown through the #394 co-residency guard rather than deleting
+    // outright: this leaf lives under the same `.worktrees` root as every live
+    // workspace's, and it was created WITH a claim above - so the claim is exactly
+    // what must be consulted before removing it. Enforced by
+    // `worktree-delete-guard-ratchet`.
+    if (gateWorktree) {
+      const dir = gateWorktree;
+      await removeWorktreeUnlessShared({
+        database,
+        workingDir: dir,
+        label: "merge-train-gate",
+        removeWorktree: () => gitService.removeWorktree(repoPath, dir),
+      }).catch(() => undefined);
+    }
+  }
+}
+
+/**
+ * The CONTROL ARM (#1204): what does the gate say about the BARE BASE the train was assembled on?
+ *
+ * Asked once, by `runMergeTrain`, when the FULL train has failed and is about to be halved. A
+ * base-health row recorded at that EXACT sha describes this very tree, so it answers for free;
+ * otherwise one staging gate runs on a scratch ref at the base sha, with no member aboard.
+ *
+ * MEASURED motivation: train/2026-09-19-02 bisected a red master 27 times and marked all 14
+ * members `gateRejected`. One run at the top of the search answers the question for the whole
+ * tree, so 26 of those 27 were avoidable and none of the 14 attributions was true.
+ *
+ * Returns null when the question could not be asked at all (the base sha would not resolve, the
+ * scratch ref could not be minted) - the bisect then proceeds exactly as it did before #1204,
+ * rather than a failed probe becoming a verdict about anybody's code.
+ */
+async function gateBaseAloneOnce(args: {
+  database: Database;
+  repoPath: string;
+  baseBranch: string;
+  projectId: string;
+  trainLabel: string;
+}): Promise<{ verdict: MergeTrainBaseVerdict; gateRuns: number } | null> {
+  const { database, repoPath, baseBranch, projectId, trainLabel } = args;
+  const baseSha = await gitService.revParse(repoPath, baseBranch).catch(() => null);
+  if (!baseSha) return null;
+
+  const recorded = await getBaseBranchHealthForSha(projectId, baseSha, database).catch(() => null);
+  if (recorded && isBaseHealthAnswer(recorded.outcome)) {
+    console.log(`[merge-train] ${trainLabel}: control arm answered from base_branch_health at ${baseSha.slice(0, 8)} - base is ${recorded.outcome}, no extra gate run`);
+    return { verdict: recorded.outcome === "green" ? "green" : "red", gateRuns: 0 };
+  }
+
+  const controlRef = trainRefName(`${trainLabel}-base`);
+  try {
+    await gitExecOrThrow(["branch", "-f", controlRef, baseSha], { cwd: repoPath });
+  } catch (err) {
+    console.warn(`[merge-train] ${trainLabel}: control arm could not mint its scratch ref (non-fatal, the bisect proceeds): ${errorMessage(err)}`);
+    return null;
+  }
+  try {
+    const gate = await runTrainStagingGate({
+      database, repoPath, baseBranch, projectId,
+      ref: controlRef,
+      attemptLabel: `${trainLabel}-base`,
+      includedWorkspaceIds: [],
+    });
+    console.log(`[merge-train] ${trainLabel}: control arm gated the bare base at ${baseSha.slice(0, 8)} - ${gate.passed ? "green" : "RED"}${gate.passed ? "" : `: ${gate.message.slice(0, 200)}`}`);
+    return { verdict: gate.passed ? "green" : "red", gateRuns: 1 };
+  } finally {
+    await gitExecOrThrow(["branch", "-D", controlRef], { cwd: repoPath }).catch(() => undefined);
+  }
 }
 
 /**
@@ -529,96 +681,43 @@ export function createMergeTrainRunner(deps: {
           // halves may be gating at the same moment, each in its own staging worktree (the
           // leaf is derived from `trainRef`, which already differs per half), and their log
           // lines and synthetic gate ids must tell them apart.
-          let gateWorktree: string | null = null;
-          try {
-            await updateMergeTrainState(trainId, { state: "gating" }, database).catch(() => undefined);
-            // #713: DB-backed claim guard alongside the namespace — the train leaf lives
-            // under the same `.worktrees` root as every live workspace's.
-            gateWorktree = await gitService.createWorktree(repoPath, trainRef, undefined, {
-              pathNamespace: "train",
-              ...(await resolveWorktreeClaims(database, { label: "merge-train-gate" })),
-            });
-            // #1154: a builder's worktree gets the project's setup/install script run against
-            // it before anything else touches it (`workspace-provision.service.ts`); this
-            // staging worktree is created fresh by `createWorktree` above with none of that —
-            // so on a project whose dependencies are per-worktree (install-per-worktree, not a
-            // symlink into main) the train verified a tree that was never actually installed.
-            // Provision it the same way a real workspace is, best-effort: a setup failure here
-            // is reported through the gate result below rather than thrown, since a project with
-            // no setup script configured (installMode "symlink", or none at all) must still gate
-            // normally.
-            const setupScript = await getProjectSetupScript(projectId, database).catch(() => null);
-            if (setupScript && setupScript.trim()) {
-              noteMergeGatePhase(`train:${attemptLabel}`, "install", setupScript);
-              const setup = await runSetupScript(gateWorktree, setupScript, {
-                timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS,
-              }).catch((err) => ({ exitCode: 1, stdout: "", stderr: errorMessage(err), timedOut: false }));
-              if (setup.exitCode !== 0 && !setup.timedOut) {
-                return {
-                  passed: false,
-                  message:
-                    `train staging worktree setup failed (exit ${setup.exitCode}) before the gate could run — ` +
-                    `dependencies were never installed for this tree, so the gate could not verify anything: ` +
-                    `${(setup.stderr || setup.stdout || "no output").slice(0, 500)}`,
-                };
+          //
+          // #1204: the worktree + setup + `runPreMergeGate` half is `runTrainStagingGate`, so
+          // the control arm gates the bare base through the SAME code rather than a second copy.
+          await updateMergeTrainState(trainId, { state: "gating" }, database).catch(() => undefined);
+          return await runTrainStagingGate({
+            database, repoPath, baseBranch, projectId,
+            ref: trainRef,
+            attemptLabel,
+            includedWorkspaceIds: included.map((m) => m.workspaceId),
+            afterGreen: async ({ gateWorktree }) => {
+              // #1194: review ONCE, on the tree that just proved green - the assembled diff vs the
+              // base, one reviewer, every member's criteria in `{{members}}`. A blocking finding
+              // names its member in `sided`; `runMergeTrain` re-lands the rest without it.
+              const decision = resolveTrainReviewDecision(toPrefMap(await getAllPreferencesCached(database).catch(() => [])), projectId);
+              if (!decision.run) {
+                reviewEvidence ??= { status: "skipped", reason: decision.reason };
+                return {};
               }
-            }
-            // `memberWorkspaceIds`: the synthetic `train:<label>` id matches no `repos` row, so
-            // without it the #628 deferred-install check passes vacuously for the whole train.
-            const gate = await runPreMergeGate(
-              {
-                id: `train:${attemptLabel}`,
-                workingDir: gateWorktree,
-                baseBranch,
-                // The INCLUDED members (#676) — a member dropped during assembly is not in this
-                // tree, so its outstanding install must not withhold the train.
-                memberWorkspaceIds: included.map((m) => m.workspaceId),
-              },
-              projectId,
-              database,
-            );
-            if (!gate.passed) return { passed: false, message: gate.message };
-            // #1194: review ONCE, on the tree that just proved green - the assembled diff vs the
-            // base, one reviewer, every member's criteria in `{{members}}`. A blocking finding
-            // names its member in `sided`; `runMergeTrain` re-lands the rest without it.
-            const decision = resolveTrainReviewDecision(toPrefMap(await getAllPreferencesCached(database).catch(() => [])), projectId);
-            if (!decision.run) {
-              reviewEvidence ??= { status: "skipped", reason: decision.reason };
-              return { passed: true, message: gate.message };
-            }
-            const reviewMembers: TrainReviewMember[] = included.flatMap((m) => {
-              const full = members.find((x) => x.workspaceId === m.workspaceId);
-              return full ? [{ workspaceId: full.workspaceId, branch: full.branch, issueId: full.issueId, issueNumber: full.issueNumber ?? null, changedFiles: full.changedFiles }] : [];
-            });
-            // #1192: `repoPath` + `sendTurn` are what a sided member's siding record needs — the
-            // same row, tag and sha-keyed hold a conflict drop gets (`partitionSidedMembers`
-            // above then withholds it from the next window until its tip moves).
-            const review = await reviewTrain({
-              projectId, trainLabel: label, trainRef, baseBranch, gateWorktree, repoPath,
-              members: reviewMembers, blocking: decision.blocking, thorough: decision.thorough,
-            }, { database, sendTurn });
-            reviewEvidence ??= review.evidence;
-            return { passed: true, message: gate.message, ...(review.sided.length > 0 ? { sided: review.sided } : {}) };
-          } catch (err) {
-            // Fail CLOSED: a gate we could not run is not a gate that passed.
-            return { passed: false, message: `train gate could not run: ${errorMessage(err)}` };
-          } finally {
-            // Route the teardown through the #394 co-residency guard rather than deleting
-            // outright: this leaf lives under the same `.worktrees` root as every live
-            // workspace's, and it was created WITH a claim above — so the claim is exactly
-            // what must be consulted before removing it. Enforced by
-            // `worktree-delete-guard-ratchet`.
-            if (gateWorktree) {
-              const dir = gateWorktree;
-              await removeWorktreeUnlessShared({
-                database,
-                workingDir: dir,
-                label: "merge-train-gate",
-                removeWorktree: () => gitService.removeWorktree(repoPath, dir),
-              }).catch(() => undefined);
-            }
-          }
+              const reviewMembers: TrainReviewMember[] = included.flatMap((m) => {
+                const full = members.find((x) => x.workspaceId === m.workspaceId);
+                return full ? [{ workspaceId: full.workspaceId, branch: full.branch, issueId: full.issueId, issueNumber: full.issueNumber ?? null, changedFiles: full.changedFiles }] : [];
+              });
+              // #1192: `repoPath` + `sendTurn` are what a sided member's siding record needs — the
+              // same row, tag and sha-keyed hold a conflict drop gets (`partitionSidedMembers`
+              // above then withholds it from the next window until its tip moves).
+              const review = await reviewTrain({
+                projectId, trainLabel: label, trainRef, baseBranch, gateWorktree, repoPath,
+                members: reviewMembers, blocking: decision.blocking, thorough: decision.thorough,
+              }, { database, sendTurn });
+              reviewEvidence ??= review.evidence;
+              return { sided: review.sided };
+            },
+          });
         },
+        // #1204 — the CONTROL ARM, asked once before a red full train is halved: is the BARE
+        // BASE red? If it is, the failure belongs to master and no member may be blamed for it.
+        gateBaseAlone: () => gateBaseAloneOnce({ database, repoPath, baseBranch, projectId, trainLabel: label }),
         closeMember: async (workspaceId) => {
           // Reuse the sanctioned already-merged path rather than reimplementing the
           // mergedAt/status/comment bookkeeping the reconcilers depend on.

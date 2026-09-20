@@ -21,7 +21,14 @@ export type MergeTrainWindowHoldReason =
   /** `POST /api/merge-queue/window/hold` — an operator held the door until `heldUntil`. */
   | "held"
   /** A train for this project is already `assembling`/`gating` (#1153); nothing departs until it finishes. */
-  | "live_train";
+  | "live_train"
+  /**
+   * #1204 - the latest `base_branch_health` row for this project is `red` at a sha the base has
+   * not moved past. A train assembled on a red base inherits the base's own failures, so every
+   * bisect attempt reproduces them and the members are blamed for a defect that is on the base.
+   * Nothing departs until the base is measured green again (the reprobe schedule does that).
+   */
+  | "base_red";
 
 export type MergeTrainWindowReason = MergeTrainWindowReleaseReason | MergeTrainWindowHoldReason;
 

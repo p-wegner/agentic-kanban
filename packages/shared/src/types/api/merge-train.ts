@@ -101,7 +101,18 @@ export interface MergeTrainGateEvidenceDto {
    * 0 (or absent, on rows written before #1193) when every gate ran one after another.
    */
   concurrentGateSavedMs?: number;
+  /**
+   * #1204 - the CONTROL ARM: what the gate said about the BARE BASE, measured once before a red
+   * full train was bisected. `red` means the failure is on the base branch and nothing is
+   * attributable to any member (no member is `gateRejected`, all stay ready); `green` means the
+   * base was clean, so the bisect's attribution stands. Absent when no control arm ran (a green
+   * train, an environment failure, a train too small to bisect, or a row written before #1204).
+   */
+  baseVerdict?: MergeTrainBaseVerdict;
 }
+
+/** #1204 - what the control-arm gate said about the bare base sha the train was assembled on. */
+export type MergeTrainBaseVerdict = "red" | "green";
 
 /**
  * How one train attempt (#1189) ended. Only `red` blames code; `sided` blames a SPECIFIC

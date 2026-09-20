@@ -1,7 +1,7 @@
 import { mergeBranch, isAncestor, revParse } from "@agentic-kanban/shared/lib/git-service";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import type { MergeTrainAttemptDto, MergeTrainAttemptVerdict } from "@agentic-kanban/shared/types";
+import type { MergeTrainAttemptDto, MergeTrainAttemptVerdict, MergeTrainBaseVerdict } from "@agentic-kanban/shared/types";
 import {
   computeConflictGraph,
   conflictClusters,
@@ -475,6 +475,13 @@ export interface TrainRunResult {
    * it every time.
    */
   conflictClusters?: ConflictCluster[];
+  /**
+   * #1204 — the CONTROL ARM's verdict on the BARE BASE, when `gateBaseAlone` was asked. `red`
+   * means the failure is the base's own, so nothing here is attributed to a member; `green`
+   * means the base was clean and the bisect's attribution stands. Absent when no control arm
+   * ran (a green train, an environment failure, or a caller that wires no port).
+   */
+  baseVerdict?: MergeTrainBaseVerdict;
 }
 
 /**
@@ -551,11 +558,32 @@ export async function runMergeTrain(args: {
    * a test overrides it rather than depending on that module's process-global state.
    */
   freeVerifySlots?: () => number;
+  /**
+   * #1204 — the CONTROL ARM, asked ONCE when the FULL train has failed its gate and is about to
+   * be halved. It gates (or reads a fresh base-health row for) the BARE BASE sha the train was
+   * assembled on, and answers whether the base alone is red.
+   *
+   * MEASURED motivation: on a red master, a 14-member train spent 27 gate runs bisecting the
+   * base's own failures and marked all 14 members `gateRejected` — the defect was on master and
+   * not one of the fourteen branches had anything to do with it. One extra run at the top of the
+   * search answers that question for the whole tree, so 26 of those 27 runs were avoidable.
+   *
+   * A `red` answer stops the search immediately and attribution-free: `gateRejected` stays
+   * empty, every member stays aboard and ready, and `baseVerdict` records why. Returning null
+   * (could not measure) leaves today's behaviour exactly as it was.
+   */
+  gateBaseAlone?: () => Promise<{ verdict: MergeTrainBaseVerdict; gateRuns: number } | null>;
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, runGate, closeMember } = args;
   const bisect = args.bisectOnFailure !== false;
   const isEnvironmentFailure = args.isEnvironmentFailure ?? (() => false);
   const freeVerifySlots = args.freeVerifySlots ?? defaultFreeVerifySlots;
+  /**
+   * #1204 — the control arm's one answer, folded into the result below (its gate run counts).
+   * A REF cell rather than a `let`: the write happens inside `landGreenest`, and TypeScript's
+   * control-flow analysis would otherwise narrow the outer binding to `null` at the read.
+   */
+  const baseProbe: { current: { verdict: MergeTrainBaseVerdict; gateRuns: number } | null } = { current: null };
 
   /**
    * Wait for `a`, then `b` (either may be absent) — used to chain a child's landing behind
@@ -614,6 +642,14 @@ export async function runMergeTrain(args: {
       // member, the rest were re-assembled and either landed or conflicted (both attributed). There
       // is nothing red left to search for, so splitting would only re-gate green code.
       if (attempt.sided.length > 0) return attempt;
+      // #1204 — the CONTROL ARM, at the TOP of the search only (`subLabel === label`) and only
+      // when there is a search to do. Every half of a bisect is assembled against the SAME base,
+      // so a base that is red on its own makes every re-gate reproduce the base's failures and
+      // the halving eventually blames an arbitrary branch. One run answers it for the whole tree.
+      if (args.gateBaseAlone && bisect && subLabel === label && subset.length > 1) {
+        baseProbe.current = await args.gateBaseAlone().catch(() => null);
+        if (baseProbe.current?.verdict === "red") return attempt;
+      }
       // Nothing landed and the gate is why. A red singleton IS attribution.
       if (!bisect || subset.length <= 1) {
         return {
@@ -675,7 +711,13 @@ export async function runMergeTrain(args: {
     }
   }
 
-  return await landGreenest(members, label);
+  const result = await landGreenest(members, label);
+  // The control arm's run is a real gate run and is counted as one; its verdict rides along so
+  // the persisted evidence can say "base red, nothing attributable to members".
+  const probe = baseProbe.current;
+  return probe
+    ? { ...result, gateRuns: result.gateRuns + probe.gateRuns, baseVerdict: probe.verdict }
+    : result;
 }
 
 /** The live default for `freeVerifySlots` — how many verify chains could start on this box right now. */

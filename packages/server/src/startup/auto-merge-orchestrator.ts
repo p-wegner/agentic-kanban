@@ -21,6 +21,7 @@ import {
   type MergeTrainWindowVerdict,
 } from "../services/merge-train-window.js";
 import { verifyChainSemaphoreActive } from "../services/verify-chain-semaphore.js";
+import { resolveBaseRedVeto, type BaseRedVeto } from "../services/merge-train-base-veto.js";
 import {
   clearTrainWindow,
   readTrainWindowsFromPrefMap,
@@ -131,9 +132,15 @@ export function createAutoMergeOrchestrator(deps: {
   getSessionManager?: () => SessionManager;
   /** Test override for the zero-candidate reconcile fallback cadence (default 10 ticks). */
   reconcileFallbackEveryTicks?: number;
+  /**
+   * #1204 — the red-base veto port, injected so a test can hand the window a verdict without a
+   * real repo on disk. Production wires `resolveBaseRedVeto`.
+   */
+  checkBaseRedVeto?: (projectId: string) => Promise<BaseRedVeto | null>;
 }) {
   const { database, boardEvents, getSessionManager } = deps;
   const reconcileFallbackEveryTicks = deps.reconcileFallbackEveryTicks ?? RECONCILE_FALLBACK_EVERY_TICKS;
+  const checkBaseRedVeto = deps.checkBaseRedVeto ?? ((projectId: string) => resolveBaseRedVeto(projectId, database));
   /** Counts effective runOnce passes; drives the zero-candidate reconcile fallback. */
   let reconcileTick = 0;
   const state: AutoMergeOrchestratorState = {
@@ -417,7 +424,21 @@ export function createAutoMergeOrchestrator(deps: {
         heldUntilMs,
         releaseRequested: existing?.releaseRequestedAt !== undefined,
       });
-      if (verdict.release) {
+      // #1204 — the red-base veto, asked only when the window would otherwise DEPART. A train
+      // assembled on a red base inherits the base's own failures, so the bisect that follows
+      // can only mis-attribute them to members (27 gate runs, 14 false `gateRejected`, nothing
+      // landed). Keep accumulating; the base-health reprobe schedule is what lifts the hold.
+      const baseRed = verdict.release ? await checkBaseRedVeto(projectId).catch(() => null) : null;
+      if (baseRed) {
+        console.log(`[auto-merge] train window held: base_red for project ${projectId} — base is red at ${baseRed.healthSha.slice(0, 8)}, holding ${ids.length} workspace(s) rather than bisecting the base's own failures onto them${baseRed.message ? `: ${baseRed.message.slice(0, 200)}` : ""}`);
+        await persistWindow(projectId, existing, {
+          pendingIds: ids,
+          firstSeenAt,
+          lastVerdict: { release: false, reason: "base_red" },
+          lastEvaluatedAt: now,
+          ...carry,
+        });
+      } else if (verdict.release) {
         console.log(`[auto-merge] train window closed for project ${projectId} (${verdict.reason}, size ${config.maxSize}/wait ${config.maxWaitMs}ms): releasing ${ids.length} workspace(s)${config.batchingFromPosture ? formatPostureNote(config.posture) : ""}`);
         released.push(...ids);
         await dropWindow(projectId, existing);
