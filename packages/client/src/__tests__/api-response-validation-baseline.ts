@@ -83,10 +83,8 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   // ── /api/merge-queue ──
   "POST /api/merge-queue",
   "POST /api/merge-queue/preview/:param",
-  // #1187's departure board reads these; #1186's `MergeTrainWindowDto` is on master
-  // (shared/src/types/api/merge-train-window.ts) but no zod schema is registered for these
-  // routes yet. Register real schemas against that DTO rather than pretending the gap is closed.
-  "GET /api/merge-queue/window",
+  // #1187's departure board reads these; no zod schema is registered for these routes yet.
+  // Register real schemas rather than pretending the gap is closed.
   "POST /api/merge-queue/trains/:param/cancel",
   "POST /api/merge-queue/window/hold",
   "POST /api/merge-queue/window/release",
