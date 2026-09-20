@@ -167,6 +167,14 @@ const COMPLEXITY_BASELINE = {
   "packages/server/src/services/session-manager/session-lifecycle.ts": 38,
   "packages/server/src/services/workspace-scorecard.service.ts": 27,
   "packages/server/src/startup/ancestor-branch-reconciler.ts": 26,
+  // Re-banked landing #1149 (2026-09-20): the real typescript-backed complexity check
+  // had been silently skipped in every worktree missing typescript up to now (that was
+  // the bug #1149 fixed), so this file's growth to 29 branches (runOnce(), via the
+  // #1204/#1207 auto-merge-orchestrator work already on master) was never caught by the
+  // gate. Pre-existing, not introduced by #1149 or by either of the two branches landed
+  // alongside it. Filed as a follow-up to restructure rather than fixed here (out of
+  // scope for all three landings).
+  "packages/server/src/startup/auto-merge-orchestrator.ts": 29,
   // monitor-auto-start.ts: runAutoStart restructured into runInProgressBackfill /
   // runTodoPull / evaluateStartCandidate (#802) — 59 branches down to 4, and the file's
   // worst function is now 17, under the flat threshold. Entry REMOVED, not lowered.
