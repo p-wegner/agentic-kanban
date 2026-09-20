@@ -19,6 +19,53 @@ description; the CLAUDE.md Skill Map row is its entry point.
 - **Verified by:** the `.codex` mirror is byte-identical (`diff -r`), and the staged tree passes
   `codex-skills-parity` + `claude-md-skill-and-feedback-invariants` (2 files, 10 tests).
 
+## 2026-09-18 — #1199: leaked E2ETest identity is NOT a 3-commit leak, it is the whole history
+
+**Blocked on a human decision — no code change possible from this worktree.** The ticket asked to
+reset `[user]` in the MAIN checkout's `.git/config` (`C:\projects\andrena\agentic-kanban`, not this
+worktree) and decide on a history rewrite. Both are explicitly a human call per the ticket text and
+per this repo's own conventions on shared, hard-to-reverse state — so nothing was edited here.
+
+**What was verified, and it changes the scope the ticket described:**
+- The main checkout's `.git/config` still has `user.name = E2ETest` / `user.email = e2e@test.local`
+  (confirmed live, 2026-09-18).
+- The ticket described three specific master commits plus a few worktree-branch first-commits as
+  the affected set. The actual count is far larger: **3,178 of the commits reachable from `master`**
+  carry `e2e@test.local` as author (`git log master --pretty='%H %ae' | grep e2e@test.local | wc -l`),
+  and 3,238 across all refs. That is effectively the entire autonomous-commit history of this
+  board's own development, not an isolated leak from #1192/#1193/#1194.
+- 11 branches are currently open with commits under this identity, including every train-feature
+  branch (#1190-#1198) and this ticket's own branch.
+- Two OTHER stray identities also show up in `git log --all`: `E2ETest <peterwegner3141@gmail.com>`
+  and `E2ETest <test@example.local>` — worth folding into the same decision rather than treating
+  `e2e@test.local` as the only variant.
+
+**Why this changes the recommendation:** rewriting authorship on 3,000+ commits already pushed to
+`origin/master`'s ancestry is a different decision than amending a handful of unpushed tips. A full
+rewrite needs `git filter-repo`, forces every existing clone/worktree to be discarded and re-cloned,
+and needs a force-push decision on a shared remote. Given the scale, the practical options are
+narrower than the ticket implied:
+1. **Reset `.git/config` only, leave history as-is.** Cheapest, stops new leaks, treats the past
+   3,178 commits as accepted historical noise (this repo's own convention: "move, don't delete" —
+   history is not rewritten lightly, and here it demonstrably never was `Peter Wegner` to begin
+   with for agent-driven commits).
+   **This is not just a placeholder recommendation — it is the two-line fix that actually clears
+   this ticket:**
+   ```
+   git config --file C:\projects\andrena\agentic-kanban\.git\config user.name "Peter Wegner"
+   git config --file C:\projects\andrena\agentic-kanban\.git\config user.email peter.wegner@andrena.de
+   ```
+2. **Amend only the still-open branch tips** (#1190-#1198, this ticket) before they merge, via
+   `git commit --amend --reset-author` on each branch tip — bounded, no shared-history rewrite,
+   no force-push. Leaves the already-merged 3,178 as-is.
+3. **Full rewrite** (`git filter-repo --commit-callback` remapping the three stray identities to the
+   correct one) — technically possible but disproportionate at this scale; would need every open
+   worktree/branch rebuilt afterward and a coordinated force-push.
+
+**Recommendation, not yet actioned:** option 1 (reset config only) plus option 2 for branches still
+open and easy to amend before merge. Full rewrite (option 3) is very likely not worth it given the
+volume — flagged for the user's call, not decided here.
+
 ## 2026-09-18 — #1196 #1197 #1198 on master; the six train tickets are still In Progress
 
 **On local `master`, not pushed.** Three follow-ups to the train merge, each its own worktree +
