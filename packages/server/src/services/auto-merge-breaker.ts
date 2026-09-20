@@ -251,3 +251,40 @@ async function currentSetupVerdict(workspaceId: string, database: Database): Pro
   const run = await getSetupRunForGate(workspaceId, database).catch(() => undefined);
   return run?.state ?? null;
 }
+
+/**
+ * Fold ONE orchestrator tick's per-project outcomes into the breakers (#1211 — lifted out of
+ * `runOnce`, which is where this bookkeeping was inline).
+ *
+ * A project that LANDED something this tick ends its streak: the breaker counts CONSECUTIVE
+ * failures, so a success both drops the failure this tick may also have recorded for it and
+ * clears the stored row. Whatever failure is left after that is folded in — one per project,
+ * because a train's members all carry the same gate failure text and counting them individually
+ * would trip the breaker inside a single window and claim three "consecutive" failures that
+ * were one tick.
+ *
+ * Never throws: a breaker that cannot be written must not fail the merge cycle around it.
+ */
+export async function applyTickBreakerOutcomes(args: {
+  /** The FIRST gate/train failure seen for each project this tick. Mutated: succeeded projects are removed. */
+  failures: Map<string, { workspaceId: string; message: string }>;
+  /** Projects that merged something this tick. */
+  succeeded: Set<string>;
+  database: Database;
+  broadcast?: (projectId: string) => void;
+}): Promise<void> {
+  const { failures, succeeded, database, broadcast } = args;
+  for (const projectId of succeeded) {
+    failures.delete(projectId);
+    await clearAutoMergeBreaker(projectId, database).catch(() => undefined);
+  }
+  for (const [projectId, failure] of failures) {
+    await recordAutoMergeGateFailure({
+      projectId,
+      workspaceId: failure.workspaceId,
+      message: failure.message,
+      database,
+      broadcast,
+    }).catch((err) => console.warn(`[auto-merge] circuit breaker update failed (non-fatal): ${errorMessage(err)}`));
+  }
+}
