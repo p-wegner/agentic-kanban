@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   decideMergeTrainRelease,
+  decideWindowHold,
   DEFAULT_GATE_BUSY_GRACE_MS,
   DEFAULT_TRAIN_MAX_SIZE,
   DEFAULT_TRAIN_MAX_WAIT_MS,
@@ -207,5 +208,41 @@ describe("decideMergeTrainRelease (#905)", () => {
       );
       expect(verdict).toEqual({ release: true, reason: "max_size" });
     });
+  });
+});
+
+
+describe("decideWindowHold (#1211)", () => {
+  const releasing = { release: true, reason: "max_size" } as const;
+  const accumulating = { release: false, reason: "accumulating" } as const;
+
+  it("breaker_paused beats everything — a paused project must not gate at all", () => {
+    expect(decideWindowHold({ verdict: releasing, breakerPaused: true, baseRed: true }))
+      .toEqual({ release: false, reason: "breaker_paused" });
+    expect(decideWindowHold({ verdict: releasing, breakerPaused: true, baseRed: false }))
+      .toEqual({ release: false, reason: "breaker_paused" });
+  });
+
+  it("base_red beats the release verdict, but loses to the breaker", () => {
+    expect(decideWindowHold({ verdict: releasing, breakerPaused: false, baseRed: true }))
+      .toEqual({ release: false, reason: "base_red" });
+  });
+
+  it("passes the size/wait/gate verdict through untouched when neither veto fires", () => {
+    expect(decideWindowHold({ verdict: releasing, breakerPaused: false, baseRed: false })).toEqual(releasing);
+    expect(decideWindowHold({ verdict: accumulating, breakerPaused: false, baseRed: false })).toEqual(accumulating);
+    expect(decideWindowHold({ verdict: { release: false, reason: "gate_busy" }, breakerPaused: false, baseRed: false }))
+      .toEqual({ release: false, reason: "gate_busy" });
+    expect(decideWindowHold({ verdict: { release: true, reason: "max_wait" }, breakerPaused: false, baseRed: false }))
+      .toEqual({ release: true, reason: "max_wait" });
+    expect(decideWindowHold({ verdict: { release: true, reason: "operator_release" }, breakerPaused: false, baseRed: false }))
+      .toEqual({ release: true, reason: "operator_release" });
+    expect(decideWindowHold({ verdict: { release: false, reason: "held" }, breakerPaused: false, baseRed: false }))
+      .toEqual({ release: false, reason: "held" });
+  });
+
+  it("holds a non-releasing verdict under a veto too — the reason is the veto, not the wait", () => {
+    expect(decideWindowHold({ verdict: accumulating, breakerPaused: true, baseRed: false }))
+      .toEqual({ release: false, reason: "breaker_paused" });
   });
 });
