@@ -64,7 +64,7 @@ import {
   type CreateWorkspaceResult,
   type GitService,
 } from "./workspace-internals.js";
-import { createWorkspaceProvisionService } from "./workspace-provision.service.js";
+import { createWorkspaceProvisionService, installAndReportCommitMsgHook } from "./workspace-provision.service.js";
 import { createLaunchPreviewService } from "./workspace-launch-preview.service.js";
 import { getIssueReposTouched } from "./repo-tags.service.js";
 import {
@@ -111,7 +111,6 @@ export function createWorkspaceCreateService(deps: {
   const {
     setupWorktree,
     buildAgentConfig,
-    installCommitMsgHook,
     packContextPrimer,
     writeWorktreeTicketContext,
     resolveAgentPromptAndSkill,
@@ -877,7 +876,10 @@ export function createWorkspaceCreateService(deps: {
       // what stops builders writing an invisible `EF BB BF` into commit subjects, and that is
       // not a TDD concern. The TDD gate is still conditional, inside the one hook git allows.
       if (worktreePath) {
-        installCommitMsgHook(worktreePath, { tddMode });
+        // #1214 — the verdict is logged either way (hence the `...AndReport` spelling): the
+        // install was silent before, which is how it went unnoticed that it had never once
+        // succeeded in a linked worktree, where every builder lives.
+        await installAndReportCommitMsgHook(worktreePath, { tddMode });
       }
 
       timing("total", phaseStart);

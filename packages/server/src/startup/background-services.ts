@@ -35,6 +35,7 @@ import { getPreference } from "../repositories/preferences.repository.js";
 import { DB_LOCATION } from "../db/data-dir.js";
 import { startStaleTempSweeper, stopStaleTempSweeper } from "./stale-temp-sweep.js";
 import { startNonBlockingSetupRetryReconciler, stopNonBlockingSetupRetryReconciler } from "./non-blocking-setup-retry-reconciler.js";
+import { startCommitMsgHookBackfill, stopCommitMsgHookBackfill } from "./commit-msg-hook-backfill.js";
 
 /**
  * Background-service (start/stop) plugin registry — the append target for periodic
@@ -375,6 +376,16 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start() {
       startNonBlockingSetupRetryReconciler();
       return stopNonBlockingSetupRetryReconciler;
+    },
+  },
+  {
+    // #1214 — #976's BOM-stripping hook never installed in a linked worktree, so every live
+    // workspace created before the fix still commits without the backstop. This installs it
+    // into those worktrees rather than making the operator recreate them.
+    name: "commit-msg-hook-backfill",
+    start({ db }) {
+      startCommitMsgHookBackfill({ database: db });
+      return stopCommitMsgHookBackfill;
     },
   },
 ];

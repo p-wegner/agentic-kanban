@@ -12,7 +12,7 @@
 
 import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve as resolvePath, sep } from "node:path";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { resolveWorktreeClaims } from "@agentic-kanban/shared/lib/worktree-claim";
 import { buildAgentPrompt } from "./workspace-create/policy.js";
@@ -54,6 +54,8 @@ import { getStackProfile, resolveEffectiveVerify } from "./stack-profile.service
 import type { StackProfile } from "@agentic-kanban/shared";
 import { resolveBoardFeedbackRouting } from "./board-feedback-routing.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
+import { execErrorMessage } from "@agentic-kanban/shared/lib/exec-result";
 
 /** Reads a worktree's already-materialized SKILL.md, or null when it doesn't exist yet. */
 async function readExistingSkillFile(worktreePath: string, skillName: string): Promise<string | null> {
@@ -347,6 +349,127 @@ exit 1
 `;
   return opts.tddMode ? bomStrip + tddGate : `${bomStrip}exit 0
 `;
+}
+
+/** What {@link installCommitMsgHook} did, so the caller can log a verdict rather than assume one. */
+export interface CommitMsgHookInstall {
+  installed: boolean;
+  /** The hook file the install targeted — written when `installed`, intended when not. */
+  path: string;
+  /** Why nothing was installed. Absent on success. */
+  reason?: string;
+}
+
+/**
+ * Install the `commit-msg` hook WHERE GIT WILL RUN IT for this particular worktree (#1214).
+ *
+ * #976 wrote the script to `<worktree>/.git/hooks/commit-msg`, which is correct for a main
+ * checkout and a no-op everywhere else: in a linked worktree `.git` is a FILE
+ * (`gitdir: <main>/.git/worktrees/<name>`), so the `mkdirSync` failed, the error was swallowed,
+ * and every builder — the population the BOM commits actually come from — committed with no
+ * backstop at all. The TDD gate riding on the same hook was inert there too.
+ *
+ * So the git-dir is ASKED for (`rev-parse --git-dir`) instead of assumed. For a main checkout
+ * that answers `.git` and the behaviour is unchanged, hooks resolving the normal way. For a
+ * linked worktree it answers the per-worktree admin dir, whose `hooks/` git would otherwise
+ * ignore — hooks resolve from the COMMON dir — so `core.hooksPath` is pointed at it via
+ * `--worktree`, which needs `extensions.worktreeConfig` on the repo. That keeps the TDD-gate
+ * variant scoped to the workspace that asked for it and leaves the main checkout's own hooks
+ * untouched, which a shared `core.hooksPath` would not.
+ *
+ * Best-effort by contract: provisioning must never fail over a hook, so every failure returns a
+ * reason for the caller to WARN with rather than throwing or going silent.
+ */
+export async function installCommitMsgHook(
+  worktreePath: string,
+  opts: { tddMode: boolean },
+): Promise<CommitMsgHookInstall> {
+  const fallbackPath = join(worktreePath, ".git", "hooks", "commit-msg");
+  try {
+    const dir = await resolveWorktreeGitDir(worktreePath);
+    if (!dir) return { installed: false, path: fallbackPath, reason: `not a git worktree: ${worktreePath}` };
+
+    const hooksDir = join(dir.gitDir, "hooks");
+    const hookPath = join(hooksDir, "commit-msg");
+    mkdirSync(hooksDir, { recursive: true });
+    // Explicit LF and no BOM: this is a `#!/bin/sh` script, and a CRLF shebang line is not
+    // executable. `writeFileSync` writes the bytes it is given, so the script's own newlines are
+    // what lands — but it is worth saying, in the one file whose whole job is byte hygiene.
+    writeFileSync(hookPath, buildCommitMsgHookScript(opts), { encoding: "utf-8" });
+    try {
+      chmodSync(hookPath, 0o755);
+    } catch {
+      // chmod is a no-op on Windows; Git for Windows runs the hook through its own sh regardless.
+    }
+
+    if (!dir.isMainCheckout) {
+      const pointed = await pointWorktreeHooksPath(worktreePath, hooksDir);
+      if (pointed) return { installed: false, path: hookPath, reason: pointed };
+    }
+    return { installed: true, path: hookPath };
+  } catch (err) {
+    return { installed: false, path: fallbackPath, reason: errorMessage(err) };
+  }
+}
+
+/**
+ * {@link installCommitMsgHook} plus the log line the provisioning path owes the operator.
+ *
+ * Separate from the install itself because the BACKFILL sweep (#1214) installs into many
+ * worktrees in one pass and reports counts once — a per-worktree line there would be the
+ * noise that makes a log stop being read.
+ */
+export async function installAndReportCommitMsgHook(
+  worktreePath: string,
+  opts: { tddMode: boolean },
+): Promise<CommitMsgHookInstall> {
+  const result = await installCommitMsgHook(worktreePath, opts);
+  if (result.installed) {
+    console.log(
+      `[workspace-provision] commit-msg hook installed at ${result.path}` +
+        (opts.tddMode ? " (TDD gate + BOM strip)" : " (BOM strip)"),
+    );
+  } else {
+    console.warn(
+      `[workspace-provision] commit-msg hook NOT installed for ${worktreePath}: ${result.reason ?? "unknown reason"}`,
+    );
+  }
+  return result;
+}
+
+/** The git-dir git itself uses for `worktreePath`, plus whether that is a main checkout. */
+async function resolveWorktreeGitDir(
+  worktreePath: string,
+): Promise<{ gitDir: string; isMainCheckout: boolean } | null> {
+  const res = await gitExec(["rev-parse", "--git-dir"], { cwd: worktreePath });
+  if (res.code !== 0) return null;
+  const raw = res.stdout.trim();
+  if (!raw) return null;
+  const gitDir = resolvePath(worktreePath, raw);
+  // A main checkout answers `.git` (relative) — a linked worktree answers
+  // `<main>/.git/worktrees/<name>`, which never resolves to the worktree's own `.git`.
+  return { gitDir, isMainCheckout: gitDir === resolvePath(worktreePath, ".git") };
+}
+
+/**
+ * Point this worktree — and only this worktree — at its own `hooks/`. Returns null on success,
+ * else the reason the hook will not run.
+ */
+async function pointWorktreeHooksPath(worktreePath: string, hooksDir: string): Promise<string | null> {
+  // `--worktree` needs the extension, and enabling it is what makes an existing
+  // `config.worktree` (if any) take effect — so only set it when it is not already true,
+  // which is also what keeps this idempotent across every provisioning and every backfill pass.
+  const current = await gitExec(["config", "--get", "extensions.worktreeConfig"], { cwd: worktreePath });
+  if (current.stdout.trim() !== "true") {
+    const enable = await gitExec(["config", "extensions.worktreeConfig", "true"], { cwd: worktreePath });
+    if (enable.code !== 0) return `could not enable extensions.worktreeConfig: ${execErrorMessage(enable)}`;
+  }
+  // Forward slashes: git config escapes backslashes in values, and a Windows path round-trips
+  // through that layer more reliably as a POSIX-shaped one, which git accepts everywhere.
+  const value = hooksDir.split(sep).join("/");
+  const set = await gitExec(["config", "--worktree", "core.hooksPath", value], { cwd: worktreePath });
+  if (set.code !== 0) return `could not set core.hooksPath: ${execErrorMessage(set)}`;
+  return null;
 }
 
 export function createWorkspaceProvisionService(deps: {
@@ -727,24 +850,6 @@ export function createWorkspaceProvisionService(deps: {
       reserveNote: runtime.provider.reserveNote,
       profileSelectionReason: runtime.provider.profileSelectionReason,
     };
-  }
-
-  /** Write {@link buildCommitMsgHookScript} into the worktree. Best-effort — never throws. */
-  function installCommitMsgHook(worktreePath: string, opts: { tddMode: boolean }): void {
-    try {
-      const hooksDir = join(worktreePath, ".git", "hooks");
-      mkdirSync(hooksDir, { recursive: true });
-      const hookPath = join(hooksDir, "commit-msg");
-      writeFileSync(hookPath, buildCommitMsgHookScript(opts), { encoding: "utf-8" });
-      try {
-        chmodSync(hookPath, 0o755);
-      } catch {
-        // chmod may fail on Windows; hook still runs via Git for Windows bash
-      }
-      console.log(`[workspaces] commit-msg hook installed${opts.tddMode ? " (TDD gate + BOM strip)" : " (BOM strip)"}: ${hookPath}`);
-    } catch (err) {
-      console.warn(`[workspaces] failed to install commit-msg hook: ${errorMessage(err)}`);
-    }
   }
 
   /**
