@@ -83,6 +83,7 @@ export {
 export type { ParsedRoster, ProfileRef, ProfileRole, RosterEntry } from "./profile-roster.js";
 export {
   headroomFromQuotaUsage,
+  headroomRecordFor,
   rankRosterEntries,
   resolveRosterSelection,
 } from "./profile-roster-selection.js";
