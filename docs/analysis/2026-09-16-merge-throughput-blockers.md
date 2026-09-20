@@ -114,3 +114,32 @@ Still open: #1182 (impact-map rebuild holds the shared merge lock), #1183 (boot 
 members when two stranded rows share a project), §6 item 5 (slot derivation, needs a measured
 gate peak). The 09-14 train deaths are explained by #1181: the reconciler's own resume path
 abandoned the live row before re-assembling, every 10 minutes.
+
+## 8. #1179 — item 4 applied, observation pending (2026-09-16)
+
+The two hazards item 4 named as prerequisites were already fixed before this ticket: #1153 gave
+the train its own 15-minute repo-lock timeout (`MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS`,
+`merge-queue-repo-lock.ts:27`, distinct from the queue's 90-minute bound so an abandoned train no
+longer occupies a wait slot for the full 90 minutes) and #1158 hardened the reconciler
+(`startup/merge-train-reconciler.ts`). Verified in `agentic-kanban`'s live preferences (the board
+this repo's CLAUDE.md calls the *stable* checkout, the one actually operating this project):
+
+| Pref | Value | Set at |
+|---|---|---|
+| `merge_strategy` | `merge_queue` | 2026-09-16T21:46:35Z |
+| `risk_posture_<agentic-kanban>` | `iterate` (unchanged) | 2026-09-09 |
+| `train_max_size_<agentic-kanban>` | `4` | 2026-09-14 |
+
+`resolveTrainOptInSize`/`resolveTrainWindowConfig` (`merge-train-window.ts:104-137`) read the
+explicit `train_max_size` over the `iterate` posture's own `trainMaxSize: 1`, so the effective
+window is size-4 batching without touching the posture — this is deliberately NOT the `standard`
+posture raise item 4 also floated (that stays #905's, untouched here). This is a live-preference
+flip, not a code change, so there is nothing in this diff to test — `pnpm test:mine` below covers
+only the doc edit.
+
+**Open**: whether trains actually land now, or die on something else, needs a day of
+`merge_trains` rows to answer and could not be observed inside one authoring session. Next
+person/session to check: query `merge_trains` (or `GET /api/merge-trains`) for rows with
+`createdAt > 2026-09-16T21:46:35Z` — no train that age has been observed as of this pass. If
+sequential trains keep abandoning on the repo lock despite the shorter timeout, that is the
+"code fix" item 4 flagged, and is a new ticket, not a reopen of this one.
