@@ -193,9 +193,18 @@ export async function runPreMergeGate(
   workspace: PreMergeGateWorkspace,
   projectId: string,
   database: Database,
+  /** #1203 — reaches the running verify/install child so a cancel kills it. Optional; absent = never aborts. */
+  signal?: AbortSignal,
 ): Promise<PreMergeGateResult> {
   // #1164 — reachable from `POST /:id/merge/cancel`; `endMergeGateRun` below is its counterpart.
   const cancelSignal = beginMergeGateRun(workspace.id);
+  // #1203 — a merge TRAIN's own AbortSignal (from `merge-queue-train.ts`'s `runDoomedTrainJob`)
+  // is a SECOND, independent way this same gate run can be told to stop: `cancelSignal` fires on
+  // `POST /:id/merge/cancel` for a single workspace, `signal` fires on `POST
+  // /trains/:id/cancel` for the whole train's in-flight gate. `runSetupScript` takes one signal,
+  // so either trigger must abort the same child process — combine them rather than picking one
+  // and silently dropping the other's cancellation path.
+  const combinedSignal = signal ? AbortSignal.any([cancelSignal, signal]) : cancelSignal;
   // ---- #628 deferred dependency installs ---------------------------------------------------
   // With install mode `background` the agent launches before its repos' dependencies exist, so
   // the protection `setupFailedBlocking` (#169) gave by refusing the LAUNCH has to be here
@@ -559,7 +568,7 @@ export async function runPreMergeGate(
           chainsInFlight: workers.chainsInFlight,
         });
         startedAt = Date.now();
-        return runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv, signal: cancelSignal })
+        return runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv, signal: combinedSignal })
           .catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false }));
       });
       lastVerifyRunMs = Date.now() - startedAt;
@@ -612,7 +621,7 @@ export async function runPreMergeGate(
             runSetupScript(workingDir, verifyScript!, {
               timeoutMs: verifyTimeoutMs,
               env: { ...verifyEnv, KANBAN_RETRY_TEST_FILES: retryScope },
-              signal: cancelSignal,
+              signal: combinedSignal,
             }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
           );
         },
@@ -623,7 +632,7 @@ export async function runPreMergeGate(
             runSetupScript(workingDir, command, {
               timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS,
               env: gradleEnv,
-              signal: cancelSignal,
+              signal: combinedSignal,
             }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
           );
         },

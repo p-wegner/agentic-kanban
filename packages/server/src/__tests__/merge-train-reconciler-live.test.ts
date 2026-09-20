@@ -69,18 +69,18 @@ describe("decideMergeTrainLiveSkip (#1181) — pure", () => {
   });
 
   it("skips a row whose own job is registered, naming its age", () => {
-    const live: LiveMergeTrainSnapshot = new Map([["t1", { trainId: "t1", label: "q1", projectId: "p1", registeredAtMs: T0 }]]);
+    const live: LiveMergeTrainSnapshot = new Map([["t1", { trainId: "t1", label: "q1", projectId: "p1", registeredAtMs: T0, abortController: new AbortController() }]]);
     expect(decideMergeTrainLiveSkip(row, live, T0 + 8 * 60_000)).toEqual({ reason: "live in this process (age 8m)" });
   });
 
   it("skips a row when ANOTHER train for the same project is live — a resume would mint a second one", () => {
-    const live: LiveMergeTrainSnapshot = new Map([["t9", { trainId: "t9", label: "q9", projectId: "p1", registeredAtMs: T0 }]]);
+    const live: LiveMergeTrainSnapshot = new Map([["t9", { trainId: "t9", label: "q9", projectId: "p1", registeredAtMs: T0, abortController: new AbortController() }]]);
     const skip = decideMergeTrainLiveSkip(row, live, T0 + 60_000);
     expect(skip?.reason).toContain("another train (t9, q9) for project p1 is live");
   });
 
   it("does not skip for a live train of a DIFFERENT project", () => {
-    const live: LiveMergeTrainSnapshot = new Map([["t9", { trainId: "t9", label: "q9", projectId: "p2", registeredAtMs: T0 }]]);
+    const live: LiveMergeTrainSnapshot = new Map([["t9", { trainId: "t9", label: "q9", projectId: "p2", registeredAtMs: T0, abortController: new AbortController() }]]);
     expect(decideMergeTrainLiveSkip(row, live, T0 + 60_000)).toBeNull();
   });
 
