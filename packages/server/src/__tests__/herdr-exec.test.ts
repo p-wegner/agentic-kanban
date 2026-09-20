@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseHerdrVersion } from "../src/lib/herdr-exec.js";
+import { parseHerdrVersion } from "../lib/herdr-exec.js";
 
 describe("parseHerdrVersion", () => {
   it("extracts a plain version", () => {

@@ -1,5 +1,5 @@
 import { execFile, type ExecFileException } from "node:child_process";
-import { execSucceeded, type ExecResult } from "./exec-result.js";
+import { execSucceeded, type ExecResult } from "@agentic-kanban/shared/lib/exec-result";
 
 /**
  * The single sanctioned adapter for spawning the `herdr` CLI (mirrors
@@ -15,10 +15,10 @@ import { execSucceeded, type ExecResult } from "./exec-result.js";
  * board uses it (an optional launch-placement concern, closer to the
  * devcontainer/worker-fleet placement kinds than to a fourth provider).
  *
- * Node-only: imports `node:child_process`, so it must never be value-exported
- * from the `@agentic-kanban/shared/lib` barrel (#791 — that would white-screen
- * the client bundle). Import the runtime via its deep path
- * `@agentic-kanban/shared/lib/herdr-exec`.
+ * Server-only (#590/#730): herdr discovery has exactly one consumer package
+ * (server), so this lives in `packages/server/src/lib/` rather than
+ * `packages/shared/src/lib/` — the shared package is for code more than one
+ * package needs.
  */
 
 const DEFAULT_TIMEOUT_MS = 5000;
@@ -76,7 +76,7 @@ export function parseHerdrVersion(stdout: string): string | undefined {
 
 /**
  * Probe the `herdr` CLI once and report both availability and version. Used by
- * the board's discovery service; kept here (rather than server-side) so a unit
+ * the board's discovery service; kept here (rather than inlined there) so a unit
  * test can exercise it against a fake `execFile` without spinning up services.
  */
 export async function probeHerdr(options: HerdrExecOptions = {}): Promise<{ available: boolean; version?: string }> {

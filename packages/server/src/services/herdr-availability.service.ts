@@ -1,4 +1,4 @@
-import { probeHerdr } from "@agentic-kanban/shared/lib/herdr-exec";
+import { probeHerdr } from "../lib/herdr-exec.js";
 
 /**
  * Config discovery for herdr (ticket #1144 of the herdr-support epic, #1129).
