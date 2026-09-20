@@ -1,5 +1,5 @@
-import { and, eq, inArray } from "drizzle-orm";
-import { sessions, workspaces, issues, projectStatuses } from "@agentic-kanban/shared/schema";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { sessions, sessionMessages, workspaces, issues, projectStatuses } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { workspaceHasCommittedWork } from "../services/workspace-commits.js";
@@ -7,9 +7,88 @@ import { isPidAlive } from "../lib/pid.js";
 import { classifySessionLiveness, type LivenessVerdict } from "../services/remote-session-liveness.js";
 import { probeRemoteSessionLiveness } from "../services/fleet-liveness-probe.js";
 import { insertSessionMessages } from "../repositories/broadcast.repository.js";
+import { insertIssueComment } from "../repositories/issue-comments.repository.js";
+import {
+  readTier0Capacity,
+  readCpuBusyPct,
+  classifyHeavyProbeSaturation,
+} from "@agentic-kanban/shared/lib/machine-capacity";
+import { resolveGateBusy } from "../services/base-branch-health-reprobe.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** How long a workspace must be in 'active' with a live PID before we reconcile it (hung agent). */
 const HUNG_AGENT_THRESHOLD_MS = 30 * 60 * 1000;
+
+/**
+ * #1212 — how long a LIVE session must have said NOTHING before it counts as stale.
+ *
+ * The wall-clock rule alone read duration as death: a per-ticket code-review session that
+ * legitimately ran past 30 minutes on a 100%-CPU box was stopped mid-stream, its workspace
+ * dropped to `idle` without `readyForMerge`, and nothing re-queued the review. Staleness is
+ * SILENCE (the shape #887 already uses for remote sessions via `ASSIGN_SILENCE_PROBE_MS`),
+ * and the 30-minute rule stays only as a backstop that must be satisfied TOO — so a session
+ * that is still producing output is never reaped, whatever its age.
+ */
+export const STALE_SESSION_SILENCE_MS = 15 * 60 * 1000;
+
+/**
+ * #1196/#1009's reasoning, applied to the reaper: a saturated host is exactly when a healthy
+ * session takes longer than usual, so both windows double rather than the reaper getting
+ * trigger-happy at the worst possible moment.
+ */
+export const SATURATED_HOST_WINDOW_MULTIPLIER = 2;
+
+/** The same host reading the base-health probe holds on (#1009/#1173/#957). */
+async function readHostSaturated(): Promise<boolean> {
+  try {
+    if (resolveGateBusy()) return true;
+    const capacity = readTier0Capacity();
+    const cpuPct = await readCpuBusyPct().catch(() => null);
+    return classifyHeavyProbeSaturation({ freeGb: capacity.freeGb, cpuPct }).hold;
+  } catch {
+    // A reading we cannot take is not evidence of saturation, but it must not widen the
+    // window either — fail to the narrow, existing behaviour.
+    return false;
+  }
+}
+
+/**
+ * When this session last SAID anything: the newest `session_messages` row, or its launch
+ * stamp when it has produced nothing at all. There is no `lastOutputAt` column; the message
+ * table is the board's only record of an agent's output and tool events.
+ */
+async function lastActivityMsOf(
+  sessionId: string,
+  startedAt: string | null,
+  database: Database,
+  fallbackMs: number,
+): Promise<number> {
+  const rows = await database
+    .select({ createdAt: sessionMessages.createdAt })
+    .from(sessionMessages)
+    .where(eq(sessionMessages.sessionId, sessionId))
+    .orderBy(desc(sessionMessages.createdAt))
+    .limit(1)
+    .catch(() => [] as { createdAt: string }[]);
+  const stamps = [rows[0]?.createdAt, startedAt]
+    .map((iso) => (iso ? Date.parse(iso) : NaN))
+    .filter((ms) => Number.isFinite(ms)) as number[];
+  return stamps.length > 0 ? Math.max(...stamps) : fallbackMs;
+}
+
+/** The hung-agent decision, kept pure so the windows are a table rather than a sweep. */
+export function decideHungAgentReap(input: {
+  notInProgress: boolean;
+  silentMs: number;
+  ageMs: number;
+  hostSaturated: boolean;
+}): { reap: boolean; silenceWindowMs: number; wallClockWindowMs: number } {
+  const multiplier = input.hostSaturated ? SATURATED_HOST_WINDOW_MULTIPLIER : 1;
+  const silenceWindowMs = STALE_SESSION_SILENCE_MS * multiplier;
+  const wallClockWindowMs = HUNG_AGENT_THRESHOLD_MS * multiplier;
+  const reap = input.notInProgress && input.silentMs >= silenceWindowMs && input.ageMs >= wallClockWindowMs;
+  return { reap, silenceWindowMs, wallClockWindowMs };
+}
 
 /**
  * #539: was a private third implementation that spawned git raw, outside the git-service
@@ -71,6 +150,18 @@ export async function reconcileCompletionStates(
       database: Database,
       probeOpts: { nowMs: number },
     ) => Promise<LivenessVerdict>;
+    /**
+     * Injected for testing — defaults to the shared capacity readers (#1009/#1173/#957).
+     * Read at most ONCE per pass, and only when a live session is actually a candidate.
+     */
+    hostSaturated?: () => Promise<boolean>;
+    /**
+     * #1212 — how a reaped REVIEW session gets its review back. The same service function
+     * `POST /api/workspaces/:id/review` calls, injected rather than reached by self-HTTP
+     * (see `packages/server/CLAUDE.md`). Absent (a caller that has no session manager) means
+     * the re-queue is REPORTED as impossible, never silently skipped.
+     */
+    requeueReview?: (workspaceId: string) => Promise<{ sessionId: string }>;
     /** Current time override for testing. */
     now?: string;
   } = {},
@@ -78,6 +169,7 @@ export async function reconcileCompletionStates(
   const checkPid = opts.checkPid ?? isPidAlive;
   const checkCommits = opts.checkCommits ?? workspaceHasCommittedChanges;
   const probeRemote = opts.probeRemote ?? probeRemoteSessionLiveness;
+  const hostSaturatedReader = opts.hostSaturated ?? readHostSaturated;
   const now = opts.now ?? new Date().toISOString();
   const nowMs = new Date(now).getTime();
 
@@ -88,6 +180,8 @@ export async function reconcileCompletionStates(
       sessionWorkerId: sessions.workerId,
       sessionStatus: sessions.status,
       sessionStartedAt: sessions.startedAt,
+      sessionTriggerType: sessions.triggerType,
+      issueId: issues.id,
       workspaceId: workspaces.id,
       workspaceStatus: workspaces.status,
       workspaceUpdatedAt: workspaces.updatedAt,
@@ -111,7 +205,10 @@ export async function reconcileCompletionStates(
   if (candidates.length === 0) return 0;
 
   let reconciled = 0;
-  const staleThreshold = new Date(now).getTime() - HUNG_AGENT_THRESHOLD_MS;
+  // One reading per pass at most, taken lazily: a sweep that finds nothing alive must not
+  // spend 150 ms sampling CPU on every tick.
+  let hostSaturatedOnce: Promise<boolean> | null = null;
+  const hostSaturated = () => (hostSaturatedOnce ??= hostSaturatedReader());
 
   for (const c of candidates) {
     const pid = c.sessionPid;
@@ -185,14 +282,25 @@ export async function reconcileCompletionStates(
       shouldReconcile = true;
       reason = verdict.reason;
     } else {
-      // PID alive — check for hung agent: issue already moved out of In Progress by the
-      // agent via MCP, but the process is still running.
+      // PID alive — a hung agent is one that has gone SILENT, not merely one that has been
+      // running a while (#1212). Both windows must be satisfied: the session said nothing for
+      // the silence window AND the workspace has been sitting in a post-implementation state
+      // for the wall-clock backstop. A saturated host doubles both.
       const notInProgress = c.issueStatusName !== "In Progress";
-      const updatedAt = new Date(c.workspaceUpdatedAt ?? now).getTime();
-      const isStale = updatedAt < staleThreshold;
-      if (notInProgress && isStale) {
+      const saturated = notInProgress ? await hostSaturated() : false;
+      const lastActivity = notInProgress
+        ? await lastActivityMsOf(c.sessionId, c.sessionStartedAt, database, nowMs)
+        : nowMs;
+      const silentMs = Math.max(0, nowMs - lastActivity);
+      const ageMs = Math.max(0, nowMs - new Date(c.workspaceUpdatedAt ?? now).getTime());
+      const decision = decideHungAgentReap({ notInProgress, silentMs, ageMs, hostSaturated: saturated });
+      if (decision.reap) {
         shouldReconcile = true;
-        reason = `${verdict.reason} but issue is in '${c.issueStatusName}' and workspace has been active for >${HUNG_AGENT_THRESHOLD_MS / 60000}m`;
+        reason =
+          `${verdict.reason} but issue is in '${c.issueStatusName}' and the session has been ` +
+          `silent for ${Math.round(silentMs / 60000)} min ` +
+          `(silence window ${decision.silenceWindowMs / 60000}m, backstop ${decision.wallClockWindowMs / 60000}m` +
+          `${saturated ? ", doubled: host saturated" : ""})`;
       }
     }
 
@@ -226,8 +334,64 @@ export async function reconcileCompletionStates(
     console.log(
       `[reconciler] reconciled: sessionId=${c.sessionId} workspaceId=${c.workspaceId} -> session=stopped, workspace=idle`,
     );
+
+    // #1212 — a reaped REVIEW session leaves the ticket In Review with no verdict and nothing
+    // to produce one, which is how #1203 needed a human to re-trigger it by hand. A builder
+    // session keeps today's behaviour: the monitor already relaunches those.
+    if (c.sessionTriggerType === "review") {
+      await requeueReapedReview({ database, opts, workspaceId: c.workspaceId, issueId: c.issueId, reason, now });
+    }
+
     reconciled++;
   }
 
   return reconciled;
+}
+
+/**
+ * Put a reaped review back in the queue and SAY SO on the ticket (#1212).
+ *
+ * Non-fatal in both halves: a failed relaunch or a failed comment must not take the sweep
+ * around it down, and each failure is reported rather than swallowed — the whole defect this
+ * fixes was a review that vanished quietly.
+ */
+async function requeueReapedReview(input: {
+  database: Database;
+  opts: { requeueReview?: (workspaceId: string) => Promise<{ sessionId: string }> };
+  workspaceId: string;
+  issueId: string;
+  reason: string;
+  now: string;
+}): Promise<void> {
+  const { database, opts, workspaceId, issueId, reason, now } = input;
+  if (!opts.requeueReview) {
+    console.warn(
+      `[reconciler] stopped review session for workspace ${workspaceId} but no review launcher is wired — ` +
+        `the review is NOT re-queued and the ticket needs one by hand`,
+    );
+    return;
+  }
+  let body: string;
+  try {
+    const { sessionId } = await opts.requeueReview(workspaceId);
+    body =
+      `The board stopped this ticket's code-review session and re-queued the review ` +
+      `(new session \`${sessionId}\`).
+
+Why it was stopped: ${reason}`;
+    console.log(`[reconciler] re-queued review for workspace ${workspaceId} session=${sessionId}`);
+  } catch (err) {
+    body =
+      `The board stopped this ticket's code-review session and could not re-queue the review: ` +
+      `${errorMessage(err)}.
+
+Why it was stopped: ${reason}`;
+    console.warn(`[reconciler] failed to re-queue review for workspace ${workspaceId}:`, errorMessage(err));
+  }
+  await insertIssueComment(
+    { issueId, workspaceId, kind: "note", author: "system", body, createdAt: now },
+    database,
+  ).catch((err) => {
+    console.warn(`[reconciler] failed to write re-queued-review comment for workspace ${workspaceId}:`, errorMessage(err));
+  });
 }
