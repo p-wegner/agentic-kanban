@@ -278,6 +278,16 @@
  * has to call it without instantiating a provisioning service. The create factory lost the
  * destructured name with it, calling the module-level `installAndReportCommitMsgHook` instead.
  * Neither factory changed behaviour; both still want splitting for their own sake.
+ *
+ * -- Fifteenth disclosed movement (2026-09-20, god-module follow-up to #1214) ---
+ *
+ *   services/workspace-create.service.ts::createWorkspaceCreateService  644 -> 642  (-2)
+ *
+ * The commit-msg-hook code moved out of workspace-provision.service.ts into its own module
+ * (`commit-msg-hook.ts`), which took both files under the 1000-line god-module ceiling. The
+ * inline comment above the `installAndReportCommitMsgHook` call in `createWorkspaceCreateService`
+ * was condensed from 4 lines to 2 as part of the same trim; the SHRINK is banked rather than
+ * left as budget, per this file's own rule.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 718 -> 720, a DISCLOSED raise (#1107, landed 2026-09-12 in d90659d081). `issue get` gained
@@ -298,7 +308,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 635 -> 641 (#1025) -> 644 (#1026) -> 645 (#1108), disclosed in the seventh, eighth and
   // eleventh movements above.
   // 645 -> 644 (#1214), a SHRINK banked per the fourteenth movement above.
-  "services/workspace-create.service.ts::createWorkspaceCreateService": 644,
+  "services/workspace-create.service.ts::createWorkspaceCreateService": 642,
   // 616 -> 629 (#1108), disclosed in the eleventh movement above.
   "services/issue.service.ts::createIssueService": 629,
   // 618 -> 620 (#968), disclosed in the sixth movement above.

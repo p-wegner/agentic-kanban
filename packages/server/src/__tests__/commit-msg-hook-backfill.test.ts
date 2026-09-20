@@ -16,7 +16,7 @@ import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/s
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { reconcileCommitMsgHooks } from "../startup/commit-msg-hook-backfill.js";
-import { installCommitMsgHook } from "../services/workspace-provision.service.js";
+import { installCommitMsgHook } from "../services/commit-msg-hook.js";
 
 const tempDirs: string[] = [];
 const IDENTITY = ["-c", "user.name=Backfill Test", "-c", "user.email=backfill@test.invalid"];

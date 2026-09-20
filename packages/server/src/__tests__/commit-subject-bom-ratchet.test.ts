@@ -21,7 +21,7 @@ import { resolve } from "node:path";
  * the one question that has a right answer: did anything new add one.
  *
  * The BACKSTOP is the `commit-msg` hook every worktree now gets
- * (`installCommitMsgHook`, `workspace-provision.service.ts`), which strips the BOM rather than
+ * (`installCommitMsgHook`, `commit-msg-hook.ts`), which strips the BOM rather than
  * refusing the commit. This test is what catches a commit that bypassed the hook — the main
  * checkout has none, which is exactly where the board's own maintainers commit.
  */
