@@ -28,7 +28,14 @@ export type MergeTrainWindowHoldReason =
    * bisect attempt reproduces them and the members are blamed for a defect that is on the base.
    * Nothing departs until the base is measured green again (the reprobe schedule does that).
    */
-  | "base_red";
+  | "base_red"
+  /**
+   * #1207 - auto-merge for this project is paused by the same-failure circuit breaker: N
+   * consecutive gate runs failed with the identical normalised signature, which no retry can
+   * fix. Cleared by `POST /api/projects/:id/auto-merge/resume`, by the base sha moving, or by
+   * the failing workspace's setup verdict changing.
+   */
+  | "breaker_paused";
 
 export type MergeTrainWindowReason = MergeTrainWindowReleaseReason | MergeTrainWindowHoldReason;
 

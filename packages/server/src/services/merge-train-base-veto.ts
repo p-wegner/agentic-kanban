@@ -13,7 +13,7 @@
  * `base-branch-health.service.ts` already writes, so the reprobe schedule
  * (`resolveBaseHealthProbeDue`) is what clears the veto once the fix lands.
  */
-import { getLatestBaseBranchHealth, isBaseHealthAnswer } from "../repositories/base-branch-health.repository.js";
+import { getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 import { getProjectRepoFields } from "../repositories/project.repository.js";
 import * as gitService from "./git.service.js";
 import type { Database } from "../db/index.js";
@@ -48,7 +48,11 @@ export interface BaseRedVeto {
  * settles it.
  */
 export function decideBaseRedVeto(facts: BaseRedVetoFacts, message?: string | null): BaseRedVeto | null {
-  if (facts.outcome !== "red" || !isBaseHealthAnswer(facts.outcome)) return null;
+  // `red` IS an answer (`isBaseHealthAnswer`), so matching it exactly is the whole check: a
+  // `timeout`/`unverified` probe learned nothing and falls out here. Spelled as a literal rather
+  // than by calling the repository's predicate, because a `decide*` function may not reach into
+  // `repositories/` at all (`decision-function-purity.test.ts`, #585).
+  if (facts.outcome !== "red") return null;
   if (!facts.healthSha) return null;
   if (facts.baseAheadOfHealthSha) return null;
   return { healthSha: facts.healthSha, message: (message ?? "").slice(0, 300) };

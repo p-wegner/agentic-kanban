@@ -5071,6 +5071,29 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{id}/auto-merge/resume:
+    post:
+      summary: Clear the same-failure circuit breaker and let this project's auto-merge gate again.
+      tags:
+        - board-monitor
+      operationId: post_api_projects_id_auto-merge_resume
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/autopilot:
     get:
       summary: stops it, and the effective auto-merge answer. Read-only.

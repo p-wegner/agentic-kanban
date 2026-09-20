@@ -22,6 +22,7 @@ import {
 } from "../services/merge-train-window.js";
 import { verifyChainSemaphoreActive } from "../services/verify-chain-semaphore.js";
 import { resolveBaseRedVeto, type BaseRedVeto } from "../services/merge-train-base-veto.js";
+import { clearAutoMergeBreaker, recordAutoMergeGateFailure, resolveAutoMergeBreakerHold } from "../services/auto-merge-breaker.js";
 import {
   clearTrainWindow,
   readTrainWindowsFromPrefMap,
@@ -424,6 +425,23 @@ export function createAutoMergeOrchestrator(deps: {
         heldUntilMs,
         releaseRequested: existing?.releaseRequestedAt !== undefined,
       });
+      // #1207 — the same-failure circuit breaker. Asked BEFORE the release decision and before
+      // the red-base veto, because a paused project must not gate at all: the failures it is
+      // counting are infrastructure ones that no retry can fix, and each retry costs an install
+      // plus a typecheck on a shared box. The hold re-checks its own automatic clears (the base
+      // moving, the failing workspace's setup verdict changing) on every tick.
+      const breakerHold = await resolveAutoMergeBreakerHold(projectId, database).catch(() => null);
+      if (breakerHold) {
+        await persistWindow(projectId, existing, {
+          pendingIds: ids,
+          firstSeenAt,
+          lastVerdict: { release: false, reason: "breaker_paused" },
+          lastEvaluatedAt: now,
+          ...carry,
+        });
+        continue;
+      }
+
       // #1204 — the red-base veto, asked only when the window would otherwise DEPART. A train
       // assembled on a red base inherits the base's own failures, so the bisect that follows
       // can only mis-attribute them to members (27 gate runs, 14 false `gateRejected`, nothing
@@ -596,6 +614,18 @@ export function createAutoMergeOrchestrator(deps: {
       if (splitNote) console.log(`[auto-merge] ${splitNote}`);
 
       const strandedIds: string[] = [];
+      // #1207 — the FIRST gate/train failure per project this tick. A train's members all carry
+      // the same gate failure text, so counting them individually would trip the breaker inside
+      // one window and claim three "consecutive" failures that were one tick.
+      const projectOfWorkspace = new Map(completedRows.map((row) => [row.workspaceId, row.projectId]));
+      const firstFailurePerProject = new Map<string, { workspaceId: string; message: string }>();
+      /** Projects that landed something this tick — "consecutive" ends at the first success. */
+      const succeededProjects = new Set<string>();
+      const noteFailure = (workspaceId: string, message: string) => {
+        const failedProjectId = projectOfWorkspace.get(workspaceId);
+        if (!failedProjectId || firstFailurePerProject.has(failedProjectId)) return;
+        firstFailurePerProject.set(failedProjectId, { workspaceId, message });
+      };
       for (const batch of releaseBatches(partition)) {
         for await (const event of queueService.executeQueue(batch.workspaceIds, {
           skipOnConflict: true,
@@ -604,9 +634,16 @@ export function createAutoMergeOrchestrator(deps: {
           if (event.type === "merged") {
             state.lastMerged++;
             console.log(`[auto-merge] merged workspace ${event.workspaceId} (#${event.issueNumber ?? "?"})`);
+            // #1207: a landing ends the streak — the breaker counts CONSECUTIVE failures, and a
+            // project that merged something is not stuck in the loop the breaker exists to stop.
+            const mergedProjectId = projectOfWorkspace.get(event.workspaceId);
+            if (mergedProjectId) succeededProjects.add(mergedProjectId);
           } else if (event.type === "conflict" || event.type === "error") {
             state.lastFailed++;
             console.warn(`[auto-merge] ${event.type} for workspace ${event.workspaceId}: ${event.error}`);
+            // #1207: a CONFLICT is the authors' to rebase and is not a repeating infrastructure
+            // failure, so only a gate/train `error` feeds the breaker.
+            if (event.type === "error") noteFailure(event.workspaceId, event.error);
             if (event.type === "conflict") strandedIds.push(event.workspaceId);
           } else if (event.type === "skipped") {
             state.lastSkipped++;
@@ -616,6 +653,23 @@ export function createAutoMergeOrchestrator(deps: {
             }
           }
         }
+      }
+
+      for (const succeededProjectId of succeededProjects) {
+        firstFailurePerProject.delete(succeededProjectId);
+        await clearAutoMergeBreaker(succeededProjectId, database).catch(() => undefined);
+      }
+      // #1207: fold this tick's one failure per project into that project's breaker. The third
+      // consecutive identical signature pauses auto-merge for the project, logs one line, and
+      // emits a board-health event; nothing here retries anything.
+      for (const [failedProjectId, failure] of firstFailurePerProject) {
+        await recordAutoMergeGateFailure({
+          projectId: failedProjectId,
+          workspaceId: failure.workspaceId,
+          message: failure.message,
+          database,
+          broadcast: (id) => boardEvents?.broadcast(id, "merge_train_window_changed"),
+        }).catch((err) => console.warn(`[auto-merge] circuit breaker update failed (non-fatal): ${errorMessage(err)}`));
       }
 
       // Conflict residue: escalate the WHOLE stranded batch to ONE merge-reconciler agent that

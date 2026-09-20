@@ -58,6 +58,8 @@ const MERGE_DETAIL: Record<AutopilotStatusResponse["autoMerge"]["source"], strin
   project_disabled: "Auto-merge is switched off for this project.",
   global_off: "Auto-merge is off globally (Settings → Workflow).",
   direct_strategy: "Merge strategy is direct: a human merges.",
+  // #1207 — configured on, but paused after N consecutive gate runs that failed identically.
+  paused_same_failure: "Auto-merge paused itself: the same gate failure repeated. Fix it, then Resume (or land a commit on the base).",
 };
 
 export function buildAutopilotChipView(status: AutopilotStatusResponse): AutopilotChipView {
