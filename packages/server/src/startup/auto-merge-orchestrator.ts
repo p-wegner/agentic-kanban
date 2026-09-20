@@ -6,7 +6,7 @@ import { and, count, eq, inArray, ne, or } from "drizzle-orm";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "../services/board-events.js";
-import { createMergeQueueService } from "../services/merge-queue.service.js";
+import { createMergeQueueService, type MergeQueueEvent } from "../services/merge-queue.service.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { buildStrandedBatch, pickIntegrationWorkspace } from "../services/reconciler.service.js";
 import type { SessionManager } from "../services/session.manager.js";
@@ -17,12 +17,13 @@ import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys"
 import type { StackProfile } from "@agentic-kanban/shared";
 import {
   decideMergeTrainRelease,
+  decideWindowHold,
   resolveTrainWindowConfig,
   type MergeTrainWindowVerdict,
 } from "../services/merge-train-window.js";
 import { verifyChainSemaphoreActive } from "../services/verify-chain-semaphore.js";
 import { resolveBaseRedVeto, type BaseRedVeto } from "../services/merge-train-base-veto.js";
-import { clearAutoMergeBreaker, recordAutoMergeGateFailure, resolveAutoMergeBreakerHold } from "../services/auto-merge-breaker.js";
+import { applyTickBreakerOutcomes, resolveAutoMergeBreakerHold } from "../services/auto-merge-breaker.js";
 import {
   clearTrainWindow,
   readTrainWindowsFromPrefMap,
@@ -123,6 +124,32 @@ function collectGatedProjectIds(prefMap: Map<string, string>): Set<string> {
     if (resolveMergeGateConfig(input).hasGate) gated.add(projectId);
   }
   return gated;
+}
+
+/**
+ * What ONE orchestrator tick accumulated while draining the merge queue (#1211) — the three
+ * facts the passes after the drain need, in one struct so the event handler can be a function
+ * instead of a 7-branch middle inside `runOnce`.
+ */
+interface TickOutcome {
+  /** Workspaces whose merge ended in a conflict (or a conflict-shaped skip) — the batch reconciler's input. */
+  strandedIds: string[];
+  /** Projects that landed something this tick. */
+  succeededProjects: Set<string>;
+  /** The FIRST gate/train failure seen per project this tick, which is what feeds the breaker. */
+  firstFailurePerProject: Map<string, { workspaceId: string; message: string }>;
+}
+
+/**
+ * Record a project's FIRST gate/train failure of the tick and ignore every later one: a train's
+ * members all carry the same gate failure text, so counting them individually would trip the
+ * same-failure breaker (#1207) inside a single window and claim three "consecutive" failures
+ * that were one tick.
+ */
+function noteFirstFailure(outcome: TickOutcome, projectOfWorkspace: Map<string, string>, workspaceId: string, message: string): void {
+  const failedProjectId = projectOfWorkspace.get(workspaceId);
+  if (!failedProjectId || outcome.firstFailurePerProject.has(failedProjectId)) return;
+  outcome.firstFailurePerProject.set(failedProjectId, { workspaceId, message });
 }
 
 export function createAutoMergeOrchestrator(deps: {
@@ -425,46 +452,27 @@ export function createAutoMergeOrchestrator(deps: {
         heldUntilMs,
         releaseRequested: existing?.releaseRequestedAt !== undefined,
       });
-      // #1207 — the same-failure circuit breaker. Asked BEFORE the release decision and before
-      // the red-base veto, because a paused project must not gate at all: the failures it is
-      // counting are infrastructure ones that no retry can fix, and each retry costs an install
-      // plus a typecheck on a shared box. The hold re-checks its own automatic clears (the base
-      // moving, the failing workspace's setup verdict changing) on every tick.
+      // The two veto READS, in the order their precedence demands. #1207's breaker is asked
+      // first and unconditionally, because a paused project must not gate at all; #1204's
+      // red-base veto only when the window would otherwise DEPART and the breaker did not
+      // already hold it, so a held project pays for no git read. `decideWindowHold` composes
+      // the three answers — it is the precedence, written once and unit-testable.
       const breakerHold = await resolveAutoMergeBreakerHold(projectId, database).catch(() => null);
-      if (breakerHold) {
-        await persistWindow(projectId, existing, {
-          pendingIds: ids,
-          firstSeenAt,
-          lastVerdict: { release: false, reason: "breaker_paused" },
-          lastEvaluatedAt: now,
-          ...carry,
-        });
-        continue;
-      }
+      const baseRed = !breakerHold && verdict.release ? await checkBaseRedVeto(projectId).catch(() => null) : null;
+      const hold = decideWindowHold({ verdict, breakerPaused: breakerHold !== null, baseRed: baseRed !== null });
 
-      // #1204 — the red-base veto, asked only when the window would otherwise DEPART. A train
-      // assembled on a red base inherits the base's own failures, so the bisect that follows
-      // can only mis-attribute them to members (27 gate runs, 14 false `gateRejected`, nothing
-      // landed). Keep accumulating; the base-health reprobe schedule is what lifts the hold.
-      const baseRed = verdict.release ? await checkBaseRedVeto(projectId).catch(() => null) : null;
-      if (baseRed) {
+      if (baseRed !== null) {
         console.log(`[auto-merge] train window held: base_red for project ${projectId} — base is red at ${baseRed.healthSha.slice(0, 8)}, holding ${ids.length} workspace(s) rather than bisecting the base's own failures onto them${baseRed.message ? `: ${baseRed.message.slice(0, 200)}` : ""}`);
-        await persistWindow(projectId, existing, {
-          pendingIds: ids,
-          firstSeenAt,
-          lastVerdict: { release: false, reason: "base_red" },
-          lastEvaluatedAt: now,
-          ...carry,
-        });
-      } else if (verdict.release) {
-        console.log(`[auto-merge] train window closed for project ${projectId} (${verdict.reason}, size ${config.maxSize}/wait ${config.maxWaitMs}ms): releasing ${ids.length} workspace(s)${config.batchingFromPosture ? formatPostureNote(config.posture) : ""}`);
+      }
+      if (hold.release) {
+        console.log(`[auto-merge] train window closed for project ${projectId} (${hold.reason}, size ${config.maxSize}/wait ${config.maxWaitMs}ms): releasing ${ids.length} workspace(s)${config.batchingFromPosture ? formatPostureNote(config.posture) : ""}`);
         released.push(...ids);
         await dropWindow(projectId, existing);
       } else {
         await persistWindow(projectId, existing, {
           pendingIds: ids,
           firstSeenAt,
-          lastVerdict: verdict,
+          lastVerdict: hold,
           lastEvaluatedAt: now,
           ...carry,
         });
@@ -500,39 +508,116 @@ export function createAutoMergeOrchestrator(deps: {
     if (previous) boardEvents?.broadcast(projectId, "merge_train_window_changed");
   }
 
+  /**
+   * Is the in-flight reconciler session a zombie — running past {@link ZOMBIE_TIMEOUT_MS} with
+   * zero output messages, i.e. almost certainly a launch-failed session that never received its
+   * input? Such a session must be reaped, or its marker blocks every subsequent tick forever.
+   */
+  async function reconcilerSessionIsZombie(sessionId: string, startedAt: string | null): Promise<boolean> {
+    const ageMs = startedAt ? Date.now() - new Date(startedAt).getTime() : 0;
+    if (ageMs < ZOMBIE_TIMEOUT_MS) return false;
+    const [{ msgCount }] = await database
+      .select({ msgCount: count() })
+      .from(sessionMessages)
+      .where(eq(sessionMessages.sessionId, sessionId));
+    if (msgCount !== 0) return false;
+    console.warn(`[auto-merge] reconciler session ${sessionId} is a zombie (0 output after ${Math.round(ageMs / 60000)}m) — reaping`);
+    return true;
+  }
+
+  /**
+   * A batch reconciler launched on a prior tick may still be resolving. While its session runs,
+   * this tick is skipped entirely (don't double-launch or re-queue its members); on exit, the
+   * marker is cleared and the integration workspace freed so the caller can re-scan what landed.
+   *
+   * Returns `"skip-tick"` while the session is genuinely live, `"proceed"` otherwise — including
+   * the zombie case, which falls through to the same cleanup a finished session gets.
+   */
+  async function settleReconciler(): Promise<"skip-tick" | "proceed"> {
+    const pending = state.reconciler;
+    if (!pending) return "proceed";
+
+    const [sess] = await database.select({ status: sessions.status, startedAt: sessions.startedAt }).from(sessions)
+      .where(eq(sessions.id, pending.sessionId)).limit(1);
+    if (sess && sess.status === "running" && !(await reconcilerSessionIsZombie(pending.sessionId, sess.startedAt))) {
+      return "skip-tick"; // session is live, wait longer
+    }
+
+    console.log(`[auto-merge] reconciler session ${pending.sessionId} finished (status=${sess?.status ?? "gone"})`);
+    await setWorkspaceStatus(database, pending.integrationWorkspaceId, "idle", { onlyIfCurrentStatus: "fixing" });
+    state.reconciler = null;
+    return "proceed";
+  }
+
+  /**
+   * The three drift-healing reconcile passes (#402), in the order they have always run. The two
+   * completion reconcilers are non-fatal on their own: a pass that throws must not take the
+   * merge cycle around it down.
+   */
+  async function runDriftHealingPasses(): Promise<void> {
+    const reconciled = await reconcileCompletionStates(database);
+    if (reconciled > 0) {
+      console.log(`[auto-merge] reconcileCompletionStates: unblocked ${reconciled} stuck workspace(s)`);
+    }
+
+    // Enforce the drive completion contract (#801): keep each active drive's meta in
+    // In Progress until all its children are Done, then drive the meta itself to Done.
+    const driveChanges = await reconcileDriveCompletion(database, { boardEvents }).catch((err) => {
+      console.warn("[auto-merge] reconcileDriveCompletion failed (non-fatal):", errorMessage(err));
+      return 0;
+    });
+    if (driveChanges > 0) {
+      console.log(`[auto-merge] reconcileDriveCompletion: applied ${driveChanges} drive completion-contract change(s)`);
+    }
+
+    // Inform the user when a project's backlog is fully implemented (#848). Edge-triggered:
+    // broadcasts `project_completed` once per completion, not every cycle.
+    const completionChanges = await reconcileProjectCompletion(database, { boardEvents }).catch((err) => {
+      console.warn("[auto-merge] reconcileProjectCompletion failed (non-fatal):", errorMessage(err));
+      return 0;
+    });
+    if (completionChanges > 0) {
+      console.log(`[auto-merge] reconcileProjectCompletion: ${completionChanges} project completion state change(s)`);
+    }
+  }
+
+  /**
+   * Fold ONE merge-queue event into this tick's counters and outcome set (#1211 — lifted out of
+   * `runOnce`). A CONFLICT is the authors' to rebase and is not a repeating infrastructure
+   * failure, so only a gate/train `error` feeds the circuit breaker; a conflict (or a
+   * conflict-shaped skip) is stranded residue for the batch reconciler instead.
+   */
+  function applyQueueEvent(event: MergeQueueEvent, projectOfWorkspace: Map<string, string>, outcome: TickOutcome): void {
+    if (event.type === "merged") {
+      state.lastMerged++;
+      console.log(`[auto-merge] merged workspace ${event.workspaceId} (#${event.issueNumber ?? "?"})`);
+      // #1207: a landing ends the streak — the breaker counts CONSECUTIVE failures, and a
+      // project that merged something is not stuck in the loop the breaker exists to stop.
+      const mergedProjectId = projectOfWorkspace.get(event.workspaceId);
+      if (mergedProjectId) outcome.succeededProjects.add(mergedProjectId);
+      return;
+    }
+    if (event.type === "conflict" || event.type === "error") {
+      state.lastFailed++;
+      console.warn(`[auto-merge] ${event.type} for workspace ${event.workspaceId}: ${event.error}`);
+      if (event.type === "error") noteFirstFailure(outcome, projectOfWorkspace, event.workspaceId, event.error);
+      if (event.type === "conflict") outcome.strandedIds.push(event.workspaceId);
+      return;
+    }
+    if (event.type === "skipped") {
+      state.lastSkipped++;
+      console.log(`[auto-merge] skipped workspace ${event.workspaceId}: ${event.reason}`);
+      if (event.reason.startsWith("rebase conflict") || event.reason.startsWith("merge conflict")) {
+        outcome.strandedIds.push(event.workspaceId);
+      }
+    }
+  }
+
   async function runOnce(force = false): Promise<AutoMergeOrchestratorState> {
     if (state.running) return state;
 
-    // A batch reconciler launched on a prior tick may still be resolving. While its session runs,
-    // skip this tick entirely (don't double-launch or re-queue its members); on exit, clear the
-    // marker, free the integration workspace, and fall through to re-scan what landed.
-    if (state.reconciler) {
-      const [sess] = await database.select({ status: sessions.status, startedAt: sessions.startedAt }).from(sessions)
-        .where(eq(sessions.id, state.reconciler.sessionId)).limit(1);
-      if (sess && sess.status === "running") {
-        // Zombie detection: a session that has been running for > ZOMBIE_TIMEOUT_MS with 0 output
-        // messages is almost certainly a launch-failed session (0-token, never received input).
-        // Reap it so the next tick can relaunch.
-        const ageMs = sess.startedAt ? Date.now() - new Date(sess.startedAt).getTime() : 0;
-        if (ageMs >= ZOMBIE_TIMEOUT_MS) {
-          const [{ msgCount }] = await database
-            .select({ msgCount: count() })
-            .from(sessionMessages)
-            .where(eq(sessionMessages.sessionId, state.reconciler.sessionId));
-          if (msgCount === 0) {
-            console.warn(`[auto-merge] reconciler session ${state.reconciler.sessionId} is a zombie (0 output after ${Math.round(ageMs / 60000)}m) — reaping`);
-            // Fall through to the cleanup below (don't return early).
-          } else {
-            return state; // session is live, wait longer
-          }
-        } else {
-          return state;
-        }
-      }
-      console.log(`[auto-merge] reconciler session ${state.reconciler.sessionId} finished (status=${sess?.status ?? "gone"})`);
-      await setWorkspaceStatus(database, state.reconciler.integrationWorkspaceId, "idle", { onlyIfCurrentStatus: "fixing" });
-      state.reconciler = null;
-    }
+    // A reconciler launched on a prior tick may still hold this cycle (see `settleReconciler`).
+    if (await settleReconciler() === "skip-tick") return state;
 
     if (!force && !(await isEnabled())) return state;
 
@@ -554,30 +639,7 @@ export function createAutoMergeOrchestrator(deps: {
       let completedRows = await findCompletedWorkspaceRows();
 
       if (completedRows.length > 0 || fallbackDue) {
-        const reconciled = await reconcileCompletionStates(database);
-        if (reconciled > 0) {
-          console.log(`[auto-merge] reconcileCompletionStates: unblocked ${reconciled} stuck workspace(s)`);
-        }
-
-        // Enforce the drive completion contract (#801): keep each active drive's meta in
-        // In Progress until all its children are Done, then drive the meta itself to Done.
-        const driveChanges = await reconcileDriveCompletion(database, { boardEvents }).catch((err) => {
-          console.warn("[auto-merge] reconcileDriveCompletion failed (non-fatal):", errorMessage(err));
-          return 0;
-        });
-        if (driveChanges > 0) {
-          console.log(`[auto-merge] reconcileDriveCompletion: applied ${driveChanges} drive completion-contract change(s)`);
-        }
-
-        // Inform the user when a project's backlog is fully implemented (#848). Edge-triggered:
-        // broadcasts `project_completed` once per completion, not every cycle.
-        const completionChanges = await reconcileProjectCompletion(database, { boardEvents }).catch((err) => {
-          console.warn("[auto-merge] reconcileProjectCompletion failed (non-fatal):", errorMessage(err));
-          return 0;
-        });
-        if (completionChanges > 0) {
-          console.log(`[auto-merge] reconcileProjectCompletion: ${completionChanges} project completion state change(s)`);
-        }
+        await runDriftHealingPasses();
 
         // The passes may have unblocked/reclassified workspaces — re-query so this
         // tick still merges what they just healed (previous behaviour, where the
@@ -613,64 +675,33 @@ export function createAutoMergeOrchestrator(deps: {
       const splitNote = describeReleasePartition(partition, plan.order.length);
       if (splitNote) console.log(`[auto-merge] ${splitNote}`);
 
-      const strandedIds: string[] = [];
       // #1207 — the FIRST gate/train failure per project this tick. A train's members all carry
       // the same gate failure text, so counting them individually would trip the breaker inside
       // one window and claim three "consecutive" failures that were one tick.
       const projectOfWorkspace = new Map(completedRows.map((row) => [row.workspaceId, row.projectId]));
-      const firstFailurePerProject = new Map<string, { workspaceId: string; message: string }>();
-      /** Projects that landed something this tick — "consecutive" ends at the first success. */
-      const succeededProjects = new Set<string>();
-      const noteFailure = (workspaceId: string, message: string) => {
-        const failedProjectId = projectOfWorkspace.get(workspaceId);
-        if (!failedProjectId || firstFailurePerProject.has(failedProjectId)) return;
-        firstFailurePerProject.set(failedProjectId, { workspaceId, message });
+      const outcome: TickOutcome = {
+        strandedIds: [],
+        succeededProjects: new Set<string>(),
+        firstFailurePerProject: new Map<string, { workspaceId: string; message: string }>(),
       };
       for (const batch of releaseBatches(partition)) {
         for await (const event of queueService.executeQueue(batch.workspaceIds, {
           skipOnConflict: true,
           strategy: batch.strategy,
         })) {
-          if (event.type === "merged") {
-            state.lastMerged++;
-            console.log(`[auto-merge] merged workspace ${event.workspaceId} (#${event.issueNumber ?? "?"})`);
-            // #1207: a landing ends the streak — the breaker counts CONSECUTIVE failures, and a
-            // project that merged something is not stuck in the loop the breaker exists to stop.
-            const mergedProjectId = projectOfWorkspace.get(event.workspaceId);
-            if (mergedProjectId) succeededProjects.add(mergedProjectId);
-          } else if (event.type === "conflict" || event.type === "error") {
-            state.lastFailed++;
-            console.warn(`[auto-merge] ${event.type} for workspace ${event.workspaceId}: ${event.error}`);
-            // #1207: a CONFLICT is the authors' to rebase and is not a repeating infrastructure
-            // failure, so only a gate/train `error` feeds the breaker.
-            if (event.type === "error") noteFailure(event.workspaceId, event.error);
-            if (event.type === "conflict") strandedIds.push(event.workspaceId);
-          } else if (event.type === "skipped") {
-            state.lastSkipped++;
-            console.log(`[auto-merge] skipped workspace ${event.workspaceId}: ${event.reason}`);
-            if (event.reason.startsWith("rebase conflict") || event.reason.startsWith("merge conflict")) {
-              strandedIds.push(event.workspaceId);
-            }
-          }
+          applyQueueEvent(event, projectOfWorkspace, outcome);
         }
       }
+      const strandedIds = outcome.strandedIds;
 
-      for (const succeededProjectId of succeededProjects) {
-        firstFailurePerProject.delete(succeededProjectId);
-        await clearAutoMergeBreaker(succeededProjectId, database).catch(() => undefined);
-      }
-      // #1207: fold this tick's one failure per project into that project's breaker. The third
-      // consecutive identical signature pauses auto-merge for the project, logs one line, and
-      // emits a board-health event; nothing here retries anything.
-      for (const [failedProjectId, failure] of firstFailurePerProject) {
-        await recordAutoMergeGateFailure({
-          projectId: failedProjectId,
-          workspaceId: failure.workspaceId,
-          message: failure.message,
-          database,
-          broadcast: (id) => boardEvents?.broadcast(id, "merge_train_window_changed"),
-        }).catch((err) => console.warn(`[auto-merge] circuit breaker update failed (non-fatal): ${errorMessage(err)}`));
-      }
+      // #1207: fold this tick's outcomes into the per-project breakers — a landing clears the
+      // streak, and the third consecutive identical signature pauses auto-merge for the project.
+      await applyTickBreakerOutcomes({
+        failures: outcome.firstFailurePerProject,
+        succeeded: outcome.succeededProjects,
+        database,
+        broadcast: (id) => boardEvents?.broadcast(id, "merge_train_window_changed"),
+      });
 
       // Conflict residue: escalate the WHOLE stranded batch to ONE merge-reconciler agent that
       // picks the efficient landing strategy across the set (clean-first, resolve each cluster's
