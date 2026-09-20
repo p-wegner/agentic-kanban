@@ -1,8 +1,8 @@
 ---
 name: agentic-kanban
 description: Operate the agentic-kanban board — a kanban board where each card is an AI coding session in its own git worktree. Use when asked to work a ticket, drive a project hands-off, review or merge agent work, inspect what agents are doing, or wire the board into another tool. Covers the MCP tools, CLI, board views, statuses, and the review/merge gate.
-commit: 637ac0a418
-generated: 2026-09-17
+commit: 60917d38ca
+generated: 2026-09-20
 ---
 
 # agentic-kanban
@@ -144,7 +144,7 @@ Depth on any of these lives in `references/` — load a file only when you actua
 
 `agentic-kanban <command>` (inside this repo: `pnpm cli -- <command>`). Full list with descriptions: `references/cli.md`.
 
-Top-level: `cleanup`, `create`, `delete-status`, `dev`, `export-backlog`, `import-backlog`, `init`, `install-skill`, `list`, `register`, `relocate`, `status`, `unregister`
+Top-level: `cleanup`, `create`, `delete-status`, `dev`, `export-backlog`, `import-backlog`, `init`, `install-skill`, `list`, `register`, `relocate`, `status`, `tracker`, `unregister`
 
 | Group | Subcommands |
 |---|---|
