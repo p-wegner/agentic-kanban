@@ -2,7 +2,7 @@
 
 # MCP tools
 
-All 118 tools exposed by the `agentic-kanban` MCP server. Call them as `mcp__agentic-kanban__<name>`.
+All 119 tools exposed by the `agentic-kanban` MCP server. Call them as `mcp__agentic-kanban__<name>`.
 
 ## Board Overview
 
@@ -46,6 +46,7 @@ All 118 tools exposed by the `agentic-kanban` MCP server. Call them as `mcp__age
 | `get_workspace_scorecard` | Get the PR quality scorecard for a workspace. Returns a 0-100 score with per-dimension breakdown (Tests, Types, Scope, Diff size, Conflicts, Docs, Skill output). |
 | `merge_workspace` | Merge a workspace branch into the project's default branch, close the workspace, and auto-transition the issue to Done. Delegates to the board server's safe merge path — per-repo merge lock, pre-merge backup/rollback, OpenSpec delta application, and conflict detection with fix-and-merge recovery — so an MCP merge has the same safety net as the UI. Requires the board server to be running. |
 | `close_workspace` | Close a workspace without merging. For direct workspaces or abandoned work. Use merge_workspace instead if you want to merge the branch. |
+| `reopen_workspace` | Re-create the worktree for a CLOSED workspace whose branch is still live and unmerged. Use this to recover a workspace that was closed while its feature branch still carried unmerged commits — the shape left behind by a manual close applied to real work. Refuses if the workspace isn't closed, is direct, is already merged, its branch no longer exists, or another open workspace already holds the issue. |
 | `mark_ready_for_merge` | Mark a workspace as reviewed and ready to merge. Call this after a successful code review with no critical or major issues. This flag allows future agents to merge the workspace without requiring another review. NOT for fork-child workspaces (a workspace with a parent) — their verdicts flow through join consolidation via propose_transition, never through this tool. |
 | `stop_workspace` | Stop any running agent session for a workspace |
 | `delete_workspace` | Delete a workspace and all its associated data |

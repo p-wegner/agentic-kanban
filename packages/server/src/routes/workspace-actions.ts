@@ -439,6 +439,14 @@ export function createWorkspaceActionsRoute(
     return c.json(await workspaceService.setupWorkspace(id));
   });
 
+  // POST /api/workspaces/:id/reopen (#1206) — re-create the worktree for a CLOSED
+  // workspace whose branch is still live and unmerged, unlike `/setup` above which
+  // only fills in a missing worktree for a workspace that is still OPEN.
+  router.post("/:id/reopen", async (c) => {
+    const id = c.req.param("id");
+    return c.json(await workspaceService.reopenWorkspace(id));
+  });
+
   // POST /api/workspaces/:id/retry-setup (#1166) — re-runs the project's setup script in the
   // workspace's EXISTING worktree and restamps the verdict, unlike `/setup` above which only
   // recreates a missing worktree and no-ops when one is already there.
