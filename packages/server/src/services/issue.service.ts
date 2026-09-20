@@ -68,6 +68,7 @@ import {
     resolveNewIssueDefaults
 } from "../repositories/issue.repository.js";
 import { findOpenUnmergedWorkspace } from "../repositories/workspace.repository.js";
+import { isWorkspaceBranchFullyContained } from "./branch-containment.service.js";
 import { enrichWorkspacesWithSessionData } from "./board-aggregation.service.js";
 import type { BoardEventSink } from "./board-events.js";
 import { createIssueDependencyService, validateBatchDependencies } from "./issue-dependency.service.js";
@@ -455,7 +456,10 @@ export function createIssueService(deps: {
       // blocked move is a no-op (no DB change, no workspace auto-close).
       if (!wasTerminal && isTerminalStatusName(newStatusName)) {
         const openWs = await findOpenUnmergedWorkspace(id, database);
-        if (openWs) {
+        // #1205: a branch fully CONTAINED in the base (0 commits ahead — including a
+        // branch that was never touched again after its fix landed by hand elsewhere)
+        // has provably nothing left to merge, so it must not block the move to Done.
+        if (openWs && !(await isWorkspaceBranchFullyContained(openWs.id, database))) {
           // newStatusName is non-null here: isTerminalStatusName returns false for null.
           throw new IssueError(openWorkspaceBlockMessage(newStatusName!, openWs.branch), "CONFLICT");
         }
@@ -544,7 +548,11 @@ export function createIssueService(deps: {
         const blockedBranches: string[] = [];
         for (const issueId of uniqueIds) {
           const openWs = await findOpenUnmergedWorkspace(issueId, database);
-          if (openWs) blockedBranches.push(openWs.branch);
+          if (!openWs) continue;
+          // #1205: a branch fully contained in the base (0 ahead) has nothing left
+          // to merge — don't let it block the whole batch.
+          if (await isWorkspaceBranchFullyContained(openWs.id, database)) continue;
+          blockedBranches.push(openWs.branch);
         }
         if (blockedBranches.length > 0) {
           const one = blockedBranches.length === 1;

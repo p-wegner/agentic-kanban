@@ -19,7 +19,7 @@ import { recoverRemoteSessionsAtBoot } from "./remote-session-readoption.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { isPidAlive } from "../lib/pid.js";
 import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.js";
-import { reconcileHandMergedBranches } from "./hand-merged-branch-reconciler.js";
+import { reconcileHandMergedBranches, reconcileContainedOpenWorkspaces } from "./hand-merged-branch-reconciler.js";
 import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-sweep.js";
 import { reapTerminalWorkspaces } from "./terminal-workspace-reaper.js";
 import { reconcileOrphanedWorktrees, realUnshippedWorkProbe } from "./orphaned-worktree-reconciler.js";
@@ -962,6 +962,14 @@ export const STARTUP_AUDIT_TASKS: StartupAuditTask[] = [
     // Done. Idempotent; skips Backlog/terminal issues.
     name: "reconcileHandMergedBranches",
     run: () => reconcileHandMergedBranches(),
+  },
+  {
+    // #1205: the sibling case to reconcileHandMergedBranches above — an issue whose
+    // workspace is STILL open (idle, readyForMerge), but whose branch is fully
+    // contained in the base (0 ahead) because the fix landed by hand elsewhere.
+    // Evidence-gated (a base commit naming the issue); see the function doc.
+    name: "reconcileContainedOpenWorkspaces",
+    run: () => reconcileContainedOpenWorkspaces(),
   },
   { name: "scanDoneUnmergedWorkspaces", run: () => scanDoneUnmergedWorkspaces({ reopenToInReview: false }) },
   { name: "reapTerminalWorkspaces", run: () => reapTerminalWorkspaces() },
