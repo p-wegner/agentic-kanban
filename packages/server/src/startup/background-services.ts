@@ -88,8 +88,10 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
   },
   {
     name: "auto-merge-orchestrator",
-    start({ db, boardEvents, getSessionManager }) {
-      startAutoMergeOrchestrator({ database: db, boardEvents, getSessionManager });
+    start({ db, boardEvents, getSessionManager, reviewSessionIds }) {
+      // #1212: `reviewSessionIds` so the completion-state reconciler can re-queue a review it
+      // had to reap, through the same service function the review route calls.
+      startAutoMergeOrchestrator({ database: db, boardEvents, getSessionManager, reviewSessionIds });
       return stopAutoMergeOrchestrator;
     },
   },
