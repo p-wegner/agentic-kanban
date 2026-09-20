@@ -19,12 +19,10 @@
  */
 import { existsSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
-import { and, eq, isNotNull, ne } from "drizzle-orm";
-import { workspaces } from "@agentic-kanban/shared/schema";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { Database } from "../db/index.js";
-import { db } from "../db/index.js";
+import { listHookBackfillCandidates } from "../repositories/commit-msg-hook-backfill.repository.js";
 import { installCommitMsgHook } from "../services/commit-msg-hook.js";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
@@ -68,16 +66,13 @@ async function needsCommitMsgHook(worktreePath: string): Promise<boolean | null>
 export async function reconcileCommitMsgHooks(
   deps: CommitMsgHookBackfillDeps = {},
 ): Promise<CommitMsgHookBackfillResult> {
-  const database = deps.database ?? db;
   const maxPerPass = deps.maxPerPass ?? DEFAULT_MAX_PER_PASS;
   const result: CommitMsgHookBackfillResult = {
     scanned: 0, installed: 0, alreadyPresent: 0, skipped: 0, failed: 0, truncated: false,
   };
 
-  const rows = await database
-    .select({ workingDir: workspaces.workingDir, tddMode: workspaces.tddMode })
-    .from(workspaces)
-    .where(and(ne(workspaces.status, "closed"), eq(workspaces.isDirect, false), isNotNull(workspaces.workingDir)));
+  // Persistence stays behind the repository (#715: startup/ has no boundary of its own).
+  const rows = await listHookBackfillCandidates(deps.database);
 
   for (const row of rows) {
     const worktreePath = row.workingDir;
