@@ -21,6 +21,7 @@ import {
 import { selectProviderFromStrategy } from "../services/strategy-objective.service.js";
 import type { ProviderProfilePolicy } from "@agentic-kanban/shared/lib/strategy-policy";
 import type { ProfileHeadroom, RosterEntry } from "@agentic-kanban/shared/lib/profile-allowlist";
+import { headroomFromQuotaUsage } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { parseProfileSelectionReason, serializeProfileSelectionReason } from "../lib/profile-selection-reason.js";
 
 const PROJECT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
@@ -143,6 +144,30 @@ describe("Bullseye selection ranks a tier by measured headroom (#1026)", () => {
     });
     // The fill tier is exhausted, so throttle decides — and inside it, headroom does.
     expect(selected?.profileName).toBe("privat");
+  });
+});
+
+describe("a quota reading never crosses providers", () => {
+  it("does not judge a codex policy exhausted from the CLAUDE account of the same name", () => {
+    // The quota source reads Claude logins and publishes a BARE `default` key alongside
+    // `claude:default`. A Bullseye whose only policy was `codex:default` read that number,
+    // called codex exhausted, selected nothing, and the caller fell back to the workspace's
+    // baked provider — master's sweep went red on two suites for exactly this, green again
+    // once the operator's own Claude account dropped back under the threshold.
+    const codexOnly = {
+      providerPolicies: [
+        { id: "codex:default", provider: "codex" as const, profileName: "default", label: "Codex", mode: "fill" as const, headroomPct: 0, notes: "" },
+      ],
+    };
+    const claudeDefaultExhausted = headroomFromQuotaUsage({
+      providers: [{ id: "default", status: "ok", stale: false, metrics: [{ label: "5h", percent: 97, periodMs: 5 * 60 * 60 * 1000 }] }],
+    });
+
+    const selected = selectProviderFromStrategy(codexOnly, { headroom: claudeDefaultExhausted });
+
+    expect(selected?.provider).toBe("codex");
+    expect(selected?.profileName).toBe("default");
+    expect(selected?.usedPct).toBeNull();
   });
 });
 
