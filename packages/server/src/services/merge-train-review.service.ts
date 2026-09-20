@@ -357,7 +357,7 @@ export async function runTrainReview(
   const invoke = deps.invoke ?? ((prompt, opts) => invokeClaudePrompt(prompt, opts));
   const buildContext = deps.buildContext ?? (({ workingDir, baseRef }) => buildReviewContext({ workingDir, baseRef, isDirect: false }));
   const now = deps.now ?? new Date().toISOString();
-  const tag = `[merge-train-review] ${args.trainLabel}`;
+  const tag = args.trainLabel;
 
   let verdict: TrainReviewVerdict;
   try {
@@ -370,7 +370,7 @@ export async function runTrainReview(
     verdict = parseTrainReviewVerdict(reply, args.members);
   } catch (err) {
     const error = errorMessage(err).slice(0, 500);
-    console.warn(`${tag}: review could not run — landing UNREVIEWED: ${error}`);
+    console.warn(`[merge-train-review] ${tag}: review could not run — landing UNREVIEWED: ${error}`);
     return { sided: [], verdict: null, evidence: { status: "failed", error } };
   }
 
@@ -385,14 +385,14 @@ export async function runTrainReview(
       trainLabel: args.trainLabel, findings: mine, blocking: args.blocking, sided: sidedIds.has(m.workspaceId), now,
       reason: verdict.blocking.find((b) => b.workspaceId === m.workspaceId)?.reason,
       baseBranch: args.baseBranch, trainTipSha, repoPath: args.repoPath,
-    }, { database, sendTurn: deps.sendTurn, getBranchHeadSha }).catch((err) => console.warn(`${tag}: could not comment on ${m.workspaceId} (non-fatal): ${errorMessage(err).slice(0, 200)}`));
+    }, { database, sendTurn: deps.sendTurn, getBranchHeadSha }).catch((err) => console.warn(`[merge-train-review] ${tag}: could not comment on ${m.workspaceId} (non-fatal): ${errorMessage(err).slice(0, 200)}`));
   }
   const unattributed = verdict.findings.filter((f) => f.workspaceId === null);
   if (unattributed.length > 0) {
-    console.warn(`${tag}: ${unattributed.length} finding(s) matched no member's files and stay on the train's evidence only`);
+    console.warn(`[merge-train-review] ${tag}: ${unattributed.length} finding(s) matched no member's files and stay on the train's evidence only`);
   }
   console.log(
-    `${tag}: ${verdict.findings.length} finding(s), ${verdict.blocking.length} member(s) blocking` +
+    `[merge-train-review] ${tag}: ${verdict.findings.length} finding(s), ${verdict.blocking.length} member(s) blocking` +
       (args.blocking ? `, siding ${sidedIds.size}` : ", advisory (sprint) — nobody sided"),
   );
   return {

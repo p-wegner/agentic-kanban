@@ -7,8 +7,8 @@ import { useAgentActivityStore } from "../stores/agentActivityStore.js";
 import { detectAgentStall } from "../lib/detectAgentStall.js";
 import { useAgentStallThreshold } from "./AgentStallBadge.js";
 import { useCrossRepoActivity } from "../hooks/useCrossRepoActivity.js";
-import { apiFetch } from "../lib/api.js";
-import type { MergeTrainRowDto, MergeTrainState, MergeTrainWindowResponse, MergeTrainWindowVerdictDto } from "@agentic-kanban/shared";
+import { fetchMergeTrains, fetchMergeTrainWindow } from "../lib/mergeTrainApi.js";
+import type { MergeTrainState, MergeTrainWindowVerdictDto } from "@agentic-kanban/shared";
 import {
   normalizeCrossRepoEntry,
   normalizeStallSignal,
@@ -173,7 +173,7 @@ function useFlightRecorderEvents(projectId: string | null, resolveIssue?: Resolv
     // Merge trains (#1195) → a state-change event per train, diffed against the prior
     // snapshot, so board-monitor/sentinel-facing consumers of this feed see a train land,
     // go red, or get abandoned without polling the merge-queue panel themselves.
-    apiFetch<{ ok: boolean; trains: MergeTrainRowDto[] }>(`/api/merge-queue/trains?projectId=${encodeURIComponent(projectId)}`)
+    fetchMergeTrains(projectId)
       .then((result) => {
         const now = new Date().toISOString();
         const fresh: FlightRecorderEvent[] = [];
@@ -198,7 +198,7 @@ function useFlightRecorderEvents(projectId: string | null, resolveIssue?: Resolv
     // The train's batching window (#1186) — a verdict-change event whenever the
     // orchestrator's hold/release decision flips, so a stuck window (held/gate_busy) is
     // visible on the same feed as a stalled agent.
-    apiFetch<MergeTrainWindowResponse>(`/api/merge-queue/window?projectId=${encodeURIComponent(projectId)}`)
+    fetchMergeTrainWindow(projectId)
       .then((result) => {
         const now = new Date().toISOString();
         const to = result.window?.lastVerdict ?? null;

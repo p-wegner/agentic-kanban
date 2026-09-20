@@ -231,11 +231,7 @@ export function createMergeQueueService(deps: {
   getSessionManager?: () => SessionManager;
 }) {
   const { database, boardEvents, getSessionManager } = deps;
-  const mergeService = createWorkspaceMergeService({
-    database,
-    boardEvents,
-    getSessionManager,
-  });
+  const mergeService = createWorkspaceMergeService({ database, boardEvents, getSessionManager });
   // #1192: the port a siding drop nudges through, via the same sanctioned 409-safe path
   // `POST /:id/turn` uses (`WorkspaceError("...", "CONFLICT")` on a busy agent).
   const sessionService = createWorkspaceSessionService({ database, boardEvents, getSessionManager });
