@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { apiFetch, apiPost } from "../lib/api.js";
+import { apiPost } from "../lib/api.js";
+import { fetchMergeTrains } from "../lib/mergeTrainApi.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import {
   collectConflictClusters,
@@ -13,7 +14,7 @@ import {
   formatDurationShort,
   type TrainMemberOutcome,
 } from "../lib/mergeTrainSummary.js";
-import type { IssueWithStatus, MainWorkspaceInfo, MergeTrainsResponse, StatusWithIssues } from "@agentic-kanban/shared";
+import type { IssueWithStatus, MainWorkspaceInfo, StatusWithIssues } from "@agentic-kanban/shared";
 import { Icon } from "./Icon.js";
 
 interface ConflictPreview {
@@ -195,7 +196,7 @@ function MergeTrainSummaryBar({ projectId, memberLabel }: { projectId: string; m
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch<MergeTrainsResponse>(`/api/merge-queue/trains?projectId=${encodeURIComponent(projectId)}`)
+    fetchMergeTrains(projectId)
       .then((result) => {
         if (cancelled) return;
         setTrains(result.trains);

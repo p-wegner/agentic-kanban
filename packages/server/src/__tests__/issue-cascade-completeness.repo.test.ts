@@ -257,6 +257,13 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
   },
   // #815: the tenth column family extracted out of `workspaces` — the computed PR-quality
   // scorecard. Same `onDelete: cascade` shape, so seeding it proves the cascade fires.
+  // #1192: the train-siding state hangs off workspaces by a cascading FK (PK = workspace_id).
+  workspace_train_siding: async (c) => {
+    await c.db.insert(schema.workspaceTrainSiding).values({
+      workspaceId: c.workspaceId, sidings: 1, sidedBranchSha: "abc123", conflictTrainTipSha: "def456",
+      lastSidedAt: c.now, cappedAt: null,
+    });
+  },
   workspace_scorecard: async (c) => {
     await c.db.insert(schema.workspaceScorecard).values({
       workspaceId: c.workspaceId, score: 88,
