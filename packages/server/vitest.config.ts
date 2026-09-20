@@ -49,6 +49,10 @@ export default defineConfig({
       // what the gate does DOWNSTREAM depend on the developer's own temp directory. See that
       // file: the probe and the admission decision are each covered directly instead.
       path.resolve(__dirname, "../../test-setup/temp-health-neutral.ts"),
+      // Quota gate — the live `api/oauth/usage` read otherwise lets the developer's own
+      // account usage decide which provider a launch resolves to. See that file: master's
+      // sweep went red on two provider-selection suites for exactly that reason.
+      path.resolve(__dirname, "../../test-setup/quota-neutral.ts"),
     ],
     // #352 — reap orphaned fixture child servers (`serve.mjs`) and their temp dirs once before
     // the first fork and once after the last. NOT a setupFile: that runs per fork and would let

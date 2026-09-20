@@ -80,12 +80,31 @@ export class TampermonkeyQuotaProvider implements QuotaUsageProvider {
  * choice for the whole process, not per project, and a preference read here would make
  * a module that must construct at import time DB-bound.
  *   KANBAN_QUOTA_SOURCE=tampermonkey  → the old :8742 path
+ *   KANBAN_QUOTA_SOURCE=none          → measure nothing (see `NullQuotaProvider`)
  *   anything else / unset             → the OAuth provider
- * `setQuotaUsageProvider()` still overrides both, which is what tests use.
+ * `setQuotaUsageProvider()` still overrides all three, which is what tests use.
  */
 export function createDefaultQuotaUsageProvider(): QuotaUsageProvider {
+  if (process.env.KANBAN_QUOTA_SOURCE === "none") return new NullQuotaProvider();
   if (process.env.KANBAN_QUOTA_SOURCE === "tampermonkey") return new TampermonkeyQuotaProvider();
   return new OAuthQuotaProvider();
+}
+
+/**
+ * A source that measures nothing — every profile reads as `unknown`, which is exactly the
+ * state of a board with no quota source at all, and never counts as exhausted.
+ *
+ * It exists for the UNIT SUITE (`test-setup/quota-neutral.ts`). Without it every test that
+ * reaches `loadProjectRuntimeConfig` made a live `api/oauth/usage` request with the
+ * developer's own OAuth token and then let that account's 5-hour percentage decide which
+ * provider the code under test selected. That is ambient state no test controls: master's
+ * sweep went red on two provider-selection suites purely because the reading crossed the
+ * pool-exhausted threshold, and green again later with no commit in between.
+ */
+export class NullQuotaProvider implements QuotaUsageProvider {
+  async fetchUsage(): Promise<QuotaUsageResult> {
+    return { providers: [], scrapedAt: new Date().toISOString() };
+  }
 }
 
 let _provider: QuotaUsageProvider | null = null;

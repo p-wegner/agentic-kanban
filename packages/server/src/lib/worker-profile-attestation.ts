@@ -77,6 +77,10 @@ export function headroomFromAttestations(
     const headroom: ProfileHeadroom = {
       usedPct: stale ? null : quota?.usedPct5h ?? null,
       stale,
+      // The bare key below is provider-ambiguous, so it carries the provider it is ABOUT:
+      // a reading for `codex:default` must not answer for `claude:default` (see
+      // `headroomRecordFor`).
+      provider: narrowProvider(entry.provider),
     };
     out.set(attestationRefId(entry), headroom);
     out.set(entry.name, headroom);

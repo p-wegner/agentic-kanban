@@ -8,7 +8,7 @@ import { resolveEffectiveModel } from "./effective-config.service.js";
 import { selectPolicyByPriority } from "@agentic-kanban/shared/lib/strategy-policy";
 import type { ProviderProfilePolicy } from "@agentic-kanban/shared/lib/strategy-policy";
 import type { ProfileHeadroom } from "@agentic-kanban/shared/lib/profile-allowlist";
-import { DEFAULT_POOL_EXHAUSTED_PCT } from "@agentic-kanban/shared/lib/profile-allowlist";
+import { DEFAULT_POOL_EXHAUSTED_PCT, headroomRecordFor } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { readStrategyBullseye } from "@agentic-kanban/shared/lib/strategy-objective-file";
 import type { StrategyBullseyeConfig } from "@agentic-kanban/shared/lib/strategy-objective-file";
 
@@ -187,10 +187,15 @@ export function policyUsedPct(
   headroom: Map<string, ProfileHeadroom> | null | undefined,
 ): number | null {
   if (!headroom) return null;
+  // The bare-name lookup goes through `headroomRecordFor`, which refuses a reading minted
+  // for another provider: the quota source publishes `default` for a CLAUDE login, and a
+  // Bullseye policy for `codex:default` was reading that number and being skipped as
+  // exhausted — on this machine that silently turned "the Bullseye says codex" into a
+  // fallback to the workspace's baked claude provider, and did it only while the Claude
+  // account happened to be above the pool-exhausted threshold.
   const rec =
     (policy.quotaProviderId ? headroom.get(policy.quotaProviderId) : undefined) ??
-    headroom.get(`${policy.provider}:${policy.profileName}`) ??
-    headroom.get(policy.profileName);
+    headroomRecordFor({ provider: policy.provider, name: policy.profileName }, headroom);
   if (!rec || rec.stale) return null;
   return typeof rec.usedPct === "number" && Number.isFinite(rec.usedPct) ? rec.usedPct : null;
 }

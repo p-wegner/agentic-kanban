@@ -21,6 +21,7 @@ import {
 } from "../src/lib/profile-roster.js";
 import {
   headroomFromQuotaUsage,
+  headroomRecordFor,
   rankRosterEntries,
   resolveRosterSelection,
   type ProfileHeadroom,
@@ -306,9 +307,39 @@ describe("headroomFromQuotaUsage", () => {
         { id: "old", status: "unknown", stale: true, metrics: [{ label: "5h", percent: 3, periodMs: 5 * 60 * 60 * 1000 }] },
       ],
     });
-    expect(map.get("claude:anth")).toEqual({ usedPct: 42, stale: false });
+    expect(map.get("claude:anth")).toEqual({ usedPct: 42, stale: false, provider: "claude" });
     // Keyed by the bare name too: the quota source names a Claude profile without a provider.
     expect(map.get("anth")?.usedPct).toBe(42);
-    expect(map.get("claude:old")).toEqual({ usedPct: null, stale: true });
+    expect(map.get("claude:old")).toEqual({ usedPct: null, stale: true, provider: "claude" });
+  });
+
+  it("tags the bare key with the provider it measured", () => {
+    // The source reads CLAUDE logins, so a bare `default` is the Claude account's number.
+    const map = headroomFromQuotaUsage({
+      providers: [{ id: "default", status: "ok", stale: false, metrics: [{ label: "5h", percent: 97, periodMs: 5 * 60 * 60 * 1000 }] }],
+    });
+    expect(map.get("default")?.provider).toBe("claude");
+  });
+});
+
+describe("headroomRecordFor — a bare key never crosses providers", () => {
+  const map = headroomFromQuotaUsage({
+    providers: [{ id: "default", status: "ok", stale: false, metrics: [{ label: "5h", percent: 97, periodMs: 5 * 60 * 60 * 1000 }] }],
+  });
+
+  it("answers for the provider the reading is about", () => {
+    expect(headroomRecordFor({ provider: "claude", name: "default" }, map)?.usedPct).toBe(97);
+  });
+
+  it("refuses to answer for another provider of the same name", () => {
+    // The regression this exists for: a Bullseye policy for `codex:default` read the CLAUDE
+    // `default` account's 97% and was skipped as exhausted, so the selection fell back to the
+    // workspace's baked provider — visible only while that account sat above the threshold.
+    expect(headroomRecordFor({ provider: "codex", name: "default" }, map)).toBeUndefined();
+  });
+
+  it("still answers when the reading carries no provenance", () => {
+    const hand = headroom({ default: { usedPct: 12, stale: false } });
+    expect(headroomRecordFor({ provider: "codex", name: "default" }, hand)?.usedPct).toBe(12);
   });
 });

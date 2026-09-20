@@ -41,6 +41,15 @@ export interface ProfileHeadroom {
   usedPct: number | null;
   /** The measurement is older than one reset window — treat as unknown, not as exhausted. */
   stale?: boolean;
+  /**
+   * Which provider this reading is ABOUT, when it was minted under a bare profile name.
+   *
+   * A bare name is provider-ambiguous ("default" is a Claude login here and a codex
+   * profile there), so a bare-key hit whose provider disagrees with the ref asking for it
+   * is NOT an answer about that ref — see `headroomOf`. Absent = unknown provenance, which
+   * keeps the pre-existing behaviour for any map built by hand.
+   */
+  provider?: string;
 }
 
 /** The minimal shape of a `QuotaUsageResult` this module needs. */
@@ -70,7 +79,15 @@ export function headroomFromQuotaUsage(result: QuotaUsageLike | null | undefined
       (m) => m.periodMs === FIVE_HOURS_MS || /5[\s-]?h/i.test(m.label ?? ""),
     );
     const stale = entry.stale === true || entry.status === "unknown";
-    const headroom: ProfileHeadroom = { usedPct: stale ? null : metric?.percent ?? null, stale };
+    const headroom: ProfileHeadroom = {
+      usedPct: stale ? null : metric?.percent ?? null,
+      stale,
+      // This source reads CLAUDE profiles (the OAuth usage endpoint, per Claude login), so
+      // the bare key it publishes carries that provenance: without it a Bullseye policy for
+      // `codex:default` picked up the Claude `default` account's reading and was skipped as
+      // exhausted while codex had not been measured at all.
+      provider: "claude",
+    };
     out.set(entry.id, headroom);
     out.set(`claude:${entry.id}`, headroom);
   }
@@ -79,7 +96,7 @@ export function headroomFromQuotaUsage(result: QuotaUsageLike | null | undefined
 
 /** The reading for one ref: absent, stale and never-measured all mean `unknown`. */
 function headroomOf(entry: ProfileRef, headroom: Map<string, ProfileHeadroom> | null | undefined): number | null {
-  const rec = headroom?.get(profileRefId(entry)) ?? headroom?.get(entry.name);
+  const rec = headroomRecordFor(entry, headroom);
   if (!rec || rec.stale) return null;
   return typeof rec.usedPct === "number" && Number.isFinite(rec.usedPct) ? rec.usedPct : null;
 }
@@ -89,6 +106,24 @@ function headroomOf(entry: ProfileRef, headroom: Map<string, ProfileHeadroom> | 
  * declared order and come last — which is also why a board with NO quota source at all
  * gets exactly the historic list-order behaviour out of this function.
  */
+/**
+ * The record a `{provider, name}` ref may read, honouring the bare key's provenance.
+ *
+ * The qualified spelling always wins. The bare name is only accepted when the reading does
+ * not say which provider it is about, or says this one — a reading minted for `claude:x`
+ * must never answer for `codex:x`.
+ */
+export function headroomRecordFor(
+  entry: ProfileRef,
+  headroom: Map<string, ProfileHeadroom> | null | undefined,
+): ProfileHeadroom | undefined {
+  const qualified = headroom?.get(profileRefId(entry));
+  if (qualified) return qualified;
+  const bare = headroom?.get(entry.name);
+  if (!bare) return undefined;
+  return !bare.provider || bare.provider === entry.provider ? bare : undefined;
+}
+
 export function rankRosterEntries(
   entries: readonly RosterEntry[],
   headroom?: Map<string, ProfileHeadroom> | null,
