@@ -6,6 +6,7 @@ import * as gitService from "../git-service.js";
 import { notifyBoard } from "../notify.js";
 import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { setWorkspaceWorkingDir } from "@agentic-kanban/shared/lib/workspace-git-state";
+import { resolveWorktreeClaims } from "@agentic-kanban/shared/lib/worktree-claim";
 import { mcpJson, mcpStructuredError, requireEntity } from "../db-utils.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -93,7 +94,9 @@ export function registerReopenWorkspace(server: McpServer, deps: ToolDeps = prod
       }
 
       try {
-        const worktreePath = await gitService.createWorktree(project.repoPath, workspace.branch, baseBranch);
+        const worktreePath = await gitService.createWorktree(project.repoPath, workspace.branch, baseBranch, {
+          ...(await resolveWorktreeClaims(db, { label: "mcp-reopen-workspace" })),
+        });
 
         await setWorkspaceWorkingDir(db, workspaceId, worktreePath);
         await setWorkspaceStatus(db, workspaceId, "idle", { caller: "mcp:reopen_workspace" });
