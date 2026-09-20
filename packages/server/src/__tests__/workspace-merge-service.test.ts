@@ -629,6 +629,10 @@ describe("MergeService — retryable sessions recover from stale failed fix-and-
     const sessionManager = createMockSessionManager();
     const git = makeGit({
       getConflictingFiles: async () => ["src/foo.ts"],
+      // #1209: resolveConflicts now rebases the worktree onto base FIRST; a real
+      // conflict must be reported here so a session is spawned (default makeGit()
+      // returns a clean rebase, which would short-circuit to "rebase-clean").
+      rebaseOntoBase: async () => ({ success: false, conflictingFiles: ["src/foo.ts"] }),
     });
 
     const svc = createWorkspaceMergeService({
@@ -1193,5 +1197,81 @@ describe("MergeService — mergeWorkspaceDeduped deduplicates concurrent request
     // Proceeding past the dedup check means git's merge path was entered a second time (even
     // though it then blocks on the repo lock the first call still holds).
     await vi.waitFor(() => expect(mergeCallCount).toBeGreaterThanOrEqual(1), { timeout: 5000 });
+  });
+});
+
+// ─── #1209: resolveConflicts rebases the worktree onto base BEFORE spawning ────────────────
+
+describe("MergeService — resolveConflicts puts the worktree into the conflicted state first (#1209)", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  it("rebases onto base before spawning — a REAL conflict launches an agent with the conflicting files from the rebase", async () => {
+    const { workspaceId } = await seedWorkspace(db);
+    const sessionManager = createMockSessionManager();
+    const rebaseOntoBase = vi.fn(async () => ({ success: false, conflictingFiles: ["src/conflicted.ts"] }));
+    const git = makeGit({
+      rebaseOntoBase,
+      getConflictingFiles: async () => ["src/conflicted.ts"],
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      getSessionManager: () => sessionManager,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    const result = await svc.resolveConflicts(workspaceId);
+
+    // The rebase preflight ran BEFORE the agent was spawned.
+    expect(rebaseOntoBase).toHaveBeenCalledWith(
+      `${REPO_PATH}/.worktrees/feature_ak-548-test`,
+      "master",
+      "feature/ak-548-test",
+      expect.objectContaining({ preferLocalBase: true }),
+    );
+    expect(result).toMatchObject({ sessionId: expect.any(String) });
+    expect(sessionManager.startSession).toHaveBeenCalledTimes(1);
+    expect(sessionManager.startSession).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: expect.stringContaining("src/conflicted.ts") }),
+    );
+
+    const [workspace] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(workspace.status).toBe("fixing");
+  });
+
+  it("a rebase that completes CLEANLY resolves with no agent spawned — the #1199/#1186 regression", async () => {
+    // This is the exact bug: calling resolve-conflicts on a workspace with no rebase/merge
+    // in progress used to spawn an agent into a clean tree, which truthfully reported
+    // "nothing to resolve" and exited 0 — after which the branch STILL conflicted with
+    // master. Now the rebase itself either resolves it (this test) or leaves a genuine
+    // conflict for the agent (the test above); either way no agent sees a fabricated clean tree.
+    const { workspaceId } = await seedWorkspace(db, { readyForMerge: false });
+    const sessionManager = createMockSessionManager();
+    const git = makeGit({ rebaseOntoBase: async () => ({ success: true }) });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      getSessionManager: () => sessionManager,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    const result = await svc.resolveConflicts(workspaceId);
+
+    expect(result).toEqual({ resolved: "rebase-clean" });
+    expect(sessionManager.startSession).not.toHaveBeenCalled();
+
+    const [workspace] = await db
+      .select({ status: workspaces.status, readyForMerge: workspaces.readyForMerge })
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(workspace.status).toBe("idle");
+    expect(workspace.readyForMerge).toBe(true);
   });
 });

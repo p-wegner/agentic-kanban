@@ -336,3 +336,38 @@ export async function listRecentIssueComments(
     .orderBy(desc(issueComments.createdAt))
     .limit(opts.limit ?? 20);
 }
+
+/**
+ * #1209: the `headShaBeforeSession` a resolve-conflicts launch pinned on its own
+ * `fix-and-merge-launched` note, for the given session — so the exit handler can tell whether
+ * the session ever moved the branch tip off the mid-rebase HEAD it was launched into. Reads the
+ * NEWEST matching note for the (workspace, session) pair rather than assuming there is only one,
+ * since a workspace can be resolve-conflicts'd more than once across its lifetime.
+ */
+export async function getResolveConflictsLaunchSnapshot(
+  workspaceId: string,
+  sessionId: string,
+  database: Database = db,
+): Promise<{ headShaBeforeSession: string | null } | null> {
+  const rows = await database
+    .select({ payload: issueComments.payload })
+    .from(issueComments)
+    .where(and(eq(issueComments.workspaceId, workspaceId), eq(issueComments.kind, "merge-attempt")))
+    .orderBy(desc(issueComments.createdAt), desc(issueComments.id))
+    .limit(20);
+
+  for (const row of rows) {
+    if (!row.payload) continue;
+    try {
+      const parsed: unknown = JSON.parse(row.payload);
+      if (!parsed || typeof parsed !== "object") continue;
+      const payload = parsed as Record<string, unknown>;
+      if (payload.sessionId !== sessionId) continue;
+      const sha = payload.headShaBeforeSession;
+      return { headShaBeforeSession: typeof sha === "string" ? sha : null };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}

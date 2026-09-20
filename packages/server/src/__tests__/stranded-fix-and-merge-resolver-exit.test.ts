@@ -12,11 +12,18 @@
 const checkBranchTipIsAncestorMock = vi.hoisted(() => vi.fn());
 // #950: the landed path now tears the worktree down, so the git service must offer the removal.
 const removeWorktreeMock = vi.hoisted(() => vi.fn(async () => {}));
+// #1209: the resolve-noop check reads the worktree's post-session HEAD and re-checks
+// conflicts against base — both default to "not a no-op" (moved tip / no conflict) unless a
+// test overrides them.
+const revParseMock = vi.hoisted(() => vi.fn(async () => "after-sha"));
+const detectConflictsByBranchMock = vi.hoisted(() => vi.fn(async (): Promise<{ hasConflicts: boolean; conflictingFiles: string[] }> => ({ hasConflicts: false, conflictingFiles: [] })));
 vi.mock("../db/index.js", () => ({ db: {} }));
 vi.mock("../services/git.service.js", () => ({
   prepareForReview: vi.fn(async () => ({ success: true, diffRef: "master", conflictingFiles: [], uncommittedChanges: [] })),
   checkBranchTipIsAncestor: checkBranchTipIsAncestorMock,
   removeWorktree: removeWorktreeMock,
+  revParse: revParseMock,
+  detectConflictsByBranch: detectConflictsByBranchMock,
 }));
 // #950: the per-workspace Docker stack / devcontainer release must run BEFORE the directory goes.
 const releaseWorkspaceResourcesMock = vi.hoisted(() => vi.fn(async () => {}));
@@ -136,6 +143,8 @@ describe("exit-workflow: stranded fix-and-merge resolver (issue #764)", () => {
     emitButlerSystemEventMock.mockReset();
     removeWorktreeMock.mockClear();
     releaseWorkspaceResourcesMock.mockClear();
+    revParseMock.mockReset().mockResolvedValue("after-sha");
+    detectConflictsByBranchMock.mockReset().mockResolvedValue({ hasConflicts: false, conflictingFiles: [] });
   });
 
   it("keeps the workspace OPEN and idle (retryable) when the resolver exits but the branch did NOT land", async () => {
@@ -292,5 +301,142 @@ describe("exit-workflow: stranded fix-and-merge resolver (issue #764)", () => {
       .toBeLessThan(removeWorktreeMock.mock.invocationCallOrder[0]);
     // The column really is nulled — i.e. the teardown genuinely had to happen here.
     expect(ws.workingDir).toBeNull();
+  });
+});
+
+/**
+ * #1209: a resolve-conflicts session (`triggerType: "fix-conflicts"`) that exits 0 without ever
+ * moving the branch tip and whose branch STILL conflicts with base is a no-op, not a completed
+ * fix — retrying the merge on it just burns a gate cycle (the #1199/#1186 incidents this fix
+ * exists for). Recorded as a `resolve_noop`, never routed into `autoMerge`.
+ */
+describe("exit-workflow: resolve-conflicts no-op detection (#1209)", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+    checkBranchTipIsAncestorMock.mockReset();
+    emitButlerSystemEventMock.mockReset();
+    revParseMock.mockReset().mockResolvedValue("same-sha");
+    detectConflictsByBranchMock.mockReset().mockResolvedValue({ hasConflicts: false, conflictingFiles: [] });
+  });
+
+  /** Seed a `fixing` workspace with a `fix-conflicts` session and its pinned launch snapshot. */
+  async function seedResolveConflictsSession(
+    db: ReturnType<typeof createTestDb>["db"],
+    headShaBeforeSession: string | null,
+  ) {
+    const { projectId, issueId, workspaceId, sessionId } = await seedFixingWorkspace(db);
+    await db.update(sessions).set({ triggerType: "fix-conflicts" }).where(eq(sessions.id, sessionId));
+    const { issueComments } = await import("@agentic-kanban/shared/schema");
+    await db.insert(issueComments).values({
+      id: randomUUID(),
+      issueId,
+      workspaceId,
+      kind: "merge-attempt",
+      author: "system",
+      body: "Launched a resolve-conflicts session.",
+      payload: JSON.stringify({ eventType: "fix-and-merge-launched", sessionId, headShaBeforeSession }),
+      createdAt: new Date().toISOString(),
+      repeatCount: 1,
+    });
+    return { projectId, issueId, workspaceId, sessionId };
+  }
+
+  it("a no-op session (tip unchanged, still conflicts) is NOT retried — recorded resolve_noop and left idle/retryable", async () => {
+    const { projectId, workspaceId, sessionId } = await seedResolveConflictsSession(db, "same-sha");
+    // Branch tip after the session is IDENTICAL to before, and the branch still conflicts.
+    revParseMock.mockResolvedValue("same-sha");
+    detectConflictsByBranchMock.mockResolvedValue({ hasConflicts: true, conflictingFiles: ["src/foo.ts"] });
+    // Landing check (the #764 guard that always runs) also reports not-landed, consistent with a no-op.
+    checkBranchTipIsAncestorMock.mockResolvedValue({ isAncestor: false, branchSha: "same-sha", baseSha: "def" });
+
+    const boardEvents = makeBoardEvents();
+    const autoMerge = vi.fn(async () => {});
+    const engine = createWorkflowEngine({
+      sessionManager: makeSessionManager() as never,
+      boardEvents: boardEvents as never,
+      autoMerge,
+      database: db as never,
+    });
+    engine.fixAndMergeSessionIds.add(sessionId);
+
+    await engine.runWorkflowOnExit(workspaceId, sessionId, /* exitCode */ 0);
+
+    // The crux: autoMerge (which would run the expensive gate) is never called.
+    expect(autoMerge).not.toHaveBeenCalled();
+
+    const ws = await getWorkspace(db, workspaceId);
+    expect(ws.status).toBe("idle");
+    expect(ws.readyForMerge).toBe(false);
+
+    expect(emitButlerSystemEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId, workspaceId, kind: "merge_failed" }),
+    );
+  });
+
+  it("a session that MOVED the branch tip is retried normally (not a no-op)", async () => {
+    const { workspaceId, sessionId } = await seedResolveConflictsSession(db, "before-sha");
+    // The agent actually did something: the tip moved.
+    revParseMock.mockResolvedValue("after-sha-moved");
+    detectConflictsByBranchMock.mockResolvedValue({ hasConflicts: true, conflictingFiles: ["src/foo.ts"] });
+    checkBranchTipIsAncestorMock.mockResolvedValue({ isAncestor: false, branchSha: "after-sha-moved", baseSha: "def" });
+
+    const autoMerge = vi.fn(async () => {});
+    const engine = createWorkflowEngine({
+      sessionManager: makeSessionManager() as never,
+      boardEvents: makeBoardEvents() as never,
+      autoMerge,
+      database: db as never,
+    });
+    engine.fixAndMergeSessionIds.add(sessionId);
+
+    await engine.runWorkflowOnExit(workspaceId, sessionId, 0);
+
+    // Not a no-op: the merge retry runs as usual.
+    expect(autoMerge).toHaveBeenCalledTimes(1);
+  });
+
+  it("a session that resolved the conflict (tip unchanged but no longer conflicting) is retried normally", async () => {
+    const { workspaceId, sessionId } = await seedResolveConflictsSession(db, "same-sha");
+    revParseMock.mockResolvedValue("same-sha");
+    // Tip happens to be unchanged (e.g. an empty commit was amended away), but the conflict is gone.
+    detectConflictsByBranchMock.mockResolvedValue({ hasConflicts: false, conflictingFiles: [] });
+    checkBranchTipIsAncestorMock.mockResolvedValue({ isAncestor: true, branchSha: "same-sha", baseSha: "same-sha" });
+
+    const autoMerge = vi.fn(async () => {});
+    const engine = createWorkflowEngine({
+      sessionManager: makeSessionManager() as never,
+      boardEvents: makeBoardEvents() as never,
+      autoMerge,
+      database: db as never,
+    });
+    engine.fixAndMergeSessionIds.add(sessionId);
+
+    await engine.runWorkflowOnExit(workspaceId, sessionId, 0);
+
+    expect(autoMerge).toHaveBeenCalledTimes(1);
+  });
+
+  it("a plain fix-and-merge session (not fix-conflicts) is never treated as a resolve-noop", async () => {
+    // triggerType stays "fix-and-merge" (seedFixingWorkspace's default) — the noop check must
+    // be scoped to resolve-conflicts sessions only.
+    const { workspaceId, sessionId } = await seedFixingWorkspace(db);
+    revParseMock.mockResolvedValue("same-sha");
+    detectConflictsByBranchMock.mockResolvedValue({ hasConflicts: true, conflictingFiles: ["src/foo.ts"] });
+    checkBranchTipIsAncestorMock.mockResolvedValue({ isAncestor: false, branchSha: "same-sha", baseSha: "def" });
+
+    const autoMerge = vi.fn(async () => {});
+    const engine = createWorkflowEngine({
+      sessionManager: makeSessionManager() as never,
+      boardEvents: makeBoardEvents() as never,
+      autoMerge,
+      database: db as never,
+    });
+    engine.fixAndMergeSessionIds.add(sessionId);
+
+    await engine.runWorkflowOnExit(workspaceId, sessionId, 0);
+
+    expect(autoMerge).toHaveBeenCalledTimes(1);
   });
 });
