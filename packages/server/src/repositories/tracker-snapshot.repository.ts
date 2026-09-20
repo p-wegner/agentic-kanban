@@ -1,7 +1,9 @@
-import { workspaces, issues, projectStatuses, sessions } from "@agentic-kanban/shared/schema";
-import { eq, and, desc, inArray } from "drizzle-orm";
+import { workspaces, issues, projectStatuses } from "@agentic-kanban/shared/schema";
+import { eq, and, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { listProjectStatusIdNames } from "./project-status.repository.js";
+import { getLatestSessionByWorkspace } from "./session/lifecycle.js";
 import { TERMINAL_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 /** Per-status ticket counts for a project, in column order (#1140). */
@@ -9,11 +11,9 @@ export async function getTrackerColumnCounts(
   projectId: string,
   database: Database = db,
 ) {
-  const statuses = await database
-    .select({ id: projectStatuses.id, name: projectStatuses.name })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId))
-    .orderBy(projectStatuses.sortOrder);
+  // Delegated rather than re-spelled: `project_statuses` is that repository's table and the
+  // accessor already orders by `sortOrder`, which is the column order this snapshot wants (#1213).
+  const statuses = await listProjectStatusIdNames(projectId, database);
 
   const issueRows = await database
     .select({ statusId: issues.statusId })
@@ -73,33 +73,6 @@ export async function listTrackerWorkspaceRows(
     ...row,
     latestSession: latestSessionByWorkspace.get(row.workspaceId) ?? null,
   }));
-}
-
-async function getLatestSessionByWorkspace(
-  workspaceIds: string[],
-  database: Database,
-): Promise<Map<string, { status: string; startedAt: string; endedAt: string | null }>> {
-  const result = new Map<string, { status: string; startedAt: string; endedAt: string | null }>();
-  if (workspaceIds.length === 0) return result;
-
-  const rows = await database
-    .select({
-      workspaceId: sessions.workspaceId,
-      status: sessions.status,
-      startedAt: sessions.startedAt,
-      endedAt: sessions.endedAt,
-    })
-    .from(sessions)
-    .where(inArray(sessions.workspaceId, workspaceIds))
-    .orderBy(desc(sessions.startedAt));
-
-  // Rows arrive newest-first per the ORDER BY; keep only the first sighting per workspace.
-  for (const row of rows) {
-    if (!result.has(row.workspaceId)) {
-      result.set(row.workspaceId, { status: row.status, startedAt: row.startedAt, endedAt: row.endedAt });
-    }
-  }
-  return result;
 }
 
 /** Count of workspaces in review-ish states or flagged ready to merge, for a project (#1140). */

@@ -27,6 +27,28 @@ vi.mock("@agentic-kanban/shared/lib/setup-script", () => ({
   runSetupScript: (...args: unknown[]) => runSetupScript(...args),
 }));
 
+// #1213 — same host-sensitivity #1196 pinned in `base-branch-health-recency.test.ts`: the sweep's
+// due-decision reads the HOST before it reads the clock (`resolveBaseHealthProbeDue` samples free
+// RAM and 150 ms of CPU, #1009/#1173, and asks the machine verify lock, #957). Any of them can
+// answer "hold" on a loaded box, and then "does not start a probe while a merge gate holds the
+// build semaphore (#931)" fails on `expect(cloneDests).toHaveLength(1)` — the probe was withheld
+// for `host_saturated`/`gate_running`, not by the code under test. Measured here: it failed 1 run
+// in 3 even ALONE at --maxWorkers=1. These cases are about the in-flight/semaphore guards, so the
+// host is pinned roomy and the lock switched off; `base-health-host-floor.test.ts` still covers
+// the saturation branch itself.
+vi.mock("@agentic-kanban/shared/lib/machine-capacity", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    readTier0Capacity: () => ({ tier: "0", hold: false, reason: "test: pinned roomy", freeGb: 16 }),
+    readCpuBusyPct: async () => 0,
+  };
+});
+vi.mock("../lib/machine-verify-lock.js", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, machineVerifyLockEnabled: () => false };
+});
+
 /** Every clone destination the probe asked for, in call order. */
 const cloneDests: string[] = [];
 const cloneBranchTo = vi.fn(async (_repo: string, _branch: string, dest: string) => {

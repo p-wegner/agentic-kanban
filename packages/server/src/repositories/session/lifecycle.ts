@@ -1,5 +1,5 @@
 import { sessions, agentSkills, workspaces, issues, projects } from "@agentic-kanban/shared/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, inArray } from "drizzle-orm";
 import { db } from "../../db/index.js";
 import type { Database } from "../../db/index.js";
 import { firstRow } from "../../lib/first-row.js";
@@ -190,4 +190,37 @@ export async function getLatestSessionIdForWorkspace(
       .orderBy(desc(sessions.startedAt))
       .limit(1)
   ))?.id ?? null;
+}
+
+/**
+ * The latest session's status/timestamps per workspace, for a batch of workspace ids
+ * (#1213). One query, newest-first, first sighting per workspace wins — no per-workspace
+ * fan-out. Lives here because `sessions` is this aggregate's table: the tracker snapshot
+ * repository delegates to this accessor instead of selecting from `sessions` itself.
+ */
+export async function getLatestSessionByWorkspace(
+  workspaceIds: string[],
+  database: Database = db,
+): Promise<Map<string, { status: string; startedAt: string; endedAt: string | null }>> {
+  const result = new Map<string, { status: string; startedAt: string; endedAt: string | null }>();
+  if (workspaceIds.length === 0) return result;
+
+  const rows = await database
+    .select({
+      workspaceId: sessions.workspaceId,
+      status: sessions.status,
+      startedAt: sessions.startedAt,
+      endedAt: sessions.endedAt,
+    })
+    .from(sessions)
+    .where(inArray(sessions.workspaceId, workspaceIds))
+    .orderBy(desc(sessions.startedAt));
+
+  // Rows arrive newest-first per the ORDER BY; keep only the first sighting per workspace.
+  for (const row of rows) {
+    if (!result.has(row.workspaceId)) {
+      result.set(row.workspaceId, { status: row.status, startedAt: row.startedAt, endedAt: row.endedAt });
+    }
+  }
+  return result;
 }
