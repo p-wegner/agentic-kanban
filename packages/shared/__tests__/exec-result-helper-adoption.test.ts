@@ -111,6 +111,12 @@ const ALLOWED: Record<string, [count: number, why: string]> = {
     "`allowedExitCodes.includes(code)` — a bisect step's caller declares WHICH non-zero exits " +
       "are expected, so the raw number is the datum and 'did it succeed' is the wrong question",
   ],
+  "server/src/startup/commit-msg-hook-backfill.ts": [
+    2,
+    "`git config --get` exits 1 for an unset key, which is a legitimate answer, not a failure — " +
+      "so both 0 and 1 are expected outcomes and only some OTHER code means git itself misbehaved; " +
+      "no execSucceeded/execFailedToRun call expresses that three-way read",
+  ],
 };
 
 interface ExecBindings {

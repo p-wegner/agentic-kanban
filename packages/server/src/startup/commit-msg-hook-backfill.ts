@@ -25,7 +25,7 @@ import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
-import { installCommitMsgHook } from "../services/workspace-provision.service.js";
+import { installCommitMsgHook } from "../services/commit-msg-hook.js";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
 /** Hourly: the population only grows when a workspace is created, and creation installs its own. */
