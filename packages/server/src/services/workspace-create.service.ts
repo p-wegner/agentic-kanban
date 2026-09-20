@@ -64,7 +64,8 @@ import {
   type CreateWorkspaceResult,
   type GitService,
 } from "./workspace-internals.js";
-import { createWorkspaceProvisionService, installAndReportCommitMsgHook } from "./workspace-provision.service.js";
+import { createWorkspaceProvisionService } from "./workspace-provision.service.js";
+import { installAndReportCommitMsgHook } from "./commit-msg-hook.js";
 import { createLaunchPreviewService } from "./workspace-launch-preview.service.js";
 import { getIssueReposTouched } from "./repo-tags.service.js";
 import {
@@ -875,12 +876,8 @@ export function createWorkspaceCreateService(deps: {
       // #976 - installed for EVERY worktree, not only TDD ones: the BOM half of the hook is
       // what stops builders writing an invisible `EF BB BF` into commit subjects, and that is
       // not a TDD concern. The TDD gate is still conditional, inside the one hook git allows.
-      if (worktreePath) {
-        // #1214 — the verdict is logged either way (hence the `...AndReport` spelling): the
-        // install was silent before, which is how it went unnoticed that it had never once
-        // succeeded in a linked worktree, where every builder lives.
-        await installAndReportCommitMsgHook(worktreePath, { tddMode });
-      }
+      // #1214 — logs the verdict either way, which the old silent install never did.
+      if (worktreePath) await installAndReportCommitMsgHook(worktreePath, { tddMode });
 
       timing("total", phaseStart);
 

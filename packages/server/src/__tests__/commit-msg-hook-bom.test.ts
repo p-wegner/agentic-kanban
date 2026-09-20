@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from "no
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
-import { installCommitMsgHook, buildCommitMsgHookScript } from "../services/workspace-provision.service.js";
+import { installCommitMsgHook, buildCommitMsgHookScript } from "../services/commit-msg-hook.js";
 
 /**
  * #976 — the `commit-msg` hook every worktree now gets — and #1214, which is the reason it
