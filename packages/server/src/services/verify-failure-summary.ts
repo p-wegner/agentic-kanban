@@ -120,6 +120,36 @@ function detectSilentVerifyDeath(body: string): { leadLine: string } | null {
 }
 
 /**
+ * The god-module gate's own self-report when it degraded to a regex heuristic because
+ * `typescript` was not installed in the worktree (#1149) — `scripts/check-god-modules.mjs`
+ * prints this verbatim and exits a distinct code (3) rather than 1 when a cohesion finding was
+ * the ONLY reason it would otherwise fail.
+ */
+const GOD_MODULE_GATE_DEGRADED_SIGNATURE = /\[god-module gate\]\s+UNVERIFIED\s+—\s+typescript is not installed/i;
+
+/**
+ * Detects the #1149 shape: a worktree whose `node_modules` never got `typescript` installed
+ * made the god-module gate fall back to a regex heuristic for its cohesion count, and that
+ * heuristic can misjudge a file's declaration count. Reporting the resulting finding as an
+ * ordinary red gate is indistinguishable from a real architecture violation — a builder was
+ * once told to fix a ceiling breach that did not exist while the branch's REAL problem (a
+ * genuine complexity regression) went unmentioned. This must lead the message, ahead of the
+ * raw gate output, so "typescript is missing, install it" is the first thing read rather than
+ * something a human has to notice buried in the tail.
+ */
+function detectGodModuleGateDegraded(body: string): { leadLine: string } | null {
+  if (!GOD_MODULE_GATE_DEGRADED_SIGNATURE.test(body)) return null;
+  return {
+    leadLine:
+      "UNVERIFIED (degraded): the god-module gate could not verify this worktree — `typescript` " +
+      "is not installed, so its cohesion count fell back to a regex heuristic that can misjudge " +
+      "a file's finding. This is NOT proof of an architecture violation. Run `pnpm install -r` " +
+      "in this worktree and re-run the gate for a trustworthy verdict; any OTHER failure named " +
+      "below (line ceiling, branch complexity) is unaffected and still real.",
+  };
+}
+
+/**
  * Detects a runner CRASH distinct from a real test failure (#490): a non-zero exit whose
  * `Test Files` summary names ZERO failures (or reports fewer files than it started with, or
  * carries a worker-crash marker) — the shape that reads as "flaky, just retry" when it is
@@ -199,10 +229,13 @@ export function summarizeVerifyFailure(
   // to) can occur ANYWHERE in the log, not just the tail, and the tail itself ends with a
   // passing-looking summary. Lift the crash verdict OUT and put it FIRST, ahead of that summary,
   // instead of leaving it to be scrolled past or truncated away entirely.
-  // Order matters: a worker crash is a run that got far enough to report SOMETHING, so it is
-  // the more specific verdict and wins. `detectSilentVerifyDeath` is the fallback for a run
+  // Order matters: the god-module degradation is checked FIRST — it is a distinct, self-declared
+  // signal (`[god-module gate] UNVERIFIED`, #1149) rather than an inference from shape the way
+  // the crash/silent-death detectors below are, so it should never be shadowed by either. A
+  // worker crash is a run that got far enough to report SOMETHING, so it is the more specific
+  // verdict of the remaining two and wins; `detectSilentVerifyDeath` is the fallback for a run
   // that reported nothing at all.
-  const crash = detectVerifyCrash(body) ?? detectSilentVerifyDeath(body);
+  const crash = detectGodModuleGateDegraded(body) ?? detectVerifyCrash(body) ?? detectSilentVerifyDeath(body);
   const message = crash ? `${crash.leadLine}\n\n${tail}` : tail;
   return `${message}${logPath ? `\n[full verify log: ${logPath}]` : ""}`;
 }
