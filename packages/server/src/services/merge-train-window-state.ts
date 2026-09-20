@@ -24,7 +24,7 @@ export type { PersistedMergeTrainWindow };
 export const trainWindowPref = projectPref("train_window");
 
 const RELEASE_REASONS = new Set(["max_size", "max_wait", "gate_busy_grace_elapsed", "operator_release"]);
-const HOLD_REASONS = new Set(["accumulating", "gate_busy", "held", "live_train"]);
+const HOLD_REASONS = new Set(["accumulating", "gate_busy", "held", "live_train", "base_red"]);
 
 function isIsoString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && Number.isFinite(new Date(value).getTime());
