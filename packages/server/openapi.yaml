@@ -2793,10 +2793,15 @@ paths:
            *
            * #1153 — the only remedy an operator had for a stranded train was a full server restart
            * (the reconciler resumes an `assembling`/`gating` row otherwise). Marks the row `abandoned`
-           * with a reason; the in-flight run (if the process holding it is still alive) is not
-           * interrupted — there is no cancellation token for it — but `finishMergeTrain` checks for
-           * `abandoned` before overwriting it, and no NEW train will be assembled for this project while
-           * one is in an unfinished state, so cancelling is what unblocks that.
+           * with a reason.
+           *
+           * #1203 — this now ALSO aborts the in-flight job when this process is running it
+           * (`abortLiveMergeTrain`): the bisect driver refuses to start another attempt once the signal
+           * is set, and the currently-running gate/install child process is killed rather than left to
+           * run to completion. `finishMergeTrain` still checks for `abandoned` before overwriting it (a
+           * cross-process defence, and a defence against a race between this route and an attempt that
+           * had already passed its signal check the instant before abort() fired), and no NEW train
+           * will be assembled for this project while one is in an unfinished state.
       tags:
         - merge-queue
       operationId: post_api_merge-queue_trains_id_cancel
