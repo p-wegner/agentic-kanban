@@ -276,6 +276,7 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start({ db, boardEvents, getSessionManager }) {
       const queueService = createMergeQueueService({ database: db, boardEvents, getSessionManager });
       startMergeTrainReconciler({
+        database: db,
         // Re-run the batch for the stranded row's member set. `executeQueue` re-derives the
         // plan from the workspace ids and re-enters `runTrainStrategy` via the normal
         // `strategy: "train"` dispatch — the same path a fresh request takes. Without this,
