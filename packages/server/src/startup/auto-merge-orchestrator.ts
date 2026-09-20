@@ -38,6 +38,7 @@ import {
   releaseBatches,
 } from "../services/merge-release-partition.js";
 import { reconcileCompletionStates } from "./completion-state-reconciler.js";
+import { startManualReview } from "../services/review.service.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { reconcileDriveCompletion } from "./drive-completion-reconciler.js";
 import { reconcileProjectCompletion } from "./project-completion-reconciler.js";
@@ -165,8 +166,14 @@ export function createAutoMergeOrchestrator(deps: {
    * real repo on disk. Production wires `resolveBaseRedVeto`.
    */
   checkBaseRedVeto?: (projectId: string) => Promise<BaseRedVeto | null>;
+  /**
+   * #1212 — the in-memory review-session id set owned by the workflow engine. Present only so
+   * `reconcileCompletionStates` can re-queue a review it had to reap; absent means that pass
+   * reports the re-queue as impossible rather than doing it silently.
+   */
+  reviewSessionIds?: Set<string>;
 }) {
-  const { database, boardEvents, getSessionManager } = deps;
+  const { database, boardEvents, getSessionManager, reviewSessionIds } = deps;
   const reconcileFallbackEveryTicks = deps.reconcileFallbackEveryTicks ?? RECONCILE_FALLBACK_EVERY_TICKS;
   const checkBaseRedVeto = deps.checkBaseRedVeto ?? ((projectId: string) => resolveBaseRedVeto(projectId, database));
   /** Counts effective runOnce passes; drives the zero-candidate reconcile fallback. */
@@ -555,7 +562,15 @@ export function createAutoMergeOrchestrator(deps: {
    * merge cycle around it down.
    */
   async function runDriftHealingPasses(): Promise<void> {
-    const reconciled = await reconcileCompletionStates(database);
+    const reconciled = await reconcileCompletionStates(database, {
+      // #1212 — the same door `POST /api/workspaces/:id/review` uses, injected rather than
+      // called over self-HTTP (`packages/server/CLAUDE.md`).
+      requeueReview:
+        boardEvents && getSessionManager && reviewSessionIds
+          ? (workspaceId) =>
+              startManualReview(database, getSessionManager, boardEvents, reviewSessionIds, workspaceId, false)
+          : undefined,
+    });
     if (reconciled > 0) {
       console.log(`[auto-merge] reconcileCompletionStates: unblocked ${reconciled} stuck workspace(s)`);
     }
@@ -733,6 +748,7 @@ export function startAutoMergeOrchestrator(deps: {
   database: Database;
   boardEvents?: BoardEventSink;
   getSessionManager?: () => SessionManager;
+  reviewSessionIds?: Set<string>;
   intervalMs?: number;
 }): AutoMergeOrchestratorState {
   stopAutoMergeOrchestrator();
