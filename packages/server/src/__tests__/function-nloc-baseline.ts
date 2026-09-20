@@ -267,6 +267,17 @@
  * route in this factory — one more `router.post(...)` block — not extractable without pulling
  * the whole per-route body out of the one factory that registers all of `/api/issues`, which is
  * the `createXRoute` architecture this file's header already names rather than a tangle.
+ *
+ * -- Fourteenth disclosed movement (2026-09-20, #1214 per-worktree commit-msg hook) ---
+ *
+ *   services/workspace-provision.service.ts::createWorkspaceProvisionService  409 -> 394  (-15)
+ *   services/workspace-create.service.ts::createWorkspaceCreateService        645 -> 644  (-1)
+ *
+ * Both SHRINKS, banked here rather than kept as budget. `installCommitMsgHook` left the
+ * factory closure: it needs neither `database` nor `gitService`, and the #1214 backfill sweep
+ * has to call it without instantiating a provisioning service. The create factory lost the
+ * destructured name with it, calling the module-level `installAndReportCommitMsgHook` instead.
+ * Neither factory changed behaviour; both still want splitting for their own sake.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 718 -> 720, a DISCLOSED raise (#1107, landed 2026-09-12 in d90659d081). `issue get` gained
@@ -286,7 +297,8 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // in the board. It is still the largest entry in this ring and still wants splitting.
   // 635 -> 641 (#1025) -> 644 (#1026) -> 645 (#1108), disclosed in the seventh, eighth and
   // eleventh movements above.
-  "services/workspace-create.service.ts::createWorkspaceCreateService": 645,
+  // 645 -> 644 (#1214), a SHRINK banked per the fourteenth movement above.
+  "services/workspace-create.service.ts::createWorkspaceCreateService": 644,
   // 616 -> 629 (#1108), disclosed in the eleventh movement above.
   "services/issue.service.ts::createIssueService": 629,
   // 618 -> 620 (#968), disclosed in the sixth movement above.
@@ -344,7 +356,8 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // `workspace-session.service.ts` can share the exact same logic without this factory
   // re-growing every time that shared logic changes. The factory now holds thin delegators.
   // 393 -> 407 (#1025) -> 409 (#1026), disclosed in the seventh and eighth movements above.
-  "services/workspace-provision.service.ts::createWorkspaceProvisionService": 409,
+  // 409 -> 394 (#1214), a SHRINK banked per the fourteenth movement above.
+  "services/workspace-provision.service.ts::createWorkspaceProvisionService": 394,
   // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.
   "routes/workspace-actions.ts::createWorkspaceActionsRoute": 384,
   // 349 -> 351 (#841): POSIX-only `detached: true` for a shell launch, closing the #836 gap.

@@ -109,6 +109,7 @@ describe("every background sweep is registered (#584)", () => {
       "worker-health-probe",
       "stale-temp-sweeper",
       "non-blocking-setup-retry-reconciler",
+      "commit-msg-hook-backfill",
     ]);
   });
 
