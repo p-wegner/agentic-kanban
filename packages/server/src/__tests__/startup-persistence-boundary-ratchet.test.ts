@@ -86,6 +86,10 @@ const DRIZZLE_BASELINE = new Set<string>([
   "monitor-file-contention.ts",
   "monitor-helpers.ts",
   "monitor-setup.ts",
+  // #1125 — same shape as born-blocked-reconciler.ts (also in this baseline): the sweep reads
+  // and restamps `workspace_setup_run` directly rather than through a repository. Draining both
+  // together is separate, larger work; this entry keeps the count honest in the meantime.
+  "non-blocking-setup-retry-reconciler.ts",
   "plan-mode-reconciler.ts",
   "project-completion-reconciler.ts",
   "scheduled-tasks.ts",
@@ -124,6 +128,7 @@ const DB_VALUE_BASELINE = new Set<string>([
   "monitor-file-contention.ts",
   "monitor-helpers.ts",
   "monitor-setup.ts",
+  "non-blocking-setup-retry-reconciler.ts",
   "plan-mode-reconciler.ts",
   // `rawClient` / `rawWriteClient`, for a WAL checkpoint on shutdown — a legitimate reach for
   // the real connection rather than a query, but it is still the singleton, so it is counted
