@@ -57,9 +57,6 @@ export type * from "./container-dep-volumes.js";
 // Type-only: machine-capacity.ts imports node:os/node:child_process. Same #791 rule —
 // runtime via the deep path (@agentic-kanban/shared/lib/machine-capacity) server-side.
 export type * from "./machine-capacity.js";
-// Type-only: herdr-exec.ts imports node:child_process. Same #791 rule — runtime via
-// the deep path (@agentic-kanban/shared/lib/herdr-exec) server-side.
-export type * from "./herdr-exec.js";
 export * from "./butler-scope.js";
 // Docs-only diff detection (#198) — pure string logic, no Node builtins.
 export * from "./docs-only-diff.js";
