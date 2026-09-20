@@ -155,6 +155,26 @@ export declare function checkPromoteDirection(input: {
   shaIsDescendant: boolean;
 }): PromoteDirection;
 
+// --- the restart-only door (#1202) ------------------------------------------------------------
+
+export declare function formatRestartRefusal(input: {
+  pid: string;
+  port: number;
+  commandLine?: string | null;
+  maxLen?: number;
+}): string;
+
+export interface RestartOnlyDecision {
+  ok: boolean;
+  code: 0 | 2;
+  detail: string;
+  lines: string[];
+}
+export declare function planRestartOnly(input?: {
+  port: number;
+  owners?: { pid: string; commandLine?: string | null }[];
+}): RestartOnlyDecision;
+
 // --- the recovery lane (#1054) ---------------------------------------------------------------
 
 export declare const RECOVERY_STATE_RELPATH: string;

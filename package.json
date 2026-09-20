@@ -57,6 +57,7 @@
     "test:docker": "pnpm --filter agentic-kanban test:docker",
     "smoke:boot-dist": "node scripts/boot-dist-smoke.mjs",
     "promote": "node scripts/promote.mjs",
+    "stable:start": "node scripts/promote.mjs --restart-stable",
     "test:unit": "pnpm test",
     "test:server": "pnpm --filter agentic-kanban test",
     "test:client": "pnpm --filter client test",

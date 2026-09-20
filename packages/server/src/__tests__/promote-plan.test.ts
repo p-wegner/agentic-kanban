@@ -18,6 +18,8 @@ import {
   isFreshSweepRow,
   isProbingThisProject,
   planSweepAcquisition,
+  planRestartOnly,
+  formatRestartRefusal,
   planRecoveryLane,
   classifyRecoveryDelta,
   buildRecoveryRecord,
@@ -488,6 +490,70 @@ describe("checkPromoteDirection", () => {
 
   it("does not block when a sha could not be read at all", () => {
     expect(checkPromoteDirection({ stableHead: "", sha: "abc", shaIsDescendant: false }).ok).toBe(true);
+  });
+});
+
+// --- the restart-only door (#1202) ------------------------------------------------------------
+
+describe("formatRestartRefusal", () => {
+  it("names the pid, the port, and the command line", () => {
+    expect(formatRestartRefusal({ pid: "4242", port: 3001, commandLine: "node dist/cli/index.js dev" })).toBe(
+      "refused: 4242 already serves 3001 (node dist/cli/index.js dev)",
+    );
+  });
+
+  it("says so when the command line could not be read, rather than printing an empty parenthesis", () => {
+    expect(formatRestartRefusal({ pid: "4242", port: 3001, commandLine: "" })).toBe(
+      "refused: 4242 already serves 3001 (<command line unavailable>)",
+    );
+  });
+
+  it("truncates a very long command line instead of blowing up a log line", () => {
+    const long = "node " + "x".repeat(300);
+    const line = formatRestartRefusal({ pid: "1", port: 3001, commandLine: long });
+    expect(line).toContain("...");
+    expect(line.length).toBeLessThan(long.length);
+  });
+});
+
+describe("planRestartOnly (#1202)", () => {
+  it("REFUSES without spawning when a pid already holds the port — whether or not it is the stable board's own", () => {
+    const heldByStable = planRestartOnly({
+      port: 3001,
+      owners: [{ pid: "100", commandLine: "node C:/stable/packages/server/dist/cli/index.js dev" }],
+    });
+    expect(heldByStable.ok).toBe(false);
+    expect(heldByStable.code).toBe(2);
+    expect(heldByStable.lines).toEqual(["refused: 100 already serves 3001 (node C:/stable/packages/server/dist/cli/index.js dev)"]);
+
+    const heldByOther = planRestartOnly({ port: 3001, owners: [{ pid: "200", commandLine: "some-other-process" }] });
+    expect(heldByOther.ok).toBe(false);
+    expect(heldByOther.code).toBe(2);
+    expect(heldByOther.lines[0]).toContain("refused: 200 already serves 3001");
+  });
+
+  it("reports every owning pid, not just the first, when several answer the port", () => {
+    const d = planRestartOnly({
+      port: 3001,
+      owners: [
+        { pid: "100", commandLine: "a" },
+        { pid: "101", commandLine: "b" },
+      ],
+    });
+    expect(d.lines).toHaveLength(2);
+    expect(d.detail).toContain("100");
+    expect(d.detail).toContain("101");
+  });
+
+  it("permits a start (the caller's cue to spawn) when nothing listens on the port", () => {
+    const d = planRestartOnly({ port: 3001, owners: [] });
+    expect(d.ok).toBe(true);
+    expect(d.code).toBe(0);
+    expect(d.lines).toEqual([]);
+  });
+
+  it("defaults owners to empty, so a bare call also permits a start", () => {
+    expect(planRestartOnly({ port: 3001 }).ok).toBe(true);
   });
 });
 

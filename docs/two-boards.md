@@ -84,6 +84,19 @@ Register fixtures from `C:\projects\andrena\exp\` with `pnpm cli -- register <pa
 
 ## 2. The stable board — built artifact, pinned DB
 
+**After a reboot, `pnpm stable:start` is the sanctioned door** (#1202,
+`node scripts/promote.mjs --restart-stable`) — it starts the ALREADY-DEPLOYED tag with none of a
+promotion's other work: no sweep is read, no tag is minted, nothing is fetched, fast-forwarded,
+built or migrated. It refuses (exit 2, nothing spawned) if the port is already held, using the
+same `planPortOwnerKill` signature check `pnpm promote` uses to stop the board — but this door
+never kills whatever it finds there. Every run — refused or started — is logged to
+`.kanban/promote.log` as a `restart-only` line, so the Sentinel sees it. `--dry-run` previews
+without touching anything. Reach for a full `pnpm promote` only when you actually want to move
+the stable checkout onto new code; reach for this after the box came back up and 3001 did not.
+
+The commands below are what that door runs under the hood — useful for understanding what it
+does, or as a manual fallback if the script itself is unavailable, but not the sanctioned path:
+
 ```bash
 git -C <stable checkout> fetch origin --tags
 git -C <stable checkout> checkout stable
@@ -478,6 +491,14 @@ dev --port <port> --no-open` — which is what `pnpm --filter agentic-kanban sta
 spawned as `node` so the process command line carries the stable checkout's path and the stop
 step above can recognise it next time. `windowsHide: true`, `detached` + `unref`, stdio into
 `.kanban/board.log`: headless, no window flash, and it outlives the promoting shell.
+
+**`pnpm stable:start` (#1202) reuses exactly this start step and the same signature check on the
+STOP side of the decision, without ever calling stop.** It runs the same listener lookup and the
+same `planPortOwnerKill` check the paragraph above describes, but only to decide whether to
+refuse — a pid already on the port is always a refusal here, never a kill, whether or not it
+turns out to belong to the stable checkout. That is what makes it a door a reboot can use even
+when nobody is sure the board is really down: worst case it refuses and says who is already
+there. See §2 for the day-to-day framing.
 
 ### The two logs — and why they are two
 

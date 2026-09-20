@@ -71,8 +71,11 @@ from this page.** Full runbook + operator cutover checklist: `docs/two-boards.md
 
 **Do not start or stop the stable board by hand from here.** `pnpm promote` owns its lifecycle —
 it stops the listener on 3001 through the same `planPortOwnerKill` signature guard this skill uses,
-rebuilds, restarts the built artifact detached, and smoke-tests it (`docs/two-boards.md` §8). Steps
-3 and 4 below are for the DEV board and for worktree servers.
+rebuilds, restarts the built artifact detached, and smoke-tests it (`docs/two-boards.md` §8). If
+3001 is simply down after a reboot and nothing needs to be rebuilt or redeployed, `pnpm stable:start`
+(#1202, `docs/two-boards.md` §2) is the restart-only door — it starts the already-deployed tag and
+refuses without spawning if the port is already held; it is not another way to promote. Steps 3 and
+4 below are for the DEV board and for worktree servers.
 
 ## Step 1 — Determine ports
 
