@@ -25,6 +25,14 @@ export interface LiveMergeTrain {
   projectId: string;
   /** Epoch ms when the job registered — for the "live (age Nm)" log line. */
   registeredAtMs: number;
+  /**
+   * #1203 — the real cancellation token for this job. `runTrainStrategy` creates one when it
+   * registers the row and passes its `signal` into `runMergeTrain`, so an operator cancel can
+   * `.abort()` this controller and have the in-flight gate's child process killed and the
+   * bisect driver refuse to start another attempt, instead of only marking the DB row
+   * `abandoned` while the job keeps running to completion (the #1153 gap).
+   */
+  abortController: AbortController;
 }
 
 /** Read-only view of the registry a sweep decides against. */
@@ -32,19 +40,40 @@ export type LiveMergeTrainSnapshot = ReadonlyMap<string, LiveMergeTrain>;
 
 const live = new Map<string, LiveMergeTrain>();
 
-/** Register a train job as live. Idempotent for the same id (a re-register refreshes the entry). */
-export function registerLiveMergeTrain(entry: { trainId: string; label: string; projectId: string; nowMs?: number }): void {
+/**
+ * Register a train job as live. Idempotent for the same id (a re-register refreshes the entry
+ * and mints a FRESH abort controller — a stale one from a previous registration of the same id
+ * must never be reused, since its `abort()` may already have fired).
+ */
+export function registerLiveMergeTrain(entry: { trainId: string; label: string; projectId: string; nowMs?: number }): AbortController {
+  const abortController = new AbortController();
   live.set(entry.trainId, {
     trainId: entry.trainId,
     label: entry.label,
     projectId: entry.projectId,
     registeredAtMs: entry.nowMs ?? Date.now(),
+    abortController,
   });
+  return abortController;
 }
 
 /** Clear a train job. Idempotent — safe from a `finally` that may run after an explicit clear. */
 export function unregisterLiveMergeTrain(trainId: string): void {
   live.delete(trainId);
+}
+
+/**
+ * Ask a live train's job to stop (#1203). A no-op — never an error — when the job is not
+ * registered in THIS process: the row may belong to a job on another process (not today's
+ * architecture, but the safe read), or may already have finished between the caller's read of
+ * the row and this call. Returns whether a live job was actually signalled, so the caller
+ * (the cancel route) can report `stoppedAfter: "current-attempt"` vs `"immediately"`.
+ */
+export function abortLiveMergeTrain(trainId: string): boolean {
+  const entry = live.get(trainId);
+  if (!entry) return false;
+  entry.abortController.abort();
+  return true;
 }
 
 export function isMergeTrainLive(trainId: string): boolean {

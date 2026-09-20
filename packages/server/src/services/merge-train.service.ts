@@ -461,6 +461,13 @@ export interface TrainRunResult {
    */
   landRefused?: string;
   /**
+   * #1203 — true when `signal` was already aborted before an attempt (root or a bisect half)
+   * even started, so that attempt spent NO gate run at all. Distinct from `landRefused`, which
+   * is asked once after a green gate: this can end the job before, during (the running gate's
+   * child process killed), or between bisect halves — anywhere `landGreenest` checks the signal.
+   */
+  cancelled?: true;
+  /**
    * #1189 — one node per assemble → gate → land cycle, in the order they finished (a bisect's
    * root first, then its halves depth-first). The tree the panel renders; the sum of the nodes'
    * `gateRuns` is `gateRuns` above.
@@ -573,6 +580,15 @@ export async function runMergeTrain(args: {
    * (could not measure) leaves today's behaviour exactly as it was.
    */
   gateBaseAlone?: () => Promise<{ verdict: MergeTrainBaseVerdict; gateRuns: number } | null>;
+  /**
+   * #1203 — real cancellation. Checked by the bisect driver before EVERY attempt (the root and
+   * each half), so an operator cancel ends the job after the CURRENT gate's child process is
+   * killed at the latest, rather than continuing through the rest of a bisect tree. The caller
+   * also passes the same signal into `runGate` (via its own closure) so the currently-running
+   * verify/install process is killed rather than left to finish. Absent means "never aborts" —
+   * every existing caller (a lone per-workspace gate has nothing to cancel) is unaffected.
+   */
+  signal?: AbortSignal;
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, runGate, closeMember } = args;
   const bisect = args.bisectOnFailure !== false;
@@ -584,6 +600,7 @@ export async function runMergeTrain(args: {
    * control-flow analysis would otherwise narrow the outer binding to `null` at the read.
    */
   const baseProbe: { current: { verdict: MergeTrainBaseVerdict; gateRuns: number } | null } = { current: null };
+  const signal = args.signal;
 
   /**
    * Wait for `a`, then `b` (either may be absent) — used to chain a child's landing behind
@@ -622,11 +639,34 @@ export async function runMergeTrain(args: {
     notifyDone?: () => void,
   ): Promise<TrainRunResult> {
     try {
+      // #1203: checked before every attempt starts — the root, and each bisect half. An
+      // already-aborted signal spends NO gate run at all: no assembly, no worktree, nothing
+      // for the (already-running, currently-being-killed-via-the-same-signal) gate to race
+      // against. `gateRejected`/`dropped`/`sided` all stay empty, since nothing here was
+      // ever attributed to any member — this is the job stopping, not a verdict about the code.
+      if (signal?.aborted) {
+        return {
+          trainRef: `kanban/train/${subLabel}`,
+          landed: [],
+          dropped: [],
+          gateRejected: [],
+          sided: [],
+          gateRuns: 0,
+          gateFailure: "train cancelled",
+          cancelled: true,
+          closeFailures: [],
+          attempts: [],
+        };
+      }
       const attempt = await runTrainAttempt({ ...args, members: subset, label: subLabel, isEnvironmentFailure, waitForLandTurn: waitForPredecessor });
       if (attempt.landed.length > 0 || !attempt.gateFailure) return attempt;
       // #1181: a refused landing is not a red gate — splitting would re-gate green code twice
       // and then refuse again. Stop here, attribution-free.
       if (attempt.landRefused) return attempt;
+      // #1203: a gate that was itself killed by the cancel signal (mid-run, via `runGate`'s own
+      // closure over the same signal) is not attribution either — stop here rather than bisect
+      // an aborted run's failure onto individual members.
+      if (attempt.cancelled) return attempt;
       // #1154: an environment failure fails the SAME way for every subset of the same staging
       // worktree — splitting cannot learn anything a second run at the top level didn't already
       // say, and it can only mislabel branches as individually red. Stop here, attribution-free.
@@ -705,6 +745,12 @@ export async function runMergeTrain(args: {
         ...(first.landed.length + second.landed.length === 0
           ? { gateFailure: attempt.gateFailure }
           : {}),
+        // #1203: a cancel that fires WHILE both halves are already gating (the parallel branch)
+        // is caught by neither half's OWN pre-attempt check — each had already started before
+        // the signal fired — so surface it here from whichever half's `runGate` closure noticed
+        // the abort and returned a failed gate. Either half reporting cancelled makes the whole
+        // split's result cancelled, since the run as a whole was told to stop.
+        ...(first.cancelled || second.cancelled ? { cancelled: true as const } : {}),
       };
     } finally {
       notifyDone?.();
@@ -744,6 +790,8 @@ async function runTrainAttempt(args: {
    * only the git-level landing is serialized.
    */
   waitForLandTurn?: Promise<void>;
+  /** #1203 — see `runMergeTrain`'s doc comment; only read here to classify a killed gate. */
+  signal?: AbortSignal;
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, trainId, runGate, closeMember } = args;
 
@@ -812,6 +860,12 @@ async function runTrainAttempt(args: {
     const gate = await runGate({ trainRef: asm.trainRef, trainSha: asm.trainSha, included: asm.included, label });
     gateFinishedAt = new Date().toISOString();
     if (!gate.passed) {
+      // #1203: the gate itself was killed by the SAME signal a cancel aborts (`runGate`'s own
+      // closure passes it into `runSetupScript`) — this failure is the cancel, not a verdict
+      // about the code, so it must not be bisected or attributed to any member.
+      if (args.signal?.aborted) {
+        return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], sided: [], gateRuns: 1, gateFailure: gate.message, cancelled: true }, "red");
+      }
       // #1154/#1189: an environment failure is the train's, not a member's — its own leaf kind.
       const verdict: MergeTrainAttemptVerdict = args.isEnvironmentFailure(gate.message) ? "env_failure" : "red";
       return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], sided: [], gateRuns: 1, gateFailure: gate.message }, verdict);

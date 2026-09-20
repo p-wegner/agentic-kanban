@@ -192,6 +192,8 @@ export async function runPreMergeGate(
   workspace: PreMergeGateWorkspace,
   projectId: string,
   database: Database,
+  /** #1203 — reaches the running verify/install child so a cancel kills it. Optional; absent = never aborts. */
+  signal?: AbortSignal,
 ): Promise<PreMergeGateResult> {
   // ---- #628 deferred dependency installs ---------------------------------------------------
   // With install mode `background` the agent launches before its repos' dependencies exist, so
@@ -556,7 +558,7 @@ export async function runPreMergeGate(
           chainsInFlight: workers.chainsInFlight,
         });
         startedAt = Date.now();
-        return runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv }).catch((e) => ({
+        return runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv, signal }).catch((e) => ({
           exitCode: 1,
           stdout: "",
           stderr: String(e),
@@ -613,6 +615,7 @@ export async function runPreMergeGate(
             runSetupScript(workingDir, verifyScript!, {
               timeoutMs: verifyTimeoutMs,
               env: { ...verifyEnv, KANBAN_RETRY_TEST_FILES: retryScope },
+              signal,
             }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
           );
         },
@@ -623,6 +626,7 @@ export async function runPreMergeGate(
             runSetupScript(workingDir, command, {
               timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS,
               env: gradleEnv,
+              signal,
             }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
           );
         },

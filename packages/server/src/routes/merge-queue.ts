@@ -8,6 +8,7 @@ import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { getMergeTrain, listActiveMergeTrainsForProject, listMergeTrainsForProject, updateMergeTrainState } from "../repositories/merge-train.repository.js";
+import { abortLiveMergeTrain } from "../services/merge-train-live-registry.js";
 import { getMergeQueueIssueRows, getMergeQueueWorkspaceRows } from "../repositories/merge-queue.repository.js";
 import { listTrainSidingStatesForProject } from "../repositories/merge-train-siding.repository.js";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
@@ -161,10 +162,15 @@ export function createMergeQueueRoute(
    *
    * #1153 — the only remedy an operator had for a stranded train was a full server restart
    * (the reconciler resumes an `assembling`/`gating` row otherwise). Marks the row `abandoned`
-   * with a reason; the in-flight run (if the process holding it is still alive) is not
-   * interrupted — there is no cancellation token for it — but `finishMergeTrain` checks for
-   * `abandoned` before overwriting it, and no NEW train will be assembled for this project while
-   * one is in an unfinished state, so cancelling is what unblocks that.
+   * with a reason.
+   *
+   * #1203 — this now ALSO aborts the in-flight job when this process is running it
+   * (`abortLiveMergeTrain`): the bisect driver refuses to start another attempt once the signal
+   * is set, and the currently-running gate/install child process is killed rather than left to
+   * run to completion. `finishMergeTrain` still checks for `abandoned` before overwriting it (a
+   * cross-process defence, and a defence against a race between this route and an attempt that
+   * had already passed its signal check the instant before abort() fired), and no NEW train
+   * will be assembled for this project while one is in an unfinished state.
    */
   router.post("/trains/:id/cancel", async (c) => {
     const id = c.req.param("id");
@@ -180,7 +186,13 @@ export function createMergeQueueRoute(
       reconciledReason: "cancelled by operator",
       finishedAt: new Date().toISOString(),
     }, database);
-    return c.json({ ok: true });
+    // #1203: aborted AFTER the row is marked, so a job that reads the row between the two
+    // writes still sees `abandoned` (the `shouldLand`/guardStates defences), and a job that
+    // reads it before still gets stopped by the signal moments later.
+    const stoppedLiveJob = abortLiveMergeTrain(id);
+    const stoppedAfter = stoppedLiveJob ? "current-attempt" : "immediately";
+    console.log(`[merge-queue] cancelled train ${id} (${train.label}) — stopped ${stoppedAfter}${stoppedLiveJob ? "" : " (no live job in this process)"}`);
+    return c.json({ ok: true, stoppedAfter });
   });
 
   /**
