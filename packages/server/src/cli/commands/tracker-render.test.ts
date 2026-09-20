@@ -38,7 +38,7 @@ function snapshot(issues: BoardStatusIssue[]): BoardStatusResponse {
   };
 }
 
-const NOW = new Date("2026-09-16T12:10:00.000Z");
+const NOW_MS = new Date("2026-09-16T12:10:00.000Z").getTime();
 
 const FIXTURE = snapshot([
   issue({
@@ -73,9 +73,9 @@ const FIXTURE = snapshot([
 
 describe("renderTrackerFrame", () => {
   it("renders a header, one line per in-flight workspace, and an attention section", () => {
-    const frame = renderTrackerFrame(FIXTURE, { limit: 5 }, { width: 80, now: NOW });
+    const frame = renderTrackerFrame(FIXTURE, { limit: 5 }, { width: 80, nowMs: NOW_MS });
 
-    // header + 2 in-flight (active, reviewing — idle #104 is NOT in-flight) + attention marker + 1 attention row
+    // header + 2 in-flight (active, reviewing - idle #104 is NOT in-flight) + attention marker + 1 attention row
     expect(frame.lines).toHaveLength(5);
     expect(frame.lines[0]).toContain("pantry");
     expect(frame.lines[0]).toContain("WIP 2/5");
@@ -88,7 +88,7 @@ describe("renderTrackerFrame", () => {
 
   it("never exceeds the requested width on any line", () => {
     for (const width of [20, 40, 80, 120]) {
-      const frame = renderTrackerFrame(FIXTURE, { limit: 5 }, { width, now: NOW });
+      const frame = renderTrackerFrame(FIXTURE, { limit: 5 }, { width, nowMs: NOW_MS });
       for (const line of frame.lines) {
         expect(line.length).toBeLessThanOrEqual(Math.max(20, width));
       }
@@ -96,7 +96,7 @@ describe("renderTrackerFrame", () => {
   });
 
   it("truncates a long title with an ellipsis rather than wrapping", () => {
-    const frame = renderTrackerFrame(FIXTURE, { limit: 5 }, { width: 30, now: NOW });
+    const frame = renderTrackerFrame(FIXTURE, { limit: 5 }, { width: 30, nowMs: NOW_MS });
     const line101 = frame.lines.find((l) => l.includes("#101"));
     expect(line101).toBeDefined();
     expect(line101!.length).toBeLessThanOrEqual(30);
@@ -104,22 +104,22 @@ describe("renderTrackerFrame", () => {
   });
 
   it("keeps the line count stable across widths (only content is truncated, not dropped)", () => {
-    const counts = [20, 40, 80, 120].map((width) => renderTrackerFrame(FIXTURE, { limit: 5 }, { width, now: NOW }).lines.length);
+    const counts = [20, 40, 80, 120].map((width) => renderTrackerFrame(FIXTURE, { limit: 5 }, { width, nowMs: NOW_MS }).lines.length);
     expect(new Set(counts).size).toBe(1);
   });
 
   it("prints a placeholder line when nothing is in-flight and omits the attention section when clean", () => {
     const idleOnly = snapshot([issue({ issueNumber: 1, statusName: "Todo", workspace: null })]);
-    const frame = renderTrackerFrame(idleOnly, { limit: 3 }, { width: 80, now: NOW });
+    const frame = renderTrackerFrame(idleOnly, { limit: 3 }, { width: 80, nowMs: NOW_MS });
     expect(frame.lines).toHaveLength(2);
     expect(frame.lines[1]).toContain("no in-flight workspaces");
   });
 
   it("falls back to width 80 when no width is given, and floors an unreasonably narrow one at 20", () => {
-    const noWidth = renderTrackerFrame(FIXTURE, { limit: 5 }, { now: NOW });
+    const noWidth = renderTrackerFrame(FIXTURE, { limit: 5 }, { nowMs: NOW_MS });
     expect(noWidth.lines[0].length).toBeLessThanOrEqual(80);
 
-    const tiny = renderTrackerFrame(FIXTURE, { limit: 5 }, { width: 1, now: NOW });
+    const tiny = renderTrackerFrame(FIXTURE, { limit: 5 }, { width: 1, nowMs: NOW_MS });
     for (const line of tiny.lines) {
       expect(line.length).toBeLessThanOrEqual(20);
     }
@@ -128,15 +128,15 @@ describe("renderTrackerFrame", () => {
 
 describe("ageSince", () => {
   it("formats seconds, minutes, hours+minutes, and days+hours", () => {
-    expect(ageSince("2026-09-16T12:09:30.000Z", NOW)).toBe("30s");
-    expect(ageSince("2026-09-16T12:05:00.000Z", NOW)).toBe("5m");
-    expect(ageSince("2026-09-16T09:07:00.000Z", NOW)).toBe("3h3m");
-    expect(ageSince("2026-09-14T10:00:00.000Z", NOW)).toBe("2d2h");
+    expect(ageSince("2026-09-16T12:09:30.000Z", NOW_MS)).toBe("30s");
+    expect(ageSince("2026-09-16T12:05:00.000Z", NOW_MS)).toBe("5m");
+    expect(ageSince("2026-09-16T09:07:00.000Z", NOW_MS)).toBe("3h3m");
+    expect(ageSince("2026-09-14T10:00:00.000Z", NOW_MS)).toBe("2d2h");
   });
 
   it("returns a placeholder for missing or invalid timestamps", () => {
-    expect(ageSince(null, NOW)).toBe("-");
-    expect(ageSince(undefined, NOW)).toBe("-");
-    expect(ageSince("not-a-date", NOW)).toBe("-");
+    expect(ageSince(null, NOW_MS)).toBe("-");
+    expect(ageSince(undefined, NOW_MS)).toBe("-");
+    expect(ageSince("not-a-date", NOW_MS)).toBe("-");
   });
 });
