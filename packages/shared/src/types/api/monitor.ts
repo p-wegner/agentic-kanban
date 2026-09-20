@@ -16,6 +16,7 @@ import type { MonitorActionName } from "../../lib/monitor-action.js";
 import type { MonitorTunables } from "../../lib/strategy-objective-file.js";
 import type { RISK_POSTURES } from "../../lib/risk-posture.js";
 import type { DiskHealthSignal } from "../../lib/machine-capacity.js";
+import type { AutoMergeSource } from "../../lib/merge-policy.js";
 
 // Re-exported so consumers take it from the wire-contract barrel. The client used to
 // deep-import lib/strategy-objective-file for it, which drags a Node-builtin chain into
@@ -192,7 +193,12 @@ export interface AutopilotStatusResponse {
   /** What the next cycle will start: 0 unless `autoStart`. */
   willStartNextCycle: number;
   holdReason: AutopilotHoldReason | null;
-  autoMerge: { enabled: boolean; source: "project_disabled" | "global_off" | "direct_strategy" | "enabled" };
+  /**
+   * The EFFECTIVE auto-merge answer. `paused_same_failure` (#1207) is the circuit breaker, which
+   * lives in `runtime_state` rather than in prefs, so it is overlaid on `resolveAutoMerge`'s
+   * verdict by the server rather than resolved from the prefMap.
+   */
+  autoMerge: { enabled: boolean; source: AutoMergeSource };
   nextCycleAt: string | null;
 }
 

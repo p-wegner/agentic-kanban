@@ -21,6 +21,7 @@ import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { requireProject } from "../services/require-project.js";
 import { previewNextStartCandidates } from "../services/start-score-preview.service.js";
 import { getAutopilotStatus, type AutopilotStatusDeps } from "../services/autopilot-status.service.js";
+import { clearAutoMergeBreaker, readAutoMergeBreaker } from "../services/auto-merge-breaker.js";
 import { getDeliveryStatus } from "../services/delivery-status.service.js";
 
 /**
@@ -113,6 +114,19 @@ export function createBoardMonitorRoute(
       nextCycleAt: deps.nextCycleAt,
     });
     return c.json(status);
+  });
+
+  // #1207: auto-merge pauses itself after N consecutive gate runs that failed with the identical
+  // normalised signature — an infrastructure failure no retry can fix. This is the operator's
+  // "I fixed it, try again" door; the other two clears are automatic (the base sha moves, or the
+  // failing workspace's setup verdict changes).
+  // Clear the same-failure circuit breaker and let this project's auto-merge gate again.
+  router.post("/:id/auto-merge/resume", async (c) => {
+    const projectId = c.req.param("id");
+    await requireProject(projectId, database);
+    const breaker = await readAutoMergeBreaker(projectId, database);
+    await clearAutoMergeBreaker(projectId, database);
+    return c.json({ ok: true, cleared: breaker !== null, breaker });
   });
 
   // #1155: one glance for the header chip — the EFFECTIVE risk posture plus the EFFECTIVE

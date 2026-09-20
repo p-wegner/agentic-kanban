@@ -23,6 +23,7 @@ import { resolveStartPolicy } from "./start-policy.service.js";
 import { resolveMonitorTunables } from "./strategy-objective.service.js";
 import { resolveWipLimit } from "./wip-limit.service.js";
 import { hostOverflowHasFleetCapacity, projectCanDispatch } from "./worker-fleet.service.js";
+import { breakerIsPaused, readAutoMergeBreaker } from "./auto-merge-breaker.js";
 
 /**
  * `GET /api/projects/:id/autopilot` — the toolbar Autopilot chip's one read (#1102).
@@ -135,6 +136,11 @@ export async function getAutopilotStatus(projectId: string, deps: AutopilotStatu
   const tunables = resolveMonitorTunables(prefMap, projectId).tunables;
   const wip = resolveWipLimit(prefMap, projectId);
   const autoMerge = resolveAutoMerge(prefMap, projectId);
+  // #1207 — the same-failure circuit breaker lives in `runtime_state`, not in prefs, so it is
+  // OVERLAID on the pure resolver's verdict rather than resolved from the prefMap. A paused
+  // project reads `paused_same_failure` even though every preference still says "enabled" —
+  // which is exactly the question an operator has when nothing is landing.
+  const breaker = await readAutoMergeBreaker(projectId, database);
   // The same two predicates `monitor-setup.ts` hands `runAutoStart`.
   const autoStart = policy.autoStartUnblocked;
   const allowFeatureTypes = policy.mode !== "manual";
@@ -201,7 +207,9 @@ export async function getAutopilotStatus(projectId: string, deps: AutopilotStatu
       dispatchAvailable: dispatch.available,
       backfillReady: backfillReady.count,
     }),
-    autoMerge: { enabled: autoMerge.enabled, source: autoMerge.source },
+    autoMerge: breakerIsPaused(breaker)
+      ? { enabled: false, source: "paused_same_failure" as const }
+      : { enabled: autoMerge.enabled, source: autoMerge.source },
     nextCycleAt: deps.nextCycleAt?.() ?? null,
   };
 }

@@ -68,7 +68,14 @@ export type AutoMergeSource =
   /** On, but merge strategy `direct` reserves merging for a human. */
   | "direct_strategy"
   /** On, owned by automation, and this project has not opted out. */
-  | "enabled";
+  | "enabled"
+  /**
+   * #1207 — configured on, but the same-failure circuit breaker has paused it: N consecutive
+   * gate runs failed with the identical normalised signature. NOT decided by this pure
+   * resolver (the breaker lives in `runtime_state`, not in prefs) — it is overlaid by the
+   * reader that knows the breaker, today `getAutopilotStatus`.
+   */
+  | "paused_same_failure";
 
 export interface EffectiveAutoMerge {
   enabled: boolean;
