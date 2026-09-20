@@ -189,3 +189,35 @@ export function decideMergeTrainRelease(
   }
   return { release: false, reason: "accumulating" };
 }
+
+/**
+ * The window's FINAL hold/release verdict for a project (#1211) — the veto layers composed over
+ * `decideMergeTrainRelease`'s size/wait/gate answer, in the one precedence the orchestrator has
+ * always applied, as a pure verdict rather than a chain of `if (...) continue` inside the sweep:
+ *
+ *  1. `breaker_paused` (#1207) — a project the same-failure circuit breaker has latched must not
+ *     gate at all, so this beats everything below it. The failures it counted are infrastructure
+ *     ones no retry can fix, and each retry costs an install plus a typecheck on a shared box.
+ *  2. `base_red` (#1204) — the base is measured red at a sha it has not moved past, so a train
+ *     assembled on it can only mis-attribute the base's own failures to its members. Asked (and
+ *     therefore possible) only when the window would otherwise DEPART.
+ *  3. whatever `decideMergeTrainRelease` said — `held` / `operator_release` / `gate_busy` /
+ *     `max_size` / `gate_busy_grace_elapsed` / `max_wait` / `accumulating`.
+ *
+ * `live_train` (#1153) is NOT here: it short-circuits earlier, before the config and the verdict
+ * are resolved at all, because a project with a train in flight must not pay for either.
+ *
+ * Pure and synchronous per the `decision function` kind (#585): the two veto inputs are booleans
+ * the orchestrator has already read from the database.
+ */
+export function decideWindowHold(input: {
+  verdict: MergeTrainWindowVerdict;
+  /** The same-failure circuit breaker is latched for this project right now. */
+  breakerPaused: boolean;
+  /** The red-base veto answered with a veto (only ever asked when `verdict.release`). */
+  baseRed: boolean;
+}): MergeTrainWindowVerdict {
+  if (input.breakerPaused) return { release: false, reason: "breaker_paused" };
+  if (input.baseRed) return { release: false, reason: "base_red" };
+  return input.verdict;
+}
