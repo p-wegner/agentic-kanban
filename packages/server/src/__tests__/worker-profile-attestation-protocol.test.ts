@@ -178,9 +178,12 @@ describe("selecting the profile a worker would run under", () => {
     // dropping it would take a perfectly usable account out of rotation on missing data.
     const result = selectAttestedProfile({ ...base, attestations: [attest("anth")] });
     expect(result.selection?.name).toBe("anth");
+    // The record names the provider it is ABOUT (`headroomRecordFor`, 61e2327697), so a bare
+    // `claude:anth` key cannot be read as codex's or pi's.
     expect(headroomFromAttestations([attest("anth")]).get("claude:anth")).toEqual({
       usedPct: null,
       stale: true,
+      provider: "claude",
     });
   });
 
