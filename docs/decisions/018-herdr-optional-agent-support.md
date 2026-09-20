@@ -45,9 +45,11 @@ and the one `spawn()` call in `agent.service.ts`, so every existing provider
 
 ### Phase 1 (this ticket, #1144) — config discovery only
 
-- `packages/shared/src/lib/herdr-exec.ts` — the exec adapter (mirrors
+- `packages/server/src/lib/herdr-exec.ts` — the exec adapter (mirrors
   `docker-exec.ts`/`devcontainer-exec.ts`): `herdrExec`, `herdrAvailable`,
-  `probeHerdr`. Node-only, `export type *` from the shared barrel (#791).
+  `probeHerdr`. Server-only (#590/#730 single-consumer ratchet) — herdr
+  discovery has exactly one consuming package, so it lives beside its caller
+  rather than in `packages/shared/src/lib/`.
 - `packages/server/src/services/herdr-availability.service.ts` —
   `getHerdrAvailability()`, a short-TTL cached probe (`herdr --version`),
   reporting `{available, version, isFork}`.
