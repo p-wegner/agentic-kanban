@@ -963,14 +963,7 @@ export const STARTUP_AUDIT_TASKS: StartupAuditTask[] = [
     name: "reconcileHandMergedBranches",
     run: () => reconcileHandMergedBranches(),
   },
-  {
-    // #1205: the sibling case to reconcileHandMergedBranches above — an issue whose
-    // workspace is STILL open (idle, readyForMerge), but whose branch is fully
-    // contained in the base (0 ahead) because the fix landed by hand elsewhere.
-    // Evidence-gated (a base commit naming the issue); see the function doc.
-    name: "reconcileContainedOpenWorkspaces",
-    run: () => reconcileContainedOpenWorkspaces(),
-  },
+  { name: "reconcileContainedOpenWorkspaces", run: () => reconcileContainedOpenWorkspaces() }, // #1205, sibling of the above
   { name: "scanDoneUnmergedWorkspaces", run: () => scanDoneUnmergedWorkspaces({ reopenToInReview: false }) },
   { name: "reapTerminalWorkspaces", run: () => reapTerminalWorkspaces() },
   { name: "pruneStaleWorktrees", run: () => pruneStaleWorktrees() },

@@ -32,6 +32,7 @@ export const SERVER_BOARD_EVENT_REASONS = [
   "workspace_idle",
   "workspace_merged",
   "workspace_closed",
+  "workspace_reopened",
   "workspace_ready_for_merge",
   "workflow_error",
   "workflow_fork",
@@ -84,6 +85,7 @@ export const EXTERNAL_BOARD_EVENT_REASONS = [
   "mcp_propose_ticket_groups",
   "mcp_propose_transition",
   "mcp_relaunch_workspace",
+  "mcp_reopen_workspace",
   "mcp_review_workspace",
   "mcp_start_workspace",
   "mcp_stop_workspace",
@@ -130,6 +132,7 @@ export const WORKSPACE_LIFECYCLE_REASONS: ReadonlySet<ClientRefreshReason> = new
   "workspace_idle",
   "workspace_merged",
   "workspace_closed",
+  "workspace_reopened",
   "workspace_ready_for_merge",
 ] as const);
 

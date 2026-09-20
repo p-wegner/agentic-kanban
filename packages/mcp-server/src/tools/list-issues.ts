@@ -19,13 +19,19 @@ export function registerListIssues(server: McpServer, deps: ToolDeps = prodDeps)
       tag: z.string().optional().describe("Filter by tag name (e.g., 'bug', 'feature')"),
       blocked: z.boolean().optional().describe("Filter by blocked status (true = only blocked, false = only unblocked)"),
       issueNumber: z.number().optional().describe("Filter by issue number (e.g., 42)"),
+      strandedInReview: z.boolean().optional().describe(
+        "Filter to issues stranded In Review (#1206): the status is In Review, EVERY workspace "
+        + "for the issue is closed (none currently open), and the latest workspace is non-direct "
+        + "and unmerged (mergedAt is null) — a real branch with nothing to board it on. Use "
+        + "reopen_workspace on the latest workspace to recover.",
+      ),
       includeDescription: z.boolean().optional().describe(
         "Include each issue's full description. Off by default: descriptions are ~70% of the payload "
         + "(509 KB across 323 issues on a mature project) and this tool's output goes straight into an "
         + "agent's context. Prefer get_issue for the one issue you actually need.",
       ),
     },
-    async ({ projectId, status, priority, tag, blocked, issueNumber, includeDescription }) => {
+    async ({ projectId, status, priority, tag, blocked, issueNumber, includeDescription, strandedInReview }) => {
       // #344: `description` used to be selected unconditionally. On the dev project that is
       // 509 KB of description text across 323 issues — ~70% of the payload — and unlike the
       // HTTP route (where a `slim=1` opt-in existed but no ecosystem consumer passed it),
@@ -109,7 +115,57 @@ export function registerListIssues(server: McpServer, deps: ToolDeps = prodDeps)
         results = results.filter(i => blocked ? blockedSet.has(i.id) : !blockedSet.has(i.id));
       }
 
+      if (strandedInReview) {
+        const inReviewIds = results.filter((i) => i.statusName === "In Review").map((i) => i.id);
+        const strandedSet = new Set(await filterStrandedInReviewIssueIds(deps, inReviewIds));
+        results = results.filter((i) => strandedSet.has(i.id));
+      }
+
       return mcpJson(results);
     },
   );
+}
+
+/**
+ * #1206 — an issue is "stranded In Review" when it has REAL branch work (a
+ * non-direct, unmerged workspace exists) but no OPEN workspace currently holds
+ * it — so no train can board it, no review can run, and `get_board_status` shows
+ * nothing "in progress" for it. A pure DB predicate (no git call): the LATEST
+ * workspace for the issue is closed, non-direct, and not merged. A branch fully
+ * CONTAINED in base (0 ahead) is handled separately and evidence-gated
+ * (`reconcileContainedOpenWorkspaces` in hand-merged-branch-reconciler.ts) — this
+ * filter does not distinguish ahead-count, since the periodic reconciler already
+ * converges the 0-ahead case on its own, so anything still showing up here after
+ * that sweep has run is, in practice, real unmerged work.
+ */
+async function filterStrandedInReviewIssueIds(deps: ToolDeps, issueIds: string[]): Promise<string[]> {
+  if (issueIds.length === 0) return [];
+  const { db, schema } = deps;
+  const wsRows = await db.select({
+      issueId: schema.workspaces.issueId,
+      status: schema.workspaces.status,
+      isDirect: schema.workspaces.isDirect,
+      mergedAt: schema.workspaces.mergedAt,
+      updatedAt: schema.workspaces.updatedAt,
+    })
+    .from(schema.workspaces)
+    .where(inArray(schema.workspaces.issueId, issueIds));
+
+  const byIssue = new Map<string, typeof wsRows>();
+  for (const w of wsRows) {
+    const arr = byIssue.get(w.issueId) ?? [];
+    arr.push(w);
+    byIssue.set(w.issueId, arr);
+  }
+
+  const stranded: string[] = [];
+  for (const issueId of issueIds) {
+    const workspacesForIssue = byIssue.get(issueId) ?? [];
+    if (workspacesForIssue.length === 0) continue; // no branch work at all — not stranded, just untouched
+    if (workspacesForIssue.some((w) => w.status !== "closed")) continue; // an open workspace exists — not stranded
+
+    const latest = [...workspacesForIssue].sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))[0];
+    if (!latest.isDirect && !latest.mergedAt) stranded.push(issueId);
+  }
+  return stranded;
 }
