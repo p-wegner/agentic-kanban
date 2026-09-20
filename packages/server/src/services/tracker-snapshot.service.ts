@@ -48,9 +48,10 @@ function ageMsFrom(iso: string, nowMs: number): number {
 export async function buildTrackerSnapshot(
   projectId: string,
   database: Database = db,
-  now: Date = new Date(),
+  // Pure arithmetic (ages/TTLs only, nothing persisted), so the sanctioned spelling is
+  // `nowMs?: number` rather than `now?: string` (#614 convention, #1213).
+  nowMs: number = Date.now(),
 ): Promise<TrackerSnapshotResponse> {
-  const nowMs = now.getTime();
 
   const [columns, workspaceRows, reviewQueueDepth, latestBaseHealth, prefRows] = await Promise.all([
     getTrackerColumnCounts(projectId, database),
@@ -93,7 +94,7 @@ export async function buildTrackerSnapshot(
 
   return {
     projectId,
-    generatedAt: now.toISOString(),
+    generatedAt: new Date(nowMs).toISOString(),
     columns,
     wipLimit,
     activeBuilderCount,

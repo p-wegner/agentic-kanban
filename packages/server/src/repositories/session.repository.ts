@@ -29,6 +29,7 @@ export {
   getSessionLiveness,
   getSessionTranscriptContext,
   getLatestSessionIdForWorkspace,
+  getLatestSessionByWorkspace,
 } from "./session/lifecycle.js";
 
 // --- Session messages (session_messages), incl. the .out-file-or-DB reads ---

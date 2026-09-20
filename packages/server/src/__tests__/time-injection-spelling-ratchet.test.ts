@@ -91,6 +91,12 @@ const NOT_AN_INSTANT = new Set([
   "timeout",
   "duration",
   "interval",
+  // #1213 — a `*WindowMs` is a LENGTH of time by construction, the same category as
+  // `duration`/`interval`/`span` above. Its absence here was an oversight in the list, not an
+  // allowance: `wallClockWindowMs` (the reaper's backstop in
+  // `startup/completion-state-reconciler.ts`, #1212) is a computed window returned from a pure
+  // function, and no `now?: string` / `nowMs?: number` spelling would be correct for it.
+  "window",
   "elapsed",
   "age",
   "ago",
