@@ -320,8 +320,15 @@ async function runTrainStagingGate(args: {
   /** The REAL workspaces whose deferred installs this gate must clear; empty for a control arm. */
   includedWorkspaceIds: string[];
   afterGreen?: (ctx: { gateWorktree: string; gateMessage: string }) => Promise<{ sided?: Array<{ workspaceId: string; reason: string }> }>;
+  /**
+   * #1203 — real cancellation. Passed into the setup script AND the verify gate, so a cancel
+   * kills whichever child process is currently running rather than letting it finish before the
+   * row's `abandoned` state is noticed. Absent means "never aborts" (the control-arm caller has
+   * nothing to cancel).
+   */
+  signal?: AbortSignal;
 }): Promise<{ passed: boolean; message: string; sided?: Array<{ workspaceId: string; reason: string }> }> {
-  const { database, repoPath, baseBranch, projectId, ref, attemptLabel } = args;
+  const { database, repoPath, baseBranch, projectId, ref, attemptLabel, signal } = args;
   let gateWorktree: string | null = null;
   try {
     // #713: DB-backed claim guard alongside the namespace - the train leaf lives
@@ -344,6 +351,9 @@ async function runTrainStagingGate(args: {
       noteMergeGatePhase(`train:${attemptLabel}`, "install", setupScript);
       const setup = await runSetupScript(gateWorktree, setupScript, {
         timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS,
+        // #1203: a cancel kills this install too, not only the verify script — an abandoned
+        // train must not keep provisioning a worktree nobody will gate.
+        signal,
       }).catch((err) => ({ exitCode: 1, stdout: "", stderr: errorMessage(err), timedOut: false }));
       if (setup.exitCode !== 0 && !setup.timedOut) {
         return {
@@ -368,6 +378,9 @@ async function runTrainStagingGate(args: {
       },
       projectId,
       database,
+      // #1203: same token — a cancel mid-verify kills the running gate process instead of
+      // letting it run to completion before the row's `abandoned` state is noticed.
+      signal,
     );
     if (!gate.passed) return { passed: false, message: gate.message };
     const extra = await args.afterGreen?.({ gateWorktree, gateMessage: gate.message });
@@ -471,8 +484,14 @@ async function runDoomedTrainJob(args: {
   projectId: string;
   /** Mutable out-param: `afterGreen` below writes the review evidence the caller persists. */
   reviewEvidenceRef: { current: MergeTrainGateEvidenceDto["review"] };
+  /**
+   * #1203 — the real cancellation token for this job. An operator cancel aborts it, which stops
+   * the bisect driver from starting another attempt and kills whatever gate/install child
+   * process is currently running.
+   */
+  abortController: AbortController;
 }): Promise<{ ok: true; result: Awaited<ReturnType<typeof runMergeTrain>> } | { ok: false; reason: string }> {
-  const { database, boardEvents, reconcileAlreadyMerged, sendTurn, reviewTrain, repoPath, baseBranch, members, label, trainId, projectId, reviewEvidenceRef } = args;
+  const { database, boardEvents, reconcileAlreadyMerged, sendTurn, reviewTrain, repoPath, baseBranch, members, label, trainId, projectId, reviewEvidenceRef, abortController } = args;
 
   let repoLock: Awaited<ReturnType<typeof acquireQueueRepoLock>>;
   try {
@@ -499,6 +518,10 @@ async function runDoomedTrainJob(args: {
       // LAND — nobody is going to account for that merge. Checked at the last moment before
       // `landMergeTrain`, on a fresh read, never on the row captured at start.
       shouldLand: () => vetoLandingIfAbandoned(trainId, database),
+      // #1203: checked by the bisect driver before EVERY attempt (root and every half) — a
+      // cancel therefore ends the job after the current gate's child process is killed, at the
+      // latest, rather than continuing through the rest of a bisect tree.
+      signal: abortController.signal,
       runGate: async ({ trainRef, included, label: attemptLabel }) => {
         // Gate the TREE THAT LANDS. A per-member gate never tests the merge commit, which is
         // how two individually-green branches can produce a red base with no conflict.
@@ -510,13 +533,22 @@ async function runDoomedTrainJob(args: {
         //
         // #1204: the worktree + setup + `runPreMergeGate` half is `runTrainStagingGate`, so
         // the control arm gates the bare base through the SAME code rather than a second copy.
-        await updateMergeTrainState(trainId, { state: "gating" }, database).catch(() => undefined);
+        //
+        // #1203: guarded — a row an operator already cancelled (`abandoned`) or the reconciler
+        // already resolved must never be re-marked `gating` by a bisect attempt that started
+        // before the cancel and is only now reaching this line. The `signal` check at the top of
+        // `landGreenest` is what actually STOPS the next attempt; this guard is the second half —
+        // it stops THIS attempt's own bookkeeping from overwriting the operator's verdict while
+        // the attempt races to notice the signal.
+        await updateMergeTrainState(trainId, { state: "gating", guardStates: ["assembling", "gating"] }, database).catch(() => undefined);
         boardEvents?.broadcast(projectId, "merge_train_changed");
         return await runTrainStagingGate({
           database, repoPath, baseBranch, projectId,
           ref: trainRef,
           attemptLabel,
           includedWorkspaceIds: included.map((m) => m.workspaceId),
+          // #1203: same token — a cancel mid-gate kills the running install/verify child process.
+          signal: abortController.signal,
           afterGreen: async ({ gateWorktree }) => {
             // #1194: review ONCE, on the tree that just proved green - the assembled diff vs the
             // base, one reviewer, every member's criteria in `{{members}}`. A blocking finding
@@ -666,7 +698,10 @@ export function createMergeTrainRunner(deps: {
     // #1181: from here until `finishMergeTrain` this row has a live job in THIS process. The
     // reconciler's periodic sweep reads the registry and leaves registered rows alone; without
     // it the sweep applied its boot-time "nothing can be live" rule to a train mid-gate.
-    registerLiveMergeTrain({ trainId, label, projectId });
+    // #1203: the returned controller is this job's real cancellation token — an operator cancel
+    // aborts it, which stops the bisect driver from starting another attempt and kills whatever
+    // gate/install child process is currently running.
+    const abortController = registerLiveMergeTrain({ trainId, label, projectId });
 
     // #1153: bounded shorter than the per-workspace queue's 90-minute budget — a train that
     // cannot get the lock within this window is ABANDONED (not left polling), since re-assembly
@@ -688,6 +723,7 @@ export function createMergeTrainRunner(deps: {
       database, boardEvents, reconcileAlreadyMerged, sendTurn, reviewTrain,
       repoPath, baseBranch, members, label, trainId, projectId,
       reviewEvidenceRef,
+      abortController,
     });
     reviewEvidence = reviewEvidenceRef.current;
     if (!outcome.ok) {

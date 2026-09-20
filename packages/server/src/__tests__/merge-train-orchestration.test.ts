@@ -395,3 +395,88 @@ describe("runMergeTrain — speculative bisect gates concurrently when slots all
     }
   }, 240000);
 });
+
+/**
+ * #1203 — a real cancellation token. Before this, an operator's `POST .../cancel` marked the
+ * `merge_trains` row `abandoned` but `runMergeTrain` had no way to hear it: the bisect driver
+ * kept starting new attempts and `runGate`'s own state write (`state: "gating"`) unconditionally
+ * overwrote the operator's `abandoned` on every attempt. An `AbortSignal` fixes both halves: the
+ * bisect driver checks it before every attempt (root and every half), and a caller aborting it
+ * mid-gate is expected to also kill whatever child process `runGate` is running (verified at the
+ * `runPreMergeGate`/`runSetupScript` layer, not here — this suite is about the ORCHESTRATION
+ * contract `runMergeTrain` offers a caller, with `runGate` and its own I/O injected).
+ */
+describe("runMergeTrain — real cancellation via AbortSignal (#1203)", () => {
+  it("does not start any attempt when the signal is already aborted, and spends no gate run", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const runGate = vi.fn().mockResolvedValue({ passed: true, message: "ok" });
+    const closeMember = vi.fn();
+
+    const result = await runMergeTrain({
+      repoPath: repo, baseBranch: "main", members, label: "cx1", runGate, closeMember, signal: controller.signal,
+    });
+
+    expect(runGate).not.toHaveBeenCalled();
+    expect(closeMember).not.toHaveBeenCalled();
+    expect(result.landed).toEqual([]);
+    expect(result.cancelled).toBe(true);
+    expect(result.gateRuns).toBe(0);
+    expect(result.gateRejected).toEqual([]);
+    expect(result.dropped).toEqual([]);
+  }, 240000);
+
+  it("stops after the current gate and does not bisect when the signal aborts mid-run", async () => {
+    // f3/f4 give the bisect something to split into once the root gate fails.
+    await git(["branch", "f3", "main"]);
+    await git(["branch", "f4", "main"]);
+    await commitOn("f3", "c.txt", "c\n");
+    await commitOn("f4", "d.txt", "d\n");
+    await git(["checkout", "-q", "main"]);
+    const allMembers = [
+      ...members,
+      { workspaceId: "w3", branch: "f3", issueNumber: 3 },
+      { workspaceId: "w4", branch: "f4", issueNumber: 4 },
+    ];
+
+    const controller = new AbortController();
+    // The root gate fails (simulating "killed by the same signal a cancel aborts") and, in the
+    // same tick, the caller's cancel route aborts the controller — exactly the sequencing a real
+    // `runGate` closure produces when its `runSetupScript` call observes the abort.
+    const runGate = vi.fn().mockImplementation(async () => {
+      controller.abort();
+      return { passed: false, message: "verify failed: killed by cancel" };
+    });
+    const closeMember = vi.fn();
+
+    const result = await runMergeTrain({
+      repoPath: repo, baseBranch: "main", members: allMembers, label: "cx2", runGate, closeMember, signal: controller.signal,
+    });
+
+    // Exactly one gate run (the root) — the aborted signal stops the driver from bisecting into
+    // "cx2a"/"cx2b", which is what would otherwise happen on any other red root gate.
+    expect(runGate).toHaveBeenCalledTimes(1);
+    expect(result.gateRuns).toBe(1);
+    expect(result.landed).toEqual([]);
+    expect(result.cancelled).toBe(true);
+    // Attribution-free: a cancelled run must not blame any individual member the way a genuine
+    // red gate's bisect would.
+    expect(result.gateRejected).toEqual([]);
+    for (const branch of ["f1", "f2", "f3", "f4"]) {
+      expect(await isAncestor(repo, await revParse(repo, branch), "main")).toBe(false);
+    }
+  }, 240000);
+
+  it("lands normally when the signal never aborts (control)", async () => {
+    const controller = new AbortController();
+    const runGate = vi.fn().mockResolvedValue({ passed: true, message: "ok" });
+    const closeMember = vi.fn().mockResolvedValue(undefined);
+
+    const result = await runMergeTrain({
+      repoPath: repo, baseBranch: "main", members, label: "cx3", runGate, closeMember, signal: controller.signal,
+    });
+
+    expect(result.landed).toHaveLength(2);
+    expect(result.cancelled).toBeUndefined();
+  }, 240000);
+});
