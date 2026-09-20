@@ -11,8 +11,8 @@ import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared";
 export interface TrackerFrameOptions {
   /** Terminal width to wrap/truncate against. Falls back to 80 when unset or non-positive. */
   width?: number;
-  /** Injected for deterministic tests; defaults to the real clock. */
-  now?: Date;
+  /** Injected for deterministic tests; epoch ms, defaults to the real clock. */
+  nowMs?: number;
 }
 
 const STATUS_GLYPH: Record<string, string> = {
@@ -32,9 +32,9 @@ function glyphFor(status: string | undefined): string {
 }
 
 /** `3h 12m` / `45s` — compact, no seconds once past a minute, matches `timeSince` elsewhere. */
-export function ageSince(iso: string | null | undefined, now: Date): string {
+export function ageSince(iso: string | null | undefined, nowMs: number): string {
   if (!iso) return "-";
-  const ms = now.getTime() - new Date(iso).getTime();
+  const ms = nowMs - new Date(iso).getTime();
   if (!Number.isFinite(ms) || ms < 0) return "-";
   const seconds = Math.floor(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
@@ -86,7 +86,7 @@ export function renderTrackerFrame(
   options: TrackerFrameOptions = {},
 ): TrackerFrame {
   const width = clampWidth(options.width);
-  const now = options.now ?? new Date();
+  const nowMs = options.nowMs ?? Date.now();
   const lines: string[] = [];
 
   const header = truncate(
@@ -102,7 +102,7 @@ export function renderTrackerFrame(
     for (const issue of inFlight) {
       const glyph = glyphFor(issue.workspace?.status);
       const num = issue.issueNumber != null ? `#${issue.issueNumber}` : "#?";
-      const age = ageSince(issue.lastActivity, now);
+      const age = ageSince(issue.lastActivity, nowMs);
       lines.push(truncate(`${glyph} ${num} ${issue.title} (${age})`, width));
     }
   }
