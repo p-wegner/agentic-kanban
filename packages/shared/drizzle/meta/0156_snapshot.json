@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e0b6bf79-82ec-42f9-8ead-80bb34f64cc1",
-  "prevId": "731021f7-541e-4f25-99e7-8079a3fc7094",
+  "id": "ba96ccb4-336a-4af2-9fb5-b68e778241a2",
+  "prevId": "e0b6bf79-82ec-42f9-8ead-80bb34f64cc1",
   "tables": {
     "agent_skills": {
       "name": "agent_skills",
@@ -5205,6 +5205,51 @@
         "workspace_merge_gate_workspace_id_workspaces_id_fk": {
           "name": "workspace_merge_gate_workspace_id_workspaces_id_fk",
           "tableFrom": "workspace_merge_gate",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "workspace_merge_hold": {
+      "name": "workspace_merge_hold",
+      "columns": {
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "held_at": {
+          "name": "held_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "workspace_merge_hold_workspace_id_workspaces_id_fk": {
+          "name": "workspace_merge_hold_workspace_id_workspaces_id_fk",
+          "tableFrom": "workspace_merge_hold",
           "tableTo": "workspaces",
           "columnsFrom": [
             "workspace_id"
