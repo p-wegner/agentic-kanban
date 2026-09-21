@@ -19,13 +19,8 @@ import {
   updateWorkspaceStatus,
 } from "../repositories/workspace.repository.js";
 import { killProcessesInDir } from "./process-cleanup.js";
-import {
-  getConflictingFiles,
-  buildConflictResolutionPrompt,
-} from "./merge-helpers.service.js";
 import { prepareFixAndMergeBriefing } from "./fix-and-merge-context.js";
 import { toExecutorProvider } from "./agent-settings.service.js";
-import { buildConflictContext } from "./phase-context.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import {
@@ -56,6 +51,7 @@ import { getRepoMergeStatus } from "./repo-merge-status.service.js";
 import { checkAlreadyMerged as checkAlreadyMergedImpl, reconcileAlreadyMerged as reconcileAlreadyMergedImpl } from "./workspace-already-merged.service.js";
 import { createWorkspaceCleanupService } from "./workspace-cleanup.service.js";
 import { createWorkspaceRebaseService } from "./workspace-rebase.service.js";
+import { createWorkspaceResolveConflictsService } from "./workspace-resolve-conflicts.service.js";
 import { resolveMergeGate, RUN_GATE, type MergeGateToken } from "./pre-merge-gate.service.js";
 import { recordGateFailureNote as recordGateFailureNoteImpl, runPreLockGate } from "./workspace-merge-gate.js";
 import { getBaseBranchHealthAtMergeBase, describeRedBaseAttribution, verifyBaseBranchHealth } from "./base-branch-health.service.js";
@@ -548,43 +544,19 @@ export function createWorkspaceMergeService(deps: {
     killWorktreeProcesses,
   });
 
-  async function resolveConflicts(id: string) {
-    const workspace = await getWorkspaceById(id, database);
-    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
-    if (!workspace.workingDir) throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
-    await recoverZeroOutputRunningFixAndMergeSession(workspace);
-    await recoverFailedFixAndMergeSessionIfNeeded(workspace);
-    const refreshedWorkspace = await getWorkspaceById(id, database);
-    if (!refreshedWorkspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
-    if (!refreshedWorkspace.workingDir) throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
-    if (refreshedWorkspace.status === "fixing") throw new WorkspaceError("Conflict resolution already in progress", "CONFLICT");
-    if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
-
-    // Kill leftover worktree processes before spawning the resolution agent.
-    await killWorktreeProcesses(refreshedWorkspace.workingDir, "resolve-conflicts");
-
-    const conflictingFiles = await getConflictingFiles(refreshedWorkspace.workingDir);
-    const { defaultBranch } = await resolveProjectRepo(id, database);
-    const baseBranch = requireBaseBranch(refreshedWorkspace.baseBranch || defaultBranch);
-    const conflictContext = await buildConflictContext(refreshedWorkspace.workingDir, conflictingFiles);
-    const prompt = buildConflictResolutionPrompt(conflictingFiles, baseBranch, conflictContext);
-
-    const resolverProjectId = await resolveProjectId(id, database);
-    const { agentCommand, agentArgs, profile, provider, model } =
-      await resolveRelaunchAgentSelection(database, resolverProjectId, refreshedWorkspace);
-    const executorProvider = toExecutorProvider(provider);
-
-    const sessionId = await getSessionManager().startSession({
-      workspaceId: id, prompt, agentCommand, agentArgs, profile, model,
-      provider: executorProvider, multiTurn: executorProvider === "codex" ? false : true, triggerType: "fix-conflicts",
-    });
-
-    await updateWorkspaceStatus(id, "fixing", {}, database);
-
-    if (resolverProjectId) boardEvents?.broadcast(resolverProjectId, "session_launched");
-
-    return { sessionId };
-  }
+  // #1209: resolveConflicts lives in its own module (kept `createWorkspaceMergeService` under
+  // the shrink-only nloc ratchet, same shape as #802's rebase-family extraction). See that
+  // module for why it rebases the worktree onto its base BEFORE spawning the agent.
+  const { resolveConflicts } = createWorkspaceResolveConflictsService({
+    database,
+    gitService,
+    getSessionManager,
+    boardEvents,
+    killWorktreeProcesses,
+    recoverZeroOutputRunningFixAndMergeSession,
+    recoverFailedFixAndMergeSessionIfNeeded,
+    recordMergeAttempt,
+  });
 
   async function fixAndMerge(id: string, mergeError?: string) {
     const workspace = await getWorkspaceById(id, database);
