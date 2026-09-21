@@ -180,6 +180,7 @@ export function createMergeQueueRoute(
       reconciledReason: "cancelled by operator",
       finishedAt: new Date().toISOString(),
     }, database);
+    options?.boardEvents?.broadcast(train.projectId, "merge_train_changed");
     return c.json({ ok: true });
   });
 

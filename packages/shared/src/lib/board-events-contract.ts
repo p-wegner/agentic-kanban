@@ -50,9 +50,12 @@ export const SERVER_BOARD_EVENT_REASONS = [
   // Broadcast by the auto-merge orchestrator and the window control routes so the departure
   // board does not poll.
   "merge_train_window_changed",
-  // #1186 — a persisted merge train row changed state (assembling → gating → merged/…).
-  // Vocabulary only in this wave; the emission point lives in the train service and is wired
-  // in the next one.
+  // #1186 — a persisted merge train row changed state (assembling → gating → landed/red/
+  // abandoned). Broadcast from merge-queue-train.ts (creation, gate start, lock-timeout
+  // abandon, the terminal write), merge-train-reconciler.ts (both stranded-train abandon
+  // paths), background-services.ts (the boot-time "superseded" write before a resume), and
+  // routes/merge-queue.ts (the operator cancel route) — so a "live train" panel does not
+  // need to poll.
   "merge_train_changed",
 ] as const;
 
