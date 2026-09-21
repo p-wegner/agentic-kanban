@@ -8,6 +8,14 @@ import type { MergeGateEvidence, MergeGateShas } from "./merge-gate-token.js";
  * discard, so the operator can't tell why a green pre-lock gate cost a second full run (#1220).
  */
 export function buildStaleVerdictReason(evidence: MergeGateEvidence, currentShas: MergeGateShas): string {
+  // #642/#1220 — `stage: "none"` is rejected unconditionally by `evidenceIsValid`, even when
+  // both SHAs still match. Falling through to the "aged past MAX_AGE" wording below would be
+  // an actively false claim in that case (see merge-gate-evidence-content-key.test.ts's
+  // "REJECTS stage:'none' evidence however well its SHAs match" case) — nothing timed out,
+  // nothing moved; the evidence never described a completed run.
+  if (evidence.stage === "none") {
+    return `evidence stage was "none" (nothing ran/was verified), so it cannot stand in for a pass`;
+  }
   const evidenceBranch = evidence.branchSha?.slice(0, 8) ?? "none recorded";
   const currentBranch = currentShas.branchSha?.slice(0, 8) ?? "unknown";
   const evidenceBase = evidence.baseSha?.slice(0, 8) ?? "none recorded";

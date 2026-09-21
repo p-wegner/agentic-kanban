@@ -248,5 +248,20 @@ describe("content-keyed merge gate evidence", () => {
       expect(message).toContain("MERGE_GATE_EVIDENCE_MAX_AGE_MS");
       warn.mockRestore();
     });
+
+    it("names the stage:none reason instead of a false age-out when SHAs still match", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await resolveMergeGate({
+        token: gateAlreadyPassed({ ranAt: FRESH, stage: "none", source: "review-exit gate", branchSha: "aaa11111", baseSha: "bbb22222" }),
+        workspace,
+        projectId: null,
+        database: db,
+        currentShas: { branchSha: "aaa11111", baseSha: "bbb22222" },
+      });
+      const message = warn.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(message).toContain('stage was "none"');
+      expect(message).not.toContain("MERGE_GATE_EVIDENCE_MAX_AGE_MS");
+      warn.mockRestore();
+    });
   });
 });
