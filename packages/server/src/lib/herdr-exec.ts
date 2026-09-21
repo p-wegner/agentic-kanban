@@ -1,5 +1,6 @@
 import { execFile, type ExecFileException } from "node:child_process";
 import { execSucceeded, type ExecResult } from "@agentic-kanban/shared/lib/exec-result";
+import type { DockerExecOptions } from "@agentic-kanban/shared/lib/docker-exec";
 
 /**
  * The single sanctioned adapter for spawning the `herdr` CLI (mirrors
@@ -26,11 +27,11 @@ const DEFAULT_MAX_BUFFER = 1024 * 1024;
 
 export type HerdrExecResult = ExecResult;
 
-export interface HerdrExecOptions {
-  cwd?: string;
-  env?: NodeJS.ProcessEnv;
-  timeoutMs?: number;
-}
+/**
+ * #569/#734 — same member list as `DockerExecOptions`/`DevcontainerExecOptions`, so it is an
+ * alias rather than a fourth declaration of one shape.
+ */
+export type HerdrExecOptions = DockerExecOptions;
 
 /**
  * Run herdr and resolve with {stdout, stderr, code, error} — NEVER rejects. On a
