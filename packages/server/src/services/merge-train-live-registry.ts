@@ -80,6 +80,18 @@ export function isMergeTrainLive(trainId: string): boolean {
   return live.has(trainId);
 }
 
+/**
+ * Is a train job for this `label` running in THIS process? (#1150) The repo lock's holder
+ * string is `merge-train:<label>` — the label is all the lock layer has on hand while it logs
+ * a contended wait, and it has no DB access to map a label back to a row id.
+ */
+export function isMergeTrainLabelLive(label: string): boolean {
+  for (const entry of live.values()) {
+    if (entry.label === label) return true;
+  }
+  return false;
+}
+
 /** A copy of the registry as of now — what the reconciler's sweep decides against. */
 export function snapshotLiveMergeTrains(): LiveMergeTrainSnapshot {
   return new Map(live);
