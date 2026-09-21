@@ -279,7 +279,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       // #1102: the per-project half of THE auto-merge resolver, not a second key parse.
       const autoMergeDisabledProjectIds = listAutoMergeDisabledProjectIds(prefMap);
 
-      const ctx: ExitContext = { workspace, projectId, issueId, skipAutoReview, sessionId, exitCode, now, prefMap, statuses, findStatus, autoMergeEnabled, defaultBranch, autoMergeDisabledProjectIds };
+      const ctx: ExitContext = { workspace, projectId, issueId, skipAutoReview, sessionId, exitCode, now, prefMap, statuses, findStatus, autoMergeEnabled, defaultBranch, autoMergeDisabledProjectIds, triggerType: sessionRows[0]?.triggerType };
       if (classification.action === "fix-and-merge") { await handleFixAndMergeExit(ctx); return; }
       if (classification.action === "learning-cleanup") { learningSessionIds.delete(sessionId); console.log(`[workflow] learning step session ${sessionId} completed  no further workflow action`); return; }
       if (classification.action === "failed") { await handleFailedSessionExit(ctx); return; }
