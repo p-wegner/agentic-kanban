@@ -310,12 +310,19 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 645 -> 644 (#1214), a SHRINK banked per the fourteenth movement above.
   "services/workspace-create.service.ts::createWorkspaceCreateService": 642,
   // 616 -> 629 (#1108), disclosed in the eleventh movement above.
-  "services/issue.service.ts::createIssueService": 629,
+  // 629 -> 631 (#1205): the AK-535 terminal-move guard now calls
+  // isWorkspaceBranchFullyContained before refusing a move to Done — a branch fully
+  // contained in the base (0 ahead) has nothing left to merge. Two lines: the extra
+  // async check plus its comment line landing inside the existing `if` body.
+  "services/issue.service.ts::createIssueService": 631,
   // 618 -> 620 (#968), disclosed in the sixth movement above.
   "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 621,
   "services/workflow-fork.service.ts::createWorkflowForkService": 581,
   // 573 -> 577 (#1047), disclosed in the tenth movement above.
-  "cli/commands/workspace.ts::registerWorkspaceCommand": 577,
+  // 577 -> 615 (#1206): a new `workspace reopen <issue-number>` subcommand, mirroring
+  // `resume`'s shape (resolve issue -> latest workspace -> POST the action endpoint),
+  // to recover a workspace closed while its branch still carried unmerged commits.
+  "cli/commands/workspace.ts::registerWorkspaceCommand": 615,
   // 637 -> 638 (#1027), disclosed in the ninth movement above.
   "services/agent-remote.service.ts::createRemoteAgentService": 638,
   "cli/commands/session.ts::registerSessionCommand": 569,
@@ -372,7 +379,9 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 409 -> 394 (#1214), a SHRINK banked per the fourteenth movement above.
   "services/workspace-provision.service.ts::createWorkspaceProvisionService": 394,
   // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.
-  "routes/workspace-actions.ts::createWorkspaceActionsRoute": 384,
+  // 399 -> 384 -> 388 (#1206): a new `POST /:id/reopen` route, one more `router.post(...)`
+  // block in the `createXRoute` architecture this file's header already names.
+  "routes/workspace-actions.ts::createWorkspaceActionsRoute": 388,
   // 349 -> 351 (#841): POSIX-only `detached: true` for a shell launch, closing the #836 gap.
   // 351 -> 358 (#1027), disclosed in the ninth movement above.
   "worker/worker-agent-runner.ts::createWorkerAgentRunner": 358,

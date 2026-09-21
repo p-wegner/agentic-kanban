@@ -3,6 +3,7 @@ import type { ToolDb } from "./tools/deps.js";
 import type * as schemaModule from "@agentic-kanban/shared/schema";
 import { findOpenUnmergedWorkspace } from "@agentic-kanban/shared/lib/issue-status-orchestration";
 import { nextIssueNumber as sharedNextIssueNumber } from "@agentic-kanban/shared/lib/issue-number";
+import { checkBranchTipIsAncestor, countUniqueCommits } from "@agentic-kanban/shared/lib/git-service";
 
 // The per-session .out transcript reader is shared with the server (single source
 // of truth in @agentic-kanban/shared/lib/session-files), not a hand-synced fork.
@@ -220,11 +221,57 @@ export async function resolveStatusByName(
  */
 export async function checkOpenUnmergedWorkspace(
   db: ToolDb,
-  _schema: typeof schemaModule,
+  schema: typeof schemaModule,
   issueId: string,
 ): Promise<{ blocked: boolean; workspaceId?: string; branch?: string }> {
   const openWs = await findOpenUnmergedWorkspace(db, issueId);
   if (!openWs) return { blocked: false };
+
+  // #1205: a branch fully CONTAINED in its base (0 commits ahead) has provably
+  // nothing left to merge — don't let it block the move. Best-effort: any lookup
+  // or git failure falls back to blocking (fail closed), same policy as the
+  // server-side twin (`branch-containment.service.ts`).
+  try {
+    const wsRows = await db.select({
+        branch: schema.workspaces.branch,
+        baseBranch: schema.workspaces.baseBranch,
+        workingDir: schema.workspaces.workingDir,
+        isDirect: schema.workspaces.isDirect,
+        issueId: schema.workspaces.issueId,
+      })
+      .from(schema.workspaces)
+      .where(eq(schema.workspaces.id, openWs.id))
+      .limit(1);
+    const ws = wsRows[0];
+    if (ws && !ws.isDirect && ws.branch) {
+      const issueRows = await db.select({ projectId: schema.issues.projectId })
+        .from(schema.issues)
+        .where(eq(schema.issues.id, ws.issueId))
+        .limit(1);
+      const projectId = issueRows[0]?.projectId;
+      if (projectId) {
+        const projectRows = await db.select({
+            repoPath: schema.projects.repoPath,
+            defaultBranch: schema.projects.defaultBranch,
+          })
+          .from(schema.projects)
+          .where(eq(schema.projects.id, projectId))
+          .limit(1);
+        const project = projectRows[0];
+        const baseBranch = ws.baseBranch || project?.defaultBranch;
+        if (project?.repoPath && baseBranch) {
+          const ancestry = await checkBranchTipIsAncestor(project.repoPath, ws.branch, baseBranch, ws.workingDir ?? undefined);
+          if (ancestry.branchSha !== null && ancestry.isAncestor) {
+            const uniqueCommits = await countUniqueCommits(project.repoPath, ancestry.baseSha, ancestry.branchSha);
+            if (uniqueCommits === 0) return { blocked: false };
+          }
+        }
+      }
+    }
+  } catch {
+    // fall through to blocked
+  }
+
   return { blocked: true, workspaceId: openWs.id, branch: openWs.branch };
 }
 

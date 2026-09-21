@@ -71,7 +71,7 @@ describe("board-events-contract", () => {
   });
 
   describe("named refresh-reason groups", () => {
-    it("WORKSPACE_LIFECYCLE_REASONS covers create/setup/idle/merge/close/ready-for-merge", () => {
+    it("WORKSPACE_LIFECYCLE_REASONS covers create/setup/idle/merge/close/ready-for-merge/reopen", () => {
       expect([...WORKSPACE_LIFECYCLE_REASONS].sort()).toEqual(
         [
           "workspace_created",
@@ -80,6 +80,7 @@ describe("board-events-contract", () => {
           "workspace_merged",
           "workspace_closed",
           "workspace_ready_for_merge",
+          "workspace_reopened",
         ].sort(),
       );
     });

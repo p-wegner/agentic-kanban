@@ -298,6 +298,81 @@ describe("generateBoardRiskDigest", () => {
   });
 });
 
+describe("generateBoardRiskDigest — stranded_in_review (#1206)", () => {
+  it("flags an In Review issue whose only workspace is closed and unmerged", async () => {
+    const { db } = createTestDb();
+    const { projectId, inReviewId } = await seedProject(db);
+
+    const issueId = await createIssue(db, projectId, inReviewId, "Stranded", 1120);
+    await createWorkspace(db, issueId, "closed");
+
+    const digest = await generateBoardRiskDigest(projectId, db as never);
+
+    expect(digest.summary.strandedInReview).toBe(1);
+    const item = digest.allItems.find((i) => i.category === "stranded_in_review");
+    expect(item).toBeDefined();
+    expect(item!.issueNumber).toBe(1120);
+    expect(item!.severity).toBe("high");
+  });
+
+  it("does NOT flag an In Review issue that still has an OPEN workspace", async () => {
+    const { db } = createTestDb();
+    const { projectId, inReviewId } = await seedProject(db);
+
+    const issueId = await createIssue(db, projectId, inReviewId, "Fine", 1121);
+    await createWorkspace(db, issueId, "idle");
+
+    const digest = await generateBoardRiskDigest(projectId, db as never);
+
+    expect(digest.summary.strandedInReview).toBe(0);
+  });
+
+  it("does NOT flag an In Review issue whose closed workspace is already merged", async () => {
+    const { db } = createTestDb();
+    const { projectId, inReviewId } = await seedProject(db);
+
+    const issueId = await createIssue(db, projectId, inReviewId, "Merged", 1122);
+    const now = new Date().toISOString();
+    const wsId = randomUUID();
+    await db.insert(schema.workspaces).values({
+      id: wsId, issueId, branch: "feature/merged", status: "closed", mergedAt: now,
+      createdAt: now, updatedAt: now,
+    });
+
+    const digest = await generateBoardRiskDigest(projectId, db as never);
+
+    expect(digest.summary.strandedInReview).toBe(0);
+  });
+
+  it("does NOT flag a direct workspace with no branch to reopen", async () => {
+    const { db } = createTestDb();
+    const { projectId, inReviewId } = await seedProject(db);
+
+    const issueId = await createIssue(db, projectId, inReviewId, "Direct", 1123);
+    const now = new Date().toISOString();
+    const wsId = randomUUID();
+    await db.insert(schema.workspaces).values({
+      id: wsId, issueId, branch: "main", status: "closed", isDirect: true,
+      createdAt: now, updatedAt: now,
+    });
+
+    const digest = await generateBoardRiskDigest(projectId, db as never);
+
+    expect(digest.summary.strandedInReview).toBe(0);
+  });
+
+  it("does NOT flag an issue with no workspace at all", async () => {
+    const { db } = createTestDb();
+    const { projectId, inReviewId } = await seedProject(db);
+
+    await createIssue(db, projectId, inReviewId, "Untouched", 1124);
+
+    const digest = await generateBoardRiskDigest(projectId, db as never);
+
+    expect(digest.summary.strandedInReview).toBe(0);
+  });
+});
+
 /**
  * #1053 — the digest is the board-visible surface for #1039's healing check: it must catch a
  * plugin skill junction gone from the main checkout independent of any workspace being created,

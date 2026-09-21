@@ -271,3 +271,153 @@ describe("reconcileHandMergedBranches (#113)", () => {
     expect(await statusOf(issue)).toBe("In Progress");
   });
 });
+
+// #1205: reconcileContainedOpenWorkspaces — the sibling case to reconcileHandMergedBranches
+// above. That reconciler only ever looks at issues with NO live workspace; #1165/#1169/#1181
+// each still had an open (idle, readyForMerge) workspace whose branch was fully contained in
+// master (0 ahead) because the fix landed on master directly. This is the evidence-gated
+// sweep that closes those workspaces and Dones their issues.
+
+import { reconcileContainedOpenWorkspaces } from "../startup/hand-merged-branch-reconciler.js";
+import type { BranchTipAncestryResult } from "@agentic-kanban/shared/lib/git-service";
+
+async function seedOpenWorkspace(
+  issueId: string,
+  opts: { branch?: string; wsStatus?: string; isDirect?: boolean } = {},
+): Promise<string> {
+  const workspaceId = randomUUID();
+  await db.insert(workspaces).values({
+    id: workspaceId,
+    issueId,
+    branch: opts.branch ?? "feature/ak-1165-fix",
+    baseBranch: "master",
+    isDirect: opts.isDirect ?? false,
+    status: opts.wsStatus ?? "idle",
+    provider: "claude",
+  });
+  return workspaceId;
+}
+
+function makeAncestor(isAncestor: boolean): (repo: string, branch: string, base: string) => Promise<BranchTipAncestryResult> {
+  return vi.fn(async (_repo, branch, base) =>
+    isAncestor
+      ? { isAncestor: true as const, branchSha: `sha-${branch}`, baseSha: `sha-${base}` }
+      : { isAncestor: false as const, branchSha: `sha-${branch}`, baseSha: `sha-${base}` },
+  );
+}
+
+function makeSummaries(entries: Array<{ sha: string; message: string }>) {
+  return vi.fn(async () => entries);
+}
+
+describe("reconcileContainedOpenWorkspaces (#1205)", () => {
+  it("closes an open workspace and Dones the issue when the branch is fully contained AND a base commit names the issue", async () => {
+    const issueId = await seedIssue(1165, "In Review");
+    const workspaceId = await seedOpenWorkspace(issueId, { branch: "feature/ak-1165-fix" });
+
+    const count = await reconcileContainedOpenWorkspaces({
+      database: db as unknown as Database,
+      checkAncestor: makeAncestor(true),
+      countCommits: vi.fn(async () => 0),
+      getSummaries: makeSummaries([{ sha: "abc1234", message: "fix(#1165,#1169): master green again" }]),
+    });
+
+    expect(count).toBe(1);
+    expect(await statusOf(issueId)).toBe("Done");
+    const [ws] = await db.select({ status: workspaces.status, mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("closed");
+    expect(ws.mergedAt).toBeTruthy();
+  });
+
+  it("leaves the workspace open when the branch is contained but NO base commit names the issue (no evidence)", async () => {
+    const issueId = await seedIssue(1165, "In Review");
+    await seedOpenWorkspace(issueId, { branch: "feature/ak-1165-fix" });
+
+    const count = await reconcileContainedOpenWorkspaces({
+      database: db as unknown as Database,
+      checkAncestor: makeAncestor(true),
+      countCommits: vi.fn(async () => 0),
+      getSummaries: makeSummaries([{ sha: "abc1234", message: "unrelated commit" }]),
+    });
+
+    expect(count).toBe(0);
+    expect(await statusOf(issueId)).toBe("In Review");
+  });
+
+  it("leaves the workspace open when it is NOT fully contained (1 ahead), even with matching evidence", async () => {
+    const issueId = await seedIssue(1165, "In Review");
+    await seedOpenWorkspace(issueId, { branch: "feature/ak-1165-fix" });
+
+    const count = await reconcileContainedOpenWorkspaces({
+      database: db as unknown as Database,
+      checkAncestor: makeAncestor(true),
+      countCommits: vi.fn(async () => 1),
+      getSummaries: makeSummaries([{ sha: "abc1234", message: "fix(#1165): real fix" }]),
+    });
+
+    expect(count).toBe(0);
+    expect(await statusOf(issueId)).toBe("In Review");
+  });
+
+  it("leaves a brand-new (0-ahead, no evidence) workspace alone — the #581/#585 false-positive guard", async () => {
+    const issueId = await seedIssue(1165, "In Progress");
+    await seedOpenWorkspace(issueId, { branch: "feature/ak-1165-fresh" });
+
+    const count = await reconcileContainedOpenWorkspaces({
+      database: db as unknown as Database,
+      checkAncestor: makeAncestor(true),
+      countCommits: vi.fn(async () => 0),
+      getSummaries: makeSummaries([]),
+    });
+
+    expect(count).toBe(0);
+    expect(await statusOf(issueId)).toBe("In Progress");
+  });
+
+  it("skips a live (non-idle) workspace", async () => {
+    const issueId = await seedIssue(1165, "In Progress");
+    await seedOpenWorkspace(issueId, { branch: "feature/ak-1165-fix", wsStatus: "active" });
+
+    const checkAncestor = makeAncestor(true);
+    const count = await reconcileContainedOpenWorkspaces({
+      database: db as unknown as Database,
+      checkAncestor,
+      countCommits: vi.fn(async () => 0),
+      getSummaries: makeSummaries([{ sha: "abc1234", message: "fix(#1165): real fix" }]),
+    });
+
+    expect(count).toBe(0);
+    expect(checkAncestor).not.toHaveBeenCalled();
+    expect(await statusOf(issueId)).toBe("In Progress");
+  });
+
+  it("skips a direct workspace", async () => {
+    const issueId = await seedIssue(1165, "In Review");
+    await seedOpenWorkspace(issueId, { branch: "feature/ak-1165-fix", isDirect: true });
+
+    const count = await reconcileContainedOpenWorkspaces({
+      database: db as unknown as Database,
+      checkAncestor: makeAncestor(true),
+      countCommits: vi.fn(async () => 0),
+      getSummaries: makeSummaries([{ sha: "abc1234", message: "fix(#1165): real fix" }]),
+    });
+
+    expect(count).toBe(0);
+    expect(await statusOf(issueId)).toBe("In Review");
+  });
+
+  it("is idempotent — a second run finds no more open workspaces to close", async () => {
+    const issueId = await seedIssue(1165, "In Review");
+    await seedOpenWorkspace(issueId, { branch: "feature/ak-1165-fix" });
+
+    const deps = {
+      database: db as unknown as Database,
+      checkAncestor: makeAncestor(true),
+      countCommits: vi.fn(async () => 0),
+      getSummaries: makeSummaries([{ sha: "abc1234", message: "fix(#1165): real fix" }]),
+    };
+
+    expect(await reconcileContainedOpenWorkspaces(deps)).toBe(1);
+    expect(await reconcileContainedOpenWorkspaces(deps)).toBe(0);
+  });
+});
