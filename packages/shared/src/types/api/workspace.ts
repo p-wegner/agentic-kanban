@@ -3,6 +3,7 @@
 import type { ProfileSelection } from "./common.js";
 import type { ServiceStackState } from "../service-stack.js";
 import type { GateActivity } from "../../lib/gate-activity.js";
+import type { TrainBoardingPassDto } from "./merge-train.js";
 
 export interface MainWorkspaceInfo {
   id: string;
@@ -54,6 +55,14 @@ export interface MainWorkspaceInfo {
    * a merge error, and a lingering badge would only go stale.
    */
   gateActivity?: GateActivity | null;
+
+  /**
+   * #1188 — set while this workspace is aboard a release train (or, for one board rebuild
+   * after the train finished, its terminal outcome), so the card can show a "boarding pass"
+   * chip instead of looking identical to a ticket nobody has touched. Null when the workspace
+   * has no active or recently-finished train association.
+   */
+  trainBoardingPass?: TrainBoardingPassDto | null;
 
   pendingPlanPath?: string | null;
   scorecard?: { score: number } | null;
