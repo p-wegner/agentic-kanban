@@ -43,7 +43,7 @@ import {
 } from "./pre-merge-gate-tier.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
-import { beginMergeGateRun, endMergeGateRun } from "./merge-cancellation.js";
+import { beginMergeGateRun, combineGateAbortSignals, endMergeGateRun } from "./merge-cancellation.js";
 // #221/#490's failure-message shaping lives in its own module now (this file crossed the
 // 1000-line god-module ceiling). Re-exported below so its importers are unchanged.
 import { summarizeVerifyFailure } from "./verify-failure-summary.js";
@@ -193,9 +193,11 @@ export async function runPreMergeGate(
   workspace: PreMergeGateWorkspace,
   projectId: string,
   database: Database,
+  /** #1203 — a train's own abort token; optional, combined below with #1164's per-workspace one. */
+  signal?: AbortSignal,
 ): Promise<PreMergeGateResult> {
-  // #1164 — reachable from `POST /:id/merge/cancel`; `endMergeGateRun` below is its counterpart.
-  const cancelSignal = beginMergeGateRun(workspace.id);
+  // #1164 (per-workspace) + #1203 (a train's `signal`) — see `combineGateAbortSignals`'s doc comment.
+  const combinedSignal = combineGateAbortSignals(beginMergeGateRun(workspace.id), signal);
   // ---- #628 deferred dependency installs ---------------------------------------------------
   // With install mode `background` the agent launches before its repos' dependencies exist, so
   // the protection `setupFailedBlocking` (#169) gave by refusing the LAUNCH has to be here
@@ -559,7 +561,7 @@ export async function runPreMergeGate(
           chainsInFlight: workers.chainsInFlight,
         });
         startedAt = Date.now();
-        return runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv, signal: cancelSignal })
+        return runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv, signal: combinedSignal })
           .catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false }));
       });
       lastVerifyRunMs = Date.now() - startedAt;
@@ -612,7 +614,7 @@ export async function runPreMergeGate(
             runSetupScript(workingDir, verifyScript!, {
               timeoutMs: verifyTimeoutMs,
               env: { ...verifyEnv, KANBAN_RETRY_TEST_FILES: retryScope },
-              signal: cancelSignal,
+              signal: combinedSignal,
             }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
           );
         },
@@ -623,7 +625,7 @@ export async function runPreMergeGate(
             runSetupScript(workingDir, command, {
               timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS,
               env: gradleEnv,
-              signal: cancelSignal,
+              signal: combinedSignal,
             }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
           );
         },

@@ -10,6 +10,15 @@ import type { Database } from "../db/index.js";
  * for why the row exists.
  */
 
+/**
+ * The one sanctioned way for a caller outside the `db`/`repositories` layer (the CLI, which
+ * `cli-not-down-to-persistence` forbids from importing `db/index.js` directly) to get the
+ * default database connection for a repository/service call that requires one.
+ */
+export function getDefaultDatabase(): Database {
+  return db;
+}
+
 export interface CreateMergeTrainInput {
   id: string;
   projectId: string;
@@ -37,20 +46,48 @@ export interface UpdateMergeTrainStateInput {
   bisectResult?: Record<string, unknown> | null;
   reconciledReason?: string | null;
   finishedAt?: string | null;
+  /**
+   * #1203 — restrict this write to rows CURRENTLY in one of these states, so a write that
+   * merely reports IN-PROGRESS work (the gate's own `state: "gating"` stamp on every attempt)
+   * can never clobber a TERMINAL state an operator or reconciler already wrote. Without this,
+   * `updateMergeTrainState(id, { state: "gating" })` was an unconditional overwrite, so an
+   * operator's cancel (`abandoned`) racing a bisect's next attempt was resolved by whichever
+   * write landed LAST rather than by the operator's intent always winning (#1153's actual gap:
+   * marking the row was correct, but nothing stopped the next attempt from re-marking it live).
+   * Omitted (every other caller) keeps today's unconditional write.
+   */
+  guardStates?: MergeTrainState[];
 }
 
-/** Advance a train's state, optionally attaching evidence/bisect data or a finish stamp. */
+/**
+ * Advance a train's state, optionally attaching evidence/bisect data or a finish stamp.
+ *
+ * Returns whether the row was actually written — always `true` when `guardStates` is omitted
+ * (an unconditional write either finds the row or is a no-op on a deleted id, matching today's
+ * behaviour byte for byte), and `false` when `guardStates` was supplied and the row's CURRENT
+ * state was not in that set — i.e. the guard refused the write.
+ */
 export async function updateMergeTrainState(
   id: string,
   input: UpdateMergeTrainStateInput,
   database: Database = db,
-): Promise<void> {
+): Promise<boolean> {
   const set: Partial<typeof mergeTrains.$inferInsert> = { state: input.state };
   if (input.gateEvidence !== undefined) set.gateEvidence = input.gateEvidence == null ? null : JSON.stringify(input.gateEvidence);
   if (input.bisectResult !== undefined) set.bisectResult = input.bisectResult == null ? null : JSON.stringify(input.bisectResult);
   if (input.reconciledReason !== undefined) set.reconciledReason = input.reconciledReason;
   if (input.finishedAt !== undefined) set.finishedAt = input.finishedAt;
-  await database.update(mergeTrains).set(set).where(eq(mergeTrains.id, id));
+  const where = input.guardStates && input.guardStates.length > 0
+    ? and(eq(mergeTrains.id, id), inArray(mergeTrains.state, input.guardStates))
+    : eq(mergeTrains.id, id);
+  const result = await database.update(mergeTrains).set(set).where(where);
+  // #1203: the driver's row-count field name differs (`rowsAffected` vs `changes`, see
+  // `cleanupExpiredRuntimeState`'s same fallback) — a guard that matched no row (state already
+  // moved on) must be visible to the caller as "not applied", not as success.
+  const rowsAffected = (result as { rowsAffected?: number; changes?: number }).rowsAffected
+    ?? (result as { changes?: number }).changes
+    ?? 0;
+  return input.guardStates ? rowsAffected !== 0 : true;
 }
 
 export type MergeTrainRow = typeof mergeTrains.$inferSelect;

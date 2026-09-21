@@ -8,6 +8,8 @@ import { cliPathArg } from "../cli-path.js";
 import { unregisterLeakedTempProjects, findProjectsWithMissingRepoPath } from "../../services/project-registration.js";
 import { exportBacklogSnapshot, importBacklogSnapshot, validateBacklogSnapshot } from "../../services/backlog-snapshot.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { sweepStaleTrainWorktrees } from "../../startup/merge-train-reconciler.js";
+import { getDefaultDatabase } from "../../repositories/merge-train.repository.js";
 
 /** Resolve a project by name or id, defaulting to the active project when omitted. */
 async function resolveProject(nameOrId: string | undefined) {
@@ -141,7 +143,7 @@ Examples:
 
   program
     .command("cleanup")
-    .description("Show stale worktrees for closed workspaces, and clean up leaked temp-fixture project registrations.\n\nLists git worktrees belonging to closed/merged workspaces (remove manually with 'git worktree remove --force <path>'). Also unregisters any project whose repoPath is both gone from disk and under the OS temp dir (leaked test/lab fixtures), and reports any OTHER registered project with a missing repoPath so it stays visible instead of silent -- non-temp paths are never auto-removed.\n\nUse --dry-run to preview the worktree listing with explicit \"would be removed\" wording and a summary count, making no changes at all.")
+    .description("Show stale worktrees for closed workspaces, clean up leaked temp-fixture project registrations, and remove stale merge-train staging worktrees.\n\nLists git worktrees belonging to closed/merged workspaces (remove manually with 'git worktree remove --force <path>'). Also unregisters any project whose repoPath is both gone from disk and under the OS temp dir (leaked test/lab fixtures), and reports any OTHER registered project with a missing repoPath so it stays visible instead of silent -- non-temp paths are never auto-removed. Merge-train staging worktrees (under .worktrees/<repo>/train/) whose train has finished (landed/red/abandoned) ARE removed by this command (#1208) -- they are otherwise cleaned up by the same background sweep the merge-train reconciler runs, so this is a manual trigger for it.\n\nUse --dry-run to preview both the worktree listing and the train-worktree removal with explicit \"would be removed\" wording and a summary count, making no changes at all.")
     .option("--dry-run", "List what would be removed without making any changes")
     .addHelpText("after", `
 Example:
@@ -157,19 +159,37 @@ Example:
       const closedWorkspaces = await getClosedWorkspaces();
       const withWorktrees = closedWorkspaces.filter((ws) => ws.workingDir);
 
+      // #1208: train staging worktrees whose train has already finished. Reported the same way
+      // in both branches below; the dry-run branch reports and returns before anything below it
+      // (temp-fixture unregistration, the real removal here) makes a change.
+      const trainSweep = await sweepStaleTrainWorktrees({ database: getDefaultDatabase(), dryRun: options.dryRun });
+      const reportTrainWorktrees = () => {
+        if (trainSweep.removed.length > 0) {
+          console.log(`\n${options.dryRun ? "Dry run: would remove" : "Removed"} ${trainSweep.removed.length} stale merge-train staging worktree(s):`);
+          for (const w of trainSweep.removed) console.log(`  ${w.path} (project ${w.projectId})`);
+        } else {
+          console.log("\nNo stale merge-train staging worktrees found.");
+        }
+        if (trainSweep.unknown.length > 0) {
+          console.log(`${trainSweep.unknown.length} train worktree(s) match no merge_trains row of any state (left for manual inspection):`);
+          for (const w of trainSweep.unknown) console.log(`  ${w.path} (project ${w.projectId})`);
+        }
+      };
+
       // #1002: --dry-run reports and changes NOTHING. It returns before the
       // temp-fixture unregistration below as well, not just before the worktree
       // advice, because that path deletes project registrations.
       if (options.dryRun) {
         if (withWorktrees.length === 0) {
           console.log("Dry run: 0 worktree(s) would be removed. No changes made.");
-          process.exit(0);
+        } else {
+          console.log(`Dry run: would remove ${withWorktrees.length} worktree(s):`);
+          for (const ws of withWorktrees) {
+            console.log(`  ${ws.branch} -> ${ws.workingDir} (session ${ws.id})`);
+          }
+          console.log(`\nDry run: ${withWorktrees.length} worktree(s) would be removed. No changes made.`);
         }
-        console.log(`Dry run: would remove ${withWorktrees.length} worktree(s):`);
-        for (const ws of withWorktrees) {
-          console.log(`  ${ws.branch} -> ${ws.workingDir} (session ${ws.id})`);
-        }
-        console.log(`\nDry run: ${withWorktrees.length} worktree(s) would be removed. No changes made.`);
+        reportTrainWorktrees();
         process.exit(0);
       }
 
@@ -183,6 +203,8 @@ Example:
         console.log("\nThese worktrees can be removed manually with:");
         console.log("  git worktree remove --force <path>");
       }
+
+      reportTrainWorktrees();
 
       const removed = await unregisterLeakedTempProjects();
       if (removed.length > 0) {

@@ -1,14 +1,21 @@
-import { mergeBranch, isAncestor, revParse } from "@agentic-kanban/shared/lib/git-service";
-import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
+import { isAncestor, mergeBranch, revParse } from "@agentic-kanban/shared/lib/git-service";
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { MergeTrainAttemptDto, MergeTrainAttemptVerdict, MergeTrainBaseVerdict } from "@agentic-kanban/shared/types";
-import {
-  computeConflictGraph,
-  conflictClusters,
-  orderByLeastOverlap,
-  pickConflictFreeSet,
-} from "./merge-train-conflict-graph.js";
 import { verifyChainSemaphoreActive, verifyChainSemaphoreConcurrency } from "./verify-chain-semaphore.js";
+import {
+  assembleMergeTrain,
+  assertTrainPreservesAncestry,
+  dedupeConflictClusters,
+  formatTrainLabel,
+  parentTrainLabel,
+  trainDateStamp,
+  trainRefName,
+  type ConflictCluster,
+  type DroppedTrainMember,
+  type TrainAssemblyResult,
+  type TrainMember,
+} from "./merge-train-assembly.js";
 
 /**
  * Release trains: gate N tickets ONCE instead of N times.
@@ -25,249 +32,24 @@ import { verifyChainSemaphoreActive, verifyChainSemaphoreConcurrency } from "./v
  * `merge-tree` reports no problem and the merge proceeds). A train gates the assembled tree,
  * which IS what lands.
  *
- * ## The one hard constraint: --no-ff, never squash and never rebase
- *
- * Every downstream invariant in this codebase is ANCESTRY-based, not shape-based:
- *   - `checkBranchTipIsAncestor` (merge-executor.service.ts) asserts the member tip is
- *     reachable from the target after the merge;
- *   - `checkAlreadyMerged` (workspace-already-merged.service.ts) decides "already merged" by
- *     ancestry;
- *   - the done-unmerged invariant scanner treats a member whose tip is NOT an ancestor as a
- *     `silent_merge_loss` and RE-MERGES it — and it has no patch-equivalence check, so a
- *     squashed member gets its work applied to master a second time as duplicate commits.
- *
- * A `--no-ff` merge preserves every member tip as an ancestor of the train, and the train's
- * tip as an ancestor of master, so all of the above keep working with no changes. Squashing or
- * rebasing members into the train breaks all of them at once. `assertTrainPreservesAncestry`
- * exists to make that failure loud rather than silent.
+ * The ANCESTRY invariant (--no-ff, never squash, never rebase a member into the train) and the
+ * ASSEMBLY step that builds the integration ref both live in `merge-train-assembly.ts` (split
+ * out to stay under the god-module gate's 1000-line ceiling); this module re-exports them so no
+ * importer needs to know about the split.
  */
 
-export interface TrainMember {
-  workspaceId: string;
-  /** The member's feature branch. Its tip must remain an ancestor of the train. */
-  branch: string;
-  /** For logs and the dropped-member report. */
-  issueNumber?: number | null;
-  /** The branch tip sha at landing time, for the merge commit body (#1190). Not set until then. */
-  tipSha?: string;
-}
-
-/**
- * A member left out of a train, with why. `deferred` (#1191) marks the member-vs-member case:
- * the branch is clean against the base and collides only with a sibling that IS riding this
- * train, so it is queued for the next train window (#905) rather than sent to the rebase path
- * — once the sibling has landed, the next assembly decides afresh. A drop without `deferred`
- * conflicts with the train ref itself (a base conflict, or an unresolvable branch) and stays
- * the author's to rebase.
- */
-export interface DroppedTrainMember {
-  member: TrainMember;
-  reason: string;
-  deferred?: true;
-}
-
-export interface TrainAssemblyResult {
-  /** The integration ref the members were assembled onto. */
-  trainRef: string;
-  /** Members successfully merged into the train, in the order they landed. */
-  included: TrainMember[];
-  /** Members left out, with why — a conflict against the train, or an unresolvable branch. */
-  dropped: DroppedTrainMember[];
-  /** The train tip after assembly, or null when nothing was included. */
-  trainSha: string | null;
-  /** The base tip the train was built from — the gate's evidence baseSha for the batch. */
-  baseSha: string;
-}
-
-/**
- * #1191 — one connected component of the member-vs-member conflict graph computed for THIS
- * assembly, restricted to members that were actually requested. Emitted so the caller can feed
- * it to `propose_ticket_groups`/`group-scan` as a candidate `coupled_with` group: tickets that
- * collide on every train attempt are coupled tickets in disguise (decision 015).
- */
-export interface ConflictCluster {
-  workspaceIds: string[];
-}
-
-/** Dedupe clusters by their member SET — a bisect re-discovers the same cluster at every level. */
-function dedupeConflictClusters(clusters: ConflictCluster[]): ConflictCluster[] {
-  const seen = new Set<string>();
-  const out: ConflictCluster[] = [];
-  for (const c of clusters) {
-    const key = [...c.workspaceIds].sort().join(",");
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(c);
-  }
-  return out;
-}
-
-/** Name of the integration ref for a train. Kept under a `kanban/` namespace to be obviously ours. */
-export function trainRefName(label: string): string {
-  return `kanban/train/${label}`;
-}
-
-/**
- * A train's label identifies the ROW/ref across every bisect sub-attempt, e.g. `train/2026-09-17-03`.
- * A bisect child extends its parent's label with a lowercase letter (`train/2026-09-17-03a`,
- * `…03ab`, …, see `landGreenest`'s `${subLabel}a`/`${subLabel}b`) — so the parent train's label is
- * whatever remains after stripping every trailing bisect letter. The landing merge commit names
- * THIS, never the sub-attempt label, so the history reads as one train regardless of which
- * bisect half actually landed.
- */
-export function parentTrainLabel(label: string): string {
-  return label.replace(/[a-z]+$/, "");
-}
-
-/**
- * Per-project, per-day sequence label (#1190): `train/YYYY-MM-DD-NN`, replacing the old
- * `q<base36 timestamp>` scratch label that carried no information a reader could use — a
- * `git log --first-parent` full of `Merge branch 'kanban/train/qmu4t981aba'` explains nothing
- * about which tickets rode together. `seq` is 1-based and left-padded to 2 digits (`01`..`99`,
- * unpadded beyond that — a project running 100 trains in one day is not a formatting problem).
- */
-export function formatTrainLabel(dateStamp: string, seq: number): string {
-  const padded = seq < 10 ? `0${seq}` : `${seq}`;
-  return `train/${dateStamp}-${padded}`;
-}
-
-/** `YYYY-MM-DD` from an ISO instant, in UTC — the calendar day a train's sequence counts against. */
-export function trainDateStamp(now?: string): string {
-  return (now ?? new Date().toISOString()).slice(0, 10);
-}
-
-/**
- * Point `trainRef` at `baseBranch`'s current tip, creating it if absent.
- *
- * `-f` is safe here precisely because a train ref is disposable scratch space that this
- * service owns: it is never checked out, never pushed, and carries no work that is not
- * already on a member branch.
- */
-async function resetTrainRef(repoPath: string, trainRef: string, baseBranch: string): Promise<string> {
-  const baseSha = await revParse(repoPath, baseBranch);
-  // `{ cwd }` — gitExecOrThrow takes an OPTIONS OBJECT. A bare string leaves cwd undefined and
-  // the command silently runs in the process cwd, against the wrong repository.
-  await gitExecOrThrow(["branch", "-f", trainRef, baseSha], { cwd: repoPath });
-  return baseSha;
-}
-
-/**
- * Assemble members onto a fresh train ref with `--no-ff` merges.
- *
- * #1191 — conflict-aware: before touching any ref, every PAIR of members is checked for a
- * member-vs-member conflict via read-only `merge-tree` (`computeConflictGraph`). A maximum
- * conflict-free SET is picked from that graph (`pickConflictFreeSet`) and stacked onto the train
- * in LEAST-OVERLAP order (`orderByLeastOverlap`, proposal 2026-08-25 §4.3) rather than the
- * caller's plan order — so a member is no longer dropped merely because of where it sat in the
- * list, and the members most likely to still collide (with the base, or with something the set
- * had to exclude) are merged last, closest to the point where a genuine problem shows up.
- *
- * A member excluded by the conflict-free-set pass is reported as dropped with the SPECIFIC
- * member it conflicts with named in the reason — not just "conflict" — and marked `deferred`:
- * its branch is clean against the base, so it is left in the queue for the next train window
- * (#905) rather than sent to the rebase path. Assembly against the train ref can still
- * additionally drop a member for a base-only conflict (the member is clean against every
- * sibling but not against the base itself); that case keeps the original per-member reason.
- *
- * One bad member must not deny the whole wave the amortized gate — every excluded/dropped member
- * keeps its branch untouched. Stacking is `--no-ff` onto the tip in the chosen order; no member
- * branch is ever rebased, so the ancestry invariant in the module docstring is unchanged.
- */
-export async function assembleMergeTrain(args: {
-  repoPath: string;
-  baseBranch: string;
-  members: TrainMember[];
-  label: string;
-}): Promise<TrainAssemblyResult & { conflictClusters: ConflictCluster[] }> {
-  const { repoPath, baseBranch, members, label } = args;
-  const trainRef = trainRefName(label);
-  const baseSha = await resetTrainRef(repoPath, trainRef, baseBranch);
-
-  const included: TrainMember[] = [];
-  const dropped: DroppedTrainMember[] = [];
-
-  let orderedForAssembly = members;
-  let clusters: ConflictCluster[] = [];
-  if (members.length >= 2) {
-    const graph = await computeConflictGraph(repoPath, members);
-    const { kept, excluded } = pickConflictFreeSet(members, graph);
-    for (const e of excluded) {
-      const reason =
-        `conflicts with ${e.conflictsWith.branch}` +
-        (e.conflictsWith.issueNumber ? ` (#${e.conflictsWith.issueNumber})` : "") +
-        " — deferred to the next train";
-      dropped.push({ member: e.member, reason, deferred: true });
-      console.warn(
-        `[merge-train] deferred ${e.member.branch}${e.member.issueNumber ? ` (#${e.member.issueNumber})` : ""} from train ${trainRef}: ${reason}`,
-      );
-    }
-    orderedForAssembly = orderByLeastOverlap(kept, graph);
-    clusters = conflictClusters(members.map((m) => m.workspaceId), graph).map((workspaceIds) => ({ workspaceIds }));
-  }
-
-  for (const member of orderedForAssembly) {
-    try {
-      // mergeBranch never touches a working tree when the target is not checked out (the train
-      // ref never is), so this is pure ref/object plumbing: merge-tree -> commit-tree -> CAS.
-      await mergeBranch(repoPath, member.branch, trainRef);
-      included.push(member);
-    } catch (err) {
-      // A member the conflict-free-set pass judged clean against every sibling can still fail
-      // here: that check is member-vs-member, never against the BASE, so this is a base-only
-      // conflict (or the rare TOCTOU where a sibling branch moved between the two checks).
-      const reason = errorMessage(err);
-      dropped.push({ member, reason });
-      console.warn(
-        `[merge-train] dropped ${member.branch}${member.issueNumber ? ` (#${member.issueNumber})` : ""} from train ${trainRef}: ${reason.slice(0, 200)}`,
-      );
-    }
-  }
-
-  const trainSha = included.length > 0 ? await revParse(repoPath, trainRef) : null;
-  return { trainRef, included, dropped, trainSha, baseSha, conflictClusters: clusters };
-}
-
-/**
- * Fail loudly if any included member's tip is not reachable from the train.
- *
- * This is the guard against the squash/rebase mistake described in the module docstring. It is
- * cheap (one `merge-base --is-ancestor` per member) and it protects an expensive, hard-to-debug
- * failure: the done-unmerged scanner silently re-merging landed work as duplicate commits.
- *
- * #1215 — a member can also leave the train's `included` set truthfully assembled and still
- * fail this check for a reason that has NOTHING to do with squash/rebase: it landed on the
- * base by another door WHILE this leaf was gating (a foundational-blocker synchronous merge,
- * #797, or a hand merge). Such a branch is not reachable from the (now-stale) `trainRef` — the
- * leaf was assembled before that merge happened — but it IS reachable from `baseBranch`, which
- * is exactly `checkAlreadyMerged`'s definition of "already merged". That is a fact to accept,
- * not a violation to throw on: when `baseBranch` is given, a member failing the train check is
- * re-checked against it before being reported broken.
- */
-export async function assertTrainPreservesAncestry(
-  repoPath: string,
-  trainRef: string,
-  included: TrainMember[],
-  baseBranch?: string,
-): Promise<void> {
-  const broken: string[] = [];
-  for (const member of included) {
-    const tip = await revParse(repoPath, member.branch).catch(() => null);
-    if (!tip) {
-      broken.push(`${member.branch} (unresolvable)`);
-      continue;
-    }
-    if (await isAncestor(repoPath, tip, trainRef)) continue;
-    if (baseBranch && (await isAncestor(repoPath, tip, baseBranch))) continue;
-    broken.push(member.branch);
-  }
-  if (broken.length > 0) {
-    throw new Error(
-      `[merge-train] ancestry invariant violated on ${trainRef}: ${broken.join(", ")} not reachable from the train. ` +
-        `Members must be merged with --no-ff — squash/rebase breaks checkAlreadyMerged and makes the ` +
-        `done-unmerged scanner re-merge landed work as duplicate commits.`,
-    );
-  }
-}
+export {
+  assembleMergeTrain,
+  assertTrainPreservesAncestry,
+  formatTrainLabel,
+  parentTrainLabel,
+  trainDateStamp,
+  trainRefName,
+  type ConflictCluster,
+  type DroppedTrainMember,
+  type TrainAssemblyResult,
+  type TrainMember,
+};
 
 /** The structural trailer a landed train's merge commit carries — see {@link buildMergeTrainCommitMessage}. */
 export const MERGE_TRAIN_TRAILER_KEY = "Merge-Train";
@@ -473,6 +255,13 @@ export interface TrainRunResult {
    */
   landRefused?: string;
   /**
+   * #1203 — true when `signal` was already aborted before an attempt (root or a bisect half)
+   * even started, so that attempt spent NO gate run at all. Distinct from `landRefused`, which
+   * is asked once after a green gate: this can end the job before, during (the running gate's
+   * child process killed), or between bisect halves — anywhere `landGreenest` checks the signal.
+   */
+  cancelled?: true;
+  /**
    * #1189 — one node per assemble → gate → land cycle, in the order they finished (a bisect's
    * root first, then its halves depth-first). The tree the panel renders; the sum of the nodes'
    * `gateRuns` is `gateRuns` above.
@@ -585,6 +374,15 @@ export async function runMergeTrain(args: {
    * (could not measure) leaves today's behaviour exactly as it was.
    */
   gateBaseAlone?: () => Promise<{ verdict: MergeTrainBaseVerdict; gateRuns: number } | null>;
+  /**
+   * #1203 — real cancellation. Checked by the bisect driver before EVERY attempt (the root and
+   * each half), so an operator cancel ends the job after the CURRENT gate's child process is
+   * killed at the latest, rather than continuing through the rest of a bisect tree. The caller
+   * also passes the same signal into `runGate` (via its own closure) so the currently-running
+   * verify/install process is killed rather than left to finish. Absent means "never aborts" —
+   * every existing caller (a lone per-workspace gate has nothing to cancel) is unaffected.
+   */
+  signal?: AbortSignal;
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, runGate, closeMember } = args;
   const bisect = args.bisectOnFailure !== false;
@@ -596,6 +394,7 @@ export async function runMergeTrain(args: {
    * control-flow analysis would otherwise narrow the outer binding to `null` at the read.
    */
   const baseProbe: { current: { verdict: MergeTrainBaseVerdict; gateRuns: number } | null } = { current: null };
+  const signal = args.signal;
 
   /**
    * Wait for `a`, then `b` (either may be absent) — used to chain a child's landing behind
@@ -634,11 +433,34 @@ export async function runMergeTrain(args: {
     notifyDone?: () => void,
   ): Promise<TrainRunResult> {
     try {
+      // #1203: checked before every attempt starts — the root, and each bisect half. An
+      // already-aborted signal spends NO gate run at all: no assembly, no worktree, nothing
+      // for the (already-running, currently-being-killed-via-the-same-signal) gate to race
+      // against. `gateRejected`/`dropped`/`sided` all stay empty, since nothing here was
+      // ever attributed to any member — this is the job stopping, not a verdict about the code.
+      if (signal?.aborted) {
+        return {
+          trainRef: `kanban/train/${subLabel}`,
+          landed: [],
+          dropped: [],
+          gateRejected: [],
+          sided: [],
+          gateRuns: 0,
+          gateFailure: "train cancelled",
+          cancelled: true,
+          closeFailures: [],
+          attempts: [],
+        };
+      }
       const attempt = await runTrainAttempt({ ...args, members: subset, label: subLabel, isEnvironmentFailure, waitForLandTurn: waitForPredecessor });
       if (attempt.landed.length > 0 || !attempt.gateFailure) return attempt;
       // #1181: a refused landing is not a red gate — splitting would re-gate green code twice
       // and then refuse again. Stop here, attribution-free.
       if (attempt.landRefused) return attempt;
+      // #1203: a gate that was itself killed by the cancel signal (mid-run, via `runGate`'s own
+      // closure over the same signal) is not attribution either — stop here rather than bisect
+      // an aborted run's failure onto individual members.
+      if (attempt.cancelled) return attempt;
       // #1154: an environment failure fails the SAME way for every subset of the same staging
       // worktree — splitting cannot learn anything a second run at the top level didn't already
       // say, and it can only mislabel branches as individually red. Stop here, attribution-free.
@@ -717,6 +539,12 @@ export async function runMergeTrain(args: {
         ...(first.landed.length + second.landed.length === 0
           ? { gateFailure: attempt.gateFailure }
           : {}),
+        // #1203: a cancel that fires WHILE both halves are already gating (the parallel branch)
+        // is caught by neither half's OWN pre-attempt check — each had already started before
+        // the signal fired — so surface it here from whichever half's `runGate` closure noticed
+        // the abort and returned a failed gate. Either half reporting cancelled makes the whole
+        // split's result cancelled, since the run as a whole was told to stop.
+        ...(first.cancelled || second.cancelled ? { cancelled: true as const } : {}),
       };
     } finally {
       notifyDone?.();
@@ -756,6 +584,8 @@ async function runTrainAttempt(args: {
    * only the git-level landing is serialized.
    */
   waitForLandTurn?: Promise<void>;
+  /** #1203 — see `runMergeTrain`'s doc comment; only read here to classify a killed gate. */
+  signal?: AbortSignal;
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, trainId, runGate, closeMember } = args;
 
@@ -824,6 +654,12 @@ async function runTrainAttempt(args: {
     const gate = await runGate({ trainRef: asm.trainRef, trainSha: asm.trainSha, included: asm.included, label });
     gateFinishedAt = new Date().toISOString();
     if (!gate.passed) {
+      // #1203: the gate itself was killed by the SAME signal a cancel aborts (`runGate`'s own
+      // closure passes it into `runSetupScript`) — this failure is the cancel, not a verdict
+      // about the code, so it must not be bisected or attributed to any member.
+      if (args.signal?.aborted) {
+        return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], sided: [], gateRuns: 1, gateFailure: gate.message, cancelled: true }, "red");
+      }
       // #1154/#1189: an environment failure is the train's, not a member's — its own leaf kind.
       const verdict: MergeTrainAttemptVerdict = args.isEnvironmentFailure(gate.message) ? "env_failure" : "red";
       return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], sided: [], gateRuns: 1, gateFailure: gate.message }, verdict);

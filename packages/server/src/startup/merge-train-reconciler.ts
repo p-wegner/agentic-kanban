@@ -44,9 +44,13 @@ import {
   updateMergeTrainState,
   type MergeTrainRow,
 } from "../repositories/merge-train.repository.js";
+import { getAllProjects } from "../repositories/project.repository.js";
 import { emptyPassReport, formatPassReportBody, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { listWorktrees, removeWorktree, worktreeDirLeafForBranch } from "@agentic-kanban/shared/lib/git-service";
+import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
+import { parentTrainLabel, trainRefName } from "../services/merge-train.service.js";
 import {
   findLiveMergeTrainForProject,
   snapshotLiveMergeTrains,
@@ -270,17 +274,140 @@ export function startMergeTrainReconciler(
     intervalMs?: number;
     runTrain?: (row: MergeTrainRow) => Promise<void>;
     boardEvents?: BoardEventSink;
-  } = {},
+    /**
+     * #1208 — injected rather than read from the module-level `db` singleton: `startup/` has a
+     * shrink-only ratchet on files that import that VALUE
+     * (`startup-persistence-boundary-ratchet.test.ts`), because a module holding the singleton
+     * connection has no seam to swap or fake in a test. The one production caller
+     * (`background-services.ts`) already receives `db` in its own `start({ db })` args, so this
+     * is a straight pass-through, not a new dependency.
+     */
+    database: Database;
+  },
 ): void {
   stopMergeTrainReconciler();
   sweep = startPeriodicSweep({
     name: "merge-train-reconciler",
     intervalMs: opts.intervalMs ?? SWEEP_INTERVAL_MS,
-    tick: () => reconcileStrandedMergeTrains({ runTrain: opts.runTrain, boardEvents: opts.boardEvents }),
+    tick: async () => {
+      const reconciled = await reconcileStrandedMergeTrains({
+        database: opts.database,
+        runTrain: opts.runTrain,
+        boardEvents: opts.boardEvents,
+      });
+      const worktrees = await sweepStaleTrainWorktrees({ database: opts.database });
+      return { ...reconciled, staleWorktreesRemoved: worktrees.removed.length };
+    },
   });
 }
 
 export function stopMergeTrainReconciler(): void {
   sweep?.stop();
   sweep = null;
+}
+
+/**
+ * #1208 — remove a train's staging worktree (`.worktrees/<repo>/train/kanban_train_<label>`)
+ * once its row is terminal, and sweep away any such directory a crashed process left behind
+ * with no live row to account for it at all.
+ *
+ * The per-attempt `finally` in `merge-queue-train.ts`'s `runGate` already removes its own
+ * worktree on every NORMAL exit (gate finishes, gate throws, cancel). What it cannot cover is
+ * the process dying mid-gate (killed by pid, an unhandled crash) — the `finally` never runs,
+ * and the directory is orphaned with nothing left in the DB naming it (the train ref and the
+ * worktree are both scratch state with no `workspaces` row). This sweep is the boot-time (and
+ * periodic, defence-in-depth) recovery for exactly that gap, mirroring how
+ * `reconcileStrandedMergeTrains` recovers the DB ROW half of the same crash.
+ *
+ * Matching a worktree back to a row: the leaf is `worktreeDirLeafForBranch("kanban/train/<label
+ * of the ATTEMPT>")` (see `worktree.ts`), and an attempt's label is the row's label plus zero or
+ * more trailing bisect letters (`parentTrainLabel` strips them). So a worktree's directory name
+ * belongs to a project's train row when `parentTrainLabel` of the decoded label equals that
+ * row's `label`. Unknown labels (matching no row of ANY state, not just the active ones) are
+ * reported rather than removed — a directory this sweep cannot positively attribute is exactly
+ * the case `removeWorktreeUnlessShared`'s design already refuses to guess about.
+ */
+export interface StaleTrainWorktreeSweepResult extends PassReport {
+  removed: Array<{ projectId: string; path: string }>;
+  /** A directory under the train namespace whose label matched no `merge_trains` row at all. */
+  unknown: Array<{ projectId: string; path: string }>;
+}
+
+export async function sweepStaleTrainWorktrees(
+  opts: { database: Database; log?: (message: string) => void; dryRun?: boolean },
+): Promise<StaleTrainWorktreeSweepResult> {
+  // `removeWorktreeUnlessShared`'s claim check reads `workspaces`, so this needs a real
+  // database. REQUIRED (not defaulted to the module-level `db` singleton) — importing that
+  // VALUE here would trip `startup-persistence-boundary-ratchet.test.ts`'s shrink-only count of
+  // `startup/` files that hold the singleton connection with no seam to swap or fake it.
+  const database = opts.database;
+  const log = opts.log ?? ((message: string) => console.log(`[merge-train-reconciler] ${message}`));
+  const result: StaleTrainWorktreeSweepResult = { ...emptyPassReport(0), removed: [], unknown: [] };
+
+  // One read for every project's rows, in EVERY state — not just the active ones, since a
+  // worktree must be attributable to a TERMINAL row (landed/red/abandoned) before it may be
+  // removed, and to an active one (assembling/gating/landing) before it is skipped rather than
+  // reported as unknown.
+  const rows = await listMergeTrainsInStates(
+    ["assembling", "gating", "landing", "landed", "red", "abandoned"],
+    database,
+  ).catch(() => [] as MergeTrainRow[]);
+  // Keyed by `projectId::<sanitized leaf>` — the leaf `worktreeDirLeafForBranch` derives from
+  // the row's OWN label, per-project since two different projects' trains both start their
+  // per-day sequence at `01` and would otherwise collide on the same label (`train/2026-09-19-01`
+  // is not unique across projects, only within one). Keying by leaf means recovering the label
+  // from a directory name never has to reverse the sanitization — it only has to reproduce it
+  // (scoped to the worktree's own project, resolved from ITS repoPath below) and look it up.
+  const rowsByProject = new Map<string, Map<string, MergeTrainRow>>();
+  for (const row of rows) {
+    const leaf = worktreeDirLeafForBranch(trainRefName(parentTrainLabel(row.label)));
+    const forProject = rowsByProject.get(row.projectId) ?? new Map<string, MergeTrainRow>();
+    forProject.set(leaf, row);
+    rowsByProject.set(row.projectId, forProject);
+  }
+
+  const projects = await getAllProjects(database, { includeArchived: true }).catch(() => []);
+  for (const project of projects) {
+    if (!project.repoPath) continue;
+    const worktrees = await listWorktrees(project.repoPath).catch(() => []);
+    const rowByLeaf = rowsByProject.get(project.id);
+    for (const wt of worktrees) {
+      const leaf = wt.path.split(/[\\/]/).filter(Boolean).pop() ?? "";
+      if (!leaf.startsWith("kanban_train_")) continue;
+      result.scanned++;
+      const owner = rowByLeaf?.get(leaf);
+      if (!owner) {
+        result.unknown.push({ projectId: project.id, path: wt.path });
+        recordSkipped(result, wt.path, "unknown-label");
+        log(`train worktree ${wt.path} (project ${project.id}) matches no merge_trains row of any state — leaving it for manual inspection`);
+        continue;
+      }
+      if (owner.state === "assembling" || owner.state === "gating" || owner.state === "landing") {
+        recordSkipped(result, wt.path, "row-still-active");
+        continue;
+      }
+      if (opts.dryRun) {
+        result.removed.push({ projectId: project.id, path: wt.path });
+        recordActed(result, wt.path, "would-remove");
+        log(`would remove stale train staging worktree ${wt.path} (project ${project.id}, train ${owner.id} terminal: ${owner.state})`);
+        continue;
+      }
+      const outcome = await removeWorktreeUnlessShared({
+        database,
+        workingDir: wt.path,
+        label: "merge-train-stale-sweep",
+        removeWorktree: () => removeWorktree(project.repoPath, wt.path),
+      }).catch((err) => ({ removed: false as const, reason: "remove-failed" as const, message: errorMessage(err), error: err }));
+      if (outcome.removed) {
+        result.removed.push({ projectId: project.id, path: wt.path });
+        recordActed(result, wt.path, "removed");
+        log(`removed stale train staging worktree ${wt.path} (project ${project.id}, train ${owner.id} terminal: ${owner.state})`);
+      } else {
+        recordSkipped(result, wt.path, outcome.reason);
+        log(`could not remove stale train worktree ${wt.path}: ${outcome.message}`);
+      }
+    }
+  }
+
+  return result;
 }

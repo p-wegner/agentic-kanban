@@ -142,3 +142,53 @@ describe("appendMergeTrainAttempt (#1189)", () => {
     expect(JSON.parse(row!.gateEvidence!)).toEqual({ attempts: [node("q1")] });
   });
 });
+
+/**
+ * #1203 — `guardStates` makes an in-progress bookkeeping write (a bisect attempt's own
+ * `state: "gating"` stamp) refuse to overwrite a row an operator/reconciler already moved to a
+ * TERMINAL state, closing the race `finishMergeTrain`'s own `abandoned` check could only catch
+ * AFTER the fact. Omitting `guardStates` keeps every existing caller's unconditional write.
+ */
+describe("updateMergeTrainState guardStates (#1203)", () => {
+  it("refuses the write and reports false when the row's current state is not in guardStates", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    const trainId = randomUUID();
+    await createMergeTrain({ id: trainId, projectId, label: "q1", memberWorkspaceIds: ["ws-a"] }, db);
+    await updateMergeTrainState(trainId, { state: "abandoned", reconciledReason: "cancelled by operator", finishedAt: new Date().toISOString() }, db);
+
+    const applied = await updateMergeTrainState(trainId, { state: "gating", guardStates: ["assembling", "gating"] }, db);
+
+    expect(applied).toBe(false);
+    const row = await getMergeTrain(trainId, db);
+    expect(row?.state).toBe("abandoned");
+    expect(row?.reconciledReason).toBe("cancelled by operator");
+  });
+
+  it("applies the write and reports true when the row's current state IS in guardStates", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    const trainId = randomUUID();
+    await createMergeTrain({ id: trainId, projectId, label: "q1", memberWorkspaceIds: ["ws-a"] }, db);
+
+    const applied = await updateMergeTrainState(trainId, { state: "gating", guardStates: ["assembling", "gating"] }, db);
+
+    expect(applied).toBe(true);
+    const row = await getMergeTrain(trainId, db);
+    expect(row?.state).toBe("gating");
+  });
+
+  it("without guardStates, the write is unconditional (today's behaviour, unchanged)", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    const trainId = randomUUID();
+    await createMergeTrain({ id: trainId, projectId, label: "q1", memberWorkspaceIds: ["ws-a"] }, db);
+    await updateMergeTrainState(trainId, { state: "abandoned", finishedAt: new Date().toISOString() }, db);
+
+    const applied = await updateMergeTrainState(trainId, { state: "landed" }, db);
+
+    expect(applied).toBe(true);
+    const row = await getMergeTrain(trainId, db);
+    expect(row?.state).toBe("landed");
+  });
+});
