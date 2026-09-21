@@ -126,6 +126,16 @@ describe("failure classification (#417 part 3)", () => {
     expect(classifyMergeFailure(GENERIC_MSG)).toBe("generic");
   });
 
+  it("classifies a configured gate with no worktree to verify against as verify_infra_missing (#1219)", () => {
+    // Exactly the ak-1219 repro: an idle workspace whose worktree is gone, verify_script still
+    // configured — a PERMANENT condition for that workspace, not a transient test failure.
+    expect(
+      classifyMergeFailure(
+        "verify_failed: Pre-merge gate failed (verify) — merge withheld. verify_script configured but workspace has no worktree — cannot verify",
+      ),
+    ).toBe("verify_infra_missing");
+  });
+
   it("non-retryable classes jump straight to the max backoff; generic doubles per repeat", () => {
     expect(nextRetryDelayMs("main_checkout_dirty", 1)).toBe(MERGE_BACKOFF_CAP_MS);
     expect(nextRetryDelayMs("verify_infra_missing", 1)).toBe(MERGE_BACKOFF_CAP_MS);

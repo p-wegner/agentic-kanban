@@ -90,6 +90,12 @@ export function classifyMergeFailure(message: string): MergeFailureClass {
   ) {
     return "verify_infra_missing";
   }
+  // A CONFIGURED gate that cannot run because the workspace has no worktree (#826) is the same
+  // shape as a missing tool: no amount of retrying conjures the worktree back, only a human
+  // (relaunching/rebuilding the workspace) or the workspace being closed does (#1219).
+  if (/(?:pre-merge gate failed|verify)/i.test(message) && /has no worktree/i.test(message)) {
+    return "verify_infra_missing";
+  }
   // A gate that TIMED OUT is retryable — the next run may get a quieter box — but it is
   // the class most likely to repeat, so it gets its own ramp rather than sharing the
   // generic one. Checked after the infra pattern: a timeout waiting for a missing tool is
