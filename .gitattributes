@@ -36,6 +36,7 @@ scripts/** text eol=lf
 # Directory-level pins for the two tooling trees, matching the .claude/skills/** rule above.
 .claude/hooks/** text eol=lf
 .codex/skills/** text eol=lf
+.herdr/plugin/**/*.mjs text eol=lf
 packages/desktop/src-tauri/src/main.rs text eol=lf
 packages/mcp-server/src/index.ts text eol=lf
 packages/server/bin/*.js text eol=lf

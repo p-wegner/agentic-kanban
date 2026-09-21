@@ -199,8 +199,20 @@ import {
  * THIS worst-case number. Should shrink at the next `durations.json` capture: both suites run
  * in well under 1s (measured via `pnpm exec vitest run` locally), against the 3,000 ms
  * placeholder each carries until then.
+ *
+ * -- Fourth disclosed movement (2026-09-21, #1146) — 576,000 -> 582,000 --------------------
+ *
+ * `herdr-hook-adapter.test.ts`, the 188th guard, MEASURED at 5,852 ms (run alone on a loaded
+ * box; entered by hand into `durations.json` rather than left at the 3,000 ms placeholder, so
+ * the assumed-file count stays at 25). The argument for the seconds: it spawns the live
+ * `.herdr/plugin/agentic-kanban-hooks.mjs` adapter and the `.claude/hooks/*.js` scripts it
+ * delegates to, outside every package's `src/` — import-graph-invisible in exactly the shape
+ * `always-run-marker-ratchet` demands a marker for, and it is the only test proving a herdr-hosted
+ * session is held to the same DB-safety / cross-worktree / command-safety gates as the other
+ * providers. It carries a `when:` territory of the hook trees it spawns, so an ordinary diff
+ * pays nothing for it.
  */
-const BASELINE_TOTAL_MS = 576_000;
+const BASELINE_TOTAL_MS = 582_000;
 
 /**
  * How far under the baseline is tolerated before it counts as stale.
