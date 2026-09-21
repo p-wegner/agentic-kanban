@@ -559,6 +559,136 @@ async function gateBaseAloneOnce(args: {
 }
 
 /**
+ * Acquire the repo lock and run the gated train, treating a repo-lock timeout and a THROW out
+ * of `runMergeTrain` as the same shape of failure: a train job that died before finishing.
+ * Both used to be handled differently (see the #1215 call-site comment) — this is the ONE place
+ * that decides "the job is doomed" and always leaves the row terminal (`abandoned` or `red`)
+ * and the live-train registry cleared before returning, so the caller never has to.
+ *
+ * Split out of `runTrainStrategy` (rather than inlined as a second `try/catch`) so the
+ * generator's own branch count stays under the god-module gate's per-function ceiling (#726) —
+ * this function carries both failure paths' branches instead.
+ */
+async function runDoomedTrainJob(args: {
+  database: Database;
+  boardEvents: BoardEventSink | undefined;
+  reconcileAlreadyMerged: (workspaceId: string) => Promise<unknown>;
+  sendTurn: (workspaceId: string, content: string) => Promise<unknown>;
+  reviewTrain: typeof runTrainReview;
+  repoPath: string;
+  baseBranch: string;
+  members: TrainReviewMember[];
+  label: string;
+  trainId: string;
+  projectId: string;
+  /** Mutable out-param: `afterGreen` below writes the review evidence the caller persists. */
+  reviewEvidenceRef: { current: MergeTrainGateEvidenceDto["review"] };
+}): Promise<{ ok: true; result: Awaited<ReturnType<typeof runMergeTrain>> } | { ok: false; reason: string }> {
+  const { database, boardEvents, reconcileAlreadyMerged, sendTurn, reviewTrain, repoPath, baseBranch, members, label, trainId, projectId, reviewEvidenceRef } = args;
+
+  let repoLock: Awaited<ReturnType<typeof acquireQueueRepoLock>>;
+  try {
+    repoLock = await acquireQueueRepoLock(repoPath, `merge-train:${label}`, { timeoutMs: MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS });
+  } catch (err) {
+    const reason = `could not acquire the repo lock within ${Math.round(MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS / 60_000)}m: ${errorMessage(err)}`;
+    unregisterLiveMergeTrain(trainId);
+    await updateMergeTrainState(trainId, { state: "abandoned", reconciledReason: reason, finishedAt: new Date().toISOString() }, database).catch(() => undefined);
+    boardEvents?.broadcast(projectId, "merge_train_changed");
+    return { ok: false, reason: `train abandoned: ${reason}` };
+  }
+  const heartbeat = setInterval(() => repoLock.heartbeat(), 15_000);
+
+  try {
+    const result = await runMergeTrain({
+      repoPath,
+      baseBranch,
+      members,
+      label,
+      trainId,
+      // #1181: an operator cancel or a reconciler verdict can mark this row `abandoned` while
+      // the job is still gating (there is no cancellation token into `runMergeTrain`). The
+      // gate work is sunk cost either way, but a train whose row says abandoned must not
+      // LAND — nobody is going to account for that merge. Checked at the last moment before
+      // `landMergeTrain`, on a fresh read, never on the row captured at start.
+      shouldLand: () => vetoLandingIfAbandoned(trainId, database),
+      runGate: async ({ trainRef, included, label: attemptLabel }) => {
+        // Gate the TREE THAT LANDS. A per-member gate never tests the merge commit, which is
+        // how two individually-green branches can produce a red base with no conflict.
+        //
+        // #1193: keyed by the ATTEMPT's label (`q1a`, `q1b`), not the train's — two bisect
+        // halves may be gating at the same moment, each in its own staging worktree (the
+        // leaf is derived from `trainRef`, which already differs per half), and their log
+        // lines and synthetic gate ids must tell them apart.
+        //
+        // #1204: the worktree + setup + `runPreMergeGate` half is `runTrainStagingGate`, so
+        // the control arm gates the bare base through the SAME code rather than a second copy.
+        await updateMergeTrainState(trainId, { state: "gating" }, database).catch(() => undefined);
+        boardEvents?.broadcast(projectId, "merge_train_changed");
+        return await runTrainStagingGate({
+          database, repoPath, baseBranch, projectId,
+          ref: trainRef,
+          attemptLabel,
+          includedWorkspaceIds: included.map((m) => m.workspaceId),
+          afterGreen: async ({ gateWorktree }) => {
+            // #1194: review ONCE, on the tree that just proved green - the assembled diff vs the
+            // base, one reviewer, every member's criteria in `{{members}}`. A blocking finding
+            // names its member in `sided`; `runMergeTrain` re-lands the rest without it.
+            const decision = resolveTrainReviewDecision(toPrefMap(await getAllPreferencesCached(database).catch(() => [])), projectId);
+            if (!decision.run) {
+              reviewEvidenceRef.current ??= { status: "skipped", reason: decision.reason };
+              return {};
+            }
+            const reviewMembers: TrainReviewMember[] = included.flatMap((m) => {
+              const full = members.find((x) => x.workspaceId === m.workspaceId);
+              return full ? [{ workspaceId: full.workspaceId, branch: full.branch, issueId: full.issueId, issueNumber: full.issueNumber ?? null, changedFiles: full.changedFiles }] : [];
+            });
+            // #1192: `repoPath` + `sendTurn` are what a sided member's siding record needs — the
+            // same row, tag and sha-keyed hold a conflict drop gets (`partitionSidedMembers`
+            // above then withholds it from the next window until its tip moves).
+            const review = await reviewTrain({
+              projectId, trainLabel: label, trainRef, baseBranch, gateWorktree, repoPath,
+              members: reviewMembers, blocking: decision.blocking, thorough: decision.thorough,
+            }, { database, sendTurn });
+            reviewEvidenceRef.current ??= review.evidence;
+            return { sided: review.sided };
+          },
+        });
+      },
+      // #1204 — the CONTROL ARM, asked once before a red full train is halved: is the BARE
+      // BASE red? If it is, the failure belongs to master and no member may be blamed for it.
+      gateBaseAlone: () => gateBaseAloneOnce({ database, repoPath, baseBranch, projectId, trainLabel: label }),
+      closeMember: async (workspaceId) => {
+        // Reuse the sanctioned already-merged path rather than reimplementing the
+        // mergedAt/status/comment bookkeeping the reconcilers depend on.
+        await reconcileAlreadyMerged(workspaceId);
+        // #1192: a member that lands has nothing left to be sided about — drop any leftover
+        // record from an earlier drop-then-rebase cycle rather than leaving a stale row.
+        const landedMember = members.find((m) => m.workspaceId === workspaceId);
+        if (landedMember) await clearTrainSiding(landedMember, { database, sendTurn });
+      },
+      // #1154: a missing-module gate failure is the staging worktree's environment, not any
+      // member's code — bisecting it burns gate runs (observed: 9 runs, 3h23m, nothing
+      // landed) to reach the same verdict every time, and risks blaming an arbitrary member.
+      // Reuses the same signature the gate's own #169 install-retry already matches against.
+      isEnvironmentFailure: looksLikeMissingDepsFailure,
+      // #1189: persist each bisect node as it finishes, so the row shows partial progress
+      // while the train is still gating. Evidence column only — never the state (#1153).
+      onAttempt: (attempt) => appendMergeTrainAttempt(trainId, { ...attempt }, database),
+    });
+    return { ok: true, result };
+  } catch (err) {
+    const reason = errorMessage(err);
+    await updateMergeTrainState(trainId, { state: "red", reconciledReason: reason, finishedAt: new Date().toISOString() }, database).catch(() => undefined);
+    unregisterLiveMergeTrain(trainId);
+    boardEvents?.broadcast(projectId, "merge_train_changed");
+    return { ok: false, reason: `train orchestrator threw: ${reason}` };
+  } finally {
+    clearInterval(heartbeat);
+    repoLock.release();
+  }
+}
+
+/**
  * Build the train-strategy runner for `createMergeQueueService`. `reconcileAlreadyMerged` is
  * injected rather than importing `workspace-merge.service.ts` directly here, so this module
  * doesn't need its own copy of that service's construction — the caller already built one.
@@ -655,102 +785,29 @@ export function createMergeTrainRunner(deps: {
     // is cheap and a livelock is exactly nine 90-minute waiters queued behind one holder that
     // itself can never catch up. Combined with `beginMergeTrain` now refusing a second train
     // while one is already in flight (below), this is the only wait a train ever takes.
-    let repoLock: Awaited<ReturnType<typeof acquireQueueRepoLock>>;
-    try {
-      repoLock = await acquireQueueRepoLock(repoPath, `merge-train:${label}`, { timeoutMs: MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS });
-    } catch (err) {
-      const reason = `could not acquire the repo lock within ${Math.round(MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS / 60_000)}m: ${errorMessage(err)}`;
-      unregisterLiveMergeTrain(trainId);
-      await updateMergeTrainState(trainId, { state: "abandoned", reconciledReason: reason, finishedAt: new Date().toISOString() }, database).catch(() => undefined);
-      boardEvents?.broadcast(projectId, "merge_train_changed");
-      yield { type: "error", workspaceId: first.id, issueNumber: first.issueNumber, issueTitle: first.issueTitle, error: `train abandoned: ${reason}` };
+    //
+    // #1215: a repo-lock timeout and a THROW out of `runMergeTrain` (the ancestry invariant, or
+    // "base moved after gating") are both "this train job died before finishing" — and used to
+    // be handled inconsistently: the lock timeout finished the row `abandoned` and reported it,
+    // while a throw from `runMergeTrain` had no handler at all, only a `finally` that released
+    // the lock. The row was left `gating` forever: `finishMergeTrain`/`unregisterLiveMergeTrain`
+    // never ran, the in-process registry still listed the train as live, the reconciler skipped
+    // it as "live in this process", and every later `beginMergeTrain` for this project refused
+    // with "already in flight" — a queue dead until the process restarted. `runDoomedTrainJob`
+    // now owns both failure shapes and always finishes the row terminal before returning.
+    const reviewEvidenceRef: { current: MergeTrainGateEvidenceDto["review"] } = { current: reviewEvidence };
+    const outcome = await runDoomedTrainJob({
+      database, boardEvents, reconcileAlreadyMerged, sendTurn, reviewTrain,
+      repoPath, baseBranch, members, label, trainId, projectId,
+      reviewEvidenceRef,
+    });
+    reviewEvidence = reviewEvidenceRef.current;
+    if (!outcome.ok) {
+      yield { type: "error", workspaceId: first.id, issueNumber: first.issueNumber, issueTitle: first.issueTitle, error: outcome.reason };
       yield { type: "done", merged: [], failed: members.map((m) => m.workspaceId), skipped: [] };
       return;
     }
-    const heartbeat = setInterval(() => repoLock.heartbeat(), 15_000);
-
-    let result: Awaited<ReturnType<typeof runMergeTrain>> | null = null;
-    try {
-      result = await runMergeTrain({
-        repoPath,
-        baseBranch,
-        members,
-        label,
-        trainId,
-        // #1181: an operator cancel or a reconciler verdict can mark this row `abandoned` while
-        // the job is still gating (there is no cancellation token into `runMergeTrain`). The
-        // gate work is sunk cost either way, but a train whose row says abandoned must not
-        // LAND — nobody is going to account for that merge. Checked at the last moment before
-        // `landMergeTrain`, on a fresh read, never on the row captured at start.
-        shouldLand: () => vetoLandingIfAbandoned(trainId, database),
-        runGate: async ({ trainRef, included, label: attemptLabel }) => {
-          // Gate the TREE THAT LANDS. A per-member gate never tests the merge commit, which is
-          // how two individually-green branches can produce a red base with no conflict.
-          //
-          // #1193: keyed by the ATTEMPT's label (`q1a`, `q1b`), not the train's — two bisect
-          // halves may be gating at the same moment, each in its own staging worktree (the
-          // leaf is derived from `trainRef`, which already differs per half), and their log
-          // lines and synthetic gate ids must tell them apart.
-          //
-          // #1204: the worktree + setup + `runPreMergeGate` half is `runTrainStagingGate`, so
-          // the control arm gates the bare base through the SAME code rather than a second copy.
-          await updateMergeTrainState(trainId, { state: "gating" }, database).catch(() => undefined);
-          boardEvents?.broadcast(projectId, "merge_train_changed");
-          return await runTrainStagingGate({
-            database, repoPath, baseBranch, projectId,
-            ref: trainRef,
-            attemptLabel,
-            includedWorkspaceIds: included.map((m) => m.workspaceId),
-            afterGreen: async ({ gateWorktree }) => {
-              // #1194: review ONCE, on the tree that just proved green - the assembled diff vs the
-              // base, one reviewer, every member's criteria in `{{members}}`. A blocking finding
-              // names its member in `sided`; `runMergeTrain` re-lands the rest without it.
-              const decision = resolveTrainReviewDecision(toPrefMap(await getAllPreferencesCached(database).catch(() => [])), projectId);
-              if (!decision.run) {
-                reviewEvidence ??= { status: "skipped", reason: decision.reason };
-                return {};
-              }
-              const reviewMembers: TrainReviewMember[] = included.flatMap((m) => {
-                const full = members.find((x) => x.workspaceId === m.workspaceId);
-                return full ? [{ workspaceId: full.workspaceId, branch: full.branch, issueId: full.issueId, issueNumber: full.issueNumber ?? null, changedFiles: full.changedFiles }] : [];
-              });
-              // #1192: `repoPath` + `sendTurn` are what a sided member's siding record needs — the
-              // same row, tag and sha-keyed hold a conflict drop gets (`partitionSidedMembers`
-              // above then withholds it from the next window until its tip moves).
-              const review = await reviewTrain({
-                projectId, trainLabel: label, trainRef, baseBranch, gateWorktree, repoPath,
-                members: reviewMembers, blocking: decision.blocking, thorough: decision.thorough,
-              }, { database, sendTurn });
-              reviewEvidence ??= review.evidence;
-              return { sided: review.sided };
-            },
-          });
-        },
-        // #1204 — the CONTROL ARM, asked once before a red full train is halved: is the BARE
-        // BASE red? If it is, the failure belongs to master and no member may be blamed for it.
-        gateBaseAlone: () => gateBaseAloneOnce({ database, repoPath, baseBranch, projectId, trainLabel: label }),
-        closeMember: async (workspaceId) => {
-          // Reuse the sanctioned already-merged path rather than reimplementing the
-          // mergedAt/status/comment bookkeeping the reconcilers depend on.
-          await reconcileAlreadyMerged(workspaceId);
-          // #1192: a member that lands has nothing left to be sided about — drop any leftover
-          // record from an earlier drop-then-rebase cycle rather than leaving a stale row.
-          const landedMember = members.find((m) => m.workspaceId === workspaceId);
-          if (landedMember) await clearTrainSiding(landedMember, { database, sendTurn });
-        },
-        // #1154: a missing-module gate failure is the staging worktree's environment, not any
-        // member's code — bisecting it burns gate runs (observed: 9 runs, 3h23m, nothing
-        // landed) to reach the same verdict every time, and risks blaming an arbitrary member.
-        // Reuses the same signature the gate's own #169 install-retry already matches against.
-        isEnvironmentFailure: looksLikeMissingDepsFailure,
-        // #1189: persist each bisect node as it finishes, so the row shows partial progress
-        // while the train is still gating. Evidence column only — never the state (#1153).
-        onAttempt: (attempt) => appendMergeTrainAttempt(trainId, { ...attempt }, database),
-      });
-    } finally {
-      clearInterval(heartbeat);
-      repoLock.release();
-    }
+    const result = outcome.result;
 
     try {
       await finishMergeTrain(trainId, projectId, result, members, database, reviewEvidence, boardEvents);
