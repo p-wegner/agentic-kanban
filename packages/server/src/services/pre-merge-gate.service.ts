@@ -56,6 +56,7 @@ import { recordVerifyGateOutcome, resolveGateImpactTierFields } from "./test-imp
 import { buildVerifyResourceEnv } from "./verify-resource-env.js";
 import { sequenceBaseHealthBeforeVerify } from "./gate-base-health-sequencing.js";
 import { openRedDebtEntry } from "../repositories/red-debt.repository.js";
+import { buildStaleVerdictReason } from "./merge-gate-verdict-reason.js";
 
 // The verify TUNABLES (timeout / worker cap / file-scope prefs, and #909's capacity
 // derivation) live in `verify-tunables.ts` — same reason as the two extractions above this
@@ -932,18 +933,13 @@ export async function resolveMergeGate(args: {
       };
     }
     // Stale/absent/fabricated proof → do NOT trust it; run the gate now (closes #943 TOCTOU).
-    //
-    // #936 — SAY SO. This is the second way a completed gate's verdict goes nowhere and a full
-    // suite is re-paid: a pre-lock gate passed, then its evidence was rejected here (a tip
-    // moved, or the lock wait outlived MERGE_GATE_EVIDENCE_MAX_AGE_MS). Nothing named that
-    // before, so from `merge-status` it looked like the merge had simply stopped progressing.
-    const currentBranch = currentShas.branchSha?.slice(0, 8) ?? "unknown";
-    const evidenceBranch = token.evidence.branchSha?.slice(0, 8) ?? "none recorded";
+    // #936/#1220 — the discard reason names WHAT MOVED (branch/base/neither), built in its
+    // own module (see merge-gate-verdict-reason.ts for why the message matters).
+    const reason = buildStaleVerdictReason(token.evidence, currentShas);
     console.warn(
       `[merge-gate] workspace ${workspace.id}: DISCARDING an already-passed verdict from `
-        + `${token.evidence.source} (stage ${token.evidence.stage}, ran ${token.evidence.ranAt}, `
-        + `branch ${evidenceBranch}) — it no longer describes the merge about to happen `
-        + `(current branch ${currentBranch}), so the gate is being re-run in full (#936).`,
+        + `${token.evidence.source} (stage ${token.evidence.stage}, ran ${token.evidence.ranAt}) — `
+        + `${reason} — so the gate is being re-run in full (#936).`,
     );
     const result = await runGateAsResolved(workspace, projectId, database);
     return { ...result, decision: "run-gate-stale-evidence" };
