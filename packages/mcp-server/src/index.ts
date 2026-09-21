@@ -19,6 +19,7 @@ import { registerGetWorkspaceDiff } from "./tools/get-workspace-diff.js";
 import { registerGetWorkspaceScorecard } from "./tools/get-workspace-scorecard.js";
 import { registerMergeWorkspace } from "./tools/merge-workspace.js";
 import { registerCloseWorkspace } from "./tools/close-workspace.js";
+import { registerReopenWorkspace } from "./tools/reopen-workspace.js";
 import { registerStopWorkspace } from "./tools/stop-workspace.js";
 import { registerDeleteWorkspace } from "./tools/delete-workspace.js";
 import { registerDeleteStatus } from "./tools/delete-status.js";
@@ -142,6 +143,7 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   get_workspace_scorecard: registerGetWorkspaceScorecard,
   merge_workspace: registerMergeWorkspace,
   close_workspace: registerCloseWorkspace,
+  reopen_workspace: registerReopenWorkspace,
   stop_workspace: registerStopWorkspace,
   delete_workspace: registerDeleteWorkspace,
   delete_status: registerDeleteStatus,

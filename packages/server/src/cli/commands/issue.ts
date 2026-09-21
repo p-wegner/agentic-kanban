@@ -27,6 +27,7 @@ import {
 import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "../../repositories/issue-number.repository.js";
 import { getProjectStatuses, getProjectById } from "../../repositories/project.repository.js";
 import { getWorkspacesByIssueId, findOpenUnmergedWorkspace } from "../../repositories/workspace.repository.js";
+import { isWorkspaceBranchFullyContained } from "../../services/branch-containment.service.js";
 import { getSessionsForWorkspacesDesc } from "../../repositories/workspace-launch-failures.repository.js";
 import { getSessionMessagesByIdDesc } from "../../repositories/session.repository.js";
 import { getWorkspaceArtifactTarget } from "../../repositories/phase-artifacts.repository.js";
@@ -316,7 +317,9 @@ Tip: Use 'issue list' to find the issue ID and see available status names.
       // the issue to a terminal status. Same guard as the server PATCH route and MCP.
       if (isTerminalStatusName(statusName)) {
         const openWs = await findOpenUnmergedWorkspace(issue.id);
-        if (openWs) {
+        // #1205: a branch fully contained in the base (0 ahead) has nothing left to
+        // merge — don't let it block the move.
+        if (openWs && !(await isWorkspaceBranchFullyContained(openWs.id))) {
           console.error(openWorkspaceBlockMessage(statusName, openWs.branch));
           process.exit(1);
         }

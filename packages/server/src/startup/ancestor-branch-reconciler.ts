@@ -200,7 +200,13 @@ export async function reconcileAncestorBranchWorkspaces(
 
     // A 0-commit workspace has no unique commits (branchSha === baseSha for a
     // fresh branch, or rev-list count==0 when the base advanced past an empty
-    // branch). Never reconcile these — they have no real merged work.
+    // branch). This is deliberately NOT treated as "already merged" here — a
+    // brand-new, never-touched workspace is indistinguishable from one whose fix
+    // landed elsewhere by SHA alone (#581/#585 incidents: auto-Done'd a workspace
+    // that had simply never started). #1205's fully-contained-branch case (a fix
+    // landed directly on base while the feature branch was never touched again)
+    // is instead handled by the EVIDENCE-gated `reconcileHandMergedBranches`
+    // sweep, which only acts when a base commit explicitly names the issue.
     let uniqueCommits: number;
     try {
       uniqueCommits = await commitCounter(c.repoPath, result.baseSha, result.branchSha);
@@ -400,6 +406,24 @@ export async function runSilentlyMergedCompensatorTick(database?: Database): Pro
 }
 
 /**
+ * Run the evidence-gated fully-contained-branch compensator
+ * ({@link reconcileContainedOpenWorkspaces}, #1205) once. Shared onto this
+ * reconciler's cadence for the same reason as the other two compensators above: a
+ * hand-landed fix that leaves its feature branch fully contained in base must
+ * converge within one tick of the server being up, not only at the next boot.
+ * Dynamically imported to avoid a startup/startup import cycle
+ * (`hand-merged-branch-reconciler.ts` has no reason to import this module back).
+ */
+export async function runContainedOpenWorkspaceCompensatorTick(database?: Database): Promise<void> {
+  try {
+    const { reconcileContainedOpenWorkspaces } = await import("./hand-merged-branch-reconciler.js");
+    await reconcileContainedOpenWorkspaces({ database });
+  } catch (err) {
+    console.warn("[ancestor-reconciler] periodic contained-open-workspace compensator tick error:", err instanceof Error ? err.message : err);
+  }
+}
+
+/**
  * Schedule the ancestor-branch reconciler to run shortly after boot and then periodically.
  * The stranded-sibling compensator (see {@link runStrandedSiblingCompensatorTick}) and the
  * silently-merged compensator (see {@link runSilentlyMergedCompensatorTick}, #380) run on
@@ -430,7 +454,7 @@ export function startAncestorBranchReconciler(
     name: "ancestor-reconciler",
     intervalMs,
     bootDelayMs: 35_000,
-    // `onTick` is the test seam — it replaces the whole tick, all three sweeps below.
+    // `onTick` is the test seam — it replaces the whole tick, all four sweeps below.
     tick: deps.onTick ?? (() => {
       void reconcileAncestorBranchWorkspaces(tickDeps);
       void runStrandedSiblingCompensatorTick(tickDeps.database);
@@ -441,6 +465,9 @@ export function startAncestorBranchReconciler(
       // is cheap and must not be disable-able by a pref about git budget, exactly as the
       // stranded-sibling compensator above is not.
       void runSilentlyMergedCompensatorTick(tickDeps.database);
+      // #1205: evidence-gated, so — like the two compensators above — safe to run
+      // every tick unconditionally.
+      void runContainedOpenWorkspaceCompensatorTick(tickDeps.database);
     }),
   });
   return activeAncestorSweep;
