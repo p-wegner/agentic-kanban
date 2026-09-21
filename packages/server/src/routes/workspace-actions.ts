@@ -11,7 +11,7 @@ import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 import {
   workspaceTurnBody, rejectPlanBody, createWorkspaceCommentBody,
-  updateWorkspaceCommentBody, resolveWorkspaceCommentBody,
+  updateWorkspaceCommentBody, resolveWorkspaceCommentBody, mergeReasonBody,
 } from "./workspace-action-body-schemas.js";
 import { describeMergeJobAttempts, getMergeJob, type MergeJob } from "../services/merge-job.service.js";
 import { describePersistedGateVerdict } from "../services/workspace-merge-gate.js";
@@ -681,7 +681,8 @@ export function createWorkspaceActionsRoute(
   // `cancelWorkspaceMerge` above for what it does and why.
   router.post("/:id/merge/cancel", async (c) => {
     const id = c.req.param("id");
-    return c.json(cancelWorkspaceMerge(id, (await parseOptionalJsonBody<{ reason?: string }>(c))?.reason));
+    const body = await parseJsonBody(c, mergeReasonBody);
+    return c.json(cancelWorkspaceMerge(id, body.reason));
   });
 
   // POST /api/workspaces/:id/merge-hold — park a workspace so the monitor walk, the auto-merge
@@ -690,7 +691,8 @@ export function createWorkspaceActionsRoute(
   // updates the reason/timestamp.
   router.post("/:id/merge-hold", async (c) => {
     const id = c.req.param("id");
-    return c.json(await placeWorkspaceMergeHold(id, (await parseOptionalJsonBody<{ reason?: string }>(c))?.reason, database));
+    const body = await parseJsonBody(c, mergeReasonBody);
+    return c.json(await placeWorkspaceMergeHold(id, body.reason, database));
   });
 
   // DELETE /api/workspaces/:id/merge-hold — release the hold. A no-op (not an error) when the

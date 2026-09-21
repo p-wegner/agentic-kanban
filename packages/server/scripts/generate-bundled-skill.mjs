@@ -311,7 +311,11 @@ function replaceBlock(content, id, body) {
 }
 
 function buildSkillMd(previous, data) {
-  let out = previous.replace(/\r\n/g, "\n");
+  // Strip a leading UTF-8 BOM before anything else: `fs.readFileSync(file, "utf-8")` does not
+  // strip it, and carrying it through hides `^---` frontmatter from any regex anchored at the
+  // start of the string (`bundled-skill-freshness.test.ts`'s frontmatter check, any agent host
+  // parsing the file) with no visible sign in a normal editor or `cat`.
+  let out = previous.replace(/^﻿/, "").replace(/\r\n/g, "\n");
   out = replaceBlock(out, "mcp-index", renderMcpIndex(data.mcp));
   out = replaceBlock(out, "cli-index", renderCliIndex(data.cli));
   out = out.replace(/^commit:.*$/m, `commit: ${data.sha}`);
