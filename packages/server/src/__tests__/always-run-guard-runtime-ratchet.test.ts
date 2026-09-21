@@ -211,8 +211,22 @@ import {
  * session is held to the same DB-safety / cross-worktree / command-safety gates as the other
  * providers. It carries a `when:` territory of the hook trees it spawns, so an ordinary diff
  * pays nothing for it.
+ *
+ * -- Ninth disclosed movement (2026-09-22, #1221) — 582,000 -> 585,000 ---------------------
+ *
+ * `pre-merge-gate-admission-mock-ratchet.test.ts`, the 189th guard, at the ASSUMED 3,000 ms.
+ * The argument for the seconds: it re-derives, from source text, which `__tests__` suites
+ * invoke the real `runPreMergeGate` and never neutralise the host-admission read
+ * (`resolveGateHostAdmission`/`readTier0Capacity`/`probeTempHealth`) — exactly the
+ * import-graph-invisible tree-scan shape `always-run-marker-ratchet` demands a marker for, and
+ * it is the guard that stops a FOURTH suite regressing the #1221 defect (a unit test that reads
+ * the real machine's free memory and fails as "host saturated" on any loaded box). It carries a
+ * `when:` territory of the four `__tests__` trees plus the two gate modules its signature is
+ * about, so an ordinary diff elsewhere pays nothing for it — which, per this file's own doc
+ * above, does not move THIS worst-case number. Should shrink at the next `durations.json`
+ * capture; it walks ~190 small test files and is expected to run in well under 1s.
  */
-const BASELINE_TOTAL_MS = 582_000;
+const BASELINE_TOTAL_MS = 585_000;
 
 /**
  * How far under the baseline is tolerated before it counts as stale.
@@ -230,8 +244,11 @@ const STALE_SLACK_MS = 30_000;
  * report is next captured, so a zero-growth rule would make every new guard require a ~15-minute
  * full-suite re-capture in the same commit. What must not happen is the total quietly becoming
  * mostly guesswork — hence a ceiling rather than a freeze. Measured at 15 when this landed.
+ *
+ * Raised 25 -> 26 with #1221's `pre-merge-gate-admission-mock-ratchet.test.ts`, added at the
+ * assumed duration (unmeasured until the next `durations.json` capture).
  */
-const MAX_ASSUMED_FILES = 25;
+const MAX_ASSUMED_FILES = 26;
 
 const REPO_ROOT = path.resolve(import.meta.dirname!, "..", "..", "..", "..");
 
