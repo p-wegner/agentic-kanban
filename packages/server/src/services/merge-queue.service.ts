@@ -222,6 +222,27 @@ export type MergeQueueEvent =
   | { type: "skipped"; workspaceId: string; issueNumber: number | null; issueTitle: string; reason: string }
   | { type: "done"; merged: string[]; failed: string[]; skipped: string[] };
 
+// #1210: wires the train runner's siding-nudge ports (sendTurn + the rebase-first
+// resolveConflicts fallback for a workspace whose agent has already exited) — pulled out of
+// createMergeQueueService so that function's own nloc stays flat as this wiring grows.
+function wireMergeTrainRunner(
+  database: Database,
+  boardEvents: BoardEventSink | undefined,
+  mergeService: ReturnType<typeof createWorkspaceMergeService>,
+  sessionService: ReturnType<typeof createWorkspaceSessionService>,
+) {
+  return createMergeTrainRunner({
+    database,
+    reconcileAlreadyMerged: (workspaceId) => mergeService.reconcileAlreadyMerged(workspaceId),
+    sendTurn: (workspaceId, content) => sessionService.sendTurn(workspaceId, content),
+    // #1210: a siding drop against a workspace whose agent has already exited routes through
+    // the rebase-first resolveConflicts instead of a /turn that would spawn into a clean tree.
+    hasLiveSession: async (workspaceId) => Boolean(await findRunningSession(workspaceId, database)),
+    resolveConflicts: (workspaceId) => mergeService.resolveConflicts(workspaceId),
+    boardEvents,
+  });
+}
+
 export function createMergeQueueService(deps: {
   database: Database;
   boardEvents?: BoardEventSink;
@@ -236,16 +257,7 @@ export function createMergeQueueService(deps: {
   // #1192: the port a siding drop nudges through, via the same sanctioned 409-safe path
   // `POST /:id/turn` uses (`WorkspaceError("...", "CONFLICT")` on a busy agent).
   const sessionService = createWorkspaceSessionService({ database, boardEvents, getSessionManager });
-  const trainRunner = createMergeTrainRunner({
-    database,
-    reconcileAlreadyMerged: (workspaceId) => mergeService.reconcileAlreadyMerged(workspaceId),
-    sendTurn: (workspaceId, content) => sessionService.sendTurn(workspaceId, content),
-    // #1210: a siding drop against a workspace whose agent has already exited routes through
-    // the rebase-first resolveConflicts instead of a /turn that would spawn into a clean tree.
-    hasLiveSession: async (workspaceId) => Boolean(await findRunningSession(workspaceId, database)),
-    resolveConflicts: (workspaceId) => mergeService.resolveConflicts(workspaceId),
-    boardEvents,
-  });
+  const trainRunner = wireMergeTrainRunner(database, boardEvents, mergeService, sessionService);
 
   async function getWorkspaceQueueInfos(workspaceIds: string[]): Promise<WorkspaceQueueInfo[]> {
     if (workspaceIds.length === 0) return [];

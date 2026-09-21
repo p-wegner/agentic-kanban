@@ -373,7 +373,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 420 -> 413 (#1151): the pre-existing pre-merge-gate skip AND the new lock-contention skip
   // both moved into `services/merge-lock-contention.ts` (each a `*SkipEvent` helper sharing one
   // shape), so the #1151 carve-out lands with net shrinkage instead of growing this factory.
-  "services/merge-queue.service.ts::createMergeQueueService": 413,
+  "services/merge-queue.service.ts::createMergeQueueService": 408,
   // 506 -> 474 in #806 batch 3: ten handlers dropped their inline type literal and guard
   // ladder for a `parseJsonBody(c, schema)` call.
   // 421 -> 424, a DISCLOSED raise (#1107, landed 2026-09-12 in d90659d081). The list route now
