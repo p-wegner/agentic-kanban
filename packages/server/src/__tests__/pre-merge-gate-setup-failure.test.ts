@@ -31,34 +31,37 @@ describe("describeFailedSetupRun (#1123)", () => {
   });
 
   it("is a no-op for a succeeded run", async () => {
-    getSetupRunMock.mockResolvedValue({ state: "succeeded", command: "pnpm install -r", stderrTail: null, workingDir: null });
+    getSetupRunMock.mockResolvedValue({ state: "succeeded", command: "pnpm install -r", stderrTail: null, workingDir: null, endedAt: null });
     expect(await describeFailedSetupRun("w1", db)).toBeNull();
   });
 
   it("is a no-op for a skipped run (project with no setup script)", async () => {
-    getSetupRunMock.mockResolvedValue({ state: "skipped", command: null, stderrTail: null, workingDir: null });
+    getSetupRunMock.mockResolvedValue({ state: "skipped", command: null, stderrTail: null, workingDir: null, endedAt: null });
     expect(await describeFailedSetupRun("w1", db)).toBeNull();
   });
 
-  it("blocks on a failed run, naming the command and the last error", async () => {
+  it("blocks on a failed run, naming the command, the last error, and when it was recorded", async () => {
     getSetupRunMock.mockResolvedValue({
       state: "failed",
       command: "pnpm install -r",
       stderrTail: "ERESOLVE could not resolve dependency tree",
       workingDir: null,
+      endedAt: "2026-09-16T00:32:22.657Z",
     });
     const msg = await describeFailedSetupRun("w1", db);
     expect(msg).toContain("FAILED");
     expect(msg).toContain("pnpm install -r");
     expect(msg).toContain("ERESOLVE could not resolve dependency tree");
     expect(msg).toContain("could not have run a single test");
+    expect(msg).toContain("2026-09-16T00:32:22.657Z");
+    expect(msg).toContain("trusted without re-checking");
   });
 
   it("corroborates with an empty node_modules/.bin when the worktree confirms it", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kanban-setup-failure-"));
     mkdirSync(join(dir, "node_modules", ".bin"), { recursive: true });
     try {
-      getSetupRunMock.mockResolvedValue({ state: "failed", command: "pnpm install -r", stderrTail: null, workingDir: dir });
+      getSetupRunMock.mockResolvedValue({ state: "failed", command: "pnpm install -r", stderrTail: null, workingDir: dir, endedAt: null });
       const msg = await describeFailedSetupRun("w1", db);
       expect(msg).toContain("node_modules/.bin is empty");
     } finally {
@@ -70,7 +73,7 @@ describe("describeFailedSetupRun (#1123)", () => {
     const dir = mkdtempSync(join(tmpdir(), "kanban-setup-failure-"));
     try {
       expect(existsSync(join(dir, "node_modules"))).toBe(false);
-      getSetupRunMock.mockResolvedValue({ state: "failed", command: null, stderrTail: null, workingDir: dir });
+      getSetupRunMock.mockResolvedValue({ state: "failed", command: null, stderrTail: null, workingDir: dir, endedAt: null });
       const msg = await describeFailedSetupRun("w1", db);
       expect(msg).toContain("node_modules/.bin is absent");
     } finally {
@@ -78,12 +81,21 @@ describe("describeFailedSetupRun (#1123)", () => {
     }
   });
 
-  it("is a no-op (#1172) when node_modules/.bin is actually populated, even on a failed row", async () => {
+  // #1175 — reproduces the stale-latch bug: a FAILED verdict from hours ago no longer reflects
+  // the tree, which now plainly has its dependencies installed. The refusal must be LIFTED, not
+  // just left uncorroborated.
+  it("#1175: clears the block when node_modules/.bin now has entries, even though the stored verdict is FAILED", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kanban-setup-failure-"));
     mkdirSync(join(dir, "node_modules", ".bin"), { recursive: true });
     writeFileSync(join(dir, "node_modules", ".bin", "vitest"), "");
     try {
-      getSetupRunMock.mockResolvedValue({ state: "failed", command: null, stderrTail: null, workingDir: dir });
+      getSetupRunMock.mockResolvedValue({
+        state: "failed",
+        command: "pnpm install -r",
+        stderrTail: "ERR_PNPM_UNKNOWN UNKNOWN: unknown error, stat '...'",
+        workingDir: dir,
+        endedAt: "2026-09-16T00:32:22.657Z",
+      });
       expect(await describeFailedSetupRun("w1", db)).toBeNull();
     } finally {
       rmSync(dir, { recursive: true, force: true });

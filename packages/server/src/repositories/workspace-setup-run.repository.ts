@@ -94,18 +94,21 @@ export async function getWorkspaceSetupRun(
 /**
  * #1123 — the fields the pre-merge gate's non-blocking-setup-failure check needs, in one read:
  * the run's verdict plus the workspace's own `workingDir` (for the cheap `node_modules/.bin`
- * corroboration). Joined here rather than making the gate do a second repository round trip.
+ * recheck, #1175) and `endedAt` (so a still-blocking refusal can say WHEN the failure was
+ * rather than reading as a claim about the tree right now). Joined here rather than making the
+ * gate do a second repository round trip.
  */
 export async function getSetupRunForGate(
   workspaceId: string,
   database: Database = db,
-): Promise<{ state: string | null; command: string | null; stderrTail: string | null; workingDir: string | null } | undefined> {
+): Promise<{ state: string | null; command: string | null; stderrTail: string | null; workingDir: string | null; endedAt: string | null } | undefined> {
   const [row] = await database
     .select({
       state: workspaceSetupRun.state,
       command: workspaceSetupRun.command,
       stderrTail: workspaceSetupRun.stderrTail,
       workingDir: workspaces.workingDir,
+      endedAt: workspaceSetupRun.endedAt,
     })
     .from(workspaceSetupRun)
     .innerJoin(workspaces, eq(workspaces.id, workspaceSetupRun.workspaceId))
