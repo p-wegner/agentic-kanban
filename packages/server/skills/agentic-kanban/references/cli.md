@@ -9,7 +9,7 @@ Run any command with `--help` for its options — this list is names and purpose
 
 | Command | Does |
 |---|---|
-| `cleanup` | Show stale worktrees for closed workspaces, and clean up leaked temp-fixture project registrations |
+| `cleanup` | Show stale worktrees for closed workspaces, clean up leaked temp-fixture project registrations, and remove stale merge-train staging worktrees |
 | `create <folder-name>` | Create a new git repo and register it as a project |
 | `delete-status <status-id>` | Delete a project status (fails if issues are linked to it) |
 | `dev` | Start the development server (server + built client UI) |
