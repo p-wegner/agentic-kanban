@@ -933,17 +933,33 @@ export async function resolveMergeGate(args: {
     }
     // Stale/absent/fabricated proof → do NOT trust it; run the gate now (closes #943 TOCTOU).
     //
-    // #936 — SAY SO. This is the second way a completed gate's verdict goes nowhere and a full
-    // suite is re-paid: a pre-lock gate passed, then its evidence was rejected here (a tip
-    // moved, or the lock wait outlived MERGE_GATE_EVIDENCE_MAX_AGE_MS). Nothing named that
-    // before, so from `merge-status` it looked like the merge had simply stopped progressing.
-    const currentBranch = currentShas.branchSha?.slice(0, 8) ?? "unknown";
+    // #936 — SAY SO, AND SAY *WHAT MOVED*. This is the second way a completed gate's verdict
+    // goes nowhere and a full suite is re-paid: a pre-lock gate passed, then its evidence was
+    // rejected here (the branch tip moved, the base tip moved, or the lock wait outlived
+    // MERGE_GATE_EVIDENCE_MAX_AGE_MS with no SHAs to pin against). A message that names the
+    // branch sha on both sides — because only the base moved — reads as a no-op discard, so
+    // the operator can't tell why a green pre-lock gate cost a second full run (#1220).
     const evidenceBranch = token.evidence.branchSha?.slice(0, 8) ?? "none recorded";
+    const currentBranch = currentShas.branchSha?.slice(0, 8) ?? "unknown";
+    const evidenceBase = token.evidence.baseSha?.slice(0, 8) ?? "none recorded";
+    const currentBase = currentShas.baseSha?.slice(0, 8) ?? "unknown";
+    const branchMoved = Boolean(
+      token.evidence.branchSha && currentShas.branchSha && token.evidence.branchSha !== currentShas.branchSha,
+    );
+    const baseMoved = Boolean(
+      token.evidence.baseSha && currentShas.baseSha && token.evidence.baseSha !== currentShas.baseSha,
+    );
+    const changedDimensions: string[] = [];
+    if (branchMoved) changedDimensions.push(`branch ${evidenceBranch} -> ${currentBranch}`);
+    if (baseMoved) changedDimensions.push(`base ${evidenceBase} -> ${currentBase}`);
+    const reason = changedDimensions.length > 0
+      ? changedDimensions.join(", ")
+      : `no SHA to pin against (evidence branch ${evidenceBranch}, base ${evidenceBase}) — aged past `
+        + `MERGE_GATE_EVIDENCE_MAX_AGE_MS`;
     console.warn(
       `[merge-gate] workspace ${workspace.id}: DISCARDING an already-passed verdict from `
-        + `${token.evidence.source} (stage ${token.evidence.stage}, ran ${token.evidence.ranAt}, `
-        + `branch ${evidenceBranch}) — it no longer describes the merge about to happen `
-        + `(current branch ${currentBranch}), so the gate is being re-run in full (#936).`,
+        + `${token.evidence.source} (stage ${token.evidence.stage}, ran ${token.evidence.ranAt}) — `
+        + `${reason} — so the gate is being re-run in full (#936).`,
     );
     const result = await runGateAsResolved(workspace, projectId, database);
     return { ...result, decision: "run-gate-stale-evidence" };
