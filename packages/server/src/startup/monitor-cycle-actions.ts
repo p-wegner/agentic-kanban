@@ -15,6 +15,7 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
 import { isPreMergeGateFailure, isLockContentionFailure } from "../services/workspace-merge-gate.js";
+import { logMonitorLockContentionSkip } from "../services/merge-lock-contention.js";
 import {
   clearFailedGate,
   clearGateInFlight,
@@ -74,14 +75,7 @@ export async function mergeWorkspaceWithFixFallback(
     // repo lock's own wait/retry loop already governs when this workspace tries again; the
     // monitor-level backoff must not also throttle it.
     if (isLockContentionFailure(err)) {
-      console.warn(
-        `[monitor] merge for workspace ${ws.wsId} was refused for lock contention — NOT routing to fix-and-merge (#1151): ${mergeError}`,
-      );
-      logAction("merge", ws.wsId, ws.issueId, {
-        endpoint: `POST /api/workspaces/${ws.wsId}/merge`,
-        responseSummary: `lock_contention (no fix-and-merge fallback): ${mergeError.slice(0, 160)}`,
-        verificationResult: "failed",
-      });
+      logMonitorLockContentionSkip({ wsId: ws.wsId, issueId: ws.issueId, mergeError, logAction });
       return;
     }
     // Record the failure BEFORE launching the fix session, so an identical repeat backs
