@@ -35,7 +35,10 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 426 -> 370 (#1144): the settings-bootstrap fetch ladder (loadCore/loadDeferred) and the
   // herdr availability/profile state moved into hooks/useSettingsBootstrap.ts.
   "components/SettingsPanel.tsx::SettingsPanel": 370,
-  "components/BoardToolbar.tsx::BoardToolbar": 456,
+  // 456 -> 457 (#1200): one call-site line wiring the previously-dead onShowMergeQueue/
+  // mergeQueueCount props to a trigger button — the button itself is the extracted
+  // MergeQueueTrigger component, which does not count against this function's own extent.
+  "components/BoardToolbar.tsx::BoardToolbar": 457,
   "components/settings/ProjectSettings.tsx::ProjectSettings": 465,
   "components/AllWorkspacesPanel.tsx::AllWorkspacesPanel": 438,
   "components/CreateIssuePanel.tsx::CreateIssuePanel": 353,

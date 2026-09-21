@@ -189,8 +189,8 @@ export function BoardToolbar({
   butlerBadgeCount = 0,
   projectId,
   onVoiceIssueCreated,
-  onShowMergeQueue: _onShowMergeQueue,
-  mergeQueueCount: _mergeQueueCount = 0,
+  onShowMergeQueue,
+  mergeQueueCount = 0,
   onShowRunQueueForecast: _onShowRunQueueForecast,
   runQueueOpenSlots: _runQueueOpenSlots = 0,
   onShowLiveActivityTicker: _onShowLiveActivityTicker,
@@ -496,6 +496,7 @@ export function BoardToolbar({
         <span className="hidden sm:inline">Tasks</span>
       </button>
       <ProjectScriptsMenu projectId={projectId} />
+      <MergeQueueTrigger onShowMergeQueue={onShowMergeQueue} mergeQueueCount={mergeQueueCount} />
       {/* Voice capture stays on the bar at all times — quick idea/command entry
           shouldn't hide behind anything. */}
       <VoiceInboxButton projectId={projectId} onIssueCreated={onVoiceIssueCreated} />
@@ -662,6 +663,32 @@ export function BoardToolbar({
     {/* Tag filtering moved into the unified BoardFilterMenu; the standalone TAGS
         legend row used to take a full header row of its own. */}
     </>
+  );
+}
+
+/** #1200: the toolbar trigger for the Merge Queue panel — wired to a previously dead prop pair. */
+function MergeQueueTrigger({
+  onShowMergeQueue,
+  mergeQueueCount,
+}: { onShowMergeQueue?: () => void; mergeQueueCount: number }) {
+  if (!onShowMergeQueue) return null;
+  return (
+    <button
+      onClick={onShowMergeQueue}
+      title="Merge Queue - review and merge workspaces awaiting merge"
+      className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
+    >
+      <Icon className="w-3 h-3" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+      <span className="hidden sm:inline">Merge Queue</span>
+      {mergeQueueCount > 0 && (
+        <span
+          className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-accent-500 text-white text-[10px] font-semibold leading-none"
+          aria-label={`${mergeQueueCount} in merge queue`}
+        >
+          {mergeQueueCount > 99 ? "99+" : mergeQueueCount}
+        </span>
+      )}
+    </button>
   );
 }
 
