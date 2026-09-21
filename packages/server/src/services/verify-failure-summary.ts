@@ -150,6 +150,48 @@ function detectGodModuleGateDegraded(body: string): { leadLine: string } | null 
 }
 
 /**
+ * A single line naming an actual failed check — the thing a human needs to see, as opposed to
+ * a passing package's own summary line. Deliberately narrower than `VERIFY_VERDICT_SIGNATURE`
+ * (which also matches a PASSING `Test Files`/`Tests` line, since it only needs to prove a check
+ * concluded): this one only matches a line that says something failed.
+ */
+const FAILURE_LINE_SIGNATURE =
+  /^\s*(?:FAIL\b|\s*×\s|AssertionError|.*\berror TS\d+\b|\[check:arch\]\s+FAILED|\[god-module gate\](?!.*\bOK\b)|.*ELIFECYCLE.*ommand failed)/m;
+
+/**
+ * Detects a real failure line that the bounded TAIL dropped (#1218): `test:mine` runs one
+ * `vitest` invocation PER PACKAGE, so a multi-package verify run prints one `Test Files`/`Tests`
+ * summary per package, in package order — not necessarily the order the failure happened in. A
+ * failure in an EARLY package is followed by every later package's PASSING summary, so by the
+ * time the tail keeps its last `VERIFY_FAILURE_TAIL_CHARS`, nothing readable survives: a train
+ * bisected two members out on `reason: "Test Files 44 passed (44) … Test Files 195 passed
+ * (195)"` — a red gate whose stored reason named no failing test at all.
+ *
+ * Conservative like the other detectors here: it only fires when the TAIL itself carries none of
+ * the failure-line shapes, so a tail that already shows the real failure (the common case) is
+ * left alone — this only recovers the case where truncation ate the only evidence.
+ */
+function detectFailureLinesOutsideTail(body: string, tail: string): { leadLine: string } | null {
+  if (FAILURE_LINE_SIGNATURE.test(tail)) return null;
+  const failureLines = body
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && FAILURE_LINE_SIGNATURE.test(l));
+  // Nothing recognisable ANYWHERE in the log is not this detector's case — that is an ordinary
+  // message in a shape this file doesn't specifically know (a foreign verify_script, a lint
+  // error, a shell error), not a failure that truncation hid. Say nothing rather than claim "no
+  // failure line matched" about a message that was never a test/build failure line to begin with.
+  if (failureLines.length === 0) return null;
+  const unique = Array.from(new Set(failureLines)).slice(0, 20);
+  return {
+    leadLine:
+      "the failing check(s), pulled from earlier in the log than the kept tail below (a later " +
+      "package's PASSING summary pushed them out of the truncation window):\n" +
+      unique.join("\n"),
+  };
+}
+
+/**
  * Detects a runner CRASH distinct from a real test failure (#490): a non-zero exit whose
  * `Test Files` summary names ZERO failures (or reports fewer files than it started with, or
  * carries a worker-crash marker) — the shape that reads as "flaky, just retry" when it is
@@ -234,8 +276,15 @@ export function summarizeVerifyFailure(
   // the crash/silent-death detectors below are, so it should never be shadowed by either. A
   // worker crash is a run that got far enough to report SOMETHING, so it is the more specific
   // verdict of the remaining two and wins; `detectSilentVerifyDeath` is the fallback for a run
-  // that reported nothing at all.
-  const crash = detectGodModuleGateDegraded(body) ?? detectVerifyCrash(body) ?? detectSilentVerifyDeath(body);
+  // that reported nothing at all. `detectFailureLinesOutsideTail` runs LAST and only when none of
+  // the above fired: it is the most conservative of the four (it only speaks when the tail is
+  // silent about failure lines that DO exist earlier in the log), so it must never shadow a more
+  // specific verdict — including the ordinary case where the tail already shows the failure.
+  const crash =
+    detectGodModuleGateDegraded(body) ??
+    detectVerifyCrash(body) ??
+    detectSilentVerifyDeath(body) ??
+    detectFailureLinesOutsideTail(body, tail);
   const message = crash ? `${crash.leadLine}\n\n${tail}` : tail;
   return `${message}${logPath ? `\n[full verify log: ${logPath}]` : ""}`;
 }
