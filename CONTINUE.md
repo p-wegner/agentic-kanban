@@ -3,6 +3,60 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-21 (evening) — the stranded set landed, backlog handed to the monitor
+
+**Promotion is done**: `stable-20260921-2` = `f9f6ee0e2b` was already live on 3001 when this pass
+started (`pnpm promote --dry-run` reported "already at" it); nothing was promoted again.
+
+**Landed this pass** (each through the board's own gated merge, one at a time — the box had
+1.2–2.3 GB usable RAM and was swapping, so no two gates ran together):
+- #1146 (herdr safety-hook delegation; closed epic #1129 with it). Its first gate went red on two
+  guards the tail-only message hid (#1218): a CRLF shebang in the reopened worktree's
+  `.herdr/plugin/agentic-kanban-hooks.mjs` (index LF, tree CRLF — `rm` + `git checkout --` fixed the
+  bytes) and the always-run runtime floor (new guard at the 3 s placeholder → 26 assumed files,
+  ceiling 25). Fixed by measuring the suite alone (5,852 ms), banking it in
+  `docs/tests/durations.json` and moving `BASELINE_TOTAL_MS` 576,000 → 582,000 with the fourth
+  disclosed movement in the ratchet's own log.
+- #1183 (coalesce stranded merge-train rows per project). Its worktree held the finished work
+  UNCOMMITTED since 2026-09-17; committed, rebased onto master (two hunks: kept the #1164
+  held-member skip before grouping, added `merge_train_changed` broadcasts on every abandon).
+- #1120, #1150, #1152 — the three In-Review tickets with a CLOSED workspace and a live branch.
+  Recovered with `workspace reopen` (#1206's path), rebased by hand / by two forks: #1120 was two
+  small commits (nloc baseline re-measured to 456); #1150 shrank to ONE commit (the liveness
+  registry and reconciler skip were already master's #1181, only the repo-lock wait-log evidence
+  remained); #1152 shrank to ONE commit (the generator `.return()` half rested on a wrong premise
+  about async-generator abort timing — the SSE route `onAbort` wiring is what master lacked).
+  #1120 was picked up by auto-merge on its own; #1150/#1152 were NOT (no auto-merge log line for
+  them in 30 min, reason unknown) and were fired by hand.
+- Epic #1128 closed too (its remaining children #1142/#1143 stay as ordinary backlog tickets).
+
+**Filed:** #1219 (auto-merge retries a worktree-less workspace of an UNREGISTERED project every
+cycle — `ac389c58`, project `50c7e36a` is not in `/api/projects`), #1220 (the #936 discard message
+names the same branch sha on both sides and hides that the BASE moved).
+
+**Observed, not fixed:** `test-impact-map` holds the repo lock for ~40 s after every landing, so a
+merge fired right after one is refused `repo_lock_held_cross_process` — retry, don't debug.
+`/api/base-branch-health` and `/api/preferences/<key>` answer 404 on the stable build (the
+project-scoped routes differ); `pnpm promote --dry-run` is the reliable read of the sweep verdict.
+
+### Next steps, in order
+1. Backlog (#1142 #1143 #1200 #1210 #1216 #1217 #1218 #1219 #1220) is being driven by the
+   in-process monitor: Start Mode `monitor`, WIP 2, one start per cycle — set at the end of this
+   pass. Watch RAM (`fleet status`); the kernel pool leak (`mssecflt.sys`, +260 MB/h) means a
+   reboot is the only real relief.
+2. #1216 first (it blocks #1209's resolve-conflicts on any real conflict), #1218 second.
+3. Re-enable auto-merge on the three fixture projects paused 2026-09-20 for CPU
+   (`c94e30c4…`, `c6355fcd…`, `bc221c46…`) once the box has headroom.
+4. The `.claude/skills/test-impact` map is STALE in every worktree gate — rebuild on the main
+   checkout (`impact.mjs build --durations docs/tests/durations.json`) when the box is quiet.
+
+### Verified by
+Each landing is a merge commit on master (`git log --oneline -6`); each ticket reads Done via
+`issue get`; the #1146 fixes were re-run alone (`always-run-guard-runtime-ratchet` 3/3,
+`shebang-eol-guard` 2/2) before the second gate, which passed. Fork claims for #1150/#1152 were
+checked only by `merge-tree` clean + the branch's own tests (9 and 2 passing) — the gate did the
+typecheck.
+
 ## 2026-09-21 — the overnight train sweep: master red under the trains, 7 landed, stable-20260921 in flight
 
 **What was true, and why nothing landed for six hours.** Train `qmua102wb` (14 members, assembled
