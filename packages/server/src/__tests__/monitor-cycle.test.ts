@@ -90,6 +90,11 @@ function makeDeps(): ProcessWorkspaceDeps {
     buildMonitorNudgePrompt: vi.fn().mockResolvedValue("nudge"),
     getRecentAgentExcerpts: vi.fn().mockResolvedValue([]),
     shouldSkipNudge: vi.fn().mockReturnValue(false),
+    // #1164 — inject an empty hold set so the walk never falls through to a live
+    // `getHeldWorkspaceIds()` read, which would consume one of the queued `db.select`
+    // mocks below out of order (see the `beforeEach` comment on why an unexpected extra
+    // select silently misaligns the whole queue).
+    heldWorkspaceIds: new Set<string>(),
   };
 }
 
