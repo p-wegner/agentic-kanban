@@ -300,6 +300,51 @@ Examples:
     }));
 
   wsCmd
+    .command("reopen <issue-number>")
+    .description("Re-create the worktree for a CLOSED workspace whose branch is still live and unmerged (#1206).\n\nUnlike 'workspace resume', which needs an already-open workspace, this recovers a workspace that was closed while its feature branch still carried unmerged commits — the shape left behind by a manual 'close' that was meant to discard abandoned work, applied instead to real work. Requires the kanban server to be running (pnpm dev).")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .addHelpText("after", `
+Examples:
+  $ agentic-kanban workspace reopen 1120
+`)
+    .action(cliAction(async (issueNumberArg: string, options: { project?: string; port?: string }) => {
+      const projectId = await resolveProjectIdArg(options.project);
+
+      const num = Number(issueNumberArg);
+      if (!Number.isInteger(num) || num <= 0) {
+        console.error(`Invalid issue number: ${issueNumberArg}`);
+        process.exit(1);
+      }
+
+      const issueId = await getIssueIdByNumberInProject(num, projectId);
+      if (issueId === null) {
+        console.error(await describeIssueNumberMiss(num, projectId));
+        process.exit(1);
+      }
+
+      const ws = await getLatestWorkspaceForIssue(issueId);
+      if (!ws) {
+        console.error(`No workspace found for issue #${num}.`);
+        process.exit(1);
+      }
+
+      const port = options.port ?? "";
+      const res = await fetch(buildWorkspaceApiUrl(port, ws.id, "reopen"), { method: "POST" });
+      const data = await res.json() as ErrorResponse & { workingDir?: string };
+
+      if (!res.ok) {
+        console.error(`Reopen failed: ${data.error ?? res.statusText}`);
+        process.exit(1);
+      }
+
+      console.log(`Reopened #${num} (${ws.branch})`);
+      console.log(`  workspace: ${ws.id}`);
+      console.log(`  workingDir: ${String(data.workingDir)}`);
+      process.exit(0);
+    }));
+
+  wsCmd
     .command("wait <issue-number>")
     .description("Block until a workspace leaves its active state, then exit.\n\nResolves the latest workspace for an issue number (same lookup as 'resume'), subscribes to the board WebSocket, and waits for the workspace to reach a terminal status. Prints each status transition as it arrives. Replaces sleep-loop polling of GET /api/workspaces/:id. Requires the kanban server to be running (pnpm dev).\n\nExit code 0: status reached idle, ready_for_merge, closed, or merged.\nExit code 1: status reached an error state, a workflow error was broadcast, the WS closed unexpectedly, or the timeout elapsed.")
     .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")

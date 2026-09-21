@@ -14,7 +14,8 @@ export function buildWorkspaceApiUrl(
     | "ready-for-merge"
     | "terminal"
     | "handoff-bundle"
-    | "comments",
+    | "comments"
+    | "reopen",
 ) {
   return buildApiUrl(port, `/api/workspaces/${encodeURIComponent(workspaceId)}/${action}`);
 }
