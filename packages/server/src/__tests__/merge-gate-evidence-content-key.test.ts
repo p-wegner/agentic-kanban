@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { gateAlreadyPassed, resolveMergeGate, MERGE_GATE_EVIDENCE_MAX_AGE_MS } from "../services/pre-merge-gate.service.js";
 import type { Database } from "../db/index.js";
 
@@ -181,5 +181,87 @@ describe("content-keyed merge gate evidence", () => {
       currentShas: {},
     });
     expect(future.decision).toBe("run-gate-stale-evidence");
+  });
+
+  /**
+   * #1220 — the discard log must name WHICH dimension moved, not just that the verdict
+   * was discarded. #936's original message compared the branch sha on both sides even
+   * when only the base had moved, so a real base move ("another merge landed") read
+   * exactly like a no-op discard.
+   */
+  describe("the DISCARDING log names what actually changed (#1220)", () => {
+    it("names the base move when only the base moved (branch unchanged)", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await resolveMergeGate({
+        token: gateAlreadyPassed({ ranAt: FRESH, stage: "verify", source: "pre-lock-merge", branchSha: "aaa11111", baseSha: "bbb22222" }),
+        workspace,
+        projectId: null,
+        database: db,
+        currentShas: { branchSha: "aaa11111", baseSha: "ccc33333" },
+      });
+      const message = warn.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(message).toContain("base bbb22222 -> ccc33333");
+      expect(message).not.toContain("branch aaa11111 -> aaa11111");
+      warn.mockRestore();
+    });
+
+    it("names the branch move when only the branch moved (base unchanged)", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await resolveMergeGate({
+        token: gateAlreadyPassed({ ranAt: FRESH, stage: "verify", source: "pre-lock-merge", branchSha: "aaa11111", baseSha: "bbb22222" }),
+        workspace,
+        projectId: null,
+        database: db,
+        currentShas: { branchSha: "ddd44444", baseSha: "bbb22222" },
+      });
+      const message = warn.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(message).toContain("branch aaa11111 -> ddd44444");
+      expect(message).not.toContain("base bbb22222 -> bbb22222");
+      warn.mockRestore();
+    });
+
+    it("names both moves when branch and base both moved", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await resolveMergeGate({
+        token: gateAlreadyPassed({ ranAt: FRESH, stage: "verify", source: "pre-lock-merge", branchSha: "aaa11111", baseSha: "bbb22222" }),
+        workspace,
+        projectId: null,
+        database: db,
+        currentShas: { branchSha: "ddd44444", baseSha: "ccc33333" },
+      });
+      const message = warn.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(message).toContain("branch aaa11111 -> ddd44444");
+      expect(message).toContain("base bbb22222 -> ccc33333");
+      warn.mockRestore();
+    });
+
+    it("names the age-out reason when there is no SHA to pin against", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await resolveMergeGate({
+        token: gateAlreadyPassed({ ranAt: ANCIENT, stage: "verify", source: "review-exit gate" }),
+        workspace,
+        projectId: null,
+        database: db,
+        currentShas: {},
+      });
+      const message = warn.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(message).toContain("MERGE_GATE_EVIDENCE_MAX_AGE_MS");
+      warn.mockRestore();
+    });
+
+    it("names the stage:none reason instead of a false age-out when SHAs still match", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await resolveMergeGate({
+        token: gateAlreadyPassed({ ranAt: FRESH, stage: "none", source: "review-exit gate", branchSha: "aaa11111", baseSha: "bbb22222" }),
+        workspace,
+        projectId: null,
+        database: db,
+        currentShas: { branchSha: "aaa11111", baseSha: "bbb22222" },
+      });
+      const message = warn.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(message).toContain('stage was "none"');
+      expect(message).not.toContain("MERGE_GATE_EVIDENCE_MAX_AGE_MS");
+      warn.mockRestore();
+    });
   });
 });
