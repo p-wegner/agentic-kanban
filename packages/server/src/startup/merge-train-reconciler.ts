@@ -52,6 +52,7 @@ import {
   snapshotLiveMergeTrains,
   type LiveMergeTrainSnapshot,
 } from "../services/merge-train-live-registry.js";
+import { getHeldWorkspaceIdsAmong } from "../repositories/merge-hold.repository.js";
 
 /** How often the reconciler sweeps for stranded trains (defence in depth beyond the boot pass). */
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
@@ -189,8 +190,26 @@ export async function reconcileStrandedMergeTrains(
 
   for (const row of rows) {
     if (skipIfLive(row, live, nowMs, result, log)) continue;
-    const { action, reason } = decideMergeTrainReconcileAction(row, opts.maxResumeAttempts);
     const ref = `train ${row.id} (${row.label}, project ${row.projectId})`;
+
+    // #1164 — a stranded train with a HELD member must not be resumed (it would re-gate the
+    // very workspace the operator parked) or abandoned (that would discard the rest of the
+    // train's assembly over one held member) — it is left exactly as found, for the operator
+    // to release explicitly.
+    let memberWorkspaceIds: string[] = [];
+    try {
+      memberWorkspaceIds = JSON.parse(row.memberWorkspaceIds) as string[];
+    } catch {
+      memberWorkspaceIds = [];
+    }
+    const heldMembers = await getHeldWorkspaceIdsAmong(memberWorkspaceIds, database);
+    if (heldMembers.size > 0) {
+      recordSkipped(result, row.id, `left on hold — member(s) held: ${[...heldMembers].join(", ")}`);
+      log(`skipped ${ref} — held member(s): ${[...heldMembers].join(", ")}`);
+      continue;
+    }
+
+    const { action, reason } = decideMergeTrainReconcileAction(row, opts.maxResumeAttempts);
 
     if (action === "abandon" || !opts.runTrain) {
       const abandonReason = action === "abandon"

@@ -11,10 +11,17 @@ import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 import {
   workspaceTurnBody, rejectPlanBody, createWorkspaceCommentBody,
-  updateWorkspaceCommentBody, resolveWorkspaceCommentBody,
+  updateWorkspaceCommentBody, resolveWorkspaceCommentBody, mergeReasonBody,
 } from "./workspace-action-body-schemas.js";
-import { completeMergeJob, describeMergeJobAttempts, failMergeJob, getMergeJob, startMergeJob, type MergeJob } from "../services/merge-job.service.js";
+import { describeMergeJobAttempts, getMergeJob, type MergeJob } from "../services/merge-job.service.js";
 import { describePersistedGateVerdict } from "../services/workspace-merge-gate.js";
+import {
+  cancelWorkspaceMerge,
+  getWorkspaceMergeHoldState,
+  placeWorkspaceMergeHold,
+  releaseWorkspaceMergeHold,
+  runWorkspaceMergeJob,
+} from "./workspace-merge-actions.js";
 import { getMergeRun, type MergeRunRow } from "../repositories/merge-run.repository.js";
 import { listMergeGateDiscards, type MergeGateDiscardRow } from "../repositories/merge-gate-discard.repository.js";
 import { getWorkspaceMergeState } from "../repositories/merge-queue.repository.js";
@@ -618,42 +625,16 @@ export function createWorkspaceActionsRoute(
     const id = c.req.param("id");
     const wantsAsync = ["1", "true", "yes"].includes((c.req.query("async") || "").toLowerCase());
     // #903 — a retried POST while a merge is already in-flight (double-click, a monitor's own
-    // retry loop) used to call `startMergeJob` unconditionally, REPLACING the tracked job's
-    // `startedAt` on every retry. That reset the zombie clock indefinitely — exactly the "only
-    // a backend restart ever cleared it" failure the zombie detector exists to fix, since a
-    // caller that keeps retrying never lets 4h elapse against a single start time. Only start a
-    // fresh job (and only this call may complete/fail it) when we are not joining an existing
-    // running job for this workspace.
-    const existingJob = getMergeJob(id);
-    const joiningExisting = existingJob !== null && existingJob.state === "running";
-    // #903 — if we are NOT joining a running job because `getMergeJob` just healed a zombie
-    // (rather than because there was never a job at all), say so explicitly: the `startMergeJob`
-    // call below overwrites that healed record with a fresh "running" job before
-    // `mergeWorkspaceDeduped` gets a chance to read it, which would otherwise erase the very
-    // signal it needs to drop the stale in-flight promise (see `dropStaleActiveRequest`).
-    const wasZombied = existingJob?.reason === "merge_job_zombied";
-    const job = joiningExisting ? existingJob : startMergeJob(id);
-    const ownsJob = !joiningExisting;
-    const run = workspaceService
-      // Only THIS caller defers the main checkout's `git reset --hard` past the merge result
-      // (#686: the reset rewrites files → tsx hot-reload → the in-flight response is dropped).
-      // Every non-interactive caller syncs inline instead, because that deferral is what left
-      // the main checkout showing the merged files as staged deletions for ~32s (#350).
-      .mergeWorkspaceDeduped(id, { deferMainCheckoutSync: true, dropStaleActiveRequest: wasZombied })
-      .then((result) => {
-        if (ownsJob) completeMergeJob(job.jobId, id, result);
-        return result;
-      })
-      .catch((err) => {
-        if (ownsJob) failMergeJob(job.jobId, id, err);
-        throw err;
-      });
+    // retry loop) must join the existing job rather than replacing its `startedAt` (which would
+    // reset the zombie clock indefinitely). See `runWorkspaceMergeJob` for the full rationale,
+    // including the #686 `deferMainCheckoutSync` and #903 `dropStaleActiveRequest` subtleties.
+    const { jobId, run } = runWorkspaceMergeJob(id, workspaceService);
 
     if (wantsAsync) {
       // Nothing awaits `run` in this branch, so an eventual rejection would be an unhandled
       // promise rejection (which this server logs as [fatal]). The job record IS the report.
       void run.catch(() => {});
-      return c.json({ accepted: true, jobId: job.jobId, workspaceId: id, statusUrl: `/api/workspaces/${id}/merge-status` }, 202);
+      return c.json({ accepted: true, jobId, workspaceId: id, statusUrl: `/api/workspaces/${id}/merge-status` }, 202);
     }
     return c.json(await run);
   });
@@ -695,6 +676,33 @@ export function createWorkspaceActionsRoute(
     if (!result) return c.json({ error: "Workspace not found" }, 404);
     return c.json(result);
   });
+
+  // POST /api/workspaces/:id/merge/cancel — stop THIS workspace's merge job (#1164). See
+  // `cancelWorkspaceMerge` above for what it does and why.
+  router.post("/:id/merge/cancel", async (c) => {
+    const id = c.req.param("id");
+    const body = await parseJsonBody(c, mergeReasonBody);
+    return c.json(cancelWorkspaceMerge(id, body.reason));
+  });
+
+  // POST /api/workspaces/:id/merge-hold — park a workspace so the monitor walk, the auto-merge
+  // orchestrator, and the merge-train reconciler all skip it, WITHOUT disabling auto-merge for
+  // the rest of the project (#1164). Idempotent: re-holding an already-held workspace just
+  // updates the reason/timestamp.
+  router.post("/:id/merge-hold", async (c) => {
+    const id = c.req.param("id");
+    const body = await parseJsonBody(c, mergeReasonBody);
+    return c.json(await placeWorkspaceMergeHold(id, body.reason, database));
+  });
+
+  // DELETE /api/workspaces/:id/merge-hold — release the hold. A no-op (not an error) when the
+  // workspace was not held.
+  router.delete("/:id/merge-hold", async (c) =>
+    c.json(await releaseWorkspaceMergeHold(c.req.param("id"), database)));
+
+  // GET /api/workspaces/:id/merge-hold — current hold state, for the UI panel.
+  router.get("/:id/merge-hold", async (c) =>
+    c.json(await getWorkspaceMergeHoldState(c.req.param("id"), database)));
 
   // GET /api/workspaces/:id/already-merged-status — check if branch is already merged without modifying state
   // ?adoptMainCheckout=true previews the #218 recovery override (work asserted to have

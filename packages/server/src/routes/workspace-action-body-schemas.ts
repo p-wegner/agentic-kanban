@@ -15,7 +15,7 @@
  * is optional.
  */
 import { z } from "zod";
-import { requiredRaw, unchecked } from "./body-schema-helpers.js";
+import { optionalString, requiredRaw, unchecked } from "./body-schema-helpers.js";
 
 /** `POST /api/workspaces/:id/turn` — the follow-up prompt. Bare falsy guard, so no trim test. */
 export const workspaceTurnBody = z.object({
@@ -60,4 +60,18 @@ export const resolveWorkspaceCommentBody = z.object({
     required_error: "resolved (boolean) is required",
     invalid_type_error: "resolved (boolean) is required",
   }),
+}).passthrough();
+
+/**
+ * `POST /api/workspaces/:id/merge/cancel` and `POST /api/workspaces/:id/merge-hold` (#1164).
+ *
+ * Both bodies are `{ reason?: string }` — an optional annotation, never a guarded field — and
+ * both routes are always called with a real JSON body (`{}` or `{reason}`) by the MCP tools and
+ * the CLI, so `parseJsonBody(c, schema)` (which 400s on a genuinely missing/malformed body) does
+ * not change behaviour for either caller. `reason` had no check at all before this; giving it
+ * its declared `string` type is the same "declared-type tightening" #512 already sanctions for
+ * an unguarded field, not a new restriction someone has to work around.
+ */
+export const mergeReasonBody = z.object({
+  reason: optionalString("reason must be a string"),
 }).passthrough();

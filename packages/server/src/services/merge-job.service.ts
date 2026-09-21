@@ -45,7 +45,7 @@ import { notifySummaryWriteThrough } from "./summary-write-through-notifier.js";
 // — the composition root and the #945 tests — keeps working.
 export { setMergeRunMarkerPort, type MergeRunMarkerPort } from "./merge-run-marker-port.js";
 
-export type MergeJobState = "running" | "succeeded" | "failed";
+export type MergeJobState = "running" | "succeeded" | "failed" | "cancelled";
 
 /**
  * One GATE ATTEMPT inside a merge job (#936).
@@ -163,16 +163,6 @@ let counter = 0;
 function nextJobId(workspaceId: string): string {
   counter += 1;
   return `merge-${workspaceId.slice(0, 8)}-${counter}`;
-}
-
-function evictIfNeeded(): void {
-  while (finishedOrder.length > MAX_FINISHED_JOBS) {
-    const oldest = finishedOrder.shift();
-    if (!oldest) break;
-    const job = jobsByWorkspace.get(oldest);
-    // Never evict a job that has since been replaced by a running one.
-    if (job && job.state !== "running") jobsByWorkspace.delete(oldest);
-  }
 }
 
 /**
@@ -349,7 +339,16 @@ function finish(jobId: string, workspaceId: string, patch: Partial<MergeJob>): v
   const previous = finishedOrder.indexOf(workspaceId);
   if (previous !== -1) finishedOrder.splice(previous, 1);
   finishedOrder.push(workspaceId);
-  evictIfNeeded();
+  // Evict the oldest finished job(s) once we're over the cap. Inlined (was `evictIfNeeded`,
+  // its only caller): a private one-line-body helper called from exactly one place is not
+  // worth its own top-level declaration slot under the cohesion gate (#889).
+  while (finishedOrder.length > MAX_FINISHED_JOBS) {
+    const oldest = finishedOrder.shift();
+    if (!oldest) break;
+    const evictable = jobsByWorkspace.get(oldest);
+    // Never evict a job that has since been replaced by a running one.
+    if (evictable && evictable.state !== "running") jobsByWorkspace.delete(oldest);
+  }
   // running -> finished, i.e. `gateActivity` goes back to null and the badge must DISAPPEAR.
   // A successful merge broadcasts on its own afterwards, but a failed one does not reliably
   // (the HTTP path's failure branch broadcasts nothing), which would leave a "Verifying" badge
@@ -375,6 +374,32 @@ export function failMergeJob(jobId: string, workspaceId: string, error: unknown)
       ? (error as { details?: { mergeReason?: string } }).details?.mergeReason
       : undefined;
   finish(jobId, workspaceId, { state: "failed", error: message, reason });
+}
+
+/**
+ * Mark a workspace's tracked merge job cancelled (#1164), if one is currently running.
+ *
+ * Unlike {@link completeMergeJob}/{@link failMergeJob}, the caller (the cancel route) does not
+ * hold a `jobId` — it only knows the workspace it wants to stop. So this reads the CURRENT job
+ * itself rather than taking one, and reports whether there was anything running to cancel: a
+ * caller cancelling a workspace with no in-flight job is a no-op, not an error, which lets the
+ * route report an honest outcome either way.
+ */
+export function cancelMergeJob(workspaceId: string, reason: string): boolean {
+  const job = jobsByWorkspace.get(workspaceId);
+  if (!job || job.state !== "running") return false;
+  // The in-flight attempt (if any) reads as cancelled too, matching the "discarded"/"failed"
+  // shape `describeMergeJobAttempts` already knows how to render — an operator reading the
+  // cancelled job's history sees WHY its last attempt never finished.
+  const attempt = [...job.attempts].reverse().find((a) => !a.finishedAt);
+  if (attempt) {
+    attempt.finishedAt = new Date().toISOString();
+    attempt.durationMs = Date.parse(attempt.finishedAt) - Date.parse(attempt.startedAt);
+    attempt.outcome = "discarded";
+    attempt.detail = reason;
+  }
+  finish(job.jobId, workspaceId, { state: "cancelled", error: reason, reason: "merge_cancelled" });
+  return true;
 }
 
 /**

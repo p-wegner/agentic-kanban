@@ -111,7 +111,13 @@ describe("runPreMergeGate (#821) — shared verify+smoke gate the monitor's auto
     await setPreference("verify_timeout_ms_p", "600000", db);
     runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "", timedOut: false });
     await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt" }, "p", db);
-    expect(runSetupScript).toHaveBeenCalledWith("/tmp/wt", ".\\gradlew.bat test", { timeoutMs: 600000, env: expect.objectContaining({ GRADLE_USER_HOME: expect.any(String) }) });
+    // #1164: the call now also carries an AbortSignal (for `POST /:id/merge/cancel`), so this
+    // asserts only the fields the test is actually about rather than the whole options object.
+    expect(runSetupScript).toHaveBeenCalledWith(
+      "/tmp/wt",
+      ".\\gradlew.bat test",
+      expect.objectContaining({ timeoutMs: 600000, env: expect.objectContaining({ GRADLE_USER_HOME: expect.any(String) }) }),
+    );
   });
 
   // #194: the verify gate's gradle must land in the SAME per-worktree home the builder's
