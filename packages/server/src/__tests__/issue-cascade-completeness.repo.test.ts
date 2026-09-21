@@ -264,6 +264,12 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       lastSidedAt: c.now, cappedAt: null,
     });
   },
+  // #1164: the per-workspace operator merge hold — one row while held, cascades with its workspace.
+  workspace_merge_hold: async (c) => {
+    await c.db.insert(schema.workspaceMergeHold).values({
+      workspaceId: c.workspaceId, reason: "operator hold", heldAt: c.now,
+    });
+  },
   workspace_scorecard: async (c) => {
     await c.db.insert(schema.workspaceScorecard).values({
       workspaceId: c.workspaceId, score: 88,

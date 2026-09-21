@@ -281,6 +281,12 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       lastSidedAt: c.now, cappedAt: null,
     });
   },
+  // #1164: the per-workspace operator merge hold — one row while held, cascades with its workspace.
+  workspace_merge_hold: async (c) => {
+    await c.db.insert(schema.workspaceMergeHold).values({
+      workspaceId: c.workspaceId, reason: "operator hold", heldAt: c.now,
+    });
+  },
   // #815: the tenth column family extracted out of `workspaces` — the computed PR-quality
   // scorecard. Same `onDelete: cascade` shape, so seeding it proves the cascade fires.
   workspace_scorecard: async (c) => {
