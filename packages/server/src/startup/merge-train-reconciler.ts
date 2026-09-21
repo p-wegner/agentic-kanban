@@ -130,6 +130,31 @@ function countPriorResumeAttempts(reconciledReason: string | null | undefined): 
   return match ? Number.parseInt(match[1], 10) : 0;
 }
 
+/**
+ * #1183 — union two rows' member sets, de-duplicated and order-preserving. Malformed JSON on
+ * either side degrades to the OTHER row's members rather than throwing, since a parse failure
+ * here must not stop the coalesced resume from including at least the row that parsed.
+ */
+function unionMemberWorkspaceIds(rows: Pick<MergeTrainRow, "memberWorkspaceIds">[]): string[] {
+  const seen = new Set<string>();
+  const union: string[] = [];
+  for (const row of rows) {
+    let members: string[];
+    try {
+      members = JSON.parse(row.memberWorkspaceIds) as string[];
+    } catch {
+      continue;
+    }
+    for (const id of members) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        union.push(id);
+      }
+    }
+  }
+  return union;
+}
+
 export interface MergeTrainSweepResult extends PassReport {
   resumed: string[];
   abandoned: string[];
@@ -192,6 +217,14 @@ export async function reconcileStrandedMergeTrains(
   const rows = await listMergeTrainsInStates(["assembling", "gating"], database).catch(() => [] as MergeTrainRow[]);
   const result: MergeTrainSweepResult = { ...emptyPassReport(rows.length), resumed: [], abandoned: [], skippedLive: [] };
 
+  // #1183 — group by project BEFORE deciding resume/abandon, so two stranded rows for the same
+  // project resolve as one coalesced resume rather than each other's `already_in_flight` refusal
+  // (`beginMergeTrain` refuses whenever ANY other assembling/gating row exists for the project —
+  // see its header comment — so resuming row A while row B still sits in the table always lost,
+  // regardless of processing order). A row still gets its OWN abandon decision first — an
+  // exhausted retry count must still abandon that row rather than being smuggled into a group
+  // resume — and only the rows that individually decided "resume" are coalesced.
+  const byProject = new Map<string, MergeTrainRow[]>();
   for (const row of rows) {
     if (skipIfLive(row, live, nowMs, result, log)) continue;
     const ref = `train ${row.id} (${row.label}, project ${row.projectId})`;
@@ -199,7 +232,7 @@ export async function reconcileStrandedMergeTrains(
     // #1164 — a stranded train with a HELD member must not be resumed (it would re-gate the
     // very workspace the operator parked) or abandoned (that would discard the rest of the
     // train's assembly over one held member) — it is left exactly as found, for the operator
-    // to release explicitly.
+    // to release explicitly. Checked BEFORE grouping, so a held row is never coalesced away.
     let memberWorkspaceIds: string[] = [];
     try {
       memberWorkspaceIds = JSON.parse(row.memberWorkspaceIds) as string[];
@@ -213,31 +246,70 @@ export async function reconcileStrandedMergeTrains(
       continue;
     }
 
-    const { action, reason } = decideMergeTrainReconcileAction(row, opts.maxResumeAttempts);
+    const list = byProject.get(row.projectId) ?? [];
+    list.push(row);
+    byProject.set(row.projectId, list);
+  }
 
-    if (action === "abandon" || !opts.runTrain) {
-      const abandonReason = action === "abandon"
-        ? reason
-        : `no resume runner configured — ${reason}`;
-      await updateMergeTrainState(row.id, {
-        state: "abandoned",
-        reconciledReason: abandonReason,
-        finishedAt: now,
-      }, database);
-      opts.boardEvents?.broadcast(row.projectId, "merge_train_changed");
-      result.abandoned.push(row.id);
-      recordActed(result, row.id, "abandoned");
-      log(`abandoned ${ref} — ${abandonReason}`);
-      continue;
+  for (const projectRows of byProject.values()) {
+    const toResume: { row: MergeTrainRow; reason: string }[] = [];
+    for (const row of projectRows) {
+      const { action, reason } = decideMergeTrainReconcileAction(row, opts.maxResumeAttempts);
+      const ref = `train ${row.id} (${row.label}, project ${row.projectId})`;
+
+      if (action === "abandon" || !opts.runTrain) {
+        const abandonReason = action === "abandon"
+          ? reason
+          : `no resume runner configured — ${reason}`;
+        await updateMergeTrainState(row.id, {
+          state: "abandoned",
+          reconciledReason: abandonReason,
+          finishedAt: now,
+        }, database);
+        opts.boardEvents?.broadcast(row.projectId, "merge_train_changed");
+        result.abandoned.push(row.id);
+        recordActed(result, row.id, "abandoned");
+        log(`abandoned ${ref} — ${abandonReason}`);
+        continue;
+      }
+      toResume.push({ row, reason });
     }
 
-    const priorAttempts = countPriorResumeAttempts(row.reconciledReason);
-    const resumeReason = `resume attempt ${priorAttempts + 1}: ${reason}`;
+    if (toResume.length === 0) continue;
+
+    // The lead row is whichever survives to carry the coalesced resume; the rest are abandoned
+    // as superseded BEFORE the lead's `runTrain` runs, so `beginMergeTrain`'s project-wide
+    // `already_in_flight` check (which counts every assembling/gating row, this one included)
+    // sees only the lead when it re-enters — exactly the same ordering the single-row path
+    // already relied on for the row it resumes.
+    const [lead, ...siblings] = toResume;
+    const leadPriorAttempts = countPriorResumeAttempts(lead.row.reconciledReason);
+    const resumeReason = siblings.length > 0
+      ? `resume attempt ${leadPriorAttempts + 1}: ${lead.reason} — coalesced with ${siblings.length} other stranded row(s) for this project (${siblings.map((s) => s.row.id).join(", ")}) into one resume`
+      : `resume attempt ${leadPriorAttempts + 1}: ${lead.reason}`;
+
+    for (const { row: sibling } of siblings) {
+      const supersededReason = `superseded — coalesced into a single resume with train ${lead.row.id} for project ${sibling.projectId} rather than resuming separately and hitting the project's in-flight refusal`;
+      await updateMergeTrainState(sibling.id, {
+        state: "abandoned",
+        reconciledReason: supersededReason,
+        finishedAt: now,
+      }, database);
+      opts.boardEvents?.broadcast(sibling.projectId, "merge_train_changed");
+      log(`abandoned train ${sibling.id} (${sibling.label}, project ${sibling.projectId}) — ${supersededReason}`);
+    }
+
+    const mergedRow: MergeTrainRow = siblings.length > 0
+      ? { ...lead.row, memberWorkspaceIds: JSON.stringify(unionMemberWorkspaceIds(toResume.map((t) => t.row))) }
+      : lead.row;
+    const ref = `train ${lead.row.id} (${lead.row.label}, project ${lead.row.projectId})`;
     log(`resuming ${ref} — ${resumeReason}`);
     try {
-      await opts.runTrain(row);
-      result.resumed.push(row.id);
-      recordActed(result, row.id, "resumed");
+      await opts.runTrain!(mergedRow);
+      for (const { row } of toResume) {
+        result.resumed.push(row.id);
+        recordActed(result, row.id, "resumed");
+      }
       // A successful `runTrain` is expected to drive the row to its own terminal state
       // (landed/red) itself — it is the same code path a fresh request takes. Only stamp the
       // attempt marker if it is SOMEHOW still non-terminal afterwards (re-read from the DB,
@@ -245,21 +317,28 @@ export async function reconcileStrandedMergeTrains(
       // was already tried once — and so we never clobber a terminal state `runTrain` just
       // persisted back to `assembling`/`gating`, which would re-queue an already-landed train
       // for resume forever.
-      const after = await getMergeTrain(row.id, database).catch(() => undefined);
+      const after = await getMergeTrain(lead.row.id, database).catch(() => undefined);
       if (after && (after.state === "assembling" || after.state === "gating")) {
-        await updateMergeTrainState(row.id, { state: after.state, reconciledReason: resumeReason }, database).catch(() => undefined);
+        await updateMergeTrainState(lead.row.id, { state: after.state, reconciledReason: resumeReason }, database).catch(() => undefined);
       }
     } catch (err) {
-      const failReason = `resume attempt ${priorAttempts + 1} failed: ${errorMessage(err)}`;
-      await updateMergeTrainState(row.id, {
+      const failReason = `resume attempt ${leadPriorAttempts + 1} failed: ${errorMessage(err)}`;
+      await updateMergeTrainState(lead.row.id, {
         state: "abandoned",
         reconciledReason: failReason,
         finishedAt: now,
       }, database).catch(() => undefined);
-      opts.boardEvents?.broadcast(row.projectId, "merge_train_changed");
-      result.abandoned.push(row.id);
-      recordActed(result, row.id, "abandoned-after-resume-error");
+      opts.boardEvents?.broadcast(lead.row.projectId, "merge_train_changed");
+      result.abandoned.push(lead.row.id);
+      recordActed(result, lead.row.id, "abandoned-after-resume-error");
       log(`abandoned ${ref} — ${failReason}`);
+      // The siblings were already abandoned as superseded above, before the resume ran — that
+      // write stands regardless of how the coalesced resume turns out. Account for them here
+      // too, so a failed resume still reports every row the pass looked at.
+      for (const { row: sibling } of siblings) {
+        result.abandoned.push(sibling.id);
+        recordActed(result, sibling.id, "coalesced-and-superseded");
+      }
     }
   }
 
