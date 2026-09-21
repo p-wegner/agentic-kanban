@@ -21,6 +21,7 @@ Run any command with `--help` for its options — this list is names and purpose
 | `register [path]` | Register a git repo as a project |
 | `relocate <project-or-from-prefix> <new-path-or-to-prefix>` | Move a registered project to a new checkout path, keeping its issues, workspaces and history |
 | `status` | Show board status overview with all active agents, workspaces, and progress |
+| `tracker` | Compact live terminal dashboard: header (project, WIP, column counts), one line per in-flight workspace, and a blocked/attention section |
 | `unregister <name-or-id>` | Remove a registered project by name or ID |
 
 ## backlog
