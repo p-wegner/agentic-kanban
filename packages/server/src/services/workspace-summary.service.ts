@@ -30,6 +30,7 @@ import { unlandedRemoteBranches } from "./worker-remote-sync.service.js";
 import { resolveRemoteUnlandedPort } from "./remote-unlanded-port.js";
 import { peekMergeJob } from "./merge-job.service.js";
 import { deriveGateActivity } from "@agentic-kanban/shared/lib/gate-activity";
+import { resolveTrainBoardingPasses } from "./train-boarding-pass.service.js";
 
 // Bounded fan-out for background git-backed refresh tasks. The REAL git concurrency
 // control is the process-wide semaphore inside the git-exec adapter (#398) — this
@@ -186,6 +187,25 @@ export async function buildWorkspaceSummaryMap(
       scheduleCodeMetricsRefresh(mainWs, summary, database);
       applyConflicts(mainWs, defaultBranch, database, mainRef);
     }
+  }
+
+  // Phase 5d (#1188): attach the "boarding pass" chip fact set for any main workspace aboard,
+  // or recently a member of, a release train. Best-effort — a lookup failure here is a missing
+  // chip, never a broken board build.
+  try {
+    const nonArchivedMainIds = [...mainWorkspaceMap.entries()]
+      .filter(([issueId]) => !archivedIssueIds?.has(issueId))
+      .map(([, ws]) => ws.id);
+    const boardingPasses = await resolveTrainBoardingPasses(nonArchivedMainIds, database);
+    for (const [issueId, ws] of mainWorkspaceMap) {
+      const pass = boardingPasses.get(ws.id);
+      if (pass) {
+        const summary = workspaceSummaryMap.get(issueId);
+        if (summary?.main) summary.main.trainBoardingPass = pass;
+      }
+    }
+  } catch (err) {
+    console.warn("[workspace-summary] failed to attach train boarding passes (non-fatal):", err);
   }
 
   // Phase 6: populate workflow transition info

@@ -31,7 +31,7 @@ import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanb
 import { randomUUID } from "node:crypto";
 import { acquireQueueRepoLock, MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS } from "./merge-queue-repo-lock.js";
 import type { MergeQueueEvent, MergeQueuePlan } from "./merge-queue.service.js";
-import type { MergeTrainAttemptDto, MergeTrainBaseVerdict, MergeTrainGateEvidenceDto } from "@agentic-kanban/shared/types";
+import type { MergeTrainBaseVerdict, MergeTrainGateEvidenceDto } from "@agentic-kanban/shared/types";
 import { getBaseBranchHealthForSha, isBaseHealthAnswer } from "../repositories/base-branch-health.repository.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
@@ -39,6 +39,12 @@ import { noteMergeGatePhase } from "./merge-job.service.js";
 import { formatIneligibleNote, trainMemberIneligibility } from "./merge-release-partition.js";
 import { resolveTrainReviewDecision, runTrainReview, type TrainReviewMember } from "./merge-train-review.service.js";
 import { clearTrainSiding, isSidingDrop, partitionSidedMembers, recordTrainSidingDrop } from "./merge-train-siding.service.js";
+import {
+  buildTrainGateEvidence,
+  recordBoardingComments,
+  recordFinishComments,
+  uniqueByWorkspace,
+} from "./train-finish-evidence.service.js";
 
 /**
  * How many ready members a project wants batched onto one train before it opts into the
@@ -230,6 +236,7 @@ async function beginMergeTrain(
   const trainId = randomUUID();
   await createMergeTrain({ id: trainId, projectId, label, memberWorkspaceIds }, database);
   boardEvents?.broadcast(projectId, "merge_train_changed");
+  await recordBoardingComments(trainId, label, memberWorkspaceIds, database);
   return { trainId, projectId, label };
 }
 
@@ -254,8 +261,9 @@ async function vetoLandingIfAbandoned(trainId: string, database: Database): Prom
 async function finishMergeTrain(
   trainId: string,
   projectId: string,
+  label: string,
   result: Awaited<ReturnType<typeof runMergeTrain>>,
-  members: Array<{ workspaceId: string }>,
+  members: Array<{ workspaceId: string; issueNumber?: number | null }>,
   database: Database,
   review?: MergeTrainGateEvidenceDto["review"],
   boardEvents?: BoardEventSink,
@@ -284,131 +292,11 @@ async function finishMergeTrain(
     finishedAt: new Date().toISOString(),
   }, database).catch((err) => console.warn(`[merge-train] failed to persist final state for ${trainId} (non-fatal):`, errorMessage(err)));
   boardEvents?.broadcast(projectId, "merge_train_changed");
-}
 
-/**
- * One entry per workspace id, first reason wins (#1184). A bisect re-assembles every
- * sub-attempt from scratch against the base, so a member that conflicts with the BASE is
- * re-dropped by every attempt that contains it — train qmu4t981a persisted 17 drops for 13
- * members, and the panel's red-debt (dropped minus landed) was wrong in sign and size. The
- * first reason is kept because it is the top-level attempt's, recorded against the full batch.
- */
-function uniqueByWorkspace<T extends { member: { workspaceId: string }; reason: string; deferred?: true }>(
-  entries: T[],
-): Array<{ workspaceId: string; reason: string; deferred?: true }> {
-  const seen = new Set<string>();
-  const out: Array<{ workspaceId: string; reason: string; deferred?: true }> = [];
-  for (const e of entries) {
-    if (seen.has(e.member.workspaceId)) continue;
-    seen.add(e.member.workspaceId);
-    // #1197: a `deferred` (member-vs-member, #1191) drop keeps its mark on the wire, so the
-    // panel can say "waits for the next train" instead of showing a bare conflict reason.
-    out.push({ workspaceId: e.member.workspaceId, reason: e.reason, ...(e.deferred ? { deferred: true as const } : {}) });
-  }
-  return out;
-}
-
-/**
- * The persisted evidence for a finished train (#906, #1154, #1184), as a pure function of the
- * run result so the shape is testable without a DB. `gateRejected` is returned beside the
- * evidence because it is persisted in its own column (`bisectResult`), not inside it.
- */
-export function buildTrainGateEvidence(
-  result: Awaited<ReturnType<typeof runMergeTrain>>,
-  members: Array<{ workspaceId: string }>,
-  review?: MergeTrainGateEvidenceDto["review"],
-): { gateEvidence: MergeTrainGateEvidenceDto; gateRejected: Array<{ workspaceId: string; reason: string }> } {
-  const dropped = uniqueByWorkspace(result.dropped);
-  const gateRejected = uniqueByWorkspace(result.gateRejected);
-  // #1194: a member the train review sided is attributed (to its own ticket), not unresolved.
-  const sided = uniqueByWorkspace(result.sided);
-  const landed = result.landed.map((m) => m.workspaceId);
-  const accounted = new Set([
-    ...landed,
-    ...dropped.map((d) => d.workspaceId),
-    ...gateRejected.map((r) => r.workspaceId),
-    ...sided.map((sd) => sd.workspaceId),
-  ]);
-  const unresolved = members.filter((m) => !accounted.has(m.workspaceId)).map((m) => m.workspaceId);
-  const { attempts, concurrentGateSavedMs } = annotateConcurrentGates(result.attempts);
-  return {
-    gateEvidence: {
-      gateRuns: result.gateRuns,
-      gateFailure: result.gateFailure ?? null,
-      landed,
-      dropped,
-      mergeSha: result.mergeSha ?? null,
-      ...(unresolved.length > 0 ? { unresolved } : {}),
-      memberCount: members.length,
-      landedCount: landed.length,
-      uniqueDroppedCount: dropped.length,
-      gateRejectedCount: gateRejected.length,
-      ...(sided.length > 0 ? { sided, sidedCount: sided.length } : {}),
-      ...(review ? { review } : {}),
-      // #1189: the complete bisect tree, replacing the live appends made as each node finished.
-      // #1193: each node now names the siblings it gated concurrently with.
-      attempts,
-      concurrentGateSavedMs,
-      // #1191: member-vs-member conflict clusters, the input to `group-scan` mode `train-conflicts`.
-      ...(result.conflictClusters && result.conflictClusters.length > 0
-        ? { conflictClusters: result.conflictClusters.map((c) => ({ workspaceIds: [...c.workspaceIds] })) }
-        : {}),
-      // #1204: the control arm's verdict on the bare base, so the panel can render "base red,
-      // nothing attributable to members" instead of an unexplained red train with no rejections.
-      ...(result.baseVerdict ? { baseVerdict: result.baseVerdict } : {}),
-    },
-    gateRejected,
-  };
-}
-
-/**
- * #1193 — make the saving from concurrent bisect halves VISIBLE in the persisted tree: mark
- * every node with the labels of the other nodes whose gate window overlapped its own, and
- * total the wall-clock saved (sum of gate durations minus the union of their windows). A tree
- * whose gates all ran one after another gets no `concurrentWith` and a saving of 0 — so a
- * reader of train qmu4t981a's successor can tell at a glance whether the second slot was used.
- *
- * Pure and computed here rather than inside `runMergeTrain` because the overlap of two halves
- * is only known once BOTH have finished, and the live `onAttempt` append happens as EACH one
- * does — the final evidence write is the first moment the whole tree is in hand.
- */
-export function annotateConcurrentGates(
-  attempts: MergeTrainAttemptDto[],
-): { attempts: MergeTrainAttemptDto[]; concurrentGateSavedMs: number } {
-  const windows = attempts.map((a) => {
-    const start = a.gateStartedAt ? Date.parse(a.gateStartedAt) : NaN;
-    const end = a.gateFinishedAt ? Date.parse(a.gateFinishedAt) : NaN;
-    return Number.isFinite(start) && Number.isFinite(end) && end >= start ? { start, end } : null;
-  });
-  const annotated = attempts.map((a, i) => {
-    const w = windows[i];
-    if (!w) return a;
-    const concurrentWith = attempts
-      .filter((_, j) => {
-        const o = windows[j];
-        // Strict overlap: a gate that starts the instant another ends was sequential.
-        return j !== i && o !== null && o.start < w.end && w.start < o.end;
-      })
-      .map((b) => b.label);
-    return concurrentWith.length > 0 ? { ...a, concurrentWith } : a;
-  });
-  // Sum of durations minus the union of the windows — the time a sequential run would have
-  // spent that this one did not.
-  const sorted = windows.filter((w): w is { start: number; end: number } => w !== null).sort((x, y) => x.start - y.start);
-  let sum = 0;
-  let union = 0;
-  let cursorEnd = -Infinity;
-  for (const w of sorted) {
-    sum += w.end - w.start;
-    if (w.start >= cursorEnd) {
-      union += w.end - w.start;
-      cursorEnd = w.end;
-    } else if (w.end > cursorEnd) {
-      union += w.end - cursorEnd;
-      cursorEnd = w.end;
-    }
-  }
-  return { attempts: annotated, concurrentGateSavedMs: Math.max(0, sum - union) };
+  // #1188 — one issue comment per member describing what the train did with it. Reuses
+  // `insertIssueComment` (the sanctioned single write path) rather than a second mechanism;
+  // best-effort per member, and never blocks the bookkeeping above.
+  await recordFinishComments(trainId, label, result, members, database);
 }
 
 /**
@@ -810,7 +698,7 @@ export function createMergeTrainRunner(deps: {
     const result = outcome.result;
 
     try {
-      await finishMergeTrain(trainId, projectId, result, members, database, reviewEvidence, boardEvents);
+      await finishMergeTrain(trainId, projectId, label, result, members, database, reviewEvidence, boardEvents);
     } finally {
       // #1181: the row's terminal state is persisted (or deliberately left `abandoned`) — only
       // now may a sweep treat it as it finds it. Idempotent with the lock-failure clear above.
