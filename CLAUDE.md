@@ -595,6 +595,8 @@ Full symptom→cause→fix in `docs/install.md` (“Clean-clone / first-start go
 - `docs/backlog-markdown.md` — Backlog Markdown (`kanban-md 1`): the one-file backlog format, export filters, liberal import + preview, UI/REST/CLI/MCP/skill surfaces
 - `docs/two-boards.md` — **the two-board operation mode**: dev vs. stable, which one MCP/hooks talk
   to, the operator cutover checklist, and `pnpm promote` (promotion, smoke, rollback, the log)
+- `docs/terminal-tracker.md` — `pnpm cli -- tracker`: the compact live dashboard, its fields/flags,
+  the `--json` contract, and a herdr-pane recipe for running it alongside builder panes
 - `docs/state.md` — progress
 - `packages/server/CLAUDE.md` — server-package detail (incl. Butler ops)
 - `scripts/board-monitor/README.md` — run/stop/observe the loop
