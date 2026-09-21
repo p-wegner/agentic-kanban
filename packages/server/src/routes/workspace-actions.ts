@@ -763,7 +763,9 @@ export function createWorkspaceActionsRoute(
   router.post("/:id/resolve-conflicts", async (c) => {
     const id = c.req.param("id");
     const result = await workspaceService.resolveConflicts(id);
-    options?.fixAndMergeSessionIds?.add(result.sessionId);
+    // #1209: a clean rebase resolves without spawning a session — `result` then carries no
+    // `sessionId`, and tracking `undefined` would pollute the exit-workflow's session-id set.
+    if ("sessionId" in result) options?.fixAndMergeSessionIds?.add(result.sessionId);
     return c.json(result, 201);
   });
 

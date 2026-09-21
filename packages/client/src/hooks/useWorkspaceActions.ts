@@ -87,6 +87,35 @@ interface WorkspaceActionsDeps {
   setWorkspaceSessions: Setter<Record<string, SessionInfo[]>>;
 }
 
+/** #1209: the rebase preflight may resolve the conflict itself, in which case the response
+ *  carries `resolved: "rebase-clean"` and no `sessionId` — no agent to watch. */
+type ResolveConflictsResult = { sessionId: string } | { resolved: string };
+
+/** Extracted so `useWorkspaceActions` (the shrink-only nloc ratchet, #763) doesn't grow for
+ *  this branch — pure dispatch over the two response shapes, no closure over hook internals. */
+async function applyResolveConflictsResult(
+  result: ResolveConflictsResult,
+  setters: {
+    setActiveSession: Setter<string | null>;
+    setCompletedMessages: Setter<AgentOutputMessage[]>;
+    setConflictState: Setter<ConflictState>;
+    setViewMode: Setter<WorkspaceViewMode>;
+    fetchWorkspaces: () => Promise<void> | void;
+  },
+): Promise<void> {
+  const { setActiveSession, setCompletedMessages, setConflictState, setViewMode, fetchWorkspaces } = setters;
+  if ("sessionId" in result) {
+    setActiveSession(result.sessionId);
+    setCompletedMessages([]);
+    setConflictState(null);
+    setViewMode("output");
+  } else {
+    showToast("Rebase resolved the conflict — nothing left to fix", "success");
+    setConflictState(null);
+    await fetchWorkspaces();
+  }
+}
+
 export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
   const {
     issue, selectedProfile, selectedModel, prefs, requiresReview, suggestion,
@@ -414,11 +443,10 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
     setSelectedHistoryId(null);
     setViewMode("output");
     try {
-      const result = await apiPost<{ sessionId: string }>(`/api/workspaces/${wsId}/resolve-conflicts`);
-      setActiveSession(result.sessionId);
-      setCompletedMessages([]);
-      setConflictState(null);
-      setViewMode("output");
+      const result = await apiPost<ResolveConflictsResult>(`/api/workspaces/${wsId}/resolve-conflicts`);
+      await applyResolveConflictsResult(result, {
+        setActiveSession, setCompletedMessages, setConflictState, setViewMode, fetchWorkspaces,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Resolve conflicts failed");
     } finally {

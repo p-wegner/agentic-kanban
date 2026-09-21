@@ -336,3 +336,46 @@ export async function listRecentIssueComments(
     .orderBy(desc(issueComments.createdAt))
     .limit(opts.limit ?? 20);
 }
+
+/**
+ * #1209: the `headShaBeforeSession` a resolve-conflicts launch pinned on its own
+ * `fix-and-merge-launched` note, for the given session — so the exit handler can tell whether
+ * the session ever moved the branch tip off the mid-rebase HEAD it was launched into. Reads the
+ * NEWEST matching note for the (workspace, session) pair rather than assuming there is only one,
+ * since a workspace can be resolve-conflicts'd more than once across its lifetime.
+ */
+export async function getResolveConflictsLaunchSnapshot(
+  workspaceId: string,
+  sessionId: string,
+  database: Database = db,
+): Promise<{ headShaBeforeSession: string | null } | null> {
+  // #1209 fix: `merge-attempt` is the shared kind for EVERY merge-timeline event on a
+  // workspace (conflict, gate-failed, already-merged, ...), written from 7+ call sites across
+  // the merge/gate/prevalidation services — not just this launch note. A capped `limit(20)`
+  // here silently drops the launch snapshot once a workspace accumulates that many
+  // merge-attempt comments (a handful of gate-failed/auto-merge retries is enough), which
+  // reproduces the exact #1199/#1186 miss this function exists to prevent (falls through to
+  // "not a no-op" instead of ever seeing the launch's pinned headShaBeforeSession). The
+  // session id is unique, so scanning unbounded and stopping at the first match is safe and
+  // correct rather than a guess bounded by an arbitrary row count.
+  const rows = await database
+    .select({ payload: issueComments.payload })
+    .from(issueComments)
+    .where(and(eq(issueComments.workspaceId, workspaceId), eq(issueComments.kind, "merge-attempt")))
+    .orderBy(desc(issueComments.createdAt), desc(issueComments.id));
+
+  for (const row of rows) {
+    if (!row.payload) continue;
+    try {
+      const parsed: unknown = JSON.parse(row.payload);
+      if (!parsed || typeof parsed !== "object") continue;
+      const payload = parsed as Record<string, unknown>;
+      if (payload.sessionId !== sessionId) continue;
+      const sha = payload.headShaBeforeSession;
+      return { headShaBeforeSession: typeof sha === "string" ? sha : null };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}

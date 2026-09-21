@@ -44,6 +44,8 @@ export interface ExitContext {
   autoMergeEnabled: boolean;
   defaultBranch: string | null;
   autoMergeDisabledProjectIds: Set<string>;
+  /** The exiting session's persisted `sessions.triggerType` (#1209 — distinguishes a resolve-conflicts run from a fix-and-merge one within the shared handler). */
+  triggerType: string | null | undefined;
 }
 
 /**
