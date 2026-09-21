@@ -1245,6 +1245,33 @@ describe("MergeService — resolveConflicts puts the worktree into the conflicte
     expect(workspace.status).toBe("fixing");
   });
 
+  it("#1216: passes skipLaunchPreflight so the agent spawns into the rebase it just left in progress", async () => {
+    // The rebase above deliberately leaves the worktree detached with UU files — the launch
+    // preflight's attach/dirty guard cannot tell that apart from an accidentally-dirty
+    // worktree and would refuse before the agent ever starts (same catch-22 fix-and-merge
+    // avoids, f00255e9). Without skipLaunchPreflight, resolve-conflicts could start the
+    // rebase and then never actually spawn a session for a real conflict.
+    const { workspaceId } = await seedWorkspace(db);
+    const sessionManager = createMockSessionManager();
+    const git = makeGit({
+      rebaseOntoBase: vi.fn(async () => ({ success: false, conflictingFiles: ["src/conflicted.ts"] })),
+      getConflictingFiles: async () => ["src/conflicted.ts"],
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      getSessionManager: () => sessionManager,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    await svc.resolveConflicts(workspaceId);
+
+    const startArgs = (sessionManager.startSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(startArgs.skipLaunchPreflight).toBe(true);
+  });
+
   it("a rebase that completes CLEANLY resolves with no agent spawned — the #1199/#1186 regression", async () => {
     // This is the exact bug: calling resolve-conflicts on a workspace with no rebase/merge
     // in progress used to spawn an agent into a clean tree, which truthfully reported
