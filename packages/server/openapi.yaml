@@ -6126,6 +6126,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/file-contention:
     get:
       summary: GET /api/projects/:id/file-contention — live file contention heatmap for active/reviewing workspaces
@@ -10818,6 +10823,24 @@ paths:
               schema: {}
         "400":
           description: Error (thrown HTTPException, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/reopen:
+    post:
+      summary: only fills in a missing worktree for a workspace that is still OPEN.
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_reopen
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
           content:
             application/json:
               schema: {}

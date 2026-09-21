@@ -1,10 +1,18 @@
 import { and, eq, inArray, ne, notInArray } from "drizzle-orm";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
-import { getMergeCommits, getRevertedMergeCommitSubjects } from "@agentic-kanban/shared/lib/git-service";
+import {
+  getMergeCommits,
+  getRevertedMergeCommitSubjects,
+  checkBranchTipIsAncestor,
+  countUniqueCommits,
+  getCommitSummariesBetween,
+} from "@agentic-kanban/shared/lib/git-service";
 import type { MergeCommitSubject } from "@agentic-kanban/shared/lib/git-service";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { reconcileMergedIssue } from "../services/merge-cleanup.service.js";
+import { finalizeMergeCleanup } from "../services/merge-cleanup.service.js";
+import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { parseIssueNumberFromBranch } from "@agentic-kanban/shared/lib/branch";
@@ -227,6 +235,170 @@ export async function reconcileHandMergedBranches(
 
   if (reconciled > 0) {
     console.log(`[hand-merge-reconciler] auto-transitioned ${reconciled} hand-merged issue(s) to Done`);
+  }
+  return reconciled;
+}
+
+export interface ContainedOpenWorkspaceDeps {
+  database?: Database;
+  /** Injectable for testing. Defaults to the real checkBranchTipIsAncestor from git-service. */
+  checkAncestor?: typeof checkBranchTipIsAncestor;
+  /** Injectable for testing. Defaults to the real countUniqueCommits from git-service. */
+  countCommits?: typeof countUniqueCommits;
+  /** Injectable for testing. Defaults to the real getCommitSummariesBetween from git-service. */
+  getSummaries?: typeof getCommitSummariesBetween;
+}
+
+/**
+ * Reconcile OPEN, non-direct workspaces whose branch is fully CONTAINED in the base
+ * branch (0 commits ahead — including the pure "never touched again" empty-branch
+ * case) but whose issue is still stuck open with the workspace still `readyForMerge`
+ * / idle (#1205).
+ *
+ * This is the case {@link reconcileAncestorBranchWorkspaces} deliberately refuses
+ * (regression #581/#585: a 0-commit branch is normally indistinguishable from a
+ * brand-new, never-started workspace, and auto-Done-ing that class caused a mass
+ * silent-merge-loss incident). What makes THIS sweep safe to act automatically is
+ * the same evidence {@link reconcileHandMergedBranches} requires: a commit on the
+ * base branch, dated AFTER the issue was created, whose message explicitly names
+ * this issue (`#<n>` or `ak-<n>`) — i.e. positive proof the fix landed by hand
+ * elsewhere, not merely the absence of unique commits. Without that evidence the
+ * workspace is left alone exactly as before.
+ *
+ * Never touches Backlog/terminal issues, workspaces with a live (non-idle) status,
+ * or a workspace with a pending sibling repo — the caller must resolve those first.
+ */
+export async function reconcileContainedOpenWorkspaces(
+  deps: ContainedOpenWorkspaceDeps = {},
+): Promise<number> {
+  const database = deps.database ?? db;
+  const ancestorCheck = deps.checkAncestor ?? checkBranchTipIsAncestor;
+  const commitCounter = deps.countCommits ?? countUniqueCommits;
+  const getSummaries = deps.getSummaries ?? getCommitSummariesBetween;
+  let reconciled = 0;
+
+  try {
+    const projectRows = await database
+      .select({ id: projects.id, repoPath: projects.repoPath, defaultBranch: projects.defaultBranch, name: projects.name })
+      .from(projects);
+
+    for (const project of projectRows) {
+      if (!project.repoPath || !project.defaultBranch) continue;
+
+      const candidates = await database
+        .select({
+          wsId: workspaces.id,
+          branch: workspaces.branch,
+          baseBranch: workspaces.baseBranch,
+          workingDir: workspaces.workingDir,
+          wsStatus: workspaces.status,
+          issueId: issues.id,
+          issueNumber: issues.issueNumber,
+          issueCreatedAt: issues.createdAt,
+          statusName: projectStatuses.name,
+        })
+        .from(workspaces)
+        .innerJoin(issues, eq(workspaces.issueId, issues.id))
+        .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+        .where(
+          and(
+            eq(issues.projectId, project.id),
+            eq(workspaces.isDirect, false),
+            eq(workspaces.status, "idle"),
+            notInArray(projectStatuses.name, PROTECTED_STATUS_NAMES),
+          ),
+        );
+
+      if (candidates.length === 0) continue;
+
+      const now = new Date().toISOString();
+      for (const c of candidates) {
+        if (!c.branch || c.issueNumber == null) continue;
+        const baseBranch = c.baseBranch || project.defaultBranch;
+
+        let ancestry: Awaited<ReturnType<typeof checkBranchTipIsAncestor>>;
+        try {
+          ancestry = await ancestorCheck(project.repoPath, c.branch, baseBranch, c.workingDir ?? undefined);
+        } catch (err) {
+          console.warn(`[hand-merge-reconciler] containment: ancestry check failed for workspace ${c.wsId}:`, errorMessage(err));
+          continue;
+        }
+        if (ancestry.branchSha === null || !ancestry.isAncestor) continue;
+
+        let uniqueCommits: number;
+        try {
+          uniqueCommits = await commitCounter(project.repoPath, ancestry.baseSha, ancestry.branchSha);
+        } catch {
+          continue;
+        }
+        if (uniqueCommits !== 0) continue;
+
+        // Evidence gate: only act when a base-branch commit newer than the issue
+        // explicitly names it. Absence of unique commits alone is NOT sufficient
+        // (see the function doc) — this is what tells a fully-contained branch
+        // apart from one that simply never started.
+        // Commits base has gained since the branch's own tip — bounded naturally to
+        // whatever landed after this branch was last touched, rather than all history.
+        let summaries: Array<{ sha: string; message: string }>;
+        try {
+          summaries = await getSummaries(project.repoPath, ancestry.branchSha, baseBranch);
+        } catch (err) {
+          console.warn(`[hand-merge-reconciler] containment: evidence scan failed for workspace ${c.wsId}:`, errorMessage(err));
+          continue;
+        }
+        const pattern = new RegExp(`(^|[^0-9a-z])(#${c.issueNumber}|ak-${c.issueNumber})(?![0-9])`, "i");
+        const match = summaries.find((s) => pattern.test(s.message));
+        if (!match) continue;
+
+        console.log(
+          `[hand-merge-reconciler] workspace ${c.wsId} (issue #${c.issueNumber}, branch=${c.branch}) — branch contained 0 commits not on ${baseBranch}; evidence: ${match.sha} "${match.message}"; reconciling`,
+        );
+
+        try {
+          await insertIssueComment({
+            issueId: c.issueId,
+            workspaceId: c.wsId,
+            kind: "merge-attempt",
+            author: "system",
+            body: `Branch ${c.branch} contained 0 commits not on ${baseBranch}; closed by reconciler. Landed by ${match.sha} "${match.message}".`,
+            payload: { mergeReason: "branch_fully_contained", evidenceSha: match.sha, evidenceMessage: match.message, reconciledAt: now },
+            createdAt: now,
+          }, database).catch(() => {});
+
+          await finalizeMergeCleanup({
+            database,
+            workspaceId: c.wsId,
+            issueId: c.issueId,
+            now,
+            mergedAt: now,
+            closedAt: now,
+            workingDir: null,
+            projectId: project.id,
+          });
+
+          reconciled++;
+          try {
+            await logBoardHealthEvent({
+              projectId: project.id,
+              cycleId: `hand-merge-reconcile-contained-${c.wsId}`,
+              eventType: "action",
+              category: "merge",
+              issueNumber: c.issueNumber,
+              summary: `Hand-merged-branch reconciliation: workspace branch ${c.branch} contained 0 commits not on ${baseBranch} but issue was still '${c.statusName}'. Closed workspace and moved issue to Done (evidence: ${match.sha}).`,
+              details: { workspaceId: c.wsId, evidenceSha: match.sha, evidenceMessage: match.message, reconciledAt: now },
+            }, database);
+          } catch { /* health event logging is non-fatal */ }
+        } catch (err) {
+          console.warn(`[hand-merge-reconciler] containment: failed to reconcile workspace ${c.wsId}:`, errorMessage(err));
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[hand-merge-reconciler] reconcileContainedOpenWorkspaces failed (non-fatal):", errorMessage(err));
+  }
+
+  if (reconciled > 0) {
+    console.log(`[hand-merge-reconciler] auto-closed ${reconciled} fully-contained-branch workspace(s)`);
   }
   return reconciled;
 }

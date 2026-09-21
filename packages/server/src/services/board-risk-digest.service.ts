@@ -3,9 +3,10 @@ import { checkPluginSkillHealth } from "./plugin-skill-health.service.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { computeStableSkew, type StableSkew } from "./stable-skew.service.js";
 import { getProjectRepoFields } from "../repositories/project.repository.js";
+import { findStrandedInReviewIssueIds } from "./stranded-in-review.service.js";
 import type { db } from "../db/index.js";
 
-export type RiskCategory = "merge_blocker" | "stale_session" | "low_backlog" | "health" | "stable_skew";
+export type RiskCategory = "merge_blocker" | "stale_session" | "low_backlog" | "health" | "stable_skew" | "stranded_in_review";
 export type RiskSeverity = "high" | "medium" | "low";
 
 export interface RiskItem {
@@ -25,6 +26,8 @@ export interface BoardRiskDigest {
     lowBacklog: boolean;
     backlogCount: number;
     healthIssues: number;
+    /** #1206 — issues In Review whose only workspace(s) are closed and unmerged. */
+    strandedInReview: number;
   };
   topItems: RiskItem[];
   allItems: RiskItem[];
@@ -130,6 +133,29 @@ export async function generateBoardRiskDigest(
     }
   }
 
+  // stranded_in_review (#1206): issue In Review + no open workspace + branch exists
+  // (closed, non-direct, unmerged) — no train can board it and nothing else on this
+  // board flags it as "stuck", since it has no running/idle workspace to be idle in.
+  // Remedy: reopen_workspace on the latest workspace. Distinct from the generic
+  // "closed-in-review" attention reason above (which fires from the FIRST closed
+  // workspace `get_board_status` happens to pick as `mainWs`); this predicate checks
+  // that EVERY workspace for the issue is closed, so it doesn't double-count an
+  // issue that merely has a stale closed workspace alongside a live one.
+  const inReviewIssueIds = boardStatus.issues
+    .filter((i) => i.statusName === "In Review")
+    .map((i) => i.issueId);
+  const strandedIds = new Set(await findStrandedInReviewIssueIds(inReviewIssueIds, database));
+  for (const issue of boardStatus.issues) {
+    if (!strandedIds.has(issue.issueId)) continue;
+    allItems.push({
+      issueNumber: issue.issueNumber,
+      issueTitle: issue.title,
+      reason: "In Review with no open workspace — every workspace is closed and unmerged. Use reopen_workspace to recover.",
+      category: "stranded_in_review",
+      severity: "high",
+    });
+  }
+
   // plugin skill health: an enabled plugin's skill that this checkout cannot resolve, or that
   // had gone missing and was just re-materialized (#1053 — #1039's heal only ran when a
   // workspace was created; this makes the SAME check visible on the board independent of one).
@@ -197,6 +223,7 @@ export async function generateBoardRiskDigest(
   const mergeBlockers = allItems.filter((i) => i.category === "merge_blocker").length;
   const staleSessions = allItems.filter((i) => i.category === "stale_session").length;
   const healthIssues = allItems.filter((i) => i.category === "health").length;
+  const strandedInReview = allItems.filter((i) => i.category === "stranded_in_review").length;
 
   return {
     projectId,
@@ -207,6 +234,7 @@ export async function generateBoardRiskDigest(
       lowBacklog,
       backlogCount,
       healthIssues,
+      strandedInReview,
     },
     topItems,
     allItems,

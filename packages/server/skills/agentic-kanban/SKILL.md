@@ -1,8 +1,8 @@
 ---
 name: agentic-kanban
 description: Operate the agentic-kanban board — a kanban board where each card is an AI coding session in its own git worktree. Use when asked to work a ticket, drive a project hands-off, review or merge agent work, inspect what agents are doing, or wire the board into another tool. Covers the MCP tools, CLI, board views, statuses, and the review/merge gate.
-commit: 60917d38ca
-generated: 2026-09-20
+commit: 1492aa87be
+generated: 2026-09-21
 ---
 
 # agentic-kanban
@@ -114,13 +114,13 @@ Depth on any of these lives in `references/` — load a file only when you actua
 
 ## MCP tool index
 
-118 tools, by category. Full descriptions: `references/mcp-tools.md`.
+119 tools, by category. Full descriptions: `references/mcp-tools.md`.
 
 | Category | Tools |
 |---|---|
 | Board Overview | `get_context`, `get_board_status`, `get_board_risk_digest`, `find_similar_failures`, `delete_status` |
 | Issues | `list_issues`, `get_issue`, `get_issue_summary`, `create_issue`, `create_sub_issue`, `create_issues_batch`, `update_issue`, `delete_issue`, `move_issue`, `attach_artifact`, `check_issue_overlap`, `analyze_touched_files`, `export_backlog_markdown`, `import_backlog_markdown` |
-| Workspaces | `list_workspaces`, `start_workspace`, `launch_workspace`, `relaunch_workspace`, `wait_workspace`, `get_workspace_diff`, `get_workspace_scorecard`, `merge_workspace`, `close_workspace`, `mark_ready_for_merge`, `stop_workspace`, `delete_workspace`, `export_handoff_bundle` |
+| Workspaces | `list_workspaces`, `start_workspace`, `launch_workspace`, `relaunch_workspace`, `wait_workspace`, `get_workspace_diff`, `get_workspace_scorecard`, `merge_workspace`, `close_workspace`, `reopen_workspace`, `mark_ready_for_merge`, `stop_workspace`, `delete_workspace`, `export_handoff_bundle` |
 | Sessions | `list_sessions`, `recent_sessions`, `read_terminal`, `get_session_transcript`, `get_session_stats`, `search_sessions`, `analyze_session`, `get_fleet_friction`, `backfill_friction`, `session_history` |
 | Tags | `list_tags`, `create_tag` |
 | Code Review | `review_workspace`, `get_diff_comments`, `create_diff_comment`, `add_comment`, `approve_tool_use`, `session_review_effectiveness`, `reviewer_fixes`, `list_red_debt` |
@@ -165,7 +165,7 @@ Top-level: `cleanup`, `create`, `delete-status`, `dev`, `export-backlog`, `impor
 | `train` | `list`, `show`, `cancel`, `depart` |
 | `worker` | `pair`, `start`, `instructions`, `list`, `explain`, `placements`, `doctor`, `doctor-board`, `update-check`, `cleanup`, `events` |
 | `workflow` | `list`, `get`, `export`, `create`, `import`, `delete` |
-| `workspace` | `list`, `create`, `launch`, `resume`, `wait`, `review`, `start`, `diff`, `scorecard`, `merge`, `close`, `stop`, `delete`, `relaunch`, `mark-ready`, `propose-transition`, `clarify`, `analyze-touched`, `terminal`, `comment-list`, `comment-add`, `handoff-bundle`, `approve-tool` |
+| `workspace` | `list`, `create`, `launch`, `resume`, `reopen`, `wait`, `review`, `start`, `diff`, `scorecard`, `merge`, `close`, `stop`, `delete`, `relaunch`, `mark-ready`, `propose-transition`, `clarify`, `analyze-touched`, `terminal`, `comment-list`, `comment-add`, `handoff-bundle`, `approve-tool` |
 
 <!-- /GENERATED:cli-index -->
 

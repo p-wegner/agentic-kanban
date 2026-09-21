@@ -10,11 +10,13 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 export type { StaleWorktreeEntry, CleanupWarningEntry } from "./workspace-cleanup.service.js";
 
 import * as realGitService from "./git.service.js";
+import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import {
   resolveProjectRepo,
   resolveProjectId,
   getWorkspaceById,
   getWorkspaceDetails,
+  getWorkspacesByIssueId,
 } from "../repositories/workspace.repository.js";
 import {
   WorkspaceError,
@@ -259,6 +261,72 @@ export function createWorkspaceCrudService(deps: {
     return { id, workingDir: worktreePath };
   }
 
+  /**
+   * Re-create a worktree for a CLOSED workspace whose branch is still live and
+   * unmerged (#1206) — the recovery door `setupWorkspace` does NOT provide, since
+   * that one only fills in a missing worktree for a workspace that is still OPEN.
+   *
+   * Six In Review tickets were found stranded this way (#1120/#1125/#1140/#1149/
+   * #1150/#1152): the branch work is real, but the workspace was closed (e.g. a
+   * manual "close" that was meant to discard it, or an abandoned recovery
+   * attempt) while the branch still carries unmerged commits, and nothing lets an
+   * operator resume it short of hand-running `git worktree add` — `POST
+   * /api/workspaces` would create a NEW branch, `workspace resume` needs an
+   * already-open workspace, and `issue move Done` is refused because the branch
+   * is unmerged with no route back to In Progress either.
+   *
+   * Refuses when: the workspace isn't closed, is a direct workspace (no branch to
+   * reopen), is already merged (mergedAt set — the terminal invariant, same as
+   * `setWorkspaceStatus`'s guard), the branch no longer exists in the repo, or
+   * another OPEN workspace already holds this issue (reopening would then create
+   * two live workspaces racing on the same issue).
+   */
+  async function reopenWorkspace(id: string): Promise<{ id: string; workingDir: string }> {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (workspace.status !== "closed") throw new WorkspaceError("Workspace is not closed", "BAD_REQUEST");
+    if (workspace.isDirect) throw new WorkspaceError("Direct workspaces have no branch to reopen", "BAD_REQUEST");
+    if (workspace.mergedAt) throw new WorkspaceError("Workspace is already merged — nothing to reopen", "BAD_REQUEST");
+    if (!workspace.branch) throw new WorkspaceError("Workspace has no branch", "BAD_REQUEST");
+
+    const siblingWorkspaces = await getWorkspacesByIssueId(workspace.issueId, database);
+    const otherOpen = siblingWorkspaces.find((w) => w.id !== id && w.status !== "closed");
+    if (otherOpen) {
+      throw new WorkspaceError(
+        `Issue already has an open workspace (${otherOpen.id}) — close it before reopening this one`,
+        "CONFLICT",
+      );
+    }
+
+    const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
+    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+
+    try {
+      await gitService.revParse(repoPath, workspace.branch);
+    } catch {
+      throw new WorkspaceError(`Branch "${workspace.branch}" no longer exists in the repository`, "BAD_REQUEST");
+    }
+
+    console.log(`[workspace-service] reopen: workspaceId=${id} branch=${workspace.branch} repoPath=${repoPath} baseBranch=${baseBranch}`);
+    const worktreePath = await gitService.createWorktree(repoPath, workspace.branch, baseBranch, {
+      ...(await resolveWorktreeClaims(database, { label: "reopen-workspace" })),
+    });
+
+    const now = new Date().toISOString();
+    await crudRepo.setWorkspaceWorkingDir(id, { workingDir: worktreePath, baseBranch, updatedAt: now }, database);
+    // Reopen preserves whatever readyForMerge was — a workspace closed while it
+    // still held that flag resumes exactly where it left off. `caller` labels the
+    // transition-legality log so a "closed" -> "idle" write here is attributable.
+    await setWorkspaceStatus(database, id, "idle", { now, caller: "reopen-workspace" });
+
+    console.log(`[workspace-service] reopen complete: workspaceId=${id} worktreePath=${worktreePath}`);
+
+    const projectId = await resolveProjectId(id, database);
+    if (projectId) boardEvents?.broadcast(projectId, "workspace_reopened");
+
+    return { id, workingDir: worktreePath };
+  }
+
   async function updateWorkspace(id: string, body: Record<string, unknown>): Promise<{ id: string }> {
     const validStatuses = ["active", "reviewing", "idle", "blocked", "closed"];
     if (body.status && !validStatuses.includes(body.status as string)) {
@@ -314,6 +382,7 @@ export function createWorkspaceCrudService(deps: {
     closeWorkspace,
     markReadyForMerge,
     setupWorkspace,
+    reopenWorkspace,
     retrySetup: setupRetry.retrySetup,
     updateWorkspace,
     getWorkspace,

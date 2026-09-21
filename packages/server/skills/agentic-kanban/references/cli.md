@@ -238,6 +238,7 @@ Manage workspaces (git worktrees linked to issues).
 | `workspace create <issue-id>` | Create a git worktree workspace for an issue |
 | `workspace launch <workspace-id>` | Relaunch an idle workspace by starting a new agent session |
 | `workspace resume <issue-number>` | Resume the latest workspace for an issue by launching a new agent session |
+| `workspace reopen <issue-number>` | Re-create the worktree for a CLOSED workspace whose branch is still live and unmerged (#1206) |
 | `workspace wait <issue-number>` | Block until a workspace leaves its active state, then exit |
 | `workspace review <workspace-id>` | Trigger an AI code review for an idle workspace |
 | `workspace start <issue>` | One-step create + launch a workspace for an issue |

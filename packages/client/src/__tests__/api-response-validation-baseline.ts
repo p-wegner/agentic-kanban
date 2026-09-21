@@ -83,6 +83,11 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   // ── /api/merge-queue ──
   "POST /api/merge-queue",
   "POST /api/merge-queue/preview/:param",
+  // #1187's departure board reads these; no zod schema is registered for these routes yet.
+  // Register real schemas rather than pretending the gap is closed.
+  "POST /api/merge-queue/trains/:param/cancel",
+  "POST /api/merge-queue/window/hold",
+  "POST /api/merge-queue/window/release",
   // ── /api/plugins ──
   "DELETE /api/plugins/:param",
   "GET /api/plugins",

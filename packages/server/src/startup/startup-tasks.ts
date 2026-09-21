@@ -19,7 +19,7 @@ import { recoverRemoteSessionsAtBoot } from "./remote-session-readoption.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { isPidAlive } from "../lib/pid.js";
 import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.js";
-import { reconcileHandMergedBranches } from "./hand-merged-branch-reconciler.js";
+import { reconcileHandMergedBranches, reconcileContainedOpenWorkspaces } from "./hand-merged-branch-reconciler.js";
 import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-sweep.js";
 import { reapTerminalWorkspaces } from "./terminal-workspace-reaper.js";
 import { reconcileOrphanedWorktrees, realUnshippedWorkProbe } from "./orphaned-worktree-reconciler.js";
@@ -963,6 +963,7 @@ export const STARTUP_AUDIT_TASKS: StartupAuditTask[] = [
     name: "reconcileHandMergedBranches",
     run: () => reconcileHandMergedBranches(),
   },
+  { name: "reconcileContainedOpenWorkspaces", run: () => reconcileContainedOpenWorkspaces() }, // #1205, sibling of the above
   { name: "scanDoneUnmergedWorkspaces", run: () => scanDoneUnmergedWorkspaces({ reopenToInReview: false }) },
   { name: "reapTerminalWorkspaces", run: () => reapTerminalWorkspaces() },
   { name: "pruneStaleWorktrees", run: () => pruneStaleWorktrees() },
