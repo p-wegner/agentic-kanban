@@ -39,6 +39,7 @@ import { createMetricsRoute } from "./metrics.js";
 import { createWorkersRoute } from "./workers.js";
 import { createPluginsRoute, createPluginProjectViewsRoute } from "./plugins.js";
 import { createHealthRoute } from "./health.js";
+import { createHerdrRoute } from "./herdr.js";
 import { createMilestonesRoute } from "./milestones.js";
 import { createDrivesRoute } from "./drives.js";
 import { createDriveObstaclesRoute } from "./drive-obstacles.js";
@@ -122,6 +123,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/plugins", createPluginsRoute(database, { ...options, getSessionManager }));
   routes.route("/projects", createPluginProjectViewsRoute(database));
   routes.route("/health", createHealthRoute());
+  routes.route("/herdr", createHerdrRoute());
   routes.route("/inbox", createInboxRoute(database));
   if (options?.boardEvents) {
     routes.route("/approvals", createApprovalsRoute(options.boardEvents));
