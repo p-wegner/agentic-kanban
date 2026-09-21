@@ -66,7 +66,11 @@ Status glyphs:
 
       const renderAndClear = async () => {
         console.clear();
-        await renderOnce();
+        try {
+          await renderOnce();
+        } catch (err) {
+          console.log(`(refresh failed: ${err instanceof Error ? err.message : String(err)})`);
+        }
         console.log(`\nRefreshing every ${intervalSec}s. Press Ctrl+C to exit.`);
       };
       await renderAndClear();
