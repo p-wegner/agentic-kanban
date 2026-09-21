@@ -119,9 +119,15 @@ export function createWorkspaceResolveConflictsService(deps: ResolveConflictsDep
     // exits having never moved the branch tip off the mid-rebase HEAD it was launched into.
     const headShaBeforeSession = await gitService.revParse(refreshedWorkspace.workingDir, "HEAD").catch(() => null);
 
+    // #1216: the rebase above deliberately leaves the worktree detached mid-rebase with `UU`
+    // files — that IS the intended state for this agent to resolve. workspaceLaunchPreflight's
+    // attach/dirty guard cannot tell that state apart from a workspace that was simply left
+    // dirty and detached, so it refuses before the agent ever spawns (see f00255e9's identical
+    // catch-22 for fix-and-merge, which sidesteps it the same way below).
     const sessionId = await getSessionManager().startSession({
       workspaceId: id, prompt, agentCommand, agentArgs, profile, model,
       provider: executorProvider, multiTurn: executorProvider === "codex" ? false : true, triggerType: "fix-conflicts",
+      skipLaunchPreflight: true,
     });
 
     await updateWorkspaceStatus(id, "fixing", {}, database);
