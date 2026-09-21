@@ -465,13 +465,30 @@ function DepartureBoard({ projectId, memberLabel, onOpenTrain }: { projectId: st
     setLoaded(true);
   }
 
+  // No dedicated WebSocket event exists yet (#1186 tracks adding one), so — same as
+  // `MergeTrainSummaryBar` below — this polls on a fixed cadence rather than fetching once.
+  // Without this the board (boarding cars, countdown trigger, live-train state) freezes at
+  // whatever was true on mount: a member that has since departed keeps showing as boarding,
+  // and a live train's phase/gate-run count never advances until the panel is reopened.
   useEffect(() => {
     let cancelled = false;
-    refresh().catch((err) => {
-      if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load departure board");
-    });
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    async function load() {
+      try {
+        await refresh();
+        if (cancelled) return;
+        setError(null);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load departure board");
+      }
+      if (!cancelled) timer = setTimeout(load, ABOARD_POLL_INTERVAL_MS);
+    }
+
+    void load();
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
