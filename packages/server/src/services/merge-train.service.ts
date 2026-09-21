@@ -233,11 +233,21 @@ export async function assembleMergeTrain(args: {
  * This is the guard against the squash/rebase mistake described in the module docstring. It is
  * cheap (one `merge-base --is-ancestor` per member) and it protects an expensive, hard-to-debug
  * failure: the done-unmerged scanner silently re-merging landed work as duplicate commits.
+ *
+ * #1215 — a member can also leave the train's `included` set truthfully assembled and still
+ * fail this check for a reason that has NOTHING to do with squash/rebase: it landed on the
+ * base by another door WHILE this leaf was gating (a foundational-blocker synchronous merge,
+ * #797, or a hand merge). Such a branch is not reachable from the (now-stale) `trainRef` — the
+ * leaf was assembled before that merge happened — but it IS reachable from `baseBranch`, which
+ * is exactly `checkAlreadyMerged`'s definition of "already merged". That is a fact to accept,
+ * not a violation to throw on: when `baseBranch` is given, a member failing the train check is
+ * re-checked against it before being reported broken.
  */
 export async function assertTrainPreservesAncestry(
   repoPath: string,
   trainRef: string,
   included: TrainMember[],
+  baseBranch?: string,
 ): Promise<void> {
   const broken: string[] = [];
   for (const member of included) {
@@ -246,7 +256,9 @@ export async function assertTrainPreservesAncestry(
       broken.push(`${member.branch} (unresolvable)`);
       continue;
     }
-    if (!(await isAncestor(repoPath, tip, trainRef))) broken.push(member.branch);
+    if (await isAncestor(repoPath, tip, trainRef)) continue;
+    if (baseBranch && (await isAncestor(repoPath, tip, baseBranch))) continue;
+    broken.push(member.branch);
   }
   if (broken.length > 0) {
     throw new Error(
@@ -370,7 +382,7 @@ export async function landMergeTrain(args: {
     );
   }
 
-  await assertTrainPreservesAncestry(repoPath, trainRef, included);
+  await assertTrainPreservesAncestry(repoPath, trainRef, included, baseBranch);
 
   const includedWithTips: TrainMember[] = [];
   for (const member of included) {
@@ -802,7 +814,7 @@ async function runTrainAttempt(args: {
 
     // Cheap insurance before spending a gate on it: if assembly somehow produced a train that
     // does not contain a member's tip, everything downstream would be wrong.
-    await assertTrainPreservesAncestry(repoPath, asm.trainRef, asm.included);
+    await assertTrainPreservesAncestry(repoPath, asm.trainRef, asm.included, baseBranch);
 
     // #676: hand the gate the members actually INCLUDED in the assembled tree, not the ones
     // requested. A member dropped during assembly (conflict) is not landing, so keying the
@@ -883,7 +895,7 @@ async function runTrainAttempt(args: {
             "assembly_empty",
           );
         }
-        await assertTrainPreservesAncestry(repoPath, landAsm.trainRef, landAsm.included);
+        await assertTrainPreservesAncestry(repoPath, landAsm.trainRef, landAsm.included, baseBranch);
       }
 
       const { mergeSha } = await landMergeTrain({
@@ -929,7 +941,7 @@ async function runTrainAttempt(args: {
           gateFailure: "no members could be re-assembled after removing the sided member(s)",
         }, "sided");
       }
-      await assertTrainPreservesAncestry(repoPath, reassembled.trainRef, reassembled.included);
+      await assertTrainPreservesAncestry(repoPath, reassembled.trainRef, reassembled.included, baseBranch);
       const { mergeSha } = await landMergeTrain({
         repoPath, baseBranch, trainRef: reassembled.trainRef, trainSha: reassembled.trainSha,
         baseSha: reassembled.baseSha, included: reassembled.included,
