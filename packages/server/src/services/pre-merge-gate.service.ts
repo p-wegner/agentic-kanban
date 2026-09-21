@@ -43,7 +43,7 @@ import {
 } from "./pre-merge-gate-tier.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
-import { beginMergeGateRun, endMergeGateRun } from "./merge-cancellation.js";
+import { beginMergeGateRun, combineGateAbortSignals, endMergeGateRun } from "./merge-cancellation.js";
 // #221/#490's failure-message shaping lives in its own module now (this file crossed the
 // 1000-line god-module ceiling). Re-exported below so its importers are unchanged.
 import { summarizeVerifyFailure } from "./verify-failure-summary.js";
@@ -193,18 +193,11 @@ export async function runPreMergeGate(
   workspace: PreMergeGateWorkspace,
   projectId: string,
   database: Database,
-  /** #1203 — reaches the running verify/install child so a cancel kills it. Optional; absent = never aborts. */
+  /** #1203 — a train's own abort token; optional, combined below with #1164's per-workspace one. */
   signal?: AbortSignal,
 ): Promise<PreMergeGateResult> {
-  // #1164 — reachable from `POST /:id/merge/cancel`; `endMergeGateRun` below is its counterpart.
-  const cancelSignal = beginMergeGateRun(workspace.id);
-  // #1203 — a merge TRAIN's own AbortSignal (from `merge-queue-train.ts`'s `runDoomedTrainJob`)
-  // is a SECOND, independent way this same gate run can be told to stop: `cancelSignal` fires on
-  // `POST /:id/merge/cancel` for a single workspace, `signal` fires on `POST
-  // /trains/:id/cancel` for the whole train's in-flight gate. `runSetupScript` takes one signal,
-  // so either trigger must abort the same child process — combine them rather than picking one
-  // and silently dropping the other's cancellation path.
-  const combinedSignal = signal ? AbortSignal.any([cancelSignal, signal]) : cancelSignal;
+  // #1164 (per-workspace) + #1203 (a train's `signal`) — see `combineGateAbortSignals`'s doc comment.
+  const combinedSignal = combineGateAbortSignals(beginMergeGateRun(workspace.id), signal);
   // ---- #628 deferred dependency installs ---------------------------------------------------
   // With install mode `background` the agent launches before its repos' dependencies exist, so
   // the protection `setupFailedBlocking` (#169) gave by refusing the LAUNCH has to be here
