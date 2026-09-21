@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { annotateConcurrentGates, buildTrainGateEvidence } from "../services/merge-queue-train.js";
+import { annotateConcurrentGates, buildTrainGateEvidence } from "../services/train-finish-evidence.service.js";
 import type { TrainMember, TrainRunResult } from "../services/merge-train.service.js";
 import type { MergeTrainAttemptDto } from "@agentic-kanban/shared/types";
 
