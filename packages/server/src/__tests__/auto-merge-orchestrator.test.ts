@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { issues, projectStatuses, projects, workspaces, preferences, sessions } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { createTestDb } from "./helpers/test-db.js";
 import { createAutoMergeOrchestrator } from "../startup/auto-merge-orchestrator.js";
 import { invalidatePreferencesCache } from "../repositories/preferences.repository.js";
@@ -141,6 +141,27 @@ describe("auto-merge orchestrator", () => {
     expect(ids).toContain(parent);
     expect(ids).not.toContain(forkChildByParentId);
     expect(ids).not.toContain(forkChildByStatus);
+  });
+
+  it("excludes a workspace whose project row no longer exists (#1219)", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusIds } = await seedProject(db);
+    const orphaned = await seedWorkspace(db, { projectId, statusId: statusIds["In Review"], readyForMerge: true });
+
+    // Simulate an unregistered/deleted project: the issue and workspace rows survive, but the
+    // project itself is gone — exactly the #1219 repro (GET /api/projects didn't list the
+    // project, yet its workspace kept being gated). `issues.projectId` has no ON DELETE
+    // CASCADE and FK enforcement is on in this test DB (mirroring production), so drop the FK
+    // check for this one statement — the point is the orphaned row this produces, not how a
+    // real deployment would arrive at it (a raw delete, a restored partial backup, ...).
+    await db.run(sql`PRAGMA foreign_keys = OFF`);
+    await db.delete(projects).where(eq(projects.id, projectId));
+    await db.run(sql`PRAGMA foreign_keys = ON`);
+
+    const orchestrator = createAutoMergeOrchestrator({ database: db });
+    const ids = await orchestrator.findCompletedWorkspaceIds();
+    expect(ids).not.toContain(orphaned);
+    expect(ids).toHaveLength(0);
   });
 
   it("excludes a project that has auto_merge_disabled_<projectId> set", async () => {
