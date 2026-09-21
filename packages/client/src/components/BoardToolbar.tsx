@@ -217,10 +217,6 @@ export function BoardToolbar({
   const viewMenuRef = useRef<HTMLDivElement>(null);
   const [showActivityMenu, setShowActivityMenu] = useState(false);
   const activityMenuRef = useRef<HTMLDivElement>(null);
-  // Occasional actions (quick tasks, scripts, export/import, voice capture) are
-  // collapsed behind a "⋯" toggle on sm+ so they don't crowd the main bar. The
-  // existing `showActions` toggle still gates the whole cluster on phones.
-  const [showMoreActions, setShowMoreActions] = useState(false);
   const [showMoreViews, setShowMoreViews] = useState(false);
   const moreViewsRef = useRef<HTMLDivElement>(null);
   // sm+ : the primary view tabs overflow into the "More" dropdown responsively.
@@ -485,38 +481,23 @@ export function BoardToolbar({
         )}
       </div>
       <div className={`${showActions ? "flex" : "hidden"} sm:flex items-start gap-2 flex-wrap`}>
+      {/* #1120: previously hidden behind a "More" toggle whose collapsed/expanded states
+          were visually indistinguishable, and which only ever hid these two small buttons —
+          not enough hotbar space to justify the extra click or the confusing toggle. Both
+          render directly; each is already its own dismissable dropdown trigger. */}
       <button
-        onClick={() => setShowMoreActions((v) => !v)}
-        aria-expanded={showMoreActions}
-        title="More actions — quick tasks, scripts"
-        className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
-          showMoreActions
-            ? "bg-surface-sunken dark:bg-gray-800 border-black/[0.07] dark:border-white/10 text-ink dark:text-gray-200"
-            : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
-        }`}
+        onClick={onShowQuickTasks}
+        title="Quick Tasks - run a skill directly on the current checkout (q)"
+        className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
       >
-        <Icon solid className="w-4 h-4">
-          <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
+        <Icon className="w-3 h-3">
+          <polygon points="5,3 19,12 5,21" />
         </Icon>
-        <span className="hidden sm:inline">More</span>
+        <span className="hidden sm:inline">Tasks</span>
       </button>
-      {showMoreActions && (
-        <>
-          <button
-            onClick={onShowQuickTasks}
-            title="Quick Tasks - run a skill directly on the current checkout (q)"
-            className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
-          >
-            <Icon className="w-3 h-3">
-              <polygon points="5,3 19,12 5,21" />
-            </Icon>
-            <span className="hidden sm:inline">Tasks</span>
-          </button>
-          <ProjectScriptsMenu projectId={projectId} />
-        </>
-      )}
+      <ProjectScriptsMenu projectId={projectId} />
       {/* Voice capture stays on the bar at all times — quick idea/command entry
-          shouldn't hide behind the More cluster. */}
+          shouldn't hide behind anything. */}
       <VoiceInboxButton projectId={projectId} onIssueCreated={onVoiceIssueCreated} />
       </div>
       {/* < sm : a single dropdown listing ALL views (the tab strip clips on phones). */}
