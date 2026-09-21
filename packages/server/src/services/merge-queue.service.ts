@@ -13,7 +13,7 @@ import { getProjectsByIds } from "../repositories/project.repository.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { createWorkspaceMergeService } from "./workspace-merge.service.js";
 import { createWorkspaceSessionService } from "./workspace-session.service.js";
-import { isPreMergeGateFailure } from "./workspace-merge-gate.js";
+import { lockContentionSkipEvent, preMergeGateSkipEvent } from "./merge-lock-contention.js";
 import type { BoardEventSink } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 import { createMergeTrainRunner, pickQueueStrategy } from "./merge-queue-train.js";
@@ -676,24 +676,16 @@ export function createMergeQueueService(deps: {
         };
       } catch (err) {
         const error = errorMessage(err);
-        // A pre-merge-gate withhold (verify_script/smoke check failed) is NOT a merge conflict —
-        // it carries the same WorkspaceError "CONFLICT" code (for HTTP-status purposes) but is
-        // tagged with `data.mergeReason: "pre_merge_gate_failed"`. Classify it separately so it
-        // never enters the conflict→reconciler escalation path: a batch reconciler agent can't
-        // fix a red verify script, and routing it there just burns attempts/tokens (#170).
-        // #638: the predicate now lives beside the throw, because the monitor needed the same
-        // rule and its absence there was an ungated-merge bypass.
-        if (isPreMergeGateFailure(err)) {
-          skipped.push(ws.id);
-          yield {
-            type: "skipped",
-            workspaceId: ws.id,
-            issueNumber: ws.issueNumber,
-            issueTitle: ws.issueTitle,
-            reason: `verify_failed: ${error}`,
-          };
-          continue;
-        }
+        // A pre-merge-gate withhold, and #1151's lock-contention refusal, are each NOT a merge
+        // conflict — both carry the same WorkspaceError "CONFLICT" code (for HTTP-status
+        // purposes) but are tagged with a distinct `data.mergeReason`. Classify them separately
+        // so neither ever enters the conflict->reconciler escalation path below: a batch
+        // reconciler agent can fix neither a red verify script (#170/#638) nor a lock that was
+        // never even acquired (#1151/#949) — see `merge-lock-contention.ts` for both checks.
+        const gateSkip = preMergeGateSkipEvent({ workspaceId: ws.id, issueNumber: ws.issueNumber, issueTitle: ws.issueTitle, err, skipped });
+        if (gateSkip) { yield gateSkip; continue; }
+        const lockSkip = lockContentionSkipEvent({ workspaceId: ws.id, issueNumber: ws.issueNumber, issueTitle: ws.issueTitle, err, skipped });
+        if (lockSkip) { yield lockSkip; continue; }
 
         const isConflict = error.toLowerCase().includes("conflict") || (err instanceof Error && (err as unknown as { code?: string }).code === "CONFLICT");
 

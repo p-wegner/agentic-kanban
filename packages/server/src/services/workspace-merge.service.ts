@@ -222,7 +222,7 @@ export function createWorkspaceMergeService(deps: {
             `(workspace ${diagnostic.activeWorkspaceId}, age ${Math.round(diagnostic.ageMs / 1000)}s). ` +
             "Please wait for it to complete.",
           "CONFLICT",
-          diagnostic,
+          { mergeReason: "repo_lock_contention", ...diagnostic },
         );
       }
     }
