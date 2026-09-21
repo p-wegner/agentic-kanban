@@ -173,3 +173,47 @@ describe("summarizeVerifyFailure — god-module gate degraded to a regex heurist
     expect(summary.startsWith("UNVERIFIED (degraded):")).toBe(true);
   });
 });
+
+// #1218: a train's staging gate (test:mine, run once per package) can fail an EARLY package and
+// then print every later package's PASSING summary after it — so the bounded TAIL, which is all
+// that used to get persisted, contained nothing but "Test Files N passed (N)" repeated for
+// package after package, and the real `FAIL`/assertion line was truncated away entirely. A red
+// train bisected two members out this way with a stored reason that named no failing test.
+describe("summarizeVerifyFailure — a failing line pushed out of the tail by later passing packages (#1218)", () => {
+  const FAILING_PACKAGE = [
+    " FAIL  src/__tests__/openapi-request-body-ratchet.test.ts (#838)",
+    "AssertionError: expected true to be false",
+    " Test Files  1 failed (12)",
+    "      Tests  1 failed | 87 passed (88)",
+  ].join("\n");
+  // Enough trailing passing-package noise to push FAILING_PACKAGE outside the last
+  // VERIFY_FAILURE_TAIL_CHARS (1500) characters.
+  const trailingPassingPackages = Array.from(
+    { length: 20 },
+    (_, i) => ` Test Files  ${i + 1} passed (${i + 1})\n      Tests  ${i + 1} passed (${i + 1})`,
+  ).join("\n".repeat(20));
+
+  it("surfaces the failing test name and a log path even though it fell out of the tail", () => {
+    const stdout = `${FAILING_PACKAGE}\n${trailingPassingPackages}`;
+    const summary = summarizeVerifyFailure(stdout, "", "train-ws-1218", () => "/tmp/kanban-verify-train-ws-1218.log");
+
+    expect(summary).toContain("openapi-request-body-ratchet.test.ts");
+    expect(summary).toContain("[full verify log: /tmp/kanban-verify-train-ws-1218.log]");
+  });
+
+  it("does not fire when the tail itself already shows a failure line", () => {
+    const summary = summarizeVerifyFailure(FAILING_PACKAGE, "", "ws-1218b", () => null);
+    // The failure line is well within the (short, unpadded) tail here, so no recovery is needed.
+    expect(summary).not.toContain("earlier in the log than the kept tail");
+    expect(summary).toContain("openapi-request-body-ratchet.test.ts");
+  });
+
+  it("leaves an opaque log (no known failure shape anywhere) exactly as before", () => {
+    // Nothing here matches FAILURE_LINE_SIGNATURE anywhere in the body — that is a message in a
+    // shape this detector doesn't recognise (a foreign verify_script, a lint tool), not a case of
+    // truncation hiding a real failure line, so it must not claim otherwise.
+    const opaque = `some non-matching diagnostic output\n${"y".repeat(4000)}\nmore non-matching output`;
+    const summary = summarizeVerifyFailure(opaque, "", "ws-1218c", () => null);
+    expect(summary).not.toContain("earlier in the log than the kept tail");
+  });
+});
