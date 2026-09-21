@@ -300,6 +300,8 @@ const projectHandle = looseObject({ id: str, name: str });
 
 const successFlag = looseObject({ success: bool });
 const sessionHandle = looseObject({ sessionId: str });
+/** #1209: resolve-conflicts skips the agent (and the sessionId) when a rebase alone resolved it. */
+const resolveConflictsResult = union(sessionHandle, looseObject({ resolved: str }));
 
 /** `{ id }` — every service that answers a mutation with a bare handle (`archiveProject`,
  *  `updateTagById`, …). Named rather than repeated so the registry reads as the census of
@@ -790,7 +792,7 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
   // generator cannot see it at all. Noted as a follow-up on #780.
   { method: "POST", template: "/api/workspaces/:id/review", schema: sessionHandle },
   { method: "POST", template: "/api/workspaces/:id/fix-and-merge", schema: sessionHandle },
-  { method: "POST", template: "/api/workspaces/:id/resolve-conflicts", schema: sessionHandle },
+  { method: "POST", template: "/api/workspaces/:id/resolve-conflicts", schema: resolveConflictsResult },
 
   // ── projects ──
   { method: "POST", template: "/api/projects", schema: projectHandle },

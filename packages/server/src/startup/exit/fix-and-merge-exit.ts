@@ -19,10 +19,12 @@
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { clearMergeGateEvidence } from "../../repositories/merge-gate.repository.js";
 import { getProjectRepoPath } from "../../repositories/project.repository.js";
+import { getResolveConflictsLaunchSnapshot, insertIssueComment } from "../../repositories/issue-comments.repository.js";
 import { getWorkspaceById } from "../../repositories/workspace-reads.repository.js";
 import { setWorkspaceStatus } from "../../repositories/workspace-status.repository.js";
 import { emitButlerSystemEvent } from "../../services/butler-event-feed.js";
 import { finalizeMergeCleanup } from "../../services/merge-cleanup.service.js";
+import { isResolveConflictsNoop } from "../../services/resolve-conflicts-noop.js";
 import { cleanupSiblingWorktrees, stampReconciledLeadingMerge } from "../../services/workspace-repos.service.js";
 import { releaseWorkspaceResources } from "../../services/workspace-resource-release.js";
 import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
@@ -224,6 +226,65 @@ export function createFixAndMergeExitHandler({ database: db, gitService, boardEv
     }
   }
 
+  /**
+   * #1209: a resolve-conflicts session (`triggerType: "fix-conflicts"`) is a NO-OP exit when it
+   * exits 0 having never moved the branch tip off the mid-rebase HEAD it was launched into, AND
+   * the branch still conflicts with its base. Retrying the merge on such a branch just runs the
+   * (expensive) gate on something that cannot land — the two live incidents this fix exists for
+   * (#1199, #1186) each burned a gate cycle this way. Best-effort throughout: any failure to
+   * determine the verdict falls through to the ordinary retry path rather than silently skipping
+   * a real fix.
+   */
+  async function checkResolveConflictsNoop(
+    ctx: ExitContext,
+    repoPath: string | null,
+  ): Promise<boolean> {
+    if (ctx.triggerType !== "fix-conflicts") return false;
+    const { workspace, sessionId } = ctx;
+    if (!workspace.workingDir || !workspace.branch || !repoPath) return false;
+    try {
+      const snapshot = await getResolveConflictsLaunchSnapshot(workspace.id, sessionId, db);
+      if (!snapshot?.headShaBeforeSession) return false;
+      const headShaAfterSession = await gitService.revParse(workspace.workingDir, "HEAD").catch(() => null);
+      const baseBranch = workspace.baseBranch;
+      if (!baseBranch) return false;
+      const conflicts = await gitService.detectConflictsByBranch(repoPath, workspace.branch, baseBranch).catch(() => null);
+      const noop = isResolveConflictsNoop({
+        headShaBeforeSession: snapshot.headShaBeforeSession,
+        headShaAfterSession,
+        stillConflicting: conflicts?.hasConflicts ?? false,
+      });
+      if (!noop) return false;
+
+      console.warn(`[workflow] #1209 resolve-conflicts session ${sessionId} for workspace ${workspace.id} was a NO-OP (branch tip unchanged, still conflicts with ${baseBranch}) — not retrying the merge`);
+      await setWorkspaceStatus(db, workspace.id, "idle", { now: ctx.now, set: { readyForMerge: false } });
+      await clearMergeGateEvidence(workspace.id, db);
+      await insertIssueComment({
+        issueId: ctx.issueId,
+        workspaceId: workspace.id,
+        kind: "merge-attempt",
+        author: "system",
+        body:
+          `The resolve-conflicts session for workspace ${workspace.id} (branch ${workspace.branch}) exited without ` +
+          `resolving the conflict against ${baseBranch} — the branch tip never moved and the branch still conflicts. ` +
+          "Not retrying the merge on an unmergeable branch; the workspace is left open and idle for another attempt.",
+        payload: { eventType: "resolve_noop", workspaceId: workspace.id, branch: workspace.branch, sessionId },
+      }, db).catch(() => undefined);
+      boardEvents.broadcast(ctx.projectId, "workspace_idle");
+      boardEvents.broadcast(ctx.projectId, "workflow_error");
+      emitButlerSystemEvent({
+        projectId: ctx.projectId,
+        kind: "merge_failed",
+        workspaceId: workspace.id,
+        text: `resolve-conflicts session for workspace ${workspace.id} (branch ${workspace.branch}) was a no-op — still conflicts with ${baseBranch}.`,
+      });
+      return true;
+    } catch (err) {
+      console.warn(`[workflow] #1209 resolve-noop check failed (non-fatal, falling through to retry) for workspace ${workspace.id}:`, errorMessage(err));
+      return false;
+    }
+  }
+
   async function handleFixAndMergeExit(ctx: ExitContext): Promise<void> {
     const { workspace, projectId, issueId, sessionId, exitCode, now, findStatus, defaultBranch, autoMergeDisabledProjectIds } = ctx;
     const workspaceId = workspace.id;
@@ -233,6 +294,9 @@ export function createFixAndMergeExitHandler({ database: db, gitService, boardEv
         console.log(`[workflow] fix-and-merge session ${sessionId} completed but auto_merge_disabled for project ${projectId} — skipping retry merge`);
         boardEvents.broadcast(projectId, "workspace_idle");
       } else {
+        const repoPath = await getProjectRepoPath(projectId, db).catch(() => null);
+        const wasNoop = await checkResolveConflictsNoop(ctx, repoPath);
+        if (wasNoop) return;
         console.log(`[workflow] fix-and-merge session ${sessionId} completed  retrying merge`);
         // autoMerge swallows its own conflict errors, so its return tells us nothing.
         // The landing guard below is what verifies the branch actually merged.
