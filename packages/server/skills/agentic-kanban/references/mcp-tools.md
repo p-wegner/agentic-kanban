@@ -2,7 +2,7 @@
 
 # MCP tools
 
-All 119 tools exposed by the `agentic-kanban` MCP server. Call them as `mcp__agentic-kanban__<name>`.
+All 122 tools exposed by the `agentic-kanban` MCP server. Call them as `mcp__agentic-kanban__<name>`.
 
 ## Board Overview
 
@@ -45,6 +45,9 @@ All 119 tools exposed by the `agentic-kanban` MCP server. Call them as `mcp__age
 | `get_workspace_diff` | Get the git diff for a workspace's working directory |
 | `get_workspace_scorecard` | Get the PR quality scorecard for a workspace. Returns a 0-100 score with per-dimension breakdown (Tests, Types, Scope, Diff size, Conflicts, Docs, Skill output). |
 | `merge_workspace` | Merge a workspace branch into the project's default branch, close the workspace, and auto-transition the issue to Done. Delegates to the board server's safe merge path — per-repo merge lock, pre-merge backup/rollback, OpenSpec delta application, and conflict detection with fix-and-merge recovery — so an MCP merge has the same safety net as the UI. Requires the board server to be running. |
+| `cancel_merge` | Cancel a workspace's in-flight or queued merge — removes a queued verify chain, aborts an in-flight gate run (killing its process tree), releases the merge lock if held, and marks the tracked job cancelled. Use this to unstick ONE workspace with a genuinely red gate without disabling auto-merge for the rest of the project. Idempotent: safe to call even if nothing is running. Requires the board server to be running. |
+| `set_merge_hold` | Place an operator merge-hold on a workspace (#1164) — parks it so the monitor walk, the auto-merge orchestrator, and the merge-train reconciler all skip it, without disabling auto-merge for the whole project. Idempotent: re-holding an already-held workspace just updates the reason. Requires the board server to be running. |
+| `release_merge_hold` | Release a workspace's operator merge-hold (#1164), letting the monitor walk, auto-merge orchestrator, and merge-train reconciler resume treating it normally. A no-op if it was not held. Requires the board server to be running. |
 | `close_workspace` | Close a workspace without merging. For direct workspaces or abandoned work. Use merge_workspace instead if you want to merge the branch. |
 | `reopen_workspace` | Re-create the worktree for a CLOSED workspace whose branch is still live and unmerged. Use this to recover a workspace that was closed while its feature branch still carried unmerged commits — the shape left behind by a manual close applied to real work. Refuses if the workspace isn't closed, is direct, is already merged, its branch no longer exists, or another open workspace already holds the issue. |
 | `mark_ready_for_merge` | Mark a workspace as reviewed and ready to merge. Call this after a successful code review with no critical or major issues. This flag allows future agents to merge the workspace without requiring another review. NOT for fork-child workspaces (a workspace with a parent) — their verdicts flow through join consolidation via propose_transition, never through this tool. |

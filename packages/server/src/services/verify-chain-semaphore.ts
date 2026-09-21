@@ -117,6 +117,8 @@ export function verifyChainBackgroundMaxWaitMs(): number {
 
 interface VerifyChainWaiter {
   resolve: () => void;
+  /** Rejects the waiting chain's own promise (#1164) — see {@link cancelQueuedVerifyChain}. */
+  reject: (err: Error) => void;
   priority: VerifyChainPriority;
   queuedAtMs: number;
   label: string;
@@ -427,9 +429,10 @@ async function runUnderInProcessSemaphore<T>(
         + `runs at 1/N speed and starves its neighbour (#949), so it waits for a slot (#1160)`,
     );
     // The admitter transfers the slot (`active++` in `admitWaiters`) before resolving, so nothing
-    // is incremented here on the way out of the wait.
-    await new Promise<void>((resolve) => {
-      waiters.push({ resolve, priority, queuedAtMs: queuedAt, label });
+    // is incremented here on the way out of the wait. A cancelled waiter (#1164) rejects instead
+    // — `active` is never touched for it, since it never held a slot to release.
+    await new Promise<void>((resolve, reject) => {
+      waiters.push({ resolve, reject, priority, queuedAtMs: queuedAt, label });
       scheduleReadmission();
     });
     const waited = Date.now() - queuedAt;
@@ -448,6 +451,32 @@ async function runUnderInProcessSemaphore<T>(
     active--;
     admitWaiters();
   }
+}
+
+/**
+ * Remove a QUEUED (not yet running) waiter by label and reject its wait (#1164).
+ *
+ * Only reaches a chain that has not been admitted yet — an already-running chain holds no
+ * waiter entry here at all (it went straight to `active++`), so cancelling it is the caller's
+ * job via `merge-cancellation.ts`'s `AbortSignal`, not this function. Returns `true` when a
+ * matching waiter was found and removed, so `POST /:id/merge/cancel` can tell "was queued" from
+ * "was already running or absent".
+ *
+ * Label matching, not identity: callers only know the workspace id they want to cancel, and
+ * every acquisition already carries a `label` (the workspace/chain description) for the queue
+ * log line — reusing it here avoids threading a second handle through every `runUnder*` call
+ * site just for cancellation.
+ */
+export function cancelQueuedVerifyChain(label: string): boolean {
+  const index = waiters.findIndex((w) => w.label === label);
+  if (index === -1) return false;
+  const [waiter] = waiters.splice(index, 1);
+  if (!waiter) return false;
+  waiter.reject(new Error(`[verify-chain] ${label} was cancelled while queued (#1164)`));
+  // A slot did not open (the waiter never held one), but a removal can still let a background
+  // waiter's starvation window re-evaluate sooner than the next tick — cheap and correct either way.
+  admitWaiters();
+  return true;
 }
 
 /**

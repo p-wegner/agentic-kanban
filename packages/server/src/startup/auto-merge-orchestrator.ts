@@ -44,6 +44,7 @@ import { reconcileDriveCompletion } from "./drive-completion-reconciler.js";
 import { reconcileProjectCompletion } from "./project-completion-reconciler.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
+import { getHeldWorkspaceIds } from "../repositories/merge-hold.repository.js";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 const DEFAULT_INTERVAL_MS = 30_000;
@@ -235,6 +236,10 @@ export function createAutoMergeOrchestrator(deps: {
     // needs (verify script, stack profile, dev-command/health-url overrides) is already in
     // prefMap, so this stays a single scan with no extra query.
     const gatedProjectIds = collectGatedProjectIds(prefMap);
+    // #1164 — an operator-held workspace must be skipped here too: this orchestrator's
+    // `executeQueue` is a SEPARATE entry point from the monitor walk's `canStartMerge`, so a
+    // hold that only lived there would be silently bypassed by this path.
+    const heldWorkspaceIds = await getHeldWorkspaceIds(database);
 
     const statusNames = autoMergeInReview
       ? MERGEABLE_STATUS_NAMES
@@ -272,6 +277,8 @@ export function createAutoMergeOrchestrator(deps: {
       .filter((row) => !row.parentWorkspaceId && !row.forkStatus)
       // Per-project opt-out (e.g. the dev board merges deliberately, not via this queue).
       .filter((row) => !autoMergeDisabledProjectIds.has(row.projectId))
+      // #1164 — an operator-placed hold on this ONE workspace, independent of its project.
+      .filter((row) => !heldWorkspaceIds.has(row.workspaceId))
       // Terminal-status (Done/Cancelled) workspaces are normally excluded — a user may
       // deliberately park an issue in Done without merging. BUT a workspace that is still
       // OPEN (the query excludes status='closed') with readyForMerge=true is a different

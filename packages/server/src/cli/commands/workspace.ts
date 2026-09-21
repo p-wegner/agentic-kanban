@@ -14,6 +14,7 @@ import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { resolveProjectIdArg, describeIssueNumberMiss, cliAction } from "../shared.js";
 import { buildWorkspaceApiUrl, buildApiUrl } from "./workspace-api-url.js";
 import { registerWorkspaceInteractionCommands } from "./workspace-interaction.js";
+import { registerWorkspaceMergeControlCommands } from "./workspace-merge-control.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Shape of the error envelope every workspace action endpoint returns on failure. */
@@ -781,4 +782,5 @@ Examples:
     });
 
   registerWorkspaceInteractionCommands(wsCmd);
+  registerWorkspaceMergeControlCommands(wsCmd);
 }

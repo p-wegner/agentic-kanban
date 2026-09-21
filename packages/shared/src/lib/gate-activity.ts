@@ -80,7 +80,9 @@ export const GATE_STALL_AFTER_MS = 45 * 60 * 1000;
 
 /** The shape this projection needs from a merge job. Structural, so the server's `MergeJob` fits. */
 export interface GateActivitySource {
-  state: "running" | "succeeded" | "failed";
+  // `"cancelled"` (#1164) behaves exactly like `"succeeded"`/`"failed"` below — anything not
+  // `"running"` returns null, since a finished job (however it finished) is not "in flight".
+  state: "running" | "succeeded" | "failed" | "cancelled";
   startedAt: string;
   lastActivityAt?: string;
   attemptCount?: number;

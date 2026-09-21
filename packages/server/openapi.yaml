@@ -10672,6 +10672,74 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/workspaces/{id}/merge-hold:
+    delete:
+      summary: workspace was not held.
+      tags:
+        - workspace-actions
+      operationId: delete_api_workspaces_id_merge-hold
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    get:
+      summary: GET /api/workspaces/:id/merge-hold — current hold state, for the UI panel.
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_merge-hold
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: updates the reason/timestamp.
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_merge-hold
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+              additionalProperties: true
+              x-unknown-keys: passthrough
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/workspaces/{id}/merge-status:
     get:
       summary: '"the gate passed and only the transport died; a merge retry will reuse the verdict".'
@@ -10687,6 +10755,40 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/merge/cancel:
+    post:
+      summary: "`cancelWorkspaceMerge` above for what it does and why."
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_merge_cancel
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+              additionalProperties: true
+              x-unknown-keys: passthrough
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}

@@ -41,6 +41,7 @@ import { shouldSkipMergeForBackoff, type MergeBackoffDeps } from "../services/me
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 import type { RiskPosture } from "@agentic-kanban/shared/types";
+import { getHeldWorkspaceIds } from "../repositories/merge-hold.repository.js";
 
 export { DEFAULT_STUCK_BUILDER_TIMEOUT_MS } from "../services/monitor-cycle-rules.js";
 
@@ -158,6 +159,14 @@ export interface ProcessWorkspaceDeps {
    * projects are skipped even when the global `autoMergeEnabled` flag is true.
    */
   autoMergeDisabledProjectIds?: Set<string>;
+  /**
+   * Workspace ids currently under an operator merge-hold (#1164) — skipped by `canStartMerge`
+   * however ready they otherwise look, without disabling auto-merge for their whole project.
+   * Injected for the same testability reason as `autoMergeDisabledProjectIds`; absent means
+   * "read it live" (see `processWorkspaceCandidates`), so an existing caller that supplies
+   * neither keeps today's behaviour.
+   */
+  heldWorkspaceIds?: Set<string>;
   /**
    * Whether the monitor may auto-merge In Review workspaces that are NOT marked
    * `readyForMerge`. Gated on the `auto_merge_in_review` preference being exactly
@@ -792,6 +801,10 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
   const stats = { relaunched: 0, merged: 0, nudged: 0 };
   const stuckBuilderTimeoutMs = deps.stuckBuilderTimeoutMs ?? parseStuckBuilderTimeoutMs();
   const logAction: LogMonitorActionFn = (action, workspaceId, issueId, extra) => deps.logMonitorAction(deps.monitorRecentActions, action, workspaceId, issueId, extra);
+  // #1164 — one read per cycle, same shape as the per-project posture/attempt caches below:
+  // a workspace an operator has explicitly HELD must never be (re)gated by this walk, however
+  // ready it otherwise looks.
+  const heldWorkspaceIds = deps.heldWorkspaceIds ?? await getHeldWorkspaceIds();
 
   // #919: the caps are PER PROJECT and posture-derived. `deps.max*PerCycle` (when given)
   // stays a board-wide ceiling on top, so an explicit override still bounds every project.
@@ -834,6 +847,13 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
     return false;
   };
   const canStartMerge = (ws: WorkspaceCandidate) => {
+    // #1164 — checked BEFORE the per-project cap, deliberately: a held workspace must not
+    // consume a cap slot at all (same reasoning as the backoff/disabled-project checks that
+    // already run ahead of this one — see the cap comment above).
+    if (heldWorkspaceIds.has(ws.wsId)) {
+      console.log(`[monitor] Workspace ${ws.wsId} is on merge hold — skipping until released (#1164)`);
+      return false;
+    }
     const caps = capsFor(ws.projectId);
     const attempts = attemptsFor(ws.projectId);
     if (attempts.merges < caps.merges) { attempts.merges++; stats.merged++; return true; }

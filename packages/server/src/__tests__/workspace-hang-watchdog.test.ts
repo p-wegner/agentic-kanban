@@ -110,6 +110,10 @@ function makeDeps(sessionManager = makeSessionManager()): ProcessWorkspaceDeps {
     // Keep the heavier stuck-builder recovery path well out of range so this
     // test isolates the 5-minute hang/nudge threshold.
     stuckBuilderTimeoutMs: 60 * 60 * 1000,
+    // #1164 — inject an empty hold set; otherwise the walk falls through to a live
+    // `getHeldWorkspaceIds()` read that consumes one of the queued `db.select` mocks
+    // out of order (same trap as monitor-cycle.test.ts).
+    heldWorkspaceIds: new Set<string>(),
   };
 }
 
