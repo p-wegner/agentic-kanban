@@ -647,7 +647,8 @@ export interface ActiveMergeLock {
 export const activeMerges = new Map<string, ActiveMergeLock>();
 
 /**
- * Release the merge lock held by ONE workspace (#1164), if it currently holds one.
+ * Release the merge lock held by ONE workspace (#1164), if it currently holds one AND it looks
+ * safe to do so.
  *
  * `activeMerges` is keyed by `repoPath`, not `workspaceId` — a cancel route only knows the
  * workspace it wants to stop, so this scans for the entry whose `workspaceId` matches rather
@@ -655,15 +656,38 @@ export const activeMerges = new Map<string, ActiveMergeLock>();
  * {@link tryRecoverStaleMergeLock}: only removes an entry that is genuinely this workspace's,
  * never a newer lock that happens to share a repo path.
  *
- * This does NOT settle the lock's `promise` — a waiter genuinely blocked on it (a second merge
- * queued for the same repo) would otherwise be handed a lock nobody is finishing. It only frees
- * the SLOT so the next acquirer can take it; the cancelled workspace's own in-flight work is
- * stopped separately via its `AbortSignal` (`merge-cancellation.ts`), and that abort is what lets
- * `mergeWorkspace`'s own `finally` reach the code that would otherwise have cleared this entry.
+ * **The cancel `AbortSignal` (`merge-cancellation.ts`) only reaches the GATE's `runSetupScript`
+ * calls, not the rest of `doMerge`.** Once a workspace's merge has passed the gate and moved on
+ * to the actual git work (merge/reset/push), cancelling has nothing left to abort — the original
+ * `doMerge` keeps running untouched. Deleting the map entry unconditionally in that case would
+ * let a brand-new `acquireRepoMergeLock` call for the same `repoPath` proceed immediately (its
+ * wait loop only checks `activeMerges.get(repoPath)`), running a SECOND `doMerge` concurrently
+ * against the same repo/worktree while the first is still mutating it — a real git-corruption
+ * race, not just a stuck queue.
+ *
+ * So this reuses {@link tryRecoverStaleMergeLock}'s own safety check: refuse when a FRESH
+ * `.git/index.lock` suggests git is still genuinely running, exactly as an unattended stale-lock
+ * recovery would. The caller reports `releasedLock: false` and the workspace stays queued; the
+ * operator can retry once the lock actually looks idle.
  */
 export function releaseMergeLockForWorkspace(workspaceId: string): boolean {
   for (const [repoPath, lock] of activeMerges) {
     if (lock.workspaceId === workspaceId) {
+      const indexLockPath = join(repoPath, ".git", "index.lock");
+      try {
+        if (existsSync(indexLockPath)) {
+          const ageMs = Date.now() - statSync(indexLockPath).mtimeMs;
+          if (ageMs < GIT_INDEX_LOCK_FRESH_MS) {
+            console.error(
+              `[merge-lock] REFUSING cancel-triggered release for workspace ${workspaceId}: ` +
+                `${indexLockPath} is only ${Math.round(ageMs / 1000)}s old — git may still be running in ${repoPath} (#1164).`,
+            );
+            return false;
+          }
+        }
+      } catch (err) {
+        console.warn(`[merge-lock] index.lock check failed during cancel-triggered release (proceeding): ${errorMessage(err)}`);
+      }
       activeMerges.delete(repoPath);
       console.warn(`[merge-lock] released repo lock for cancelled workspace ${workspaceId} (repoPath=${repoPath}) (#1164)`);
       return true;
