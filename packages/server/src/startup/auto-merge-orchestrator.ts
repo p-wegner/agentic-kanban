@@ -1,7 +1,7 @@
 import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 import { isTerminalStatusView } from "@agentic-kanban/shared";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
-import { issues, projectStatuses, workspaces, workflowNodes, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
+import { issues, projects, projectStatuses, workspaces, workflowNodes, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
 import { and, count, eq, inArray, ne, or } from "drizzle-orm";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import type { Database } from "../db/index.js";
@@ -45,6 +45,7 @@ import { reconcileProjectCompletion } from "./project-completion-reconciler.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 import { getHeldWorkspaceIds } from "../repositories/merge-hold.repository.js";
+import { clearMergeBackoff, recordMergeFailure } from "../services/merge-backoff.service.js";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 const DEFAULT_INTERVAL_MS = 30_000;
@@ -258,6 +259,11 @@ export function createAutoMergeOrchestrator(deps: {
       })
       .from(workspaces)
       .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      // #1219 — a workspace whose project row is gone (unregistered/deleted) must never be a
+      // candidate: without this join the query only required a live ISSUE, so a workspace of an
+      // unregistered project (e.g. `50c7e36a`, absent from `GET /api/projects`) was retried by
+      // auto-merge forever even though there is no live project to merge it into.
+      .innerJoin(projects, eq(issues.projectId, projects.id))
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
       .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
       .where(and(
@@ -608,8 +614,24 @@ export function createAutoMergeOrchestrator(deps: {
    * `runOnce`). A CONFLICT is the authors' to rebase and is not a repeating infrastructure
    * failure, so only a gate/train `error` feeds the circuit breaker; a conflict (or a
    * conflict-shaped skip) is stranded residue for the batch reconciler instead.
+   *
+   * #1219 — a `verify_failed` skip (the pre-merge gate withheld the merge, e.g. a configured
+   * verify_script but no worktree) is otherwise retried every tick forever: this path never fed
+   * the #417 merge-backoff bookkeeping the monitor's own merge path has always had, so a
+   * PERMANENT condition (a worktree that will never come back on an idle workspace) was
+   * classified as transient and re-gated on every 30s tick with no backoff and no escalation.
+   * Mirrors `mergeWorkspaceWithFixFallback` in monitor-cycle-actions.ts: record on a gate
+   * withhold, clear on a landing. `shouldSkipMergeForBackoff` is not consulted here yet (the
+   * queue always re-plans the whole candidate set), so this only stops the SIGNAL from being
+   * silently dropped — the backoff row still lets an operator/monitor see and act on it via the
+   * existing `merge_retry_blocked` drive obstacle once the same failure repeats.
    */
-  function applyQueueEvent(event: MergeQueueEvent, projectOfWorkspace: Map<string, string>, outcome: TickOutcome): void {
+  function applyQueueEvent(
+    event: MergeQueueEvent,
+    projectOfWorkspace: Map<string, string>,
+    workspaceInfo: Map<string, { workingDir: string | null; issueNumber: number | null }>,
+    outcome: TickOutcome,
+  ): void {
     if (event.type === "merged") {
       state.lastMerged++;
       console.log(`[auto-merge] merged workspace ${event.workspaceId} (#${event.issueNumber ?? "?"})`);
@@ -617,6 +639,7 @@ export function createAutoMergeOrchestrator(deps: {
       // project that merged something is not stuck in the loop the breaker exists to stop.
       const mergedProjectId = projectOfWorkspace.get(event.workspaceId);
       if (mergedProjectId) outcome.succeededProjects.add(mergedProjectId);
+      void clearMergeBackoff(database, event.workspaceId);
       return;
     }
     if (event.type === "conflict" || event.type === "error") {
@@ -631,6 +654,17 @@ export function createAutoMergeOrchestrator(deps: {
       console.log(`[auto-merge] skipped workspace ${event.workspaceId}: ${event.reason}`);
       if (event.reason.startsWith("rebase conflict") || event.reason.startsWith("merge conflict")) {
         outcome.strandedIds.push(event.workspaceId);
+      }
+      if (event.reason.startsWith("verify_failed:")) {
+        const skippedProjectId = projectOfWorkspace.get(event.workspaceId);
+        const info = workspaceInfo.get(event.workspaceId);
+        if (skippedProjectId) {
+          void recordMergeFailure(
+            { wsId: event.workspaceId, projectId: skippedProjectId, workingDir: info?.workingDir ?? null, issueNumber: info?.issueNumber ?? event.issueNumber },
+            event.reason,
+            { database },
+          );
+        }
       }
     }
   }
@@ -701,6 +735,10 @@ export function createAutoMergeOrchestrator(deps: {
       // the same gate failure text, so counting them individually would trip the breaker inside
       // one window and claim three "consecutive" failures that were one tick.
       const projectOfWorkspace = new Map(completedRows.map((row) => [row.workspaceId, row.projectId]));
+      // #1219 — `workingDir`/`issueNumber` for the backoff bookkeeping in `applyQueueEvent`;
+      // `completedRows` doesn't carry them, but the plan's own order does (it read them off the
+      // workspace/issue rows already).
+      const workspaceInfo = new Map(plan.order.map((info) => [info.id, { workingDir: info.workingDir, issueNumber: info.issueNumber }]));
       const outcome: TickOutcome = {
         strandedIds: [],
         succeededProjects: new Set<string>(),
@@ -711,7 +749,7 @@ export function createAutoMergeOrchestrator(deps: {
           skipOnConflict: true,
           strategy: batch.strategy,
         })) {
-          applyQueueEvent(event, projectOfWorkspace, outcome);
+          applyQueueEvent(event, projectOfWorkspace, workspaceInfo, outcome);
         }
       }
       const strandedIds = outcome.strandedIds;
