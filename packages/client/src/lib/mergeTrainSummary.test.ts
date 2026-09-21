@@ -31,9 +31,10 @@ describe("summarizeMergeTrains", () => {
     const summary = summarizeMergeTrains([]);
     expect(summary.aboard).toEqual([]);
     expect(summary.aboardMemberCount).toBe(0);
-    expect(summary.waitingCount).toBe(0);
+    expect(summary.finishedCount).toBe(0);
     expect(summary.lastGate).toBeNull();
     expect(summary.redDebtDelta).toBe(0);
+    expect(summary.gateRunsPerLanded).toEqual({ gateRuns: 0, landedMembers: 0, ratio: null, windowSize: 0 });
   });
 
   it("counts a gating train as aboard with its member count", () => {
@@ -42,16 +43,16 @@ describe("summarizeMergeTrains", () => {
     ]);
     expect(summary.aboard.map((t) => t.id)).toEqual(["t1"]);
     expect(summary.aboardMemberCount).toBe(2);
-    expect(summary.waitingCount).toBe(0);
+    expect(summary.finishedCount).toBe(0);
   });
 
-  it("counts terminal rows as waiting/history, not aboard", () => {
+  it("counts terminal rows as finished, not aboard", () => {
     const summary = summarizeMergeTrains([
       train({ id: "t1", state: "landed" }),
       train({ id: "t2", state: "abandoned" }),
     ]);
     expect(summary.aboard).toEqual([]);
-    expect(summary.waitingCount).toBe(2);
+    expect(summary.finishedCount).toBe(2);
   });
 
   it("reads the most recent train's gate evidence as lastGate", () => {
@@ -68,7 +69,18 @@ describe("summarizeMergeTrains", () => {
       gateEvidence: JSON.stringify({ gateRuns: 3 }),
     });
     const summary = summarizeMergeTrains([older, newer]);
-    expect(summary.lastGate).toEqual({ trainId: "new", state: "red", gateRuns: 3, finishedAt: newer.finishedAt });
+    expect(summary.lastGate).toEqual({ trainId: "new", state: "red", gateRuns: 3, finishedAt: newer.finishedAt, unresolvedCount: 0 });
+  });
+
+  it("reports the unresolved count on the most recent train's gate outcome", () => {
+    const summary = summarizeMergeTrains([
+      train({
+        id: "t1",
+        state: "red",
+        gateEvidence: JSON.stringify({ gateRuns: 2, landed: [], dropped: [], unresolved: ["ws-1", "ws-2"] }),
+      }),
+    ]);
+    expect(summary.lastGate?.unresolvedCount).toBe(2);
   });
 
   it("computes a positive red-debt delta when trains drop more members than they land", () => {
@@ -99,6 +111,62 @@ describe("summarizeMergeTrains", () => {
     ]);
     expect(summary.aboardMemberCount).toBe(0);
     expect(summary.lastGate?.gateRuns).toBeNull();
+  });
+
+  it("does not double-count a member bisect re-recorded as dropped in both gateEvidence.dropped and bisectResult.gateRejected", () => {
+    // Same workspace conflicted during assembly on every bisect sub-attempt — the #1184 defect:
+    // 13 members, 17 recorded drops, because each half re-assembles from scratch.
+    const summary = summarizeMergeTrains([
+      train({
+        id: "t1",
+        state: "red",
+        gateEvidence: JSON.stringify({
+          gateRuns: 4,
+          landed: [],
+          dropped: [
+            { workspaceId: "ws-1", reason: "conflict" },
+            { workspaceId: "ws-1", reason: "conflict" },
+            { workspaceId: "ws-2", reason: "conflict" },
+          ],
+        }),
+        bisectResult: JSON.stringify({
+          gateRejected: [{ workspaceId: "ws-3", reason: "gate failed" }],
+        }),
+      }),
+    ]);
+    // Unique ids: ws-1, ws-2, ws-3 = 3, not 4.
+    expect(summary.redDebtDelta).toBe(3);
+  });
+
+  it("computes gate-runs-per-landed over the rolling window of finished trains", () => {
+    const summary = summarizeMergeTrains([
+      train({ id: "t1", state: "landed", gateEvidence: JSON.stringify({ gateRuns: 1, landed: ["ws-1", "ws-2", "ws-3", "ws-4"] }) }),
+      train({ id: "t2", state: "red", gateEvidence: JSON.stringify({ gateRuns: 9, landed: [] }) }),
+      // In-flight trains do not count toward the window.
+      train({ id: "t3", state: "gating", gateEvidence: JSON.stringify({ gateRuns: 1, landed: [] }) }),
+    ]);
+    expect(summary.gateRunsPerLanded).toEqual({ gateRuns: 10, landedMembers: 4, ratio: 2.5, windowSize: 2 });
+  });
+
+  it("reports a null ratio when the window landed nothing (division by zero)", () => {
+    const summary = summarizeMergeTrains([
+      train({ id: "t1", state: "red", gateEvidence: JSON.stringify({ gateRuns: 3, landed: [] }) }),
+    ]);
+    expect(summary.gateRunsPerLanded.ratio).toBeNull();
+  });
+
+  it("only looks at the last 10 finished trains for the headline and red-debt trend", () => {
+    const rows = Array.from({ length: 12 }, (_, i) =>
+      train({
+        id: `t${i}`,
+        state: "landed",
+        startedAt: new Date(Date.now() - i * 1000).toISOString(),
+        gateEvidence: JSON.stringify({ gateRuns: 1, landed: ["ws"] }),
+      }),
+    );
+    const summary = summarizeMergeTrains(rows);
+    expect(summary.gateRunsPerLanded.windowSize).toBe(10);
+    expect(summary.gateRunsPerLanded.gateRuns).toBe(10);
   });
 });
 
