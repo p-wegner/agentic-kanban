@@ -13,7 +13,20 @@ export interface TrackerFrameOptions {
   width?: number;
   /** Injected for deterministic tests; epoch ms, defaults to the real clock. */
   nowMs?: number;
+  /**
+   * Live-refresh connection state (#1142) — `ws` when the board WebSocket is driving
+   * refreshes, `polling` when it fell back to the interval timer, `connecting` before
+   * the first attempt resolves either way. Omitted entirely when the caller has no
+   * live transport (e.g. `--once`/`--json`), in which case no indicator is rendered.
+   */
+  connectionStatus?: "connecting" | "ws" | "polling";
 }
+
+const CONNECTION_INDICATOR: Record<"connecting" | "ws" | "polling", string> = {
+  ws: "● live",
+  polling: "○ polling",
+  connecting: "◌ connecting",
+};
 
 const STATUS_GLYPH: Record<string, string> = {
   active: "*",
@@ -89,8 +102,9 @@ export function renderTrackerFrame(
   const nowMs = options.nowMs ?? Date.now();
   const lines: string[] = [];
 
+  const indicator = options.connectionStatus ? ` | ${CONNECTION_INDICATOR[options.connectionStatus]}` : "";
   const header = truncate(
-    `${snapshot.project.name} | WIP ${snapshot.totals.activeWorkspaces}/${wip.limit} | ${columnCountsLine(snapshot.issues, width)}`,
+    `${snapshot.project.name} | WIP ${snapshot.totals.activeWorkspaces}/${wip.limit} | ${columnCountsLine(snapshot.issues, width)}${indicator}`,
     width,
   );
   lines.push(header);
