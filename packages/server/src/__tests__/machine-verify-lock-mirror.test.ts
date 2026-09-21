@@ -22,7 +22,7 @@
  * So this asserts on real lockfiles in a temp dir — the actual contract — not on source text.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as script from "../../../../scripts/machine-verify-lock.mjs";
@@ -152,26 +152,57 @@ describe("machine verify lock: shared module vs scripts/ mirror", () => {
   it("both halves REPLACE the lockfile on heartbeat rather than rewriting it in place", () => {
     // The torn-write race, mirrored. An in-place `writeFileSync` truncates first, so a concurrent
     // acquirer can read a partial record, call it corrupt, and discard a LIVE holder's lock —
-    // measured, with both processes acquiring. Each half must therefore swap the file atomically,
-    // and the observable signature of that is a CHANGED file identity. If only one half is atomic
-    // the box is still racy, which is exactly the drift this suite exists to catch.
-    const identity = () => {
-      const s = statSync(machineVerifyLockPath());
-      return `${s.ino}:${s.birthtimeMs}`;
+    // measured, with both processes acquiring. Each half must therefore swap the file atomically
+    // (write to a temp name, `rename` over the target) rather than truncate-and-rewrite in place.
+    //
+    // NOT `ino:birthtimeMs` (the original assertion here, #1217): comparing the identity of
+    // `stat(path)` before and after only proves the replacement if the OS never recycles the freed
+    // file id, and never lands the new file on the same birthtime tick. Neither holds under load —
+    // NTFS reuses a just-freed file id immediately, and mtime/birthtime granularity is coarse
+    // enough for two `rename`s a few ms apart to collide — so a genuine replace can read as an
+    // in-place rewrite by that key alone. (An fd held open across the heartbeat and compared by
+    // `fstat` was tried too and is worse on Windows: `rename` onto a path with an open read handle
+    // either fails outright (EPERM) or, when it succeeds, NTFS is free to keep serving the SAME
+    // file id through the stale handle — there is no portable "orphaned inode" signal here.)
+    //
+    // The deterministic, portable proof instead: plant a lockfile at the target path that is
+    // LONGER than a real record, carrying a marker field — `{"padding":"xxxxxxxxxx...", ...}`.
+    // A rewrite-in-place (`writeFileSync` without a prior truncate) only overwrites the LEADING
+    // bytes of a longer existing file, so the marker in the tail survives on disk; a real
+    // rename-replace can only ever produce content that is EXACTLY the new record, so the marker
+    // is gone. This depends on nothing OS-specific — no identity key, no timing, no granularity.
+    const plantOversizedForeign = (contents: unknown) => {
+      const real = JSON.stringify(contents);
+      const padded = `${real.slice(0, -1)},"padding":"${"x".repeat(4096)}"}`;
+      writeFileSync(machineVerifyLockPath(), padded);
     };
+    const rawContents = () => readFileSync(machineVerifyLockPath(), "utf8");
 
     const byShared = attemptMachineVerifyLock(MACHINE_VERIFY_ROLES.gate, "the-gate");
     if (byShared.outcome !== "acquired") throw new Error("expected to acquire");
-    const sharedBefore = identity();
+    plantOversizedForeign(byShared.handle.contents);
+    expect(rawContents().length).toBeGreaterThan(4096);
     byShared.handle.heartbeat();
-    expect(identity()).not.toBe(sharedBefore);
+    const afterShared = JSON.parse(rawContents());
+    // The proof: the planted "padding" key is gone. A rewrite-in-place (`writeFileSync` without a
+    // prior truncate) only overwrites the LEADING bytes of a longer existing file, so the planted
+    // tail — including "padding" — would still be there, either dangling after the new JSON's
+    // closing brace (making the whole read unparseable) or, worse, silently absorbed as valid
+    // trailing bytes some parsers ignore. A real rename-replace can only ever produce content that
+    // is EXACTLY the new record, so "padding" surviving in valid, parseable JSON is only possible
+    // if the disk still holds our planted object underneath the real fields.
+    expect(afterShared).not.toHaveProperty("padding");
+    expect(afterShared.pid).toBe(process.pid);
     byShared.handle.release();
 
     const byScript = script.attemptMachineVerifyLock("a-builder");
     if (byScript.outcome !== "acquired") throw new Error("expected to acquire");
-    const scriptBefore = identity();
+    plantOversizedForeign(byScript.handle.contents);
+    expect(rawContents().length).toBeGreaterThan(4096);
     byScript.handle.heartbeat();
-    expect(identity()).not.toBe(scriptBefore);
+    const afterScript = JSON.parse(rawContents());
+    expect(afterScript).not.toHaveProperty("padding");
+    expect(afterScript.pid).toBe(process.pid);
     byScript.handle.release();
   });
 
