@@ -70,11 +70,25 @@ export function createMergeQueueRoute(
 
     // Execute the queue and stream SSE events
     return streamSSE(c, async (stream) => {
+      const events = queueService.executeQueue(body.workspaceIds, {
+        skipOnConflict: body.skipOnConflict ?? false,
+        strategy: body.strategy,
+      });
+      // #1152 (#1150 criterion #2): a client disconnect must be noticed when it happens, not
+      // only after the next `writeSSE` returns — the loop below only reaches `stream.closed`
+      // between events, and `executeQueue`'s locked region can run for tens of minutes between
+      // yields (a rebase, a 30-45 minute gate). `onAbort` fires off the request's real abort
+      // signal; `.return()` is queued and delivered at the generator's NEXT `yield`, where it
+      // runs every enclosing `finally` (lock release, heartbeat clear) and ends the run instead
+      // of streaming into a socket nobody reads. It cannot preempt an in-flight `await`, so a
+      // train mid-gate still finishes that gate and its row bookkeeping headless — acceptance
+      // criterion #2's other sanctioned outcome; the operator cancel (`DELETE /trains/:id`)
+      // remains the way to abort a running gate.
+      stream.onAbort(() => {
+        void events.return(undefined);
+      });
       try {
-        for await (const event of queueService.executeQueue(body.workspaceIds, {
-          skipOnConflict: body.skipOnConflict ?? false,
-          strategy: body.strategy,
-        })) {
+        for await (const event of events) {
           await stream.writeSSE({ data: JSON.stringify(event) });
           if (event.type === "done") break;
           if (stream.closed) break;
