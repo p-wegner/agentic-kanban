@@ -250,6 +250,55 @@ describe("merge train assembly", () => {
   });
 
   /**
+   * #1215 — the finding's exact shape: a bisect leaf is checked against the ORIGINAL train's
+   * roster (`included` naming a branch that was actually DROPPED from this leaf earlier for a
+   * conflict), so the check compares against a member the leaf never carries. That branch then
+   * lands on the base by another door entirely (a #797 foundational-blocker synchronous merge)
+   * while the leaf gates — reachable from `baseBranch`, unreachable from the leaf's `trainRef`.
+   * `checkAlreadyMerged`'s definition of "already merged" is exactly this: passing `baseBranch`
+   * must resolve it instead of throwing "ancestry invariant violated".
+   */
+  it("accepts a member reachable from baseBranch even when it is unreachable from the leaf's train ref (#1215)", async () => {
+    await git(["branch", "f-dropped"]);
+    await git(["branch", "f-leaf"]);
+    await commitFile("f-dropped", "d.txt", "dropped\n");
+    await commitFile("f-leaf", "l.txt", "leaf\n");
+    await git(["checkout", "-q", "main"]);
+
+    // The LEAF only ever carries f-leaf — f-dropped was never assembled onto it (it left the
+    // train earlier, exactly like #1186 leaving qmuaj7n7p's roster before leaf `bb` gated).
+    const leaf = await assembleMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members: [{ workspaceId: "w-leaf", branch: "f-leaf" }],
+      label: "t-leaf",
+    });
+    expect(leaf.included.map((m) => m.branch)).toEqual(["f-leaf"]);
+
+    // f-dropped lands on main through another door while the leaf's gate is (conceptually)
+    // still running — a synchronous merge, unrelated to this leaf's own --no-ff chain.
+    await git(["merge", "--no-ff", "-q", "-m", "synchronous merge of f-dropped", "f-dropped"]);
+
+    // Naively re-checking the leaf against the ORIGINAL roster (leaf.included plus the member
+    // that actually left it) is the bug: f-dropped is genuinely unreachable from the leaf ref.
+    const originalRoster = [...leaf.included, { workspaceId: "w-dropped", branch: "f-dropped" }];
+    await expect(
+      assertTrainPreservesAncestry(repo, leaf.trainRef, originalRoster),
+    ).rejects.toThrow(/ancestry invariant violated/);
+
+    // With baseBranch given, the same call recognizes f-dropped as already merged into main by
+    // another door and does not throw.
+    await expect(
+      assertTrainPreservesAncestry(repo, leaf.trainRef, originalRoster, "main"),
+    ).resolves.toBeUndefined();
+
+    // The leaf's OWN included set (what it actually carries) was never the problem either way.
+    await expect(
+      assertTrainPreservesAncestry(repo, leaf.trainRef, leaf.included, "main"),
+    ).resolves.toBeUndefined();
+  });
+
+  /**
    * `deleteTrainRef` used to be called at each of `runMergeTrain`'s three exits
    * (assembly-empty, gate-fail, success) — so a THROW from `assertTrainPreservesAncestry` or
    * `landMergeTrain` (base moved, ancestry violation) skipped all of them and left the
