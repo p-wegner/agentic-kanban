@@ -442,4 +442,51 @@ describe("merge queue service", () => {
     const done = events.find((e) => e.type === "done");
     expect(done).toMatchObject({ merged: [], failed: [], skipped: [workspaceId] });
   });
+
+  // #1151: a merge refused because another job held the repo lock never even STARTED — there is
+  // no conflict and nothing for a reconciler agent to fix. It carries the same WorkspaceError
+  // "CONFLICT" code but is tagged `data.mergeReason: "repo_lock_held_cross_process"` (or
+  // "repo_lock_contention" for the in-process refuse/reuse check). Routing it into the
+  // conflict->reconciler escalation converts lock contention directly into queue depth: each
+  // contended merge spawns a reconciler session and a verify chain, and every chain then
+  // serializes behind the very lock that caused it (#949). Same rule as #170 above, for the same
+  // reason: the orchestrator's strandedIds check only matches reasons starting with "rebase
+  // conflict"/"merge conflict", so the "lock_contention:" prefix here keeps it out.
+  it("classifies a repo-lock-contention refusal as lock_contention, never as a merge conflict", async () => {
+    const { db } = createTestDb();
+    const repoPath = makeRepoPath();
+    const { projectId, statusId } = await seedProject(db, repoPath);
+    const { workspaceId } = await seedWorkspace(db, {
+      projectId,
+      statusId,
+      issueNumber: 1151,
+      issueTitle: "Lock-contended workspace",
+      workingDir: wt(repoPath, "locked"),
+      branch: "feature/locked",
+    });
+
+    const lockError = Object.assign(
+      new Error(
+        "A merge or other git operation is already in progress for this repository " +
+          "(held by merge-train:qmu0m26d0 pid=24284 on AO-PF69VL7N, age 2s). Please wait for it to complete.",
+      ),
+      { code: "CONFLICT", data: { mergeReason: "repo_lock_held_cross_process", holder: "merge-train:qmu0m26d0" } },
+    );
+    mocks.mergeWorkspace.mockRejectedValue(lockError);
+
+    const service = createMergeQueueService({ database: db });
+    const events = [];
+    for await (const event of service.executeQueue([workspaceId], { skipOnConflict: true })) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "skipped",
+      workspaceId,
+      reason: expect.stringContaining("lock_contention:"),
+    }));
+    expect(events.some((e) => e.type === "conflict")).toBe(false);
+    const done = events.find((e) => e.type === "done");
+    expect(done).toMatchObject({ merged: [], failed: [], skipped: [workspaceId] });
+  });
 });
