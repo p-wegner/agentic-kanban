@@ -53,3 +53,14 @@ export function hasMergeGateRun(workspaceId: string): boolean {
 export function resetMergeCancellation(): void {
   controllers.clear();
 }
+
+/**
+ * #1203 — a merge TRAIN's own AbortSignal (from `merge-queue-train.ts`'s `runDoomedTrainJob`)
+ * is a SECOND, independent way a gate run can be told to stop: `cancelSignal` (this module)
+ * fires on `POST /:id/merge/cancel` for a single workspace, `trainSignal` fires on `POST
+ * /trains/:id/cancel` for the whole train's in-flight gate. `runSetupScript` takes one signal,
+ * so either trigger must abort the same child process.
+ */
+export function combineGateAbortSignals(cancelSignal: AbortSignal, trainSignal: AbortSignal | undefined): AbortSignal {
+  return trainSignal ? AbortSignal.any([cancelSignal, trainSignal]) : cancelSignal;
+}
