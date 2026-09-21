@@ -106,6 +106,34 @@ export function isPreMergeGateFailure(err: unknown): boolean {
   return data?.mergeReason === PRE_MERGE_GATE_FAILURE_REASON;
 }
 
+/**
+ * The `mergeReason` tags a refused merge carries when it never got to attempt anything because
+ * the repo lock was held by someone else at that instant — the in-process refuse/reuse check
+ * (`repo_lock_contention`, `workspace-merge.service.ts`'s `activeMerges` guard) and the
+ * cross-process on-disk lock check (`repo_lock_held_cross_process`, the same file's
+ * `describeCrossProcessMergeHolder` guard). Deliberately excludes `repo_lock_unavailable`
+ * (`workspace-internals.ts`'s `RepoLockUnavailableError` path, #230) — that one means the repo
+ * can NEVER be locked (missing `.git`, unwritable lockfile), which is a real, actionable failure,
+ * not a moment of contention that will pass.
+ */
+export const LOCK_CONTENTION_MERGE_REASONS = new Set(["repo_lock_contention", "repo_lock_held_cross_process"]);
+
+/**
+ * True when a rejected merge never even STARTED because another job held the repo lock at that
+ * instant (#1151). This is not a merge failure — there is no conflict, nothing for an agent to
+ * fix, and the correct response is to retry once the lock frees. Routing it to `fix-and-merge`
+ * anyway launches an agent and queues a full verify chain for a merge that was never attempted,
+ * and every such chain then serializes behind the very lock that caused it (#949) — so contention
+ * converts directly into queue depth instead of draining on its own.
+ *
+ * Same shape as {@link isPreMergeGateFailure}: reads the structured `data.mergeReason`, never the
+ * message text.
+ */
+export function isLockContentionFailure(err: unknown): boolean {
+  const data = err instanceof Error ? (err as unknown as { data?: { mergeReason?: string } }).data : undefined;
+  return data?.mergeReason !== undefined && LOCK_CONTENTION_MERGE_REASONS.has(data.mergeReason);
+}
+
 export async function recordGateFailureNote(args: {
   workspace: WorkspaceRow;
   stage: string;

@@ -14,7 +14,8 @@ import { clearMergeBackoff, recordMergeFailure, type MergeBackoffDeps } from "..
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
-import { isPreMergeGateFailure } from "../services/workspace-merge-gate.js";
+import { isPreMergeGateFailure, isLockContentionFailure } from "../services/workspace-merge-gate.js";
+import { logMonitorLockContentionSkip } from "../services/merge-lock-contention.js";
 import {
   clearFailedGate,
   clearGateInFlight,
@@ -66,6 +67,17 @@ export async function mergeWorkspaceWithFixFallback(
     });
   } catch (err) {
     const mergeError = err instanceof Error ? err.message : "merge failed";
+    // #1151: lock contention is checked, and returned on, BEFORE the backoff bookkeeping
+    // below. `recordMergeFailure` classifies by message signature with digits stripped, so
+    // repeated contention against the same holder class (e.g. a merge train) hashes to an
+    // IDENTICAL signature — recording it would ramp the exponential backoff and eventually
+    // fire a false `merge_retry_blocked` obstacle for a merge that never even started. The
+    // repo lock's own wait/retry loop already governs when this workspace tries again; the
+    // monitor-level backoff must not also throttle it.
+    if (isLockContentionFailure(err)) {
+      logMonitorLockContentionSkip({ wsId: ws.wsId, issueId: ws.issueId, mergeError, logAction });
+      return;
+    }
     // Record the failure BEFORE launching the fix session, so an identical repeat backs
     // off the NEXT cycle even if the fix session itself dies. Never throws (telemetry).
     await recordMergeFailure(
