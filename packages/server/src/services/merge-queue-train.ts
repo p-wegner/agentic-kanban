@@ -25,7 +25,7 @@ import {
   updateMergeTrainState,
 } from "../repositories/merge-train.repository.js";
 import { runMergeTrain, formatTrainLabel, trainDateStamp, trainRefName } from "./merge-train.service.js";
-import { registerLiveMergeTrain, unregisterLiveMergeTrain } from "./merge-train-live-registry.js";
+import { isMergeTrainLabelLive, registerLiveMergeTrain, unregisterLiveMergeTrain } from "./merge-train-live-registry.js";
 import { runPreMergeGate, looksLikeMissingDepsFailure } from "./pre-merge-gate.service.js";
 import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { randomUUID } from "node:crypto";
@@ -495,7 +495,16 @@ async function runDoomedTrainJob(args: {
 
   let repoLock: Awaited<ReturnType<typeof acquireQueueRepoLock>>;
   try {
-    repoLock = await acquireQueueRepoLock(repoPath, `merge-train:${label}`, { timeoutMs: MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS });
+    repoLock = await acquireQueueRepoLock(repoPath, `merge-train:${label}`, {
+      timeoutMs: MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS,
+      // #1150: let a contended wait say whether the CURRENT holder is a train job this process
+      // itself still has registered as live, rather than only ever repeating a pid that stays
+      // alive for as long as the whole server does.
+      checkHolderLiveness: (holder) => {
+        const match = /^merge-train:(.+)$/.exec(holder);
+        return match ? isMergeTrainLabelLive(match[1]) : undefined;
+      },
+    });
   } catch (err) {
     const reason = `could not acquire the repo lock within ${Math.round(MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS / 60_000)}m: ${errorMessage(err)}`;
     unregisterLiveMergeTrain(trainId);
