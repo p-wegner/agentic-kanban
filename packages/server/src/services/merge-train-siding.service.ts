@@ -28,6 +28,16 @@
  * Ownership rule: this module NEVER rewrites a member's branch. It only asks — the same
  * ownership boundary `runMergeTrain`'s own docs describe for a conflict ("the author's to
  * rebase"), as opposed to a gate failure ("the author's to FIX").
+ *
+ * **Follow-up (#1210):** `sendTurn` only ever delivers a `/turn` to a LIVE session — if the
+ * member's owning session has already exited (the agent is gone), a `/turn` has nothing to
+ * resume into cleanly and `workspace-session.service.ts`'s own `sendTurn` falls through to a
+ * fresh `startSession` with `resumeFromId` set, launched straight into whatever the worktree
+ * already is — the exact #1209 bug (agent sees a clean tree, reports "nothing to resolve"),
+ * recurring via the siding path specifically because nothing here ever rebases the worktree
+ * first. When no live session exists, `recordTrainSidingDrop` now calls `resolveConflicts`
+ * instead — the rebase-first fix from `workspace-resolve-conflicts.service.ts` — which puts
+ * the worktree into the real conflicted state before spawning a fresh agent into it.
  */
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
@@ -41,6 +51,7 @@ import {
 } from "../repositories/merge-train-siding.repository.js";
 import { applyIssueTag, removeIssueTag } from "./repo-tags.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
+import { findRunningSession } from "../repositories/session.repository.js";
 
 export const TRAIN_SIDING_MAX_ATTEMPTS = 3;
 export const TRAIN_SIDING_TAG = "train-siding";
@@ -104,6 +115,23 @@ export interface TrainSidingDeps {
   getBranchHeadSha?: (repoPath: string, branch: string) => Promise<string | null>;
   /** 409-safe: a busy agent is expected, not an error — see `sendTurn` on `workspace-session.service.ts`. */
   sendTurn: (workspaceId: string, content: string) => Promise<unknown>;
+  /**
+   * #1210 — is there a live/running session to receive a `/turn` at all? Defaults to a real
+   * check (`findRunningSession`). Injected so tests can force either branch without a session
+   * table. When absent (agent gone), `recordTrainSidingDrop` routes through `resolveConflicts`
+   * instead of `sendTurn`.
+   */
+  hasLiveSession?: (workspaceId: string) => Promise<boolean>;
+  /**
+   * #1210 — the rebase-first fix (`workspace-resolve-conflicts.service.ts`'s `resolveConflicts`,
+   * #1209): puts the worktree into the real conflicted state relative to base before spawning a
+   * fresh agent into it. Used instead of `sendTurn` when the member has no live session, so an
+   * idle/agentless workspace nudged by a siding gets the same rebase preflight a live one's
+   * `/turn` would eventually trigger via a manual `update-base`. Optional so existing callers
+   * that never hit the agentless branch (e.g. tests exercising only the live path) need not
+   * supply it; if it IS needed and absent, the drop still records and just skips the nudge.
+   */
+  resolveConflicts?: (workspaceId: string) => Promise<unknown>;
 }
 
 async function defaultGetBranchHeadSha(repoPath: string, branch: string): Promise<string | null> {
@@ -112,6 +140,11 @@ async function defaultGetBranchHeadSha(repoPath: string, branch: string): Promis
   } catch {
     return null;
   }
+}
+
+/** #1210: real "is there a live session" check — a `sessions` row with `status === "running"`. */
+async function defaultHasLiveSession(workspaceId: string, database: Database): Promise<boolean> {
+  return Boolean(await findRunningSession(workspaceId, database));
 }
 
 /**
@@ -217,6 +250,25 @@ export async function recordTrainSidingDrop(
         `[merge-train-siding] ${member.workspaceId}${member.issueNumber ? ` (#${member.issueNumber})` : ""} ` +
           `capped at ${sidings} siding(s) — no further nudge`,
       );
+      return;
+    }
+
+    // #1210: route an agentless member through the rebase-first `resolveConflicts` instead of
+    // `sendTurn` — a `/turn` to a dead session falls through to a fresh `startSession` that
+    // spawns straight into whatever the worktree already is, never rebasing first (the #1209
+    // bug, recurring here for exactly the same reason it recurred on the sequential path).
+    const checkLiveSession = deps.hasLiveSession ?? ((workspaceId: string) => defaultHasLiveSession(workspaceId, database));
+    const isLive = await checkLiveSession(member.workspaceId).catch(() => true);
+    if (!isLive) {
+      if (!deps.resolveConflicts) {
+        console.warn(`[merge-train-siding] ${member.workspaceId} has no live session and no resolveConflicts port was supplied — siding recorded, no nudge sent`);
+        return;
+      }
+      try {
+        await deps.resolveConflicts(member.workspaceId);
+      } catch (err) {
+        console.warn(`[merge-train-siding] could not resolve-conflicts for idle ${member.workspaceId} (non-fatal): ${errorMessage(err).slice(0, 200)}`);
+      }
       return;
     }
 
