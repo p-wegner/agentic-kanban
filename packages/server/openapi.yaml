@@ -10719,7 +10719,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -10727,9 +10727,16 @@ paths:
               properties:
                 reason:
                   type: string
+              additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -10764,7 +10771,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -10772,9 +10779,16 @@ paths:
               properties:
                 reason:
                   type: string
+              additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
