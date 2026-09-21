@@ -71,6 +71,17 @@ export const SETTINGS_REGISTRY = {
    * Off by default (best-effort fallback is the default contract, #160).
    */
   devcontainer_strict: { type: "bool", default: "false" },
+  /**
+   * herdr support (#1129/#1144) is OPT-IN and OFF by default. This flag records
+   * intent only — it is surfaced in Settings so the board can tell an operator
+   * whether herdr-hosted launches are wanted, and it is checked alongside
+   * `getHerdrAvailability()` (`packages/server/src/services/
+   * herdr-availability.service.ts`) before anything acts on it. It does not
+   * itself change how an agent is launched: wiring the actual launch-wrap
+   * (mirroring `agent-provider/container-wrap.ts`'s pure-transform shape) is
+   * #1145's scope, not this ticket's.
+   */
+  herdr_hosted_agents: { type: "bool", default: "false" },
   auto_review: { type: "bool", default: "true" },
   auto_merge: { type: "bool", default: "true" },
   auto_merge_in_review: { type: "bool", default: "false" },
