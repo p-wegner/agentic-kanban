@@ -917,6 +917,18 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/herdr/availability:
+    get:
+      summary: GET /api/herdr/availability
+      tags:
+        - herdr
+      operationId: get_api_herdr_availability
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
   /api/inbox:
     get:
       summary: GET /api/inbox

@@ -27,6 +27,10 @@ import { getSetupRunForGate } from "../repositories/workspace-setup-run.reposito
  * gate itself can see RIGHT NOW, and it must outrank a verdict it cannot corroborate. So a
  * present dependency tree makes this a no-op rather than merely dropping the clause that used
  * to (asymmetrically) announce the corroboration in the block message.
+ *
+ * #1175 — when the tree still looks uninstalled (or can't be checked) and the refusal stands,
+ * name WHEN the failure happened, so the message reads as a dated verdict being trusted rather
+ * than a claim about the tree right now.
  */
 export async function describeFailedSetupRun(
   workspaceId: string,
@@ -38,8 +42,9 @@ export async function describeFailedSetupRun(
   const corroboration = run.workingDir ? checkBinDir(run.workingDir) : null;
   if (corroboration?.depsPresent) return null;
 
+  const age = run.endedAt ? ` (recorded ${run.endedAt}, trusted without re-checking the tree)` : "";
   return `pre-merge gate blocked: this workspace's dependency setup script FAILED`
-    + `${run.command ? ` (${run.command})` : ""} and was never retried successfully — the`
+    + `${run.command ? ` (${run.command})` : ""} and was never retried successfully${age} — the`
     + ` branch was built without its dependencies and could not have run a single test.`
     + `${corroboration ? ` ${corroboration.description}` : ""}`
     + `${run.stderrTail ? ` Last error: ${run.stderrTail.slice(-500)}` : ""}`

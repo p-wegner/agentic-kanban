@@ -5,6 +5,7 @@ import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import {
   collectConflictClusters,
   describeTrainMembers,
+  formatMergeTrainSummaryLabels,
   summarizeMergeTrains,
   type MergeTrainRowDto,
   type MergeTrainSidingDto,
@@ -115,10 +116,15 @@ function riskClasses(label: MergeQueueItem["riskLabel"]): string {
 
 type MergeQueueStrategy = "auto" | "sequential" | "train";
 
+/** While a train is in flight, poll its history often enough that the bar tracks a gate landing. */
+const ABOARD_POLL_INTERVAL_MS = 5000;
+
 /**
- * "Merge train" panel (#906) — aboard / waiting / last gate / red-debt delta, reachable from
- * the merge-queue view. Reads the persisted `merge_trains` history instead of the old
- * per-request scratch state, so it survives a server restart mid-train.
+ * "Merge train" panel (#906, headline metric #1184) — gate-runs-per-landed / aboard / finished /
+ * last gate / red-debt delta, reachable from the merge-queue view. Reads the persisted
+ * `merge_trains` history instead of the old per-request scratch state, so it survives a server
+ * restart mid-train. Polls while a train is assembling/gating/landing so the bar does not go
+ * stale for the whole run (#1184).
  */
 /** What a member chip says beside its label (#1197); `title` carries the full reason. */
 function trainOutcomeLabel(outcome: TrainMemberOutcome): string {
@@ -196,17 +202,26 @@ function MergeTrainSummaryBar({ projectId, memberLabel }: { projectId: string; m
 
   useEffect(() => {
     let cancelled = false;
-    fetchMergeTrains(projectId)
-      .then((result) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    async function load() {
+      try {
+        const result = await fetchMergeTrains(projectId);
         if (cancelled) return;
         setTrains(result.trains);
         setSidings(Array.isArray(result.sidings) ? result.sidings : []);
-      })
-      .catch((err) => {
+        setError(null);
+        const stillAboard = result.trains.some((t) => t.state === "assembling" || t.state === "gating" || t.state === "landing");
+        if (stillAboard) timer = setTimeout(load, ABOARD_POLL_INTERVAL_MS);
+      } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load merge train history");
-      });
+      }
+    }
+
+    void load();
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, [projectId]);
 
@@ -227,12 +242,8 @@ function MergeTrainSummaryBar({ projectId, memberLabel }: { projectId: string; m
   }
 
   const summary = summarizeMergeTrains(trains);
-  const aboardLabel = summary.aboard.length === 0
-    ? "none"
-    : `${summary.aboard.length} (${summary.aboardMemberCount} member${summary.aboardMemberCount === 1 ? "" : "s"})`;
-  const lastGateLabel = summary.lastGate
-    ? `${summary.lastGate.state}${summary.lastGate.gateRuns != null ? ` (${summary.lastGate.gateRuns} run${summary.lastGate.gateRuns === 1 ? "" : "s"})` : ""}`
-    : "none yet";
+  const { aboardLabel, lastGateLabel, headlineLabel } = formatMergeTrainSummaryLabels(summary);
+  const { gateRunsPerLanded } = summary;
 
   // #1197: the newest train's members with how each fared, and the member-vs-member conflict
   // clusters (#1191) the train-conflicts group scan would turn into coupled_with proposals.
@@ -250,12 +261,17 @@ function MergeTrainSummaryBar({ projectId, memberLabel }: { projectId: string; m
     <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 space-y-1 text-xs text-gray-600 dark:text-gray-300">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <span className="font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[11px]">Merge train</span>
+        <span
+          title={`Gate runs spent per member landed, over the last ${gateRunsPerLanded.windowSize} finished train(s). A train's whole promise is 1 gate run for the batch — this shows whether that held.`}
+        >
+          Gate runs/landed: <strong className="font-medium text-gray-800 dark:text-gray-100">{headlineLabel}</strong>
+        </span>
         <span>Aboard: <strong className="font-medium text-gray-800 dark:text-gray-100">{aboardLabel}</strong></span>
-        <span>Waiting: <strong className="font-medium text-gray-800 dark:text-gray-100">{summary.waitingCount}</strong></span>
+        <span>Finished: <strong className="font-medium text-gray-800 dark:text-gray-100">{summary.finishedCount}</strong></span>
         <span>Last gate: <strong className="font-medium text-gray-800 dark:text-gray-100">{lastGateLabel}</strong></span>
         <span
           className={summary.redDebtDelta > 0 ? "text-red-600 dark:text-red-400" : "text-gray-600 dark:text-gray-300"}
-          title="Members dropped or gate-rejected minus members landed, across the last 10 finished trains"
+          title="Unique members dropped or gate-rejected minus unique members landed, across the last 10 finished trains"
         >
           Red-debt Δ: <strong className="font-medium">{summary.redDebtDelta > 0 ? `+${summary.redDebtDelta}` : summary.redDebtDelta}</strong>
         </span>
