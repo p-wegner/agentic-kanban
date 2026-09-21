@@ -258,3 +258,6 @@ Manage workspaces (git worktrees linked to issues).
 | `workspace comment-add <workspace-id>` | Add a review comment on a file in a workspace's diff |
 | `workspace handoff-bundle <workspace-id>` | Export a compact handoff bundle for a workspace |
 | `workspace approve-tool <workspace-id>` | Create a pending tool-use approval request for a workspace session |
+| `workspace merge-cancel <workspace-id>` | Cancel this workspace's merge job (#1164) |
+| `workspace merge-hold <workspace-id>` | Park a workspace so the monitor walk, the auto-merge orchestrator, and the merge-train reconciler all skip it, without disabling auto-merge for the rest of the project (#1164) |
+| `workspace merge-hold-release <workspace-id>` | Release a workspace's merge hold (#1164), letting the monitor walk / auto-merge orchestrator / merge-train reconciler resume treating it normally |

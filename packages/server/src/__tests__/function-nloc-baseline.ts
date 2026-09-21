@@ -288,6 +288,26 @@
  * inline comment above the `installAndReportCommitMsgHook` call in `createWorkspaceCreateService`
  * was condensed from 4 lines to 2 as part of the same trim; the SHRINK is banked rather than
  * left as budget, per this file's own rule.
+ *
+ * -- Fifteenth disclosed movement (2026-09-16, #1164 per-workspace merge cancel/hold) ----
+ *
+ *   cli/commands/workspace.ts::registerWorkspaceCommand   577 -> 578  (+1)
+ *   routes/workspace-actions.ts::createWorkspaceActionsRoute   384 -> 382  (-2, BANKED)
+ *
+ * #1164 added `merge-cancel` / `merge-hold` / `merge-hold-release` as a new CLI command group
+ * and `POST /:id/merge/cancel` + `POST|GET|DELETE /:id/merge-hold` as new routes. The route
+ * logic was extracted into standalone functions (`cancelWorkspaceMerge`,
+ * `runWorkspaceMergeJob`, `placeWorkspaceMergeHold`, `releaseWorkspaceMergeHold`,
+ * `getWorkspaceMergeHoldState`, all above `createWorkspaceActionsRoute` in this file) and the
+ * three new CLI commands were extracted verbatim into a new sibling file,
+ * `cli/commands/workspace-merge-control.ts` (same split shape as `workspace-interaction.ts`,
+ * #859), following this ring's own established remedy (see `bcb2323638`, "shrink
+ * createWorkspaceActionsRoute back under the nloc ratchet"). That extraction actually shrank
+ * `createWorkspaceActionsRoute` below its pre-#1164 baseline (384 -> 382), banked here.
+ * `registerWorkspaceCommand` grew by exactly the one line needed to register the new command
+ * group (`registerWorkspaceMergeControlCommands(wsCmd)`) — a single call site, nothing left to
+ * extract without ceremony. Disclosed rather than worked around, per this file's own rule: a
+ * named cause and a ticket, or it is just a budget.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 718 -> 720, a DISCLOSED raise (#1107, landed 2026-09-12 in d90659d081). `issue get` gained
@@ -318,11 +338,13 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 618 -> 620 (#968), disclosed in the sixth movement above.
   "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 621,
   "services/workflow-fork.service.ts::createWorkflowForkService": 581,
-  // 573 -> 577 (#1047), disclosed in the tenth movement above.
-  // 577 -> 615 (#1206): a new `workspace reopen <issue-number>` subcommand, mirroring
-  // `resume`'s shape (resolve issue -> latest workspace -> POST the action endpoint),
-  // to recover a workspace closed while its branch still carried unmerged commits.
-  "cli/commands/workspace.ts::registerWorkspaceCommand": 615,
+  // 573 -> 577 (#1047), disclosed in the tenth movement above. 577 -> 578 (#1164), disclosed
+  // in the fourteenth movement above. 578 -> 616 (#1206, rebase): a new `workspace reopen
+  // <issue-number>` subcommand, mirroring `resume`'s shape (resolve issue -> latest workspace
+  // -> POST the action endpoint), to recover a workspace closed while its branch still carried
+  // unmerged commits. Landed independently on master while #1164 was in flight; both features
+  // are present after the rebase, so the number is the sum of the two additions, re-measured.
+  "cli/commands/workspace.ts::registerWorkspaceCommand": 616,
   // 637 -> 638 (#1027), disclosed in the ninth movement above.
   "services/agent-remote.service.ts::createRemoteAgentService": 638,
   "cli/commands/session.ts::registerSessionCommand": 569,
@@ -382,8 +404,11 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 409 -> 394 (#1214), a SHRINK banked per the fourteenth movement above.
   "services/workspace-provision.service.ts::createWorkspaceProvisionService": 394,
   // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.
-  // 399 -> 384 -> 388 (#1206): a new `POST /:id/reopen` route, one more `router.post(...)`
-  // block in the `createXRoute` architecture this file's header already names.
+  // 399 -> 384, banked (#1164), disclosed in the fourteenth movement above. 384 -> 388
+  // (#1206, rebase): a new `POST /:id/reopen` route, one more `router.post(...)` block in the
+  // `createXRoute` architecture this file's header already names. Landed independently on
+  // master while #1164 was in flight; both features are present after the rebase, so the
+  // number is re-measured rather than either parent's raw delta.
   "routes/workspace-actions.ts::createWorkspaceActionsRoute": 388,
   // 349 -> 351 (#841): POSIX-only `detached: true` for a shell launch, closing the #836 gap.
   // 351 -> 358 (#1027), disclosed in the ninth movement above.
