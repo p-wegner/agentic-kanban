@@ -1,12 +1,20 @@
 import type { Command } from "commander";
 import { cliAction, resolveProjectIdArg } from "../shared.js";
 import { renderTrackerFrame } from "./tracker-render.js";
+import { createTrackerTransport, type TrackerConnectionStatus, type TrackerSocketLike } from "./tracker-transport.js";
+import { resolveCliPort } from "./workspace-api-url.js";
 
 /**
  * `pnpm cli -- tracker` (#1141) — a dense, fixed-height terminal dashboard sized for a
- * narrow herdr pane. Polls `getBoardStatus` in-process (same pattern as `status --watch`,
- * see `commands/status.ts`) rather than over HTTP — the CLI and server share the DB, so
- * there is no server round-trip to make.
+ * narrow herdr pane. Reads `getBoardStatus` in-process (same pattern as `status --watch`,
+ * see `commands/status.ts`) — the CLI and server share the DB, so there is no server
+ * round-trip to fetch the snapshot.
+ *
+ * The REFRESH TRIGGER (#1142), however, does round-trip: the live dashboard connects to
+ * the board's own `/ws/board/:projectId` WebSocket (the same channel the browser client
+ * subscribes to) and re-renders on relevant board events instead of a fixed timer, with
+ * an interval-polling fallback while the socket is unavailable or reconnecting. See
+ * `tracker-transport.ts` for the connect/fallback/backoff logic.
  */
 export function registerTrackerCommand(program: Command) {
   program
@@ -34,7 +42,7 @@ Status glyphs:
 
       const projectId = await resolveProjectIdArg(options.project);
 
-      const renderOnce = async () => {
+      const renderOnce = async (connectionStatus?: TrackerConnectionStatus) => {
         const snapshot = await getBoardStatus({ projectId });
         if (options.json) {
           console.log(JSON.stringify(snapshot, null, 2));
@@ -42,7 +50,7 @@ Status glyphs:
         }
         const prefMap = toPrefMap(await getAllPreferences());
         const wip = resolveWipLimit(prefMap, projectId);
-        const frame = renderTrackerFrame(snapshot, wip, { width: process.stdout.columns });
+        const frame = renderTrackerFrame(snapshot, wip, { width: process.stdout.columns, connectionStatus });
         console.log(frame.text);
       };
 
@@ -55,27 +63,40 @@ Status glyphs:
       const parsedInterval = parseInt(options.interval ?? "5", 10);
       const intervalSec = Math.max(Number.isFinite(parsedInterval) ? parsedInterval : 5, 2);
       let stopped = false;
+      let connectionStatus: TrackerConnectionStatus = "connecting";
+
+      const renderAndClear = async () => {
+        console.clear();
+        try {
+          await renderOnce(connectionStatus);
+        } catch (err) {
+          console.log(`(refresh failed: ${err instanceof Error ? err.message : String(err)})`);
+        }
+        console.log(`\nPress Ctrl+C to exit.`);
+      };
+
+      const port = resolveCliPort();
+      const wsUrl = `ws://127.0.0.1:${port}/ws/board/${projectId}`;
+
+      const transport = createTrackerTransport({
+        connect: () => new WebSocket(wsUrl) as unknown as TrackerSocketLike,
+        onRefresh: () => void renderAndClear(),
+        onStatusChange: (status) => {
+          connectionStatus = status;
+        },
+        pollIntervalMs: intervalSec * 1000,
+      });
+
       const shutdown = () => {
         if (stopped) return;
         stopped = true;
-        clearInterval(timer);
+        transport.stop();
         process.exit(0);
       };
       process.on("SIGINT", shutdown);
       process.on("SIGTERM", shutdown);
 
-      const renderAndClear = async () => {
-        console.clear();
-        try {
-          await renderOnce();
-        } catch (err) {
-          console.log(`(refresh failed: ${err instanceof Error ? err.message : String(err)})`);
-        }
-        console.log(`\nRefreshing every ${intervalSec}s. Press Ctrl+C to exit.`);
-      };
       await renderAndClear();
-      const timer = setInterval(() => {
-        if (!stopped) void renderAndClear();
-      }, intervalSec * 1000);
+      transport.start();
     }));
 }
