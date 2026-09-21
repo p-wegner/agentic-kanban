@@ -17,6 +17,7 @@ import { lockContentionSkipEvent, preMergeGateSkipEvent } from "./merge-lock-con
 import type { BoardEventSink } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 import { createMergeTrainRunner, pickQueueStrategy } from "./merge-queue-train.js";
+import { findRunningSession } from "../repositories/session.repository.js";
 
 export interface WorkspaceConflictPreview {
   workspaceId: string;
@@ -239,6 +240,10 @@ export function createMergeQueueService(deps: {
     database,
     reconcileAlreadyMerged: (workspaceId) => mergeService.reconcileAlreadyMerged(workspaceId),
     sendTurn: (workspaceId, content) => sessionService.sendTurn(workspaceId, content),
+    // #1210: a siding drop against a workspace whose agent has already exited routes through
+    // the rebase-first resolveConflicts instead of a /turn that would spawn into a clean tree.
+    hasLiveSession: async (workspaceId) => Boolean(await findRunningSession(workspaceId, database)),
+    resolveConflicts: (workspaceId) => mergeService.resolveConflicts(workspaceId),
     boardEvents,
   });
 

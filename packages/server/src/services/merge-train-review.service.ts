@@ -325,7 +325,13 @@ export async function recordTrainReviewSiding(
   await recordTrainSidingDrop(
     { workspaceId: member.workspaceId, issueId: member.issueId, issueNumber: member.issueNumber, branch: member.branch },
     { reason: args.reason ?? `train review (#1194): ${args.findings.length} blocking finding(s)`, baseBranch: args.baseBranch, trainTipSha: args.trainTipSha, repoPath: args.repoPath },
-    { database, sendTurn: deps.sendTurn ?? noSessionPort, getBranchHeadSha: deps.getBranchHeadSha, now: args.now },
+    {
+      database, sendTurn: deps.sendTurn ?? noSessionPort, getBranchHeadSha: deps.getBranchHeadSha, now: args.now,
+      // #1210 is scoped to the conflict-drop siding path (merge-queue-train.ts); this review
+      // siding (#1194) always nudges via sendTurn as before — it has no resolveConflicts port
+      // wired, and widening its scope here is not this ticket's job.
+      hasLiveSession: async () => true,
+    },
   );
 }
 
