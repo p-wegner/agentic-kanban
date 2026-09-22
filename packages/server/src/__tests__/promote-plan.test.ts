@@ -20,6 +20,10 @@ import {
   planSweepAcquisition,
   planRestartOnly,
   formatRestartRefusal,
+  formatPromoteUsage,
+  formatUnknownFlagRefusal,
+  parsePromoteArgv,
+  KNOWN_PROMOTE_FLAGS,
   planRecoveryLane,
   classifyRecoveryDelta,
   buildRecoveryRecord,
@@ -47,6 +51,88 @@ const greenRow = (over: Record<string, unknown> = {}) => ({
   message: null,
   createdAt: new Date(NOW - 2 * HOUR).toISOString(),
   ...over,
+});
+
+describe("strict argv parsing (#1222)", () => {
+  it("refuses an unknown flag instead of falling through to a live promotion", () => {
+    const r = parsePromoteArgv(["--help"]);
+    // --help IS known (this is the regression case): it must parse ok and be flagged as help,
+    // never as an unknown flag that falls through.
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.help).toBe(true);
+  });
+
+  it("refuses a genuine typo of a known flag", () => {
+    const r = parsePromoteArgv(["--dryrun"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.unknown).toEqual(["--dryrun"]);
+      expect(r.knownFlags).toEqual([...KNOWN_PROMOTE_FLAGS]);
+    }
+  });
+
+  it("refuses every unrecognised token, not just the first", () => {
+    const r = parsePromoteArgv(["--dry_run", "--forcesweep"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.unknown).toEqual(["--dry_run", "--forcesweep"]);
+  });
+
+  it("accepts -h as well as --help", () => {
+    const r = parsePromoteArgv(["-h"]);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.help).toBe(true);
+  });
+
+  it("parses every real flag combination without flagging it unknown", () => {
+    const r = parsePromoteArgv(["--recover", "--with-migration", "--reason", "fix the leak"]);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.recover).toBe(true);
+      expect(r.withMigration).toBe(true);
+      expect(r.reason).toBe("fix the leak");
+      expect(r.help).toBe(false);
+      expect(r.dryRun).toBe(false);
+    }
+  });
+
+  it("does not treat --reason's value as a flag even when it looks like one", () => {
+    // A reason starting with "-" is rejected as a value (matches the old inline parser's
+    // behaviour) rather than being swallowed as an unknown flag.
+    const r = parsePromoteArgv(["--reason", "--not-a-real-reason"]);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.reason).toBeNull();
+  });
+
+  it("treats a bare --reason with nothing after it as reason: null, not a dangling flag", () => {
+    const r = parsePromoteArgv(["--reason"]);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.reason).toBeNull();
+  });
+
+  it("formats a usage block and an unknown-flag refusal that lists the known flags", () => {
+    expect(formatPromoteUsage()).toContain("--dry-run");
+    expect(formatPromoteUsage()).toContain("--help");
+    const refusal = formatUnknownFlagRefusal(["--dryrun"]);
+    expect(refusal).toContain("--dryrun");
+    for (const flag of KNOWN_PROMOTE_FLAGS) expect(refusal).toContain(flag);
+  });
+
+  it("defaults to every flag false and reason null on empty argv", () => {
+    const r = parsePromoteArgv([]);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r).toMatchObject({
+        help: false,
+        dryRun: false,
+        forceSweep: false,
+        noAwaitSweep: false,
+        recover: false,
+        withMigration: false,
+        restartStable: false,
+        reason: null,
+      });
+    }
+  });
 });
 
 describe("tag naming", () => {
