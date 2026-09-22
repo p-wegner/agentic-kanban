@@ -97,8 +97,12 @@ export const PROBE_MAX_DURATION_MS = CLONE_TIMEOUT_MS + INSTALL_TIMEOUT_MS + VER
  * the entire 45–60 minutes a probe ran the persisted "last result" was the OLD one and every
  * `tsx watch` restart in that window launched a second full verify.
  */
+/** Prefix shared with {@link baseHealthProbeStartPrefKey} so a sweep can find every such key
+ *  without knowing the set of project ids in advance (#1223's startup reap). */
+export const BASE_HEALTH_PROBE_START_PREF_PREFIX = "base_health_probe_started_";
+
 export function baseHealthProbeStartPrefKey(projectId: string): string {
-  return `base_health_probe_started_${projectId}`;
+  return `${BASE_HEALTH_PROBE_START_PREF_PREFIX}${projectId}`;
 }
 
 export interface BaseBranchVerifyResult {

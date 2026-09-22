@@ -81,6 +81,94 @@ export const DEFAULT_BOARD_URL = "http://127.0.0.1:3001";
 /** The project whose base-branch health decides the promotion. */
 export const DEFAULT_PROJECT_NAME = "agentic-kanban";
 
+/**
+ * Every flag `promote.mjs` understands. `--reason` is the one that takes a value; the rest are
+ * bare switches. `--help`/`-h` are real flags here (not "whatever falls through") so a typo of
+ * one word never lands anyone in the promotion lane.
+ */
+export const KNOWN_PROMOTE_FLAGS = Object.freeze([
+  "--dry-run",
+  "--force-sweep",
+  "--no-await-sweep",
+  "--recover",
+  "--with-migration",
+  "--restart-stable",
+  "--reason",
+  "--help",
+  "-h",
+]);
+
+/**
+ * Strict argv parsing (#1222). The old parser (`args.includes("--flag")`) silently ignores any
+ * token it does not recognise, so `--help`, `--dryrun`, `--dry_run`, or a misspelling of any
+ * real flag falls through to the FULL promotion lane — the single most dangerous default for a
+ * typo, since the operator's intent in every one of those cases is "ask me something / change
+ * nothing" and the script did the opposite.
+ *
+ * Collects every `--`/`-`-prefixed token and diffs it against {@link KNOWN_PROMOTE_FLAGS}.
+ * Returns `{ ok: false, unknown }` on the first pass rather than throwing, so the caller can
+ * print the known-flags list and refuse loudly instead of a stack trace.
+ */
+export function parsePromoteArgv(argv = []) {
+  const unknown = [];
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i];
+    if (!token.startsWith("-")) continue; // a value (e.g. --reason's argument), not a flag
+    if (token === "--reason") {
+      i++; // consume its value, whatever it is — not itself a flag to validate
+      continue;
+    }
+    if (!KNOWN_PROMOTE_FLAGS.includes(token)) unknown.push(token);
+  }
+  if (unknown.length > 0) {
+    return { ok: false, unknown, knownFlags: [...KNOWN_PROMOTE_FLAGS] };
+  }
+
+  const help = argv.includes("--help") || argv.includes("-h");
+  const reasonIndex = argv.indexOf("--reason");
+  const reason = reasonIndex >= 0 && argv[reasonIndex + 1] && !argv[reasonIndex + 1].startsWith("-") ? argv[reasonIndex + 1] : null;
+
+  return {
+    ok: true,
+    help,
+    dryRun: argv.includes("--dry-run"),
+    forceSweep: argv.includes("--force-sweep"),
+    noAwaitSweep: argv.includes("--no-await-sweep"),
+    recover: argv.includes("--recover"),
+    withMigration: argv.includes("--with-migration"),
+    restartStable: argv.includes("--restart-stable"),
+    reason,
+  };
+}
+
+/** Rendered once for `--help`/`-h` and for a refusal on an unknown flag. */
+export function formatPromoteUsage() {
+  return [
+    "Usage:",
+    "  node scripts/promote.mjs --dry-run        # print the resolved sha/tag/paths and every step; touch nothing",
+    "  node scripts/promote.mjs                  # promote (triggering + awaiting a sweep if one is needed)",
+    "  node scripts/promote.mjs --no-await-sweep # never trigger one; refuse when the recorded verdict is unusable",
+    '  node scripts/promote.mjs --recover --reason "fix the leak"   # FAST LANE: no sweep (#1054)',
+    "  node scripts/promote.mjs --force-sweep    # promote WITHOUT a green sweep (loud warning)",
+    "  node scripts/promote.mjs --restart-stable # RESTART-ONLY (#1202): after a reboot, start the",
+    "                                             # already-deployed tag if the port is free; refuse",
+    "                                             # (exit 2) without spawning if it is already held.",
+    "                                             # No tag, no fast-forward, no build, no sweep. Also",
+    "                                             # `pnpm stable:start`.",
+    "  node scripts/promote.mjs --with-migration # (with --recover) ack that the delta includes a migration",
+    '  node scripts/promote.mjs --reason "..."   # (with --recover) why this bypassed the sweep',
+    "  node scripts/promote.mjs --help           # this text",
+  ].join("\n");
+}
+
+/** One line naming the known flags, for an unknown-flag refusal. */
+export function formatUnknownFlagRefusal(unknown) {
+  return (
+    `unknown flag${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}\n` +
+    `known flags: ${KNOWN_PROMOTE_FLAGS.join(", ")}\n\n${formatPromoteUsage()}`
+  );
+}
+
 export function resolveStableCheckout({ env = process.env, repoRoot = process.cwd() } = {}) {
   if (env.KANBAN_STABLE_CHECKOUT) return resolve(env.KANBAN_STABLE_CHECKOUT);
   return resolve(repoRoot, "..", DEFAULT_STABLE_CHECKOUT_DIRNAME);
