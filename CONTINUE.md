@@ -39,6 +39,22 @@ between filing and my Done move, and the builder implemented the ticket's "left 
 ratchet against an unmocked Tier-0 read, `8260c97c26`) on top of the direct fix. Merged by the
 queue as `f7025e1e0a`; #1221 is Done.
 
+**Promoted: `stable-20260922-2` = `d1fe5d8178` is live on 3001** (smoke passed, pid 27968,
+rollback tag `stable-20260922`). It carries #1210, #1220 and #1221; the authorizing sweep was
+green on master tip at 2026-09-22T08:41:37Z, triggered by the promote run itself.
+
+**Incident during that promotion, worth knowing before the next one.** `promote.mjs` does not
+parse `--help` and treats an unknown flag as a LIVE RUN: it tagged, fast-forwarded and started
+building. That build was then killed by a too-short wrapper timeout (exit 143), leaving
+`dist/migrations/meta/_journal.json` gone and the board `degraded`; the script's own rollback was
+cut short by the same timeout. Recovery was `pnpm build` + `db:migrate` + stopping the stale pid
+by signature + `promote.mjs --restart-stable`. The operated DB was never touched.
+Second-order effect: stopping that pid killed an in-flight base-branch sweep (stamp
+`2026-09-22T07:09:14Z`), and the stamp is persisted so a restart cannot forget it — it blocks
+every reprobe for the 65-min ceiling (5 clone + 15 install + 45 verify). A 40-min wait sat
+entirely inside that window, so the first promotion attempt legitimately found no fresh verdict
+and changed nothing. It self-healed at 08:14.
+
 **The board is at zero open work.** 1204 issues: 1193 Done, 10 Cancelled, 0 open. WIP 0/2, no
 workspaces, no sessions, and no `loop.sh` running. The next pass is a producer pass, not a
 builder pass — nothing will auto-start because there is nothing to start.
