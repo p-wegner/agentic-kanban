@@ -26,8 +26,22 @@ misleading when `merge_strategy = merge_queue` — merging is owned by the queue
 disabled. Trains on the stable build (pre-#1218) still write no per-leaf verify log, so a leaf
 bisected out has no readable reason; a direct `POST …/merge` is how you get one.
 
+**The stable board died at ~01:54 and nobody noticed for 6.7 h.** `[exit-record]` on restart: pid
+35932 left NO exit record (killed without notice — OOM or a hard kill; it went down right after
+#1210's direct gate had PASSED, before the merge step). Restarted 08:34 with the sanctioned
+`node scripts/promote.mjs --restart-stable` (smoke passed, `stable-20260921-2`, pid 32640). The
+first #1210 merge was therefore lost with the process; re-fired after the restart. Suspect worth
+checking before the next long run: the board is spawned from inside a Claude session by
+`promote.mjs`; if it dies with that session's process tree, it needs a service/scheduled-task home.
+
+**#1221 grew a workspace of its own:** the monitor started it in the minute between filing and
+my Done move, and the builder implemented the ticket's "left open" half (a ratchet against an
+unmocked Tier-0 read, `8260c97c26`) on top of the direct fix. Landing it via the queue; #1221 is
+In Review until then, correctly.
+
 ### Next steps, in order
-1. #1210: last open ticket. Its branch is rebased on master with the #1221 fix, ready-for-merge;
+1. #1210 and #1221: the two open tickets, both In Review, both ready-for-merge on a rebased
+   branch; a direct gated merge for #1210 is running. Old text: #1210: last open ticket. Its branch is rebased on master with the #1221 fix, ready-for-merge;
    the train bisected it out with an unreadable tail, so a direct gated merge was fired at 01:50 —
    check `git log -1 master` / `issue get 1210`; if red, read `%TEMP%/kanban-verify-71a92ffe-….log`.
 2. `pnpm promote --dry-run` once master is quiet: #1216 (resolve-conflicts), #1218 (train reasons),
