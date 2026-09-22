@@ -633,11 +633,21 @@ export function createMergeTrainRunner(deps: {
   reviewTrain?: typeof runTrainReview;
   /** #1192 — the port a siding drop nudges through. 409-safe: a busy agent is not an error. */
   sendTurn: (workspaceId: string, content: string) => Promise<unknown>;
+  /**
+   * #1210 — is there a live session to receive that `/turn`? Defaults to the real check
+   * (`merge-train-siding.service.ts`'s own default) when omitted.
+   */
+  hasLiveSession?: (workspaceId: string) => Promise<boolean>;
+  /**
+   * #1210 — routes a siding drop through the rebase-first fix (#1209) when the member's agent
+   * is gone, instead of a `/turn` that would fall through to a clean-tree spawn.
+   */
+  resolveConflicts?: (workspaceId: string) => Promise<unknown>;
   /** #1186 — broadcasts `merge_train_changed` at every `merge_trains` row state write, so a
    * departure-board "live train" panel does not need to poll. */
   boardEvents?: BoardEventSink;
 }) {
-  const { database, reconcileAlreadyMerged, sendTurn, boardEvents } = deps;
+  const { database, reconcileAlreadyMerged, sendTurn, hasLiveSession, resolveConflicts, boardEvents } = deps;
   const reviewTrain = deps.reviewTrain ?? runTrainReview;
 
   /**
@@ -776,7 +786,7 @@ export function createMergeTrainRunner(deps: {
       const uniqueDrops = uniqueByWorkspace(result.dropped.filter(isSidingDrop));
       for (const d of uniqueDrops) {
         const member = members.find((m) => m.workspaceId === d.workspaceId);
-        if (member) await recordTrainSidingDrop(member, { reason: d.reason, baseBranch, trainTipSha, repoPath }, { database, sendTurn });
+        if (member) await recordTrainSidingDrop(member, { reason: d.reason, baseBranch, trainTipSha, repoPath }, { database, sendTurn, hasLiveSession, resolveConflicts });
       }
     }
     for (const d of result.dropped) {
