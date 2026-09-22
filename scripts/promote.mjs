@@ -36,6 +36,13 @@
  *                                              # (exit 2) without spawning if it is already held.
  *                                              # No tag, no fast-forward, no build, no sweep. Also
  *                                              # `pnpm stable:start`.
+ *   node scripts/promote.mjs --help            # print this usage and exit 0; touches nothing
+ *
+ * Argv parsing is STRICT (#1222): any token this script does not recognise (a typo of a flag
+ * above, or `--help` before it was one) REFUSES with the known-flags list rather than silently
+ * falling through to a live promotion — the previous `args.includes("--flag")` parser ignored
+ * anything unrecognised, so `--help` itself tagged, fast-forwarded and rebuilt the stable
+ * checkout on 2026-09-22.
  *
  * The RECOVERY lane (`--recover`, #1054) exists because the full lane's precondition — a fresh
  * green full sweep, which is a clone + install + full verify with a 45-minute ceiling — is the
@@ -78,9 +85,12 @@ import {
   buildPromotionPlan,
   checkPromoteDirection,
   formatPlan,
+  formatPromoteUsage,
+  formatUnknownFlagRefusal,
   isFreshSweepRow,
   isProbingThisProject,
   nextStableTag,
+  parsePromoteArgv,
   parseSweepVerdict,
   planSweepAcquisition,
   planRestartOnly,
@@ -105,29 +115,40 @@ import { OUTCOMES_RELPATH, formatGateEvidence, parseOutcomeRows, summarizeGateEv
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const args = process.argv.slice(2);
+
+// #1222: strict parsing — ANY unrecognised flag (a typo, `--help` before it was a real flag,
+// `--dryrun`/`--dry_run`) must REFUSE rather than silently fall through to the full promotion
+// lane. `parsePromoteArgv` is the pure half (`promote-plan.mjs`), tested in isolation.
+const parsedArgv = parsePromoteArgv(args);
+if (!parsedArgv.ok) {
+  console.error(`[promote] REFUSED — ${formatUnknownFlagRefusal(parsedArgv.unknown)}`);
+  process.exit(1);
+}
+if (parsedArgv.help) {
+  console.log(formatPromoteUsage());
+  process.exit(0);
+}
+
 const opts = {
-  dryRun: args.includes("--dry-run"),
-  forceSweep: args.includes("--force-sweep"),
+  dryRun: parsedArgv.dryRun,
+  forceSweep: parsedArgv.forceSweep,
   // #1044: the trigger-and-wait path is the DEFAULT, because the alternative is what turned
   // `--force-sweep` into the routine path. This flag restores the old refuse-immediately
   // behaviour for a caller that genuinely cannot wait tens of minutes.
-  noAwaitSweep: args.includes("--no-await-sweep"),
+  noAwaitSweep: parsedArgv.noAwaitSweep,
   // #1054: the RECOVERY lane. Skips the sweep entirely and deploys the branch tip, on the premise
   // that for a local single-user board the existing pipeline (build -> migrate -> restart -> smoke
   // -> automatic rollback) already IS the gate, and that minutes of pre-verification are the wrong
   // trade at that blast radius — the case it exists for is "the running board has a leak, fix it
   // now", where a slow gate is worst exactly when the fix is most urgent.
-  recover: args.includes("--recover"),
+  recover: parsedArgv.recover,
   // The one ack the lane asks for: a migration is the only change a rollback cannot reverse.
-  withMigration: args.includes("--with-migration"),
+  withMigration: parsedArgv.withMigration,
   // #1202: a restart-only door for after a reboot — reuses startStableBoard()/smoke() and the
   // same port-owner signature check the stop step uses, but never tags, builds, migrates or
   // kills. A separate lane from promotion, not another flavour of it.
-  restartStable: args.includes("--restart-stable"),
-  reason: (() => {
-    const i = args.indexOf("--reason");
-    return i >= 0 && args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : null;
-  })(),
+  restartStable: parsedArgv.restartStable,
+  reason: parsedArgv.reason,
 };
 
 /**
@@ -304,11 +325,18 @@ async function acquireFreshSweep(projectId, previousRow, waitMs) {
         const answer = await requestReprobe(projectId);
         const probing = isProbingThisProject(answer);
         nextAskAt = Date.now() + (probing ? PROBE_RECHECK_MS : SWEEP_POLL_INTERVAL_MS);
+        // #1223 — "probe_in_flight" alone cannot be told apart from a stamp whose owning process
+        // was killed (the board now reaps those on boot, but this loop must not assume that ran
+        // recently). When the response names the stamp's age/expiry, say so instead of the old
+        // unqualified claim that a probe is running.
+        const stampNote = answer?.skippedReason === "probe_in_flight" && answer?.probeInFlightSince
+          ? ` (in flight since ${answer.probeInFlightSince.startedAt}, expires ${answer.probeInFlightSince.expiresAt})`
+          : "";
         log(
           `[promote] reprobe: started=${answer?.started === true} ` +
-            `${answer?.skippedReason ? `skipped=${answer.skippedReason} ` : ""}` +
+            `${answer?.skippedReason ? `skipped=${answer.skippedReason}${stampNote} ` : ""}` +
             `${answer?.joinedRunningProbe ? "(some project's probe was already running) " : ""}` +
-            `${probing ? "— this project's probe is running; waiting for its verdict" : "— nothing is probing this project yet; will ask again"}`,
+            `${probing ? "— this project's probe is (believed) running; waiting for its verdict" : "— nothing is probing this project yet; will ask again"}`,
         );
       } catch (e) {
         nextAskAt = Date.now() + SWEEP_POLL_INTERVAL_MS;
