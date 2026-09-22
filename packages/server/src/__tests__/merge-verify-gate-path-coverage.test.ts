@@ -38,6 +38,18 @@ vi.mock("@agentic-kanban/shared/lib/setup-script", () => ({
 vi.mock("@agentic-kanban/shared/lib/smoke-check", () => ({
   runSmokeCheck: (...args: unknown[]) => runSmokeCheck(...args),
 }));
+// The gate asks the HOST whether it may run at all (#1009 Tier-0 floor, #1056 %TEMP% probe) before
+// any of the decision logic this file tests. Left unmocked, that reads the real machine's free
+// memory, so on a loaded box every case here fails with "pre-merge gate HELD — host saturated"
+// (#1221 — same defect as pre-merge-gate.service.test.ts). Admission has its own suite
+// (gate-host-admission.test.ts); here it is always granted.
+vi.mock("../services/gate-quiesce.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/gate-quiesce.js")>();
+  return {
+    ...actual,
+    resolveGateHostAdmission: vi.fn(async () => ({ admit: true, reason: "host_has_room" })),
+  };
+});
 
 const { runPreMergeGate, resolveMergeGate, gateAlreadyPassed, gateSkipExplicit, MERGE_GATE_EVIDENCE_MAX_AGE_MS } =
   await import("../services/pre-merge-gate.service.js");
