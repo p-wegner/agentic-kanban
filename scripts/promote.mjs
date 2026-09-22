@@ -304,11 +304,18 @@ async function acquireFreshSweep(projectId, previousRow, waitMs) {
         const answer = await requestReprobe(projectId);
         const probing = isProbingThisProject(answer);
         nextAskAt = Date.now() + (probing ? PROBE_RECHECK_MS : SWEEP_POLL_INTERVAL_MS);
+        // #1223 — "probe_in_flight" alone cannot be told apart from a stamp whose owning process
+        // was killed (the board now reaps those on boot, but this loop must not assume that ran
+        // recently). When the response names the stamp's age/expiry, say so instead of the old
+        // unqualified claim that a probe is running.
+        const stampNote = answer?.skippedReason === "probe_in_flight" && answer?.probeInFlightSince
+          ? ` (in flight since ${answer.probeInFlightSince.startedAt}, expires ${answer.probeInFlightSince.expiresAt})`
+          : "";
         log(
           `[promote] reprobe: started=${answer?.started === true} ` +
-            `${answer?.skippedReason ? `skipped=${answer.skippedReason} ` : ""}` +
+            `${answer?.skippedReason ? `skipped=${answer.skippedReason}${stampNote} ` : ""}` +
             `${answer?.joinedRunningProbe ? "(some project's probe was already running) " : ""}` +
-            `${probing ? "— this project's probe is running; waiting for its verdict" : "— nothing is probing this project yet; will ask again"}`,
+            `${probing ? "— this project's probe is (believed) running; waiting for its verdict" : "— nothing is probing this project yet; will ask again"}`,
         );
       } catch (e) {
         nextAskAt = Date.now() + SWEEP_POLL_INTERVAL_MS;
