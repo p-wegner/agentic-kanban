@@ -44,6 +44,22 @@ function glyphFor(status: string | undefined): string {
   return STATUS_GLYPH[status] ?? ".";
 }
 
+/**
+ * Statuses shown as an in-flight line in the tracker (#1225). Wider than
+ * `ACTIVE_WORKSPACE_STATUSES` on purpose: that shared set feeds the operator focus filter
+ * and WIP accounting elsewhere, where "blocked"/"error" correctly do NOT count as active
+ * capacity — but the tracker's job is to show the operator what is happening, and a
+ * quota-blocked or errored workspace disappearing entirely (while the header still says
+ * "In Progress:1") is the exact failure this line list exists to avoid.
+ */
+const TRACKER_LINE_STATUSES = new Set<string>([...ACTIVE_WORKSPACE_STATUSES, "blocked", "error"]);
+
+/** First non-empty line of an agent message, used as a short blocked/error reason. */
+function firstLine(text: string): string {
+  const line = text.split("\n").find((l) => l.trim().length > 0);
+  return line ? line.trim() : "";
+}
+
 /** `3h 12m` / `45s` — compact, no seconds once past a minute, matches `timeSince` elsewhere. */
 export function ageSince(iso: string | null | undefined, nowMs: number): string {
   if (!iso) return "-";
@@ -109,15 +125,20 @@ export function renderTrackerFrame(
   );
   lines.push(header);
 
-  const inFlight = snapshot.issues.filter((issue) => issue.workspace && ACTIVE_WORKSPACE_STATUSES.has(issue.workspace.status));
+  const inFlight = snapshot.issues.filter((issue) => issue.workspace && TRACKER_LINE_STATUSES.has(issue.workspace.status));
   if (inFlight.length === 0) {
     lines.push(truncate("(no in-flight workspaces)", width));
   } else {
     for (const issue of inFlight) {
-      const glyph = glyphFor(issue.workspace?.status);
+      const status = issue.workspace?.status;
+      const glyph = glyphFor(status);
       const num = issue.issueNumber != null ? `#${issue.issueNumber}` : "#?";
       const age = ageSince(issue.lastActivity, nowMs);
-      lines.push(truncate(`${glyph} ${num} ${issue.title} (${age})`, width));
+      const reason =
+        (status === "blocked" || status === "error") && issue.lastAgentMessage
+          ? ` - ${firstLine(issue.lastAgentMessage)}`
+          : "";
+      lines.push(truncate(`${glyph} ${num} ${issue.title} (${age})${reason}`, width));
     }
   }
 

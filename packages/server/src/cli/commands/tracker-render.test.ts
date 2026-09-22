@@ -71,6 +71,47 @@ const FIXTURE = snapshot([
   }),
 ]);
 
+describe("renderTrackerFrame — blocked/error workspaces (#1225)", () => {
+  it("keeps a blocked workspace visible as a `!` line with its last agent message, even when attention is null", () => {
+    const withBlocked = snapshot([
+      ...FIXTURE.issues,
+      issue({
+        issueNumber: 1224,
+        title: "Quota-blocked ticket",
+        statusName: "In Progress",
+        workspace: { id: "ws-1224", branch: "feature/ak-1224", status: "blocked", workingDir: "/repo/.worktrees/ak-1224", baseBranch: "master", isDirect: false, readyForMerge: false },
+        lastActivity: "2026-09-16T12:00:00.000Z",
+        lastAgentMessage: "You've hit your session limit · resets 2pm",
+        attention: null,
+      }),
+    ]);
+
+    const frame = renderTrackerFrame(withBlocked, { limit: 5 }, { width: 80, nowMs: NOW_MS });
+    const blockedLine = frame.lines.find((l) => l.includes("#1224"));
+    expect(blockedLine).toBeDefined();
+    expect(blockedLine).toContain("!");
+    expect(blockedLine).toContain("You've hit your session limit");
+  });
+
+  it("keeps an errored workspace visible as an `x` line", () => {
+    const withError = snapshot([
+      issue({
+        issueNumber: 55,
+        title: "Errored ticket",
+        statusName: "In Progress",
+        workspace: { id: "ws-55", branch: "feature/ak-55", status: "error", workingDir: "/repo/.worktrees/ak-55", baseBranch: "master", isDirect: false, readyForMerge: false },
+        lastActivity: "2026-09-16T12:00:00.000Z",
+        attention: null,
+      }),
+    ]);
+
+    const frame = renderTrackerFrame(withError, { limit: 5 }, { width: 80, nowMs: NOW_MS });
+    const errorLine = frame.lines.find((l) => l.includes("#55"));
+    expect(errorLine).toBeDefined();
+    expect(errorLine!.startsWith("x")).toBe(true);
+  });
+});
+
 describe("renderTrackerFrame", () => {
   it("renders a header, one line per in-flight workspace, and an attention section", () => {
     const frame = renderTrackerFrame(FIXTURE, { limit: 5 }, { width: 80, nowMs: NOW_MS });
