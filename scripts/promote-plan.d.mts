@@ -17,6 +17,31 @@ export declare const DEFAULT_MAX_SWEEP_AGE_HOURS: number;
 export declare const DEFAULT_BOARD_URL: string;
 export declare const DEFAULT_PROJECT_NAME: string;
 export declare const DEFAULT_SWEEP_WAIT_MINUTES: number;
+
+// --- strict argv parsing (#1222) ---------------------------------------------------------------
+
+export declare const KNOWN_PROMOTE_FLAGS: readonly string[];
+
+export interface ParsedPromoteArgvOk {
+  ok: true;
+  help: boolean;
+  dryRun: boolean;
+  forceSweep: boolean;
+  noAwaitSweep: boolean;
+  recover: boolean;
+  withMigration: boolean;
+  restartStable: boolean;
+  reason: string | null;
+}
+export interface ParsedPromoteArgvUnknown {
+  ok: false;
+  unknown: string[];
+  knownFlags: string[];
+}
+export declare function parsePromoteArgv(argv?: string[]): ParsedPromoteArgvOk | ParsedPromoteArgvUnknown;
+
+export declare function formatPromoteUsage(): string;
+export declare function formatUnknownFlagRefusal(unknown: string[]): string;
 export declare const SWEEP_POLL_INTERVAL_MS: number;
 export declare const REPROBEABLE_SWEEP_REASONS: readonly string[];
 
