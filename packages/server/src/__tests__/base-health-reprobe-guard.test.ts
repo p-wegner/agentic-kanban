@@ -102,12 +102,22 @@ describe("requestBaseBranchReprobe yields to the machine guards (#935)", () => {
   });
 
   it("does NOT probe while another probe is already in flight", async () => {
-    probeStartedAt.mockResolvedValue(iso(-60_000));
+    const startedAt = iso(-60_000);
+    probeStartedAt.mockResolvedValue(startedAt);
     latestRow.mockResolvedValue({ createdAt: iso(-24 * 60 * 60 * 1000), outcome: "timeout" });
 
     const verdict = await requestBaseBranchReprobe("p1", {} as never, INTERVAL_MS, NOW);
 
-    expect(verdict).toEqual({ due: false, reason: "probe_in_flight" });
+    // #1223 — the verdict now names when the stamp started and when it will expire, so a caller
+    // can tell a live probe from a stale claim instead of reading an unqualified "probe_in_flight".
+    expect(verdict).toEqual({
+      due: false,
+      reason: "probe_in_flight",
+      probeInFlightSince: {
+        startedAt,
+        expiresAt: new Date(Date.parse(startedAt) + PROBE_MAX_DURATION_MS).toISOString(),
+      },
+    });
     expect(verifyBaseBranchHealth).not.toHaveBeenCalled();
   });
 

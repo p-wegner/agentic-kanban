@@ -18,6 +18,7 @@ import type { Database } from "../db/index.js";
 import {
   verifyBaseBranchHealth,
   baseHealthProbeStartPrefKey,
+  BASE_HEALTH_PROBE_START_PREF_PREFIX,
   PROBE_MAX_DURATION_MS,
 } from "./base-branch-health.service.js";
 import {
@@ -27,7 +28,7 @@ import {
 } from "../repositories/base-branch-health.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { revParse } from "@agentic-kanban/shared/lib/git-service";
-import { getPreference } from "../repositories/preferences.repository.js";
+import { getPreference, getAllPreferences, setPreference } from "../repositories/preferences.repository.js";
 import { buildGateBusy, buildSemaphoreActive, buildSemaphoreOldestActiveAgeMs } from "./jvm-build-semaphore.js";
 import {
   inspectMachineVerifyLock,
@@ -173,6 +174,15 @@ export interface BaseHealthDueVerdict {
     | "gate_running"
     | "sha_unchanged"
     | "host_saturated";
+  /**
+   * Present only when `reason === "probe_in_flight"` (#1223). An operator (or `promote.mjs`)
+   * cannot tell a live probe from a corpse whose owning process was killed mid-run — both read
+   * as the same unqualified "probe_in_flight" — so this names the stamp's own start time and its
+   * expiry under `PROBE_MAX_DURATION_MS`, the numbers a reader needs to decide whether waiting
+   * makes sense. `startedAt` is the persisted ISO stamp; `expiresAt` is when
+   * `isBaseHealthProbeDue` stops trusting it.
+   */
+  probeInFlightSince?: { startedAt: string; expiresAt: string };
 }
 
 /**
@@ -196,7 +206,14 @@ export function isBaseHealthProbeDue(input: BaseHealthDueInput): BaseHealthDueVe
   //    forever would wedge the project permanently, so it EXPIRES rather than blocks.
   const startMs = input.probeStartedAt ? Date.parse(input.probeStartedAt) : NaN;
   if (Number.isFinite(startMs) && startMs <= nowMs && nowMs - startMs < PROBE_MAX_DURATION_MS) {
-    return { due: false, reason: "probe_in_flight" };
+    return {
+      due: false,
+      reason: "probe_in_flight",
+      probeInFlightSince: {
+        startedAt: input.probeStartedAt as string,
+        expiresAt: new Date(startMs + PROBE_MAX_DURATION_MS).toISOString(),
+      },
+    };
   }
 
   // 1b. #1009 — the host is below the same free-RAM floor the monitor holds auto-starts at.
@@ -400,4 +417,32 @@ export async function requestBaseBranchReprobe(
     );
   }
   return verdict;
+}
+
+/**
+ * Clear every persisted "probe started" stamp on boot (#1223).
+ *
+ * `base_health_probe_started_<projectId>` is deliberately persisted so a restart mid-probe does
+ * not forget it — `isBaseHealthProbeDue` trusts the stamp for up to `PROBE_MAX_DURATION_MS`
+ * (65 min) before treating it as abandoned. That is the right safety property for a LIVE
+ * process, but a freshly-booted process starts with an empty `inFlightProbes` map: nothing it
+ * runs from now on could possibly be the probe that wrote an inherited stamp, so a stamp already
+ * on disk at boot can only be one thing — the write half of `runBaseBranchProbe`'s `finally`
+ * (which clears it on completion) never ran, because the owning process was killed, restarted,
+ * or crashed mid-probe. Trusting it anyway is what wedged #1223: `promote.mjs` read
+ * `probe_in_flight` and waited out most of its 40-minute budget against a stamp with nothing
+ * behind it.
+ *
+ * Mirrors `cleanupStaleSessions` (`startup/startup-tasks.ts`): both reap persisted state whose
+ * owning process cannot possibly still exist in THIS generation. Same idempotent shape.
+ */
+export async function reapStaleBaseHealthProbeStamps(database: Database = db): Promise<string[]> {
+  const rows = await getAllPreferences(database);
+  const stale = rows.filter(
+    (r) => r.key.startsWith(BASE_HEALTH_PROBE_START_PREF_PREFIX) && r.value.trim() !== "",
+  );
+  for (const row of stale) {
+    await setPreference(row.key, "", database);
+  }
+  return stale.map((r) => r.key);
 }
