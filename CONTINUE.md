@@ -34,16 +34,18 @@ first #1210 merge was therefore lost with the process; re-fired after the restar
 checking before the next long run: the board is spawned from inside a Claude session by
 `promote.mjs`; if it dies with that session's process tree, it needs a service/scheduled-task home.
 
-**#1221 grew a workspace of its own:** the monitor started it in the minute between filing and
-my Done move, and the builder implemented the ticket's "left open" half (a ratchet against an
-unmocked Tier-0 read, `8260c97c26`) on top of the direct fix. Landing it via the queue; #1221 is
-In Review until then, correctly.
+**#1221 grew a workspace of its own, and it landed:** the monitor started it in the minute
+between filing and my Done move, and the builder implemented the ticket's "left open" half (a
+ratchet against an unmocked Tier-0 read, `8260c97c26`) on top of the direct fix. Merged by the
+queue as `f7025e1e0a`; #1221 is Done.
+
+**The board is at zero open work.** 1204 issues: 1193 Done, 10 Cancelled, 0 open. WIP 0/2, no
+workspaces, no sessions, and no `loop.sh` running. The next pass is a producer pass, not a
+builder pass — nothing will auto-start because there is nothing to start.
 
 ### Next steps, in order
-1. #1210 and #1221: the two open tickets, both In Review, both ready-for-merge on a rebased
-   branch; a direct gated merge for #1210 is running. Old text: #1210: last open ticket. Its branch is rebased on master with the #1221 fix, ready-for-merge;
-   the train bisected it out with an unreadable tail, so a direct gated merge was fired at 01:50 —
-   check `git log -1 master` / `issue get 1210`; if red, read `%TEMP%/kanban-verify-71a92ffe-….log`.
+1. Refill the backlog — the board has no open ticket at all (see above). Until it does, every
+   other step here is the operator's, not the monitor's.
 2. `pnpm promote --dry-run` once master is quiet: #1216 (resolve-conflicts), #1218 (train reasons),
    #1219, #1221 are worth having on the operated board.
 3. Re-enable auto-merge on the three fixture projects paused 2026-09-20 for CPU.
@@ -51,8 +53,9 @@ In Review until then, correctly.
    gate swap hard at ~2 GB usable.
 
 ### Verified by
-Each landing is a merge commit on master; `issue list` shows only #1210 outside Done/Cancelled;
-the #1221 fix ran 33/33 alone on master; the killed #1219 gate had 0 FAIL lines in its log.
+Each landing is a merge commit on master (#1210 `270f2d2db0`, #1221 `f7025e1e0a`); `issue list`
+shows nothing outside Done/Cancelled; the two gate suites ran 42/42 on master at 11.9 GB free
+after the #1221 merge; the killed #1219 gate had 0 FAIL lines in its log.
 
 ## 2026-09-21 (evening) — the stranded set landed, backlog handed to the monitor
 
