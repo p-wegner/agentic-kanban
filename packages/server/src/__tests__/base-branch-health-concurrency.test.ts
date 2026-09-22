@@ -256,7 +256,8 @@ describe("isBaseHealthProbeDue (#712)", () => {
       lastOutcome: "green",
       probeStartedAt: iso(-5 * 60 * 1000),
     });
-    expect(verdict).toEqual({ due: false, reason: "probe_in_flight" });
+    expect(verdict.due).toBe(false);
+    expect(verdict.reason).toBe("probe_in_flight");
   });
 
   it("treats a start stamp older than the probe ceiling as an abandoned run, not a lock", () => {

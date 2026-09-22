@@ -112,6 +112,11 @@ export function createProjectHealthRoute(database: Database) {
       machine: !verdict.due && verdict.reason === "host_saturated"
         ? { freeGb: readTier0Capacity().freeGb, cpuPct: await readCpuBusyPct().catch(() => null) }
         : null,
+      // #1223 — "probe_in_flight" alone cannot be told apart from a killed-process stamp with
+      // nothing behind it (startup now reaps those, but a stamp can still be legitimately live
+      // within one process's uptime). Name when it started and when `isBaseHealthProbeDue` will
+      // stop trusting it, so a caller can decide to wait rather than assume either way.
+      probeInFlightSince: verdict.probeInFlightSince ?? null,
     });
   });
 
