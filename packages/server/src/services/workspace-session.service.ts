@@ -14,7 +14,7 @@ import {
 } from "../repositories/workspace-session.repository.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEventSink } from "./board-events.js";
-import { loadAgentSettings, resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
+import { loadAgentSettings, resolveAgentSettings, toExecutorProvider, type AgentSettings } from "./agent-settings.service.js";
 import {
   getWorkspaceById,
   moveIssueToInProgress,
@@ -33,6 +33,7 @@ import { getPreference, getAllPreferencesCached } from "../repositories/preferen
 import { buildImplementPrompt, buildRejectPrompt, writePlanFile, PLAN_FILE } from "./plan-mode.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { buildPhaseArtifactsContext, isImplementWorkflowNode } from "./phase-artifacts.service.js";
+import { buildProfileSelectionReason, type ProfileSelectionReason } from "../lib/profile-selection-reason.js";
 import {
   WorkspaceError,
   applyWorkspaceAgentSelection,
@@ -49,6 +50,47 @@ import { resolveEffectiveModel } from "./effective-config.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+
+/**
+ * #1226: the two halves of "which profile, and why" for a relaunch. Kept as free functions
+ * (not closures inside `createWorkspaceSessionService`) so this logic doesn't count toward
+ * that factory's own NLOC ratchet (#800) — `launchSession` is one of several functions it
+ * defines, and every nested closure adds to the enclosing function's line count.
+ */
+async function resolveOverriddenResumeSelection(
+  database: Database,
+  id: string,
+  ws0: Parameters<typeof applyWorkspaceAgentSelection>[1],
+  body: Record<string, unknown>,
+  profileOverride: NonNullable<ReturnType<typeof readLaunchProfileOverride>>,
+): Promise<{ selection: AgentSettings; profileSelectionReason: ProfileSelectionReason | null }> {
+  const resolved = await resolveRelaunchAgentSelection(
+    database,
+    await resolveProjectId(id, database),
+    ws0,
+    body.agentCommand as string | undefined,
+    profileOverride,
+  );
+  return { selection: resolved, profileSelectionReason: resolved.profileSelectionReason };
+}
+
+function resolveInheritedResumeSelection(
+  prefMap: Map<string, string>,
+  body: Record<string, unknown>,
+  ws0: Parameters<typeof applyWorkspaceAgentSelection>[1],
+): { selection: AgentSettings; profileSelectionReason: ProfileSelectionReason | null } {
+  const selection = applyWorkspaceAgentSelection(resolveAgentSettings(prefMap, body.agentCommand as string | undefined), ws0, prefMap);
+  const profileSelectionReason = selection.profile
+    ? buildProfileSelectionReason({
+        selected: `${selection.profile.provider}:${selection.profile.name}`,
+        source: "workspace",
+        candidates: [{ id: `${selection.profile.provider}:${selection.profile.name}`, usedPct: null }],
+        explicit: true,
+      })
+    : null;
+  return { selection, profileSelectionReason };
+}
+
 export function createWorkspaceSessionService(deps: {
   database: Database;
   getSessionManager?: () => SessionManager;
@@ -204,15 +246,9 @@ export function createWorkspaceSessionService(deps: {
     // enforcement seam); with no override the path below is byte-for-byte what it was, so
     // an ordinary relaunch keeps honoring the profile baked onto the workspace row.
     const profileOverride = readLaunchProfileOverride(body, ws0.provider);
-    const selection = profileOverride
-      ? await resolveRelaunchAgentSelection(
-          database,
-          await resolveProjectId(id, database),
-          ws0,
-          body.agentCommand as string | undefined,
-          profileOverride,
-        )
-      : applyWorkspaceAgentSelection(resolveAgentSettings(prefMap, body.agentCommand as string | undefined), ws0, prefMap);
+    const { selection, profileSelectionReason } = profileOverride
+      ? await resolveOverriddenResumeSelection(database, id, ws0, body, profileOverride)
+      : resolveInheritedResumeSelection(prefMap, body, ws0);
     const { agentCommand, agentArgs, profile: agentProfile, provider: agentProvider, resumeWithNewModel, permissionPromptTool } =
       selection;
 
@@ -263,10 +299,10 @@ export function createWorkspaceSessionService(deps: {
     await refreshWorktreeMaterialization(ws0);
 
     const sessionId = await getSessionManager().startSession({
-      workspaceId: id, prompt, agentCommand, agentArgs, resumeFromId, 
+      workspaceId: id, prompt, agentCommand, agentArgs, resumeFromId,
       provider: toExecutorProvider(agentProvider), multiTurn: false, permissionPromptTool,
       planMode, resumeWithNewModel, triggerType: "chat", profile: agentProfile, skipPermissions,
-      model: resolvedModel,
+      model: resolvedModel, profileSelectionReason,
     });
 
     await updateWorkspaceStatus(id, "active", {

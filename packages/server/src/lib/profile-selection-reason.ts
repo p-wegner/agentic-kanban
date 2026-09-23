@@ -133,11 +133,15 @@ export function buildProfileSelectionReason(
       ? "clamped"
       : input.explicit
         ? "explicit"
-      // Headroom only DECIDED when there was a real choice AND a measurement to make it
-      // with — ruling a candidate out as exhausted counts, since that is the reading
-      // deciding too. One candidate, or none measured, is list order; calling that
-      // "headroom" would report a decision nothing actually made.
-      : candidates.length > 1 && candidates.some((c) => c.usedPct !== null)
+      // Headroom only DECIDED when there was a real choice AND the picked candidate's OWN
+      // reading is what won it — ruling a candidate out as exhausted counts, since that is
+      // the reading deciding too. #1226: a LOSING candidate having a measurement is not
+      // enough — `anth` (unmeasured) being kept over `team5x` (measured, 5% used) was
+      // reported as "chosen by headroom" even though nothing was ranked; the roster kept
+      // the already-active, still-usable selection regardless of `team5x`'s reading. That
+      // is list order (or "explicit" alone), never headroom, unless the SELECTED profile
+      // itself carries a measurement.
+      : candidates.length > 1 && selectedUsedPct !== null
         ? "headroom"
         : candidates.length > 1
           ? "list-order"
