@@ -55,8 +55,18 @@ describe("detectProviderAuthFailure", () => {
     ["not authenticated", "not-authenticated"],
     ["No credentials found", "not-authenticated"],
     ["Please run `claude login`", "not-authenticated"],
+    ["Your organization has disabled Claude subscription access for Claude Code", "org-disabled"],
   ])("classifies %j as %s", (text, kind) => {
     expect(detectProviderAuthFailure(text)?.kind).toBe(kind);
+  });
+
+  it("#1226: classifies the org-disabled text as terminal, not as an expired/missing login", () => {
+    // Observed on #1224: an "org has disabled Claude subscription access" launch failure
+    // was never classified at all, so the profile was never cooled or excluded from
+    // rotation and a plain `workspace resume` went straight back onto it.
+    const failure = detectProviderAuthFailure("Your organization has disabled Claude subscription access for Claude Code");
+    expect(failure).not.toBeNull();
+    expect(failure!.kind).toBe("org-disabled");
   });
 
   it("does NOT claim transient failures — killing a recoverable run is the worse error", () => {
@@ -126,8 +136,12 @@ describe("authFailureRemedy", () => {
   });
 
   it("gives a distinct remedy per kind", () => {
-    const kinds = ["OAuth session expired", "no credentials found", "Invalid API key"]
-      .map((t) => authFailureRemedy(detectProviderAuthFailure(t)!));
-    expect(new Set(kinds).size).toBe(3);
+    const kinds = [
+      "OAuth session expired",
+      "no credentials found",
+      "Invalid API key",
+      "Your organization has disabled Claude subscription access for Claude Code",
+    ].map((t) => authFailureRemedy(detectProviderAuthFailure(t)!));
+    expect(new Set(kinds).size).toBe(4);
   });
 });

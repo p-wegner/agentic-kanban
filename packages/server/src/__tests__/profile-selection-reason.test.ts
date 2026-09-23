@@ -45,6 +45,25 @@ describe("buildProfileSelectionReason", () => {
     expect(alone?.decidedBy).toBe("explicit");
   });
 
+  it("#1226: a LOSING candidate's measurement does not credit headroom for the winner", () => {
+    // #1224: `anth` (never measured) was kept over `andrena_team_5x_2` (measured, 5% used) —
+    // the roster kept the already-active, still-usable selection; nothing ranked them. The
+    // record must not claim "chosen by headroom" when the winner itself was never measured.
+    const reason = buildProfileSelectionReason({
+      selected: "claude:anth",
+      source: "strategy",
+      candidates: [
+        { id: "claude:anth", usedPct: null },
+        { id: "claude:andrena_team_5x_2", usedPct: 5 },
+      ],
+    });
+    expect(reason?.decidedBy).toBe("list-order");
+    // The losing, measured candidate's reading still survives in the summary — "say why it
+    // ranks higher" even when the label itself is honestly "list-order", not "headroom".
+    expect(reason?.summary).toContain("andrena_team_5x_2");
+    expect(reason?.summary).toContain("5% used");
+  });
+
   it("a clamp and a reserve start outrank the reading in what gets reported", () => {
     const base = {
       selected: "claude:b",

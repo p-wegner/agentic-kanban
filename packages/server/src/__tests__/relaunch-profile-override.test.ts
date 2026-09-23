@@ -109,6 +109,21 @@ describe("resolveRelaunchAgentSelection — explicit profile override (#1047)", 
     expect(sel.profile).toEqual({ provider: "claude", name: "exhausted" });
   });
 
+  it("#1226: records WHY, same as a fresh workspace launch does", async () => {
+    // Observed on #1224: a resumed session's `profile_selection_reason` column stayed NULL
+    // because this helper computed the resolver's reason and then dropped it before
+    // returning — the caller had nowhere to read it from.
+    const { projectId, workspaceId } = await seed(db, { provider: "claude", claudeProfile: "exhausted" });
+
+    const sel = await resolveRelaunchAgentSelection(
+      db, projectId, await wsRow(db, workspaceId), undefined,
+      { provider: "claude", name: "fresh" },
+    );
+
+    expect(sel.profileSelectionReason).not.toBeNull();
+    expect(sel.profileSelectionReason?.profile).toBe("claude:fresh");
+  });
+
   it("is an override, not a bypass: a forbidden profile is still refused", async () => {
     // The roster remains the one enforcement seam. A `forbidden` role is refused, not
     // clamped — an override that could reach a forbidden account would make the global
