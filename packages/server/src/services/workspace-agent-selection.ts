@@ -15,6 +15,7 @@ import type { ProviderName } from "./agent-provider.js";
 import type { AgentSettings } from "./agent-settings.service.js";
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import { WorkspaceError } from "./workspace-error.js";
+import type { ProfileSelectionReason } from "../lib/profile-selection-reason.js";
 
 /**
  * #1048: the pinned profile still wins unconditionally when the ring reports it cooling —
@@ -119,7 +120,15 @@ export async function resolveRelaunchAgentSelection(
   workspace: typeof workspaces.$inferSelect,
   commandOverride?: string,
   profileOverride?: { provider?: string; name?: string } | null,
-): Promise<AgentSettings> {
+): Promise<AgentSettings & {
+  /**
+   * #1226: WHY this relaunch runs on this profile, so a resumed session records the same
+   * kind of reason a fresh workspace launch does — previously only `loadProjectRuntimeConfig`
+   * computed this and this helper silently dropped it, so a resumed session's
+   * `profile_selection_reason` column stayed NULL even though the resolver had the answer.
+   */
+  profileSelectionReason: ProfileSelectionReason | null;
+}> {
   const runtime = await loadProjectRuntimeConfig(database, {
     projectId: projectId ?? "",
     workspaceSelection: {
@@ -169,5 +178,6 @@ export async function resolveRelaunchAgentSelection(
     resumeWithNewModel: runtime.provider.resumeWithNewModel,
     permissionPromptTool: runtime.provider.permissionPromptTool,
     model: runtime.provider.model,
+    profileSelectionReason: runtime.provider.profileSelectionReason,
   };
 }

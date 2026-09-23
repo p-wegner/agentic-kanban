@@ -30,7 +30,14 @@ export type ProviderAuthFailureKind =
   /** Credentials are absent entirely — never logged in, or the config dir is empty/wrong. */
   | "not-authenticated"
   /** The credential was rejected as invalid (bad/rotated API key, revoked token). */
-  | "invalid-credentials";
+  | "invalid-credentials"
+  /**
+   * The org that owns the subscription has turned off Claude Code access for it (#1226) —
+   * distinct from an expired/invalid credential: the login itself is fine, but an admin
+   * decision blocks it. Retrying, or even re-authenticating, cannot fix this; only the org
+   * re-enabling access can.
+   */
+  | "org-disabled";
 
 export interface ProviderAuthFailure {
   kind: ProviderAuthFailureKind;
@@ -48,6 +55,13 @@ export interface ProviderAuthFailure {
  * worse outcome than the retry loop this is meant to end.
  */
 const AUTH_FAILURE_PATTERNS: Array<{ kind: ProviderAuthFailureKind; pattern: RegExp }> = [
+  {
+    // Most specific of all: this text also contains "subscription" and "Claude Code" but
+    // is neither an expired login nor a missing/invalid credential — it must be checked
+    // before the generic patterns below or it falls through unclassified (#1226).
+    kind: "org-disabled",
+    pattern: /organization\s+has\s+disabled\s+claude\s+subscription\s+access/i,
+  },
   {
     kind: "oauth-expired",
     // The live #430 string, plus the common refresh-failure phrasings.
@@ -106,5 +120,7 @@ export function authFailureRemedy(failure: ProviderAuthFailure, profileName?: st
       return `${who} has no usable credentials — log in against its config dir before using it.`;
     case "invalid-credentials":
       return `The credentials for ${who} were rejected — replace the key or re-authenticate. Retrying cannot fix this.`;
+    case "org-disabled":
+      return `The organization that owns ${who} has disabled Claude subscription access for Claude Code — an admin must re-enable it. Retrying or re-authenticating cannot fix this.`;
   }
 }
