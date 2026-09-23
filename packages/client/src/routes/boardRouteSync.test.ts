@@ -420,6 +420,108 @@ describe("planUrlSync — the tab dimension", () => {
   });
 });
 
+/**
+ * #1227 — the Plugins view's pick (which plugin, which of its iframe views)
+ * reflects into the URL the same way the tab dimension above does: switching
+ * pushes a history entry, an in-place upgrade of an already-correct URL
+ * writes nothing, and an unknown slug/view is opaque here — this layer does
+ * not know which plugins exist, so it only plans what the URL SHOULD say for
+ * whatever `pluginSlug`/`pluginViewId` the caller currently holds; resolving
+ * whether that names a real plugin/view is PluginViewsPanel's job, once its
+ * surface has loaded (the same split as `unknownViewSegment` above, which
+ * this layer detects but does not itself correct).
+ */
+describe("planUrlSync — the plugin-views dimension (#1227)", () => {
+  const base = { projects: PROJECTS, activeProjectId: AK, view: "plugin-views" as const, issueNumber: null };
+  const SLUG = "/p/agentic-kanban";
+
+  it("names the picked plugin in the canonical path", () => {
+    expect(
+      planUrlSync({ ...base, pluginSlug: "jira-sync", currentPath: `${SLUG}/plugin-views` }),
+    ).toEqual({ path: `${SLUG}/plugin-views/jira-sync`, action: "push", unknownViewSegment: null });
+  });
+
+  it("names the picked view alongside the plugin", () => {
+    expect(
+      planUrlSync({
+        ...base,
+        pluginSlug: "jira-sync",
+        pluginViewId: "dashboard",
+        currentPath: `${SLUG}/plugin-views`,
+      }),
+    ).toEqual({ path: `${SLUG}/plugin-views/jira-sync/dashboard`, action: "push", unknownViewSegment: null });
+  });
+
+  it("gives a plugin switch its own history entry", () => {
+    expect(
+      planUrlSync({
+        ...base,
+        pluginSlug: "reqextract",
+        currentPath: `${SLUG}/plugin-views/jira-sync`,
+      }).action,
+    ).toBe("push");
+  });
+
+  it("gives a view switch WITHIN the same plugin its own history entry too", () => {
+    expect(
+      planUrlSync({
+        ...base,
+        pluginSlug: "jira-sync",
+        pluginViewId: "settings",
+        currentPath: `${SLUG}/plugin-views/jira-sync/dashboard`,
+      }).action,
+    ).toBe("push");
+  });
+
+  it("writes nothing when the URL already names the current pick", () => {
+    expect(
+      planUrlSync({
+        ...base,
+        pluginSlug: "jira-sync",
+        pluginViewId: "dashboard",
+        currentPath: `${SLUG}/plugin-views/jira-sync/dashboard`,
+      }).action,
+    ).toBe("none");
+  });
+
+  it("drops back to the bare route when nothing is picked", () => {
+    expect(
+      planUrlSync({ ...base, currentPath: `${SLUG}/plugin-views/jira-sync/dashboard` }),
+    ).toEqual({ path: `${SLUG}/plugin-views`, action: "push", unknownViewSegment: null });
+  });
+
+  it("carries an opaque slug/view id through unchanged — resolving it is not this layer's job", () => {
+    // No plugin registry here: a pick naming a plugin or view that does not
+    // exist plans exactly the same URL as a real one. PluginViewsPanel is what
+    // notices the mismatch once its surface has loaded and falls back.
+    expect(
+      planUrlSync({ ...base, pluginSlug: "does-not-exist", currentPath: `${SLUG}/plugin-views` }).path,
+    ).toBe(`${SLUG}/plugin-views/does-not-exist`);
+  });
+
+  it("fills in the resolved default view in place, without its own history entry", () => {
+    // A plugin's first (default) view is only known once its surface has
+    // loaded — unlike a container's default tab, which resolves before the
+    // container even mounts — so the URL first names just the plugin, and the
+    // view id arrives a moment later for the SAME pick. That is one logical
+    // navigation, not two.
+    expect(
+      planUrlSync({
+        ...base,
+        pluginSlug: "jira-sync",
+        pluginViewId: "dashboard",
+        currentPath: `${SLUG}/plugin-views/jira-sync`,
+      }),
+    ).toEqual({ path: `${SLUG}/plugin-views/jira-sync/dashboard`, action: "replace", unknownViewSegment: null });
+  });
+
+  it("upgrades a legacy flat plugin-views path in place, keeping the pick", () => {
+    expect(
+      planUrlSync({ ...base, pluginSlug: "jira-sync", currentPath: "/plugin-views/jira-sync" }),
+    ).toEqual({ path: `${SLUG}/plugin-views/jira-sync`, action: "replace", unknownViewSegment: null });
+  });
+});
+
 describe("legacy ?tab= links are promoted into the path at router init", () => {
   // MEASURED: the container view mounts ~500ms after load, while the outbound
   // sync canonicalises a tabless path to the registry default at ~400ms. So by
