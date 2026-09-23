@@ -349,7 +349,7 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
   // No plugin picked yet (fresh navigation), OR a deep link named a slug that
   // is not actually enabled here (#1227 — a stale/mistyped /plugin-views/<slug>
   // URL) → adopt the first plugin present, same as the "nothing picked" case.
-  usePluginSlugFallback({ loading, pluginSlug, surface, setStoreSelection });
+  usePluginSlugFallback({ loading, pluginSlug, surface, setStoreSelection, requestedViewId, clearRequestedViewId });
 
   // Whenever the SHOWN plugin changes, auto-select its first view (reusing the
   // server when already running), else its first loop — a plugin may offer no

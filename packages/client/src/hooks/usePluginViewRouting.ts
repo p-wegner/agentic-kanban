@@ -28,6 +28,10 @@ interface UsePluginSlugFallbackOptions {
    * project-wide, not the slice a not-yet-resolved slug would filter down to. */
   surface: PluginSurfaceLike;
   setStoreSelection: (selection: { kind: "plugin"; slug: string }) => void;
+  /** A pending `requestViewId` naming the SAME unresolvable slug (#1227) is
+   * for a plugin we are about to navigate away from — see below. */
+  requestedViewId: { slug: string; viewId: string } | null;
+  clearRequestedViewId: () => void;
 }
 
 /**
@@ -36,8 +40,24 @@ interface UsePluginSlugFallbackOptions {
  * adopt the first plugin present, same as the "nothing picked" case. Fires
  * once per unresolvable slug: once the fallback selection lands, `pluginSlug`
  * becomes a real one and `known` goes true.
+ *
+ * A `requestedViewId` naming that same unresolvable slug is cleared here too
+ * (rather than left for `usePluginViewDeepLink` to consume) — that hook only
+ * fires once `pluginSlug` matches the request, which for a slug that will
+ * never resolve is never. Left alone, it stayed pending indefinitely and
+ * could fire LATER against an unrelated selection: if the same slug becomes
+ * genuinely reachable afterwards (a plugin enabled mid-session, a manual rail
+ * click), the stale request replayed and silently overrode that unrelated
+ * navigation.
  */
-export function usePluginSlugFallback({ loading, pluginSlug, surface, setStoreSelection }: UsePluginSlugFallbackOptions): void {
+export function usePluginSlugFallback({
+  loading,
+  pluginSlug,
+  surface,
+  setStoreSelection,
+  requestedViewId,
+  clearRequestedViewId,
+}: UsePluginSlugFallbackOptions): void {
   const items = useMemo(
     () => [...surface.views, ...surface.loops, ...surface.scripts, ...surface.skills],
     [surface],
@@ -50,9 +70,10 @@ export function usePluginSlugFallback({ loading, pluginSlug, surface, setStoreSe
     if (!first) return; // nothing to fall back to — the empty-surface state covers this
     if (pluginSlug && !known) {
       showToast(`Unknown plugin "${pluginSlug}" — showing ${first.pluginName} instead.`, "warning");
+      if (requestedViewId && requestedViewId.slug === pluginSlug) clearRequestedViewId();
     }
     setStoreSelection({ kind: "plugin", slug: first.pluginSlug });
-  }, [loading, pluginSlug, items, setStoreSelection]);
+  }, [loading, pluginSlug, items, setStoreSelection, requestedViewId, clearRequestedViewId]);
 }
 
 interface DeepLinkView {
