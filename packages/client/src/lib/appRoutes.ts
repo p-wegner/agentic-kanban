@@ -144,6 +144,13 @@ export type IssuePanel = "issue" | "workspace";
 /** The view a project-scoped path with no view segment resolves to. */
 const DEFAULT_VIEW: ViewMode = "kanban";
 
+/**
+ * The one view whose tail names a PLUGIN + one of its iframe views rather than
+ * a registry tab (#1227) — `viewHasTabs` is false for it, so `parseViewTail`'s
+ * generic tab grammar would treat any extra segment as junk and drop the route.
+ */
+const PLUGIN_VIEWS_VIEW: ViewMode = "plugin-views";
+
 export interface ParsedAppRoute {
   /** Project slug or raw id from `/p/<slugOrId>/…`; null for legacy flat paths. */
   projectSlug: string | null;
@@ -174,6 +181,20 @@ export interface ParsedAppRoute {
    * caller surface "unknown view" instead of silently falling back.
    */
   unknownViewSegment: string | null;
+  /**
+   * Plugin slug the Plugins view (#1227) should show — the segment right after
+   * `/plugin-views`. Null for every other view, and for a bare `/plugin-views`
+   * naming nothing further. Opaque: this layer does not know which plugins
+   * exist, so any non-empty segment parses — an unresolvable slug is a runtime
+   * concern for whoever reads it (fall back to a default and say so, same
+   * shape as `unknownViewSegment` above).
+   */
+  pluginSlug: string | null;
+  /**
+   * One of that plugin's iframe view ids — the segment after the slug. Null
+   * unless `pluginSlug` is also set. Same opacity rule as `pluginSlug`.
+   */
+  pluginViewId: string | null;
 }
 
 const NO_ROUTE: ParsedAppRoute = {
@@ -184,6 +205,8 @@ const NO_ROUTE: ParsedAppRoute = {
   issueNumber: null,
   panel: null,
   unknownViewSegment: null,
+  pluginSlug: null,
+  pluginViewId: null,
 };
 
 function parseIssueNumber(raw: string | undefined): number | null {
@@ -256,6 +279,45 @@ function parseViewTail(
 }
 
 /**
+ * Parse the tail of a `/plugin-views` route: an optional plugin slug, an
+ * optional iframe view id, followed by the SAME optional issue deep link
+ * every other view supports (`/issue/<n>[/workspace]`). Distinct from
+ * `parseViewTail` because plugin identity is dynamic — loaded from the API,
+ * not a static registry like a container view's tabs — so there is no "is
+ * this routable" check to run for the slug/view-id; any non-"issue" segment
+ * is accepted as-is, opaque, and resolving whether it names a REAL
+ * plugin/view is left to whatever reads it. A malformed issue tail, or
+ * anything left over after it, falls back to the bare pick (both null)
+ * rather than being partially applied.
+ */
+function parsePluginViewsTail(tail: string[]): {
+  pluginSlug: string | null;
+  pluginViewId: string | null;
+  issueNumber: number | null;
+  panel: IssuePanel | null;
+} | null {
+  let i = 0;
+  let pluginSlug: string | null = null;
+  let pluginViewId: string | null = null;
+  if (tail[i] !== undefined && tail[i] !== ISSUE_SEGMENT) {
+    pluginSlug = decodeSegment(tail[i]);
+    i += 1;
+    if (tail[i] !== undefined && tail[i] !== ISSUE_SEGMENT) {
+      pluginViewId = decodeSegment(tail[i]);
+      i += 1;
+    }
+  }
+  const issueTail = tail.slice(i);
+  if (issueTail.length === 0) return { pluginSlug, pluginViewId, issueNumber: null, panel: null };
+  if (issueTail[0] !== ISSUE_SEGMENT || issueTail.length > 3) return null;
+  const issueNumber = parseIssueNumber(issueTail[1]);
+  if (issueNumber === null) return null;
+  const panel = parsePanelSegment(issueTail[2]);
+  if (panel === null) return null;
+  return { pluginSlug, pluginViewId, issueNumber, panel };
+}
+
+/**
  * Parse any in-app path into its project scope, view, tab and issue deep link.
  * Never throws — malformed input yields null fields.
  */
@@ -279,6 +341,8 @@ export function parseAppPath(pathname: string): ParsedAppRoute {
     issueNumber: null,
     panel: null,
     unknownViewSegment: null,
+    pluginSlug: null,
+    pluginViewId: null,
   };
 
   // /p/<slug>
@@ -295,6 +359,13 @@ export function parseAppPath(pathname: string): ParsedAppRoute {
 
   const resolved = resolveViewSegment(rest[0]);
   if (!resolved) return { ...base, unknownViewSegment: rest[0] };
+
+  if (resolved.view === PLUGIN_VIEWS_VIEW) {
+    const pluginTail = parsePluginViewsTail(rest.slice(1));
+    return pluginTail
+      ? { ...base, view: PLUGIN_VIEWS_VIEW, ...pluginTail }
+      : { ...base, view: PLUGIN_VIEWS_VIEW };
+  }
 
   // /p/<slug>/<viewPath>[/<tab>][/issue/<n>[/workspace]]
   const tail = parseViewTail(resolved.view, resolved.tab, rest.slice(1));
@@ -319,6 +390,8 @@ function parseFlatPath(normalized: string): ParsedAppRoute {
       issueNumber: null,
       panel: null,
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     };
   }
 
@@ -334,6 +407,8 @@ function parseFlatPath(normalized: string): ParsedAppRoute {
       issueNumber,
       panel: "issue",
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     };
   }
 
@@ -343,9 +418,23 @@ function parseFlatPath(normalized: string): ParsedAppRoute {
   // a legacy flat non-route (e.g. an API path) stays a plain non-match.
   const resolved = segments[0] ? resolveViewSegment(segments[0]) : null;
   if (!resolved) return NO_ROUTE;
+
+  if (resolved.view === PLUGIN_VIEWS_VIEW) {
+    const pluginTail = parsePluginViewsTail(segments.slice(1))
+      ?? { pluginSlug: null, pluginViewId: null, issueNumber: null, panel: null };
+    return {
+      projectSlug: null,
+      view: PLUGIN_VIEWS_VIEW,
+      tab: null,
+      tabIsExplicit: false,
+      unknownViewSegment: null,
+      ...pluginTail,
+    };
+  }
+
   const tail = parseViewTail(resolved.view, resolved.tab, segments.slice(1));
   if (!tail) return NO_ROUTE;
-  return { projectSlug: null, unknownViewSegment: null, ...tail };
+  return { projectSlug: null, unknownViewSegment: null, pluginSlug: null, pluginViewId: null, ...tail };
 }
 
 function decodeSegment(segment: string): string {
@@ -374,12 +463,24 @@ export function buildAppPath(opts: {
   tab?: string | null;
   issueNumber?: number | null;
   panel?: IssuePanel | null;
+  /** Plugin slug for a `plugin-views` route (#1227); ignored for every other view. */
+  pluginSlug?: string | null;
+  /** Iframe view id within that plugin; ignored without `pluginSlug`. */
+  pluginViewId?: string | null;
 }): string {
   const viewPath = VIEW_ROUTE_PATHS[opts.view] ?? VIEW_ROUTE_PATHS[DEFAULT_VIEW];
   const tab = opts.tab ? resolveViewTab(opts.view, opts.tab) : null;
   const tabPath = tab ? `/${tab}` : "";
+  // plugin-views has its own non-tab tail: an opaque plugin slug and optional
+  // view id, not a resolved registry tab (see parsePluginViewsTail).
+  const pluginTailPath =
+    opts.view === PLUGIN_VIEWS_VIEW && opts.pluginSlug
+      ? `/${encodeURIComponent(opts.pluginSlug)}${opts.pluginViewId ? `/${encodeURIComponent(opts.pluginViewId)}` : ""}`
+      : "";
   const slug = opts.projectSlug ? encodeURIComponent(opts.projectSlug) : null;
-  const base = slug ? `/${PROJECT_ROUTE_PREFIX}/${slug}${viewPath}${tabPath}` : `${viewPath}${tabPath}`;
+  const base = slug
+    ? `/${PROJECT_ROUTE_PREFIX}/${slug}${viewPath}${tabPath}${pluginTailPath}`
+    : `${viewPath}${tabPath}${pluginTailPath}`;
   const issueNumber =
     typeof opts.issueNumber === "number" && Number.isSafeInteger(opts.issueNumber) && opts.issueNumber > 0
       ? opts.issueNumber

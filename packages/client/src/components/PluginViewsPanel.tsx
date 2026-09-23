@@ -145,6 +145,9 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
   const openMarketplace = usePluginViewStore((s) => s.openMarketplace);
   const loopFocus = usePluginViewStore((s) => s.loopFocus);
   const clearLoopFocus = usePluginViewStore((s) => s.clearLoopFocus);
+  const setStoreActiveViewId = usePluginViewStore((s) => s.setActiveViewId);
+  const requestedViewId = usePluginViewStore((s) => s.requestedViewId);
+  const clearRequestedViewId = usePluginViewStore((s) => s.clearRequestedViewId);
   const startLatch = useRef(createStartLatch());
   const isDark = useBoardIsDark();
 
@@ -334,11 +337,25 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
   // setup — and including it here is what lets the JSX below use the path without a cast.
   const scaffoldNeedsSetup = (scaffold?.exists && scaffold.targetPath !== null && scaffold.fields.length > 0) ?? false;
 
-  // No plugin picked yet (fresh navigation) → adopt the first plugin present.
+  // No plugin picked yet (fresh navigation), OR a deep link named a slug that
+  // is not actually enabled here (#1227 — a stale/mistyped /plugin-views/<slug>
+  // URL) → adopt the first plugin present, same as the "nothing picked" case.
+  // Guarded so this only fires ONCE per unresolvable slug: once the fallback
+  // selection lands, `pluginSlug` becomes a real one and `known` goes true.
   useEffect(() => {
-    if (loading || pluginSlug) return;
+    if (loading) return;
+    const known = pluginSlug
+      ? [...surface.views, ...surface.loops, ...surface.scripts, ...surface.skills].some(
+          (item) => item.pluginSlug === pluginSlug,
+        )
+      : false;
+    if (pluginSlug && known) return;
     const first = [...surface.views, ...surface.loops, ...surface.scripts, ...surface.skills][0];
-    if (first) setStoreSelection({ kind: "plugin", slug: first.pluginSlug });
+    if (!first) return; // nothing to fall back to — surfaceEmpty covers this below
+    if (pluginSlug && !known) {
+      showToast(`Unknown plugin "${pluginSlug}" — showing ${first.pluginName} instead.`, "warning");
+    }
+    setStoreSelection({ kind: "plugin", slug: first.pluginSlug });
   }, [loading, pluginSlug, surface, setStoreSelection]);
 
   // Whenever the SHOWN plugin changes, auto-select its first view (reusing the
@@ -386,6 +403,26 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     clearLoopFocus();
   }, [loading, loopFocus, surface.loops, clearLoopFocus]);
 
+  // Deep-link consumption (#1227): a pasted /plugin-views/<slug>/<view-id> URL
+  // asked for a specific iframe view. Runs after the surface has loaded and
+  // the shown plugin matches the request; one-shot regardless of outcome — an
+  // unresolvable view id falls back to whatever the auto-select effect above
+  // already landed on (its default), with a notice, rather than looping
+  // forever waiting for a view that will never arrive.
+  useEffect(() => {
+    if (loading || !requestedViewId || requestedViewId.slug !== pluginSlug) return;
+    const target = surface.views.find(
+      (v) => v.pluginSlug === requestedViewId.slug && v.id === requestedViewId.viewId,
+    );
+    clearRequestedViewId();
+    if (!target) {
+      showToast(`Unknown plugin view "${requestedViewId.viewId}" — showing the default instead.`, "warning");
+      return;
+    }
+    setSelection({ kind: "view", key: ownerKey(target, target.id) });
+    void startView(target);
+  }, [loading, requestedViewId, pluginSlug, surface.views, clearRequestedViewId, startView]);
+
   // Latest selection, readable from an async continuation (state captured in a
   // closure is the selection as it was when the request went out).
   const selectionRef = useRef<Selection | null>(selection);
@@ -395,6 +432,17 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     () => (selection?.kind === "view" ? surface.views.find((v) => ownerKey(v, v.id) === selection.key) ?? null : null),
     [selection, surface.views],
   );
+
+  // Report the currently-shown iframe view id to the store (#1227) so the
+  // route hook can name it in the URL — null whenever the pane is showing
+  // something else (a loop/script/skill/scaffold), or nothing at all.
+  useEffect(() => {
+    setStoreActiveViewId(activeView?.id ?? null);
+  }, [activeView, setStoreActiveViewId]);
+
+  // Never leave a stale view id behind for the NEXT plugin panel mount (e.g.
+  // switching to the marketplace, which unmounts this component entirely).
+  useEffect(() => () => setStoreActiveViewId(null), [setStoreActiveViewId]);
   const activeLoop = useMemo(
     () => (selection?.kind === "loop" ? surface.loops.find((l) => ownerKey(l, l.name) === selection.key) ?? null : null),
     [selection, surface.loops],

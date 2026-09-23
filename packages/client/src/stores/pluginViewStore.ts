@@ -23,10 +23,31 @@ interface PluginViewState {
    * PluginViewsPanel once the loop is present in the loaded surface.
    */
   loopFocus: { slug: string; loopName: string; nonce: number } | null;
+  /**
+   * The iframe view id the panel is CURRENTLY showing for a `{kind:"plugin"}`
+   * selection (#1227) — reported by PluginViewsPanel, read by the route hook
+   * so a plugin's URL can name which of its views is open, the same way
+   * `useViewTabStore.active` makes a container view's tab a URL dimension.
+   * Null while nothing iframe-shaped is selected (a loop/script/skill/scaffold
+   * pane, or no plugin picked yet).
+   */
+  activeViewId: string | null;
+  /**
+   * One-shot inbound request (#1227): "select THIS iframe view once its
+   * plugin's surface has loaded" — set by the route hook from a pasted
+   * `/plugin-views/<slug>/<view-id>` URL, consumed (and cleared) by
+   * PluginViewsPanel. Unlike `loopFocus`, an unresolvable view id is expected
+   * (a stale link, a typo) and falls back to the panel's normal default
+   * landing pane rather than staying pending forever.
+   */
+  requestedViewId: { slug: string; viewId: string } | null;
   setSelection: (selection: PluginViewSelection | null) => void;
   openMarketplace: (opts?: { focusInstall?: boolean }) => void;
   focusLoop: (slug: string, loopName: string) => void;
   clearLoopFocus: () => void;
+  setActiveViewId: (viewId: string | null) => void;
+  requestViewId: (slug: string, viewId: string) => void;
+  clearRequestedViewId: () => void;
   /**
    * Scope the selection to a project. A plugin pick is only meaningful for the
    * project it was made in: carried onto another project it names a plugin that
@@ -50,6 +71,8 @@ export const usePluginViewStore = create<PluginViewState>((set) => ({
   installFocusNonce: 0,
   projectId: null,
   loopFocus: null,
+  activeViewId: null,
+  requestedViewId: null,
   setSelection: (selection) => set({ selection }),
   focusLoop: (slug, loopName) =>
     set((s) => ({
@@ -69,4 +92,7 @@ export const usePluginViewStore = create<PluginViewState>((set) => ({
       selection: { kind: "marketplace" },
       installFocusNonce: opts?.focusInstall ? s.installFocusNonce + 1 : s.installFocusNonce,
     })),
+  setActiveViewId: (viewId) => set((s) => (s.activeViewId === viewId ? s : { activeViewId: viewId })),
+  requestViewId: (slug, viewId) => set({ requestedViewId: { slug, viewId } }),
+  clearRequestedViewId: () => set({ requestedViewId: null }),
 }));
