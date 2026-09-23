@@ -1,15 +1,21 @@
 # Terminal tracker (`pnpm cli -- tracker`)
 
 A dense, fixed-height terminal dashboard for one project — sized for a narrow pane, meant to
-sit alongside builder panes rather than replace the web UI. It polls the same in-process
-`getBoardStatus` the web board and `status --watch` use (no server round-trip), so it works from
-the main checkout without a running dev server.
+sit alongside builder panes rather than replace the web UI. The snapshot DATA is read the same
+way as `status --watch`: in-process from `getBoardStatus` (no server round-trip), so `--once`
+and `--json` work from the main checkout without a running dev server.
+
+The live dashboard's REFRESH TRIGGER is different: it connects to the board's own
+`/ws/board/:projectId` WebSocket (the same channel the browser client subscribes to) and
+redraws on `board_changed`, `projects_changed`, `session_activity`, `session_stats` and
+`session_todos` events, instead of a fixed timer. It falls back to interval polling only
+while the socket is unavailable, reconnecting with backoff (1s, doubling up to 30s).
 
 ```bash
-pnpm cli -- tracker                     # live dashboard, refreshes every 5s
+pnpm cli -- tracker                     # live dashboard, redraws on board events
 pnpm cli -- tracker --once              # one static frame, then exit
 pnpm cli -- tracker --json              # raw snapshot as JSON, for scripting (implies --once)
-pnpm cli -- tracker -i 10 --project foo # 10s refresh, explicit project
+pnpm cli -- tracker -i 10 --project foo # 10s fallback poll cadence, explicit project
 ```
 
 ## Flags
@@ -17,18 +23,18 @@ pnpm cli -- tracker -i 10 --project foo # 10s refresh, explicit project
 | Flag | Default | Does |
 |---|---|---|
 | `-p, --project <id>` | active project | Which project to show. Same id forms as every other CLI command (`pnpm cli -- list` prints them). |
-| `-i, --interval <seconds>` | `5` | Refresh interval while polling. Clamped to a minimum of 2s. Ignored with `--once`/`--json`. |
-| `--once` | off | Print a single frame and exit — no polling loop, no `console.clear()`. |
+| `-i, --interval <seconds>` | `5` | Fallback poll cadence, used only while the WebSocket connection is down or reconnecting. Clamped to a minimum of 2s. Ignored with `--once`/`--json`. |
+| `--once` | off | Print a single frame and exit — no live connection, no `console.clear()`. |
 | `--json` | off | Print the raw `BoardStatusResponse` snapshot as JSON instead of a rendered frame. Implies `--once`. |
 
-With no `--once`/`--json`, the command polls forever: it clears the screen, renders a frame,
-prints `Refreshing every <n>s. Press Ctrl+C to exit.`, and repeats. `Ctrl+C`/`SIGTERM` exit
-cleanly (exit code 0).
+With no `--once`/`--json`, the command runs live: it clears the screen, renders a frame,
+prints a status line naming the connection state, and redraws on the next board event (or,
+while disconnected, on the next fallback poll). `Ctrl+C`/`SIGTERM` exit cleanly (exit code 0).
 
 ## Reading a frame
 
 ```
-agentic-kanban | WIP 3/5 | in-progress:3 review:1 done:12
+agentic-kanban | WIP 3/5 | in-progress:3 review:1 done:12 | ● live
 * #1141 Add the terminal tracker (2h4m)
 o #1150 Fix disconnect handling (18m)
 ! #1183 Stranded merge-train rows (41m)
@@ -36,11 +42,16 @@ o #1150 Fix disconnect handling (18m)
 ! #1183 stale in review
 ```
 
-**Header line** — `<project name> | WIP <active>/<limit> | <status>:<count> ...`. WIP is the
-project's resolved active-workspace count over its configured limit (`resolveWipLimit` — the
-Strategy Bullseye's `activeAgentsTarget`, see the root `CLAUDE.md`'s WIP section). The column
-counts are every issue's `statusName`, not just in-flight ones, so a status with 0 in-flight
-work but a full backlog still shows a count.
+**Header line** — `<project name> | WIP <active>/<limit> | <status>:<count> ... | <connection>`.
+WIP is the project's resolved active-workspace count over its configured limit
+(`resolveWipLimit` — the Strategy Bullseye's `activeAgentsTarget`, see the root `CLAUDE.md`'s
+WIP section). The column counts are every issue's `statusName`, not just in-flight ones, so a
+status with 0 in-flight work but a full backlog still shows a count.
+
+**Connection indicator** — only present in live mode (absent for `--once`/`--json`, which have
+no ongoing transport): `◌ connecting` before the first attempt resolves, `● live` while the
+board WebSocket is driving refreshes, `○ polling` while it has fallen back to the interval
+timer in `-i`/`--interval`.
 
 **In-flight lines** — one per issue whose main workspace is in an active status
 (`ACTIVE_WORKSPACE_STATUSES`: `active`, `fixing`, `reviewing`, `awaiting-plan-approval`):
