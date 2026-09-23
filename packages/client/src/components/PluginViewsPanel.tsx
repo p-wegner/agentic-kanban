@@ -15,6 +15,11 @@ import { PluginSkillPane } from "./PluginSkillPane.js";
 import { PluginScaffoldPane, type ScaffoldForm } from "./PluginScaffoldPane.js";
 import { Icon } from "./Icon.js";
 import { useBoardIsDark, withThemeParam } from "./PluginGuidePanel.js";
+import {
+  usePluginSlugFallback,
+  usePluginViewDeepLink,
+  useReportActivePluginViewId,
+} from "../hooks/usePluginViewRouting.js";
 
 /**
  * Who a rail entry is for (#456). Mirrors `PluginAudience` in the manifest contract; the
@@ -257,6 +262,10 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     }
   }, [projectId]);
 
+  // Referentially stable (deps: only `startView`) — passed to the #1227 deep-link
+  // hook below, whose one-shot effect depends on it staying the same function.
+  const selectView = useCallback((view: PluginView) => { setSelection({ kind: "view", key: ownerKey(view, view.id) }); void startView(view); }, [startView]);
+
   // #320 — Start Mode is a PREFERENCE, written from the Monitor popover, but the chip that
   // reports it ("Start mode is Manual — the monitor will not drive this loop") is rendered from
   // `surface.startPolicy`, which the server resolves per plugin-surface fetch. That fetch happens
@@ -340,23 +349,7 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
   // No plugin picked yet (fresh navigation), OR a deep link named a slug that
   // is not actually enabled here (#1227 — a stale/mistyped /plugin-views/<slug>
   // URL) → adopt the first plugin present, same as the "nothing picked" case.
-  // Guarded so this only fires ONCE per unresolvable slug: once the fallback
-  // selection lands, `pluginSlug` becomes a real one and `known` goes true.
-  useEffect(() => {
-    if (loading) return;
-    const known = pluginSlug
-      ? [...surface.views, ...surface.loops, ...surface.scripts, ...surface.skills].some(
-          (item) => item.pluginSlug === pluginSlug,
-        )
-      : false;
-    if (pluginSlug && known) return;
-    const first = [...surface.views, ...surface.loops, ...surface.scripts, ...surface.skills][0];
-    if (!first) return; // nothing to fall back to — surfaceEmpty covers this below
-    if (pluginSlug && !known) {
-      showToast(`Unknown plugin "${pluginSlug}" — showing ${first.pluginName} instead.`, "warning");
-    }
-    setStoreSelection({ kind: "plugin", slug: first.pluginSlug });
-  }, [loading, pluginSlug, surface, setStoreSelection]);
+  usePluginSlugFallback({ loading, pluginSlug, surface, setStoreSelection });
 
   // Whenever the SHOWN plugin changes, auto-select its first view (reusing the
   // server when already running), else its first loop — a plugin may offer no
@@ -404,24 +397,10 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
   }, [loading, loopFocus, surface.loops, clearLoopFocus]);
 
   // Deep-link consumption (#1227): a pasted /plugin-views/<slug>/<view-id> URL
-  // asked for a specific iframe view. Runs after the surface has loaded and
-  // the shown plugin matches the request; one-shot regardless of outcome — an
-  // unresolvable view id falls back to whatever the auto-select effect above
-  // already landed on (its default), with a notice, rather than looping
-  // forever waiting for a view that will never arrive.
-  useEffect(() => {
-    if (loading || !requestedViewId || requestedViewId.slug !== pluginSlug) return;
-    const target = surface.views.find(
-      (v) => v.pluginSlug === requestedViewId.slug && v.id === requestedViewId.viewId,
-    );
-    clearRequestedViewId();
-    if (!target) {
-      showToast(`Unknown plugin view "${requestedViewId.viewId}" — showing the default instead.`, "warning");
-      return;
-    }
-    setSelection({ kind: "view", key: ownerKey(target, target.id) });
-    void startView(target);
-  }, [loading, requestedViewId, pluginSlug, surface.views, clearRequestedViewId, startView]);
+  // asked for a specific iframe view — falls back to whatever the auto-select
+  // effect above already landed on, with a notice, rather than looping forever
+  // waiting for a view that will never arrive.
+  usePluginViewDeepLink({ loading, requestedViewId, pluginSlug, views: surface.views, clearRequestedViewId, onResolved: selectView });
 
   // Latest selection, readable from an async continuation (state captured in a
   // closure is the selection as it was when the request went out).
@@ -436,13 +415,8 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
   // Report the currently-shown iframe view id to the store (#1227) so the
   // route hook can name it in the URL — null whenever the pane is showing
   // something else (a loop/script/skill/scaffold), or nothing at all.
-  useEffect(() => {
-    setStoreActiveViewId(activeView?.id ?? null);
-  }, [activeView, setStoreActiveViewId]);
+  useReportActivePluginViewId({ activeViewId: activeView?.id ?? null, setStoreActiveViewId });
 
-  // Never leave a stale view id behind for the NEXT plugin panel mount (e.g.
-  // switching to the marketplace, which unmounts this component entirely).
-  useEffect(() => () => setStoreActiveViewId(null), [setStoreActiveViewId]);
   const activeLoop = useMemo(
     () => (selection?.kind === "loop" ? surface.loops.find((l) => ownerKey(l, l.name) === selection.key) ?? null : null),
     [selection, surface.loops],
@@ -455,11 +429,6 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     () => (selection?.kind === "skill" ? surface.skills.find((s) => ownerKey(s, s.name) === selection.key) ?? null : null),
     [selection, surface.skills],
   );
-
-  function selectView(view: PluginView) {
-    setSelection({ kind: "view", key: ownerKey(view, view.id) });
-    void startView(view);
-  }
 
   async function handleStop() {
     if (!activeView || stopping) return;
