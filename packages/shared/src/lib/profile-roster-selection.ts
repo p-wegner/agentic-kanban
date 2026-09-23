@@ -255,7 +255,13 @@ export function resolveRosterSelection(input: RosterSelectionInput): RosterSelec
   const usablePool = poolRanked.filter((e) => !cooling(e) && !exhausted(e));
 
   // The requested profile is permitted and usable — nothing to do. The common path once a
-  // project is configured, so it must stay free of notes and log noise.
+  // project is configured, so it must stay free of notes and log noise. This deliberately
+  // does NOT preempt an already-active, usable selection just because another candidate
+  // currently ranks ahead of it (see "does NOT preempt a healthy explicit choice" and "an
+  // UNKNOWN measurement ... is never read as exhausted" in project-profile-roster.test.ts) —
+  // old/unmeasured beats wrong, same principle as `rankRosterEntries`. What #1226 actually
+  // found broken is downstream of here: `buildProfileSelectionReason` mislabelled this case
+  // as "chosen by headroom" even though no ranking decided it — fixed there instead.
   if (requested && usablePool.some((e) => profileRefId(e) === profileRefId(requested))) {
     return { ...PASS_THROUGH, selection: { ...requested, role: "pool" }, poolOrder };
   }
