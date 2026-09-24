@@ -628,7 +628,7 @@ export function createWorkspaceActionsRoute(
     // retry loop) must join the existing job rather than replacing its `startedAt` (which would
     // reset the zombie clock indefinitely). See `runWorkspaceMergeJob` for the full rationale,
     // including the #686 `deferMainCheckoutSync` and #903 `dropStaleActiveRequest` subtleties.
-    const { jobId, run } = runWorkspaceMergeJob(id, workspaceService);
+    const { jobId, run } = runWorkspaceMergeJob(id, workspaceService, { database });
 
     if (wantsAsync) {
       // Nothing awaits `run` in this branch, so an eventual rejection would be an unhandled
