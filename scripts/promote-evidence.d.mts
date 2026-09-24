@@ -60,3 +60,42 @@ export interface UnreadableGateEvidence {
 export declare function formatGateEvidence(
   summary: GateEvidenceSummary | UnreadableGateEvidence | null | undefined,
 ): string;
+
+// --- the impact-tier miss rate (#1234) ---------------------------------------------------------
+
+export declare const MISSES_RELPATH: string;
+
+/** One row of `.test-impact/misses.jsonl`, as the sweep join writes it. */
+export interface MissSidecarRow {
+  kind: "miss" | "flake-or-environment" | "heal";
+  sweepAt?: string;
+  sweepSha?: string;
+  suite?: string;
+  suites?: string[];
+  candidateCommits?: string[];
+  tier?: string | null;
+  staleMap?: boolean;
+}
+
+export interface MissRateTier {
+  tier: string;
+  misses: number;
+  merges: number;
+  rate: number | null;
+  staleExcluded: number;
+}
+
+export interface MissRateSummary {
+  since: string | null;
+  lastSweepAt: string | null;
+  tiers: MissRateTier[];
+}
+
+export declare function summarizeMissRate(
+  ledgerRows: OutcomeRow[] | null | undefined,
+  missRows: MissSidecarRow[] | null | undefined,
+): MissRateSummary;
+
+export declare function formatMissRate(
+  summary: MissRateSummary | UnreadableGateEvidence | null | undefined,
+): string;

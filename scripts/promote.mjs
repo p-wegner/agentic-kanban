@@ -110,7 +110,7 @@ import {
   shouldReinstall,
   stableTagDate,
 } from "./promote-plan.mjs";
-import { OUTCOMES_RELPATH, formatGateEvidence, parseOutcomeRows, summarizeGateEvidence } from "./promote-evidence.mjs";
+import { MISSES_RELPATH, OUTCOMES_RELPATH, formatGateEvidence, formatMissRate, parseOutcomeRows, summarizeGateEvidence, summarizeMissRate } from "./promote-evidence.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -379,6 +379,22 @@ function readGateEvidence(sinceIso) {
   try {
     const rows = parseOutcomeRows(readFileSync(ledgerPath, "utf8"));
     return summarizeGateEvidence(rows, { sinceIso, ledgerPath });
+  } catch (e) {
+    return { ledgerPath, unreadable: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * #1234 — the impact-tier miss rate over the whole corpus (outcomes ledger + the sweep join's
+ * misses sidecar). PRINTED ONLY, labelled exactly like the gate evidence: it authorizes nothing.
+ */
+function readMissRateEvidence() {
+  const ledgerPath = join(MAIN_CHECKOUT, OUTCOMES_RELPATH);
+  const missesPath = join(MAIN_CHECKOUT, MISSES_RELPATH);
+  try {
+    const rows = parseOutcomeRows(readFileSync(ledgerPath, "utf8"));
+    const misses = existsSync(missesPath) ? parseOutcomeRows(readFileSync(missesPath, "utf8")) : [];
+    return summarizeMissRate(rows, misses);
   } catch (e) {
     return { ledgerPath, unreadable: e instanceof Error ? e.message : String(e) };
   }
@@ -878,6 +894,7 @@ async function main() {
   const headSha = branchHead;
   const sha = verdict.ok && verdict.sha ? verdict.sha : headSha;
   const gateEvidence = readGateEvidence(verdict.at ?? null);
+  const missRate = readMissRateEvidence();
 
   // #1054: the recovery lane's whole gate set. `recoveryDelta` is also what makes the delta
   // LEGIBLE — on a single-user board the operator is the review, so printing what would deploy
@@ -945,6 +962,9 @@ async function main() {
     console.log(`  sweep plan       ${acquisition.detail}`);
     // #1045: printed beside the verdict it is weaker than, and labelled as such.
     console.log(`  gate evidence    ${formatGateEvidence(gateEvidence)}`);
+    // #1234: the corpus number beside it, under the same label. What the impact tier drops is
+    // measured here; whether a rung may become a default is a decision made elsewhere.
+    console.log(`  miss rate        ${formatMissRate(missRate)}`);
     if (opts.recover) {
       console.log(`  lane             RECOVERY (--recover) — no sweep; pipeline + rollback are the gate`);
       console.log(`  recovery delta   ${formatRecoveryLane(recoveryLane, recoveryDelta)}`);
@@ -1022,6 +1042,7 @@ async function main() {
   // #1045 — into the audit trail the Sentinel reads, as context for the verdict above. It is
   // never what authorized this promotion; the sweep line is.
   log(`[promote] gate evidence: ${formatGateEvidence(gateEvidence)}`);
+  log(`[promote] miss rate: ${formatMissRate(missRate)}`);
   log(`[promote] rollback target: ${rollbackTag ?? "<none — first promotion>"}`);
 
   // A promotion must move the stable checkout FORWARD. See checkPromoteDirection. Re-read rather

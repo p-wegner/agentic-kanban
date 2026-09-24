@@ -6,6 +6,8 @@ import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { resolveWipLimit } from "./wip-limit.service.js";
 import { getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
+import { getProjectById } from "../repositories/project.repository.js";
+import { readImpactMissRate } from "./test-impact-miss-rate.js";
 import {
   getTrackerColumnCounts,
   listTrackerWorkspaceRows,
@@ -53,12 +55,13 @@ export async function buildTrackerSnapshot(
   nowMs: number = Date.now(),
 ): Promise<TrackerSnapshotResponse> {
 
-  const [columns, workspaceRows, reviewQueueDepth, latestBaseHealth, prefRows] = await Promise.all([
+  const [columns, workspaceRows, reviewQueueDepth, latestBaseHealth, prefRows, project] = await Promise.all([
     getTrackerColumnCounts(projectId, database),
     listTrackerWorkspaceRows(projectId, database),
     getReviewQueueDepth(projectId, database),
     getLatestBaseBranchHealth(projectId, database),
     getAllPreferencesCached(database).catch(() => []),
+    getProjectById(projectId, database).catch(() => null),
   ]);
 
   const prefMap = toPrefMap(prefRows);
@@ -110,5 +113,7 @@ export async function buildTrackerSnapshot(
           scope: latestBaseHealth.scope ?? null,
         }
       : null,
+    // #1234 — the impact-tier miss rate off the main checkout's `.test-impact/` files.
+    impactMissRate: readImpactMissRate(project?.repoPath),
   };
 }

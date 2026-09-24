@@ -7,6 +7,8 @@
  * them. Kept intentionally small and flat so it is cheap to poll every few seconds.
  */
 
+import type { ImpactMissRateSummary } from "./monitor.js";
+
 /** Per-column ticket count, in the project's own column order. */
 export interface TrackerSnapshotColumn {
   statusId: string;
@@ -62,4 +64,9 @@ export interface TrackerSnapshotResponse {
   /** Number of workspaces currently in a review/merge-pending state. */
   reviewQueueDepth: number;
   baseBranchHealth: TrackerSnapshotBaseBranchHealth | null;
+  /**
+   * The impact-tier miss rate over the project's test-impact corpus (#1234), `null` when the
+   * project has no outcomes ledger. Optional on the wire for an older server.
+   */
+  impactMissRate?: ImpactMissRateSummary | null;
 }
