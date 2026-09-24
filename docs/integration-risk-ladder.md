@@ -97,7 +97,7 @@ the rc), and the heal work is real work that the cadence makes visible instead o
 | Posture dial and the five existing rungs | landed, decision 017 |
 | Guard-floor deferral under `iterate` / `flow` | #1232 |
 | Posture-aware red-base veto, heal ticket under `iterate` | landed, #1233 |
-| Miss-rate join and gate durations in the ledger | #1234 |
+| Miss-rate join and gate durations in the ledger | landed, #1234 — `.test-impact/misses.jsonl`, `impactMissRate` on delivery + tracker, the `miss rate` line in `promote --dry-run` |
 | Sweep env scrub and scope stamp; `promote` refuses a non-full green | #1231 |
 | Deterministic guard failures stop the re-gate loop | #1230 |
 | RC branch promotion and the cadence | #1238 |
