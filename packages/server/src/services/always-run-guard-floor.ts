@@ -28,6 +28,15 @@ import { join, relative, resolve, sep } from "node:path";
 /** Mirrors `ALWAYS_RUN_MARKER_RE` in `scripts/test-mine.mjs`; the tail carries the `when:` clause. */
 const ALWAYS_RUN_MARKER_RE = /^\s*\/\/\s*@gate:always-run\b(.*)$/m;
 
+/**
+ * Does this suite's source carry the `@gate:always-run` marker (#1230)? The one rule, exported so
+ * `verify-failed-suites.ts` classifies a failing suite by the SAME marker this floor forces it
+ * to run by — two regexes for one marker is how the classification would drift from the run.
+ */
+export function hasAlwaysRunMarker(source: string): boolean {
+  return ALWAYS_RUN_MARKER_RE.test(source);
+}
+
 /** Mirrors `ALWAYS_RUN_WHEN_RE` in `scripts/test-mine.mjs` (#1041). */
 const ALWAYS_RUN_WHEN_RE = /\bwhen:([^\s,]+(?:\s*,\s*[^\s,]+)*)/;
 

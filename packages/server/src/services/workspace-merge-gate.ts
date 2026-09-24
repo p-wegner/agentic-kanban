@@ -107,6 +107,21 @@ export function isPreMergeGateFailure(err: unknown): boolean {
 }
 
 /**
+ * The failing suites a withheld gate named (#1230), read off the same structured `data` as
+ * {@link isPreMergeGateFailure} — never parsed back out of the message. Empty for a withhold
+ * that named nothing (a compile error, a stale-branch refusal, an older caller).
+ */
+export function preMergeGateFailedSuites(err: unknown): { failedSuites: string[]; guardFailure: boolean } {
+  const data = err instanceof Error
+    ? (err as unknown as { data?: { failedSuites?: unknown; guardFailure?: unknown } }).data
+    : undefined;
+  const failedSuites = Array.isArray(data?.failedSuites)
+    ? data.failedSuites.filter((file): file is string => typeof file === "string")
+    : [];
+  return { failedSuites, guardFailure: data?.guardFailure === true && failedSuites.length > 0 };
+}
+
+/**
  * The `mergeReason` tags a refused merge carries when it never got to attempt anything because
  * the repo lock was held by someone else at that instant — the in-process refuse/reuse check
  * (`repo_lock_contention`, `workspace-merge.service.ts`'s `activeMerges` guard) and the
@@ -414,7 +429,7 @@ export async function describePersistedGateVerdict(
  * the unconditional refusal it is.
  */
 function throwWithheldPreMergeGate(
-  preGate: { stage: string; held?: boolean },
+  preGate: { stage: string; held?: boolean; failedSuites?: string[]; guardFailure?: boolean },
   gateMessage: string,
 ): never {
   throw new WorkspaceError(
@@ -422,7 +437,14 @@ function throwWithheldPreMergeGate(
       ? `Pre-merge gate HELD (${preGate.stage}) — merge deferred, nothing ran. ${gateMessage}`
       : `Pre-merge gate failed (${preGate.stage}) — merge withheld. ${gateMessage}`,
     "CONFLICT",
-    { mergeReason: PRE_MERGE_GATE_FAILURE_REASON, gateStage: preGate.stage, ...(preGate.held ? { gateHeld: true } : {}) },
+    {
+      mergeReason: PRE_MERGE_GATE_FAILURE_REASON,
+      gateStage: preGate.stage,
+      ...(preGate.held ? { gateHeld: true } : {}),
+      // #1230 — structured, so the queue's skip event and the orchestrator's backoff read the
+      // suites off `data` (see `preMergeGateFailedSuites`) rather than out of the prose.
+      ...(preGate.failedSuites?.length ? { failedSuites: preGate.failedSuites, guardFailure: preGate.guardFailure === true } : {}),
+    },
   );
 }
 

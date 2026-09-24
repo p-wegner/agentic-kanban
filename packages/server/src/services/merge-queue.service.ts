@@ -219,7 +219,9 @@ export type MergeQueueEvent =
   | { type: "merged"; workspaceId: string; issueNumber: number | null; issueTitle: string }
   | { type: "conflict"; workspaceId: string; issueNumber: number | null; issueTitle: string; conflictingFiles: string[]; error: string }
   | { type: "error"; workspaceId: string; issueNumber: number | null; issueTitle: string; error: string }
-  | { type: "skipped"; workspaceId: string; issueNumber: number | null; issueTitle: string; reason: string }
+  // #1230 — a `verify_failed:` skip may name the suites the gate blamed (`failedSuites`) and
+  // whether every one is a guard/ratchet (`guardFailure`, i.e. deterministic on this commit).
+  | { type: "skipped"; workspaceId: string; issueNumber: number | null; issueTitle: string; reason: string; failedSuites?: string[]; guardFailure?: boolean }
   | { type: "done"; merged: string[]; failed: string[]; skipped: string[] };
 
 // #1210: wires the train runner's siding-nudge ports (sendTurn + the rebase-first
