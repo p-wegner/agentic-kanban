@@ -243,8 +243,26 @@ import {
  * `when:` territory, 38 (the whole-tree scanners) an explicit `always`. None of that moves this
  * number — a `when:` narrows what a diff pays, never the worst case — which is exactly why the
  * second number exists. All three should shrink at the next `durations.json` capture.
+ *
+ * -- Eleventh movement, DOWN (2026-09-24, #1241) — 594,000 -> 561,000 ---------------------
+ *
+ * The first shrink. Fourteen tree-walking guard suites and three scripts moved onto the one
+ * shared walker (`scripts/lib/repo-tree.mjs`), and each migrated suite was re-measured with
+ * the JSON reporter (`--maxWorkers=2`, otherwise idle worktree) and banked in
+ * `docs/tests/durations.json`: `max-file-size` 8,172 -> 5,631 ms, `shared-package-exports`
+ * 7,085 -> 2,634, `temp-dir-namespace-guard` 5,205 -> 694, `git-exec-single-spawn` 5,458 ->
+ * 3,098, `chart-duplication-ratchet` 5,770 -> 1,366, `provider-resolution-single-source`
+ * 2,638 -> 262, and the rest between 1.2x and 1.9x faster (the full table is in the #1241
+ * commit). Two guards arrived measured rather than assumed: `repo-tree-walker.test.ts`
+ * (22 ms, `when:scripts/lib/repo-tree.mjs`) and `private-tree-walker-ratchet.test.ts`
+ * (284 ms, `always` — it walks the tree to find walkers). Part of the shrink is the
+ * measurement itself: the old numbers came from a full capture at `--maxWorkers=4` over every
+ * suite at once, these from a few-suite run at `--maxWorkers=2` on a box with other builders
+ * active, so the next full capture may give some of it back — which this ratchet will report
+ * as growth, honestly. The suites that dropped 5-10x (`temp-dir-namespace-guard`,
+ * `provider-resolution-single-source`) are past what contention explains.
  */
-const BASELINE_TOTAL_MS = 594_000;
+const BASELINE_TOTAL_MS = 561_000;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative
