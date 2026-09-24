@@ -127,7 +127,7 @@ export function createWorkspaceCreateService(deps: {
   }
 
   async function resolveIssueAndProject(issueId: string): Promise<{
-    issue: { projectId: string; issueNumber: number | null; title: string; description: string | null; priority: string | null };
+    issue: { projectId: string; issueNumber: number | null; title: string; description: string | null; priority: string | null; externalKey: string | null };
     project: { repoPath: string; defaultBranch: string | null; defaultSkillId: string | null; servicesConfig: string | null };
     setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean };
     symlinkConfig: { enabled: boolean; dirs: string[] };

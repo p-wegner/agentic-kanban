@@ -1,4 +1,5 @@
 import type { projects, workspaces } from "@agentic-kanban/shared/schema";
+import { resolveWorkspaceBase } from "./workspace-base.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import {
   recoverFailedFixAndMergeSessionIfNeeded as recoverFailedFixAndMergeSession,
@@ -275,7 +276,7 @@ export function createWorkspaceMergeService(deps: {
       workspaceId: id,
       workspace,
       projectId: project?.id ?? null,
-      baseBranch: requireBaseBranch(workspace.baseBranch || defaultBranch),
+      baseBranch: resolveWorkspaceBase(workspace, { defaultBranch }),
       token: opts.gate ?? RUN_GATE,
       database, recordMergeAttempt,
       // #1169 — a badly-stale branch is rebased by the board before the gate, not refused.
@@ -326,7 +327,7 @@ export function createWorkspaceMergeService(deps: {
     // `MergeWorkspaceResult` is that union written once, so the whole family
     // reads as one shape.
   ): Promise<MergeWorkspaceResult> {
-    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+    const baseBranch = resolveWorkspaceBase(workspace, { defaultBranch });
     console.log(`[workspace-merge] doMerge phase=start workspaceId=${id} repoPath=${repoPath} baseBranch=${baseBranch}`);
     const prefMap = await loadMergePreferences(database);
     const autoMergeInReview = getBool(prefMap, "auto_merge_in_review");
@@ -570,7 +571,7 @@ export function createWorkspaceMergeService(deps: {
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
 
     const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
-    const baseBranch = requireBaseBranch(refreshedWorkspace.baseBranch || defaultBranch);
+    const baseBranch = resolveWorkspaceBase(refreshedWorkspace, { defaultBranch });
 
     const rebuildNote = await prepareFixAndMergeRebuildNote(id, refreshedWorkspace, repoPath, baseBranch);
 
@@ -739,7 +740,7 @@ export function createWorkspaceMergeService(deps: {
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
 
     const { repoPath, defaultBranch } = await resolveProjectRepo(integrationWorkspaceId, database);
-    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+    const baseBranch = resolveWorkspaceBase(workspace, { defaultBranch });
     const projectId = await resolveProjectId(integrationWorkspaceId, database);
 
     // Same guard as fixAndMerge/merge: refuse if the main checkout drifted off the base branch.

@@ -1,4 +1,5 @@
 import type { workspaces } from "@agentic-kanban/shared/schema";
+import { resolveWorkspaceBase } from "./workspace-base.js";
 import type { Database } from "../db/index.js";
 import type { SessionLauncher } from "./session.manager.js";
 import type { BoardEventSink } from "./board-events.js";
@@ -17,7 +18,6 @@ import { toExecutorProvider } from "./agent-settings.service.js";
 import {
   WorkspaceError,
   resolveRelaunchAgentSelection,
-  requireBaseBranch,
   type GitService,
 } from "./workspace-internals.js";
 
@@ -82,7 +82,7 @@ export function createWorkspaceResolveConflictsService(deps: ResolveConflictsDep
     await killWorktreeProcesses(refreshedWorkspace.workingDir, "resolve-conflicts");
 
     const { defaultBranch } = await resolveProjectRepo(id, database);
-    const baseBranch = requireBaseBranch(refreshedWorkspace.baseBranch || defaultBranch);
+    const baseBranch = resolveWorkspaceBase(refreshedWorkspace, { defaultBranch });
 
     // Put the worktree INTO the conflicted state relative to base — nothing else does this.
     const rebaseResult = await gitService.rebaseOntoBase(

@@ -1,4 +1,5 @@
 import { readSessionStats } from "@agentic-kanban/shared/lib/session-stats-blob";
+import { resolveWorkspaceBaseOrNull } from "./workspace-base.js";
 import type { Database } from "../db/index.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import {
@@ -457,10 +458,10 @@ export async function startManualReview(
     const autoFix = getBool(prefMap, "review_auto_fix");
 
     const defaultBranch = (await getProjectDefaultBranch(projectId, database))?.defaultBranch ?? null;
-    let diffRef = workspace.baseBranch || defaultBranch;
+    let diffRef = resolveWorkspaceBaseOrNull(workspace, { defaultBranch });
 
     if (!workspace.isDirect && workspace.workingDir) {
-      const baseBranch = workspace.baseBranch || defaultBranch;
+      const baseBranch = resolveWorkspaceBaseOrNull(workspace, { defaultBranch });
       if (!baseBranch) throw new ReviewError("No default branch configured for this project. Set a default branch in project settings before reviewing.", "BAD_REQUEST");
       const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
       if (!prep.success) {

@@ -1,4 +1,5 @@
 import type { workspaces } from "@agentic-kanban/shared/schema";
+import { resolveWorkspaceBase } from "./workspace-base.js";
 import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "./board-events.js";
 import {
@@ -11,7 +12,6 @@ import { cleanupSiblingWorktrees, stampReconciledMerges } from "./workspace-repo
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 import {
   WorkspaceError,
-  requireBaseBranch,
   listPendingSiblingMerges,
   listDirtySiblingWorktrees,
   type GitService,
@@ -66,7 +66,7 @@ export async function checkAlreadyMerged(
   if (!workspace.branch) throw new WorkspaceError("Workspace has no branch", "BAD_REQUEST");
 
   const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
-  const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+  const baseBranch = resolveWorkspaceBase(workspace, { defaultBranch });
 
   // Resolve issue number for the confirmation summary
   const issueNumber = await getIssueNumberById(workspace.issueId, database);

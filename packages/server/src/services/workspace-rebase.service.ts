@@ -1,4 +1,5 @@
 import { LEADING_REPO_KEY, type RepoRebaseResponse } from "@agentic-kanban/shared";
+import { resolveWorkspaceBase } from "./workspace-base.js";
 import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "./board-events.js";
 import {
@@ -46,7 +47,7 @@ export function createWorkspaceRebaseService(deps: {
     }
 
     const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
-    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+    const baseBranch = resolveWorkspaceBase(workspace, { defaultBranch });
 
     // Multi-repo (#72): a cross-cutting ticket touches every repo, so update-base must
     // rebase/merge the leading repo AND every sibling worktree — otherwise a trailing

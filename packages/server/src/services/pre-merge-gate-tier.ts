@@ -434,9 +434,18 @@ export function resolveImpactSelectorEnv(args: {
    * as when the tier did.
    */
   budget?: ParsedTestImpactBudget | null;
+  /**
+   * #1239 — suites forced REGARDLESS of the diff: a heal workspace's gate runs the suites its
+   * release candidate's sweep found red (`resolveHealForcedSuites`). Unioned with the diff's own
+   * test files through the same `KANBAN_TEST_NEW_FILES` door. Empty for every other workspace.
+   */
+  forcedTestFiles?: readonly string[];
 }): Record<string, string> {
   if (args.strategy !== "impact" && !args.budget) return {};
-  const newTestFiles = args.changedFiles.filter((file) => TEST_FILE_RE.test(file) && args.fileExists(file));
+  const newTestFiles = [...new Set([
+    ...args.changedFiles.filter((file) => TEST_FILE_RE.test(file) && args.fileExists(file)),
+    ...(args.forcedTestFiles ?? []),
+  ])];
   return {
     KANBAN_TEST_SELECTOR: "impact",
     ...resolveTestImpactBudgetEnv(args.budget ?? null),

@@ -10,6 +10,7 @@
  * deterministic given its inputs + the on-disk repo; best-effort steps never throw.
  */
 
+import { resolveIssueBaseBranch } from "./workspace-base.js";
 import { readFile } from "node:fs/promises";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { resolveWorktreeClaims } from "@agentic-kanban/shared/lib/worktree-claim";
@@ -316,7 +317,7 @@ export function createWorkspaceProvisionService(deps: {
     // devcontainer provision below mounts the SAME profile the launch-time call in
     // session-lifecycle.ts will use — not the default profile it used to fall back to.
     agentProfile: { claudeProfile?: string; settingsProfile?: string },
-    issue?: { issueNumber?: number | null; title: string },
+    issue?: { issueNumber?: number | null; title: string; externalKey?: string | null },
   ): Promise<{
     branch: string;
     worktreePath: string;
@@ -338,7 +339,8 @@ export function createWorkspaceProvisionService(deps: {
       baseBranch = null;
       baseCommitSha = await gitService.getHeadCommitSha(repoPath);
     } else {
-      baseBranch = input.baseBranch || defaultBranch;
+      // #1239 — an rc heal ticket branches from its candidate unless the caller named a base.
+      baseBranch = input.baseBranch || resolveIssueBaseBranch(issue?.externalKey) || defaultBranch;
       if (!baseBranch) {
         throw new WorkspaceError(
           "No default branch configured for this project. Set a default branch in project settings or choose a base branch.",
