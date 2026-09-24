@@ -27,6 +27,8 @@ export interface IssueByExternalKeyRow {
   statusName: string | null;
   sortOrder: number;
   createdAt: string;
+  /** The key the row was found by — a prefix scan needs it back to tell signatures apart (#1233). */
+  externalKey: string | null;
 }
 
 /**
@@ -48,10 +50,38 @@ export async function listIssuesByExternalKey(
       statusName: projectStatuses.name,
       sortOrder: issues.sortOrder,
       createdAt: issues.createdAt,
+      externalKey: issues.externalKey,
     })
     .from(issues)
     .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
     .where(and(eq(issues.projectId, projectId), eq(issues.externalKey, externalKey)))
+    .orderBy(desc(issues.createdAt));
+}
+
+/**
+ * Every issue in this project whose `externalKey` STARTS WITH `prefix`, newest first — the
+ * "all heal tickets of this project" read (#1233: one key per failure signature, so an exact
+ * match can no longer enumerate them). `prefix` is a literal, not a LIKE pattern: `%` and `_`
+ * in it are escaped, so a caller cannot widen the scan by accident.
+ */
+export async function listIssuesByExternalKeyPrefix(
+  projectId: string,
+  prefix: string,
+  database: Database = db,
+): Promise<IssueByExternalKeyRow[]> {
+  const pattern = `${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  return database
+    .select({
+      ...issueTextColumns,
+      statusId: issues.statusId,
+      statusName: projectStatuses.name,
+      sortOrder: issues.sortOrder,
+      createdAt: issues.createdAt,
+      externalKey: issues.externalKey,
+    })
+    .from(issues)
+    .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .where(and(eq(issues.projectId, projectId), sql`${issues.externalKey} LIKE ${pattern} ESCAPE '\\'`))
     .orderBy(desc(issues.createdAt));
 }
 
