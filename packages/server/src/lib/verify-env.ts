@@ -75,3 +75,104 @@ export function withNeutralizedListenerEnv(
 ): Record<string, string> {
   return { ...env, ...VERIFY_NEUTRALIZED_LISTENER_ENV };
 }
+
+/**
+ * The ONLY variables the base-branch health probe's children may inherit from the board process
+ * (#1231) — matched case-insensitively, because Windows spells `Path`/`PATH` and `Temp`/`TEMP`
+ * however the parent happened to.
+ *
+ * Why an allowlist and not a longer blanklist: the probe is the one full-suite signal behind
+ * `pnpm promote` and behind the `iterate` posture's promise that the FULL suite runs nightly on
+ * the base. `runSetupScript` spreads `options.env` over `process.env`, so whatever
+ * `KANBAN_TEST_*` / `KANBAN_IMPACT_*` / `KANBAN_ARCH_CHANGED_FILES` / `KANBAN_RETRY_TEST_FILES`
+ * the board process carries reaches `scripts/test-mine.mjs` unchanged and turns the "full" probe
+ * into a scoped or selector run — which then records a green that `promote` reads as a
+ * full-suite verdict. The red sweep rows of 2026-09-18/19 carried
+ * `[test:mine] added 1 NEW test file(s) from the diff on top of the selection`, a line only the
+ * impact-selector path prints. A blanklist can only name the vars that exist today; the next
+ * scoping knob is invisible to it by construction.
+ *
+ * What is here is what the shell, node, pnpm and git need to run at all: process location
+ * (PATH, PATHEXT, ComSpec, SystemRoot, windir), home and profile dirs (pnpm's store, the npm
+ * cache, git config), temp dirs, the Windows app-data dirs pnpm keeps its state under,
+ * `PNPM_HOME` and pnpm's own `npm_execpath` (which `scripts/pnpm-exec.mjs` re-invokes), proxies
+ * and CA certs for an install, `CI`, locale and timezone.
+ *
+ * Deliberately NOT here: any `KANBAN_*` (the neutralisers and the probe's own resource vars are
+ * layered on explicitly by {@link buildBaseProbeEnv}), `NODE_ENV` (a `production` board would
+ * skip devDependencies in the clone's install), `VITEST*`, `AGENTIC_KANBAN_DIR`, and anything
+ * else that configures THIS board rather than the machine.
+ */
+export const BASE_PROBE_ENV_ALLOWLIST: readonly string[] = Object.freeze([
+  // process location / shell
+  "PATH",
+  "PATHEXT",
+  "COMSPEC",
+  "SYSTEMROOT",
+  "WINDIR",
+  "SYSTEMDRIVE",
+  "SHELL",
+  // identity + home (pnpm store, npm cache, git config)
+  "HOME",
+  "USERPROFILE",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "USER",
+  "USERNAME",
+  "LOGNAME",
+  // temp
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  // Windows app-data (pnpm state, npm cache, node-gyp) and the XDG equivalents
+  "APPDATA",
+  "LOCALAPPDATA",
+  "PROGRAMDATA",
+  "PROGRAMFILES",
+  "PROGRAMFILES(X86)",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_CACHE_HOME",
+  // pnpm / node
+  "PNPM_HOME",
+  "NPM_EXECPATH",
+  "NPM_CONFIG_USERCONFIG",
+  "NODE_EXTRA_CA_CERTS",
+  "NODE_TLS_REJECT_UNAUTHORIZED",
+  "NODE_OPTIONS",
+  // network, for the clone's install
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  // ci / locale
+  "CI",
+  "LANG",
+  "LC_ALL",
+  "TZ",
+]);
+
+/**
+ * Build the base-branch health probe's child environment FROM SCRATCH (#1231): the allowlisted
+ * subset of `source` (the board process env by default), then the listener and DB-location
+ * neutralisers, then `extra` — the resource vars and, on the flake retry, `KANBAN_RETRY_TEST_FILES`,
+ * which is the ONLY scoping key a probe child may ever carry, and only on that path.
+ *
+ * Pair it with `runSetupScript(..., { inheritEnv: false })`, or the runner spreads the result
+ * back over `process.env` and the allowlist is decoration.
+ */
+export function buildBaseProbeEnv(
+  extra: Record<string, string> = {},
+  source: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const allowed = new Set(BASE_PROBE_ENV_ALLOWLIST.map((k) => k.toUpperCase()));
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (value !== undefined && allowed.has(key.toUpperCase())) env[key] = value;
+  }
+  return {
+    ...env,
+    ...VERIFY_NEUTRALIZED_LISTENER_ENV,
+    ...VERIFY_NEUTRALIZED_DB_LOCATION_ENV,
+    ...extra,
+  };
+}
