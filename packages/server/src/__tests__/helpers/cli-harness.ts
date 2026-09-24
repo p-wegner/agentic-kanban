@@ -65,6 +65,7 @@ function sweepStaleBundleDirs(nodeModules: string): void {
       /* not alive (or not ours to signal) — treat as stale */
     }
     try {
+      // REPO-TREE-WRITE OK: the bundle must sit at dist depth under this package's gitignored node_modules so ../../package.json and the migrations probe resolve (#1236); nothing tracked changes and tree walkers skip node_modules
       rmSync(join(nodeModules, name), { recursive: true, force: true });
     } catch {
       /* best-effort */
@@ -81,6 +82,7 @@ export function builtCliPath(): string {
   const nodeModules = resolve(PKG_DIR, "node_modules");
   sweepStaleBundleDirs(nodeModules);
   const outDir = join(nodeModules, `${BUNDLE_DIR_PREFIX}${process.pid}`);
+  // REPO-TREE-WRITE OK: the bundle must sit at dist depth under this package's gitignored node_modules so ../../package.json and the migrations probe resolve (#1236); nothing tracked changes and tree walkers skip node_modules
   mkdirSync(outDir, { recursive: true });
   const outfile = join(outDir, "index.js");
   buildSync({
@@ -117,6 +119,7 @@ export function builtCliPath(): string {
   builtCli = outfile;
   process.on("exit", () => {
     try {
+      // REPO-TREE-WRITE OK: the bundle must sit at dist depth under this package's gitignored node_modules so ../../package.json and the migrations probe resolve (#1236); nothing tracked changes and tree walkers skip node_modules
       rmSync(outDir, { recursive: true, force: true });
     } catch {
       /* best-effort */
