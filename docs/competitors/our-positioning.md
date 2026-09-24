@@ -18,14 +18,13 @@ These are things no competitor currently does (or does as well):
 8. **Command palette** — Ctrl+K quick actions. No competitor has this.
 9. **Agent skills system** — Built-in + custom skills, SKILL.md injection, export to Claude Code format, install from Settings UI.
 10. **Windows support** — Only Cline Kanban also runs on Windows; Lanes is macOS-only.
-11. **Estimate field** — XS/S/M/L/XL sizing on issues. No competitor has this.
-12. **All Workspaces panel** — Aggregate view of every active workspace across all issues. Unique to us.
-13. **Quick tasks panel** — Launch an agent directly from a skill without creating an issue first.
-14. **Create project from UI** — New project dialog (git init or local path) without requiring CLI. Lanes also has this; others don't.
-15. **Issue dependency types** — 6 typed relationships (depends_on, blocked_by, related_to, duplicates, parent_of, child_of) with color-coded badges and cycle detection. No competitor has typed deps.
-16. **Scheduled runs** — Cron-based recurring agent sessions. No competitor has this.
-17. **Ready-for-merge badge** — Visual indicator on workspace row when branch has no conflicts. No competitor has this.
-18. **Hover quick-start actions** — Action row appears on IssueCard hover for one-click workspace start or issue move. No competitor has this.
+11. **All Workspaces panel** — Aggregate view of every active workspace across all issues. Unique to us.
+12. **Quick tasks panel** — Launch an agent directly from a skill without creating an issue first.
+13. **Create project from UI** — New project dialog (git init or local path) without requiring CLI. Lanes also has this; others don't.
+14. **Issue dependency types** — 6 typed relationships (depends_on, blocked_by, related_to, duplicates, parent_of, child_of) with color-coded badges and cycle detection. No competitor has typed deps.
+15. **Scheduled runs** — Cron-based recurring agent sessions. No competitor has this.
+16. **Ready-for-merge badge** — Visual indicator on workspace row when branch has no conflicts. No competitor has this.
+17. **Hover quick-start actions** — Action row appears on IssueCard hover for one-click workspace start or issue move. No competitor has this.
 
 ## Where Competitors Lead
 

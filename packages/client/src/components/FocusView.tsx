@@ -58,9 +58,6 @@ function ReadyRow({ issue, onIssueClick, rank }: { issue: FocusIssue; onIssueCli
             <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ backgroundColor: PRIORITY_COLOR[issue.priority] ?? "#94a3b8" }} />
             {issue.priority}
           </span>
-          {issue.estimate && (
-            <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">{issue.estimate}</span>
-          )}
           {issue.reasons.map((r) => (
             <span key={r} className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300">{r}</span>
           ))}

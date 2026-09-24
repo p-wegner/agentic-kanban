@@ -38,7 +38,6 @@ describe("POST/PATCH /api/issues body validation keeps its exact 400 messages (#
     // The combined message is deliberate: the guard was ONE `if (!a || !b)`, so a caller
     // missing only projectId has always been told about both.
     ["analyze-dependencies names both fields", "/api/issues/analyze-dependencies", { issueId: "x" }, "issueId and projectId are required"],
-    ["ai-estimate rejects a missing issueId", "/api/issues/ai-estimate", {}, "issueId is required"],
     ["contract rejects a missing projectId", "/api/issues/contract", {}, "projectId is required"],
     ["contract/confirm rejects a missing survivorId", "/api/issues/contract/confirm", { projectId: "p" }, "survivorId is required"],
     ["contract/confirm rejects a short memberIds", "/api/issues/contract/confirm", { projectId: "p", survivorId: "s", memberIds: ["only-one"] }, "memberIds must be an array of at least 2 ids"],

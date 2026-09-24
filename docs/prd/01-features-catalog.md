@@ -7,7 +7,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 ## Category: Task Management (CORE)
 
 ### F-TASK-01: Create/Update/Delete Issues
-- Issues have: title, description (markdown), priority, status, type, estimate, and an optional **due date** (shown and sortable in the Table view)
+- Issues have: title, description (markdown), priority, status, type, and an optional **due date** (shown and sortable in the Table view)
 - Priorities: Urgent, High, Medium, Low
 - Auto-incrementing issue numbers per project (#1, #2, #3)
 - AI enhancement: "Enhance with AI" button spawns Claude CLI to improve title/description
@@ -18,7 +18,6 @@ Complete inventory of features, organized by category. Status reflects the curre
   - **Decompose…** — AI epic decomposer: splits a large ticket into linked child tickets (closed ticket #55)
   - **Expand to modal** button — opens the detail panel as a full-screen modal
   - **Mark for visual verification** button (header) — applies the `needs-visual-verification` tag; ties into the "Visual verification timing" setting (F-UI-09)
-  - **Estimate** row — T-shirt buttons XS/S/M/L/XL plus an **AI** button that AI-suggests an estimate (`POST /api/issues/ai-estimate`)
   - **Predict Files** button — AI-predicts the files a ticket will touch (closed ticket #96)
   - **Custom options...** next to "Start Workspace" — opens the launch dialog (base branch / skill / plan-mode / skip-review)
   - **Status dropdown** offers 7 statuses: Backlog, Todo, In Progress, In Review, AI Reviewed, Done, Cancelled
@@ -336,7 +335,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 
 ### F-UI-10: Board Views
 - Eleven view modes, in order: Board (kanban columns), Graph (dependency DAG), Table (flat sortable list), Agents, Timeline, Metrics, Butler, Workflows, Insights, Swimlane, Flaky (see F-UI-18 through F-UI-22 and F-BUTLER-01 for the analytical/Butler views)
-- Table view: sortable columns (#, Title, Status, Priority, Type, Estimate, **Due Date**, Updated, Tags), plus a leading **"Select all" checkbox column** and per-row checkboxes; status filter dropdown (Active only [default], All statuses, Backlog, Todo, In Progress, In Review, AI Reviewed, Done, Cancelled); row click opens detail panel. Selecting rows reveals a **bulk-action bar** ("N selected") with: Clear, **Move to status ▾**, **Add tag ▾**, and **Delete**
+- Table view: sortable columns (#, Title, Status, Priority, Type, **Due Date**, Updated, Tags), plus a leading **"Select all" checkbox column** and per-row checkboxes; status filter dropdown (Active only [default], All statuses, Backlog, Todo, In Progress, In Review, AI Reviewed, Done, Cancelled); row click opens detail panel. Selecting rows reveals a **bulk-action bar** ("N selected") with: Clear, **Move to status ▾**, **Add tag ▾**, and **Delete**
 - Graph view: nodes colored by status, dependency arrows, "Show completed" toggle, zoom controls (+/−/reset), status legend
 - Agents view: lists active agent sessions across workspaces
 - Timeline view: all issues as horizontal bars on a chronological timeline, grouped into per-status swim lanes; each bar spans createdAt->updatedAt; color-coded by issue type (task=blue, bug=red, feature=violet, chore=amber) with a priority-colored dot; sticky date axis with tick marks and a red 'Today' marker; zoom controls (50%-500%); hover tooltip showing #, created/updated dates, type, priority, tags; click a bar to open the issue detail panel; issue-type legend; empty state when no issues match; dark mode support

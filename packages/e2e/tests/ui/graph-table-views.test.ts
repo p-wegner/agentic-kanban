@@ -96,7 +96,6 @@ test.describe("Graph and Table board views", () => {
     expect(normalized).toContain("Title");
     expect(normalized).toContain("Status");
     expect(normalized).toContain("Priority");
-    expect(normalized).toContain("Estimate");
   });
 
   test("Table view shows test issues in rows", async ({ page }) => {

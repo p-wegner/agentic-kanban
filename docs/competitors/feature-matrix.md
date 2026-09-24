@@ -34,7 +34,6 @@ Side-by-side comparison of all four AI-driven kanban tools. See individual profi
 | Issue numbers | Yes | Numeric IDs | Yes | Yes (auto-increment per project, copy-to-clipboard reference) |
 | Tags/Labels | Yes | Yes (13 colors) | Yes | Yes (4 seed tags + CRUD, tag management tab in Settings) |
 | Priority levels | Yes | Yes | Yes | Yes (Urgent/High/Medium/Low) |
-| Estimate/sizing | No | No | No | Yes (XS/S/M/L/XL per issue) |
 | Search | Basic | By label, directory, step | Basic | Full-text with highlighting |
 | Filter | By status | By label, dir, step | Basic | By text, priority, status |
 | Task dependencies | No | Yes (cycle detection) | Yes (auto-chain) | Yes (6 types: depends_on, blocked_by, related_to, duplicates, parent_of, child_of) |

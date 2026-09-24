@@ -53,7 +53,7 @@ These are real DONE product features, but they belong to capability modules alre
 | Settings panel (tabbed), command palette (Ctrl+K), keyboard shortcuts, dark/light theme | client app-shell |
 | Flaky-Tests Radar + ingestion API, PR Quality Score badge, Scheduled recurring runs, Voice Inbox | analytics / scheduling long-tail (deferred in `_coverage.md`) |
 | Desktop app (Tauri v2, system tray, OS notifications) | `packages/desktop` (deferred non-product-domain) |
-| AI ticket utilities (Enhance / Decompose / AI-estimate / Predict-files) | issues-board (fold-in: `issue-ai.service`, queued) |
+| AI ticket utilities (Enhance / Decompose / Predict-files) | issues-board (fold-in: `issue-ai.service`, queued) |
 
 ### Class 3 — rationale/partial gaps (noted, low priority)
 Architectural *outcomes* are documented but some *binding rationale* is thin: ADR 006 (disposable-process tradeoff + bounded `state.md`), ADR 007 (Pi hook reuse-not-fork + degraded Stop-hook), ADR 004 (spec-planning interactivity/opt-in/Constitution-alignment — partly unbuilt). Captured here rather than expanded inline.

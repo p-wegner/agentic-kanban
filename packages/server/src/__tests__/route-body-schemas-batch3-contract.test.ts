@@ -7,7 +7,7 @@
  * request that succeeded before still succeeds; the moment a schema validates *more* than the
  * guard did, a live caller starts getting a 400 it never got, and the refactor has changed the
  * contract while claiming not to. Each `accepts` case below is a body some caller can send
- * today — `{ estimate: 5 }`, `{ dryRun: "yes" }`, `{ runner: "junit" }`, `{ kind: "bogus" }` —
+ * today — `{ sortOrder: "3" }`, `{ dryRun: "yes" }`, `{ runner: "junit" }`, `{ kind: "bogus" }` —
  * that the old handler passed straight through, coerced, or defaulted.
  *
  * These are schema-level rather than HTTP-level on purpose: `parseJsonBody` surfaces only the
@@ -97,7 +97,6 @@ describe("#806 batch 3 — bodies that succeed today still succeed", () => {
     ["archive-done with a string olderThanDays", archiveDoneBody, { projectId: "p", olderThanDays: "30" }],
     // Fields the create route DECLARED but never checked stay unchecked — tightening them
     // would 400 callers who send the wrong primitive today.
-    ["create issue with a numeric estimate", createIssueBody, { projectId: "p", title: "t", estimate: 5 }],
     ["create issue with a string sortOrder", createIssueBody, { projectId: "p", title: "t", sortOrder: "3" }],
     ["create issue with a non-array reposTouched", createIssueBody, { projectId: "p", title: "t", reposTouched: "web" }],
     ["a boolean refresh", analyzeTouchedFilesBody, { refresh: true }],

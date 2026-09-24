@@ -74,7 +74,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "POST /api/issues/:param/decompose/confirm",
   "POST /api/issues/:param/decompose/too-small",
   "POST /api/issues/:param/preflight",
-  "POST /api/issues/ai-estimate",
   "POST /api/issues/analyze-dependencies",
   "POST /api/issues/archive-done",
   "POST /api/issues/contract-coupled",

@@ -29,7 +29,6 @@ describe("issueEditBaseline", () => {
       title: "Fix the gate",
       description: null,
       issueType: undefined,
-      estimate: null,
       dueDate: null,
       externalKey: null,
       externalUrl: null,
@@ -39,7 +38,6 @@ describe("issueEditBaseline", () => {
       title: "Fix the gate",
       description: "",
       issueType: "task",
-      estimate: "",
       dueDate: "",
       externalKey: "",
       externalUrl: "",
@@ -57,12 +55,12 @@ describe("issueEditBaseline", () => {
 
   it("passes the saved values through unchanged when they are all set", () => {
     const saved = issue({
-      title: "t", description: "d", issueType: "bug", estimate: "M",
+      title: "t", description: "d", issueType: "bug",
       dueDate: "2026-09-01", externalKey: "JIRA-1", externalUrl: "https://x.test/1",
       skipAutoReview: true, milestoneId: "m1",
     });
     expect(issueEditBaseline(saved)).toEqual({
-      title: "t", description: "d", issueType: "bug", estimate: "M",
+      title: "t", description: "d", issueType: "bug",
       dueDate: "2026-09-01", externalKey: "JIRA-1", externalUrl: "https://x.test/1",
       skipAutoReview: true, milestoneId: "m1",
     });
@@ -71,14 +69,14 @@ describe("issueEditBaseline", () => {
 
 describe("hasIssueEditChanges", () => {
   it("is false when every field still matches the saved issue", () => {
-    const saved = issue({ description: "d", estimate: "M", skipAutoReview: true, milestoneId: "m1" });
+    const saved = issue({ description: "d", skipAutoReview: true, milestoneId: "m1" });
     expect(hasIssueEditChanges(issueEditBaseline(saved), saved)).toBe(false);
   });
 
   it("is false when the saved issue's nullable columns are null and the fields are empty", () => {
     // Mutation: drop a `?? ""` from the baseline — an untouched form on an issue with a null
     // description would then read as dirty and prompt "discard changes?" on every cancel.
-    const saved = issue({ description: null, estimate: null, dueDate: null, externalKey: null, externalUrl: null });
+    const saved = issue({ description: null, dueDate: null, externalKey: null, externalUrl: null });
     expect(hasIssueEditChanges(issueEditBaseline(saved), saved)).toBe(false);
   });
 
@@ -87,7 +85,6 @@ describe("hasIssueEditChanges", () => {
     ["title", { title: "changed" }],
     ["description", { description: "changed" }],
     ["issueType", { issueType: "bug" }],
-    ["estimate", { estimate: "L" }],
     ["dueDate", { dueDate: "2026-09-09" }],
     ["externalKey", { externalKey: "JIRA-9" }],
     ["externalUrl", { externalUrl: "https://x.test/9" }],
@@ -137,12 +134,11 @@ describe("buildIssueUpdatePayload", () => {
   });
 
   it("normalises emptied fields to null so the server clears the column", () => {
-    // Mutation: `estimate: fields.estimate || undefined` — undefined LEAVES the column alone,
-    // so clearing an estimate/due date/link in the UI would silently not stick.
+    // Mutation: `dueDate: fields.dueDate || undefined` — undefined LEAVES the column alone,
+    // so clearing a due date/link in the UI would silently not stick.
     const payload = buildIssueUpdatePayload(fields({
-      estimate: "", dueDate: "", externalKey: "  ", externalUrl: "", milestoneId: null,
+      dueDate: "", externalKey: "  ", externalUrl: "", milestoneId: null,
     }), []);
-    expect(payload.estimate).toBeNull();
     expect(payload.dueDate).toBeNull();
     expect(payload.externalKey).toBeNull();
     expect(payload.externalUrl).toBeNull();

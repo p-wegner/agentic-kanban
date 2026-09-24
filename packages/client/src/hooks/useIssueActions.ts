@@ -1,4 +1,4 @@
-// Issue-action handlers extracted from IssueDetailPanel (estimate, pin, duplicate,
+// Issue-action handlers extracted from IssueDetailPanel (pin, duplicate,
 // artifact copy/open/delete, notes, status-change, delete). Behaviour-preserving:
 // handler bodies are a verbatim move; the panel destructures them with the same
 // names so its render + child props are unchanged.
@@ -63,11 +63,6 @@ export function useIssueActions(deps: IssueActionsDeps) {
     setEditing, setExpandedArtifactId, setIssueTags, setMoveToDonePending,
     setNewNoteBody, setSaving, setSubmittingNote, setTogglingVisualVerify,
   } = deps;
-  async function handleQuickEstimate(value: string) {
-    const newEstimate = (value === issue.estimate ? null : value) as UpdateIssueRequest["estimate"];
-    await onUpdate(issue.id, { estimate: newEstimate });
-  }
-
   async function handleTogglePinned() {
     await onUpdate(issue.id, { pinned: !issue.pinned });
   }
@@ -264,7 +259,7 @@ export function useIssueActions(deps: IssueActionsDeps) {
   }
 
   return {
-    handleQuickEstimate, handleTogglePinned, handleDuplicate,
+    handleTogglePinned, handleDuplicate,
     handleAppendTouchedFilesToDescription, handleCopyArtifact, handleOpenArtifact,
     handleDeleteArtifact, handleAddNote, handleDeleteComment, handleStatusChange,
     handleDelete, isVisualVerify, toggleVisualVerify,
