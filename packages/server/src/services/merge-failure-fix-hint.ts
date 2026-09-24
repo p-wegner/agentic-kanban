@@ -26,23 +26,8 @@
  * guessed — a wrong baseline file is worse than a missing hint (cf. `repoRelativeSuitePath`).
  */
 
-export interface MergeFixHintEdit {
-  /** Repo-relative path of the baseline file to edit. */
-  baselineFile: string;
-  /** The entry key (`<file>::<fn>` for the nloc rings, the `const` name for the runtime ratchet). */
-  key: string;
-  /** The value the baseline holds now; null when the failure text did not state it. */
-  from: number | null;
-  /** The value the ratchet asked for. */
-  to: number;
-}
-
-export interface MergeFixHint {
-  kind: "bank-shrinks";
-  edits: MergeFixHintEdit[];
-  /** One operator line, e.g. `stale baseline: lower a.tsx::A 416 -> 371 in packages/client/…`. */
-  summary: string;
-}
+export type { MergeFixHint, MergeFixHintEdit } from "@agentic-kanban/shared/types";
+import type { MergeFixHint, MergeFixHintEdit } from "@agentic-kanban/shared/types";
 
 const NLOC_PACKAGES = new Set(["client", "server"]);
 const NLOC_BASELINE = (pkg: string) => `packages/${pkg}/src/__tests__/function-nloc-baseline.ts`;
