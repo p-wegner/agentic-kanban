@@ -120,7 +120,8 @@ lists three registered projects with a missing repoPath (`tsz-coarse/medium/fine
    promotion via `pnpm promote --recover` (see the bootstrap caveat), then `pnpm promote --dry-run`
    again to watch the rc lane cut `rc/<date>`.
 2. Decide the dev board's posture: `flow` needs `promote_cadence_<id>` set first.
-3. #1244, #1245 (Backlog, `no-auto-start`); the `tsz-*` missing-path projects.
+3. Decision 020 (queue flush) is written; #1246–#1249 filed as a coupled group, `no-auto-start`,
+   #1246 (observability) first. Also #1244, #1245; the `tsz-*` missing-path projects.
 
 ### Verified by
 Each ticket's Done comment (POST `/api/issues/:id/comments`) names its commits and the wave's gate
