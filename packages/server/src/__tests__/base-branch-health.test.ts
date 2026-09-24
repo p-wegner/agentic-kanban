@@ -31,7 +31,7 @@ vi.mock("@agentic-kanban/shared/lib/git-service", async (importOriginal) => {
   return { ...actual, cloneBranchTo: (...args: unknown[]) => cloneBranchTo(...args) };
 });
 
-const { verifyBaseBranchHealth, getBaseBranchHealthAtMergeBase, describeRedBaseAttribution } =
+const { verifyBaseBranchHealth, probeBranch, getBaseBranchHealthAtMergeBase, describeRedBaseAttribution } =
   await import("../services/base-branch-health.service.js");
 const { saveStackProfile } = await import("../services/stack-profile.service.js");
 const { setPreference } = await import("../repositories/preferences.repository.js");
@@ -395,6 +395,35 @@ describe("verifyBaseBranchHealth — installs before verifying (#674)", () => {
     expect(calls).toEqual(["pnpm install -r", "pnpm test"]);
     expect(result?.outcome).toBe("green");
     expect(cloneBranchTo).toHaveBeenCalledTimes(1);
+  });
+
+  it("probeBranch sweeps a NAMED branch (a release candidate), stamps the row with it, and keeps it OUT of the base lane (#1238)", async () => {
+    const repoPath = makeRealGitRepo();
+    const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+    execFileSync("git", ["branch", "rc/20260924"], { cwd: repoPath, encoding: "utf8" });
+    execFileSync("git", ["commit", "--allow-empty", "-q", "-m", "master moves on"], { cwd: repoPath, encoding: "utf8" });
+    const rcSha = execFileSync("git", ["rev-parse", "rc/20260924"], { cwd: repoPath, encoding: "utf8" }).trim();
+    const masterSha = execFileSync("git", ["rev-parse", "master"], { cwd: repoPath, encoding: "utf8" }).trim();
+    expect(rcSha).not.toBe(masterSha);
+    const projectId = await seedProject(db, repoPath);
+    await setPreference(verifyScriptPrefKey(projectId), "pnpm test", db);
+    runSetupScript.mockImplementation(async () => ({ exitCode: 0, stdout: "[gate:step] name=tests seconds=1 scope=full", stderr: "" }));
+
+    const result = await probeBranch(projectId, "rc/20260924", db);
+
+    // The clone and the verdict are about the candidate, not the default branch.
+    expect(cloneBranchTo).toHaveBeenCalledWith(repoPath, "rc/20260924", expect.any(String), expect.any(Number));
+    expect(result?.branch).toBe("rc/20260924");
+    expect(result?.sha).toBe(rcSha);
+    expect(result?.outcome).toBe("green");
+    expect(result?.scope).toBe("full");
+
+    // The rc row is readable by branch, and INVISIBLE to the base-lane readers every pre-#1238
+    // consumer uses — a candidate's verdict must never answer "is master red".
+    const byBranch = await getLatestBaseBranchHealth(projectId, db, { branch: "rc/20260924" });
+    expect(byBranch?.sha).toBe(rcSha);
+    expect(byBranch?.branch).toBe("rc/20260924");
+    expect(await getLatestBaseBranchHealth(projectId, db)).toBeNull();
   });
 
   it("records 'unverified' (never 'red') when the install itself fails, without running verify_script", async () => {

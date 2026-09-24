@@ -27,6 +27,15 @@ export interface ScheduledTasksDeps {
     id: string,
     triggeredBy: string,
   ) => Promise<{ workspaceId?: string; skipped?: boolean; reason?: string }>;
+  /**
+   * The promotion-cadence tick (#1238): fires `pnpm promote`'s code path for every project whose
+   * `promote_cadence_<id>` is due. Injected (never spawned from here) for the same reason
+   * `runScheduledRun` is — the wiring in `background-services.ts` passes
+   * `runDuePromoteCadences` with the real prefs and the detached-run `fire`; a test passes a
+   * fake and asserts the tick alone. Optional so a caller that has no cadence to run (older
+   * wiring, a test of the scheduled_runs table) changes nothing.
+   */
+  runPromoteCadenceTick?: () => Promise<unknown>;
 }
 
 let activeScheduledTaskTimers: ScheduledTaskTimers | null = null;
@@ -106,15 +115,28 @@ export function setupScheduledTasks(deps: ScheduledTasksDeps): ScheduledTaskTime
     }
   }
 
+  // #1238 — the promotion cadence rides the same minute tick. The decision (which projects are
+  // due, the in-flight check, the fire) lives in `promote-cadence.service.ts`; this only calls it.
+  async function runPromoteCadenceCycle() {
+    if (!deps.runPromoteCadenceTick) return;
+    try {
+      await deps.runPromoteCadenceTick();
+    } catch (err) {
+      console.error("[scheduler] promote cadence cycle error:", err);
+    }
+  }
+
   // Check every minute
   const interval = setInterval(() => {
     runScheduledRunsCycle().catch(() => {});
     runConductorCronCycle().catch(() => {});
+    runPromoteCadenceCycle().catch(() => {});
   }, 60 * 1000);
   // Initial check after 10s (let server fully start)
   const timer = setTimeout(() => {
     runScheduledRunsCycle().catch(() => {});
     runConductorCronCycle().catch(() => {});
+    runPromoteCadenceCycle().catch(() => {});
   }, 10 * 1000);
 
   const handles: ScheduledTaskTimers = { timer, interval };

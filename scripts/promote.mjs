@@ -8,18 +8,26 @@
  * one moment the full suite decides anything
  * (`docs/proposals/2026-09-03-dev-board-vs-deployed-board.md` §3.A, Yegge's drawbridge).
  *
- * One run does, in order:
+ * One run does, in order (#1238, decision 019: the gate is a RELEASE CANDIDATE, never master):
  *
- *   1. reads the last full-sweep verdict for master out of the board's `base_branch_health`
- *      table — via `GET /api/projects/:id/base-branch-health` when a board answers, else a
- *      READ-ONLY sqlite query. It never writes to that database. When the only thing missing is
- *      a CURRENT verdict it ASKS THE BOARD for one (`POST …/base-branch-health/reprobe`) and
- *      waits — see `planSweepAcquisition` for the trap that closes (#1044).
- *   2. tags `stable-YYYYMMDD` (`-2`, `-3`, … if the day already has one) on the green sha,
+ *   0. cuts `rc/YYYYMMDD[-N]` from master's tip in the main checkout (a branch ref only, no
+ *      checkout switch), or reuses the candidate already in flight; a candidate red for longer
+ *      than one cadence is abandoned first. Lifecycle: `<stable>/.kanban/rc-state.json`
+ *      (`scripts/rc-state.mjs`). Master keeps merging throughout; nothing on it waits.
+ *   1. reads the last full-sweep verdict FOR THE RC out of the board's `base_branch_health`
+ *      table — via `GET /api/projects/:id/base-branch-health?branch=rc/…` when a board answers,
+ *      else a READ-ONLY sqlite query. It never writes to that database. When the only thing
+ *      missing is a CURRENT verdict it ASKS THE BOARD for one (`POST …/base-branch-health/
+ *      reprobe?branch=rc/…`) and waits — see `planSweepAcquisition` for the trap that closes
+ *      (#1044). A red rc is recorded as `red` with its failing suites and the run stops with
+ *      the heal instruction; the branch stays for the heal ticket (#1239).
+ *   2. tags `stable-YYYYMMDD` (`-2`, `-3`, … if the day already has one) on the green RC sha,
  *   3. in the stable checkout: fetch, fast-forward to the tag, install only if the lockfile
  *      moved, build, migrate, restart,
  *   4. smokes `/health`, `GET /api/projects` (non-empty) and one board-status call; on failure
  *      fast-forwards back to the previous `stable-*` tag, rebuilds, restarts and says so.
+ *   5. records the rc as `promoted` and prints the merge-back command (a board workspace will do
+ *      it, #1239). `--recover` and `--force-sweep` stay on MASTER'S TIP, loudly, and touch no rc.
  *
  * Every step is appended to `<stable checkout>/.kanban/promote.log`, which is what the
  * Sentinel reads. The board this script STARTS logs somewhere else — `.kanban/board.log` — so a
@@ -36,6 +44,7 @@
  *                                              # (exit 2) without spawning if it is already held.
  *                                              # No tag, no fast-forward, no build, no sweep. Also
  *                                              # `pnpm stable:start`.
+ *   node scripts/promote.mjs --cadence         # the board's promote_cadence tick: same run, logged as scheduled
  *   node scripts/promote.mjs --help            # print this usage and exit 0; touches nothing
  *
  * Argv parsing is STRICT (#1222): any token this script does not recognise (a typo of a flag
@@ -111,6 +120,17 @@ import {
   stableTagDate,
 } from "./promote-plan.mjs";
 import { MISSES_RELPATH, OUTCOMES_RELPATH, formatGateEvidence, formatMissRate, parseOutcomeRows, summarizeGateEvidence, summarizeMissRate } from "./promote-evidence.mjs";
+import {
+  DEFAULT_RC_CADENCE_MS,
+  RC_BRANCH_PREFIX,
+  findRcCandidate,
+  formatRcCandidate,
+  planRcCandidate,
+  readRcState,
+  rcStatePath,
+  upsertRcCandidate,
+  writeRcState,
+} from "./rc-state.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -148,6 +168,8 @@ const opts = {
   // same port-owner signature check the stop step uses, but never tags, builds, migrates or
   // kills. A separate lane from promotion, not another flavour of it.
   restartStable: parsedArgv.restartStable,
+  // #1238: provenance — fired by the board's cadence rather than by a hand. Same run.
+  cadence: parsedArgv.cadence,
   reason: parsedArgv.reason,
 };
 
@@ -208,14 +230,16 @@ function gitOrThrow(gitArgs, cwd = REPO_ROOT) {
 
 // --- step 1: the sweep verdict ------------------------------------------------------------
 
-async function readSweepRowViaHttp() {
+async function readSweepRowViaHttp(branch) {
   const projectsRes = await fetch(`${boardUrl}/api/projects`, { signal: AbortSignal.timeout(5000) });
   if (!projectsRes.ok) throw new Error(`GET /api/projects -> ${projectsRes.status}`);
   const body = await projectsRes.json();
   const projects = Array.isArray(body) ? body : (body?.projects ?? []);
   const project = projects.find((p) => p?.name === projectName || p?.slug === projectName);
   if (!project) throw new Error(`no project named '${projectName}' on ${boardUrl}`);
-  const healthRes = await fetch(`${boardUrl}/api/projects/${project.id}/base-branch-health?limit=20`, {
+  // #1238 — `?branch=` selects the candidate's rows; without it the board answers for the base
+  // lane (its `rc/…` rows excluded), which is a verdict about master, never about the rc.
+  const healthRes = await fetch(`${boardUrl}/api/projects/${project.id}/base-branch-health?limit=20&branch=${encodeURIComponent(branch)}`, {
     signal: AbortSignal.timeout(5000),
   });
   if (!healthRes.ok) throw new Error(`GET /api/projects/${project.id}/base-branch-health -> ${healthRes.status}`);
@@ -230,7 +254,7 @@ async function readSweepRowViaHttp() {
  * SELECTs are issued — the operated database is the stable board's live data and this script
  * is never allowed to write to it.
  */
-async function readSweepRowViaSqlite() {
+async function readSweepRowViaSqlite(branch) {
   if (!existsSync(dbPath)) throw new Error(`no database at ${dbPath}`);
   const { DatabaseSync } = await import("node:sqlite");
   const db = new DatabaseSync(dbPath, { readOnly: true });
@@ -247,22 +271,22 @@ async function readSweepRowViaSqlite() {
       .get() !== undefined;
     const row = db
       .prepare(
-        `select sha, branch, outcome, message, ${hasScope ? "scope, " : ""}created_at from base_branch_health where project_id = ? order by created_at desc limit 1`,
+        `select sha, branch, outcome, message, ${hasScope ? "scope, " : ""}created_at from base_branch_health where project_id = ? and branch = ? order by created_at desc limit 1`,
       )
-      .get(project.id);
+      .get(project.id, branch);
     return { row: row ?? null, projectId: project.id, viaHttp: false, source: `read-only sqlite ${dbPath}` };
   } finally {
     db.close();
   }
 }
 
-async function readSweepRow() {
+async function readSweepRow(branch) {
   try {
-    return await readSweepRowViaHttp();
+    return await readSweepRowViaHttp(branch);
   } catch (httpErr) {
     const httpReason = httpErr instanceof Error ? httpErr.message : String(httpErr);
     try {
-      const viaDb = await readSweepRowViaSqlite();
+      const viaDb = await readSweepRowViaSqlite(branch);
       return { ...viaDb, source: `${viaDb.source} (board HTTP unavailable: ${httpReason})` };
     } catch (dbErr) {
       const dbReason = dbErr instanceof Error ? dbErr.message : String(dbErr);
@@ -271,13 +295,49 @@ async function readSweepRow() {
   }
 }
 
+// --- the project's risk posture (#1240) -------------------------------------------------------
+
+/**
+ * The project's RESOLVED risk-posture level, for the dry run's `flow` statement. Via the board's
+ * own resolver (`GET /api/projects/:id/delivery` → `posture.level`) when a board answers — that is
+ * the same function the gate and the veto run, tag overrides included. The read-only sqlite
+ * fallback reads the raw `risk_posture_<id>` preference, which is the level as SET, not as
+ * resolved (an unset pref reads `standard`, the resolver's own default). Never fatal: the posture
+ * only shapes one line of the plan, so an unreadable one is reported as unknown.
+ */
+async function readPostureLevel(projectId) {
+  if (!projectId) return null;
+  try {
+    const res = await fetch(`${boardUrl}/api/projects/${projectId}/delivery`, { signal: AbortSignal.timeout(5000) });
+    if (res.ok) {
+      const body = await res.json();
+      if (typeof body?.posture?.level === "string") return body.posture.level;
+    }
+  } catch {
+    // fall through to the database
+  }
+  try {
+    if (!existsSync(dbPath)) return null;
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      const row = db.prepare("select value from preferences where key = ? limit 1").get(`risk_posture_${projectId}`);
+      return typeof row?.value === "string" && row.value.trim() ? row.value.trim() : "standard";
+    } finally {
+      db.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
 // --- step 1b: ASK for the sweep this run needs (#1044) --------------------------------------
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** `POST /api/projects/:id/base-branch-health/reprobe` — the board decides, and answers at once. */
-async function requestReprobe(projectId) {
-  const res = await fetch(`${boardUrl}/api/projects/${projectId}/base-branch-health/reprobe`, {
+async function requestReprobe(projectId, branch) {
+  const res = await fetch(`${boardUrl}/api/projects/${projectId}/base-branch-health/reprobe?branch=${encodeURIComponent(branch)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: "{}",
@@ -287,8 +347,8 @@ async function requestReprobe(projectId) {
   return await res.json();
 }
 
-async function latestSweepRow(projectId) {
-  const res = await fetch(`${boardUrl}/api/projects/${projectId}/base-branch-health?limit=1`, {
+async function latestSweepRow(projectId, branch) {
+  const res = await fetch(`${boardUrl}/api/projects/${projectId}/base-branch-health?limit=1&branch=${encodeURIComponent(branch)}`, {
     signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) throw new Error(`GET base-branch-health -> ${res.status}`);
@@ -320,15 +380,15 @@ async function latestSweepRow(projectId) {
  */
 const PROBE_RECHECK_MS = 5 * 60_000;
 
-async function acquireFreshSweep(projectId, previousRow, waitMs) {
+async function acquireFreshSweep(projectId, previousRow, waitMs, branch) {
   const deadline = Date.now() + waitMs;
   let nextAskAt = 0;
   let lastNote = 0;
-  log(`[promote] requesting a fresh base-branch sweep for project ${projectId} (waiting up to ${Math.round(waitMs / 60_000)} min)`);
+  log(`[promote] requesting a fresh full sweep of ${branch} for project ${projectId} (waiting up to ${Math.round(waitMs / 60_000)} min)`);
   while (Date.now() < deadline) {
     if (Date.now() >= nextAskAt) {
       try {
-        const answer = await requestReprobe(projectId);
+        const answer = await requestReprobe(projectId, branch);
         const probing = isProbingThisProject(answer);
         nextAskAt = Date.now() + (probing ? PROBE_RECHECK_MS : SWEEP_POLL_INTERVAL_MS);
         // #1223 — "probe_in_flight" alone cannot be told apart from a stamp whose owning process
@@ -351,7 +411,7 @@ async function acquireFreshSweep(projectId, previousRow, waitMs) {
     }
     await sleep(SWEEP_POLL_INTERVAL_MS);
     try {
-      const row = await latestSweepRow(projectId);
+      const row = await latestSweepRow(projectId, branch);
       if (isFreshSweepRow(row, previousRow)) {
         log(`[promote] fresh sweep landed: ${row.outcome} on ${row.sha} at ${row.createdAt ?? row.created_at}`);
         return { row };
@@ -830,6 +890,61 @@ async function runRestartOnly() {
   process.exitCode = 1;
 }
 
+// --- the release-candidate lane (#1238) ----------------------------------------------------
+
+/** Every `rc/*` branch in the MAIN checkout — the names a new cut must not reuse. */
+function listRcBranches() {
+  return gitOrThrow(["branch", "--list", "--format=%(refname:short)", `${RC_BRANCH_PREFIX}*`], MAIN_CHECKOUT)
+    .split(/\r?\n/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Decide which candidate this run gates and, in a real run, make it so: retire a stuck red one,
+ * cut the new branch ref from master's tip (`git branch`, never a checkout switch — the main
+ * checkout's working tree is untouched), and record the transition. A dry run only decides.
+ */
+function resolveRcCandidate({ masterTip, dryRun }) {
+  let state = readRcState(stableCheckout);
+  const existing = listRcBranches();
+  const plan = planRcCandidate({ dateStamp: stableTagDate(), state, existingBranches: existing, cadenceMs: DEFAULT_RC_CADENCE_MS });
+  const at = new Date().toISOString();
+  if (plan.abandon) {
+    log(`[promote] rc: ABANDONING ${plan.abandon} — ${plan.reason}`);
+    state = upsertRcCandidate(state, plan.abandon, { state: "abandoned", note: plan.reason }, at);
+  }
+  if (plan.action === "cut") {
+    if (!dryRun) {
+      gitOrThrow(["branch", plan.branch, masterTip], MAIN_CHECKOUT);
+      state = upsertRcCandidate(state, plan.branch, { sha: masterTip, state: "cut", cutAt: at, note: `cut from ${baseBranch} by ${opts.cadence ? "the promotion cadence" : "pnpm promote"}` }, at);
+      writeRcState(stableCheckout, state);
+      log(`[promote] rc: CUT ${plan.branch} at ${masterTip} — ${plan.reason}`);
+    }
+    return { plan, branch: plan.branch, sha: masterTip, state };
+  }
+  const sha = gitOrThrow(["rev-parse", plan.branch], MAIN_CHECKOUT);
+  if (!dryRun && plan.abandon) writeRcState(stableCheckout, state);
+  log(`[promote] rc: REUSE ${plan.branch} at ${sha} — ${plan.reason}`);
+  return { plan, branch: plan.branch, sha, state };
+}
+
+/** Move the candidate to `next` in the lifecycle file — best-effort, loud, never fatal. */
+function recordRc(branch, patch) {
+  try {
+    const state = upsertRcCandidate(readRcState(stableCheckout), branch, patch);
+    writeRcState(stableCheckout, state);
+    log(`[promote] rc: ${formatRcCandidate(findRcCandidate(state, branch))}`);
+  } catch (e) {
+    log(`[promote] !!! could not record ${branch} -> ${patch.state ?? "?"} in ${rcStatePath(stableCheckout)} (${e instanceof Error ? e.message : String(e)})`);
+  }
+}
+
+/** The merge-back a board workspace will run (#1239); until then it is printed, never run. */
+function mergeBackInstruction(rcBranch) {
+  return `git -C ${MAIN_CHECKOUT} merge --no-ff ${rcBranch} -m "merge-back ${rcBranch} into ${baseBranch}"   (a no-op refusal when nothing was healed on the rc: check with git -C ${MAIN_CHECKOUT} merge-base --is-ancestor ${rcBranch} ${baseBranch})`;
+}
+
 async function main() {
   if (opts.restartStable) {
     return await runRestartOnly();
@@ -847,22 +962,31 @@ async function main() {
     fail("--with-migration only means anything in the --recover lane (it acks the one change a rollback cannot reverse). The full lane's sweep already covers migrations.");
   }
 
+  if (opts.cadence) log(`[promote] fired by the board's promotion cadence (--cadence)`);
+
+  // #1238 — the rc lane. `--recover` and `--force-sweep` deliberately stay on MASTER'S TIP: both
+  // consult no sweep, so there is no candidate for them to gate, and they say so loudly below.
+  const masterTip = gitOrThrow(["rev-parse", baseBranch], MAIN_CHECKOUT);
+  const onRcLane = !opts.forceSweep && !opts.recover;
+  const rc = onRcLane ? resolveRcCandidate({ masterTip, dryRun: opts.dryRun }) : null;
+  const gatedBranch = rc ? rc.branch : baseBranch;
+
   const verdictFor = (sweep) =>
     opts.forceSweep || opts.recover
       ? { ok: true, reason: opts.recover ? "recovery" : "forced", sha: null, detail: opts.recover ? "--recover: the sweep was not consulted; the build/migrate/restart/smoke pipeline and its rollback are the gate" : "--force-sweep: no sweep verdict was consulted" }
       : sweep.unreadable
         ? { ok: false, reason: "unreadable", sha: null, detail: `the sweep verdict could not be READ at all — ${sweep.source}` }
-        : parseSweepVerdict(sweep.row, { branch: baseBranch, maxAgeMs: resolveMaxSweepAgeMs(env) });
+        : parseSweepVerdict(sweep.row, { branch: gatedBranch, maxAgeMs: resolveMaxSweepAgeMs(env) });
 
   // The recovery lane reads no verdict, exactly like --force-sweep: there is nothing to acquire.
-  let sweep = opts.forceSweep || opts.recover ? null : await readSweepRow();
+  let sweep = opts.forceSweep || opts.recover ? null : await readSweepRow(gatedBranch);
   let verdict = verdictFor(sweep);
 
   const stableHead = readStableHead();
   // Read the tip BEFORE the acquisition decision, not after it: `planSweepAcquisition` needs it to
   // tell a RED verdict that still describes the tree from one about a commit that has since been
-  // fixed past (#1060). It was computed below purely by accident of ordering.
-  const branchHead = gitOrThrow(["rev-parse", baseBranch]);
+  // fixed past (#1060). On the rc lane the tip is the candidate's, which only a heal moves.
+  const branchHead = rc ? rc.sha : masterTip;
   const acquisition = planSweepAcquisition({
     verdict,
     headSha: branchHead,
@@ -880,7 +1004,8 @@ async function main() {
   // nothing, so it says what it WOULD do and stops there.
   if (acquisition.request && !opts.dryRun) {
     log(`[promote] sweep acquisition: ${acquisition.detail}`);
-    const acquired = await acquireFreshSweep(sweep.projectId, sweep.row, resolveSweepWaitMs(env));
+    if (rc) recordRc(rc.branch, { state: "sweeping", sha: rc.sha });
+    const acquired = await acquireFreshSweep(sweep.projectId, sweep.row, resolveSweepWaitMs(env), gatedBranch);
     if (acquired.row) {
       sweep = { ...sweep, row: acquired.row, source: `${sweep.source} (sweep TRIGGERED by this run)` };
       // Re-parsed, not trusted: a sweep this run asked for is judged by exactly the same rules
@@ -895,6 +1020,8 @@ async function main() {
   const sha = verdict.ok && verdict.sha ? verdict.sha : headSha;
   const gateEvidence = readGateEvidence(verdict.at ?? null);
   const missRate = readMissRateEvidence();
+  // #1240 — under `flow` the plan's first line names the rc verdict as the one that counts.
+  const postureLevel = await readPostureLevel(sweep?.projectId ?? null);
 
   // #1054: the recovery lane's whole gate set. `recoveryDelta` is also what makes the delta
   // LEGIBLE — on a single-user board the operator is the review, so printing what would deploy
@@ -935,13 +1062,18 @@ async function main() {
     sweepAcquisition: acquisition,
     gateEvidence: formatGateEvidence(gateEvidence),
     recovery: recoveryLane ? formatRecoveryLane(recoveryLane, recoveryDelta) : null,
+    rc: rc ? rc.plan : null,
+    postureLevel,
   });
 
   if (opts.dryRun) {
     console.log("[promote] DRY RUN — nothing is tagged, built, started or written.\n");
     console.log(`  repo checkout    ${REPO_ROOT}${MAIN_CHECKOUT === REPO_ROOT ? "" : `   (main checkout: ${MAIN_CHECKOUT})`}`);
     console.log(`  stable checkout  ${stableCheckout}${existsSync(stableCheckout) ? "" : "   (DOES NOT EXIST)"}`);
-    console.log(`  base branch      ${baseBranch} @ ${headSha}`);
+    console.log(`  base branch      ${baseBranch} @ ${masterTip}`);
+    console.log(`  release cand.    ${rc ? `${rc.plan.action === "cut" ? "would CUT" : "REUSE"} ${rc.branch} @ ${rc.sha}${rc.plan.abandon ? ` (abandoning ${rc.plan.abandon})` : ""} — ${rc.plan.reason}` : `none — ${opts.recover ? "--recover" : "--force-sweep"} stays on ${baseBranch}'s tip`}`);
+    console.log(`  rc state file    ${rcStatePath(stableCheckout)}${rc ? `  (${formatRcCandidate(findRcCandidate(rc.state, rc.branch))})` : ""}`);
+    console.log(`  risk posture     ${postureLevel ?? "<unknown: no board and no readable preference>"}${postureLevel === "flow" ? " — the rc sweep is the only full verdict owed" : ""}`);
     console.log(`  promote sha      ${sha}`);
     console.log(`  new tag          ${tag}`);
     console.log(`  rollback tag     ${rollbackTag ?? "<none — first promotion>"}`);
@@ -1017,8 +1149,16 @@ async function main() {
     log("[promote] ############################################################");
     log("[promote] # --force-sweep: the nightly full-sweep verdict was NOT    #");
     log("[promote] # consulted. Nothing has verified that master is green.    #");
+    log(`[promote] # No release candidate: this tags ${baseBranch}'s TIP.       #`);
     log("[promote] ############################################################");
   } else if (!verdict.ok) {
+    // #1238 — a RED candidate is recorded with its failing suites and left in place: the fix
+    // happens ON the rc (a heal ticket, #1239), never by re-cutting from a master that has moved.
+    if (verdict.reason === "red") {
+      const failedSuites = Array.isArray(sweep?.row?.failedSuites) ? sweep.row.failedSuites : [];
+      recordRc(rc.branch, { state: "red", sha: rc.sha, failedSuites, note: verdict.detail });
+      fail(`${verdict.detail}. ${rc.branch} is RED and stays in place — heal it ON the candidate (a workspace based on ${rc.branch}, merging into it; #1239 files that ticket), then re-run this: the next sweep measures the healed rc. It is abandoned automatically once red for longer than one cadence. --force-sweep tags ${baseBranch}'s tip instead, loudly.`);
+    }
     // Name whether this run TRIED to get evidence. "Re-run once a green sweep exists" is bad
     // advice when the run just spent 40 minutes asking for one — that is a board problem, and
     // reading it as "wait for the nightly" is what sends an operator to --force-sweep (#1044).
@@ -1027,6 +1167,7 @@ async function main() {
       : `No sweep was requested: ${acquisition.detail}`;
     fail(`${verdict.detail} (reason: ${verdict.reason}). ${tried} Or promote deliberately with --force-sweep.`);
   }
+  if (rc) recordRc(rc.branch, { state: "green", sha: rc.sha, failedSuites: [] });
 
   // Refuse rather than create or repair the stable checkout: it is an operator artifact
   // (docs/two-boards.md §7), and a promotion into a dirty tree would destroy uncommitted work.
@@ -1037,7 +1178,7 @@ async function main() {
   if (dirty.code !== 0) fail(`${stableCheckout} is not a git checkout (${dirty.stderr})`);
   if (dirty.stdout) fail(`stable checkout ${stableCheckout} is DIRTY:\n${dirty.stdout}`);
 
-  log(`[promote] === promotion ${tag} -> ${sha} (from ${REPO_ROOT}) ===`);
+  log(`[promote] === promotion ${tag} -> ${sha} (from ${REPO_ROOT}${rc ? `, candidate ${rc.branch}` : `, ${baseBranch}'s tip`}) ===`);
   log(`[promote] sweep: ${verdict.detail} (source: ${opts.recover ? "SKIPPED (--recover)" : opts.forceSweep ? "SKIPPED" : sweep.source})`);
   // #1045 — into the audit trail the Sentinel reads, as context for the verdict above. It is
   // never what authorized this promotion; the sweep line is.
@@ -1092,6 +1233,12 @@ async function main() {
         );
       }
       log(`[promote] === ${tag} is live on ${boardUrl} ===`);
+      if (rc) {
+        // #1238 item 3 — terminal. The merge-back into master is the board's job (#1239 gives it a
+        // workspace and the normal gate); until then the exact command is printed and NOT run.
+        recordRc(rc.branch, { state: "promoted", tag, sha });
+        log(`[promote] rc: ${rc.branch} is promoted as ${tag}. Merge it back into ${baseBranch} through the board; by hand: ${mergeBackInstruction(rc.branch)}`);
+      }
       return;
     }
     throw new Error(`smoke failed at ${result.failed}: ${result.detail}`);

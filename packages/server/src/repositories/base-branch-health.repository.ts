@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { baseBranchHealth } from "@agentic-kanban/shared/schema";
-import { and, count, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, notLike, sql, type SQL } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { firstRow } from "../lib/first-row.js";
@@ -81,16 +81,48 @@ export async function recordBaseBranchHealth(
   return id;
 }
 
-/** The newest recorded base-branch health result for a project, or null when none was ever recorded. */
+/**
+ * Which rows a reader means (#1238). Every consumer that existed before release candidates —
+ * the gate's attribution, the red-base veto, the delivery chip, the probe's own recency check —
+ * asks about the project's BASE branch. An rc sweep writes into the same table with
+ * `branch = rc/<date>`, and letting those rows answer "is master red" would hold the train
+ * window over a candidate's red (or clear it over a candidate's green). So:
+ *
+ *  - `branch` absent  → the base-branch lane: every row whose `branch` is NOT an `rc/…` one.
+ *    Older rows carry whatever the project's default branch was, so "not rc" is the filter that
+ *    keeps them, rather than an equality against a default branch the reader would have to
+ *    look up first.
+ *  - `branch` given   → exactly that branch's rows — what `pnpm promote` and the reprobe route
+ *    read for a candidate.
+ */
+export interface BaseBranchHealthReadOptions {
+  branch?: string | null;
+}
+
+/** The rc-branch prefix, spelled once here so the readers need not import the rc-state module. */
+export const RC_HEALTH_BRANCH_PREFIX = "rc/";
+
+function branchLane(opts?: BaseBranchHealthReadOptions): SQL {
+  return opts?.branch
+    ? eq(baseBranchHealth.branch, opts.branch)
+    : notLike(baseBranchHealth.branch, `${RC_HEALTH_BRANCH_PREFIX}%`);
+}
+
+/**
+ * The newest recorded base-branch health result for a project, or null when none was ever
+ * recorded. Reads the base-branch lane unless `opts.branch` names a candidate — see
+ * {@link BaseBranchHealthReadOptions}.
+ */
 export async function getLatestBaseBranchHealth(
   projectId: string,
   database: Database = db,
+  opts?: BaseBranchHealthReadOptions,
 ) {
   return firstRow(
     database
       .select()
       .from(baseBranchHealth)
-      .where(eq(baseBranchHealth.projectId, projectId))
+      .where(and(eq(baseBranchHealth.projectId, projectId), branchLane(opts)))
       .orderBy(desc(baseBranchHealth.createdAt))
       .limit(1)
   );
@@ -109,12 +141,13 @@ export async function getLatestBaseBranchHealth(
 export async function getLastGreenBaseBranchHealth(
   projectId: string,
   database: Database = db,
+  opts?: BaseBranchHealthReadOptions,
 ) {
   return firstRow(
     database
       .select()
       .from(baseBranchHealth)
-      .where(and(eq(baseBranchHealth.projectId, projectId), eq(baseBranchHealth.outcome, "green")))
+      .where(and(eq(baseBranchHealth.projectId, projectId), eq(baseBranchHealth.outcome, "green"), branchLane(opts)))
       .orderBy(desc(baseBranchHealth.createdAt))
       .limit(1)
   );
@@ -139,11 +172,12 @@ export async function listBaseBranchHealth(
   projectId: string,
   limit = 20,
   database: Database = db,
+  opts?: BaseBranchHealthReadOptions,
 ) {
   return database
     .select()
     .from(baseBranchHealth)
-    .where(eq(baseBranchHealth.projectId, projectId))
+    .where(and(eq(baseBranchHealth.projectId, projectId), branchLane(opts)))
     .orderBy(desc(baseBranchHealth.createdAt))
     .limit(limit);
 }

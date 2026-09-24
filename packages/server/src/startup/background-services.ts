@@ -4,6 +4,15 @@ import type { SessionManager } from "../services/session.manager.js";
 import { setupScheduledTasks, stopScheduledTasks } from "./scheduled-tasks.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
 import { createScheduledRunService } from "../services/scheduled-run.service.js";
+import { getPreference, setPreference } from "../repositories/preferences.repository.js";
+import { projects } from "@agentic-kanban/shared/schema";
+import {
+  isPidAlive,
+  promoteCadencePrefKey,
+  promoteCadenceStatePrefKey,
+  runDuePromoteCadences,
+  spawnPromoteCadenceRun,
+} from "../services/promote-cadence.service.js";
 import { startAutoMergeOrchestrator, stopAutoMergeOrchestrator } from "./auto-merge-orchestrator.js";
 import { startStrandedReviewReconciler, stopStrandedReviewReconciler } from "./stranded-review-reconciler.js";
 import { startStrandedPlanReconciler, stopStrandedPlanReconciler } from "./plan-mode-reconciler.js";
@@ -31,7 +40,6 @@ import { setMergeRunMarkerPort } from "../services/merge-job.service.js";
 import { clearMergeRun, setMergeRun } from "../repositories/merge-run.repository.js";
 import { startAgentSessionRegistryReaper, stopAgentSessionRegistryReaper, isMachineGlobalReapAllowed } from "./agent-session-registry-reaper.js";
 import { startWorkerHealthProbe, stopWorkerHealthProbe } from "../services/worker-health-probe.service.js";
-import { getPreference } from "../repositories/preferences.repository.js";
 import { DB_LOCATION } from "../db/data-dir.js";
 import { startStaleTempSweeper, stopStaleTempSweeper } from "./stale-temp-sweep.js";
 import { startNonBlockingSetupRetryReconciler, stopNonBlockingSetupRetryReconciler } from "./non-blocking-setup-retry-reconciler.js";
@@ -83,7 +91,27 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
       // invokes the same service function the POST /api/scheduled-runs/:id/run route uses.
       const workspaceService = createWorkspaceService({ database: db, getSessionManager, boardEvents });
       const scheduledRunService = createScheduledRunService({ database: db, createWorkspace: workspaceService.createWorkspace });
-      setupScheduledTasks({ runScheduledRun: (id, triggeredBy) => scheduledRunService.run(id, triggeredBy) });
+      setupScheduledTasks({
+        runScheduledRun: (id, triggeredBy) => scheduledRunService.run(id, triggeredBy),
+        // #1238 — the promotion cadence: real prefs, real projects, a detached `promote.mjs` run.
+        runPromoteCadenceTick: async () => {
+          const fired = await runDuePromoteCadences({
+            listProjects: async () => {
+              const rows = await db.select({ id: projects.id, repoPath: projects.repoPath }).from(projects);
+              return rows.filter((r) => !!r.repoPath).map((r) => ({ projectId: r.id, repoPath: r.repoPath }));
+            },
+            getCadencePref: (projectId) => getPreference(promoteCadencePrefKey(projectId), db),
+            getStatePref: (projectId) => getPreference(promoteCadenceStatePrefKey(projectId), db),
+            setStatePref: (projectId, value) => setPreference(promoteCadenceStatePrefKey(projectId), value, db),
+            fire: (project) => spawnPromoteCadenceRun(project),
+            isRunAlive: isPidAlive,
+          });
+          for (const r of fired) {
+            if (r.fired) console.log(`[scheduler] fired promotion cadence for project ${r.projectId} (pid ${r.pid ?? "?"}; rc ${r.rcBranch ?? "<none>"} ${r.rcState ?? ""})`);
+            else if (r.skipped === "fire_failed" || r.skipped === "invalid") console.warn(`[scheduler] promotion cadence for project ${r.projectId} not fired (${r.skipped}): ${r.error ?? "unknown"}`);
+          }
+        },
+      });
       return stopScheduledTasks;
     },
   },

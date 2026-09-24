@@ -18,6 +18,17 @@ import { getAllPreferencesCached } from "../repositories/preferences.repository.
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 
 import { queryInt } from "../middleware/query-params.js";
+
+/**
+ * `?branch=rc/20260924` (#1238): read or probe a NAMED branch — a release candidate — instead
+ * of the base-branch lane. Absent = the base lane, which is every pre-#1238 caller. A value
+ * that is not a plausible ref name is ignored rather than passed to git.
+ */
+function branchQuery(raw: string | undefined): string | null {
+  const v = (raw ?? "").trim();
+  if (!v || v.length > 200 || /[\s~^:?*[\]\\]|\.\./.test(v)) return null;
+  return v;
+}
 /**
  * Project health / board-health-event feature endpoints. Extracted from the
  * 400-commit routes/projects.ts grab-bag (arch-review §1.5). Mounted at the SAME
@@ -55,16 +66,17 @@ export function createProjectHealthRoute(database: Database) {
   router.get("/:id/base-branch-health", async (c) => {
     const projectId = c.req.param("id");
     const limit = queryInt(c, "limit", { def: 20, min: 1, max: 100 });
+    const branch = branchQuery(c.req.query("branch"));
     const [latest, history, prefRows] = await Promise.all([
-      getLatestBaseBranchHealth(projectId, database),
-      listBaseBranchHealth(projectId, limit, database),
+      getLatestBaseBranchHealth(projectId, database, { branch }),
+      listBaseBranchHealth(projectId, limit, database, { branch }),
       getAllPreferencesCached(database).catch(() => []),
     ]);
     // #1031: the EFFECTIVE sweep cadence, so an operator can see whether this project is on
     // a scheduled full-suite sweep and how often — the posture decides, the opt-in rule
     // (`resolveBaseSweepIntervalMs`) may say "never".
     const sweep = describeBaseSweep(resolveRiskPosture(toPrefMap(prefRows), projectId), latest?.createdAt);
-    return c.json({ latest, history, sweep });
+    return c.json({ latest, history, sweep, branch });
   });
 
   // POST /api/projects/:id/base-branch-health/reprobe — invalidate the cached verdict and
@@ -91,10 +103,13 @@ export function createProjectHealthRoute(database: Database) {
   // it started one.
   router.post("/:id/base-branch-health/reprobe", async (c) => {
     const projectId = c.req.param("id");
-    const previous = await getLatestBaseBranchHealth(projectId, database).catch(() => null);
+    // #1238 — `?branch=rc/…` sweeps a release candidate; the route stays body-less.
+    const branch = branchQuery(c.req.query("branch"));
+    const previous = await getLatestBaseBranchHealth(projectId, database, { branch }).catch(() => null);
     const alreadyRunning = inFlightBaseBranchProbeCount() > 0;
     const verdict = await requestBaseBranchReprobe(projectId, database, undefined, undefined, {
       ignoreRecency: true,
+      branch,
     });
     return c.json({
       started: verdict.due,
@@ -104,6 +119,8 @@ export function createProjectHealthRoute(database: Database) {
       previousOutcome: previous?.outcome ?? null,
       previousSha: previous?.sha ?? null,
       previousAt: previous?.createdAt ?? null,
+      // #1238 — which branch this request was about, so a log line can tell an rc sweep from a base one.
+      branch,
       // #1084 — "gate_running" alone gives no way to tell a legitimately busy gate from a stuck
       // one without reading source. Naming the holder count/age settles that from the response.
       gateBusy: !verdict.due && verdict.reason === "gate_running" ? describeGateBusy() : null,

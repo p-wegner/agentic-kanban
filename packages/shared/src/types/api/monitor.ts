@@ -244,6 +244,32 @@ export interface DeliveryStatusResponse {
    * verdict — see `test-impact-miss-rate.ts`.
    */
   impactMissRate?: ImpactMissRateSummary | null;
+  /**
+   * The promotion cadence (#1238, decision 019 part 4): `promote_cadence_<projectId>` as stored —
+   * `off` or `daily@HH:MM`. Optional on the wire for an older server; absent reads as `off`.
+   */
+  promoteCadence?: string | null;
+  /**
+   * The release candidate most recently touched (#1238), read from
+   * `<stable checkout>/.kanban/rc-state.json`. `null` when no rc was ever cut, or the stable
+   * checkout is not there — a project not run under the two-board setup at all.
+   */
+  rc?: RcCandidateSummary | null;
+}
+
+/** One release candidate's lifecycle state (#1238). Mirrors `scripts/rc-state.mjs`. */
+export type RcState = "cut" | "sweeping" | "red" | "healing" | "green" | "promoted" | "abandoned";
+
+export interface RcCandidateSummary {
+  /** `rc/YYYYMMDD[-N]`. */
+  branch: string;
+  sha: string | null;
+  state: RcState;
+  updatedAt: string | null;
+  /** The `stable-*` tag, once promoted. */
+  tag: string | null;
+  /** What the rc sweep named as failed, when `state` is `red`. */
+  failedSuites: string[];
 }
 
 /**

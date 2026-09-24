@@ -5146,6 +5146,11 @@ paths:
           required: true
           schema:
             type: string
+        - name: branch
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: Success
@@ -5162,6 +5167,11 @@ paths:
         - name: id
           in: path
           required: true
+          schema:
+            type: string
+        - name: branch
+          in: query
+          required: false
           schema:
             type: string
       responses:

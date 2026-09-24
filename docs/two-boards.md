@@ -259,10 +259,9 @@ Run on 2026-09-05 (tag `stable-20260905` = `stable` = `e01438a4c5`). Do it in th
 
 ## 8. Promotion — `pnpm promote`
 
-> **Decision 019 (2026-09-24) changes what this section gates.** The sweep and the tag move to a
-> release-candidate branch (`rc/<date>`) that master does not wait for; a red candidate is healed
-> on the candidate by a board ticket and merged back. Until #1238/#1239 land, everything below
-> describes the current master-gated run. The ladder across postures is
+> **Decision 019 (2026-09-24): what this section gates is a RELEASE CANDIDATE, never master.**
+> #1238 landed the cut, the rc sweep, the rc promotion and the cadence (below); #1239 adds the
+> heal-on-candidate ticket and the board-driven merge-back. The ladder across postures is
 > `docs/integration-risk-ladder.md`.
 
 Master reaches the stable checkout by a TIMED promotion, never per merge (proposal §3.A, Yegge's
@@ -270,12 +269,59 @@ drawbridge). That is the one moment the full suite decides anything. `scripts/pr
 moment; the checklist above is its manual form.
 
 ```bash
-pnpm promote --dry-run        # print the resolved sha, tag and every step; touch nothing
-pnpm promote                  # promote — triggering and AWAITING a sweep when one is needed
-pnpm promote --no-await-sweep # never trigger one; refuse when the recorded verdict is unusable
-pnpm promote --recover --reason "<why>"   # FAST LANE: no sweep at all (#1054)
-pnpm promote --force-sweep    # promote WITHOUT a green sweep verdict, loudly
+pnpm promote --dry-run        # print the rc it would cut or reuse, the resolved sha, tag and every step; touch nothing
+pnpm promote                  # cut/reuse rc/<date>, sweep IT (triggering and AWAITING the sweep), promote the rc sha
+pnpm promote --no-await-sweep # never trigger one; refuse when the recorded rc verdict is unusable
+pnpm promote --recover --reason "<why>"   # FAST LANE: no sweep, MASTER'S TIP, no rc (#1054)
+pnpm promote --force-sweep    # promote MASTER'S TIP without a green sweep verdict, loudly
+pnpm promote --cadence        # what the board's promote_cadence tick runs: the same run, logged as scheduled
 ```
+
+### The release-candidate lane (#1238)
+
+Master moves while a sweep runs (25-35 min measured), so a verdict about master is stale the
+moment a train lands, and #1044 recorded what that did to `--force-sweep`. The run therefore
+gates a branch master does not wait for:
+
+1. **Cut, or reuse.** `rc/<YYYYMMDD>[-N]` is created from master's tip in the MAIN checkout as a
+   branch ref only — no checkout switch, no worktree. A candidate still in flight (`cut`,
+   `sweeping`, `red`, `healing`, `green`) is reused, never re-cut past a sweep or a heal under way;
+   `-N` increments only past a terminal one (`promoted`, `abandoned`). A candidate **red for
+   longer than one cadence** (24h) is marked `abandoned` and a fresh one is cut — the fix that did
+   not arrive rides with the next candidate, together with its heal ticket (#1239).
+2. **Sweep the rc, not master.** The verdict is read with `GET …/base-branch-health?branch=rc/…`
+   (the sqlite fallback filters the same way) and requested with `POST …/base-branch-health/
+   reprobe?branch=rc/…`, which runs `probeBranch` (`base-branch-health.service.ts`): the same
+   clone + install + full `verify_script` as the base probe, the row stamped `branch = rc/…`.
+   `parseSweepVerdict` refuses a row for any other branch — master's own nightly included — and
+   keeps #1231's rule (a present `scope` must be `full`). `KANBAN_PROMOTE_SWEEP_WAIT_MIN` bounds
+   the rc probe exactly as it bounded master's. **The default health readers exclude `rc/…`
+   rows** (`BaseBranchHealthReadOptions`), so a candidate's red never holds master's train window
+   and a candidate's green never clears it; an rc verdict files no heal ticket and joins no
+   miss-rate corpus — both are measured against master's last green and belong to #1239.
+3. **Promote from the rc.** Green: `stable-<date>` is tagged on the rc sha and steps 3-6 below
+   run unchanged (fast-forward, build, migrate, restart, smoke, rollback). On a passing smoke the
+   rc is recorded `promoted` and the run PRINTS the merge-back
+   (`git merge --no-ff rc/<date>` in the main checkout — a no-op when nothing was healed) and
+   stops; the board workspace that runs it is #1239. Red: the branch stays in place, the rc is
+   recorded `red` with the failing suites, and the run exits non-zero with the heal instruction.
+4. **The lifecycle file** is `<stable>/.kanban/rc-state.json` — `cut | sweeping | red | healing |
+   green | promoted | abandoned` per candidate, readable without the repo by the Sentinel and the
+   delivery view (`GET /api/projects/:id/delivery` → `rc`). One reader/writer: `scripts/rc-state.mjs`,
+   mirrored for the server in `services/rc-state.ts` and held in lockstep by `rc-state.test.ts`.
+5. **Cadence.** `promote_cadence_<projectId>` (`off` | `daily@HH:MM`, local time; Delivery chip →
+   Advanced) makes the server's minute scheduler fire the same run
+   (`runDuePromoteCadences`, `promote-cadence.service.ts`) — as a detached, headless
+   `node scripts/promote.mjs --cadence` in the project's main checkout, because the run's last
+   steps stop and restart the stable board, which is the process whose scheduler is ticking when
+   the board is operated from its stable checkout; an in-process promotion would kill itself
+   between "fast-forwarded" and "smoke". A missed tick (server down at HH:MM) fires on the next
+   tick; a run still alive from the last tick is never stacked. `promote_cadence_state_<id>` is
+   the scheduler's own record (`lastFiredAt`, pid).
+
+`--recover` and `--force-sweep` keep working against **master's tip**: neither consults a sweep,
+so neither has a candidate to gate, and both say so in the log and the dry run (`release cand.
+none`).
 
 ### The RECOVERY lane (`--recover`, #1054)
 
@@ -324,7 +370,8 @@ of them corrected is folded into the sections below.
 
 ### What one run does
 
-1. **Reads the last full-sweep verdict for `master`** out of the board's `base_branch_health`
+1. **Reads the last full-sweep verdict for the candidate** (`rc/<date>`; `master` only under
+   `--force-sweep`/`--recover`, which consult none) out of the board's `base_branch_health`
    table — the row the nightly probe writes through `recordBaseBranchHealth`
    (`packages/server/src/services/base-branch-health.service.ts`). It never re-runs the suite.
    Preferred source is the board's own API, `GET /api/projects/:id/base-branch-health`; when no
@@ -553,8 +600,9 @@ that is what §7 step 5 does, and the collision above began with a hand launch t
 
 ## 9. What is deliberately NOT here
 
-- **A promotion SCHEDULE.** `pnpm promote` is by hand or from whatever timer the operator wires
-  it to; nothing in the board runs it. "Once a day, idle" is a policy, not a script.
+- ~~A promotion SCHEDULE.~~ Since #1238 the board runs it: `promote_cadence_<id>` (§8, "The
+  release-candidate lane"). What is still not here is a policy about WHEN in the day is idle —
+  the operator picks the `HH:MM`.
 - **A second repository.** A second CHECKOUT is enough and keeps tags, history and hooks in one
   place (proposal §5).
 - **Any runtime change from #1013 itself.** #1013 was code and docs only. (#1014's promotion runs

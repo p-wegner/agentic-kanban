@@ -23,6 +23,9 @@ import { showToast } from "../lib/toast.js";
 const trainMaxSizePref = projectPref("train_max_size");
 const trainMaxWaitMsPref = projectPref("train_max_wait_ms");
 const redBasePolicyPref = projectPref("red_base_policy");
+// #1238 — `off` | `daily@HH:MM`; the board cuts and drives an rc on the tick.
+const promoteCadencePref = projectPref("promote_cadence");
+const PROMOTE_CADENCE_SHAPE = /^(off|daily@([01]?\d|2[0-3]):[0-5]\d)$/i;
 
 const RED_BASE_POLICY_LABELS: Record<RedBasePolicy, string> = {
   block: "Block — never merge onto a red base",
@@ -139,6 +142,15 @@ function DeliveryPanelBody({
   const setRedBasePolicy = (v: RedBasePolicy) =>
     save(() => setProjectPref(projectId, redBasePolicyPref.prefix, v), "Failed to change red-base policy");
 
+  const [cadenceDraft, setCadenceDraft] = useState<string | null>(null);
+  const cadenceValue = cadenceDraft ?? (status.promoteCadence?.trim() || "off");
+  const cadenceValid = PROMOTE_CADENCE_SHAPE.test(cadenceValue.trim());
+  const commitCadence = () => {
+    const v = cadenceValue.trim().toLowerCase();
+    if (!cadenceValid || v === (status.promoteCadence?.trim().toLowerCase() || "off")) { setCadenceDraft(null); return; }
+    void save(() => setProjectPref(projectId, promoteCadencePref.prefix, v === "off" ? "" : v), "Failed to change the promotion cadence").then(() => setCadenceDraft(null));
+  };
+
   const trainWaitMin = Math.round(status.trainWindowMaxWaitMs / 60_000);
 
   return (
@@ -241,10 +253,34 @@ function DeliveryPanelBody({
             </select>
             <p className="mt-1 text-[10px] text-ink-faint dark:text-gray-500">Softer only — a stricter choice than the posture's own is ignored (#1015).</p>
           </div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="font-medium">Promotion cadence</div>
+              <div className="text-[10px] text-ink-faint dark:text-gray-500 truncate">
+                <code>off</code> or <code>daily@HH:MM</code> — cuts an rc from master and promotes it on green
+              </div>
+            </div>
+            <input
+              type="text"
+              value={cadenceValue}
+              disabled={saving}
+              aria-invalid={!cadenceValid}
+              onChange={(e) => setCadenceDraft(e.target.value)}
+              onBlur={commitCadence}
+              onKeyDown={(e) => { if (e.key === "Enter") commitCadence(); }}
+              data-testid="delivery-promote-cadence"
+              className={`w-28 px-2 py-1 text-xs border rounded bg-surface-raised dark:bg-surface-raised-dark text-ink dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-accent-500 disabled:opacity-50 ${cadenceValid ? "border-black/[0.07] dark:border-white/10" : "border-red-500"}`}
+            />
+          </div>
         </div>
       </details>
 
       <div className="text-[11px] text-ink-soft dark:text-gray-400">{status.baseSweep.reason}</div>
+      <div className="text-[11px] text-ink-soft dark:text-gray-400" data-testid="delivery-rc">
+        {status.rc
+          ? `Release candidate ${status.rc.branch}: ${status.rc.state}${status.rc.tag ? ` as ${status.rc.tag}` : ""}${status.rc.state === "red" && status.rc.failedSuites.length > 0 ? ` (${status.rc.failedSuites.length} failing suite${status.rc.failedSuites.length === 1 ? "" : "s"})` : ""}`
+          : "No release candidate cut yet — pnpm promote or a cadence cuts one."}
+      </div>
       <div
         className={`text-[11px] ${status.redBase?.holdingWindow ? "text-red-600 dark:text-red-400" : "text-ink-soft dark:text-gray-400"}`}
         data-testid="delivery-red-base"

@@ -360,7 +360,13 @@ export async function requestBaseBranchReprobe(
   database: Database = db,
   intervalMs = BASE_HEALTH_DEFAULT_INTERVAL_MS,
   nowMs: number = Date.now(),
-  opts: { ignoreRecency?: boolean; readCapacity?: () => Tier0Capacity; readCpuPct?: () => Promise<number | null> } = {},
+  opts: {
+    ignoreRecency?: boolean;
+    readCapacity?: () => Tier0Capacity;
+    readCpuPct?: () => Promise<number | null>;
+    /** #1238 — probe this branch (a release candidate) instead of the project's base branch. */
+    branch?: string | null;
+  } = {},
 ): Promise<BaseHealthDueVerdict> {
   let verdict: BaseHealthDueVerdict = { due: false, reason: "recent_result" };
   try {
@@ -404,7 +410,12 @@ export async function requestBaseBranchReprobe(
     // An `ignoreRecency` request is someone blocked on the answer (an operator, `pnpm promote`):
     // it runs at gate priority and does not yield to gates, or #1165's override only lets it
     // reach a slot it then hands back (see `BaseBranchProbeOptions`).
-    void verifyBaseBranchHealth(projectId, database, undefined, { explicit: opts.ignoreRecency === true }).catch((err) => {
+    // #1238 — a named branch is a candidate sweep: `explicit` by construction (someone is blocked
+    // on it), and the branch rides on the options so the row is stamped with what was measured.
+    void verifyBaseBranchHealth(projectId, database, undefined, {
+      explicit: opts.ignoreRecency === true || Boolean(opts.branch),
+      ...(opts.branch ? { branch: opts.branch } : {}),
+    }).catch((err) => {
       console.warn(
         `[base-branch-health] on-demand re-probe failed for project ${projectId} (non-fatal):`,
         err instanceof Error ? err.message : String(err),

@@ -97,6 +97,7 @@ export const KNOWN_PROMOTE_FLAGS = Object.freeze([
   "--recover",
   "--with-migration",
   "--restart-stable",
+  "--cadence",
   "--reason",
   "--help",
   "-h",
@@ -141,6 +142,9 @@ export function parsePromoteArgv(argv = []) {
     recover: argv.includes("--recover"),
     withMigration: argv.includes("--with-migration"),
     restartStable: argv.includes("--restart-stable"),
+    // #1238 — fired by the board's promotion cadence rather than by hand. Provenance only: the
+    // run is byte-for-byte the same, the log header says who started it.
+    cadence: argv.includes("--cadence"),
     reason,
   };
 }
@@ -159,6 +163,7 @@ export function formatPromoteUsage() {
     "                                             # (exit 2) without spawning if it is already held.",
     "                                             # No tag, no fast-forward, no build, no sweep. Also",
     "                                             # `pnpm stable:start`.",
+    "  node scripts/promote.mjs --cadence        # (set by the board's promote_cadence tick) same run, logged as scheduled",
     "  node scripts/promote.mjs --with-migration # (with --recover) ack that the delta includes a migration",
     '  node scripts/promote.mjs --reason "..."   # (with --recover) why this bypassed the sweep',
     "  node scripts/promote.mjs --help           # this text",
@@ -270,6 +275,13 @@ export function previousStableTag(existingTags = [], excludeTag = null) {
  * (`scoped`). A NULL scope is accepted: every row written before the column existed carries
  * one, and so does any project whose verify script has no `[gate:step]` contract; the detail
  * says `scope <none: unknown, accepted>` so the reader sees the gap rather than a claim.
+ *
+ * `branch` (#1238) is the RELEASE CANDIDATE the run is gating — `rc/<date>[-N]` — and a row
+ * recorded for any other branch (master's own nightly sweep included) is refused as
+ * `wrong-branch`: a verdict about master says nothing about the candidate, even when the two
+ * shas coincide at cut time, because the candidate is what gets tagged. The `master` default
+ * exists for `--force-sweep`/`--recover`, which consult no verdict, and for callers that
+ * predate the rc lane.
  */
 export function parseSweepVerdict(row, { branch = "master", nowMs = Date.now(), maxAgeMs = DEFAULT_MAX_SWEEP_AGE_HOURS * 3600_000 } = {}) {
   if (!row) {
@@ -458,12 +470,17 @@ export function planSweepAcquisition({ verdict, direction = null, forceSweep = f
  * @param {object} p
  * @param {string|null|undefined} p.postureLevel  the project's resolved risk-posture level
  * @param {string} p.dateStamp                    `YYYYMMDD`, the cut this promotion would look for
+ * @param {string|null|undefined} p.rcBranch      #1238 — the candidate this run actually gates, once
+ *                                                the rc lookup has run; names it instead of the `[-N]` shape
  */
-export function formatFlowSweepStatement({ postureLevel, dateStamp } = {}) {
+export function formatFlowSweepStatement({ postureLevel, dateStamp, rcBranch = null } = {}) {
   if (postureLevel !== "flow") return null;
+  const which = rcBranch
+    ? `this run's candidate, ${rcBranch}`
+    : `the rc branch's (rc/${dateStamp}[-N]`;
   return (
     `risk posture 'flow': master has NO scheduled sweep by design — the full suite runs on the ` +
-    `release candidate only. The verdict to read is the rc branch's (rc/${dateStamp}[-N], ` +
+    `release candidate only. The verdict to read is ${which}${rcBranch ? " (" : ", "}` +
     `base_branch_health.branch = rc/...; decision 019 / #1238), never master's.`
   );
 }
@@ -496,21 +513,30 @@ export function buildPromotionPlan({
   sweepAcquisition = null,
   gateEvidence = null,
   recovery = null,
+  rc = null,
   postureLevel = null,
 }) {
+  // #1238 — the candidate this run gates, when it is on the rc lane. `--force-sweep` and
+  // `--recover` stay on master's tip and get no rc line at all.
+  const rcNote = rc
+    ? `
+      release candidate: ${rc.action === "cut" ? "CUT" : "REUSE"} ${rc.branch}${rc.abandon ? ` (abandoning ${rc.abandon} first)` : ""} — ${rc.reason}`
+    : "";
   const step1 = {
     n: 1,
     title: recovery
       ? "sweep NOT consulted (--recover) — the delta is reviewed, the pipeline is the gate"
       : forceSweep
         ? "sweep check SKIPPED (--force-sweep)"
-        : "check the last full sweep on master was green",
+        : rc
+          ? `cut/reuse ${rc.branch} from master's tip, then check the last full sweep on it was green`
+          : "check the last full sweep on master was green",
     detail: recovery
       ? `${recovery}
       the gate is steps 5-9: a failed build, a board that will not boot, or a failed smoke roll back automatically`
       : forceSweep
         ? "WARNING: --force-sweep — promoting WITHOUT a green verdict from base_branch_health"
-        : `read via ${sweepSource} (board ${boardUrl}, db ${dbPath}) for project '${projectName}': ${sweepVerdict}`,
+        : `read via ${sweepSource} (board ${boardUrl}, db ${dbPath}) for project '${projectName}': ${sweepVerdict}${rcNote}`,
   };
   if (sweepAcquisition?.request) {
     step1.title = "TRIGGER a fresh sweep, wait for its verdict, then check it";
@@ -520,11 +546,11 @@ export function buildPromotionPlan({
   // nowhere else — it decides nothing (#1045).
   if (gateEvidence) step1.detail = `${step1.detail}\n      gate evidence (does not authorize a promotion): ${gateEvidence}`;
   // #1240 — under `flow` the master verdict above is the wrong one to read; say so first.
-  const flowNote = formatFlowSweepStatement({ postureLevel, dateStamp: parseStableTag(tag)?.date ?? stableTagDate() });
+  const flowNote = formatFlowSweepStatement({ postureLevel, dateStamp: parseStableTag(tag)?.date ?? stableTagDate(), rcBranch: rc?.branch ?? null });
   if (flowNote) step1.detail = `${flowNote}\n      ${step1.detail}`;
   return [
     step1,
-    { n: 2, title: `tag ${tag} on ${sha}`, detail: `git -C ${repoRoot} tag ${tag} ${sha}   (rollback target: ${previousTag ?? "<none — first promotion>"})` },
+    { n: 2, title: `tag ${tag} on ${sha}${rc ? ` (the tip of ${rc.branch})` : ""}`, detail: `git -C ${repoRoot} tag ${tag} ${sha}   (rollback target: ${previousTag ?? "<none — first promotion>"})` },
     { n: 3, title: "stable checkout: fetch + fast-forward", detail: `git -C ${stableCheckout} fetch origin --tags && git -C ${stableCheckout} merge --ff-only ${tag}` },
     { n: 4, title: "install only if pnpm-lock.yaml changed", detail: `pnpm install -r --prefer-offline in ${stableCheckout}` },
     { n: 5, title: "build", detail: `pnpm build in ${stableCheckout}` },
@@ -532,7 +558,7 @@ export function buildPromotionPlan({
     { n: 7, title: `restart the stable board on port ${stablePort}`, detail: `stop the port-${stablePort} listener whose command line belongs to ${stableCheckout} (signature only, never kill-all-node), then spawn packages/server/dist/cli/index.js` },
     { n: 8, title: "smoke", detail: `GET ${boardUrl}/health, GET ${boardUrl}/api/projects (non-empty), GET ${boardUrl}/api/issues?projectId=<${projectName}> (the get_board_status equivalent)` },
     { n: 9, title: "on smoke failure: roll back", detail: previousTag ? `fast-forward ${stableCheckout} to ${previousTag}, rebuild, restart, report loudly` : "NO previous stable-* tag exists — a failed smoke cannot be rolled back automatically; the run reports that loudly" },
-    { n: 10, title: "logs", detail: `promotion audit trail: ${logPath}${boardLogPath ? `  ·  started board's stdout/stderr: ${boardLogPath}` : ""}` },
+    { n: 10, title: "logs", detail: `promotion audit trail: ${logPath}${boardLogPath ? `  ·  started board's stdout/stderr: ${boardLogPath}` : ""}${rc ? `  ·  rc lifecycle: <stable>/.kanban/rc-state.json (${rc.branch} -> promoted on a passing smoke, red with the failing suites otherwise)` : ""}` },
   ];
 }
 
