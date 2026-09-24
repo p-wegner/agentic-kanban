@@ -48,6 +48,11 @@ export interface RecordBaseBranchHealthInput {
   flaky?: boolean;
   /** Machine-load snapshot around this probe (#1110), stored as an opaque JSON object. */
   contention?: object | null;
+  /**
+   * The verify script's self-reported `tests` scope (#1231) — see the schema column. `undefined`
+   * /`null` means the script said nothing, which is stored as null and read as "unknown, accepted".
+   */
+  scope?: string | null;
 }
 
 /** Record one verify attempt against a project's base branch at a given sha. Returns the row id. */
@@ -70,6 +75,7 @@ export async function recordBaseBranchHealth(
     failedSuites: input.failedSuites == null ? null : JSON.stringify(input.failedSuites),
     flaky: input.flaky ?? null,
     contention: input.contention == null ? null : JSON.stringify(input.contention),
+    scope: input.scope ?? null,
     createdAt: new Date().toISOString(),
   });
   return id;

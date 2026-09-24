@@ -96,6 +96,7 @@ describe("runPreLockGate attributes a gate failure to an already-red base (#491)
         failedSuites: null,
         flaky: null,
         contention: null,
+        scope: null,
         createdAt: new Date().toISOString(),
       },
     });
@@ -128,6 +129,7 @@ describe("runPreLockGate attributes a gate failure to an already-red base (#491)
         failedSuites: null,
         flaky: null,
         contention: null,
+        scope: null,
         createdAt: new Date().toISOString(),
       },
     });
@@ -173,6 +175,7 @@ describe("runPreLockGate attributes a gate failure to an already-red base (#491)
         failedSuites: null,
         flaky: null,
         contention: null,
+        scope: null,
         createdAt: new Date().toISOString(),
       },
       recordedSha: "base-tip",
@@ -218,6 +221,7 @@ describe("runPreLockGate attributes a gate failure to an already-red base (#491)
         failedSuites: null,
         flaky: null,
         contention: null,
+        scope: null,
         createdAt: new Date().toISOString(),
       },
     });

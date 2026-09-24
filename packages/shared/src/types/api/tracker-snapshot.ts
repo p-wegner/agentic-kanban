@@ -43,6 +43,12 @@ export interface TrackerSnapshotBaseBranchHealth {
   outcome: string | null;
   sha: string | null;
   checkedAt: string | null;
+  /**
+   * What the sweep's `tests` step reported it RAN (#1231): `full`, `file-scoped`,
+   * `impact-selected`, ... `null` when the verify script reported no scope (or the row predates
+   * the column). Optional on the wire for an older server.
+   */
+  scope?: string | null;
 }
 
 export interface TrackerSnapshotResponse {
