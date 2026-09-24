@@ -6515,6 +6515,112 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{id}/rc:
+    get:
+      summary: GET /api/projects/:id/rc
+      tags:
+        - project-rc
+      operationId: get_api_projects_id_rc
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/rc/merge-back:
+    post:
+      summary: POST /api/projects/:id/rc/merge-back
+      tags:
+        - project-rc
+      operationId: post_api_projects_id_rc_merge-back
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                branch:
+                  type: string
+                tag:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/rc/retarget:
+    post:
+      summary: POST /api/projects/:id/rc/retarget
+      tags:
+        - project-rc
+      operationId: post_api_projects_id_rc_retarget
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                from:
+                  type: string
+                to:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/relocate:
     post:
       summary: every persisted path that pointed at the old one. `dryRun` reports the plan only.

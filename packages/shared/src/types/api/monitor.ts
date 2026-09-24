@@ -270,6 +270,16 @@ export interface RcCandidateSummary {
   tag: string | null;
   /** What the rc sweep named as failed, when `state` is `red`. */
   failedSuites: string[];
+  /**
+   * Open `heal` tickets keyed to THIS candidate (#1239) — filed by its red sweep, closed by the
+   * merge-back. Optional on the wire: absent from an older server or a bare rc-state read.
+   */
+  openHealTickets?: number;
+  /**
+   * How many of the candidate's failing suites master's latest sweep ALSO names as red (#1239,
+   * decision 019 part 5) — red the candidate inherited rather than introduced. Optional as above.
+   */
+  inheritedRed?: number;
 }
 
 /**

@@ -8,6 +8,8 @@ import { resolveWipLimit } from "./wip-limit.service.js";
 import { getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { readImpactMissRate } from "./test-impact-miss-rate.js";
+import { currentRcCandidate, readRcState, resolveStableCheckoutFor, toRcCandidateSummary } from "./rc-state.js";
+import { withRcHeal } from "./delivery-status.service.js";
 import {
   getTrackerColumnCounts,
   listTrackerWorkspaceRows,
@@ -115,5 +117,9 @@ export async function buildTrackerSnapshot(
       : null,
     // #1234 — the impact-tier miss rate off the main checkout's `.test-impact/` files.
     impactMissRate: readImpactMissRate(project?.repoPath),
+    // #1239 — the rc, its open heal tickets and inherited red, off the stable checkout's rc-state.json.
+    rc: project?.repoPath
+      ? await withRcHeal(projectId, toRcCandidateSummary(currentRcCandidate(readRcState(resolveStableCheckoutFor(project.repoPath)))), database)
+      : null,
   };
 }

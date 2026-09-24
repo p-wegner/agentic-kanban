@@ -7,7 +7,7 @@
  * them. Kept intentionally small and flat so it is cheap to poll every few seconds.
  */
 
-import type { ImpactMissRateSummary } from "./monitor.js";
+import type { ImpactMissRateSummary, RcCandidateSummary } from "./monitor.js";
 
 /** Per-column ticket count, in the project's own column order. */
 export interface TrackerSnapshotColumn {
@@ -69,4 +69,9 @@ export interface TrackerSnapshotResponse {
    * project has no outcomes ledger. Optional on the wire for an older server.
    */
   impactMissRate?: ImpactMissRateSummary | null;
+  /**
+   * The release candidate most recently touched (#1238/#1239), with its open heal tickets and
+   * inherited-red count. `null` when no rc was ever cut; optional on the wire for an older server.
+   */
+  rc?: RcCandidateSummary | null;
 }

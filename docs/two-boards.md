@@ -260,7 +260,7 @@ Run on 2026-09-05 (tag `stable-20260905` = `stable` = `e01438a4c5`). Do it in th
 ## 8. Promotion — `pnpm promote`
 
 > **Decision 019 (2026-09-24): what this section gates is a RELEASE CANDIDATE, never master.**
-> #1238 landed the cut, the rc sweep, the rc promotion and the cadence (below); #1239 adds the
+> #1238 landed the cut, the rc sweep, the rc promotion and the cadence (below); #1239 landed the
 > heal-on-candidate ticket and the board-driven merge-back. The ladder across postures is
 > `docs/integration-risk-ladder.md`.
 
@@ -288,7 +288,9 @@ gates a branch master does not wait for:
    `sweeping`, `red`, `healing`, `green`) is reused, never re-cut past a sweep or a heal under way;
    `-N` increments only past a terminal one (`promoted`, `abandoned`). A candidate **red for
    longer than one cadence** (24h) is marked `abandoned` and a fresh one is cut — the fix that did
-   not arrive rides with the next candidate, together with its heal ticket (#1239).
+   not arrive rides with the next candidate, together with its heal ticket: the run POSTs
+   `…/rc/retarget` and the board moves the abandoned rc's open heal tickets — key, a comment,
+   and the base of every open heal workspace — onto the fresh cut (#1239).
 2. **Sweep the rc, not master.** The verdict is read with `GET …/base-branch-health?branch=rc/…`
    (the sqlite fallback filters the same way) and requested with `POST …/base-branch-health/
    reprobe?branch=rc/…`, which runs `probeBranch` (`base-branch-health.service.ts`): the same
@@ -297,17 +299,41 @@ gates a branch master does not wait for:
    keeps #1231's rule (a present `scope` must be `full`). `KANBAN_PROMOTE_SWEEP_WAIT_MIN` bounds
    the rc probe exactly as it bounded master's. **The default health readers exclude `rc/…`
    rows** (`BaseBranchHealthReadOptions`), so a candidate's red never holds master's train window
-   and a candidate's green never clears it; an rc verdict files no heal ticket and joins no
-   miss-rate corpus — both are measured against master's last green and belong to #1239.
+   and a candidate's green never clears it; an rc verdict joins no outcome ledger and no
+   miss-rate corpus (both are measured against master's last green). **A red rc verdict files
+   the rc HEAL ticket** (#1239, `rc-heal-ticket.service.ts`): ONE per failure signature PER
+   candidate, keyed `base-health-heal:<project>:<sig>:<rc>`, under every posture (the rc lane is
+   opt-in by running `promote` at all). Its body names the rc, the failing suites, the merges
+   between the previous green (the last green rc, else master's last green sweep) and this cut,
+   and the exact command to reproduce one suite; a second red with the same set refreshes it, a
+   green rc sweep only comments (the merge-back closes it). `heal_review_posture_<id>` = a risk
+   level tags it `risk:<level>` at birth. It is an ordinary critical ticket the monitor starts
+   within WIP — **its workspace is based on the rc**: `resolveIssueBaseBranch` reads the rc off
+   the key, so the worktree branches from the rc, `update-base` rebases onto it, the diff and the
+   review are against it, and the merge lands ON it. The pre-merge gate runs against that tree
+   with the rc's red suites forced into the selection (`resolveHealForcedSuites` → the
+   `KANBAN_TEST_NEW_FILES` door). A train never mixes bases (`trainEligible`), and every
+   merge/review/rebase/diff/conflict path resolves the base through `services/workspace-base.ts`;
+   the hand-spelled reads that remain are pinned shrink-only by `workspace-base-read-ratchet.test.ts`.
 3. **Promote from the rc.** Green: `stable-<date>` is tagged on the rc sha and steps 3-6 below
    run unchanged (fast-forward, build, migrate, restart, smoke, rollback). On a passing smoke the
-   rc is recorded `promoted` and the run PRINTS the merge-back
-   (`git merge --no-ff rc/<date>` in the main checkout — a no-op when nothing was healed) and
-   stops; the board workspace that runs it is #1239. Red: the branch stays in place, the rc is
-   recorded `red` with the failing suites, and the run exits non-zero with the heal instruction.
+   rc is recorded `promoted` and the run asks the freshly restarted board for the **merge-back
+   workspace** (`POST /api/projects/:id/rc/merge-back`, #1239): its issue is keyed
+   `rc-merge-back:<project>:<rc>` (one per candidate), its BRANCH is the rc itself, its BASE is
+   master, so the board rebases, gates and lands it exactly as any workspace — a conflict is a
+   normal reconcile there, and an rc that carried no heal short-circuits as already merged.
+   `finalizeMergeCleanup` recognises the key and closes the rc's heal tickets when the landing is
+   verified. Only when no board answers is the hand command printed (`git merge --no-ff
+   rc/<date>` in the main checkout). Red: the branch stays in place, the rc is recorded `red`
+   with the failing suites, the board has filed the heal ticket, and the run exits non-zero with
+   the heal instruction.
 4. **The lifecycle file** is `<stable>/.kanban/rc-state.json` — `cut | sweeping | red | healing |
    green | promoted | abandoned` per candidate, readable without the repo by the Sentinel and the
-   delivery view (`GET /api/projects/:id/delivery` → `rc`). One reader/writer: `scripts/rc-state.mjs`,
+   delivery view (`GET /api/projects/:id/delivery` → `rc`, since #1239 with `openHealTickets`
+   and `inheritedRed` — the rc's failing suites master's latest sweep also names; the same two
+   ride on `GET …/tracker-snapshot`, `GET …/rc` lists the tickets, and `pnpm cli -- tracker`
+   prints them as its `rc …` line). `healing` is declared but not yet written by anything: the
+   heal ticket lives on the board, and `red` stays the state the abandon rule reads. One reader/writer: `scripts/rc-state.mjs`,
    mirrored for the server in `services/rc-state.ts` and held in lockstep by `rc-state.test.ts`.
 5. **Cadence.** `promote_cadence_<projectId>` (`off` | `daily@HH:MM`, local time; Delivery chip →
    Advanced) makes the server's minute scheduler fire the same run
