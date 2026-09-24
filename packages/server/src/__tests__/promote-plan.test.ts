@@ -85,6 +85,14 @@ describe("strict argv parsing (#1222)", () => {
     if (r.ok) expect(r.help).toBe(true);
   });
 
+  it("knows --cadence, the board's scheduled-run marker (#1238)", () => {
+    const r = parsePromoteArgv(["--cadence"]);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.cadence).toBe(true);
+    expect(KNOWN_PROMOTE_FLAGS).toContain("--cadence");
+    expect(formatPromoteUsage()).toContain("--cadence");
+  });
+
   it("parses every real flag combination without flagging it unknown", () => {
     const r = parsePromoteArgv(["--recover", "--with-migration", "--reason", "fix the leak"]);
     expect(r.ok).toBe(true);
@@ -254,6 +262,39 @@ describe("sweep-verdict parsing", () => {
     expect(v.detail).toContain("50.0h");
   });
 
+  describe("the release-candidate branch (#1238)", () => {
+    const rcRow = (over: Record<string, unknown> = {}) => greenRow({ branch: "rc/20260904", scope: "full", ...over });
+
+    it("accepts a fresh, full green recorded FOR the rc", () => {
+      const v = parseSweepVerdict(rcRow(), { branch: "rc/20260904", nowMs: NOW });
+      expect(v.ok).toBe(true);
+      expect(v.branch).toBe("rc/20260904");
+      expect(v.sha).toBe("abc1234def");
+    });
+
+    it("refuses master's own nightly green as wrong-branch — a verdict about master says nothing about the candidate", () => {
+      const v = parseSweepVerdict(greenRow({ scope: "full" }), { branch: "rc/20260904", nowMs: NOW });
+      expect(v.ok).toBe(false);
+      expect(v.reason).toBe("wrong-branch");
+      expect(v.detail).toContain("'master', not 'rc/20260904'");
+      expect(REPROBEABLE_SWEEP_REASONS).toContain("wrong-branch");
+    });
+
+    it("refuses another candidate's row too, and a red rc names the rc", () => {
+      expect(parseSweepVerdict(rcRow({ branch: "rc/20260903" }), { branch: "rc/20260904", nowMs: NOW }).reason).toBe("wrong-branch");
+      const red = parseSweepVerdict(rcRow({ outcome: "red" }), { branch: "rc/20260904", nowMs: NOW });
+      expect(red.reason).toBe("red");
+      expect(red.detail).toContain("rc/20260904");
+    });
+
+    it("keeps #1231's rule on the rc: a present scope must be `full`", () => {
+      const v = parseSweepVerdict(rcRow({ scope: "impact-selected" }), { branch: "rc/20260904", nowMs: NOW });
+      expect(v.ok).toBe(false);
+      expect(v.reason).toBe("scoped");
+      expect(parseSweepVerdict(rcRow({ scope: null }), { branch: "rc/20260904", nowMs: NOW }).ok).toBe(true);
+    });
+  });
+
   it("refuses a sweep recorded on another branch", () => {
     const v = parseSweepVerdict(greenRow({ branch: "release" }), { branch: "master", nowMs: NOW });
     expect(v.ok).toBe(false);
@@ -365,6 +406,20 @@ describe("the dry-run plan", () => {
     const withEvidence = buildPromotionPlan({ ...input, gateEvidence: "7 green gate run(s) covering 43 changed file(s)" });
     expect(withEvidence[0].detail).toContain("7 green gate run(s)");
     expect(withEvidence[0].detail).toContain("does not authorize a promotion");
+  });
+
+  it("names the candidate it cuts or reuses in step 1, the tag step and the log step (#1238)", () => {
+    const cut = buildPromotionPlan({ ...input, rc: { branch: "rc/20260904", action: "cut", abandon: null, reason: "no release candidate is in flight" } });
+    expect(cut[0].title).toContain("rc/20260904");
+    expect(cut[0].title).toContain("full sweep on it");
+    expect(cut[0].detail).toContain("CUT rc/20260904");
+    expect(cut[1].title).toContain("the tip of rc/20260904");
+    expect(cut[9].detail).toContain("rc-state.json");
+    const reuse = buildPromotionPlan({ ...input, rc: { branch: "rc/20260904-2", action: "reuse", abandon: "rc/20260904", reason: "stuck red" } });
+    expect(reuse[0].detail).toContain("REUSE rc/20260904-2");
+    expect(reuse[0].detail).toContain("abandoning rc/20260904");
+    // Off the rc lane (--force-sweep / --recover) nothing about a candidate is claimed.
+    expect(formatPlan(buildPromotionPlan({ ...input, forceSweep: true }))).not.toContain("release candidate");
   });
 
   it("logs under the stable checkout's .kanban directory", () => {

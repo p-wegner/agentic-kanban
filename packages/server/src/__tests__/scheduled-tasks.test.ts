@@ -83,6 +83,35 @@ describe("setupScheduledTasks", () => {
     warnSpy.mockRestore();
   });
 
+  it("runs the injected promotion-cadence tick on the initial timer and every minute after (#1238)", async () => {
+    mockWhere.mockResolvedValue([]);
+    const runPromoteCadenceTick = vi.fn(async () => undefined);
+    setupScheduledTasks({ runScheduledRun: vi.fn(async () => ({})), runPromoteCadenceTick });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(runPromoteCadenceTick).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(runPromoteCadenceTick).toHaveBeenCalledTimes(2);
+  });
+
+  it("a cadence tick that throws is logged and does not stop the next tick (#1238)", async () => {
+    mockWhere.mockResolvedValue([]);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runPromoteCadenceTick = vi.fn(async () => { throw new Error("cadence boom"); });
+    setupScheduledTasks({ runScheduledRun: vi.fn(async () => ({})), runPromoteCadenceTick });
+    await vi.advanceTimersByTimeAsync(10_000 + 60_000);
+    expect(runPromoteCadenceTick).toHaveBeenCalledTimes(2);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("promote cadence"), expect.any(Error));
+    errorSpy.mockRestore();
+  });
+
+  it("changes nothing for a caller that injects no cadence tick", async () => {
+    mockWhere.mockResolvedValue([]);
+    const runScheduledRun = vi.fn(async () => ({}));
+    setupScheduledTasks({ runScheduledRun });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(runScheduledRun).not.toHaveBeenCalled();
+  });
+
   it("source contains no self-HTTP fetch to its own server (#402 anti-pattern gate)", () => {
     const source = readFileSync(
       join(import.meta.dirname, "..", "startup", "scheduled-tasks.ts"),

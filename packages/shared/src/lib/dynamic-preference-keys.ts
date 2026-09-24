@@ -56,6 +56,13 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "project_quiesce_reason",
   "board_conductor",
   "conductor_cron",
+  // Promotion cadence (#1238, decision 019 part 4): `promote_cadence_<id>` is `off` (the
+  // default) or `daily@HH:MM` (local time). On the tick the board cuts an `rc/<date>` from
+  // master's tip and drives the same promotion `pnpm promote` runs by hand, so a release is
+  // scheduled rather than remembered. `promote_cadence_state_<id>` is the scheduler's own
+  // JSON record (`lastFiredAt`, the pid it spawned), the same split `conductor_cron` uses.
+  "promote_cadence",
+  "promote_cadence_state",
   "verify_script",
   "cold_clone_check",
   "project_stack_profile",

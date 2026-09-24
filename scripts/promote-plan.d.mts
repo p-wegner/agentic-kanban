@@ -31,6 +31,8 @@ export interface ParsedPromoteArgvOk {
   recover: boolean;
   withMigration: boolean;
   restartStable: boolean;
+  /** #1238 — fired by the board's promotion cadence; provenance for the log header only. */
+  cadence: boolean;
   reason: string | null;
 }
 export interface ParsedPromoteArgvUnknown {
@@ -167,12 +169,14 @@ export interface PromotionPlanInput {
   sweepAcquisition?: SweepAcquisition | null;
   /** One line from `formatGateEvidence` (#1045) — printed, never acted on. */
   gateEvidence?: string | null;
+  /** The release candidate this run gates (#1238), from `planRcCandidate`; null off the rc lane. */
+  rc?: { branch: string; action: "reuse" | "cut"; abandon: string | null; reason: string } | null;
   /** The project's resolved risk-posture level (#1240): `flow` makes step 1 name the rc verdict. */
   postureLevel?: string | null;
 }
 export declare function buildPromotionPlan(input: PromotionPlanInput): PromotionStep[];
 /** #1240 — the `flow` dry-run statement, or null for every other posture. */
-export declare function formatFlowSweepStatement(input?: { postureLevel?: string | null; dateStamp?: string }): string | null;
+export declare function formatFlowSweepStatement(input?: { postureLevel?: string | null; dateStamp?: string; rcBranch?: string | null }): string | null;
 export declare function formatPlan(plan: PromotionStep[]): string;
 
 export declare function shouldForceSmokeFailure(env?: Record<string, string | undefined>): boolean;

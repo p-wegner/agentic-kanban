@@ -100,7 +100,7 @@ the rc), and the heal work is real work that the cadence makes visible instead o
 | Miss-rate join and gate durations in the ledger | landed, #1234 — `.test-impact/misses.jsonl`, `impactMissRate` on delivery + tracker, the `miss rate` line in `promote --dry-run` |
 | Sweep env scrub and scope stamp; `promote` refuses a non-full green | #1231 |
 | Deterministic guard failures stop the re-gate loop | #1230 |
-| RC branch promotion and the cadence | #1238 |
+| RC branch promotion and the cadence | landed, #1238 — `pnpm promote` cuts `rc/<date>[-N]` from master's tip and gates THAT (`?branch=` on the health/reprobe routes, `probeBranch`); green tags the rc sha, red records the failing suites in `<stable>/.kanban/rc-state.json` and stops with the heal instruction; `promote_cadence_<id>` (`off` \| `daily@HH:MM`) fires the same run from the scheduler, and a red rc older than one cadence is abandoned for a fresh cut. The merge-back is printed, not run, until #1239 |
 | Heal-on-candidate and the merge-back | #1239 |
 | The `flow` posture | landed, #1240 — `gateTier: impact`, `redBasePolicy: report`, `sweepIntervalMs: null` (the delivery view says "full suite: release candidate only"), guards `intersecting` at merge; the rungs table above is ratcheted against the resolver by `integration-risk-ladder-doc.test.ts` |
 

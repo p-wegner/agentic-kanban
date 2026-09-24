@@ -227,6 +227,22 @@ export interface BaseBranchProbeOptions {
    * priority and runs to completion. The periodic sweep keeps its background manners unchanged.
    */
   explicit?: boolean;
+  /**
+   * Probe THIS branch instead of the project's default one (#1238). `pnpm promote` and the
+   * cadence sweep a release candidate (`rc/<date>`), never master; the row is stamped with the
+   * branch it measured, and the default health readers exclude `rc/…` rows so a candidate's
+   * verdict never answers "is master red" (`BaseBranchHealthReadOptions`). A non-default
+   * branch's verdict is recorded and nothing else: no heal ticket (that is #1239's job, against
+   * the rc), no outcome-ledger row and no miss-rate join, both of which are measured against the
+   * BASE branch's last green and would otherwise attribute a candidate's red to master's merges.
+   */
+  branch?: string | null;
+}
+
+/** In-flight key: the base lane keeps the bare project id so `inFlightBaseBranchProbe` still
+ *  finds it; a candidate probe is keyed apart so a gate never joins an rc sweep by mistake. */
+function inFlightKey(projectId: string, branch?: string | null): string {
+  return branch ? `${projectId} ${branch}` : projectId;
 }
 
 export function verifyBaseBranchHealth(
@@ -235,14 +251,31 @@ export function verifyBaseBranchHealth(
   now?: string,
   opts?: BaseBranchProbeOptions,
 ): Promise<BaseBranchVerifyResult | null> {
-  const running = inFlightProbes.get(projectId);
+  const key = inFlightKey(projectId, opts?.branch);
+  const running = inFlightProbes.get(key);
   if (running) return running;
 
   const probe = runBaseBranchProbe(projectId, database, now, opts).finally(() => {
-    inFlightProbes.delete(projectId);
+    inFlightProbes.delete(key);
   });
-  inFlightProbes.set(projectId, probe);
+  inFlightProbes.set(key, probe);
   return probe;
+}
+
+/**
+ * Sweep a NAMED branch of the project — the release-candidate entry (#1238). The same clone +
+ * install + full `verify_script` as the base probe, the same slot manners, the same row shape;
+ * only `branch` differs, and with it what the verdict may be used for (see
+ * `BaseBranchProbeOptions.branch`). Always `explicit`: the only callers are a promotion or the
+ * cadence, and both are blocked on the answer.
+ */
+export function probeBranch(
+  projectId: string,
+  branch: string,
+  database: Database,
+  opts?: Omit<BaseBranchProbeOptions, "branch">,
+): Promise<BaseBranchVerifyResult | null> {
+  return verifyBaseBranchHealth(projectId, database, undefined, { explicit: true, ...opts, branch });
 }
 
 /** What a retry run reports — the shape `runSetupScript` returns, narrowed to what this needs. */
@@ -348,7 +381,9 @@ async function runBaseBranchProbe(
   const verifyScript = effective?.command ?? null;
   if (!verifyScript) return null;
 
-  const branch = project.defaultBranch;
+  // #1238 — a candidate probe measures the branch it was asked for; everything else is the base.
+  const branch = opts?.branch || project.defaultBranch;
+  const isBaseLane = branch === project.defaultBranch;
   const sha = await revParse(project.repoPath, branch).catch(() => null);
   if (!sha) return null;
 
@@ -649,7 +684,7 @@ ${tail(combined)}`,
 
   // Read the last green BEFORE recording this run, or a green run would find itself.
   const lastGreen = isBaseHealthAnswer(result.outcome)
-    ? await getLastGreenBaseBranchHealth(projectId, database).catch(() => null)
+    ? await getLastGreenBaseBranchHealth(projectId, database, { branch: isBaseLane ? null : branch }).catch(() => null)
     : null;
 
   const healthRowId = await recordBaseBranchHealth(
@@ -675,6 +710,9 @@ ${tail(combined)}`,
   // the next red sweep with the same signature and closed by a green one. Every other policy
   // gets nothing — the decision is made inside `reconcileBaseHealthHealTicket`, through the
   // #1015 posture resolver, and the call itself never throws.
+  // #1238 — a candidate's verdict is recorded and nothing more (see `BaseBranchProbeOptions.branch`).
+  if (!isBaseLane) return result;
+
   await reconcileBaseHealthHealTicket({
     projectId,
     outcome: result.outcome,

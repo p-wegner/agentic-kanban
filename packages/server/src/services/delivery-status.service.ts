@@ -10,8 +10,10 @@ import { describeBaseSweep, resolveRiskPosture, type RiskPosture } from "./risk-
 import { requireProject } from "./require-project.js";
 import { resolveTrainWindowConfig } from "./merge-train-window.js";
 import { readImpactMissRate } from "./test-impact-miss-rate.js";
+import { currentRcCandidate, readRcState, resolveStableCheckoutFor, toRcCandidateSummary } from "./rc-state.js";
 
 const trainMaxSizePref = projectPref("train_max_size");
+const promoteCadencePref = projectPref("promote_cadence");
 
 /**
  * `GET /api/projects/:id/delivery` — the resolved delivery-process read model (#1155) behind
@@ -47,6 +49,11 @@ export async function getDeliveryStatus(projectId: string, database: Database): 
     redBase: await describeRedBase(projectId, posture, baseHealth, database),
     // #1234 — read off the main checkout's `.test-impact/` files; null for a project without the skill.
     impactMissRate: readImpactMissRate(project.repoPath),
+    // #1238 — the cadence as stored (absent reads as `off`), and the candidate most recently
+    // touched, off the stable checkout's `.kanban/rc-state.json`. Both null-safe: a project not
+    // run under the two-board setup has neither.
+    promoteCadence: prefMap.get(promoteCadencePref.key(projectId)) ?? null,
+    rc: toRcCandidateSummary(currentRcCandidate(readRcState(resolveStableCheckoutFor(project.repoPath)))),
   };
 }
 
