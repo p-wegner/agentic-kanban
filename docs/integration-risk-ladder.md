@@ -24,7 +24,7 @@ with a `risk:<level>` tag.
 | **standard** | full suite, every merge | at every merge; master swept half-daily | blocks | standard, per ticket | the default; a repo that has not chosen |
 | **fast** | scoped suite once per train (up to 8) | per train; master swept | allowed when it is known debt | the train, not the ticket | a sprint with a trusted crew |
 | **sprint** | guards only, per train (up to 12) | never at merge; master swept | allowed, files a debt ticket | none | a throwaway or a spike |
-| **iterate** | test-impact selection + the guard floor | nightly on master, misses recorded | blocks the train window today (#1233 makes it a report) | standard, per ticket | a board that wants narrow gates but still a green master signal |
+| **iterate** | test-impact selection + the guard floor | nightly on master, misses recorded | allowed; files a heal ticket per failure signature, never holds the window (#1233) | standard, per ticket | a board that wants narrow gates but still a green master signal |
 | **flow** (#1240) | typecheck + test-impact selection + the diff's own new tests; no guard floor | **on the release candidate only** | never blocks; reported and counted | standard, per ticket | the fastest honest cycle: this board's own development |
 
 Two rules hold on every rung:
@@ -96,7 +96,7 @@ the rc), and the heal work is real work that the cadence makes visible instead o
 |---|---|
 | Posture dial and the five existing rungs | landed, decision 017 |
 | Guard-floor deferral under `iterate` / `flow` | #1232 |
-| Posture-aware red-base veto, heal ticket under `iterate` | #1233 |
+| Posture-aware red-base veto, heal ticket under `iterate` | landed, #1233 |
 | Miss-rate join and gate durations in the ledger | #1234 |
 | Sweep env scrub and scope stamp; `promote` refuses a non-full green | #1231 |
 | Deterministic guard failures stop the re-gate loop | #1230 |
