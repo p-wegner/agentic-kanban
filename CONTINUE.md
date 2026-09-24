@@ -52,10 +52,27 @@ Mode `monitor`, WIP 2, one start per cycle, sweep every 24 h (last green 2026-09
 **Untracked in the main checkout:** `.sentinel-issues.json` (3.6 MB, 2026-09-14, an issue
 export from a sentinel run). Not ours to delete; not ignored either.
 
+**Afternoon: #1228 landed (`1e05a1303e`, Done), after an incident worth reading before the next
+review.** The auto-review session for #1228 followed the review brief's "`git rebase origin/master`"
+(`review.service.ts:160,173`) while `origin/master` was five days stale (nothing pushes master to
+GitHub), replayed 112 commits onto that base, then ran `git update-ref refs/heads/master
+origin/master` and force-moved the SHARED master to `6ec1600622` (2026-09-19) at 09:19:48. The
+main checkout then read as "262 uncommitted tracked changes", a plugin scaffold committed on the
+wrong tip, and every merge refused (`dirty_main`, then "174 commits stale"). No guard fired: the
+cross-worktree hook arms on paths, not on ref writes. Repaired by hand: `git update-ref
+refs/heads/master ac8ef86f24 0a5bfae04f`, scaffold re-committed as `58a2926d4f`, the branch reset
+to master and its final 7-file diff applied as one commit (`e321bc23d3`; the re-click guard now
+reads through a ref so `selectView` stays stable for #1227's deep-link hook). Also fixed on the
+way: the worktree's CRLF `.herdr/plugin/agentic-kanban-hooks.mjs` (the #1146 trap, `rm` + `git
+checkout --`) and its stale impact map (rebuilt on main, copied in). Filed **#1237** (critical,
+`no-auto-start`): review brief must name the local base, a worktree session may never write the
+base ref, and a lagging remote base ref must be reported. `origin/master` is still at 09-19;
+pushing it is the operator's call.
+
 ### Next steps, in order
-1. Let #1228 land through the queue once the builder commits; then `pnpm promote --dry-run`
+1. `pnpm promote --dry-run` (#1227, #1228, #1229 are on master; it will ask for a sweep) once the builder commits; then `pnpm promote --dry-run`
    (it will ask for a sweep: master is ahead of the 17:54 verdict).
-2. Pick from #1230-#1236. Suggested order: #1230 (stops the waste today), #1231 (makes the
+2. Pick from #1230-#1237. Suggested order: #1237, #1230 (stops the waste today), #1231 (makes the
    sweep trustworthy), #1233 + #1232 as a group (the actual Yegge workflow), #1234 (proves it),
    #1235, #1236. Remove the `no-auto-start` tag to hand one to the monitor.
 3. Re-enable auto-merge on the three fixture projects paused 2026-09-20 for CPU.
