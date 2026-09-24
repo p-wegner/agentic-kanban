@@ -1,6 +1,7 @@
 import React from "react";
 import { getWorkspacePreviewUrl } from "../lib/workspace-preview.js";
 import { WorkspaceActionButton } from "./WorkspaceActionButton.js";
+import { MergeJobBadge } from "./MergeJobBadge.js";
 import type { WorkspaceResponse, DiffResponse, DiffComment } from "@agentic-kanban/shared";
 import type { SessionInfo } from "./WorkspaceCard.js";
 import { Icon } from "./Icon.js";
@@ -156,6 +157,7 @@ export function WorkspaceActionBar({
                 {ws.isDirect ? "Close" : "Merge"}
               </WorkspaceActionButton>
               )}
+              <MergeJobBadge wsId={ws.id} className="self-center" />
 
               <span className="w-px bg-gray-300 dark:bg-gray-600 self-stretch mx-1" aria-hidden="true" />
 

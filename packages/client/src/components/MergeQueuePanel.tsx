@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiPost } from "../lib/api.js";
+import { startAsyncMerge } from "../lib/mergeJobTracker.js";
 import { fetchMergeTrains } from "../lib/mergeTrainApi.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import {
@@ -712,15 +713,15 @@ export function MergeQueuePanel({ columns, projectId, onClose, onIssueClick, onM
       return next;
     });
 
+    const failed = (message: string) => setErrorByWorkspace((prev) => ({ ...prev, [workspaceId]: message }));
     try {
-      await apiPost(`/api/workspaces/${workspaceId}/merge`);
-      onMerged?.();
+      // #1250 — async: the row's spinner lasts until the polled job is terminal.
+      await startAsyncMerge(workspaceId, {
+        onSucceeded: () => { setMergingId((id) => (id === workspaceId ? null : id)); onMerged?.(); },
+        onFailed: (error) => { setMergingId((id) => (id === workspaceId ? null : id)); failed(error.message); },
+      });
     } catch (err) {
-      setErrorByWorkspace((prev) => ({
-        ...prev,
-        [workspaceId]: err instanceof Error ? err.message : "Merge failed",
-      }));
-    } finally {
+      failed(err instanceof Error ? err.message : "Merge failed");
       setMergingId(null);
     }
   }

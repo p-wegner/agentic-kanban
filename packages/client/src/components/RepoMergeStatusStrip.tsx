@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
+import { startAsyncMerge } from "../lib/mergeJobTracker.js";
 import { LEADING_REPO_KEY } from "@agentic-kanban/shared";
 import type { RepoMergeStatusResponse, RepoMergeStatusRepoEntry, RepoRebaseResponse } from "@agentic-kanban/shared";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -202,9 +203,11 @@ export function RepoMergeStatusStrip({ workspaceId, refreshKey }: { workspaceId:
   const onRetryMerge = useCallback(async () => {
     setRetryState({ phase: "running" });
     try {
-      await apiPost(`/api/workspaces/${workspaceId}/merge`);
-      setRetryState({ phase: "done" });
-      setNonce((n) => n + 1); // refresh status after the coordinated merge
+      // #1250 — async: `running` lasts until the polled job is terminal, then the status refreshes.
+      await startAsyncMerge(workspaceId, {
+        onSucceeded: () => { setRetryState({ phase: "done" }); setNonce((n) => n + 1); },
+        onFailed: (error) => { setRetryState({ phase: "done", error: error.message }); setNonce((n) => n + 1); },
+      });
     } catch (err) {
       const message = errorMessage(err);
       setRetryState({ phase: "done", error: message });

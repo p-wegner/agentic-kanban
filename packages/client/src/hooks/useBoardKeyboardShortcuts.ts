@@ -2,6 +2,7 @@ import { useEffect, useMemo, type Dispatch, type RefObject, type SetStateAction 
 import type { CreateIssueFormState } from "../lib/boardTypes.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiPost } from "../lib/api.js";
+import { startAsyncMerge } from "../lib/mergeJobTracker.js";
 import { registerAction } from "../lib/actions.js";
 import { visibleViews, type ViewMode } from "../lib/viewRegistry.js";
 import { useHiddenViews } from "./useHiddenViews.js";
@@ -450,8 +451,12 @@ export function useBoardKeyboardShortcuts(
           handler: () => {
             void (async () => {
               try {
-                await apiPost(`/api/workspaces/${ws.id}/merge`);
-                showToast("Merge started", "success");
+                // #1250 — async merge; the card's badge follows it, the toasts report the end.
+                const { joined } = await startAsyncMerge(ws.id, {
+                  onFailed: (error) => showToast(`Merge of #${issue.issueNumber} failed: ${error.message.split("\n")[0]}`, "error", { sticky: true }),
+                  onSucceeded: () => showToast(`Merged #${issue.issueNumber}`, "success"),
+                });
+                showToast(joined ? "Joining the running merge" : "Merge started", "success");
               } catch {
                 showToast("Failed to merge", "error");
               }

@@ -25,6 +25,7 @@ import { WorkspaceEmptyState } from "./WorkspaceEmptyState.js";
 import { WorkspacePanelHeader } from "./WorkspacePanelHeader.js";
 import { useWorkspaceGithubHandoff } from "../hooks/useWorkspaceGithubHandoff.js";
 import { useWorkspaceActions } from "../hooks/useWorkspaceActions.js";
+import type { MergeErrorState } from "../lib/mergeJobBadge.js";
 import { useProjectRepos } from "../hooks/useProjectRepos.js";
 import { useWorkspacePlanReview } from "../hooks/useWorkspacePlanReview.js";
 import { invalidateClientSurface } from "../lib/clientInvalidation.js";
@@ -105,7 +106,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const [conflictState, setConflictState] = useState<{ hasConflicts: boolean; conflictingFiles: string[] } | null>(null);
   const [expandedQuickActions, setExpandedQuickActions] = useState<Record<string, boolean>>({});
   const [expandedScorecards, setExpandedScorecards] = useState<Record<string, boolean>>({});
-  const [mergeError, setMergeError] = useState<{ wsId: string; message: string } | null>(null);
+  const [mergeError, setMergeError] = useState<MergeErrorState | null>(null);
   const [replaySession, setReplaySession] = useState<{ id: string; label: string; outputFormat: string } | null>(null);
 
   const invalidateWorkspaceSurface = useCallback(async () => {
@@ -346,7 +347,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     handleOpenTerminal, handleOpenEditor, copyPreviewUrl, handleUpdateBase,
     handleMonitorRunNow, handleAbortRebase, handleResolveConflicts, handleResume,
     handleRestart, handleContinueFromSession, handleAutoBisect, handleReview,
-    handleResetWorkspaceToIdle,
+    handleResetWorkspaceToIdle, mergeHandlers,
     handleImplementPlan, handleRejectPlan, handleDeleteWorkspace, handleCloseWorkspace,
   } = useWorkspaceActions({
     issue, selectedProfile, selectedModel, prefs, requiresReview, suggestion,
@@ -539,7 +540,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
               launchingFix={launchingFix}
               diff={diff}
               diffComments={diffComments}
-              mergeError={mergeError}
+              mergeError={mergeError} mergeHandlers={mergeHandlers}
               conflictState={conflictState}
               availableSkills={availableSkills}
               expandedQuickActions={expandedQuickActions}

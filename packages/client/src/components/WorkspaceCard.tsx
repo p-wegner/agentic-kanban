@@ -34,6 +34,10 @@ import {
 } from "../lib/workspace-helpers.js";
 import { SessionStatsSummary } from "../lib/session-stats.js";
 import { ContextWindowView } from "./ContextWindowView.js";
+import { MergeErrorPanel } from "./MergeErrorPanel.js";
+import { MergeJobBadge } from "./MergeJobBadge.js";
+import type { MergeErrorState } from "../lib/mergeJobBadge.js";
+import type { MergeJobHandlers } from "../lib/mergeJobTracker.js";
 import type { WorkspaceViewMode } from "../hooks/useWorkspaceSession.js";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import type {
@@ -173,6 +177,7 @@ export function WorkspaceQuickActions({
             >
               {workspace.isDirect ? "Close" : "AI Merge"}
             </button>
+            <MergeJobBadge wsId={workspace.id} />
             {lastMerge && (
               <span className={`text-[9px] px-1 ${lastMerge.status === "completed" ? "text-green-600" : "text-yellow-600"}`}>
                 {lastMerge.status === "completed" ? "✓" : "✗"} {formatRelativeTime(lastMerge.endedAt ?? lastMerge.startedAt)}
@@ -282,7 +287,9 @@ export interface WorkspaceCardProps {
   launchingFix: { wsId: string; kind: "fix-and-merge" | "resolve" } | null;
   diff: DiffResponse | null;
   diffComments: DiffComment[];
-  mergeError: { wsId: string; message: string } | null;
+  mergeError: MergeErrorState | null;
+  /** #1250 — what a terminal async merge does (set the error / refetch); shared with "Bank shrinks and retry". */
+  mergeHandlers: MergeJobHandlers;
   conflictState: { hasConflicts: boolean; conflictingFiles: string[] } | null;
   // Quick actions
   availableSkills: AvailableSkill[];
@@ -382,6 +389,7 @@ export function WorkspaceCard({
   diff,
   diffComments,
   mergeError,
+  mergeHandlers,
   conflictState,
   availableSkills,
   expandedQuickActions,
@@ -880,19 +888,7 @@ export function WorkspaceCard({
               handleDeleteWorkspace={handleDeleteWorkspace}
             />
             {mergeError && mergeError.wsId === ws.id && (
-              <div className="mt-2 p-2 bg-orange-50 dark:bg-orange-950 border border-orange-200 dark:border-orange-800 rounded">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-orange-700 dark:text-orange-400">Merge failed -- AI can fix and retry</span>
-                  <button
-                    onClick={() => handleFixAndMerge(ws.id, mergeError.message)}
-                    disabled={actionLoading}
-                    className="text-xs bg-orange-600 text-white px-2 py-1 rounded hover:bg-orange-700 disabled:opacity-50"
-                  >
-                    Fix &amp; Merge with AI
-                  </button>
-                </div>
-                <p className="mt-1 text-xs text-orange-600 dark:text-orange-400 font-mono break-all">{mergeError.message}</p>
-              </div>
+              <MergeErrorPanel wsId={ws.id} mergeError={mergeError} actionLoading={actionLoading} onFixAndMerge={handleFixAndMerge} mergeHandlers={mergeHandlers} />
             )}
             {conflictState && conflictState.hasConflicts && (
               <div className="mt-2 p-2 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded">
