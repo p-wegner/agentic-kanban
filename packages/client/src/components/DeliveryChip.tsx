@@ -15,6 +15,7 @@ import {
   TRAIN_SIZE_MIN,
   buildDeliveryChipView,
   clampStep,
+  describeRedBase,
 } from "../lib/deliveryChip.js";
 import { setProjectPref } from "../lib/settingsStore.js";
 import { showToast } from "../lib/toast.js";
@@ -27,6 +28,7 @@ const RED_BASE_POLICY_LABELS: Record<RedBasePolicy, string> = {
   block: "Block — never merge onto a red base",
   "allow-known-debt": "Allow known debt — merge if the red set is already tracked",
   "allow-file-debt-ticket": "Allow, file a debt ticket — merge and record it",
+  report: "Report only — never holds, files no ticket (for the flow posture)",
 };
 
 /**
@@ -243,6 +245,12 @@ function DeliveryPanelBody({
       </details>
 
       <div className="text-[11px] text-ink-soft dark:text-gray-400">{status.baseSweep.reason}</div>
+      <div
+        className={`text-[11px] ${status.redBase?.holdingWindow ? "text-red-600 dark:text-red-400" : "text-ink-soft dark:text-gray-400"}`}
+        data-testid="delivery-red-base"
+      >
+        {describeRedBase(status.redBase)}
+      </div>
     </>
   );
 }

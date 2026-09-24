@@ -245,10 +245,13 @@ describe("the subset rule keys on redBasePolicy, not on the posture level (#1015
     },
   );
 
-  it("a softer per-project override lets `iterate` (redBasePolicy `block`) carry known debt", async () => {
+  // #1233 moved `iterate` to `allow-file-debt-ticket`, so `standard` is now the level whose own
+  // policy is `block` — the override cases below use it for exactly the reason they used to use
+  // `iterate`: a project reaching a soft policy WITHOUT a soft level.
+  it("a softer per-project override lets `standard` (redBasePolicy `block`) carry known debt", async () => {
     mockBaseHealthFailedSuites(["suite-a"]);
     stubPreferences({
-      [riskPosturePrefKey("project-1")]: "iterate",
+      [riskPosturePrefKey("project-1")]: "standard",
       [redBasePolicyPrefKey("project-1")]: "allow-known-debt",
     });
     ledgerSuiteA();
@@ -264,7 +267,7 @@ describe("the subset rule keys on redBasePolicy, not on the posture level (#1015
   it("`allow-known-debt` still refuses a NEW red suite, whatever the level says", async () => {
     mockBaseHealthFailedSuites(["suite-a", "suite-new"]);
     stubPreferences({
-      [riskPosturePrefKey("project-1")]: "iterate",
+      [riskPosturePrefKey("project-1")]: "standard",
       [redBasePolicyPrefKey("project-1")]: "allow-known-debt",
     });
     ledgerSuiteA();
@@ -277,7 +280,7 @@ describe("the subset rule keys on redBasePolicy, not on the posture level (#1015
   it("`allow-file-debt-ticket` ledgers a new red suite and lands, on a level that never would", async () => {
     mockBaseHealthFailedSuites(["suite-a", "suite-new"]);
     stubPreferences({
-      [riskPosturePrefKey("project-1")]: "iterate",
+      [riskPosturePrefKey("project-1")]: "standard",
       [redBasePolicyPrefKey("project-1")]: "allow-file-debt-ticket",
     });
     ledgerSuiteA();

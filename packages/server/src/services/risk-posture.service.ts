@@ -24,7 +24,10 @@ import { getIssueTagRows } from "../repositories/tag.repository.js";
  *                 the base branch instead, and every miss it finds is recorded to the outcome
  *                 ledger. Trades "a defect is caught before it lands" for "a defect is caught
  *                 within a day and costs a rebase" — right for a repo with no deployment,
- *                 wrong for one with a real release (use `strict`).
+ *                 wrong for one with a real release (use `strict`). Since #1233 a red sweep
+ *                 FILES a heal ticket instead of holding the train window (`redBasePolicy`
+ *                 `allow-file-debt-ticket`): master only moves through trains, so a red
+ *                 nightly under `block` froze the project until a human hand-landed a fix.
  *  - `fast`     — large backlog, trusted agents. Scoped gate once per train, review the train
  *                 not each ticket, red base allowed if the red set is known debt, contention
  *                 downgraded to a warning, placement prefers remote.
@@ -55,12 +58,15 @@ export function redBasePolicyPrefKey(projectId: string): string {
 /**
  * Softness order of {@link RedBasePolicy} — the ONE place the "softer only" direction is
  * defined, so the override check and the red-debt cap's degrade step cannot disagree about
- * which way is looser.
+ * which way is looser. `report` (#1233) is the softest: a red base never holds the train window
+ * and files no ticket — reserved for decision 019's `flow` posture (#1240); no shipped level
+ * resolves it today.
  */
 export const RED_BASE_POLICY_RANK: Record<RedBasePolicy, number> = {
   block: 0,
   "allow-known-debt": 1,
   "allow-file-debt-ticket": 2,
+  report: 3,
 };
 
 const VALID_RED_BASE_POLICIES: ReadonlySet<string> = new Set(Object.keys(RED_BASE_POLICY_RANK));
@@ -69,7 +75,7 @@ const VALID_RED_BASE_POLICIES: ReadonlySet<string> = new Set(Object.keys(RED_BAS
  * Apply the per-project `red_base_policy_<projectId>` override to a level-derived posture
  * (#1015, decision 017 Amendment 2026-09-04).
  *
- * **Softer only.** `block` -> `allow-known-debt` -> `allow-file-debt-ticket` is allowed; the
+ * **Softer only.** `block` -> `allow-known-debt` -> `allow-file-debt-ticket` -> `report` is allowed; the
  * reverse is IGNORED with a logged warning rather than honoured. The reason is decision 017's
  * own shape: the LEVEL is the dial that says how strict a project is, and a per-field key that
  * could tighten one dimension would re-create exactly the "~8 prefs to align by hand, and
@@ -222,7 +228,13 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         gateTier: "impact",
         sweepIntervalMs: 24 * 60 * 60 * 1000,
         reviewMode: "standard",
-        redBasePolicy: "block",
+        // #1233 (decision 017 Amendment 2026-09-24): a red nightly sweep FILES a heal ticket and
+        // lets the train window depart. Under `block` the same sweep held every train — and the
+        // base only moves through trains, so the project froze until a human hand-landed a fix
+        // (measured 2026-09-24 on the dev board). The per-merge gate here is the impact
+        // selection, which never proved the base green in the first place; holding on the
+        // sweep's verdict bought nothing the heal ticket does not disclose better.
+        redBasePolicy: "allow-file-debt-ticket",
         trainMaxSize: 1,
         trainMaxWaitMs: 0,
         mergesPerCycle: 2,
@@ -230,7 +242,7 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         builderStopChecks: "tests-capacity-gated",
         contentionMode: "serialize",
         placementBias: "host-preferred",
-        summary: "iterate: per-merge gate is the test-impact selection (a ranked guess, narrower than scoped); the FULL suite runs nightly on the base instead, and its misses are recorded",
+        summary: "iterate: per-merge gate is the test-impact selection (a ranked guess, narrower than scoped); the FULL suite runs nightly on the base instead, its misses are recorded, and a red base files a heal ticket rather than holding the train window",
       };
     case "standard":
     default:

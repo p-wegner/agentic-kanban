@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DeliveryStatusResponse, RiskPosture } from "@agentic-kanban/shared/types";
-import { buildDeliveryChipView, clampStep } from "./deliveryChip.js";
+import { buildDeliveryChipView, clampStep, describeRedBase } from "./deliveryChip.js";
 
 function posture(overrides: Partial<RiskPosture> = {}): RiskPosture {
   return {
@@ -39,9 +39,34 @@ function status(overrides: Partial<DeliveryStatusResponse> = {}): DeliveryStatus
       reason: "risk posture 'iterate' sweeps the base every 24 h",
       nextDueAt: null,
     },
+    redBase: {
+      policy: "allow-file-debt-ticket",
+      latestOutcome: null,
+      latestSha: null,
+      holdingWindow: false,
+      openHealTickets: 0,
+    },
     ...overrides,
   };
 }
+
+describe("describeRedBase (#1233)", () => {
+  it("names a hold on a red base under block", () => {
+    expect(describeRedBase({ policy: "block", latestOutcome: "red", latestSha: "deadbeefcafe", holdingWindow: true, openHealTickets: 0 }))
+      .toBe("Red base: latest sweep red at deadbeef, HOLDING the train window");
+  });
+
+  it("names the policy that lets a red base through, and the heal tickets it filed", () => {
+    expect(describeRedBase({ policy: "allow-file-debt-ticket", latestOutcome: "red", latestSha: "deadbeefcafe", holdingWindow: false, openHealTickets: 2 }))
+      .toBe("Red base: latest sweep red at deadbeef, not holding the window (policy 'allow-file-debt-ticket'), 2 open heal tickets");
+  });
+
+  it("a never-swept project reads as such", () => {
+    expect(describeRedBase({ policy: "block", latestOutcome: null, latestSha: null, holdingWindow: false, openHealTickets: 0 }))
+      .toBe("Red base: never swept, not holding the window");
+    expect(buildDeliveryChipView(status()).title).toContain("Red base: never swept");
+  });
+});
 
 describe("buildDeliveryChipView (#1155)", () => {
   it("names the level and the un-batched train plainly", () => {

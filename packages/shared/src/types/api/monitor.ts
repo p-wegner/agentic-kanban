@@ -68,11 +68,17 @@ export type RiskPostureLevel = (typeof RISK_POSTURES)[number];
  */
 /**
  * Whether a merge may land on top of a red base branch, in increasing order of softness:
- * `block` < `allow-known-debt` < `allow-file-debt-ticket` (#1015). Named separately from
- * `RiskPosture` because it is the field the merge gate's red-debt subset rule keys on, and
- * because a project may override it (softer only) via `red_base_policy_<projectId>`.
+ * `block` < `allow-known-debt` < `allow-file-debt-ticket` < `report` (#1015, #1233). Named
+ * separately from `RiskPosture` because it is the field the merge gate's red-debt subset rule
+ * and the train window's red-base veto key on, and because a project may override it (softer
+ * only) via `red_base_policy_<projectId>`.
+ *
+ * `report` is the softest: a red base never holds anything and files no ticket — the red is
+ * only reported (delivery view, sweep row). It exists for decision 019's `flow` posture, where
+ * the release candidate's sweep is the only place a full verdict is owed; no shipped level
+ * resolves it today.
  */
-export type RedBasePolicy = "block" | "allow-known-debt" | "allow-file-debt-ticket";
+export type RedBasePolicy = "block" | "allow-known-debt" | "allow-file-debt-ticket" | "report";
 
 /**
  * The EFFECTIVE periodic base-branch sweep for one project (#1031) — reported on
@@ -229,6 +235,27 @@ export interface DeliveryStatusResponse {
   /** Did the train WINDOW pick up the posture's numbers, or stay on the shipped defaults? */
   trainWindowFromPosture: boolean;
   baseSweep: BaseSweepInfo;
+  /** The effective red-base policy and whether a red base is holding the train window (#1233). */
+  redBase: RedBaseStatus;
+}
+
+/**
+ * What a red base currently does to this project (#1233): the EFFECTIVE policy (the posture's,
+ * after any softer-only project override), the latest sweep verdict, and whether the merge-train
+ * window is being HELD by it right now — `resolveBaseRedVeto`'s own answer, so the chip shows
+ * the same decision the orchestrator makes. Under `block` a red base the branch has not moved
+ * past holds the window; under every other policy it is reported here and never holds.
+ */
+export interface RedBaseStatus {
+  policy: RedBasePolicy;
+  /** The latest sweep's outcome for this project, or null when it was never swept. */
+  latestOutcome: "green" | "red" | "timeout" | "unverified" | null;
+  /** The sha that outcome was recorded at. */
+  latestSha: string | null;
+  /** True exactly when the train window would be held for a red base on the next tick. */
+  holdingWindow: boolean;
+  /** Open `heal` tickets filed by the sweep for this project (0 under any policy but `allow-file-debt-ticket`). */
+  openHealTickets: number;
 }
 
 export interface ConductorSchedule {
