@@ -2,7 +2,7 @@ import type { Context, Hono } from "hono";
 import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
-import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, contractCoupledComponent, confirmContractComponent, analyzeTouchedFiles } from "../services/issue-ai.service.js";
+import { analyzeDependencies, enhanceIssue, decomposeEpic, confirmEpicDecomposition, contractCoupledComponent, confirmContractComponent, analyzeTouchedFiles } from "../services/issue-ai.service.js";
 import { markTooSmallToDecompose } from "../services/decompose-verdict.service.js";
 import { scanForTicketGroups, scanMergeTrainConflictsForTicketGroups, scanTouchedFilesForTicketGroups } from "../services/ticket-group-scan.service.js";
 import type { DecomposeChildProposal, DecomposeDependencyProposal } from "../services/issue-ai.service.js";
@@ -38,7 +38,7 @@ import { createIssueCommentsService } from "../services/issue-comments.service.j
 import type { IssueCommentKind, IssueCommentAuthor } from "../repositories/issue-comments.repository.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import {
-  enhanceIssueBody, analyzeDependenciesBody, aiEstimateBody, projectIdBody,
+  enhanceIssueBody, analyzeDependenciesBody, projectIdBody,
   decomposeConfirmBody, contractConfirmBody, groupScanBody, batchIssuesBody, dependenciesBatchBody,
   contractCoupledBody, bulkUpdateBody,
   archiveDoneBody, createIssueBody, analyzeTouchedFilesBody, preflightBody, reposTouchedBody,
@@ -224,12 +224,6 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     return c.json(result);
   });
 
-  // POST /api/issues/ai-estimate — AI-suggest a T-shirt size estimate for an issue
-  router.post("/ai-estimate", async (c) => {
-    const body = await parseJsonBody(c, aiEstimateBody);
-    return c.json(await wrapAiOperation("ai-estimate", () => aiEstimateIssue(body.issueId, database)));
-  });
-
   // POST /api/issues/:id/decompose — AI-generate epic decomposition proposal
   router.post("/:id/decompose", async (c) => {
     const issueId = c.req.param("id");
@@ -350,7 +344,6 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
       priority: body.priority,
       issueType: body.issueType,
       skipAutoReview: body.skipAutoReview,
-      estimate: body.estimate,
       sortOrder: body.sortOrder,
       statusId: body.statusId,
       workflowTemplateId: body.workflowTemplateId,

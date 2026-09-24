@@ -6,7 +6,6 @@ import { type ProjectTag, type QuickUpdateCallbacks } from "./IssueCard.js";
 import { BoardColumnCard } from "./BoardColumnCard.js";
 import { computeDropSortOrder } from "../lib/reorderIssues.js";
 import { computeColumnScrollState, showsBottomFade, showsTopFade } from "../lib/columnScrollState.js";
-import { computeColumnEstimate } from "../lib/columnHelpers.js";
 import { SwimlaneRenderer, DropGap } from "./BoardColumnSwimlanes.js";
 import {
   loadSortMode,
@@ -195,7 +194,6 @@ export function BoardColumn({
 
   const isCreating = creatingInColumn === column.id;
   const displayedIssues = sortColumnIssues(column.issues, sortMode);
-  const estimateRollup = computeColumnEstimate(column.issues);
   const shouldVirtualizeIssues =
     !stacked && swimlaneDimension === "none" && displayedIssues.length > VIRTUALIZE_ISSUE_THRESHOLD;
   const cardGapPx = CARD_GAP_PX[cardDensity];
@@ -297,13 +295,6 @@ export function BoardColumn({
           </h2>
           {column.name === "AI Reviewed" && (
             <span className="text-[10px] text-accent-700 dark:text-accent-300 font-medium">Awaiting manual merge</span>
-          )}
-          {column.issues.length > 0 && (
-            <span className="text-[10px] text-ink-faint dark:text-gray-500">
-              {estimateRollup.total > 0 ? `${estimateRollup.total} pts` : ""}
-              {estimateRollup.total > 0 && estimateRollup.unestimated > 0 ? " · " : ""}
-              {estimateRollup.unestimated > 0 ? `${estimateRollup.unestimated} unestimated` : ""}
-            </span>
           )}
         </div>
         </div>

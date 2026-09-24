@@ -264,7 +264,6 @@ export async function insertChildIssue(
     priority: string;
     issueType: string;
     skipAutoReview: boolean;
-    estimate: null;
     sortOrder: number;
     statusId: string;
     projectId: string;

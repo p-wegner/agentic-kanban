@@ -23,7 +23,7 @@ import { issueIdentityColumns } from "../projections.js";
 /**
  * Issue rows projected for the Focus ranking ("what should I work on next?"):
  * status name + the current workflow node's type (so isTerminalStatusView can tell
- * done-ness), priority/estimate for scoring. One per-project read, no I/O beyond the DB.
+ * done-ness), priority for scoring. One per-project read, no I/O beyond the DB.
  */
 export async function getFocusIssueRows(projectId: string, database: Database = db) {
   return database
@@ -35,7 +35,6 @@ export async function getFocusIssueRows(projectId: string, database: Database = 
       currentNodeType: workflowNodes.nodeType,
       priority: issues.priority,
       issueType: issues.issueType,
-      estimate: issues.estimate,
     })
     .from(issues)
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))

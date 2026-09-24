@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import type { CreateIssueRequest, IssueEstimate, ProfileSelection } from "@agentic-kanban/shared";
+import type { CreateIssueRequest, ProfileSelection } from "@agentic-kanban/shared";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { apiFetch } from "../lib/api.js";
@@ -12,7 +12,6 @@ import { EnhanceButton, UndoEnhanceButton } from "./EnhanceActions.js";
 import type { AgentSkillOption } from "./IssueFormFields.js";
 import {
   AgentOptionCheckbox,
-  IssueEstimateSelect,
   IssueTemplateSelect,
   IssueTypeSelect,
   PastedImageStrip,
@@ -70,7 +69,6 @@ export function CreateIssuePanel({
   const [description, setDescription] = useState(initialState?.description ?? "");
   const [pastedImages, setPastedImages] = useState<string[]>(initialState?.pastedImages ?? []);
   const [issueType, setIssueType] = useState<CreateIssueRequest["issueType"]>(initialState?.issueType ?? "task");
-  const [estimate, setEstimate] = useState<IssueEstimate | "">(initialState?.estimate ?? "");
   const [reposTouched, setReposTouched] = useState<string[]>([]);
   const { repos: projectRepos, isMultiRepo } = useProjectRepos(projectId);
   const [startWorkspace, setStartWorkspace] = useState(initialState?.startWorkspace ?? false);
@@ -137,7 +135,7 @@ export function CreateIssuePanel({
     setSubmitting(true);
     try {
       await onSubmit(buildCreateIssuePayload({
-        title, description: descriptionWithImages, issueType, estimate,
+        title, description: descriptionWithImages, issueType,
         statusId: selectedStatusId, projectId,
         start, planMode, skipAutoReview, isDirect,
         selectedProfile, selectedModel, skillId,
@@ -260,15 +258,6 @@ export function CreateIssuePanel({
                 value={issueType}
                 onChange={setIssueType}
                 className={`w-full ${FIELD_SELECT_CLASS}`}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Estimate</label>
-              <IssueEstimateSelect
-                value={estimate}
-                onChange={setEstimate}
-                emptyLabel="None"
-                className={FIELD_SELECT_CLASS}
               />
             </div>
           </div>

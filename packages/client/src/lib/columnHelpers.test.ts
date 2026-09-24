@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
-import { groupByPriority, groupByTag, computeColumnEstimate, sortIssues } from "./columnHelpers.js";
+import { groupByPriority, groupByTag, sortIssues } from "./columnHelpers.js";
 
 let counter = 0;
 
@@ -89,19 +89,6 @@ describe("groupByTag", () => {
     expect(groups).toHaveLength(2);
     expect(groups[0].issues).toEqual([multi]);
     expect(groups[1].issues).toEqual([multi]);
-  });
-});
-
-describe("computeColumnEstimate", () => {
-  it("sums known estimate points and counts the rest as unestimated", () => {
-    const issues = [
-      issue({ estimate: "XS" }), // 1
-      issue({ estimate: "L" }), // 5
-      issue({ estimate: "XXL" }), // unknown -> unestimated
-      issue({ estimate: null }),
-      issue({}),
-    ];
-    expect(computeColumnEstimate(issues)).toEqual({ total: 6, unestimated: 3 });
   });
 });
 

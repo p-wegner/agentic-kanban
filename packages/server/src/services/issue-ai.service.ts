@@ -11,7 +11,6 @@ import {
   type DecomposeChildProposal,
   type DecomposeDependencyProposal,
 } from "./decompose-sizing.js";
-import type { IssueEstimate } from "@agentic-kanban/shared";
 import {
   computeCouplingCandidates,
   couplingCandidatesFor,
@@ -33,7 +32,6 @@ import { getProjectRepoNames } from "../repositories/repo.repository.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { nextIssueNumber } from "../repositories/issue-number.repository.js";
 import { normalizeIssuePriority } from "@agentic-kanban/shared/lib/issue-priority";
-import { ISSUE_ESTIMATES } from "@agentic-kanban/shared";
 
 export interface EnhanceIssueResult {
   title: string;
@@ -422,40 +420,6 @@ export async function checkIssueOverlap(
   return { overlap };
 }
 
-export interface AiEstimateResult {  estimate: IssueEstimate;
-  reasoning: string;
-}
-
-const VALID_ESTIMATES: readonly IssueEstimate[] = ISSUE_ESTIMATES;
-
-export async function aiEstimateIssue(
-  issueId: string,
-  database: Database,
-): Promise<AiEstimateResult> {
-  const issueRow = await repo.getIssueTitleDescription(issueId, database);
-  if (!issueRow) {
-    throw new NotFoundError("Issue not found");
-  }
-  const { title, description } = issueRow;
-
-  const prompt = `You are a software project estimator. Given a kanban issue, suggest a T-shirt size estimate.
-Sizes: XS (< 1 hour), S (half day), M (1-2 days), L (3-5 days), XL (> 1 week).
-Respond ONLY with valid JSON — no markdown, no explanation:
-{"estimate": "XS|S|M|L|XL", "reasoning": "one sentence"}
-
-Issue title: ${title}
-${description ? `Description:\n${description}` : ""}`;
-
-  const stdout = await invokeClaudePrompt(prompt, { database, model: "claude-haiku-4-5" });
-  const parsed = extractModelJson(stdout, { shape: "object" }) as { estimate?: string; reasoning?: string };
-
-  const estimate = parsed.estimate?.trim().toUpperCase() as IssueEstimate;
-  if (!VALID_ESTIMATES.includes(estimate)) {
-    throw new Error(`AI returned invalid estimate: ${parsed.estimate}`);
-  }
-  return { estimate, reasoning: parsed.reasoning?.trim() ?? "" };
-}
-
 // Ticket-sizing types + the pure over-split guard live in decompose-sizing.ts (#116;
 // extracted to keep this file under the god-module ceiling). Re-exported so existing
 // importers (routes/issues.ts, the regression test) keep resolving them from here.
@@ -706,7 +670,6 @@ export async function confirmEpicDecomposition(
       priority: child.priority ?? "medium",
       issueType: "task",
       skipAutoReview: false,
-      estimate: null,
       sortOrder: 0,
       statusId: defaultStatusId,
       projectId,

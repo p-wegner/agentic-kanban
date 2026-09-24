@@ -22,7 +22,6 @@ export async function insertIssue(
     priority: string;
     issueType: string;
     skipAutoReview: boolean;
-    estimate: string | null;
     sortOrder: number;
     workflowTemplateId: string | null;
     externalKey: string | null;
@@ -79,7 +78,6 @@ export async function insertBatchIssue(
     priority: string;
     issueType: string;
     skipAutoReview: boolean;
-    estimate: string | null;
     sortOrder: number;
     statusId: string;
     projectId: string;
@@ -550,7 +548,6 @@ export async function createIssuesBatchWithDepsAndTags(
         priority: input.priority ?? "medium",
         issueType: input.issueType ?? "task",
         sortOrder: input.sortOrder ?? 0,
-        estimate: input.estimate ?? null,
         statusId,
         projectId,
         createdAt: now,

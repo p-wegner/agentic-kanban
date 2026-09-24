@@ -1,8 +1,6 @@
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { ISSUE_PRIORITIES, PRIORITY_TRAITS, normalizeIssuePriority } from "./priorityTraits.js";
 
-export const ESTIMATE_POINTS: Record<string, number> = { XS: 1, S: 2, M: 3, L: 5, XL: 8 };
-
 /**
  * Lane keys = the four priorities plus `ungrouped`, which is a LANE, not a priority —
  * it holds issues with no priority set. Derived from the traits table (#516) so a lane
@@ -47,19 +45,6 @@ export function groupByTag(issues: IssueWithStatus[]): { key: string; label: str
   result.sort((a, b) => a.label.localeCompare(b.label));
   if (ungrouped.length > 0) result.push({ key: "ungrouped", label: "Ungrouped", color: null, issues: ungrouped });
   return result;
-}
-
-export function computeColumnEstimate(issues: IssueWithStatus[]): { total: number; unestimated: number } {
-  let total = 0;
-  let unestimated = 0;
-  for (const issue of issues) {
-    if (issue.estimate && ESTIMATE_POINTS[issue.estimate] != null) {
-      total += ESTIMATE_POINTS[issue.estimate];
-    } else {
-      unestimated++;
-    }
-  }
-  return { total, unestimated };
 }
 
 export type SortMode = "default" | "type";
