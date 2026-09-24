@@ -25,7 +25,7 @@ with a `risk:<level>` tag.
 | **fast** | scoped suite once per train (up to 8) | per train; master swept | allowed when it is known debt | the train, not the ticket | a sprint with a trusted crew |
 | **sprint** | guards only, per train (up to 12) | never at merge; master swept | allowed, files a debt ticket | none | a throwaway or a spike |
 | **iterate** | test-impact selection + the guard floor | nightly on master, misses recorded | allowed; files a heal ticket per failure signature, never holds the window (#1233) | standard, per ticket | a board that wants narrow gates but still a green master signal |
-| **flow** (#1240) | typecheck + test-impact selection + the diff's own new tests; no guard floor | **on the release candidate only** | never blocks; reported and counted | standard, per ticket | the fastest honest cycle: this board's own development |
+| **flow** | typecheck + test-impact selection + the diff's own new tests; no guard floor | **on the release candidate only** | never blocks; reported and counted | standard, per ticket | the fastest honest cycle: this board's own development |
 
 Two rules hold on every rung:
 
@@ -102,8 +102,9 @@ the rc), and the heal work is real work that the cadence makes visible instead o
 | Deterministic guard failures stop the re-gate loop | #1230 |
 | RC branch promotion and the cadence | #1238 |
 | Heal-on-candidate and the merge-back | #1239 |
-| The `flow` posture | #1240 |
+| The `flow` posture | landed, #1240 — `gateTier: impact`, `redBasePolicy: report`, `sweepIntervalMs: null` (the delivery view says "full suite: release candidate only"), guards `intersecting` at merge; the rungs table above is ratcheted against the resolver by `integration-risk-ladder-doc.test.ts` |
 
-A ratchet keeps this table honest: `integration-risk-ladder-doc.test.ts` (part of #1240)
-fails when a posture level exists in the resolver and not in the rungs table above, or the
-other way round.
+A ratchet keeps this table honest: `integration-risk-ladder-doc.test.ts` (#1240) fails when a
+posture level exists in the resolver (`RISK_POSTURES` and the `case` labels of
+`postureForLevel`) and not in the rungs table above, or the other way round. A rung is a row
+whose first cell is `**<level>**`.
