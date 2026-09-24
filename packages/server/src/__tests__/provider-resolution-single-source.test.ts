@@ -1,7 +1,8 @@
 // @gate:always-run when:packages/server/src/**,packages/mcp-server/src/** — scans server+mcp-server src for provider-resolution forks; imports nothing it checks (#538).
 import { describe, it, expect } from "vitest";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { walkRepoTree } from "../../../../scripts/lib/repo-tree.mjs";
 
 // Architecture guard for ticket #901 / #890-A1: "Route ALL provider/profile
 // resolution through one shared resolver."
@@ -56,16 +57,11 @@ const SELECT_PROVIDER_ALLOWLIST = new Set<string>([
 
 /** Recursively collect non-test .ts source files under a directory. */
 function collectSourceFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    if (statSync(full).isDirectory()) {
-      out.push(...collectSourceFiles(full));
-    } else if (entry.endsWith(".ts") && !entry.endsWith(".test.ts") && !full.includes("__tests__")) {
-      out.push(full);
-    }
-  }
-  return out;
+  return walkRepoTree(dir, {
+    skipDirs: ["__tests__"],
+    extensions: [".ts"],
+    filter: (_abs, entry) => !entry.name.endsWith(".test.ts"),
+  });
 }
 
 /** Strip // line and block comments so a comment mentioning the symbol is not flagged. */

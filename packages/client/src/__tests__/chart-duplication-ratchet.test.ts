@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { walkRepoTree } from "../../../../scripts/lib/repo-tree.mjs";
 
 /**
  * The dashboard charts' duplication is a DOWN-only ring (#732).
@@ -71,16 +72,12 @@ const WINDOW = 15;
 const clientSrc = path.join(import.meta.dirname!, "..");
 const rel = (f: string) => path.relative(clientSrc, f).split(path.sep).join("/");
 
-function walk(dir: string, out: string[] = []): string[] {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === "node_modules" || entry.name === "dist" || entry.name === "__tests__") continue;
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) walk(full, out);
-    else if (/\.tsx?$/.test(entry.name) && !entry.name.includes(".test.") && !entry.name.endsWith(".d.ts")) {
-      out.push(full);
-    }
-  }
-  return out;
+function walk(dir: string): string[] {
+  return walkRepoTree(dir, {
+    skipDirs: ["__tests__"],
+    extensions: [".ts", ".tsx"],
+    filter: (_abs, entry) => !entry.name.includes(".test.") && !entry.name.endsWith(".d.ts"),
+  });
 }
 
 /** Drop comment bodies so prose about the duplication does not count as duplication. */

@@ -1,10 +1,11 @@
 // @gate:always-run always — scans the tree for oversized/low-cohesion modules; imports nothing it checks (#538).
 import { describe, it, expect } from "vitest";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, resolve, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { parseGuardSource, readGuardSource } from "./helpers/guard-scan";
+import { listRepoSubdirs, walkRepoTree } from "../../../scripts/lib/repo-tree.mjs";
 
 /**
  * Architecture gate: a cohesion-aware god-module guard (arch-review #875).
@@ -178,18 +179,12 @@ const COMPLEXITY_BASELINE: Record<string, number> = {
   "packages/shared/src/lib/workflow-engine/graph-validation.ts": 28,
 };
 
-function isExcluded(absPath: string): boolean {
-  // Check segments RELATIVE to the repo root: when this test runs from inside a
-  // worktree the absolute path itself contains ".worktrees" (…/.worktrees/<wt>/…),
-  // and matching on the absolute prefix would silently exclude EVERY file, turning
-  // the whole gate into a no-op. We only want to skip a NESTED worktree copy that
-  // appears below the repo root.
-  const parts = relative(REPO_ROOT, absPath).split(sep);
+// Directory exclusion (`node_modules`, `dist`, a nested `.worktrees` or linked worktree BELOW
+// the root — never the root's own prefix, which is what made an earlier absolute-path match
+// exclude every file inside a worktree) is the shared walker's job (#1241). This names only
+// what is specific to the god-module gate.
+function isExcludedFile(absPath: string): boolean {
   return (
-    parts.includes("node_modules") ||
-    parts.includes("dist") ||
-    parts.includes(".worktrees") ||
-    parts.includes("__tests__") ||
     absPath.endsWith(".test.ts") ||
     absPath.endsWith(".test.tsx") ||
     absPath.endsWith(".spec.ts") ||
@@ -198,21 +193,13 @@ function isExcluded(absPath: string): boolean {
 }
 
 function collectSourceFiles(dir: string, out: string[]): void {
-  let entries: string[];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return;
-  }
-  for (const name of entries) {
-    const full = join(dir, name);
-    if (isExcluded(full)) continue;
-    if (statSync(full).isDirectory()) {
-      collectSourceFiles(full, out);
-    } else if (full.endsWith(".ts") || full.endsWith(".tsx")) {
-      out.push(full);
-    }
-  }
+  out.push(
+    ...walkRepoTree(dir, {
+      skipDirs: ["__tests__"],
+      extensions: [".ts", ".tsx"],
+      filter: (abs) => !isExcludedFile(abs),
+    }),
+  );
 }
 
 function lineCount(text: string): number {
@@ -348,9 +335,8 @@ function gatherSourceFiles(): string[] {
   if (sourceFileCache) return sourceFileCache;
   const packagesDir = join(REPO_ROOT, "packages");
   const files: string[] = [];
-  for (const pkg of readdirSync(packagesDir)) {
-    if (pkg === ".worktrees") continue;
-    collectSourceFiles(join(packagesDir, pkg, "src"), files);
+  for (const pkgDir of listRepoSubdirs(packagesDir)) {
+    collectSourceFiles(join(pkgDir, "src"), files);
   }
   sourceFileCache = files;
   return files;

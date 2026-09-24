@@ -1,9 +1,10 @@
 // @gate:always-run always — walks every package's src tree, so its subject is not in this
 // file's import graph and scoped test selection must not skip it.
 import { describe, it, expect } from "vitest";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
+import { walkRepoTree } from "../../../../scripts/lib/repo-tree.mjs";
 import { parseGuardSource, forEachNode, lineOf } from "../../../shared/__tests__/helpers/guard-scan.js";
 
 /**
@@ -53,13 +54,10 @@ const ALLOWED: Record<string, string> = {
 };
 
 function tsFiles(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
-    const full = path.join(dir, e.name);
-    if (e.isDirectory()) {
-      if (e.name === "node_modules" || e.name === "dist" || e.name === "__tests__") return [];
-      return tsFiles(full);
-    }
-    return e.name.endsWith(".ts") && !e.name.includes(".test.") ? [full] : [];
+  return walkRepoTree(dir, {
+    skipDirs: ["__tests__"],
+    extensions: [".ts"],
+    filter: (_abs, entry) => !entry.name.includes(".test."),
   });
 }
 

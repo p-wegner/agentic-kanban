@@ -4,6 +4,7 @@ import path, { join } from "node:path";
 import fs, { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import ts from "typescript";
+import { listRepoSubdirs } from "../../../scripts/lib/repo-tree.mjs";
 import {
   calleeName,
   forEachNode,
@@ -211,11 +212,7 @@ function testScopeFiles(packageDir: string): string[] {
 
 /** Every package that actually holds tests, so adding a package cannot silently escape the scan. */
 function testRoots(): string[] {
-  return fs
-    .readdirSync(PACKAGES_ROOT, { withFileTypes: true })
-    .filter((e) => e.isDirectory() || e.isSymbolicLink())
-    .map((e) => path.join(PACKAGES_ROOT, e.name))
-    .filter((dir) => fs.existsSync(path.join(dir, "package.json")));
+  return listRepoSubdirs(PACKAGES_ROOT).filter((dir) => fs.existsSync(path.join(dir, "package.json")));
 }
 
 describe("tests never write into the real repo tree (#680)", () => {

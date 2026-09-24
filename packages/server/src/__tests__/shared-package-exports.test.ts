@@ -1,9 +1,10 @@
 // @gate:always-run when:packages/server/src/**,packages/shared/package.json — statically verifies shared subpath imports resolve; imports nothing it checks (#538).
 import { describe, expect, it } from "vitest";
 import ts from "typescript";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { walkRepoTree } from "../../../../scripts/lib/repo-tree.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "../../../..");
@@ -11,14 +12,7 @@ const serverSrc = join(repoRoot, "packages/server/src");
 const sharedPackageJson = join(repoRoot, "packages/shared/package.json");
 
 function findTypeScriptFiles(dir: string): string[] {
-  return readdirSync(dir).flatMap((entry) => {
-    const fullPath = join(dir, entry);
-    const stats = statSync(fullPath);
-    if (stats.isDirectory()) {
-      return findTypeScriptFiles(fullPath);
-    }
-    return fullPath.endsWith(".ts") || fullPath.endsWith(".tsx") ? [fullPath] : [];
-  });
+  return walkRepoTree(dir, { extensions: [".ts", ".tsx"] });
 }
 
 const SHARED_SUBPATH_PREFIX = "@agentic-kanban/shared/";

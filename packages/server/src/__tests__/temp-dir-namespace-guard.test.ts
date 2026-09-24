@@ -79,8 +79,9 @@
  * cannot outlive the code it was written for.
  */
 import { describe, expect, it } from "vitest";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { walkRepoTree } from "../../../../scripts/lib/repo-tree.mjs";
 import ts from "typescript";
 import {
   calleeName,
@@ -93,8 +94,9 @@ import { matchedNamespace } from "./helpers/reap-fixture-child-servers.js";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../../..");
 const SCAN_ROOTS = ["packages", "scripts", "test-setup"];
-const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "coverage", "test-results", "playwright-report", "drizzle"]);
-const SOURCE_EXT = /\.(ts|tsx|mjs|cjs|js)$/;
+/** Beyond the shared walker's canonical set (#1241): generated SQL is never a temp-dir mint site. */
+const EXTRA_SKIP_DIRS = ["drizzle"];
+const SOURCE_EXT = [".ts", ".tsx", ".mjs", ".cjs", ".js"];
 
 const OK_MARKER = "TEMP-PREFIX OK:";
 
@@ -125,33 +127,12 @@ interface Site {
 }
 
 function sourceFiles(): string[] {
-  const out: string[] = [];
-  const walk = (dir: string): void => {
-    let entries: import("node:fs").Dirent[];
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (SKIP_DIRS.has(entry.name)) continue;
-      const full = join(dir, entry.name);
-      // `readdir` reports a junction as a symlink, never a directory (plugin skills are
-      // junctioned in), so ask `statSync` rather than trusting `isDirectory()`.
-      let isDir = entry.isDirectory();
-      if (entry.isSymbolicLink()) {
-        try {
-          isDir = statSync(full).isDirectory();
-        } catch {
-          continue;
-        }
-      }
-      if (isDir) walk(full);
-      else if (SOURCE_EXT.test(entry.name)) out.push(full);
-    }
-  };
-  for (const root of SCAN_ROOTS) walk(join(REPO_ROOT, root));
-  return out;
+  // The shared walker never follows a junction (a junctioned-in plugin skill is another repo's
+  // code, not a mint site of ours) and skips a nested linked worktree; dot-directories are
+  // admitted because the scan roots' own dot-dirs are ours (#1241).
+  return SCAN_ROOTS.flatMap((root) =>
+    walkRepoTree(join(REPO_ROOT, root), { includeDotfiles: true, skipDirs: EXTRA_SKIP_DIRS, extensions: SOURCE_EXT }),
+  );
 }
 
 /**

@@ -1,9 +1,10 @@
 // @gate:always-run always — scans the tree for raw git spawns outside the adapter; imports nothing it checks (#538).
 import { describe, it, expect } from "vitest";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, resolve, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { listRepoSubdirs, walkRepoTree } from "../../../scripts/lib/repo-tree.mjs";
 
 /**
  * Architecture gate: the git CLI may be spawned from exactly ONE place —
@@ -205,32 +206,20 @@ const GIT_COMMANDS = new Set(["git", "git.exe"]);
  * whether the gate shouts about it, which is not a property worth gating on. The real
  * scope gap was the repo-root trees, fixed in collectAllPackageSources below.
  */
-const EXCLUDED_DIRS = ["node_modules", "dist", ".worktrees", "__tests__"];
-
-function isExcluded(absPath: string): boolean {
-  const parts = relative(REPO_ROOT, absPath).split(sep);
-  return (
-    parts.some((part) => EXCLUDED_DIRS.includes(part)) ||
-    /\.(test|spec)\.(ts|js|mjs|cjs)$/.test(absPath)
-  );
-}
+// `node_modules`, `dist`, `.worktrees` and a nested linked worktree are the shared walker's
+// business since #1241 (it matches directory NAMES below the root it is given, so the
+// worktree-prefix aliasing above cannot recur); `__tests__` is this gate's own exclusion.
+const EXCLUDED_DIRS = ["__tests__"];
+const TEST_FILE = /\.(test|spec)\.(ts|js|mjs|cjs)$/;
 
 function collectSourceFiles(dir: string, out: string[]): void {
-  let entries: string[];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return;
-  }
-  for (const name of entries) {
-    const full = join(dir, name);
-    if (isExcluded(full)) continue;
-    if (statSync(full).isDirectory()) {
-      collectSourceFiles(full, out);
-    } else if (SOURCE_EXTENSIONS.some((ext) => full.endsWith(ext))) {
-      out.push(full);
-    }
-  }
+  out.push(
+    ...walkRepoTree(dir, {
+      skipDirs: EXCLUDED_DIRS,
+      extensions: SOURCE_EXTENSIONS,
+      filter: (abs) => !TEST_FILE.test(abs),
+    }),
+  );
 }
 
 type Offender = { line: number; snippet: string };
@@ -515,11 +504,10 @@ describe("git-exec single-spawn gate", () => {
   function collectAllPackageSources(): string[] {
     const packagesDir = join(REPO_ROOT, "packages");
     const files: string[] = [];
-    for (const pkg of readdirSync(packagesDir)) {
-      if (pkg === ".worktrees") continue;
+    for (const pkgDir of listRepoSubdirs(packagesDir)) {
       // Walk the WHOLE package dir (not just src/) so files outside src — e.g.
       // packages/e2e/global-setup.ts and the scaffold .js hook scripts — are visible.
-      collectSourceFiles(join(packagesDir, pkg), files);
+      collectSourceFiles(pkgDir, files);
     }
     for (const rootTree of [join(".claude", "hooks"), "scripts"]) {
       collectSourceFiles(join(REPO_ROOT, rootTree), files);

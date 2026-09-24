@@ -1,10 +1,11 @@
 // @gate:always-run when:packages/shared/src/** — scans the client-reachable barrel for node-only re-exports; imports nothing it checks (#538).
 import { describe, it, expect } from "vitest";
 import { builtinModules } from "node:module";
-import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { dirname, resolve, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { walkRepoTree } from "../../../scripts/lib/repo-tree.mjs";
 
 /**
  * #791 regression guard — the client white-screen class.
@@ -135,14 +136,7 @@ function walkValueGraph(entry: string): { visited: Set<string>; nodeImports: str
 
 /** Every `.ts`/`.tsx` source file directly under shared/src/lib (one level, the barrel layer). */
 function libBarrelCandidates(): string[] {
-  const libDir = resolve(sharedSrc, "lib");
-  const out: string[] = [];
-  for (const name of readdirSync(libDir)) {
-    const full = join(libDir, name);
-    if (statSync(full).isDirectory()) continue;
-    if (full.endsWith(".ts") || full.endsWith(".tsx")) out.push(full);
-  }
-  return out;
+  return walkRepoTree(resolve(sharedSrc, "lib"), { maxDepth: 0, extensions: [".ts", ".tsx"] });
 }
 
 describe("shared barrel client-safety (#791 guard)", () => {
@@ -233,13 +227,7 @@ const CLIENT_SRC = resolve(dirname(fileURLToPath(import.meta.url)), "../../clien
 function clientDeepImportedSharedModules(): string[] {
   const specs = new Set<string>();
   const walk = (dir: string): void => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (entry.name !== "node_modules" && entry.name !== "dist") walk(full);
-        continue;
-      }
-      if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".tsx")) continue;
+    for (const full of walkRepoTree(dir, { extensions: [".ts", ".tsx"] })) {
       const text = readFileSync(full, "utf8");
       const re = /from\s+"@agentic-kanban\/shared\/(lib\/[\w./-]+)"/g;
       for (const m of text.matchAll(re)) {
