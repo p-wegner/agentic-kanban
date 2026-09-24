@@ -45,7 +45,8 @@ import { reconcileProjectCompletion } from "./project-completion-reconciler.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 import { getHeldWorkspaceIds } from "../repositories/merge-hold.repository.js";
-import { clearMergeBackoff, recordMergeFailure } from "../services/merge-backoff.service.js";
+import { clearMergeBackoff, shouldSkipMergeForBackoff, type MergeBackoffSkipDecision } from "../services/merge-backoff.service.js";
+import { describeVerifyFailedSkip, escalateVerifyFailedSkip } from "../services/verify-failed-escalation.js";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 const DEFAULT_INTERVAL_MS = 30_000;
@@ -141,6 +142,46 @@ interface TickOutcome {
   succeededProjects: Set<string>;
   /** The FIRST gate/train failure seen per project this tick, which is what feeds the breaker. */
   firstFailurePerProject: Map<string, { workspaceId: string; message: string }>;
+  /**
+   * #1230 — the per-skip bookkeeping (backoff row, deterministic-guard escalation) the event
+   * handler starts; `runOnce` awaits them before the breaker pass so a tick's writes land
+   * inside the tick that made them rather than racing the next one.
+   */
+  deferred: Promise<unknown>[];
+}
+
+/**
+ * Drop the candidates whose merge backoff is still in its window (#1230) — consulted BEFORE any
+ * gate work, the same question the monitor walk asks in `monitor-cycle.ts`. `shouldSkipMergeForBackoff`
+ * runs the reset probes itself (a branch that gained real work clears the block), so a fixed
+ * branch is back in the next tick without waiting the window out. The skip is logged once per
+ * distinct reason rather than on every 30 s tick, via `lastLogged`.
+ */
+async function excludeBackedOffCandidates(
+  database: Database,
+  candidates: { workspaceId: string; projectId: string; workingDir: string | null }[],
+  lastLogged: Map<string, string>,
+): Promise<{ workspaceId: string; projectId: string }[]> {
+  const kept: { workspaceId: string; projectId: string }[] = [];
+  for (const candidate of candidates) {
+    const decision: MergeBackoffSkipDecision = await shouldSkipMergeForBackoff(
+      { wsId: candidate.workspaceId, projectId: candidate.projectId, workingDir: candidate.workingDir },
+      { database },
+    ).catch(() => ({ skip: false }));
+    if (!decision.skip) {
+      if (lastLogged.delete(candidate.workspaceId) && decision.reason) {
+        console.log(`[auto-merge] workspace ${candidate.workspaceId} is back in the merge queue: ${decision.reason}`);
+      }
+      kept.push({ workspaceId: candidate.workspaceId, projectId: candidate.projectId });
+      continue;
+    }
+    const reason = decision.reason ?? "merge backoff active";
+    if (lastLogged.get(candidate.workspaceId) !== reason) {
+      lastLogged.set(candidate.workspaceId, reason);
+      console.log(`[auto-merge] holding workspace ${candidate.workspaceId} out of the merge queue: ${reason}`);
+    }
+  }
+  return kept;
 }
 
 /**
@@ -153,6 +194,80 @@ function noteFirstFailure(outcome: TickOutcome, projectOfWorkspace: Map<string, 
   const failedProjectId = projectOfWorkspace.get(workspaceId);
   if (!failedProjectId || outcome.firstFailurePerProject.has(failedProjectId)) return;
   outcome.firstFailurePerProject.set(failedProjectId, { workspaceId, message });
+}
+
+/**
+ * Fold ONE merge-queue event into this tick's counters and outcome set (#1211 — lifted out of
+ * `runOnce`; #1230 lifted out of the factory closure, which had reached the `function-nloc`
+ * ring's 400-nloc ceiling). A CONFLICT is the authors' to rebase and is not a repeating
+ * infrastructure failure, so only a gate/train `error` feeds the circuit breaker; a conflict
+ * (or a conflict-shaped skip) is stranded residue for the batch reconciler instead.
+ *
+ * #1219 — a `verify_failed` skip (the pre-merge gate withheld the merge, e.g. a configured
+ * verify_script but no worktree) is otherwise retried every tick forever: this path never fed
+ * the #417 merge-backoff bookkeeping the monitor's own merge path has always had, so a
+ * PERMANENT condition (a worktree that will never come back on an idle workspace) was
+ * classified as transient and re-gated on every 30s tick with no backoff and no escalation.
+ * Mirrors `mergeWorkspaceWithFixFallback` in monitor-cycle-actions.ts: record on a gate
+ * withhold, clear on a landing.
+ *
+ * #1230 — the row is now also CONSULTED (`excludeBackedOffCandidates`, before the train window
+ * sees a candidate), the skip is handed to `escalateVerifyFailedSkip` (the `verify_failed`
+ * ramp, and the deterministic-guard stop after the second identical failure on one commit),
+ * and the log line names the failing suite(s) instead of printing the verify tail.
+ */
+function applyQueueEvent(
+  ctx: { state: AutoMergeOrchestratorState; database: Database; boardEvents?: BoardEventSink },
+  event: MergeQueueEvent,
+  projectOfWorkspace: Map<string, string>,
+  workspaceInfo: Map<string, { workingDir: string | null; issueNumber: number | null }>,
+  outcome: TickOutcome,
+): void {
+  const { state, database, boardEvents } = ctx;
+  if (event.type === "merged") {
+    state.lastMerged++;
+    console.log(`[auto-merge] merged workspace ${event.workspaceId} (#${event.issueNumber ?? "?"})`);
+    // #1207: a landing ends the streak — the breaker counts CONSECUTIVE failures, and a
+    // project that merged something is not stuck in the loop the breaker exists to stop.
+    const mergedProjectId = projectOfWorkspace.get(event.workspaceId);
+    if (mergedProjectId) outcome.succeededProjects.add(mergedProjectId);
+    void clearMergeBackoff(database, event.workspaceId);
+    return;
+  }
+  if (event.type === "conflict" || event.type === "error") {
+    state.lastFailed++;
+    console.warn(`[auto-merge] ${event.type} for workspace ${event.workspaceId}: ${event.error}`);
+    if (event.type === "error") noteFirstFailure(outcome, projectOfWorkspace, event.workspaceId, event.error);
+    if (event.type === "conflict") outcome.strandedIds.push(event.workspaceId);
+    return;
+  }
+  if (event.type === "skipped") {
+    state.lastSkipped++;
+    if (event.reason.startsWith("rebase conflict") || event.reason.startsWith("merge conflict")) {
+      outcome.strandedIds.push(event.workspaceId);
+    }
+    if (!event.reason.startsWith("verify_failed:")) {
+      console.log(`[auto-merge] skipped workspace ${event.workspaceId}: ${event.reason}`);
+      return;
+    }
+    const skip = {
+      workspaceId: event.workspaceId,
+      projectId: projectOfWorkspace.get(event.workspaceId) ?? "",
+      workingDir: workspaceInfo.get(event.workspaceId)?.workingDir ?? null,
+      issueNumber: workspaceInfo.get(event.workspaceId)?.issueNumber ?? event.issueNumber,
+      reason: event.reason,
+      failedSuites: event.failedSuites,
+      guardFailure: event.guardFailure,
+    };
+    // #1230 — the ONE line the board log gets for a red gate names the suite(s); the tail is in
+    // the issue comment and `%TEMP%\kanban-verify-<ws>.log`, where it always was.
+    console.log(`[auto-merge] ${describeVerifyFailedSkip(skip)}`);
+    if (!skip.projectId) return;
+    outcome.deferred.push(escalateVerifyFailedSkip(skip, {
+      database,
+      broadcast: (projectId, reason) => boardEvents?.broadcast(projectId, reason),
+    }));
+  }
 }
 
 export function createAutoMergeOrchestrator(deps: {
@@ -180,6 +295,8 @@ export function createAutoMergeOrchestrator(deps: {
   const checkBaseRedVeto = deps.checkBaseRedVeto ?? ((projectId: string) => resolveBaseRedVeto(projectId, database));
   /** Counts effective runOnce passes; drives the zero-candidate reconcile fallback. */
   let reconcileTick = 0;
+  /** #1230 — last logged backoff reason per workspace, so a held candidate is logged once, not per tick. */
+  const backoffLogState = new Map<string, string>();
   const state: AutoMergeOrchestratorState = {
     running: false,
     timer: null,
@@ -256,6 +373,7 @@ export function createAutoMergeOrchestrator(deps: {
         readyForMerge: workspaces.readyForMerge,
         parentWorkspaceId: workspaces.parentWorkspaceId,
         forkStatus: workspaces.forkStatus,
+        workingDir: workspaces.workingDir,
       })
       .from(workspaces)
       .innerJoin(issues, eq(workspaces.issueId, issues.id))
@@ -276,7 +394,7 @@ export function createAutoMergeOrchestrator(deps: {
         ),
       ));
 
-    return rows
+    const candidates = rows
       // #998: a fork child (parentWorkspaceId set, or forkStatus stamped) is an ephemeral
       // sub-branch consolidated by its JOIN — it must never be auto-merged directly; only
       // the join consolidates its commits into the parent.
@@ -302,7 +420,10 @@ export function createAutoMergeOrchestrator(deps: {
       // NOT for a gated project, where readyForMerge means "the verify/smoke gate passed". Gated
       // un-ready In-Review work waits for its review's gate instead of being merged unverified (#821).
       .filter((row) => row.readyForMerge || row.issueStatusName === "AI Reviewed" || (autoMergeInReview && !gatedProjectIds.has(row.projectId)))
-      .map((row) => ({ workspaceId: row.workspaceId, projectId: row.projectId }));
+      .map((row) => ({ workspaceId: row.workspaceId, projectId: row.projectId, workingDir: row.workingDir }));
+    // #1230 — the merge backoff (#417/#1219) is consulted HERE, before the train window ever
+    // sees the candidate: a `verify_failed` skip used to be re-gated on every 30 s tick.
+    return excludeBackedOffCandidates(database, candidates, backoffLogState);
   }
 
   async function findCompletedWorkspaceIds(): Promise<string[]> {
@@ -609,66 +730,6 @@ export function createAutoMergeOrchestrator(deps: {
     }
   }
 
-  /**
-   * Fold ONE merge-queue event into this tick's counters and outcome set (#1211 — lifted out of
-   * `runOnce`). A CONFLICT is the authors' to rebase and is not a repeating infrastructure
-   * failure, so only a gate/train `error` feeds the circuit breaker; a conflict (or a
-   * conflict-shaped skip) is stranded residue for the batch reconciler instead.
-   *
-   * #1219 — a `verify_failed` skip (the pre-merge gate withheld the merge, e.g. a configured
-   * verify_script but no worktree) is otherwise retried every tick forever: this path never fed
-   * the #417 merge-backoff bookkeeping the monitor's own merge path has always had, so a
-   * PERMANENT condition (a worktree that will never come back on an idle workspace) was
-   * classified as transient and re-gated on every 30s tick with no backoff and no escalation.
-   * Mirrors `mergeWorkspaceWithFixFallback` in monitor-cycle-actions.ts: record on a gate
-   * withhold, clear on a landing. `shouldSkipMergeForBackoff` is not consulted here yet (the
-   * queue always re-plans the whole candidate set), so this only stops the SIGNAL from being
-   * silently dropped — the backoff row still lets an operator/monitor see and act on it via the
-   * existing `merge_retry_blocked` drive obstacle once the same failure repeats.
-   */
-  function applyQueueEvent(
-    event: MergeQueueEvent,
-    projectOfWorkspace: Map<string, string>,
-    workspaceInfo: Map<string, { workingDir: string | null; issueNumber: number | null }>,
-    outcome: TickOutcome,
-  ): void {
-    if (event.type === "merged") {
-      state.lastMerged++;
-      console.log(`[auto-merge] merged workspace ${event.workspaceId} (#${event.issueNumber ?? "?"})`);
-      // #1207: a landing ends the streak — the breaker counts CONSECUTIVE failures, and a
-      // project that merged something is not stuck in the loop the breaker exists to stop.
-      const mergedProjectId = projectOfWorkspace.get(event.workspaceId);
-      if (mergedProjectId) outcome.succeededProjects.add(mergedProjectId);
-      void clearMergeBackoff(database, event.workspaceId);
-      return;
-    }
-    if (event.type === "conflict" || event.type === "error") {
-      state.lastFailed++;
-      console.warn(`[auto-merge] ${event.type} for workspace ${event.workspaceId}: ${event.error}`);
-      if (event.type === "error") noteFirstFailure(outcome, projectOfWorkspace, event.workspaceId, event.error);
-      if (event.type === "conflict") outcome.strandedIds.push(event.workspaceId);
-      return;
-    }
-    if (event.type === "skipped") {
-      state.lastSkipped++;
-      console.log(`[auto-merge] skipped workspace ${event.workspaceId}: ${event.reason}`);
-      if (event.reason.startsWith("rebase conflict") || event.reason.startsWith("merge conflict")) {
-        outcome.strandedIds.push(event.workspaceId);
-      }
-      if (event.reason.startsWith("verify_failed:")) {
-        const skippedProjectId = projectOfWorkspace.get(event.workspaceId);
-        const info = workspaceInfo.get(event.workspaceId);
-        if (skippedProjectId) {
-          void recordMergeFailure(
-            { wsId: event.workspaceId, projectId: skippedProjectId, workingDir: info?.workingDir ?? null, issueNumber: info?.issueNumber ?? event.issueNumber },
-            event.reason,
-            { database },
-          );
-        }
-      }
-    }
-  }
-
   async function runOnce(force = false): Promise<AutoMergeOrchestratorState> {
     if (state.running) return state;
 
@@ -743,15 +804,18 @@ export function createAutoMergeOrchestrator(deps: {
         strandedIds: [],
         succeededProjects: new Set<string>(),
         firstFailurePerProject: new Map<string, { workspaceId: string; message: string }>(),
+        deferred: [],
       };
       for (const batch of releaseBatches(partition)) {
         for await (const event of queueService.executeQueue(batch.workspaceIds, {
           skipOnConflict: true,
           strategy: batch.strategy,
         })) {
-          applyQueueEvent(event, projectOfWorkspace, workspaceInfo, outcome);
+          applyQueueEvent({ state, database, boardEvents }, event, projectOfWorkspace, workspaceInfo, outcome);
         }
       }
+      // #1230 — the per-skip backoff/escalation writes land inside this tick (each is total).
+      await Promise.all(outcome.deferred);
       const strandedIds = outcome.strandedIds;
 
       // #1207: fold this tick's outcomes into the per-project breakers — a landing clears the

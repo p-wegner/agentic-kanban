@@ -75,6 +75,17 @@ export async function clearMergeBackoffState(workspaceId: string, database: Data
   await database.delete(workspaceMergeBackoff).where(eq(workspaceMergeBackoff.workspaceId, workspaceId));
 }
 
+/**
+ * Overwrite only the failure count of an EXISTING row (#1230) — how a deterministic failure is
+ * pinned at the attempt ceiling without re-deriving the signature, sha and hash the row already
+ * holds. A workspace with no row is a no-op: there is no block to pin.
+ */
+export async function setMergeBackoffFailures(workspaceId: string, failures: number, database: Database = db): Promise<void> {
+  await database.update(workspaceMergeBackoff)
+    .set({ failures })
+    .where(eq(workspaceMergeBackoff.workspaceId, workspaceId));
+}
+
 export async function setMergeBackoffState(
   workspaceId: string,
   state: {

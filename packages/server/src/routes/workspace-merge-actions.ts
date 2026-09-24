@@ -1,5 +1,6 @@
 import type { Database } from "../db/index.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
+import { resetMergeBackoffForExplicitMerge } from "../services/merge-backoff.service.js";
 import { cancelMergeJob, completeMergeJob, failMergeJob, getMergeJob, startMergeJob } from "../services/merge-job.service.js";
 import { requestMergeGateCancellation } from "../services/merge-cancellation.js";
 import { cancelQueuedVerifyChain } from "../services/verify-chain-semaphore.js";
@@ -19,14 +20,20 @@ import { clearMergeHold, getMergeHold, setMergeHold } from "../repositories/merg
 export function runWorkspaceMergeJob(
   id: string,
   workspaceService: ReturnType<typeof createWorkspaceService>,
+  opts: { database?: Database } = {},
 ): { jobId: string; run: Promise<Awaited<ReturnType<typeof workspaceService.mergeWorkspaceDeduped>>> } {
   const existingJob = getMergeJob(id);
   const joiningExisting = existingJob !== null && existingJob.state === "running";
   const wasZombied = existingJob?.reason === "merge_job_zombied";
   const job = joiningExisting ? existingJob : startMergeJob(id);
   const ownsJob = !joiningExisting;
-  const run = workspaceService
-    .mergeWorkspaceDeduped(id, { deferMainCheckoutSync: true, dropStaleActiveRequest: wasZombied })
+  // #1230 — an EXPLICIT merge request runs immediately and resets the auto-merge backoff: the
+  // merge path below never consults `shouldSkipMergeForBackoff` (only the orchestrator's tick
+  // and the monitor walk do), so the bypass is by construction; the clear is what makes the
+  // operator's request also the reset. Awaited before the merge so the row cannot outlive it.
+  const reset = ownsJob ? resetMergeBackoffForExplicitMerge(id, opts.database) : Promise.resolve();
+  const run = reset
+    .then(() => workspaceService.mergeWorkspaceDeduped(id, { deferMainCheckoutSync: true, dropStaleActiveRequest: wasZombied }))
     .then((result) => {
       if (ownsJob) completeMergeJob(job.jobId, id, result);
       return result;
