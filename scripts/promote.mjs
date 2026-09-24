@@ -239,9 +239,15 @@ async function readSweepRowViaSqlite() {
       .prepare("select id, name from projects where name = ? limit 1")
       .get(projectName);
     if (!project) throw new Error(`no project named '${projectName}' in ${dbPath}`);
+    // #1231 — `scope` exists only once the operated DB carries migration 0157; the stable board
+    // is what migrates it, so read the column only when it is there rather than failing the
+    // whole read-only fallback on a not-yet-promoted schema.
+    const hasScope = db
+      .prepare("select 1 as present from pragma_table_info('base_branch_health') where name = 'scope'")
+      .get() !== undefined;
     const row = db
       .prepare(
-        "select sha, branch, outcome, message, created_at from base_branch_health where project_id = ? order by created_at desc limit 1",
+        `select sha, branch, outcome, message, ${hasScope ? "scope, " : ""}created_at from base_branch_health where project_id = ? order by created_at desc limit 1`,
       )
       .get(project.id);
     return { row: row ?? null, projectId: project.id, viaHttp: false, source: `read-only sqlite ${dbPath}` };
@@ -929,6 +935,9 @@ async function main() {
     console.log(`  board log        ${boardLogPath}`);
     console.log(`  sweep source     ${opts.recover ? "SKIPPED (--recover)" : opts.forceSweep ? "SKIPPED (--force-sweep)" : sweep.source}`);
     console.log(`  sweep verdict    ${verdict.detail}`);
+    // #1231 — what the sweep RAN, on its own line: a `full` here is the claim the promotion
+    // rests on; anything else refuses above, and a missing value is an old row, not a full run.
+    console.log(`  sweep scope      ${verdict.scope ?? "<none: row predates #1231 or the verify script reported no scope — accepted>"}`);
     // #1044: the direction against the stable checkout is the OTHER refusal, and it was invisible
     // here — a dry run could print a clean plan for a run that refuses at `behind`.
     const dryDirection = directionFor(sha, stableHead);

@@ -119,6 +119,7 @@ describe("describeRedBaseAttribution (#491)", () => {
         failedSuites: null,
         flaky: null,
         contention: null,
+        scope: null,
       },
     });
     expect(attribution).not.toBeNull();
@@ -142,6 +143,7 @@ describe("describeRedBaseAttribution (#491)", () => {
         failedSuites: null,
         flaky: null,
         contention: null,
+        scope: null,
       },
     });
     expect(attribution).toBeNull();
@@ -166,6 +168,7 @@ describe("describeRedBaseAttribution (#491)", () => {
         failedSuites: null,
         flaky: null,
         contention: null,
+        scope: null,
       },
     });
     expect(attribution).not.toBeNull();
@@ -423,6 +426,48 @@ describe("verifyBaseBranchHealth — installs before verifying (#674)", () => {
     expect(result?.message).toContain("pnpm install -r");
     expect(result?.message).toContain("shared has no dist");
     expect(result?.message).not.toBeUndefined();
+  });
+
+  it("stamps the row with the runner's self-reported tests scope, and spawns every probe child with inheritEnv: false (#1231)", async () => {
+    const repoPath = makeRealGitRepo();
+    const projectId = await seedProject(db, repoPath);
+    await setPreference(verifyScriptPrefKey(projectId), "pnpm test:mine", db);
+
+    const seen: { command: string; inheritEnv: boolean | undefined; env: Record<string, string> | undefined }[] = [];
+    runSetupScript.mockImplementation(async (_dest: string, command: string, options) => {
+      seen.push({ command, inheritEnv: options?.inheritEnv, env: options?.env });
+      return {
+        exitCode: 0,
+        stdout: "9297 passed\n[gate:step] name=tests seconds=118 scope=file-scoped\n[gate:step] name=typecheck seconds=30\n",
+        stderr: "",
+      };
+    });
+
+    const result = await verifyBaseBranchHealth(projectId, db);
+    expect(result?.outcome).toBe("green");
+    expect(result?.scope).toBe("file-scoped");
+    const row = await getLatestBaseBranchHealth(projectId, db);
+    expect(row?.scope).toBe("file-scoped");
+
+    // Every child the probe spawned started from the allowlist, never from process.env.
+    expect(seen.length).toBeGreaterThan(0);
+    for (const call of seen) {
+      expect(call.inheritEnv, call.command).toBe(false);
+      expect(call.env?.KANBAN_GIT_HTTP_PORT, call.command).toBe("");
+    }
+  });
+
+  it("records a null scope when the verify script reports no [gate:step] line (no step contract)", async () => {
+    const repoPath = makeRealGitRepo();
+    const projectId = await seedProject(db, repoPath);
+    await setPreference(verifyScriptPrefKey(projectId), "npm test", db);
+    runSetupScript.mockImplementation(async () => ({ exitCode: 0, stdout: "ok", stderr: "" }));
+
+    const result = await verifyBaseBranchHealth(projectId, db);
+    expect(result?.outcome).toBe("green");
+    expect(result?.scope).toBeNull();
+    const row = await getLatestBaseBranchHealth(projectId, db);
+    expect(row?.scope).toBeNull();
   });
 
   it("surfaces the tail (the failing step) of a red verify run, not the head of the log", async () => {
