@@ -26,6 +26,7 @@ import {
   scanAlwaysRunTests,
   scanAlwaysRunGuards,
   guardAppliesToChanges,
+  guardForcedForRun,
   isAlwaysRunMarked,
 } from "../../../../scripts/test-mine.mjs";
 import {
@@ -196,6 +197,55 @@ describe("always-run guard-suite dirs: test-mine vs the gate's tier reporter", (
         expect(runFor([]).length).toBe(2);
         expect(runFor(["docs/x.md"]).length).toBe(2);
         expect(describeAlwaysRunGuards(root, { packages: ["client"] }).count).toBe(0);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    /**
+     * #1232 — a THIRD rule the two sides must agree on: under `KANBAN_TEST_GUARDS=intersecting`
+     * which guards are forced and which are deferred. A divergence here is the same silent shape:
+     * the message prices `N intersecting of M (K deferred)` for a set the runner did not run.
+     */
+    it("both implementations apply the `intersecting` guards mode to the same change sets (#1232)", () => {
+      const root = mkdtempSync(path.join(tmpdir(), "ak-marker-intersecting-"));
+      try {
+        const dir = path.join(root, "packages", "server", "src", "__tests__");
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(path.join(dir, "bare.test.ts"), DECLARES);
+        writeFileSync(path.join(dir, "always.test.ts"), "// @gate:always-run always — walks the tree\nimport {} from \"vitest\";\n");
+        writeFileSync(
+          path.join(dir, "scoped.test.ts"),
+          "// @gate:always-run when:packages/server/src/routes/**, docs/x.md - only these\nimport {} from \"vitest\";\n",
+        );
+
+        const runFor = (changed: string[]): string[] =>
+          (scanAlwaysRunGuards(path.join(root, "packages", "server"), "src/__tests__") as {
+            file: string;
+            when: string[];
+            always: boolean;
+          }[])
+            .filter((g) => guardForcedForRun(g, changed, "intersecting") as boolean)
+            .map((g) => g.file.replace(/\\/g, "/"))
+            .sort();
+
+        for (const changed of [
+          [] as string[],
+          ["packages/server/src/routes/issues.ts"],
+          ["docs/x.md"],
+          ["packages/client/src/App.tsx"],
+        ]) {
+          const reported = describeAlwaysRunGuards(root, { changedFiles: changed, guards: "intersecting" });
+          expect(reported.count, `change set ${JSON.stringify(changed)}`).toBe(runFor(changed).length);
+          expect(reported.totalCount).toBe(3);
+          // Deferred = total - forced - excused-by-territory; both sides count 2 unconditional
+          // markers, and neither defers anything on an unknown change set.
+          expect(reported.deferredCount).toBe(changed.length === 0 ? 0 : 2);
+        }
+
+        expect(runFor(["packages/server/src/routes/issues.ts"])).toEqual(["src/__tests__/scoped.test.ts"]);
+        expect(runFor(["packages/client/src/App.tsx"])).toEqual([]);
+        expect(runFor([]).length).toBe(3);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }

@@ -67,7 +67,15 @@ export interface GuardFloorFields {
   guardSuiteCount: number;
   guardEstMs?: number;
   guardAssumedCount?: number;
+  /** #1232 — set only under `intersecting`: how many markers the run DEFERRED to the base sweep
+   *  (bare / `always`), and how many the tree carries in total, so the message can price
+   *  `N intersecting of M (K deferred to the base sweep)`. */
+  guardDeferredCount?: number;
+  guardTotalCount?: number;
 }
+
+/** Mirrors `KANBAN_TEST_GUARDS` in `scripts/test-mine.mjs` (#1232). */
+export type GuardsMode = "all" | "intersecting";
 
 /**
  * How many `@gate:always-run` suites will run, and what they are estimated to cost (#1043).
@@ -75,7 +83,10 @@ export interface GuardFloorFields {
  * `changedFiles` applies each marker's `when:` precondition (#1041), so the count describes the
  * RUN rather than the tree. Pass `[]` whenever the runner will not narrow either (no
  * `KANBAN_TEST_FILES`): the two must agree, or the message is
- * wrong in the flattering direction.
+ * wrong in the flattering direction. `guards: "intersecting"` (#1232) applies the merge-time
+ * rule the runner applies under `KANBAN_TEST_GUARDS=intersecting`: a bare or `always` marker is
+ * deferred (counted in `deferredCount`, not in `count`) — unless the change set is unknown, in
+ * which case everything is forced on both sides.
  *
  * Best-effort throughout: a scan or parse error yields whatever was gathered, never an exception.
  * `estMs: null` means no duration report was readable, and the message then omits the estimate
@@ -83,13 +94,16 @@ export interface GuardFloorFields {
  */
 export function describeAlwaysRunGuards(
   repoRoot: string,
-  options?: { changedFiles?: readonly string[]; packages?: readonly string[] },
-): { count: number; estMs: number | null; assumedCount: number } {
+  options?: { changedFiles?: readonly string[]; packages?: readonly string[]; guards?: GuardsMode },
+): { count: number; estMs: number | null; assumedCount: number; deferredCount: number; totalCount: number } {
   const changedFiles = (options?.changedFiles ?? []).map((f) => f.replace(/\\/g, "/"));
+  const mode: GuardsMode = options?.guards ?? "all";
   const durations = readTestDurationsMap(repoRoot);
   let count = 0;
   let estMs = 0;
   let assumedCount = 0;
+  let deferredCount = 0;
+  let totalCount = 0;
   // #583 — RECURSIVE, and every test extension. The old flat `readdirSync` over `.test.ts`
   // only saw a `__tests__` dir's top level, so `mcp-server/src/__tests__/tools/` (33 suites)
   // and every `.test.tsx`/`.test.mjs` were invisible: the gate under-reported the guard set
@@ -106,7 +120,15 @@ export function describeAlwaysRunGuards(
       if (!ALWAYS_RUN_TEST_FILE.test(entry.name)) continue;
       const marker = ALWAYS_RUN_MARKER_RE.exec(readFileSync(full, "utf8"));
       if (!marker) continue;
-      if (!guardRunsForChanges(parseWhenClause(marker[1] ?? ""), changedFiles)) continue;
+      totalCount += 1;
+      const when = parseWhenClause(marker[1] ?? "");
+      // #1232 — mirrors `guardForcedForRun` in `scripts/test-mine.mjs`: under `intersecting` a
+      // marker without a territory is deferred, except on an UNKNOWN change set.
+      if (mode === "intersecting" && changedFiles.length > 0 && when.length === 0) {
+        deferredCount += 1;
+        continue;
+      }
+      if (!guardRunsForChanges(when, changedFiles)) continue;
       count += 1;
       const measured = durations?.get(relative(repoRoot, full).split(sep).join("/"));
       estMs += measured ?? ASSUMED_GUARD_MS;
@@ -123,7 +145,7 @@ export function describeAlwaysRunGuards(
       // Best-effort decoration only — never let a scan error affect the gate.
     }
   }
-  return { count, estMs: durations ? estMs : null, assumedCount };
+  return { count, estMs: durations ? estMs : null, assumedCount, deferredCount, totalCount };
 }
 
 /** The `when:` globs on a marker line, `[]` for a bare marker. Mirrors `parseAlwaysRunMarker`. */
@@ -213,14 +235,19 @@ export function countAlwaysRunGuardSuites(repoRoot: string): number {
 export function guardFloorFor(
   repoRoot: string,
   changedFiles: readonly string[],
-  options: { narrowed: boolean; packages?: readonly string[]; guardsOnly?: boolean },
+  options: { narrowed: boolean; packages?: readonly string[]; guardsOnly?: boolean; guardsAtMerge?: GuardsMode },
 ): GuardFloorFields {
   const floor = describeAlwaysRunGuards(repoRoot, {
     changedFiles: options.narrowed ? changedFiles : [],
     packages: options.guardsOnly ? undefined : options.packages,
+    guards: options.guardsAtMerge ?? "all",
   });
   return {
     guardSuiteCount: floor.count,
     ...(floor.estMs === null ? {} : { guardEstMs: floor.estMs, guardAssumedCount: floor.assumedCount }),
+    // #1232 — only under `intersecting`, so an `all` run's fields are byte-identical to before.
+    ...(options.guardsAtMerge === "intersecting"
+      ? { guardDeferredCount: floor.deferredCount, guardTotalCount: floor.totalCount }
+      : {}),
   };
 }

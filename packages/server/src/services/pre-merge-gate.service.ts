@@ -228,7 +228,7 @@ export async function runPreMergeGate(
   // #958: `workingDir` lets the key carry the test-impact SELECTOR's identity — the one thing
   // that changes what this gate runs while tier, verify command and merged tree stay identical,
   // because the skill is materialized into the worktree untracked. #966 folds the budget in there.
-  const { strategy: gateStrategy, posture: gatePosture, effectiveVerify, verifyScript, verificationKey, budget: gateBudget } =
+  const { strategy: gateStrategy, posture: gatePosture, effectiveVerify, verifyScript, verificationKey, budget: gateBudget, guardsAtMerge } =
     await resolveGateVerification(projectId, database, { workingDir: workspace.workingDir });
 
   // ---- #492 tree-hash memo -----------------------------------------------------------------
@@ -463,6 +463,10 @@ export async function runPreMergeGate(
       packagesEnv: effectiveTestScope,
       emitFileScope,
       changedFiles,
+      // #1232 — `intersecting` under `iterate` (or the project's guards-at-merge pref, resolved in
+      // `resolveGuardsAtMerge`) defers the bare/`always` guard floor to the base sweep; `all`
+      // emits nothing.
+      guardsAtMerge,
     });
     if (docsOnlyGuardsRunApplies) {
       console.log(`[pre-merge-gate] ${guardsOnlyReasonFor(docsOnly)} diff for workspace ${workspace.id} (${changedFiles.length} file(s)) — running @gate:always-run guard suites only (#1008)`);
@@ -510,7 +514,10 @@ export async function runPreMergeGate(
         narrowed: emitFileScope || docsOnlyGuardsRunApplies,
         packages: effectiveTestScope?.split(","),
         guardsOnly: docsOnlyGuardsRunApplies,
+        guardsAtMerge,
       }),
+      // #1232 — which guards this run forced, so the message prices a deferred floor.
+      guardsAtMerge,
       // Filled with the sampled capacity only once execution is admitted.
       maxWorkers: DEFAULT_VERIFY_MAX_WORKERS,
       // #581: say whether this run was protected from builder contention. A gate that

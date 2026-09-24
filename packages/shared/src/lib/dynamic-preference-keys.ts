@@ -219,6 +219,14 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // `resolveRiskPosture` after level derivation; nothing else may read the key
   // (`red-base-policy-raw-read-ratchet.test.ts`). See decision 017, Amendment 2026-09-04.
   "red_base_policy",
+  // Guards at merge time (#1232): `guards_at_merge_<id>` = `all` | `intersecting` overrides what
+  // the project's risk-posture LEVEL derives (`iterate` -> `intersecting`, every other level ->
+  // `all`). Under `intersecting` the pre-merge gate forces only the `@gate:always-run` suites
+  // whose `when:` territory the diff intersects and defers the bare/`always` floor (~585s) to the
+  // base sweep. Read in exactly one place, `resolveGuardsAtMerge`
+  // (`server/src/services/guards-at-merge.ts`); nothing else may read the raw key
+  // (`guards-at-merge-raw-read-ratchet.test.ts`).
+  "guards_at_merge",
 ] as const;
 
 // Deliberately NOT registered, though both are per-project keys that exist on disk (#496):
