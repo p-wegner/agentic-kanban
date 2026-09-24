@@ -75,7 +75,11 @@ git update-ref refs/heads/master "$new" "$(git rev-parse HEAD)"   # CAS: fails i
 unset GIT_INDEX_FILE
 ```
 The `update-ref` old-value argument is the point: if another agent committed while you were building,
-it fails instead of clobbering. Afterwards verify `git diff HEAD -- <file>` is *exactly* the other
+it fails instead of clobbering. **This recipe is for the MAIN checkout only**: a worktree/builder/reviewer
+session must never write the base ref (`update-ref refs/heads/master`, `branch -f master`, `push … master`,
+`checkout master`) — it rebases its OWN branch onto the local base and lets the board land it; the
+cross-worktree guard hard-blocks those commands under `KANBAN_WORKTREE_DIR` (#1237, after a reviewer
+pattern-matched this very text and force-moved master five days back). Afterwards verify `git diff HEAD -- <file>` is *exactly* the other
 agent's remaining delta, so you can show you left their work intact and committable.
 
 **Aftermath to clean up:** a private-index commit leaves any NEW file it added looking
