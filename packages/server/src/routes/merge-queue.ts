@@ -9,6 +9,8 @@ import type { SessionManager } from "../services/session.manager.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { getMergeTrain, listActiveMergeTrainsForProject, listMergeTrainsForProject, updateMergeTrainState } from "../repositories/merge-train.repository.js";
 import { abortLiveMergeTrain } from "../services/merge-train-live-registry.js";
+import { cleanupTrainWorktreesForLabel } from "../services/merge-train-worktrees.js";
+import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { getMergeQueueIssueRows, getMergeQueueWorkspaceRows } from "../repositories/merge-queue.repository.js";
 import { listTrainSidingStatesForProject } from "../repositories/merge-train-siding.repository.js";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
@@ -207,6 +209,14 @@ export function createMergeQueueRoute(
     const stoppedAfter = stoppedLiveJob ? "current-attempt" : "immediately";
     console.log(`[merge-queue] cancelled train ${id} (${train.label}) — stopped ${stoppedAfter}${stoppedLiveJob ? "" : " (no live job in this process)"}`);
     options?.boardEvents?.broadcast(train.projectId, "merge_train_changed");
+    // #1235: a cancel with NO live job is a terminal transition nothing else tears down — the
+    // job that would have run the gate's `finally` is gone. A live job cleans up after itself
+    // when its abort lands (`runDoomedTrainJob`'s `finally`), so only the stranded case does
+    // it here. Best-effort: the row is already abandoned, and the reconcilers are the backstop.
+    if (!stoppedLiveJob) {
+      const repoPath = await getProjectRepoPath(train.projectId, database).catch(() => null);
+      if (repoPath) await cleanupTrainWorktreesForLabel({ database, repoPath, label: train.label });
+    }
     return c.json({ ok: true, stoppedAfter });
   });
 
