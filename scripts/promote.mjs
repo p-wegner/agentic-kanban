@@ -26,8 +26,12 @@
  *      moved, build, migrate, restart,
  *   4. smokes `/health`, `GET /api/projects` (non-empty) and one board-status call; on failure
  *      fast-forwards back to the previous `stable-*` tag, rebuilds, restarts and says so.
- *   5. records the rc as `promoted` and prints the merge-back command (a board workspace will do
- *      it, #1239). `--recover` and `--force-sweep` stay on MASTER'S TIP, loudly, and touch no rc.
+ *   5. records the rc as `promoted` and asks the board for the MERGE-BACK workspace
+ *      (`POST /api/projects/:id/rc/merge-back`, #1239): branch = the rc, base = master, merged by
+ *      the board's normal gate, which closes the rc's heal tickets. When no board answers the
+ *      exact command is printed instead. An rc abandoned by the cadence hands its open heal
+ *      tickets to the fresh cut (`POST …/rc/retarget`). `--recover` and `--force-sweep` stay on
+ *      MASTER'S TIP, loudly, and touch no rc.
  *
  * Every step is appended to `<stable checkout>/.kanban/promote.log`, which is what the
  * Sentinel reads. The board this script STARTS logs somewhere else — `.kanban/board.log` — so a
@@ -940,9 +944,56 @@ function recordRc(branch, patch) {
   }
 }
 
-/** The merge-back a board workspace will run (#1239); until then it is printed, never run. */
+/** The merge-back by hand — the FALLBACK when no board answered `POST …/rc/merge-back` (#1239). */
 function mergeBackInstruction(rcBranch) {
   return `git -C ${MAIN_CHECKOUT} merge --no-ff ${rcBranch} -m "merge-back ${rcBranch} into ${baseBranch}"   (a no-op refusal when nothing was healed on the rc: check with git -C ${MAIN_CHECKOUT} merge-base --is-ancestor ${rcBranch} ${baseBranch})`;
+}
+
+/**
+ * #1239 item 3 — ask the board for the merge-back workspace: branch = the rc, base = master,
+ * merged through the board's normal gate, which closes the rc's heal tickets when it lands.
+ * Returns the board's answer, or null when no board answered (the caller prints the command).
+ */
+async function requestMergeBack(projectId, rcBranch, tag) {
+  if (!projectId) return null;
+  try {
+    const res = await fetch(`${boardUrl}/api/projects/${projectId}/rc/merge-back`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ branch: rcBranch, tag }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!res.ok) throw new Error(`POST rc/merge-back -> ${res.status}`);
+    return await res.json();
+  } catch (e) {
+    log(`[promote] rc: the board did not create the merge-back workspace (${e instanceof Error ? e.message : String(e)})`);
+    return null;
+  }
+}
+
+/**
+ * #1239 item 4 — an abandoned candidate's open heal tickets move to the fresh cut: the ticket
+ * key, a comment, and the base of every open heal workspace. Best-effort: the board may be down
+ * (the cadence run restarts it), in which case the tickets keep the old rc in their key and the
+ * next red sweep of the new rc files afresh — nothing is lost, one ticket is duplicated.
+ */
+async function requestHealRetarget(projectId, fromBranch, toBranch) {
+  if (!projectId) return null;
+  try {
+    const res = await fetch(`${boardUrl}/api/projects/${projectId}/rc/retarget`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ from: fromBranch, to: toBranch }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) throw new Error(`POST rc/retarget -> ${res.status}`);
+    const body = await res.json();
+    log(`[promote] rc: heal tickets ${fromBranch} -> ${toBranch}: ${body?.reason ?? JSON.stringify(body)}`);
+    return body;
+  } catch (e) {
+    log(`[promote] rc: could not retarget ${fromBranch}'s heal tickets to ${toBranch} (${e instanceof Error ? e.message : String(e)}) — the next red sweep of ${toBranch} files afresh`);
+    return null;
+  }
 }
 
 async function main() {
@@ -981,6 +1032,12 @@ async function main() {
   // The recovery lane reads no verdict, exactly like --force-sweep: there is nothing to acquire.
   let sweep = opts.forceSweep || opts.recover ? null : await readSweepRow(gatedBranch);
   let verdict = verdictFor(sweep);
+
+  // #1239 item 4 — the abandon above retired a red candidate; its open heal tickets follow the
+  // fresh cut. Only through a board that answered (the sqlite fallback has nothing to POST to).
+  if (rc?.plan.abandon && !opts.dryRun && sweep?.projectId && sweep?.viaHttp) {
+    await requestHealRetarget(sweep.projectId, rc.plan.abandon, rc.branch);
+  }
 
   const stableHead = readStableHead();
   // Read the tip BEFORE the acquisition decision, not after it: `planSweepAcquisition` needs it to
@@ -1234,10 +1291,16 @@ async function main() {
       }
       log(`[promote] === ${tag} is live on ${boardUrl} ===`);
       if (rc) {
-        // #1238 item 3 — terminal. The merge-back into master is the board's job (#1239 gives it a
-        // workspace and the normal gate); until then the exact command is printed and NOT run.
+        // #1238 item 3 — terminal. #1239: the merge-back into master is a board workspace (branch =
+        // the rc, base = master, the normal gate); the freshly restarted stable board is asked for
+        // it, and the hand command is printed only when it did not answer.
         recordRc(rc.branch, { state: "promoted", tag, sha });
-        log(`[promote] rc: ${rc.branch} is promoted as ${tag}. Merge it back into ${baseBranch} through the board; by hand: ${mergeBackInstruction(rc.branch)}`);
+        const mergeBack = await requestMergeBack(sweep?.projectId ?? null, rc.branch, tag);
+        if (mergeBack) {
+          log(`[promote] rc: ${rc.branch} is promoted as ${tag}. Merge-back #${mergeBack.issueNumber ?? "?"} on workspace ${mergeBack.workspaceId}${mergeBack.created ? "" : " (already open)"} — the board lands it into ${baseBranch} and closes the heal tickets.`);
+        } else {
+          log(`[promote] rc: ${rc.branch} is promoted as ${tag}. No board answered for the merge-back; by hand: ${mergeBackInstruction(rc.branch)}`);
+        }
       }
       return;
     }

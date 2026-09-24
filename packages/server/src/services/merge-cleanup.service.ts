@@ -8,6 +8,7 @@ import {
   setIssueStatus,
 } from "../repositories/merge-cleanup.repository.js";
 import { listMemberIssueIds } from "../repositories/workspace-issue-members.repository.js";
+import { closeHealTicketsForMergedIssue } from "./rc-heal-ticket.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { isTerminalStatusName } from "@agentic-kanban/shared/lib/status-view";
 
@@ -256,6 +257,12 @@ export async function finalizeMergeCleanup(
     now,
     projectId,
     fallbackToAiReviewed: input.fallbackToAiReviewed,
+  });
+
+  // #1239 — a landed MERGE-BACK (`rc-merge-back:…`) closes its candidate's heal tickets; every
+  // other issue is a no-op. Best-effort: it never fails a merge that has already landed.
+  await closeHealTicketsForMergedIssue({ issueId: input.issueId, projectId, now }, input.database).catch((err) => {
+    console.warn(`[merge-cleanup] heal-ticket close after merge-back of issue ${input.issueId} failed:`, errorMessage(err));
   });
 
   let workspaceUpdated = false;

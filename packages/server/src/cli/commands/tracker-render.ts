@@ -1,4 +1,4 @@
-import type { BoardStatusResponse, BoardStatusIssue } from "@agentic-kanban/shared";
+import type { BoardStatusResponse, BoardStatusIssue, RcCandidateSummary } from "@agentic-kanban/shared";
 import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared";
 
 /**
@@ -9,6 +9,8 @@ import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared";
  */
 
 export interface TrackerFrameOptions {
+  /** #1239 — the release candidate line (state, open heal tickets, inherited red); omitted = no line. */
+  rc?: RcCandidateSummary | null;
   /** Terminal width to wrap/truncate against. Falls back to 80 when unset or non-positive. */
   width?: number;
   /** Injected for deterministic tests; epoch ms, defaults to the real clock. */
@@ -53,6 +55,15 @@ function glyphFor(status: string | undefined): string {
  * "In Progress:1") is the exact failure this line list exists to avoid.
  */
 const TRACKER_LINE_STATUSES = new Set<string>([...ACTIVE_WORKSPACE_STATUSES, "blocked", "error"]);
+
+/** `rc rc/20260925 red | 2 failing | heal open 1 | inherited red 1` — decision 019's numbers in one line. */
+export function rcLine(rc: RcCandidateSummary): string {
+  const parts = [`rc ${rc.branch} ${rc.state}${rc.tag ? ` as ${rc.tag}` : ""}`];
+  if (rc.state === "red" && rc.failedSuites.length > 0) parts.push(`${rc.failedSuites.length} failing`);
+  if (rc.openHealTickets !== undefined) parts.push(`heal open ${rc.openHealTickets}`);
+  if (rc.inheritedRed !== undefined) parts.push(`inherited red ${rc.inheritedRed}`);
+  return parts.join(" | ");
+}
 
 /** First non-empty line of an agent message, used as a short blocked/error reason. */
 function firstLine(text: string): string {
@@ -124,6 +135,7 @@ export function renderTrackerFrame(
     width,
   );
   lines.push(header);
+  if (options.rc) lines.push(truncate(rcLine(options.rc), width));
 
   const inFlight = snapshot.issues.filter((issue) => issue.workspace && TRACKER_LINE_STATUSES.has(issue.workspace.status));
   if (inFlight.length === 0) {

@@ -39,6 +39,7 @@ Status glyphs:
       const { resolveWipLimit } = await import("../../services/wip-limit.service.js");
       const { getAllPreferences } = await import("../../repositories/preferences.repository.js");
       const { toPrefMap } = await import("@agentic-kanban/shared/lib/preference-map");
+      const { getDeliveryStatus } = await import("../../services/delivery-status.service.js");
 
       const projectId = await resolveProjectIdArg(options.project);
 
@@ -50,7 +51,9 @@ Status glyphs:
         }
         const prefMap = toPrefMap(await getAllPreferences());
         const wip = resolveWipLimit(prefMap, projectId);
-        const frame = renderTrackerFrame(snapshot, wip, { width: process.stdout.columns, connectionStatus });
+        // #1239 — the rc line reads the same resolver the delivery chip does; absent = no line.
+        const rc = await getDeliveryStatus(projectId).then((d) => d.rc ?? null).catch(() => null);
+        const frame = renderTrackerFrame(snapshot, wip, { width: process.stdout.columns, connectionStatus, rc });
         console.log(frame.text);
       };
 

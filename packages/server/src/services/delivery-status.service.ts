@@ -1,7 +1,8 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
-import type { DeliveryStatusResponse, RedBaseStatus } from "@agentic-kanban/shared/types";
+import type { DeliveryStatusResponse, RcCandidateSummary, RedBaseStatus } from "@agentic-kanban/shared/types";
 import type { Database } from "../db/index.js";
+import { db } from "../db/index.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 import { listOpenHealTickets } from "./base-health-heal-ticket.service.js";
@@ -11,6 +12,7 @@ import { requireProject } from "./require-project.js";
 import { resolveTrainWindowConfig } from "./merge-train-window.js";
 import { readImpactMissRate } from "./test-impact-miss-rate.js";
 import { currentRcCandidate, readRcState, resolveStableCheckoutFor, toRcCandidateSummary } from "./rc-state.js";
+import { rcHealSummary } from "./rc-heal-ticket.service.js";
 
 const trainMaxSizePref = projectPref("train_max_size");
 const promoteCadencePref = projectPref("promote_cadence");
@@ -27,7 +29,7 @@ const promoteCadencePref = projectPref("promote_cadence");
  * own verdict for this project, so the chip shows whether the train window is frozen by a red
  * base — and which policy decides that — from the exact function the orchestrator runs.
  */
-export async function getDeliveryStatus(projectId: string, database: Database): Promise<DeliveryStatusResponse> {
+export async function getDeliveryStatus(projectId: string, database: Database = db): Promise<DeliveryStatusResponse> {
   const project = await requireProject(projectId, database);
 
   const prefMap = toPrefMap(await getAllPreferences(database));
@@ -53,8 +55,16 @@ export async function getDeliveryStatus(projectId: string, database: Database): 
     // touched, off the stable checkout's `.kanban/rc-state.json`. Both null-safe: a project not
     // run under the two-board setup has neither.
     promoteCadence: prefMap.get(promoteCadencePref.key(projectId)) ?? null,
-    rc: toRcCandidateSummary(currentRcCandidate(readRcState(resolveStableCheckoutFor(project.repoPath)))),
+    // #1239 — plus the candidate's open heal tickets and how much of its red master also carries.
+    rc: await withRcHeal(projectId, toRcCandidateSummary(currentRcCandidate(readRcState(resolveStableCheckoutFor(project.repoPath)))), database),
   };
+}
+
+/** The rc summary with #1239's two counts attached; a bare summary when they cannot be read. */
+export async function withRcHeal(projectId: string, rc: RcCandidateSummary | null, database: Database): Promise<RcCandidateSummary | null> {
+  if (!rc) return null;
+  const heal = await rcHealSummary(projectId, rc, database).catch(() => null);
+  return heal ? { ...rc, ...heal } : rc;
 }
 
 /** The red-base half of the read model — see `RedBaseStatus`. Never throws: an unreadable
