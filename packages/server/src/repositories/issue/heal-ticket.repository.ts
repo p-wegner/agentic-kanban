@@ -105,3 +105,15 @@ export async function getMinIssueSortOrder(
   );
   return row?.min ?? null;
 }
+
+/**
+ * One issue's `externalKey` (#1239) — what tells a merge-back workspace (`rc-merge-back:…`) or
+ * an rc heal ticket (`base-health-heal:…:<rc>`) apart from ordinary work at merge time and at
+ * gate time. `null` for an unknown issue as for one without a key.
+ */
+export async function getIssueExternalKey(issueId: string, database: Database = db): Promise<string | null> {
+  const row = await firstRow(
+    database.select({ externalKey: issues.externalKey }).from(issues).where(eq(issues.id, issueId)).limit(1),
+  );
+  return row?.externalKey ?? null;
+}

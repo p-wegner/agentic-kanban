@@ -63,6 +63,10 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // JSON record (`lastFiredAt`, the pid it spawned), the same split `conductor_cron` uses.
   "promote_cadence",
   "promote_cadence_state",
+  // Heal-ticket review posture (#1239): `heal_review_posture_<id>` names a risk level
+  // (`standard` is the intended value) that every rc heal ticket is born tagged with
+  // (`risk:<level>`), pinning its per-ticket review. Unset = the project's own posture.
+  "heal_review_posture",
   "verify_script",
   "cold_clone_check",
   "project_stack_profile",

@@ -48,6 +48,7 @@ import { resolveEffectiveVerify, deriveSetupScriptFromProfile, getStackProfile }
 import { recordBaseSweepOutcome } from "./test-impact-outcome.service.js";
 import { recordSweepJoin } from "./test-impact-misses.js";
 import { reconcileBaseHealthHealTicket } from "./base-health-heal-ticket.service.js";
+import { reconcileRcSweepAfterProbe } from "./rc-heal-sweep-hook.js";
 import {
   recordBaseBranchHealth,
   getLastGreenBaseBranchHealth,
@@ -710,8 +711,14 @@ ${tail(combined)}`,
   // the next red sweep with the same signature and closed by a green one. Every other policy
   // gets nothing — the decision is made inside `reconcileBaseHealthHealTicket`, through the
   // #1015 posture resolver, and the call itself never throws.
-  // #1238 — a candidate's verdict is recorded and nothing more (see `BaseBranchProbeOptions.branch`).
-  if (!isBaseLane) return result;
+  // #1238/#1239 — a candidate's verdict files or refreshes the rc HEAL ticket (one per failure
+  // signature per rc) and nothing more: no outcome-ledger row, no miss-rate join, no base-lane
+  // heal ticket (see `BaseBranchProbeOptions.branch`). The merge range starts at the previous
+  // green rc, else master's last green sweep.
+  if (!isBaseLane) {
+    await reconcileRcSweepAfterProbe({ projectId, branch, result, healthRowId, repoPath: project.repoPath, verifyScript, lastGreen }, database);
+    return result;
+  }
 
   await reconcileBaseHealthHealTicket({
     projectId,
