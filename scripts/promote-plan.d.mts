@@ -167,8 +167,12 @@ export interface PromotionPlanInput {
   sweepAcquisition?: SweepAcquisition | null;
   /** One line from `formatGateEvidence` (#1045) — printed, never acted on. */
   gateEvidence?: string | null;
+  /** The project's resolved risk-posture level (#1240): `flow` makes step 1 name the rc verdict. */
+  postureLevel?: string | null;
 }
 export declare function buildPromotionPlan(input: PromotionPlanInput): PromotionStep[];
+/** #1240 — the `flow` dry-run statement, or null for every other posture. */
+export declare function formatFlowSweepStatement(input?: { postureLevel?: string | null; dateStamp?: string }): string | null;
 export declare function formatPlan(plan: PromotionStep[]): string;
 
 export declare function shouldForceSmokeFailure(env?: Record<string, string | undefined>): boolean;

@@ -14,6 +14,7 @@ import {
   DEFAULT_SWEEP_WAIT_MINUTES,
   buildPromotionPlan,
   checkPromoteDirection,
+  formatFlowSweepStatement,
   formatPlan,
   isFreshSweepRow,
   isProbingThisProject,
@@ -391,6 +392,30 @@ describe("the dry-run plan", () => {
  * green verdict for an ancestor of what is already deployed and is (correctly) refused as
  * `behind` — with `--force-sweep` as the only way out, which sets the trap again.
  */
+describe("the dry-run plan under `flow` (#1240)", () => {
+  it("names the rc verdict instead of master's, and changes nothing for any other posture", () => {
+    expect(formatFlowSweepStatement({ postureLevel: "iterate", dateStamp: "20260924" })).toBeNull();
+    expect(formatFlowSweepStatement({ postureLevel: undefined, dateStamp: "20260924" })).toBeNull();
+    const line = formatFlowSweepStatement({ postureLevel: "flow", dateStamp: "20260924" });
+    expect(line).toMatch(/master has NO scheduled sweep by design/);
+    expect(line).toContain("release candidate only");
+    expect(line).toContain("rc/20260924[-N]");
+
+    const base = {
+      sha: "abc1234def", tag: "stable-20260924-2", previousTag: null, stableCheckout: "C:/s", repoRoot: "C:/r",
+      boardUrl: "http://127.0.0.1:3001", dbPath: "C:/db", sweepSource: "board HTTP", sweepVerdict: "green sweep — sha abc1234def",
+      projectName: "agentic-kanban", stablePort: 3001, dbUrl: "file:C:/db", logPath: "C:/s/.kanban/promote.log",
+    };
+    const flow = buildPromotionPlan({ ...base, postureLevel: "flow" });
+    // The date is the TAG's day, so the statement names the cut this promotion belongs to.
+    expect(flow[0].detail).toMatch(/^risk posture 'flow'.*rc\/20260924\[-N\]/);
+    expect(flow[0].detail).toContain("green sweep — sha abc1234def");
+    expect(formatPlan(flow)).toContain("release candidate only");
+    // Every other posture (and an absent one) renders byte-for-byte what it did before #1240.
+    expect(buildPromotionPlan({ ...base, postureLevel: "iterate" })).toEqual(buildPromotionPlan(base));
+  });
+});
+
 describe("sweep acquisition (#1044)", () => {
   const green = parseSweepVerdict(greenRow(), { nowMs: NOW });
   const behind = { ok: false, reason: "behind" as const, detail: "the sha to promote is NOT a descendant" };
