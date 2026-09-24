@@ -57,6 +57,14 @@ export function isClaimablePrefix(prefix) {
 }
 
 /** Every source file that could mint a temp dir. */
+function isLinkedWorktree(dir) {
+  try {
+    return statSync(join(dir, ".git")).isFile();
+  } catch {
+    return false;
+  }
+}
+
 function sourceFiles(root) {
   const out = [];
   const walk = (dir) => {
@@ -69,6 +77,11 @@ function sourceFiles(root) {
     for (const entry of entries) {
       if (SKIP_DIRS.has(entry.name)) continue;
       const full = join(dir, entry.name);
+      // A nested LINKED worktree (its `.git` is a file, not a directory) is a whole second copy
+      // of the source tree — Claude Code's `.claude/worktrees/*` layout puts several under the
+      // main checkout. Walking them multiplies this pass by their count (measured 2026-09-24:
+      // five of them took the guard past its 300 s budget) and derives nothing new.
+      if (entry.isDirectory() && dir !== root && isLinkedWorktree(full)) continue;
       // A junction reports as a symlink, never a directory (plugin skills are junctioned in).
       let isDir = entry.isDirectory();
       if (entry.isSymbolicLink()) {
