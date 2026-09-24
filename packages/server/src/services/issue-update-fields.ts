@@ -76,7 +76,6 @@ const SHARED_ISSUE_UPDATE_FIELDS: Record<
   issueType: (v, u) => { u.issueType = v; },
   statusId: (v, u, now) => { u.statusId = v; u.statusChangedAt = now; },
   sortOrder: (v, u) => { u.sortOrder = v; },
-  estimate: (v, u) => { u.estimate = v; },
   skipAutoReview: (v, u) => { u.skipAutoReview = v; },
   dueDate: (v, u) => { u.dueDate = v; },
   externalKey: (v, u) => { u.externalKey = normalizeExternalKey(v); },

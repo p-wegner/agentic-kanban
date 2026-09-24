@@ -91,7 +91,6 @@ export async function runCreateIssueFlow(data: CreateIssuePayload, deps: CreateI
       statusChangedAt: null,
       statusName: targetColumn.name,
       skipAutoReview: issueData.skipAutoReview,
-      estimate: issueData.estimate ?? null,
       dueDate: null,
       tags: [],
     };

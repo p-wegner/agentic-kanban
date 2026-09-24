@@ -44,10 +44,6 @@ export const analyzeDependenciesBody = z.object({
   projectId: requiredRaw("issueId and projectId are required"),
 });
 
-export const aiEstimateBody = z.object({
-  issueId: requiredRaw("issueId is required"),
-});
-
 export const projectIdBody = z.object({
   projectId: requiredRaw("projectId is required"),
 });
@@ -140,9 +136,8 @@ export const archiveDoneBody = z.object({
  *
  * Every other field keeps its declared type and NO predicate. They were never checked, and
  * #512's sanctioned declared-type tightening is optional — taking it here would 400 requests
- * that succeed today (`estimate: 5`, `sortOrder: "3"`), which is the one thing the swap rule
- * forbids. The declared type is documentation; the guard never enforced it and neither does
- * this.
+ * that succeed today (`sortOrder: "3"`), which is the one thing the swap rule forbids. The
+ * declared type is documentation; the guard never enforced it and neither does this.
  */
 export const createIssueBody = z.object({
   projectId: requiredRaw("projectId is required"),
@@ -151,7 +146,6 @@ export const createIssueBody = z.object({
   priority: unchecked<string>(),
   issueType: unchecked<string>(),
   skipAutoReview: unchecked<boolean>(),
-  estimate: unchecked<string | null>(),
   sortOrder: unchecked<number>(),
   statusId: unchecked<string>(),
   workflowTemplateId: unchecked<string | null>(),

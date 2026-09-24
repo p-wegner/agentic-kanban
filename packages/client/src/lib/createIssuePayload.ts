@@ -1,4 +1,4 @@
-import type { CreateIssueRequest, IssueEstimate, ProfileSelection } from "@agentic-kanban/shared";
+import type { CreateIssueRequest, ProfileSelection } from "@agentic-kanban/shared";
 import { parseProfileSelection, resolveDefaultProfile } from "./createWorkspaceBody.js";
 
 // Pure construction of the create-issue submit payload from CreateIssuePanel state.
@@ -26,7 +26,6 @@ export interface CreateIssuePayloadInput {
   title: string;
   description: string;
   issueType: CreateIssueRequest["issueType"];
-  estimate: IssueEstimate | "";
   statusId: string;
   projectId: string;
   /** Whether a workspace should be launched on create (checkbox or force). */
@@ -51,7 +50,6 @@ export function buildCreateIssuePayload(i: CreateIssuePayloadInput): CreateIssue
     title: i.title.trim(),
     description: i.description.trim() || undefined,
     issueType: i.issueType,
-    estimate: i.estimate || undefined,
     statusId: i.statusId,
     projectId: i.projectId,
     startWorkspace: i.start || undefined,

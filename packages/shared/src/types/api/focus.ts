@@ -22,7 +22,6 @@ export interface FocusIssue {
   statusName: string;
   priority: string;
   issueType: string;
-  estimate: string | null;
   /** IDs of still-open issues directly blocking this one. */
   blockedBy: Array<{ issueId: string; issueNumber: number | null; title: string }>;
   /** Count of still-open issues this one transitively unblocks. */

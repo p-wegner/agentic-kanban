@@ -13,7 +13,6 @@ const EXPORT_COLUMNS = [
   "priority",
   "type",
   "tags",
-  "estimate",
   "createdAt",
   "updatedAt",
 ] as const;
@@ -26,7 +25,6 @@ interface ExportRow {
   priority: string;
   type: string;
   tags: string;
-  estimate: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -49,7 +47,6 @@ function rowsToCsv(rows: ExportRow[]): string {
       escapeCsvField(row.priority),
       escapeCsvField(row.type),
       escapeCsvField(row.tags),
-      escapeCsvField(row.estimate),
       escapeCsvField(row.createdAt),
       escapeCsvField(row.updatedAt),
     ].join(","),
@@ -112,7 +109,6 @@ async function fetchExportRows(projectId: string, database: Database): Promise<E
     priority: row.priority,
     type: row.issueType,
     tags: (tagsByIssue.get(row.id) ?? []).join(";"),
-    estimate: row.estimate ?? "",
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }));
@@ -125,7 +121,6 @@ interface ImportInput {
   description?: string;
   priority?: string;
   issueType?: string;
-  estimate?: string | null;
 }
 
 interface ImportRow {
@@ -133,7 +128,6 @@ interface ImportRow {
   description: string;
   priority: string;
   issueType: string;
-  estimate: string;
 }
 
 interface SkippedRow {
@@ -156,7 +150,6 @@ interface PreviewRow {
   description: string;
   priority: string;
   issueType: string;
-  estimate: string;
 }
 
 const VALID_PRIORITIES = new Set(["low", "medium", "high", "critical"]);
@@ -219,7 +212,6 @@ function parseJsonImport(body: unknown): { rows: ImportRow[]; errors: string[] }
       description: obj.description ? importFieldToString(obj.description) : "",
       priority: obj.priority ? importFieldToString(obj.priority).trim() : "",
       issueType: rawType ? importFieldToString(rawType).trim() : "",
-      estimate: obj.estimate ? importFieldToString(obj.estimate).trim() : "",
     });
   }
   return { rows, errors };
@@ -241,7 +233,6 @@ function parseCsvImport(text: string): { rows: ImportRow[]; errors: string[] } {
   const descIdx = header.indexOf("description");
   const priorityIdx = header.indexOf("priority");
   const typeIdx = header.indexOf("type");
-  const estimateIdx = header.indexOf("estimate");
 
   const rows: ImportRow[] = [];
   for (let i = 1; i < lines.length; i++) {
@@ -256,7 +247,6 @@ function parseCsvImport(text: string): { rows: ImportRow[]; errors: string[] } {
       description: descIdx !== -1 ? (fields[descIdx] ?? "").trim() : "",
       priority: priorityIdx !== -1 ? (fields[priorityIdx] ?? "").trim() : "",
       issueType: typeIdx !== -1 ? (fields[typeIdx] ?? "").trim() : "",
-      estimate: estimateIdx !== -1 ? (fields[estimateIdx] ?? "").trim() : "",
     });
   }
   return { rows, errors };
@@ -284,7 +274,6 @@ function parseMarkdownImport(text: string): { rows: ImportRow[]; errors: string[
         description: descLines.join("\n"),
         priority: "",
         issueType: "",
-        estimate: "",
       });
     }
     currentTitle = null;
@@ -414,15 +403,13 @@ function validateRows(parsedRows: ImportRow[]): {
     }
 
     const description = row.description.trim() || undefined;
-    const estimate = row.estimate.trim() || null;
-    validInputs.push({ title, description, priority, issueType, estimate });
+    validInputs.push({ title, description, priority, issueType });
     previewRows.push({
       row: rowNum,
       title,
       description: row.description.trim(),
       priority,
       issueType,
-      estimate: row.estimate.trim(),
     });
   }
 

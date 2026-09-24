@@ -16,7 +16,7 @@ statuses: Backlog, In Progress, In Review, Done
 ## Backlog                        # one ## per status column (the target's names; unknown names become new columns)
 
 ### #12 Title as one line          # #N optional — keep it when the issue exists on the target
-\`priority: high\` · \`type: chore\` · \`tags: arch, client\` · \`milestone: M2\` · \`estimate: 3d\` · \`due: 2026-09-01\` · \`depends: #10, #11\` · \`blocks: #13\` · \`key: gh-77\` · \`url: https://…\`
+\`priority: high\` · \`type: chore\` · \`tags: arch, client\` · \`milestone: M2\` · \`due: 2026-09-01\` · \`depends: #10, #11\` · \`blocks: #13\` · \`key: gh-77\` · \`url: https://…\`
 
 Description in markdown (any length; headings inside must be #### or deeper).
 
@@ -33,9 +33,9 @@ Priority ∈ critical|high|medium|low · type ∈ feature|bug|task|chore|epic. E
 
 ## Import (file → board) — the agentic path
 The board's parser is LIBERAL (## sections + \`- [ ] item\` lists, \`- **Title** — text\`, \`#12\` in titles, \`**Priority:** high\`, \`depends on #3\`, \`[x]\` = done) and returns a **confidence**. Your job is the part it cannot do: understand a file written for humans and turn it into the standard without inventing anything.
-1. **Read the source** (a BACKLOG.md, a TODO list, another tool's export, meeting notes, a spreadsheet pasted as text). Identify: what is an item, what is its status (section names, checkboxes, words like DONE/WIP), priority signals (P1, urgent, !, "must"), type (bug/feature/refactor…), owners → tags, references (#N, ticket ids → \`key:\`), dependencies ("after", "blocked by", "needs"), estimates, dates.
+1. **Read the source** (a BACKLOG.md, a TODO list, another tool's export, meeting notes, a spreadsheet pasted as text). Identify: what is an item, what is its status (section names, checkboxes, words like DONE/WIP), priority signals (P1, urgent, !, "must"), type (bug/feature/refactor…), owners → tags, references (#N, ticket ids → \`key:\`), dependencies ("after", "blocked by", "needs"), dates.
 2. **Preview first, always**: \`import_backlog_markdown\` with \`dryRun: true\` on the raw text. If confidence ≥ 0.6 and the preview rows look right (titles clean, statuses sensible, no prose mistaken for issues), you may apply the raw text as-is.
-3. Otherwise **rewrite it into the standard** (above): one \`###\` per item, clean titles (no numbering artefacts, no trailing metadata), status sections mapped onto the TARGET project's status names (ask \`get_board_status\` for them; unknown sections either become new columns or — usually better — map to Backlog with a tag), metadata line from what the source actually said. Keep the source's wording in descriptions; do NOT invent priorities/estimates that were not there. Preserve source ids as \`key:\` so a re-import matches.
+3. Otherwise **rewrite it into the standard** (above): one \`###\` per item, clean titles (no numbering artefacts, no trailing metadata), status sections mapped onto the TARGET project's status names (ask \`get_board_status\` for them; unknown sections either become new columns or — usually better — map to Backlog with a tag), metadata line from what the source actually said. Keep the source's wording in descriptions; do NOT invent priorities that were not there. Preserve source ids as \`key:\` so a re-import matches.
 4. **Preview the rewritten text**; show the user the counts (create/update/unchanged), new columns/tags, and warnings; fix anything wrong; then apply with \`dryRun: false\`. Default \`mode: update\` (matches by #number for a same-project file, then external key, then title); use \`mode: create\` only when the user wants copies.
 5. Report: created / updated / unchanged, new columns/tags, renumbering warnings, and where the file came from.
 

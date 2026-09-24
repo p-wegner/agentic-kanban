@@ -1,11 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   ISSUE_TYPES,
-  ISSUE_ESTIMATES,
   ISSUE_ARTIFACT_TYPES,
   ISSUE_TYPE_ALIASES_REJECTED,
   isIssueType,
-  isIssueEstimate,
   issueTypeLabel,
 } from "../src/lib/issue-vocab.js";
 
@@ -22,12 +20,6 @@ describe("issue-vocab", () => {
 
     it("does not include epic — that is a tag, not a type", () => {
       expect(ISSUE_TYPES as readonly string[]).not.toContain("epic");
-    });
-  });
-
-  describe("ISSUE_ESTIMATES", () => {
-    it("lists the five t-shirt sizes in order", () => {
-      expect(ISSUE_ESTIMATES).toEqual(["XS", "S", "M", "L", "XL"]);
     });
   });
 
@@ -58,23 +50,6 @@ describe("issue-vocab", () => {
       expect(isIssueType(null)).toBe(false);
       expect(isIssueType(42)).toBe(false);
       expect(isIssueType({})).toBe(false);
-    });
-  });
-
-  describe("isIssueEstimate", () => {
-    it("accepts every canonical estimate", () => {
-      for (const e of ISSUE_ESTIMATES) expect(isIssueEstimate(e)).toBe(true);
-    });
-
-    it("rejects unknown strings and non-string values", () => {
-      expect(isIssueEstimate("XXL")).toBe(false);
-      expect(isIssueEstimate("")).toBe(false);
-      expect(isIssueEstimate(undefined)).toBe(false);
-      expect(isIssueEstimate(3)).toBe(false);
-    });
-
-    it("is case-sensitive — lowercase is not a canonical estimate", () => {
-      expect(isIssueEstimate("xs")).toBe(false);
     });
   });
 

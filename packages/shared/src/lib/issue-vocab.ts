@@ -1,7 +1,7 @@
 /**
  * The issue domain's closed vocabularies, as runtime arrays (#570).
  *
- * `types/api/issue.ts` declares `IssueType`/`IssueEstimate`/artifact `type` as TYPE-ONLY
+ * `types/api/issue.ts` declares `IssueType`/artifact `type` as TYPE-ONLY
  * unions, and the types barrel is `export type *` — so no runtime array can live there, and
  * every layer that needs one at RUNTIME (a zod enum, a validation `Set`, a `<option>` list)
  * re-listed the literals by hand. They disagreed, and the disagreements were invisible:
@@ -21,9 +21,6 @@
 
 export const ISSUE_TYPES = ["task", "bug", "feature", "chore"] as const;
 export type IssueType = (typeof ISSUE_TYPES)[number];
-
-export const ISSUE_ESTIMATES = ["XS", "S", "M", "L", "XL"] as const;
-export type IssueEstimate = (typeof ISSUE_ESTIMATES)[number];
 
 /**
  * Artifact kinds. `video` is storable but deliberately not offered everywhere — the CLI
@@ -45,10 +42,6 @@ export const ISSUE_TYPE_ALIASES_REJECTED = ["epic"] as const;
 
 export function isIssueType(value: unknown): value is IssueType {
   return typeof value === "string" && (ISSUE_TYPES as readonly string[]).includes(value);
-}
-
-export function isIssueEstimate(value: unknown): value is IssueEstimate {
-  return typeof value === "string" && (ISSUE_ESTIMATES as readonly string[]).includes(value);
 }
 
 /**

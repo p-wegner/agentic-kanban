@@ -38,7 +38,6 @@ export interface BacklogImportIssue {
   statusName: string;
   /** Milestone name or null (resolved to a target milestone id by the writer). */
   milestoneName: string | null;
-  estimate: string | null;
   dueDate: string | null;
   externalKey: string | null;
   externalUrl: string | null;
@@ -177,7 +176,6 @@ export async function applyBacklogImport(
         updatedAt: issue.updatedAt,
         statusChangedAt: issue.statusChangedAt,
         skipAutoReview: issue.skipAutoReview,
-        estimate: issue.estimate,
         dueDate: issue.dueDate,
         externalKey: issue.externalKey,
         externalUrl: issue.externalUrl,

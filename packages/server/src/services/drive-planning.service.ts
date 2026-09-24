@@ -148,7 +148,6 @@ export async function planDrive(
       priority: "high",
       issueType: "feature",
       skipAutoReview: false,
-      estimate: null,
       sortOrder: 0,
       statusId,
       projectId,

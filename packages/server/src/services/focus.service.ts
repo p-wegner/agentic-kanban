@@ -32,8 +32,8 @@ import { isBlockingDependencyType } from "@agentic-kanban/shared/lib/dependency-
  *   2. Unblock leverage — how many *other* open issues this one transitively
  *      unblocks. A small ticket that frees up ten others is high-leverage.
  *
- * Those combine with priority and (inverse) estimate into a single 0-100
- * focusScore, surfacing the highest-impact work you can actually start now.
+ * Those combine with priority into a single 0-100 focusScore, surfacing the
+ * highest-impact work you can actually start now.
  *
  * Reads only existing tables (issues, project_statuses, issue_dependencies) —
  * no new table, no migration. Modelled on `digest.ts`.
@@ -51,18 +51,6 @@ const PRIORITY_WEIGHT: Record<string, number> = {
   medium: 12,
   low: 5,
 };
-
-/** Inverse estimate weight — smaller tickets are cheaper wins, so they score higher. */
-const ESTIMATE_WEIGHT: Record<string, number> = {
-  xs: 12,
-  s: 10,
-  m: 6,
-  l: 3,
-  xl: 1,
-};
-
-
-
 
 
 
@@ -143,10 +131,9 @@ export async function computeFocus(
       const unblocks = transitiveUnblocks(row.id);
 
       const priorityScore = PRIORITY_WEIGHT[row.priority] ?? 12;
-      const estimateScore = row.estimate ? ESTIMATE_WEIGHT[row.estimate.toLowerCase()] ?? 4 : 4;
       // Leverage saturates so one mega-blocker doesn't swamp everything.
       const leverageScore = Math.min(unblocks, 6) * 8;
-      const rawScore = priorityScore + estimateScore + leverageScore;
+      const rawScore = priorityScore + leverageScore;
       // Ready issues use the full score; blocked issues are heavily penalised
       // (they can't be started) but still ranked among themselves.
       const focusScore = Math.min(100, Math.round(rawScore));
@@ -154,9 +141,6 @@ export async function computeFocus(
       const reasons: string[] = [];
       if (priorityScore >= 22) reasons.push(`${row.priority} priority`);
       if (unblocks > 0) reasons.push(`unblocks ${unblocks} issue${unblocks === 1 ? "" : "s"}`);
-      if (row.estimate && (row.estimate.toLowerCase() === "xs" || row.estimate.toLowerCase() === "s")) {
-        reasons.push("quick win");
-      }
 
       const entry: FocusIssue = {
         issueId: row.id,
@@ -165,7 +149,6 @@ export async function computeFocus(
         statusName: name,
         priority: row.priority,
         issueType: row.issueType,
-        estimate: row.estimate,
         blockedBy: openBlockers.map((b) => {
           const m = issueMeta.get(b)!;
           return { issueId: m.id, issueNumber: m.issueNumber, title: m.title };

@@ -6,8 +6,8 @@ import type { WorkspaceSummary } from "./workspace.js";
 // file — which is exactly why every layer that needed one at runtime hand-listed the literals
 // and then disagreed (four client selects were missing `chore`). Re-exported so every existing
 // importer of `types/api/issue` keeps working.
-export type { IssueType, IssueEstimate, IssueArtifactType } from "../../lib/issue-vocab.js";
-import type { IssueType, IssueEstimate, IssueArtifactType } from "../../lib/issue-vocab.js";
+export type { IssueType, IssueArtifactType } from "../../lib/issue-vocab.js";
+import type { IssueType, IssueArtifactType } from "../../lib/issue-vocab.js";
 
 export interface CreateIssueRequest {
   title: string;
@@ -17,7 +17,6 @@ export interface CreateIssueRequest {
   statusId: string;
   projectId: string;
   skipAutoReview?: boolean;
-  estimate?: IssueEstimate;
   /** Optional configurable-workflow template; null/omitted = auto-route by ticket type. */
   workflowTemplateId?: string | null;
   /** Optional external-tracker identifier (e.g. "PROJ-123"). */
@@ -36,7 +35,6 @@ export interface UpdateIssueRequest {
   issueType?: IssueType;
   statusId?: string;
   sortOrder?: number;
-  estimate?: IssueEstimate | null;
   skipAutoReview?: boolean;
   dueDate?: string | null;
   /** Optional external-tracker identifier (e.g. "PROJ-123"). */
@@ -92,7 +90,6 @@ export interface IssueWithStatus {
    */
   awaitingManualStart?: boolean;
   skipAutoReview?: boolean;
-  estimate?: string | null;
   dueDate?: string | null;
   externalKey?: string | null;
   externalUrl?: string | null;
