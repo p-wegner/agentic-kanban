@@ -61,8 +61,10 @@ import {
  * may genuinely have been broken by the diff — which is why `iterate` is documented as trading
  * "caught before it lands" for "caught within a day, costing a rebase", and why it is wrong for
  * a repo with a real deployment. `DEFAULT_VERIFY_GATE_STRATEGY` stays `full`, and every posture
- * except `iterate` still yields a non-`impact` tier: a project reaches this tier only by an
- * operator explicitly choosing `iterate` (or setting `verify_gate_strategy_<id>` by hand).
+ * except `iterate` and `flow` (#1240 — the same selection, backed by the release candidate's
+ * sweep instead of a nightly one) still yields a non-`impact` tier: a project reaches this tier
+ * only by an operator explicitly choosing one of those two (or setting
+ * `verify_gate_strategy_<id>` by hand).
  */
 export const VERIFY_GATE_STRATEGY_VALUES = ["full", "scoped", "scoped-base-watch", "impact"] as const;
 export type VerifyGateStrategy = (typeof VERIFY_GATE_STRATEGY_VALUES)[number];

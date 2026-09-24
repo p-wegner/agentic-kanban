@@ -115,7 +115,7 @@ describe("resolveRiskPosture", () => {
   });
 
   it("every posture's summary names what it does relative to standard", () => {
-    for (const level of ["strict", "iterate", "fast", "sprint"] as const) {
+    for (const level of ["strict", "iterate", "fast", "sprint", "flow"] as const) {
       const p = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: level }), PID);
       expect(p.summary.startsWith(`${level}:`)).toBe(true);
     }
@@ -124,9 +124,10 @@ describe("resolveRiskPosture", () => {
 
 // @covers preferences-config.resolve.risk-posture [config,risk]
 describe("iterate posture (#983)", () => {
-  it("is the ONLY posture that yields the impact gate tier", () => {
+  it("is one of the two postures that yield the impact gate tier (the other is `flow`, #1240)", () => {
     const iterate = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: "iterate" }), PID);
     expect(iterate.gateTier).toBe("impact");
+    expect(resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: "flow" }), PID).gateTier).toBe("impact");
 
     for (const level of ["strict", "standard", "fast", "sprint"] as const) {
       expect(resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: level }), PID).gateTier).not.toBe("impact");
@@ -159,6 +160,9 @@ describe("resolveBaseSweepIntervalMs — the sweep is OPT-IN (#983)", () => {
     iterate: 24 * 60 * 60 * 1000,
     fast: 6 * 60 * 60 * 1000,
     sprint: 24 * 60 * 60 * 1000,
+    // #1240: `null` is a pinned VALUE here, not an absence — `flow` owes its full verdict on the
+    // release candidate only (decision 019), so master has no scheduled sweep by design.
+    flow: null,
   } as const;
 
   it("returns the level's cadence once a posture is explicitly set — pinned per posture (#1031)", () => {
@@ -173,7 +177,8 @@ describe("resolveBaseSweepIntervalMs — the sweep is OPT-IN (#983)", () => {
     // `standard` was the last posture on the pre-posture 30-minute constant: 48 full-suite runs a
     // day on the shared box, while every other posture swept 2-4x. `BASE_HEALTH_DEFAULT_INTERVAL_MS`
     // is now ONLY the sweep loop's tick rate, and no posture may quietly re-adopt it.
-    for (const level of Object.keys(PINNED_SWEEP_INTERVALS)) {
+    for (const [level, pinned] of Object.entries(PINNED_SWEEP_INTERVALS)) {
+      if (pinned === null) continue; // `flow` sweeps master never, which is not "more often".
       const p = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: level }), PID);
       expect(resolveBaseSweepIntervalMs(p)!, level).toBeGreaterThanOrEqual(6 * 60 * 60 * 1000);
     }
@@ -257,7 +262,7 @@ describe("red-base policy under iterate, and the report policy (#1233)", () => {
     }
   });
 
-  it("report ranks softest — below every other policy, and no shipped level resolves it", () => {
+  it("report ranks softest — below every other policy, and `flow` (#1240) is the only level that resolves it", () => {
     const ranks = Object.entries(RED_BASE_POLICY_RANK) as Array<[RedBasePolicy, number]>;
     const softest = ranks.reduce((a, b) => (b[1] > a[1] ? b : a));
     expect(softest[0]).toBe("report");
@@ -265,6 +270,7 @@ describe("red-base policy under iterate, and the report policy (#1233)", () => {
     for (const level of ["strict", "standard", "iterate", "fast", "sprint"] as const) {
       expect(resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: level }), PID).redBasePolicy).not.toBe("report");
     }
+    expect(resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: "flow" }), PID).redBasePolicy).toBe("report");
   });
 
   it("report is reachable as a softer-only override, and never as a tightening", () => {

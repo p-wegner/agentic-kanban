@@ -170,7 +170,10 @@ export function ProjectHealthOverview({ activeProjectId, onProjectChange, onClos
                               · base sweep{" "}
                               {project.baseSweep.scheduled && project.baseSweep.intervalMs !== null
                                 ? <>every {formatSweepInterval(project.baseSweep.intervalMs)} ({project.baseSweep.postureLevel})</>
-                                : "off (no posture chosen)"}
+                                : project.baseSweep.postureSource === "risk_posture" && project.baseSweep.nominalIntervalMs === null
+                                  // #1240: `flow` schedules none by design; the full suite runs on the release candidate only.
+                                  ? <>none — full suite: release candidate only ({project.baseSweep.postureLevel})</>
+                                  : "off (no posture chosen)"}
                             </span>
                           )}
                         </div>
