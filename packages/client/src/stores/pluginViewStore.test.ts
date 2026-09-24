@@ -2,7 +2,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { usePluginViewStore } from "./pluginViewStore.js";
 
 function reset() {
-  usePluginViewStore.setState({ selection: null, installFocusNonce: 0, projectId: null });
+  usePluginViewStore.setState({
+    selection: null,
+    installFocusNonce: 0,
+    projectId: null,
+    activeViewId: null,
+    requestedViewId: null,
+  });
 }
 
 describe("pluginViewStore", () => {
@@ -60,5 +66,18 @@ describe("pluginViewStore", () => {
     setSelection({ kind: "plugin", slug: "reqextract" });
     setActiveProject(null);
     expect(usePluginViewStore.getState().selection).toBeNull();
+  });
+
+  it("reports and one-shot requests the active iframe view id (#1227)", () => {
+    const { setActiveViewId, requestViewId, clearRequestedViewId } = usePluginViewStore.getState();
+    setActiveViewId("dashboard");
+    expect(usePluginViewStore.getState().activeViewId).toBe("dashboard");
+    setActiveViewId(null);
+    expect(usePluginViewStore.getState().activeViewId).toBeNull();
+
+    requestViewId("jira-sync", "dashboard");
+    expect(usePluginViewStore.getState().requestedViewId).toEqual({ slug: "jira-sync", viewId: "dashboard" });
+    clearRequestedViewId();
+    expect(usePluginViewStore.getState().requestedViewId).toBeNull();
   });
 });

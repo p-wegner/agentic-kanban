@@ -162,6 +162,13 @@ export interface UrlSyncInput {
    * a URL whose slug resolved to nothing.
    */
   preferReplace?: boolean;
+  /**
+   * Plugin slug the Plugins view (#1227) is showing, or null when it is not
+   * the active view (or nothing is picked yet). Ignored for every other view.
+   */
+  pluginSlug?: string | null;
+  /** Iframe view id within that plugin, or null when none is active. */
+  pluginViewId?: string | null;
 }
 
 /**
@@ -252,6 +259,8 @@ export function planUrlSync(input: UrlSyncInput): UrlSyncPlan {
   const current = parseAppPath(currentPath);
   const unknownViewSegment = current.unknownViewSegment;
   const tab = resolveSyncTab(view, input.tab, current.view === view ? current.tab : null);
+  const pluginSlug = input.pluginSlug ?? null;
+  const pluginViewId = input.pluginViewId ?? null;
   const slug = activeProjectId ? buildProjectSlugMap(projects).get(activeProjectId) ?? null : null;
   // No slug and no loaded projects = the projects query is still in flight.
   // Writing now would flatten a scoped inbound URL and lose the link.
@@ -261,15 +270,28 @@ export function planUrlSync(input: UrlSyncInput): UrlSyncPlan {
     return { path: normalizePathname(currentPath), action: "none", unknownViewSegment };
   }
 
-  const path = buildAppPath({ projectSlug: slug, view, tab, issueNumber, panel });
+  const path = buildAppPath({ projectSlug: slug, view, tab, issueNumber, panel, pluginSlug, pluginViewId });
   if (normalizePathname(currentPath) === path) return { path, action: "none", unknownViewSegment };
   if (input.preferReplace) return { path, action: "replace", unknownViewSegment };
+
+  // A plugin's default view resolves ASYNCHRONOUSLY (its surface is an API
+  // fetch), unlike a container's default tab, which `resolveSyncTab` can
+  // compute before the container even mounts. So the URL first names just the
+  // plugin, and the view id fills in a moment later once PluginViewsPanel has
+  // picked one — an in-place upgrade of the SAME pick, not a second switch,
+  // exactly like a legacy path gaining its tab below. Only this one direction
+  // (null -> a view id, same plugin) counts; a real id -> a DIFFERENT id is a
+  // genuine switch and still pushes.
+  const pluginViewIdFillingIn =
+    (current.pluginSlug ?? null) === pluginSlug && (current.pluginViewId ?? null) === null && pluginViewId !== null;
 
   const sameTarget =
     current.view === view &&
     (current.tab ?? null) === tab &&
     (current.issueNumber ?? null) === (issueNumber ?? null) &&
-    (current.panel ?? null) === panel;
+    (current.panel ?? null) === panel &&
+    (current.pluginSlug ?? null) === pluginSlug &&
+    ((current.pluginViewId ?? null) === pluginViewId || pluginViewIdFillingIn);
   const currentIsActiveProject =
     current.projectSlug !== null &&
     activeProjectId !== null &&
