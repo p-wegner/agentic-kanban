@@ -35,6 +35,7 @@ import {
   clearMergeBackoffState,
   getMergeBackoffSignatureState,
   getMergeBackoffState,
+  setMergeBackoffFailures,
   setMergeBackoffState,
 } from "../repositories/merge-backoff.repository.js";
 import { resolveEffectiveVerify } from "./stack-profile.service.js";
@@ -63,6 +64,16 @@ export const MERGE_BACKOFF_TIMEOUT_BASE_MS = 40 * 60_000;
  * reset conditions) resumes it, and a human is told once that it stopped.
  */
 export const MERGE_BACKOFF_MAX_ATTEMPTS = 6;
+/**
+ * The auto-merge queue's `verify_failed:` skip (#1230): a gate that RAN and went red. Its own
+ * ramp — 15 min, 30, 60, 2 h, then a 4 h ceiling — because the measured thrash (#1228: 31 gate
+ * runs overnight on one commit, ~3 min each, one deterministic guard failing every time) sat on
+ * a 30 s tick with no backoff at all, and because a red gate is the one class whose next run is
+ * almost certainly identical: the branch did not change, so neither does the verdict. The
+ * branch-moved reset in `shouldSkipMergeForBackoff` is what resumes it.
+ */
+export const MERGE_BACKOFF_VERIFY_FAILED_BASE_MS = 15 * 60_000;
+export const MERGE_BACKOFF_VERIFY_FAILED_CAP_MS = 4 * 60 * 60_000;
 
 /**
  * Failure classes. The first two are NON-RETRYABLE-WITHOUT-CHANGE: no amount of retrying
@@ -73,6 +84,7 @@ export type MergeFailureClass =
   | "main_checkout_dirty"
   | "verify_infra_missing"
   | "verify_timeout"
+  | "verify_failed"
   | "generic";
 
 export function isNonRetryableWithoutChange(cls: MergeFailureClass): boolean {
@@ -103,6 +115,10 @@ export function classifyMergeFailure(message: string): MergeFailureClass {
   if (/(?:pre-merge gate failed|verify|gate)/i.test(message) && /(?:timed? ?out|timeout|exceeded .*(?:time|budget))/i.test(message)) {
     return "verify_timeout";
   }
+  // #1230 — the auto-merge queue's own vocabulary for "the gate ran and went red" (see
+  // `preMergeGateSkipEvent`). Only that prefix: the monitor path's `Pre-merge gate failed …`
+  // prose keeps its generic ramp, which its tests pin.
+  if (/^verify_failed:/i.test(message)) return "verify_failed";
   return "generic";
 }
 
@@ -115,9 +131,18 @@ export function computeMergeFailureSignature(cls: MergeFailureClass, message: st
   return `${cls}|${createHash("sha1").update(normalized).digest("hex").slice(0, 16)}`;
 }
 
+/**
+ * The signature for an EXPLICIT identity key (#1230, `MergeBackoffDeps.signatureKey`) — digested
+ * verbatim, no digit normalization: the key carries a commit sha, and `computeMergeFailureSignature`'s
+ * `\d+ → #` would fold `sha-1` and `sha-2` into one failure.
+ */
+export function computeKeyedMergeFailureSignature(cls: MergeFailureClass, key: string): string {
+  return `${cls}|${createHash("sha1").update(key).digest("hex").slice(0, 16)}`;
+}
+
 export function failureClassFromSignature(signature: string | null): MergeFailureClass {
   const cls = signature?.split("|")[0];
-  return cls === "main_checkout_dirty" || cls === "verify_infra_missing" || cls === "verify_timeout"
+  return cls === "main_checkout_dirty" || cls === "verify_infra_missing" || cls === "verify_timeout" || cls === "verify_failed"
     ? cls
     : "generic";
 }
@@ -125,8 +150,10 @@ export function failureClassFromSignature(signature: string | null): MergeFailur
 /** Delay before the next allowed retry after `failures` identical failures. */
 export function nextRetryDelayMs(cls: MergeFailureClass, failures: number): number {
   if (isNonRetryableWithoutChange(cls)) return MERGE_BACKOFF_CAP_MS;
-  const base = cls === "verify_timeout" ? MERGE_BACKOFF_TIMEOUT_BASE_MS : MERGE_BACKOFF_BASE_MS;
   const doublings = Math.min(Math.max(failures, 1) - 1, 10);
+  // #1230 — a red gate ramps 15/30/60/120 min and caps at 4 h, above the generic 2 h cap.
+  if (cls === "verify_failed") return Math.min(MERGE_BACKOFF_VERIFY_FAILED_BASE_MS * 2 ** doublings, MERGE_BACKOFF_VERIFY_FAILED_CAP_MS);
+  const base = cls === "verify_timeout" ? MERGE_BACKOFF_TIMEOUT_BASE_MS : MERGE_BACKOFF_BASE_MS;
   return Math.min(base * 2 ** doublings, MERGE_BACKOFF_CAP_MS);
 }
 
@@ -159,9 +186,18 @@ export interface MergeBackoffDeps {
   /** true = clean, false = dirty, null = unknown (keep the block on unknown). */
   isMainCheckoutClean?: (projectId: string) => Promise<boolean | null>;
   getVerifyScriptHash?: (projectId: string) => Promise<string | null>;
+  /**
+   * #1230 — what to DIGEST for the failure's identity instead of the message. A `verify_failed:`
+   * reason carries the verify tail (durations, timestamps, reaper counts), which differs between
+   * two runs of the same red gate, so signing the message would count every repeat as a fresh
+   * failure and never ramp. The orchestrator signs `<head sha>|<sorted failing suites>` instead:
+   * same commit, same suites ⇒ identical; a new commit ⇒ a fresh count by construction.
+   */
+  signatureKey?: string;
 }
 
-async function defaultBranchHeadSha(workingDir: string): Promise<string | null> {
+/** The current HEAD of a worktree, or null. Exported for the orchestrator's signature key (#1230). */
+export async function defaultBranchHeadSha(workingDir: string): Promise<string | null> {
   try {
     return (await revParse(workingDir, "HEAD")).trim() || null;
   } catch {
@@ -218,6 +254,31 @@ export async function clearMergeBackoff(database: Database, workspaceId: string)
     await clearMergeBackoffState(workspaceId, database);
   } catch (err) {
     console.warn(`[merge-backoff] could not clear backoff for ${workspaceId}:`, err instanceof Error ? err.message : err);
+  }
+}
+
+/**
+ * An EXPLICIT merge request (`POST /api/workspaces/:id/merge`) resets the backoff (#1230): the
+ * operator asked for the gate now, so whatever the orchestrator's tick had counted is moot. The
+ * route never consults `shouldSkipMergeForBackoff` — the request runs immediately by
+ * construction — and this is the other half, so the next automatic tick starts a fresh count.
+ * Same seam convention as every fn-module here (`database: Database = db`).
+ */
+export async function resetMergeBackoffForExplicitMerge(workspaceId: string, database: Database = db): Promise<void> {
+  await clearMergeBackoff(database, workspaceId);
+}
+
+/**
+ * Stop the retries for a workspace whose failure is DETERMINISTIC (#1230): pin its backoff row
+ * at the attempt ceiling, so `shouldSkipMergeForBackoff` stops expiring the window. Waiting no
+ * longer buys another gate run; new work on the branch (the branch-moved reset) still does. A
+ * workspace with no backoff row yet is left alone — there is nothing to exhaust.
+ */
+export async function exhaustMergeBackoff(database: Database, workspaceId: string): Promise<void> {
+  try {
+    await setMergeBackoffFailures(workspaceId, MERGE_BACKOFF_MAX_ATTEMPTS, database);
+  } catch (err) {
+    console.warn(`[merge-backoff] could not exhaust backoff for ${workspaceId}:`, err instanceof Error ? err.message : err);
   }
 }
 
@@ -326,7 +387,9 @@ export async function recordMergeFailure(
     const database = deps.database ?? db;
     const now = (deps.now ?? (() => new Date()))();
     const cls = classifyMergeFailure(message);
-    const signature = computeMergeFailureSignature(cls, message);
+    const signature = deps.signatureKey
+      ? computeKeyedMergeFailureSignature(cls, deps.signatureKey)
+      : computeMergeFailureSignature(cls, message);
 
     const row = await getMergeBackoffSignatureState(ws.wsId, database);
     if (!row) return null;
