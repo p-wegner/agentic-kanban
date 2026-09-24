@@ -75,7 +75,7 @@ export function snapshotIssueToMd(i: BacklogSnapshotIssue, deps: BacklogSnapshot
   const n = i.issueNumber;
   return {
     number: n, title: i.title, description: i.description ?? "", status: i.status, priority: i.priority, issueType: i.issueType,
-    tags: i.tags, milestone: i.milestone, estimate: i.estimate, dueDate: i.dueDate, externalKey: i.externalKey, externalUrl: i.externalUrl,
+    tags: i.tags, milestone: i.milestone, dueDate: i.dueDate, externalKey: i.externalKey, externalUrl: i.externalUrl,
     dependsOn: n == null ? [] : deps.filter((d) => d.fromNumber === n && d.type !== "parent_of").map((d) => d.toNumber),
     blocks: n == null ? [] : deps.filter((d) => d.toNumber === n && d.type === "blocked_by").map((d) => d.fromNumber),
     checklist, doneMark: TERMINAL.has(i.status.toLowerCase()), createdAt: i.createdAt, updatedAt: i.updatedAt, line: 0,
@@ -162,7 +162,7 @@ export interface ImportPreview {
   lowConfidence: boolean;
 }
 
-interface Existing { id: string; issueNumber: number | null; title: string; description: string | null; status: string; priority: string; issueType: string; estimate: string | null; dueDate: string | null; externalKey: string | null; milestoneId: string | null; tags: string[]; dependsOn: number[]; checklist: { text: string; done: boolean }[] }
+interface Existing { id: string; issueNumber: number | null; title: string; description: string | null; status: string; priority: string; issueType: string; dueDate: string | null; externalKey: string | null; milestoneId: string | null; tags: string[]; dependsOn: number[]; checklist: { text: string; done: boolean }[] }
 
 async function loadExisting(projectId: string, database: Database): Promise<{ existing: Existing[]; statusNames: string[]; defaultStatus: string; statusIdByName: Map<string, string> }> {
   const [statusRows, rows] = await Promise.all([getProjectStatuses(projectId, database), getFullIssuesForProject(projectId, database)]);
@@ -180,7 +180,7 @@ async function loadExisting(projectId: string, database: Database): Promise<{ ex
   };
   const existing: Existing[] = rows.map((r) => ({
     id: r.id, issueNumber: r.issueNumber, title: r.title, description: r.description, status: statusNameById.get(r.statusId) ?? "",
-    priority: r.priority, issueType: r.issueType, estimate: r.estimate, dueDate: r.dueDate, externalKey: r.externalKey, milestoneId: r.milestoneId,
+    priority: r.priority, issueType: r.issueType, dueDate: r.dueDate, externalKey: r.externalKey, milestoneId: r.milestoneId,
     tags: tagsByIssue.get(r.id) ?? [], dependsOn: depsByIssue.get(r.id) ?? [], checklist: parseChecklist(r.checklistJson),
   }));
   const def = statusRows.find((s) => s.isDefault) ?? statusRows.slice().sort((a, b) => a.sortOrder - b.sortOrder)[0];
@@ -238,7 +238,6 @@ export async function previewBacklogMarkdownImport(projectId: string, text: stri
       if (st.name.toLowerCase() !== match.status.toLowerCase()) changes.push(`status ${match.status} → ${st.name}`);
       if (mi.priority && mi.priority !== match.priority) changes.push(`priority ${match.priority} → ${mi.priority}`);
       if (mi.issueType && mi.issueType !== match.issueType) changes.push(`type ${match.issueType} → ${mi.issueType}`);
-      if (mi.estimate && mi.estimate !== (match.estimate ?? "")) changes.push("estimate");
       if (mi.dueDate && mi.dueDate !== (match.dueDate ?? "")) changes.push("due");
       const newTags = mi.tags.filter((t) => !match.tags.some((x) => x.toLowerCase() === t.toLowerCase()));
       if (newTags.length) changes.push(`+tags ${newTags.join(",")}`);
@@ -288,7 +287,7 @@ export async function applyBacklogMarkdownImport(projectId: string, text: string
     const mi = doc.issues[i], r = rows[i];
     return {
       issueNumber: mi.number, title: mi.title, description: mi.description || null, priority: r.priority, issueType: r.issueType, sortOrder: k,
-      status: r.status, milestone: mi.milestone, estimate: mi.estimate, dueDate: mi.dueDate, externalKey: mi.externalKey, externalUrl: mi.externalUrl,
+      status: r.status, milestone: mi.milestone, dueDate: mi.dueDate, externalKey: mi.externalKey, externalUrl: mi.externalUrl,
       pinned: false, skipAutoReview: false,
       checklistJson: mi.checklist.length ? JSON.stringify(mi.checklist.map((c, j) => ({ id: `md-${j + 1}`, text: c.text, completed: c.done }))) : null,
       touchedFilesJson: null, tags: mi.tags, createdAt: mi.createdAt && /^\d{4}-\d{2}-\d{2}/.test(mi.createdAt) ? new Date(mi.createdAt).toISOString() : nowIso,
@@ -345,7 +344,6 @@ export async function applyBacklogMarkdownImport(projectId: string, text: string
       if (r.changes.includes("description")) body.description = mi.description;
       if (mi.priority && mi.priority !== ex.priority) body.priority = mi.priority;
       if (mi.issueType && mi.issueType !== ex.issueType) body.issueType = mi.issueType;
-      if (mi.estimate && mi.estimate !== ex.estimate) body.estimate = mi.estimate;
       if (mi.dueDate && mi.dueDate !== ex.dueDate) body.dueDate = mi.dueDate;
       const sid = statusIdByName.get(r.status.toLowerCase());
       if (sid && r.status.toLowerCase() !== ex.status.toLowerCase()) body.statusId = sid;

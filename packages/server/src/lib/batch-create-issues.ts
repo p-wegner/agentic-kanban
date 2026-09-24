@@ -11,7 +11,6 @@ export interface BatchIssueInput {
   description?: string;
   priority?: "low" | "medium" | "high" | "critical";
   issueType?: string;
-  estimate?: string | null;
   sortOrder?: number;
   statusName?: string;
   tags?: string[];

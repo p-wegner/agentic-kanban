@@ -102,7 +102,6 @@ export async function insertMaterializedIssue(
     priority: values.priority,
     issueType: "task",
     skipAutoReview: false,
-    estimate: null,
     sortOrder: 0,
     statusId: values.statusId,
     projectId: values.projectId,

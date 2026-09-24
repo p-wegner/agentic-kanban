@@ -129,7 +129,6 @@ export interface CreateIssueInput {
   priority?: string;
   issueType?: string;
   skipAutoReview?: boolean;
-  estimate?: string | null;
   sortOrder?: number;
   statusId?: string;
   workflowTemplateId?: string | null;
@@ -210,7 +209,6 @@ export function createIssueService(deps: {
           priority: input.priority ?? "medium",
           issueType: input.issueType ?? "task",
           skipAutoReview: input.skipAutoReview ?? false,
-          estimate: input.estimate ?? null,
           sortOrder: input.sortOrder ?? 0,
           workflowTemplateId: input.workflowTemplateId ?? null,
           externalKey,
@@ -350,7 +348,6 @@ export function createIssueService(deps: {
               priority: input.priority ?? "medium",
               issueType: input.issueType ?? "task",
               skipAutoReview: input.skipAutoReview ?? false,
-              estimate: input.estimate ?? null,
               sortOrder: input.sortOrder ?? 0,
               statusId: input.statusId ?? defaultStatusId,
               projectId,

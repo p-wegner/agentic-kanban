@@ -737,7 +737,7 @@ JSON file format:
     ]
   }
 
-Each issue: title (required), description, priority, issueType, estimate, sortOrder, statusName, tags
+Each issue: title (required), description, priority, issueType, sortOrder, statusName, tags
 Each dependency: issueIndex, dependsOnIndex (0-based indices), type (optional, default: depends_on)
 `)
     .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")

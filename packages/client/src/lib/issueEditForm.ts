@@ -6,19 +6,18 @@ import { isHttpUrl } from "./url.js";
  * The pure half of `hooks/useIssueEditForm` (#782).
  *
  * The hook owns React state; the two things worth testing in it were never stateful —
- * a nine-field dirty comparison and the save-payload construction (title trimming,
+ * a multi-field dirty comparison and the save-payload construction (title trimming,
  * pasted-image markdown, the external-URL guard, the `"" → null` normalisations).
  * `packages/client` has no jsdom by design, so logic living inside a hook is logic no
  * test can reach; `lib/` is where a pure client module belongs (#589), so it moved here
  * rather than a browser harness moving in.
  */
 
-/** The nine editable fields the issue edit form owns. */
+/** The editable fields the issue edit form owns. */
 export interface IssueEditFields {
   title: string;
   description: string;
   issueType: string;
-  estimate: string;
   dueDate: string;
   externalKey: string;
   externalUrl: string;
@@ -36,7 +35,6 @@ export function issueEditBaseline(issue: IssueWithStatus): IssueEditFields {
     title: issue.title,
     description: issue.description ?? "",
     issueType: issue.issueType ?? "task",
-    estimate: issue.estimate ?? "",
     dueDate: issue.dueDate ?? "",
     externalKey: issue.externalKey ?? "",
     externalUrl: issue.externalUrl ?? "",
@@ -55,7 +53,6 @@ export function hasIssueEditChanges(fields: IssueEditFields, issue: IssueWithSta
     fields.title !== baseline.title ||
     fields.description !== baseline.description ||
     fields.issueType !== baseline.issueType ||
-    fields.estimate !== baseline.estimate ||
     fields.dueDate !== baseline.dueDate ||
     fields.externalKey !== baseline.externalKey ||
     fields.externalUrl !== baseline.externalUrl ||
@@ -91,7 +88,6 @@ export function buildIssueUpdatePayload(fields: IssueEditFields, pastedImages: s
     title: fields.title.trim(),
     description: fullDescription || undefined,
     issueType: fields.issueType as UpdateIssueRequest["issueType"],
-    estimate: (fields.estimate || null) as UpdateIssueRequest["estimate"],
     skipAutoReview: fields.skipAutoReview,
     dueDate: fields.dueDate || null,
     externalKey: fields.externalKey.trim() || null,

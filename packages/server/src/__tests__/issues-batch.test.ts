@@ -376,7 +376,7 @@ describe("POST /api/issues/contract-coupled", () => {
 });
 
 describe("PATCH /api/issues/bulk", () => {
-  it("updates priority, estimate, and due date for multiple issues in one request", async () => {
+  it("updates priority and due date for multiple issues in one request", async () => {
     const { app, db } = createTestApp();
     const { projectId, statusId } = await seed(db);
     const a = await insertIssue(db, projectId, statusId, 1);
@@ -387,7 +387,7 @@ describe("PATCH /api/issues/bulk", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         issueIds: [a, b],
-        updates: { priority: "critical", estimate: "L", dueDate: "2026-06-15" },
+        updates: { priority: "critical", dueDate: "2026-06-15" },
       }),
     });
 
@@ -397,11 +397,10 @@ describe("PATCH /api/issues/bulk", () => {
     const rows = await db.select().from(schema.issues);
     expect(rows.map((row) => ({
       priority: row.priority,
-      estimate: row.estimate,
       dueDate: row.dueDate,
     }))).toEqual([
-      { priority: "critical", estimate: "L", dueDate: "2026-06-15" },
-      { priority: "critical", estimate: "L", dueDate: "2026-06-15" },
+      { priority: "critical", dueDate: "2026-06-15" },
+      { priority: "critical", dueDate: "2026-06-15" },
     ]);
   });
 });

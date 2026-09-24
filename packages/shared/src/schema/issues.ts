@@ -17,6 +17,9 @@ export const issues = sqliteTable("issues", {
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
   statusChangedAt: text("status_changed_at"),
   skipAutoReview: integer("skip_auto_review", { mode: "boolean" }).notNull().default(false),
+  // #1243: t-shirt size estimate feature retired — column kept (a migration already
+  // created it, and the schema↔migrations drift gate requires them to agree; SQLite
+  // drop-column is unnecessary churn) but no application code reads or writes it.
   estimate: text("estimate"),
   dueDate: text("due_date"),
   // Optional link to an issue in an external tracker (Jira, Linear, GitHub, ...).

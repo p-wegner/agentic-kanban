@@ -6,7 +6,7 @@ import { useDismissable } from "./useDismissable.js";
 export type { Tag } from "../lib/boardTypes.js";
 
 /**
- * Encapsulates the TableView bulk-action UI state: row selection, the six
+ * Encapsulates the TableView bulk-action UI state: row selection, the five
  * dropdown open/closed booleans (plus their outside-click-to-close listener),
  * the bulk due-date input, and the lazily loaded tag list.
  */
@@ -15,7 +15,6 @@ export function useBulkOperations() {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
   const [bulkPriorityOpen, setBulkPriorityOpen] = useState(false);
-  const [bulkEstimateOpen, setBulkEstimateOpen] = useState(false);
   const [bulkDueDateOpen, setBulkDueDateOpen] = useState(false);
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
   const [bulkRemoveTagOpen, setBulkRemoveTagOpen] = useState(false);
@@ -24,17 +23,15 @@ export function useBulkOperations() {
   const [tagsLoaded, setTagsLoaded] = useState(false);
   const statusDropdownRef = useRef<HTMLDivElement>(null);
   const priorityDropdownRef = useRef<HTMLDivElement>(null);
-  const estimateDropdownRef = useRef<HTMLDivElement>(null);
   const dueDateDropdownRef = useRef<HTMLDivElement>(null);
   const tagDropdownRef = useRef<HTMLDivElement>(null);
   const removeTagDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Six independent dropdowns, one hook call each (#515). The single shared listener
-  // this replaces re-tested all six on every mousedown anywhere in the document and
-  // handled no Escape at all — so none of these six was keyboard-dismissable.
+  // Five independent dropdowns, one hook call each (#515). The single shared listener
+  // this replaces re-tested all of them on every mousedown anywhere in the document and
+  // handled no Escape at all — so none of these was keyboard-dismissable.
   useDismissable(statusDropdownRef, bulkStatusOpen, () => setBulkStatusOpen(false));
   useDismissable(priorityDropdownRef, bulkPriorityOpen, () => setBulkPriorityOpen(false));
-  useDismissable(estimateDropdownRef, bulkEstimateOpen, () => setBulkEstimateOpen(false));
   useDismissable(dueDateDropdownRef, bulkDueDateOpen, () => setBulkDueDateOpen(false));
   useDismissable(tagDropdownRef, bulkTagOpen, () => setBulkTagOpen(false));
   useDismissable(removeTagDropdownRef, bulkRemoveTagOpen, () => setBulkRemoveTagOpen(false));
@@ -44,7 +41,6 @@ export function useBulkOperations() {
     bulkLoading, setBulkLoading,
     bulkStatusOpen, setBulkStatusOpen,
     bulkPriorityOpen, setBulkPriorityOpen,
-    bulkEstimateOpen, setBulkEstimateOpen,
     bulkDueDateOpen, setBulkDueDateOpen,
     bulkTagOpen, setBulkTagOpen,
     bulkRemoveTagOpen, setBulkRemoveTagOpen,
@@ -53,7 +49,6 @@ export function useBulkOperations() {
     tagsLoaded, setTagsLoaded,
     statusDropdownRef,
     priorityDropdownRef,
-    estimateDropdownRef,
     dueDateDropdownRef,
     tagDropdownRef,
     removeTagDropdownRef,

@@ -1,6 +1,6 @@
 import type { CreateIssueFormState } from "../lib/boardTypes.js";
 import { useRef, useEffect, useState } from "react";
-import type { CreateIssueRequest, IssueEstimate } from "@agentic-kanban/shared";
+import type { CreateIssueRequest } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { isHttpUrl } from "../lib/url.js";
 import { showToast } from "../lib/toast.js";
@@ -12,7 +12,6 @@ import { EnhanceButton, UndoEnhanceButton } from "./EnhanceActions.js";
 import type { AgentSkillOption } from "./IssueFormFields.js";
 import {
   AgentOptionCheckbox,
-  IssueEstimateSelect,
   IssueTemplateSelect,
   IssueTypeSelect,
   PastedImageStrip,
@@ -53,7 +52,6 @@ export function CreateIssueForm({
   const [description, setDescription] = useState(initialState?.description ?? "");
   const [pastedImages, setPastedImages] = useState<string[]>(initialState?.pastedImages ?? []);
   const [issueType, setIssueType] = useState<CreateIssueRequest["issueType"]>(initialState?.issueType ?? "task");
-  const [estimate, setEstimate] = useState<IssueEstimate | "">(initialState?.estimate ?? "");
   const [startWorkspace, setStartWorkspace] = useState(initialState?.startWorkspace ?? false);
   const [planMode, setPlanMode] = useState(initialState?.planMode ?? false);
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
@@ -127,7 +125,6 @@ export function CreateIssueForm({
         title: title.trim(),
         description: mergeDescriptionWithImages(description, pastedImages) || undefined,
         issueType,
-        estimate: estimate || undefined,
         statusId,
         projectId,
         workflowTemplateId: workflowTemplateId || undefined,
@@ -216,13 +213,6 @@ export function CreateIssueForm({
           value={issueType}
           onChange={setIssueType}
           className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
-        />
-        <IssueEstimateSelect
-          value={estimate}
-          onChange={setEstimate}
-          emptyLabel="Est."
-          title="Effort estimate"
-          className="text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
         />
       </div>
       <div className="flex gap-2">
@@ -333,7 +323,7 @@ export function CreateIssueForm({
         {onExpand && (
           <button
             type="button"
-            onClick={() => onExpand({ title, description, pastedImages, issueType, estimate, startWorkspace, planMode, skipAutoReview, skillId })}
+            onClick={() => onExpand({ title, description, pastedImages, issueType, startWorkspace, planMode, skipAutoReview, skillId })}
             className="ml-auto text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded"
             title="Expand form"
           >

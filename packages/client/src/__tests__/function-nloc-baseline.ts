@@ -25,7 +25,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "components/WorkspaceCard.tsx::WorkspaceCard": 570,
   // #972 moved the dependency-wave concern out to `hooks/useDependencyWave.ts`.
   "components/BacklogView.tsx::BacklogView": 568,
-  "components/IssueDetailPanel.tsx::IssueDetailPanel": 542,
+  "components/IssueDetailPanel.tsx::IssueDetailPanel": 535,
   // 552 -> 550 (#1227): the plugin-views subrouting effects (slug fallback, view-id
   // deep link, active-view-id reporting) moved to hooks/usePluginViewRouting.ts.
   // 550 -> 544 (#1228): the iframe host, overlay/timeout notices and the frame lifecycle
@@ -46,11 +46,11 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "components/BoardToolbar.tsx::BoardToolbar": 457,
   "components/settings/ProjectSettings.tsx::ProjectSettings": 465,
   "components/AllWorkspacesPanel.tsx::AllWorkspacesPanel": 438,
-  "components/CreateIssuePanel.tsx::CreateIssuePanel": 353,
+  "components/CreateIssuePanel.tsx::CreateIssuePanel": 343,
   "components/ButlerViewBody.tsx::ButlerViewBody": 415,
   // 410 -> 411 (#1135): threads boardDriveOptions into BoardFilterMenu.
   "components/BoardPageView.tsx::BoardPageView": 411,
-  "components/TableView.tsx::TableView": 416,
+  "components/TableView.tsx::TableView": 371,
   "components/AddProjectModal.tsx::AddProjectModal": 408,
   "components/PluginActionPanes.tsx::PluginLoopPane": 406,
 };

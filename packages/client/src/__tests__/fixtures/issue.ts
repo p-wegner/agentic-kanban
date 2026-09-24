@@ -29,7 +29,6 @@ export function issueFixture(overrides: Partial<IssueWithStatus> = {}): IssueWit
     updatedAt: new Date(Date.now() - 86_400_000).toISOString(),
     statusChangedAt: new Date(Date.now() - 86_400_000).toISOString(),
     statusName: "Todo",
-    estimate: null,
     dueDate: null,
     externalKey: null,
     externalUrl: null,
