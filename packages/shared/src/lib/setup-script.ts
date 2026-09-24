@@ -219,6 +219,16 @@ export interface RunSetupScriptOptions {
    */
   env?: Record<string, string>;
   /**
+   * Whether the child starts from a copy of `process.env` (the default, `true`) or from an EMPTY
+   * environment onto which only `env` is layered (#1231). The base-branch health probe passes
+   * `false`: it is the one full-suite signal behind `pnpm promote`, and a board process carrying
+   * `KANBAN_TEST_*` / `KANBAN_IMPACT_*` scoping vars would otherwise hand them straight to
+   * `scripts/test-mine.mjs` and turn the "full" sweep into a scoped or selector run. A caller
+   * that opts out is responsible for supplying everything the shell and the tools need (PATH,
+   * HOME, TEMP, ...) — see `buildBaseProbeEnv` in the server's `lib/verify-env.ts`.
+   */
+  inheritEnv?: boolean;
+  /**
    * Abort the run from outside (#989): when this fires, the child is killed and the promise
    * RESOLVES with `aborted: true` — never rejects, matching the never-reject contract the
    * timeout and no-progress paths already keep, so a caller cannot mistake "we stopped it" for
@@ -279,7 +289,8 @@ export function runSetupScript(
 
     const proc = spawn(spec.command, spec.args, {
       cwd: worktreePath,
-      env: { ...process.env, ...options.env },
+      // #1231 — `inheritEnv: false` starts from NOTHING: the caller's allowlist is the whole env.
+      env: options.inheritEnv === false ? { ...options.env } : { ...process.env, ...options.env },
       windowsHide: true,
       // Verbatim quoting is a cmd.exe concern only. `docker` is a real
       // executable receiving a normal argv, so re-quoting must stay OFF for it

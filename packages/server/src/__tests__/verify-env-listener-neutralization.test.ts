@@ -24,6 +24,7 @@ import { envPort, resolveListenHost } from "../lib/bearer-token.js";
 import {
   VERIFY_NEUTRALIZED_DB_LOCATION_ENV,
   VERIFY_NEUTRALIZED_LISTENER_ENV,
+  buildBaseProbeEnv,
   withNeutralizedListenerEnv,
 } from "../lib/verify-env.js";
 import { resolveDbLocation } from "@agentic-kanban/shared/lib/db-path";
@@ -75,11 +76,25 @@ describe("verify subprocesses do not inherit the board's listener pins (#846 gat
     const base = read("base-branch-health.service.ts");
     // The install call, the full verify call, and the #1110 isolated flake-retry call: an
     // install command can open a listener too, and the retry is a spawn site in its own right.
+    // Since #1231 all three build their env through `buildBaseProbeEnv`, which overlays BOTH
+    // neutraliser sets itself (asserted below) and — paired with `inheritEnv: false` — is the
+    // whole child env, so the pins cannot arrive by inheritance either.
     const spawns = base.split("runSetupScript(dest,").slice(1);
     expect(spawns.length).toBe(3);
     for (const call of spawns) {
-      expect(call.slice(0, call.indexOf(")"))).toContain("VERIFY_NEUTRALIZED_LISTENER_ENV");
+      // Everything before `inheritEnv` must still be INSIDE this call (no `.catch(` yet), so a
+      // spawn that dropped the option cannot borrow the next call's.
+      const head = call.slice(0, call.indexOf("inheritEnv: false"));
+      expect(head).not.toContain(".catch(");
+      expect(head).toContain("buildBaseProbeEnv(");
     }
+    // The builder applies the neutralisers even when the SOURCE env carries the pins and a
+    // caller's `extra` tries to re-introduce one — overlay order is neutralisers over source,
+    // then `extra` over that, and `extra` is the probe's own resource vars, never a pin.
+    const built = buildBaseProbeEnv({}, { KANBAN_GIT_HTTP_PORT: "3002", KANBAN_DB_URL: "file:/x", PATH: "/bin" });
+    expect(built.KANBAN_GIT_HTTP_PORT).toBe("");
+    expect(built.KANBAN_DB_URL).toBe("");
+    expect(built.PATH).toBe("/bin");
   });
 });
 
@@ -129,7 +144,50 @@ describe("verify subprocesses do not inherit the board's DB-location overrides (
     const spawns = base.split("runSetupScript(dest,").slice(1);
     expect(spawns.length).toBe(3);
     for (const call of spawns) {
-      expect(call.slice(0, call.indexOf(")"))).toContain("VERIFY_NEUTRALIZED_DB_LOCATION_ENV");
+      // #1231 — via `buildBaseProbeEnv`, which overlays the DB-location neutraliser itself.
+      expect(call.slice(0, call.indexOf("inheritEnv: false"))).toContain("buildBaseProbeEnv(");
     }
+    const built = buildBaseProbeEnv({}, { KANBAN_DB_URL: "file:/live.db", DB_URL: "file:/old.db" });
+    expect(built.KANBAN_DB_URL).toBe("");
+    expect(built.DB_URL).toBe("");
+  });
+});
+
+/**
+ * The same leak, generalised (#1231): the probe must inherit NOTHING but an allowlist.
+ *
+ * The two blanklists above name the pins that had already bitten. What they cannot name is the
+ * next scoping knob — and `KANBAN_TEST_*` / `KANBAN_IMPACT_*` / `KANBAN_ARCH_CHANGED_FILES` /
+ * `KANBAN_RETRY_TEST_FILES` reaching `scripts/test-mine.mjs` from the board process turn the one
+ * FULL-suite signal behind `pnpm promote` into a scoped run (the 2026-09-18/19 red rows carried
+ * an impact-selector-only line). So every probe spawn now builds its env with `buildBaseProbeEnv`
+ * (allowlist from scratch) AND passes `inheritEnv: false`, the half without which the allowlist
+ * is decoration. The behavioural half — what the builder keeps and drops, and that the child
+ * really sees none of it — is `base-probe-env.test.ts`; this half pins the SOURCE, because the
+ * drift being guarded against is a fourth spawn site or a dropped option.
+ */
+describe("the base probe's children start from an allowlist, never process.env (#1231)", () => {
+  it("all THREE probe spawn sites pass inheritEnv: false with a buildBaseProbeEnv env", () => {
+    const base = read("base-branch-health.service.ts");
+    const spawns = base.split("runSetupScript(dest,").slice(1);
+    expect(spawns.length).toBe(3);
+    for (const call of spawns) {
+      // Everything before `inheritEnv` must still be INSIDE this call (no `.catch(` yet), so a
+      // spawn that dropped the option cannot borrow the next call's.
+      const head = call.slice(0, call.indexOf("inheritEnv: false"));
+      expect(head).not.toContain(".catch(");
+      expect(head).toContain("buildBaseProbeEnv(");
+      expect(head).not.toContain("process.env");
+    }
+  });
+
+  it("the retry spawn is the ONLY one that names a scoping key, and it is KANBAN_RETRY_TEST_FILES", () => {
+    const base = read("base-branch-health.service.ts");
+    const spawns = base.split("runSetupScript(dest,").slice(1);
+    const heads = spawns.map((call) => call.slice(0, call.indexOf("inheritEnv: false")));
+    const scoping = /KANBAN_(TEST_(?!MAX_WORKERS)\w+|IMPACT_\w+|ARCH_CHANGED_FILES|RETRY_TEST_FILES)/g;
+    expect(heads[0].match(scoping)).toBeNull(); // install
+    expect(heads[1].match(scoping)).toBeNull(); // full verify
+    expect([...new Set(heads[2].match(scoping))]).toEqual(["KANBAN_RETRY_TEST_FILES"]); // flake retry
   });
 });

@@ -34,7 +34,8 @@ import {
 // The base probe spawns the SAME verify script as the gate, so it inherits the board's
 // listener pins the same way — and a phantom EADDRINUSE here is worse, because it is
 // recorded as "the base is red" and then withholds every branch's merge.
-import { VERIFY_NEUTRALIZED_DB_LOCATION_ENV, VERIFY_NEUTRALIZED_LISTENER_ENV } from "../lib/verify-env.js";
+import { buildBaseProbeEnv } from "../lib/verify-env.js";
+import { parseVerifyStepTimings } from "./verify-step-timings.js";
 import { cloneBranchTo, getMergeBase, revParse, isAncestor } from "@agentic-kanban/shared/lib/git-service";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
@@ -121,6 +122,27 @@ export interface BaseBranchVerifyResult {
   flaky?: boolean;
   /** Machine-load context around this probe (#1110) — see `captureCapacitySample`. */
   contention?: ProbeContentionSnapshot | null;
+  /**
+   * What `scripts/test-mine.mjs` said its `tests` step RAN (#1231) — `full`, `package-scoped`,
+   * `file-scoped`, `impact-selected`, `guards-only`, ... — parsed off the verify output's
+   * `[gate:step] name=tests ... scope=<mode>` line. `null` when the script reported nothing (a
+   * project with no step contract, a timeout that killed the process before its exit handler,
+   * or a row written before this field existed). A green whose scope is present and not `full`
+   * is NOT a full-suite verdict, and `scripts/promote-plan.mjs` refuses to promote on it.
+   */
+  scope?: string | null;
+}
+
+/**
+ * The `tests` step's self-reported scope out of one probe run's output, or `null` (#1231).
+ *
+ * Total, never throws — `parseVerifyStepTimings` already is. Reads the PRIMARY run's output: a
+ * flake retry is a narrowed re-run by design, and the verdict's scope is what the full run
+ * covered, not what the retry re-checked.
+ */
+export function probeScopeFromOutput(output: string | undefined | null): string | null {
+  const tests = parseVerifyStepTimings(output).find((step) => step.name === "tests");
+  return tests?.scope ?? null;
 }
 
 /**
@@ -385,7 +407,9 @@ async function runBaseBranchProbe(
   try {
     await cloneBranchTo(project.repoPath, branch, dest, CLONE_TIMEOUT_MS);
     if (installCommand) {
-      const install = await runSetupScript(dest, installCommand, { timeoutMs: INSTALL_TIMEOUT_MS, env: { ...VERIFY_NEUTRALIZED_LISTENER_ENV, ...VERIFY_NEUTRALIZED_DB_LOCATION_ENV } }).catch((e) => ({
+      // #1231 — an ALLOWLIST built from scratch, never a spread over `process.env`: see
+      // `buildBaseProbeEnv`. `inheritEnv: false` is what makes the allowlist the whole env.
+      const install = await runSetupScript(dest, installCommand, { timeoutMs: INSTALL_TIMEOUT_MS, env: buildBaseProbeEnv(), inheritEnv: false }).catch((e) => ({
         exitCode: 1,
         stdout: "",
         stderr: String(e),
@@ -483,7 +507,11 @@ ${tail(combined)}`,
         poll.unref?.();
         return runSetupScript(dest, verifyScript, {
           timeoutMs: VERIFY_TIMEOUT_MS,
-          env: { ...VERIFY_NEUTRALIZED_LISTENER_ENV, ...VERIFY_NEUTRALIZED_DB_LOCATION_ENV, ...resources },
+          // #1231 — allowlist from scratch (`buildBaseProbeEnv`), so no `KANBAN_TEST_*` /
+          // `KANBAN_IMPACT_*` scoping var the board process carries can narrow this run. The
+          // resource vars are the ONLY `KANBAN_TEST_*` keys the full run may see.
+          env: buildBaseProbeEnv(resources),
+          inheritEnv: false,
           signal: abort.signal,
         }).catch((e) => ({
           exitCode: 1,
@@ -541,12 +569,13 @@ ${tail(combined)}`,
         runRetry: (retryScopeEnv) => runUnderVerifyChainSemaphore(
           () => runSetupScript(dest, verifyScript, {
             timeoutMs: VERIFY_TIMEOUT_MS,
-            env: {
-              ...VERIFY_NEUTRALIZED_LISTENER_ENV,
-              ...VERIFY_NEUTRALIZED_DB_LOCATION_ENV,
+            // #1231 — same allowlist; `KANBAN_RETRY_TEST_FILES` is the one scoping key a probe
+            // child may carry, and only on this retry path — it IS the retry.
+            env: buildBaseProbeEnv({
               ...buildVerifyResourceEnv(probeMaxWorkers),
               KANBAN_RETRY_TEST_FILES: retryScopeEnv,
-            },
+            }),
+            inheritEnv: false,
           }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
           `base-branch health flake retry for project ${projectId}`,
           undefined,
@@ -557,6 +586,11 @@ ${tail(combined)}`,
     } else {
       result = { outcome: "green", sha, branch, durationMs, failedSuites: failedSuitesForOutcome("green", combined) };
     }
+    // #1231 — what the runner said it RAN, stamped on every verdict that has an output to read.
+    // Assigned once here rather than in each branch above: the retry-green, the red and the
+    // plain green all describe the same primary run, and a timeout has no step line to parse
+    // (the exit handler that prints it never ran), which `probeScopeFromOutput` returns as null.
+    result.scope = probeScopeFromOutput(combined);
   } catch (e) {
     result = {
       outcome: "red",
@@ -628,6 +662,7 @@ ${tail(combined)}`,
       failedSuites: result.failedSuites,
       flaky: result.flaky,
       contention: result.contention,
+      scope: result.scope,
     },
     database,
   );
