@@ -289,3 +289,50 @@ list against a real repository. The two raw-read ratchets are unchanged and gree
 Not changed, and deliberately: the merge gate's red-debt subset rule (#915/#1015) already keyed
 on the policy and now softens `iterate` the way it softened `sprint`; the control arm; and the
 sweep cadence table above.
+
+## Amendment 2026-09-24 (#1240): the `flow` level, and `report` is now a shipped policy
+
+**Decision: a sixth level, `flow`, sits below `iterate` on the ladder
+(`docs/integration-risk-ladder.md`), and it is the one shipped level whose `redBasePolicy` is
+`report` — the softest rank in `RED_BASE_POLICY_RANK`.** Decision 019 part 3 is the rationale
+(the highest-risk-tolerant integration style must be a LEVEL on the dial, not a pile of
+per-project overrides); this record carries the row.
+
+What `flow` resolves, relative to `iterate`:
+
+| Field | `iterate` | `flow` |
+|---|---|---|
+| `gateTier` | `impact` | `impact` |
+| guards at merge (#1232) | `intersecting` | `intersecting` |
+| `sweepIntervalMs` | 24 h | **`null`** — no scheduled master sweep by design; the release candidate's sweep (#1238) is the only full-suite run |
+| `redBasePolicy` | `allow-file-debt-ticket` | **`report`** — never holds the train window, files no heal ticket; the red is disclosed in the delivery view and the sweep row, and healed on the rc (#1239) |
+| `reviewMode` | `standard` | `standard` |
+| train, merges/relaunches per cycle, builder stop checks, contention, placement | 1 / 0 ms, 2 / 2, `tests-capacity-gated`, `serialize`, `host-preferred` | the same |
+
+Every other level is unchanged, byte for byte. The visibility rule holds: `summary` names each
+skip ("flow: merge gate = typecheck + impact selection + the diff's own tests; no guard floor at
+merge; red base reported, never blocking; the full suite runs on the release candidate only"),
+the gate's pass message prices the deferred floor (`guards: N intersecting of M (K deferred to
+the base sweep)`), and `describeBaseSweep` reports `scheduled: false` with the reason "full
+suite: release candidate only" rather than the opt-in rule's "no posture chosen" — the two are
+different facts and the wire struct (`nominalIntervalMs: null`, `postureSource: risk_posture`)
+keeps them apart.
+
+The pinned policy table gains a row; the `report` override row stays as the softer-only route
+for every other level:
+
+| Posture | `redBasePolicy` | Red base holds the train window | Red sweep files a heal ticket |
+|---|---|---|---|
+| `flow` | `report` | no | no |
+
+Enforcement: `risk-posture.service.test.ts` pins the row and that `flow` is the only level
+resolving `report`; `merge-train-base-veto-posture.test.ts` drives a red row plus a ready train
+through the real resolver under `flow` (departs, `holdingWindow: false`, zero heal tickets);
+`guards-at-merge.test.ts` pins `flow -> intersecting`; `integration-risk-ladder-doc.test.ts`
+ratchets the ladder's rungs table against the resolver; the three raw-read ratchets are
+unchanged and green.
+
+Not changed, and deliberately: the dev board's own posture pref. Switching it to `flow` is the
+operator's call, made through Settings -> Workflow once #1238 (the rc cadence) is in place —
+until then `flow` on a project with no rc means no full-suite run anywhere, which the summary
+says but nothing prevents.

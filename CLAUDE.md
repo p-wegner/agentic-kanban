@@ -321,8 +321,9 @@ only weaken verification VISIBLY: a passing gate's message always names what ran
 `pre-merge gate passed (tier: file-scoped, 3 changed file(s), +14 guard suites, workers 6)` —
 never a bare "passed" that hides whether scoping applied.
 
-**`impact` (#956) is the narrowest tier and is STRICTLY OPT-IN** — nobody's default, and no risk
-posture yields it (`RiskPosture.gateTier` deliberately stays a three-value union). It picks the file
+**`impact` (#956) is the narrowest tier and is STRICTLY OPT-IN** — nobody's default; only the
+`iterate` and `flow` risk postures yield it (#983/#1240 — `iterate` backs it with a nightly master
+sweep, `flow` with the release candidate's sweep alone), and `standard` never will. It picks the file
 half with the test-impact SELECTION rather than `vitest related`, plus the `@gate:always-run` guards
 and every test file the diff touches. That last part is not decoration: a test file the branch ADDS is
 absent from the committed impact map, so it has no coverage/failure/runtime history — the signals the
