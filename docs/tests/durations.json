@@ -38,7 +38,7 @@
     {
       "name": "packages/client/src/__tests__/chart-duplication-ratchet.test.ts",
       "startTime": 0,
-      "endTime": 5770.141357421875
+      "endTime": 1366
     },
     {
       "name": "packages/client/src/__tests__/chartGeometry.test.ts",
@@ -48,7 +48,7 @@
     {
       "name": "packages/client/src/__tests__/client-conventions-guard.test.ts",
       "startTime": 0,
-      "endTime": 3094.4248046875
+      "endTime": 1909
     },
     {
       "name": "packages/client/src/__tests__/client-module-placement.test.ts",
@@ -1338,12 +1338,12 @@
     {
       "name": "packages/server/src/__tests__/auto-merge-pref.test.ts",
       "startTime": 0,
-      "endTime": 1966.320068359375
+      "endTime": 1504
     },
     {
       "name": "packages/server/src/__tests__/auto-review-pref.test.ts",
       "startTime": 0,
-      "endTime": 4303.734130859375
+      "endTime": 2578
     },
     {
       "name": "packages/server/src/__tests__/auto-start-claim-no-duplicate-workspace.test.ts",
@@ -1716,6 +1716,11 @@
       "endTime": 10.40673828125
     },
     {
+      "name": "packages/server/src/__tests__/cli-dispatch.test.ts",
+      "startTime": 0,
+      "endTime": 17725.8
+    },
+    {
       "name": "packages/server/src/__tests__/cli-failure-detail.test.ts",
       "startTime": 0,
       "endTime": 3.296630859375
@@ -1724,6 +1729,11 @@
       "name": "packages/server/src/__tests__/cli-issue-number-cross-project.test.ts",
       "startTime": 0,
       "endTime": 366.75634765625
+    },
+    {
+      "name": "packages/server/src/__tests__/cli-issue.test.ts",
+      "startTime": 0,
+      "endTime": 69832.4
     },
     {
       "name": "packages/server/src/__tests__/cli-preferences-guard.test.ts",
@@ -1736,24 +1746,14 @@
       "endTime": 209.93798828125
     },
     {
-      "name": "packages/server/src/__tests__/cli-register-populate.test.ts",
-      "startTime": 0,
-      "endTime": 217.910888671875
-    },
-    {
-      "name": "packages/server/src/__tests__/cli-dispatch.test.ts",
-      "startTime": 0,
-      "endTime": 17725.8
-    },
-    {
-      "name": "packages/server/src/__tests__/cli-issue.test.ts",
-      "startTime": 0,
-      "endTime": 69832.4
-    },
-    {
       "name": "packages/server/src/__tests__/cli-project.test.ts",
       "startTime": 0,
       "endTime": 75871
+    },
+    {
+      "name": "packages/server/src/__tests__/cli-register-populate.test.ts",
+      "startTime": 0,
+      "endTime": 217.910888671875
     },
     {
       "name": "packages/server/src/__tests__/cli-skill.test.ts",
@@ -2023,7 +2023,7 @@
     {
       "name": "packages/server/src/__tests__/dev-script.test.mjs",
       "startTime": 0,
-      "endTime": 3082.8056640625
+      "endTime": 2441
     },
     {
       "name": "packages/server/src/__tests__/dev-server.service.test.ts",
@@ -2446,6 +2446,11 @@
       "endTime": 221.803955078125
     },
     {
+      "name": "packages/server/src/__tests__/herdr-hook-adapter.test.ts",
+      "startTime": 0,
+      "endTime": 5852
+    },
+    {
       "name": "packages/server/src/__tests__/hook-cost-collapse.test.ts",
       "startTime": 0,
       "endTime": 936.492431640625
@@ -2504,6 +2509,11 @@
       "name": "packages/server/src/__tests__/install-staleness-reconciler.test.ts",
       "startTime": 0,
       "endTime": 8.47021484375
+    },
+    {
+      "name": "packages/server/src/__tests__/integration-risk-ladder-doc.test.ts",
+      "startTime": 0,
+      "endTime": 6.30078125
     },
     {
       "name": "packages/server/src/__tests__/ipv6-companion-listener.test.ts",
@@ -2669,6 +2679,11 @@
       "name": "packages/server/src/__tests__/learning-step-prompt.test.ts",
       "startTime": 0,
       "endTime": 3.397705078125
+    },
+    {
+      "name": "packages/server/src/__tests__/legacy-temp-prefixes.test.ts",
+      "startTime": 0,
+      "endTime": 828
     },
     {
       "name": "packages/server/src/__tests__/list-endpoints-etag.test.ts",
@@ -3518,7 +3533,7 @@
     {
       "name": "packages/server/src/__tests__/provider-resolution-single-source.test.ts",
       "startTime": 0,
-      "endTime": 2638.354736328125
+      "endTime": 262
     },
     {
       "name": "packages/server/src/__tests__/provider-switch-stale-default-model.test.ts",
@@ -4078,7 +4093,7 @@
     {
       "name": "packages/server/src/__tests__/shared-package-exports.test.ts",
       "startTime": 0,
-      "endTime": 7084.814697265625
+      "endTime": 2634
     },
     {
       "name": "packages/server/src/__tests__/sibling-orphan-worktree-sweep.test.ts",
@@ -4348,7 +4363,7 @@
     {
       "name": "packages/server/src/__tests__/temp-dir-namespace-guard.test.ts",
       "startTime": 0,
-      "endTime": 5204.6240234375
+      "endTime": 694
     },
     {
       "name": "packages/server/src/__tests__/terminal-move-guard.test.ts",
@@ -4528,7 +4543,7 @@
     {
       "name": "packages/server/src/__tests__/windows-hide-spawn-guard.test.ts",
       "startTime": 0,
-      "endTime": 2549.71240234375
+      "endTime": 1901
     },
     {
       "name": "packages/server/src/__tests__/worker-agent-runner-posix-detach.test.ts",
@@ -5328,7 +5343,7 @@
     {
       "name": "packages/shared/__tests__/barrel-client-safety.test.ts",
       "startTime": 0,
-      "endTime": 3587.983642578125
+      "endTime": 2195
     },
     {
       "name": "packages/shared/__tests__/board-events-contract.test.ts",
@@ -5373,7 +5388,7 @@
     {
       "name": "packages/shared/__tests__/check-god-modules-script.test.ts",
       "startTime": 0,
-      "endTime": 6203.163330078125
+      "endTime": 4464
     },
     {
       "name": "packages/shared/__tests__/client-test-typecheck-ratchet.test.ts",
@@ -5513,7 +5528,7 @@
     {
       "name": "packages/shared/__tests__/git-exec-single-spawn.test.ts",
       "startTime": 0,
-      "endTime": 5457.82373046875
+      "endTime": 3098
     },
     {
       "name": "packages/shared/__tests__/git-service-worktree-collision.test.ts",
@@ -5578,7 +5593,7 @@
     {
       "name": "packages/shared/__tests__/kanban-db-literal-ratchet.test.ts",
       "startTime": 0,
-      "endTime": 4737.43994140625
+      "endTime": 3092
     },
     {
       "name": "packages/shared/__tests__/line-based-guard-ratchet.test.ts",
@@ -5598,7 +5613,7 @@
     {
       "name": "packages/shared/__tests__/max-file-size.test.ts",
       "startTime": 0,
-      "endTime": 8172.245849609375
+      "endTime": 5631
     },
     {
       "name": "packages/shared/__tests__/merge-ref-cas.integration.test.ts",
@@ -5671,6 +5686,11 @@
       "endTime": 1.45263671875
     },
     {
+      "name": "packages/shared/__tests__/private-tree-walker-ratchet.test.ts",
+      "startTime": 0,
+      "endTime": 284
+    },
+    {
       "name": "packages/shared/__tests__/profile-allowlist.test.ts",
       "startTime": 0,
       "endTime": 11.315185546875
@@ -5709,6 +5729,11 @@
       "name": "packages/shared/__tests__/repo-tags.test.ts",
       "startTime": 0,
       "endTime": 5.2666015625
+    },
+    {
+      "name": "packages/shared/__tests__/repo-tree-walker.test.ts",
+      "startTime": 0,
+      "endTime": 22
     },
     {
       "name": "packages/shared/__tests__/risk-posture.test.ts",
@@ -5818,7 +5843,7 @@
     {
       "name": "packages/shared/__tests__/test-tree-write-hermeticity.test.ts",
       "startTime": 0,
-      "endTime": 4847.81591796875
+      "endTime": 3615
     },
     {
       "name": "packages/shared/__tests__/transcript-cwd-encoding.test.ts",
@@ -5864,16 +5889,6 @@
       "name": "packages/shared/__tests__/worktree-delete-guard-ratchet.test.ts",
       "startTime": 0,
       "endTime": 4024.91748046875
-    },
-    {
-      "name": "packages/server/src/__tests__/herdr-hook-adapter.test.ts",
-      "startTime": 0,
-      "endTime": 5852
-    },
-    {
-      "name": "packages/server/src/__tests__/integration-risk-ladder-doc.test.ts",
-      "startTime": 0,
-      "endTime": 6.30078125
     }
   ]
 }
