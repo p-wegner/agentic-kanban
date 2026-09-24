@@ -137,6 +137,13 @@ export async function getProjectHealth(database: Database = db): Promise<Project
       try {
         const baseHealth = await getLatestBaseBranchHealth(project.id, database);
         lastProbeAt = baseHealth?.createdAt ?? null;
+        // #1231 — a GREEN that the verify script itself reported as a narrowed run is not a
+        // full-suite green. Say so, or the health view claims a measurement nobody made.
+        if (baseHealth && baseHealth.outcome === "green" && baseHealth.scope && baseHealth.scope !== "full") {
+          warnings.push(
+            `Base branch '${baseHealth.branch}' is GREEN at ${baseHealth.sha.slice(0, 8)} but the sweep ran scope=${baseHealth.scope}, not the full suite — this verdict does not cover every suite and \`pnpm promote\` will refuse it. Re-measure with POST /api/projects/${project.id}/base-branch-health/reprobe.`,
+          );
+        }
         if (baseHealth && baseHealth.outcome !== "green") {
           // #935 — a `timeout`/`unverified` probe never reached a verdict, so reporting the
           // base as "TIMEOUT ... verify failed" states as fact something nobody measured. Say

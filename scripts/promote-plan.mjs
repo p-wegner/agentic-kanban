@@ -73,6 +73,10 @@ export const REPROBEABLE_SWEEP_REASONS = Object.freeze([
   "not-an-answer",
   "no-sha",
   "wrong-branch",
+  // #1231 — a green the runner itself reported as a NARROWED run. Since #1231 the probe's child
+  // env is an allowlist, so a fresh sweep runs full; the scoped row is the one thing a re-probe
+  // genuinely resolves.
+  "scoped",
 ]);
 
 /** Board API the sweep row is read from when a board is up. */
@@ -260,6 +264,12 @@ export function previousStableTag(existingTags = [], excludeTag = null) {
  * mean the probe was cut off or never got far enough — see `isBaseHealthAnswer`. A non-answer
  * must refuse, not promote: it says nothing about master, and treating it as green is exactly
  * the false confidence #935 documents in the other direction.
+ *
+ * `scope` (#1231) is what the verify script's own `tests` step said it RAN. A green whose scope
+ * is present and not `full` is a scoped verdict — the sweep checked a subset — and is refused
+ * (`scoped`). A NULL scope is accepted: every row written before the column existed carries
+ * one, and so does any project whose verify script has no `[gate:step]` contract; the detail
+ * says `scope <none: unknown, accepted>` so the reader sees the gap rather than a claim.
  */
 export function parseSweepVerdict(row, { branch = "master", nowMs = Date.now(), maxAgeMs = DEFAULT_MAX_SWEEP_AGE_HOURS * 3600_000 } = {}) {
   if (!row) {
@@ -269,7 +279,8 @@ export function parseSweepVerdict(row, { branch = "master", nowMs = Date.now(), 
   const outcome = row.outcome ?? null;
   const at = row.createdAt ?? row.created_at ?? null;
   const rowBranch = row.branch ?? null;
-  const stamp = `sha ${sha ?? "<none>"} branch ${rowBranch ?? "<none>"} verdict ${outcome ?? "<none>"} at ${at ?? "<unknown>"}`;
+  const scope = row.scope ?? null;
+  const stamp = `sha ${sha ?? "<none>"} branch ${rowBranch ?? "<none>"} verdict ${outcome ?? "<none>"} scope ${scope ?? "<none: unknown, accepted>"} at ${at ?? "<unknown>"}`;
 
   if (rowBranch && rowBranch !== branch) {
     return { ok: false, reason: "wrong-branch", sha, outcome, at, branch: rowBranch, detail: `last sweep was on '${rowBranch}', not '${branch}' — ${stamp}` };
@@ -278,20 +289,26 @@ export function parseSweepVerdict(row, { branch = "master", nowMs = Date.now(), 
     return { ok: false, reason: "not-an-answer", sha, outcome, at, branch: rowBranch, detail: `last sweep produced no verdict (${outcome}) — ${stamp}` };
   }
   if (outcome === "red") {
-    return { ok: false, reason: "red", sha, outcome, at, branch: rowBranch, detail: `last sweep was RED — ${stamp}`, message: row.message ?? null };
+    return { ok: false, reason: "red", sha, outcome, at, branch: rowBranch, scope, detail: `last sweep was RED — ${stamp}`, message: row.message ?? null };
+  }
+  if (scope !== null && scope !== "full") {
+    // #1231 — green, but the runner says it did not run everything. A scoped green is not the
+    // full-suite signal this promotion is gated on; treating it as one is the defect this ticket
+    // exists for. A null scope stays accepted (pre-#1231 rows, projects with no step contract).
+    return { ok: false, reason: "scoped", sha, outcome, at, branch: rowBranch, scope, detail: `last green sweep ran scope=${scope}, not the full suite (a null scope would be accepted as pre-#1231) — ${stamp}` };
   }
   const ageMs = at ? nowMs - Date.parse(at) : Number.NaN;
   if (!Number.isFinite(ageMs)) {
-    return { ok: false, reason: "undated", sha, outcome, at, branch: rowBranch, detail: `green sweep has no readable timestamp — ${stamp}` };
+    return { ok: false, reason: "undated", sha, outcome, at, branch: rowBranch, scope, detail: `green sweep has no readable timestamp — ${stamp}` };
   }
   if (ageMs > maxAgeMs) {
     const hours = (ageMs / 3600_000).toFixed(1);
-    return { ok: false, reason: "stale", sha, outcome, at, ageMs, branch: rowBranch, detail: `last green sweep is ${hours}h old (limit ${(maxAgeMs / 3600_000).toFixed(1)}h) — ${stamp}` };
+    return { ok: false, reason: "stale", sha, outcome, at, ageMs, branch: rowBranch, scope, detail: `last green sweep is ${hours}h old (limit ${(maxAgeMs / 3600_000).toFixed(1)}h) — ${stamp}` };
   }
   if (!sha) {
-    return { ok: false, reason: "no-sha", outcome, at, branch: rowBranch, detail: `green sweep row carries no sha — ${stamp}` };
+    return { ok: false, reason: "no-sha", outcome, at, branch: rowBranch, scope, detail: `green sweep row carries no sha — ${stamp}` };
   }
-  return { ok: true, reason: "green", sha, outcome, at, ageMs, branch: rowBranch, detail: `green sweep — ${stamp}` };
+  return { ok: true, reason: "green", sha, outcome, at, ageMs, branch: rowBranch, scope, detail: `green sweep — ${stamp}` };
 }
 
 /**

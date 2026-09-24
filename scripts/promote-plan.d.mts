@@ -70,6 +70,8 @@ export interface SweepRow {
   branch?: string | null;
   outcome?: string | null;
   message?: string | null;
+  /** #1231 — `full`, `file-scoped`, `impact-selected`, ...; null/absent on a pre-#1231 row. */
+  scope?: string | null;
   createdAt?: string | null;
   created_at?: string | null;
 }
@@ -85,6 +87,8 @@ export interface SweepVerdict {
   ageMs?: number;
   branch?: string | null;
   message?: string | null;
+  /** #1231 — the sweep's self-reported `tests` scope; null = unknown, accepted (pre-#1231 rows). */
+  scope?: string | null;
 }
 export declare function parseSweepVerdict(
   row: SweepRow | null | undefined,

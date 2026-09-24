@@ -18,6 +18,7 @@ import {
   isFreshSweepRow,
   isProbingThisProject,
   planSweepAcquisition,
+  REPROBEABLE_SWEEP_REASONS,
   planRestartOnly,
   formatRestartRefusal,
   formatPromoteUsage,
@@ -188,6 +189,49 @@ describe("sweep-verdict parsing", () => {
     expect(v.reason).toBe("red");
     expect(v.detail).toContain("abc1234def");
     expect(v.detail).toContain("red");
+  });
+
+  describe("the sweep's self-reported scope (#1231)", () => {
+    it("refuses a green whose scope is present and not `full` — a scoped green is not the full-suite signal", () => {
+      for (const scope of ["file-scoped", "package-scoped", "impact-selected", "impact+related", "guards-only", "flake-retry"]) {
+        const v = parseSweepVerdict(greenRow({ scope }), { nowMs: NOW });
+        expect(v.ok, scope).toBe(false);
+        expect(v.reason).toBe("scoped");
+        expect(v.scope).toBe(scope);
+        expect(v.detail).toContain(`scope=${scope}`);
+        expect(v.detail).toContain("not the full suite");
+      }
+    });
+
+    it("accepts a green whose scope is `full`, and carries the scope on the verdict", () => {
+      const v = parseSweepVerdict(greenRow({ scope: "full" }), { nowMs: NOW });
+      expect(v.ok).toBe(true);
+      expect(v.scope).toBe("full");
+      expect(v.detail).toContain("scope full");
+    });
+
+    it("accepts a NULL / absent scope (a pre-#1231 row, or a verify script with no step contract) and SAYS so", () => {
+      for (const row of [greenRow(), greenRow({ scope: null }), greenRow({ scope: undefined })]) {
+        const v = parseSweepVerdict(row, { nowMs: NOW });
+        expect(v.ok).toBe(true);
+        expect(v.scope).toBeNull();
+        expect(v.detail).toContain("scope <none: unknown, accepted>");
+      }
+    });
+
+    it("a RED row is still refused as red, whatever its scope — scope only qualifies a green", () => {
+      const v = parseSweepVerdict(greenRow({ outcome: "red", scope: "file-scoped" }), { nowMs: NOW });
+      expect(v.reason).toBe("red");
+      expect(v.scope).toBe("file-scoped");
+    });
+
+    it("a scoped green is REPROBEABLE — since #1231 a fresh sweep runs full, so a re-probe resolves it", () => {
+      expect(REPROBEABLE_SWEEP_REASONS).toContain("scoped");
+      const scoped = parseSweepVerdict(greenRow({ scope: "file-scoped" }), { nowMs: NOW });
+      const plan = planSweepAcquisition({ verdict: scoped, canRequest: true });
+      expect(plan.request).toBe(true);
+      expect(plan.detail).toContain("scoped");
+    });
   });
 
   it("refuses timeout/unverified — a non-answer is not a green (isBaseHealthAnswer)", () => {

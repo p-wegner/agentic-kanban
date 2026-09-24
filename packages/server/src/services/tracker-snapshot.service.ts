@@ -102,7 +102,13 @@ export async function buildTrackerSnapshot(
     blocked,
     reviewQueueDepth,
     baseBranchHealth: latestBaseHealth
-      ? { outcome: latestBaseHealth.outcome, sha: latestBaseHealth.sha, checkedAt: latestBaseHealth.createdAt }
+      ? {
+          outcome: latestBaseHealth.outcome,
+          sha: latestBaseHealth.sha,
+          checkedAt: latestBaseHealth.createdAt,
+          // #1231 — what the sweep RAN; a `green` at `file-scoped` is not a full-suite green.
+          scope: latestBaseHealth.scope ?? null,
+        }
       : null,
   };
 }
