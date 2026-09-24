@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { showToast } from "../lib/toast.js";
+import { planPluginSlugFallback } from "../lib/pluginViewRouting.js";
 
 /**
  * #1227 subrouting effects for PluginViewsPanel, pulled out of the component
@@ -64,15 +65,11 @@ export function usePluginSlugFallback({
   );
   useEffect(() => {
     if (loading) return;
-    const known = pluginSlug ? items.some((item) => item.pluginSlug === pluginSlug) : false;
-    if (pluginSlug && known) return;
-    const first = items[0];
-    if (!first) return; // nothing to fall back to — the empty-surface state covers this
-    if (pluginSlug && !known) {
-      showToast(`Unknown plugin "${pluginSlug}" — showing ${first.pluginName} instead.`, "warning");
-      if (requestedViewId && requestedViewId.slug === pluginSlug) clearRequestedViewId();
-    }
-    setStoreSelection({ kind: "plugin", slug: first.pluginSlug });
+    const decision = planPluginSlugFallback({ pluginSlug, items, requestedViewId });
+    if (decision.action === "none") return;
+    if (decision.toastMessage) showToast(decision.toastMessage, "warning");
+    if (decision.clearRequestedViewId) clearRequestedViewId();
+    setStoreSelection({ kind: "plugin", slug: decision.slug });
   }, [loading, pluginSlug, items, setStoreSelection, requestedViewId, clearRequestedViewId]);
 }
 
