@@ -47,6 +47,9 @@ import { listPluginDocs, readPluginDoc } from "../services/plugin-docs.service.j
  *           `GET .../views` / the status route instead of framing the URL; #252)
  *   POST   /api/plugins/:id/views/:viewId/stop  { projectId }
  *   POST   /api/plugins/:id/scripts/:name/run   { projectId } → { code, stdout, stderr, timedOut }
+ *            With `?stream=1` (or Accept: text/event-stream), same SSE shape as
+ *            `skills/:name/run?stream=1` below: periodic `progress` events carrying elapsed time,
+ *            the streamed stdout/stderr tail and the timeout limit, then a final `done`/`error`.
  *   POST   /api/plugins/:id/skills/:name/run
  *            { projectId, title?, description?, prompt?, workflowTemplateId? } →
  *            { issueId, issueNumber, workspaceId, branch } (creates a ticket + launches a
@@ -358,7 +361,46 @@ export function createPluginsRoute(
 
   router.post("/:id/scripts/:name/run", async (c) => {
     const projectId = await requireProjectId(c);
-    return c.json(await service.runScript(c.req.param("id"), c.req.param("name"), projectId));
+    const pluginId = c.req.param("id");
+    const scriptName = c.req.param("name");
+
+    const wantsStream = queryFlag(c, "stream")
+      || (c.req.header("accept") ?? "").includes("text/event-stream");
+    if (!wantsStream) {
+      return c.json(await service.runScript(pluginId, scriptName, projectId));
+    }
+
+    // Same SSE-from-POST shape as `skills/:name/run?stream=1` above: the response opens
+    // immediately, and periodic `progress` events (elapsed time + output tail) replace the
+    // bare "Running…" a multi-minute script used to show with no evidence it was alive.
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (event: unknown) => {
+          try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`)); }
+          catch { /* client went away mid-run; the run itself carries on */ }
+        };
+        try {
+          const result = await service.runScript(pluginId, scriptName, projectId, {
+            onProgress: (progress) => send({ stage: "progress", ...progress }),
+          });
+          send({ stage: "done", ...result });
+        } catch (err) {
+          send({ stage: "error", message: errorMessage(err) });
+        } finally {
+          try { controller.close(); } catch { /* already closed */ }
+        }
+      },
+    });
+    return new Response(stream, {
+      status: 200,
+      headers: {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+        "x-accel-buffering": "no",
+      },
+    });
   });
 
   router.post("/:id/skills/:name/run", async (c) => {

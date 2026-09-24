@@ -954,7 +954,7 @@ Endpoints you will use while developing (all take the plugin ROW id — see belo
 | `GET /api/plugins/:id/loops?projectId=` | per-loop ticket counts (planner NOT run) |
 | `POST /api/plugins/:id/loops/:name/advance` | one advance |
 | `POST /api/plugins/:id/loops/:name/pause\|resume` | stop/allow monitor auto-advance |
-| `POST /api/plugins/:id/scripts/:name/run` | run a script |
+| `POST /api/plugins/:id/scripts/:name/run` | run a script; add `?stream=1` for SSE progress (elapsed time, streamed output tail, the timeout limit) |
 | `POST /api/plugins/:id/skills/:name/run` | launch a skill — body `{ projectId, title?, prompt?, description?, workflowTemplateId? }`, add `?stream=1` for SSE progress |
 | `POST /api/plugins/:id/views/:viewId/start\|stop` | supervise a view |
 | `GET /api/projects/:projectId/plugin-surface` | everything enabled for a project, as the panel sees it |

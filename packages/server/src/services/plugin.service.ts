@@ -6,7 +6,7 @@ import {
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
 import { resolvePublicBoardUrl } from "../runtime-port.js";
-import { runPluginCommand, type PluginCommandResult } from "./plugin-exec.js";
+import { runPluginCommand, type PluginCommandProgress, type PluginCommandResult } from "./plugin-exec.js";
 import { createPluginLoopEngine, type LoopAdvanceResult, type LoopStatus } from "./plugin-loop.service.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { createPluginOutputLocationOps } from "./plugin-output-location.service.js";
@@ -178,7 +178,12 @@ export function createPluginService(deps: {
     return buildButlerFragments(projectId, { database, boardUrl, requireProject, peekOutputRepoPath });
   }
 
-  async function runScript(pluginRowId: string, scriptName: string, projectId: string): Promise<PluginScriptResult> {
+  async function runScript(
+    pluginRowId: string,
+    scriptName: string,
+    projectId: string,
+    opts?: { onProgress?: (progress: PluginCommandProgress) => void },
+  ): Promise<PluginScriptResult> {
     const plugin = await requirePlugin(pluginRowId);
     const script = (plugin.manifest.scripts ?? []).find((s) => s.name === scriptName);
     if (!script) throw new PluginError(`Script "${scriptName}" not found in plugin manifest`, "NOT_FOUND");
@@ -186,6 +191,7 @@ export function createPluginService(deps: {
     return runPluginCommand(substitutePluginPlaceholders(script.command, vars), {
       cwd: script.cwd === "plugin" ? plugin.localPath : outputRepoPath,
       env: substitutePluginEnv(script.env, vars),
+      onProgress: opts?.onProgress,
     });
   }
 
