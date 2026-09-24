@@ -6561,6 +6561,8 @@ paths:
                   type: string
                 tag:
                   type: string
+              additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -6605,6 +6607,8 @@ paths:
                   type: string
                 to:
                   type: string
+              additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success

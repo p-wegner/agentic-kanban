@@ -3,6 +3,7 @@ import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import { rcMergeBackBody, rcRetargetBody } from "./project-rc-body-schemas.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
 import { createRcMergeBackWorkspace, MergeBackError } from "../services/rc-merge-back.service.js";
@@ -45,7 +46,7 @@ export function createProjectRcRoute(
   // POST /api/projects/:id/rc/merge-back
   router.post("/:id/rc/merge-back", async (c) => {
     const projectId = c.req.param("id");
-    const body = await parseJsonBody<{ branch?: string; tag?: string }>(c);
+    const body = await parseJsonBody(c, rcMergeBackBody);
     const branch = (body.branch ?? "").trim();
     if (!isRcBranch(branch)) return c.json({ error: "branch must be a release-candidate branch (rc/<date>[-N])" }, 400);
     try {
@@ -63,7 +64,7 @@ export function createProjectRcRoute(
   // POST /api/projects/:id/rc/retarget
   router.post("/:id/rc/retarget", async (c) => {
     const projectId = c.req.param("id");
-    const body = await parseJsonBody<{ from?: string; to?: string }>(c);
+    const body = await parseJsonBody(c, rcRetargetBody);
     const from = (body.from ?? "").trim();
     const to = (body.to ?? "").trim();
     if (!isRcBranch(from) || !isRcBranch(to) || from === to) {
