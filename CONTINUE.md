@@ -104,14 +104,35 @@ mirror gap) and #1245 (base sweep's flake retry still header-only). Three agents
 first tool call (stream watchdog, 600 s); two resumed, one had a half-created worktree (no `.git`
 link) and was relaunched fresh. #1239 (heal on the candidate + merge-back) is building now.
 
+**#1239 landed too (`6962e3ac1f` + fix-forward `19aacf3583` for the route-body ratchet), gate
+green at `19aacf3583`.** Every ticket of the rc model is on master; the builder's honest gaps are
+in #1239's Done comment (no `healing` state written, no Settings field for
+`heal_review_posture_<id>`, the merge-back workspace still launches a no-op agent).
+
+**Master's own full sweep was red and is fixed.** The 19:45 UTC sweep on `80ab329c40` (39 min)
+failed one suite, `workspace-actions-route.test.ts`; cause bc1c543a35 (#1230): the explicit merge
+awaited a backoff clear against the default real db. Fixed in `879a5b1237` (route passes its
+database; test mocks the seam). A fresh master reprobe was triggered at the end of this pass. No
+heal ticket was filed because the stable board (`stable-20260923`) predates #1233.
+
+**Bootstrap caveat for the first rc promotion.** `pnpm promote` now wants a sweep row for
+`rc/<date>` (`--dry-run` at `19aacf3583` prints `WOULD REFUSE … wrong-branch`), but the sweep
+with `?branch=` support runs INSIDE the board, and the stable board is still the old build. So the
+first promotion onto today's master has to go through the old lane: a green MASTER sweep (in
+flight) and then `pnpm promote --recover` (pipeline + rollback are the gate) or `--force-sweep`,
+loudly. After that the rc lane is self-hosting. Operator's call.
+
+**Also done:** auto-merge re-enabled on the three fixture projects (`auto_merge_disabled_*` =
+false); `pnpm cli -- cleanup` removed the ten terminal train worktrees (2.7 GB). `cleanup` also
+lists three registered projects with a missing repoPath (`tsz-coarse/medium/fine` under
+`ticket-sizing-lab`); not touched.
+
 ### Next steps, in order
-1. Land #1239, run the gate once, mark Done. Then `pnpm promote --dry-run` on the main checkout:
-   the first `rc/<date>` plan against the real board (it may POST a reprobe and wait ~35 min).
+1. When the master reprobe lands green (`GET /api/projects/<id>/base-branch-health`): the first
+   promotion via `pnpm promote --recover` (see the bootstrap caveat), then `pnpm promote --dry-run`
+   again to watch the rc lane cut `rc/<date>`.
 2. Decide the dev board's posture: `flow` needs `promote_cadence_<id>` set first.
-3. Re-enable auto-merge on the three fixture projects paused 2026-09-20 for CPU (`c94e30c4…`,
-   `c6355fcd…`, `bc221c46…`); `pnpm cli -- cleanup --dry-run` should now list the ten train
-   worktrees (#1235).
-4. `origin/master` is pushed through `80ab329c40`.
+3. #1244, #1245 (Backlog, `no-auto-start`); the `tsz-*` missing-path projects.
 
 ### Verified by
 Each ticket's Done comment (POST `/api/issues/:id/comments`) names its commits and the wave's gate
