@@ -1,4 +1,4 @@
-// @gate:always-run — scans every package's src tree; imports nothing it checks.
+// @gate:always-run always — scans every package's src tree; imports nothing it checks.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

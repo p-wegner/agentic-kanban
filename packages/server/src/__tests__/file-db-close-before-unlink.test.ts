@@ -1,4 +1,4 @@
-// @gate:always-run — recursively walks every package's test tree; imports nothing it checks (#828).
+// @gate:always-run always — recursively walks every package's test tree; imports nothing it checks (#828).
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

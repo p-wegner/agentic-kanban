@@ -1,4 +1,4 @@
-// @gate:always-run — scans services/ by path and reads the provider registry; imports the
+// @gate:always-run when:packages/server/src/services/** — scans services/ by path and reads the provider registry; imports the
 // two provider-keyed tables it asserts over.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";

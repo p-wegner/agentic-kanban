@@ -1,4 +1,4 @@
-// @gate:always-run
+// @gate:always-run when:packages/server/src/services/session-manager/**
 /**
  * #543 ratchet — the FINALIZE side of the session-exit state machine has ONE implementation.
  *

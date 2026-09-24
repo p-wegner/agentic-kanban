@@ -1,4 +1,4 @@
-// @gate:always-run — reads sibling service sources to assert the claim invariant; imports nothing it checks (#647).
+// @gate:always-run when:packages/server/src/services/** — reads sibling service sources to assert the claim invariant; imports nothing it checks (#647).
 /**
  * Regression test for issue #366.
  *

@@ -1,4 +1,4 @@
-// @gate:always-run — recursively walks every package's source and test tree; imports nothing it checks (#816).
+// @gate:always-run always — recursively walks every package's source and test tree; imports nothing it checks (#816).
 import { describe, expect, it } from "vitest";
 import path, { join } from "node:path";
 import fs, { mkdtempSync, rmSync, writeFileSync } from "node:fs";

@@ -1,4 +1,4 @@
-// @gate:always-run — recursively walks the whole server src tree; imports nothing it measures.
+// @gate:always-run when:packages/server/src/** — recursively walks the whole server src tree; imports nothing it measures.
 import { describe, expect, it } from "vitest";
 import path from "node:path";
 import { compareNlocRatchet, measureFunctionNloc } from "../../../shared/__tests__/helpers/function-nloc.js";

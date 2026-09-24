@@ -1,4 +1,4 @@
-// @gate:always-run — recursively scans client src/lib and src/hooks; imports nothing it checks (#694).
+// @gate:always-run when:packages/client/src/**,.dependency-cruiser.cjs — recursively scans client src/lib and src/hooks; imports nothing it checks (#694).
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

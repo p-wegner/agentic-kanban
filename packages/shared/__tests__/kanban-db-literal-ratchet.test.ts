@@ -1,4 +1,4 @@
-// @gate:always-run — scans every package's src/ tree for raw kanban.db path literals; imports nothing it checks (#854).
+// @gate:always-run always — scans every package's src/ tree for raw kanban.db path literals; imports nothing it checks (#854).
 import { describe, it, expect } from "vitest";
 import { readdirSync, existsSync, readFileSync } from "node:fs";
 import { join, relative, sep, dirname } from "node:path";

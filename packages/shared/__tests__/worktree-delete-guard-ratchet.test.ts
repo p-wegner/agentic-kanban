@@ -1,4 +1,4 @@
-// @gate:always-run — scans every package's src tree for unguarded worktree deletions; imports nothing it checks (#713).
+// @gate:always-run always — scans every package's src tree for unguarded worktree deletions; imports nothing it checks (#713).
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, relative, dirname, sep } from "node:path";

@@ -1,4 +1,4 @@
-// @gate:always-run — scans the shared source tree and reads the pattern-language spec;
+// @gate:always-run when:packages/shared/src/**,docs/pattern-language/** — scans the shared source tree and reads the pattern-language spec;
 // imports nothing it checks.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";

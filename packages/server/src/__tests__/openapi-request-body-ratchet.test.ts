@@ -1,4 +1,4 @@
-// @gate:always-run
+// @gate:always-run when:packages/server/openapi.yaml,packages/server/src/routes/**
 //
 // #838 — the FOURTH half of the openapi gate. `openapi-drift.test.ts` proves the committed
 // spec matches what the generator produces, `openapi-route-coverage.test.ts` proves the

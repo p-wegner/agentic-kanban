@@ -1,4 +1,4 @@
-// @gate:always-run — walks the client src tree with the TS compiler; imports nothing it measures.
+// @gate:always-run when:packages/client/src/** — walks the client src tree with the TS compiler; imports nothing it measures.
 import { describe, expect, it } from "vitest";
 import path from "node:path";
 import { compareNlocRatchet, measureFunctionNloc } from "../../../shared/__tests__/helpers/function-nloc.js";

@@ -1,4 +1,4 @@
-// @gate:always-run — scans MIGRATIONS_DIR + the journal for drift; reachable by no single-file diff (#538).
+// @gate:always-run when:packages/shared/drizzle/**,packages/shared/src/schema/** — scans MIGRATIONS_DIR + the journal for drift; reachable by no single-file diff (#538).
 import { describe, it, expect } from "vitest";
 import { createClient } from "@libsql/client";
 import { readdirSync, readFileSync } from "node:fs";

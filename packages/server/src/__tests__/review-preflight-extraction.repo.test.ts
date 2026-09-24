@@ -1,4 +1,4 @@
-// @gate:always-run — the backfill assertion reads the 0134 migration .sql off disk, which is
+// @gate:always-run when:packages/shared/drizzle/** — the backfill assertion reads the 0134 migration .sql off disk, which is
 // not in this file's import graph (#798).
 // @covers review-merge.reconcile.stranded-review [persistence,state-transition,migration]
 /**

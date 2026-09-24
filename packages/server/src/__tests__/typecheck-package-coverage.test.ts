@@ -1,4 +1,4 @@
-// @gate:always-run
+// @gate:always-run when:scripts/typecheck.mjs,package.json,packages/*/tsconfig.json
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";

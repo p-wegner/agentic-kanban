@@ -1,4 +1,4 @@
-// @gate:always-run — recursively walks packages/server/src/routes and parses every file; it
+// @gate:always-run when:packages/server/src/routes/** — recursively walks packages/server/src/routes and parses every file; it
 // imports nothing it checks, so `vitest related` can never select it from a route diff (#806).
 import { describe, expect, it } from "vitest";
 import path from "node:path";

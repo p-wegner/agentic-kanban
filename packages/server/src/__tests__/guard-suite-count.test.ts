@@ -1,4 +1,4 @@
-// @gate:always-run - asserts a property of the gate's own scanner; before #891 this suite
+// @gate:always-run when:packages/server/src/services/always-run-guard-floor.ts,packages/server/src/services/pre-merge-gate-tier.ts - asserts a property of the gate's own scanner; before #891 this suite
 // was force-run only because it holds the marker in a `const MARKER` fixture below, which
 // the old substring match could not tell apart from a declaration.
 /**

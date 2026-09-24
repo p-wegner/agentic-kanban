@@ -1,4 +1,4 @@
-// @gate:always-run — scans the packages tree for hand-rolled `roster_` / `reserve_allowed_`
+// @gate:always-run always — scans the packages tree for hand-rolled `roster_` / `reserve_allowed_`
 // reads; that half has no import edge (mirrors risk-posture-raw-read-ratchet.test.ts, #911).
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";

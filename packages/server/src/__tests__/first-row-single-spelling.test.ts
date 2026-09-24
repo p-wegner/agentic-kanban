@@ -1,4 +1,4 @@
-// @gate:always-run
+// @gate:always-run when:packages/server/src/repositories/**,packages/server/src/lib/first-row.ts
 //
 // #772 — the `firstRow` ratchet.
 //

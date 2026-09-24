@@ -1,4 +1,4 @@
-// @gate:always-run — recursively walks the whole client source tree and parses every file; it
+// @gate:always-run when:packages/client/src/** — recursively walks the whole client source tree and parses every file; it
 // imports nothing it measures, so `vitest related` can never select it from a component diff.
 import { describe, expect, it } from "vitest";
 import path from "node:path";

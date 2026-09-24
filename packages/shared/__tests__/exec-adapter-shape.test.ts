@@ -1,4 +1,4 @@
-// @gate:always-run — scans every `lib/*-exec.ts` adapter in the shared tree.
+// @gate:always-run when:packages/shared/src/lib/** — scans every `lib/*-exec.ts` adapter in the shared tree.
 /**
  * #591 — `exec adapter` is a named kind with ONE result shape.
  *

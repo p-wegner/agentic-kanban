@@ -1,4 +1,4 @@
-// @gate:always-run — asserts a property of the whole migrated SQLite schema, which arrives via
+// @gate:always-run when:packages/shared/drizzle/**,packages/shared/src/schema/** — asserts a property of the whole migrated SQLite schema, which arrives via
 // migration .sql files read from MIGRATIONS_DIR; none of that is in this file's import graph (#812/#813).
 import { describe, it, expect } from "vitest";
 import { getTableConfig, SQLiteTable } from "drizzle-orm/sqlite-core";

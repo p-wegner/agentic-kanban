@@ -1,4 +1,4 @@
-// @gate:always-run — meta-ratchet over the always-run classification itself; imports nothing it checks (#538).
+// @gate:always-run always — meta-ratchet over the always-run classification itself; imports nothing it checks (#538).
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
@@ -356,6 +356,35 @@ describe("always-run marker ratchet (#538)", () => {
     ).toEqual([]);
   });
 
+  /**
+   * #1232 — a marker with neither a `when:` territory nor the explicit `always` is a marker
+   * nobody reviewed. Every one of the 155 bare markers got a spelling in one commit (117 `when:`,
+   * 38 `always`), so the grandfathered count is ZERO: a new bare marker fails here. The choice is
+   * the reviewed one — name the territory the suite reads, or say `always — <reason>` when the
+   * territory is the whole tree — because under `KANBAN_TEST_GUARDS=intersecting` the two are
+   * treated differently (a territory guard runs when the diff reaches it; an `always` guard is
+   * deferred to the base sweep), and a bare marker would silently get the second behaviour.
+   */
+  it("no bare marker remains — every marked suite declares `when:` or `always` (#1232)", () => {
+    const bare: string[] = [];
+    for (const { label, testsDir } of SCAN_PACKAGES) {
+      for (const { rel, full } of collectTestFiles(testsDir)) {
+        const marker = parseAlwaysRunMarker(fs.readFileSync(full, "utf8"));
+        if (!marker) continue;
+        if (marker.when.length === 0 && !marker.always) bare.push(`${label}/${rel}`);
+      }
+    }
+    expect(
+      bare,
+      `These suites carry a BARE "${MARKER}" marker. Give each a reviewed spelling: ` +
+        `\`// @gate:always-run when:<glob>[,<glob>…]\` naming the territory it reads, or ` +
+        `\`// @gate:always-run always — <reason>\` when its subject is the whole tree (a scanner ` +
+        `over every package). Under KANBAN_TEST_GUARDS=intersecting the first runs when the diff ` +
+        `reaches it and the second is deferred to the base sweep, so the spelling is a decision:\n  ` +
+        bare.join("\n  "),
+    ).toEqual([]);
+  });
+
   it("KNOWN_SAFE_UNMARKED entries are not stale", () => {
     const stale: string[] = [];
     const byPath = collectByPath();
@@ -447,6 +476,22 @@ describe("always-run marker ratchet (#538)", () => {
         when: ["packages/server/src/routes/**", "docs/env-vars.md"],
       });
       expect(parseAlwaysRunMarker('const M = "@gate:always-run";\n')).toBeNull();
+    });
+
+    /**
+     * #1232 — the explicit unconditional spelling. Same meaning as a bare marker for every
+     * runner rule (`when: []`), plus `always: true`, which is what lets the zero-bare rule below
+     * tell a reviewed unconditional guard from one nobody looked at.
+     */
+    it("`always` parses as unconditional AND reviewed; the token must follow the marker", () => {
+      const ALWAYS = "// @gate:always-run always — walks every package's src tree\nimport {} from \"vitest\";\n";
+      expect(isAlwaysRunMarked(ALWAYS)).toBe(true);
+      expect(parseAlwaysRunMarker(ALWAYS)).toEqual({ when: [], always: true });
+      expect(guardAppliesToChanges(parseAlwaysRunMarker(ALWAYS)!.when, ["docs/x.md"])).toBe(true);
+      // A rationale that merely contains the word is still a bare marker.
+      expect(parseAlwaysRunMarker("// @gate:always-run — this one always reads the tree\n")).toEqual({ when: [] });
+      // `when:` and `always` are alternatives, not a pair.
+      expect(parseAlwaysRunMarker(SCOPED)).not.toHaveProperty("always");
     });
 
     it("comma-space formatting preserves every territory before the trailing rationale", () => {

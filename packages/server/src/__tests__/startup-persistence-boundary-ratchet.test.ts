@@ -1,4 +1,4 @@
-// @gate:always-run — scans the whole `packages/server/src/startup/` tree and the repo's
+// @gate:always-run when:packages/server/src/startup/**,.dependency-cruiser.cjs — scans the whole `packages/server/src/startup/` tree and the repo's
 // dependency-cruiser config; it imports none of the files it judges (#715).
 /**
  * `startup/` may not grow another raw-persistence offender (#715).

@@ -1,4 +1,4 @@
-// @gate:always-run — scans the client source tree by path; imports nothing it checks.
+// @gate:always-run when:packages/client/src/** — scans the client source tree by path; imports nothing it checks.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

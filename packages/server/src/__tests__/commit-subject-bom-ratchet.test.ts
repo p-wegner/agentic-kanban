@@ -1,4 +1,4 @@
-// @gate:always-run
+// @gate:always-run always — reads the git history, which no file territory names
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";

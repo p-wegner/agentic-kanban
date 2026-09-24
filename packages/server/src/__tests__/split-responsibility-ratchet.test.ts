@@ -1,4 +1,4 @@
-// @gate:always-run — reads source files it does not import; invisible to `vitest related`.
+// @gate:always-run when:packages/server/src/**,scripts/check-god-modules.mjs — reads source files it does not import; invisible to `vitest related`.
 /**
  * The #728 split-responsibility remainder may only SHRINK.
  *

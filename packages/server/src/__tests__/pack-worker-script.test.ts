@@ -1,4 +1,4 @@
-// @gate:always-run — spawns `scripts/pack-worker.mjs` and reads its source; nothing here
+// @gate:always-run when:scripts/pack-worker.mjs — spawns `scripts/pack-worker.mjs` and reads its source; nothing here
 // is reachable through this package's import graph, so scoped test selection would miss it.
 /**
  * `scripts/pack-worker.mjs` is the fast track for handing a worker tarball to a machine

@@ -1,4 +1,4 @@
-// @gate:always-run — reads session-manager/types.ts off disk to compare the teardown
+// @gate:always-run when:packages/server/src/services/session-manager/** — reads session-manager/types.ts off disk to compare the teardown
 // list against the state shape; imports the module but asserts on its SOURCE.
 //
 // #543. The per-session teardown was a hand-maintained delete-list repeated at several

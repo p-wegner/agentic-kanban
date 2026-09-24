@@ -1,4 +1,4 @@
-// @gate:always-run — reads the resolver's SOURCE TEXT and a docs page; imports neither (#755).
+// @gate:always-run when:packages/server/src/services/worker-fleet.service.ts,docs/worker-fleet.md — reads the resolver's SOURCE TEXT and a docs page; imports neither (#755).
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

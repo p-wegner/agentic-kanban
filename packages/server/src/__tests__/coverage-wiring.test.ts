@@ -1,5 +1,5 @@
 // @covers platform.testing.coverage [regression-guard]
-// @gate:always-run — reads the ROOT package.json, the arch-gate workflow and all four
+// @gate:always-run when:package.json,scripts/coverage-report.mjs,.github/workflows/**,packages/*/vitest.config.ts,packages/client/vite.config.ts — reads the ROOT package.json, the arch-gate workflow and all four
 // packages' vitest/vite configs; it imports none of them, so import-graph scoping cannot
 // see it (#765).
 /**

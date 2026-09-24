@@ -1,4 +1,4 @@
-// @gate:always-run — pins the scheduler every background reconciler depends on (#529).
+// @gate:always-run when:packages/server/src/lib/periodic-sweep.ts — pins the scheduler every background reconciler depends on (#529).
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { startPeriodicSweep } from "../lib/periodic-sweep.js";
 

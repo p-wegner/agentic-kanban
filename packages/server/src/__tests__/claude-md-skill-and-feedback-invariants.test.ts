@@ -1,4 +1,4 @@
-// @gate:always-run — reads CLAUDE.md, .claude/skills via git, and builtin-skills.ts; imports
+// @gate:always-run when:CLAUDE.md,.claude/skills/**,packages/server/src/builtin-skills.ts,packages/server/src/services/board-feedback-routing.ts — reads CLAUDE.md, .claude/skills via git, and builtin-skills.ts; imports
 // nothing it checks beyond the two contracts it asserts about.
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";

@@ -1,4 +1,4 @@
-// @gate:always-run — reads docs/env-vars.md, a file outside any src tree; imports nothing
+// @gate:always-run when:docs/env-vars.md,packages/shared/src/lib/** — reads docs/env-vars.md, a file outside any src tree; imports nothing
 // it checks beyond the registry itself.
 import { describe, expect, it, beforeEach } from "vitest";
 import fs from "node:fs";

@@ -1,4 +1,4 @@
-// @gate:always-run — reads MIGRATIONS_DIR (the journal + meta/ snapshots); reachable by no single-file diff.
+// @gate:always-run when:packages/shared/drizzle/**,packages/shared/src/schema/** — reads MIGRATIONS_DIR (the journal + meta/ snapshots); reachable by no single-file diff.
 /**
  * The drizzle snapshot baseline tracks the newest migration (#789).
  *

@@ -1,4 +1,4 @@
-// @gate:always-run — reads .claude/settings.json + spawns the live hook scripts outside src/; imports nothing it checks (#538).
+// @gate:always-run when:.claude/settings.json,.claude/hooks/** — reads .claude/settings.json + spawns the live hook scripts outside src/; imports nothing it checks (#538).
 /**
  * #914 — two costs paid on every tool call, both removed.
  *

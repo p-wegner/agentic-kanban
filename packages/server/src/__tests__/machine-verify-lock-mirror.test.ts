@@ -1,4 +1,4 @@
-// @gate:always-run - imports a repo-root script (scripts/machine-verify-lock.mjs) that lives
+// @gate:always-run when:scripts/machine-verify-lock.mjs,packages/server/src/lib/machine-verify-lock.ts - imports a repo-root script (scripts/machine-verify-lock.mjs) that lives
 // outside every package's module graph, so `vitest related` cannot select this suite from a
 // change to the script half — which is exactly the half whose drift it exists to catch.
 /**

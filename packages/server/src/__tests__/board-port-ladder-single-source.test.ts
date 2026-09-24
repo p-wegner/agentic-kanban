@@ -1,4 +1,4 @@
-// @gate:always-run — scans every package's src tree and reads the dev proxy (a .mjs outside
+// @gate:always-run always — scans every package's src tree and reads the dev proxy (a .mjs outside
 // src); imports nothing it checks except the two resolvers it compares.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";

@@ -1,4 +1,4 @@
-// @gate:always-run — walks the services/lib/repositories trees and the routes tree; imports nothing it checks.
+// @gate:always-run when:packages/server/src/** — walks the services/lib/repositories trees and the routes tree; imports nothing it checks.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

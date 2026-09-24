@@ -1,4 +1,4 @@
-// @gate:always-run — reads repo files and .claude/settings.json directly; the one import
+// @gate:always-run always — reads repo files and .claude/settings.json directly; the one import
 // (DISCLOSE_CONTEXT_COMMAND) is the source-of-truth constant for a single exempt command, not
 // a stand-in for reading the tree.
 import { describe, expect, it } from "vitest";

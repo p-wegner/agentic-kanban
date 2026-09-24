@@ -1,4 +1,4 @@
-// @gate:always-run — scans components/ and reads the registry; imports only what it asserts.
+// @gate:always-run when:packages/client/src/** — scans components/ and reads the registry; imports only what it asserts.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

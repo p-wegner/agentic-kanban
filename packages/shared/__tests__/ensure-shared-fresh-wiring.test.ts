@@ -1,4 +1,4 @@
-// @gate:always-run — reads the repo-root package.json, which it does not import (#583).
+// @gate:always-run when:package.json,scripts/ensure-shared-fresh.mjs,scripts/typecheck.mjs — reads the repo-root package.json, which it does not import (#583).
 //
 // Guard for #865/#582. `scripts/ensure-shared-fresh.mjs` rebuilds a stale
 // `packages/shared/dist` before it can produce a plausible-looking

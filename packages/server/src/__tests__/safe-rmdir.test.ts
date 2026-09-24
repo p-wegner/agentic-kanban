@@ -1,4 +1,4 @@
-// @gate:always-run — spawns scripts/safe-rmdir.mjs, a script under `scripts/` that no import graph reaches (#1033).
+// @gate:always-run when:scripts/safe-rmdir.mjs — spawns scripts/safe-rmdir.mjs, a script under `scripts/` that no import graph reaches (#1033).
 /**
  * #1033 — `scripts/safe-rmdir.mjs` refuses to delete a tree that holds a reparse point
  * whose target lies OUTSIDE the tree, and deletes one that does not. Junction-following

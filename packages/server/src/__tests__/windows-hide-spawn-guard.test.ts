@@ -1,4 +1,4 @@
-// @gate:always-run — walks every package's src tree, so its subject is not in this
+// @gate:always-run always — walks every package's src tree, so its subject is not in this
 // file's import graph and scoped test selection must not skip it.
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";

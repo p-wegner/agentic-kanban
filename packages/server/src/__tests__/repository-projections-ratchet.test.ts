@@ -1,4 +1,4 @@
-// @gate:always-run — recursively walks the repositories tree; imports nothing it checks.
+// @gate:always-run when:packages/server/src/repositories/** — recursively walks the repositories tree; imports nothing it checks.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

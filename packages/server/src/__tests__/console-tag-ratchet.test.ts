@@ -1,4 +1,4 @@
-// @gate:always-run — scans the services/ and startup/ trees; imports nothing it checks.
+// @gate:always-run when:packages/server/src/services/**,packages/server/src/startup/** — scans the services/ and startup/ trees; imports nothing it checks.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

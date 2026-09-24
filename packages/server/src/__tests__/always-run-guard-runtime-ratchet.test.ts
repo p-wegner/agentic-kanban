@@ -225,8 +225,44 @@ import {
  * about, so an ordinary diff elsewhere pays nothing for it — which, per this file's own doc
  * above, does not move THIS worst-case number. Should shrink at the next `durations.json`
  * capture; it walks ~190 small test files and is expected to run in well under 1s.
+ *
+ * -- Tenth disclosed movement (2026-09-24, #1232) — 585,000 -> 594,000 --------------------
+ *
+ * Three guards arrived with #1232, each at the ASSUMED 3,000 ms:
+ *   `test-mine-guards-intersecting.test.mjs`   — imports `scripts/test-mine.mjs` (`when:` that script)
+ *   `guards-at-merge.test.ts`                  — marked by policy, like `gate-tier-scoping` (`when:`
+ *                                                the three gate modules it asserts against)
+ *   `guards-at-merge-raw-read-ratchet.test.ts` — scans every package's src tree (`always`)
+ *
+ * The argument for the seconds: #1232 is the ticket that makes this number stop being what a
+ * merge pays. Under the `iterate` posture the gate now runs `KANBAN_TEST_GUARDS=intersecting`,
+ * which forces only `when:`-territory guards the diff intersects and DEFERS every bare/`always`
+ * marker to the base sweep — so this unconditional total is now the SWEEP's floor (and
+ * `standard`'s, unchanged), while `MERGE_FLOOR_BASELINE_MS` below is what an `iterate` merge
+ * pays. The same commit gave every one of the 155 bare markers a reviewed spelling: 117 got a
+ * `when:` territory, 38 (the whole-tree scanners) an explicit `always`. None of that moves this
+ * number — a `when:` narrows what a diff pays, never the worst case — which is exactly why the
+ * second number exists. All three should shrink at the next `durations.json` capture.
  */
-const BASELINE_TOTAL_MS = 585_000;
+const BASELINE_TOTAL_MS = 594_000;
+
+/**
+ * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative
+ * small change set: the 3-file client change #1232 was measured on (arch 43s, typecheck 19s,
+ * tests 118s of which the impact selection was ~2 files), reduced to the one component file
+ * that stands for it. Under `intersecting` that diff forces 14 guard suites / ~65s (measured
+ * 2026-09-24 from the committed durations), against 53 suites / ~141s under `all` — and the
+ * bare floor of ~594s the sweep still runs.
+ *
+ * Shrink-only, banked like the number above: over it is a `when:` territory that grew to cover
+ * the client tree for no reason, or a new client-territory guard nobody priced; well under it is
+ * a stale baseline to lower. The path need not exist — the rule is a glob match — and it must not
+ * be widened to a server file without re-banking: a server change intersects every
+ * `when:packages/server/src/**` guard and measures ~226s (48 suites), which is a different
+ * number about a different territory.
+ */
+const MERGE_FLOOR_CHANGE_SET = ["packages/client/src/components/PluginViewsPanel.tsx"];
+const MERGE_FLOOR_BASELINE_MS = 66_000;
 
 /**
  * How far under the baseline is tolerated before it counts as stale.
@@ -246,9 +282,10 @@ const STALE_SLACK_MS = 30_000;
  * mostly guesswork — hence a ceiling rather than a freeze. Measured at 15 when this landed.
  *
  * Raised 25 -> 26 with #1221's `pre-merge-gate-admission-mock-ratchet.test.ts`, added at the
- * assumed duration (unmeasured until the next `durations.json` capture).
+ * assumed duration (unmeasured until the next `durations.json` capture). 26 -> 29 with #1232's
+ * three guards (see the tenth movement above), same caveat.
  */
-const MAX_ASSUMED_FILES = 26;
+const MAX_ASSUMED_FILES = 29;
 
 const REPO_ROOT = path.resolve(import.meta.dirname!, "..", "..", "..", "..");
 
@@ -307,6 +344,60 @@ describe("always-run guard RUNTIME ratchet (#1042)", () => {
         `~${seconds(BASELINE_TOTAL_MS)}. Lower BASELINE_TOTAL_MS to ${Math.round(current.estMs)} — a ` +
         `baseline that is never lowered is a budget, not a ratchet.`,
     ).toBeGreaterThan(BASELINE_TOTAL_MS - STALE_SLACK_MS);
+  });
+
+  /**
+   * #1232 — the second number: what an `iterate` merge pays for the representative change set
+   * under `KANBAN_TEST_GUARDS=intersecting`. Same shape as the floor above (shrink-only, stale
+   * check), and read through the same `alwaysRunFloor`, so the two cannot disagree about what a
+   * marker means.
+   */
+  describe("the merge-time floor under `intersecting` (#1232)", () => {
+    const mergeFloor = (): Floor =>
+      alwaysRunFloor({
+        root: REPO_ROOT,
+        durations: readTestDurations(REPO_ROOT),
+        changedFiles: MERGE_FLOOR_CHANGE_SET,
+        guards: "intersecting",
+      }) as Floor;
+
+    it("stays at or below its banked baseline for the representative change set", () => {
+      const current = mergeFloor();
+      const suites = current.files.map((f) => `  ${seconds(f.ms).padStart(6)} ${f.file}${f.assumed ? " (assumed)" : ""}`).join("\n");
+      expect(
+        Math.round(current.estMs),
+        `Under KANBAN_TEST_GUARDS=intersecting the representative change set ` +
+          `${JSON.stringify(MERGE_FLOOR_CHANGE_SET)} now forces ${current.count} guard suite(s) / ` +
+          `~${seconds(current.estMs)} (baseline ~${seconds(MERGE_FLOOR_BASELINE_MS)}). This is what an ` +
+          `\`iterate\` merge pays on top of its impact selection. Either a \`when:\` territory widened ` +
+          `over the client tree, or a new client-territory guard arrived unpriced:\n${suites}\n` +
+          `Narrow the territory, make the suite cheaper, or raise MERGE_FLOOR_BASELINE_MS with an ` +
+          `argument for the seconds.`,
+      ).toBeLessThanOrEqual(MERGE_FLOOR_BASELINE_MS);
+    });
+
+    it("its baseline is not stale either", () => {
+      const current = mergeFloor();
+      expect(
+        Math.round(current.estMs),
+        `The merge-time floor is now ~${seconds(current.estMs)}, well under the pinned ` +
+          `~${seconds(MERGE_FLOOR_BASELINE_MS)}. Lower MERGE_FLOOR_BASELINE_MS to ${Math.round(current.estMs)}.`,
+      ).toBeGreaterThan(MERGE_FLOOR_BASELINE_MS - STALE_SLACK_MS);
+    });
+
+    it("is genuinely narrower than the same change set under `all` — the deferral is real", () => {
+      const all = alwaysRunFloor({
+        root: REPO_ROOT,
+        durations: readTestDurations(REPO_ROOT),
+        changedFiles: MERGE_FLOOR_CHANGE_SET,
+        guards: "all",
+      }) as Floor;
+      const merge = mergeFloor();
+      expect(merge.count).toBeLessThan(all.count);
+      expect(merge.estMs).toBeLessThan(all.estMs);
+      // And every suite it keeps declares a territory — nothing bare or `always` slipped in.
+      expect(merge.count).toBeGreaterThan(0);
+    });
   });
 
   it("the estimate does not silently become guesswork", () => {

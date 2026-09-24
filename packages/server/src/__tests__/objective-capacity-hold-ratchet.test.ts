@@ -1,4 +1,4 @@
-// @gate:always-run — reads scripts/board-monitor/objective.md, a repo file no source module imports (#1029).
+// @gate:always-run when:scripts/board-monitor/objective.md — reads scripts/board-monitor/objective.md, a repo file no source module imports (#1029).
 /**
  * The Conductor's capacity brake is GENERATED, never hand-written (#1029).
  *

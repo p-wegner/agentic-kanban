@@ -1,4 +1,4 @@
-// @gate:always-run — reads `package.json`, `scripts/gate-always-run.mjs` and the two
+// @gate:always-run when:package.json,scripts/gate-always-run.mjs,scripts/test-mine.mjs,.claude/skills/direct-master/**,.codex/skills/direct-master/** — reads `package.json`, `scripts/gate-always-run.mjs` and the two
 // `direct-master` SKILL.md copies; it imports none of them, so `vitest related` is blind to it.
 //
 // #817 — the `@gate:always-run` guard set had NO enforcement point on the direct-master path.

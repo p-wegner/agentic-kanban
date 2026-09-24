@@ -1,4 +1,4 @@
-// @gate:always-run — scans every package's src tree and reads the shared key table; imports
+// @gate:always-run always — scans every package's src tree and reads the shared key table; imports
 // nothing it checks except that table.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";

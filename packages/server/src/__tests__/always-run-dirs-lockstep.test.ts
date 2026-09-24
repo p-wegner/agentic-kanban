@@ -1,4 +1,4 @@
-// @gate:always-run
+// @gate:always-run when:scripts/test-mine.mjs,packages/server/src/services/always-run-guard-floor.ts,packages/server/src/services/pre-merge-gate-tier.ts,packages/server/src/__tests__/always-run-marker-ratchet.test.ts
 /**
  * #639 — the gate counted a guard suite it structurally could not run.
  *

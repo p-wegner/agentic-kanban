@@ -1,4 +1,4 @@
-// @gate:always-run
+// @gate:always-run when:scripts/test-mine.mjs,package.json,packages/*/package.json
 /**
  * #641 — the flaky-exclusion list had no counter-pressure, and #640 — nothing ran what it hid.
  *

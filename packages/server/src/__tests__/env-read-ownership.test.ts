@@ -1,4 +1,4 @@
-// @gate:always-run — walks every package's src tree plus `scripts/` and reads `docs/env-vars.md`;
+// @gate:always-run always — walks every package's src tree plus `scripts/` and reads `docs/env-vars.md`;
 // it imports none of the files it judges.
 /**
  * Every `process.env` read has a known OWNER (#707).
