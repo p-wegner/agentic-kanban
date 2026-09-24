@@ -659,3 +659,109 @@ describe("foreign-checkout hard block (#959)", () => {
     expect(res.blocked).toBe(true);
   });
 });
+
+/**
+ * #1237 — the base branch REF is never written from a board-launched session.
+ *
+ * The incident: the auto-review session for #1228 was briefed to `git rebase origin/master`,
+ * found that ref five days stale (nothing pushes master in this board's model), replayed 112
+ * commits onto it, and then ran `git update-ref refs/heads/master origin/master` — force-moving
+ * the SHARED master back five days. Every check above arms on PATHS, and a ref write from inside
+ * the worktree names no other worktree's path, so nothing blocked it. These are the ref-write
+ * shapes, plus the reads and own-branch writes that must keep passing.
+ */
+describe("base-branch ref write hard block (#1237)", () => {
+  const board = () => ({ KANBAN_WORKTREE_DIR: worktree });
+  const bash = (command: string, env = board()) =>
+    runHook({ tool_name: "Bash", tool_input: { command }, cwd: worktree }, env);
+
+  it("BLOCKS the exact incident command: git update-ref refs/heads/master <X>", () => {
+    const res = bash("git update-ref refs/heads/master origin/master");
+    expect(res.blocked).toBe(true);
+    expect(res.reason).toContain("Base-branch ref write blocked");
+  });
+
+  it("BLOCKS git branch -f master <X> and git branch --force master <X>", () => {
+    expect(bash("git branch -f master deadbeef").blocked).toBe(true);
+    expect(bash("git branch --force master deadbeef").blocked).toBe(true);
+  });
+
+  it("BLOCKS git push origin master, push HEAD:master, and any push --force", () => {
+    expect(bash("git push origin master").blocked).toBe(true);
+    expect(bash("git push origin HEAD:master").blocked).toBe(true);
+    expect(bash("git push --force origin feature/ak-91").blocked).toBe(true);
+  });
+
+  it("BLOCKS git symbolic-ref targeting refs/heads/master", () => {
+    expect(bash("git symbolic-ref HEAD refs/heads/master").blocked).toBe(true);
+  });
+
+  it("BLOCKS git checkout master and git switch master (a worktree is never ON the base)", () => {
+    expect(bash("git checkout master").blocked).toBe(true);
+    expect(bash("git switch master").blocked).toBe(true);
+  });
+
+  it("protects BOTH master and main when the board exports no KANBAN_BASE_BRANCH, and says so", () => {
+    const res = bash("git update-ref refs/heads/main deadbeef");
+    expect(res.blocked).toBe(true);
+    expect(res.reason).toContain("KANBAN_BASE_BRANCH is not set");
+    expect(res.reason).toContain("`master` and `main`");
+  });
+
+  it("takes the base name from KANBAN_BASE_BRANCH when the board exports it", () => {
+    const env = { ...board(), KANBAN_BASE_BRANCH: "develop" };
+    expect(bash("git branch -f develop deadbeef", env).blocked).toBe(true);
+    expect(bash("git branch -f develop deadbeef", env).reason).toContain("from KANBAN_BASE_BRANCH");
+    // With a declared base, an unrelated `master` is just another branch.
+    expect(bash("git update-ref refs/heads/master deadbeef", env).blocked).toBe(false);
+  });
+
+  it("names the alternative — rebase your OWN branch onto the LOCAL base, never move the base", () => {
+    const res = bash("git update-ref refs/heads/master origin/master");
+    expect(res.reason).toContain("git rebase master");
+    expect(res.reason).toMatch(/never move/i);
+    expect(res.reason).toContain("MAIN checkout only");
+  });
+
+  it("passes the same commands through WITHOUT a board-declared worktree (a hand-run main-checkout session)", () => {
+    const none = { KANBAN_WORKTREE_DIR: undefined };
+    expect(bash("git update-ref refs/heads/master deadbeef", none).blocked).toBe(false);
+    expect(bash("git branch -f master deadbeef", none).blocked).toBe(false);
+    expect(bash("git push origin master", none).blocked).toBe(false);
+  });
+
+  it("ALLOWS git rebase master — rebasing the OWN branch onto the local base is the instruction", () => {
+    expect(bash("git rebase master").blocked).toBe(false);
+  });
+
+  it("ALLOWS update-ref on the agent's OWN branch ref", () => {
+    expect(bash("git update-ref refs/heads/feature/x deadbeef").blocked).toBe(false);
+  });
+
+  it("ALLOWS reading the base: log, diff, merge-base, checkout <base> -- <file>, branching OFF it", () => {
+    expect(bash("git log master..HEAD --oneline").blocked).toBe(false);
+    expect(bash("git diff master --stat").blocked).toBe(false);
+    expect(bash("git merge-base master HEAD").blocked).toBe(false);
+    expect(bash("git checkout master -- seed.md").blocked).toBe(false);
+    expect(bash("git checkout -b feature/y master").blocked).toBe(false);
+    expect(bash("git switch -c feature/y master").blocked).toBe(false);
+    expect(bash("git push origin feature/ak-91").blocked).toBe(false);
+  });
+
+  it("ignores the incident command quoted inside a heredoc BODY (data, not a command)", () => {
+    expect(bash("cat <<'EOF' > note.md\ngit update-ref refs/heads/master x\nEOF").blocked).toBe(false);
+  });
+
+  it("has NO override — the ALLOW_CROSS_WORKTREE_WRITE prefix does not lift it", () => {
+    const res = bash("ALLOW_CROSS_WORKTREE_WRITE=1 git update-ref refs/heads/master deadbeef");
+    expect(res.blocked).toBe(true);
+  });
+
+  it("holds for the Codex/Pi shell input shape too", () => {
+    const res = runHook(
+      { tool_name: "shell", tool_input: { command: "git update-ref refs/heads/master deadbeef" }, cwd: worktree },
+      board(),
+    );
+    expect(res.blocked).toBe(true);
+  });
+});
