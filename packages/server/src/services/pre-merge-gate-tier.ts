@@ -10,6 +10,7 @@ import { gateVerificationKey } from "./merge-gate-tree-memo.js";
 import { resolveSelectorId } from "./test-impact-selector-id.js";
 import { buildStepTimingNote, type VerifyStepTiming } from "./verify-step-timings.js";
 import { archVerifyEnv } from "./arch-verify-env.js";
+import { guardsAtMergeEnv, resolveGuardsAtMerge, type GuardsAtMerge } from "./guards-at-merge.js";
 import {
   resolveTestImpactBudget,
   resolveTestImpactBudgetEnv,
@@ -130,9 +131,15 @@ export async function resolveGateTierFor(
   posture: RiskPosture;
   fromPosture: boolean;
   budget: ParsedTestImpactBudget | null;
+  /** Which guards the merge gate forces (#1232) — from the same prefMap, same instant. */
+  guardsAtMerge: GuardsAtMerge;
 }> {
   const prefMap = toPrefMap(await getAllPreferencesCached(database).catch(() => []));
-  return { ...resolveGateTier(prefMap, projectId), budget: resolveTestImpactBudget(prefMap, projectId) };
+  return {
+    ...resolveGateTier(prefMap, projectId),
+    budget: resolveTestImpactBudget(prefMap, projectId),
+    guardsAtMerge: resolveGuardsAtMerge(prefMap, projectId).guardsAtMerge,
+  };
 }
 
 /**
@@ -467,17 +474,26 @@ export function buildVerifyEnv(args: {
   /** `resolveGateFileScopeEmission`'s `emitFileScope`. */
   emitFileScope: boolean;
   changedFiles: readonly string[];
+  /**
+   * Which guards the run forces (#1232). `intersecting` emits `KANBAN_TEST_GUARDS=intersecting`
+   * in EVERY arm, the guards-only one included (a docs-only diff under `iterate` pays only the
+   * docs-territory guards); `all`/absent emits nothing, so every other posture's env is
+   * byte-identical to before.
+   */
+  guardsAtMerge?: GuardsAtMerge;
 }): Record<string, string> {
   // #1052: see `archVerifyEnv`'s own header — unconditional (base of every branch below) so
   // `check:arch` scoping applies at every tier, not just the ones that also scope tests.
   const archEnv = archVerifyEnv(args.changedFiles);
+  const guardsEnv = guardsAtMergeEnv(args.guardsAtMerge);
   if (args.guardsOnly) return {
     ...args.isolationEnv,
     ...archEnv,
+    ...guardsEnv,
     KANBAN_TEST_GUARDS_ONLY: "1",
     ...(args.changedFiles.length > 0 ? { KANBAN_TEST_FILES: args.changedFiles.join(",") } : {}),
   };
-  const base = { ...args.isolationEnv, ...archEnv, ...args.impactEnv };
+  const base = { ...args.isolationEnv, ...archEnv, ...guardsEnv, ...args.impactEnv };
   if (!args.packagesEnv) return base;
   return {
     ...base,
@@ -560,6 +576,16 @@ export interface GateTierInfo {
   /** How many of those suites had no measured duration and were counted at an assumed 3s, so a
    *  reader can tell a measured floor from a partly guessed one (#1042/#1043). */
   guardAssumedCount?: number;
+  /**
+   * Which guards this run forced (#1232). `intersecting` means the bare/`always` floor was
+   * DEFERRED to the base sweep and only `when:`-territory guards the diff intersects ran; the
+   * message then prices it as `guards: N intersecting of M (K deferred to the base sweep)`.
+   * Absent or `all` = every other posture, whose message is unchanged.
+   */
+  guardsAtMerge?: GuardsAtMerge;
+  /** The two numbers behind that clause — see `GuardFloorFields` (#1232). */
+  guardDeferredCount?: number;
+  guardTotalCount?: number;
   maxWorkers: number;
   /**
    * Was `maxWorkers` DERIVED from live capacity (#909), or pinned (env override, or a
@@ -692,6 +718,30 @@ export function buildWorkersLabel(tierInfo: Pick<GateTierInfo, "maxWorkers" | "m
   return `workers ${tierInfo.maxWorkers} (derived, host free ${(tierInfo.hostFreeGb ?? 0).toFixed(1)} GB${slotNote})`;
 }
 
+/**
+ * The guard-floor clause of the pass message — `+N guard suites (~Ns est)` for a narrowed run, or
+ * under `intersecting` (#1232) the priced deferral: `guards: 12 intersecting of 208 (196 deferred
+ * to the base sweep) (~30s est)`. Its own function so `buildGateTierMessage`, already the
+ * branchiest thing in this file, pays no branch for the mode.
+ *
+ * Unconditional under `intersecting` even when no other narrowing applied: deferring the floor is
+ * itself a weakening, and a level may only weaken verification VISIBLY.
+ */
+export function buildGuardFloorClause(tierInfo: GateTierInfo): string[] {
+  if (tierInfo.guardsAtMerge === "intersecting") {
+    const total = tierInfo.guardTotalCount ?? tierInfo.guardSuiteCount + (tierInfo.guardDeferredCount ?? 0);
+    return [
+      `guards: ${tierInfo.guardSuiteCount} intersecting of ${total} (${tierInfo.guardDeferredCount ?? 0} deferred to the base sweep)${buildGuardCostNote(tierInfo)}`,
+    ];
+  }
+  if (tierInfo.fileScoped || tierInfo.guardsOnly || (tierInfo.selector === "impact" && !tierInfo.guardsOnly)) {
+    return [
+      `${tierInfo.guardsOnly ? "" : "+"}${tierInfo.guardSuiteCount} guard suites${buildGuardCostNote(tierInfo)}${tierInfo.guardsOnly ? "" : " (forced floor; selected/full suites may include more)"}`,
+    ];
+  }
+  return [];
+}
+
 export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
   if (!tierInfo) return "pre-merge gate passed (smoke check only — no verify_script tier)";
   // #956 — the impact SELECTION outranks the package/file scoping for the tier NAME, because it
@@ -760,9 +810,7 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
     // narrows this hard must name the set it did NOT narrow.
     // #1043 — with the ESTIMATE attached, because the bare count is what made this clause read
     // as a footnote on the selection when it is in fact almost the whole run.
-    ...(tierInfo.fileScoped || tierInfo.guardsOnly || (tierInfo.selector === "impact" && !tierInfo.guardsOnly)
-      ? [`${tierInfo.guardsOnly ? "" : "+"}${tierInfo.guardSuiteCount} guard suites${buildGuardCostNote(tierInfo)}${tierInfo.guardsOnly ? "" : " (forced floor; selected/full suites may include more)"}`]
-      : []),
+    ...buildGuardFloorClause(tierInfo),
     workersLabel,
     ...(tierInfo.buildersQuiesced === undefined
       ? []
@@ -855,9 +903,11 @@ export async function resolveGateVerification(
   selectorId: string;
   /** The project's test-impact budget, resolved with the tier (#966); null when off. */
   budget: ParsedTestImpactBudget | null;
+  /** Which guards the merge gate forces (#1232), resolved with the tier from the same prefMap. */
+  guardsAtMerge: GuardsAtMerge;
   verificationKey: string;
 }> {
-  const { strategy, posture, fromPosture, budget } = await resolveGateTierFor(projectId, database);
+  const { strategy, posture, fromPosture, budget, guardsAtMerge } = await resolveGateTierFor(projectId, database);
   const effectiveVerify = await resolveEffectiveVerify(projectId, database, { persistDerived: true }).catch(() => null);
   const verifyScript = effectiveVerify?.command ?? null;
   // Never throws and never blocks: an unresolvable selector yields `""`, which reproduces the
@@ -879,10 +929,20 @@ export async function resolveGateVerification(
     verifyScript,
     selectorId,
     budget,
+    guardsAtMerge,
     // The KEY stays keyed on the resolved tier, not the posture that chose it: two projects on
     // different postures that resolve to the same tier + script bought the same verification, and
     // a pass under one is legitimately reusable under the other (#492's memo is about what the
     // pass BOUGHT). A posture CHANGE that moves the tier already changes this key.
-    verificationKey: gateVerificationKey(strategy, verifyScript, selectorId),
+    //
+    // #1232 — the guards mode IS part of what a pass bought: a pass banked under `intersecting`
+    // (floor deferred) replayed under `all` would be a level weakening verification invisibly, the
+    // one thing the tier contract forbids. Folded into the selector component only when
+    // `intersecting`, so every `all` project's key is byte-identical to before.
+    verificationKey: gateVerificationKey(
+      strategy,
+      verifyScript,
+      guardsAtMerge === "intersecting" ? `${selectorId}|guards=intersecting` : selectorId,
+    ),
   };
 }

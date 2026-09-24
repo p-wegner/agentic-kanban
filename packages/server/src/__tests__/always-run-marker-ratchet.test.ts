@@ -202,6 +202,9 @@ const MARKED_BY_POLICY = new Set<string>([
   // #643 — asserts the tier CONTRACT (a level may only weaken verification visibly) against
   // the tier module it imports. Marked because the gate's own honesty is what it guards.
   "server/gate-tier-scoping.test.ts",
+  // #1232 — the same contract for the guards mode (`intersecting` defers the floor VISIBLY:
+  // env var, pass message, verification key). Import-reachable; marked for the same reason.
+  "server/guards-at-merge.test.ts",
   // #687 — reaches the tree only through the helper it is testing (`countAlwaysRunGuardSuites`,
   // imported from pre-merge-gate-tier) and against TEMP fixture roots, never the real tree, so
   // no signature here applies. Marked because it is the suite that proves the guard COUNT in

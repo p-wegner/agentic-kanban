@@ -58,14 +58,14 @@ export declare function scanAlwaysRunGuards(
   testsDir: string,
   listDir?: (dir: string) => readonly (string | { name: string; isDirectory(): boolean })[],
   readText?: (path: string) => string,
-): { file: string; when: string[] }[];
+): { file: string; when: string[]; always: boolean }[];
 
 /**
  * The marker and its optional `when:<glob>[,<glob>…]` precondition (#1041), or `null` when the
  * source carries no marker at all. `{ when: [] }` is "always", deliberately distinct from
- * "no glob matched".
+ * "no glob matched". The explicit `always` spelling (#1232) adds `always: true`.
  */
-export declare function parseAlwaysRunMarker(source: string): { when: string[] } | null;
+export declare function parseAlwaysRunMarker(source: string): { when: string[]; always?: true } | null;
 
 /**
  * Must a guard with these `when:` globs run for this change set (#1041)? Fails open twice: a
@@ -74,6 +74,22 @@ export declare function parseAlwaysRunMarker(source: string): { when: string[] }
 export declare function guardAppliesToChanges(
   when: readonly string[] | null | undefined,
   changedFiles: readonly string[] | null | undefined,
+): boolean;
+
+/** `KANBAN_TEST_GUARDS` (#1232): `all` (today's rule) or `intersecting` (defer bare/`always`). */
+export type GuardsMode = "all" | "intersecting";
+
+/** Parse `KANBAN_TEST_GUARDS`; an unknown value warns and falls back to `all`. */
+export declare function parseGuardsMode(raw: string | undefined, warn?: (message: string) => void): GuardsMode;
+
+/**
+ * `guardAppliesToChanges` with the guards mode applied (#1232): under `intersecting` a marker with
+ * no territory is deferred, except on an unknown change set, which forces everything.
+ */
+export declare function guardForcedForRun(
+  guard: { when: readonly string[]; always?: boolean },
+  changedFiles: readonly string[] | null | undefined,
+  mode: GuardsMode,
 ): boolean;
 
 /** Malformed or stale `when:` globs, as human-readable strings; empty when the list is fine. */
@@ -101,6 +117,8 @@ export declare function alwaysRunFloor(options?: {
   durations?: Map<string, number> | null;
   assumedMs?: number;
   changedFiles?: readonly string[];
+  /** `intersecting` (#1232) applies the merge-time rule: bare/`always` markers are left out. */
+  guards?: GuardsMode;
 }): {
   count: number;
   estMs: number;
