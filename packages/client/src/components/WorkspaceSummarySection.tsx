@@ -10,6 +10,7 @@ import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liven
 import { deriveWorkspaceCardState } from "../lib/workspaceCardState.js";
 import { deriveTrainBoardingPass } from "../lib/trainBoardingPass.js";
 import { Icon } from "./Icon.js";
+import { MergeJobBadge } from "./MergeJobBadge.js";
 
 function RelativeTime({ timestamp, prefix = "" }: { timestamp: string; prefix?: string }) {
   useNow(30_000);
@@ -62,6 +63,8 @@ export function WorkspaceSummarySection(props: {
           ) : (
             <>
               <span className="min-w-0 flex-1 basis-24 font-mono text-gray-600 dark:text-gray-400 truncate">{ws.main.branch}</span>
+              {/* #1250 — a merge this client just started, before the board's own gate state catches up. */}
+              <MergeJobBadge wsId={ws.main.id} />
               {ws.main.workflow && <WorkflowMiniIndicator workflow={ws.main.workflow} />}
               {ws.main.status === "idle" && liveActivity && (() => {
                 const badge = getLastSessionBadge(ws.main.lastSessionTriggerType);

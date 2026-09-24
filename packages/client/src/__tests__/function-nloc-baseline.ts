@@ -21,8 +21,9 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 625 -> 637 (#1135): boardDriveOptions derivation + driveFilterId wiring for the new
   // drive board filter.
   "routes/BoardPage.tsx::BoardPage": 637,
-  // master shrank this one; #972 never touched it.
-  "components/WorkspaceCard.tsx::WorkspaceCard": 570,
+  // 570 -> 559 (#1250): the inline merge-error banner moved to `components/MergeErrorPanel.tsx`,
+  // which is also where "Bank shrinks and retry" lives.
+  "components/WorkspaceCard.tsx::WorkspaceCard": 559,
   // #972 moved the dependency-wave concern out to `hooks/useDependencyWave.ts`.
   "components/BacklogView.tsx::BacklogView": 568,
   "components/IssueDetailPanel.tsx::IssueDetailPanel": 535,

@@ -7,6 +7,8 @@ import type { Dispatch, SetStateAction } from "react";
 import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { buildQuickLaunchBody, buildDefaultLaunchPrompt } from "../lib/workspace-launch.js";
+import { mergeDoorHandlers, startAsyncMerge } from "../lib/mergeJobTracker.js";
+import type { MergeErrorState as MergeError } from "../lib/mergeJobBadge.js";
 import type { AgentOutputMessage, IssueWithStatus, WorkspaceResponse, DiffResponse, DiffComment, SessionSummaryResponse } from "@agentic-kanban/shared";
 import type { WorkspaceViewMode } from "./useWorkspaceSession.js";
 
@@ -19,8 +21,8 @@ type Setter<T> = Dispatch<SetStateAction<T>>;
 type ConflictState = { hasConflicts: boolean; conflictingFiles: string[] } | null;
 /** Optimistic launch banner state for fix-and-merge / resolve-conflicts. */
 type LaunchingFix = { wsId: string; kind: "fix-and-merge" | "resolve" } | null;
-/** Inline merge-error banner state, keyed to the failing workspace. */
-type MergeErrorState = { wsId: string; message: string } | null;
+/** Inline merge-error banner state, keyed to the failing workspace (carries the #1250 fix hint). */
+type MergeErrorState = MergeError | null;
 type ApiError = Error & { status?: number };
 /** Per-workspace session listing — structurally mirrors the page's session rows. */
 interface SessionInfo {
@@ -312,6 +314,8 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
     }
   }
 
+  // #1250 — the merge is ASYNC (202 + a polled job); these handlers fire once it is terminal.
+  const mergeHandlers = mergeDoorHandlers({ setMergeError, setError, refetch: () => { void fetchWorkspaces(); void onWorkspaceChange?.(); } });
   async function handleMerge(wsId: string) {
     if (isRunning && !window.confirm("Agent is still running. Stop and merge?")) return;
     setActionLoading(true);
@@ -323,9 +327,8 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
         setActiveSession(null);
         setCompletedMessages([]);
       }
-      await apiPost(`/api/workspaces/${wsId}/merge`, {});
-      await fetchWorkspaces();
-      void onWorkspaceChange?.();
+      const { joined } = await startAsyncMerge(wsId, mergeHandlers);
+      showToast(joined ? "Joining the running merge" : "Merge started — the gate runs in the background", "success");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Merge failed";
       setError(message);
@@ -665,7 +668,7 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
     handleOpenTerminal, handleOpenEditor, copyPreviewUrl, handleUpdateBase,
     handleMonitorRunNow, handleAbortRebase, handleResolveConflicts, handleResume,
     handleRestart, handleContinueFromSession, handleAutoBisect, handleReview,
-    handleResetWorkspaceToIdle,
+    handleResetWorkspaceToIdle, mergeHandlers,
     handleImplementPlan, handleRejectPlan, handleDeleteWorkspace, handleCloseWorkspace,
   };
 }

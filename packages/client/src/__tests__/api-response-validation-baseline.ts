@@ -243,7 +243,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "POST /api/workspaces/:param/bisect",
   "POST /api/workspaces/:param/comments",
   "POST /api/workspaces/:param/github-handoff-draft",
-  "POST /api/workspaces/:param/merge",
   "POST /api/workspaces/:param/open-editor",
   "POST /api/workspaces/:param/repos/:param/rebase",
   "POST /api/workspaces/:param/retry-cleanup",

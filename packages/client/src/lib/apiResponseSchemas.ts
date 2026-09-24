@@ -71,6 +71,7 @@ import type { StatusWithIssues, IssueWithStatus } from "@agentic-kanban/shared/t
 import type { DiffResponse, DiffStatsResponse } from "@agentic-kanban/shared/types";
 import type { ScorecardResult } from "@agentic-kanban/shared/types";
 import type { MergeTrainRowDto, MergeTrainSidingDto, MergeTrainsResponse } from "@agentic-kanban/shared/types";
+import { MERGE_JOB_ROUTES } from "./mergeJobSchemas.js";
 
 export type ApiMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -792,6 +793,7 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
   // generator cannot see it at all. Noted as a follow-up on #780.
   { method: "POST", template: "/api/workspaces/:id/review", schema: sessionHandle },
   { method: "POST", template: "/api/workspaces/:id/fix-and-merge", schema: sessionHandle },
+  ...MERGE_JOB_ROUTES, // #1250 — the async merge path (`?async=1`, `merge-status`, `bank-shrinks`)
   { method: "POST", template: "/api/workspaces/:id/resolve-conflicts", schema: resolveConflictsResult },
 
   // ── projects ──
