@@ -34,13 +34,12 @@
  * `--legacy` flag, not a steady-state sweep. The steady state is already correct — every one of
  * these call sites mints `ak-*` today, which is why their bare forms are historical at all.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { walkRepoTree } from "./lib/repo-tree.mjs";
 
-const SKIP_DIRS = new Set([
-  "node_modules", ".git", "dist", "coverage", "test-results", "playwright-report", "drizzle", ".worktrees",
-]);
-const SOURCE_EXT = /\.(ts|tsx|mjs|cjs|js)$/;
+/** Beyond the shared walker's canonical set: generated SQL is never a temp-dir mint site. */
+const EXTRA_SKIP_DIRS = ["drizzle"];
+const SOURCE_EXT = [".ts", ".tsx", ".mjs", ".cjs", ".js"];
 
 /** A bare prefix shorter than this, with no hyphen, is too common to claim. */
 export const MIN_GENERIC_LENGTH = 8;
@@ -56,47 +55,15 @@ export function isClaimablePrefix(prefix) {
   return prefix.includes("-") || prefix.length >= MIN_GENERIC_LENGTH;
 }
 
-/** Every source file that could mint a temp dir. */
-function isLinkedWorktree(dir) {
-  try {
-    return statSync(join(dir, ".git")).isFile();
-  } catch {
-    return false;
-  }
-}
-
+/**
+ * Every source file that could mint a temp dir. The shared walker (#1241) carries the rule
+ * this script was the first to need: a nested LINKED worktree (`.git` is a file) is a whole
+ * second copy of the tree — measured 2026-09-24, five of them took the guard past its 300 s
+ * budget — and it is skipped, as is every junction. Dot-directories are admitted because
+ * `.claude/hooks/*.js` are real mint sites.
+ */
 function sourceFiles(root) {
-  const out = [];
-  const walk = (dir) => {
-    let entries;
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (SKIP_DIRS.has(entry.name)) continue;
-      const full = join(dir, entry.name);
-      // A nested LINKED worktree (its `.git` is a file, not a directory) is a whole second copy
-      // of the source tree — Claude Code's `.claude/worktrees/*` layout puts several under the
-      // main checkout. Walking them multiplies this pass by their count (measured 2026-09-24:
-      // five of them took the guard past its 300 s budget) and derives nothing new.
-      if (entry.isDirectory() && dir !== root && isLinkedWorktree(full)) continue;
-      // A junction reports as a symlink, never a directory (plugin skills are junctioned in).
-      let isDir = entry.isDirectory();
-      if (entry.isSymbolicLink()) {
-        try {
-          isDir = statSync(full).isDirectory();
-        } catch {
-          continue;
-        }
-      }
-      if (isDir) walk(full);
-      else if (SOURCE_EXT.test(entry.name)) out.push(full);
-    }
-  };
-  walk(root);
-  return out;
+  return walkRepoTree(root, { includeDotfiles: true, skipDirs: EXTRA_SKIP_DIRS, extensions: SOURCE_EXT });
 }
 
 /**

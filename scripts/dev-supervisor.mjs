@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join, relative } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { relative } from "node:path";
+import { walkRepoTree } from "./lib/repo-tree.mjs";
 
 const DEPENDENCY_MANIFEST_NAMES = new Set([
   "package.json",
@@ -24,16 +25,12 @@ const DEPENDENCY_MANIFEST_NAMES = new Set([
 // is exactly the #1033 signature, and it requires no `--force`, no junction between the
 // trees, and no command ever run with a nested worktree as cwd — reproduced and pinned by
 // `packages/server/src/__tests__/dev-script.test.mjs`.
-const IGNORED_DIRS = new Set([
-  ".claude",
-  ".git",
-  ".turbo",
-  ".vite",
-  "build",
-  "dist",
-  "node_modules",
-  "target",
-]);
+//
+// #1241: the skip set is no longer kept here. `walkRepoTree` (scripts/lib/repo-tree.mjs)
+// carries the canonical set (`.git`, `.turbo`, `.vite`, `build`, `dist`, `node_modules`,
+// `target`, …), hides every dot-directory by default (which covers `.claude`), skips any
+// directory whose `.git` is a FILE (a nested linked worktree under ANY name, not only under
+// `.claude/worktrees`) and never follows a junction.
 
 // A child that stayed up this long is considered to have started successfully,
 // so a later exit is a crash under load rather than a startup failure.
@@ -61,23 +58,8 @@ function hashFile(path) {
 }
 
 export function listDependencyManifestFiles(rootDir) {
-  const files = [];
-
-  function visit(dir) {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isDirectory()) {
-        if (!IGNORED_DIRS.has(entry.name)) visit(join(dir, entry.name));
-        continue;
-      }
-
-      if (entry.isFile() && DEPENDENCY_MANIFEST_NAMES.has(entry.name)) {
-        files.push(join(dir, entry.name));
-      }
-    }
-  }
-
-  if (existsSync(rootDir)) visit(rootDir);
-  return files.sort();
+  if (!existsSync(rootDir)) return [];
+  return walkRepoTree(rootDir, { filter: (_abs, entry) => DEPENDENCY_MANIFEST_NAMES.has(entry.name) }).sort();
 }
 
 export function snapshotDependencyManifests(rootDir) {
