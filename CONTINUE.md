@@ -126,7 +126,8 @@ after. The stable board now runs #1233 (heal tickets), #1238 (`?branch=` sweeps,
 #1239, so from here `pnpm promote` can cut and sweep `rc/<date>` itself.
 
 ### Next steps, in order
-1. Land #1250 (in flight), then `pnpm promote --dry-run`: the rc lane should now cut `rc/<date>`
+1. #1250 landed (`c44e4e7772` + `4250691aa3`: async merge doors, Merging badge, fix hint, bank-shrinks
+   action; not yet promoted). Next `pnpm promote --dry-run`: the rc lane should now cut `rc/<date>`
    and ask the promoted board for its sweep.
 2. Decide the dev board's posture (`flow` needs `promote_cadence_<id>` set first).
 3. #1246–#1249 (queue flush, observability first), #1244, #1245; the `tsz-*` missing-path projects.
