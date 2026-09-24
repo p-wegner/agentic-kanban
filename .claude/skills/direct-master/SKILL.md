@@ -179,7 +179,7 @@ Never stage or commit `kanban.db`, `kanban.db-shm`, or `kanban.db-wal`.
 git -C "$(git rev-parse --show-toplevel)" push
 ```
 
-Push after each commit (or each tight batch). An unpushed master commit doesn't dirty the tree, but pushing promptly keeps worktrees that rebase onto `origin/master` current and avoids a pile-up.
+Push after each commit (or each tight batch). An unpushed master commit doesn't dirty the tree, but pushing promptly keeps remote clones (fleet workers, the other device) current and avoids a pile-up. Worktrees on this machine rebase onto the LOCAL `master`, never `origin/master` (#1237) — a stale origin is harmless to them.
 
 ## Step 5 — Verify the tree is clean before you stop
 
