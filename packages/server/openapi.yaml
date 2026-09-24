@@ -1128,9 +1128,6 @@ paths:
                   type: string
                 skipAutoReview:
                   type: boolean
-                estimate:
-                  type: string
-                  nullable: true
                 sortOrder:
                   type: number
                 statusId:
@@ -1172,47 +1169,6 @@ paths:
               schema: {}
         "409":
           description: Error (thrown CONFLICT, status from domainErrorHandler)
-          content:
-            application/json:
-              schema: {}
-  /api/issues/ai-estimate:
-    post:
-      summary: POST /api/issues/ai-estimate — AI-suggest a T-shirt size estimate for an issue
-      tags:
-        - issues
-      operationId: post_api_issues_ai-estimate
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                issueId:
-                  type: string
-                  minLength: 1
-              required:
-                - issueId
-              additionalProperties: true
-              x-unknown-keys: stripped
-      responses:
-        "200":
-          description: Success
-          content:
-            application/json:
-              schema: {}
-        "400":
-          description: Error (thrown HTTPException, status from domainErrorHandler)
-          content:
-            application/json:
-              schema: {}
-        "404":
-          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
-          content:
-            application/json:
-              schema: {}
-        "500":
-          description: Error (thrown AI_ERROR, status from domainErrorHandler)
           content:
             application/json:
               schema: {}

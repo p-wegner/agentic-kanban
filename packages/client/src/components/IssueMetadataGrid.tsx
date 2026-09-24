@@ -2,8 +2,8 @@ import type { Dispatch, SetStateAction } from "react";
 import type { IssueWithStatus, MilestoneResponse } from "@agentic-kanban/shared";
 import { isHttpUrl } from "../lib/url.js";
 import { parseLocalDate } from "../lib/timeScale.js";
-import { ISSUE_TYPES, ISSUE_ESTIMATES, issueTypeLabel } from "@agentic-kanban/shared";
-import { Icon, Spinner } from "./Icon.js";
+import { ISSUE_TYPES, issueTypeLabel } from "@agentic-kanban/shared";
+import { Icon } from "./Icon.js";
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 
@@ -13,8 +13,6 @@ interface IssueMetadataGridProps {
   statuses: { id: string; name: string }[];
   issueType: string;
   setIssueType: Setter<string>;
-  estimate: string;
-  setEstimate: Setter<string>;
   dueDate: string;
   setDueDate: Setter<string>;
   externalKey: string;
@@ -26,19 +24,16 @@ interface IssueMetadataGridProps {
   milestoneId: string | null;
   setMilestoneId: Setter<string | null>;
   milestones: MilestoneResponse[];
-  estimating: boolean;
   handleStatusChange: (newStatusId: string) => Promise<void> | void;
-  handleQuickEstimate: (value: string) => Promise<void> | void;
-  handleAiEstimate: () => Promise<void> | void;
   badgeColor: string;
   issueTypeDisplay: React.ReactNode;
 }
 
 export function IssueMetadataGrid({
-  editing, issue, statuses, issueType, setIssueType, estimate, setEstimate,
+  editing, issue, statuses, issueType, setIssueType,
   dueDate, setDueDate, externalKey, setExternalKey, externalUrl, setExternalUrl,
   skipAutoReview, setSkipAutoReview, milestoneId, setMilestoneId, milestones,
-  estimating, handleStatusChange, handleQuickEstimate, handleAiEstimate,
+  handleStatusChange,
   badgeColor, issueTypeDisplay,
 }: IssueMetadataGridProps) {
   return (
@@ -59,34 +54,17 @@ export function IssueMetadataGrid({
                   ))}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Type</label>
-                  <select
-                    value={issueType}
-                    onChange={(e) => setIssueType(e.target.value)}
-                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                  >
-                    {ISSUE_TYPES.map((t) => (
-                      <option key={t} value={t}>{issueTypeLabel(t)}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Estimate</label>
-                  <select
-                    value={estimate}
-                    onChange={(e) => setEstimate(e.target.value)}
-                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                  >
-                    <option value="">None</option>
-                    <option value="XS">XS</option>
-                    <option value="S">S</option>
-                    <option value="M">M</option>
-                    <option value="L">L</option>
-                    <option value="XL">XL</option>
-                  </select>
-                </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Type</label>
+                <select
+                  value={issueType}
+                  onChange={(e) => setIssueType(e.target.value)}
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                >
+                  {ISSUE_TYPES.map((t) => (
+                    <option key={t} value={t}>{issueTypeLabel(t)}</option>
+                  ))}
+                </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -161,50 +139,13 @@ export function IssueMetadataGrid({
                   ))}
                 </select>
               </div>
-              {/* Type + Estimate side by side */}
+              {/* Type */}
               <div className="flex items-center gap-3 flex-wrap">
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-gray-500 dark:text-gray-400">Type:</span>
                   <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded capitalize ${badgeColor}`}>
                     {issueTypeDisplay}
                   </span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-gray-500 dark:text-gray-400">Size:</span>
-                  <div className="flex items-center gap-0.5">
-                    {ISSUE_ESTIMATES.map((size) => (
-                      <button
-                        key={size}
-                        type="button"
-                        onClick={() => handleQuickEstimate(size)}
-                        title={issue.estimate === size ? `Clear estimate` : `Set estimate to ${size}`}
-                        className={`text-xs font-medium px-1.5 py-0.5 rounded transition-colors ${
-                          issue.estimate === size
-                            ? "bg-teal-600 text-white"
-                            : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-teal-100 hover:text-teal-700 dark:hover:bg-teal-900 dark:hover:text-teal-300"
-                        }`}
-                      >
-                        {size}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={handleAiEstimate}
-                      disabled={estimating}
-                      title="Estimate with AI (Haiku)"
-                      className="ml-0.5 text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-0.5 px-1 py-0.5"
-                    >
-                      {estimating ? (
-                        <Spinner className="animate-spin h-3 w-3" />
-                      ) : (
-                        <Icon
-                          className="h-3 w-3"
-                          d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z"
-                        />
-                      )}
-                      {estimating ? "..." : "AI"}
-                    </button>
-                  </div>
                 </div>
                 {issue.dueDate && (() => {
                   const due = parseLocalDate(issue.dueDate);

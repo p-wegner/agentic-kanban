@@ -30,8 +30,6 @@ function render(i: IssueWithStatus): string {
       statuses={[{ id: "status-1", name: "Todo" }]}
       issueType="task"
       setIssueType={() => {}}
-      estimate=""
-      setEstimate={() => {}}
       dueDate=""
       setDueDate={() => {}}
       externalKey=""
@@ -43,10 +41,7 @@ function render(i: IssueWithStatus): string {
       milestoneId={null}
       setMilestoneId={() => {}}
       milestones={[]}
-      estimating={false}
       handleStatusChange={() => {}}
-      handleQuickEstimate={() => {}}
-      handleAiEstimate={() => {}}
       badgeColor="bg-slate-100 text-slate-700"
       issueTypeDisplay="Task"
     />,

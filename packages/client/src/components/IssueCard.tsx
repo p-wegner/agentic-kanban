@@ -297,7 +297,6 @@ function IssueCardBody({
             <Badge className={`capitalize ${priorityBadgeColor}`}>{issue.priority}</Badge>
           )
         )}
-        {issue.estimate && <Badge tone="accent">{issue.estimate}</Badge>}
         {issue.externalUrl && (
           <a
             href={issue.externalUrl}

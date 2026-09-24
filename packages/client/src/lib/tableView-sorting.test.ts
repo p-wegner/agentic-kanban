@@ -10,7 +10,6 @@
 //     `PRIORITY_ORDER` listed a value (`urgent`) no colour map knew, so it sorted top and
 //     rendered unstyled. That the table is DERIVED from the one priority table is the fix,
 //     so it is asserted here rather than re-listing the ranks;
-//   * an unestimated issue sorts LAST, not as if it were XS;
 //   * an issue with no due date sorts last in BOTH directions is *not* true — descending
 //     genuinely puts it first, and that is pinned so nobody "fixes" it by accident.
 
@@ -19,7 +18,6 @@ import type { IssueWithStatus } from "@agentic-kanban/shared";
 import {
   applySortDirection,
   compareSortKey,
-  ESTIMATE_ORDER,
   ISSUE_TYPE_ORDER,
   PRIORITY_ORDER,
   type SortKey,
@@ -95,20 +93,6 @@ describe("compareSortKey — type", () => {
       issue({ id: "chore", issueType: "chore" }),
     ];
     expect(sorted(rows, "type")).toEqual(["bug", "unknown", "chore"]);
-  });
-});
-
-describe("compareSortKey — estimate", () => {
-  it("orders by size, not by the label's alphabet", () => {
-    const rows = Object.keys(ESTIMATE_ORDER).map((e) => issue({ id: e, estimate: e as IssueWithStatus["estimate"] }));
-    expect(sorted(rows, "estimate")).toEqual(["XS", "S", "M", "L", "XL"]);
-  });
-
-  it("sorts an unestimated issue LAST, not as the smallest", () => {
-    // "Not sized yet" is the opposite of "tiny"; conflating them hides the unsized work
-    // at the top of the list, which is where a planner stops reading.
-    const rows = [issue({ id: "none", estimate: null }), issue({ id: "XL", estimate: "XL" })];
-    expect(sorted(rows, "estimate")).toEqual(["XL", "none"]);
   });
 });
 

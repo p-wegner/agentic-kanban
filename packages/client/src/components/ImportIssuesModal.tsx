@@ -11,7 +11,6 @@ interface PreviewRow {
   description: string;
   priority: string;
   issueType: string;
-  estimate: string;
 }
 interface SkippedRow {
   row: number;
@@ -233,7 +232,6 @@ export function ImportIssuesModal({ projectId, onClose }: ImportIssuesModalProps
                               <th className="text-left font-medium px-2 py-1.5">Title</th>
                               <th className="text-left font-medium px-2 py-1.5 w-20">Priority</th>
                               <th className="text-left font-medium px-2 py-1.5 w-24">Type</th>
-                              <th className="text-left font-medium px-2 py-1.5 w-16">Est.</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -249,7 +247,6 @@ export function ImportIssuesModal({ projectId, onClose }: ImportIssuesModalProps
                                 </td>
                                 <td className="px-2 py-1.5 text-gray-600 dark:text-gray-400">{r.priority}</td>
                                 <td className="px-2 py-1.5 text-gray-600 dark:text-gray-400">{r.issueType}</td>
-                                <td className="px-2 py-1.5 text-gray-600 dark:text-gray-400">{r.estimate || "—"}</td>
                               </tr>
                             ))}
                           </tbody>

@@ -192,12 +192,6 @@ Add dependencies from the issue detail panel or via the CLI:
 pnpm cli -- issue dependency add 5 3 -t depends_on
 ```
 
-### Estimates
-
-- Use T-shirt sizing: XS, S, M, L, XL
-- Click the estimate buttons in the detail panel, or
-- Click **AI** to let the agent suggest an estimate
-
 ### AI Enhancement
 
 Click **Enhance with AI** to have the agent improve your issue title and description for clarity.
@@ -265,7 +259,7 @@ Dependency DAG visualization. Nodes are colored by status with arrows showing de
 
 ### Table
 
-Flat sortable list of all issues. Sort by any column (number, title, status, priority, type, estimate, due date, updated, tags). Use the status filter dropdown to focus on active issues. Select multiple rows for bulk operations.
+Flat sortable list of all issues. Sort by any column (number, title, status, priority, type, due date, updated, tags). Use the status filter dropdown to focus on active issues. Select multiple rows for bulk operations.
 
 ### Timeline
 

@@ -16,7 +16,7 @@ describe("resolveProfileSelection", () => {
 
 function base(over: Partial<CreateIssuePayloadInput> = {}): CreateIssuePayloadInput {
   return {
-    title: "  My issue  ", description: "  body  ", issueType: "task", estimate: "",
+    title: "  My issue  ", description: "  body  ", issueType: "task",
     statusId: "st1", projectId: "p1", start: false, planMode: false, skipAutoReview: false,
     isDirect: false, selectedProfile: "", selectedModel: "", skillId: "", modelApplies: false,
     settings: {}, ...over,
@@ -24,11 +24,10 @@ function base(over: Partial<CreateIssuePayloadInput> = {}): CreateIssuePayloadIn
 }
 
 describe("buildCreateIssuePayload", () => {
-  it("trims title, maps empty description/estimate to undefined", () => {
+  it("trims title, maps empty description to undefined", () => {
     const p = buildCreateIssuePayload(base());
     expect(p.title).toBe("My issue");
     expect(p.description).toBe("body");
-    expect(p.estimate).toBeUndefined();
     expect(buildCreateIssuePayload(base({ description: "   " })).description).toBeUndefined();
   });
 
@@ -57,8 +56,8 @@ describe("buildCreateIssuePayload", () => {
     expect(buildCreateIssuePayload(base({ start: true, modelApplies: false, selectedModel: "opus" })).model).toBeUndefined();
   });
 
-  it("carries through issueType/estimate/status/project", () => {
-    const p = buildCreateIssuePayload(base({ issueType: "bug", estimate: "M", statusId: "st9", projectId: "p9" }));
-    expect(p).toMatchObject({ issueType: "bug", estimate: "M", statusId: "st9", projectId: "p9" });
+  it("carries through issueType/status/project", () => {
+    const p = buildCreateIssuePayload(base({ issueType: "bug", statusId: "st9", projectId: "p9" }));
+    expect(p).toMatchObject({ issueType: "bug", statusId: "st9", projectId: "p9" });
   });
 });

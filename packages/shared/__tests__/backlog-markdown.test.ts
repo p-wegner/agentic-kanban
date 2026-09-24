@@ -6,7 +6,7 @@ import {
 
 const issue = (o: Partial<BacklogMdIssue>): BacklogMdIssue => ({
   number: null, title: "", description: "", status: null, priority: null, issueType: null, tags: [], milestone: null,
-  estimate: null, dueDate: null, externalKey: null, externalUrl: null, dependsOn: [], blocks: [], checklist: [], doneMark: false,
+  dueDate: null, externalKey: null, externalUrl: null, dependsOn: [], blocks: [], checklist: [], doneMark: false,
   createdAt: null, updatedAt: null, line: 0, ...o,
 });
 
@@ -14,7 +14,7 @@ describe("backlog markdown — the standard round-trips", () => {
   it("render → parse preserves every persisted field", () => {
     const src: BacklogMdIssue[] = [
       issue({ number: 12, title: "refactor: collapse the ladders", status: "Backlog", priority: "high", issueType: "chore",
-        tags: ["arch", "client"], milestone: "M2", estimate: "3d", dueDate: "2026-09-01", dependsOn: [10, 11], blocks: [13],
+        tags: ["arch", "client"], milestone: "M2", dueDate: "2026-09-01", dependsOn: [10, 11], blocks: [13],
         externalKey: "gh-77", externalUrl: "https://example.test/77", createdAt: "2026-08-01T10:00:00Z", updatedAt: "2026-08-02T10:00:00Z",
         description: "Why: nine copies.\n\n## Not a section\nsteps:\n1. one\n2. two",
         checklist: [{ text: "write the table", done: true }, { text: "delete copies", done: false }] }),
@@ -31,7 +31,7 @@ describe("backlog markdown — the standard round-trips", () => {
     expect(doc.issues).toHaveLength(3);
     const a = doc.issues[0];
     expect(a).toMatchObject({ number: 12, title: "refactor: collapse the ladders", status: "Backlog", priority: "high", issueType: "chore",
-      tags: ["arch", "client"], milestone: "M2", estimate: "3d", dueDate: "2026-09-01", dependsOn: [10, 11], blocks: [13],
+      tags: ["arch", "client"], milestone: "M2", dueDate: "2026-09-01", dependsOn: [10, 11], blocks: [13],
       externalKey: "gh-77", externalUrl: "https://example.test/77", createdAt: "2026-08-01", updatedAt: "2026-08-02" });
     expect(a.checklist).toEqual([{ text: "write the table", done: true }, { text: "delete copies", done: false }]);
     expect(a.description).toContain("Why: nine copies.");

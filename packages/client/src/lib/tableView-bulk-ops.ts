@@ -34,7 +34,7 @@ export async function bulkMoveStatus(statusId: string, statusName: string, deps:
   }
 }
 
-/** Apply a partial update (priority, estimate, due date, ...) to all selected issues. */
+/** Apply a partial update (priority, due date, ...) to all selected issues. */
 export async function bulkUpdateIssues(data: UpdateIssueRequest, successLabel: string, deps: BulkOpDeps): Promise<void> {
   const { ids, api, toast, setSelectedIds, setBulkLoading, onRefresh } = deps;
   setBulkLoading(true);
