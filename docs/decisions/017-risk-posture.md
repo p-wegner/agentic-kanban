@@ -222,3 +222,70 @@ excludes. `GET /api/projects/:id/base-branch-health` carries it as `sweep`;
 `GET /api/projects/health` carries it per project as `baseSweep`, and the Project Health
 Overview renders it (`base sweep every 12 h (standard)` / `base sweep off (no posture chosen)`),
 so an operator can list which projects are on which cadence from one response.
+
+## Amendment 2026-09-24 (#1233): master's health is a report under `iterate`, and the train veto reads the posture
+
+**Decision: `iterate`'s `redBasePolicy` is `allow-file-debt-ticket`, the merge-train window's
+red-base veto (#1204) holds only under `block`, and `report` joins the policy vocabulary as
+the softest value.** `standard` and `strict` keep `block`. Decision 019 §5 is the rationale
+("master's health is a report, never a lock"); this record carries the mechanism.
+
+Why. Measured 2026-09-24 on the dev board: a red nightly sweep on master held the train window
+under `iterate`, and since master only moves through trains the project froze until a human
+hand-landed a fix on master. Under `block` the sweep also files no heal ticket (the ticket is
+`allow-file-debt-ticket`'s disclosure channel, #1016), so nothing on the board said why nothing
+was merging. The hold bought nothing: `iterate`'s per-merge gate is the impact selection, which
+never proved the base green in the first place, and the #1204 case the veto was built for — a
+bisect blaming a member for master's own red — is answered by the control arm in
+`merge-train.service.ts`, which stays under every posture.
+
+What changed, each visible where it acts:
+
+- `resolveBaseRedVeto` (`merge-train-base-veto.ts`) takes the project's `RiskPosture` — handed
+  in by the orchestrator, which already resolved it for the window's size and wait, or resolved
+  through the one sanctioned reader — and `decideBaseRedVeto` returns no hold unless
+  `redBasePolicy` is `block`. A red base under any softer policy logs one line naming the
+  policy and lets the window depart. The refinement the ticket allowed (veto under `block` only
+  when the failing suites intersect the train's changed files or the guards they map to) is
+  NOT implemented: it needs the impact map, the guard `when:` globs and a diff per pending
+  workspace, and a wrong intersection releases a train onto exactly the red it was meant to
+  avoid. The posture switch alone answers the measured problem.
+- The heal ticket is **one per failure signature** (`heal-failure-signature.ts`: a short hash
+  of the sorted, de-duplicated failing-suite list; `verify-failed` when none was named), keyed
+  `base-health-heal:<projectId>:<sig>`. A second red with the same signature refreshes that
+  ticket (sha, body) and files nothing; a red with a new signature files a second ticket beside
+  it; a green closes every open one with a comment. The body names the failing suites, the
+  sha, and `git log <lastGreenSha>..<redSha> --oneline` through the git adapter. Priority
+  `critical`, `sort_order` below the backlog, tag `heal` — the monitor starts it within WIP like
+  any other ticket (no WIP exemption exists, and #1016's rule 4 still holds).
+- `report` (`RED_BASE_POLICY_RANK` 3) never holds and files no ticket — the red is disclosed in
+  the delivery view only. It is reachable today only as a softer-only project override; no
+  shipped level resolves it, and the `flow` posture that will (#1240) is not part of this
+  amendment. The red-debt cap (#916) degrades it like any other soft policy
+  (`report -> allow-file-debt-ticket -> allow-known-debt -> block`), so it is not a way out
+  of the cap.
+- `GET /api/projects/:id/delivery` carries `redBase: { policy, latestOutcome, latestSha,
+  holdingWindow, openHealTickets }`, where `holdingWindow` is `resolveBaseRedVeto`'s own verdict,
+  and the Delivery chip renders it. The `summary` of `iterate` names the softening ("a red base
+  files a heal ticket rather than holding the train window"), per the visibility rule.
+
+The pinned policy table (decision-level; a change to any row amends this record):
+
+| Posture | `redBasePolicy` | Red base holds the train window | Red sweep files a heal ticket |
+|---|---|---|---|
+| `strict` | `block` | yes | no |
+| `standard` | `block` | yes | no |
+| `iterate` | `allow-file-debt-ticket` | **no** (was yes) | **yes** (was no) |
+| `fast` | `allow-known-debt` | no | no |
+| `sprint` | `allow-file-debt-ticket` | no | yes |
+| *(override)* `report` | — | no | no |
+
+Enforcement: `risk-posture.service.test.ts` pins the rows and that `report` ranks softest;
+`merge-train-base-veto-posture.test.ts` drives a red row plus a ready train through the real
+resolver under `iterate` (departs) and `standard` (holds); `base-health-heal-ticket.test.ts`
+covers one-ticket-per-signature, the no-second-ticket case, the green close and the merges-since
+list against a real repository. The two raw-read ratchets are unchanged and green.
+
+Not changed, and deliberately: the merge gate's red-debt subset rule (#915/#1015) already keyed
+on the policy and now softens `iterate` the way it softened `sprint`; the control arm; and the
+sweep cadence table above.
