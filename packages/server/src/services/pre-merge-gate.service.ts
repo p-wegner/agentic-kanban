@@ -643,6 +643,9 @@ export async function runPreMergeGate(
         // Only this repo's `scripts/test-mine.mjs` honours a suite scope; for any other project
         // the env var is inert and the "targeted re-run" would be a second FULL run.
         scoped: isSelfRepo,
+        // #1242 — the retry decision attributes failing suites by DISK (vitest 4 prints FAIL lines
+        // on stderr, ahead of every stdout package header), and refuses a deterministic guard.
+        workingDir,
         verifyTimeoutMs,
         projectId,
         workspaceId: workspace.id,

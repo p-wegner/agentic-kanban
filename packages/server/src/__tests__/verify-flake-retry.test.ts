@@ -126,6 +126,26 @@ describe("decideFlakeRetry", () => {
     const d = decideFlakeRetry({ output: REAL_846_OUTPUT, timedOut: true, ...scoped });
     expect(d.retry).toBe(false);
   });
+
+  it("takes pre-attributed suites in place of the output (#1242) — the output is then not parsed", () => {
+    const suites = [{ packageLabel: "server", file: "src/__tests__/a.test.ts" }];
+    const d = decideFlakeRetry({ output: "", suites, ...scoped });
+    expect(d.retry).toBe(true);
+    expect(d.suites).toBe(suites);
+  });
+
+  it("refuses a failure that includes a deterministic guard suite, naming it (#1230/#1242)", () => {
+    const suites = [
+      { packageLabel: "server", file: "src/__tests__/a.test.ts" },
+      { packageLabel: "client", file: "src/__tests__/size-ratchet.test.ts" },
+    ];
+    const d = decideFlakeRetry({ suites, guardSuites: ["packages/client/src/__tests__/size-ratchet.test.ts"], ...scoped });
+    expect(d.retry).toBe(false);
+    expect(d.reason).toMatch(/deterministic guard/);
+    expect(d.reason).toContain("size-ratchet.test.ts");
+    // The guard set only bites on a MATCH — a guard elsewhere in the tree changes nothing.
+    expect(decideFlakeRetry({ suites, guardSuites: ["packages/shared/src/__tests__/other-ratchet.test.ts"], ...scoped }).retry).toBe(true);
+  });
 });
 
 describe("retryScopeEnvValue", () => {
