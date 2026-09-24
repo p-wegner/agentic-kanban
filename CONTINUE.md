@@ -41,7 +41,10 @@ runs on master in the background and its misses feed back, promotion needs a gre
   `block`, so no heal ticket is filed either. Posture-aware veto + `allow-file-debt-ticket`.
 - **#1234** the impact miss rate (#954 step 5) is still UNKNOWN; ledger rows carry no duration.
 - **#1235** ten `kanban/train/*` worktrees since 09-14 kept forever by the reconciler.
-- **#1236** `cli.test.ts` is 643 s of a 60 min suite.
+- **#1236** ~~`cli.test.ts` is 643 s of a 60 min suite~~ — split into five `cli-<group>.test.ts`
+  files on one esbuild-bundled CLI + template DBs (`helpers/cli-harness.ts`); measured 11-76 s
+  each, ~230 s together (was 643 s). Still excluded from `test:mine` (child process per case),
+  so `MAX_EXCLUSIONS` moved 10 → 14 for the same one suite.
 
 **Current settings that matter for this** (read from `/api/preferences/settings`): posture
 `iterate`, `verify_gate_strategy` = `impact`, `test_impact_budget` 120 s, `verify_max_workers` 2,

@@ -244,10 +244,12 @@ const KNOWN_SAFE_UNMARKED = new Set<string>([
   //    hand-rolled reads of the pref, and no diff to the offending file imports the suite.
   //    Both carry the marker now.
   //
-  // Spawn-based CLI integration tests, already excluded from `pnpm test:mine` entirely
+  // Spawn-based CLI integration test, already excluded from `pnpm test:mine` entirely
   // (scripts/test-mine.mjs ALWAYS_RUN_TESTS never runs for a package whose suite is
   // excluded outright) — the MIGRATIONS_DIR read is real but moot for file-scoping.
-  "server/cli.test.ts",
+  // `cli.test.ts` used to sit beside it; #1236 split it into `cli-*.test.ts` files whose
+  // MIGRATIONS_DIR read moved into `helpers/cli-harness.ts`, so they match no signature and
+  // need no exemption.
   "server/cli-butler.test.ts",
   // Import the real service under test (`merge-cleanup.service.ts` / project-scripts route /
   // `reconcileMergedIssue`); MIGRATIONS_DIR is only used to seed a temp test DB with the real

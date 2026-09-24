@@ -184,27 +184,28 @@ describe("exclusion of selected suites this runner never runs", () => {
   const server = PACKAGES.find((p) => p.label === "server");
 
   it("matches the `**/name.test.ts` shape the exclude globs actually use", () => {
-    expect(matchesExcludeGlob("**/cli.test.ts", "src/__tests__/cli.test.ts")).toBe(true);
-    expect(matchesExcludeGlob("**/cli.test.ts", "cli.test.ts")).toBe(true);
+    expect(matchesExcludeGlob("**/cli-issue.test.ts", "src/__tests__/cli-issue.test.ts")).toBe(true);
+    expect(matchesExcludeGlob("**/cli-issue.test.ts", "cli-issue.test.ts")).toBe(true);
     // Not a prefix match — `cli-butler.test.ts` has its own entry for its own reason.
-    expect(matchesExcludeGlob("**/cli.test.ts", "src/__tests__/cli-butler.test.ts")).toBe(false);
-    expect(matchesExcludeGlob("**/cli.test.ts", "src/__tests__/mycli.test.ts")).toBe(false);
+    expect(matchesExcludeGlob("**/cli-issue.test.ts", "src/__tests__/cli-butler.test.ts")).toBe(false);
+    expect(matchesExcludeGlob("**/cli-issue.test.ts", "src/__tests__/cli-issue-number-cross-project.test.ts")).toBe(false);
+    expect(matchesExcludeGlob("**/cli-issue.test.ts", "src/__tests__/mycli-issue.test.ts")).toBe(false);
   });
 
   it("drops an excluded suite and reports WHY, keeping the runnable ones", () => {
     const { kept, excluded } = partitionExcluded(server, [
-      "src/__tests__/cli.test.ts",
+      "src/__tests__/cli-issue.test.ts",
       "src/__tests__/gate-builder-quiesce.test.ts",
     ]);
     expect(kept).toEqual(["src/__tests__/gate-builder-quiesce.test.ts"]);
     expect(excluded).toEqual([
-      { file: "packages/server/src/__tests__/cli.test.ts", reason: "spawns the CLI binary as a child process" },
+      { file: "packages/server/src/__tests__/cli-issue.test.ts", reason: "spawns the CLI binary as a child process" },
     ]);
   });
 
   it("drops every excluded suite in the package, not just the first", () => {
     const { kept, excluded } = partitionExcluded(server, [
-      "src/__tests__/cli.test.ts",
+      "src/__tests__/cli-issue.test.ts",
       "src/__tests__/git.service.test.ts",
       "src/__tests__/compose-lifecycle-real-docker.test.ts",
     ]);

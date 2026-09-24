@@ -1741,9 +1741,29 @@
       "endTime": 217.910888671875
     },
     {
-      "name": "packages/server/src/__tests__/cli.test.ts",
+      "name": "packages/server/src/__tests__/cli-dispatch.test.ts",
       "startTime": 0,
-      "endTime": 643285.7861328125
+      "endTime": 17725.8
+    },
+    {
+      "name": "packages/server/src/__tests__/cli-issue.test.ts",
+      "startTime": 0,
+      "endTime": 69832.4
+    },
+    {
+      "name": "packages/server/src/__tests__/cli-project.test.ts",
+      "startTime": 0,
+      "endTime": 75871
+    },
+    {
+      "name": "packages/server/src/__tests__/cli-skill.test.ts",
+      "startTime": 0,
+      "endTime": 53798.2
+    },
+    {
+      "name": "packages/server/src/__tests__/cli-workspace.test.ts",
+      "startTime": 0,
+      "endTime": 10858.3
     },
     {
       "name": "packages/server/src/__tests__/close-workspace-on-terminal-issue.test.ts",
