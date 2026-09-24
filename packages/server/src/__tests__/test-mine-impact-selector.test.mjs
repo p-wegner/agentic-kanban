@@ -13,6 +13,7 @@ import {
   resolveImpactCli,
   relatedUnionSpecs,
   runImpactSelector,
+  formatImpactSelectorSpawnFailure,
   selectorFileScopeUnionNote,
   PACKAGES,
 } from "../../../../scripts/test-mine.mjs";
@@ -288,6 +289,33 @@ describe("runImpactSelector fail-open", () => {
   it("returns null when the selector cannot start", () => {
     const spawnFn = () => ({ error: new Error("ENOENT"), status: null, stdout: "", stderr: "" });
     expect(runImpactSelector(selectorOpts({ cli, spawnFn }))).toBeNull();
+  });
+
+  it("names the resolved path, cwd, node binary and errno when the spawn fails (#1231)", () => {
+    // The #1228 gate logged a bare `(ENOENT)` while the tool existed in the worktree — nothing
+    // in the line said which of path / cwd / node was the wrong one.
+    const error = Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" });
+    const spawnFn = () => ({ error, status: null, stdout: "", stderr: "" });
+    const warned = [];
+    const origWarn = console.warn;
+    console.warn = (line) => warned.push(String(line));
+    try {
+      expect(runImpactSelector(selectorOpts({ cli, spawnFn, root: "/repo" }))).toBeNull();
+    } finally {
+      console.warn = origWarn;
+    }
+    const line = warned.find((l) => l.includes("impact selector failed to start"));
+    expect(line).toBeDefined();
+    expect(line).toContain("selector FAILED TO SPAWN (ENOENT: ");
+    expect(line).toContain(cli);
+    expect(line).toContain("cwd /repo");
+    expect(line).toContain(`node ${process.execPath}`);
+    expect(line).toContain("falling back to `vitest related`");
+  });
+
+  it("formatImpactSelectorSpawnFailure: an error with no code reads UNKNOWN, never a blank", () => {
+    const line = formatImpactSelectorSpawnFailure({ error: new Error("boom"), cli: "/x/impact.mjs", cwd: "/wt", execPath: "/usr/bin/node" });
+    expect(line).toContain("selector FAILED TO SPAWN (UNKNOWN: /x/impact.mjs, cwd /wt, node /usr/bin/node; boom)");
   });
 
   it("returns null on a non-zero exit", () => {

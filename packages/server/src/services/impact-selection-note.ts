@@ -25,6 +25,36 @@ import type { GateTierInfo } from "./pre-merge-gate-tier.js";
  * reads it back off `tierInfo.stepTimings` (already parsed by `parseVerifyStepTimings`) and compares
  * it against the claimed selector.
  */
+/**
+ * A selector spawn that never started, as `scripts/test-mine.mjs` reports it (#1231).
+ */
+export interface ImpactSelectorSpawnFailure {
+  /** The spawn errno (`ENOENT`, `EACCES`, `ENAMETOOLONG`, ...), or `UNKNOWN`. */
+  code: string;
+  /** The resolved selector CLI path the runner tried to start. */
+  path: string;
+  /** The cwd the spawn was attempted in. */
+  cwd: string;
+}
+
+/**
+ * The runner's `selector FAILED TO SPAWN (<code>: <path>, cwd <cwd>` line (#1231) — the contract
+ * with `formatImpactSelectorSpawnFailure` in `scripts/test-mine.mjs`. `<path>` is cut at `, cwd `
+ * and `<cwd>` at the next `,` or `)`, so neither may contain that sequence; a Windows path does
+ * not. Total: no line, or a malformed one, yields `undefined` and the gate message says only what
+ * #1170's fallback detection already says.
+ */
+const SELECTOR_SPAWN_FAILURE_RE = /selector FAILED TO SPAWN \(([A-Z0-9_]+|UNKNOWN): (.+?), cwd ([^,)]+)/;
+
+export function parseImpactSelectorSpawnFailure(
+  output: string | undefined | null,
+): ImpactSelectorSpawnFailure | undefined {
+  if (!output) return undefined;
+  const m = SELECTOR_SPAWN_FAILURE_RE.exec(output);
+  if (!m) return undefined;
+  return { code: m[1], path: m[2].trim(), cwd: m[3].trim() };
+}
+
 export function impactRunnerFellBack(tierInfo: GateTierInfo): boolean {
   if (tierInfo.selector !== "impact" || tierInfo.guardsOnly) return false;
   const testsStep = (tierInfo.stepTimings ?? []).find((step) => step.name === "tests");
@@ -161,6 +191,17 @@ export function buildImpactSelectionNote(tierInfo: GateTierInfo): string | null 
   // (#1039's `impactSelectorAbsent`, `impactSelection`'s own null case) both miss this.
   if (impactRunnerFellBack(tierInfo)) {
     const ranScope = (tierInfo.stepTimings ?? []).find((step) => step.name === "tests")?.scope;
+    // #1231 — WHY it fell back, when the runner said. A spawn failure is not the same finding as
+    // #1039's ABSENT: the tool was there (or the runner would not have had a path to try), and
+    // the thing to look at is the errno, the node binary or the cwd — not skill provisioning.
+    const spawn = tierInfo.impactSelectorSpawnFailure;
+    if (spawn) {
+      return (
+        `selection UNKNOWN — selector FAILED TO SPAWN (${spawn.code}: ${spawn.path}, cwd ${spawn.cwd}; ` +
+        `the runner fell back to \`vitest related\`, tests ran scope=${ranScope} — the tier below is what was ` +
+        "REQUESTED, not what ran; the verify log's `[test:mine] impact selector failed to start` line names the node binary)"
+      );
+    }
     return (
       `selection UNKNOWN — RUNNER FELL BACK (the verify script reported tests ran ` +
       `scope=${ranScope}, not impact-selected; check the verify log for ` +

@@ -39,6 +39,7 @@ import {
   resolveImpactSelectorEnv,
   buildVerifyEnv,
   guardsOnlyReasonFor,
+  parseImpactSelectorSpawnFailure,
   type GateTierInfo,
 } from "./pre-merge-gate-tier.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -571,6 +572,8 @@ export async function runPreMergeGate(
       // yields `[]` and the message simply omits the clause. It must never be able to turn a
       // green gate into an error, which is why nothing here can throw.
       lastVerifySteps = parseVerifyStepTimings(result.stdout);
+      // #1231 — the runner's `selector FAILED TO SPAWN (...)` line, off BOTH streams (it warns to stderr); total, undefined when absent.
+      gateTierInfo!.impactSelectorSpawnFailure = parseImpactSelectorSpawnFailure(`${result.stderr}\n${result.stdout}`);
       return result;
     };
     // #169's install retry and #894's targeted flake retry both answer ONE question - "is this

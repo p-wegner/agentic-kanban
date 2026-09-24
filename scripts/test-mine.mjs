@@ -969,6 +969,22 @@ export function mergeNewTestFiles(byLabel, newFiles, packages = PACKAGES) {
  * --min-score 1`, the staleness/escalation notes). That line is the operator's only view of what
  * was DROPPED, so it is echoed verbatim rather than swallowed.
  */
+/**
+ * The runner's own report of a selector spawn that never started (#1231) — one line, carrying
+ * everything a reader needs to tell "the tool is not there" from "node could not be spawned" from
+ * "the cwd is gone": errno, the resolved CLI path, the cwd, and the node binary. The
+ * `selector FAILED TO SPAWN (<code>: <path>, cwd <cwd>` prefix is a contract with
+ * `parseImpactSelectorSpawnFailure` in `packages/server/src/services/impact-selection-note.ts`,
+ * which turns it into the gate's `selector FAILED TO SPAWN` clause.
+ */
+export function formatImpactSelectorSpawnFailure({ error, cli, cwd, execPath = process.execPath }) {
+  const code = error?.code ?? "UNKNOWN";
+  return (
+    `[test:mine] impact selector failed to start — selector FAILED TO SPAWN (${code}: ${cli}, cwd ${cwd}, ` +
+    `node ${execPath}; ${error?.message ?? String(error)}) — falling back to \`vitest related\`.`
+  );
+}
+
 export function runImpactSelector({
   cli,
   minScore = impactMinScore,
@@ -1023,7 +1039,12 @@ export function runImpactSelector({
   // The skill's own summary/escalation lines — what it selected AND what it dropped.
   if (res.stderr) process.stderr.write(res.stderr);
   if (res.error) {
-    console.warn(`[test:mine] impact selector failed to start (${res.error.message}) — falling back to \`vitest related\`.`);
+    // #1231 — the ONE line that says the selector spawn itself failed, so it has to carry enough
+    // to act on: the resolved CLI path, the cwd it was spawned in, the node binary, and the
+    // errno. On 2026-09-24 the #1228 gate logged a bare `(ENOENT)` while the tool DID exist in
+    // the worktree, and nothing in the line said which of the three inputs was wrong. The
+    // `selector FAILED TO SPAWN (` shape is parsed by the gate (`impact-selection-note.ts`).
+    console.warn(formatImpactSelectorSpawnFailure({ error: res.error, cli, cwd: root }));
     return null;
   }
   if (res.status !== 0) {
