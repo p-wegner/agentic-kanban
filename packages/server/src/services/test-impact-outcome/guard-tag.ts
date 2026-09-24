@@ -9,8 +9,11 @@
  * and rewrite that one line with the extra fields. Anything unexpected — no file, a last line that
  * does not parse, a row that does not match — leaves the ledger untouched and reports why.
  *
- * Two producers use it today:
+ * Three producers use it today:
  *
+ * - **`retried: [...]` (#1242).** The suites a targeted flake re-run (#894) was attempted for,
+ *   repo-relative like `failed`, on both verdicts — so a suite that keeps needing a retry is
+ *   countable, and a red row that survived its retry is distinguishable from one never retried.
  * - **`guardFailure: true` (#1230).** `--source` already carries a `-guardfailure` suffix, but
  *   `stats`' miss-rate join reads `failed` against `selected`; a guard is always selected
  *   (`--always-run`), so it can never be a MISS, and a corpus consumer grouping failures by cause
@@ -98,10 +101,13 @@ const LEDGER_STEP_NAMES = ["arch", "typecheck", "tests"] as const;
  */
 export function gateRowExtras(input: {
   guardFailure?: boolean;
+  /** #1242 — repo-relative suites a targeted flake re-run was attempted for; omitted when none. */
+  retried?: readonly string[];
   tierInfo: { verifyRunMs?: number; stepTimings?: VerifyStepTiming[] } | null | undefined;
 }): Record<string, unknown> {
   const extras: Record<string, unknown> = {};
   if (input.guardFailure) extras.guardFailure = true;
+  if (input.retried && input.retried.length > 0) extras.retried = [...input.retried];
   const wallMs = input.tierInfo?.verifyRunMs;
   if (typeof wallMs === "number" && Number.isFinite(wallMs) && wallMs >= 0) extras.durationMs = Math.round(wallMs);
   const steps: Record<string, number> = {};

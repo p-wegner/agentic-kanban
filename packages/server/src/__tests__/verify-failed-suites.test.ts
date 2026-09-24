@@ -191,6 +191,33 @@ describe("recordVerifyGateOutcome names a guard failure (#1230)", () => {
     }
   });
 
+  it("records the suites a flake re-run was attempted for as `retried: [...]`, repo-relative (#1242)", async () => {
+    const repos = makeRepos();
+    try {
+      const result = await recordVerifyGateOutcome({
+        workspaceId: "ws-3",
+        workingDir: repos.root,
+        repoPath: repos.main,
+        baseBranch: "master",
+        // A pass that needed a retry: the verdict is the pass, the failed set is what failed on the way.
+        outcome: {
+          failure: null,
+          failedSuites: [{ file: PLAIN, packageLabel: null }],
+          retriedSuites: [{ file: PLAIN, packageLabel: "client" }],
+        },
+        tierInfo: null,
+        runCommand: repos.run,
+        log: () => {},
+      });
+      expect(result.recorded).toBe(true);
+      const row = JSON.parse(readFileSync(repos.outcomes, "utf8").trim().split("\n").at(-1)!);
+      expect(row).toMatchObject({ result: "pass", failed: [`packages/client/${PLAIN}`], retried: [`packages/client/${PLAIN}`] });
+      expect(row.guardFailure).toBeUndefined();
+    } finally {
+      repos.cleanup();
+    }
+  });
+
   it("names the suites even when the ledger itself is not written (timeout) so the gate can still say them", async () => {
     const repos = makeRepos();
     try {
