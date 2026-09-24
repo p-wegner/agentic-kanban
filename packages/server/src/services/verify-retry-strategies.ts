@@ -23,7 +23,8 @@
  * Everything the caller needs is injected as a callback, so this module reaches no database,
  * spawns no process of its own, and is exercised without a worktree.
  */
-import { type FailedSuite, decideFlakeRetry, retryScopeEnvValue } from "./verify-flake-retry.js";
+import { type FailedSuite, decideFlakeRetry, parseFailedSuites, retryScopeEnvValue } from "./verify-flake-retry.js";
+import { type FailedSuiteClassification, classifyFailedSuites } from "./verify-failed-suites.js";
 
 export interface VerifyRunResult {
   exitCode: number;
@@ -74,6 +75,15 @@ export interface VerifyOutcome {
    * out of the output — a compile, install or runner failure names nothing to attribute.
    */
   failedSuites: FailedSuite[];
+  /**
+   * The suites a targeted re-run was ATTEMPTED for (#1242), attributed, whatever the re-run then
+   * decided — set on both the cleared and the confirmed-red path, so the ledger row can record
+   * `retried: [...]` for a failure that survived its retry as well as for one that did not.
+   * Absent when no retry ran.
+   */
+  retriedSuites?: FailedSuite[];
+  /** Why the retry was (or was not) attempted — the classifier's own sentence. Absent on a first-run pass. */
+  retryReason?: string;
 }
 
 export interface ResolveVerifyOutcomeInput {
@@ -91,6 +101,15 @@ export interface ResolveVerifyOutcomeInput {
   looksLikeMissingDeps: (output: string) => boolean;
   /** Whether this project's verify_script honours a suite scope at all. */
   scoped: boolean;
+  /**
+   * The worktree the verify ran in (#1242). Vitest 4 prints its `FAIL` summary on stderr and the
+   * runner its package headers on stdout, so the combined text attributes nothing; the failing
+   * suites are placed by DISK instead (`classifyFailedSuites`), which also says which of them are
+   * deterministic guards. Absent (or null) means header-only attribution, as before #1242.
+   */
+  workingDir?: string | null;
+  /** Injected for tests; defaults to `classifyFailedSuites(workingDir, suites)`. */
+  classifySuites?: (suites: FailedSuite[]) => FailedSuiteClassification;
   verifyTimeoutMs: number;
   projectId: string;
   workspaceId: string;
@@ -128,6 +147,30 @@ function noProgressFailure(input: { projectId: string; afterInstall: boolean }):
 }
 
 const suiteNames = (suites: FailedSuite[]) => suites.map((s) => `${s.packageLabel}/${s.file}`).join(", ");
+
+/**
+ * The failing suites in the form `decideFlakeRetry` needs: attributed to a package (#1242).
+ *
+ * `parseFailedSuites` reads the combined text and, on vitest-4 output, labels nothing (see the
+ * `workingDir` doc on the input). `classifyFailedSuites` places each unlabelled suite by which
+ * single `packages/<pkg>/` holds it on disk. A suite it cannot place (the same relative path in
+ * two packages) keeps its null label, so `decideFlakeRetry` refuses it for the reason it always
+ * had. The repo-relative guard set rides along for the same decision.
+ */
+function attributeForRetry(
+  parsed: FailedSuite[],
+  classify: (suites: FailedSuite[]) => FailedSuiteClassification,
+): { suites: FailedSuite[]; guardSuites: string[] } {
+  const classified = classify(parsed);
+  const suites = parsed.map((suite) => {
+    if (suite.packageLabel) return suite;
+    const file = suite.file.replace(/\\/g, "/").replace(/^\.\//, "");
+    const placed = classified.files.find((f) => f.endsWith(`/${file}`));
+    const m = placed ? /^packages\/([^/]+)\//.exec(placed) : null;
+    return m ? { packageLabel: m[1]!, file } : suite;
+  });
+  return { suites, guardSuites: classified.guardSuites };
+}
 
 /**
  * Decide the verify stage's verdict, applying at most one install retry and at most one
@@ -171,31 +214,40 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
   }
 
   // ---- #894 targeted flake retry -----------------------------------------------------------
-  // `decideFlakeRetry` parses the failed suites in EVERY branch, including the ones where it
-  // declines to retry, so `flake.suites` is the answer to "what failed here" regardless of what
+  // The failed suites are parsed in EVERY branch, including the ones where the classifier
+  // declines to retry, so `failedSuites` is the answer to "what failed here" regardless of what
   // it decides to do about it — which is what the #954 ledger needs on the non-retry paths too.
-  const flake = decideFlakeRetry({ output: combinedOutput(result), timedOut: result.timedOut, scoped: input.scoped });
-  const failedSuites = flake.suites;
+  // #1242 — attributed by DISK before the decision: on vitest-4 output the combined text labels
+  // nothing (stderr's FAIL lines precede stdout's package headers), which had made every retry a
+  // refusal. A deterministic guard failure (#1230) is refused by the same call.
+  const failedSuites = parseFailedSuites(combinedOutput(result));
+  const classify = input.classifySuites ?? ((suites: FailedSuite[]) => classifyFailedSuites(input.workingDir ?? null, suites));
+  const attributed = attributeForRetry(failedSuites, classify);
+  const flake = decideFlakeRetry({ ...attributed, timedOut: result.timedOut, scoped: input.scoped });
   if (flake.retry) {
     const names = suiteNames(flake.suites);
     log(
       `verify_script failed on ${flake.suites.length} suite(s) for workspace ${input.workspaceId} — ` +
-        `re-running only those to tell contention from a regression: ${names}`,
+        `re-running only those to tell contention from a regression: ${names} (${flake.reason})`,
     );
     const retryResult = await input.runVerifyWithRetryScope(retryScopeEnvValue(flake.suites));
+    const retried = { retriedSuites: flake.suites, retryReason: flake.reason };
     if (retryResult.exitCode === 0 && !retryResult.timedOut && !retryResult.noProgress) {
       return {
         failure: null,
-        flakeRetryNote: `— ${flake.suites.length} suite(s) failed under load and PASSED on a targeted re-run: ${names}`,
+        flakeRetryNote:
+          `— ${flake.suites.length} suite(s) failed under load and PASSED on a targeted re-run: ${names} ` +
+          `[retried because ${flake.reason}]`,
         flakySuites: flake.suites,
         // The gate PASSED, but these suites did fail on the way there. The ledger records the
         // pass (that is the verdict) alongside what failed, so a suite that keeps needing a retry
         // is visible as failure history rather than being erased by the retry that cleared it.
         failedSuites,
+        ...retried,
       };
     }
     if (retryResult.noProgress) {
-      return { failure: noProgressFailure({ ...input, afterInstall: installed }), failedSuites };
+      return { failure: noProgressFailure({ ...input, afterInstall: installed }), failedSuites, ...retried };
     }
     // Failed twice, the second time nearly alone on the machine. That is a much stronger
     // signal than the first failure was, and the message says so rather than repeating the
@@ -204,20 +256,27 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
       failure: {
         message:
           `verify_script failed (exit ${result.exitCode}) and the same ${flake.suites.length} suite(s) failed ` +
-          `again on a targeted re-run (${names}) — this is a real failure, not machine load: ` +
+          `again on a targeted re-run (${names}; retried because ${flake.reason}) — this is a real failure, ` +
+          `not machine load: ` +
           input.summarize(result.stdout || "", result.stderr || ""),
       },
       failedSuites,
+      ...retried,
     };
   }
 
+  // A declined retry says why, so a red gate never reads as "the flake mechanism did not run"
+  // (#1242's finding: it had silently declined every time). Only when something was named —
+  // a compile or install failure carries nothing to explain.
+  const declined = failedSuites.length > 0 ? ` [no flake retry: ${flake.reason}]` : "";
   const suffix = installed ? " (retried once after an auto-install; still failing)" : "";
   return {
     failure: {
       message:
-        `verify_script failed (exit ${result.exitCode})${suffix}: ` +
+        `verify_script failed (exit ${result.exitCode})${suffix}${declined}: ` +
         input.summarize(result.stdout || "", result.stderr || ""),
     },
     failedSuites,
+    retryReason: flake.reason,
   };
 }

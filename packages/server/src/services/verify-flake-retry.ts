@@ -125,13 +125,28 @@ export type FlakeRetryDecision =
  * same trap `KANBAN_TEST_GUARDS_ONLY` documents at the docs-only skip.
  */
 export function decideFlakeRetry(input: {
-  output: string;
+  /** The run's combined output, parsed with {@link parseFailedSuites} when `suites` is absent. */
+  output?: string;
+  /**
+   * The failing suites, ALREADY attributed (#1242). Vitest 4 prints its `FAIL` summary on stderr
+   * and the runner its `[test:mine] <pkg>:` headers on stdout, so in a `stderr + stdout` text
+   * every FAIL line precedes every header and `parseFailedSuites` can label nothing — which made
+   * this decision refuse every retry on this repo's own output. A caller that can place suites by
+   * disk (`verify-failed-suites.ts`) hands them in here; `output` is then not parsed at all.
+   */
+  suites?: FailedSuite[];
+  /**
+   * Repo-relative paths (`packages/<pkg>/<file>`) of the failing suites that are tree-level
+   * guards/ratchets (#1230). A guard's verdict is a property of the commit, not of the machine,
+   * so a failure that includes one cannot be cleared by a re-run and is refused outright.
+   */
+  guardSuites?: readonly string[];
   /** False when the failure was a timeout — inconclusive already, and handled upstream. */
   timedOut?: boolean;
   /** Whether the verify_script honours suite scoping at all. */
   scoped: boolean;
 }): FlakeRetryDecision {
-  const suites = parseFailedSuites(input.output);
+  const suites = input.suites ?? parseFailedSuites(input.output ?? "");
   if (input.timedOut) {
     return { retry: false, suites, reason: "the run timed out, which is already reported as inconclusive" };
   }
@@ -159,6 +174,18 @@ export function decideFlakeRetry(input: {
       reason: `${unattributed.length} failing suite(s) could not be attributed to a package, and the same relative path exists in several`,
     };
   }
+  // A deterministic guard failure (#1230) is refused BEFORE the ceiling: one ratchet among two
+  // flaky suites would still fail the re-run, so the retry buys ~20s of nothing.
+  const guards = suites.filter((s) => isGuard(s, input.guardSuites ?? []));
+  if (guards.length > 0) {
+    return {
+      retry: false,
+      suites,
+      reason:
+        `${guards.length} of the failing suite(s) are deterministic guard/ratchet suites ` +
+        `(${guards.map((s) => s.file).join(", ")}) — the same commit fails them the same way, so a re-run cannot clear it`,
+    };
+  }
   if (suites.length > MAX_RETRYABLE_SUITES) {
     return {
       retry: false,
@@ -171,6 +198,14 @@ export function decideFlakeRetry(input: {
     suites,
     reason: `${suites.length} suite(s) failed out of a full run; re-running just those to tell a load artefact from a real failure`,
   };
+}
+
+/** Is this suite one of the repo-relative guard paths? Compared in the `packages/<pkg>/<file>` form. */
+function isGuard(suite: FailedSuite, guardSuites: readonly string[]): boolean {
+  if (guardSuites.length === 0) return false;
+  const file = suite.file.replace(/\\/g, "/");
+  const repoRelative = suite.packageLabel ? `packages/${suite.packageLabel}/${file}` : file;
+  return guardSuites.some((g) => g.replace(/\\/g, "/") === repoRelative);
 }
 
 /**
