@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -1027,6 +1027,84 @@ describe("recordBaseSweepOutcome", () => {
       expect(result.recorded).toBe(true);
     } finally {
       cleanup();
+    }
+  });
+});
+
+describe("a gate outcome row carries durationMs and steps (#1234)", () => {
+  /** A runner whose `record` appends a row the way `impact.mjs` does, so the patch has something to hit. */
+  function appendingRunner(main: string): { run: RunImpactCommand; calls: string[][] } {
+    const outcomes = join(main, OUTCOMES_RELATIVE_PATH);
+    mkdirSync(join(main, ".test-impact"), { recursive: true });
+    const calls: string[][] = [];
+    const run: RunImpactCommand = async ({ args }) => {
+      calls.push(args);
+      if (args[1] === "select") {
+        return { exitCode: 0, stdout: selectionJson("impact", ["packages/server/src/__tests__/x.test.ts"]), stderr: "" };
+      }
+      const flag = (name: string) => args[args.indexOf(`--${name}`) + 1];
+      const failed = args.includes("--failed") ? flag("failed")!.split(",") : [];
+      appendFileSync(outcomes, JSON.stringify({ at: "now", commit: "abc1234", source: flag("source"), result: flag("result"), failed, missed: [] }) + "\n");
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
+    return { run, calls };
+  }
+
+  it("patches the verify wall clock and the per-step seconds onto the row record appended", async () => {
+    const repos = makeRepos();
+    try {
+      const runner = appendingRunner(repos.main);
+      const result = await recordGateOutcome({
+        workingDir: repos.worktree,
+        repoPath: repos.main,
+        baseBranch: "master",
+        passed: true,
+        failedSuites: [],
+        tierInfo: tierInfo({
+          selector: "impact",
+          verifyRunMs: 180_499.6,
+          stepTimings: [
+            { name: "arch", seconds: 43 },
+            { name: "typecheck", seconds: 19 },
+            { name: "tests", seconds: 118, scope: "impact-selected" },
+            { name: "smoke", seconds: 2 },
+          ],
+        }),
+        runCommand: runner.run,
+        log: () => {},
+      });
+      expect(result.recorded).toBe(true);
+      const row = JSON.parse(readFileSync(join(repos.main, OUTCOMES_RELATIVE_PATH), "utf8").trim().split("\n").at(-1)!);
+      // The tool's own fields survive, and the two new ones ride beside them.
+      expect(row).toMatchObject({ result: "pass", source: "ci", durationMs: 180_500, steps: { arch: 43, typecheck: 19, tests: 118 } });
+      expect(row.guardFailure).toBeUndefined();
+      // `record` itself was NOT handed the fields: the external tool's argv contract is untouched.
+      const record = runner.calls.find((args) => args[1] === "record")!;
+      expect(record.some((arg) => /duration|steps/.test(arg))).toBe(false);
+    } finally {
+      repos.cleanup();
+    }
+  });
+
+  it("leaves the row as record wrote it when the run reported no timings", async () => {
+    const repos = makeRepos();
+    try {
+      const runner = appendingRunner(repos.main);
+      await recordGateOutcome({
+        workingDir: repos.worktree,
+        repoPath: repos.main,
+        baseBranch: "master",
+        passed: true,
+        failedSuites: [],
+        tierInfo: tierInfo(),
+        runCommand: runner.run,
+        log: () => {},
+      });
+      const row = JSON.parse(readFileSync(join(repos.main, OUTCOMES_RELATIVE_PATH), "utf8").trim().split("\n").at(-1)!);
+      expect(row.durationMs).toBeUndefined();
+      expect(row.steps).toBeUndefined();
+    } finally {
+      repos.cleanup();
     }
   });
 });

@@ -44,7 +44,7 @@ import type { GateImpactSelection, GateTierInfo } from "./pre-merge-gate-tier.js
 // test-impact-outcome.service -> pre-merge-gate-tier`), caught by the `no-circular` depcruise rule.
 import { impactRunnerFellBack } from "./impact-selection-note.js";
 import { classifyFailedSuites } from "./verify-failed-suites.js";
-import { tagGuardFailureRow } from "./test-impact-outcome/guard-tag.js";
+import { gateRowExtras, patchLastRow } from "./test-impact-outcome/guard-tag.js";
 
 /**
  * Path of `impact.mjs` relative to a repo root, as the board materializes the skill into a
@@ -786,10 +786,12 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
     if (record.exitCode !== 0) {
       return { recorded: false, reason: `record exited ${record.exitCode}: ${(record.stderr || record.stdout).trim()}` };
     }
-    // #1230 — the structured tag `record` cannot carry, patched onto the row it just appended (see guard-tag.ts).
-    if (input.guardFailure) {
-      const tagged = tagGuardFailureRow(outcomesPath, { result: input.passed ? "pass" : "fail", failed: input.failedSuites });
-      if (!tagged.tagged) log(`could not tag the ledger row as a guard failure: ${tagged.reason}`);
+    // #1230/#1234 — the fields `record` cannot carry (guard tag, verify wall clock, per-step
+    // seconds), patched onto the row it just appended (see guard-tag.ts).
+    const extras = gateRowExtras({ guardFailure: input.guardFailure, tierInfo: input.tierInfo });
+    if (Object.keys(extras).length > 0) {
+      const tagged = patchLastRow(outcomesPath, { result: input.passed ? "pass" : "fail", failed: input.failedSuites }, extras);
+      if (!tagged.tagged) log(`could not patch the ledger row with ${Object.keys(extras).join("/")}: ${tagged.reason}`);
     }
     if (!input.repoPath) {
       log(`recorded a gate outcome into the WORKTREE ledger at ${outcomesPath} — the project's repo path is unknown, so this row will be lost with the worktree`);
