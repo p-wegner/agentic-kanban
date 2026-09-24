@@ -43,7 +43,7 @@ import type { GateImpactSelection, GateTierInfo } from "./pre-merge-gate-tier.js
 // here would be a cycle (`pre-merge-gate-tier -> test-impact-selector-id ->
 // test-impact-outcome.service -> pre-merge-gate-tier`), caught by the `no-circular` depcruise rule.
 import { impactRunnerFellBack } from "./impact-selection-note.js";
-import { classifyFailedSuites } from "./verify-failed-suites.js";
+import { attributeFailedSuites, classifyFailedSuites } from "./verify-failed-suites.js";
 import { gateRowExtras, patchLastRow } from "./test-impact-outcome/guard-tag.js";
 
 /**
@@ -215,8 +215,9 @@ export interface RecordGateOutcomeInput {
   tierInfo: GateTierInfo | null;
   /** Tags the row's origin. The board's gate is `ci`: it is the automated gate, not a dev loop. */
   source?: string;
-  /** #1230 — every failing suite is a guard (always selected, so never a miss): source suffix + row tag. */
+  /** #1230 — every failing suite is a guard (always selected, so never a miss): source suffix + row tag. #1242 — `retried`: the repo-relative suites a flake re-run was attempted for (row tag). */
   guardFailure?: boolean;
+  retried?: string[];
   /** Injected for tests. */
   runCommand?: RunImpactCommand;
   log?: (message: string) => void;
@@ -788,7 +789,7 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
     }
     // #1230/#1234 — the fields `record` cannot carry (guard tag, verify wall clock, per-step
     // seconds), patched onto the row it just appended (see guard-tag.ts).
-    const extras = gateRowExtras({ guardFailure: input.guardFailure, tierInfo: input.tierInfo });
+    const extras = gateRowExtras({ guardFailure: input.guardFailure, retried: input.retried, tierInfo: input.tierInfo });
     if (Object.keys(extras).length > 0) {
       const tagged = patchLastRow(outcomesPath, { result: input.passed ? "pass" : "fail", failed: input.failedSuites }, extras);
       if (!tagged.tagged) log(`could not patch the ledger row with ${Object.keys(extras).join("/")}: ${tagged.reason}`);
@@ -864,7 +865,7 @@ export async function recordVerifyGateOutcome(args: {
    * `failure.timedOut` (inconclusive) and `failedSuites` are read; `message` is accepted so a real
    * `VerifyFailure` satisfies this without a cast.
    */
-  outcome: { failure: { timedOut?: boolean; message?: string } | null; failedSuites: FailedSuiteLike[] };
+  outcome: { failure: { timedOut?: boolean; message?: string } | null; failedSuites: FailedSuiteLike[]; retriedSuites?: FailedSuiteLike[] };
   tierInfo: GateTierInfo | null;
   runCommand?: RunImpactCommand;
   log?: (message: string) => void;
@@ -891,7 +892,7 @@ export async function recordVerifyGateOutcome(args: {
       parsedFailedSuiteCount: outcome.failedSuites.length,
       tierInfo: args.tierInfo,
       source: "ci",
-      guardFailure: classified.guardFailure,
+      guardFailure: classified.guardFailure, retried: attributeFailedSuites(args.workingDir, outcome.retriedSuites ?? []),
       runCommand: args.runCommand,
       log,
     })),
