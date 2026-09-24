@@ -6,23 +6,11 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
 
 ## 2026-09-24 — review of the last landings, the #1228 gate loop, and the Yegge follow-ups
 
-**Board restarted.** 3001 was down on session start (no exit record looked at; the dev board on
-3101 was down too). `node scripts/promote.mjs --restart-stable` brought `stable-20260923`
-(`461837706c`) back on pid 3856, smoke passed. Master is two landings ahead of it: #1229
-(`01ef8a6cda`, plugin scripts stream progress over SSE) and #1227 (train `2026-09-24-01`,
-Plugins view subroute). Both reviewed: shape is fine, nothing to fix before promotion.
-
-**#1228 is the one open ticket and it was looping.** Its branch (`0f2e1546e7`) failed the
-pre-merge gate **31 times between 22:47 and 06:49 UTC**, every run on the same deterministic
-guard: `function-nloc-ratchet.test.ts`, because #1227 lowered `PluginViewsPanel` to 550 and the
-overlay JSX pushes it over. The ledger rows all say `failed: []` (guards are not named), the
-board log says only `verify_script failed (exit 1)`, and auto-merge re-gated it every tick
-(the gap #1219's own comment admits: `shouldSkipMergeForBackoff` is not consulted for
-`verify_failed`). Each run: arch 43 s + typecheck 19 s + tests 118 s. The same log shows
-`impact selector failed to start (ENOENT)` although the selector file exists in the worktree, so
-those gates ran `vitest related`, not the impact tier. Sent the builder a turn naming the guard
-and asking for extraction, not a baseline bump; it is extracting (`PluginViewFrameHost.tsx`,
-`usePluginViewFrameLifecycle.ts`) as this is written. The window holds it as `accumulating`.
+**Morning.** 3001 was down on session start; `node scripts/promote.mjs --restart-stable` brought
+`stable-20260923` (`461837706c`) back on pid 3856. #1228 had failed its gate 31 times overnight on
+one deterministic guard (`function-nloc-ratchet`, ledger rows `failed: []`, no backoff): the root
+cause of #1230; its ticket comments hold the measurements (arch 43 s + typecheck 19 s + tests 118 s
+per run).
 
 **Filed #1230-#1236 (Backlog, tagged `no-auto-start` so the monitor waits for a human pick).**
 The goal they serve: a merge pays only for what it touched, master may be red, the full suite
