@@ -1,4 +1,4 @@
-// @gate:always-run — reads route/service SOURCE TEXT outside its own import graph (#774).
+// @gate:always-run when:packages/server/src/routes/**,packages/server/src/services/** — reads route/service SOURCE TEXT outside its own import graph (#774).
 //
 // The point of this guard: the event VOCABULARY and the set of types the board actually
 // writes are two different lists, and they drift apart silently. #774 could emit only four

@@ -1,4 +1,4 @@
-// @gate:always-run
+// @gate:always-run when:packages/shared/src/types/**
 /**
  * #987 — `PATCH /api/issues/:id` returned **200 with the full issue object** for a body whose
  * fields nobody read.

@@ -1,4 +1,4 @@
-// @gate:always-run — two cases probe the repo root for the materialized test-impact skill
+// @gate:always-run always — two cases probe the repo root for the materialized test-impact skill
 // (`.claude/skills/test-impact/tools/impact.mjs`), which is state outside this file's import
 // graph, so dependency-based selection cannot see that they depend on it.
 import { describe, expect, it } from "vitest";

@@ -1,4 +1,4 @@
-// @gate:always-run
+// @gate:always-run always — regenerates the bundled skill from registries in three packages
 //
 // The bundled `agentic-kanban` skill is generated FROM source (MCP tool table, CLI command
 // files, view/shortcut registries) — so adding an MCP tool or a CLI command silently makes

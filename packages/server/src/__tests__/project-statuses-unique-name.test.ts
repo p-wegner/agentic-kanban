@@ -1,4 +1,4 @@
-// @gate:always-run — reads the migration SQL from packages/shared/drizzle, which is outside
+// @gate:always-run when:packages/shared/drizzle/** — reads the migration SQL from packages/shared/drizzle, which is outside
 // this suite's own import graph, so dependency-based test selection cannot see it.
 /**
  * #668 — a project could hold two statuses with the same name.

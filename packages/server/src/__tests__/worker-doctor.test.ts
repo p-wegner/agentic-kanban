@@ -1,4 +1,4 @@
-// @gate:always-run — reads the auth-ring SOURCE files, which are outside this test's own
+// @gate:always-run when:packages/server/src/** — reads the auth-ring SOURCE files, which are outside this test's own
 // import graph (the doctor deliberately does not import them: it ships in the standalone
 // worker binary, which must never reach the database layer).
 //

@@ -1,4 +1,4 @@
-// @gate:always-run — imports scripts/promote-plan.mjs, which no package-local diff links to (#687).
+// @gate:always-run when:scripts/promote-plan.mjs — imports scripts/promote-plan.mjs, which no package-local diff links to (#687).
 /**
  * Unit tests for the PURE half of `pnpm promote` (#1014): tag naming, sweep-verdict parsing,
  * and the dry-run plan. Nothing here promotes, tags, starts a server or opens a database —

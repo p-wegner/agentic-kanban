@@ -1,4 +1,4 @@
-// @gate:always-run — walks `startup/` and `services/`; imports nothing it checks.
+// @gate:always-run when:packages/server/src/startup/**,packages/server/src/services/** — walks `startup/` and `services/`; imports nothing it checks.
 /**
  * #584 — `background sweep` is a named kind, and its registry is complete.
  *

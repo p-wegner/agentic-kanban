@@ -1,4 +1,4 @@
-// @gate:always-run — reads the repo's own gate scripts off disk; imports nothing it checks (#988).
+// @gate:always-run when:scripts/check-arch.mjs,scripts/typecheck.mjs,scripts/test-mine.mjs,package.json — reads the repo's own gate scripts off disk; imports nothing it checks (#988).
 /**
  * The EMITTING half of the `[gate:step]` contract (#988).
  *

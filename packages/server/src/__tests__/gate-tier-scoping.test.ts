@@ -1,3 +1,7 @@
+// @gate:always-run when:packages/server/src/services/pre-merge-gate-tier.ts,packages/server/src/services/always-run-guard-floor.ts,packages/server/src/services/impact-selection-note.ts
+// — asserts the tier CONTRACT (a level may only weaken verification visibly); marked by policy
+// (#643). Until #1232 this file's only marker was a mid-comment mention below, which the
+// line-anchored matcher (#891) happened to accept — now it declares itself.
 /**
  * #643 — `full` was not full.
  *
@@ -219,7 +223,7 @@ describe("the tier MESSAGE agrees with the tier that ran", () => {
 
   // A docs-only diff used to skip verification entirely and report "pre-merge gate skipped —
   // docs-only diff", which read as "nothing could have broken" while the markdown-reading
-  // @gate:always-run suites were exactly what went unrun. It now runs those guards, so the
+  // `@gate:always-run` suites were exactly what went unrun. It now runs those guards, so the
   // message must name the narrower tier rather than passing as an ordinary run.
   it("names `base probe <age>` under scoped-base-watch (#916 acceptance criterion)", () => {
     const msg = buildGateTierMessage({

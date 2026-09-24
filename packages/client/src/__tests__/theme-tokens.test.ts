@@ -1,4 +1,4 @@
-// @gate:always-run — reads app.css from disk; imports nothing it checks (#601).
+// @gate:always-run when:packages/client/src/** — reads app.css from disk; imports nothing it checks (#601).
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";

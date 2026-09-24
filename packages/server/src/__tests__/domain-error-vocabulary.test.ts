@@ -1,4 +1,4 @@
-// @gate:always-run — scans services/ and repositories/ for error-class declarations;
+// @gate:always-run when:packages/server/src/services/**,packages/server/src/repositories/** — scans services/ and repositories/ for error-class declarations;
 // imports only the vocabulary it checks against.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";

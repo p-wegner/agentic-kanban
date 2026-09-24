@@ -1,4 +1,4 @@
-// @gate:always-run — scans server+mcp-server src for provider-resolution forks; imports nothing it checks (#538).
+// @gate:always-run when:packages/server/src/**,packages/mcp-server/src/** — scans server+mcp-server src for provider-resolution forks; imports nothing it checks (#538).
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";

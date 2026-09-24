@@ -1,4 +1,4 @@
-// @gate:always-run — recursively scans the startup/ and services/ source trees, so its
+// @gate:always-run when:packages/server/src/startup/**,packages/server/src/services/** — recursively scans the startup/ and services/ source trees, so its
 // subject is not in this file's import graph and scoped test selection must not skip it.
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";

@@ -1,4 +1,4 @@
-// @gate:always-run — walks every package's `src/` tree; it imports none of the files it judges.
+// @gate:always-run always — walks every package's `src/` tree; it imports none of the files it judges.
 /**
  * The `ExecResult` helpers are USED, and a new hand-rolled `.code` check cannot appear (#705).
  *

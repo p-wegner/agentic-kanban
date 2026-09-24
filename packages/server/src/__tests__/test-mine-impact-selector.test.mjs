@@ -1,4 +1,4 @@
-// @gate:always-run - exercises the impact-selector derivation in `scripts/test-mine.mjs`, a repo
+// @gate:always-run when:scripts/test-mine.mjs - exercises the impact-selector derivation in `scripts/test-mine.mjs`, a repo
 // script outside this suite's own import graph (same reason as test-mine-scope-derivation).
 import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";

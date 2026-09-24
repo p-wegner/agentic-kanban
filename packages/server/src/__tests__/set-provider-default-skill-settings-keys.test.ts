@@ -1,4 +1,4 @@
-// @gate:always-run — scans skill markdown for a write to the retired global default_model key.
+// @gate:always-run when:.claude/skills/set-provider-default/**,.codex/skills/set-provider-default/** — scans skill markdown for a write to the retired global default_model key.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

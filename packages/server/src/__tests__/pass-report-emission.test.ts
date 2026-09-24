@@ -15,7 +15,7 @@
 // only pass if the pass emits a summary unconditionally — which is the behaviour that was
 // missing.
 
-// @gate:always-run — the caller guard at the bottom walks the server source tree; it
+// @gate:always-run when:packages/server/src/** — the caller guard at the bottom walks the server source tree; it
 // imports nothing it checks.
 import fs from "node:fs";
 import path from "node:path";

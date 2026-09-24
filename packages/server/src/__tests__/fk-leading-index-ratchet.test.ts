@@ -1,4 +1,4 @@
-// @gate:always-run — asserts a property of the whole migrated SQLite schema; a new table with an un-indexed FK arrives via a migration .sql file, which is not in this file's import graph (#740).
+// @gate:always-run when:packages/shared/drizzle/** — asserts a property of the whole migrated SQLite schema; a new table with an un-indexed FK arrives via a migration .sql file, which is not in this file's import graph (#740).
 import { describe, it, expect } from "vitest";
 import { createTestDb } from "./helpers/test-db.js";
 

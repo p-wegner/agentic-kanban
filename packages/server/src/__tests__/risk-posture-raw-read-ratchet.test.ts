@@ -1,4 +1,4 @@
-// @gate:always-run — scans the packages tree for hand-rolled `risk_posture_` reads; that
+// @gate:always-run always — scans the packages tree for hand-rolled `risk_posture_` reads; that
 // half has no import edge (mirrors auto-review-pref.test.ts, #911).
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";

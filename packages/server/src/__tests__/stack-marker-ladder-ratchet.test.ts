@@ -1,4 +1,4 @@
-// @gate:always-run — recursively walks every package's `src/` tree; it imports none of
+// @gate:always-run always — recursively walks every package's `src/` tree; it imports none of
 // the files it judges, so `vitest related` cannot see it (#583).
 //
 // #695. `9b79937d13` genuinely collapsed a 9-branch stack ladder into

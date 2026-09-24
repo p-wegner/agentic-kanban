@@ -1,4 +1,4 @@
-// @gate:always-run — asserts on the TEXT of `fleet-worker-prompt.ts` and of the worker
+// @gate:always-run when:packages/server/src/services/**,packages/server/src/worker/**,packages/server/src/cli/** — asserts on the TEXT of `fleet-worker-prompt.ts` and of the worker
 // sources (the rejected-fix guard below), none of which this test imports, so a scoped
 // run computed from the import graph would silently drop it.
 // #847 and #851 — two doctor checks that reported a TRUE condition in a way that sent the

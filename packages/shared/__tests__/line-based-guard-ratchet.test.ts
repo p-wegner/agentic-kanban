@@ -1,4 +1,4 @@
-// @gate:always-run — enumerates every guard suite in the repo by walking the test tree; imports none of them (#779).
+// @gate:always-run always — enumerates every guard suite in the repo by walking the test tree; imports none of them (#779).
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

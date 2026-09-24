@@ -1,4 +1,4 @@
-// @gate:always-run — walks the whole server source tree; imports nothing it checks.
+// @gate:always-run when:packages/server/src/** — walks the whole server source tree; imports nothing it checks.
 /**
  * #586 — `prefMap resolver` is a named kind: `resolveX(prefMap, ctx) → one decision value`,
  * pure and synchronous.

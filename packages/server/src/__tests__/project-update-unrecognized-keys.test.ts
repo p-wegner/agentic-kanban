@@ -1,4 +1,4 @@
-// @gate:always-run
+// @gate:always-run when:packages/client/src/lib/**,packages/shared/src/types/**
 /**
  * #992 — `PATCH /api/projects/:id` returned **200 with the full project object** for a body
  * whose fields nobody read. The #987 defect one route over: `updateProject` picks fields out of

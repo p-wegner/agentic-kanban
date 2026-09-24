@@ -1,4 +1,4 @@
-// @gate:always-run — the backfill assertion reads the 0141 migration .sql off disk, which is
+// @gate:always-run when:packages/shared/drizzle/** — the backfill assertion reads the 0141 migration .sql off disk, which is
 // not in this file's import graph (#815).
 // @covers workspaces.summary.git-projection [persistence,migration]
 /**

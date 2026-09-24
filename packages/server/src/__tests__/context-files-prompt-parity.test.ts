@@ -1,4 +1,4 @@
-// @gate:always-run — reads the two launch services off disk; imports neither.
+// @gate:always-run when:packages/server/src/services/** — reads the two launch services off disk; imports neither.
 //
 // #524. `contextFiles` reach codex ONLY by having their contents appended to the prompt
 // (claude ignores the field; copilot passes `--attachment`). The host path did that; the

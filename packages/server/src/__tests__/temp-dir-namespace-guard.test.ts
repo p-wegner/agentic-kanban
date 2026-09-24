@@ -1,4 +1,4 @@
-// @gate:always-run
+// @gate:always-run always — walks packages/, scripts/ and test-setup/
 /**
  * #839 — a temp dir minted OUTSIDE the reaper's swept namespace leaks permanently.
  *

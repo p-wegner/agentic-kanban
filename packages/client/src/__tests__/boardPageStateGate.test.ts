@@ -1,4 +1,4 @@
-// @gate:always-run — scans BoardPage's source for the #905 state ratchet; imports nothing it checks (#601).
+// @gate:always-run when:packages/client/src/** — scans BoardPage's source for the #905 state ratchet; imports nothing it checks (#601).
 // Ratchet gate for the BoardPage decentralisation (#905, parent #895/B).
 //
 // BoardPage is the board's hottest file precisely because every piece of

@@ -1,4 +1,4 @@
-// @gate:always-run — cross-checks server SETTINGS_KEYS against the shared registry (#538).
+// @gate:always-run when:packages/shared/src/lib/settings-registry.ts,packages/server/src/services/preference.service.ts,packages/server/src/services/harness-settings.ts — cross-checks server SETTINGS_KEYS against the shared registry (#538).
 import { describe, it, expect } from "vitest";
 import { SETTINGS_KEYS } from "../services/preference.service.js";
 import {

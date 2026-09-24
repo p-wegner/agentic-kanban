@@ -1,4 +1,4 @@
-// @gate:always-run — scans every package's src tree for the client-port ladder; imports
+// @gate:always-run always — scans every package's src tree for the client-port ladder; imports
 // nothing it checks.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";

@@ -1,4 +1,4 @@
-// @gate:always-run — byte-compares scaffold hooks against .claude/hooks/ outside src/; imports nothing it checks (#538).
+// @gate:always-run when:packages/server/src/scaffold/**,.claude/hooks/** — byte-compares scaffold hooks against .claude/hooks/ outside src/; imports nothing it checks (#538).
 import { describe, it, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";

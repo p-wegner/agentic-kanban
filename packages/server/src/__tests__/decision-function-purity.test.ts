@@ -1,4 +1,4 @@
-// @gate:always-run — walks the whole server source tree; imports nothing it checks.
+// @gate:always-run when:packages/server/src/** — walks the whole server source tree; imports nothing it checks.
 /**
  * #585 — `decision function` is a named kind: a pure, synchronous verdict co-located with the
  * executor that acts on it — `decideX(row) -> {action, reason}`, `classifyX(...) -> union`,

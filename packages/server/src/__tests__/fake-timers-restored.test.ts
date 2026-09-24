@@ -1,4 +1,4 @@
-// @gate:always-run — scans the __tests__ tree; imports nothing it checks.
+// @gate:always-run when:packages/server/src/__tests__/** — scans the __tests__ tree; imports nothing it checks.
 import { describe, expect, it } from "vitest";
 import path from "node:path";
 import ts from "typescript";

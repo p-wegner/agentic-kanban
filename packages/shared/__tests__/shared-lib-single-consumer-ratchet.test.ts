@@ -1,4 +1,4 @@
-// @gate:always-run — walks the client, server, mcp-server, e2e, desktop and shared trees plus scripts/; imports nothing it checks.
+// @gate:always-run always — walks the client, server, mcp-server, e2e, desktop and shared trees plus scripts/; imports nothing it checks.
 /**
  * `shared/lib` is for code MORE THAN ONE package needs (#590). This is the first thing
  * that checks it (#730).

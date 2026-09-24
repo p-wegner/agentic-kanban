@@ -1,4 +1,4 @@
-// @gate:always-run — scans the server src tree for unbounded session-message reads; no import edge (#647).
+// @gate:always-run when:packages/server/src/** — scans the server src tree for unbounded session-message reads; no import edge (#647).
 /**
  * #401 — bounded session_messages reads + sync-free hot paths.
  *

@@ -1,4 +1,4 @@
-// @gate:always-run — reads scripts/coverage-floors.json directly off disk; imports nothing
+// @gate:always-run when:scripts/coverage-floors.json,scripts/coverage-report.mjs — reads scripts/coverage-floors.json directly off disk; imports nothing
 // that would put it in another suite's import graph (#765's under-reporting failure mode).
 /**
  * Per-package coverage floor ratchet (#902, #807 follow-up).

@@ -1,4 +1,4 @@
-// @gate:always-run — reads .claude/.codex skill files + a repo-root script, never imported (#538).
+// @gate:always-run when:.claude/skills/board-monitor/**,.codex/skills/board-monitor/**,scripts/board-monitor/** — reads .claude/.codex skill files + a repo-root script, never imported (#538).
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 

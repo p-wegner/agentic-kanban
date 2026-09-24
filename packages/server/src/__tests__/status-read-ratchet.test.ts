@@ -1,4 +1,4 @@
-// @gate:always-run — ratchets raw status-name reads across the tree; imports nothing it checks.
+// @gate:always-run always — ratchets raw status-name reads across the tree; imports nothing it checks.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

@@ -1,4 +1,4 @@
-// @gate:always-run — exercises the live command-safety hook script outside src/ (a plain .js
+// @gate:always-run when:.claude/hooks/** — exercises the live command-safety hook script outside src/ (a plain .js
 // hook loaded by path); imports nothing it checks, so import-graph scoping is blind to it (#787).
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createRequire } from "node:module";

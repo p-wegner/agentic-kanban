@@ -1,4 +1,4 @@
-// @gate:always-run — recursively walks every package `src/` tree, so its subject is not
+// @gate:always-run always — recursively walks every package `src/` tree, so its subject is not
 // reachable through its own import graph and scoped test selection would skip it.
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";

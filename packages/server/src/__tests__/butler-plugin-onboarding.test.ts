@@ -1,4 +1,4 @@
-// @gate:always-run — reads mcp-server + route sources across packages; imports neither (#647).
+// @gate:always-run when:packages/mcp-server/src/tools/plugin-onboarding.ts,packages/mcp-server/src/index.ts,packages/server/src/routes/butler.ts,packages/server/src/butler/** — reads mcp-server + route sources across packages; imports neither (#647).
 // @covers butler.pluginOnboarding [correctness, boundary]
 //
 // #390 gap 4: MEASURED — NO test referenced the plugin-onboarding flow at all, which is how gaps

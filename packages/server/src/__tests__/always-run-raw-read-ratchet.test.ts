@@ -1,4 +1,4 @@
-// @gate:always-run — walks every always-run suite in every package and reads its source
+// @gate:always-run always — walks every always-run suite in every package and reads its source
 // looking for a raw repo-file read; imports nothing it checks (#888).
 /**
  * #888 — an `@gate:always-run` suite that reads a repo file raw (`readFileSync(path, "utf8")`)

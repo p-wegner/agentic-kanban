@@ -1,4 +1,4 @@
-// @gate:always-run — the round-trip block below reads the repo's own gate scripts off disk, so
+// @gate:always-run when:scripts/typecheck.mjs,scripts/check-arch.mjs,scripts/test-mine.mjs — the round-trip block below reads the repo's own gate scripts off disk, so
 // it asserts a property of the tree that its own imports cannot reach (#988).
 /**
  * The `[gate:step]` contract between a verify script and the merge gate (#988).

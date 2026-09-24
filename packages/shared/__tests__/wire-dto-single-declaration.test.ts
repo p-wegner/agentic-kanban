@@ -1,4 +1,4 @@
-// @gate:always-run — walks the client, server, mcp-server and shared source trees; imports nothing it checks.
+// @gate:always-run always — walks the client, server, mcp-server and shared source trees; imports nothing it checks.
 /**
  * A wire DTO is declared ONCE (#569).
  *

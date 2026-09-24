@@ -1,4 +1,4 @@
-// @gate:always-run — spawns scripts/guard-inventory.mjs over the whole package tree; imports nothing it checks (#1022).
+// @gate:always-run always — spawns scripts/guard-inventory.mjs over the whole package tree; imports nothing it checks (#1022).
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import path from "node:path";

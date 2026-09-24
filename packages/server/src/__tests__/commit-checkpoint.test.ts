@@ -1,4 +1,4 @@
-// @gate:always-run — reads the live kanban-workflow SKILL.md outside src/; imports nothing it checks (#538).
+// @gate:always-run when:.claude/skills/kanban-workflow/** — reads the live kanban-workflow SKILL.md outside src/; imports nothing it checks (#538).
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { writeFileSync } from "node:fs";

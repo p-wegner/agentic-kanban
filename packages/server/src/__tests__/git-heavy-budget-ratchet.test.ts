@@ -1,4 +1,4 @@
-// @gate:always-run — recursively scans the whole server __tests__ tree; imports nothing it checks (#680).
+// @gate:always-run when:packages/server/src/__tests__/** — recursively scans the whole server __tests__ tree; imports nothing it checks (#680).
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

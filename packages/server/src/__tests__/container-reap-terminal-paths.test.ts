@@ -1,4 +1,4 @@
-// @gate:always-run — scans the service/startup source tree, so its subject is not in its own import graph.
+// @gate:always-run when:packages/server/src/services/**,packages/server/src/startup/** — scans the service/startup source tree, so its subject is not in its own import graph.
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";

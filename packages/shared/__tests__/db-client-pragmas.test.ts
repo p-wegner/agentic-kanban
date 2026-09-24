@@ -1,4 +1,4 @@
-// @gate:always-run — reads server + mcp-server db sources to assert pragma parity; imports neither (#647).
+// @gate:always-run when:packages/server/src/db/**,packages/mcp-server/src/db.ts,packages/shared/src/lib/db-client.ts — reads server + mcp-server db sources to assert pragma parity; imports neither (#647).
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { rmSync } from "node:fs";

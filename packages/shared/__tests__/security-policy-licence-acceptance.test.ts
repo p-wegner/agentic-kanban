@@ -1,4 +1,4 @@
-// @gate:always-run — this suite's subject, scripts/security-scan.mjs, lives at the
+// @gate:always-run when:scripts/security-scan.mjs,docs/security-policy.md — this suite's subject, scripts/security-scan.mjs, lives at the
 // repo root and belongs to no package, so package-scoped test selection cannot map a
 // change in it back to this file. It is a pure policy assertion and runs in ~1s.
 import { describe, expect, it } from "vitest";

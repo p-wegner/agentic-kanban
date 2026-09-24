@@ -1,4 +1,4 @@
-// @gate:always-run — asserts against server-start.ts SOURCE, which its imports never reach (#687).
+// @gate:always-run when:packages/server/src/server-start.ts — asserts against server-start.ts SOURCE, which its imports never reach (#687).
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
