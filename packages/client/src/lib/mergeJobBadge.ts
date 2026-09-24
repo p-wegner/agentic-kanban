@@ -3,14 +3,10 @@
  * (#1250). Beside `mergeJobTracker.ts`, which owns the fetching; this file owns no state, so
  * the badge text and the error text are assertable without a DOM.
  */
+import type { MergeFixHint } from "@agentic-kanban/shared/types";
 import { formatGateDuration } from "@agentic-kanban/shared/lib/gate-activity";
 
-/** The `merge-failure-fix-hint.ts` shape the server sends. */
-export interface MergeFixHint {
-  kind: "bank-shrinks";
-  edits: Array<{ baselineFile: string; key: string; from: number | null; to: number }>;
-  summary: string;
-}
+export type { MergeFixHint } from "@agentic-kanban/shared/types";
 
 export interface MergeJobAttemptView {
   attempt: number;

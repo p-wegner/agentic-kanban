@@ -44,13 +44,13 @@ export interface TrackedMergeJob {
   status: MergeStatusView | null;
 }
 
-interface Entry extends TrackedMergeJob {
+interface TrackedEntry extends TrackedMergeJob {
   handlers: MergeJobHandlers;
   poll: PollHandle | null;
   inFlight: boolean;
 }
 
-const entries = new Map<string, Entry>();
+const entries = new Map<string, TrackedEntry>();
 const listeners = new Set<() => void>();
 /** The snapshot handed to `useSyncExternalStore`; replaced (never mutated) on every change. */
 let snapshot: ReadonlyMap<string, TrackedMergeJob> = new Map();
@@ -74,7 +74,7 @@ export function isMergeTracked(wsId: string): boolean {
   return entries.has(wsId);
 }
 
-function finish(entry: Entry, status: MergeStatusView): void {
+function finish(entry: TrackedEntry, status: MergeStatusView): void {
   entry.poll?.stop();
   entries.delete(entry.wsId);
   publish();
@@ -114,14 +114,14 @@ export async function pollMergeStatus(wsId: string): Promise<void> {
   }
 }
 
-function track(wsId: string, jobId: string | null, handlers: MergeJobHandlers): Entry {
+function track(wsId: string, jobId: string | null, handlers: MergeJobHandlers): TrackedEntry {
   const existing = entries.get(wsId);
   if (existing) {
     existing.handlers = handlers;
     if (jobId) existing.jobId = jobId;
     return existing;
   }
-  const entry: Entry = { wsId, jobId, startedAt: Date.now(), status: null, handlers, poll: null, inFlight: false };
+  const entry: TrackedEntry = { wsId, jobId, startedAt: Date.now(), status: null, handlers, poll: null, inFlight: false };
   entries.set(wsId, entry);
   entry.poll = startStaggeredPoll(() => { void pollMergeStatus(wsId); }, MERGE_STATUS_POLL_MS);
   publish();

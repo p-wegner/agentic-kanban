@@ -19,6 +19,7 @@
  */
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { UnprocessableError } from "../errors/index.js";
 import type { MergeFixHint, MergeFixHintEdit } from "./merge-failure-fix-hint.js";
@@ -123,9 +124,9 @@ export async function bankMergeShrinks(input: BankMergeShrinksInput): Promise<Ba
   for (const [file, source] of rewritten) await writeFile(join(workingDir, file), source, "utf8");
   const subject = bankShrinksCommitSubject(input.issueNumber);
   const add = await gitExec(["add", "--", ...files], { cwd: workingDir });
-  if (add.error || add.code !== 0) throw new UnprocessableError(`git add failed: ${add.stderr || add.error?.message}`);
+  if (!execSucceeded(add)) throw new UnprocessableError(`git add failed: ${add.stderr || add.error?.message}`);
   const commit = await gitExec(["commit", "-q", "-m", subject, "--", ...files], { cwd: workingDir });
-  if (commit.error || commit.code !== 0) {
+  if (!execSucceeded(commit)) {
     throw new UnprocessableError(`git commit failed: ${commit.stderr || commit.stdout || commit.error?.message}`);
   }
   const committed = (await gitExecOrThrow(["rev-parse", "HEAD"], { cwd: workingDir })).trim();
