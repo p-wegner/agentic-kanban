@@ -624,6 +624,13 @@ process that will hold its fd for days happens to buffer.
 **So when you start a stable board by hand, send its output to `board.log`, not `promote.log`** —
 that is what §7 step 5 does, and the collision above began with a hand launch that did otherwise.
 
+### A queue flush never waits for the promotion (decision 020)
+
+When the merge queue stalls, a flush lands every ready branch with arch + typecheck as the only gate
+and defers the suite to the heal target: the rc lane above (`heal_target_<id>=rc`) or master itself
+(`=master`, heal tickets based on master, no merge-back). A flush is tagged `flush/<date>-N`, recorded
+with its heal state, and never runs while an rc sweep is in flight. #1246–#1249.
+
 ## 9. What is deliberately NOT here
 
 - ~~A promotion SCHEDULE.~~ Since #1238 the board runs it: `promote_cadence_<id>` (§8, "The

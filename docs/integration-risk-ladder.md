@@ -82,6 +82,27 @@ the rc), and the heal work is real work that the cadence makes visible instead o
 - Never move the base branch, never rebase onto a remote ref, never fix master from a
   worktree. The guard from #1237 blocks the first two; the third is what heal tickets are for.
 
+## Queue pressure: the flush (decision 020)
+
+When builders outrun the gate, the queue itself becomes the blocker. The flush (Yegge's "land it
+all and fix it after") is the merge train with no cap, a gate of `check:arch` + `typecheck` only,
+no bisect, and the suite deferred to the heal target. It is available on `fast`, `sprint`,
+`iterate` and `flow`, refused on `strict` and `standard`, and it is loud: a `flush/<date>-N` tag,
+`source: flush` on the ledger row, a comment on every member ticket, a badge on the delivery chip.
+
+Healing after a flush does not require an rc. `heal_target_<id>` picks the shape:
+
+```
+rc      master ──flush──●──●──●──▶          master ──flush──●──●──●──●──▶
+                        \                                  │ sweep master, heal tickets
+                         rc/<date> ─sweep─✗─heal─✓─▶ tag ─┘  based on master, land = healed
+```
+
+Under both shapes the base-red veto holds nothing and trains keep landing while heal tickets are
+open; the flush record answers "did it happen", "is it healed", "is the healed state on master".
+The trigger is measured first (queue depth, oldest age, arrivals vs gate runs), then manual, then
+`auto`. Tickets #1246–#1249; the rest is decision 020.
+
 ## What the operator watches
 
 - The delivery view (and `pnpm cli -- tracker`): master's last verdict, the rc's verdict, the
@@ -103,6 +124,10 @@ the rc), and the heal work is real work that the cadence makes visible instead o
 | RC branch promotion and the cadence | landed, #1238 — `pnpm promote` cuts `rc/<date>[-N]` from master's tip and gates THAT (`?branch=` on the health/reprobe routes, `probeBranch`); green tags the rc sha, red records the failing suites in `<stable>/.kanban/rc-state.json` and stops with the heal instruction; `promote_cadence_<id>` (`off` \| `daily@HH:MM`) fires the same run from the scheduler, and a red rc older than one cadence is abandoned for a fresh cut. The merge-back is a board workspace since #1239 |
 | Heal-on-candidate and the merge-back | landed, #1239 — a red rc sweep files ONE `heal` ticket per failure signature PER candidate (`base-health-heal:<project>:<sig>:<rc>`, refreshed on the same red, every posture; `heal_review_posture_<id>` pins its `risk:` tag); its workspace branches from the rc, `update-base` rebases onto it, the merge lands on it, and the gate forces the rc's red suites (`KANBAN_TEST_NEW_FILES`); a train never mixes bases; every merge/review/rebase/diff path reads the base through `resolveWorkspaceBase` (`workspace-base-read-ratchet.test.ts` pins the 32 hand-spelled reads that remain, shrink-only). Green promotes, then `promote.mjs` POSTs `…/rc/merge-back` for a board workspace (branch = the rc, base = master, normal gate) whose landing closes the heal tickets — the hand command is printed only when no board answers; an abandoned rc's open heal tickets and their workspace bases move to the next cut (`…/rc/retarget`). Delivery view, `GET …/rc` and the tracker carry `openHealTickets` and `inheritedRed` |
 | The `flow` posture | landed, #1240 — `gateTier: impact`, `redBasePolicy: report`, `sweepIntervalMs: null` (the delivery view says "full suite: release candidate only"), guards `intersecting` at merge; the rungs table above is ratcheted against the resolver by `integration-risk-ladder-doc.test.ts` |
+| Queue-pressure signal, flush record and its observability | #1246 |
+| Flush train mode (no cap, arch + typecheck, no bisect, siding, tag, ledger source) | #1247 |
+| Flush trigger: pref, Flush action + CLI, `auto`, rails | #1248 |
+| Heal target after a flush: `rc` or `master`, merges keep flowing | #1249 |
 
 A ratchet keeps this table honest: `integration-risk-ladder-doc.test.ts` (#1240) fails when a
 posture level exists in the resolver (`RISK_POSTURES` and the `case` labels of

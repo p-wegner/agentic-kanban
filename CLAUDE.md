@@ -596,7 +596,7 @@ Full symptom→cause→fix in `docs/install.md` (“Clean-clone / first-start go
 ## Documentation Map
 - `.llm/workflows.md` — clean-start, DB reset, registration, migration diagnosis
 - `docs/prd/` — `00` vision, `05` MVP scope/stages, `03` data model, `04` agent integration, `06` testability
-- `docs/decisions/` — numbered decision records (`003` Butler, `006` board-monitor, `008` Start Mode, `012` worker fleet, `017` risk posture, `019` release-candidate promotion)
+- `docs/decisions/` — numbered decision records (`003` Butler, `006` board-monitor, `008` Start Mode, `012` worker fleet, `017` risk posture, `019` release-candidate promotion, `020` queue flush)
 - `docs/integration-risk-ladder.md` — **the risk ladder**: what a merge proves per posture, where the full suite runs, who heals red where; the release-candidate model (rc branch swept and promoted while master keeps merging)
 - `docs/backlog-markdown.md` — Backlog Markdown (`kanban-md 1`): the one-file backlog format, export filters, liberal import + preview, UI/REST/CLI/MCP/skill surfaces
 - `docs/two-boards.md` — **the two-board operation mode**: dev vs. stable, which one MCP/hooks talk
