@@ -74,9 +74,9 @@ export type RiskPostureLevel = (typeof RISK_POSTURES)[number];
  * only) via `red_base_policy_<projectId>`.
  *
  * `report` is the softest: a red base never holds anything and files no ticket — the red is
- * only reported (delivery view, sweep row). It exists for decision 019's `flow` posture, where
- * the release candidate's sweep is the only place a full verdict is owed; no shipped level
- * resolves it today.
+ * only reported (delivery view, sweep row). Decision 019's `flow` posture (#1240) resolves it,
+ * since there the release candidate's sweep is the only place a full verdict is owed; every
+ * other level reaches it only as a softer-only project override.
  */
 export type RedBasePolicy = "block" | "allow-known-debt" | "allow-file-debt-ticket" | "report";
 

@@ -26,7 +26,7 @@ type Db = ReturnType<typeof createTestDb>["db"];
 
 const RED_SHA = "0".repeat(40);
 
-async function seedRedProject(db: Db, level: "standard" | "iterate" | "strict") {
+async function seedRedProject(db: Db, level: "standard" | "iterate" | "strict" | "flow") {
   const now = new Date().toISOString();
   const projectId = randomUUID();
   // A repo path that does not exist: the tip cannot be read, so the base is not known to have
@@ -78,6 +78,27 @@ describe("the train window's red-base veto reads the risk posture (#1233)", () =
     expect(delivery.redBase).toMatchObject({
       policy: "allow-file-debt-ticket", latestOutcome: "red", latestSha: RED_SHA, holdingWindow: false, openHealTickets: 0,
     });
+  });
+
+  it("departs on a red base under `flow` (#1240) — `report` never holds and files no heal ticket", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedRedProject(db, "flow");
+
+    await expect(resolveBaseRedVeto(projectId, db)).resolves.toBeNull();
+
+    const orchestrator = createAutoMergeOrchestrator({ database: db });
+    const rows = await orchestrator.findCompletedWorkspaceRows();
+    const released = await orchestrator.applyTrainWindow(rows, new Date().toISOString());
+    expect(released).toHaveLength(4);
+    expect(orchestrator.state.trainWindows.get(projectId)).toBeUndefined();
+
+    const delivery = await getDeliveryStatus(projectId, db);
+    expect(delivery.redBase).toMatchObject({
+      policy: "report", latestOutcome: "red", latestSha: RED_SHA, holdingWindow: false, openHealTickets: 0,
+    });
+    // And the delivery view says where the full suite runs instead of naming a cadence.
+    expect(delivery.baseSweep).toMatchObject({ scheduled: false, intervalMs: null, nominalIntervalMs: null, postureLevel: "flow" });
+    expect(delivery.baseSweep.reason).toContain("full suite: release candidate only");
   });
 
   it("holds on a red base under `standard`, exactly as #1204 built it", async () => {

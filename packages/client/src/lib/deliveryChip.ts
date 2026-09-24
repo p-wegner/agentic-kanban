@@ -15,6 +15,7 @@ export const RISK_POSTURE_DOT: Record<RiskPostureLevel, string> = {
   iterate: "bg-emerald-500",
   fast: "bg-amber-500",
   sprint: "bg-red-500",
+  flow: "bg-violet-500",
 };
 
 export const RISK_POSTURE_LABELS: Record<RiskPostureLevel, string> = {
@@ -23,6 +24,7 @@ export const RISK_POSTURE_LABELS: Record<RiskPostureLevel, string> = {
   iterate: "Iterate",
   fast: "Fast",
   sprint: "Sprint",
+  flow: "Flow",
 };
 
 export interface DeliveryChipView {

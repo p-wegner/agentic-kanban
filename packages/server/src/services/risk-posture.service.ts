@@ -33,6 +33,12 @@ import { getIssueTagRows } from "../repositories/tag.repository.js";
  *                 downgraded to a warning, placement prefers remote.
  *  - `sprint`   — greenfield/prototype. Guards-only gate, no per-ticket review, red base allowed
  *                 with a debt ticket, builder self-tests off, contention off.
+ *  - `flow`     — the fastest honest cycle (#1240, decision 019 part 3), below `iterate` on the
+ *                 ladder (`docs/integration-risk-ladder.md`). Per-merge gate = typecheck + the
+ *                 test-impact selection + the diff's own tests, with NO guard floor at merge
+ *                 (`guards-at-merge.ts` yields `intersecting`); red base is `report` — never a
+ *                 hold, never a ticket; and the ONLY full-suite run is the release candidate's
+ *                 sweep, so `sweepIntervalMs` is `null` by design. Everything else as `iterate`.
  *
  * Visibility rule: a weaker posture may only weaken verification VISIBLY — `summary` names what
  * this posture skips relative to `standard`, and every gate/merge message that reads a
@@ -59,8 +65,8 @@ export function redBasePolicyPrefKey(projectId: string): string {
  * Softness order of {@link RedBasePolicy} — the ONE place the "softer only" direction is
  * defined, so the override check and the red-debt cap's degrade step cannot disagree about
  * which way is looser. `report` (#1233) is the softest: a red base never holds the train window
- * and files no ticket — reserved for decision 019's `flow` posture (#1240); no shipped level
- * resolves it today.
+ * and files no ticket — the `flow` posture (#1240) is the one shipped level that resolves it;
+ * every other level reaches it only as a softer-only project override.
  */
 export const RED_BASE_POLICY_RANK: Record<RedBasePolicy, number> = {
   block: 0,
@@ -244,6 +250,31 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         placementBias: "host-preferred",
         summary: "iterate: per-merge gate is the test-impact selection (a ranked guess, narrower than scoped); the FULL suite runs nightly on the base instead, its misses are recorded, and a red base files a heal ticket rather than holding the train window",
       };
+    case "flow":
+      return {
+        level, source,
+        // The same ranked GUESS `iterate` runs — and, unlike `iterate`, with nothing behind it on
+        // THIS branch: no nightly master sweep, no guard floor at merge (`guardsAtMergeForPosture`
+        // reads this level). What backs it is the release candidate's full sweep (decision 019),
+        // which is the only place a full verdict is owed under this level.
+        gateTier: "impact",
+        // `null` = no scheduled base sweep at all, by design — not the opt-in rule's "no posture
+        // chosen". `describeBaseSweep` says "release candidate only" for this case.
+        sweepIntervalMs: null,
+        reviewMode: "standard",
+        // `report` (rank 3, the softest): a red master never holds the train window and files no
+        // heal ticket. The delivery view and the sweep row are where the red is disclosed; the
+        // rc sweep is where it is healed (#1239).
+        redBasePolicy: "report",
+        trainMaxSize: 1,
+        trainMaxWaitMs: 0,
+        mergesPerCycle: 2,
+        relaunchesPerCycle: 2,
+        builderStopChecks: "tests-capacity-gated",
+        contentionMode: "serialize",
+        placementBias: "host-preferred",
+        summary: "flow: merge gate = typecheck + impact selection + the diff's own tests; no guard floor at merge; red base reported, never blocking; the full suite runs on the release candidate only",
+      };
     case "standard":
     default:
       // Today's behaviour, exactly — see the header doc. The ONE deliberate exception is the
@@ -330,7 +361,11 @@ export function describeBaseSweep(
     reason: intervalMs === null
       ? (posture.source === "issue_tag"
         ? "a risk: issue tag is scoped to one ticket and does not opt the project into a sweep"
-        : "no risk posture chosen for this project — choosing one is the opt-in (#983)")
+        : posture.sweepIntervalMs === null
+          // #1240: a level with NO nominal cadence chose that on purpose — `flow` owes a full
+          // verdict on the release candidate only, so this is not the opt-in rule's "unchosen".
+          ? `risk posture '${posture.level}' schedules no base sweep by design — full suite: release candidate only`
+          : "no risk posture chosen for this project — choosing one is the opt-in (#983)")
       : `risk posture '${posture.level}' sweeps the base every ${formatIntervalHuman(intervalMs)}`,
     nextDueAt,
   };

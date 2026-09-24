@@ -41,14 +41,16 @@ const posture = (level: string, extra: Record<string, string> = {}) =>
   prefs({ [riskPosturePrefKey(PID)]: level, ...extra });
 
 describe("resolveGuardsAtMerge (#1232)", () => {
-  it("`iterate` yields `intersecting`; every other level (and no posture) yields `all`", () => {
+  it("`iterate` and `flow` (#1240) yield `intersecting`; every other level (and no posture) yields `all`", () => {
     expect(resolveGuardsAtMerge(posture("iterate"), PID)).toMatchObject({ guardsAtMerge: "intersecting", source: "posture" });
-    for (const level of RISK_POSTURES.filter((l) => l !== "iterate")) {
+    expect(resolveGuardsAtMerge(posture("flow"), PID)).toMatchObject({ guardsAtMerge: "intersecting", source: "posture" });
+    for (const level of RISK_POSTURES.filter((l) => l !== "iterate" && l !== "flow")) {
       expect(resolveGuardsAtMerge(posture(level), PID), level).toMatchObject({ guardsAtMerge: "all", source: "posture" });
     }
     expect(resolveGuardsAtMerge(prefs(), PID)).toMatchObject({ guardsAtMerge: "all", source: "posture" });
     // The level -> mode table is one function, and it is the one the resolver uses.
     expect(guardsAtMergeForPosture({ level: "iterate" })).toBe("intersecting");
+    expect(guardsAtMergeForPosture({ level: "flow" })).toBe("intersecting");
     expect(guardsAtMergeForPosture({ level: "standard" })).toBe("all");
   });
 
