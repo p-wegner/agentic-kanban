@@ -23,6 +23,12 @@ const rebaseRepoMock = vi.hoisted(() => vi.fn<WorkspaceService["rebaseRepo"]>(as
   success: true,
 })));
 
+// #1230 made an explicit merge await a backoff-row clear before the merge itself; that seam
+// reaches the real database by default, which a route test must not touch.
+vi.mock("../services/merge-backoff.service.js", () => ({
+  resetMergeBackoffForExplicitMerge: vi.fn(async () => {}),
+}));
+
 vi.mock("../services/workspace.service.js", () => ({
   createWorkspaceService: vi.fn(() => ({
     mergeWorkspace: mergeWorkspaceMock,
@@ -96,6 +102,9 @@ describe("workspace actions route", () => {
     abortController.abort();
 
     const retryRequest = app.request("/api/workspaces/workspace-1/merge", { method: "POST" });
+    // The merge is invoked only after the (mocked) backoff reset resolves, i.e. a microtask
+    // later than the request; releasing it before then would release a no-op.
+    await vi.waitFor(() => expect(mergeWorkspaceMock).toHaveBeenCalledTimes(1));
     resolveMerge();
 
     const retryResponse = await retryRequest;
