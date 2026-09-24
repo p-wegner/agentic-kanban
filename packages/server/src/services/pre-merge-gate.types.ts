@@ -3,6 +3,7 @@
 // neither has to import the other — see the no-circular arch rule.
 import type { Database } from "../db/index.js";
 import type { GateImpactSelection } from "./pre-merge-gate-tier.js";
+import type { MergeFixHint } from "./merge-failure-fix-hint.js";
 
 /** The workspace fields the pre-merge gate needs. A thin shape so any caller (exit-workflow's
  *  full WorkspaceRow, the monitor's WorkspaceCandidate) can satisfy it. */
@@ -89,4 +90,10 @@ export interface PreMergeGateResult {
    */
   failedSuites?: string[];
   guardFailure?: boolean;
+  /**
+   * #1250 — when the red is a STALE shrink-only baseline (`function-nloc-ratchet`, the
+   * always-run runtime ratchet), the edits that bank it, parsed from the verify tail by
+   * `merge-failure-fix-hint.ts`. Absent for every other failure.
+   */
+  fixHint?: MergeFixHint;
 }

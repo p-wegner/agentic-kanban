@@ -10839,6 +10839,39 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/workspaces/{id}/merge/bank-shrinks:
+    post:
+      summary: POST /api/workspaces/{id}/merge/bank-shrinks
+      tags:
+        - workspace-merge-bank-shrinks
+      operationId: post_api_workspaces_id_merge_bank-shrinks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "422":
+          description: Error (thrown UNPROCESSABLE, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/workspaces/{id}/merge/cancel:
     post:
       summary: "`cancelWorkspaceMerge` above for what it does and why."

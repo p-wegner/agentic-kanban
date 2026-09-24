@@ -9,6 +9,7 @@ import { createDriveRoute } from "./drive.js";
 import { createIssuesRoute } from "./issues.js";
 import { createWorkspacesRoute } from "./workspaces.js";
 import { createWorkspaceActionsRoute } from "./workspace-actions.js";
+import { createWorkspaceMergeBankShrinksRoute } from "./workspace-merge-bank-shrinks.js";
 import { createTagsRoute } from "./tags.js";
 import { createPreferencesRoute } from "./preferences.js";
 import { createAgentSkillsRoute } from "./agent-skills.js";
@@ -96,6 +97,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/issues", createIssuesRoute(database, { ...options, getSessionManager }));
   routes.route("/workspaces", createWorkspacesRoute(database, getSessionManager, options));
   routes.route("/workspaces", createWorkspaceActionsRoute(getSessionManager, database, options));
+  routes.route("/workspaces", createWorkspaceMergeBankShrinksRoute(getSessionManager, database, options));
   routes.route("/tags", createTagsRoute(database));
   routes.route("/preferences", createPreferencesRoute(database));
   routes.route("/agent-skills", createAgentSkillsRoute(database));
