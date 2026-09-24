@@ -49,6 +49,16 @@ export const baseBranchHealth = sqliteTable("base_branch_health", {
    * before this column existed, or when the read itself failed (never blocks the probe).
    */
   contention: text("contention"),
+  /**
+   * What the verify script's `tests` step said it RAN (#1231) — `full`, `package-scoped`,
+   * `file-scoped`, `impact-selected`, `guards-only`, `flake-retry` — parsed off its
+   * `[gate:step] name=tests ... scope=<mode>` self-report. `null` when the script reported
+   * nothing (no step contract, a timeout that killed it first, or a row from before this
+   * column). A `green` with a scope that is present and not `full` is a scoped verdict, and
+   * `scripts/promote-plan.mjs` refuses to promote on it; a null scope is accepted as the
+   * pre-#1231 default so old rows keep working, and the refusal message says so.
+   */
+  scope: text("scope"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 }, (table) => ({
   projectShaIdx: index("idx_base_branch_health_project_sha").on(table.projectId, table.sha),
