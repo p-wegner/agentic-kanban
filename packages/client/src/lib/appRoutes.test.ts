@@ -92,6 +92,8 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       issueNumber: null,
       panel: null,
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
     expect(parseAppPath("/board")).toEqual({
       projectSlug: null,
@@ -101,6 +103,8 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       issueNumber: null,
       panel: null,
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
     expect(parseAppPath("/plugin-views").view).toBe("plugin-views");
     expect(parseAppPath("/merge-queue").view).toBe("agents");
@@ -117,6 +121,8 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       issueNumber: null,
       panel: null,
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
     expect(parseAppPath("/monitor-history")).toEqual({
       projectSlug: null,
@@ -126,6 +132,8 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       issueNumber: null,
       panel: null,
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
     // A container view with no tab segment resolves to its default (#446) —
     // never null, so the canonical URL can always name a tab.
@@ -153,6 +161,8 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       issueNumber: 42,
       panel: "issue",
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
     expect(parseAppPath("/table/issue/7")).toEqual({
       projectSlug: null,
@@ -162,6 +172,8 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       issueNumber: 7,
       panel: "issue",
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
   });
 
@@ -174,6 +186,8 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       issueNumber: null,
       panel: null,
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
     expect(parseAppPath("/not-a-view").view).toBeNull();
     expect(parseAppPath("").view).toBe("kanban");
@@ -190,6 +204,8 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       issueNumber: null,
       panel: null,
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
     expect(parseAppPath("/p/mealplan/")).toEqual(parseAppPath("/p/mealplan"));
   });
@@ -203,6 +219,8 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       issueNumber: null,
       panel: null,
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
     expect(parseAppPath("/p/agentic-kanban/board").view).toBe("kanban");
     expect(parseAppPath("/p/agentic-kanban/merge-queue").view).toBe("agents");
@@ -220,6 +238,8 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       issueNumber: null,
       panel: null,
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
     expect(parseAppPath("/plugins").view).toBe("plugin-views");
   });
@@ -239,6 +259,8 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       issueNumber: null,
       panel: null,
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
   });
 
@@ -251,6 +273,8 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       issueNumber: 446,
       panel: "issue",
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
     expect(parseAppPath("/p/mealplan/burndown/issue/9")).toEqual({
       projectSlug: "mealplan",
@@ -260,6 +284,8 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       issueNumber: 9,
       panel: "issue",
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
   });
 
@@ -272,6 +298,8 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       issueNumber: 12,
       panel: "issue",
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
   });
 
@@ -288,6 +316,8 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       issueNumber: null,
       panel: null,
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
     expect(parseAppPath("/p/")).toEqual({
       projectSlug: null,
@@ -297,6 +327,8 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       issueNumber: null,
       panel: null,
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
     // Unknown view segment — project is still known, view is not, and the raw
     // segment is reported (#478) so a caller can surface it rather than
@@ -309,6 +341,8 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       issueNumber: null,
       panel: null,
       unknownViewSegment: "not-a-view",
+      pluginSlug: null,
+      pluginViewId: null,
     });
     // Non-numeric / invalid issue numbers.
     expect(parseAppPath("/p/mealplan/board/issue/abc").view).toBeNull();
@@ -395,6 +429,8 @@ describe("issue panel segment — /issue/<n>/workspace", () => {
       issueNumber: 28,
       panel: "workspace",
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
     expect(parseAppPath("/table/issue/7/workspace")).toEqual({
       projectSlug: null,
@@ -404,6 +440,8 @@ describe("issue panel segment — /issue/<n>/workspace", () => {
       issueNumber: 7,
       panel: "workspace",
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
   });
 
@@ -449,6 +487,8 @@ describe("tab segment — /p/<slug>/<view>/<tab>", () => {
       issueNumber: null,
       panel: null,
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
     expect(parseAppPath("/runtime/health-events")).toEqual({
       projectSlug: null,
@@ -458,6 +498,8 @@ describe("tab segment — /p/<slug>/<view>/<tab>", () => {
       issueNumber: null,
       panel: null,
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
   });
 
@@ -502,6 +544,8 @@ describe("tab segment — /p/<slug>/<view>/<tab>", () => {
       issueNumber: 12,
       panel: "issue",
       unknownViewSegment: null,
+      pluginSlug: null,
+      pluginViewId: null,
     });
     expect(parseAppPath("/p/taskflow/runtime/monitor-cycles/issue/12/workspace")).toMatchObject({
       view: "runtime",
@@ -593,6 +637,129 @@ describe("tab segment — /p/<slug>/<view>/<tab>", () => {
         `${name}_TABS is declared but missing from VIEW_TAB_REGISTRY — its container's tabs ` +
           `would render but never reach the URL, and a deep link to them would not parse.`,
       ).toBe(true);
+    }
+  });
+});
+
+/**
+ * #1227 — `/plugin-views/<slug>[/<view-id>]` deep-links a plugin (or one of its
+ * iframe views) instead of leaving the pick in component state. Distinct from
+ * the tab grammar above: plugin identity is loaded from the API, not a static
+ * registry, so this layer treats the slug/view-id as opaque strings rather
+ * than validating them — an unresolvable one is a runtime concern for
+ * whatever reads `pluginSlug`/`pluginViewId` (PluginViewsPanel), the same way
+ * `unknownViewSegment` is a runtime concern for the route hook.
+ */
+describe("plugin-views subroute — /plugin-views/<slug>[/<view-id>] (#1227)", () => {
+  it("parses the bare view with no plugin named", () => {
+    expect(parseAppPath("/p/mealplan/plugin-views")).toMatchObject({
+      view: "plugin-views",
+      pluginSlug: null,
+      pluginViewId: null,
+    });
+    expect(parseAppPath("/plugin-views")).toMatchObject({
+      view: "plugin-views",
+      pluginSlug: null,
+      pluginViewId: null,
+    });
+  });
+
+  it("parses a plugin slug, scoped and flat", () => {
+    expect(parseAppPath("/p/mealplan/plugin-views/jira-sync")).toMatchObject({
+      projectSlug: "mealplan",
+      view: "plugin-views",
+      pluginSlug: "jira-sync",
+      pluginViewId: null,
+    });
+    expect(parseAppPath("/plugin-views/jira-sync")).toMatchObject({
+      projectSlug: null,
+      view: "plugin-views",
+      pluginSlug: "jira-sync",
+      pluginViewId: null,
+    });
+  });
+
+  it("parses a plugin slug plus an iframe view id", () => {
+    expect(parseAppPath("/p/mealplan/plugin-views/jira-sync/dashboard")).toMatchObject({
+      projectSlug: "mealplan",
+      view: "plugin-views",
+      pluginSlug: "jira-sync",
+      pluginViewId: "dashboard",
+    });
+  });
+
+  it("accepts a slug/view-id naming a plugin or view that does not exist — opaque at this layer", () => {
+    // This module has no plugin registry to check against; an unresolvable
+    // pick is resolved (and reported) by whoever reads these fields.
+    expect(parseAppPath("/p/mealplan/plugin-views/does-not-exist")).toMatchObject({
+      view: "plugin-views",
+      pluginSlug: "does-not-exist",
+      pluginViewId: null,
+    });
+    expect(parseAppPath("/p/mealplan/plugin-views/jira-sync/no-such-view")).toMatchObject({
+      view: "plugin-views",
+      pluginSlug: "jira-sync",
+      pluginViewId: "no-such-view",
+    });
+  });
+
+  it("falls back to the bare route for more segments than slug+view-id", () => {
+    expect(parseAppPath("/p/mealplan/plugin-views/jira-sync/dashboard/extra")).toMatchObject({
+      view: "plugin-views",
+      pluginSlug: null,
+      pluginViewId: null,
+    });
+  });
+
+  it("decodes a percent-encoded slug and view id", () => {
+    const parsed = parseAppPath("/p/mealplan/plugin-views/a%20b/c%20d");
+    expect(parsed.pluginSlug).toBe("a b");
+    expect(parsed.pluginViewId).toBe("c d");
+  });
+
+  it("carries no pluginSlug/pluginViewId for any other view", () => {
+    expect(parseAppPath("/p/mealplan/board/jira-sync")).toMatchObject({ view: null });
+    expect(parseAppPath("/p/mealplan/analytics/burndown")).toMatchObject({
+      pluginSlug: null,
+      pluginViewId: null,
+    });
+  });
+
+  it("builds the plugin-views path from a slug and an optional view id", () => {
+    expect(buildAppPath({ projectSlug: "mealplan", view: "plugin-views", pluginSlug: "jira-sync" })).toBe(
+      "/p/mealplan/plugin-views/jira-sync",
+    );
+    expect(
+      buildAppPath({
+        projectSlug: "mealplan",
+        view: "plugin-views",
+        pluginSlug: "jira-sync",
+        pluginViewId: "dashboard",
+      }),
+    ).toBe("/p/mealplan/plugin-views/jira-sync/dashboard");
+    // No slug -> the bare route, same as today.
+    expect(buildAppPath({ projectSlug: "mealplan", view: "plugin-views" })).toBe(
+      "/p/mealplan/plugin-views",
+    );
+    // A view id with no slug is meaningless and is dropped.
+    expect(buildAppPath({ projectSlug: "mealplan", view: "plugin-views", pluginViewId: "dashboard" })).toBe(
+      "/p/mealplan/plugin-views",
+    );
+    // pluginSlug/pluginViewId are ignored for any other view.
+    expect(buildAppPath({ projectSlug: "mealplan", view: "kanban", pluginSlug: "jira-sync" })).toBe(
+      "/p/mealplan/board",
+    );
+  });
+
+  it("round-trips slug and slug+view-id through parse/build, scoped and flat", () => {
+    for (const opts of [
+      { pluginSlug: "jira-sync" },
+      { pluginSlug: "jira-sync", pluginViewId: "dashboard" },
+    ]) {
+      const scoped = buildAppPath({ projectSlug: "x", view: "plugin-views", ...opts });
+      expect(parseAppPath(scoped)).toMatchObject({ projectSlug: "x", view: "plugin-views", ...opts });
+      const flat = buildAppPath({ view: "plugin-views", ...opts });
+      expect(parseAppPath(flat)).toMatchObject({ projectSlug: null, view: "plugin-views", ...opts });
     }
   });
 });

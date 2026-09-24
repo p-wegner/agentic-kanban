@@ -5,6 +5,7 @@ import { buildProjectSlugMap, resolveProjectIdFromSlug, type SlugProject } from 
 import { NAVIGATE_VIEW_EVENT, type NavigateViewDetail } from "../lib/navigateView.js";
 import { showToast } from "../lib/toast.js";
 import { useViewTabStore, viewTabActions } from "../stores/viewTabStore.js";
+import { usePluginViewStore } from "../stores/pluginViewStore.js";
 import {
   createPendingDeepLink,
   isDeepLinkSettled,
@@ -104,6 +105,15 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
   // and for every view that has no tabs — planUrlSync handles both.
   const activeTab = useViewTabStore((s) => s.active[viewMode] ?? null);
 
+  // The plugin-views pick (#1227): which plugin is selected, and which of its
+  // iframe views PluginViewsPanel is currently showing. Mirrors activeTab's
+  // shape — read from the store so a change to either triggers the outbound
+  // sync effect below, the same way a tab change does.
+  const pluginSelection = usePluginViewStore((s) => s.selection);
+  const activePluginViewId = usePluginViewStore((s) => s.activeViewId);
+  const pluginSlug = viewMode === "plugin-views" && pluginSelection?.kind === "plugin" ? pluginSelection.slug : null;
+  const pluginViewId = pluginSlug ? activePluginViewId : null;
+
   // Callbacks BoardPage owns. Assigned on every render (same pattern as
   // BoardPage's own projectChangeRef) so the effects and window listeners below
   // never need them as dependencies.
@@ -163,6 +173,21 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
     }
     const legacyTab = getAppRouteTab(window.location.pathname);
     if (legacyTab) viewTabActions.request(legacyTab.view, legacyTab.tab);
+  }, []);
+
+  // Inbound plugin-views deep link (#1227): /plugin-views/<slug>[/<view-id>]
+  // names a plugin (and optionally one of its iframe views) to preselect. The
+  // slug becomes the store's selection directly — same shape as a toolbar
+  // pick — and the view id is a one-shot request PluginViewsPanel consumes
+  // once that plugin's surface has loaded (falling back and saying so if it
+  // does not resolve to a real view, rather than staying pending forever).
+  useEffect(() => {
+    const parsed = parseAppPath(window.location.pathname);
+    if (!parsed.pluginSlug) return;
+    usePluginViewStore.getState().setSelection({ kind: "plugin", slug: parsed.pluginSlug });
+    if (parsed.pluginViewId) {
+      usePluginViewStore.getState().requestViewId(parsed.pluginSlug, parsed.pluginViewId);
+    }
   }, []);
 
   // Programmatic navigation from lib-layer code (#300): toast/notification clicks
@@ -230,6 +255,8 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
       tab: activeTab,
       issueNumber: selectedIssueNumber,
       panel: openPanel,
+      pluginSlug,
+      pluginViewId,
       preferReplace: pending.unresolved || navigationBurst.isCoalescing(now),
     });
     if (plan.action === "none") return;
@@ -245,7 +272,7 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
       window.history.pushState(null, "", nextUrl);
       navigationBurst.notePush(now);
     }
-  }, [projects, activeProjectId, viewMode, activeTab, selectedIssueNumber, openPanel, columns]);
+  }, [projects, activeProjectId, viewMode, activeTab, selectedIssueNumber, openPanel, columns, pluginSlug, pluginViewId]);
 
   // ---- Back/forward across all three dimensions. ----
   useEffect(() => {
@@ -268,6 +295,17 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
 
       if (parsed.view) {
         if (parsed.tab) viewTabActions.request(parsed.view, parsed.tab);
+        if (parsed.view === "plugin-views") {
+          // Restore the plugin pick the same way the inbound-mount effect
+          // does; absent a slug (back to the bare /plugin-views), drop
+          // whatever was picked so the panel re-resolves its default.
+          usePluginViewStore.getState().setSelection(
+            parsed.pluginSlug ? { kind: "plugin", slug: parsed.pluginSlug } : null,
+          );
+          if (parsed.pluginSlug && parsed.pluginViewId) {
+            usePluginViewStore.getState().requestViewId(parsed.pluginSlug, parsed.pluginViewId);
+          }
+        }
         setViewMode(parsed.view);
         localStorage.setItem("kanban-board-view", parsed.view);
       }
