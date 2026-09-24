@@ -261,8 +261,18 @@ import {
  * active, so the next full capture may give some of it back — which this ratchet will report
  * as growth, honestly. The suites that dropped 5-10x (`temp-dir-namespace-guard`,
  * `provider-resolution-single-source`) are past what contention explains.
+ *
+ * -- Twelfth movement, UP (2026-09-24, #1239) — 561,000 -> 562,000 -------------------------
+ *
+ * One guard, `workspace-base-read-ratchet.test.ts`, arrived MEASURED (700 ms at
+ * `--maxWorkers=1`, banked) with a `when:packages/server/src/services/**,packages/server/src/
+ * startup/**` territory. It is the disclosure channel CLAUDE.md requires for a partial refactor
+ * (the 32 hand-spelled `baseBranch || defaultBranch` reads #1239 did not convert, shrink-only),
+ * so it cannot be folded into an existing suite: nothing else scans for that spelling. The
+ * eleventh movement left ~0.3 s of headroom under 561 s; the new 0.7 s crosses it, and the
+ * next `durations.json` capture is what should give it back.
  */
-const BASELINE_TOTAL_MS = 561_000;
+const BASELINE_TOTAL_MS = 562_000;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative

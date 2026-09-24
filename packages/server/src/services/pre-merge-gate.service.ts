@@ -1,5 +1,6 @@
 import { gateVerificationKey, combinedMergedTreeHash, rememberTreeGatedGreen, wasTreeGatedGreen } from "./merge-gate-tree-memo.js";
 import { getAllWorkspaceRepos } from "./workspace-all-repos.js";
+import { resolveHealForcedSuites } from "./heal-gate-forcing.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -457,6 +458,8 @@ export async function runPreMergeGate(
         changedFiles,
         fileExists: (file) => existsSync(join(workingDir, file)),
         budget: gateBudget,
+        // #1239 — a heal workspace (base = an rc) runs the rc's red suites whatever the diff ranks.
+        forcedTestFiles: await resolveHealForcedSuites({ projectId, baseBranch: workspace.baseBranch, workingDir }, database),
       }),
       packagesEnv: effectiveTestScope,
       emitFileScope,

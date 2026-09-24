@@ -1,4 +1,5 @@
 import type { Database } from "../db/index.js";
+import { resolveWorkspaceBase } from "./workspace-base.js";
 import type { DiffStatsResponse, DiffStatsRepoEntry, WorkspaceHandoffResponse, WorkspaceHandoffRepoEntry } from "@agentic-kanban/shared";
 import * as realGitService from "./git.service.js";
 import { getWorkspaceById, resolveProjectRepo } from "../repositories/workspace.repository.js";
@@ -32,7 +33,7 @@ export function createWorkspaceDiffService(deps: {
     let diff = "";
     let conflicts: { hasConflicts: boolean; conflictingFiles: string[] } | null = null;
     const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
-    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+    const baseBranch = resolveWorkspaceBase(workspace, { defaultBranch });
 
     if (workspace.isDirect) {
       diff = workspace.workingDir
@@ -175,7 +176,7 @@ export function createWorkspaceDiffService(deps: {
     }
 
     const { defaultBranch } = await resolveProjectRepo(id, database);
-    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+    const baseBranch = resolveWorkspaceBase(workspace, { defaultBranch });
     const result = await gitService.detectConflicts(workspace.workingDir, baseBranch);
 
     // Multi-repo: a conflict in ANY sibling repo blocks the same way (no-op single-repo).

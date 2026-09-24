@@ -1,4 +1,5 @@
 import { checkBranchTipIsAncestor, countUniqueCommits } from "@agentic-kanban/shared/lib/git-service";
+import { resolveWorkspaceBaseOrNull } from "./workspace-base.js";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { resolveProjectRepo } from "../repositories/workspace-project-resolution.repository.js";
@@ -33,7 +34,7 @@ export async function isWorkspaceBranchFullyContained(
     if (!workspace || workspace.isDirect || !workspace.branch) return false;
 
     const { repoPath, defaultBranch } = await resolveProjectRepo(workspaceId, database);
-    const baseBranch = workspace.baseBranch || defaultBranch;
+    const baseBranch = resolveWorkspaceBaseOrNull(workspace, { defaultBranch });
     if (!baseBranch) return false;
 
     const ancestry = await ancestorCheck(repoPath, workspace.branch, baseBranch, workspace.workingDir ?? undefined);
