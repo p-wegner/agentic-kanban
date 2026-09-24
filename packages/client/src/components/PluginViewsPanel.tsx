@@ -3,6 +3,8 @@ import { apiFetch, apiPost } from "../lib/api.js";
 import { subscribeSettingsInvalidated } from "../lib/settingsStore.js";
 import { showToast } from "../lib/toast.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
+import { usePluginViewFrameLifecycle } from "../hooks/usePluginViewFrameLifecycle.js";
+import { usePluginRailVisibility } from "../hooks/usePluginRailVisibility.js";
 import {
   PluginLoopPane,
   PluginScriptPane,
@@ -13,8 +15,9 @@ import {
 } from "./PluginActionPanes.js";
 import { PluginSkillPane } from "./PluginSkillPane.js";
 import { PluginScaffoldPane, type ScaffoldForm } from "./PluginScaffoldPane.js";
+import { PluginViewFrameHost, PluginViewStartFailedNotice } from "./PluginViewFrameHost.js";
 import { Icon } from "./Icon.js";
-import { useBoardIsDark, withThemeParam } from "./PluginGuidePanel.js";
+import { useBoardIsDark } from "./PluginGuidePanel.js";
 import {
   usePluginSlugFallback,
   usePluginViewDeepLink,
@@ -91,9 +94,6 @@ type Selection =
 
 const ownerKey = (o: PluginOwner, id: string) => `${o.pluginId}:${id}`;
 
-/** Remembered rail visibility (#432) — an explicit choice outranks the width default. */
-const RAIL_OPEN_STORAGE_KEY = "kanban.pluginRail.open";
-
 /**
  * Last-request-wins latch for view starts (#251).
  *
@@ -155,56 +155,9 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
   const clearRequestedViewId = usePluginViewStore((s) => s.clearRequestedViewId);
   const startLatch = useRef(createStartLatch());
   const isDark = useBoardIsDark();
-
-  /**
-   * Capability-rail visibility (#432). The rail was a hard `w-56` column with no way to
-   * dismiss it: on a 390px phone it took 238px — 61% of the screen — leaving the detail
-   * pane wrapping at 2-4 words per line, which makes answering a human gate on a phone
-   * impractical. It is now collapsible on every size, and on mobile it is an OVERLAY
-   * rather than a column, so opening it never costs the content any width.
-   *
-   * Initial state is width-derived (open on >=md, closed below) and an explicit user
-   * choice is remembered. `matchMedia` is read lazily inside the initializer so this
-   * still renders under SSR/jsdom where `window` may be absent.
-   */
-  const [railOpen, setRailOpen] = useState(() => {
-    try {
-      const stored = localStorage.getItem(RAIL_OPEN_STORAGE_KEY);
-      if (stored === "true") return true;
-      if (stored === "false") return false;
-    } catch { /* private mode / storage disabled — fall through to the width default */ }
-    try {
-      return window.matchMedia("(min-width: 768px)").matches;
-    } catch {
-      return true;
-    }
-  });
-
-  /**
-   * Persist the choice ONLY at desktop width (#437). Below md the rail is an overlay, so
-   * closing it is dismissing a drawer — not a statement about how you want the pane laid out.
-   * Persisting that leaked across form factors: dismissing the drawer on a phone left the rail
-   * collapsed on the desktop the next time, where "collapsed" means something else entirely.
-   */
-  const toggleRail = useCallback((next: boolean) => {
-    setRailOpen(next);
-    try {
-      if (window.matchMedia("(min-width: 768px)").matches) {
-        localStorage.setItem(RAIL_OPEN_STORAGE_KEY, String(next));
-      }
-    } catch { /* non-fatal */ }
-  }, []);
-
-  /**
-   * Picking something on a phone should reveal it, not leave the drawer covering it.
-   * Desktop keeps the rail pinned — there the rail costs nothing, and closing it on
-   * every click would be hostile.
-   */
-  const closeRailOnMobile = useCallback(() => {
-    try {
-      if (!window.matchMedia("(min-width: 768px)").matches) toggleRail(false);
-    } catch { /* no matchMedia — leave it open */ }
-  }, [toggleRail]);
+  const { frameState, frameElapsedSec, markStartFailed, beginRetry, onFrameLoaded } =
+    usePluginViewFrameLifecycle(activeUrl, frameKey);
+  const { railOpen, toggleRail, closeRailOnMobile } = usePluginRailVisibility();
 
   const refetch = useCallback(async () => {
     try {
@@ -251,6 +204,9 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
       }));
     } catch (err) {
       if (!latch.isCurrent(key)) return;
+      // Not-ready notice instead of a blank frame (#1228) — a bare toast leaves the
+      // detail pane empty with no obvious next action.
+      markStartFailed();
       showToast(err instanceof Error ? err.message : `Failed to start view "${view.label}"`, "error");
     } finally {
       // Only the current start owns the flag; a superseded one must not clear it
@@ -260,11 +216,26 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
         setStarting(false);
       }
     }
-  }, [projectId]);
+  }, [projectId, markStartFailed]);
 
   // Referentially stable (deps: only `startView`) — passed to the #1227 deep-link
   // hook below, whose one-shot effect depends on it staying the same function.
-  const selectView = useCallback((view: PluginView) => { setSelection({ kind: "view", key: ownerKey(view, view.id) }); void startView(view); }, [startView]);
+  // Read through a ref so selectView stays referentially stable (deps: only `startView`):
+  // the #1227 deep-link hook's one-shot effect depends on it staying the same function.
+  const frameGuardRef = useRef({ selection, activeUrl, status: frameState.status });
+  frameGuardRef.current = { selection, activeUrl, status: frameState.status };
+  const selectView = useCallback((view: PluginView) => {
+    const key = ownerKey(view, view.id);
+    setSelection({ kind: "view", key });
+    // Re-clicking the already-active, already-loaded view must not re-run startView (#1228):
+    // that would null activeUrl and set it back to the same url, re-arming the loading
+    // overlay and its timeout over an iframe that is never remounted (no frameKey bump)
+    // and therefore never fires onLoad again — a fully working view would eventually show
+    // a false "taking longer than expected" notice on top of itself.
+    const g = frameGuardRef.current;
+    if (g.selection?.kind === "view" && g.selection.key === key && g.activeUrl && g.status === "loaded") return;
+    void startView(view);
+  }, [startView]);
 
   // #320 — Start Mode is a PREFERENCE, written from the Monitor popover, but the chip that
   // reports it ("Start mode is Manual — the monitor will not drive this loop") is rendered from
@@ -429,6 +400,13 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     () => (selection?.kind === "skill" ? surface.skills.find((s) => ownerKey(s, s.name) === selection.key) ?? null : null),
     [selection, surface.skills],
   );
+
+  /** Retry from the timeout/start-failed notice (#1228) — re-runs the same start. */
+  function retryActiveView() {
+    if (!activeView) return;
+    beginRetry();
+    selectView(activeView);
+  }
 
   async function handleStop() {
     if (!activeView || stopping) return;
@@ -765,18 +743,19 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
               <div className="flex-1 flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">
                 Starting {activeView.label}…
               </div>
+            ) : frameState.status === "start-failed" ? (
+              <PluginViewStartFailedNotice viewLabel={activeView.label} onRetry={retryActiveView} />
             ) : activeUrl ? (
-              <iframe
-                key={`${frameKey}:${isDark}`}
-                src={withThemeParam(activeUrl, isDark)}
-                title={`${activeView.pluginName} — ${activeView.label}`}
-                className="flex-1 w-full bg-white dark:bg-gray-950"
-                sandbox="allow-forms allow-modals allow-popups allow-same-origin allow-scripts"
-                // A view is a whole tool inside a panel — a graph, a dashboard — and the panel is
-                // the smallest part of the screen. Without this, requestFullscreen() REJECTS in
-                // here (permissions policy, nothing to do with sandbox), so a view offering a
-                // fullscreen control can only ever fall back to filling its own frame.
-                allow="fullscreen"
+              <PluginViewFrameHost
+                viewLabel={activeView.label}
+                pluginName={activeView.pluginName}
+                activeUrl={activeUrl}
+                frameKey={frameKey}
+                isDark={isDark}
+                frameState={frameState}
+                frameElapsedSec={frameElapsedSec}
+                onFrameLoaded={() => onFrameLoaded(activeUrl)}
+                onRetry={retryActiveView}
               />
             ) : (
               <div className="flex-1 flex items-center justify-center">

@@ -28,7 +28,10 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "components/IssueDetailPanel.tsx::IssueDetailPanel": 542,
   // 552 -> 550 (#1227): the plugin-views subrouting effects (slug fallback, view-id
   // deep link, active-view-id reporting) moved to hooks/usePluginViewRouting.ts.
-  "components/PluginViewsPanel.tsx::PluginViewsPanel": 550,
+  // 550 -> 544 (#1228): the iframe host, overlay/timeout notices and the frame lifecycle
+  // moved to components/PluginViewFrameHost.tsx + hooks/usePluginViewFrameLifecycle.ts;
+  // the re-click guard reads its inputs through a ref so selectView stays stable for #1227.
+  "components/PluginViewsPanel.tsx::PluginViewsPanel": 544,
   "components/GraphView.tsx::GraphView": 548,
   "hooks/useWorkspaceActions.ts::useWorkspaceActions": 523,
   "components/WorkflowBuilder.tsx::WorkflowBuilder": 516,
