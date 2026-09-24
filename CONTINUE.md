@@ -115,13 +115,21 @@ false); `pnpm cli -- cleanup` removed the ten terminal train worktrees (2.7 GB).
 lists three registered projects with a missing repoPath (`tsz-coarse/medium/fine` under
 `ticket-sizing-lab`); not touched.
 
+**2026-09-25 00:xx — promoted.** Master's reprobe came back GREEN on `879a5b1237` (26 min). Master
+had moved on (docs, the #1243 merge `7923d2886b`, whose gate needed five nloc shrinks banked on the
+branch; #1250 filed for the missing merge feedback and is being built). The new promote lane wants
+an rc verdict, so the first promotion went through the documented bootstrap:
+`node scripts/promote.mjs --recover --with-migration --reason …` → `stable-20260925` on
+`7923d2886b`, pid 28152, smoke passed, rollback target `stable-20260923`. A full sweep is OWED
+(`<stable>/.kanban/promote-recovery.json`); the reprobe on the promoted board was triggered right
+after. The stable board now runs #1233 (heal tickets), #1238 (`?branch=` sweeps, rc lane) and
+#1239, so from here `pnpm promote` can cut and sweep `rc/<date>` itself.
+
 ### Next steps, in order
-1. When the master reprobe lands green (`GET /api/projects/<id>/base-branch-health`): the first
-   promotion via `pnpm promote --recover` (see the bootstrap caveat), then `pnpm promote --dry-run`
-   again to watch the rc lane cut `rc/<date>`.
-2. Decide the dev board's posture: `flow` needs `promote_cadence_<id>` set first.
-3. Decision 020 (queue flush) is written; #1246–#1249 filed as a coupled group, `no-auto-start`,
-   #1246 (observability) first. Also #1244, #1245; the `tsz-*` missing-path projects.
+1. Land #1250 (in flight), then `pnpm promote --dry-run`: the rc lane should now cut `rc/<date>`
+   and ask the promoted board for its sweep.
+2. Decide the dev board's posture (`flow` needs `promote_cadence_<id>` set first).
+3. #1246–#1249 (queue flush, observability first), #1244, #1245; the `tsz-*` missing-path projects.
 
 ### Verified by
 Each ticket's Done comment (POST `/api/issues/:id/comments`) names its commits and the wave's gate
