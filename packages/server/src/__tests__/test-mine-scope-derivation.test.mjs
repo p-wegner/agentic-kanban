@@ -45,7 +45,7 @@ function recordedRunner(changedFiles, guardsOnly = false) {
       cwd: root, encoding: "utf8", windowsHide: true, timeout: 30_000,
       env: { ...process.env, TEST_MINE_ARGV_LOG: log, KANBAN_TEST_PACKAGES: "shared,server,client",
         KANBAN_TEST_FILES: changedFiles.join(","), KANBAN_TEST_GUARDS_ONLY: guardsOnly ? "1" : "",
-        KANBAN_RETRY_TEST_FILES: "", KANBAN_TEST_SELECTOR: "", KANBAN_TEST_MAX_WORKERS: "1",
+        KANBAN_RETRY_TEST_FILES: "", KANBAN_TEST_SELECTOR: "", KANBAN_TEST_GUARDS: "", KANBAN_TEST_MAX_WORKERS: "1",
         KANBAN_TEST_NO_COVERAGE_PROBE: "1", KANBAN_TEST_HERMETIC: "", KANBAN_MACHINE_VERIFY_LOCK: "" },
     });
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);

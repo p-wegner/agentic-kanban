@@ -9,12 +9,37 @@
 // each scoped sub-step declares in `scripts/check-arch.mjs`, a repo script outside this
 // suite's own import graph.
 import { describe, expect, it } from "vitest";
-import { stepApplies, matchesPathGlob, isArchRelevantFile, STEP_TERRITORY } from "../../../../scripts/check-arch.mjs";
+import { stepApplies, matchesPathGlob, isArchRelevantFile, isGodModuleRelevantFile, STEP_TERRITORY } from "../../../../scripts/check-arch.mjs";
 
 describe("check:arch sub-step territory (#1052)", () => {
-  it("god-modules has no territory — it always applies, diff or no diff", () => {
+  // #1232 — god-modules used to have no territory. Its reading is every non-test `.ts`/`.tsx`
+  // under a package's `src/`, so that is what it is scoped to now: a docs, tests, scripts or
+  // config diff cannot move its verdict and no longer pays its ~5s.
+  it("god-modules applies to a source-module diff and to an unknown diff", () => {
     expect(stepApplies("god-modules", [])).toBe(true);
-    expect(stepApplies("god-modules", ["docs/README.md"])).toBe(true);
+    expect(stepApplies("god-modules", ["packages/server/src/services/foo.service.ts"])).toBe(true);
+    expect(stepApplies("god-modules", ["packages/client/src/components/Board.tsx"])).toBe(true);
+    expect(stepApplies("god-modules", ["scripts/check-god-modules.mjs"])).toBe(true);
+  });
+
+  it("god-modules skips a diff that touches no non-test source module (#1232)", () => {
+    expect(stepApplies("god-modules", ["docs/README.md"])).toBe(false);
+    expect(stepApplies("god-modules", ["packages/server/src/__tests__/foo.test.ts"])).toBe(false);
+    expect(stepApplies("god-modules", ["packages/server/src/foo.test.ts"])).toBe(false);
+    expect(stepApplies("god-modules", ["packages/shared/src/types/api.d.ts"])).toBe(false);
+    expect(stepApplies("god-modules", ["scripts/test-mine.mjs", "packages/server/openapi.yaml"])).toBe(false);
+    expect(STEP_TERRITORY["god-modules"].reason).toBeTruthy();
+  });
+
+  it("isGodModuleRelevantFile mirrors check-god-modules.mjs's own exclusions", () => {
+    expect(isGodModuleRelevantFile("packages/server/src/services/foo.service.ts")).toBe(true);
+    expect(isGodModuleRelevantFile("packages/client/src/App.tsx")).toBe(true);
+    expect(isGodModuleRelevantFile("scripts/check-god-modules.mjs")).toBe(true);
+    expect(isGodModuleRelevantFile("packages/server/src/__tests__/foo.test.ts")).toBe(false);
+    expect(isGodModuleRelevantFile("packages/server/src/foo.spec.ts")).toBe(false);
+    expect(isGodModuleRelevantFile("packages/shared/drizzle/0001_init.sql")).toBe(false);
+    expect(isGodModuleRelevantFile("packages/server/scripts/gen.mjs")).toBe(false);
+    expect(isGodModuleRelevantFile("scripts/typecheck.mjs")).toBe(false);
   });
 
   it("an UNKNOWN diff (empty changed-file list) runs every step — fail open, never fail narrow", () => {
@@ -22,11 +47,11 @@ describe("check:arch sub-step territory (#1052)", () => {
     expect(stepApplies("mcp-catalog-parity", [])).toBe(true);
   });
 
-  it("a diff that skips BOTH scoped steps: docs only, no import edge, no MCP tool/catalog touch", () => {
+  it("a diff that skips ALL scoped steps: docs only, no import edge, no MCP tool/catalog touch", () => {
     const changedFiles = ["docs/state.md", "CONTINUE.md"];
     expect(stepApplies("lint:arch", changedFiles)).toBe(false);
     expect(stepApplies("mcp-catalog-parity", changedFiles)).toBe(false);
-    expect(stepApplies("god-modules", changedFiles)).toBe(true);
+    expect(stepApplies("god-modules", changedFiles)).toBe(false);
   });
 
   it("a diff that skips NEITHER: touches a server import edge and an MCP tool module", () => {

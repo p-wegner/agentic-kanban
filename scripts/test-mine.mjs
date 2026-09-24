@@ -359,6 +359,17 @@ const ALWAYS_RUN_MARKER_RE = /^\s*\/\/\s*@gate:always-run\b(.*)$/m;
 const ALWAYS_RUN_WHEN_RE = /\bwhen:([^\s,]+(?:\s*,\s*[^\s,]+)*)/;
 
 /**
+ * The explicit unconditional spelling (#1232): `// @gate:always-run always — <reason>`.
+ *
+ * Semantically identical to a bare marker (no territory, forced on every diff under
+ * `KANBAN_TEST_GUARDS=all`, deferred to the base sweep under `intersecting`), but it says so:
+ * a marker with neither `when:` nor `always` is now a marker nobody reviewed, and
+ * `always-run-marker-ratchet.test.ts` refuses it. Anchored to the token right after the marker
+ * so a `when:` marker's trailing rationale cannot accidentally contain it.
+ */
+const ALWAYS_RUN_ALWAYS_RE = /^\s+always(?=\s|$)/;
+
+/**
  * Does `source` DECLARE itself always-run?
  *
  * The single definition of that rule for everything that CAN import this file. It deliberately
@@ -395,12 +406,16 @@ export function isAlwaysRunMarked(source) {
  * declaration still lives in the file, and there is still no hand-maintained list to drift.
  *
  * Returns `{ when: string[] }` — an EMPTY array means "always", which is deliberately different
- * from "no globs matched".
+ * from "no globs matched". The explicit `always` spelling (#1232) adds `always: true`; a bare
+ * marker carries neither, which is what lets the marker ratchet tell "reviewed as unconditional"
+ * from "nobody looked".
  */
 export function parseAlwaysRunMarker(source) {
   const marker = ALWAYS_RUN_MARKER_RE.exec(source);
   if (!marker) return null;
-  const when = ALWAYS_RUN_WHEN_RE.exec(marker[1] ?? "");
+  const tail = marker[1] ?? "";
+  if (ALWAYS_RUN_ALWAYS_RE.test(tail)) return { when: [], always: true };
+  const when = ALWAYS_RUN_WHEN_RE.exec(tail);
   if (!when) return { when: [] };
   return { when: when[1].split(",").map((g) => g.trim().replace(/\\/g, "/")).filter(Boolean) };
 }
@@ -417,6 +432,43 @@ export function guardAppliesToChanges(when, changedFiles) {
   if (!when || when.length === 0) return true;
   if (!changedFiles || changedFiles.length === 0) return true;
   return changedFiles.some((file) => when.some((glob) => matchesPathGlob(glob, file)));
+}
+
+/**
+ * Which guards a run forces (`KANBAN_TEST_GUARDS`, #1232): `all` (default, today's rule byte for
+ * byte) or `intersecting`.
+ *
+ * Under `intersecting` only a marker WITH a `when:` whose territory intersects the change set is
+ * forced; bare and `always` markers are DEFERRED to the base sweep, which sets nothing and so
+ * still runs everything. Measured 2026-09-24 under the `iterate` posture on a 3-file client
+ * change: the impact selection was ~2 files and the unconditional floor 158 guard suites — the
+ * merge paid ~118s of tests for a change that touched none of their territory. A guard that fails
+ * on the base under that posture is a heal ticket, not a lost branch, so it may run once per
+ * release candidate instead of once per merge.
+ *
+ * An unrecognized value falls back to `all` with a warning: the fail-open direction, since
+ * `intersecting` is the mode that runs LESS.
+ */
+export function parseGuardsMode(raw, warn = console.warn) {
+  const value = (raw || "").trim().toLowerCase();
+  if (value === "" || value === "all") return "all";
+  if (value === "intersecting") return "intersecting";
+  warn(`[test:mine] unknown KANBAN_TEST_GUARDS="${raw}" — the supported values are "all" and "intersecting"; running ALL guards.`);
+  return "all";
+}
+
+/**
+ * `guardAppliesToChanges`, with the guards mode applied (#1232).
+ *
+ * `all` is exactly `guardAppliesToChanges`. `intersecting` keeps the unknown-change-set rule (an
+ * empty list forces everything — a mode that narrowed on "I cannot see the diff" would silently
+ * force nothing) and otherwise forces a guard only when it names a territory the diff intersects.
+ */
+export function guardForcedForRun(guard, changedFiles, mode) {
+  if (mode !== "intersecting") return guardAppliesToChanges(guard.when, changedFiles);
+  if (!changedFiles || changedFiles.length === 0) return true;
+  if (!guard.when || guard.when.length === 0) return false;
+  return guardAppliesToChanges(guard.when, changedFiles);
 }
 
 /**
@@ -503,7 +555,7 @@ export function scanAlwaysRunGuards(
       }
       if (!ALWAYS_RUN_TEST_FILE.test(name)) continue;
       const marker = parseAlwaysRunMarker(readText(resolve(pkgDir, rel)));
-      if (marker) found.push({ file: rel, when: marker.when });
+      if (marker) found.push({ file: rel, when: marker.when, always: marker.always === true });
     }
   };
   walk(testsDir);
@@ -573,6 +625,8 @@ export function readTestDurations(root = ROOT) {
  * `changedFiles: []` (the default) is the unconditional floor — every marked suite, which is the
  * number that matters at review time, because that is what a new marker adds to every gate run
  * that cannot narrow. Passing a change set applies each marker's `when:` precondition (#1041).
+ * `guards: "intersecting"` (#1232) applies the merge-time rule instead — bare and `always`
+ * markers are left out — which is the floor a merge pays under the `iterate` posture.
  *
  * Pure w.r.t. its arguments apart from the tree scan, so both the ratchet and a one-off
  * measurement read the same function rather than two summations that can disagree.
@@ -583,13 +637,14 @@ export function alwaysRunFloor({
   durations = null,
   assumedMs = ASSUMED_GUARD_MS,
   changedFiles = [],
+  guards = "all",
 } = {}) {
   const files = [];
   for (const pkg of packages) {
     const testsDir = ALWAYS_RUN_TESTS_DIR[pkg.label];
     if (!testsDir) continue;
     for (const guard of scanAlwaysRunGuards(resolve(root, pkg.dir), testsDir)) {
-      if (!guardAppliesToChanges(guard.when, changedFiles)) continue;
+      if (!guardForcedForRun(guard, changedFiles, guards)) continue;
       const rel = `${pkg.dir}/${guard.file}`.replace(/\\/g, "/");
       const measured = durations?.get(rel);
       files.push({ file: rel, ms: measured ?? assumedMs, assumed: measured === undefined });
@@ -620,6 +675,13 @@ export function alwaysRunFloor({
  * full suites. Without a file list it retains the conservative all-guards behavior.
  */
 const guardsOnly = /^(1|true|yes)$/i.test((process.env.KANBAN_TEST_GUARDS_ONLY || "").trim());
+
+/**
+ * Which guards this run forces (`KANBAN_TEST_GUARDS=all|intersecting`, #1232) — see
+ * `parseGuardsMode`. The board's gate sets `intersecting` under the `iterate` posture only; the
+ * base sweep sets nothing and so still runs every guard.
+ */
+const guardsMode = parseGuardsMode(process.env.KANBAN_TEST_GUARDS);
 
 /**
  * Flake-retry mode (`KANBAN_RETRY_TEST_FILES=pkg:file,pkg:file`): run EXACTLY these suites and
@@ -1153,16 +1215,25 @@ const scopedFiles = fileScopeRaw
 const ALWAYS_RUN_TESTS = Object.fromEntries(
   Object.entries(ALWAYS_RUN_GUARDS).map(([label, guards]) => [
     label,
-    guards.filter((g) => guardAppliesToChanges(g.when, scopedFiles)).map((g) => g.file),
+    guards.filter((g) => guardForcedForRun(g, scopedFiles, guardsMode)).map((g) => g.file),
   ]),
 );
 
-/** `{ total, kept, skipped }` over the whole marker-derived floor, for the scope notice. */
+/**
+ * `{ total, kept, skipped, deferred }` over the whole marker-derived floor, for the scope notice.
+ * `skipped` is what a `when:` precondition excused; `deferred` (#1232) is what the `intersecting`
+ * mode left to the base sweep — the bare and `always` markers. The two are reported apart because
+ * they are different claims: a skipped guard cannot be affected by this diff, a deferred one
+ * simply is not this merge's job.
+ */
 function alwaysRunGuardCounts() {
   const packages = guardsOnly ? PACKAGES : toRun;
   const all = packages.flatMap((pkg) => ALWAYS_RUN_GUARDS[pkg.label]);
   const kept = packages.flatMap((pkg) => ALWAYS_RUN_TESTS[pkg.label]).length;
-  return { total: all.length, kept, skipped: all.length - kept };
+  const deferred = guardsMode === "intersecting" && scopedFiles.length > 0
+    ? all.filter((g) => g.when.length === 0).length
+    : 0;
+  return { total: all.length, kept, skipped: all.length - kept - deferred, deferred };
 }
 
 /**
@@ -1628,6 +1699,15 @@ export function announceScope(log = console.log, warn = console.warn) {
         `related selections or a full-suite fallback can still include them (#1041)`,
     );
   }
+  // #1232 — the intersecting mode is a different claim from a `when:` skip, so it gets its own
+  // line: N ran because the diff reached their territory, K were left to the base sweep.
+  if (guardsMode === "intersecting") {
+    log(
+      scopedFiles.length > 0
+        ? `[test:mine] guards: ${guards.kept} intersecting of ${guards.total} (${guards.deferred} bare markers deferred to the base sweep) (KANBAN_TEST_GUARDS=intersecting)`
+        : `[test:mine] KANBAN_TEST_GUARDS=intersecting, but the change set is UNKNOWN (no KANBAN_TEST_FILES) — forcing all ${guards.total} guard suite(s); nothing is deferred on a diff the runner cannot see`,
+    );
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -1833,6 +1913,14 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     stepScope = "guards-only";
     console.log(`\n[test:mine] guards-only mode (KANBAN_TEST_GUARDS_ONLY): ${total} @gate:always-run suite(s) across ${planned.length} package(s)`);
     if (total === 0) {
+      // #1232 — under `intersecting` an empty set is a legitimate answer: every marker was either
+      // outside this diff's territory or deferred to the base sweep, and both are said above.
+      // Only a run with NO markers at all is the "checked nothing" case.
+      const counts = alwaysRunGuardCounts();
+      if (guardsMode === "intersecting" && counts.total > 0) {
+        console.log(`[test:mine] guards-only run under KANBAN_TEST_GUARDS=intersecting forces no suite for this diff — ${counts.deferred} deferred to the base sweep, ${counts.skipped} outside their territory.`);
+        process.exit(0);
+      }
       // Fail loudly rather than reporting a green that checked nothing — the whole point of
       // this mode is that SOMETHING ran.
       console.error("[test:mine] guards-only mode found no @gate:always-run suites — refusing to report a green that checked nothing.");

@@ -14,9 +14,10 @@
  * EVERY gate death on this board happened inside this script, before `test:mine` was ever
  * reached — so the impact tier, the whole mechanism built to make the gate affordable, had no
  * opportunity to do anything on those runs. `lint:arch` (depcruise, 18-69s) and
- * `mcp-catalog-parity` (10-56s) are the two of three sub-steps with an obvious territory —
- * `god-modules` stays unconditional because it reads every file's line count, so its subject IS
- * the tree.
+ * `mcp-catalog-parity` (10-56s) are the two of three sub-steps with an obvious territory.
+ * `god-modules` stayed unconditional under #1052 because it reads every file's line count; #1232
+ * gave it the territory that reading actually has — every non-test `.ts`/`.tsx` under a package's
+ * `src/` — so a docs/tests/scripts-only diff no longer pays it either.
  *
  * `KANBAN_ARCH_CHANGED_FILES` (comma-separated, repo-relative, set by the gate — see
  * `buildVerifyEnv` in `pre-merge-gate-tier.ts`) carries the diff. Unset or empty means "I cannot
@@ -73,9 +74,34 @@ export function isArchRelevantFile(relPath) {
 }
 
 /**
- * Territory per scoped sub-step (#1052). `god-modules` carries none — it always runs.
+ * Mirrors `isExcluded` + the `.ts`/`.tsx` filter in `scripts/check-god-modules.mjs`: the script
+ * measures every non-test TypeScript module under `packages/<pkg>/src`, so only such a file (or
+ * the script that grandfathers them) can change its verdict.
+ */
+export function isGodModuleRelevantFile(relPath) {
+  if (relPath === "scripts/check-god-modules.mjs") return true;
+  if (!/^packages\/[^/]+\/src\//.test(relPath)) return false;
+  if (!/\.tsx?$/.test(relPath)) return false;
+  if (/(^|\/)__tests__\//.test(relPath)) return false;
+  if (/\.(test|spec)\.tsx?$/.test(relPath)) return false;
+  if (/\.d\.ts$/.test(relPath)) return false;
+  return true;
+}
+
+/**
+ * Territory per scoped sub-step (#1052). `god-modules` joined the scoped set with #1232: it
+ * reads every package's non-test `.ts`/`.tsx` under `src/` and nothing else, so a diff with no
+ * such file (docs, tests, scripts, config) cannot move its verdict. A CHANGED-PACKAGE scope
+ * would be narrower still and was deliberately not taken: the cohesion baseline keys on paths
+ * across packages, and a single reading of the whole set is cheaper (~5s) than the argument
+ * that a per-package reading is equivalent.
  */
 export const STEP_TERRITORY = {
+  "god-modules": {
+    when: ["packages/**", "scripts/check-god-modules.mjs"],
+    filter: isGodModuleRelevantFile,
+    reason: "no source module changes",
+  },
   "lint:arch": {
     when: ["packages/**", "scripts/**", ".dependency-cruiser.cjs"],
     filter: isArchRelevantFile,
