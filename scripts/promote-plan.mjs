@@ -445,6 +445,29 @@ export function planSweepAcquisition({ verdict, direction = null, forceSweep = f
   return { request: true, reason: "acquire", detail: `${need} — requesting a fresh sweep and waiting for its verdict` };
 }
 
+/**
+ * The one statement a dry run adds for a project on the `flow` risk posture (#1240, decision
+ * 019 part 3): master has NO scheduled sweep by design, so the verdict this promotion should
+ * look for is the release candidate's — `rc/<YYYYMMDD>[-N]`, the branch #1238 cuts and sweeps.
+ * Returns `null` for every other posture, so no other project's plan changes by a byte.
+ *
+ * ONE function on purpose: the rc mechanics (#1238) are being built beside this, and a single
+ * splice point is what keeps that merge trivial — when the rc verdict is readable, this is
+ * where the plan stops merely NAMING it.
+ *
+ * @param {object} p
+ * @param {string|null|undefined} p.postureLevel  the project's resolved risk-posture level
+ * @param {string} p.dateStamp                    `YYYYMMDD`, the cut this promotion would look for
+ */
+export function formatFlowSweepStatement({ postureLevel, dateStamp } = {}) {
+  if (postureLevel !== "flow") return null;
+  return (
+    `risk posture 'flow': master has NO scheduled sweep by design — the full suite runs on the ` +
+    `release candidate only. The verdict to read is the rc branch's (rc/${dateStamp}[-N], ` +
+    `base_branch_health.branch = rc/...; decision 019 / #1238), never master's.`
+  );
+}
+
 /** A lockfile change is the only thing that justifies re-installing in the stable checkout. */
 export function shouldReinstall(lockBefore, lockAfter) {
   return String(lockBefore ?? "") !== String(lockAfter ?? "");
@@ -473,6 +496,7 @@ export function buildPromotionPlan({
   sweepAcquisition = null,
   gateEvidence = null,
   recovery = null,
+  postureLevel = null,
 }) {
   const step1 = {
     n: 1,
@@ -495,6 +519,9 @@ export function buildPromotionPlan({
   // The accumulated-gate evidence is printed HERE, next to the verdict it is weaker than, and
   // nowhere else — it decides nothing (#1045).
   if (gateEvidence) step1.detail = `${step1.detail}\n      gate evidence (does not authorize a promotion): ${gateEvidence}`;
+  // #1240 — under `flow` the master verdict above is the wrong one to read; say so first.
+  const flowNote = formatFlowSweepStatement({ postureLevel, dateStamp: parseStableTag(tag)?.date ?? stableTagDate() });
+  if (flowNote) step1.detail = `${flowNote}\n      ${step1.detail}`;
   return [
     step1,
     { n: 2, title: `tag ${tag} on ${sha}`, detail: `git -C ${repoRoot} tag ${tag} ${sha}   (rollback target: ${previousTag ?? "<none — first promotion>"})` },
