@@ -26,7 +26,9 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // #972 moved the dependency-wave concern out to `hooks/useDependencyWave.ts`.
   "components/BacklogView.tsx::BacklogView": 568,
   "components/IssueDetailPanel.tsx::IssueDetailPanel": 542,
-  "components/PluginViewsPanel.tsx::PluginViewsPanel": 552,
+  // 552 -> 550 (#1227): the plugin-views subrouting effects (slug fallback, view-id
+  // deep link, active-view-id reporting) moved to hooks/usePluginViewRouting.ts.
+  "components/PluginViewsPanel.tsx::PluginViewsPanel": 550,
   "components/GraphView.tsx::GraphView": 548,
   "hooks/useWorkspaceActions.ts::useWorkspaceActions": 523,
   "components/WorkflowBuilder.tsx::WorkflowBuilder": 516,
