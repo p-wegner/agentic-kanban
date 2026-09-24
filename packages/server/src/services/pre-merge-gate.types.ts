@@ -80,4 +80,13 @@ export interface PreMergeGateResult {
    * decides on it.
    */
   impactSelection?: GateImpactSelection | null;
+  /**
+   * #1230 — the suites a failed verify run blamed, repo-relative (guard or selected, every one
+   * that could be placed), and whether they were ALL guards/ratchets. A guard-only failure is
+   * deterministic: the same commit fails it the same way every time, so the orchestrator stops
+   * re-gating it after the second identical failure instead of every tick. Absent when the run
+   * passed or named nothing.
+   */
+  failedSuites?: string[];
+  guardFailure?: boolean;
 }

@@ -53,6 +53,7 @@ import { resolveVerifyOutcome } from "./verify-retry-strategies.js";
 import type { FailedSuite } from "./verify-flake-retry.js";
 import { parseVerifyStepTimings, type VerifyStepTiming } from "./verify-step-timings.js";
 import { recordVerifyGateOutcome, resolveGateImpactTierFields } from "./test-impact-outcome.service.js";
+import { withFailedSuites } from "./verify-failed-suites.js";
 import { buildVerifyResourceEnv } from "./verify-resource-env.js";
 import { sequenceBaseHealthBeforeVerify } from "./gate-base-health-sequencing.js";
 import { openRedDebtEntry } from "../repositories/red-debt.repository.js";
@@ -676,7 +677,7 @@ export async function runPreMergeGate(
     // an EMPTY change set (a gate runs on a clean, fully-committed tree, so `git diff HEAD` and
     // the untracked list are both empty) and every row records the constant always-run set with a
     // free `missed: 0`.
-    await recordVerifyGateOutcome({
+    const ledger = await recordVerifyGateOutcome({
       workspaceId: workspace.id,
       workingDir,
       repoPath: projectRepoPath,
@@ -685,7 +686,8 @@ export async function runPreMergeGate(
       tierInfo: gateTierInfo,
     });
     if (outcome.failure) {
-      return { passed: false, skipped: false, stage: "verify", ...outcome.failure };
+      // #1230 — the failing suites ride on the result and lead its message; total, so no branch here.
+      return withFailedSuites({ passed: false, skipped: false, stage: "verify" as const, ...outcome.failure }, ledger);
     }
     // Carried on the tier info so the PASSING message names it (see GateTierInfo).
     if (gateTierInfo && outcome.flakeRetryNote) gateTierInfo.flakeRetryNote = outcome.flakeRetryNote;

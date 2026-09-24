@@ -43,6 +43,8 @@ import type { GateImpactSelection, GateTierInfo } from "./pre-merge-gate-tier.js
 // here would be a cycle (`pre-merge-gate-tier -> test-impact-selector-id ->
 // test-impact-outcome.service -> pre-merge-gate-tier`), caught by the `no-circular` depcruise rule.
 import { impactRunnerFellBack } from "./impact-selection-note.js";
+import { classifyFailedSuites } from "./verify-failed-suites.js";
+import { tagGuardFailureRow } from "./test-impact-outcome/guard-tag.js";
 
 /**
  * Path of `impact.mjs` relative to a repo root, as the board materializes the skill into a
@@ -213,6 +215,8 @@ export interface RecordGateOutcomeInput {
   tierInfo: GateTierInfo | null;
   /** Tags the row's origin. The board's gate is `ci`: it is the automated gate, not a dev loop. */
   source?: string;
+  /** #1230 — every failing suite is a guard (always selected, so never a miss): source suffix + row tag. */
+  guardFailure?: boolean;
   /** Injected for tests. */
   runCommand?: RunImpactCommand;
   log?: (message: string) => void;
@@ -222,6 +226,10 @@ export interface RecordGateOutcomeResult {
   recorded: boolean;
   /** Why nothing was recorded, when `recorded` is false. Always set in that case. */
   reason?: string;
+  /** #1230 — the named failing suites (repo-relative) and whether ALL are guards; set by `recordVerifyGateOutcome` on every return. */
+  failedSuites?: string[];
+  guardFailure?: boolean;
+  guardSuites?: string[];
   /** The selection tier `select` reported (`impact` | `package` | `all`), when it ran. */
   tier?: string;
   /** How many test files the selection would have picked. */
@@ -736,9 +744,10 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
       attributed: input.failedSuites.length,
     });
     const suspectReason = noChangeReason ?? unionReason ?? unattributedReason;
+    // #1230 — a guard-only failure is a real observation (not suspect) that can never be a miss; named so `bySource` separates it.
     const sourceSuffix =
       `${noChangeReason ? "-nochange" : ""}${unionReason ? "-partialselection" : ""}`
-      + `${unattributedReason ? "-unattributed" : ""}`;
+      + `${unattributedReason ? "-unattributed" : ""}${input.guardFailure ? "-guardfailure" : ""}`;
     // #1098 — the tool at THIS path may or may not accept `--selected -` yet; see
     // `recordAcceptsSelectedViaStdin`. A stale read (the tool updates mid-session) just costs one
     // more inline attempt, never a wrong ledger row.
@@ -776,6 +785,11 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
     });
     if (record.exitCode !== 0) {
       return { recorded: false, reason: `record exited ${record.exitCode}: ${(record.stderr || record.stdout).trim()}` };
+    }
+    // #1230 — the structured tag `record` cannot carry, patched onto the row it just appended (see guard-tag.ts).
+    if (input.guardFailure) {
+      const tagged = tagGuardFailureRow(outcomesPath, { result: input.passed ? "pass" : "fail", failed: input.failedSuites });
+      if (!tagged.tagged) log(`could not tag the ledger row as a guard failure: ${tagged.reason}`);
     }
     if (!input.repoPath) {
       log(`recorded a gate outcome into the WORKTREE ledger at ${outcomesPath} — the project's repo path is unknown, so this row will be lost with the worktree`);
@@ -834,11 +848,8 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
  * with an empty failed set, which is the honest shape: something broke, no suite can be blamed,
  * and it contributes no miss either way.
  *
- * Suite names are REPO-RELATIVE, because that is the vocabulary `select` names tests in and
- * `record`'s miss computation is a plain string comparison against it. vitest prints them
- * package-relative (its cwd is the package), so `repoRelativeSuitePath` performs the join; a
- * suite that cannot be attributed to a package is dropped rather than recorded under a name that
- * could never match. See that function for why the alternative silently reports a 100% miss rate.
+ * Suite names are REPO-RELATIVE (`select`'s vocabulary; `record` compares plain strings), so
+ * `classifyFailedSuites` performs the join and drops what it cannot place — see its header.
  */
 export async function recordVerifyGateOutcome(args: {
   workspaceId: string;
@@ -858,29 +869,32 @@ export async function recordVerifyGateOutcome(args: {
 }): Promise<RecordGateOutcomeResult> {
   const { workspaceId, outcome } = args;
   const log = args.log ?? ((message: string) => console.warn(`[test-impact] ${message}`));
+  // #1230 — name and classify the failures BEFORE any early return (the gate carries them either
+  // way). #997's label-only attribution dropped EVERY failure here: the parser gets stderr before
+  // stdout, so no `FAIL` line ever follows its `[test:mine] <pkg>:` header (31 rows of `failed: []`
+  // on #1228). `classifyFailedSuites` places an unlabelled suite by disk instead — see its header.
+  const classified = classifyFailedSuites(args.workingDir, outcome.failedSuites);
+  const named = { failedSuites: classified.files, guardFailure: classified.guardFailure, guardSuites: classified.guardSuites };
   if (outcome.failure?.timedOut) {
-    return { recorded: false, reason: "the run timed out or was killed — inconclusive, so it is not an observation" };
+    return { recorded: false, reason: "the run timed out or was killed — inconclusive, so it is not an observation", ...named };
   }
   const passed = outcome.failure === null;
-  // #997 — keep the PRE-attribution count. `repoRelativeSuitePath` returns null for a suite with
-  // no package label and this filter drops it; that is correct (an unattributed name would match
-  // nothing in `select`'s vocabulary and report a 100% miss rate) but it used to be SILENT, which
-  // is how nine consecutive failing rows came to name no suite at all with nothing recording why.
-  const attributedSuites = outcome.failedSuites
-    .map(repoRelativeSuitePath)
-    .filter((file): file is string => file !== null);
-  const result = await recordGateOutcome({
-    workingDir: args.workingDir,
-    repoPath: args.repoPath,
-    baseBranch: args.baseBranch,
-    passed,
-    failedSuites: attributedSuites,
-    parsedFailedSuiteCount: outcome.failedSuites.length,
-    tierInfo: args.tierInfo,
-    source: "ci",
-    runCommand: args.runCommand,
-    log,
-  });
+  const result: RecordGateOutcomeResult = {
+    ...(await recordGateOutcome({
+      workingDir: args.workingDir,
+      repoPath: args.repoPath,
+      baseBranch: args.baseBranch,
+      passed,
+      failedSuites: classified.files,
+      parsedFailedSuiteCount: outcome.failedSuites.length,
+      tierInfo: args.tierInfo,
+      source: "ci",
+      guardFailure: classified.guardFailure,
+      runCommand: args.runCommand,
+      log,
+    })),
+    ...named,
+  };
   if (result.recorded) {
     console.log(
       `[test-impact] recorded gate outcome for workspace ${workspaceId}: ${passed ? "pass" : "fail"}, ` +

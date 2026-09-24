@@ -7,7 +7,7 @@
  * `isLockContentionFailure` in `workspace-merge-gate.ts` for why.
  */
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { isLockContentionFailure, isPreMergeGateFailure } from "./workspace-merge-gate.js";
+import { isLockContentionFailure, isPreMergeGateFailure, preMergeGateFailedSuites } from "./workspace-merge-gate.js";
 
 /** The reason string both callers attach to a lock-contention skip/log entry. */
 export function lockContentionReason(err: unknown, prefix = "lock_contention"): string {
@@ -20,6 +20,10 @@ type LockContentionSkipEvent = {
   issueNumber: number | null;
   issueTitle: string;
   reason: string;
+  /** #1230 — a `verify_failed` skip names the suites the gate blamed, when it could. */
+  failedSuites?: string[];
+  /** #1230 — every named suite is a guard/ratchet: deterministic, not worth re-gating. */
+  guardFailure?: boolean;
 };
 
 /**
@@ -62,12 +66,14 @@ export function preMergeGateSkipEvent(args: {
 }): LockContentionSkipEvent | null {
   if (!isPreMergeGateFailure(args.err)) return null;
   args.skipped.push(args.workspaceId);
+  const named = preMergeGateFailedSuites(args.err);
   return {
     type: "skipped",
     workspaceId: args.workspaceId,
     issueNumber: args.issueNumber,
     issueTitle: args.issueTitle,
     reason: `verify_failed: ${errorMessage(args.err)}`,
+    ...(named.failedSuites.length > 0 ? { failedSuites: named.failedSuites, guardFailure: named.guardFailure } : {}),
   };
 }
 
