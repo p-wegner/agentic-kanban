@@ -18,8 +18,9 @@
 // signal now runs beside it: MAX FUNCTION BRANCH COMPLEXITY (see
 // MAX_FUNCTION_BRANCHES below).
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, resolve, relative, sep, dirname } from "node:path";
+import { listRepoSubdirs, walkRepoTree } from "./lib/repo-tree.mjs";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
@@ -202,13 +203,10 @@ if (!process.env.KANBAN_GOD_MODULE_GATE_FORCE_NO_TS) {
   }
 }
 
-function isExcluded(absPath) {
-  const parts = relative(REPO_ROOT, absPath).split(sep);
+// `node_modules`, `dist`, `.worktrees` and nested linked worktrees are the shared walker's
+// business (#1241); this names only what is specific to the god-module gate.
+function isExcludedFile(absPath) {
   return (
-    parts.includes("node_modules") ||
-    parts.includes("dist") ||
-    parts.includes(".worktrees") ||
-    parts.includes("__tests__") ||
     absPath.endsWith(".test.ts") ||
     absPath.endsWith(".test.tsx") ||
     absPath.endsWith(".spec.ts") ||
@@ -217,21 +215,13 @@ function isExcluded(absPath) {
 }
 
 function collectSourceFiles(dir, out) {
-  let entries;
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return;
-  }
-  for (const name of entries) {
-    const full = join(dir, name);
-    if (isExcluded(full)) continue;
-    if (statSync(full).isDirectory()) {
-      collectSourceFiles(full, out);
-    } else if (full.endsWith(".ts") || full.endsWith(".tsx")) {
-      out.push(full);
-    }
-  }
+  out.push(
+    ...walkRepoTree(dir, {
+      skipDirs: ["__tests__"],
+      extensions: [".ts", ".tsx"],
+      filter: (abs) => !isExcludedFile(abs),
+    }),
+  );
 }
 
 function lineCount(text) {
@@ -351,9 +341,8 @@ function maxFunctionBranches(file, text) {
 function gatherSourceFiles() {
   const packagesDir = join(REPO_ROOT, "packages");
   const files = [];
-  for (const pkg of readdirSync(packagesDir)) {
-    if (pkg === ".worktrees") continue;
-    collectSourceFiles(join(packagesDir, pkg, "src"), files);
+  for (const pkgDir of listRepoSubdirs(packagesDir)) {
+    collectSourceFiles(join(pkgDir, "src"), files);
   }
   return files;
 }
