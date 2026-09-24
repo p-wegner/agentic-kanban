@@ -46,6 +46,7 @@
  * a health probe; a ticket that could not be written must not turn a green sweep into an error.
  */
 
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { LEGACY_TERMINAL_STATUS_NAMES } from "@agentic-kanban/shared/lib/status-view";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
@@ -287,7 +288,7 @@ async function listCommitsSinceLastGreen(input: HealTicketReconcileInput): Promi
     ["log", "--oneline", "--no-decorate", `${input.lastGreenSha}..${input.sha}`],
     { cwd: input.repoPath, timeout: 30_000 },
   );
-  if (result.code !== 0) return null;
+  if (!execSucceeded(result)) return null;
   return result.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 }
 

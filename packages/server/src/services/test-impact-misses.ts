@@ -42,6 +42,7 @@
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { OUTCOMES_RELATIVE_PATH } from "./test-impact-outcome.service.js";
 
@@ -219,7 +220,7 @@ export function computeSweepJoinRows(input: SweepJoinInput): SweepJoinRow[] {
 /** `git log --format=%H <from>..<to>` through the adapter; `null` when git could not answer. */
 export async function listCommitsBetween(repoPath: string, fromSha: string, toSha: string): Promise<string[] | null> {
   const result = await gitExec(["log", "--format=%H", `${fromSha}..${toSha}`], { cwd: repoPath, timeout: 60_000 });
-  if (result.code !== 0) return null;
+  if (!execSucceeded(result)) return null;
   return result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 }
 
