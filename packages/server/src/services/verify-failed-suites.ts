@@ -35,6 +35,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { hasAlwaysRunMarker } from "./always-run-guard-floor.js";
+import { withMergeFixHint, type MergeFixHint } from "./merge-failure-fix-hint.js";
 
 /** The un-prefixed failing-suite shape the ledger and this module both read. */
 export interface FailedSuiteRef {
@@ -149,14 +150,17 @@ export function describeFailedSuites(classification: { files: readonly string[];
 /**
  * Carry the named failures onto a failed gate result and lead its message with them, so the
  * merge path, the issue comment and the board log all name the file(s) without opening
- * `%TEMP%\kanban-verify-<ws>.log`. Total: with nothing named the result comes back unchanged.
+ * `%TEMP%\kanban-verify-<ws>.log`. Since #1250 the message also ENDS with the one-line fix
+ * when the red is a stale shrink-only baseline (`withMergeFixHint`), and the parsed edits ride
+ * on the result as `fixHint`. Total: with nothing named and no recognised shape the result
+ * comes back unchanged.
  */
 export function withFailedSuites<T extends { message: string }>(
   result: T,
   named: { failedSuites?: string[]; guardFailure?: boolean },
-): T & { failedSuites?: string[]; guardFailure?: boolean } {
+): T & { failedSuites?: string[]; guardFailure?: boolean; fixHint?: MergeFixHint } {
   const files = named.failedSuites ?? [];
-  if (files.length === 0) return result;
+  if (files.length === 0) return withMergeFixHint(result);
   const lead = describeFailedSuites({ files, guardFailure: named.guardFailure === true });
-  return { ...result, message: `${lead}. ${result.message}`, failedSuites: files, guardFailure: named.guardFailure === true };
+  return withMergeFixHint({ ...result, message: `${lead}. ${result.message}`, failedSuites: files, guardFailure: named.guardFailure === true });
 }

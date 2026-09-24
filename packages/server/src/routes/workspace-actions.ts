@@ -15,6 +15,7 @@ import {
 } from "./workspace-action-body-schemas.js";
 import { describeMergeJobAttempts, getMergeJob, type MergeJob } from "../services/merge-job.service.js";
 import { describePersistedGateVerdict } from "../services/workspace-merge-gate.js";
+import { mergeFixHintFromJob, type MergeFixHint } from "../services/merge-failure-fix-hint.js";
 import {
   cancelWorkspaceMerge,
   getWorkspaceMergeHoldState,
@@ -128,6 +129,11 @@ export async function describeAbsentMergeJob(workspaceId: string): Promise<{
   persistedGateVerdict?: Awaited<ReturnType<typeof describePersistedGateVerdict>>;
   /** Every #243 discard recorded for this workspace, newest first (#1030). */
   gateDiscards: MergeGateDiscardRow[];
+  /**
+   * #1250 — always null here: the parsed shrink-only fix rides on a FAILED gate attempt, and no
+   * attempt outlives the job map. Present so the two `merge-status` shapes read alike.
+   */
+  fixHint: null;
   message: string;
 }> {
   const [persistedGateVerdict, interruptedMerge, mergeState, interruptedRecord, gateDiscards] = await Promise.all([
@@ -153,6 +159,7 @@ export async function describeAbsentMergeJob(workspaceId: string): Promise<{
       mergedHeadSha: mergeState.mergedHeadSha,
       interruptedMerge: interruptedMerge ?? null,
       gateDiscards,
+      fixHint: null,
       message:
         `no merge job is held in the current server process, but this workspace is stamped MERGED at ${mergeState.mergedAt}`
         + (mergeState.mergedHeadSha ? ` (merged head ${mergeState.mergedHeadSha})` : "")
@@ -193,6 +200,7 @@ export async function describeAbsentMergeJob(workspaceId: string): Promise<{
       ...(interruptedRecord ? { interruptedMergeRecord: interruptedRecord } : {}),
       ...(persistedGateVerdict ? { persistedGateVerdict } : {}),
       gateDiscards,
+      fixHint: null,
       message:
         `no merge job is held in the current server process, and the last thing that happened to this `
         + `workspace's merge was an INTERRUPTION: a merge${job}${when} never reached a verdict — the process `
@@ -217,6 +225,7 @@ export async function describeAbsentMergeJob(workspaceId: string): Promise<{
       // Provably null here: any interruption, live or recorded, returned above.
       interruptedMerge: null,
       gateDiscards,
+      fixHint: null,
       message:
         "no merge job recorded for this workspace in the current server process (it may have restarted mid-merge) — "
         + `but a PASSING pre-merge gate verdict is persisted (stage ${persistedGateVerdict.stage}, ran ${persistedGateVerdict.ranAt}). `
@@ -229,6 +238,7 @@ export async function describeAbsentMergeJob(workspaceId: string): Promise<{
     job: null,
     interruptedMerge: null,
     gateDiscards,
+    fixHint: null,
     message: "no merge job recorded for this workspace in the current server process.",
   };
 }
@@ -245,9 +255,10 @@ export async function describeAbsentMergeJob(workspaceId: string): Promise<{
 export async function describeLiveMergeJob(
   workspaceId: string,
   job: MergeJob,
-): Promise<{ job: MergeJob; attemptSummary: string; gateDiscards: MergeGateDiscardRow[] }> {
+): Promise<{ job: MergeJob; attemptSummary: string; gateDiscards: MergeGateDiscardRow[]; fixHint: MergeFixHint | null }> {
   const gateDiscards = await listMergeGateDiscards(workspaceId).catch(() => [] as MergeGateDiscardRow[]);
-  return { job, attemptSummary: describeMergeJobAttempts(job), gateDiscards };
+  // #1250 — a stale shrink-only baseline is a one-line fix; say so beside the failed attempt.
+  return { job, attemptSummary: describeMergeJobAttempts(job), gateDiscards, fixHint: mergeFixHintFromJob(job) };
 }
 
 /**
