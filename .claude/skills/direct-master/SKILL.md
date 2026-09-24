@@ -23,7 +23,7 @@ Rules of thumb: board = slow but safe and best traceable; worktree subagents nex
 
 **Mode 2 operating rules** (shared checkout, concurrent writers):
 - Partition by file overlap BEFORE launching: agents in the same wave must have disjoint file sets. Overlapping tickets run in later waves, sequentially.
-- Every agent commits **by pathspec, never via the shared index**: `git commit -F msg.txt -- <exact paths>` (new files: targeted `git add <path>` first). Never `git add -A`/`-a`/`.`, never `git reset`. On `index.lock` contention: wait and retry. (Same rule as the root CLAUDE.md "Several agents committing in ONE checkout" section — it exists because a swept-index commit already happened once.)
+- Every agent commits **by pathspec, never via the shared index**: `git commit -F msg.txt -- <exact paths>` (new files: targeted `git add <path>` first). Never `git add -A`/`-a`/`.`, never `git reset`. On `index.lock` contention: wait and retry. (Same rule as the root CLAUDE.md Scope Discipline section and the `shared-checkout-commit` skill — it exists because a swept-index commit already happened once.)
 - Give each agent its allowed file list explicitly and forbid everything else.
 - Orchestrator verifies BETWEEN waves: typecheck + targeted tests on the combined result, before the next wave builds on it.
 - Reflect state on the board: move tickets In Progress at launch, Done only after the orchestrator has verified the commit (never on the subagent's word alone).
