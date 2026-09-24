@@ -142,8 +142,11 @@ export function resolveEffectiveRedDebtPosture(input: RedDebtCapInput): RedDebtC
 }
 
 /** One degrade step for the RED-BASE POLICY, in the same direction the softer-only override
- *  is allowed to move (#1015): allow-file-debt-ticket -> allow-known-debt -> block. */
+ *  is allowed to move (#1015): report -> allow-file-debt-ticket -> allow-known-debt -> block.
+ *  `report` (#1233) is in the chain on purpose — a policy the cap could not reach would be the
+ *  #916 hole again (a project softening verdicts forever with a ledger nobody drains). */
 const POLICY_DEGRADE_STEP: Partial<Record<RedBasePolicy, RedBasePolicy>> = {
+  report: "allow-file-debt-ticket",
   "allow-file-debt-ticket": "allow-known-debt",
   "allow-known-debt": "block",
 };

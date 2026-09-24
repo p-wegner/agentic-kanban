@@ -31,7 +31,7 @@ import {
   writeTrainWindow,
   type PersistedMergeTrainWindow,
 } from "../services/merge-train-window-state.js";
-import { formatPostureNote } from "../services/risk-posture.service.js";
+import { formatPostureNote, type RiskPosture } from "../services/risk-posture.service.js";
 import {
   describeReleasePartition,
   partitionMergeRelease,
@@ -280,9 +280,10 @@ export function createAutoMergeOrchestrator(deps: {
   reconcileFallbackEveryTicks?: number;
   /**
    * #1204 — the red-base veto port, injected so a test can hand the window a verdict without a
-   * real repo on disk. Production wires `resolveBaseRedVeto`.
+   * real repo on disk. Production wires `resolveBaseRedVeto`, handing it the posture the window
+   * already resolved (#1233: the veto holds only under a `block` red-base policy).
    */
-  checkBaseRedVeto?: (projectId: string) => Promise<BaseRedVeto | null>;
+  checkBaseRedVeto?: (projectId: string, posture: RiskPosture) => Promise<BaseRedVeto | null>;
   /**
    * #1212 — the in-memory review-session id set owned by the workflow engine. Present only so
    * `reconcileCompletionStates` can re-queue a review it had to reap; absent means that pass
@@ -292,7 +293,8 @@ export function createAutoMergeOrchestrator(deps: {
 }) {
   const { database, boardEvents, getSessionManager, reviewSessionIds } = deps;
   const reconcileFallbackEveryTicks = deps.reconcileFallbackEveryTicks ?? RECONCILE_FALLBACK_EVERY_TICKS;
-  const checkBaseRedVeto = deps.checkBaseRedVeto ?? ((projectId: string) => resolveBaseRedVeto(projectId, database));
+  const checkBaseRedVeto = deps.checkBaseRedVeto
+    ?? ((projectId: string, posture: RiskPosture) => resolveBaseRedVeto(projectId, database, { posture }));
   /** Counts effective runOnce passes; drives the zero-candidate reconcile fallback. */
   let reconcileTick = 0;
   /** #1230 — last logged backoff reason per workspace, so a held candidate is logged once, not per tick. */
@@ -599,7 +601,7 @@ export function createAutoMergeOrchestrator(deps: {
       // already hold it, so a held project pays for no git read. `decideWindowHold` composes
       // the three answers — it is the precedence, written once and unit-testable.
       const breakerHold = await resolveAutoMergeBreakerHold(projectId, database).catch(() => null);
-      const baseRed = !breakerHold && verdict.release ? await checkBaseRedVeto(projectId).catch(() => null) : null;
+      const baseRed = !breakerHold && verdict.release ? await checkBaseRedVeto(projectId, config.posture).catch(() => null) : null;
       const hold = decideWindowHold({ verdict, breakerPaused: breakerHold !== null, baseRed: baseRed !== null });
 
       if (baseRed !== null) {

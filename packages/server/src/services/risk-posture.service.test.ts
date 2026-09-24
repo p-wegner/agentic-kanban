@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
+  RED_BASE_POLICY_RANK,
   describeBaseSweep,
   formatIntervalHuman,
+  redBasePolicyPrefKey,
   resolveBaseSweepIntervalMs,
   resolveRiskPosture,
   riskPosturePrefKey,
+  type RedBasePolicy,
 } from "./risk-posture.service.js";
 
 const PID = "11111111-2222-3333-4444-555555555555";
@@ -236,5 +239,47 @@ describe("describeBaseSweep — the effective cadence as one wire struct (#1031)
     expect(formatIntervalHuman(6 * 60 * 60 * 1000)).toBe("6 h");
     expect(formatIntervalHuman(24 * 60 * 60 * 1000)).toBe("24 h");
     expect(formatIntervalHuman(90 * 1000)).toBe("90 s");
+  });
+});
+
+// @covers preferences-config.resolve.risk-posture [config,risk]
+describe("red-base policy under iterate, and the report policy (#1233)", () => {
+  it("iterate files a heal ticket instead of holding the train window — and says so", () => {
+    const p = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: "iterate" }), PID);
+    expect(p.redBasePolicy).toBe("allow-file-debt-ticket");
+    // Visibility rule: the summary names the softening, so every gate/merge message carries it.
+    expect(p.summary).toContain("heal ticket");
+  });
+
+  it("standard and strict keep blocking on a red base", () => {
+    for (const level of ["standard", "strict"] as const) {
+      expect(resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: level }), PID).redBasePolicy).toBe("block");
+    }
+  });
+
+  it("report ranks softest — below every other policy, and no shipped level resolves it", () => {
+    const ranks = Object.entries(RED_BASE_POLICY_RANK) as Array<[RedBasePolicy, number]>;
+    const softest = ranks.reduce((a, b) => (b[1] > a[1] ? b : a));
+    expect(softest[0]).toBe("report");
+    expect(new Set(ranks.map(([, r]) => r)).size).toBe(ranks.length);
+    for (const level of ["strict", "standard", "iterate", "fast", "sprint"] as const) {
+      expect(resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: level }), PID).redBasePolicy).not.toBe("report");
+    }
+  });
+
+  it("report is reachable as a softer-only override, and never as a tightening", () => {
+    const softened = resolveRiskPosture(
+      prefs({ [riskPosturePrefKey(PID)]: "sprint", [redBasePolicyPrefKey(PID)]: "report" }),
+      PID,
+    );
+    expect(softened.redBasePolicy).toBe("report");
+    expect(softened.summary).toContain("'report' per project override");
+    // An `iterate` project asking for `block` keeps its level's own policy — the override is
+    // softer-only, so a tightening is ignored (with a warning), never honoured.
+    const ignored = resolveRiskPosture(
+      prefs({ [riskPosturePrefKey(PID)]: "iterate", [redBasePolicyPrefKey(PID)]: "block" }),
+      PID,
+    );
+    expect(ignored.redBasePolicy).toBe("allow-file-debt-ticket");
   });
 });

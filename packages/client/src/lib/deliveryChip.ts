@@ -55,6 +55,7 @@ export function buildDeliveryChipView(status: DeliveryStatusResponse): DeliveryC
     `Merges / cycle: ${posture.mergesPerCycle}`,
     `Merge train: max ${status.trainWindowMaxSize}, wait ${formatMs(status.trainWindowMaxWaitMs)}${sourceNote}`,
     status.baseSweep.reason,
+    describeRedBase(status.redBase),
     "",
     "Click for the Delivery controls.",
   ];
@@ -65,6 +66,27 @@ export function buildDeliveryChipView(status: DeliveryStatusResponse): DeliveryC
     compactLabel: `${RISK_POSTURE_LABELS[posture.level]} · ${status.trainWindowMaxSize}`,
     title: titleLines.join("\n"),
   };
+}
+
+/**
+ * One line for the red-base state (#1233): the latest sweep verdict, whether it is holding the
+ * train window right now, and how many heal tickets are open — so "why is nothing merging?"
+ * and "is the red being worked on?" are both answerable from the chip.
+ */
+export function describeRedBase(redBase: DeliveryStatusResponse["redBase"] | undefined): string {
+  if (!redBase) return "Red base: not reported";
+  const verdict = redBase.latestOutcome
+    ? `latest sweep ${redBase.latestOutcome}${redBase.latestSha ? ` at ${redBase.latestSha.slice(0, 8)}` : ""}`
+    : "never swept";
+  const hold = redBase.holdingWindow
+    ? "HOLDING the train window"
+    : redBase.latestOutcome === "red"
+      ? `not holding the window (policy '${redBase.policy}')`
+      : "not holding the window";
+  const heal = redBase.openHealTickets > 0
+    ? `, ${redBase.openHealTickets} open heal ticket${redBase.openHealTickets === 1 ? "" : "s"}`
+    : "";
+  return `Red base: ${verdict}, ${hold}${heal}`;
 }
 
 function formatMs(ms: number): string {

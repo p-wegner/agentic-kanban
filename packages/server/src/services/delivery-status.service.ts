@@ -1,10 +1,12 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
-import type { DeliveryStatusResponse } from "@agentic-kanban/shared/types";
+import type { DeliveryStatusResponse, RedBaseStatus } from "@agentic-kanban/shared/types";
 import type { Database } from "../db/index.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
-import { describeBaseSweep, resolveRiskPosture } from "./risk-posture.service.js";
+import { listOpenHealTickets } from "./base-health-heal-ticket.service.js";
+import { resolveBaseRedVeto } from "./merge-train-base-veto.js";
+import { describeBaseSweep, resolveRiskPosture, type RiskPosture } from "./risk-posture.service.js";
 import { requireProject } from "./require-project.js";
 import { resolveTrainWindowConfig } from "./merge-train-window.js";
 
@@ -17,6 +19,10 @@ const trainMaxSizePref = projectPref("train_max_size");
  * client's level-only resolver and was blind to the per-project red-base-policy and train-size
  * overrides). Modelled on `getAutopilotStatus`: read-only, one request, the numbers come
  * straight from the same resolvers the gate/merge code paths use.
+ *
+ * `redBase` (#1233) is the same shape of promise: `holdingWindow` is `resolveBaseRedVeto`'s
+ * own verdict for this project, so the chip shows whether the train window is frozen by a red
+ * base — and which policy decides that — from the exact function the orchestrator runs.
  */
 export async function getDeliveryStatus(projectId: string, database: Database): Promise<DeliveryStatusResponse> {
   await requireProject(projectId, database);
@@ -37,5 +43,26 @@ export async function getDeliveryStatus(projectId: string, database: Database): 
     trainWindowMaxWaitMs: trainWindow.maxWaitMs,
     trainWindowFromPosture: trainWindow.batchingFromPosture,
     baseSweep: describeBaseSweep(posture, lastProbeAt),
+    redBase: await describeRedBase(projectId, posture, baseHealth, database),
+  };
+}
+
+/** The red-base half of the read model — see `RedBaseStatus`. Never throws: an unreadable
+ *  veto or ticket list reads as "not holding / none open" rather than failing the whole chip. */
+async function describeRedBase(
+  projectId: string,
+  posture: RiskPosture,
+  baseHealth: Awaited<ReturnType<typeof getLatestBaseBranchHealth>>,
+  database: Database,
+): Promise<RedBaseStatus> {
+  const veto = await resolveBaseRedVeto(projectId, database, { posture }).catch(() => null);
+  const openHealTickets = await listOpenHealTickets(projectId, database).catch(() => []);
+  const outcome = baseHealth?.outcome;
+  return {
+    policy: posture.redBasePolicy,
+    latestOutcome: outcome === "green" || outcome === "red" || outcome === "timeout" || outcome === "unverified" ? outcome : null,
+    latestSha: baseHealth?.sha ?? null,
+    holdingWindow: veto !== null,
+    openHealTickets: openHealTickets.length,
   };
 }

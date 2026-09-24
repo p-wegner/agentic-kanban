@@ -21,21 +21,30 @@ import { runMergeTrain } from "../services/merge-train.service.js";
 
 // ── half 1: the pure veto decision ──────────────────────────────────────────────────────
 
+const block = { redBasePolicy: "block" } as const;
+
 describe("decideBaseRedVeto (#1204)", () => {
   it("vetoes a red base the tip has not moved past", () => {
-    expect(decideBaseRedVeto({ outcome: "red", healthSha: "abc", baseAheadOfHealthSha: false }, "4 suites failed"))
+    expect(decideBaseRedVeto({ outcome: "red", healthSha: "abc", baseAheadOfHealthSha: false, ...block }, "4 suites failed"))
       .toEqual({ healthSha: "abc", message: "4 suites failed" });
   });
 
   it("does NOT veto once the base has moved past the red sha — the commits since may be the fix", () => {
-    expect(decideBaseRedVeto({ outcome: "red", healthSha: "abc", baseAheadOfHealthSha: true })).toBeNull();
+    expect(decideBaseRedVeto({ outcome: "red", healthSha: "abc", baseAheadOfHealthSha: true, ...block })).toBeNull();
   });
 
   it("does not veto on green, nor on a NON-ANSWER probe (a false red would withhold every merge)", () => {
-    expect(decideBaseRedVeto({ outcome: "green", healthSha: "abc", baseAheadOfHealthSha: false })).toBeNull();
-    expect(decideBaseRedVeto({ outcome: "timeout", healthSha: "abc", baseAheadOfHealthSha: false })).toBeNull();
-    expect(decideBaseRedVeto({ outcome: "unverified", healthSha: "abc", baseAheadOfHealthSha: false })).toBeNull();
-    expect(decideBaseRedVeto({ outcome: null, healthSha: null, baseAheadOfHealthSha: false })).toBeNull();
+    expect(decideBaseRedVeto({ outcome: "green", healthSha: "abc", baseAheadOfHealthSha: false, ...block })).toBeNull();
+    expect(decideBaseRedVeto({ outcome: "timeout", healthSha: "abc", baseAheadOfHealthSha: false, ...block })).toBeNull();
+    expect(decideBaseRedVeto({ outcome: "unverified", healthSha: "abc", baseAheadOfHealthSha: false, ...block })).toBeNull();
+    expect(decideBaseRedVeto({ outcome: null, healthSha: null, baseAheadOfHealthSha: false, ...block })).toBeNull();
+  });
+
+  it("holds ONLY under a `block` red-base policy — every softer policy reports instead (#1233)", () => {
+    for (const redBasePolicy of ["allow-known-debt", "allow-file-debt-ticket", "report"] as const) {
+      expect(decideBaseRedVeto({ outcome: "red", healthSha: "abc", baseAheadOfHealthSha: false, redBasePolicy }, "red"))
+        .toBeNull();
+    }
   });
 });
 

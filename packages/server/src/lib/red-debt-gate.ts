@@ -104,7 +104,8 @@ export function resolveRedDebtGateVerdict(input: RedDebtGateInput): RedDebtGateV
  */
 export function redDebtGatePostureForPolicy(policy: RedBasePolicy): RedDebtGatePosture | null {
   if (policy === "allow-known-debt") return "fast";
-  if (policy === "allow-file-debt-ticket") return "sprint";
+  // `report` (#1233) never withholds a merge either; the ledger entry it opens is the report.
+  if (policy === "allow-file-debt-ticket" || policy === "report") return "sprint";
   return null;
 }
 
