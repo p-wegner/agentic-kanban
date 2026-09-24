@@ -20,6 +20,7 @@ import {
   buildImpactSelectionNote,
   impactRunnerFellBack,
   type GateImpactSelection,
+  type ImpactSelectorSpawnFailure,
 } from "./impact-selection-note.js";
 
 /**
@@ -370,6 +371,8 @@ export {
   buildGuardCostNote,
   IMPACT_MAP_STALE_REMEDY,
   impactRunnerFellBack,
+  parseImpactSelectorSpawnFailure,
+  type ImpactSelectorSpawnFailure,
 } from "./impact-selection-note.js";
 
 /** Matches the test-file extensions `scripts/test-mine.mjs` actually runs. */
@@ -513,6 +516,14 @@ export interface GateTierInfo {
    * selector the board neither materialized nor can vouch for.
    */
   impactSelectorAbsent?: string;
+  /**
+   * The runner's OWN spawn of the selector failed to start (#1231): errno, the resolved CLI
+   * path and the cwd, parsed off `scripts/test-mine.mjs`'s `selector FAILED TO SPAWN (...)` line.
+   * The tool may well be on disk (so `impactSelectorAbsent` stays unset) — this is the
+   * complementary case, and the message must not describe the two the same way: ABSENT says
+   * "provision the skill", FAILED TO SPAWN says "look at node, the cwd, or the errno".
+   */
+  impactSelectorSpawnFailure?: ImpactSelectorSpawnFailure;
   /**
    * Which selector chose the suites (#962). Optional for back-compat with a caller that never
    * resolved one; `gateRanScope` treats an absent value as `related`, which reproduces the

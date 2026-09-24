@@ -4,6 +4,7 @@ import {
   VERIFY_GATE_STRATEGY_VALUES,
   buildGateTierMessage,
   buildImpactSelectionNote,
+  parseImpactSelectorSpawnFailure,
   buildVerifyEnv,
   resolveImpactSelectorEnv,
   resolveGateFileScopeEmission,
@@ -445,6 +446,48 @@ describe("buildImpactSelectionNote", () => {
       };
       expect(buildImpactSelectionNote(noSteps)).not.toContain("RUNNER FELL BACK");
       expect(buildGateTierMessage(noSteps)).toContain("tier: impact-selected");
+    });
+
+    describe("a spawn failure is named as such, distinct from ABSENT (#1231)", () => {
+      const runnerLine =
+        "[test:mine] impact selector failed to start — selector FAILED TO SPAWN (ENOENT: " +
+        "C:\\wt\\.claude\\skills\\test-impact\\tools\\impact.mjs, cwd C:\\wt, node C:\\node\\node.exe; spawn ENOENT) " +
+        "— falling back to `vitest related`.";
+
+      it("parses the runner's line into code, path and cwd — and nothing from a run that printed none", () => {
+        expect(parseImpactSelectorSpawnFailure(`noise\n${runnerLine}\nmore`)).toEqual({
+          code: "ENOENT",
+          path: "C:\\wt\\.claude\\skills\\test-impact\\tools\\impact.mjs",
+          cwd: "C:\\wt",
+        });
+        expect(parseImpactSelectorSpawnFailure("[gate:step] name=tests seconds=4 scope=file-scoped")).toBeUndefined();
+        expect(parseImpactSelectorSpawnFailure("")).toBeUndefined();
+        expect(parseImpactSelectorSpawnFailure(undefined)).toBeUndefined();
+      });
+
+      it("the note says FAILED TO SPAWN with code, path and cwd — not ABSENT, since the tool was there", () => {
+        const spawnFailed: GateTierInfo = {
+          ...fellBackTier,
+          impactSelectorSpawnFailure: parseImpactSelectorSpawnFailure(runnerLine),
+        };
+        const note = buildImpactSelectionNote(spawnFailed);
+        expect(note).toContain("UNKNOWN");
+        expect(note).toContain("selector FAILED TO SPAWN (ENOENT: C:\\wt\\.claude\\skills\\test-impact\\tools\\impact.mjs, cwd C:\\wt");
+        expect(note).toContain("scope=file-scoped");
+        expect(note).not.toContain("selector ABSENT");
+        expect(buildGateTierMessage(spawnFailed)).not.toContain("tier: impact-selected");
+      });
+
+      it("ABSENT keeps its own wording when the selector was never in the worktree", () => {
+        const absent: GateTierInfo = {
+          ...baseTier,
+          impactSelection: null,
+          impactSelectorAbsent: ".claude/skills/test-impact/tools/impact.mjs",
+        };
+        const note = buildImpactSelectionNote(absent);
+        expect(note).toContain("selector ABSENT (.claude/skills/test-impact/tools/impact.mjs is not in the worktree");
+        expect(note).not.toContain("FAILED TO SPAWN");
+      });
     });
 
     it("also fires for the impact+related union shape", () => {
