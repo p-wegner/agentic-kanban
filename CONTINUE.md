@@ -27,24 +27,8 @@ and asking for extraction, not a baseline bump; it is extracting (`PluginViewFra
 **Filed #1230-#1236 (Backlog, tagged `no-auto-start` so the monitor waits for a human pick).**
 The goal they serve: a merge pays only for what it touched, master may be red, the full suite
 runs on master in the background and its misses feed back, promotion needs a green sweep or the
-`--recover` lane. What the map showed (agent-verified, file:line in the tickets):
-- **#1230** the `verify_failed` loop above: backoff, breaker for deterministic guard failures,
-  guard names in the ledger row.
-- **#1231** the base sweep spreads the board's `process.env` into the probe (`setup-script.ts:282`)
-  and the 09-18/09-19 red rows carry selector-mode output; the verdict row does not record the
-  mode it ran in, so a scoped green could promote. Also the selector ENOENT diagnostics.
-- **#1232** the big lever: under `iterate` the merge-time floor is 171 unconditional
-  `@gate:always-run` guards (`BASELINE_TOTAL_MS` 585 s) against a selection of ~2 files. Run only
-  intersecting guards at merge time, defer the bare floor to the sweep.
-- **#1233** `resolveBaseRedVeto` holds every train while the last sweep is red and master only
-  moves through trains: a red sweep freezes the project. Under `iterate` `redBasePolicy` is
-  `block`, so no heal ticket is filed either. Posture-aware veto + `allow-file-debt-ticket`.
-- **#1234** the impact miss rate (#954 step 5) is still UNKNOWN; ledger rows carry no duration.
-- **#1235** ten `kanban/train/*` worktrees since 09-14 kept forever by the reconciler.
-- **#1236** ~~`cli.test.ts` is 643 s of a 60 min suite~~ — split into five `cli-<group>.test.ts`
-  files on one esbuild-bundled CLI + template DBs (`helpers/cli-harness.ts`); measured 11-76 s
-  each, ~230 s together (was 643 s). Still excluded from `test:mine` (child process per case),
-  so `MAX_EXCLUSIONS` moved 10 → 14 for the same one suite.
+`--recover` lane. All seven landed the same evening (see below); each ticket's Done comment names
+its commits and the group gate run.
 
 **Current settings that matter for this** (read from `/api/preferences/settings`): posture
 `iterate`, `verify_gate_strategy` = `impact`, `test_impact_budget` 120 s, `verify_max_workers` 2,
@@ -72,19 +56,57 @@ checkout --`) and its stale impact map (rebuilt on main, copied in). Filed **#12
 base ref, and a lagging remote base ref must be reported. `origin/master` is still at 09-19;
 pushing it is the operator's call.
 
+### Evening — #1230-#1237 landed, wave B/C gated once, next wave is the rc model
+
+**Landed on master, direct-master mode 3 (one subagent per ticket in a nested worktree, rebased and
+fast-forwarded by the orchestrator).** Wave A: #1237 (`review.service.ts` names the LOCAL base;
+`prevent-cross-worktree-writes.js` v6 hard-blocks base-ref writes under `KANBAN_WORKTREE_DIR`),
+#1235 (`merge-train-worktrees.ts`, reaped by row state), #1236 (`cli-*.test.ts` on one bundled
+CLI). Wave B/C: #1230 (`verify_failed` backoff 15 m → 4 h, a deterministic guard stops the
+re-gate, ledger names the suites), #1231 (migration 0157 `scope`, sweep env allowlist, `promote`
+refuses a non-`full` green), #1232 (`KANBAN_TEST_GUARDS=intersecting` under `iterate`, every bare
+`@gate:always-run` now carries `when:` or `always`; measured client change 53 → 14 guards, 112 s →
+51 s), #1233 (posture-aware `resolveBaseRedVeto`, `report` policy, `iterate` defaults to
+`allow-file-debt-ticket`, one heal ticket per failure signature), #1234 (`durationMs` + step
+seconds on ledger rows, `.test-impact/misses.jsonl`, `impactMissRate` on delivery/tracker/promote).
+Decision 019 and `docs/integration-risk-ladder.md` are committed; #1238-#1242 filed (Backlog,
+`no-auto-start`).
+
+**Gates, once per wave.** Wave A at `dc1e0cc930`; wave B/C at `8c48dc9e0e`: `pnpm
+gate:always-run -- --maxWorkers=2` (two reds fixed forward in `8c48dc9e0e`: ExecResult-helper
+reads in the two new services, and the `cli-test` fixture family renamed by #1236),
+`pnpm check:arch` (0 errors), `KANBAN_TYPECHECK_WORKERS=2 pnpm typecheck`. No per-ticket suite.
+`pre-merge-gate.service.ts` hit 1001 lines under #1231 and is 965 after #1232's
+`merge-gate-config.ts` extraction.
+
+**Two things the board did on its own, both handled.** (1) It auto-started a workspace for
+#1232 at 13:38 (`no-auto-start` was set after the monitor had claimed it); by the time the
+subagent's branch landed, that builder was merging master into its own copy and had dropped the
+merge-floor ratchet test. Stopped and deleted (two rows; the `.worktrees/.../ak-1232` husk
+removed by hand). Nothing from it is on master. (2) Two `chore(monitor): sync objective.md`
+commits (`76181f7e8f`, `68429075f6`) appeared on master mid-landing: a Bullseye save on the stable
+board. Harmless; they moved master under a fast-forward once.
+
+**Cleanup.** Eleven dead `.claude/worktrees/agent-*` husks from this and earlier sessions (no
+`.git` link, no branch) removed with `scripts/safe-rmdir.mjs`; `git worktree remove` stops on
+"Filename too long" for them. `.claude/worktrees/` is empty now.
+
 ### Next steps, in order
-1. `pnpm promote --dry-run`: #1227, #1228 and #1229 are on master, ahead of the 17:54 verdict, so
-   it will trigger and wait for a sweep.
-2. Pick from #1230-#1237. Suggested order: #1237, #1230 (stops the waste today), #1231 (makes the
-   sweep trustworthy), #1233 + #1232 as a group (the actual Yegge workflow), #1234 (proves it),
-   #1235, #1236. Remove the `no-auto-start` tag to hand one to the monitor.
-3. Re-enable auto-merge on the three fixture projects paused 2026-09-20 for CPU.
+1. Wave D, same mode: #1238 (rc branch promotion + cadence), #1240 (`flow` posture; #1232 and
+   #1233 are in, so the "no guard floor" half is real), #1241 (shared tree walker) in parallel;
+   then #1239 (heal on the candidate; needs #1238) and #1242 (flake retry on vitest-4 output).
+2. `pnpm promote --dry-run` after wave D: master is far ahead of `stable-20260923`; with #1231 in,
+   a scoped green can no longer promote, so expect it to ask for a sweep.
+3. Re-enable auto-merge on the three fixture projects paused 2026-09-20 for CPU (`c94e30c4…`,
+   `c6355fcd…`, `bc221c46…`); `pnpm cli -- cleanup --dry-run` should now list the ten train
+   worktrees (#1235).
+4. Push `origin/master` after each batch (done through `8c48dc9e0e`).
 
 ### Verified by
-`curl 127.0.0.1:3001/api/health` after the restart; `git diff --stat stable-20260923..master`
-read in full; `.test-impact/outcomes.jsonl` has 31 rows for `0f2e1546e7`, all `fail` with
-`failed: []`; the failing suite is in `%TEMP%\kanban-verify-75b824fe-…log` line 20; the seven
-tickets answer `issue list` with the `no-auto-start` tag (`POST /api/issues/:id/tags` → 201).
+Each ticket's Done comment (POST `/api/issues/:id/comments`) names its commits and the wave's gate
+run; `git log --oneline dc1e0cc930..8c48dc9e0e` is the wave B/C landing; `git worktree list` has
+no `agent-*` or `ak-1232` entry; `pnpm --silent cli -- issue get 1232` shows Done with no
+workspace.
 
 ## Archive
 
