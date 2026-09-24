@@ -133,7 +133,7 @@ Why: nine hand-rolled copies drift.
   — numbers are assigned, and a colliding number is renumbered rather than overwriting.
 - The backtick line right under the heading is metadata: `` `key: value` `` tokens joined by ` · `.
   Keys: `priority` (critical/high/medium/low), `type` (feature/bug/task/chore/epic), `tags`,
-  `milestone`, `estimate`, `due`, `depends`, `blocks`, `key` (external id), `url`. All optional.
+  `milestone`, `due`, `depends`, `blocks`, `key` (external id), `url`. All optional.
 - Everything until the next `###`/`##` is the description. **Headings inside a description must be
   `####` or deeper** — a `##` or `###` there would be read as a new section or issue.
 - `- [ ]` / `- [x]` lines in the body are the issue's checklist.

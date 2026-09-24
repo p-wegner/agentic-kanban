@@ -18,11 +18,10 @@ export function registerCreateSubIssue(server: McpServer, deps: ToolDeps = prodD
       description: z.string().optional().describe("Child issue description"),
       priority: z.enum(["low", "medium", "high", "critical"]).optional().describe("Priority (default: medium)"),
       issueType: z.enum(ISSUE_TYPES).optional().describe("Issue type (default: task)"),
-      estimate: z.string().nullable().optional().describe("Optional estimate"),
       sortOrder: z.number().optional().describe("Sort order within the status column"),
       statusName: z.string().optional().describe("Status column name (default: first status in parent project)"),
     },
-    async ({ parentIssueId, title, description, priority, issueType, estimate, sortOrder, statusName }) => {
+    async ({ parentIssueId, title, description, priority, issueType, sortOrder, statusName }) => {
 
       if (!title.trim()) return mcpError("Error: title is required");
 
@@ -64,7 +63,6 @@ export function registerCreateSubIssue(server: McpServer, deps: ToolDeps = prodD
               description: description ?? null,
               priority: priority ?? "medium",
               issueType: issueType ?? "task",
-              estimate: estimate ?? null,
               sortOrder: sortOrder ?? 0,
               statusId,
               projectId: parent.projectId,

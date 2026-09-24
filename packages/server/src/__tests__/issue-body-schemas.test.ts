@@ -1,6 +1,5 @@
 // @covers server.routes.issue-body-schemas.enhanceIssueBody [contract]
 // @covers server.routes.issue-body-schemas.analyzeDependenciesBody [contract]
-// @covers server.routes.issue-body-schemas.aiEstimateBody [contract]
 // @covers server.routes.issue-body-schemas.projectIdBody [contract]
 // @covers server.routes.issue-body-schemas.groupScanBody [contract]
 // @covers server.routes.issue-body-schemas.decomposeConfirmBody [contract]
@@ -21,7 +20,6 @@ import { describe, it, expect } from "vitest";
 import {
   enhanceIssueBody,
   analyzeDependenciesBody,
-  aiEstimateBody,
   projectIdBody,
   groupScanBody,
   decomposeConfirmBody,
@@ -66,16 +64,6 @@ describe("analyzeDependenciesBody", () => {
       .toBe("issueId and projectId are required");
     expect(firstMessage(analyzeDependenciesBody.safeParse({ issueId: "i1" })))
       .toBe("issueId and projectId are required");
-  });
-});
-
-describe("aiEstimateBody", () => {
-  it("accepts an issueId", () => {
-    expect(aiEstimateBody.safeParse({ issueId: "i1" }).success).toBe(true);
-  });
-
-  it("rejects a missing issueId", () => {
-    expect(firstMessage(aiEstimateBody.safeParse({}))).toBe("issueId is required");
   });
 });
 

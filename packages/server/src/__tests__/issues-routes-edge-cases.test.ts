@@ -146,11 +146,11 @@ type CommentsPageResponse = { comments: IssueComment[]; totalCount: number; hasM
 type BatchIssuesResponse = { issues: CreateIssueResult[]; driveId?: string; dependenciesCreated?: number };
 type ExportRowResponse = {
   number: number | null; title: string; description: string; status: string; priority: string;
-  type: string; tags: string; estimate: string; createdAt: string; updatedAt: string;
+  type: string; tags: string; createdAt: string; updatedAt: string;
 };
 type SkippedRowResponse = { row: number; title: string; reason: string };
 type WarningRowResponse = { row: number; title: string; field: "priority" | "type"; message: string };
-type PreviewRowResponse = { row: number; title: string; description: string; priority: string; issueType: string; estimate: string };
+type PreviewRowResponse = { row: number; title: string; description: string; priority: string; issueType: string };
 type ImportResponse = {
   created: number; skipped: number; skippedRows: SkippedRowResponse[];
   parseErrors: string[]; warnings: WarningRowResponse[];

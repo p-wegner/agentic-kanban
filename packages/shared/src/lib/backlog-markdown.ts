@@ -35,7 +35,6 @@ export interface BacklogMdIssue {
   issueType: string | null;
   tags: string[];
   milestone: string | null;
-  estimate: string | null;
   dueDate: string | null;
   externalKey: string | null;
   externalUrl: string | null;
@@ -155,7 +154,6 @@ export function renderBacklogMarkdown(issues: BacklogMdIssue[], opts: RenderOpti
       if (i.issueType) meta.push(`type: ${i.issueType}`);
       if (i.tags.length) meta.push(`tags: ${i.tags.join(", ")}`);
       if (i.milestone) meta.push(`milestone: ${i.milestone}`);
-      if (i.estimate) meta.push(`estimate: ${i.estimate}`);
       if (i.dueDate) meta.push(`due: ${i.dueDate}`);
       if (opts.dependencies !== false && i.dependsOn.length) meta.push(`depends: ${i.dependsOn.map((n) => `#${n}`).join(", ")}`);
       if (opts.dependencies !== false && i.blocks.length) meta.push(`blocks: ${i.blocks.map((n) => `#${n}`).join(", ")}`);
@@ -188,7 +186,6 @@ const META_KEYS: Record<string, string> = {
   type: "issueType", kind: "issueType", issuetype: "issueType",
   tags: "tags", labels: "tags", label: "tags", tag: "tags",
   milestone: "milestone", sprint: "milestone", release: "milestone", iteration: "milestone",
-  estimate: "estimate", est: "estimate", size: "estimate", points: "estimate", effort: "estimate",
   due: "dueDate", duedate: "dueDate", deadline: "dueDate",
   depends: "depends", "depends on": "depends", dependson: "depends", "blocked by": "depends", blockedby: "depends", after: "depends", needs: "depends", requires: "depends",
   blocks: "blocks", before: "blocks",
@@ -202,7 +199,7 @@ const HASH_NUM = /#(\d+)\b/g;
 
 function blankIssue(line: number): BacklogMdIssue {
   return { number: null, title: "", description: "", status: null, priority: null, issueType: null, tags: [], milestone: null,
-    estimate: null, dueDate: null, externalKey: null, externalUrl: null, dependsOn: [], blocks: [], checklist: [], doneMark: false,
+    dueDate: null, externalKey: null, externalUrl: null, dependsOn: [], blocks: [], checklist: [], doneMark: false,
     createdAt: null, updatedAt: null, line };
 }
 
@@ -232,7 +229,6 @@ export function applyMeta(issue: BacklogMdIssue, keyRaw: string, valueRaw: strin
     case "issueType": { const t = normalizeIssueType(value); if (t) issue.issueType = t; else warnings.push(`line ${issue.line}: unknown type "${value}"`); return true; }
     case "tags": issue.tags.push(...value.split(/[,;]\s*|\s+/).map((t) => t.replace(/^#/, "").trim()).filter(Boolean)); issue.tags = [...new Set(issue.tags)]; return true;
     case "milestone": issue.milestone = value || null; return true;
-    case "estimate": issue.estimate = value || null; return true;
     case "dueDate": issue.dueDate = value || null; return true;
     case "depends": issue.dependsOn.push(...nums()); return true;
     case "blocks": issue.blocks.push(...nums()); return true;

@@ -43,7 +43,6 @@ export interface BacklogSnapshotIssue {
   sortOrder: number;
   status: string;
   milestone: string | null;
-  estimate: string | null;
   dueDate: string | null;
   externalKey: string | null;
   externalUrl: string | null;
@@ -111,7 +110,6 @@ export async function exportBacklogSnapshot(
       sortOrder: row.sortOrder,
       status: statusNameById.get(row.statusId) ?? "",
       milestone: row.milestoneId ? milestoneNameById.get(row.milestoneId) ?? null : null,
-      estimate: row.estimate,
       dueDate: row.dueDate,
       externalKey: row.externalKey,
       externalUrl: row.externalUrl,
@@ -224,7 +222,6 @@ export function validateBacklogSnapshot(raw: unknown): { snapshot: BacklogSnapsh
       sortOrder: asNumberOrNull(io.sortOrder) ?? 0,
       status: asString(io.status),
       milestone: asStringOrNull(io.milestone),
-      estimate: asStringOrNull(io.estimate),
       dueDate: asStringOrNull(io.dueDate),
       externalKey: asStringOrNull(io.externalKey),
       externalUrl: asStringOrNull(io.externalUrl),
@@ -301,7 +298,6 @@ export async function importBacklogSnapshot(
       sortOrder: issue.sortOrder,
       statusName: issue.status,
       milestoneName: issue.milestone,
-      estimate: issue.estimate,
       dueDate: issue.dueDate,
       externalKey: issue.externalKey,
       externalUrl: issue.externalUrl,

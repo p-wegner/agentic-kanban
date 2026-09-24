@@ -334,7 +334,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // isWorkspaceBranchFullyContained before refusing a move to Done — a branch fully
   // contained in the base (0 ahead) has nothing left to merge. Two lines: the extra
   // async check plus its comment line landing inside the existing `if` body.
-  "services/issue.service.ts::createIssueService": 631,
+  "services/issue.service.ts::createIssueService": 629,
   // 618 -> 620 (#968), disclosed in the sixth movement above.
   "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 621,
   "services/workflow-fork.service.ts::createWorkflowForkService": 581,
@@ -393,7 +393,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // (+2 lines), landing in the SAME factory #1107 already raised for the list route's tag
   // hydration -- both handlers live in this one `createIssuesRoute` body. Measured on the
   // rebased tree with the shared scanner, not guessed from either parent's delta.
-  "routes/issues.ts::createIssuesRoute": 433,
+  "routes/issues.ts::createIssuesRoute": 428,
   "services/workflow.service.ts::createWorkflowService": 456,
   // 418 -> 409, banked (#892): the skill-materialization body (resolveSkillFile +
   // materializeEnabledPluginSkills + the new materializeWorkspaceSkills) moved to

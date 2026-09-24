@@ -29,7 +29,7 @@ issues: 2
 ## Backlog
 
 ### #12 refactor: collapse the client's provider ladders
-`priority: high` · `type: chore` · `tags: arch, client` · `milestone: M2` · `estimate: 3d` · `due: 2026-09-01` · `depends: #10, #11` · `blocks: #13` · `key: gh-77` · `url: https://example.test/77` · `created: 2026-08-01` · `updated: 2026-08-02`
+`priority: high` · `type: chore` · `tags: arch, client` · `milestone: M2` · `due: 2026-09-01` · `depends: #10, #11` · `blocks: #13` · `key: gh-77` · `url: https://example.test/77` · `created: 2026-08-01` · `updated: 2026-08-02`
 
 Why: nine hand-rolled copies drift.
 
@@ -54,7 +54,7 @@ Rules:
 | `# Title` | optional document title; `<project> — backlog` by default. |
 | `## Section` | a **status column**. Names are matched to the target's statuses case-insensitively, then through aliases (`Todo`/`To Do`/`Open` → Backlog, `Doing`/`WIP` → In Progress, `Closed`/`Completed` → Done, `Blocked`/`On hold` → Blocked, …). An unknown section is created as a new column (or mapped to the default column with `unknownStatus=map`). |
 | `### [#N] Title` | one **issue**. `#N` is the project-local number — keep it when the issue exists; omit for new ones (numbers are assigned, colliding ones renumbered). |
-| the backtick line right under the heading | **metadata**: `` `key: value` `` tokens joined by ` · `. Keys: `priority` (critical/high/medium/low + aliases P0–P4, urgent, minor…), `type` (feature/bug/task/chore/epic + aliases story, defect, refactor…), `tags`/`labels`, `milestone`/`sprint`, `estimate`/`points`, `due`, `depends`/`blocked by`/`after`, `blocks`, `key` (external id), `url`, `created`, `updated`. All optional. |
+| the backtick line right under the heading | **metadata**: `` `key: value` `` tokens joined by ` · `. Keys: `priority` (critical/high/medium/low + aliases P0–P4, urgent, minor…), `type` (feature/bug/task/chore/epic + aliases story, defect, refactor…), `tags`/`labels`, `milestone`/`sprint`, `due`, `depends`/`blocked by`/`after`, `blocks`, `key` (external id), `url`, `created`, `updated`. All optional. |
 | body until the next `###`/`##` | the **description** (markdown). Headings inside must be `####` or deeper — export demotes them; a `##`/`###` inside a description would be read as a new section/issue. |
 | `- [ ]` / `- [x]` lines in the body | the issue's **checklist**. |
 

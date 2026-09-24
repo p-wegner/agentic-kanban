@@ -7,13 +7,13 @@ import { mcpJson, mcpStructuredError, requireEntity, resolveStatusByName, checkO
 import { fireIssueStatusWebhook } from "@agentic-kanban/shared/lib/issue-status-orchestration";
 import { isTerminalStatusName } from "@agentic-kanban/shared/lib";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
-import { ISSUE_TYPES, ISSUE_ESTIMATES } from "@agentic-kanban/shared";
+import { ISSUE_TYPES } from "@agentic-kanban/shared";
 
 export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
   server.tool(
     "update_issue",
-    "Update an existing issue (title, description, status, priority, type, estimate, tags). tags.add / tags.remove take tag NAMES; an added tag is created when the board has none of that name (e.g. 'harness').",
+    "Update an existing issue (title, description, status, priority, type, tags). tags.add / tags.remove take tag NAMES; an added tag is created when the board has none of that name (e.g. 'harness').",
     {
       issueId: z.string().describe("The issue ID to update"),
       title: z.string().optional().describe("New title"),
@@ -21,13 +21,12 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
       statusName: z.string().optional().describe("Move to status column by name (e.g., 'In Progress', 'Done')"),
       priority: z.enum(["low", "medium", "high", "critical"]).optional().describe("New priority"),
       issueType: z.enum(ISSUE_TYPES).optional().describe("Issue type (task, bug, feature, chore)"),
-      estimate: z.enum(ISSUE_ESTIMATES).nullable().optional().describe("Size estimate (XS/S/M/L/XL), or null to clear"),
       tags: z.object({
         add: z.array(z.string().min(1)).optional().describe("Tag names to add (created if the board has no tag of that name; already-present tags are left alone)"),
         remove: z.array(z.string().min(1)).optional().describe("Tag names to remove (a name the issue does not carry is a no-op)"),
       }).optional().describe("Tag changes by NAME, e.g. { add: ['harness'] } — #1032: the REST tag routes need a tag id, this does not"),
     },
-    async ({ issueId, title, description, statusName, priority, issueType, estimate, tags }) => {
+    async ({ issueId, title, description, statusName, priority, issueType, tags }) => {
       const existingResult = await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)).limit(1);
       const r0 = requireEntity(existingResult, issueId, "Issue");
       if (!r0.ok) return r0.error;
@@ -40,7 +39,6 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
       if (description !== undefined) updates.description = description;
       if (priority !== undefined) updates.priority = priority;
       if (issueType !== undefined) updates.issueType = issueType;
-      if (estimate !== undefined) updates.estimate = estimate;
 
       let resolvedStatusId: string | null = null;
       if (statusName) {

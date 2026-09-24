@@ -1,4 +1,4 @@
-import type { CreateIssueRequest, IssueEstimate } from "@agentic-kanban/shared";
+import type { CreateIssueRequest } from "@agentic-kanban/shared";
 import { ISSUE_TYPES, issueTypeLabel } from "@agentic-kanban/shared";
 import type { IssueTemplate } from "../hooks/useIssueTemplates.js";
 
@@ -93,33 +93,6 @@ export function IssueTypeSelect({ value, onChange, className }: IssueTypeSelectP
     >
       {ISSUE_TYPES.map((t) => (
         <option key={t} value={t}>{issueTypeLabel(t)}</option>
-      ))}
-    </select>
-  );
-}
-
-const ESTIMATES: IssueEstimate[] = ["XS", "S", "M", "L", "XL"];
-
-interface IssueEstimateSelectProps {
-  value: IssueEstimate | "";
-  onChange: (value: IssueEstimate | "") => void;
-  className: string;
-  /** Label for "no estimate" — the panel labels the field, the inline card does not. */
-  emptyLabel: string;
-  title?: string;
-}
-
-export function IssueEstimateSelect({ value, onChange, className, emptyLabel, title }: IssueEstimateSelectProps) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value as IssueEstimate | "")}
-      className={className}
-      title={title}
-    >
-      <option value="">{emptyLabel}</option>
-      {ESTIMATES.map((e) => (
-        <option key={e} value={e}>{e}</option>
       ))}
     </select>
   );

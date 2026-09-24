@@ -136,7 +136,6 @@ export async function getBoardIssues(
       statusChangedAt: issues.statusChangedAt,
       statusName: projectStatuses.name,
       skipAutoReview: issues.skipAutoReview,
-      estimate: issues.estimate,
       externalKey: issues.externalKey,
       externalUrl: issues.externalUrl,
       checklistJson: issues.checklistJson,
@@ -188,7 +187,6 @@ export async function getGraphIssues(
       statusChangedAt: issues.statusChangedAt,
       statusName: projectStatuses.name,
       skipAutoReview: issues.skipAutoReview,
-      estimate: issues.estimate,
       pinned: issues.pinned,
       milestoneId: issues.milestoneId,
     })

@@ -32,7 +32,6 @@ export function stringifyForIssueCard(issue: IssueWithStatus): string {
     isColumnStale: issue.isColumnStale,
     awaitingManualStart: issue.awaitingManualStart,
     skipAutoReview: issue.skipAutoReview,
-    estimate: issue.estimate,
     dueDate: issue.dueDate,
     externalKey: issue.externalKey,
     externalUrl: issue.externalUrl,

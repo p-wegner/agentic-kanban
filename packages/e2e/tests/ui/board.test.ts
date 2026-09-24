@@ -139,7 +139,7 @@ test.describe("Board interactions", () => {
     // the title is a <textarea> (not an <input>), the description placeholder gained a
     // "— paste screenshots with Ctrl+V" suffix that an exact `[placeholder=…]` match cannot
     // see, and the form has no PRIORITY select at all any more — `form.locator("select")`
-    // now resolves to the issue-type and estimate selects, so `selectOption("high")` was
+    // now resolves to the issue-type select, so `selectOption("high")` was
     // setting a control that does not exist.
     const form = page.locator("[data-testid='create-issue-form']");
     await form.locator("[data-testid='create-issue-title']").fill(title);

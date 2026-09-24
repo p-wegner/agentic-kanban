@@ -104,7 +104,6 @@ export async function insertVoiceCaptureIssue(
     priority: values.priority,
     issueType: "task",
     skipAutoReview: false,
-    estimate: null,
     sortOrder: 0,
     workflowTemplateId: null,
     statusId: values.statusId,

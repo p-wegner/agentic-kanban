@@ -86,16 +86,15 @@ export function IssueDetailPanel({
     description, setDescription,
     pastedImages, setPastedImages,
     issueType, setIssueType,
-    estimate, setEstimate,
     dueDate, setDueDate,
     externalKey, setExternalKey,
     externalUrl, setExternalUrl,
     skipAutoReview, setSkipAutoReview,
     milestoneId, setMilestoneId,
-    saving, setSaving, enhancing, preEnhanceSnapshot, estimating,
+    saving, setSaving, enhancing, preEnhanceSnapshot,
     descriptionRef,
     hasChanges,
-    handleCancelEdit, handleEnhance, handleUndoEnhance, handleAiEstimate, handleSave,
+    handleCancelEdit, handleEnhance, handleUndoEnhance, handleSave,
   } = useIssueEditForm(issue, onUpdate);
   const {
     workspaceCount,
@@ -177,7 +176,6 @@ export function IssueDetailPanel({
       setTitle(issue.title);
       setDescription(issue.description ?? "");
       setIssueType(issue.issueType ?? "task");
-      setEstimate(issue.estimate ?? "");
       setDueDate(issue.dueDate ?? "");
       setExternalKey(issue.externalKey ?? "");
       setExternalUrl(issue.externalUrl ?? "");
@@ -200,7 +198,7 @@ export function IssueDetailPanel({
   }, [confirmDelete]);
 
   const {
-    handleQuickEstimate, handleTogglePinned, handleDuplicate,
+    handleTogglePinned, handleDuplicate,
     handleAppendTouchedFilesToDescription, handleCopyArtifact, handleOpenArtifact,
     handleDeleteArtifact, handleAddNote, handleDeleteComment, handleStatusChange,
     handleDelete, isVisualVerify, toggleVisualVerify,
@@ -521,8 +519,6 @@ export function IssueDetailPanel({
             statuses={statuses}
             issueType={issueType}
             setIssueType={setIssueType}
-            estimate={estimate}
-            setEstimate={setEstimate}
             dueDate={dueDate}
             setDueDate={setDueDate}
             externalKey={externalKey}
@@ -534,10 +530,7 @@ export function IssueDetailPanel({
             milestoneId={milestoneId}
             setMilestoneId={setMilestoneId}
             milestones={milestones}
-            estimating={estimating}
             handleStatusChange={handleStatusChange}
-            handleQuickEstimate={handleQuickEstimate}
-            handleAiEstimate={handleAiEstimate}
             badgeColor={badgeColor}
             issueTypeDisplay={issueTypeDisplay}
           />

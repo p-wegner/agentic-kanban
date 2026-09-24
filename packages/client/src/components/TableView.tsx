@@ -12,7 +12,6 @@ import type { BulkOpDeps } from "../lib/tableView-bulk-ops.js";
 import { useBulkOperations } from "../hooks/useBulkOperations.js";
 import type { Tag } from "../hooks/useBulkOperations.js";
 import { resolveRowCells, PRIORITY_LABEL, tagClass } from "../lib/tableView-cells.js";
-import { ISSUE_ESTIMATES } from "@agentic-kanban/shared";
 
 interface TableViewProps {
   columns: StatusWithIssues[];
@@ -23,7 +22,6 @@ interface TableViewProps {
   onClearCreatedDateFilter?: () => void;
 }
 
-const ESTIMATE_OPTIONS = ISSUE_ESTIMATES;
 const PRIORITY_OPTIONS = ["critical", "high", "medium", "low"] as const;
 
 type TableSort = { key: SortKey; dir: SortDir };
@@ -34,7 +32,6 @@ const SORTABLE_COLUMNS: [SortKey, string][] = [
   ["status", "Status"],
   ["priority", "Priority"],
   ["type", "Type"],
-  ["estimate", "Estimate"],
   ["updated", "Updated"],
   ["dueDate", "Due Date"],
 ];
@@ -127,9 +124,6 @@ function TableRow({ issue, selected, onSelect, onClick }: TableRowProps) {
           {cells.typeLabel}
         </span>
       </td>
-      <td className="px-3 py-1.5 whitespace-nowrap text-xs text-gray-600 dark:text-gray-400">
-        {issue.estimate ?? <span className="text-gray-300 dark:text-gray-600">—</span>}
-      </td>
       <td className="px-3 py-1.5 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
         {cells.updatedText}
       </td>
@@ -168,7 +162,6 @@ export function TableView({
     bulkLoading, setBulkLoading,
     bulkStatusOpen, setBulkStatusOpen,
     bulkPriorityOpen, setBulkPriorityOpen,
-    bulkEstimateOpen, setBulkEstimateOpen,
     bulkDueDateOpen, setBulkDueDateOpen,
     bulkTagOpen, setBulkTagOpen,
     bulkRemoveTagOpen, setBulkRemoveTagOpen,
@@ -177,7 +170,6 @@ export function TableView({
     tagsLoaded, setTagsLoaded,
     statusDropdownRef,
     priorityDropdownRef,
-    estimateDropdownRef,
     dueDateDropdownRef,
     tagDropdownRef,
     removeTagDropdownRef,
@@ -252,7 +244,6 @@ export function TableView({
 
   async function handleBulkUpdate(data: UpdateIssueRequest, successLabel: string) {
     setBulkPriorityOpen(false);
-    setBulkEstimateOpen(false);
     setBulkDueDateOpen(false);
     await bulkUpdateIssues(data, successLabel, bulkOpDeps());
   }
@@ -338,7 +329,6 @@ export function TableView({
               onClick={() => {
                 setBulkStatusOpen((v) => !v);
                 setBulkPriorityOpen(false);
-                setBulkEstimateOpen(false);
                 setBulkDueDateOpen(false);
                 setBulkTagOpen(false);
                 setBulkRemoveTagOpen(false);
@@ -369,7 +359,6 @@ export function TableView({
               onClick={() => {
                 setBulkPriorityOpen((v) => !v);
                 setBulkStatusOpen(false);
-                setBulkEstimateOpen(false);
                 setBulkDueDateOpen(false);
                 setBulkTagOpen(false);
                 setBulkRemoveTagOpen(false);
@@ -393,44 +382,6 @@ export function TableView({
             )}
           </div>
 
-          {/* Set estimate */}
-          <div className="relative" ref={estimateDropdownRef}>
-            <button
-              disabled={bulkLoading}
-              onClick={() => {
-                setBulkEstimateOpen((v) => !v);
-                setBulkStatusOpen(false);
-                setBulkPriorityOpen(false);
-                setBulkDueDateOpen(false);
-                setBulkTagOpen(false);
-                setBulkRemoveTagOpen(false);
-              }}
-              className="flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
-            >
-              Set estimate ▾
-            </button>
-            {bulkEstimateOpen && (
-              <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark shadow-lg py-1">
-                {ESTIMATE_OPTIONS.map((estimate) => (
-                  <button
-                    key={estimate}
-                    onClick={() => handleBulkUpdate({ estimate }, `Set estimate to "${estimate}"`)}
-                    className="w-full text-left px-3 py-1.5 text-xs text-gray-700 dark:text-gray-300 hover:bg-brand-50 dark:hover:bg-brand-900/30"
-                  >
-                    {estimate}
-                  </button>
-                ))}
-                <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
-                <button
-                  onClick={() => handleBulkUpdate({ estimate: null }, "Cleared estimate")}
-                  className="w-full text-left px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400 hover:bg-brand-50 dark:hover:bg-brand-900/30"
-                >
-                  Clear estimate
-                </button>
-              </div>
-            )}
-          </div>
-
           {/* Set due date */}
           <div className="relative" ref={dueDateDropdownRef}>
             <button
@@ -439,7 +390,6 @@ export function TableView({
                 setBulkDueDateOpen((v) => !v);
                 setBulkStatusOpen(false);
                 setBulkPriorityOpen(false);
-                setBulkEstimateOpen(false);
                 setBulkTagOpen(false);
                 setBulkRemoveTagOpen(false);
               }}
@@ -483,7 +433,6 @@ export function TableView({
                 setBulkTagOpen((v) => !v);
                 setBulkStatusOpen(false);
                 setBulkPriorityOpen(false);
-                setBulkEstimateOpen(false);
                 setBulkDueDateOpen(false);
                 setBulkRemoveTagOpen(false);
                 void loadTags();
@@ -519,7 +468,6 @@ export function TableView({
                 setBulkRemoveTagOpen((v) => !v);
                 setBulkStatusOpen(false);
                 setBulkPriorityOpen(false);
-                setBulkEstimateOpen(false);
                 setBulkDueDateOpen(false);
                 setBulkTagOpen(false);
                 void loadTags();

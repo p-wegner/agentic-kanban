@@ -222,7 +222,6 @@ describe("the shared issue-form pieces are declared once (#810)", () => {
     PastedImageStrip: "components/IssueFormFields.tsx",
     IssueTemplateSelect: "components/IssueFormFields.tsx",
     IssueTypeSelect: "components/IssueFormFields.tsx",
-    IssueEstimateSelect: "components/IssueFormFields.tsx",
     SkillSelect: "components/IssueFormFields.tsx",
     AgentOptionCheckbox: "components/IssueFormFields.tsx",
     WorkspaceQuickLaunchMenu: "components/WorkspaceQuickLaunchMenu.tsx",

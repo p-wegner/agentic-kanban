@@ -33,7 +33,6 @@ describe("buildSharedIssueUpdate", () => {
       priority: "high",
       issueType: "feature",
       sortOrder: 5,
-      estimate: "2h",
       skipAutoReview: true,
       dueDate: "2026-07-01",
       workflowTemplateId: "wf1",

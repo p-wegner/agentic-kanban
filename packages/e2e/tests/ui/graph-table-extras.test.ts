@@ -124,8 +124,8 @@ test.describe("Graph & Table view extras (#207)", () => {
     const row = page.locator("tbody tr", { hasText: `GTXa ${suffix}` }).first();
     await expect(row).toBeVisible({ timeout: 5000 });
 
-    // The Updated <th> is the 8th header (checkbox + #,Title,Status,Priority,Type,
-    // Estimate,Updated). formatDate never produces an empty cell, so assert the
+    // The Updated <th> is the 7th header (checkbox + #,Title,Status,Priority,Type,
+    // Updated). formatDate never produces an empty cell, so assert the
     // cell at that index has non-whitespace text.
     const headerTexts = (await page.locator("thead th").allTextContents()).map((t) =>
       t.trim().replace(/[↑↓↕]/g, "").trim(),

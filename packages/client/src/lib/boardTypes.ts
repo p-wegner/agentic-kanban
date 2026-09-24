@@ -1,4 +1,4 @@
-import type { CreateIssueRequest, IssueEstimate } from "@agentic-kanban/shared";
+import type { CreateIssueRequest } from "@agentic-kanban/shared";
 
 /**
  * DTO shapes for the board surface (#610).
@@ -28,7 +28,6 @@ export interface CreateIssueFormState {
   description: string;
   pastedImages: string[];
   issueType: CreateIssueRequest["issueType"];
-  estimate?: IssueEstimate | "";
   startWorkspace: boolean;
   planMode: boolean;
   skipAutoReview: boolean;
