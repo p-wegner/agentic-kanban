@@ -259,6 +259,12 @@ Run on 2026-09-05 (tag `stable-20260905` = `stable` = `e01438a4c5`). Do it in th
 
 ## 8. Promotion — `pnpm promote`
 
+> **Decision 019 (2026-09-24) changes what this section gates.** The sweep and the tag move to a
+> release-candidate branch (`rc/<date>`) that master does not wait for; a red candidate is healed
+> on the candidate by a board ticket and merged back. Until #1238/#1239 land, everything below
+> describes the current master-gated run. The ladder across postures is
+> `docs/integration-risk-ladder.md`.
+
 Master reaches the stable checkout by a TIMED promotion, never per merge (proposal §3.A, Yegge's
 drawbridge). That is the one moment the full suite decides anything. `scripts/promote.mjs` is that
 moment; the checklist above is its manual form.
