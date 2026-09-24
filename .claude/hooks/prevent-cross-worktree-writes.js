@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @board-hook-version: 5
+// @board-hook-version: 6
 /**
  * Prevent cross-worktree writes — keep each Claude Code instance inside its own
  * git worktree.
@@ -85,6 +85,29 @@
  *
  * Reads are untouched, as everywhere else in this guard: a builder legitimately reads sibling
  * repos and materialized skills.
+ *
+ * THE BASE BRANCH REF IS NEVER WRITTEN FROM A WORKTREE (#1237)
+ * -------------------------------------------------------------
+ * Everything above is about PATHS. A ref write is not a path: `git update-ref refs/heads/master X`
+ * issued from inside the worktree touches no other worktree's directory, so nothing here saw it.
+ * On 2026-09-24 the auto-review session for #1228 was told to `git rebase origin/master`, found
+ * origin/master five days stale (nothing pushes master in this board's model), replayed 112
+ * commits onto that old base, and then ran `git update-ref refs/heads/master origin/master` —
+ * force-moving the SHARED master back five days. Nothing blocked it.
+ *
+ * So, when the board declared the worktree (KANBAN_WORKTREE_DIR), a shell command that would
+ * MOVE, DELETE, PUSH or CHECK OUT the base branch is a hard block, whatever path it names:
+ * `update-ref`/`symbolic-ref` on refs/heads/<base>, `branch -f|-D|-m … <base>`, `push … <base>`
+ * (or `push --force`/`--all`/`--mirror`), `fetch … :<base>`, `checkout <base>`, `switch <base>`.
+ * The base name comes from KANBAN_BASE_BRANCH when the board exports it; otherwise BOTH `master`
+ * and `main` are protected and the refusal says so. Reading the base (`git log master`,
+ * `git diff master`, `git rebase master`, `git checkout master -- <file>`) stays allowed — the
+ * rule is "never move the base", never "never look at it". A builder rebases ITS OWN branch
+ * onto the local base; landing on the base is the board's merge, not the agent's.
+ *
+ * There is deliberately NO override for this one. The incident was a session pattern-matching
+ * an instruction it had been handed; an escape hatch named in the refusal is the next thing
+ * it would pattern-match.
  */
 
 const path = require("path");
@@ -133,6 +156,129 @@ const MUTATING_PATTERNS = [
   // PowerShell file mutation cmdlets
   /\b(Set-Content|Add-Content|Out-File|Remove-Item|New-Item|Copy-Item|Move-Item|Clear-Content|Rename-Item|Set-ItemProperty|Write-File)\b/i,
 ];
+
+/** Fallback base-branch names, protected together when the board exports no KANBAN_BASE_BRANCH. */
+const DEFAULT_BASE_BRANCHES = ["master", "main"];
+
+/**
+ * The base branch names this session must never write (#1237). `KANBAN_BASE_BRANCH` when the
+ * board exports it (an `origin/` or `refs/heads/` prefix is tolerated and stripped); otherwise
+ * both conventional defaults. Returns `{ names, declared }`.
+ */
+function protectedBaseBranches(env) {
+  const raw = (env.KANBAN_BASE_BRANCH || "").trim().replace(/^refs\/heads\//, "").replace(/^origin\//, "");
+  if (raw) return { names: [raw], declared: true };
+  return { names: DEFAULT_BASE_BRANCHES.slice(), declared: false };
+}
+
+/** git global options that consume the NEXT token (`git -C <dir> <sub>`, `git -c k=v <sub>`). */
+const GIT_GLOBAL_OPTS_WITH_ARG = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"]);
+
+/** Split `git [global opts] <sub> [args]` into `{ sub, args }`; `sub` is "" for a bare `git`. */
+function gitSubcommand(tokens) {
+  let i = 1;
+  while (i < tokens.length && tokens[i].startsWith("-")) {
+    if (GIT_GLOBAL_OPTS_WITH_ARG.has(tokens[i])) i += 2;
+    else i += 1;
+  }
+  return { sub: (tokens[i] || "").toLowerCase(), args: tokens.slice(i + 1) };
+}
+
+/** True when `token` names one of the base branches, as a bare name or a full ref. */
+function namesBase(token, names) {
+  const t = String(token).replace(/^\+/, "");
+  return names.some((n) => t === n || t === `refs/heads/${n}` || t === `heads/${n}`);
+}
+
+/** The destination side of a push/fetch refspec (`src:dst` → dst, `dst` → dst). */
+function refspecDestination(token) {
+  const t = String(token).replace(/^\+/, "");
+  const colon = t.indexOf(":");
+  return colon === -1 ? t : t.slice(colon + 1);
+}
+
+/**
+ * Classify ONE git segment as a base-ref write (#1237). Returns a short description of what the
+ * command would do to the base, or null when it leaves the base ref alone.
+ */
+function gitBaseRefWrite(tokens, names) {
+  const { sub, args } = gitSubcommand(tokens);
+  const positional = args.filter((a) => !a.startsWith("-"));
+  const flags = args.filter((a) => a.startsWith("-"));
+  switch (sub) {
+    case "update-ref":
+      // `update-ref refs/heads/<base> <sha>` moves it; `update-ref -d refs/heads/<base>` deletes it.
+      return positional.some((a) => namesBase(a, names)) ? "update-ref on the base branch ref" : null;
+    case "symbolic-ref":
+      // `symbolic-ref HEAD refs/heads/<base>` re-points this worktree's HEAD at the base (a checkout
+      // of the base with no working-tree update); `symbolic-ref refs/heads/<base> …` rewrites it.
+      return positional.some((a) => namesBase(a, names)) ? "symbolic-ref targeting the base branch ref" : null;
+    case "branch": {
+      // `branch -f <base> X` moves it, `-D`/`-d <base>` deletes it, `-m`/`-M`/`-c`/`-C … <base>`
+      // renames or copies over it. `branch <base> X` without -f fails on an existing branch, and
+      // `branch --show-current` / `branch -a` / `branch --contains <base>` are reads.
+      const mutating = flags.some((f) =>
+        /^--(force|delete|move|copy)$/.test(f) || (/^-[A-Za-z]+$/.test(f) && /[fdDmMcC]/.test(f.slice(1)))
+      );
+      return mutating && positional.some((a) => namesBase(a, names)) ? "force-move/delete/rename of the base branch" : null;
+    }
+    case "push": {
+      // Any push whose refspec DESTINATION is the base, plus every push that could carry it
+      // regardless of what it names (--force, --all, --mirror).
+      if (flags.some((f) => /^(-f|--force|--force-with-lease(=.*)?|--force-if-includes|--all|--mirror|--branches)$/.test(f)))
+        return "push --force/--all/--mirror";
+      if (positional.some((a) => namesBase(refspecDestination(a), names))) return "push of the base branch";
+      return null;
+    }
+    case "fetch":
+    case "pull": {
+      // `fetch origin master:master` writes the local base ref directly. A worktree is never ON
+      // the base, so an explicit `:<base>` refspec is the only shape of these two that reaches it.
+      const explicit = positional.filter((a) => a.includes(":"));
+      return explicit.some((a) => namesBase(refspecDestination(a), names)) ? `${sub} with the base branch as refspec destination` : null;
+    }
+    case "checkout":
+    case "switch": {
+      // `checkout <base>` / `switch <base>` put this worktree ON the base. `checkout <base> -- <path>`
+      // restores files FROM the base (a read of it) and `checkout -b <new> <base>` / `switch -c
+      // <new> <base>` branch OFF it — both stay allowed: only a bare base as the checkout target is
+      // the violation.
+      if (args.includes("--")) return null;
+      const takesArg = new Set(["-b", "-B", "-c", "-C", "--orphan", "--track", "-t"]);
+      let target = null;
+      for (let i = 0; i < args.length; i++) {
+        const a = args[i];
+        if (a.startsWith("-")) {
+          if (takesArg.has(a)) return null; // creating a new branch — the base is the start point
+          if (/^--(orphan|track)=/.test(a) || /^-[bBcC].+/.test(a)) return null;
+          continue;
+        }
+        target = a;
+        break;
+      }
+      return target !== null && namesBase(target, names) ? `${sub} onto the base branch` : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * The base-ref guard over a whole shell command (#1237): each body-stripped segment whose verb
+ * is git is classified by {@link gitBaseRefWrite}. Returns `{ what, segment }` for the first
+ * offending segment, or null.
+ */
+function baseRefViolation(command, names) {
+  for (const segment of splitShellSegments(stripHeredocBodies(command))) {
+    const tokens = segmentTokens(segment);
+    if (tokens.length === 0 || segmentVerb(tokens) !== "git") continue;
+    // segmentVerb skipped env-assignment/wrapper prefixes; realign so tokens[0] is `git`.
+    const gi = tokens.findIndex((t) => segmentVerb([t]) === "git");
+    const what = gitBaseRefWrite(tokens.slice(gi), names);
+    if (what) return { what, segment: segment.trim() };
+  }
+  return null;
+}
 
 /**
  * Normalise a path for separator-insensitive (and, on Windows, case-insensitive) comparison.
@@ -628,6 +774,40 @@ function evaluateToolCall(input) {
   const targets = isShell ? [] : targetPaths(toolName, toolInput);
   if (!isShell && targets.length === 0) return allowV();
   if (isShell && !command) return allowV();
+
+  // #1237 — the base branch ref is never written from a board-launched session. Checked BEFORE
+  // the override and before the worktree topology: it needs neither, and a single-worktree
+  // clone (a fleet worker's own checkout) is covered too. Only armed when the board declared
+  // the worktree — a hand-run session in the main checkout is exactly where landing on the
+  // base is legitimate (the private-index recipe in CLAUDE.md, `pnpm promote`, the unstuck skill).
+  if (isShell && process.env.KANBAN_WORKTREE_DIR && process.env.KANBAN_WORKTREE_DIR.trim()) {
+    const { names, declared } = protectedBaseBranches(process.env);
+    const hit = baseRefViolation(command, names);
+    if (hit) {
+      const list = names.map((n) => "`" + n + "`").join(" and ");
+      return blockV(
+        `⛔ Base-branch ref write blocked (${hit.what}).\n\n` +
+          `Protected base branch: ${list}` +
+          (declared
+            ? " (from KANBAN_BASE_BRANCH)\n"
+            : " (KANBAN_BASE_BRANCH is not set, so both conventional names are protected)\n") +
+          `Command segment:\n  ${hit.segment}\n\n` +
+          "A builder or reviewer session must NEVER move, delete, push or check out the base branch.\n" +
+          "This is the #1237 vector: a reviewer rebased onto a five-day-old origin/master and then\n" +
+          "`git update-ref refs/heads/master origin/master` force-moved the SHARED master back five\n" +
+          "days. The private-index recipe in CLAUDE.md that ends in `git update-ref refs/heads/master`\n" +
+          "is for the MAIN checkout only, never for a worktree.\n\n" +
+          "What to do instead:\n" +
+          `  • rebase YOUR OWN branch onto the LOCAL base: git rebase ${names[0]}\n` +
+          "    (the local branch, not origin/<base> — merges land locally here, so a remote may be\n" +
+          "    missing, renamed or days stale)\n" +
+          "  • commit on your own branch and let the board land it; the merge is the board's job\n" +
+          "  • if the base itself looks wrong, REPORT it — do not repair it from a worktree.\n" +
+          "Reading the base (git log/diff/rebase <base>, checkout <base> -- <file>) is still allowed.\n" +
+          "There is no override for this block, and editing this hook is not one either."
+      );
+    }
+  }
 
   // Checked HERE, not before reading the input, so the inline form on the command can be
   // seen (#408).
