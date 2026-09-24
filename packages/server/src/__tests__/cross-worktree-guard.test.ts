@@ -672,7 +672,7 @@ describe("foreign-checkout hard block (#959)", () => {
  */
 describe("base-branch ref write hard block (#1237)", () => {
   const board = () => ({ KANBAN_WORKTREE_DIR: worktree });
-  const bash = (command: string, env = board()) =>
+  const bash = (command: string, env: Record<string, string | undefined> = board()) =>
     runHook({ tool_name: "Bash", tool_input: { command }, cwd: worktree }, env);
 
   it("BLOCKS the exact incident command: git update-ref refs/heads/master <X>", () => {
