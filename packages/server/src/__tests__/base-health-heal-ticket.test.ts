@@ -13,20 +13,51 @@
  * resolver bypassed.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { eq, like } from "drizzle-orm";
+import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { issueComments, issues, issueTags, preferences, projects, tags } from "@agentic-kanban/shared/schema";
-import { healTicketExternalKey, HEAL_TICKET_TAG } from "../lib/heal-ticket-key.js";
+import { failureSignature, VERIFY_FAILED_SIGNATURE } from "../lib/heal-failure-signature.js";
+import {
+  healTicketExternalKey,
+  healTicketKeyScanPrefix,
+  parseHealTicketExternalKey,
+  HEAL_TICKET_TAG,
+} from "../lib/heal-ticket-key.js";
 import { createTestDb } from "./helpers/test-db.js";
 import { initializeProjectStatuses } from "../repositories/issue.repository.js";
 import { invalidatePreferencesCache } from "../repositories/preferences.repository.js";
-import { reconcileBaseHealthHealTicket } from "../services/base-health-heal-ticket.service.js";
+import { listOpenHealTickets, reconcileBaseHealthHealTicket } from "../services/base-health-heal-ticket.service.js";
 
 const RED_SUITES = [
   "packages/server/src/__tests__/merge-gate.test.ts",
   "packages/shared/__tests__/git-exec-single-spawn.test.ts",
 ];
+
+describe("failure signature (#1233)", () => {
+  it("is order- and duplicate-insensitive, slash-normalised, and constant for a suite-less red", () => {
+    const a = failureSignature(["b.test.ts", "a.test.ts"]);
+    expect(failureSignature(["a.test.ts", "b.test.ts", "a.test.ts "])).toBe(a);
+    expect(failureSignature(["a.test.ts", "b.test.ts"].map((s) => `packages\\${s}`)))
+      .toBe(failureSignature(["packages/a.test.ts", "packages/b.test.ts"]));
+    expect(failureSignature(["a.test.ts"])).not.toBe(a);
+    expect(failureSignature([])).toBe(VERIFY_FAILED_SIGNATURE);
+    expect(failureSignature(null)).toBe(VERIFY_FAILED_SIGNATURE);
+    expect(a).toMatch(/^[0-9a-f]{12}$/);
+  });
+
+  it("the key carries the signature, parses back, and a pre-#1233 key still parses", () => {
+    const key = healTicketExternalKey("p1", "abc123");
+    expect(key.startsWith(healTicketKeyScanPrefix("p1"))).toBe(true);
+    expect(parseHealTicketExternalKey(key)).toEqual({ projectId: "p1", signature: "abc123" });
+    expect(parseHealTicketExternalKey("base-health-heal:p1")).toEqual({ projectId: "p1", signature: null });
+    expect(parseHealTicketExternalKey("plugin-loop:p1:x")).toBeNull();
+  });
+});
 
 describe("base-health heal ticket (#1016)", () => {
   let db: ReturnType<typeof createTestDb>["db"];
@@ -43,15 +74,20 @@ describe("base-health heal ticket (#1016)", () => {
     invalidatePreferencesCache();
   }
 
-  async function sweep(outcome: "red" | "green" | "timeout", failedSuites: string[] | null = null) {
+  async function sweep(
+    outcome: "red" | "green" | "timeout",
+    failedSuites: string[] | null = null,
+    extra: { repoPath?: string; lastGreenSha?: string | null; sha?: string } = {},
+  ) {
     return reconcileBaseHealthHealTicket({
       projectId,
       outcome,
-      sha: outcome === "green" ? "beef1234beef1234beef1234beef1234beef1234" : "cafe9876cafe9876cafe9876cafe9876cafe9876",
+      sha: extra.sha ?? (outcome === "green" ? "beef1234beef1234beef1234beef1234beef1234" : "cafe9876cafe9876cafe9876cafe9876cafe9876"),
       branch: "master",
       failedSuites,
       healthRowId: "sweep-row-1",
       message: outcome === "red" ? "2 failed | 781 passed" : undefined,
+      ...extra,
     }, db);
   }
 
@@ -59,7 +95,7 @@ describe("base-health heal ticket (#1016)", () => {
     return db
       .select()
       .from(issues)
-      .where(eq(issues.externalKey, healTicketExternalKey(projectId)));
+      .where(like(issues.externalKey, `${healTicketKeyScanPrefix(projectId)}%`));
   }
 
   beforeEach(async () => {
@@ -110,32 +146,50 @@ describe("base-health heal ticket (#1016)", () => {
     expect(linked.map((t) => t.name)).toContain(HEAL_TICKET_TAG);
   });
 
-  it("updates the open ticket on a second red sweep instead of filing another", async () => {
+  it("a second red sweep with the SAME failure signature refreshes the open ticket — never a second one (#1233)", async () => {
     const first = await sweep("red", RED_SUITES);
     expect(first.action).toBe("created");
 
-    const second = await sweep("red", ["packages/server/src/__tests__/only-one-now.test.ts"]);
+    // Same set, other order, a Windows spelling and a new sha: one signature, one ticket.
+    const second = await sweep("red", [RED_SUITES[1], RED_SUITES[0].replace(/\//g, "\\")], { sha: "d00d".repeat(10) });
     expect(second.action).toBe("updated");
     expect(second.issueId).toBe(first.issueId);
 
     const rows = await healRows();
     expect(rows).toHaveLength(1);
-    expect(rows[0].title).toContain("1 failing suite");
-    expect(rows[0].description).toContain("only-one-now.test.ts");
-    // The superseded list is gone — the ticket describes the CURRENT red, not a union of every
-    // red the base ever had.
-    expect(rows[0].description).not.toContain("merge-gate.test.ts");
+    expect(rows[0].externalKey).toBe(healTicketExternalKey(projectId, failureSignature(RED_SUITES)));
+    // The body now describes the LATEST sweep of that signature.
+    expect(rows[0].description).toContain("d00d".repeat(10));
+    expect(await listOpenHealTickets(projectId, db)).toHaveLength(1);
   });
 
-  it("closes the heal ticket, with a comment, when a sweep goes green", async () => {
-    const filed = await sweep("red", RED_SUITES);
-    const closed = await sweep("green", []);
-    expect(closed.action).toBe("closed");
-    expect(closed.issueId).toBe(filed.issueId);
+  it("a red with a DIFFERENT failure signature files a second ticket beside the first (#1233)", async () => {
+    const first = await sweep("red", RED_SUITES);
+    const second = await sweep("red", ["packages/server/src/__tests__/only-one-now.test.ts"]);
+    expect(second.action).toBe("created");
+    expect(second.issueId).not.toBe(first.issueId);
 
     const rows = await healRows();
-    expect(rows).toHaveLength(1);
-    expect(rows[0].statusId).toBe(statusIds.Done);
+    expect(rows).toHaveLength(2);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    expect(byId.get(second.issueId!)?.title).toContain("1 failing suite");
+    expect(byId.get(second.issueId!)?.description).toContain("only-one-now.test.ts");
+    // The first ticket keeps describing ITS red — nothing rewrote it under a builder.
+    expect(byId.get(first.issueId!)?.description).toContain("merge-gate.test.ts");
+    expect(await listOpenHealTickets(projectId, db)).toHaveLength(2);
+  });
+
+  it("closes EVERY open heal ticket, each with a comment, when a sweep goes green", async () => {
+    const filed = await sweep("red", RED_SUITES);
+    const other = await sweep("red", ["packages/server/src/__tests__/only-one-now.test.ts"]);
+    const closed = await sweep("green", []);
+    expect(closed.action).toBe("closed");
+    expect(closed.closedIssueIds?.sort()).toEqual([filed.issueId, other.issueId].sort());
+
+    const rows = await healRows();
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(row.statusId).toBe(statusIds.Done);
+    expect(await listOpenHealTickets(projectId, db)).toHaveLength(0);
 
     const comments = await db.select().from(issueComments).where(eq(issueComments.issueId, filed.issueId!));
     expect(comments).toHaveLength(1);
@@ -143,6 +197,78 @@ describe("base-health heal ticket (#1016)", () => {
 
     // A green sweep with nothing open is a no-op, not a second close.
     expect((await sweep("green", [])).action).toBe("noop");
+  });
+
+  it("under `iterate` (#1233) a red files exactly one open heal ticket, the same red files none, a green closes it", async () => {
+    await setPosture("iterate");
+    expect((await sweep("red", RED_SUITES)).action).toBe("created");
+    expect(await listOpenHealTickets(projectId, db)).toHaveLength(1);
+
+    expect((await sweep("red", RED_SUITES)).action).toBe("updated");
+    expect(await listOpenHealTickets(projectId, db)).toHaveLength(1);
+    expect(await healRows()).toHaveLength(1);
+
+    expect((await sweep("green", [])).action).toBe("closed");
+    expect(await listOpenHealTickets(projectId, db)).toHaveLength(0);
+  });
+
+  it("files nothing under `report` — the softest policy discloses in the delivery view only (#1233)", async () => {
+    await setPosture("sprint");
+    await db.insert(preferences).values({ key: `red_base_policy_${projectId}`, value: "report", updatedAt: new Date().toISOString() });
+    invalidatePreferencesCache();
+    const result = await sweep("red", RED_SUITES);
+    expect(result.action).toBe("skipped_policy");
+    expect(result.reason).toContain("report");
+    expect(await healRows()).toHaveLength(0);
+  });
+
+  describe("merges since the last green sweep, through the git adapter (#1233)", () => {
+    let repo: string;
+    const git = (args: string[]) => gitExecOrThrow(args, { cwd: repo });
+    const commit = async (file: string, subject: string) => {
+      writeFileSync(join(repo, file), subject, "utf8");
+      await git(["add", file]);
+      await git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", subject]);
+      return (await git(["rev-parse", "HEAD"])).trim();
+    };
+
+    beforeEach(async () => {
+      repo = mkdtempSync(join(tmpdir(), "kanban-heal-log-"));
+      await git(["init", "-q", "-b", "master"]);
+    });
+    afterEach(() => {
+      try { rmSync(repo, { recursive: true, force: true }); } catch { /* best effort */ }
+    });
+
+    it("names every commit between the last green sha and the red sha, and nothing before", async () => {
+      await commit("0.txt", "chore: before green");
+      const green = await commit("1.txt", "feat: last green");
+      await commit("2.txt", "feat(#1): landed after green");
+      const red = await commit("3.txt", "fix(#2): also landed after green");
+
+      const result = await sweep("red", RED_SUITES, { repoPath: repo, lastGreenSha: green, sha: red });
+      expect(result.action).toBe("created");
+      const [row] = await healRows();
+      expect(row.description).toContain("feat(#1): landed after green");
+      expect(row.description).toContain("fix(#2): also landed after green");
+      expect(row.description).not.toContain("feat: last green");
+      expect(row.description).not.toContain("chore: before green");
+      expect(row.description).toContain(`Last green sweep: \`${green}\``);
+    });
+
+    it("says so when there is no green to measure from, or the repo cannot be read", async () => {
+      const red = await commit("a.txt", "feat: only commit");
+      const none = await sweep("red", RED_SUITES, { repoPath: repo, lastGreenSha: null, sha: red });
+      expect(none.action).toBe("created");
+      expect((await healRows())[0].description).toContain("No green sweep is recorded");
+
+      await sweep("green", []);
+      const unreadable = await sweep("red", RED_SUITES, { repoPath: join(tmpdir(), "no-such-repo-1233"), lastGreenSha: "1".repeat(40), sha: red });
+      expect(unreadable.action).toBe("created");
+      const open = await listOpenHealTickets(projectId, db);
+      expect(open).toHaveLength(1);
+      expect(open[0].description).toContain("Could not read");
+    });
   });
 
   it("files a fresh ticket for a NEW red episode once the previous one is closed", async () => {

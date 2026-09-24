@@ -669,10 +669,11 @@ ${tail(combined)}`,
 
   // #1016 — land-then-heal's disclosure channel. A project whose effective `redBasePolicy` is
   // `allow-file-debt-ticket` does not withhold merges on a red base, so this sweep's verdict is
-  // the ONLY place the red gets recorded: one `heal` ticket carrying the failing-suite list,
-  // updated by the next red sweep and closed by a green one. Every other policy gets nothing —
-  // the decision is made inside `reconcileBaseHealthHealTicket`, through the #1015 posture
-  // resolver, and the call itself never throws.
+  // the ONLY place the red gets recorded: one `heal` ticket per failure signature (#1233)
+  // carrying the failing-suite list and the merges landed since the last green, refreshed by
+  // the next red sweep with the same signature and closed by a green one. Every other policy
+  // gets nothing — the decision is made inside `reconcileBaseHealthHealTicket`, through the
+  // #1015 posture resolver, and the call itself never throws.
   await reconcileBaseHealthHealTicket({
     projectId,
     outcome: result.outcome,
@@ -681,6 +682,8 @@ ${tail(combined)}`,
     failedSuites: result.failedSuites,
     healthRowId,
     message: result.message,
+    repoPath: project.repoPath,
+    lastGreenSha: lastGreen?.sha ?? null,
   }, database);
 
   // #982 — feed the full-suite verdict back into the test-impact outcome ledger, so the fast
