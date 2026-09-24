@@ -10,6 +10,7 @@ import { exportBacklogSnapshot, importBacklogSnapshot, validateBacklogSnapshot }
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { sweepStaleTrainWorktrees } from "../../startup/merge-train-reconciler.js";
 import { getDefaultDatabase } from "../../repositories/merge-train.repository.js";
+import { estimateDirectorySize, formatBytes } from "../../services/merge-train-worktrees.js";
 
 /** Resolve a project by name or id, defaulting to the active project when omitted. */
 async function resolveProject(nameOrId: string | undefined) {
@@ -162,17 +163,30 @@ Example:
       // #1208: train staging worktrees whose train has already finished. Reported the same way
       // in both branches below; the dry-run branch reports and returns before anything below it
       // (temp-fixture unregistration, the real removal here) makes a change.
-      const trainSweep = await sweepStaleTrainWorktrees({ database: getDefaultDatabase(), dryRun: options.dryRun });
+      //
+      // #1235: sized BEFORE the sweep removes anything (a dry run leaves them in place either
+      // way), bounded per directory so ten `node_modules` cost a capped walk, not a `du`.
+      const trainPreview = await sweepStaleTrainWorktrees({ database: getDefaultDatabase(), dryRun: true, log: () => {} });
+      const trainSizes = new Map<string, string>();
+      let trainBytes = 0;
+      for (const w of [...trainPreview.removed, ...trainPreview.unknown]) {
+        const size = await estimateDirectorySize(w.path);
+        trainBytes += size.bytes;
+        trainSizes.set(w.path, `${size.capped ? ">=" : ""}${formatBytes(size.bytes)}`);
+      }
+      const trainSweep = options.dryRun ? trainPreview : await sweepStaleTrainWorktrees({ database: getDefaultDatabase() });
       const reportTrainWorktrees = () => {
+        const total = trainSweep.removed.length + trainSweep.unknown.length;
+        console.log(`\nMerge-train leftovers: ${total} worktree(s), ${formatBytes(trainBytes)} on disk`);
         if (trainSweep.removed.length > 0) {
-          console.log(`\n${options.dryRun ? "Dry run: would remove" : "Removed"} ${trainSweep.removed.length} stale merge-train staging worktree(s):`);
-          for (const w of trainSweep.removed) console.log(`  ${w.path} (project ${w.projectId})`);
+          console.log(`${options.dryRun ? "Dry run: would remove" : "Removed"} ${trainSweep.removed.length} stale merge-train staging worktree(s) (train terminal):`);
+          for (const w of trainSweep.removed) console.log(`  ${w.path} (train ${w.state}, ${trainSizes.get(w.path) ?? "?"}, project ${w.projectId})`);
         } else {
-          console.log("\nNo stale merge-train staging worktrees found.");
+          console.log("No stale merge-train staging worktrees found.");
         }
         if (trainSweep.unknown.length > 0) {
-          console.log(`${trainSweep.unknown.length} train worktree(s) match no merge_trains row of any state (left for manual inspection):`);
-          for (const w of trainSweep.unknown) console.log(`  ${w.path} (project ${w.projectId})`);
+          console.log(`${trainSweep.unknown.length} train worktree(s) match no merge_trains row of any state (left for manual inspection — 'git worktree remove --force <path>' if the train is history):`);
+          for (const w of trainSweep.unknown) console.log(`  ${w.path} (${trainSizes.get(w.path) ?? "?"}, project ${w.projectId})`);
         }
       };
 

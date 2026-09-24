@@ -26,6 +26,7 @@ import {
 } from "../repositories/merge-train.repository.js";
 import { runMergeTrain, formatTrainLabel, trainDateStamp, trainRefName } from "./merge-train.service.js";
 import { isMergeTrainLabelLive, registerLiveMergeTrain, unregisterLiveMergeTrain } from "./merge-train-live-registry.js";
+import { cleanupTrainWorktreesForLabel } from "./merge-train-worktrees.js";
 import { runPreMergeGate, looksLikeMissingDepsFailure } from "./pre-merge-gate.service.js";
 import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { randomUUID } from "node:crypto";
@@ -510,6 +511,7 @@ async function runDoomedTrainJob(args: {
     unregisterLiveMergeTrain(trainId);
     await updateMergeTrainState(trainId, { state: "abandoned", reconciledReason: reason, finishedAt: new Date().toISOString() }, database).catch(() => undefined);
     boardEvents?.broadcast(projectId, "merge_train_changed");
+    await cleanupTrainWorktreesForLabel({ database, repoPath, label });
     return { ok: false, reason: `train abandoned: ${reason}` };
   }
   const heartbeat = setInterval(() => repoLock.heartbeat(), 15_000);
@@ -613,6 +615,12 @@ async function runDoomedTrainJob(args: {
     return { ok: false, reason: `train orchestrator threw: ${reason}` };
   } finally {
     clearInterval(heartbeat);
+    // #1235: the train's own teardown, under the lock it still holds. Every attempt's worktree
+    // and `kanban/train/<label>*` branch goes here on BOTH exits — the gate's per-attempt
+    // `finally` already removed the directory on a normal run, but the branch delete in
+    // `runMergeTrain`'s own `finally` fails while a leftover worktree still has it checked out,
+    // and a killed gate leaves both. Never throws; the reconcilers are the backstop.
+    await cleanupTrainWorktreesForLabel({ database, repoPath, label });
     repoLock.release();
   }
 }
