@@ -91,16 +91,27 @@ board. Harmless; they moved master under a fast-forward once.
 `.git` link, no branch) removed with `scripts/safe-rmdir.mjs`; `git worktree remove` stops on
 "Filename too long" for them. `.claude/worktrees/` is empty now.
 
+**Wave D (later the same evening), same mode, gated once at `80ab329c40`.** #1240 (`flow`
+level: impact tier, intersecting guards, `report` red-base policy, no master sweep, doc ratchet
+`integration-risk-ladder-doc.test.ts`; the dev board is still on `iterate`, switching is the
+operator's call), #1241 (`scripts/lib/repo-tree.mjs`; 14 guard suites migrated, private walkers
+80 → 63 pinned by a ratchet, always-run floor 594 s → 561 s), #1242 (flake retry attributes by
+disk, refuses a guard failure, ledger `retried: [...]`), #1238 (`rc/<date>` cut + sweep + promote
+via `rc-state.json`, `?branch=` on the health routes, `promote_cadence_<id>` fired from the minute
+tick as a detached headless run; landed as ONE squash commit because the branch carried a merge of
+master — only a dry run was exercised, never a real rc promotion). Filed #1244 (hook-posture.js
+mirror gap) and #1245 (base sweep's flake retry still header-only). Three agents stalled at their
+first tool call (stream watchdog, 600 s); two resumed, one had a half-created worktree (no `.git`
+link) and was relaunched fresh. #1239 (heal on the candidate + merge-back) is building now.
+
 ### Next steps, in order
-1. Wave D, same mode: #1238 (rc branch promotion + cadence), #1240 (`flow` posture; #1232 and
-   #1233 are in, so the "no guard floor" half is real), #1241 (shared tree walker) in parallel;
-   then #1239 (heal on the candidate; needs #1238) and #1242 (flake retry on vitest-4 output).
-2. `pnpm promote --dry-run` after wave D: master is far ahead of `stable-20260923`; with #1231 in,
-   a scoped green can no longer promote, so expect it to ask for a sweep.
+1. Land #1239, run the gate once, mark Done. Then `pnpm promote --dry-run` on the main checkout:
+   the first `rc/<date>` plan against the real board (it may POST a reprobe and wait ~35 min).
+2. Decide the dev board's posture: `flow` needs `promote_cadence_<id>` set first.
 3. Re-enable auto-merge on the three fixture projects paused 2026-09-20 for CPU (`c94e30c4…`,
    `c6355fcd…`, `bc221c46…`); `pnpm cli -- cleanup --dry-run` should now list the ten train
    worktrees (#1235).
-4. Push `origin/master` after each batch (done through `8c48dc9e0e`).
+4. `origin/master` is pushed through `80ab329c40`.
 
 ### Verified by
 Each ticket's Done comment (POST `/api/issues/:id/comments`) names its commits and the wave's gate
