@@ -15,6 +15,11 @@ import { PluginSkillPane } from "./PluginSkillPane.js";
 import { PluginScaffoldPane, type ScaffoldForm } from "./PluginScaffoldPane.js";
 import { Icon } from "./Icon.js";
 import { useBoardIsDark, withThemeParam } from "./PluginGuidePanel.js";
+import {
+  usePluginSlugFallback,
+  usePluginViewDeepLink,
+  useReportActivePluginViewId,
+} from "../hooks/usePluginViewRouting.js";
 
 /**
  * Who a rail entry is for (#456). Mirrors `PluginAudience` in the manifest contract; the
@@ -145,6 +150,9 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
   const openMarketplace = usePluginViewStore((s) => s.openMarketplace);
   const loopFocus = usePluginViewStore((s) => s.loopFocus);
   const clearLoopFocus = usePluginViewStore((s) => s.clearLoopFocus);
+  const setStoreActiveViewId = usePluginViewStore((s) => s.setActiveViewId);
+  const requestedViewId = usePluginViewStore((s) => s.requestedViewId);
+  const clearRequestedViewId = usePluginViewStore((s) => s.clearRequestedViewId);
   const startLatch = useRef(createStartLatch());
   const isDark = useBoardIsDark();
 
@@ -254,6 +262,10 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     }
   }, [projectId]);
 
+  // Referentially stable (deps: only `startView`) — passed to the #1227 deep-link
+  // hook below, whose one-shot effect depends on it staying the same function.
+  const selectView = useCallback((view: PluginView) => { setSelection({ kind: "view", key: ownerKey(view, view.id) }); void startView(view); }, [startView]);
+
   // #320 — Start Mode is a PREFERENCE, written from the Monitor popover, but the chip that
   // reports it ("Start mode is Manual — the monitor will not drive this loop") is rendered from
   // `surface.startPolicy`, which the server resolves per plugin-surface fetch. That fetch happens
@@ -334,12 +346,10 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
   // setup — and including it here is what lets the JSX below use the path without a cast.
   const scaffoldNeedsSetup = (scaffold?.exists && scaffold.targetPath !== null && scaffold.fields.length > 0) ?? false;
 
-  // No plugin picked yet (fresh navigation) → adopt the first plugin present.
-  useEffect(() => {
-    if (loading || pluginSlug) return;
-    const first = [...surface.views, ...surface.loops, ...surface.scripts, ...surface.skills][0];
-    if (first) setStoreSelection({ kind: "plugin", slug: first.pluginSlug });
-  }, [loading, pluginSlug, surface, setStoreSelection]);
+  // No plugin picked yet (fresh navigation), OR a deep link named a slug that
+  // is not actually enabled here (#1227 — a stale/mistyped /plugin-views/<slug>
+  // URL) → adopt the first plugin present, same as the "nothing picked" case.
+  usePluginSlugFallback({ loading, pluginSlug, surface, setStoreSelection, requestedViewId, clearRequestedViewId });
 
   // Whenever the SHOWN plugin changes, auto-select its first view (reusing the
   // server when already running), else its first loop — a plugin may offer no
@@ -386,6 +396,12 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     clearLoopFocus();
   }, [loading, loopFocus, surface.loops, clearLoopFocus]);
 
+  // Deep-link consumption (#1227): a pasted /plugin-views/<slug>/<view-id> URL
+  // asked for a specific iframe view — falls back to whatever the auto-select
+  // effect above already landed on, with a notice, rather than looping forever
+  // waiting for a view that will never arrive.
+  usePluginViewDeepLink({ loading, requestedViewId, pluginSlug, views: surface.views, clearRequestedViewId, onResolved: selectView });
+
   // Latest selection, readable from an async continuation (state captured in a
   // closure is the selection as it was when the request went out).
   const selectionRef = useRef<Selection | null>(selection);
@@ -395,6 +411,12 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     () => (selection?.kind === "view" ? surface.views.find((v) => ownerKey(v, v.id) === selection.key) ?? null : null),
     [selection, surface.views],
   );
+
+  // Report the currently-shown iframe view id to the store (#1227) so the
+  // route hook can name it in the URL — null whenever the pane is showing
+  // something else (a loop/script/skill/scaffold), or nothing at all.
+  useReportActivePluginViewId({ activeViewId: activeView?.id ?? null, setStoreActiveViewId });
+
   const activeLoop = useMemo(
     () => (selection?.kind === "loop" ? surface.loops.find((l) => ownerKey(l, l.name) === selection.key) ?? null : null),
     [selection, surface.loops],
@@ -407,11 +429,6 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     () => (selection?.kind === "skill" ? surface.skills.find((s) => ownerKey(s, s.name) === selection.key) ?? null : null),
     [selection, surface.skills],
   );
-
-  function selectView(view: PluginView) {
-    setSelection({ kind: "view", key: ownerKey(view, view.id) });
-    void startView(view);
-  }
 
   async function handleStop() {
     if (!activeView || stopping) return;
