@@ -74,6 +74,25 @@ describe("sweepStaleTrainWorktrees (#1208)", () => {
     expect(existsSync(worktreePath)).toBe(false);
   });
 
+  it("removes a BISECT attempt's worktree by its parent row, and deletes the branch (#1235)", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db, repo);
+    const trainId = randomUUID();
+    await createMergeTrain({ id: trainId, projectId, label: "train/2026-09-19-03", memberWorkspaceIds: ["ws-1"] }, db);
+    await updateMergeTrainState(trainId, { state: "red", finishedAt: new Date().toISOString() }, db);
+    // The measured leftover shape: `kanban/train/train/2026-09-19-03babb`, a bisect half whose
+    // label is the row's plus trailing letters — the leaf-keyed lookup never matched it.
+    const worktreePath = await makeTrainStagingWorktree("train/2026-09-19-03babb");
+
+    const result = await sweepStaleTrainWorktrees({ database: db });
+
+    expect(result.removed.map((r) => normSlash(r.path))).toEqual([normSlash(worktreePath)]);
+    expect(result.removed[0].state).toBe("red");
+    expect(result.unknown).toEqual([]);
+    expect(existsSync(worktreePath)).toBe(false);
+    await expect(git(["rev-parse", "--verify", "refs/heads/kanban/train/train/2026-09-19-03babb"])).rejects.toThrow();
+  });
+
   it("leaves a worktree alone whose row is still assembling/gating", async () => {
     const { db } = createTestDb();
     const projectId = await seedProject(db, repo);
