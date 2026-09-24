@@ -162,3 +162,92 @@ export function formatGateEvidence(summary) {
     `WEAKER THAN A SWEEP: each was a ranked SELECTION over one branch's diff, not the full suite over the base. Authorizes nothing.`
   );
 }
+
+// --- the impact-tier miss rate (#1234) --------------------------------------------------------
+//
+// MIRROR of `packages/server/src/services/test-impact-miss-rate.ts` — a published `packages/server`
+// cannot import a repo-root script and `pnpm promote` runs without the server, so the pure rate
+// lives twice and `test-impact-miss-rate.test.ts` holds both copies to one behaviour on one
+// fixture. Change both or the lockstep test goes red.
+//
+//   missRate = misses / merges, per selection tier, since the corpus start.
+//
+// `merges` are the non-suspect gate rows of a tier (one per gate run); `misses` are the sidecar's
+// `miss` rows (`.test-impact/misses.jsonl`, written by the sweep join) of that tier whose
+// candidates were all valid observations; a miss with a stale-map candidate is counted in
+// `staleExcluded` instead. Like the gate evidence above it is PRINTED and authorizes nothing.
+
+/** Where the sweep join's sidecar lives, relative to the checkout that owns the outcomes ledger. */
+export const MISSES_RELPATH = join(".test-impact", "misses.jsonl");
+
+const UNKNOWN_TIER = "unknown";
+const SUSPECT_SUFFIXES = ["-nochange", "-partialselection", "-unattributed"];
+
+function isSuspectGateRow(row) {
+  const s = sourceOf(row);
+  return SUSPECT_SUFFIXES.some((suffix) => s.includes(suffix));
+}
+
+function rowTimeMs(row) {
+  const at = row?.at ?? row?.sweepAt ?? null;
+  const ms = typeof at === "string" ? Date.parse(at) : Number.NaN;
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** Pure: the per-tier miss rate over the parsed outcomes ledger and the parsed misses sidecar. */
+export function summarizeMissRate(ledgerRows, missRows) {
+  const byTier = new Map();
+  const tierFor = (tier) => {
+    const key = typeof tier === "string" && tier.length > 0 ? tier : UNKNOWN_TIER;
+    let entry = byTier.get(key);
+    if (!entry) {
+      entry = { tier: key, misses: 0, merges: 0, rate: null, staleExcluded: 0 };
+      byTier.set(key, entry);
+    }
+    return entry;
+  };
+  let sinceMs = null;
+  let since = null;
+  for (const row of ledgerRows ?? []) {
+    if (!isGateRow(row) || isSuspectGateRow(row)) continue;
+    tierFor(row.tier).merges += 1;
+    const ms = rowTimeMs(row);
+    if (ms !== null && (sinceMs === null || ms < sinceMs)) {
+      sinceMs = ms;
+      since = String(row.at);
+    }
+  }
+  let lastSweepAt = null;
+  let lastSweepMs = null;
+  for (const row of missRows ?? []) {
+    const ms = rowTimeMs(row);
+    if (ms !== null && (lastSweepMs === null || ms > lastSweepMs)) {
+      lastSweepMs = ms;
+      lastSweepAt = row.sweepAt;
+    }
+    if (row?.kind !== "miss") continue;
+    const entry = tierFor(row.tier);
+    if (row.staleMap) entry.staleExcluded += 1;
+    else entry.misses += 1;
+  }
+  for (const entry of byTier.values()) {
+    entry.rate = entry.merges > 0 ? entry.misses / entry.merges : null;
+  }
+  const tiers = [...byTier.values()].sort((a, b) => b.merges - a.merges || a.tier.localeCompare(b.tier));
+  return { since, lastSweepAt, tiers };
+}
+
+/** One line for the promote output — mirrors `formatMissRate` in the server module, caveat included. */
+export function formatMissRate(summary) {
+  if (!summary) return "not read (no ledger)";
+  if (summary.unreadable) return `no ledger at ${summary.ledgerPath ?? "<unknown>"} (${summary.unreadable})`;
+  if (summary.tiers.length === 0) return "no gate rows recorded yet — the corpus is empty";
+  const parts = summary.tiers.map((t) => {
+    const pct = t.rate === null ? "n/a" : `${(t.rate * 100).toFixed(1)}%`;
+    const stale = t.staleExcluded > 0 ? `, ${t.staleExcluded} stale-map miss(es) excluded` : "";
+    return `${t.tier}: ${t.misses}/${t.merges} = ${pct}${stale}`;
+  });
+  const window = summary.since ? `since ${summary.since}` : "undated";
+  const sweep = summary.lastSweepAt ? `, last sweep joined ${summary.lastSweepAt}` : ", no sweep joined yet";
+  return `${parts.join("; ")} (${window}${sweep}) — misses / gate runs per tier; a corpus measurement, not a verdict on any merge. Authorizes nothing.`;
+}

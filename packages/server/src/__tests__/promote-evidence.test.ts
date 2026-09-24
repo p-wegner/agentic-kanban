@@ -1,4 +1,4 @@
-// @gate:always-run when:scripts/promote-evidence.mjs,scripts/promote-evidence.d.mts,scripts/promote.mjs — imports scripts/promote-evidence.mjs, which no package-local diff links to (#687).
+// @gate:always-run when:scripts/promote-evidence.mjs,scripts/promote-evidence.d.mts,scripts/promote.mjs,packages/server/src/services/test-impact-miss-rate.ts — imports scripts/promote-evidence.mjs, which no package-local diff links to (#687); holds its miss-rate mirror to the server module (#1234).
 //
 // Territory (#1041): the marker is here because the import crosses OUT of this package, so
 // `vitest related` cannot see it — not because the suite reads the tree. Its subject is
@@ -19,11 +19,14 @@ import { describe, expect, it } from "vitest";
 import {
   OUTCOMES_RELPATH,
   formatGateEvidence,
+  formatMissRate,
   isGateRow,
   isSuspectRow,
   parseOutcomeRows,
   summarizeGateEvidence,
+  summarizeMissRate,
 } from "../../../../scripts/promote-evidence.mjs";
+import { formatMissRate as formatMissRateServer, summarizeMissRate as summarizeMissRateServer } from "../services/test-impact-miss-rate.js";
 
 const SWEEP_AT = "2026-09-05T06:00:00.000Z";
 const after = (minutes: number) => new Date(Date.parse(SWEEP_AT) + minutes * 60_000).toISOString();
@@ -119,5 +122,46 @@ describe("what has accumulated since the last sweep", () => {
     expect(text).toContain("suspect (excluded)");
     // and the summary exposes no boolean a caller could mistake for permission to promote
     expect(Object.values(summary).some((v) => typeof v === "boolean")).toBe(false);
+  });
+});
+
+describe("the miss-rate line (#1234)", () => {
+  it("prints the rate per tier beside the gate evidence, labelled as authorizing nothing", () => {
+    const misses = [
+      { kind: "miss" as const, sweepAt: after(120), sweepSha: "deadbeef", suite: "packages/server/src/__tests__/b.test.ts", candidateCommits: ["abc1234"], tier: "impact" },
+      { kind: "flake-or-environment" as const, sweepAt: after(120), sweepSha: "deadbeef", suite: "packages/server/src/__tests__/a.test.ts" },
+    ];
+    const summary = summarizeMissRate([gate(), gate(), gate({ source: "ci-partialselection" })], misses);
+    expect(summary.tiers).toEqual([{ tier: "impact", misses: 1, merges: 2, rate: 0.5, staleExcluded: 0 }]);
+    const line = formatMissRate(summary);
+    expect(line).toContain("impact: 1/2 = 50.0%");
+    expect(line).toContain(`last sweep joined ${after(120)}`);
+    expect(line).toMatch(/Authorizes nothing/);
+    // The same failure shapes the gate evidence uses, so a promote dry run never prints a bare blank.
+    expect(formatMissRate({ ledgerPath: "/x/outcomes.jsonl", unreadable: "ENOENT" })).toContain("no ledger at /x/outcomes.jsonl");
+    expect(formatMissRate(summarizeMissRate([], []))).toMatch(/corpus is empty/);
+  });
+});
+
+describe("the miss-rate mirror agrees with packages/server/src/services/test-impact-miss-rate.ts (#1234)", () => {
+  // The rate lives twice on purpose (a published server cannot import a repo-root script, and
+  // `pnpm promote` runs without the server). One fixture, both copies, same answer — or red.
+  it("produces the same summary and the same line on one fixture", () => {
+    const ledger = [gate(), gate({ tier: "package" }), gate({ source: "ci-nochange" }), gate({ source: "base-sweep" })];
+    const misses = [
+      { kind: "miss" as const, sweepAt: after(120), sweepSha: "deadbeef", suite: "b", candidateCommits: ["abc1234"], tier: "impact" },
+      { kind: "miss" as const, sweepAt: after(120), sweepSha: "deadbeef", suite: "c", candidateCommits: ["abc1234"], tier: "impact", staleMap: true as const },
+      { kind: "flake-or-environment" as const, sweepAt: after(120), sweepSha: "deadbeef", suite: "a" },
+      { kind: "heal" as const, sweepAt: after(240), sweepSha: "feedface", suites: ["a", "b", "c"] },
+    ];
+    const server = summarizeMissRateServer(ledger, misses);
+    const mirror = summarizeMissRate(ledger, misses);
+    expect(mirror).toEqual(server);
+    expect(server.tiers).toEqual([
+      { tier: "impact", misses: 1, merges: 1, rate: 1, staleExcluded: 1 },
+      { tier: "package", misses: 0, merges: 1, rate: 0, staleExcluded: 0 },
+    ]);
+    expect(formatMissRate(mirror)).toBe(formatMissRateServer(server));
+    expect(formatMissRate(summarizeMissRate([], []))).toBe(formatMissRateServer(summarizeMissRateServer([], [])));
   });
 });

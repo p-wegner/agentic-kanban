@@ -46,6 +46,7 @@ import { resolveVerifyMaxWorkers } from "./verify-tunables.js";
 import { failedSuitesForOutcome } from "./failed-suite-parse.js";
 import { resolveEffectiveVerify, deriveSetupScriptFromProfile, getStackProfile } from "./stack-profile.service.js";
 import { recordBaseSweepOutcome } from "./test-impact-outcome.service.js";
+import { recordSweepJoin } from "./test-impact-misses.js";
 import { reconcileBaseHealthHealTicket } from "./base-health-heal-ticket.service.js";
 import {
   recordBaseBranchHealth,
@@ -703,6 +704,17 @@ ${tail(combined)}`,
       failedSuites: result.failedSuites ?? [],
     }).catch((e) => {
       console.warn(`[base-branch-health] outcome ledger write failed for ${projectId} (non-fatal):`, e instanceof Error ? e.message : String(e));
+    });
+    // #1234 — the miss-rate JOIN: this verdict's red suites against the gate rows of every merge
+    // in `lastGreen..sha`; a green after reds records the heal. Same window, same best-effort
+    // contract as the ledger row above; `recordSweepJoin` never throws.
+    await recordSweepJoin({
+      projectId,
+      repoPath: project.repoPath,
+      lastGreenSha: lastGreen.sha,
+      sweepSha: result.sha,
+      passed: result.outcome === "green",
+      failedSuites: result.failedSuites ?? [],
     });
   }
   return result;

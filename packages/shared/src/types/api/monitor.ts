@@ -237,6 +237,13 @@ export interface DeliveryStatusResponse {
   baseSweep: BaseSweepInfo;
   /** The effective red-base policy and whether a red base is holding the train window (#1233). */
   redBase: RedBaseStatus;
+  /**
+   * The impact-tier miss rate over the project's test-impact corpus (#1234): misses the sweep
+   * join found, per selection tier, against the gate runs of that tier. `null` when the project
+   * has no outcomes ledger. Optional on the wire for an older server. A measurement, never a
+   * verdict — see `test-impact-miss-rate.ts`.
+   */
+  impactMissRate?: ImpactMissRateSummary | null;
 }
 
 /**
@@ -256,6 +263,30 @@ export interface RedBaseStatus {
   holdingWindow: boolean;
   /** Open `heal` tickets filed by the sweep for this project (0 under any policy but `allow-file-debt-ticket`). */
   openHealTickets: number;
+}
+
+/** One selection tier's line of the miss rate (#1234). */
+export interface ImpactMissRateTier {
+  /** `impact`, `package`, `all`, `mixed`, or `unknown` for a row that named none. */
+  tier: string;
+  /** `miss` rows of this tier whose candidates were all valid observations. */
+  misses: number;
+  /** Gate rows of this tier the gate did not tag as a non-observation — one per gate run. */
+  merges: number;
+  /** `misses / merges`; `null` when there are no merges to divide by. */
+  rate: number | null;
+  /** `miss` rows excluded because a candidate gate ran against a stale impact map. */
+  staleExcluded: number;
+}
+
+/** The miss rate over a project's `.test-impact/` ledgers (#1234). */
+export interface ImpactMissRateSummary {
+  /** The corpus start: the earliest gate row's timestamp, or null when undated. */
+  since: string | null;
+  /** The newest sweep the join has recorded, or null when no sweep has been joined yet. */
+  lastSweepAt: string | null;
+  /** Ordered by `merges` descending, so the tier that matters most reads first. */
+  tiers: ImpactMissRateTier[];
 }
 
 export interface ConductorSchedule {

@@ -9,6 +9,7 @@ import { resolveBaseRedVeto } from "./merge-train-base-veto.js";
 import { describeBaseSweep, resolveRiskPosture, type RiskPosture } from "./risk-posture.service.js";
 import { requireProject } from "./require-project.js";
 import { resolveTrainWindowConfig } from "./merge-train-window.js";
+import { readImpactMissRate } from "./test-impact-miss-rate.js";
 
 const trainMaxSizePref = projectPref("train_max_size");
 
@@ -25,7 +26,7 @@ const trainMaxSizePref = projectPref("train_max_size");
  * base — and which policy decides that — from the exact function the orchestrator runs.
  */
 export async function getDeliveryStatus(projectId: string, database: Database): Promise<DeliveryStatusResponse> {
-  await requireProject(projectId, database);
+  const project = await requireProject(projectId, database);
 
   const prefMap = toPrefMap(await getAllPreferences(database));
   const posture = resolveRiskPosture(prefMap, projectId);
@@ -44,6 +45,8 @@ export async function getDeliveryStatus(projectId: string, database: Database): 
     trainWindowFromPosture: trainWindow.batchingFromPosture,
     baseSweep: describeBaseSweep(posture, lastProbeAt),
     redBase: await describeRedBase(projectId, posture, baseHealth, database),
+    // #1234 — read off the main checkout's `.test-impact/` files; null for a project without the skill.
+    impactMissRate: readImpactMissRate(project.repoPath),
   };
 }
 
