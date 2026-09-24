@@ -1,4 +1,5 @@
 import { spawnShellCommand, taskkillTree } from "./process-exec.js";
+import type { PluginScriptRunProgress, PluginScriptRunResult } from "@agentic-kanban/shared";
 
 /**
  * One-shot execution of a plugin-declared shell command.
@@ -26,17 +27,18 @@ export function tailOutput(text: string, cap: number = OUTPUT_TAIL_CAP): string 
   return text.length > cap ? text.slice(text.length - cap) : text;
 }
 
-export interface PluginCommandResult {
-  code: number | null;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
-  /**
-   * True when stdout exceeded the cap and its FRONT was discarded. Callers that parse stdout
-   * must report this instead of attributing the failure to the command's output format.
-   */
-  stdoutTruncated: boolean;
-}
+/**
+ * The wire shape (`packages/shared/src/types/api/plugin.ts`) IS this result — declared once
+ * there so the route can return it verbatim without a second hand-maintained copy drifting
+ * from it (#569/#1229 guard).
+ */
+export type PluginCommandResult = PluginScriptRunResult;
+
+/** Periodic progress snapshot for a still-running command (elapsed time + output tail so far). */
+export type PluginCommandProgress = PluginScriptRunProgress;
+
+/** How often a running command's `onProgress` fires while there is nothing else to report. */
+const PROGRESS_INTERVAL_MS = 1000;
 
 export interface PluginCommandOptions {
   cwd: string;
@@ -47,10 +49,17 @@ export interface PluginCommandOptions {
    * `STRUCTURED_STDOUT_CAP` when stdout is a payload to be parsed rather than shown.
    */
   maxStdoutChars?: number;
+  /**
+   * Called once immediately (elapsedMs 0) and then on a fixed tick while the command runs, so a
+   * caller can show elapsed time + a streaming output tail instead of a bare "Running…". Never
+   * called after the command settles — the caller's own `done`/`timedOut` result is the last word.
+   */
+  onProgress?: (progress: PluginCommandProgress) => void;
 }
 
 export function runPluginCommand(command: string, options: PluginCommandOptions): Promise<PluginCommandResult> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_PLUGIN_COMMAND_TIMEOUT_MS;
+  const startedAt = Date.now();
   return new Promise<PluginCommandResult>((resolveRun, rejectRun) => {
     const child = spawnShellCommand(command, {
       cwd: options.cwd,
@@ -68,10 +77,20 @@ export function runPluginCommand(command: string, options: PluginCommandOptions)
     });
     child.stderr?.on("data", (c: Buffer) => { stderr = tailOutput(stderr + c.toString("utf8")); });
 
+    const { onProgress } = options;
+    let progressTimer: ReturnType<typeof setInterval> | undefined;
+    if (onProgress) {
+      const emitProgress = () => onProgress({ stdout, stderr, stdoutTruncated, elapsedMs: Date.now() - startedAt, timeoutMs });
+      emitProgress();
+      progressTimer = setInterval(emitProgress, PROGRESS_INTERVAL_MS);
+      progressTimer.unref();
+    }
+
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
+      if (progressTimer) clearInterval(progressTimer);
       if (process.platform === "win32" && child.pid) void taskkillTree(child.pid).catch(() => {});
       try { child.kill(); } catch { /* already gone */ }
       resolveRun({ code: null, stdout, stderr, timedOut: true, stdoutTruncated });
@@ -81,12 +100,14 @@ export function runPluginCommand(command: string, options: PluginCommandOptions)
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
+      if (progressTimer) clearInterval(progressTimer);
       clearTimeout(timer);
       rejectRun(err);
     });
     child.on("close", (code) => {
       if (settled) return;
       settled = true;
+      if (progressTimer) clearInterval(progressTimer);
       clearTimeout(timer);
       resolveRun({ code, stdout, stderr, timedOut: false, stdoutTruncated });
     });

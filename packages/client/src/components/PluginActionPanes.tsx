@@ -5,6 +5,7 @@ import { setProjectPref } from "../lib/settingsStore.js";
 import { requestIssueFocus, requestViewNavigation } from "../lib/navigateView.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { checkLocationTokens } from "../lib/gateCardPolicy.js";
+import { formatDurationShort } from "../lib/mergeTrainSummary.js";
 import { deriveProductIdentity, type ProductIdentity, type ScaffoldForm } from "./PluginScaffoldPane.js";
 import {
   ArtifactViewer,
@@ -68,7 +69,12 @@ function OpenTicketLinks({ refs }: { refs: Array<{ issueId: string; issueNumber:
 // services/plugin-enabled.ts.
 export type { PluginOwner } from "@agentic-kanban/shared";
 
-import type { PluginOwner } from "@agentic-kanban/shared";
+import type {
+  PluginOwner,
+  PluginScriptRunEvent,
+  PluginScriptRunProgress,
+  PluginScriptRunResult,
+} from "@agentic-kanban/shared";
 
 export type PluginLoop = PluginOwner & {
   name: string;
@@ -140,7 +146,7 @@ type LoopAdvanceResult = {
   warnings: string[];
 }
 
-type ScriptRunResult = { code: number | null; stdout: string; stderr: string; timedOut: boolean };
+// Declared once, in shared (#569/#1229) — PluginScriptRunResult/Progress/Event, imported above.
 
 export function PaneHeading({ title, subtitle, mono, identity }: {
   title: string;
@@ -727,36 +733,78 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
  * repo as it was minutes ago, so carrying it across a page reload would be a lie, while
  * carrying it across a pane switch is exactly what the reader expects.
  */
-const lastScriptRuns = new Map<string, { result: ScriptRunResult; ranAt: number }>();
+const lastScriptRuns = new Map<string, { result: PluginScriptRunResult; ranAt: number; timeoutMs?: number }>();
 
 export function PluginScriptPane({ script, projectId }: { script: PluginScript; projectId: string }) {
   const runKey = `${script.pluginId}:${script.name}:${projectId}`;
   const [running, setRunning] = useState(false);
   const [lastRun, setLastRun] = useState(() => lastScriptRuns.get(runKey) ?? null);
+  // Live output/elapsed-time while a run is in flight — reset on every new run, cleared once it
+  // settles (the settled result lives in `lastRun` instead, which survives a pane switch).
+  const [live, setLive] = useState<PluginScriptRunProgress | null>(null);
   // Selecting a different script re-renders this same component with new props.
-  useEffect(() => { setLastRun(lastScriptRuns.get(runKey) ?? null); }, [runKey]);
+  useEffect(() => { setLastRun(lastScriptRuns.get(runKey) ?? null); setLive(null); }, [runKey]);
   const result = lastRun?.result ?? null;
 
   async function run() {
     if (running) return;
     setRunning(true);
+    setLive(null);
     try {
-      const res = await apiPost<ScriptRunResult>(
-        `/api/plugins/${script.pluginId}/scripts/${encodeURIComponent(script.name)}/run`,
-        { projectId },
+      // SSE over POST must be read with fetch + ReadableStream — EventSource is GET-only
+      // (client/CLAUDE.md). The no-raw-fetch rule routes READS through a data-layer hook so
+      // they are cached and cancellable; a streaming POST is neither, so the rule has nothing
+      // to offer here. Same pattern as PluginSkillPane's launch stream.
+      // eslint-disable-next-line no-restricted-syntax
+      const resp = await fetch(
+        `/api/plugins/${script.pluginId}/scripts/${encodeURIComponent(script.name)}/run?stream=1`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId }),
+        },
       );
-      const entry = { result: res, ranAt: Date.now() };
+      if (!resp.ok || !resp.body) throw new Error(`Run failed (${resp.status})`);
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let res: PluginScriptRunResult | null = null;
+      let timeoutMs: number | undefined;
+      for (;;) {
+        const { done: streamDone, value } = await reader.read();
+        if (streamDone) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+        for (const chunk of chunks) {
+          const line = chunk.split("\n").find((l) => l.startsWith("data:"));
+          if (!line) continue;
+          const event = JSON.parse(line.slice(5).trim()) as PluginScriptRunEvent;
+          if (event.stage === "progress") { setLive(event); timeoutMs = event.timeoutMs; }
+          else if (event.stage === "done") res = event;
+          else if (event.stage === "error") throw new Error(event.message);
+        }
+      }
+      if (!res) throw new Error("Run ended with no result");
+      const entry = { result: res, ranAt: Date.now(), timeoutMs };
       lastScriptRuns.set(runKey, entry);
       setLastRun(entry);
-      if (res.timedOut) showToast(`"${script.label}" timed out`, "error");
+      if (res.timedOut) showToast(`"${script.label}" timed out${timeoutMs ? ` after ${formatDurationShort(timeoutMs)}` : ""}`, "error");
       else if (res.code !== 0) showToast(`"${script.label}" exited ${res.code}`, "error");
       else showToast(`"${script.label}" finished`, "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Script run failed", "error");
     } finally {
       setRunning(false);
+      setLive(null);
     }
   }
+
+  // What to show in the output pane: the live streaming tail while running, else the last
+  // settled result. Kept as one derived value so the JSX below doesn't branch twice.
+  const shown = running
+    ? (live && { stdout: live.stdout, stderr: live.stderr, stdoutTruncated: live.stdoutTruncated })
+    : (result && { stdout: result.stdout, stderr: result.stderr, stdoutTruncated: result.stdoutTruncated });
 
   return (
     <div className="p-3 sm:p-6 space-y-4 min-h-0 flex flex-col" data-testid="plugin-script-pane">
@@ -774,18 +822,29 @@ export function PluginScriptPane({ script, projectId }: { script: PluginScript; 
           {running ? "Running…" : "Run"}
         </button>
       </div>
-      {result && (
+      {running && (
+        <div className="text-xs text-gray-500 dark:text-gray-400" data-testid="plugin-script-live-meta">
+          {live
+            ? `Running · ${formatDurationShort(live.elapsedMs)} elapsed · times out after ${formatDurationShort(live.timeoutMs)}`
+            : "Starting…"}
+        </div>
+      )}
+      {result && !running && (
+        <div className="text-xs text-gray-500 dark:text-gray-400" data-testid="plugin-script-result-meta">
+          {result.timedOut
+            ? `Timed out${lastRun?.timeoutMs ? ` after ${formatDurationShort(lastRun.timeoutMs)}` : ""} — showing its last output`
+            : `Exit code ${result.code ?? "?"}`}
+          {result.code === 0 && !result.timedOut ? " ✓" : ""}
+          {lastRun && ` · ran ${formatRelativeTime(new Date(lastRun.ranAt).toISOString())}`}
+        </div>
+      )}
+      {shown && (
         <div className="flex-1 min-h-0 flex flex-col gap-1">
-          <div className="text-xs text-gray-500 dark:text-gray-400" data-testid="plugin-script-result-meta">
-            {result.timedOut ? "Timed out" : `Exit code ${result.code ?? "?"}`}
-            {result.code === 0 && !result.timedOut ? " ✓" : ""}
-            {lastRun && ` · ran ${formatRelativeTime(new Date(lastRun.ranAt).toISOString())}`}
-          </div>
           <pre className="flex-1 min-h-0 p-3 rounded bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 overflow-auto whitespace-pre-wrap break-all text-[11px] text-gray-700 dark:text-gray-300">
             {[
-              result.stdout && `── stdout ──\n${result.stdout}`,
-              result.stderr && `── stderr ──\n${result.stderr}`,
-            ].filter(Boolean).join("\n\n") || "(no output)"}
+              shown.stdout && `── stdout ──${shown.stdoutTruncated ? " (truncated)" : ""}\n${shown.stdout}`,
+              shown.stderr && `── stderr ──\n${shown.stderr}`,
+            ].filter(Boolean).join("\n\n") || (running ? "(no output yet)" : "(no output)")}
           </pre>
         </div>
       )}
