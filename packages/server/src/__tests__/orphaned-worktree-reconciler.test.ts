@@ -148,7 +148,7 @@ describe("#361: reconcileOrphanedWorktrees on the measured kassenbuch state", ()
 
     const report = await reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims, git, database: guardDb() });
 
-    expect(report).toEqual({ removed: [], keptWithUnshippedWork: [], keptClaimed: [] });
+    expect(report).toEqual({ removed: [], keptWithUnshippedWork: [], keptClaimed: [], removedTrain: [], keptTrainInFlight: [], keptTrainUnknown: [] });
     expect(vi.mocked(git.getWorkingTreeDiff)).not.toHaveBeenCalled();
     expect(vi.mocked(git.removeWorktree)).not.toHaveBeenCalled();
   });
@@ -156,7 +156,7 @@ describe("#361: reconcileOrphanedWorktrees on the measured kassenbuch state", ()
   it("returns empty (never throws) when the repo cannot be listed", async () => {
     const git = makeGit({ listWorktrees: vi.fn(async () => { throw new Error("not a git repository"); }) });
 
-    await expect(reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims: [], git, database: guardDb() })).resolves.toEqual({ removed: [], keptWithUnshippedWork: [], keptClaimed: [] });
+    await expect(reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims: [], git, database: guardDb() })).resolves.toEqual({ removed: [], keptWithUnshippedWork: [], keptClaimed: [], removedTrain: [], keptTrainInFlight: [], keptTrainUnknown: [] });
   });
 });
 
@@ -188,7 +188,7 @@ describe("#1104: refuses to sweep a repoPath that is itself a linked worktree", 
         repoPath: worktreeDir, baseBranch: "master", claims: [], git, database: guardDb(),
       });
 
-      expect(report).toEqual({ removed: [], keptWithUnshippedWork: [], keptClaimed: [] });
+      expect(report).toEqual({ removed: [], keptWithUnshippedWork: [], keptClaimed: [], removedTrain: [], keptTrainInFlight: [], keptTrainUnknown: [] });
       expect(vi.mocked(git.listWorktrees)).not.toHaveBeenCalled();
     } finally {
       await exec("git", ["worktree", "remove", "--force", worktreeDir], mainDir).catch(() => undefined);
@@ -215,7 +215,7 @@ describe("#1104: refuses to sweep a repoPath that is itself a linked worktree", 
         repoPath: mainDir, baseBranch: "master", claims: [], git, database: guardDb(),
       });
 
-      expect(report).toEqual({ removed: [], keptWithUnshippedWork: [], keptClaimed: [] });
+      expect(report).toEqual({ removed: [], keptWithUnshippedWork: [], keptClaimed: [], removedTrain: [], keptTrainInFlight: [], keptTrainUnknown: [] });
       expect(vi.mocked(git.listWorktrees)).toHaveBeenCalledTimes(1);
     } finally {
       await rm(mainDir, { recursive: true, force: true });

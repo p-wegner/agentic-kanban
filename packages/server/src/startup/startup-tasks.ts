@@ -23,6 +23,7 @@ import { reconcileHandMergedBranches, reconcileContainedOpenWorkspaces } from ".
 import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-sweep.js";
 import { reapTerminalWorkspaces } from "./terminal-workspace-reaper.js";
 import { reconcileOrphanedWorktrees, realUnshippedWorkProbe } from "./orphaned-worktree-reconciler.js";
+import { listMergeTrainsForProject } from "../repositories/merge-train.repository.js";
 import { assertForeignKeysEnabled, alignForeignKeyActionsOnStartup } from "./fk-alignment.js";
 import { checkForeignKeyViolations, logForeignKeyViolations } from "../db/fk-violations.js";
 import { modelBelongsToProvider } from "@agentic-kanban/shared";
@@ -584,15 +585,29 @@ export async function pruneOrphanedWorktrees(): Promise<void> {
         .from(workspaces)
         .innerJoin(issues, eq(workspaces.issueId, issues.id))
         .where(eq(issues.projectId, project.id));
+      // #1235: a `kanban/train/*` worktree is judged by its train row, not by the commits it
+      // holds. A failed read passes `undefined`, which makes the reconciler KEEP train
+      // worktrees (the old behaviour) rather than misreport them all as "no row".
+      const trainRows = await listMergeTrainsForProject(project.id, db)
+        .then((rows) => rows.map((r) => ({ label: r.label, state: r.state })))
+        .catch((err) => {
+          console.warn(`[startup] pruneOrphanedWorktrees: could not read merge_trains for '${project.name}' (train worktrees kept):`, errorMessage(err));
+          return undefined;
+        });
       const report = await reconcileOrphanedWorktrees({
         repoPath: project.repoPath,
         baseBranch: project.defaultBranch || "master",
         claims,
         git: { ...realGitService, ...realUnshippedWorkProbe },
         database: db,
+        trainRows,
       });
-      if (report.removed.length > 0 || report.keptWithUnshippedWork.length > 0 || report.keptClaimed.length > 0) {
-        console.log(`[startup] orphaned worktrees for project '${project.name}': removed ${report.removed.length}, kept (unshipped work) ${report.keptWithUnshippedWork.length}, kept (still claimed) ${report.keptClaimed.length}`);
+      const trainTouched = report.removedTrain.length + report.keptTrainInFlight.length + report.keptTrainUnknown.length;
+      if (report.removed.length > 0 || report.keptWithUnshippedWork.length > 0 || report.keptClaimed.length > 0 || trainTouched > 0) {
+        console.log(
+          `[startup] orphaned worktrees for project '${project.name}': removed ${report.removed.length}, kept (unshipped work) ${report.keptWithUnshippedWork.length}, kept (still claimed) ${report.keptClaimed.length}` +
+            (trainTouched > 0 ? `; train worktrees: removed ${report.removedTrain.length}, in flight ${report.keptTrainInFlight.length}, no row ${report.keptTrainUnknown.length}` : ""),
+        );
       }
 
       // #630: the sweep above only ever looked at the LEADING repo, so for a multi-repo

@@ -5,6 +5,13 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import type { Database } from "../db/index.js";
+import {
+  decideTrainWorktreeAction,
+  findTrainRowForAttemptLabel,
+  noteUnknownTrainWorktreeOnce,
+  removeTrainWorktree,
+  trainAttemptLabelFromBranch,
+} from "../services/merge-train-worktrees.js";
 
 /**
  * #361 (Observation C, second half) — a git worktree left registered after its unit merged, which
@@ -160,6 +167,17 @@ export interface OrphanedWorktreeGitPort {
    * the dirt. Untracked files the base does NOT ignore still count, unchanged.
    */
   filterIgnoredAtBase?(repoPath: string, relPaths: string[]): Promise<string[]>;
+  /**
+   * `git branch -D` (#1235) — a reaped train worktree's branch goes with it; a port without
+   * this removes the directory and leaves the ref, which `deleteTrainRef` already tolerates.
+   */
+  deleteBranch?(repoPath: string, branch: string, options?: { force?: boolean }): Promise<void>;
+}
+
+/** What the reconciler needs to know about a `merge_trains` row (#1235): its label and state. */
+export interface TrainRowSummary {
+  label: string;
+  state: string;
 }
 
 /**
@@ -218,6 +236,15 @@ export interface OrphanedWorktreeReport {
    * appears in a log line is the shape that lets a stuck sweep look like a clean one.
    */
   keptClaimed: string[];
+  /**
+   * #1235 — `kanban/train/*` worktrees, decided by their `merge_trains` row rather than by the
+   * unshipped-work probe (a train's "unmerged commits" are its own integration merges, which
+   * landed under another sha or died with the train). Absent when the caller passed no
+   * `trainRows`, in which case such a worktree takes the ordinary path above.
+   */
+  removedTrain: string[];
+  keptTrainInFlight: string[];
+  keptTrainUnknown: string[];
 }
 
 /**
@@ -343,8 +370,19 @@ export async function reconcileOrphanedWorktrees(args: {
    * something a caller should be able to reach by forgetting an argument.
    */
   database: Database;
+  /**
+   * #1235 — every `merge_trains` row of the project, any state. With it, a worktree on a
+   * `kanban/train/*` branch is decided by its row (terminal → removed with its branch, in
+   * flight → kept, no row → kept and logged once per boot) INSTEAD of by the unshipped-work
+   * probe. Without it (a sibling-repo sweep, an older caller, or a read that failed) a train
+   * worktree takes the ordinary path, which keeps it — the safe direction.
+   */
+  trainRows?: readonly TrainRowSummary[];
 }): Promise<OrphanedWorktreeReport> {
-  const report: OrphanedWorktreeReport = { removed: [], keptWithUnshippedWork: [], keptClaimed: [] };
+  const report: OrphanedWorktreeReport = {
+    removed: [], keptWithUnshippedWork: [], keptClaimed: [],
+    removedTrain: [], keptTrainInFlight: [], keptTrainUnknown: [],
+  };
 
   if (repoPathIsLinkedWorktree(args.repoPath)) {
     console.warn(
@@ -368,6 +406,50 @@ export async function reconcileOrphanedWorktrees(args: {
     // entry without spending three git calls on the unshipped-work probe.
     const cheap = classifyWorktree({ ...args, worktreePath: worktree.path, mainCheckoutPath: args.repoPath, worktreeBranch: worktree.branch, hasUnshippedWork: false });
     if (cheap === "main_checkout" || cheap === "claimed") continue;
+
+    // #1235: a train worktree is decided by its row, never by the unshipped-work probe below
+    // (which would keep it forever on its own integration merges). Only when the caller
+    // supplied the rows — without them the ordinary, conservative path applies.
+    const attemptLabel = trainAttemptLabelFromBranch(worktree.branch);
+    if (attemptLabel !== null && args.trainRows) {
+      const row = findTrainRowForAttemptLabel(attemptLabel, args.trainRows);
+      const action = decideTrainWorktreeAction(row);
+      if (action === "keep_in_flight") {
+        report.keptTrainInFlight.push(worktree.path);
+        continue;
+      }
+      if (action === "keep_unknown") {
+        if (noteUnknownTrainWorktreeOnce(worktree.path)) {
+          console.warn(
+            `[worktree-reconcile] keeping train worktree ${worktree.path} (${worktree.branch}) — no merge_trains row of any ` +
+              `state carries its label, so nothing can say whether it landed; remove it by hand if the train is history (#1235)`,
+          );
+        }
+        report.keptTrainUnknown.push(worktree.path);
+        continue;
+      }
+      const outcome = await removeTrainWorktree({
+        database: args.database,
+        repoPath: args.repoPath,
+        worktreePath: worktree.path,
+        branch: worktree.branch,
+        label: "startup:orphaned-worktree-reconcile",
+        // The removal itself happens inside `removeWorktreeUnlessShared` in that helper — the
+        // #713 guard is lexical, so the port goes in whole rather than as a callback here.
+        git: args.git,
+      });
+      if (outcome.removed) {
+        console.log(
+          `[worktree-reconcile] removed train worktree ${worktree.path} (${worktree.branch}) — its train is ${row!.state}` +
+            `${outcome.branchDeleted ? ", branch deleted" : outcome.branchError ? `, branch left (${outcome.branchError})` : ""} (#1235)`,
+        );
+        report.removedTrain.push(worktree.path);
+      } else {
+        console.warn(`[worktree-reconcile] could not remove train worktree ${worktree.path}: ${outcome.message}`);
+        report.keptClaimed.push(worktree.path);
+      }
+      continue;
+    }
 
     const reason = await probeUnshippedWork(args.git, args.repoPath, args.baseBranch, worktree);
     const verdict = classifyWorktree({

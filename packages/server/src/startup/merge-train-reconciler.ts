@@ -48,9 +48,14 @@ import { getAllProjects } from "../repositories/project.repository.js";
 import { emptyPassReport, formatPassReportBody, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { listWorktrees, removeWorktree, worktreeDirLeafForBranch } from "@agentic-kanban/shared/lib/git-service";
-import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
-import { parentTrainLabel, trainRefName } from "../services/merge-train.service.js";
+import { listWorktrees } from "@agentic-kanban/shared/lib/git-service";
+import {
+  decideTrainWorktreeAction,
+  findTrainRowForAttemptLabel,
+  noteUnknownTrainWorktreeOnce,
+  removeTrainWorktree,
+  trainAttemptLabelFromBranch,
+} from "../services/merge-train-worktrees.js";
 import {
   findLiveMergeTrainForProject,
   snapshotLiveMergeTrains,
@@ -398,16 +403,17 @@ export function stopMergeTrainReconciler(): void {
  * periodic, defence-in-depth) recovery for exactly that gap, mirroring how
  * `reconcileStrandedMergeTrains` recovers the DB ROW half of the same crash.
  *
- * Matching a worktree back to a row: the leaf is `worktreeDirLeafForBranch("kanban/train/<label
- * of the ATTEMPT>")` (see `worktree.ts`), and an attempt's label is the row's label plus zero or
- * more trailing bisect letters (`parentTrainLabel` strips them). So a worktree's directory name
- * belongs to a project's train row when `parentTrainLabel` of the decoded label equals that
- * row's `label`. Unknown labels (matching no row of ANY state, not just the active ones) are
- * reported rather than removed — a directory this sweep cannot positively attribute is exactly
- * the case `removeWorktreeUnlessShared`'s design already refuses to guess about.
+ * Matching a worktree back to a row (#1235): by its BRANCH, `kanban/train/<label of the
+ * ATTEMPT>`, where an attempt's label is the row's label plus zero or more trailing bisect
+ * letters — `findTrainRowForAttemptLabel` in `services/merge-train-worktrees.ts`. Unknown
+ * labels (matching no row of ANY state, not just the active ones) are reported rather than
+ * removed — a directory this sweep cannot positively attribute is exactly the case
+ * `removeWorktreeUnlessShared`'s design already refuses to guess about. The branch is deleted
+ * with the worktree, since a `kanban/train/*` ref checked out in a leftover worktree is what
+ * made `deleteTrainRef`'s own `branch -D` fail in the first place.
  */
 export interface StaleTrainWorktreeSweepResult extends PassReport {
-  removed: Array<{ projectId: string; path: string }>;
+  removed: Array<{ projectId: string; path: string; state: string }>;
   /** A directory under the train namespace whose label matched no `merge_trains` row at all. */
   unknown: Array<{ projectId: string; path: string }>;
 }
@@ -431,17 +437,20 @@ export async function sweepStaleTrainWorktrees(
     ["assembling", "gating", "landing", "landed", "red", "abandoned"],
     database,
   ).catch(() => [] as MergeTrainRow[]);
-  // Keyed by `projectId::<sanitized leaf>` — the leaf `worktreeDirLeafForBranch` derives from
-  // the row's OWN label, per-project since two different projects' trains both start their
-  // per-day sequence at `01` and would otherwise collide on the same label (`train/2026-09-19-01`
-  // is not unique across projects, only within one). Keying by leaf means recovering the label
-  // from a directory name never has to reverse the sanitization — it only has to reproduce it
-  // (scoped to the worktree's own project, resolved from ITS repoPath below) and look it up.
-  const rowsByProject = new Map<string, Map<string, MergeTrainRow>>();
+  // Per project, since two different projects' trains both start their per-day sequence at
+  // `01` and would otherwise collide on the same label (`train/2026-09-19-01` is not unique
+  // across projects, only within one).
+  //
+  // #1235: matched on the worktree's BRANCH (`kanban/train/<attempt label>`), not on its
+  // directory leaf. The leaf lookup keyed on the row's own label, so a bisect attempt's
+  // worktree (`…-03babb` for row `…-03`) never matched and every one of them read as "no row"
+  // — which is how ten of them accumulated. `findTrainRowForAttemptLabel` accepts the row's
+  // label plus trailing bisect letters, and copes with the pre-#1190 `q<base36>` labels that
+  // end in letters themselves.
+  const rowsByProject = new Map<string, MergeTrainRow[]>();
   for (const row of rows) {
-    const leaf = worktreeDirLeafForBranch(trainRefName(parentTrainLabel(row.label)));
-    const forProject = rowsByProject.get(row.projectId) ?? new Map<string, MergeTrainRow>();
-    forProject.set(leaf, row);
+    const forProject = rowsByProject.get(row.projectId) ?? [];
+    forProject.push(row);
     rowsByProject.set(row.projectId, forProject);
   }
 
@@ -449,38 +458,46 @@ export async function sweepStaleTrainWorktrees(
   for (const project of projects) {
     if (!project.repoPath) continue;
     const worktrees = await listWorktrees(project.repoPath).catch(() => []);
-    const rowByLeaf = rowsByProject.get(project.id);
+    const projectRows = rowsByProject.get(project.id) ?? [];
     for (const wt of worktrees) {
       const leaf = wt.path.split(/[\\/]/).filter(Boolean).pop() ?? "";
-      if (!leaf.startsWith("kanban_train_")) continue;
+      const attemptLabel = trainAttemptLabelFromBranch(wt.branch);
+      if (attemptLabel === null && !leaf.startsWith("kanban_train_")) continue;
       result.scanned++;
-      const owner = rowByLeaf?.get(leaf);
-      if (!owner) {
+      const owner = attemptLabel === null ? undefined : findTrainRowForAttemptLabel(attemptLabel, projectRows);
+      const action = decideTrainWorktreeAction(owner);
+      if (action === "keep_unknown") {
         result.unknown.push({ projectId: project.id, path: wt.path });
         recordSkipped(result, wt.path, "unknown-label");
-        log(`train worktree ${wt.path} (project ${project.id}) matches no merge_trains row of any state — leaving it for manual inspection`);
+        // Once per process per path (#1235) — this sweep runs every ten minutes, and a
+        // directory nobody can attribute must not re-announce itself on every cycle.
+        if (noteUnknownTrainWorktreeOnce(wt.path)) {
+          log(`train worktree ${wt.path} (${wt.branch || "detached"}, project ${project.id}) matches no merge_trains row of any state — leaving it for manual inspection`);
+        }
         continue;
       }
-      if (owner.state === "assembling" || owner.state === "gating" || owner.state === "landing") {
+      if (action === "keep_in_flight") {
         recordSkipped(result, wt.path, "row-still-active");
         continue;
       }
+      const owned = owner!;
       if (opts.dryRun) {
-        result.removed.push({ projectId: project.id, path: wt.path });
+        result.removed.push({ projectId: project.id, path: wt.path, state: owned.state });
         recordActed(result, wt.path, "would-remove");
-        log(`would remove stale train staging worktree ${wt.path} (project ${project.id}, train ${owner.id} terminal: ${owner.state})`);
+        log(`would remove stale train staging worktree ${wt.path} (project ${project.id}, train ${owned.id} terminal: ${owned.state})`);
         continue;
       }
-      const outcome = await removeWorktreeUnlessShared({
+      const outcome = await removeTrainWorktree({
         database,
-        workingDir: wt.path,
+        repoPath: project.repoPath,
+        worktreePath: wt.path,
+        branch: wt.branch,
         label: "merge-train-stale-sweep",
-        removeWorktree: () => removeWorktree(project.repoPath, wt.path),
-      }).catch((err) => ({ removed: false as const, reason: "remove-failed" as const, message: errorMessage(err), error: err }));
+      });
       if (outcome.removed) {
-        result.removed.push({ projectId: project.id, path: wt.path });
+        result.removed.push({ projectId: project.id, path: wt.path, state: owned.state });
         recordActed(result, wt.path, "removed");
-        log(`removed stale train staging worktree ${wt.path} (project ${project.id}, train ${owner.id} terminal: ${owner.state})`);
+        log(`removed stale train staging worktree ${wt.path} (project ${project.id}, train ${owned.id} terminal: ${owned.state})${outcome.branchDeleted ? " and its branch" : outcome.branchError ? ` — branch left: ${outcome.branchError}` : ""}`);
       } else {
         recordSkipped(result, wt.path, outcome.reason);
         log(`could not remove stale train worktree ${wt.path}: ${outcome.message}`);
