@@ -84,7 +84,7 @@ describe("legacy temp-prefix derivation (#1056 follow-up)", () => {
     expect(claimable.length).toBeGreaterThan(100);
     // The families the drain was actually built for must still be derivable, or the rule has
     // gone dead while continuing to report success.
-    for (const p of ["smoke-srv", "cli-test", "compounding-setup", "preflight-test"]) {
+    for (const p of ["smoke-srv", "cli-fixture-repo", "compounding-setup", "preflight-test"]) {
       expect(claimable, `${p} must still be derived from the tree`).toContain(p);
     }
     // And the narrowing must still BITE. If `rejected` ever empties, either the generic filter
