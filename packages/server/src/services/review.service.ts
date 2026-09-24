@@ -145,6 +145,10 @@ ${approvalInstruction}`
 If only MINOR issues or no issues:
 ${approvalInstruction}`;
 
+  // #1237: the brief names the LOCAL base only. Merges land locally in this board's model, so
+  // `origin/<base>` may not exist, may be renamed, or may be days stale — the 2026-09-24 incident
+  // had a reviewer replay 112 commits onto a 5-day-old origin/master and then force-move the
+  // shared master ref back to it. `review-brief-local-base.test.ts` pins the absence of `origin/`.
   const localBaseBranch = (baseBranch ?? "HEAD").replace(/^origin\//, "");
 
   let conflictPreamble = "";
@@ -157,7 +161,8 @@ ${uncommittedChanges.map(f => `  ${f}`).join("\n")}
 Steps to resolve:
 1. Review the changes: git diff (for unstaged), git diff --cached (for staged)
 2. If the changes belong to this branch: git add -A && git commit -m "WIP: uncommitted changes"
-3. Then rebase: git rebase origin/${localBaseBranch} (or git rebase ${localBaseBranch} if no remote)
+3. Then rebase YOUR branch onto the LOCAL base: git rebase ${localBaseBranch}
+   (the LOCAL branch, never a remote-tracking one — merges land locally here, so a remote may be missing or days stale)
 4. Once the working tree is clean and rebased, proceed with the code review below.
 
 ---
@@ -170,8 +175,9 @@ Conflicting files:
 ${conflictingFiles.map(f => `- ${f}`).join("\n")}
 
 Steps to resolve:
-1. Start a fresh rebase: git rebase origin/${localBaseBranch}
-   (or use the local branch if no remote: git rebase ${localBaseBranch})
+1. Start a fresh rebase of YOUR branch onto the LOCAL base: git rebase ${localBaseBranch}
+   (the LOCAL branch, never a remote-tracking one — merges land locally here, so a remote may be missing or days stale;
+   and never move ${localBaseBranch} itself — no update-ref, branch -f, push or checkout of the base)
 2. For each conflicting file, open it and resolve the conflict markers (<<<<<<<, =======, >>>>>>>)
 3. After resolving each file: git add <resolved-file>
 4. Continue: git rebase --continue (repeat for each conflicting commit)
@@ -200,9 +206,12 @@ Steps to resolve:
   // The context block is substituted LAST and its own text is never re-scanned:
   // a diff can legitimately contain literal `{{baseBranch}}`-style text (this file
   // does), and expanding placeholders inside reviewed source would corrupt it.
+  // `{{baseBranch}}` renders as the LOCAL base (#1237): `prepareForReview` hands in
+  // `origin/<base>` only when no local base exists, and an instruction to diff against a
+  // remote-tracking ref is the same stale-origin trap as the rebase line above.
   const rendered = template
     .replace(/\{\{branch}}/g, branch)
-    .replace(/\{\{baseBranch}}/g, baseBranch ?? "HEAD")
+    .replace(/\{\{baseBranch}}/g, localBaseBranch)
     .replace(/\{\{issueId}}/g, issueId)
     .replace(/\{\{workspaceId}}/g, workspaceId ?? "")
     .replace(/\{\{serverPort}}/g, serverPort)
@@ -212,7 +221,7 @@ Steps to resolve:
   // Only the fallback text carries a placeholder; a real diff must be passed through verbatim.
   const renderedContext = precomputedContext?.trim()
     ? contextBlock
-    : contextBlock.replace(/\{\{baseBranch}}/g, baseBranch ?? "HEAD");
+    : contextBlock.replace(/\{\{baseBranch}}/g, localBaseBranch);
 
   let prompt = conflictPreamble + contextPrefix + rendered
     .replace(/\{\{precomputedContext}}/g, () => renderedContext);
