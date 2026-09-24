@@ -1,10 +1,11 @@
 // @gate:always-run always — scans every package's src/ tree for raw kanban.db path literals; imports nothing it checks (#854).
 import { describe, it, expect } from "vitest";
-import { readdirSync, existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, relative, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { walkPackageSources, packagesRootFrom, compareRatchet, parseGuardSource, forEachNode } from "./helpers/guard-scan.js";
+import { listRepoSubdirs } from "../../../scripts/lib/repo-tree.mjs";
 
 /**
  * Guard (#854): the ONLY sanctioned way to locate `kanban.db` is the shared resolver
@@ -84,10 +85,8 @@ function countDbPathLiterals(absFile: string): number {
 
 function collectSrcFiles(): string[] {
   const files: string[] = [];
-  for (const pkg of readdirSync(PACKAGES_ROOT)) {
-    if (pkg.startsWith(".")) continue;
-    const srcDir = join(PACKAGES_ROOT, pkg, "src");
-    files.push(...walkPackageSources(srcDir, { extensions: EXTENSIONS }));
+  for (const pkgDir of listRepoSubdirs(PACKAGES_ROOT)) {
+    files.push(...walkPackageSources(join(pkgDir, "src"), { extensions: EXTENSIONS }));
   }
   return files;
 }

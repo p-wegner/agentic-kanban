@@ -60,7 +60,7 @@ const NEWLINE_SPLITS = [
   `.split(${"/"}\\n${"/"})`,
 ];
 /** A test whose subject is the repo TREE rather than a module — the guard-suite kind (#583). */
-const TREE_SCAN = /walkPackageSources|walkTestFiles|readdirSync|globSync/;
+const TREE_SCAN = /walkPackageSources|walkTestFiles|walkRepoTree|listRepoSubdirs|readdirSync|globSync/;
 
 /**
  * Every tree-scanning guard suite that splits file text into lines, with WHY it still does.

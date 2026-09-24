@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
+import { walkRepoTree } from "../../../../scripts/lib/repo-tree.mjs";
 import {
   parseGuardSource,
   forEachNode,
@@ -44,14 +45,11 @@ import {
  */
 const clientSrc = path.join(import.meta.dirname!, "..");
 
-function walk(dir: string, out: string[] = []): string[] {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === "node_modules" || entry.name === "dist") continue;
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) walk(full, out);
-    else if (/\.tsx?$/.test(entry.name) && !entry.name.includes(".test.")) out.push(full);
-  }
-  return out;
+function walk(dir: string): string[] {
+  return walkRepoTree(dir, {
+    extensions: [".ts", ".tsx"],
+    filter: (_abs, entry) => !entry.name.includes(".test."),
+  });
 }
 
 const files = walk(clientSrc);

@@ -20,6 +20,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
+import { walkRepoTree } from "../../../../scripts/lib/repo-tree.mjs";
 
 const SKIP_DIRS = new Set(["__tests__", "node_modules", "dist", "coverage", ".git"]);
 
@@ -36,30 +37,24 @@ export interface WalkOptions {
  * Every source file under `absDir`, recursively. Returns `[]` for a missing directory rather
  * than throwing, because a guard that scans several roots must not die on the one a given
  * checkout happens not to have.
+ *
+ * The walk itself is the shared repo-tree walker (#1241), so every guard on this helper also
+ * gets its rules: a nested linked worktree (`.git` is a file) and a junction are never
+ * descended, and the canonical skip set applies beneath the caller's own.
  */
 export function walkPackageSources(absDir: string, options: WalkOptions = {}): string[] {
   const extensions = options.extensions ?? [".ts", ".tsx"];
   const skipDirs = options.skipDirs ?? SKIP_DIRS;
   const includeTests = options.includeTests ?? false;
-  if (!fs.existsSync(absDir)) return [];
-
-  const out: string[] = [];
-  const walk = (dir: string): void => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (!skipDirs.has(entry.name) && !entry.name.startsWith(".")) walk(full);
-        continue;
-      }
-      if (!extensions.some((ext) => entry.name.endsWith(ext))) continue;
+  return walkRepoTree(absDir, {
+    skipDirs,
+    extensions,
+    filter: (_abs, entry) => {
       // A generated declaration is never what a guard means by "a source file".
-      if (entry.name.endsWith(".d.ts")) continue;
-      if (!includeTests && entry.name.includes(".test.")) continue;
-      out.push(full);
-    }
-  };
-  walk(absDir);
-  return out;
+      if (entry.name.endsWith(".d.ts")) return false;
+      return includeTests || !entry.name.includes(".test.");
+    },
+  });
 }
 
 /** Every `*.test.*` file under a `__tests__` tree, recursively. */

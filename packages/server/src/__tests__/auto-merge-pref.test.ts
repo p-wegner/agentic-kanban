@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
+import { walkRepoTree } from "../../../../scripts/lib/repo-tree.mjs";
 import {
   AUTO_MERGE_DEFAULT_ENABLED,
   AUTO_MERGE_PREF_KEY,
@@ -65,15 +66,13 @@ const scanRoots = [path.join(packagesRoot, "server", "src"), path.join(packagesR
 
 function listTsFiles(dir: string): string[] {
   const out: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === "__tests__" || entry.name === "node_modules") continue;
-      out.push(...listTsFiles(full));
-    } else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) {
-      out.push(full);
-    }
-  }
+  out.push(
+    ...walkRepoTree(dir, {
+      skipDirs: ["__tests__"],
+      extensions: [".ts"],
+      filter: (_abs, entry) => !entry.name.endsWith(".d.ts"),
+    }),
+  );
   return out;
 }
 

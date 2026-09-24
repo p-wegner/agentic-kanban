@@ -140,7 +140,7 @@ const IMPORTS_A_REPO_SCRIPT = /from\s+["'][^"']*\/scripts\/[^"']+["']/;
  * lifted out of the client test, which is how this was found.
  */
 const USES_SHARED_GUARD_HELPER =
-  /guard-scan|walkPackageSources|walkTestFiles|packagesRootFrom|parseGuardSource|function-nloc|measureFunctionNloc/;
+  /guard-scan|walkPackageSources|walkTestFiles|packagesRootFrom|parseGuardSource|function-nloc|measureFunctionNloc|repo-tree|walkRepoTree|listRepoSubdirs/;
 
 const UNSOUND_SIGNATURES: Array<{ name: string; test: (source: string) => boolean }> = [
   { name: "reaches-tree-via-shared-guard-helper", test: (s) => USES_SHARED_GUARD_HELPER.test(s) },
