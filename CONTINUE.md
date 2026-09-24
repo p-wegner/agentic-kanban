@@ -70,8 +70,8 @@ base ref, and a lagging remote base ref must be reported. `origin/master` is sti
 pushing it is the operator's call.
 
 ### Next steps, in order
-1. `pnpm promote --dry-run` (#1227, #1228, #1229 are on master; it will ask for a sweep) once the builder commits; then `pnpm promote --dry-run`
-   (it will ask for a sweep: master is ahead of the 17:54 verdict).
+1. `pnpm promote --dry-run`: #1227, #1228 and #1229 are on master, ahead of the 17:54 verdict, so
+   it will trigger and wait for a sweep.
 2. Pick from #1230-#1237. Suggested order: #1237, #1230 (stops the waste today), #1231 (makes the
    sweep trustworthy), #1233 + #1232 as a group (the actual Yegge workflow), #1234 (proves it),
    #1235, #1236. Remove the `no-auto-start` tag to hand one to the monitor.
