@@ -440,9 +440,11 @@ sweep, not a faster trigger for the existing one — and belongs to its own tick
 
 Every pre-merge gate already writes one row into the test-impact ledger
 (`recordVerifyGateOutcome` → `impact.mjs record` → `.test-impact/outcomes.jsonl` in the MAIN
-checkout: the suites selected, the ones dropped below the score floor, pass/fail, runtime and the
-change set). Nothing read them, so ten green gates covering a hundred files gave a promotion zero
-evidence. `pnpm promote` now summarizes what has accumulated **since the last sweep** and prints it
+checkout: the suites selected, the ones dropped below the score floor, pass/fail, the change set,
+and since #1234 the verify wall clock as `durationMs` plus the `[gate:step]` seconds as
+`steps: {arch, typecheck, tests}` — patched onto the row after `record` appends it, since the
+tool's argv takes no free-form field). Nothing read them, so ten green gates covering a hundred
+files gave a promotion zero evidence. `pnpm promote` now summarizes what has accumulated **since the last sweep** and prints it
 beside the verdict, in the dry run and in `promote.log`:
 
 ```
@@ -460,11 +462,36 @@ producer itself tagged as non-observations (`ci-nochange`, `ci-partialselection`
 `ci-unattributed`) are counted separately and excluded from the headline, for the same reason the
 skill's own miss-rate report excludes them.
 
-The same ledger is the corpus **#954** needs before the `impact` gate tier can become anyone's
-default — it comes out of runs the board is already paying for. `impact.mjs stats --outcomes
-<ledger>` is the miss-rate report and runs off those real entries today (37 rows as of
-2026-09-05); the rate itself still reads `UNKNOWN` because no full-scope failing run has yet named
-its failed suites, which is #954's problem, not the ledger's.
+The same ledger is half the corpus **#954** needs before the `impact` gate tier can become
+anyone's default — it comes out of runs the board is already paying for. `impact.mjs stats
+--outcomes <ledger>` is the skill's own report, and it can only see a miss INSIDE one row
+(`failed − selected`), which a gate row never contains: the gate cannot fail a suite it did not
+run. So that number read `UNKNOWN` for as long as it existed.
+
+### The miss rate — sweep reds joined to the merges since the last green (#1234)
+
+The other half is the base sweep. On every `green`/`red` verdict `recordBaseSweepOutcome`
+writes its ledger row, and `recordSweepJoin` (`services/test-impact-misses.ts`) then joins the
+red suites to the gate rows of every merge in `git log <lastGreenSha>..<sweptSha>` (a row's
+`commit` is the branch tip; a squash-merged tip is not in that log and goes unattributed). The
+result lands in a sidecar, `.test-impact/misses.jsonl`, so the outcomes ledger keeps the shape
+`impact.mjs` owns:
+
+| Row | When |
+|---|---|
+| `{kind:"miss", sweepAt, sweepSha, suite, candidateCommits[], tier, staleMap?}` | at least one intervening gate did NOT run `suite` (`selected ∪ seenFiles ∪ failed`, or `ran: full`); `candidateCommits` names every such gate — attributed, not bisected. `staleMap: true` when a candidate row was one the gate tagged `-nochange`/`-partialselection`/`-unattributed` |
+| `{kind:"flake-or-environment", sweepAt, sweepSha, suite}` | every intervening gate ran `suite` (or nothing merged), so the selection cannot explain the red |
+| `{kind:"heal", sweepAt, sweepSha, suites[]}` | a green sweep after reds; `suites` are the ones open since the last heal |
+
+`missRate = misses / merges` per selection tier, since the corpus start
+(`services/test-impact-miss-rate.ts`, pure; `merges` = the non-suspect gate rows of that tier,
+one per gate run; a `staleMap` miss is excluded and counted as `staleExcluded`). It shows in
+three places: `GET /api/projects/:id/delivery` (`impactMissRate`), the tracker snapshot
+(`impactMissRate`), and `pnpm promote --dry-run` on the `miss rate` line right under `gate
+evidence`, mirrored into `scripts/promote-evidence.mjs` and held in lockstep by
+`test-impact-miss-rate.test.ts`. Same label as its neighbour: a corpus measurement, not a verdict
+on any merge, and it authorizes nothing. What it is FOR is `docs/integration-risk-ladder.md`:
+the number that decides whether a narrower rung may become a default.
 
 ### Rehearsing the rollback
 
