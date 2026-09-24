@@ -275,6 +275,31 @@ export function createTestDb() {
 }
 
 /**
+ * A fully-migrated file DB with NO client attached — for suites that hand the path to a
+ * spawned process (the `cli-*.test.ts` harness, #1236) rather than querying it in-process.
+ * Same template copy as `createTestDb()`, so the `__drizzle_migrations` bookkeeping is stamped
+ * by tag and a child's own `runMigrations()` is a no-op. `dispose()` removes the copy; the exit
+ * sweep is the backstop when a caller forgets.
+ */
+export function createTestDbFile(): { dbPath: string; dispose: () => void } {
+  registerExitCleanup();
+  const templatePath = getOrBuildTemplateDb();
+  const dbPath = join(tempDbDir(), `test-db-${randomUUID()}.db`);
+  createdTempDbFiles.push(dbPath);
+  copyFileSync(templatePath, dbPath);
+  const dispose = (): void => {
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        rmSync(`${dbPath}${suffix}`, { force: true });
+      } catch {
+        /* best-effort temp cleanup */
+      }
+    }
+  };
+  return { dbPath, dispose };
+}
+
+/**
  * Get-or-create one project status, by name (#668).
  *
  * A project may not hold two statuses with the same name — a unique index since migration

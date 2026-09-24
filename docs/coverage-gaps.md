@@ -128,16 +128,17 @@ The previous document claimed all root CLI commands were untested. That is stale
 
 | Command | Coverage | Evidence |
 |---------|----------|----------|
-| `register` | Covered | `packages/server/src/__tests__/cli.test.ts` |
-| `unregister` | Covered | `packages/server/src/__tests__/cli.test.ts` |
-| `list` | Covered | `packages/server/src/__tests__/cli.test.ts` |
-| `cleanup` | Covered | `packages/server/src/__tests__/cli.test.ts` |
-| `issue list` / issue workflows | Covered | `packages/server/src/__tests__/cli.test.ts` |
-| `workspace list` | Covered | `packages/server/src/__tests__/cli.test.ts` |
-| `skill list` | Covered | `packages/server/src/__tests__/cli.test.ts` |
+| `register` | Covered | `packages/server/src/__tests__/cli-project.test.ts` |
+| `unregister` | Covered | `packages/server/src/__tests__/cli-project.test.ts` |
+| `list` | Covered | `packages/server/src/__tests__/cli-project.test.ts` |
+| `cleanup` | Covered | `packages/server/src/__tests__/cli-project.test.ts` |
+| `issue list` / issue workflows | Covered | `packages/server/src/__tests__/cli-issue.test.ts` |
+| `workspace list` | Covered | `packages/server/src/__tests__/cli-workspace.test.ts` |
+| `skill list` | Covered | `packages/server/src/__tests__/cli-skill.test.ts` |
+| dispatch gate (`--help`, `--version`, subcommand vs. server start) | Covered | `packages/server/src/__tests__/cli-dispatch.test.ts` |
 | Butler CLI commands | Covered | `packages/server/src/__tests__/cli-butler.test.ts` |
 
-Remaining CLI gap: the tests are spawn-based and broad. For new CLI commands, add command-specific cases to `cli.test.ts` or `cli-butler.test.ts` and include at least one failure path, not only `--help`.
+Remaining CLI gap: the tests are spawn-based and broad. For new CLI commands, add command-specific cases to the matching `cli-<group>.test.ts` (or `cli-butler.test.ts`) and include at least one failure path, not only `--help`. The shared spawn/DB harness is `packages/server/src/__tests__/helpers/cli-harness.ts` (one esbuild bundle of the CLI per file, template-copied DBs; #1236).
 
 ---
 
@@ -190,7 +191,7 @@ Known stale areas:
 | API routes | Previously stale gaps for health, tags, statuses, branches, and active-project are covered | `POST /api/internal/board-notify`, WebSocket edge cases, shared error format |
 | UI flows | Previously stale gaps for archive columns, shortcut help, search highlighting, diff viewer, and merge UI are covered | Skeleton loading state, broader failure-toast coverage, direct header project-switch workflow |
 | MCP tools | Most MCP coverage lives outside the requested scan | Add command-specific MCP error-path cases as tools change |
-| CLI commands | Root CLI commands are covered in `cli.test.ts` | Keep adding command-specific failure-path cases for new commands |
+| CLI commands | Root CLI commands are covered in the `cli-<group>.test.ts` files | Keep adding command-specific failure-path cases for new commands |
 | Unit tests | Agent service, session manager, board events, tags, issue numbers, and preferences are no longer untested | Add focused edge-case and contract tests where listed above |
 
 ## Last Verified
@@ -205,6 +206,6 @@ Originally verified on 2026-05-31 with these repository searches:
 rg --files packages/e2e/tests packages/server/src/__tests__
 rg -n "GET /health|POST /api/projects|/api/preferences/active-project|/api/projects/.*/branches|/api/projects/.*statuses|/api/issues/.*/tags|/api/tags|/api/internal/board-notify" packages/e2e/tests packages/server/src/__tests__
 rg -n "shortcut|Keyboard shortcuts|archive|Completed|DiffViewer|View Diff|Merge button|skeleton|toast|Toast|project switch|active project|base branch" packages/e2e/tests packages/server/src/__tests__
-rg -n "register|unregister|list|cleanup" packages/server/src/__tests__/cli.test.ts packages/server/src/__tests__/cli-butler.test.ts packages/e2e/tests packages/server/src/__tests__
+rg -n "register|unregister|list|cleanup" packages/server/src/__tests__/cli-project.test.ts packages/server/src/__tests__/cli-butler.test.ts packages/e2e/tests packages/server/src/__tests__
 rg -n "get_workspace_diff|get-workspace-diff|getWorkspaceDiff|workspace diff" packages/e2e/tests packages/server/src/__tests__ packages/mcp-server/src/__tests__
 ```

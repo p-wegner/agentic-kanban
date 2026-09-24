@@ -43,7 +43,12 @@
 //       timeout under full-suite parallelism. Raising their timeouts was already tried and is
 //       not the answer: they are starved, not merely slow.
 //   server:
-//     - cli.test.ts        spawn-based CLI integration; stale migration list / worktree DB resolution
+//     - cli-dispatch / cli-project / cli-issue / cli-workspace / cli-skill .test.ts — the
+//       spawn-based CLI integration suite, ONE file until #1236 split it per command group
+//       (cli.test.ts was 643 s of a 60 min suite; the five together measure ~230 s, none over
+//       76 s, because each file bundles the CLI once with esbuild instead of paying a tsx
+//       transpile per spawn). Excluded for the same reason as before: each case is a real
+//       child process, and under gate parallelism that is the #173 contention shape.
 //     - cli-butler.test.ts spawn-based CLI integration; same root causes
 //     - git.service.test.ts real git on temp dirs; Windows file-locking / timing
 //     - done-unmerged-invariant-sweep.test.ts, workspace-merge-service.test.ts,
@@ -209,7 +214,13 @@ export const PACKAGES = [
     // breaking merge-retry idempotency, breaking `resolveMergeState`'s decision table — each
     // already shipped once as a bug, each covered by a test that did not run.
     exclude: [
-      { glob: "**/cli.test.ts", reason: "spawns the CLI binary as a child process" },
+      // #1236: the one cli.test.ts, split per command group. Five entries for one suite —
+      // each still spawns a child process per case, so each keeps the exclusion.
+      { glob: "**/cli-dispatch.test.ts", reason: "spawns the CLI binary as a child process" },
+      { glob: "**/cli-project.test.ts", reason: "spawns the CLI binary as a child process" },
+      { glob: "**/cli-issue.test.ts", reason: "spawns the CLI binary as a child process" },
+      { glob: "**/cli-workspace.test.ts", reason: "spawns the CLI binary as a child process" },
+      { glob: "**/cli-skill.test.ts", reason: "spawns the CLI binary as a child process" },
       { glob: "**/cli-butler.test.ts", reason: "spawns the CLI binary as a child process" },
       { glob: "**/git.service.test.ts", reason: "drives real `git` processes against temp repos" },
       {

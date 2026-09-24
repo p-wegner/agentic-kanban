@@ -42,8 +42,15 @@ const BASELINE: Record<string, string[]> = {
   // together: 193 tests, ~78s. This shrink is exactly the explicit, reviewed edit the
   // mechanism above exists to force — the list moving in the good direction still needs
   // someone to notice.
+  // #1236 split the one `cli.test.ts` (643 s) into five per-command-group files. Five globs
+  // for what was one suite — the resource claim (a child process per case) is unchanged,
+  // and a wildcard is forbidden below, so each file is named.
   server: [
-    "**/cli.test.ts",
+    "**/cli-dispatch.test.ts",
+    "**/cli-project.test.ts",
+    "**/cli-issue.test.ts",
+    "**/cli-workspace.test.ts",
+    "**/cli-skill.test.ts",
     "**/cli-butler.test.ts",
     "**/git.service.test.ts",
     "**/api-workspace.test.ts",
@@ -68,8 +75,13 @@ const BASELINE: Record<string, string[]> = {
  * is designed to make visible, and which a reviewer can wave through as "one more line" —
  * still fails here until someone raises a number that has only ever been lowered. Lower it
  * whenever the list shrinks; think hard before raising it.
+ *
+ * Raised 10 -> 14 by #1236, which is the one movement this number has ever made upward, and
+ * it is not four new flakes: it is the same `cli.test.ts` suite split into five files so no
+ * single file exceeds 120 s (it was 643 s). The number of SUITES the gate skips is unchanged;
+ * the number of FILES is +4 because the wildcard rule below (rightly) forbids `cli-*.test.ts`.
  */
-const MAX_EXCLUSIONS = 10;
+const MAX_EXCLUSIONS = 14;
 
 /**
  * #679 made each entry `{ glob, reason }` so an exclusion carries the argument for its own
