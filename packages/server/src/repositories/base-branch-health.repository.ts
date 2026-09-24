@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { baseBranchHealth } from "@agentic-kanban/shared/schema";
-import { and, count, desc, eq, notLike, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, like, notLike, sql, type SQL } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { firstRow } from "../lib/first-row.js";
@@ -55,6 +55,21 @@ export interface RecordBaseBranchHealthInput {
   scope?: string | null;
 }
 
+/**
+ * The `failed_suites` column decoded (#1239) — it is stored as JSON text by `recordBaseBranchHealth`
+ * below, and a reader that wants the list should not re-derive that encoding. `[]` for null,
+ * empty or unparseable text.
+ */
+export function decodeFailedSuites(text: string | null | undefined): string[] {
+  if (!text) return [];
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Record one verify attempt against a project's base branch at a given sha. Returns the row id. */
 export async function recordBaseBranchHealth(
   input: RecordBaseBranchHealthInput,
@@ -97,15 +112,20 @@ export async function recordBaseBranchHealth(
  */
 export interface BaseBranchHealthReadOptions {
   branch?: string | null;
+  /**
+   * #1239 — every `rc/…` row regardless of which candidate: the "previous green rc" a heal
+   * ticket's merge range starts from. Ignored when `branch` is given.
+   */
+  anyRc?: boolean;
 }
 
 /** The rc-branch prefix, spelled once here so the readers need not import the rc-state module. */
 export const RC_HEALTH_BRANCH_PREFIX = "rc/";
 
 function branchLane(opts?: BaseBranchHealthReadOptions): SQL {
-  return opts?.branch
-    ? eq(baseBranchHealth.branch, opts.branch)
-    : notLike(baseBranchHealth.branch, `${RC_HEALTH_BRANCH_PREFIX}%`);
+  if (opts?.branch) return eq(baseBranchHealth.branch, opts.branch);
+  if (opts?.anyRc) return like(baseBranchHealth.branch, `${RC_HEALTH_BRANCH_PREFIX}%`);
+  return notLike(baseBranchHealth.branch, `${RC_HEALTH_BRANCH_PREFIX}%`);
 }
 
 /**

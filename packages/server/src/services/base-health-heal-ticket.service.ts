@@ -147,7 +147,8 @@ export async function reconcileBaseHealthHealTicket(
       return { action: "skipped_no_verdict", reason: `sweep outcome '${outcome}' is not a verdict about the base` };
     }
 
-    const open = await listOpenHealTickets(projectId, database);
+    // Base lane only: a green MASTER sweep must never close a ticket healing a release candidate.
+    const open = await listOpenHealTickets(projectId, database, { lane: "base" });
     if (outcome === "green") return await closeHealTickets({ input, database, open });
     return await fileOrRefreshHealTicket({ input, database, open });
   } catch (err) {
@@ -167,12 +168,19 @@ type HealTicketRow = Awaited<ReturnType<typeof listIssuesByExternalKeyPrefix>>[n
  * whose key carries no signature. The LIKE prefix is confirmed per row by parsing the key, so
  * a project id that happens to prefix another's cannot pull in a neighbour's tickets.
  */
-export async function listOpenHealTickets(projectId: string, database: Database = db): Promise<HealTicketRow[]> {
+export async function listOpenHealTickets(
+  projectId: string,
+  database: Database = db,
+  /** #1239 — `base` = tickets about the base branch only (what a master sweep may close); `all` includes rc heal tickets. */
+  opts: { lane?: "base" | "all" } = {},
+): Promise<HealTicketRow[]> {
   const rows = await listIssuesByExternalKeyPrefix(projectId, healTicketKeyScanPrefix(projectId), database);
   return rows.filter((row): row is HealTicketRow => {
     if (!row.externalKey) return false;
     if (LEGACY_TERMINAL_STATUS_NAMES.has(row.statusName ?? "")) return false;
-    return parseHealTicketExternalKey(row.externalKey)?.projectId === projectId;
+    const parsed = parseHealTicketExternalKey(row.externalKey);
+    if (parsed?.projectId !== projectId) return false;
+    return opts.lane === "all" || parsed.branch === null;
   });
 }
 

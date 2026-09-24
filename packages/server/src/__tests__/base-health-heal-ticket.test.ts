@@ -53,8 +53,8 @@ describe("failure signature (#1233)", () => {
   it("the key carries the signature, parses back, and a pre-#1233 key still parses", () => {
     const key = healTicketExternalKey("p1", "abc123");
     expect(key.startsWith(healTicketKeyScanPrefix("p1"))).toBe(true);
-    expect(parseHealTicketExternalKey(key)).toEqual({ projectId: "p1", signature: "abc123" });
-    expect(parseHealTicketExternalKey("base-health-heal:p1")).toEqual({ projectId: "p1", signature: null });
+    expect(parseHealTicketExternalKey(key)).toEqual({ projectId: "p1", signature: "abc123", branch: null });
+    expect(parseHealTicketExternalKey("base-health-heal:p1")).toEqual({ projectId: "p1", signature: null, branch: null });
     expect(parseHealTicketExternalKey("plugin-loop:p1:x")).toBeNull();
   });
 });

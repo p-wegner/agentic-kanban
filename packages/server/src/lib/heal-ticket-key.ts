@@ -41,9 +41,15 @@ export const HEAL_TICKET_KEY_PREFIX = "base-health-heal:";
 /** The tag every heal ticket carries, so the board can list them without parsing keys. */
 export const HEAL_TICKET_TAG = "heal";
 
-/** The `external_key` of a project's heal ticket for one failure signature. */
-export function healTicketExternalKey(projectId: string, signature: string): string {
-  return `${healTicketKeyPrefix(projectId)}${signature}`;
+/**
+ * The `external_key` of a project's heal ticket for one failure signature — and, since #1239,
+ * for one RELEASE CANDIDATE: `base-health-heal:<projectId>:<sig>:<rcBranch>`. The branch
+ * segment is what makes "at most one open heal ticket per signature" hold PER rc: the same
+ * failing set on `rc/20260925` and on `rc/20260926` are two tickets, because they are healed
+ * on two different trees and merged back separately. A base-lane key carries no branch.
+ */
+export function healTicketExternalKey(projectId: string, signature: string, branch?: string | null): string {
+  return `${healTicketKeyPrefix(projectId)}${signature}${branch ? `:${branch}` : ""}`;
 }
 
 /** The prefix every signature-scoped heal key of one project is built from. */
@@ -60,20 +66,55 @@ export function healTicketKeyScanPrefix(projectId: string): string {
   return `${HEAL_TICKET_KEY_PREFIX}${projectId}`;
 }
 
+export interface ParsedHealTicketKey {
+  projectId: string;
+  signature: string | null;
+  /** The release candidate the ticket heals ON (#1239); `null` for a base-lane ticket. */
+  branch: string | null;
+}
+
 /**
  * Inverse of {@link healTicketExternalKey}: null for anything that is not a heal key. A key
  * from before #1233 (`base-health-heal:<projectId>`, no signature) parses with `signature:
- * null`, so the prefix scan and the green-close path still reach it.
+ * null`, so the prefix scan and the green-close path still reach it. A signature is a hex
+ * digest or the `verify-failed` constant, so the FIRST `:` after it starts the branch (#1239);
+ * an rc branch (`rc/<date>[-N]`) never contains one.
  */
 export function parseHealTicketExternalKey(
   externalKey: string | null | undefined,
-): { projectId: string; signature: string | null } | null {
+): ParsedHealTicketKey | null {
   if (!externalKey || !externalKey.startsWith(HEAL_TICKET_KEY_PREFIX)) return null;
   const rest = externalKey.slice(HEAL_TICKET_KEY_PREFIX.length);
   if (!rest) return null;
   const sep = rest.indexOf(":");
-  if (sep === -1) return { projectId: rest, signature: null };
+  if (sep === -1) return { projectId: rest, signature: null, branch: null };
   const projectId = rest.slice(0, sep);
-  const signature = rest.slice(sep + 1);
-  return projectId ? { projectId, signature: signature || null } : null;
+  const tail = rest.slice(sep + 1);
+  const branchSep = tail.indexOf(":");
+  const signature = branchSep === -1 ? tail : tail.slice(0, branchSep);
+  const branch = branchSep === -1 ? null : tail.slice(branchSep + 1);
+  return projectId ? { projectId, signature: signature || null, branch: branch || null } : null;
+}
+
+// --- the merge-back ticket (#1239 item 3) ------------------------------------------------------
+
+/** Namespace prefix of the ticket whose workspace merges a promoted rc back into master. */
+export const MERGE_BACK_KEY_PREFIX = "rc-merge-back:";
+
+/** `rc-merge-back:<projectId>:<rcBranch>` — one per candidate, found by key like a heal ticket. */
+export function mergeBackExternalKey(projectId: string, rcBranch: string): string {
+  return `${MERGE_BACK_KEY_PREFIX}${projectId}:${rcBranch}`;
+}
+
+/** Inverse of {@link mergeBackExternalKey}; null for anything else. */
+export function parseMergeBackExternalKey(
+  externalKey: string | null | undefined,
+): { projectId: string; branch: string } | null {
+  if (!externalKey || !externalKey.startsWith(MERGE_BACK_KEY_PREFIX)) return null;
+  const rest = externalKey.slice(MERGE_BACK_KEY_PREFIX.length);
+  const sep = rest.indexOf(":");
+  if (sep === -1) return null;
+  const projectId = rest.slice(0, sep);
+  const branch = rest.slice(sep + 1);
+  return projectId && branch ? { projectId, branch } : null;
 }
