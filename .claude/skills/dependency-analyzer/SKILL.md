@@ -1,6 +1,7 @@
 ---
 name: dependency-analyzer
 description: Analyze a ticket and its relationships to other open tickets, suggest dependency updates
+disable-model-invocation: true
 ---
 
 Analyze the given issue and its relationships to other open (non-Done, non-Cancelled) issues on the board.

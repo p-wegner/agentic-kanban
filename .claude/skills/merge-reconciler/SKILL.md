@@ -1,6 +1,7 @@
 ---
 name: merge-reconciler
 description: Land a whole BATCH of stranded/mergeable-but-conflicting workspaces onto the base branch in the most efficient way. You are handed the full batch as injected JSON ({{strandedBatch}}), analyze the whole set first (clean-independent / file-overlap clusters / migration collisions / dependencies), then land everything via the board's SAFE primitives — never manual git in the main checkout. Resolve each overlapping cluster's union ONCE in an integration worktree instead of N re-conflicting rebases. Report what landed and what was escalated.
+disable-model-invocation: true
 ---
 
 # merge-reconciler

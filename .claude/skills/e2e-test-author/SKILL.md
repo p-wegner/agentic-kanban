@@ -1,6 +1,7 @@
 ---
 name: e2e-test-author
 description: Generate the highest-ROI end-to-end tests from a prioritized coverage-gap backlog, then subject them to an adversarial review that tries to REFUTE them before they land. Consumes the verification model (_priorities.md / _coverage.json from coverage-intelligence), authors complete user-workflow tests (not isolated clicks) using the target project's own anti-flake conventions, makes each test DECLARE the coverage dimensions it contributes, runs independent adversarial reviewer subagents (overfitted assertions, flaky interactions, false positives, missed edge cases), fixes what they find, and writes the new coverage back into the model so re-running the pipeline improves. Use when the user asks to "write the missing tests", "generate high-value e2e tests", "author tests for the coverage gaps", "close the top coverage gaps", or as phase 3 of an end-to-end verification effort. For a single ad-hoc test in agentic-kanban use the project `e2e-author` skill instead; this skill is the gap-driven, reviewed, batch author.
+disable-model-invocation: true
 ---
 
 # e2e-test-author

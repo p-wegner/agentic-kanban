@@ -2,6 +2,7 @@
 name: learning-step
 description: Analyze agent session data (kanban sessions, JSONL transcripts, or inline context), detect friction points, and produce targeted improvements to documentation, hooks, skills, or code.
 argument-hint: "[--issue <N>] [--last] [--session <path>] [--analysis-only]"
+disable-model-invocation: true
 ---
 
 # Learning Step — Agent Interaction Analysis
