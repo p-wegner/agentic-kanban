@@ -1,6 +1,7 @@
 ---
 name: coverage-intelligence
 description: Build a multidimensional functional-coverage model for a software system and rank the highest-ROI verification gaps. Binds the observable-behaviour model (from behavior-discovery) against requirements (PRD/ADRs/user stories/acceptance criteria), the existing test suites (unit/integration/e2e), and historical signals (git churn, bug history) to compute — per behaviour — whether it is covered / partial / uncovered / undocumented-implemented / documented-missing, across many orthogonal coverage dimensions (capability, requirement, workflow, permission, navigation, API, error, boundary, state-transition, config, accessibility, regression, risk). Produces a coverage matrix, gap report, and an ROI-ranked test backlog. NOT line coverage. Use when the user asks "what's our real test coverage", "what behaviour is unverified", "where are the coverage gaps", "what tests give the most value", "map requirements to tests", "build a coverage model", or as phase 2 of an end-to-end verification effort.
+disable-model-invocation: true
 ---
 
 # coverage-intelligence

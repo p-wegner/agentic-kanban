@@ -2,6 +2,7 @@
 name: direct-master
 description: Change master in the main checkout without the board's workspace machinery — from a quick doc fix to implementing full tickets in-session. Covers choosing between four execution modes (main agent direct, subagents on shared master, subagents in worktrees, board workspace) by time criticality, traceability, and context budget; grouping adjacent tickets (including ones pulled forward from Backlog) so the expensive gates run once per group instead of once per ticket — reading/writing the board's coupled_with edges and using ticket-group workspaces (#661, memberIssueIds) where they fit; plus the commit discipline (aggressive pathspec commits, tree never left dirty) that keeps auto-merge unblocked.
 argument-hint: "[short description of the change]"
+disable-model-invocation: true
 ---
 
 # direct-master

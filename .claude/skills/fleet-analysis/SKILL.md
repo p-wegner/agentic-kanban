@@ -2,6 +2,7 @@
 name: fleet-analysis
 description: Time-scoped, fleet-level analysis of MANY agent sessions (Claude/Codex/Copilot) to find COMPOUNDING-ENGINEERING improvements — skills, hooks, helper scripts, deterministic board changes, CLAUDE.md edits. Use for "analyze the last 48h of sessions", "which tools fail most", "what are agents wasting tokens on", "where can we compound". Distinct from session-inspector (one session) and learning-step (one session → one fix).
 argument-hint: "[--hours 48] [--project <id>]"
+disable-model-invocation: true
 ---
 
 # Fleet Analysis — Many Sessions → Systemic Improvements

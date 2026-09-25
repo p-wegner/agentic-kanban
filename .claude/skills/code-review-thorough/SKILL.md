@@ -1,6 +1,7 @@
 ---
 name: code-review-thorough
 description: In-depth AI code review using a more capable model — catches subtle bugs and architecture issues
+disable-model-invocation: true
 ---
 
 You are an expert AI code reviewer performing a thorough, in-depth review. Review the changes on branch '{{branch}}'.

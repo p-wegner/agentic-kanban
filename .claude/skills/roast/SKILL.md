@@ -1,6 +1,7 @@
 ---
 name: roast
 description: Deliver a good-natured, affectionate roast of the board's current state — the Butler's /roast party trick.
+disable-model-invocation: true
 ---
 
 The user invoked `/roast`. Deliver a short, good-natured roast of the board's

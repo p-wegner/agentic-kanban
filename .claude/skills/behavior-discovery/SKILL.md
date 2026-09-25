@@ -1,6 +1,7 @@
 ---
 name: behavior-discovery
 description: Build a high-confidence model of a software system's EXTERNALLY OBSERVABLE behaviour — capabilities, actors, permissions, entry points, workflows, state transitions and error states — by combining many evidence sources (domain docs, OpenAPI/GraphQL schemas, source, routing, running-UI exploration, existing tests, git history) and degrading gracefully when some are absent. Infers business semantics; never paraphrases code. Marks unknowns explicitly instead of guessing. Output is the shared `_behavior-model.json` that the coverage-intelligence and e2e-test-author skills consume. Use when the user asks to "model what the app does", "discover observable behaviour", "build a verification/behaviour model", "explore the running app and map its capabilities", or as phase 1 of an end-to-end verification effort.
+disable-model-invocation: true
 ---
 
 # behavior-discovery

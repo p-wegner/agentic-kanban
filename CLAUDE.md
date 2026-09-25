@@ -87,6 +87,8 @@ Never assign `$pid`/`$host`/`$home`/`$true`/`$null`/`$pshome` (use `$procId`/`$p
 Prompt templates in the `agent_skills` table, written to `.claude/skills/<name>/SKILL.md` in each worktree (API `/api/agent-skills`, MCP `list/get/create/export_agent_skills`). **Built-ins** (`packages/server/src/builtin-skills.ts`) are generic and ship in npm; **project-specific skills live only in `.claude/skills/` — do NOT add them to `builtin-skills.ts`.** `session-inspector` is a gitignored junction to `claude-session-tools` (recreate it on a fresh clone). The review prompt is the built-in `code-review` (override per project). The bundled skill `packages/server/skills/agentic-kanban/` is **generated** — after adding an MCP tool or CLI command run `pnpm skill:generate` (`bundled-skill-freshness.test.ts` fails otherwise). Plugins: read `docs/plugin-development.md` first.
 
 ## Skill Map
+Skills marked * are user-invoked (`/name`); an agent that needs one reads `.claude/skills/<name>/SKILL.md` directly.
+
 | Need | Skill |
 |---|---|
 | Start/stop/health-check dev server | `dev-server` |
@@ -98,11 +100,11 @@ Prompt templates in the `agent_skills` table, written to `.claude/skills/<name>/
 | Commit beside other agents in one checkout | `shared-checkout-commit` |
 | Board via MCP / reflect progress | `board-navigator`, `kanban-workflow` |
 | Per-cycle board health | `board-monitor` |
-| Drive a stuck issue to master | `unstuck` |
-| Clean up stale worktrees/sessions/artifacts | `cleanup` |
-| Publish/release npm package | `publish`, `release` |
-| Change directly on master | `direct-master` |
-| Tune the board along a dimension, or lab the Sentinel | `sentinel` lab: `.claude/skills/sentinel/references/lab.md` (never on a watch wakeup) |
+| Drive a stuck issue to master | `unstuck`* |
+| Clean up stale worktrees/sessions/artifacts | `cleanup`* |
+| Publish/release npm package | `publish`*, `release`* |
+| Change directly on master | `direct-master`* |
+| Tune the board along a dimension, or lab the Sentinel | `sentinel`* lab: `.claude/skills/sentinel/references/lab.md` (never on a watch wakeup) |
 
 ## Common Commands
 - **`pnpm dev:devboard`** in THIS main checkout (plain `pnpm dev` here would take the stable board's ports and DB). Plain `pnpm dev` is for worktrees (`feature/<N>-…` = `3001+N`/`5173+N`). Safe headless launch: `dev-server` skill. Clean-clone blockers: `docs/install.md`.
