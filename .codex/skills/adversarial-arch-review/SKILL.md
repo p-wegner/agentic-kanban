@@ -2,6 +2,7 @@
 name: adversarial-arch-review
 description: Adversarial, code-metrics-driven architecture review. Distrust the codebase's own self-assessment (memory, "DONE/COMPLETE" notes, comments), use churn/complexity/coupling metrics to TARGET where to dig and to INFER structural problems, verify the most damning findings directly before relaying, and answer three questions — what architecture decisions truly limit future work, what dependencies (internal + external) are risky, what code is concerning. Use for "adversarial architecture review", "be critical about the architecture", "what's truly limiting us", "metrics-based code health audit", "where are the real risks".
 argument-hint: "[optional: focus area, package, or 'file tickets']"
+disable-model-invocation: true
 ---
 
 # adversarial-arch-review

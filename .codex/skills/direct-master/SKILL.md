@@ -2,6 +2,7 @@
 name: direct-master
 description: Change master in the main checkout without the board's workspace machinery — from a quick doc fix to implementing full tickets in-session. Covers choosing between four execution modes (main agent direct, subagents on shared master, subagents in worktrees, board workspace) by time criticality, traceability, and context budget; grouping adjacent tickets (including ones pulled forward from Backlog) so the expensive gates run once per group instead of once per ticket — reading/writing the board's coupled_with edges and using ticket-group workspaces (#661, memberIssueIds) where they fit; plus the commit discipline (aggressive pathspec commits, tree never left dirty) that keeps auto-merge unblocked.
 argument-hint: "[short description of the change]"
+disable-model-invocation: true
 ---
 
 # direct-master
@@ -23,7 +24,7 @@ Rules of thumb: board = slow but safe and best traceable; worktree subagents nex
 
 **Mode 2 operating rules** (shared checkout, concurrent writers):
 - Partition by file overlap BEFORE launching: agents in the same wave must have disjoint file sets. Overlapping tickets run in later waves, sequentially.
-- Every agent commits **by pathspec, never via the shared index**: `git commit -F msg.txt -- <exact paths>` (new files: targeted `git add <path>` first). Never `git add -A`/`-a`/`.`, never `git reset`. On `index.lock` contention: wait and retry. (Same rule as the root CLAUDE.md "Several agents committing in ONE checkout" section — it exists because a swept-index commit already happened once.)
+- Every agent commits **by pathspec, never via the shared index**: `git commit -F msg.txt -- <exact paths>` (new files: targeted `git add <path>` first). Never `git add -A`/`-a`/`.`, never `git reset`. On `index.lock` contention: wait and retry. (Same rule as the root CLAUDE.md Scope Discipline section and the `shared-checkout-commit` skill — it exists because a swept-index commit already happened once.)
 - Give each agent its allowed file list explicitly and forbid everything else.
 - Orchestrator verifies BETWEEN waves: typecheck + targeted tests on the combined result, before the next wave builds on it.
 - Reflect state on the board: move tickets In Progress at launch, Done only after the orchestrator has verified the commit (never on the subagent's word alone).

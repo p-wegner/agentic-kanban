@@ -2,6 +2,7 @@
 name: endpoint-docs
 description: Create, maintain, and query a concise Markdown catalog of the REST API (docs/api/endpoints.md) — method, path, request shape, response, semantic — with a frontmatter SHA so staleness is detected via git diff. Use when asked "what endpoints exist", "is there an API for X", "where is endpoint Y used", "document the API", or after adding/changing Hono routes.
 argument-hint: "[build | update | check | find <q> | get <METHOD> <path> | usage <path>]"
+disable-model-invocation: true
 ---
 
 # endpoint-docs
