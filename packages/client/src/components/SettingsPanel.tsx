@@ -309,7 +309,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
 
               {/* Plugins tab */}
               {tab === "plugins" && (
-                <PluginsSettings activeProjectId={activeProjectId} />
+                <PluginsSettings activeProjectId={activeProjectId} settings={settings} set={set} />
               )}
 
               {/* MCP Tools tab */}

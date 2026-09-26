@@ -3771,6 +3771,49 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/plugins/{id}/skills/{name}/listing:
+    post:
+      summary: "#1252 — per-skill listing-mode picker (the Plugins view selector left out of #1251)."
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_skills_name_listing
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                mode:
+                  type: string
+              required:
+                - projectId
+              additionalProperties: true
+              x-unknown-keys: passthrough
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/plugins/{id}/skills/{name}/run:
     post:
       summary: POST /api/plugins/{id}/skills/{name}/run

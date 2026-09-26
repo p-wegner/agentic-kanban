@@ -14,6 +14,7 @@ import {
   pluginSaveArtifactBody,
   pluginScaffoldFillBody,
   pluginScaffoldSaveBody,
+  pluginSkillListingBody,
   pluginSyncConfigBody,
   pluginSyncTriggerBody,
 } from "./plugin-body-schemas.js";
@@ -41,6 +42,13 @@ import { listPluginDocs, readPluginDoc } from "../services/plugin-docs.service.j
  *   POST   /api/plugins/:id/output-location { projectId, location: "leading" | "sidecar" } —
  *            "leading" (default) writes into the project's leading repo; "sidecar" writes into
  *            a dedicated repo (created on first use) named "<pluginSlug>-requirements"
+ *   POST   /api/plugins/:id/skills/:name/listing { projectId, mode } (#1252) — one skill's
+ *            project-scoped listing override (`on | name-only | user-invocable-only | off`),
+ *            outranking the manifest's own hint and the global `plugin_skill_listing_default`.
+ *            Re-syncs `.claude/settings.local.json` in the project's MAIN checkout immediately
+ *            (a worktree resolves fresh at provisioning time — see `plugin-skill-listing.ts`).
+ *            `GET /api/plugins?projectId=` returns each plugin's resolved `skillListings`
+ *            (mode + source + manifest hint + description size) for the Plugins-view picker.
  *   GET    /api/plugins/:id/views?projectId=  view descriptors + running state + url
  *   POST   /api/plugins/:id/views/:viewId/start { projectId } → { url, port, pid, ready }
  *          (`ready: false` = the child is up but not answering its health probe yet — poll
@@ -207,6 +215,13 @@ export function createPluginsRoute(
     const body = await parsePluginBody(c, pluginOutputLocationBody);
     const location = typeof body.location === "string" ? body.location : "";
     return c.json(await service.setOutputLocation(c.req.param("id"), body.projectId, location));
+  });
+
+  // #1252 — per-skill listing-mode picker (the Plugins view selector left out of #1251).
+  router.post("/:id/skills/:name/listing", async (c) => {
+    const body = await parsePluginBody(c, pluginSkillListingBody);
+    const mode = typeof body.mode === "string" ? body.mode : "";
+    return c.json(await service.setSkillListingModeForProject(c.req.param("id"), body.projectId, c.req.param("name"), mode));
   });
 
   // GET /api/plugins/:id/docs/*?theme=dark|light — serve one declared doc from the plugin checkout.
