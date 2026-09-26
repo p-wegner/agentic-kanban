@@ -6168,6 +6168,29 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{id}/flushes:
+    get:
+      summary: throws — see `readFlushState`).
+      tags:
+        - board-monitor
+      operationId: get_api_projects_id_flushes
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/graph:
     get:
       summary: GET /api/projects/:id/graph

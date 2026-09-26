@@ -7,7 +7,7 @@
  * them. Kept intentionally small and flat so it is cheap to poll every few seconds.
  */
 
-import type { ImpactMissRateSummary, RcCandidateSummary } from "./monitor.js";
+import type { FlushRecord, ImpactMissRateSummary, QueuePressureSummary, RcCandidateSummary } from "./monitor.js";
 
 /** Per-column ticket count, in the project's own column order. */
 export interface TrackerSnapshotColumn {
@@ -74,4 +74,8 @@ export interface TrackerSnapshotResponse {
    * inherited-red count. `null` when no rc was ever cut; optional on the wire for an older server.
    */
   rc?: RcCandidateSummary | null;
+  /** The queue-pressure signal (#1246). Optional on the wire for an older server. */
+  queuePressure?: QueuePressureSummary;
+  /** The most recent flush's heal state (#1246), `null` when this project never flushed. */
+  flush?: FlushRecord | null;
 }

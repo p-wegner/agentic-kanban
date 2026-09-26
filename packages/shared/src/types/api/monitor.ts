@@ -222,6 +222,47 @@ export interface AutopilotStatusResponse {
  * whether each number came from the posture (`batchingFromPosture`) or an explicit per-project
  * override, so "why is this 1?" is answerable from the chip alone.
  */
+/** The queue-pressure signal (#1246, decision 020 part 5). Mirrors `computeQueuePressure`'s output. */
+export interface QueuePressureSummary {
+  queueDepth: number;
+  oldestWaitingMs: number | null;
+  arrivalsPerHour: number;
+  gateRunsPerHour: number;
+  windowMs: number;
+}
+
+/** The queue flush's heal state machine (#1246, decision 020 part 4). */
+export type FlushState = "flushed" | "sweeping" | "red" | "healing" | "healed" | "merged-back" | "abandoned";
+
+export type FlushTrigger = "auto" | "manual" | "cli";
+
+/** One append-only flush record (decision 020 part 2). */
+export interface FlushRecord {
+  /** `flush/<date>-N`. */
+  id: string;
+  at: string;
+  triggeredBy: FlushTrigger;
+  /** Ticket numbers of the member branches the flush landed. */
+  memberIssueNumbers: number[];
+  /** Member branch names, same order as `memberIssueNumbers`. */
+  memberBranches: string[];
+  landingSha: string | null;
+  tag: string;
+  /** The rc branch or `master` this flush swept into. */
+  sweepTarget: string;
+  state: FlushState;
+  /** Open heal ticket numbers filed against this flush's red, if any. */
+  openHealTickets: number[];
+  updatedAt: string;
+}
+
+/** `GET /api/projects/:id/flushes` — latest + history (#1246). */
+export interface FlushesResponse {
+  projectId: string;
+  latest: FlushRecord | null;
+  history: FlushRecord[];
+}
+
 export interface DeliveryStatusResponse {
   projectId: string;
   posture: RiskPosture;
@@ -255,6 +296,16 @@ export interface DeliveryStatusResponse {
    * checkout is not there — a project not run under the two-board setup at all.
    */
   rc?: RcCandidateSummary | null;
+  /**
+   * The queue-pressure signal (#1246, decision 020 part 5): queue depth, oldest waiting age,
+   * arrivals/hour vs gate-runs/hour. Optional on the wire for an older server.
+   */
+  queuePressure?: QueuePressureSummary;
+  /**
+   * The most recent flush record (#1246, decision 020 part 2), `null` when this project has
+   * never flushed. Optional on the wire for an older server.
+   */
+  flush?: FlushRecord | null;
 }
 
 /** One release candidate's lifecycle state (#1238). Mirrors `scripts/rc-state.mjs`. */

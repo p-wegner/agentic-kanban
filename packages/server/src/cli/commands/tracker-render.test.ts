@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { BoardStatusResponse, BoardStatusIssue } from "@agentic-kanban/shared";
-import { renderTrackerFrame, ageSince } from "./tracker-render.js";
+import type { BoardStatusResponse, BoardStatusIssue, FlushRecord, QueuePressureSummary } from "@agentic-kanban/shared";
+import { renderTrackerFrame, ageSince, flushLine } from "./tracker-render.js";
 
 function issue(overrides: Partial<BoardStatusIssue>): BoardStatusIssue {
   return {
@@ -164,6 +164,78 @@ describe("renderTrackerFrame", () => {
     for (const line of tiny.lines) {
       expect(line.length).toBeLessThanOrEqual(20);
     }
+  });
+});
+
+describe("renderTrackerFrame — queue pressure and flush lines (#1246)", () => {
+  const pressure: QueuePressureSummary = {
+    queueDepth: 7,
+    oldestWaitingMs: 48 * 60 * 1000,
+    arrivalsPerHour: 3.2,
+    gateRunsPerHour: 1.1,
+    windowMs: 60 * 60 * 1000,
+  };
+
+  const flush: FlushRecord = {
+    id: "flush/20260926-1",
+    at: "2026-09-26T10:00:00.000Z",
+    triggeredBy: "auto",
+    memberIssueNumbers: [1200, 1201],
+    memberBranches: ["feature/ak-1200-x", "feature/ak-1201-y"],
+    landingSha: "abc123",
+    tag: "flush/20260926-1",
+    sweepTarget: "master",
+    state: "red",
+    openHealTickets: [1210, 1211],
+    updatedAt: "2026-09-26T10:05:00.000Z",
+  };
+
+  it("renders the queue-pressure line right after the header when given", () => {
+    const frame = renderTrackerFrame(FIXTURE, { limit: 5 }, { width: 80, nowMs: NOW_MS, queuePressure: pressure });
+    expect(frame.lines[1]).toBe("queue 7 waiting, oldest 48 min, 3.2 arrivals/h vs 1.1 gates/h");
+  });
+
+  it("renders the flush line with its open heal ticket count", () => {
+    const frame = renderTrackerFrame(FIXTURE, { limit: 5 }, { width: 80, nowMs: NOW_MS, flush });
+    expect(frame.lines[1]).toBe("flush flush/20260926-1 red | 2 heal open");
+  });
+
+  it("omits both lines when neither is given", () => {
+    const frame = renderTrackerFrame(FIXTURE, { limit: 5 }, { width: 80, nowMs: NOW_MS });
+    expect(frame.lines.some((l) => l.startsWith("queue "))).toBe(false);
+    expect(frame.lines.some((l) => l.startsWith("flush "))).toBe(false);
+  });
+
+  it("renders rc, queue-pressure, and flush lines together, in that order", () => {
+    const frame = renderTrackerFrame(FIXTURE, { limit: 5 }, {
+      width: 80,
+      nowMs: NOW_MS,
+      rc: { branch: "rc/20260926", sha: "aaa", state: "green", updatedAt: null, tag: null, failedSuites: [] },
+      queuePressure: pressure,
+      flush,
+    });
+    expect(frame.lines[1]).toContain("rc rc/20260926");
+    expect(frame.lines[2]).toBe("queue 7 waiting, oldest 48 min, 3.2 arrivals/h vs 1.1 gates/h");
+    expect(frame.lines[3]).toBe("flush flush/20260926-1 red | 2 heal open");
+  });
+});
+
+describe("flushLine", () => {
+  it("omits the heal-open segment when there are no open heal tickets", () => {
+    const flush: FlushRecord = {
+      id: "flush/20260926-1",
+      at: "2026-09-26T10:00:00.000Z",
+      triggeredBy: "manual",
+      memberIssueNumbers: [],
+      memberBranches: [],
+      landingSha: null,
+      tag: "flush/20260926-1",
+      sweepTarget: "master",
+      state: "merged-back",
+      openHealTickets: [],
+      updatedAt: "2026-09-26T10:05:00.000Z",
+    };
+    expect(flushLine(flush)).toBe("flush flush/20260926-1 merged-back");
   });
 });
 
