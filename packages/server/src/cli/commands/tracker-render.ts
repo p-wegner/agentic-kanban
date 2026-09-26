@@ -1,5 +1,6 @@
-import type { BoardStatusResponse, BoardStatusIssue, RcCandidateSummary } from "@agentic-kanban/shared";
+import type { BoardStatusResponse, BoardStatusIssue, FlushRecord, QueuePressureSummary, RcCandidateSummary } from "@agentic-kanban/shared";
 import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared";
+import { formatQueuePressure } from "../../lib/queue-pressure.js";
 
 /**
  * Pure frame renderer for `pnpm cli -- tracker` (#1141) — a dense, fixed-height terminal
@@ -11,6 +12,10 @@ import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared";
 export interface TrackerFrameOptions {
   /** #1239 — the release candidate line (state, open heal tickets, inherited red); omitted = no line. */
   rc?: RcCandidateSummary | null;
+  /** #1246 — the queue-pressure signal; omitted = no line. */
+  queuePressure?: QueuePressureSummary | null;
+  /** #1246 — the most recent flush's heal state; omitted or null = no line. */
+  flush?: FlushRecord | null;
   /** Terminal width to wrap/truncate against. Falls back to 80 when unset or non-positive. */
   width?: number;
   /** Injected for deterministic tests; epoch ms, defaults to the real clock. */
@@ -62,6 +67,13 @@ export function rcLine(rc: RcCandidateSummary): string {
   if (rc.state === "red" && rc.failedSuites.length > 0) parts.push(`${rc.failedSuites.length} failing`);
   if (rc.openHealTickets !== undefined) parts.push(`heal open ${rc.openHealTickets}`);
   if (rc.inheritedRed !== undefined) parts.push(`inherited red ${rc.inheritedRed}`);
+  return parts.join(" | ");
+}
+
+/** `flush flush/20260926-1 red | 2 heal open` — decision 020's operator questions in one line. */
+export function flushLine(flush: FlushRecord): string {
+  const parts = [`flush ${flush.id} ${flush.state}`];
+  if (flush.openHealTickets.length > 0) parts.push(`${flush.openHealTickets.length} heal open`);
   return parts.join(" | ");
 }
 
@@ -136,6 +148,8 @@ export function renderTrackerFrame(
   );
   lines.push(header);
   if (options.rc) lines.push(truncate(rcLine(options.rc), width));
+  if (options.queuePressure) lines.push(truncate(formatQueuePressure(options.queuePressure), width));
+  if (options.flush) lines.push(truncate(flushLine(options.flush), width));
 
   const inFlight = snapshot.issues.filter((issue) => issue.workspace && TRACKER_LINE_STATUSES.has(issue.workspace.status));
   if (inFlight.length === 0) {

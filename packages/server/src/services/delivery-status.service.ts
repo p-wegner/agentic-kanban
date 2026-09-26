@@ -13,6 +13,8 @@ import { resolveTrainWindowConfig } from "./merge-train-window.js";
 import { readImpactMissRate } from "./test-impact-miss-rate.js";
 import { currentRcCandidate, readRcState, resolveStableCheckoutFor, toRcCandidateSummary } from "./rc-state.js";
 import { rcHealSummary } from "./rc-heal-ticket.service.js";
+import { getQueuePressure } from "./queue-pressure.service.js";
+import { latestFlush, readFlushState } from "./flush-state.js";
 
 const trainMaxSizePref = projectPref("train_max_size");
 const promoteCadencePref = projectPref("promote_cadence");
@@ -57,6 +59,10 @@ export async function getDeliveryStatus(projectId: string, database: Database = 
     promoteCadence: prefMap.get(promoteCadencePref.key(projectId)) ?? null,
     // #1239 — plus the candidate's open heal tickets and how much of its red master also carries.
     rc: await withRcHeal(projectId, toRcCandidateSummary(currentRcCandidate(readRcState(resolveStableCheckoutFor(project.repoPath)))), database),
+    // #1246 — the pressure signal, and the most recent flush's heal state, off the same stable
+    // checkout's `.kanban/` directory the rc summary above already reads.
+    queuePressure: await getQueuePressure(projectId, project.repoPath, database),
+    flush: latestFlush(readFlushState(resolveStableCheckoutFor(project.repoPath))),
   };
 }
 
