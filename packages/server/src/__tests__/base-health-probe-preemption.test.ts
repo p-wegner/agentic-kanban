@@ -3,6 +3,7 @@ import {
   clearProbeYieldStreak,
   probeConsecutiveYields,
   probeGatePollIntervalMs,
+  probeYieldHistory,
   probeYieldStreakFloorMs,
   probeMaxConsecutiveYields,
   recordProbeYield,
@@ -195,5 +196,43 @@ describe("the consecutive-yield streak (#989)", () => {
     // That run completes and clears the streak, so the next gate can preempt again.
     clearProbeYieldStreak("p1");
     expect(decide("p1").yield).toBe(true);
+  });
+});
+
+/**
+ * #1256 — what a caller EXPLAINING a late verdict (`pnpm promote`'s wait loop, an operator reading
+ * the reprobe response) needs, as opposed to `probeConsecutiveYields`: a total across the whole
+ * wait rather than just the anti-thrash streak, and one that is NOT reset by a below-floor "free"
+ * yield the way the streak deliberately is — a caller explaining lateness wants every attempt
+ * counted, including the cheap ones the escape logic is right to ignore.
+ */
+describe("probeYieldHistory (#1256)", () => {
+  beforeEach(() => resetProbeYieldStreaksForTests());
+  afterEach(() => resetProbeYieldStreaksForTests());
+
+  it("starts empty, per project, independently", () => {
+    expect(probeYieldHistory("p1")).toEqual({ totalYields: 0, totalDiscardedMs: 0 });
+    recordProbeYield("p1", 90_000);
+    expect(probeYieldHistory("p2")).toEqual({ totalYields: 0, totalDiscardedMs: 0 });
+  });
+
+  it("accumulates count and discarded time across yields, even below the streak floor", () => {
+    recordProbeYield("p1", 3_000); // below the 60s floor — spends no streak, but is a real yield
+    recordProbeYield("p1", 90_000);
+    expect(probeYieldHistory("p1")).toEqual({ totalYields: 2, totalDiscardedMs: 93_000 });
+    // The streak counter is unaffected by the below-floor yield, unlike history.
+    expect(probeConsecutiveYields("p1")).toBe(1);
+  });
+
+  it("an untimed yield still counts toward history, contributing 0ms discarded", () => {
+    recordProbeYield("p1");
+    expect(probeYieldHistory("p1")).toEqual({ totalYields: 1, totalDiscardedMs: 0 });
+  });
+
+  it("clears together with the streak on a completed run", () => {
+    recordProbeYield("p1", 90_000);
+    recordProbeYield("p1", 90_000);
+    clearProbeYieldStreak("p1");
+    expect(probeYieldHistory("p1")).toEqual({ totalYields: 0, totalDiscardedMs: 0 });
   });
 });

@@ -133,9 +133,30 @@ export function shouldProbeYield(input: {
  */
 const consecutiveYields = new Map<string, number>();
 
+/**
+ * Cumulative yield history for a project, kept ALONGSIDE the consecutive-streak counter rather
+ * than replacing it: the streak decides the run-to-completion escape and clears on every verdict,
+ * but a caller EXPLAINING lateness (`pnpm promote`'s wait loop, an operator reading the reprobe
+ * response) wants "how many times has this been yielded, and how much verify has it thrown away"
+ * across the whole wait — a number that must therefore survive a completed-but-yielded-earlier
+ * run and only reset when the caller starts a fresh wait (a new reprobe request with no prior
+ * yields to explain). Kept in memory like the streak counter, for the same reason: it explains a
+ * live wait, not a historical audit — a process restart ends the run whose lateness it described.
+ */
+const yieldHistory = new Map<string, { totalYields: number; totalDiscardedMs: number }>();
+
 /** How many times in a row this project's probe has yielded (diagnostics/tests). */
 export function probeConsecutiveYields(projectId: string): number {
   return consecutiveYields.get(projectId) ?? 0;
+}
+
+/**
+ * Total yields and total discarded verify time recorded for this project since the last cleared
+ * streak (#1256) — what a caller waiting on a verdict needs to explain WHY it is late, as opposed
+ * to `probeConsecutiveYields`, which only the run-to-completion escape consults.
+ */
+export function probeYieldHistory(projectId: string): { totalYields: number; totalDiscardedMs: number } {
+  return yieldHistory.get(projectId) ?? { totalYields: 0, totalDiscardedMs: 0 };
 }
 
 /**
@@ -149,6 +170,14 @@ export function probeConsecutiveYields(projectId: string): number {
  */
 export function recordProbeYield(projectId: string, discardedMs?: number): number {
   const current = probeConsecutiveYields(projectId);
+  // #1256 — recorded regardless of the streak floor: even a "free" yield (too cheap to spend
+  // streak budget on) still discarded a probe attempt, and a caller explaining lateness wants
+  // every attempt counted, not just the ones that count against the anti-thrash escape.
+  const history = probeYieldHistory(projectId);
+  yieldHistory.set(projectId, {
+    totalYields: history.totalYields + 1,
+    totalDiscardedMs: history.totalDiscardedMs + (discardedMs ?? 0),
+  });
   if (discardedMs !== undefined && discardedMs < probeYieldStreakFloorMs()) return current;
   const next = current + 1;
   consecutiveYields.set(projectId, next);
@@ -164,9 +193,14 @@ export function recordProbeYield(projectId: string, discardedMs?: number): numbe
  */
 export function clearProbeYieldStreak(projectId: string): void {
   consecutiveYields.delete(projectId);
+  // #1256 — a landed verdict is the answer the yield history exists to explain the ABSENCE of;
+  // once it exists there is nothing left to explain, and carrying stale counts forward would
+  // misdescribe the NEXT wait as already having yielded before it had.
+  yieldHistory.delete(projectId);
 }
 
-/** Test seam: forget every project's streak. */
+/** Test seam: forget every project's streak and yield history. */
 export function resetProbeYieldStreaksForTests(): void {
   consecutiveYields.clear();
+  yieldHistory.clear();
 }
