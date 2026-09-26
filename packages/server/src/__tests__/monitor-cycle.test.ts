@@ -34,6 +34,7 @@ import {
   type ProcessWorkspaceDeps,
   type WorkspaceCandidate,
 } from "../startup/monitor-cycle.js";
+import { describeSkippedAutoMerge } from "../startup/monitor-cycle-actions.js";
 
 // Returns a chainable drizzle-style select builder that resolves to `result`.
 function makeSelectChain(result: unknown[]) {
@@ -82,7 +83,7 @@ function makeDeps(): ProcessWorkspaceDeps {
     sessionManager: { isProcessAlive: vi.fn(() => true), stopSession: vi.fn() } as unknown as ProcessWorkspaceDeps["sessionManager"],
     boardEvents: { broadcast: vi.fn() } as unknown as ProcessWorkspaceDeps["boardEvents"],
     workspaceActions: makeWorkspaceActions(),
-    autoMergeEnabled: true,
+    monitorOwnsMerge: true,
     autoMergeInReview: false,
     reviewSessionIds: new Set<string>(),
     monitorRecentActions: [],
@@ -370,7 +371,7 @@ describe("processWorkspaceCandidates — idle + readyForMerge=false", () => {
 
 describe("processWorkspaceCandidates — auto_merge_in_review (not-ready In Review)", () => {
   it("does NOT merge or relaunch a zero-diff In-Review workspace awaiting attention", async () => {
-    const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeInReview: true };
+    const deps = { ...makeDeps(), monitorOwnsMerge: true, autoMergeInReview: true };
     const candidate: WorkspaceCandidate = {
       ...baseCandidate,
       readyForMerge: false,
@@ -393,7 +394,7 @@ describe("processWorkspaceCandidates — auto_merge_in_review (not-ready In Revi
       .mockReturnValueOnce(makeSelectChain([{ count: 1 }]))
       .mockReturnValueOnce(makeSelectChain([{ id: "status-in-progress" }]));
 
-    const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeInReview: true };
+    const deps = { ...makeDeps(), monitorOwnsMerge: true, autoMergeInReview: true };
     const candidate: WorkspaceCandidate = {
       ...baseCandidate,
       wsStatus: "reviewing",
@@ -413,7 +414,7 @@ describe("processWorkspaceCandidates — auto_merge_in_review (not-ready In Revi
   });
 
   it("merges an idle In-Review workspace with readyForMerge=false when auto_merge_in_review is on", async () => {
-    const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeInReview: true };
+    const deps = { ...makeDeps(), monitorOwnsMerge: true, autoMergeInReview: true };
     const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: false };
     const stats = await processWorkspaceCandidates([candidate], deps);
 
@@ -426,7 +427,7 @@ describe("processWorkspaceCandidates — auto_merge_in_review (not-ready In Revi
   });
 
   it("falls back to fix-and-merge on conflict when auto_merge_in_review is on", async () => {
-    const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeInReview: true };
+    const deps = { ...makeDeps(), monitorOwnsMerge: true, autoMergeInReview: true };
     vi.mocked(deps.workspaceActions.merge).mockRejectedValueOnce(new Error("Merge conflicts detected"));
     const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: false };
     const stats = await processWorkspaceCandidates([candidate], deps);
@@ -436,7 +437,7 @@ describe("processWorkspaceCandidates — auto_merge_in_review (not-ready In Revi
   });
 
   it("does NOT merge a not-ready In-Review workspace when auto_merge_in_review is off", async () => {
-    const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeInReview: false };
+    const deps = { ...makeDeps(), monitorOwnsMerge: true, autoMergeInReview: false };
     const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: false };
     const stats = await processWorkspaceCandidates([candidate], deps);
 
@@ -446,7 +447,7 @@ describe("processWorkspaceCandidates — auto_merge_in_review (not-ready In Revi
   });
 
   it("does NOT merge a not-ready In-Review workspace when the auto_merge kill-switch is off, even if auto_merge_in_review is on", async () => {
-    const deps = { ...makeDeps(), autoMergeEnabled: false, autoMergeInReview: true };
+    const deps = { ...makeDeps(), monitorOwnsMerge: false, autoMergeInReview: true };
     const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: false };
     const stats = await processWorkspaceCandidates([candidate], deps);
 
@@ -456,8 +457,8 @@ describe("processWorkspaceCandidates — auto_merge_in_review (not-ready In Revi
 });
 
 describe("processWorkspaceCandidates — auto_merge gating", () => {
-  it("does NOT merge an idle+readyForMerge workspace when autoMergeEnabled=false", async () => {
-    const deps = { ...makeDeps(), autoMergeEnabled: false };
+  it("does NOT merge an idle+readyForMerge workspace when monitorOwnsMerge=false", async () => {
+    const deps = { ...makeDeps(), monitorOwnsMerge: false };
     const stats = await processWorkspaceCandidates([baseCandidate], deps);
 
     expect(stats.merged).toBe(0);
@@ -467,8 +468,8 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
     expect(vi.mocked(deps.logMonitorAction)).not.toHaveBeenCalled();
   });
 
-  it("merges an idle+readyForMerge workspace when autoMergeEnabled=true", async () => {
-    const deps = { ...makeDeps(), autoMergeEnabled: true };
+  it("merges an idle+readyForMerge workspace when monitorOwnsMerge=true", async () => {
+    const deps = { ...makeDeps(), monitorOwnsMerge: true };
     const stats = await processWorkspaceCandidates([baseCandidate], deps);
 
     expect(stats.merged).toBe(1);
@@ -483,7 +484,7 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
         .mockReturnValueOnce(makeSelectChain([{ count: 0 }]));
     }
 
-    const deps = { ...makeDeps(), autoMergeEnabled: true };
+    const deps = { ...makeDeps(), monitorOwnsMerge: true };
     const candidates = [1, 2, 3].map((n) => ({
       ...baseCandidate,
       wsId: `ws-${n}`,
@@ -498,14 +499,14 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
     expect(mergedIds).not.toContain("ws-3");
   });
 
-  it("does NOT merge a reviewing+stopped workspace when autoMergeEnabled=false", async () => {
+  it("does NOT merge a reviewing+stopped workspace when monitorOwnsMerge=false", async () => {
     // Override the default session mock: this path needs a stopped session.
     vi.mocked(db.select).mockReset();
     vi.mocked(db.select)
       .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]))
       .mockReturnValueOnce(makeSelectChain([{ count: 1 }]));
 
-    const deps = { ...makeDeps(), autoMergeEnabled: false };
+    const deps = { ...makeDeps(), monitorOwnsMerge: false };
     const candidate: WorkspaceCandidate = { ...baseCandidate, wsStatus: "reviewing", readyForMerge: false };
     const stats = await processWorkspaceCandidates([candidate], deps);
 
@@ -513,7 +514,7 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
     expectNoWorkspaceAction(deps);
   });
 
-  it("merges a reviewing+stopped workspace when autoMergeEnabled=true", async () => {
+  it("merges a reviewing+stopped workspace when monitorOwnsMerge=true", async () => {
     vi.mocked(db.select).mockReset();
     vi.mocked(db.select)
       .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]))
@@ -521,7 +522,7 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
     // Later gate reads (backoff, #893 persisted verdict, #894 repo path) → empty results.
     vi.mocked(db.select).mockReturnValue(makeSelectChain([]));
 
-    const deps = { ...makeDeps(), autoMergeEnabled: true };
+    const deps = { ...makeDeps(), monitorOwnsMerge: true };
     const candidate: WorkspaceCandidate = { ...baseCandidate, wsStatus: "reviewing", readyForMerge: false };
     const stats = await processWorkspaceCandidates([candidate], deps);
 
@@ -543,7 +544,7 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
       .mockReturnValueOnce(makeSelectChain([{ count: 1 }]));
     vi.mocked(db.select).mockReturnValue(makeSelectChain([]));
 
-    const deps = { ...makeDeps(), autoMergeEnabled: true };
+    const deps = { ...makeDeps(), monitorOwnsMerge: true };
     const candidate: WorkspaceCandidate = { ...baseCandidate, wsStatus: "reviewing", readyForMerge: false };
     await processWorkspaceCandidates([candidate], deps);
 
@@ -556,9 +557,78 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
   });
 });
 
+describe("describeSkippedAutoMerge (#1255)", () => {
+  it("attributes 'enabled' to the merge queue, not to auto-merge being off", () => {
+    // monitorOwnsMerge=false with source "enabled" only happens when the effective owner is
+    // NOT the monitor but IS automatic — i.e. merge_strategy=merge_queue with auto_merge ON.
+    expect(describeSkippedAutoMerge("enabled")).toBe("left to the merge queue (merge_strategy=merge_queue)");
+  });
+
+  it("names a direct merge strategy as reserving merging for a human", () => {
+    expect(describeSkippedAutoMerge("direct_strategy")).toBe("auto-merge off (direct_strategy: merge_strategy=direct reserves merging for a human)");
+  });
+
+  it("names a per-project opt-out", () => {
+    expect(describeSkippedAutoMerge("project_disabled")).toBe("auto-merge off (project_disabled: auto_merge_disabled is set for this project)");
+  });
+
+  it("names the global auto_merge preference being off", () => {
+    expect(describeSkippedAutoMerge("global_off")).toBe("auto-merge off (global_off: the auto_merge preference is off)");
+  });
+
+  it("falls back to the generic wording when no source is known", () => {
+    expect(describeSkippedAutoMerge(undefined)).toBe("auto_merge is disabled");
+  });
+});
+
+describe("processWorkspaceCandidates — auto-merge skip message names the real owner (#1255)", () => {
+  it("logs 'left to the merge queue' for an idle+readyForMerge workspace when the queue owns merging", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const deps = { ...makeDeps(), monitorOwnsMerge: false, mergeOwnerSource: () => "enabled" as const };
+    await processWorkspaceCandidates([baseCandidate], deps);
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("left to the merge queue (merge_strategy=merge_queue)"));
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("auto_merge is disabled"));
+    logSpy.mockRestore();
+  });
+
+  it("logs 'global_off' for an idle+readyForMerge workspace when auto_merge is off entirely", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const deps = { ...makeDeps(), monitorOwnsMerge: false, mergeOwnerSource: () => "global_off" as const };
+    await processWorkspaceCandidates([baseCandidate], deps);
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("auto-merge off (global_off: the auto_merge preference is off)"));
+    logSpy.mockRestore();
+  });
+
+  it("falls back to the generic message when no mergeOwnerSource is injected", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const deps = { ...makeDeps(), monitorOwnsMerge: false };
+    await processWorkspaceCandidates([baseCandidate], deps);
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("auto_merge is disabled"));
+    logSpy.mockRestore();
+  });
+
+  it("logs 'left to the merge queue' for a reviewing+stopped workspace when the queue owns merging", async () => {
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]))
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]));
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const deps = { ...makeDeps(), monitorOwnsMerge: false, mergeOwnerSource: () => "enabled" as const };
+    const candidate: WorkspaceCandidate = { ...baseCandidate, wsStatus: "reviewing", readyForMerge: false };
+    await processWorkspaceCandidates([candidate], deps);
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("left to the merge queue (merge_strategy=merge_queue)"));
+    logSpy.mockRestore();
+  });
+});
+
 describe("processWorkspaceCandidates — per-project auto_merge_disabled", () => {
   it("does NOT merge an idle+readyForMerge workspace when its project is in autoMergeDisabledProjectIds", async () => {
-    const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeDisabledProjectIds: new Set(["proj-1"]) };
+    const deps = { ...makeDeps(), monitorOwnsMerge: true, autoMergeDisabledProjectIds: new Set(["proj-1"]) };
     const stats = await processWorkspaceCandidates([baseCandidate], deps);
 
     expect(stats.merged).toBe(0);
@@ -573,7 +643,7 @@ describe("processWorkspaceCandidates — per-project auto_merge_disabled", () =>
         .mockReturnValueOnce(makeSelectChain([{ count: 0 }]));
     }
 
-    const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeDisabledProjectIds: new Set(["proj-disabled"]) };
+    const deps = { ...makeDeps(), monitorOwnsMerge: true, autoMergeDisabledProjectIds: new Set(["proj-disabled"]) };
     const disabledCandidate: WorkspaceCandidate = { ...baseCandidate, wsId: "ws-disabled", issueId: "issue-disabled", projectId: "proj-disabled" };
     const enabledCandidate: WorkspaceCandidate = { ...baseCandidate, wsId: "ws-enabled", issueId: "issue-enabled", projectId: "proj-1" };
     const stats = await processWorkspaceCandidates([disabledCandidate, enabledCandidate], deps);
@@ -589,7 +659,7 @@ describe("processWorkspaceCandidates — per-project auto_merge_disabled", () =>
       .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]))
       .mockReturnValueOnce(makeSelectChain([{ count: 1 }]));
 
-    const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeDisabledProjectIds: new Set(["proj-1"]) };
+    const deps = { ...makeDeps(), monitorOwnsMerge: true, autoMergeDisabledProjectIds: new Set(["proj-1"]) };
     const candidate: WorkspaceCandidate = { ...baseCandidate, wsStatus: "reviewing", readyForMerge: false };
     const stats = await processWorkspaceCandidates([candidate], deps);
 
@@ -598,7 +668,7 @@ describe("processWorkspaceCandidates — per-project auto_merge_disabled", () =>
   });
 
   it("does NOT merge an idle In-Review workspace via auto_merge_in_review when its project is disabled", async () => {
-    const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeInReview: true, autoMergeDisabledProjectIds: new Set(["proj-1"]) };
+    const deps = { ...makeDeps(), monitorOwnsMerge: true, autoMergeInReview: true, autoMergeDisabledProjectIds: new Set(["proj-1"]) };
     const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: false };
     const stats = await processWorkspaceCandidates([candidate], deps);
 
@@ -621,7 +691,7 @@ describe("processWorkspaceCandidates — idle workspace with committed work on a
   it("auto-recovers via merge (falling back to fix-and-merge) when the base has moved and there are real commits", async () => {
     const deps = {
       ...makeDeps(),
-      autoMergeEnabled: true,
+      monitorOwnsMerge: true,
       getCommitCountAhead: vi.fn().mockResolvedValue(3),
       countBehindCommits: vi.fn().mockResolvedValue(2),
     } satisfies ProcessWorkspaceDeps;
@@ -639,7 +709,7 @@ describe("processWorkspaceCandidates — idle workspace with committed work on a
   it("falls back to fix-and-merge when the recovery merge conflicts", async () => {
     const deps = {
       ...makeDeps(),
-      autoMergeEnabled: true,
+      monitorOwnsMerge: true,
       getCommitCountAhead: vi.fn().mockResolvedValue(3),
       countBehindCommits: vi.fn().mockResolvedValue(2),
     } satisfies ProcessWorkspaceDeps;
@@ -654,7 +724,7 @@ describe("processWorkspaceCandidates — idle workspace with committed work on a
   it("flags instead of auto-recovering when auto_merge is disabled", async () => {
     const deps = {
       ...makeDeps(),
-      autoMergeEnabled: false,
+      monitorOwnsMerge: false,
       getCommitCountAhead: vi.fn().mockResolvedValue(3),
       countBehindCommits: vi.fn().mockResolvedValue(2),
     } satisfies ProcessWorkspaceDeps;
@@ -676,7 +746,7 @@ describe("processWorkspaceCandidates — idle workspace with committed work on a
   it("flags instead of auto-recovering when the project has auto_merge_disabled", async () => {
     const deps = {
       ...makeDeps(),
-      autoMergeEnabled: true,
+      monitorOwnsMerge: true,
       autoMergeDisabledProjectIds: new Set(["proj-1"]),
       getCommitCountAhead: vi.fn().mockResolvedValue(3),
       countBehindCommits: vi.fn().mockResolvedValue(2),
@@ -688,14 +758,14 @@ describe("processWorkspaceCandidates — idle workspace with committed work on a
     expectNoWorkspaceAction(deps);
   });
 
-  // #1258: under `merge_strategy = merge_queue`, `autoMergeEnabled` (owner === "monitor") is
+  // #1258: under `merge_strategy = merge_queue`, `monitorOwnsMerge` (owner === "monitor") is
   // false even with auto-merge ON — but the queue only ever picks up `readyForMerge`
   // workspaces, so it would never recover one stuck on a stale base with no review. Recovery
   // must key off the per-project `staleBaseAutoMergeEnabled` resolver, not the owner flag.
   it("recovers a stale-base workspace when staleBaseAutoMergeEnabled is true, even though the monitor does not own merging (merge_queue)", async () => {
     const deps = {
       ...makeDeps(),
-      autoMergeEnabled: false,
+      monitorOwnsMerge: false,
       staleBaseAutoMergeEnabled: vi.fn().mockReturnValue(true),
       getCommitCountAhead: vi.fn().mockResolvedValue(3),
       countBehindCommits: vi.fn().mockResolvedValue(2),
@@ -708,10 +778,10 @@ describe("processWorkspaceCandidates — idle workspace with committed work on a
     expect(vi.mocked(deps.workspaceActions.merge)).toHaveBeenCalledWith("ws-1", { kind: "run-gate" });
   });
 
-  it("flags instead of recovering when staleBaseAutoMergeEnabled resolves false for the project, even though autoMergeEnabled is true", async () => {
+  it("flags instead of recovering when staleBaseAutoMergeEnabled resolves false for the project, even though monitorOwnsMerge is true", async () => {
     const deps = {
       ...makeDeps(),
-      autoMergeEnabled: true,
+      monitorOwnsMerge: true,
       staleBaseAutoMergeEnabled: vi.fn().mockReturnValue(false),
       getCommitCountAhead: vi.fn().mockResolvedValue(3),
       countBehindCommits: vi.fn().mockResolvedValue(2),
@@ -723,10 +793,10 @@ describe("processWorkspaceCandidates — idle workspace with committed work on a
     expectNoWorkspaceAction(deps);
   });
 
-  it("falls back to autoMergeEnabled when no staleBaseAutoMergeEnabled resolver is injected", async () => {
+  it("falls back to monitorOwnsMerge when no staleBaseAutoMergeEnabled resolver is injected", async () => {
     const deps = {
       ...makeDeps(),
-      autoMergeEnabled: false,
+      monitorOwnsMerge: false,
       getCommitCountAhead: vi.fn().mockResolvedValue(3),
       countBehindCommits: vi.fn().mockResolvedValue(2),
     } satisfies ProcessWorkspaceDeps;
@@ -740,7 +810,7 @@ describe("processWorkspaceCandidates — idle workspace with committed work on a
   it("does NOT treat an idle workspace with no commits ahead as a stale-base recovery case", async () => {
     const deps = {
       ...makeDeps(),
-      autoMergeEnabled: true,
+      monitorOwnsMerge: true,
       getCommitCountAhead: vi.fn().mockResolvedValue(0),
       countBehindCommits: vi.fn().mockResolvedValue(2),
     } satisfies ProcessWorkspaceDeps;
@@ -759,7 +829,7 @@ describe("processWorkspaceCandidates — idle workspace with committed work on a
   it("#324: relaunches WITHOUT update-base when the base has not moved", async () => {
     const deps = {
       ...makeDeps(),
-      autoMergeEnabled: true,
+      monitorOwnsMerge: true,
       getCommitCountAhead: vi.fn().mockResolvedValue(0),
       countBehindCommits: vi.fn().mockResolvedValue(0),
     } satisfies ProcessWorkspaceDeps;
@@ -774,7 +844,7 @@ describe("processWorkspaceCandidates — idle workspace with committed work on a
   it("#324: a failed update-base still falls through to the plain relaunch", async () => {
     const deps = {
       ...makeDeps(),
-      autoMergeEnabled: true,
+      monitorOwnsMerge: true,
       getCommitCountAhead: vi.fn().mockResolvedValue(0),
       countBehindCommits: vi.fn().mockResolvedValue(2),
     } satisfies ProcessWorkspaceDeps;
@@ -789,7 +859,7 @@ describe("processWorkspaceCandidates — idle workspace with committed work on a
   it("does NOT treat an idle workspace with commits but a NON-stale (up to date) base as a recovery case", async () => {
     const deps = {
       ...makeDeps(),
-      autoMergeEnabled: true,
+      monitorOwnsMerge: true,
       getCommitCountAhead: vi.fn().mockResolvedValue(3),
       countBehindCommits: vi.fn().mockResolvedValue(0),
     } satisfies ProcessWorkspaceDeps;
@@ -1252,7 +1322,7 @@ describe("processWorkspaceCandidates — head-of-line blocking on a red gate (#1
     gateSpy.mockResolvedValue(redGateResult("sha-red"));
 
     const redCandidate = makeCandidate("red-1", "proj-1");
-    const deps = { ...makeDeps(), autoMergeEnabled: true };
+    const deps = { ...makeDeps(), monitorOwnsMerge: true };
 
     // Cycle 1: the gate genuinely runs and fails, and is remembered.
     await processWorkspaceCandidates([redCandidate], deps);
@@ -1271,7 +1341,7 @@ describe("processWorkspaceCandidates — head-of-line blocking on a red gate (#1
     gateSpy.mockResolvedValue(redGateResult("sha-red"));
 
     const redCandidate = makeCandidate("red-1", "proj-1");
-    const deps = { ...makeDeps(), autoMergeEnabled: true };
+    const deps = { ...makeDeps(), monitorOwnsMerge: true };
     await processWorkspaceCandidates([redCandidate], deps);
     expect(gateSpy).toHaveBeenCalledTimes(1);
 
@@ -1300,7 +1370,7 @@ describe("processWorkspaceCandidates — head-of-line blocking on a red gate (#1
     });
 
     queueSelectsForStoppedReviewing(2);
-    const deps = { ...makeDeps(), autoMergeEnabled: true, candidateTimeoutMs: 20, projectConcurrency: 1 };
+    const deps = { ...makeDeps(), monitorOwnsMerge: true, candidateTimeoutMs: 20, projectConcurrency: 1 };
 
     // Cycle 1: red-1 is first (input order), times out and is abandoned; other-1 is still
     // processed in the SAME cycle rather than being deferred behind it.

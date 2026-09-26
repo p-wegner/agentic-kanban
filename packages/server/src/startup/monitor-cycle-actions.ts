@@ -24,8 +24,35 @@ import {
   markGateInFlight,
   recordFailedGate,
 } from "../services/monitor-gate-recall.js";
+import type { AutoMergeSource } from "@agentic-kanban/shared/lib/merge-policy";
 
 export type LogMonitorActionFn = (action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => void;
+
+/**
+ * Why the monitor is leaving an idle+readyForMerge (or reviewing+stopped) workspace alone
+ * instead of merging it (#1255). `monitorOwnsMerge=false` is NOT synonymous with "auto-merge is
+ * disabled": under `merge_strategy=merge_queue` with the global `auto_merge` pref ON, the queue
+ * — not the monitor — owns landing reviewed work, and reporting that as "disabled" reads as an
+ * outage to an operator watching board.log, who then merges by hand and duplicates a job the
+ * queue already has in flight. `source` (from `resolveAutoMerge`) names the real reason; absent
+ * (an older/simpler test double) falls back to the generic wording this message used to have.
+ */
+export function describeSkippedAutoMerge(source: AutoMergeSource | undefined): string {
+  switch (source) {
+    case "enabled":
+      // monitorOwnsMerge is false yet the effective owner is "enabled" only when the owner is
+      // the merge queue (owner !== "monitor" but not off/direct/disabled) — the queue owns it.
+      return "left to the merge queue (merge_strategy=merge_queue)";
+    case "direct_strategy":
+      return "auto-merge off (direct_strategy: merge_strategy=direct reserves merging for a human)";
+    case "project_disabled":
+      return "auto-merge off (project_disabled: auto_merge_disabled is set for this project)";
+    case "global_off":
+      return "auto-merge off (global_off: the auto_merge preference is off)";
+    default:
+      return "auto_merge is disabled";
+  }
+}
 
 /** Looks up a project status id by name. Issues exactly ONE db.select per invocation. */
 export async function getProjectStatusIdByName(projectId: string, name: string): Promise<string | undefined> {

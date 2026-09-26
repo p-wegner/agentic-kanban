@@ -30,6 +30,7 @@ import {
 } from "../services/monitor-cycle-rules.js";
 import {
   closeDirectWorkspaceAsDone,
+  describeSkippedAutoMerge,
   getProjectStatusIdByName,
   mergeWorkspaceWithFixFallback,
   resolveReviewingStoppedGateToken,
@@ -41,6 +42,7 @@ import { shouldSkipMergeForBackoff, type MergeBackoffDeps } from "../services/me
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 import type { RiskPosture } from "@agentic-kanban/shared/types";
+import type { AutoMergeSource } from "@agentic-kanban/shared/lib/merge-policy";
 import { getHeldWorkspaceIds } from "../repositories/merge-hold.repository.js";
 
 export { DEFAULT_STUCK_BUILDER_TIMEOUT_MS } from "../services/monitor-cycle-rules.js";
@@ -146,17 +148,28 @@ export interface ProcessWorkspaceDeps {
    */
   workspaceActions: MonitorWorkspaceActions;
   /**
-   * Whether the monitor is allowed to auto-merge workspaces on its timer.
-   * Gated on the `auto_merge` preference being exactly "true". When false/unset,
-   * the monitor must NOT merge (leaving the workspace in its current state) so an
-   * operator can freeze automatic merging. Does NOT affect the manual
-   * `POST /api/workspaces/:id/merge` route, relaunch, auto-start, or nudge behavior.
+   * Whether the MONITOR (as opposed to the merge queue, or nobody) is allowed to auto-merge
+   * workspaces on its timer — `resolveMergePolicy(prefMap).owner === "monitor"` (#1255). This
+   * is false both when auto-merge is off entirely AND when a different owner (the merge queue,
+   * under `merge_strategy=merge_queue`) is the one landing reviewed work — those are different
+   * situations for an operator reading board.log, so a `false` here must not be reported as
+   * "auto-merge is disabled" (see `mergeOwnerSource` and `describeSkippedAutoMerge`). Does NOT
+   * affect the manual `POST /api/workspaces/:id/merge` route, relaunch, auto-start, or nudge
+   * behavior.
    */
-  autoMergeEnabled: boolean;
+  monitorOwnsMerge: boolean;
+  /**
+   * Why `monitorOwnsMerge` is what it is — `resolveAutoMerge(prefMap, projectId).source`, read
+   * per-workspace since the source (in particular `project_disabled`) can vary by project even
+   * though `monitorOwnsMerge` itself is a single board-wide flag. Optional so an existing test
+   * that only cares about the boolean can omit it; the log messages fall back to a generic
+   * "auto-merge off" wording when absent.
+   */
+  mergeOwnerSource?: (projectId: string) => AutoMergeSource;
   /**
    * Set of project IDs for which auto-merge is disabled via the per-project
    * `auto_merge_disabled_<projectId>` preference. Workspaces belonging to these
-   * projects are skipped even when the global `autoMergeEnabled` flag is true.
+   * projects are skipped even when the global `monitorOwnsMerge` flag is true.
    */
   autoMergeDisabledProjectIds?: Set<string>;
   /**
@@ -174,18 +187,18 @@ export interface ProcessWorkspaceDeps {
    * committed but not explicitly marked ready is left untouched (the agent/human
    * `readyForMerge` handshake is respected). When on, the monitor merges it anyway
    * — "land In Review work without the readyForMerge gate". Still also requires
-   * `autoMergeEnabled` (the operator kill-switch).
+   * `monitorOwnsMerge` (the monitor must be the configured merge owner).
    */
   autoMergeInReview: boolean;
   /**
    * #1258: whether auto-merge is effectively enabled for a GIVEN project
    * (`resolveAutoMerge(prefMap, projectId).enabled`), independent of who OWNS
-   * merging. `autoMergeEnabled` above is `owner === "monitor"` — false under
+   * merging. `monitorOwnsMerge` above is `owner === "monitor"` — false under
    * `merge_strategy = merge_queue`, even with auto-merge on — so the stale-base
    * recovery below (finished builder, moved base, never reviewed) must NOT gate on
    * it: the merge queue only picks up `readyForMerge` workspaces, and a workspace
    * stuck on a stale base never gets there, so nothing else would ever recover it.
-   * Absent ⇒ falls back to `autoMergeEnabled` (today's owner-scoped behaviour).
+   * Absent ⇒ falls back to `monitorOwnsMerge` (today's owner-scoped behaviour).
    */
   staleBaseAutoMergeEnabled?: (projectId: string) => boolean;
   reviewSessionIds: Set<string>;
@@ -464,7 +477,7 @@ async function launchStrandedReview(ws: WorkspaceCandidate, ctx: CycleContext): 
  */
 async function handleIdleInReviewWorkspace(ws: WorkspaceCandidate, ctx: CycleContext): Promise<void> {
   const { deps, logAction, canStartMerge } = ctx;
-  if (!(deps.autoMergeEnabled && deps.autoMergeInReview && !deps.autoMergeDisabledProjectIds?.has(ws.projectId))) {
+  if (!(deps.monitorOwnsMerge && deps.autoMergeInReview && !deps.autoMergeDisabledProjectIds?.has(ws.projectId))) {
     if (await launchStrandedReview(ws, ctx)) return;
     console.log(`[monitor] Skipping relaunch for idle workspace ${ws.wsId}  issue #${ws.issueNumber} is in review (committed work awaiting merge; enable auto_merge_in_review to land it)`);
     return;
@@ -540,8 +553,8 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
     console.log(`[monitor] Closed stale direct workspace ${ws.wsId}  issue moved to Done`);
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
   } else if (ws.readyForMerge) {
-    if (!deps.autoMergeEnabled) {
-      console.log(`[monitor] Skipping auto-merge for idle+readyForMerge workspace ${ws.wsId}  auto_merge is disabled`);
+    if (!deps.monitorOwnsMerge) {
+      console.log(`[monitor] Skipping auto-merge for idle+readyForMerge workspace ${ws.wsId}  ${describeSkippedAutoMerge(deps.mergeOwnerSource?.(ws.projectId))}`);
       return;
     }
     if (deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
@@ -564,13 +577,14 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
     // the same way a human would (update-base then land), rather than falling into the
     // catch-all relaunch (which just wakes an agent with nothing left to do) or the
     // stuck-session flag/close path (which would strand the finished work as "closed").
-    const staleBaseAutoMergeEnabled = deps.staleBaseAutoMergeEnabled?.(ws.projectId) ?? deps.autoMergeEnabled;
+    const staleBaseAutoMergeEnabled = deps.staleBaseAutoMergeEnabled?.(ws.projectId) ?? deps.monitorOwnsMerge;
     if (!staleBaseAutoMergeEnabled || deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
+      const reason = describeSkippedAutoMerge(deps.mergeOwnerSource?.(ws.projectId));
       logAction("mark_idle", ws.wsId, ws.issueId, {
-        responseSummary: "Idle workspace has committed work but its base branch has moved (stale base); auto_merge is disabled so it was flagged instead of auto-recovered",
+        responseSummary: `Idle workspace has committed work but its base branch has moved (stale base); ${reason} so it was flagged instead of auto-recovered`,
         verificationResult: "failed",
       });
-      console.log(`[monitor] Needs attention: idle workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} has committed work on a stale base  auto_merge disabled, flagging instead of recovering`);
+      console.log(`[monitor] Needs attention: idle workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} has committed work on a stale base  ${reason}, flagging instead of recovering`);
       emitButlerSystemEvent({
         projectId: ws.projectId,
         kind: "workspace_error",
@@ -661,8 +675,8 @@ async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSess
     });
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
   } else if (sess?.status === "stopped") {
-    if (!deps.autoMergeEnabled) {
-      console.log(`[monitor] Skipping auto-merge for reviewing+stopped workspace ${ws.wsId}  auto_merge is disabled`);
+    if (!deps.monitorOwnsMerge) {
+      console.log(`[monitor] Skipping auto-merge for reviewing+stopped workspace ${ws.wsId}  ${describeSkippedAutoMerge(deps.mergeOwnerSource?.(ws.projectId))}`);
       return;
     }
     if (deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {

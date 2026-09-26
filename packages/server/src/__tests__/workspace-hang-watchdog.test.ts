@@ -99,7 +99,7 @@ function makeDeps(sessionManager = makeSessionManager()): ProcessWorkspaceDeps {
     sessionManager: sessionManager as unknown as ProcessWorkspaceDeps["sessionManager"],
     boardEvents: { broadcast: vi.fn() } as unknown as ProcessWorkspaceDeps["boardEvents"],
     workspaceActions: makeWorkspaceActions(),
-    autoMergeEnabled: true,
+    monitorOwnsMerge: true,
     autoMergeInReview: false,
     reviewSessionIds: new Set<string>(),
     monitorRecentActions: [],
