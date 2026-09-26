@@ -116,7 +116,7 @@ ship as a per-provider module with a mirrored export shape:
 
 **Skill-listing filter is the one row where "unsupported" does not mean "missing".** Claude Code
 hides a skill's description from implicit invocation via its own native `skillOverrides` key
-(`plugin-skill-listing-settings.ts` writes it); Pi's equivalent is centralized board logic
+(`plugin-skill-overrides.service.ts` writes it); Pi's equivalent is centralized board logic
 (`materializedSkillFiles` in `agent.service.ts`, gating which `--skill` flags Pi's launch
 receives) rather than a `pi-provider.ts`-resident module; Copilot and Herdr have no skills
 concept to filter. **Codex CLI has no equivalent lever at all** — its context comes from

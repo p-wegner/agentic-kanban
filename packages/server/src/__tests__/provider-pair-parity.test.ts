@@ -66,7 +66,7 @@ const CAPABILITIES: Capability[] = [
     name: "skill-listing filter",
     modulePath: (p) => path.join(providerDir, `${p}-skill-listing.ts`),
     unsupported: {
-      claude: "handled by Claude Code's own `skillOverrides` in settings.local.json (plugin-skill-listing-settings.ts) — no board module needed",
+      claude: "handled by Claude Code's own `skillOverrides` in settings.local.json (plugin-skill-overrides.service.ts) — no board module needed",
       codex: "Codex CLI has no per-skill listing/visibility lever: context comes from AGENTS.md as a whole, and there is no --skill-style flag or config key to hide one skill's description from implicit invocation without editing the file itself",
       copilot: "no skills concept — Copilot CLI has no equivalent surface to filter",
       pi: "the filter is centralized board logic (materializedSkillFiles in agent.service.ts, gating which --skill flags Pi receives), not a per-provider pi-provider.ts module",
