@@ -688,6 +688,55 @@ describe("processWorkspaceCandidates — idle workspace with committed work on a
     expectNoWorkspaceAction(deps);
   });
 
+  // #1258: under `merge_strategy = merge_queue`, `autoMergeEnabled` (owner === "monitor") is
+  // false even with auto-merge ON — but the queue only ever picks up `readyForMerge`
+  // workspaces, so it would never recover one stuck on a stale base with no review. Recovery
+  // must key off the per-project `staleBaseAutoMergeEnabled` resolver, not the owner flag.
+  it("recovers a stale-base workspace when staleBaseAutoMergeEnabled is true, even though the monitor does not own merging (merge_queue)", async () => {
+    const deps = {
+      ...makeDeps(),
+      autoMergeEnabled: false,
+      staleBaseAutoMergeEnabled: vi.fn().mockReturnValue(true),
+      getCommitCountAhead: vi.fn().mockResolvedValue(3),
+      countBehindCommits: vi.fn().mockResolvedValue(2),
+    } satisfies ProcessWorkspaceDeps;
+
+    const stats = await processWorkspaceCandidates([staleBaseCandidate], deps);
+
+    expect(deps.staleBaseAutoMergeEnabled).toHaveBeenCalledWith("proj-1");
+    expect(stats.merged).toBe(1);
+    expect(vi.mocked(deps.workspaceActions.merge)).toHaveBeenCalledWith("ws-1", { kind: "run-gate" });
+  });
+
+  it("flags instead of recovering when staleBaseAutoMergeEnabled resolves false for the project, even though autoMergeEnabled is true", async () => {
+    const deps = {
+      ...makeDeps(),
+      autoMergeEnabled: true,
+      staleBaseAutoMergeEnabled: vi.fn().mockReturnValue(false),
+      getCommitCountAhead: vi.fn().mockResolvedValue(3),
+      countBehindCommits: vi.fn().mockResolvedValue(2),
+    } satisfies ProcessWorkspaceDeps;
+
+    const stats = await processWorkspaceCandidates([staleBaseCandidate], deps);
+
+    expect(stats.merged).toBe(0);
+    expectNoWorkspaceAction(deps);
+  });
+
+  it("falls back to autoMergeEnabled when no staleBaseAutoMergeEnabled resolver is injected", async () => {
+    const deps = {
+      ...makeDeps(),
+      autoMergeEnabled: false,
+      getCommitCountAhead: vi.fn().mockResolvedValue(3),
+      countBehindCommits: vi.fn().mockResolvedValue(2),
+    } satisfies ProcessWorkspaceDeps;
+
+    const stats = await processWorkspaceCandidates([staleBaseCandidate], deps);
+
+    expect(stats.merged).toBe(0);
+    expectNoWorkspaceAction(deps);
+  });
+
   it("does NOT treat an idle workspace with no commits ahead as a stale-base recovery case", async () => {
     const deps = {
       ...makeDeps(),

@@ -28,7 +28,7 @@ import { scanDirtyMainCheckouts } from "../services/dirty-main-checkout.js";
 import { scanRottedSuites } from "../services/rotted-suite-scan.js";
 import { scanDegenerateBaseHealth } from "../services/degenerate-base-health.js";
 import { scanAutodriveStallWarnings, buildAutoStartSkipWarnings } from "../services/autodrive-stall-warning.service.js";
-import { resolveMergePolicy } from "./merge-strategy.js";
+import { resolveMergePolicy, resolveAutoMerge } from "./merge-strategy.js";
 import { listAutoMergeDisabledProjectIds } from "@agentic-kanban/shared/lib/merge-policy";
 import { resolveRiskPosture } from "../services/risk-posture.service.js";
 import { getAllPreferencesCached, invalidatePreferencesCache } from "../repositories/preferences.repository.js";
@@ -471,6 +471,10 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
         workspaceActions,
         // The monitor only owns merging when it is the configured owner (#546).
         autoMergeEnabled: resolveMergePolicy(prefMap).owner === "monitor",
+        // #1258: stale-base recovery must run whenever auto-merge is effectively ON for the
+        // PROJECT, whoever owns merging — a merge_queue-owned workspace stuck on a stale base
+        // is never `readyForMerge`, so the queue would never pick it up either.
+        staleBaseAutoMergeEnabled: (projectId: string) => resolveAutoMerge(prefMap, projectId).enabled,
         autoMergeInReview: getBool(prefMap, "auto_merge_in_review"),
         autoMergeDisabledProjectIds,
         reviewSessionIds,
