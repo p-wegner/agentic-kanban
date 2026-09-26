@@ -308,6 +308,19 @@
  * group (`registerWorkspaceMergeControlCommands(wsCmd)`) — a single call site, nothing left to
  * extract without ceremony. Disclosed rather than worked around, per this file's own rule: a
  * named cause and a ticket, or it is just a budget.
+ *
+ * -- Sixteenth disclosed movement (2026-09-26, #1254 tag an issue at creation) ---------
+ *
+ *   cli/commands/issue.ts::registerIssueCommand   720 -> 723  (+3)
+ *
+ * `issue create` gained a repeatable `--tag <name>` option so a ticket can be born tagged
+ * (e.g. `no-auto-start`) from the CLI, closing the same race #1108 closed for the REST/MCP
+ * creation paths: a monitor-mode project with free WIP could auto-start the issue between
+ * `issue create` and a follow-up tag call (#1232, #1253). The three lines are the `.option()`
+ * declaration (with its commander accumulator), one `--tag` usage example, and forwarding
+ * `options.tag` into `createIssueWithNextNumber`. Same `registerXCommand` shape this file's
+ * header names as architecture rather than tangle — nothing here is extractable without
+ * ceremony. Disclosed rather than worked around, per this file's own rule.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 718 -> 720, a DISCLOSED raise (#1107, landed 2026-09-12 in d90659d081). `issue get` gained
@@ -318,7 +331,8 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // file's header names as architecture rather than tangle, so there is nothing to extract that
   // would not be ceremony. Raised rather than worked around, per the header's rule: a named
   // cause and a ticket, or it is just a budget. Disclosed in the eleventh movement above.
-  "cli/commands/issue.ts::registerIssueCommand": 720,
+  // 720 -> 723 (#1254), disclosed in the sixteenth movement above.
+  "cli/commands/issue.ts::registerIssueCommand": 723,
   // 621 -> 623, a DELIBERATE raise (#815). The eight `latest_setup_*` columns moved off
   // `workspaces` into `workspace_setup_run`, and writing a child row costs an
   // `insertWorkspaceSetupRun(...)` call where eight inline field assignments used to sit.

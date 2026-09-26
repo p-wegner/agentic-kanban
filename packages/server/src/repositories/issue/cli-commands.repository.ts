@@ -5,10 +5,10 @@
  * #957 pattern: the blanket /repositories/ exemption is gone, so this facade
  * ships its OWN sub-modules rather than growing past the flat threshold).
  */
-import { issues, projectStatuses, issueDependencies, projects } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, issueDependencies, projects, tags, issueTags } from "@agentic-kanban/shared/schema";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { parseIssueRef } from "@agentic-kanban/shared/lib/issue-ref";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../../db/index.js";
 import type { Database } from "../../db/index.js";
@@ -168,6 +168,12 @@ export async function createIssueWithNextNumber(
     description?: string | null;
     priority?: string;
     issueType?: string;
+    /**
+     * #1254: tags applied in the SAME transaction as the issue insert, so a ticket
+     * can be born tagged (e.g. `no-auto-start`) — a follow-up `POST /:id/tags` call
+     * would let a monitor-mode project auto-start it first (#1232, #1253).
+     */
+    tags?: string[];
   },
   database: Database = db,
 ): Promise<{ id: string; issueNumber: number }> {
@@ -178,18 +184,40 @@ export async function createIssueWithNextNumber(
     const now = new Date().toISOString();
 
     try {
-      await database.insert(issues).values({
-        id,
-        issueNumber,
-        title: input.title,
-        description: input.description ?? null,
-        priority: (input.priority as "low" | "medium" | "high" | "critical") ?? "medium",
-        issueType: (input.issueType as "task" | "bug" | "feature" | "chore") ?? "task",
-        sortOrder: 0,
-        statusId: input.statusId,
-        projectId: input.projectId,
-        createdAt: now,
-        updatedAt: now,
+      await database.transaction(async (tx) => {
+        await tx.insert(issues).values({
+          id,
+          issueNumber,
+          title: input.title,
+          description: input.description ?? null,
+          priority: (input.priority as "low" | "medium" | "high" | "critical") ?? "medium",
+          issueType: (input.issueType as "task" | "bug" | "feature" | "chore") ?? "task",
+          sortOrder: 0,
+          statusId: input.statusId,
+          projectId: input.projectId,
+          createdAt: now,
+          updatedAt: now,
+        });
+
+        if (input.tags && input.tags.length > 0) {
+          const seenTagIds = new Set<string>();
+          for (const tagName of input.tags) {
+            const trimmed = tagName.trim();
+            if (!trimmed) continue;
+            const existing = await tx
+              .select({ id: tags.id })
+              .from(tags)
+              .where(sql`lower(${tags.name}) = lower(${trimmed})`)
+              .limit(1);
+            const tagId = existing.length > 0 ? existing[0].id : randomUUID();
+            if (existing.length === 0) {
+              await tx.insert(tags).values({ id: tagId, name: trimmed, color: null, createdAt: now });
+            }
+            if (seenTagIds.has(tagId)) continue;
+            seenTagIds.add(tagId);
+            await tx.insert(issueTags).values({ id: randomUUID(), issueId: id, tagId });
+          }
+        }
       });
 
       return { id, issueNumber };

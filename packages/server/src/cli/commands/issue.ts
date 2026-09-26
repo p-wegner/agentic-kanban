@@ -146,15 +146,17 @@ Examples:
     .option("-p, --priority <priority>", "Priority: low, medium, high, critical (default: medium)")
     .option("-t, --type <type>", "Issue type: task, bug, feature, chore (default: task)")
     .option("-s, --status <status>", "Initial status name (default: first project status, typically Todo)")
+    .option("--tag <name>", "Tag to apply at creation (repeatable). Unknown names are created; matching is case-insensitive. Applied in the SAME transaction as the issue insert — e.g. --tag no-auto-start closes the race where a monitor auto-starts the issue before a follow-up tag call lands (#1254).", (val: string, prev: string[]) => [...prev, val], [] as string[])
     .addHelpText("after", `
 Examples:
   $ agentic-kanban issue create "Fix login bug" -t bug
   $ agentic-kanban issue create "Add dark mode" -d "Support theme switching" -t feature
   $ agentic-kanban issue create "Hotfix" -t bug -s "In Progress"
   $ agentic-kanban issue create "Long writeup" --description-file ./body.md
+  $ agentic-kanban issue create "Maintenance window ticket" --tag no-auto-start
 `)
     .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
-    .action(cliAction(async (title: string, options: { project?: string; description?: string; descriptionFile?: string; priority?: string; type?: string; status?: string }) => {
+    .action(cliAction(async (title: string, options: { project?: string; description?: string; descriptionFile?: string; priority?: string; type?: string; status?: string; tag?: string[] }) => {
       const projectId = await resolveProjectIdArg(options.project);
 
       const statuses = await getProjectStatuses(projectId);
@@ -192,6 +194,7 @@ Examples:
         description,
         priority: options.priority,
         issueType: options.type,
+        tags: options.tag,
       });
 
       console.log(`Created issue #${issueNumber}: ${title}`);
