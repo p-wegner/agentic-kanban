@@ -10,6 +10,8 @@ import { getProjectById } from "../repositories/project.repository.js";
 import { readImpactMissRate } from "./test-impact-miss-rate.js";
 import { currentRcCandidate, readRcState, resolveStableCheckoutFor, toRcCandidateSummary } from "./rc-state.js";
 import { withRcHeal } from "./delivery-status.service.js";
+import { getQueuePressure } from "./queue-pressure.service.js";
+import { latestFlush, readFlushState } from "./flush-state.js";
 import {
   getTrackerColumnCounts,
   listTrackerWorkspaceRows,
@@ -121,5 +123,8 @@ export async function buildTrackerSnapshot(
     rc: project?.repoPath
       ? await withRcHeal(projectId, toRcCandidateSummary(currentRcCandidate(readRcState(resolveStableCheckoutFor(project.repoPath)))), database)
       : null,
+    // #1246 — the pressure signal and the most recent flush's heal state.
+    queuePressure: await getQueuePressure(projectId, project?.repoPath ?? null, database, nowMs),
+    flush: project?.repoPath ? latestFlush(readFlushState(resolveStableCheckoutFor(project.repoPath))) : null,
   };
 }

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { DeliveryStatusResponse, RiskPosture } from "@agentic-kanban/shared/types";
-import { buildDeliveryChipView, clampStep, describeRedBase } from "./deliveryChip.js";
+import type { DeliveryStatusResponse, FlushRecord, RiskPosture } from "@agentic-kanban/shared/types";
+import {
+  buildDeliveryChipView,
+  buildFlushBadge,
+  clampStep,
+  describeFlush,
+  describeQueuePressure,
+  describeRedBase,
+} from "./deliveryChip.js";
 
 function posture(overrides: Partial<RiskPosture> = {}): RiskPosture {
   return {
@@ -103,5 +110,70 @@ describe("buildDeliveryChipView (#1155)", () => {
     expect(clampStep(40, 1, 20)).toBe(20);
     expect(clampStep(Number.NaN, 1, 20)).toBe(1);
     expect(clampStep(3.4, 1, 20)).toBe(3);
+  });
+});
+
+function flushRecord(overrides: Partial<FlushRecord> = {}): FlushRecord {
+  return {
+    id: "flush/20260926-1",
+    at: "2026-09-26T10:00:00.000Z",
+    triggeredBy: "auto",
+    memberIssueNumbers: [1200],
+    memberBranches: ["feature/ak-1200-x"],
+    landingSha: "abc123",
+    tag: "flush/20260926-1",
+    sweepTarget: "master",
+    state: "flushed",
+    openHealTickets: [],
+    updatedAt: "2026-09-26T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("describeQueuePressure (#1246)", () => {
+  it("names the queue depth, oldest wait and both rates", () => {
+    expect(describeQueuePressure({ queueDepth: 7, oldestWaitingMs: 48 * 60 * 1000, arrivalsPerHour: 3.2, gateRunsPerHour: 1.1, windowMs: 3_600_000 }))
+      .toBe("Queue pressure: 7 waiting, oldest 48 min, 3.2 arrivals/h vs 1.1 gates/h");
+  });
+
+  it("names n/a for an empty queue's oldest age", () => {
+    expect(describeQueuePressure({ queueDepth: 0, oldestWaitingMs: null, arrivalsPerHour: 0, gateRunsPerHour: 0, windowMs: 3_600_000 }))
+      .toBe("Queue pressure: 0 waiting, oldest n/a, 0.0 arrivals/h vs 0.0 gates/h");
+  });
+
+  it("reads as not reported when absent", () => {
+    expect(describeQueuePressure(undefined)).toBe("Queue pressure: not reported");
+  });
+});
+
+describe("describeFlush (#1246)", () => {
+  it("names the flush id, state, and open heal ticket count", () => {
+    expect(describeFlush(flushRecord({ state: "red", openHealTickets: [1210, 1211] })))
+      .toBe("Flush: flush/20260926-1 red, 2 open heal tickets");
+  });
+
+  it("omits the heal segment when there are none", () => {
+    expect(describeFlush(flushRecord({ state: "merged-back" }))).toBe("Flush: flush/20260926-1 merged-back");
+  });
+
+  it("reads as none when the project never flushed", () => {
+    expect(describeFlush(null)).toBe("Flush: none");
+    expect(describeFlush(undefined)).toBe("Flush: none");
+  });
+});
+
+describe("buildFlushBadge (#1246)", () => {
+  it("is null when the project never flushed", () => {
+    expect(buildFlushBadge(null)).toBeNull();
+  });
+
+  it("marks a red flush urgent, with the open heal count in the label", () => {
+    const badge = buildFlushBadge(flushRecord({ state: "red", openHealTickets: [1210] }));
+    expect(badge).toEqual({ label: "flush red (1)", urgent: true });
+  });
+
+  it("is not urgent once healed", () => {
+    const badge = buildFlushBadge(flushRecord({ state: "healed", openHealTickets: [] }));
+    expect(badge).toEqual({ label: "flush healed", urgent: false });
   });
 });

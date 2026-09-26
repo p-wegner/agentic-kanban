@@ -58,9 +58,10 @@ export function buildDeliveryChipView(status: DeliveryStatusResponse): DeliveryC
     `Merge train: max ${status.trainWindowMaxSize}, wait ${formatMs(status.trainWindowMaxWaitMs)}${sourceNote}`,
     status.baseSweep.reason,
     describeRedBase(status.redBase),
-    "",
-    "Click for the Delivery controls.",
   ];
+  if (status.queuePressure) titleLines.push(describeQueuePressure(status.queuePressure));
+  if (status.flush) titleLines.push(describeFlush(status.flush));
+  titleLines.push("", "Click for the Delivery controls.");
 
   return {
     dotClass: RISK_POSTURE_DOT[posture.level],
@@ -89,6 +90,42 @@ export function describeRedBase(redBase: DeliveryStatusResponse["redBase"] | und
     ? `, ${redBase.openHealTickets} open heal ticket${redBase.openHealTickets === 1 ? "" : "s"}`
     : "";
   return `Red base: ${verdict}, ${hold}${heal}`;
+}
+
+/** `Queue pressure: 7 waiting, oldest 48 min, 3.2 arrivals/h vs 1.1 gates/h` — #1246. */
+export function describeQueuePressure(pressure: DeliveryStatusResponse["queuePressure"] | undefined): string {
+  if (!pressure) return "Queue pressure: not reported";
+  const oldest = pressure.oldestWaitingMs === null ? "n/a" : formatMs(pressure.oldestWaitingMs);
+  return `Queue pressure: ${pressure.queueDepth} waiting, oldest ${oldest}, ${pressure.arrivalsPerHour.toFixed(1)} arrivals/h vs ${pressure.gateRunsPerHour.toFixed(1)} gates/h`;
+}
+
+/**
+ * The flush badge (#1246, decision 020 part 3): state plus open heal ticket count, so the
+ * operator's three questions — did a flush happen, is its red healed, is the healed state
+ * back on master — are answerable from the chip alone. `null` when the project never flushed.
+ */
+export function describeFlush(flush: DeliveryStatusResponse["flush"] | undefined | null): string {
+  if (!flush) return "Flush: none";
+  const heal = flush.openHealTickets.length > 0
+    ? `, ${flush.openHealTickets.length} open heal ticket${flush.openHealTickets.length === 1 ? "" : "s"}`
+    : "";
+  return `Flush: ${flush.id} ${flush.state}${heal}`;
+}
+
+export interface FlushBadgeView {
+  label: string;
+  /** True once a red flush has stayed red past one cadence — the "loud" state (decision 020 part 3). */
+  urgent: boolean;
+}
+
+/** The delivery chip's `flush` badge — state + open heal count, or absent when never flushed. */
+export function buildFlushBadge(flush: DeliveryStatusResponse["flush"] | undefined | null): FlushBadgeView | null {
+  if (!flush) return null;
+  const heal = flush.openHealTickets.length > 0 ? ` (${flush.openHealTickets.length})` : "";
+  return {
+    label: `flush ${flush.state}${heal}`,
+    urgent: flush.state === "red",
+  };
 }
 
 function formatMs(ms: number): string {

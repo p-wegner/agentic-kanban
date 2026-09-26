@@ -51,9 +51,13 @@ Status glyphs:
         }
         const prefMap = toPrefMap(await getAllPreferences());
         const wip = resolveWipLimit(prefMap, projectId);
-        // #1239 — the rc line reads the same resolver the delivery chip does; absent = no line.
-        const rc = await getDeliveryStatus(projectId).then((d) => d.rc ?? null).catch(() => null);
-        const frame = renderTrackerFrame(snapshot, wip, { width: process.stdout.columns, connectionStatus, rc });
+        // #1239/#1246 — the rc, queue-pressure and flush lines read the same delivery status
+        // the chip does, in one call; absent = no line for each.
+        const delivery = await getDeliveryStatus(projectId).catch(() => null);
+        const rc = delivery?.rc ?? null;
+        const queuePressure = delivery?.queuePressure ?? null;
+        const flush = delivery?.flush ?? null;
+        const frame = renderTrackerFrame(snapshot, wip, { width: process.stdout.columns, connectionStatus, rc, queuePressure, flush });
         console.log(frame.text);
       };
 

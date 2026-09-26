@@ -23,6 +23,9 @@ import { previewNextStartCandidates } from "../services/start-score-preview.serv
 import { getAutopilotStatus, type AutopilotStatusDeps } from "../services/autopilot-status.service.js";
 import { clearAutoMergeBreaker, readAutoMergeBreaker } from "../services/auto-merge-breaker.js";
 import { getDeliveryStatus } from "../services/delivery-status.service.js";
+import { latestFlush, readFlushState, sortFlushes } from "../services/flush-state.js";
+import { resolveStableCheckoutFor } from "../services/rc-state.js";
+import type { FlushesResponse } from "@agentic-kanban/shared/types";
 
 /**
  * #1102: the Autopilot chip re-reads on board events, and a Tier-1 capacity read spawns a
@@ -136,6 +139,19 @@ export function createBoardMonitorRoute(
     const projectId = c.req.param("id");
     const status = await getDeliveryStatus(projectId, database);
     return c.json(status);
+  });
+
+  // #1246: latest + history of this project's queue flushes, off the stable checkout's
+  // `.kanban/flush-state.json` — the one shape the delivery chip, `pnpm cli -- tracker` and the
+  // Sentinel all read, so none of them re-derives the state machine's rendering. `null`/`[]`
+  // for a project that has never flushed, or has no stable checkout at all (read-only, never
+  // throws — see `readFlushState`).
+  router.get("/:id/flushes", async (c) => {
+    const projectId = c.req.param("id");
+    const project = await requireProject(projectId, database);
+    const state = readFlushState(resolveStableCheckoutFor(project.repoPath));
+    const body: FlushesResponse = { projectId, latest: latestFlush(state), history: sortFlushes(state.flushes) };
+    return c.json(body);
   });
 
   // #917: top-N ranked Todo-pull candidates for this project, by the same score the

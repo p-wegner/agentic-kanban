@@ -1,11 +1,38 @@
 import { workspaces, issues, preferences } from "@agentic-kanban/shared/schema";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { preferenceKeyValueColumns } from "./projections.js";
 
 const trainMaxSizePref = projectPref("train_max_size");
+
+/**
+ * The queue-pressure signal's input (#1246): ready-for-merge, idle, non-fork workspaces for
+ * one project, with the timestamp they became ready (`updatedAt`, the same field
+ * `resolvePendingMembers` in `merge-queue.ts` reads for `readySince`). Deliberately a simpler
+ * read than the auto-merge orchestrator's own candidate query — it does not need the join
+ * status name filter, since `readyForMerge` alone is what "waiting in the queue" means for a
+ * pressure READING (unlike the orchestrator, which also accepts an un-flagged "In Review"/"AI
+ * Reviewed" workspace as a merge candidate under `auto_merge_in_review`).
+ */
+export async function getQueuePressureMemberRows(
+  projectId: string,
+  database: Database = db,
+): Promise<{ workspaceId: string; readySince: string }[]> {
+  const rows = await database
+    .select({ workspaceId: workspaces.id, issueId: workspaces.issueId, updatedAt: workspaces.updatedAt })
+    .from(workspaces)
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(and(
+      eq(issues.projectId, projectId),
+      ne(workspaces.status, "closed"),
+      eq(workspaces.isDirect, false),
+      eq(workspaces.readyForMerge, true),
+      eq(workspaces.status, "idle"),
+    ));
+  return rows.map((row) => ({ workspaceId: row.workspaceId, readySince: row.updatedAt }));
+}
 
 export async function getMergeQueueWorkspaceRows(
   workspaceIds: string[],
