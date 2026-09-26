@@ -4,6 +4,7 @@
 export {
   resolveMergeStrategy,
   resolveMergePolicy,
+  resolveAutoMerge,
   isAutomaticMergeEnabled,
   MERGE_STRATEGY_PREF_KEY,
 } from "@agentic-kanban/shared/lib/merge-policy";
