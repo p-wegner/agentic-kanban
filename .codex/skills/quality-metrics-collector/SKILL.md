@@ -1,6 +1,7 @@
 ---
 name: quality-metrics-collector
 description: Collect repository code-health metrics and POST them to the board Quality Metrics API
+disable-model-invocation: true
 ---
 
 # quality-metrics-collector

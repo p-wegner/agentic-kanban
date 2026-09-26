@@ -2,6 +2,7 @@
 name: convert-hooks-to-opencode
 description: Convert Claude Code hooks (.claude/settings.json hooks block + .claude/hooks/ scripts) into an equivalent OpenCode plugin under .opencode/plugin/. Use when porting a repo's hook automation from Claude Code to OpenCode.
 argument-hint: "[path to .claude/settings.json, defaults to current repo]"
+disable-model-invocation: true
 ---
 
 # convert-hooks-to-opencode

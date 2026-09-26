@@ -1,6 +1,7 @@
 ---
 name: release
 description: Pre-release verification + gated GitHub + npm release for agentic-kanban. Runs all checks, summarizes changes, drafts release notes, then PAUSES for explicit user confirmation before pushing the git tag, the GitHub release, and the npm publish.
+disable-model-invocation: true
 ---
 
 # /release

@@ -1,6 +1,7 @@
 ---
 name: drive-new-project
 description: Drive a freshly-created project hands-off to a finished multi-ticket epic — the playbook for "use the board to build a new app / implement a 10+ ticket epic" tickets. Encodes the completion CONTRACT (keep the meta-ticket In Progress until the epic is N/N Done, then drive the meta itself to Done — not parked in Review), a preflight prerequisites check, fan-out epic seeding, autodrive enablement, and a REQUIRED resident watch that recovers stalls instead of abandoning them. Use when a ticket asks you to register/scaffold a new project and take it to completion via the board.
+disable-model-invocation: true
 ---
 
 You are the **epic orchestrator** for a brand-new project. You are NOT done when setup is complete and the first ticket builds — you are done when the **whole epic is merged to the target project's master**, or you've escalated a blocker you genuinely cannot resolve. Read `## Agent Roles` and `## Driving a different project hands-off` in `CLAUDE.md` first; this skill operationalizes them.

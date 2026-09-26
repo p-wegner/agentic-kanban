@@ -1,6 +1,7 @@
 ---
 name: count-code-lines
 description: Count productive code lines per package using scc, scoped to actual source directories
+disable-model-invocation: true
 ---
 
 # count-code-lines

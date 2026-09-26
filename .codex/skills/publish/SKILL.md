@@ -1,6 +1,7 @@
 ---
 name: publish
 description: Publish a new version of the agentic-kanban npm package — build, bump, pack check, publish, commit, push
+disable-model-invocation: true
 ---
 
 # Publishing agentic-kanban to npm

@@ -1,6 +1,7 @@
 ---
 name: ticket-enhancer
 description: Enhance a ticket's title and description for clarity and completeness
+disable-model-invocation: true
 ---
 
 Review and enhance the given issue to make it more actionable for an AI agent.

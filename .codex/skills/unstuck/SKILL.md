@@ -1,6 +1,7 @@
 ---
 name: unstuck
 description: Drive a stuck kanban issue all the way to master. Diagnose why the agent stopped, answer pending questions, run the agent to commit, then merge via the kanban endpoint and verify master actually advanced.
+disable-model-invocation: true
 ---
 
 # /unstuck N
