@@ -7,9 +7,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { getQueuePressure } from "../services/queue-pressure.service.js";
+import { stampWorkspaceReadyForMergeAt } from "../repositories/workspace-ready-for-merge.repository.js";
 
 const NOW = Date.parse("2026-09-26T12:00:00.000Z");
 const isoAgo = (ms: number) => new Date(NOW - ms).toISOString();
@@ -27,14 +29,19 @@ async function seedProjectWithReadyWorkspaces(db: TestDb, readySinceOffsets: num
   });
   for (const [index, offsetMs] of readySinceOffsets.entries()) {
     const issueId = randomUUID();
+    const workspaceId = randomUUID();
     await db.insert(issues).values({
       id: issueId, issueNumber: index + 1, title: "T", statusId, projectId, createdAt: now, updatedAt: now,
     });
     await db.insert(workspaces).values({
-      id: randomUUID(), issueId, branch: "feature/x", status: "idle",
+      id: workspaceId, issueId, branch: "feature/x", status: "idle",
       workingDir: "/tmp/x", isDirect: false, readyForMerge: true,
       createdAt: now, updatedAt: isoAgo(offsetMs),
     });
+    // #1253: the real writers stamp `workspace_ready_for_merge` alongside `readyForMerge`.
+    // Seeding it here (rather than relying on the `updatedAt` fallback) is what exercises the
+    // fixed column instead of accidentally re-testing the bug it replaced.
+    await stampWorkspaceReadyForMergeAt(workspaceId, isoAgo(offsetMs), db);
   }
   return projectId;
 }
@@ -109,5 +116,20 @@ describe("getQueuePressure", () => {
     const summary = await getQueuePressure(projectId, repoPath, db, NOW);
     expect(summary.arrivalsPerHour).toBe(0);
     expect(summary.gateRunsPerHour).toBe(0);
+  });
+
+  it("#1253: a later unrelated update to a ready workspace does not reset its waiting age", async () => {
+    const { db } = createTestDb();
+    // Became ready 48 minutes ago.
+    const projectId = await seedProjectWithReadyWorkspaces(db, [48 * 60_000]);
+    const [{ id: workspaceId }] = await db.select({ id: workspaces.id }).from(workspaces);
+
+    // Something else touches the row much later (a diff-stat refresh, a rebase) — bumps
+    // `updatedAt` without the workspace leaving or re-entering the ready-for-merge queue.
+    await db.update(workspaces).set({ updatedAt: isoAgo(2 * 60_000) }).where(eq(workspaces.id, workspaceId));
+
+    const summary = await getQueuePressure(projectId, null, db, NOW);
+    // Before #1253 this read as 2 minutes (updatedAt) instead of the true 48.
+    expect(summary.oldestWaitingMs).toBe(48 * 60_000);
   });
 });

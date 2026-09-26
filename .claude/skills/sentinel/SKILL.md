@@ -35,6 +35,7 @@ Never poll in a tight loop or hold a session open sleeping. Each wakeup does one
      | grep -aoE "ACTIVE_AGENTS_TARGET = [0-9]+|BACKLOG_FLOOR = [0-9]+|MAX_NEW_STARTS_PER_CYCLE = [0-9]+|REFILL_FOCUS = [a-z-]+"
    ```
    Report it compactly (`target 3 · floor 10 · 2/cycle · balanced`) and name the top 1–2 strategy weights (e.g. "REST-perf 5/5, backend-eff 4/5"). Edited via the board UI **Strategy** view (`z`) / the `board_strategy_<projectId>` preference — not by hand-editing `objective.md` (changes get overwritten on the next bullseye save).
+6a. **Latest flush + heal state (decision 020 part 3, #1246/#1253)** — `GET /api/projects/<id>/flushes`. If `latest` is `null` or its `state` is terminal (`merged-back`/`abandoned`), the project has no live flush — omit the segment entirely rather than reporting a stale one. Otherwise report `flush <id> <state>`, and mark it **loud** (prefix `⚠️`) when `state` is `red` or `healing` AND it has been in a non-`flushed`/`sweeping` state longer than one promotion cadence — compare `latest.updatedAt` (when it last changed state) against the cadence read from `GET /api/projects/<id>/delivery`'s `promoteCadence` field (`daily@HH:MM` → 24h; `off` → treat as 24h, the decision doc's own default window). A flush loud past one cadence with no heal ticket moving is the case decision 020 says the operator must be told about without having to go looking.
 7. **Which version the operated board runs (#1013/#1014)** — the board on 3001 is the STABLE one: a built artifact in `../agentic-kanban-stable` that only `pnpm promote` moves (see `CLAUDE.md` § What This Is). Three cheap reads:
    ```bash
    curl -s -m 5 http://127.0.0.1:3001/health
@@ -75,7 +76,7 @@ Never poll in a tight loop or hold a session open sleeping. Each wakeup does one
 
 ## Output format
 
-Healthy: one line — `loop ALIVE(pid) · cycles clean · profile=anth · In Progress N · In Review N · Backlog N · strategy: target 3/floor 10/balanced · pulling: yes`.
+Healthy: one line — `loop ALIVE(pid) · cycles clean · profile=anth · In Progress N · In Review N · Backlog N · strategy: target 3/floor 10/balanced · pulling: yes`, with ` · flush <id> <state>` appended when a live (non-terminal) flush exists (step 6a). Prefix the WHOLE line with `⚠️` instead when that flush is loud.
 Problem: lead with `⚠️`, state what failed, what you did (or why you deliberately did nothing), and current state.
 
 ## Lab (not part of a watch pass)

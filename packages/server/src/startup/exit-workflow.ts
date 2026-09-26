@@ -42,6 +42,7 @@ import type { Database } from "../db/index.js";
 import { classifySessionExit, resolveSessionRoleFlags } from "./session-exit-classification.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { setMergeGateEvidence } from "../repositories/merge-gate.repository.js";
+import { stampWorkspaceReadyForMergeAt } from "../repositories/workspace-ready-for-merge.repository.js";
 import { resolveGateVerification } from "../services/pre-merge-gate-tier.js";
 import { resolveProjectReviewMode } from "../services/review-mode-pref.js";
 import { formatPostureNote } from "../services/risk-posture.service.js";
@@ -361,6 +362,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       readyForMerge: true,
       updatedAt: evidence.ranAt ?? new Date().toISOString(),
     }).where(eq(workspaces.id, workspaceId));
+    await stampWorkspaceReadyForMergeAt(workspaceId, evidence.ranAt, db);
     // #815: the five `merge_gate_*` columns moved to `workspace_merge_gate`. Same values,
     // same trustworthiness rule — an upsert, because a workspace can be re-gated.
     // #893: also stamp the verification-tier key, so the HTTP merge path's bounded

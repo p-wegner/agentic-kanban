@@ -19,6 +19,7 @@ import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sw
 import { clearReviewPreflightBlockRow, setReviewPreflightBlock } from "../repositories/review-preflight.repository.js";
 import { resolveProjectReviewMode } from "../services/review-mode-pref.js";
 import { formatPostureNote } from "../services/risk-posture.service.js";
+import { stampWorkspaceReadyForMergeAt } from "../repositories/workspace-ready-for-merge.repository.js";
 
 /**
  * How many times the reconciler may attempt a review preflight for the SAME pair of
@@ -313,7 +314,11 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
         // earlier run, `evidenceIsValid` rejects it on a moved tip or on age. So the merge
         // still gates, and `readyForMerge` goes back to meaning "reviewed and approved"
         // rather than "and the gate also happened to get a semaphore slot in time".
-        await database.update(workspaces).set({ readyForMerge: true, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, c.wsId));
+        {
+          const now = new Date().toISOString();
+          await database.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, c.wsId));
+          await stampWorkspaceReadyForMergeAt(c.wsId, now, database);
+        }
         boardEvents.broadcast(c.projectId, "workspace_ready_for_merge");
         console.log(`[reconcile] review of workspace ${c.wsId} (#${c.issueNumber ?? "?"}) exited clean but readyForMerge was never armed — arming it (#932)`);
       } else if (reviewThisOne) {
@@ -321,7 +326,11 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
         if (priorFailures > 0) await clearReviewPreflightBlock(database, c.wsId);
         console.log(`[reconcile] re-launched stranded review for workspace ${c.wsId} (#${c.issueNumber ?? "?"}) session=${sessionId}`);
       } else {
-        await database.update(workspaces).set({ readyForMerge: true, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, c.wsId));
+        {
+          const now = new Date().toISOString();
+          await database.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, c.wsId));
+          await stampWorkspaceReadyForMergeAt(c.wsId, now, database);
+        }
         boardEvents.broadcast(c.projectId, "workspace_ready_for_merge");
         const why = autoReview
           ? `per-ticket review is off for this project${formatPostureNote(reviewDecision.posture)}`

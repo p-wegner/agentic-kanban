@@ -1107,6 +1107,13 @@
       "when": 1790000000000,
       "tag": "0157_base_branch_health_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 158,
+      "version": "6",
+      "when": 1790100000000,
+      "tag": "0158_workspace_ready_for_merge",
+      "breakpoints": true
     }
   ]
 }

@@ -12,6 +12,7 @@ import { abortLiveMergeTrain } from "../services/merge-train-live-registry.js";
 import { cleanupTrainWorktreesForLabel } from "../services/merge-train-worktrees.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { getMergeQueueIssueRows, getMergeQueueWorkspaceRows } from "../repositories/merge-queue.repository.js";
+import { getWorkspaceReadyForMergeAtBatch } from "../repositories/workspace-ready-for-merge.repository.js";
 import { listTrainSidingStatesForProject } from "../repositories/merge-train-siding.repository.js";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
@@ -322,6 +323,9 @@ export function createMergeQueueRoute(
     const issueRows = issueIds.length > 0 ? await getMergeQueueIssueRows(issueIds, database) : [];
     const issueById = new Map(issueRows.map((i) => [i.id, i]));
     const workspaceById = new Map(workspaceRows.map((w) => [w.id, w]));
+    // #1253: `readySince` prefers the moment readyForMerge was stamped true over `updatedAt`,
+    // same reasoning as `getQueuePressureMemberRows` — see that function's header.
+    const readySinceById = await getWorkspaceReadyForMergeAtBatch(workspaceIds, database);
     return workspaceIds.map((workspaceId) => {
       const workspace = workspaceById.get(workspaceId);
       const issue = workspace ? issueById.get(workspace.issueId) : undefined;
@@ -329,7 +333,7 @@ export function createMergeQueueRoute(
         workspaceId,
         issueNumber: issue?.issueNumber ?? null,
         issueTitle: issue?.title ?? null,
-        readySince: workspace?.updatedAt ?? null,
+        readySince: readySinceById.get(workspaceId) ?? workspace?.updatedAt ?? null,
       };
     });
   }

@@ -18,6 +18,7 @@
  */
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { clearMergeGateEvidence } from "../../repositories/merge-gate.repository.js";
+import { clearWorkspaceReadyForMergeAt } from "../../repositories/workspace-ready-for-merge.repository.js";
 import { getProjectRepoPath } from "../../repositories/project.repository.js";
 import { getResolveConflictsLaunchSnapshot, insertIssueComment } from "../../repositories/issue-comments.repository.js";
 import { getWorkspaceById } from "../../repositories/workspace-reads.repository.js";
@@ -208,6 +209,7 @@ export function createFixAndMergeExitHandler({ database: db, gitService, boardEv
       // conflicted branch is not silently re-queued as "ready". Surface a clear signal.
       const now = new Date().toISOString();
       await setWorkspaceStatus(db, workspace.id, "idle", { now, set: { readyForMerge: false } });
+      await clearWorkspaceReadyForMergeAt(workspace.id, db);
       // #815: the gate evidence moved to `workspace_merge_gate`. Nulling three of the five
       // columns was how this path said "the proof is void"; DELETING the row says the same
       // thing and cannot leave a half-cleared quartet behind.
@@ -258,6 +260,7 @@ export function createFixAndMergeExitHandler({ database: db, gitService, boardEv
 
       console.warn(`[workflow] #1209 resolve-conflicts session ${sessionId} for workspace ${workspace.id} was a NO-OP (branch tip unchanged, still conflicts with ${baseBranch}) — not retrying the merge`);
       await setWorkspaceStatus(db, workspace.id, "idle", { now: ctx.now, set: { readyForMerge: false } });
+      await clearWorkspaceReadyForMergeAt(workspace.id, db);
       await clearMergeGateEvidence(workspace.id, db);
       await insertIssueComment({
         issueId: ctx.issueId,
