@@ -152,3 +152,7 @@ export function pluginSyncConfigPreferenceKey(pluginSlug: string, projectId: str
 export function pluginSyncStatusPreferenceKey(pluginSlug: string, projectId: string): string {
   return `plugin_sync_status_${pluginSlug}_${projectId}`;
 }
+
+// Per-project skill-listing override key (#1251) is `pluginSkillListingPreferenceKey` in
+// `plugin-skill-listing.ts`, alongside `SkillListing`/`SKILL_LISTINGS` — the listing vocabulary
+// lives there, not here, so this module stays pure key-derivation.

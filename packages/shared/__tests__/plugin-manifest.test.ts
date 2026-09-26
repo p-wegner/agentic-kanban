@@ -166,6 +166,28 @@ describe("parsePluginManifest", () => {
     ).toThrow(/must be one of operator, developer/);
   });
 
+  // #1251 — a plugin author's listing hint, outranked by a project override and the global
+  // default at resolve time, but parsed and carried through here.
+  it("parses a skill's listing hint", () => {
+    const m = parsePluginManifest({
+      id: "p",
+      name: "P",
+      skills: [{ dir: "skills/runner", listing: "off" }],
+    });
+    expect(m.skills?.[0].listing).toBe("off");
+  });
+
+  it("leaves listing undefined when the manifest omits it (backward compatible)", () => {
+    const m = parsePluginManifest(JSON.stringify(FULL_MANIFEST));
+    expect(m.skills?.[0].listing).toBeUndefined();
+  });
+
+  it("rejects an unknown listing value", () => {
+    expect(() =>
+      parsePluginManifest({ id: "p", name: "P", skills: [{ dir: "skills/x", listing: "always" }] }),
+    ).toThrow(/must be one of on, name-only, user-invocable-only, off/);
+  });
+
   // #462 — a plugin author marks its entry skill for a codebase that has never used the
   // plugin before; the board cannot infer this.
   it("parses skills[].init when present", () => {
