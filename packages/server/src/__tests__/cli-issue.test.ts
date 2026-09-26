@@ -110,6 +110,43 @@ describe("CLI issue create", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("not found");
   });
+
+  it("applies --tag no-auto-start atomically with the issue insert (#1254)", async () => {
+    await seedProject(ctx.dbPath);
+    const result = runCli(["issue", "create", "Maintenance ticket", "--tag", "no-auto-start"], ctx.dbPath);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Created issue #1");
+
+    const { db: database, close } = openDb(ctx.dbPath);
+    try {
+      const issue = (await database.select().from(schema.issues).where(eq(schema.issues.issueNumber, 1)))[0];
+      const rows = await database.select({ name: schema.tags.name })
+        .from(schema.issueTags)
+        .innerJoin(schema.tags, eq(schema.issueTags.tagId, schema.tags.id))
+        .where(eq(schema.issueTags.issueId, issue.id));
+      expect(rows.map((r) => r.name)).toEqual(["no-auto-start"]);
+    } finally {
+      close();
+    }
+  });
+
+  it("accepts --tag repeated for multiple tags", async () => {
+    await seedProject(ctx.dbPath);
+    const result = runCli(["issue", "create", "Multi-tag ticket", "--tag", "no-auto-start", "--tag", "urgent"], ctx.dbPath);
+    expect(result.status).toBe(0);
+
+    const { db: database, close } = openDb(ctx.dbPath);
+    try {
+      const issue = (await database.select().from(schema.issues).where(eq(schema.issues.issueNumber, 1)))[0];
+      const rows = await database.select({ name: schema.tags.name })
+        .from(schema.issueTags)
+        .innerJoin(schema.tags, eq(schema.issueTags.tagId, schema.tags.id))
+        .where(eq(schema.issueTags.issueId, issue.id));
+      expect(rows.map((r) => r.name).sort()).toEqual(["no-auto-start", "urgent"]);
+    } finally {
+      close();
+    }
+  });
 });
 
 describe("CLI issue move", () => {
