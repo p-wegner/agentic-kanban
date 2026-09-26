@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import type { PluginManifest, PluginOutputLocation } from "@agentic-kanban/shared";
-import { PLUGIN_OUTPUT_LOCATIONS } from "@agentic-kanban/shared";
+import type { PluginManifest, PluginOutputLocation, SkillListing } from "@agentic-kanban/shared";
+import { PLUGIN_OUTPUT_LOCATIONS, SKILL_LISTINGS } from "@agentic-kanban/shared";
 import { apiFetch, apiPost, apiDelete } from "../../lib/api.js";
 import { getViewRoutePath } from "../../lib/appRoutes.js";
 import { showToast } from "../../lib/toast.js";
+import type { Settings, SettingsTextSetter } from "../SettingsPanel.shared.js";
+import { PluginSkillListingSelector, type ResolvedSkillListing } from "./PluginSkillListingSelector.js";
 
 /** One row from GET /api/plugins?projectId= — DB row + parsed manifest + enabled flag. */
 type PluginListItem = {
@@ -19,6 +21,8 @@ type PluginListItem = {
   enabled?: boolean;
   /** Only present when the list was fetched with a projectId. */
   outputLocation?: PluginOutputLocation;
+  /** Only present when the list was fetched with a projectId and the plugin declares skills. */
+  skillListings?: ResolvedSkillListing[];
 };
 
 type OutputLocationResult = { location: PluginOutputLocation; repoPath: string | null; sidecarRepoName: string };
@@ -26,6 +30,13 @@ type OutputLocationResult = { location: PluginOutputLocation; repoPath: string |
 const OUTPUT_LOCATION_LABELS: Record<PluginOutputLocation, string> = {
   leading: "Leading repo",
   sidecar: "Dedicated sidecar repo",
+};
+
+const LISTING_MODE_LABELS: Record<SkillListing, string> = {
+  on: "On (full description)",
+  "name-only": "Name only",
+  "user-invocable-only": "User-invocable only",
+  off: "Off",
 };
 
 type ScriptRunResult = {
@@ -44,10 +55,13 @@ type EnableReport = {
 
 type PluginsSettingsProps = {
   activeProjectId?: string | null;
+  /** Global settings blob + text setter — only used here for `plugin_skill_listing_default`. */
+  settings: Settings;
+  set: SettingsTextSetter;
 };
 
 /** Settings → Plugins tab: install, list, per-project enable/disable, and run plugin scripts. */
-export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
+export function PluginsSettings({ activeProjectId, settings, set }: PluginsSettingsProps) {
   const [plugins, setPlugins] = useState<PluginListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [installSource, setInstallSource] = useState("");
@@ -135,6 +149,18 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
     }
   }
 
+  function handleSkillListingChanged(pluginId: string, skillName: string, mode: SkillListing) {
+    setPlugins((rows) => rows.map((p) => {
+      if (p.id !== pluginId || !p.skillListings) return p;
+      return {
+        ...p,
+        skillListings: p.skillListings.map((s) =>
+          s.name === skillName ? { ...s, mode, source: "project" } : s,
+        ),
+      };
+    }));
+  }
+
   async function handleDelete(plugin: PluginListItem) {
     if (deletingId) return;
     if (!window.confirm(`Remove plugin "${plugin.name}"? Files on disk are kept; the plugin is disabled everywhere.`)) return;
@@ -175,6 +201,28 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
         Install once, then enable per project. Scripts run as one-shot subprocesses here; skills need
         judgment (and a prompt), so they are launched as a ticket + workspace from the Plugins board view.
       </p>
+
+      {/* Global default listing mode — applies where a skill has no project override and no
+          manifest hint; saved along with the rest of Settings via this panel's own Save button. */}
+      <div className="border border-gray-200 dark:border-gray-700 rounded-md p-3 space-y-1">
+        <div className="text-sm font-medium text-gray-800 dark:text-gray-200">Default skill listing</div>
+        <div className="flex items-center gap-2">
+          <select
+            value={(settings.plugin_skill_listing_default as SkillListing | undefined) ?? "name-only"}
+            onChange={(e) => set("plugin_skill_listing_default")(e.target.value)}
+            className="text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-800 dark:text-gray-200"
+            data-testid="plugin-skill-listing-default"
+          >
+            {SKILL_LISTINGS.map((mode) => (
+              <option key={mode} value={mode}>{LISTING_MODE_LABELS[mode]}</option>
+            ))}
+          </select>
+        </div>
+        <p className="text-[11px] text-gray-400 dark:text-gray-500">
+          Board-wide fallback for a plugin skill with no per-project override and no manifest hint.
+          Takes effect on Save.
+        </p>
+      </div>
 
       {/* Install form */}
       <div className="border border-gray-200 dark:border-gray-700 rounded-md p-3 space-y-2">
@@ -225,6 +273,7 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
             const scripts = plugin.manifest?.scripts ?? [];
             const views = plugin.manifest?.views ?? [];
             const skills = (plugin.manifest?.skills ?? []).map((s) => s.dir.split("/").pop() || s.dir);
+            const skillListings = plugin.skillListings ?? [];
             const producesOutput = Boolean(plugin.manifest?.scaffold || plugin.manifest?.loops?.length || scripts.length > 0);
             return (
               <div key={plugin.id} className="border border-gray-200 dark:border-gray-700 rounded-md p-3 space-y-2">
@@ -366,17 +415,29 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
                 {skills.length > 0 && (
                   <div className="border-t border-gray-100 dark:border-gray-800 pt-2 space-y-1.5">
                     <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">Skills</div>
-                    <div className="flex flex-wrap gap-1">
-                      {skills.map((skillName) => (
-                        <span
-                          key={skillName}
-                          className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300"
-                        >
-                          {skillName}
-                        </span>
-                      ))}
-                    </div>
+                    {activeProjectId && skillListings.length > 0 ? (
+                      <PluginSkillListingSelector
+                        pluginId={plugin.id}
+                        activeProjectId={activeProjectId}
+                        listings={skillListings}
+                        onChange={(skillName, mode) => handleSkillListingChanged(plugin.id, skillName, mode)}
+                      />
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {skills.map((skillName) => (
+                          <span
+                            key={skillName}
+                            className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+                          >
+                            {skillName}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     <p className="text-[11px] text-gray-400 dark:text-gray-500">
+                      {activeProjectId
+                        ? "Listing controls how much of a skill's description loads into every session — \"off\" still allows an explicit /name invocation. "
+                        : ""}
                       Run these from the{" "}
                       <a
                         href={getViewRoutePath("plugin-views")}

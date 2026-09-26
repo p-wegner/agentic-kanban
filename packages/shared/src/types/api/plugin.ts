@@ -1,3 +1,5 @@
+import type { SkillListing } from "../../lib/plugin-skill-listing.js";
+
 /**
  * Plugin wire types (#569).
  *
@@ -47,3 +49,19 @@ export type PluginScriptRunEvent =
   | ({ stage: "progress" } & PluginScriptRunProgress)
   | ({ stage: "done" } & PluginScriptRunResult)
   | { stage: "error"; message: string };
+
+/**
+ * A per-project resolved listing mode for one plugin-declared skill (#1252 Plugins-view
+ * picker) — one entry per `GET /api/plugins?projectId=` row's `skillListings`, and the shape
+ * `PluginSkillListingSelector` renders.
+ */
+export interface ResolvedSkillListing {
+  name: string;
+  mode: SkillListing;
+  /** Where the resolved mode came from — for display, not decision-making. */
+  source: "project" | "manifest" | "default";
+  /** The manifest author's own hint, if any (undefined = no opinion declared). */
+  manifestHint: SkillListing | undefined;
+  /** `description.length` — a rough per-turn token-cost proxy for listing this skill "on". */
+  descriptionSize: number;
+}

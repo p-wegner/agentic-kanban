@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync, symlinkSync, cpSync } from "node:fs";
-import { join } from "node:path";
 import { skillDirOf, skillsDirOf } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
 import {
@@ -7,14 +6,22 @@ import {
   pluginSkillName,
   type PluginManifest,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
+import {
+  isSkillListing,
+  pluginSkillListingPreferenceKey,
+} from "@agentic-kanban/shared/lib/plugin-skill-listing";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+import { getJson } from "@agentic-kanban/shared/lib/settings-registry";
 import type { Database } from "../db/index.js";
 import type { PluginRow } from "../repositories/plugins.repository.js";
+import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { resolveInside, addToGitInfoExclude, isLinkPath, removeLink } from "./plugin-fs.js";
 import { fanOutScaffold } from "./plugin-scaffold.js";
 import { syncPluginSkillOverrides } from "./plugin-skill-overrides.service.js";
 import { stopPluginViews } from "./plugin-views.service.js";
 import { deletePluginViewProcessesForPlugin } from "../repositories/plugin-view-processes.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { PluginError } from "./plugin-errors.js";
 
 /**
  * Per-project enable/disable of an installed plugin: skill fan-out (junction, copy
@@ -95,6 +102,43 @@ export function fanOutPluginSkills(
   }
 }
 
+/**
+ * An operator's explicit per-skill listing override (#1252) — merged into the project's
+ * `plugin_skill_listing_<slug>_<projectId>` JSON map (#1251's own preference key), then
+ * re-synced via `syncPluginSkillOverrides` for the MAIN checkout (the Plugins view's own
+ * scope; a worktree gets its resolution fresh at provisioning time).
+ */
+async function setSkillListingMode(
+  plugin: PluginRow & { manifest: PluginManifest },
+  project: { id: string; repoPath: string },
+  skillName: string,
+  mode: string,
+  database: Database,
+): Promise<{ warning: string | null }> {
+  if (!isSkillListing(mode)) {
+    throw new PluginError(
+      `mode must be one of: on, name-only, user-invocable-only, off (got ${JSON.stringify(mode)})`,
+      "BAD_REQUEST",
+    );
+  }
+  const declaredNames = (plugin.manifest.skills ?? []).map((s) => pluginSkillName(s.dir));
+  if (!declaredNames.includes(skillName)) {
+    throw new PluginError(`Skill "${skillName}" is not declared by this plugin`, "NOT_FOUND");
+  }
+
+  const prefKey = pluginSkillListingPreferenceKey(plugin.pluginId, project.id);
+  const prefSource = toPrefMap(await getAllPreferences(database));
+  const existingOverrides = getJson<Record<string, string>>(prefSource, prefKey, {});
+  const mergedOverrides = { ...existingOverrides, [skillName]: mode };
+  await setPreferenceChecked(database, [{ key: prefKey, value: JSON.stringify(mergedOverrides) }]);
+
+  const result = await syncPluginSkillOverrides(database, project.id, project.repoPath);
+  const warning = result.status === "skipped-tracked" || result.status === "failed"
+    ? (result.message ?? result.status)
+    : result.warnings[0] ?? null;
+  return { warning };
+}
+
 export function createPluginEnablementOps(deps: {
   database: Database;
   requirePlugin: (id: string) => Promise<PluginRow & { manifest: PluginManifest }>;
@@ -163,5 +207,12 @@ export function createPluginEnablementOps(deps: {
     return { prefKey, skillsRemoved };
   }
 
-  return { fanOutSkills, enableForProject, disableForProject };
+  /** Set one skill's project-scoped listing override and re-sync the main checkout (#1252). */
+  async function setSkillListingModeForProject(pluginRowId: string, projectId: string, skillName: string, mode: string) {
+    const plugin = await requirePlugin(pluginRowId);
+    const project = await requireProject(projectId);
+    return setSkillListingMode(plugin, project, skillName, mode, database);
+  }
+
+  return { fanOutSkills, enableForProject, disableForProject, setSkillListingModeForProject };
 }

@@ -95,6 +95,25 @@ operator still installs it (one click, which posts its local path) and enables i
 A preference `plugin_enabled_<slug>_<projectId>` records the state. Disabling removes the skill
 junctions and clears the preference; scaffolded files stay (they are the project's now).
 
+### Skill listing — how much of a skill's description loads into every session
+
+A junctioned plugin skill's `description` is read into every session in the project — builders
+included — whether or not that session ever invokes it. Each `skills[].listing` may declare a
+default (`"on" | "name-only" | "user-invocable-only" | "off"`); precedence at runtime is a
+per-project override, then this manifest hint, then the board-wide `plugin_skill_listing_default`
+setting, then `"name-only"`.
+
+The **Plugins** Settings tab shows, per enabled skill, the resolved mode, where it came from
+(project / manifest / board default), and an estimated per-turn cost derived from the skill's
+`description` length — changing it writes the per-project override immediately and re-syncs the
+main checkout's `.claude/settings.local.json`. `plugin_skill_listing_default` is also editable
+there as a board-wide fallback.
+
+**Claude Code only, today.** The mechanism is Claude Code's own `skillOverrides` setting; Pi
+reads the resolved modes to decide which skills it auto-loads via `--skill`. Codex has no
+equivalent — its context comes from `AGENTS.md` as a whole, with no per-skill visibility lever —
+so a Codex-driven workspace always sees every enabled skill's full description.
+
 **Use** — the **Plugins** toolbar tab (after Workflows) is a dropdown listing every enabled
 plugin; each opens that plugin's own view with its capabilities, and the menu also carries
 "Install plugin…" and "Marketplace". Scripts run inline; views open in a framed iframe; skills
@@ -615,7 +634,9 @@ description (a skill agents should reach for unprompted): `{ "dir": ".claude/ski
 - A `settings.local.json` that is **tracked by git** is never written (it would dirty the tree and
   commit a per-machine choice); the enable report and the provisioning log say so.
 - Pi has no name-only mode: skills listed `user-invocable-only`/`off` are not passed as `--skill`.
-  Codex has no equivalent wired yet.
+  Codex has no equivalent at all — its context comes from `AGENTS.md` as a whole, with no
+  per-skill visibility lever — so a Codex-driven workspace always sees every enabled skill's
+  full description (declared `unsupported` in `provider-pair-parity.test.ts`).
 
 ## Placeholders and env
 
