@@ -177,6 +177,17 @@ export interface ProcessWorkspaceDeps {
    * `autoMergeEnabled` (the operator kill-switch).
    */
   autoMergeInReview: boolean;
+  /**
+   * #1258: whether auto-merge is effectively enabled for a GIVEN project
+   * (`resolveAutoMerge(prefMap, projectId).enabled`), independent of who OWNS
+   * merging. `autoMergeEnabled` above is `owner === "monitor"` — false under
+   * `merge_strategy = merge_queue`, even with auto-merge on — so the stale-base
+   * recovery below (finished builder, moved base, never reviewed) must NOT gate on
+   * it: the merge queue only picks up `readyForMerge` workspaces, and a workspace
+   * stuck on a stale base never gets there, so nothing else would ever recover it.
+   * Absent ⇒ falls back to `autoMergeEnabled` (today's owner-scoped behaviour).
+   */
+  staleBaseAutoMergeEnabled?: (projectId: string) => boolean;
   reviewSessionIds: Set<string>;
   monitorRecentActions: MonitorAction[];
   logMonitorAction: (recentActions: MonitorAction[], action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => void;
@@ -553,7 +564,8 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
     // the same way a human would (update-base then land), rather than falling into the
     // catch-all relaunch (which just wakes an agent with nothing left to do) or the
     // stuck-session flag/close path (which would strand the finished work as "closed").
-    if (!deps.autoMergeEnabled || deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
+    const staleBaseAutoMergeEnabled = deps.staleBaseAutoMergeEnabled?.(ws.projectId) ?? deps.autoMergeEnabled;
+    if (!staleBaseAutoMergeEnabled || deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
       logAction("mark_idle", ws.wsId, ws.issueId, {
         responseSummary: "Idle workspace has committed work but its base branch has moved (stale base); auto_merge is disabled so it was flagged instead of auto-recovered",
         verificationResult: "failed",
