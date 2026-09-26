@@ -20,6 +20,7 @@ import * as crudRepo from "../repositories/workspace-crud.repository.js";
 import { getEnabledPluginBySlug, listEnabledPlugins } from "./plugin-enabled.js";
 import { parsePluginLoopUnitKey, pluginSkillName, pluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { fanOutPluginSkills, type EnableReport } from "./plugin-enablement.service.js";
+import { syncPluginSkillOverrides } from "./plugin-skill-overrides.service.js";
 import { parseOnboardingUnitKey, parseInitSkillStepId } from "@agentic-kanban/shared/lib/onboarding-plan";
 import type { ProviderName } from "./agent-provider.js";
 import { runSetupScript } from "./setup-script.js";
@@ -210,6 +211,17 @@ async function materializeEnabledPluginSkillsImpl(
     }
   } catch (err) {
     console.warn(`[workspaces] plugin-skill materialization failed (non-fatal): ${errorMessage(err)}`);
+  }
+  // #1251: the copied skills carry their full descriptions; list them the way the project chose
+  // (default `name-only`) so a builder's context is not paying for every plugin it never uses.
+  if (result.materialized.length > 0) {
+    const listing = await syncPluginSkillOverrides(database, projectId, worktreePath);
+    if (listing.status === "skipped-tracked" || listing.status === "failed" || listing.warnings.length > 0) {
+      console.warn(
+        `[workspaces] plugin skill listings for ${worktreePath}: ${listing.status}` +
+          `${listing.message ? ` (${listing.message})` : ""}${listing.warnings.length ? `; ${listing.warnings.join("; ")}` : ""} (#1251)`,
+      );
+    }
   }
   return result;
 }

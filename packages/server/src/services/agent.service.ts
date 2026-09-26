@@ -1,5 +1,6 @@
 import { execErrorMessage } from "@agentic-kanban/shared/lib/exec-result";
 import type { AgentLaunchRequest } from "./agent-dispatch.service.js";
+import { readModelHiddenSkills } from "../lib/model-hidden-skills.js";
 import { resolveEffectivePrompt } from "./agent-provider/context-files-prompt.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { listLocalSkillNamesSync, localSkillFilePath } from "@agentic-kanban/shared/lib/agent-skill-files";
@@ -94,7 +95,10 @@ export const agentState = new AgentState();
  * `isSafeSkillName` already decide both questions, in one place, for every other reader.
  */
 function materializedSkillFiles(worktreePath: string): string[] {
+  // #1251: Pi has no "name-only" listing, so a skill the settings hide from the model is omitted.
+  const hidden = readModelHiddenSkills(worktreePath);
   return listLocalSkillNamesSync(worktreePath)
+    .filter((name) => !hidden.has(name))
     .map((name) => localSkillFilePath(worktreePath, name))
     .filter((skillPath) => existsSync(skillPath));
 }

@@ -26,5 +26,30 @@
       "C:\\andrena\\claude_code\\claude-marketplace"
     ]
   },
-  "spinnerTipsEnabled": true
+  "spinnerTipsEnabled": true,
+  "skillOverrides": {
+    "api-inventory": "name-only",
+    "arch-improvement": "name-only",
+    "code-metrics": "name-only",
+    "code-metrics-operate": "name-only",
+    "dependency-upgrade": "name-only",
+    "functional-coverage": "name-only",
+    "hotspot-remediation": "name-only",
+    "modernization-plan": "name-only",
+    "module-decomposition": "name-only",
+    "module-identification": "name-only",
+    "pattern-language": "name-only",
+    "prd-consolidation": "name-only",
+    "refactor-friction": "name-only",
+    "refactoring-scout": "name-only",
+    "refactor-lab-round": "name-only",
+    "requirement-extraction": "name-only",
+    "requirement-grounding": "name-only",
+    "requirement-refinement": "name-only",
+    "requirements-navigator": "name-only",
+    "safety-net-bootstrap": "name-only",
+    "safety-net-operate": "name-only",
+    "test-strategy": "name-only",
+    "ui-sdk": "name-only"
+  }
 }

@@ -37,6 +37,7 @@
 import { extractModelJson, ModelJsonError } from "./model-json.js";
 
 import { errorMessage } from "./error-message.js";
+import { isSkillListing, SKILL_LISTINGS, type SkillListing } from "./plugin-skill-listing.js";
 
 export {
   pluginLoopUnitKey,
@@ -121,6 +122,12 @@ export interface PluginSkillDef {
    * Optional and absent by default, so a pre-#462 manifest keeps parsing unchanged.
    */
   init?: boolean;
+  /**
+   * How this skill should be LISTED to the model when the board materializes it (#1251) — a
+   * hint from the plugin author, e.g. `on` for a skill agents must find by its description. The
+   * project override still wins; absent, the board-wide `plugin_skill_listing_default` applies.
+   */
+  listing?: SkillListing;
 }
 
 export interface PluginViewServeDef {
@@ -571,6 +578,9 @@ export function parsePluginManifest(input: unknown): PluginManifest {
       workflow: optionalString(rec.workflow, `skills[${i}].workflow`),
       audience: optionalAudience(rec.audience, `skills[${i}].audience`),
       init: optionalBoolean(rec.init, `skills[${i}].init`),
+      // #1251 — inline rather than a helper: this module sits at the god-module cohesion ceiling.
+      listing: rec.listing == null ? undefined : isSkillListing(rec.listing) ? rec.listing
+        : fail(`"skills[${i}].listing" must be one of ${SKILL_LISTINGS.join(", ")} (got ${JSON.stringify(rec.listing)})`),
     };
   });
 

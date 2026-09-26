@@ -84,6 +84,12 @@ export const SETTINGS_REGISTRY = {
   herdr_hosted_agents: { type: "bool", default: "false" },
   auto_review: { type: "bool", default: "true" },
   auto_merge: { type: "bool", default: "true" },
+  /**
+   * Board-wide listing for PLUGIN skills (#1251): Claude Code `skillOverrides` value the board
+   * writes next to the skills it materialized. `name-only` keeps them model-invocable without
+   * loading their descriptions into every session. Resolver: `shared/lib/plugin-skill-listing.ts`.
+   */
+  plugin_skill_listing_default: { type: "string", default: "name-only" },
   auto_merge_in_review: { type: "bool", default: "false" },
   resume_with_new_model: { type: "bool", default: "false" },
   review_auto_fix: { type: "bool", default: "true" },
