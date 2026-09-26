@@ -21,12 +21,15 @@ import {
   MAX_SESSIONS,
   NON_TRIVIAL_WORKTREE_DIFF_CHARS,
   classifyQuotaBlock,
-  hasRepeatedFailedCommand, heldByImplementExitCheck,
+  consecutiveBlockingReviewSessions,
+  hasRepeatedFailedCommand,
+  heldByImplementExitCheck,
   isBuilderSession,
   isZeroDiffInReviewAwaiting,
   orderCandidatesForWalk,
   parseStuckBuilderTimeoutMs,
   type LatestSession,
+  type ReviewLoopSessionRow,
 } from "../services/monitor-cycle-rules.js";
 import {
   closeDirectWorkspaceAsDone,
@@ -34,6 +37,7 @@ import {
   getProjectStatusIdByName,
   mergeWorkspaceWithFixFallback,
   resolveReviewingStoppedGateToken,
+  reviewLoopBreakerShouldFire,
   type LogMonitorActionFn,
 } from "./monitor-cycle-actions.js";
 import type { MonitorWorkspaceActions } from "./monitor-workspace-actions.js";
@@ -520,7 +524,7 @@ async function handleIdleInReviewWorkspace(ws: WorkspaceCandidate, ctx: CycleCon
   deps.boardEvents.broadcast(ws.projectId, "board_changed");
 }
 
-async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession | undefined, sessionCount: number, ctx: CycleContext): Promise<void> {
+async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession | undefined, sessionCount: number, recentSessionRows: ReviewLoopSessionRow[], ctx: CycleContext): Promise<void> {
   const { deps, logAction, canStartRelaunch, canStartMerge } = ctx;
   // Provider-neutral since #542. This site (and the stopped-workspace one below) used to
   // check the CODEX predicate only, so a CLAUDE-quota death was relaunched here instead of
@@ -604,10 +608,12 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
     logAction("mark_idle", ws.wsId, ws.issueId, { responseSummary: `${sessionCount} sessions — flagged stuck`, verificationResult: "ok" });
     console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions  flagged as stuck, closing`);
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
-  } else if (sessionCount >= 5 && ws.issueStatusName === "In Review") {
+  } else if (sessionCount >= 5 && ws.issueStatusName === "In Review" && !ws.readyForMerge
+      && await reviewLoopBreakerShouldFire(ws, recentSessionRows)) {
+    const countedIds = consecutiveBlockingReviewSessions(recentSessionRows);
     await closeWorkspace({ database: db, workspaceId: ws.wsId, markMerged: false });
-    logAction("mark_idle", ws.wsId, ws.issueId, { responseSummary: "Closed to break review loop", verificationResult: "ok" });
-    console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions with issue in review  closing to break review loop (merge or create new workspace)`);
+    logAction("mark_idle", ws.wsId, ws.issueId, { responseSummary: `Closed to break review loop — counted ${countedIds.length} consecutive blocking reviews: ${countedIds.join(", ")}`, verificationResult: "ok" });
+    console.log(`[monitor] Workspace ${ws.wsId} has ${countedIds.length} consecutive review sessions with blocking findings (${countedIds.join(", ")})  closing to break review loop (merge or create new workspace)`);
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
   } else if (ws.issueStatusName === "In Review") {
     await handleIdleInReviewWorkspace(ws, ctx);
@@ -886,9 +892,15 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
           or(isNull(sessions.triggerType), notInArray(sessions.triggerType, [...NOISE_TRIGGER_TYPES])),
         ));
       const sessionCount = Number(sessionCountRows[0]?.count ?? 0);
+      // Only fetched when the review-loop breaker could possibly fire — every other idle
+      // disposition (merge, relaunch, stale-base recovery) has no use for the row list.
+      const recentSessionRows: ReviewLoopSessionRow[] = sessionCount >= 5 && ws.issueStatusName === "In Review"
+        ? await db.select({ id: sessions.id, triggerType: sessions.triggerType, stats: sessions.stats }).from(sessions)
+          .where(eq(sessions.workspaceId, ws.wsId)).orderBy(desc(sessions.startedAt)).limit(MAX_SESSIONS)
+        : [];
 
       if (ws.wsStatus === "idle" && !heldByImplementExitCheck(ws.wsId)) {
-        await handleIdleWorkspace(ws, sess, sessionCount, ctx);
+        await handleIdleWorkspace(ws, sess, sessionCount, recentSessionRows, ctx);
       } else if (ws.wsStatus === "reviewing") {
         await handleReviewingWorkspace(ws, sess, ctx);
       } else if (ws.wsStatus === "blocked") {

@@ -16,6 +16,9 @@ import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.servic
 import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
 import { isPreMergeGateFailure, isLockContentionFailure } from "../services/workspace-merge-gate.js";
 import { logMonitorLockContentionSkip } from "../services/merge-lock-contention.js";
+import { getMergeRun } from "../repositories/merge-run.repository.js";
+import { peekMergeJob } from "../services/merge-job.service.js";
+import { consecutiveBlockingReviewSessions, type ReviewLoopSessionRow } from "../services/monitor-cycle-rules.js";
 import {
   clearFailedGate,
   clearGateInFlight,
@@ -232,4 +235,34 @@ export async function resolveReviewingStoppedGateToken(
   }
   clearFailedGate(ws.wsId);
   return { kind: "token", token: gate.token ?? RUN_GATE };
+}
+
+/**
+ * #1259: true while a gate/merge job is running for this workspace right now — checked by the
+ * review-loop breaker so it never closes a workspace mid-merge (a closed workspace is invisible
+ * to the merge queue, so this would strand a reviewed, gated branch until a hand reopen).
+ * `getMergeRun` is the durable cross-restart marker (`workspace_merge_run`, deleted on every
+ * terminal transition); `peekMergeJob` is the in-process job tracker's display-only reader (no
+ * zombie self-heal side effect, which is what a passive check wants); `isGateInFlight` is the
+ * monitor's own "gate already running for this workspace" flag used above by
+ * `resolveReviewingStoppedGateToken`.
+ */
+async function isMergeOrGateInFlight(workspaceId: string): Promise<boolean> {
+  if (isGateInFlight(workspaceId)) return true;
+  if (peekMergeJob(workspaceId)?.state === "running") return true;
+  return (await getMergeRun(workspaceId)) !== undefined;
+}
+
+/**
+ * #1259: the review-loop breaker's actual trigger, once the caller has already checked
+ * `sessionCount >= 5`, `issueStatusName === "In Review"` and `!readyForMerge`. Requires at
+ * least 5 CONSECUTIVE review sessions that each ended with a blocking finding — a build, a
+ * chat turn, or one clean review anywhere in the recent history means this is progress, not a
+ * loop — and additionally never fires while a gate/merge job is in flight for this workspace
+ * (closing it then would strand a branch the merge queue can no longer see, exactly what
+ * happened to #1256).
+ */
+export async function reviewLoopBreakerShouldFire(ws: WorkspaceCandidate, recentSessionRows: ReviewLoopSessionRow[]): Promise<boolean> {
+  if (consecutiveBlockingReviewSessions(recentSessionRows).length < 5) return false;
+  return !(await isMergeOrGateInFlight(ws.wsId));
 }
