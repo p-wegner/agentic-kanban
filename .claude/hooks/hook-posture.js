@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @board-hook-version: 1
+// @board-hook-version: 2
 /**
  * Hook posture policy (#913) — how much the Stop/PostToolUse chain is allowed to spend.
  *
@@ -14,14 +14,29 @@
  * one input this module reads, so a project that has declared it is going fast does
  * not have to declare it a second time for its hooks.
  *
- * The four levels, and what each one buys:
+ * The levels, and what each one buys (mirrors `builderStopChecks` in
+ * `packages/server/src/services/risk-posture.service.ts`, the per-level posture table):
  *
  *   strict    typecheck + related tests, and NOT capacity-gated — a strict project
  *             wants the answer even when the box is tight, because for it a slow
- *             turn is cheaper than an unverified one.
+ *             turn is cheaper than an unverified one. (`tests-and-typecheck`)
  *   standard  typecheck + related tests, capacity-gated (today's behaviour).
+ *             (`tests-capacity-gated`)
+ *   iterate   same builder Stop-chain policy as `standard` — the two postures differ
+ *             at the pre-merge gate and the base sweep, not at this hook.
+ *             (`tests-capacity-gated`)
+ *   flow      same builder Stop-chain policy as `standard`/`iterate` — `flow` differs
+ *             at the merge gate and the base sweep, not at this hook.
+ *             (`tests-capacity-gated`)
  *   fast      typecheck only, capacity-gated. Tests move to the train gate.
+ *             (`typecheck-only`)
  *   sprint    safety guards only. No tsc, no vitest, no generated stack rules.
+ *             (`none`)
+ *
+ * `hook-posture-lockstep.test.ts` fails if `RISK_POSTURES` (the shared source of truth)
+ * gains a level that is missing here — this file cannot `require()` that TS module at
+ * runtime (it is copied byte-for-byte into a scaffolded worktree's `.claude/hooks/`,
+ * outside any build step), so the lockstep test is what keeps the two in sync instead.
  *
  * THE ONE INVARIANT: safety guards never change with posture. A check marked
  * `alwaysRun` (validate-command-safety, the uncommitted/cleanup reminders, the
@@ -41,12 +56,19 @@
 const fs = require("fs");
 const path = require("path");
 
-/** Mirrors RISK_POSTURES in packages/shared/src/lib/risk-posture.ts. */
-const POSTURES = ["strict", "standard", "fast", "sprint"];
+/**
+ * Mirrors RISK_POSTURES in packages/shared/src/lib/risk-posture.ts — every level that dial
+ * can resolve to, whether or not its builder Stop-chain policy differs from `standard`'s.
+ * Kept in lockstep by `hook-posture-lockstep.test.ts`, not by hand.
+ */
+const POSTURES = ["strict", "standard", "iterate", "fast", "sprint", "flow"];
 const DEFAULT_POSTURE = "standard";
 
 /** Mirrors TICKET_CONTEXT_FILENAME in packages/shared/src/lib/ticket-context.ts. */
 const TICKET_CONTEXT_FILENAME = "CLAUDE.local.md";
+
+/** Built from POSTURES so a level added there is matched here without a second edit. */
+const POSTURE_ALTERNATION = POSTURES.join("|");
 
 /**
  * Policy per posture. `expensiveChecks` gates the speculative correctness work
@@ -56,6 +78,13 @@ const TICKET_CONTEXT_FILENAME = "CLAUDE.local.md";
 const POLICIES = {
   strict: { typecheck: true, tests: true, generatedRules: true, capacityGated: false },
   standard: { typecheck: true, tests: true, generatedRules: true, capacityGated: true },
+  // `iterate`/`flow` want the same builder Stop-chain policy as `standard`
+  // (`builderStopChecks: "tests-capacity-gated"` in risk-posture.service.ts) — spelled out
+  // as their own rows, not a fallthrough, so a future level with a DIFFERENT policy cannot
+  // be silently misread as `standard`'s row the way these two were before this table
+  // enumerated every RISK_POSTURES member.
+  iterate: { typecheck: true, tests: true, generatedRules: true, capacityGated: true },
+  flow: { typecheck: true, tests: true, generatedRules: true, capacityGated: true },
   fast: { typecheck: true, tests: false, generatedRules: false, capacityGated: true },
   sprint: { typecheck: false, tests: false, generatedRules: false, capacityGated: true },
 };
@@ -90,8 +119,8 @@ function normalizePosture(value) {
 function parsePostureFromTicketContext(text) {
   const section = riskPostureSection(String(text || ""));
   if (!section) return null;
-  const tagged = /\brisk:(strict|standard|fast|sprint)\b/i.exec(section);
-  const declared = /runs under \*\*(strict|standard|fast|sprint)\*\* risk posture/i.exec(section);
+  const tagged = new RegExp(`\\brisk:(${POSTURE_ALTERNATION})\\b`, "i").exec(section);
+  const declared = new RegExp(`runs under \\*\\*(${POSTURE_ALTERNATION})\\*\\* risk posture`, "i").exec(section);
   // A ticket-level tag beats the project default, matching the sentence the section
   // itself prints. The generic prose line that DOCUMENTS the tag syntax uses the
   // literal `risk:<posture>`, which this regex deliberately does not match.
