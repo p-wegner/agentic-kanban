@@ -14,7 +14,10 @@ import {
   TRAIN_SIZE_MAX,
   TRAIN_SIZE_MIN,
   buildDeliveryChipView,
+  buildFlushBadge,
   clampStep,
+  describeFlush,
+  describeQueuePressure,
   describeRedBase,
 } from "../lib/deliveryChip.js";
 import { setProjectPref } from "../lib/settingsStore.js";
@@ -56,6 +59,7 @@ export function DeliveryChip({
   if (!activeProjectId) return null;
   const { status } = delivery;
   const view = status ? buildDeliveryChipView(status) : null;
+  const flushBadge = status ? buildFlushBadge(status.flush) : null;
 
   return (
     <div ref={wrapRef} className="relative">
@@ -71,6 +75,14 @@ export function DeliveryChip({
         {view && <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${view.dotClass}`} />}
         <span className="hidden sm:inline">{view?.label ?? "Delivery"}</span>
         <span className="sm:hidden">{view?.compactLabel ?? "Delivery"}</span>
+        {flushBadge && (
+          <span
+            data-testid="delivery-flush-badge"
+            className={`rounded px-1 py-0.5 text-[10px] font-semibold ${flushBadge.urgent ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" : "bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200"}`}
+          >
+            {flushBadge.label}
+          </span>
+        )}
       </button>
       {open && (
         <div
@@ -286,6 +298,15 @@ function DeliveryPanelBody({
         data-testid="delivery-red-base"
       >
         {describeRedBase(status.redBase)}
+      </div>
+      <div className="text-[11px] text-ink-soft dark:text-gray-400" data-testid="delivery-queue-pressure">
+        {describeQueuePressure(status.queuePressure)}
+      </div>
+      <div
+        className={`text-[11px] ${status.flush?.state === "red" ? "text-red-600 dark:text-red-400" : "text-ink-soft dark:text-gray-400"}`}
+        data-testid="delivery-flush"
+      >
+        {describeFlush(status.flush)}
       </div>
     </>
   );
