@@ -141,63 +141,51 @@ export interface ProcessWorkspaceDeps {
   sessionManager: ReturnType<typeof createSessionManager>;
   boardEvents: ReturnType<typeof createBoardEvents>;
   /**
-   * Port for the workspace mutations the monitor drives (relaunch/merge/
-   * fix-and-merge/delete). Injected so the monitor calls the application service
-   * DIRECTLY instead of self-HTTP — see monitor-workspace-actions.ts. Replaced the
-   * old `serverPort` + `fetch('http://127.0.0.1:<port>/...')` plumbing.
+   * Port for the workspace mutations the monitor drives (relaunch/merge/fix-and-merge/delete).
+   * Injected so the monitor calls the application service DIRECTLY instead of self-HTTP — see
+   * monitor-workspace-actions.ts. Replaced the old `serverPort` + fetch plumbing.
    */
   workspaceActions: MonitorWorkspaceActions;
   /**
-   * Whether the MONITOR (as opposed to the merge queue, or nobody) is allowed to auto-merge
-   * workspaces on its timer — `resolveMergePolicy(prefMap).owner === "monitor"` (#1255). This
-   * is false both when auto-merge is off entirely AND when a different owner (the merge queue,
-   * under `merge_strategy=merge_queue`) is the one landing reviewed work — those are different
-   * situations for an operator reading board.log, so a `false` here must not be reported as
-   * "auto-merge is disabled" (see `mergeOwnerSource` and `describeSkippedAutoMerge`). Does NOT
-   * affect the manual `POST /api/workspaces/:id/merge` route, relaunch, auto-start, or nudge
-   * behavior.
+   * Whether the MONITOR (vs. the merge queue, or nobody) owns auto-merge on its timer —
+   * `resolveMergePolicy(prefMap).owner === "monitor"` (#1255). False both when auto-merge is
+   * off AND when the merge queue owns landing under `merge_strategy=merge_queue` — different
+   * situations for board.log, so `false` must not be reported as "auto-merge is disabled" (see
+   * `mergeOwnerSource`/`describeSkippedAutoMerge`). Does not affect manual merge, relaunch,
+   * auto-start, or nudge.
    */
   monitorOwnsMerge: boolean;
   /**
    * Why `monitorOwnsMerge` is what it is — `resolveAutoMerge(prefMap, projectId).source`, read
-   * per-workspace since the source (in particular `project_disabled`) can vary by project even
-   * though `monitorOwnsMerge` itself is a single board-wide flag. Optional so an existing test
-   * that only cares about the boolean can omit it; the log messages fall back to a generic
-   * "auto-merge off" wording when absent.
+   * per-workspace since the source (`project_disabled` in particular) can vary by project even
+   * though the flag itself is board-wide. Optional so an existing test that only cares about
+   * the boolean can omit it; log messages fall back to a generic "auto-merge off" when absent.
    */
   mergeOwnerSource?: (projectId: string) => AutoMergeSource;
   /**
-   * Set of project IDs for which auto-merge is disabled via the per-project
-   * `auto_merge_disabled_<projectId>` preference. Workspaces belonging to these
-   * projects are skipped even when the global `monitorOwnsMerge` flag is true.
+   * Project IDs with auto-merge disabled via the per-project `auto_merge_disabled_<projectId>`
+   * preference — skipped even when the global `monitorOwnsMerge` flag is true.
    */
   autoMergeDisabledProjectIds?: Set<string>;
   /**
-   * Workspace ids currently under an operator merge-hold (#1164) — skipped by `canStartMerge`
-   * however ready they otherwise look, without disabling auto-merge for their whole project.
-   * Injected for the same testability reason as `autoMergeDisabledProjectIds`; absent means
-   * "read it live" (see `processWorkspaceCandidates`), so an existing caller that supplies
-   * neither keeps today's behaviour.
+   * Workspace ids under an operator merge-hold (#1164) — skipped by `canStartMerge` however
+   * ready they otherwise look, without disabling auto-merge for their whole project. Absent
+   * means "read it live" (see `processWorkspaceCandidates`).
    */
   heldWorkspaceIds?: Set<string>;
   /**
-   * Whether the monitor may auto-merge In Review workspaces that are NOT marked
-   * `readyForMerge`. Gated on the `auto_merge_in_review` preference being exactly
-   * "true" (default off). When off, an idle In-Review workspace whose work is
-   * committed but not explicitly marked ready is left untouched (the agent/human
-   * `readyForMerge` handshake is respected). When on, the monitor merges it anyway
-   * — "land In Review work without the readyForMerge gate". Still also requires
-   * `monitorOwnsMerge` (the monitor must be the configured merge owner).
+   * Whether the monitor may auto-merge In Review workspaces NOT marked `readyForMerge`.
+   * Gated on `auto_merge_in_review` being exactly "true" (default off); when off, an idle
+   * In-Review workspace with committed but unready work is left untouched (the agent/human
+   * `readyForMerge` handshake is respected). Still also requires `monitorOwnsMerge`.
    */
   autoMergeInReview: boolean;
   /**
    * #1258: whether auto-merge is effectively enabled for a GIVEN project
-   * (`resolveAutoMerge(prefMap, projectId).enabled`), independent of who OWNS
-   * merging. `monitorOwnsMerge` above is `owner === "monitor"` — false under
-   * `merge_strategy = merge_queue`, even with auto-merge on — so the stale-base
-   * recovery below (finished builder, moved base, never reviewed) must NOT gate on
-   * it: the merge queue only picks up `readyForMerge` workspaces, and a workspace
-   * stuck on a stale base never gets there, so nothing else would ever recover it.
+   * (`resolveAutoMerge(prefMap, projectId).enabled`), independent of who owns merging.
+   * `monitorOwnsMerge` is false under `merge_strategy = merge_queue` even with auto-merge on,
+   * but stale-base recovery below must NOT gate on it: the queue only picks up `readyForMerge`
+   * workspaces, and a stale-base workspace never gets there, so nothing else would recover it.
    * Absent ⇒ falls back to `monitorOwnsMerge` (today's owner-scoped behaviour).
    */
   staleBaseAutoMergeEnabled?: (projectId: string) => boolean;
