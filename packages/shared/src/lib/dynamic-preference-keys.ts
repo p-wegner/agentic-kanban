@@ -67,6 +67,22 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // (`standard` is the intended value) that every rc heal ticket is born tagged with
   // (`risk:<level>`), pinning its per-ticket review. Unset = the project's own posture.
   "heal_review_posture",
+  // Flush heal target (#1249, decision 020 part 4): `heal_target_<id>` is `rc` | `master` —
+  // where a flush's red gets healed. Unset derives from `promote_cadence_<id>` (see
+  // `resolveHealTarget`): `rc` when a cadence is set, `master` otherwise. Overridable so a
+  // project with no cadence may still opt into the rc shape and vice versa.
+  "heal_target",
+  // Flush trigger (#1248, decision 020 part 3): `queue_flush_<id>` is `off` (default) |
+  // `manual` | `auto`; `queue_flush_thresholds_<id>` is a JSON `{minWaiting,
+  // maxOldestAgeMinutes, arrivalsPerGateRatio}` object the `auto` mode evaluates against the
+  // pressure signal (#1246); `queue_flush_daily_cap_<id>` bounds how many flushes (manual or
+  // auto) may fire per day (default 2); `queue_flush_history_<id>` is the trigger's own record
+  // of past flush timestamps, for the daily-cap check (kept apart from the flush lifecycle
+  // record `flush-state.json` owns, the same split `promote_cadence_state` uses).
+  "queue_flush",
+  "queue_flush_thresholds",
+  "queue_flush_daily_cap",
+  "queue_flush_history",
   "verify_script",
   "cold_clone_check",
   "project_stack_profile",
