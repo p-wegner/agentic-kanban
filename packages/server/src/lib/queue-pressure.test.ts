@@ -39,13 +39,15 @@ describe("computeQueuePressure", () => {
     expect(summary.oldestWaitingMs).toBe(5 * 60 * 1000);
   });
 
-  it("rates arrivals and gate runs per hour over the trailing window", () => {
+  it("rates arrivals and gate runs per hour independently over the trailing window", () => {
     const summary = computeQueuePressure({
       members: [],
       ledgerRows: [
         { at: new Date(NOW - 10 * 60 * 1000).toISOString(), isGateRun: true },
         { at: new Date(NOW - 20 * 60 * 1000).toISOString(), isGateRun: true },
         { at: new Date(NOW - 30 * 60 * 1000).toISOString(), isGateRun: false },
+        { at: new Date(NOW - 40 * 60 * 1000).toISOString(), isGateRun: false },
+        { at: new Date(NOW - 50 * 60 * 1000).toISOString(), isGateRun: false },
         // outside the 1h window — excluded
         { at: new Date(NOW - 90 * 60 * 1000).toISOString(), isGateRun: true },
       ],
@@ -65,7 +67,7 @@ describe("computeQueuePressure", () => {
       nowMs: NOW,
       windowMs: 30 * 60 * 1000, // half an hour -> doubles the rate
     });
-    expect(summary.arrivalsPerHour).toBe(4);
+    expect(summary.arrivalsPerHour).toBe(0);
     expect(summary.gateRunsPerHour).toBe(4);
     expect(summary.windowMs).toBe(30 * 60 * 1000);
   });
@@ -74,8 +76,8 @@ describe("computeQueuePressure", () => {
     const summary = computeQueuePressure({
       members: [],
       ledgerRows: [
-        { at: new Date(NOW + 5000).toISOString(), isGateRun: true }, // future — excluded
-        { at: new Date(NOW - 60 * 60 * 1000).toISOString(), isGateRun: true }, // exactly at the edge — included
+        { at: new Date(NOW + 5000).toISOString(), isGateRun: false }, // future — excluded
+        { at: new Date(NOW - 60 * 60 * 1000).toISOString(), isGateRun: false }, // exactly at the edge — included
       ],
       nowMs: NOW,
     });

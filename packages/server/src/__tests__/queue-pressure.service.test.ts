@@ -53,7 +53,9 @@ describe("getQueuePressure", () => {
     const summary = await getQueuePressure(projectId, null, db, NOW);
     expect(summary.queueDepth).toBe(2);
     expect(summary.oldestWaitingMs).toBe(48 * 60_000);
-    expect(summary.arrivalsPerHour).toBe(0);
+    // Both seeded workspaces became ready within the trailing hour -> 2 arrivals; no repo
+    // path means no gate ledger to read, so gate runs stay at 0.
+    expect(summary.arrivalsPerHour).toBe(2);
     expect(summary.gateRunsPerHour).toBe(0);
   });
 
@@ -80,7 +82,23 @@ describe("getQueuePressure", () => {
     writeFileSync(join(repoPath, ".test-impact", "outcomes.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
     const summary = await getQueuePressure(projectId, repoPath, db, NOW);
     expect(summary.gateRunsPerHour).toBe(2);
+    // No ready-for-merge workspaces seeded in this project -> zero arrivals, independent of
+    // the gate ledger (arrivals and gate runs are different events, see queue-pressure.service.ts).
+    expect(summary.arrivalsPerHour).toBe(0);
+  });
+
+  it("counts arrivals from ready-for-merge members, independent of the gate ledger", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProjectWithReadyWorkspaces(db, [10 * 60_000, 20 * 60_000, 90 * 60_000]);
+    const repoPath = mkdtempSync(join(tmpdir(), "ak-queue-pressure-repo-"));
+    tempDirs.push(repoPath);
+    mkdirSync(join(repoPath, ".test-impact"), { recursive: true });
+    const rows = [{ at: new Date(NOW - 10 * 60_000).toISOString(), source: "ci" }];
+    writeFileSync(join(repoPath, ".test-impact", "outcomes.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
+    const summary = await getQueuePressure(projectId, repoPath, db, NOW);
+    // 2 of the 3 seeded workspaces became ready within the trailing hour; the 90-min-old one is outside it.
     expect(summary.arrivalsPerHour).toBe(2);
+    expect(summary.gateRunsPerHour).toBe(1);
   });
 
   it("reads a repo with no ledger file as zero arrivals, never throwing", async () => {

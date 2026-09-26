@@ -23,16 +23,18 @@ export interface QueuePressureMember {
 }
 
 export interface QueuePressureLedgerRow {
-  /** ISO timestamp of a gate run (arrival) — a ledger row's `at`. */
+  /** ISO timestamp of the event — an arrival (ready-for-merge) or a completed gate run. */
   at: string;
-  /** Whether this row is a completed gate run (counts toward gate throughput). */
+  /** `true` for a completed gate run (#1234 ledger); `false` for an arrival (a branch
+   *  becoming ready-for-merge). A row counts toward exactly one of `arrivalsPerHour` /
+   *  `gateRunsPerHour` — never both, and never neither. */
   isGateRun: boolean;
 }
 
 export interface QueuePressureInput {
   /** Ready-for-merge branches currently waiting (the queue depth). */
   members: readonly QueuePressureMember[];
-  /** Gate-run ledger rows (#1234) to compute arrivals/hour and gates/hour from. */
+  /** Arrival + gate-run rows (#1234) to compute arrivals/hour and gates/hour from. */
   ledgerRows: readonly QueuePressureLedgerRow[];
   /** Epoch ms "now" — injected so this stays clock-independent. */
   nowMs: number;
@@ -62,7 +64,7 @@ export function computeQueuePressure(input: QueuePressureInput): QueuePressureSu
   }, null);
 
   const windowRows = input.ledgerRows.filter((row) => withinWindow(row.at, nowMs, windowMs));
-  const arrivals = windowRows.length;
+  const arrivals = windowRows.filter((row) => !row.isGateRun).length;
   const gateRuns = windowRows.filter((row) => row.isGateRun).length;
   const hours = windowMs / (60 * 60 * 1000);
 
