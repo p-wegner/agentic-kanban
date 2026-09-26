@@ -107,7 +107,7 @@ function makeCycleDeps(): ProcessWorkspaceDeps {
       delete: vi.fn(async () => {}),
       updateBase: vi.fn(async () => {}),
     },
-    autoMergeEnabled: true,
+    monitorOwnsMerge: true,
     // Off, as it is by default — this is the branch that used to only LOG.
     autoMergeInReview: false,
     reviewSessionIds: new Set<string>(),
