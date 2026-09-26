@@ -900,6 +900,56 @@ describe("a running base-health probe YIELDS the verify slot to a waiting gate (
     expect(probeConsecutiveYields(projectId)).toBe(0);
   }, 30000);
 
+  /**
+   * #1256 — the actual 2026-09-26 incident: the PERIODIC sweep was already running (background
+   * priority, willing to yield) when `pnpm promote`'s explicit reprobe landed. `verifyBaseBranchHealth`
+   * joins an in-flight probe for the same key instead of starting a second one (#712) — the right
+   * call for the machine — but used to hand the joining `explicit: true}` nowhere, so the join
+   * silently inherited the running probe's background manners. The probe yielded 1636s in, discarding
+   * 1566s of verify, and promote's 40-minute wait expired with `no-sweep`.
+   */
+  it("an EXPLICIT caller JOINING an already-running non-explicit probe stops it from yielding (#1256)", async () => {
+    const { probeConsecutiveYields } = await import("../services/base-health-probe-preemption.js");
+    const projectId = await seedProject(db);
+
+    let verifyRunning: () => void = () => {};
+    const verifyHasStarted = new Promise<void>((resolve) => { verifyRunning = resolve; });
+    let finishVerify: () => void = () => {};
+    runSetupScript.mockImplementation((_cwd: string, _script: string, opts?: { signal?: AbortSignal }) =>
+      new Promise((resolve) => {
+        finishVerify = () => resolve({ exitCode: 0, stdout: "ok", stderr: "", timedOut: false });
+        opts?.signal?.addEventListener(
+          "abort",
+          () => resolve({ exitCode: 130, stdout: "", stderr: "", aborted: true }),
+          { once: true },
+        );
+        verifyRunning();
+      }),
+    );
+
+    // The periodic sweep starts it — non-explicit, background priority, willing to yield.
+    const periodicProbe = verifyBaseBranchHealth(projectId, db);
+    await verifyHasStarted;
+
+    // An operator / `pnpm promote` reprobe lands while it is running and JOINS it rather than
+    // starting a second one.
+    const joined = verifyBaseBranchHealth(projectId, db, undefined, { explicit: true });
+    expect(joined).toBe(periodicProbe);
+
+    const gate = await queueGate();
+    // Give the poll interval room to fire (and NOT yield, now that an explicit caller is
+    // waiting on this run) before letting the verify finish.
+    await new Promise((r) => setTimeout(r, PROBE_GATE_POLL_INTERVAL_MS_TEST));
+    finishVerify();
+
+    const result = await periodicProbe;
+    await gate.done;
+
+    expect(result?.outcome).toBe("green");
+    // Escalated to non-yielding once the explicit caller joined — nothing was thrown away.
+    expect(probeConsecutiveYields(projectId)).toBe(0);
+  }, 30000);
+
   it("does not yield when only a BACKGROUND chain is queued — a probe does not preempt a probe", async () => {
     const { runUnderVerifyChainSemaphore } = await import("../services/verify-chain-semaphore.js");
     const { probeConsecutiveYields } = await import("../services/base-health-probe-preemption.js");
