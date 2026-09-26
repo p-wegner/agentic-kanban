@@ -751,6 +751,18 @@ const sessionPlacements = looseObject({ placements: arrayOf(nested(sessionPlacem
  *  above, this asserts only that the request actually succeeded. */
 const incomingRefActionResult = looseObject({ ok: trueLiteral });
 
+/**
+ * `POST /api/plugins/:id/skills/:name/listing` (#1252) → `setSkillListingModeForProject`
+ * (`plugin-enablement.service.ts`): `{ overrides: Record<string, SkillListing>, warning: string
+ * | null }`. `PluginsSettings` only reads `warning` (to toast it) and does not destructure
+ * `overrides` — it optimistically updates its own state instead — so `overrides` is checked as
+ * an opaque object, not field-by-field.
+ */
+const skillListingResult = looseObject({
+  overrides: nested(looseObject({})),
+  warning: nullable(str),
+});
+
 export interface ApiResponseRoute {
   method: ApiMethod;
   /** Express-style template with `:param` segments, matched against the request path. */
@@ -893,6 +905,9 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
   { method: "GET", template: "/api/workers/placements", schema: sessionPlacements },
   { method: "POST", template: "/api/workers/incoming/land", schema: incomingRefActionResult },
   { method: "POST", template: "/api/workers/incoming/discard", schema: incomingRefActionResult },
+
+  // ── #1252: per-skill listing-mode picker (the Plugins-view selector) ──
+  { method: "POST", template: "/api/plugins/:id/skills/:name/listing", schema: skillListingResult },
 
   // ── #1028: the profile roster read model ──
   // The invariants the UI actually depends on: a list of profiles it maps over, the

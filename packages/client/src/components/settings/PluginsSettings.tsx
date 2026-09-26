@@ -5,15 +5,7 @@ import { apiFetch, apiPost, apiDelete } from "../../lib/api.js";
 import { getViewRoutePath } from "../../lib/appRoutes.js";
 import { showToast } from "../../lib/toast.js";
 import type { Settings, SettingsTextSetter } from "../SettingsPanel.shared.js";
-
-/** One skill's resolved listing (mode + where it came from) — from GET /api/plugins?projectId=. */
-type ResolvedSkillListing = {
-  name: string;
-  mode: SkillListing;
-  source: "project" | "manifest" | "default";
-  manifestHint: SkillListing | undefined;
-  descriptionSize: number;
-};
+import { PluginSkillListingSelector, type ResolvedSkillListing } from "./PluginSkillListingSelector.js";
 
 /** One row from GET /api/plugins?projectId= — DB row + parsed manifest + enabled flag. */
 type PluginListItem = {
@@ -45,12 +37,6 @@ const LISTING_MODE_LABELS: Record<SkillListing, string> = {
   "name-only": "Name only",
   "user-invocable-only": "User-invocable only",
   off: "Off",
-};
-
-const LISTING_SOURCE_LABELS: Record<ResolvedSkillListing["source"], string> = {
-  project: "this project",
-  manifest: "plugin's manifest hint",
-  default: "board default",
 };
 
 type ScriptRunResult = {
@@ -86,8 +72,6 @@ export function PluginsSettings({ activeProjectId, settings, set }: PluginsSetti
   // Script runs keyed `${pluginRowId}:${scriptName}`.
   const [runningScript, setRunningScript] = useState<string | null>(null);
   const [scriptResults, setScriptResults] = useState<Record<string, ScriptRunResult>>({});
-  // Skill-listing saves keyed `${pluginId}:${skillName}`.
-  const [changingListingKey, setChangingListingKey] = useState<string | null>(null);
 
   const refetch = useCallback(async () => {
     try {
@@ -165,31 +149,16 @@ export function PluginsSettings({ activeProjectId, settings, set }: PluginsSetti
     }
   }
 
-  async function handleChangeSkillListing(plugin: PluginListItem, skillName: string, mode: SkillListing) {
-    if (!activeProjectId) return;
-    const key = `${plugin.id}:${skillName}`;
-    if (changingListingKey) return;
-    setChangingListingKey(key);
-    try {
-      await apiPost(`/api/plugins/${plugin.id}/skills/${encodeURIComponent(skillName)}/listing`, {
-        projectId: activeProjectId,
-        mode,
-      });
-      setPlugins((rows) => rows.map((p) => {
-        if (p.id !== plugin.id || !p.skillListings) return p;
-        return {
-          ...p,
-          skillListings: p.skillListings.map((s) =>
-            s.name === skillName ? { ...s, mode, source: "project" } : s,
-          ),
-        };
-      }));
-      showToast(`"${skillName}" listing set to "${LISTING_MODE_LABELS[mode]}"`, "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to change skill listing", "error");
-    } finally {
-      setChangingListingKey(null);
-    }
+  function handleSkillListingChanged(pluginId: string, skillName: string, mode: SkillListing) {
+    setPlugins((rows) => rows.map((p) => {
+      if (p.id !== pluginId || !p.skillListings) return p;
+      return {
+        ...p,
+        skillListings: p.skillListings.map((s) =>
+          s.name === skillName ? { ...s, mode, source: "project" } : s,
+        ),
+      };
+    }));
   }
 
   async function handleDelete(plugin: PluginListItem) {
@@ -447,33 +416,12 @@ export function PluginsSettings({ activeProjectId, settings, set }: PluginsSetti
                   <div className="border-t border-gray-100 dark:border-gray-800 pt-2 space-y-1.5">
                     <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">Skills</div>
                     {activeProjectId && skillListings.length > 0 ? (
-                      <div className="space-y-1.5">
-                        {skillListings.map((listing) => {
-                          const listingKey = `${plugin.id}:${listing.name}`;
-                          return (
-                            <div key={listing.name} className="flex items-center gap-2 flex-wrap">
-                              <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">
-                                {listing.name}
-                              </span>
-                              <select
-                                value={listing.mode}
-                                onChange={(e) => void handleChangeSkillListing(plugin, listing.name, e.target.value as SkillListing)}
-                                disabled={changingListingKey === listingKey}
-                                className="text-xs border border-gray-300 dark:border-gray-600 rounded px-1.5 py-0.5 dark:bg-gray-800 dark:text-gray-200 disabled:opacity-50"
-                                data-testid={`plugin-skill-listing-${plugin.id}-${listing.name}`}
-                              >
-                                {SKILL_LISTINGS.map((mode) => (
-                                  <option key={mode} value={mode}>{LISTING_MODE_LABELS[mode]}</option>
-                                ))}
-                              </select>
-                              <span className="text-[11px] text-gray-400 dark:text-gray-500">
-                                from {LISTING_SOURCE_LABELS[listing.source]} · ~{listing.descriptionSize} chars/turn when on
-                              </span>
-                              {changingListingKey === listingKey && <span className="text-[11px] text-gray-400">Saving…</span>}
-                            </div>
-                          );
-                        })}
-                      </div>
+                      <PluginSkillListingSelector
+                        pluginId={plugin.id}
+                        activeProjectId={activeProjectId}
+                        listings={skillListings}
+                        onChange={(skillName, mode) => handleSkillListingChanged(plugin.id, skillName, mode)}
+                      />
                     ) : (
                       <div className="flex flex-wrap gap-1">
                         {skills.map((skillName) => (
