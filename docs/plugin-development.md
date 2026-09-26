@@ -634,7 +634,9 @@ description (a skill agents should reach for unprompted): `{ "dir": ".claude/ski
 - A `settings.local.json` that is **tracked by git** is never written (it would dirty the tree and
   commit a per-machine choice); the enable report and the provisioning log say so.
 - Pi has no name-only mode: skills listed `user-invocable-only`/`off` are not passed as `--skill`.
-  Codex has no equivalent wired yet.
+  Codex has no equivalent at all — its context comes from `AGENTS.md` as a whole, with no
+  per-skill visibility lever — so a Codex-driven workspace always sees every enabled skill's
+  full description (declared `unsupported` in `provider-pair-parity.test.ts`).
 
 ## Placeholders and env
 
