@@ -12,6 +12,7 @@ import { getProjectHealth } from "../services/project-health.service.js";
 import { listBaseBranchHealth, getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 import { inFlightBaseBranchProbeCount } from "../services/base-branch-health.service.js";
 import { requestBaseBranchReprobe, describeGateBusy } from "../services/base-branch-health-reprobe.service.js";
+import { probeYieldHistory } from "../services/base-health-probe-preemption.js";
 import { readTier0Capacity, readCpuBusyPct } from "@agentic-kanban/shared/lib/machine-capacity";
 import { describeBaseSweep, resolveRiskPosture } from "../services/risk-posture.service.js";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
@@ -134,6 +135,14 @@ export function createProjectHealthRoute(database: Database) {
       // within one process's uptime). Name when it started and when `isBaseHealthProbeDue` will
       // stop trusting it, so a caller can decide to wait rather than assume either way.
       probeInFlightSince: verdict.probeInFlightSince ?? null,
+      // #1256 — why a probe someone is waiting on has not landed yet: how many times it has
+      // yielded its verify slot and how much verify that discarded, across THIS wait. An
+      // `explicit` probe (what this route always starts, since #1165) never yields mid-run, so
+      // for it this stays {0, 0} — non-zero here means an OLDER, non-explicit probe (the
+      // periodic sweep, still running when this request landed and joined via
+      // `inFlightBaseBranchProbe`) is the one yielding, which is exactly the case a caller
+      // waiting on a promotion needs named rather than reading as an unexplained "still waiting".
+      yieldHistory: probeYieldHistory(projectId),
     });
   });
 

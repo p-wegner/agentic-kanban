@@ -193,6 +193,26 @@ async function captureCapacitySample(): Promise<{ freeGb: number | null; cpuPct:
  */
 const inFlightProbes = new Map<string, Promise<BaseBranchVerifyResult | null>>();
 
+/**
+ * Keys with an EXPLICIT caller blocked on the currently in-flight probe, even though that
+ * probe itself started as the unattended (non-explicit) sweep (#1256).
+ *
+ * `verifyBaseBranchHealth` below joins an already-running probe for the same key rather than
+ * starting a second one — the right call for the machine, but it used to also discard the
+ * joining call's `explicit: true`: a promote-requested reprobe that joined a periodic sweep
+ * inherited the sweep's background priority and its willingness to yield, so it could still
+ * be starved by a gate stream (measured 2026-09-26: 1636s probe, yielded, discarded 1566s of
+ * verify, promote refused with `no-sweep`). Escalating here lets the running probe's own yield
+ * check (`explicit ? { maxConsecutiveYields: 0 } : {}` in `runBaseBranchProbe`) see that a real
+ * caller is now waiting, without restarting or duplicating the run in progress.
+ */
+const explicitWaiters = new Set<string>();
+
+/** Is any explicit (blocked-on-it) caller currently waiting on this key's in-flight probe? */
+export function isExplicitProbeWaiter(key: string): boolean {
+  return explicitWaiters.has(key);
+}
+
 /** How many probes are currently running in this process — for tests and diagnostics. */
 export function inFlightBaseBranchProbeCount(): number {
   return inFlightProbes.size;
@@ -261,10 +281,18 @@ export function verifyBaseBranchHealth(
 ): Promise<BaseBranchVerifyResult | null> {
   const key = inFlightKey(projectId, opts?.branch);
   const running = inFlightProbes.get(key);
-  if (running) return running;
+  if (running) {
+    // #1256 — joining an in-flight probe must not silently drop THIS call's `explicit`: someone
+    // is blocked on the answer regardless of how the running probe itself started. Escalating
+    // is cleared in the running probe's own `finally` (below), never here, so it survives for
+    // the whole run rather than only until the next unrelated join.
+    if (opts?.explicit) explicitWaiters.add(key);
+    return running;
+  }
 
   const probe = runBaseBranchProbe(projectId, database, now, opts).finally(() => {
     inFlightProbes.delete(key);
+    explicitWaiters.delete(key);
   });
   inFlightProbes.set(key, probe);
   return probe;
@@ -419,6 +447,10 @@ async function runBaseBranchProbe(
   now?: string,
   opts?: BaseBranchProbeOptions,
 ): Promise<BaseBranchVerifyResult | null> {
+  const probeKey = inFlightKey(projectId, opts?.branch);
+  // #1256 — an explicit joiner escalates a run that itself started non-explicit (see
+  // `explicitWaiters` above), so this is read live in the yield-decision poll below rather than
+  // captured once: the escalation can arrive after this run has already started.
   const explicit = opts?.explicit === true;
   // An explicit probe has a caller blocked on it, so it competes for the slot as a gate would
   // and never yields; the unattended sweep stays the box's one background user (#978, #989).
@@ -548,12 +580,17 @@ ${tail(combined)}`,
         const verifyStartedAt = Date.now();
         const poll = setInterval(() => {
           const already = probeConsecutiveYields(projectId);
+          // #1256 — re-read on every tick: a promote/operator reprobe can join THIS run (and set
+          // `explicitWaiters`) after it already started as the unattended sweep, so a caller
+          // blocked on the answer must stop this probe from yielding from the moment it joins,
+          // not only if it had been there from the start.
+          const nonYielding = explicit || isExplicitProbeWaiter(probeKey);
           const decision = shouldProbeYield({
             gateWaiting: verifyChainGateWaiting(),
             consecutiveYields: already,
-            // `disabled` (silent), not `exhausted`: an explicit probe not yielding is the
+            // `disabled` (silent), not `exhausted`: a non-yielding probe not yielding is the
             // configuration of that request, not a spent budget.
-            ...(explicit ? { maxConsecutiveYields: 0 } : {}),
+            ...(nonYielding ? { maxConsecutiveYields: 0 } : {}),
           });
           if (decision.reason === "yield_budget_exhausted") {
             // Once per RUN, not once per tick — at 15s over a 45-minute verify this would
