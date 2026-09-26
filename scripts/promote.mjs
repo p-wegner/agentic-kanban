@@ -388,6 +388,10 @@ async function acquireFreshSweep(projectId, previousRow, waitMs, branch) {
   const deadline = Date.now() + waitMs;
   let nextAskAt = 0;
   let lastNote = 0;
+  // #1256 — carried from the last reprobe answer into the periodic "still waiting" line below,
+  // so a caller tailing the log sees WHY the wait is long without needing to correlate it against
+  // the less-frequent reprobe lines above by timestamp.
+  let lastYieldNote = "";
   log(`[promote] requesting a fresh full sweep of ${branch} for project ${projectId} (waiting up to ${Math.round(waitMs / 60_000)} min)`);
   while (Date.now() < deadline) {
     if (Date.now() >= nextAskAt) {
@@ -402,11 +406,22 @@ async function acquireFreshSweep(projectId, previousRow, waitMs, branch) {
         const stampNote = answer?.skippedReason === "probe_in_flight" && answer?.probeInFlightSince
           ? ` (in flight since ${answer.probeInFlightSince.startedAt}, expires ${answer.probeInFlightSince.expiresAt})`
           : "";
+        // #1256 — WHY a probe someone is blocked on has not landed: a non-zero yield history
+        // means an OLDER, non-explicit probe (the periodic sweep) is still running and giving up
+        // its verify slot to every gate-class waiter rather than the explicit one this route
+        // starts (which never yields, since #1165) — the exact starvation this ticket exists to
+        // make legible instead of a bare "still waiting".
+        const yh = answer?.yieldHistory;
+        const yieldNote = yh?.totalYields > 0
+          ? ` — yielded ${yh.totalYields}x so far, discarding ${Math.round(yh.totalDiscardedMs / 1000)}s of verify`
+          : "";
+        lastYieldNote = yieldNote;
         log(
           `[promote] reprobe: started=${answer?.started === true} ` +
             `${answer?.skippedReason ? `skipped=${answer.skippedReason}${stampNote} ` : ""}` +
             `${answer?.joinedRunningProbe ? "(some project's probe was already running) " : ""}` +
-            `${probing ? "— this project's probe is (believed) running; waiting for its verdict" : "— nothing is probing this project yet; will ask again"}`,
+            `${probing ? "— this project's probe is (believed) running; waiting for its verdict" : "— nothing is probing this project yet; will ask again"}` +
+            yieldNote,
         );
       } catch (e) {
         nextAskAt = Date.now() + SWEEP_POLL_INTERVAL_MS;
@@ -426,7 +441,7 @@ async function acquireFreshSweep(projectId, previousRow, waitMs, branch) {
     const elapsed = Date.now() - (deadline - waitMs);
     if (elapsed - lastNote >= 120_000) {
       lastNote = elapsed;
-      log(`[promote] still waiting for the sweep verdict (${Math.round(elapsed / 60_000)} min elapsed of ${Math.round(waitMs / 60_000)})`);
+      log(`[promote] still waiting for the sweep verdict (${Math.round(elapsed / 60_000)} min elapsed of ${Math.round(waitMs / 60_000)})${lastYieldNote}`);
     }
   }
   return { row: null, reason: `no fresh verdict within ${Math.round(waitMs / 60_000)} min` };
