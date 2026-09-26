@@ -11,6 +11,7 @@ import type { Database } from "../db/index.js";
 import type { PluginRow } from "../repositories/plugins.repository.js";
 import { resolveInside, addToGitInfoExclude, isLinkPath, removeLink } from "./plugin-fs.js";
 import { fanOutScaffold } from "./plugin-scaffold.js";
+import { syncPluginSkillOverrides } from "./plugin-skill-overrides.service.js";
 import { stopPluginViews } from "./plugin-views.service.js";
 import { deletePluginViewProcessesForPlugin } from "../repositories/plugin-view-processes.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -106,6 +107,17 @@ export function createPluginEnablementOps(deps: {
 }) {
   const { database, requirePlugin, requireProject, resolveOutputRepoPath, setOutputLocation } = deps;
 
+  /** #1251: write the enabled plugins' skill listings (skillOverrides) next to the fanned-out skills. */
+  async function applySkillListings(projectId: string, repoPath: string, warnings: string[]) {
+    const result = await syncPluginSkillOverrides(database, projectId, repoPath);
+    warnings.push(...result.warnings);
+    if (result.status === "skipped-tracked" || result.status === "failed") {
+      const message = `skill listings not applied: ${result.message ?? result.status}`;
+      warnings.push(message);
+      console.warn(`[plugins] ${message}`);
+    }
+  }
+
   function fanOutSkills(plugin: PluginRow & { manifest: PluginManifest }, repoPath: string, report: EnableReport) {
     fanOutPluginSkills(plugin, repoPath, report);
   }
@@ -121,6 +133,7 @@ export function createPluginEnablementOps(deps: {
 
     const report: EnableReport = { prefKey, skills: [], scaffoldWritten: false, scaffoldPlaceholders: 0, warnings: [] };
     fanOutSkills(plugin, project.repoPath, report);
+    await applySkillListings(projectId, project.repoPath, report.warnings);
     const outputRepoPath = await resolveOutputRepoPath(plugin, project);
     await fanOutScaffold(plugin, outputRepoPath, project.repoPath, project.name, report);
     return report;
@@ -146,6 +159,7 @@ export function createPluginEnablementOps(deps: {
       removeLink(target);
       skillsRemoved.push(name);
     }
+    await applySkillListings(projectId, project.repoPath, []);
     return { prefKey, skillsRemoved };
   }
 

@@ -284,6 +284,7 @@ export function isProjectScopedDynamicKey(key: string): boolean {
   return matchesScopedKey(key, PROJECT_SCOPED_KEY_PREFIXES, (rest) => PROJECT_ID_SUFFIX.test(rest))
     || matchesScopedKey(key, FREEFORM_SUFFIX_KEY_PREFIXES, (rest) => rest.length > 0)
     || isPluginEnabledPreferenceKey(key)
+    || isPluginSkillListingPreferenceKey(key)
     || isPluginLoopPausedPreferenceKey(key)
     || isPluginLoopConvergedPreferenceKey(key)
     || isPluginOutputLocationPreferenceKey(key)
@@ -299,6 +300,15 @@ export function isProjectScopedDynamicKey(key: string): boolean {
  */
 export function isPluginEnabledPreferenceKey(key: string): boolean {
   return /^plugin_enabled_[a-z0-9-]+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(key);
+}
+
+/**
+ * True for the per-project plugin skill LISTING override (#1251,
+ * `plugin_skill_listing_<pluginSlug>_<projectId>`). Same two-dynamic-segment shape as the
+ * enable key; the builder is `pluginSkillListingPreferenceKey` in `plugin-skill-listing.ts`.
+ */
+export function isPluginSkillListingPreferenceKey(key: string): boolean {
+  return /^plugin_skill_listing_[a-z0-9-]+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(key);
 }
 
 /**

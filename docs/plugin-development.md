@@ -589,6 +589,34 @@ Rule of thumb: mark it `developer` when a person *running your pipeline* would n
 anything that validates the plugin's own fixtures, dumps internal state, or is launched by a loop
 on its own.
 
+## `listing` — how your skills are shown to the model (#1251)
+
+Every skill a plugin declares is junctioned into the project's `.claude/skills` and copied into each
+worktree, so by default its `description` would load into **every** session of the project, builders
+included, whether or not it ever fires. The board therefore decides how each plugin skill is listed,
+by writing Claude Code's `skillOverrides` into `.claude/settings.local.json` next to the skills it
+materialized. Your `SKILL.md` is never edited, so the skill stays self-contained and fully
+model-invocable wherever it is installed outside the board.
+
+| Listing | Model sees | `/name` works |
+|---|---|---|
+| `on` | name + description | yes |
+| `name-only` (**board default**) | name only; can still invoke it by name | yes |
+| `user-invocable-only` | nothing | yes |
+| `off` | nothing | no |
+
+Resolution, strongest first: the project's `plugin_skill_listing_<slug>_<projectId>` preference (a
+JSON map `{ "<skill>": "<listing>" }`) → your manifest's `skills[].listing` hint → the board-wide
+`plugin_skill_listing_default` → `name-only`. Give a hint only when a skill must be found by its
+description (a skill agents should reach for unprompted): `{ "dir": ".claude/skills/x", "listing": "on" }`.
+
+- Applied at enable, removed at disable, and written into every worktree at provisioning. The board
+  owns only keys that are plugin skill names; hand-written overrides in the same file survive.
+- A `settings.local.json` that is **tracked by git** is never written (it would dirty the tree and
+  commit a per-machine choice); the enable report and the provisioning log say so.
+- Pi has no name-only mode: skills listed `user-invocable-only`/`off` are not passed as `--skill`.
+  Codex has no equivalent wired yet.
+
 ## Placeholders and env
 
 Available in every `command` and every `env` value, and in the scaffold template:
@@ -908,6 +936,7 @@ half-valid. The rules that are easy to trip:
 - `views[].kind` must be `"iframe"`.
 - `audience` (on `skills[]`, `scripts[]`, `views[]`) must be `"operator"` or `"developer"` when
   present; absent means `"operator"`.
+- `skills[].listing` must be `"on"`, `"name-only"`, `"user-invocable-only"` or `"off"` when present.
 - `sync.provider` must match `^[a-z0-9-]+$`; `sync` must declare at least one of `pull`/`push`;
   `sync.config[].key` and `sync.secrets[]` entries must be unique; a `sync.secrets[]` entry that
   looks like an inline secret value (a JWT, a known provider token prefix, or anything over 64
