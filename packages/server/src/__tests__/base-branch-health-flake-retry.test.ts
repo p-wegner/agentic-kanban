@@ -4,22 +4,41 @@
  * `monitor-file-contention.test.ts` reded a 41-minute sweep and blocked `pnpm promote` outright,
  * while the same suite passed 21/21 minutes later on an idle box. `runRetry` is injected so this
  * exercises the decision without a real clone/install/verify chain.
+ *
+ * #1242 follow-up — vitest 4 prints its `FAIL` summary lines on STDERR and the runner's
+ * `[test:mine] <pkg>:` headers on STDOUT. `combined` is built as `stderr + "\n" + stdout`
+ * (mirroring the real caller), so on vitest-4-shaped output every FAIL line precedes every
+ * header and the OLD header-based parse attributed nothing, refusing every retry. The suites
+ * below are therefore split across stderr/stdout exactly like a real run, and
+ * `resolveRedProbeOutcome` is exercised with an injected `classifySuites` standing in for
+ * `classifyFailedSuites(workingDir, …)` (disk attribution), the same seam
+ * `verify-retry-strategies.ts` uses.
  */
 import { describe, expect, it } from "vitest";
 import { resolveRedProbeOutcome, type RetryRunResult } from "../services/base-branch-health.service.js";
+import type { FailedSuite } from "../services/verify-flake-retry.js";
+import type { FailedSuiteClassification } from "../services/verify-failed-suites.js";
 
-const FLAKY_OUTPUT = `
-[test:mine] server: node vitest run
- FAIL  src/__tests__/monitor-file-contention.test.ts > one
- Test Files  1 failed | 761 passed (762)
-`;
+const FLAKY_STDERR = ` FAIL  src/__tests__/monitor-file-contention.test.ts > one\n Test Files  1 failed | 761 passed (762)`;
+const FLAKY_STDOUT = `[test:mine] server: node vitest run`;
+// #1242 follow-up: FAIL on stderr, header on stdout — `combined` is `stderr + "\n" + stdout`.
+const FLAKY_OUTPUT = `${FLAKY_STDERR}\n${FLAKY_STDOUT}`;
 
-const BROAD_OUTPUT = Array.from({ length: 8 }, (_, i) => `
-[test:mine] server: node vitest run
- FAIL  src/__tests__/suite-${i}.test.ts > one`).join("\n");
+const BROAD_STDERR = Array.from({ length: 8 }, (_, i) => ` FAIL  src/__tests__/suite-${i}.test.ts > one`).join("\n");
+const BROAD_OUTPUT = `${BROAD_STDERR}\n[test:mine] server: node vitest run`;
+
+const GUARD_STDERR = ` FAIL  src/__tests__/example-invariant.test.ts > one`;
+const GUARD_OUTPUT = `${GUARD_STDERR}\n[test:mine] server: node vitest run`;
 
 const pass: RetryRunResult = { exitCode: 0, stdout: "", stderr: "" };
 const fail = (stdout = FLAKY_OUTPUT): RetryRunResult => ({ exitCode: 1, stdout, stderr: "" });
+
+/** Stands in for `classifyFailedSuites(workingDir, …)`: places every unlabelled suite under `server`. */
+function classifyUnderServer(suites: readonly FailedSuite[], guardFiles: readonly string[] = []): FailedSuiteClassification {
+  const files = suites.map((s) => `packages/server/${s.file}`);
+  const guardSuites = files.filter((f) => guardFiles.some((g) => f.endsWith(g)));
+  return { files, guardSuites, guardFailure: files.length > 0 && guardSuites.length === files.length };
+}
 
 function harness(overrides: Partial<Parameters<typeof resolveRedProbeOutcome>[0]> = {}) {
   const calls = { retry: 0 };
@@ -33,6 +52,8 @@ function harness(overrides: Partial<Parameters<typeof resolveRedProbeOutcome>[0]
     startedAt: 1_000,
     scoped: true,
     nowMs: 1_000 + 5_000,
+    workingDir: "/probe/clone",
+    classifySuites: (suites: FailedSuite[]) => classifyUnderServer(suites),
     runRetry: async (retryScopeEnv: string) => {
       calls.retry++;
       scopes.push(retryScopeEnv);
@@ -43,7 +64,7 @@ function harness(overrides: Partial<Parameters<typeof resolveRedProbeOutcome>[0]
   return { input, calls, scopes };
 }
 
-describe("resolveRedProbeOutcome (#1110)", () => {
+describe("resolveRedProbeOutcome (#1110, #1242 follow-up)", () => {
   it("records a plain red without retrying when nothing looks attributable", async () => {
     const h = harness({ combined: "some opaque tsc crash with no suite names", scoped: true });
     const out = await resolveRedProbeOutcome(h.input);
@@ -52,7 +73,7 @@ describe("resolveRedProbeOutcome (#1110)", () => {
     expect(h.calls.retry).toBe(0);
   });
 
-  it("clears a load-induced failure with ONE targeted re-run and records GREEN, flaky: true", async () => {
+  it("attributes and clears a vitest-4-shaped (stderr-first) load-induced failure with ONE targeted re-run, GREEN + flaky: true, and records retried", async () => {
     const h = harness();
     const out = await resolveRedProbeOutcome(h.input);
     expect(out.outcome).toBe("green");
@@ -63,6 +84,8 @@ describe("resolveRedProbeOutcome (#1110)", () => {
     // A level may only weaken verification VISIBLY — the retry must be named in the message.
     expect(out.message).toMatch(/passed on a targeted re-run/);
     expect(out.message).toContain("monitor-file-contention.test.ts");
+    // #1242 follow-up — the sweep names exactly the one retried suite.
+    expect(out.retried).toEqual(["packages/server/src/__tests__/monitor-file-contention.test.ts"]);
     // durationMs reflects the retry too, not just the first (failed) run.
     expect(out.durationMs).toBe(5_000);
   });
@@ -75,6 +98,7 @@ describe("resolveRedProbeOutcome (#1110)", () => {
     expect(out.flaky).toBeUndefined();
     expect(out.message).toMatch(/failed again on a targeted re-run/);
     expect(out.message).toMatch(/this is a real failure, not machine load/);
+    expect(out.retried).toEqual(["packages/server/src/__tests__/monitor-file-contention.test.ts"]);
     expect(retries).toBe(1);
   });
 
@@ -83,6 +107,7 @@ describe("resolveRedProbeOutcome (#1110)", () => {
     const out = await resolveRedProbeOutcome(h.input);
     expect(out.outcome).toBe("red");
     expect(h.calls.retry).toBe(0);
+    expect(out.retried).toBeUndefined();
   });
 
   it("never retries when the project's verify_script does not honour a suite scope", async () => {
@@ -97,5 +122,27 @@ describe("resolveRedProbeOutcome (#1110)", () => {
     const out = await resolveRedProbeOutcome(h.input);
     expect(out.outcome).toBe("red");
     expect(out.flaky).toBeUndefined();
+  });
+
+  it("refuses a retry on a deterministic guard/ratchet failure, even attributed and narrow (#1230)", async () => {
+    const h = harness({
+      combined: GUARD_OUTPUT,
+      classifySuites: (suites: FailedSuite[]) => classifyUnderServer(suites, ["example-invariant.test.ts"]),
+    });
+    const out = await resolveRedProbeOutcome(h.input);
+    expect(out.outcome).toBe("red");
+    expect(out.flaky).toBeUndefined();
+    expect(h.calls.retry).toBe(0);
+    expect(out.retried).toBeUndefined();
+  });
+
+  it("falls back to header-only (unattributed) behaviour when no workingDir/classifySuites is given", async () => {
+    // No workingDir and no classifySuites injected: the stderr-first FAIL line still cannot be
+    // placed by a package header, so this must decline exactly as before the fix — never throw
+    // and never misattribute.
+    const h = harness({ workingDir: undefined, classifySuites: undefined });
+    const out = await resolveRedProbeOutcome(h.input);
+    expect(out.outcome).toBe("red");
+    expect(h.calls.retry).toBe(0);
   });
 });
