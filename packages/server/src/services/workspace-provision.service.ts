@@ -19,16 +19,13 @@ import type { Database } from "../db/index.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
 import { getEnabledPluginBySlug, listEnabledPlugins } from "./plugin-enabled.js";
 import { parsePluginLoopUnitKey, pluginSkillName, pluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/plugin-manifest";
-import { resolvePluginSkillListing, parsePluginSkillListingOverrides, pluginSkillListingPreferenceKey, type SkillListing } from "@agentic-kanban/shared/lib/plugin-skill-listing";
-import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { fanOutPluginSkills, type EnableReport } from "./plugin-enablement.service.js";
 import { syncPluginSkillOverrides } from "./plugin-skill-overrides.service.js";
-import { applySkillListingOverrides } from "./plugin-skill-listing-settings.js";
 import { parseOnboardingUnitKey, parseInitSkillStepId } from "@agentic-kanban/shared/lib/onboarding-plan";
 import type { ProviderName } from "./agent-provider.js";
 import { runSetupScript } from "./setup-script.js";
 import type { SetupScriptContainer } from "@agentic-kanban/shared/lib/setup-script";
-import { getPreference, getAllPreferences } from "../repositories/preferences.repository.js";
+import { getPreference } from "../repositories/preferences.repository.js";
 import { resolveRiskPosture, riskPosturePref, type RiskPosture } from "@agentic-kanban/shared/lib/risk-posture";
 import { provisionContainerForWorkspace, resolveDevcontainerProvisionOptions } from "./devcontainer-workspace.service.js";
 import {
@@ -160,26 +157,15 @@ async function materializeEnabledPluginSkillsImpl(
   projectId: string,
 ): Promise<PluginSkillMaterialization> {
   const result: PluginSkillMaterialization = { materialized: [], healed: [], missing: [] };
-  const skillOverrides: Record<string, SkillListing> = {};
   try {
     // #552: one enabled-plugin iterator — this used to run `isPluginEnabledForProject`
     // once per INSTALLED plugin, i.e. a DB query per plugin on the workspace-create path.
-    const prefSource = toPrefMap(await getAllPreferences(database));
     for (const { row, manifest } of await listEnabledPlugins(projectId, database)) {
       for (const skill of manifest.skills ?? []) {
         // #553: pluginSkillName is the ONE derivation of a plugin skill's directory name
         // (its comment says three hand-rolled ones disagreed) — the loop and onboarding
         // resolvers in this same file already use it.
         const name = pluginSkillName(skill.dir);
-        const projectOverrides = parsePluginSkillListingOverrides(
-          prefSource.get(pluginSkillListingPreferenceKey(row.pluginId, projectId)),
-        ).overrides;
-        skillOverrides[name] = resolvePluginSkillListing({
-          skillName: name,
-          projectOverrides,
-          manifestListing: skill.listing,
-          globalDefault: prefSource.get("plugin_skill_listing_default"),
-        });
         if (await copySkillToWorktree(repoPath, name, worktreePath)) {
           result.materialized.push(name);
           continue;
@@ -222,10 +208,6 @@ async function materializeEnabledPluginSkillsImpl(
             `it — a plugin-loop ticket or an impact-tier gate that names this skill will fall back silently (#1039).`,
         );
       }
-    }
-    if (Object.keys(skillOverrides).length > 0) {
-      const applied = await applySkillListingOverrides(worktreePath, skillOverrides);
-      if (applied.warning) console.warn(`[workspaces] ${applied.warning}`);
     }
   } catch (err) {
     console.warn(`[workspaces] plugin-skill materialization failed (non-fatal): ${errorMessage(err)}`);

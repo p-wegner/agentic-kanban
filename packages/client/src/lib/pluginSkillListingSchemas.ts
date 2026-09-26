@@ -44,29 +44,17 @@ function looseObject(fields: Record<string, FieldCheck>): Schema {
   };
 }
 
-function nested(schema: Schema): FieldCheck {
-  return {
-    check(value, path, issues) {
-      const inner: string[] = [];
-      schema.validate(value, inner);
-      for (const issue of inner) issues.push(`${path}.${issue}`);
-    },
-  };
-}
-
 function nullable(inner: FieldCheck): FieldCheck {
   return { check: (value, path, issues) => { if (value !== null) inner.check(value, path, issues); } };
 }
 
 /**
  * `POST /api/plugins/:id/skills/:name/listing` (#1252) → `setSkillListingModeForProject`
- * (`plugin-enablement.service.ts`): `{ overrides: Record<string, SkillListing>, warning: string
- * | null }`. `PluginsSettings` only reads `warning` (to toast it) and does not destructure
- * `overrides` — it optimistically updates its own state instead — so `overrides` is checked as
- * an opaque object, not field-by-field.
+ * (`plugin-enablement.service.ts`): `{ warning: string | null }`. `PluginsSettings` reads
+ * `warning` (to toast it) and optimistically updates its own state rather than reading a
+ * server-resolved listing back.
  */
 const skillListingResult: Schema = looseObject({
-  overrides: nested(looseObject({})),
   warning: nullable(str),
 });
 
