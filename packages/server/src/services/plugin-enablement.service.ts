@@ -7,13 +7,22 @@ import {
   pluginSkillName,
   type PluginManifest,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
+import {
+  resolvePluginSkillListing,
+  parsePluginSkillListingOverrides,
+  pluginSkillListingPreferenceKey,
+  type SkillListing,
+} from "@agentic-kanban/shared/lib/plugin-skill-listing";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import type { Database } from "../db/index.js";
 import type { PluginRow } from "../repositories/plugins.repository.js";
+import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { resolveInside, addToGitInfoExclude, isLinkPath, removeLink } from "./plugin-fs.js";
 import { fanOutScaffold } from "./plugin-scaffold.js";
 import { syncPluginSkillOverrides } from "./plugin-skill-overrides.service.js";
 import { stopPluginViews } from "./plugin-views.service.js";
 import { deletePluginViewProcessesForPlugin } from "../repositories/plugin-view-processes.repository.js";
+import { applySkillListingOverrides, removeSkillListingOverrides } from "./plugin-skill-listing-settings.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
@@ -95,6 +104,34 @@ export function fanOutPluginSkills(
   }
 }
 
+/**
+ * The `skillOverrides` entries this plugin's skills resolve to for this project (#1251) — one
+ * per manifest-declared skill, via the same precedence `materializeWorkspaceSkills`'s Pi filter
+ * uses (project override -> manifest hint -> global default). Computed at enable/disable time
+ * so `.claude/settings.local.json` starts correct without waiting for a launch to read it.
+ */
+async function resolveSkillOverridesFor(
+  plugin: PluginRow & { manifest: PluginManifest },
+  projectId: string,
+  database: Database,
+): Promise<Record<string, SkillListing>> {
+  const prefSource = toPrefMap(await getAllPreferences(database));
+  const overrides: Record<string, SkillListing> = {};
+  for (const skill of plugin.manifest.skills ?? []) {
+    const name = pluginSkillName(skill.dir);
+    const projectOverrides = parsePluginSkillListingOverrides(
+      prefSource.get(pluginSkillListingPreferenceKey(plugin.pluginId, projectId)),
+    ).overrides;
+    overrides[name] = resolvePluginSkillListing({
+      skillName: name,
+      projectOverrides,
+      manifestListing: skill.listing,
+      globalDefault: prefSource.get("plugin_skill_listing_default"),
+    });
+  }
+  return overrides;
+}
+
 export function createPluginEnablementOps(deps: {
   database: Database;
   requirePlugin: (id: string) => Promise<PluginRow & { manifest: PluginManifest }>;
@@ -136,6 +173,12 @@ export function createPluginEnablementOps(deps: {
     await applySkillListings(projectId, project.repoPath, report.warnings);
     const outputRepoPath = await resolveOutputRepoPath(plugin, project);
     await fanOutScaffold(plugin, outputRepoPath, project.repoPath, project.name, report);
+
+    if ((plugin.manifest.skills ?? []).length > 0) {
+      const overrides = await resolveSkillOverridesFor(plugin, projectId, database);
+      const result = await applySkillListingOverrides(project.repoPath, overrides);
+      if (result.warning) report.warnings.push(result.warning);
+    }
     return report;
   }
 
@@ -160,6 +203,11 @@ export function createPluginEnablementOps(deps: {
       skillsRemoved.push(name);
     }
     await applySkillListings(projectId, project.repoPath, []);
+
+    const allSkillNames = (plugin.manifest.skills ?? []).map((s) => pluginSkillName(s.dir));
+    if (allSkillNames.length > 0) {
+      await removeSkillListingOverrides(project.repoPath, allSkillNames);
+    }
     return { prefKey, skillsRemoved };
   }
 

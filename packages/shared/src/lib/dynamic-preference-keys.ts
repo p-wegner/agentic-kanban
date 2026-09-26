@@ -289,7 +289,8 @@ export function isProjectScopedDynamicKey(key: string): boolean {
     || isPluginLoopConvergedPreferenceKey(key)
     || isPluginOutputLocationPreferenceKey(key)
     || isPluginSyncConfigPreferenceKey(key)
-    || isPluginSyncStatusPreferenceKey(key);
+    || isPluginSyncStatusPreferenceKey(key)
+    || isPluginSkillListingPreferenceKey(key);
 }
 
 /**
@@ -354,6 +355,15 @@ export function isPluginSyncConfigPreferenceKey(key: string): boolean {
  */
 export function isPluginSyncStatusPreferenceKey(key: string): boolean {
   return /^plugin_sync_status_[a-z0-9-]+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(key);
+}
+
+/**
+ * True for the per-project skill-listing OVERRIDE key
+ * (`plugin_skill_listing_<pluginSlug>_<projectId>`, #1251). Same two-dynamic-segment shape as
+ * {@link isPluginEnabledPreferenceKey}, for the same reason.
+ */
+export function isPluginSkillListingPreferenceKey(key: string): boolean {
+  return /^plugin_skill_listing_[a-z0-9-]+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(key);
 }
 
 /**

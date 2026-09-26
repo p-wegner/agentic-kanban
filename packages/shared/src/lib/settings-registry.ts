@@ -186,6 +186,12 @@ export const SETTINGS_REGISTRY = {
   // on a clean main, #38); turning it off leaves the scaffold writes sitting uncommitted in the
   // working tree instead, so an operator who wants to review them first can.
   scaffold_auto_commit: { type: "bool", default: "true" },
+  /**
+   * Board-wide listing for PLUGIN skills (#1251): Claude Code `skillOverrides` value the board
+   * writes next to the skills it materialized. `name-only` keeps them model-invocable without
+   * loading their descriptions into every session. Resolver: `shared/lib/plugin-skill-listing.ts`.
+   */
+  plugin_skill_listing_default: { type: "string", default: "name-only" },
 } as const satisfies Record<string, SettingDef>;
 
 /** Union of the registry's static setting keys. */

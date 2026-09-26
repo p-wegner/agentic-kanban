@@ -93,6 +93,11 @@ export const agentState = new AgentState();
  * SYMLINK, not a directory — so every PLUGIN skill (fanned out as a junction) was invisible
  * here and never reached the Pi launch, while sitting plainly on disk. `couldHoldSkill` +
  * `isSafeSkillName` already decide both questions, in one place, for every other reader.
+ *
+ * #1251 — a plugin skill listed `user-invocable-only`/`off` is excluded from this
+ * MODEL-INITIATED auto-load list: it is still on disk (so an explicit `/name` invocation or
+ * Claude's own slash-command discovery still works), it is just not force-fed into every
+ * turn's context via `--skill`.
  */
 function materializedSkillFiles(worktreePath: string): string[] {
   // #1251: Pi has no "name-only" listing, so a skill the settings hide from the model is omitted.
