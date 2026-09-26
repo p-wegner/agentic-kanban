@@ -11,7 +11,6 @@ import {
   resolvePluginSkillListing,
   parsePluginSkillListingOverrides,
   pluginSkillListingPreferenceKey,
-  type SkillListing,
 } from "@agentic-kanban/shared/lib/plugin-skill-listing";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import type { Database } from "../db/index.js";
@@ -19,18 +18,7 @@ import { listPluginRows } from "../repositories/plugins.repository.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { marketplaceCatalogPath, buildMarketplaceEntries, type PluginMarketplaceEntry, type InstalledPluginRow } from "./plugin-marketplace.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-
-/** A per-project resolved listing mode for one plugin-declared skill (#1252 Plugins-view picker). */
-export interface ResolvedSkillListing {
-  name: string;
-  mode: SkillListing;
-  /** Where the resolved mode came from — for display, not decision-making. */
-  source: "project" | "manifest" | "default";
-  /** The manifest author's own hint, if any (undefined = no opinion declared). */
-  manifestHint: SkillListing | undefined;
-  /** `description.length` — a rough per-turn token-cost proxy for listing this skill "on". */
-  descriptionSize: number;
-}
+import type { ResolvedSkillListing } from "@agentic-kanban/shared";
 
 /**
  * Read-side listing of installed plugins: the short-TTL memoized `listPlugins`, the

@@ -1,17 +1,10 @@
 import { useState } from "react";
-import type { SkillListing } from "@agentic-kanban/shared";
+import type { SkillListing, ResolvedSkillListing } from "@agentic-kanban/shared";
 import { SKILL_LISTINGS } from "@agentic-kanban/shared";
 import { apiPost } from "../../lib/api.js";
 import { showToast } from "../../lib/toast.js";
 
-/** One skill's resolved listing (mode + where it came from) — from GET /api/plugins?projectId=. */
-export type ResolvedSkillListing = {
-  name: string;
-  mode: SkillListing;
-  source: "project" | "manifest" | "default";
-  manifestHint: SkillListing | undefined;
-  descriptionSize: number;
-};
+export type { ResolvedSkillListing };
 
 const LISTING_MODE_LABELS: Record<SkillListing, string> = {
   on: "On (full description)",
