@@ -76,6 +76,13 @@ describe("hook posture resolution (#913)", () => {
   it("returns null when there is no posture section at all, so absent is not 'explicitly standard'", () => {
     expect(posture.parsePostureFromTicketContext("# Ticket #913\n\nSome description.\n")).toBeNull();
   });
+
+  it("reads the iterate and flow levels (decision 017's 2026-09-24 amendments), not just the original four", () => {
+    for (const [label, slug] of [["Iterate", "iterate"], ["Flow", "flow"]] as const) {
+      const rendered = `## Risk posture\n\nThis project runs under **${label}** risk posture. Some detail.\n`;
+      expect(posture.parsePostureFromTicketContext(rendered)).toBe(slug);
+    }
+  });
 });
 
 describe("hook posture policy (#913)", () => {
@@ -91,7 +98,7 @@ describe("hook posture policy (#913)", () => {
 
   it("NEVER skips a safety check, at any posture — the one invariant", () => {
     const safety = { name: "Validate command safety", command: "node .claude/hooks/validate-command-safety.js", alwaysRun: true };
-    for (const level of ["strict", "standard", "fast", "sprint"]) {
+    for (const level of ["strict", "standard", "iterate", "fast", "sprint", "flow"]) {
       expect(posture.classifyCheck(safety)).toBe("safety");
       expect(posture.checkAllowedUnderPosture(safety, level).run).toBe(true);
     }
