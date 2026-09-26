@@ -11,9 +11,11 @@ import {
   resolvePluginSkillListing,
   parsePluginSkillListingOverrides,
   pluginSkillListingPreferenceKey,
+  isSkillListing,
   type SkillListing,
 } from "@agentic-kanban/shared/lib/plugin-skill-listing";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+import { getJson } from "@agentic-kanban/shared/lib/settings-registry";
 import type { Database } from "../db/index.js";
 import type { PluginRow } from "../repositories/plugins.repository.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
@@ -24,6 +26,7 @@ import { stopPluginViews } from "./plugin-views.service.js";
 import { deletePluginViewProcessesForPlugin } from "../repositories/plugin-view-processes.repository.js";
 import { applySkillListingOverrides, removeSkillListingOverrides } from "./plugin-skill-listing-settings.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { PluginError } from "./plugin-errors.js";
 
 /**
  * Per-project enable/disable of an installed plugin: skill fan-out (junction, copy
@@ -110,7 +113,7 @@ export function fanOutPluginSkills(
  * uses (project override -> manifest hint -> global default). Computed at enable/disable time
  * so `.claude/settings.local.json` starts correct without waiting for a launch to read it.
  */
-async function resolveSkillOverridesFor(
+export async function resolveSkillOverridesFor(
   plugin: PluginRow & { manifest: PluginManifest },
   projectId: string,
   database: Database,
@@ -130,6 +133,43 @@ async function resolveSkillOverridesFor(
     });
   }
   return overrides;
+}
+
+/**
+ * An operator's explicit per-skill listing override (#1252) — merged into the project's
+ * `plugin_skill_listing_<slug>_<projectId>` JSON map, then re-run through
+ * `applySkillListingOverrides` for the MAIN checkout (the Plugins view's own scope; a
+ * worktree gets its resolution fresh at provisioning time via `resolveSkillOverridesFor`).
+ */
+async function setSkillListingMode(
+  plugin: PluginRow & { manifest: PluginManifest },
+  project: { id: string; repoPath: string },
+  skillName: string,
+  mode: string,
+  database: Database,
+): Promise<{ overrides: Record<string, SkillListing>; warning: string | null }> {
+  if (!isSkillListing(mode)) {
+    throw new PluginError(
+      `mode must be one of: on, name-only, user-invocable-only, off (got ${JSON.stringify(mode)})`,
+      "BAD_REQUEST",
+    );
+  }
+  const declaredNames = (plugin.manifest.skills ?? []).map((s) => pluginSkillName(s.dir));
+  if (!declaredNames.includes(skillName)) {
+    throw new PluginError(`Skill "${skillName}" is not declared by this plugin`, "NOT_FOUND");
+  }
+
+  const prefKey = pluginSkillListingPreferenceKey(plugin.pluginId, project.id);
+  const prefSource = toPrefMap(await getAllPreferences(database));
+  const existingOverrides = getJson<Record<string, string>>(prefSource, prefKey, {});
+  const mergedOverrides = { ...existingOverrides, [skillName]: mode };
+  await setPreferenceChecked(database, [{ key: prefKey, value: JSON.stringify(mergedOverrides) }]);
+
+  // Re-resolve every declared skill (not just the one just set) so the settings.local.json
+  // write reflects the full, current precedence chain for this project.
+  const overrides = await resolveSkillOverridesFor(plugin, project.id, database);
+  const result = await applySkillListingOverrides(project.repoPath, overrides);
+  return { overrides, warning: result.warning };
 }
 
 export function createPluginEnablementOps(deps: {
@@ -211,5 +251,12 @@ export function createPluginEnablementOps(deps: {
     return { prefKey, skillsRemoved };
   }
 
-  return { fanOutSkills, enableForProject, disableForProject };
+  /** Set one skill's project-scoped listing override and re-sync the main checkout (#1252). */
+  async function setSkillListingModeForProject(pluginRowId: string, projectId: string, skillName: string, mode: string) {
+    const plugin = await requirePlugin(pluginRowId);
+    const project = await requireProject(projectId);
+    return setSkillListingMode(plugin, project, skillName, mode, database);
+  }
+
+  return { fanOutSkills, enableForProject, disableForProject, setSkillListingModeForProject };
 }

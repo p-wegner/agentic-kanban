@@ -4,12 +4,33 @@ import { readFile, stat } from "node:fs/promises";
 import {
   PLUGIN_MANIFEST_FILENAME,
   parsePluginManifest,
+  pluginSkillName,
   type PluginManifest,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
+import {
+  resolvePluginSkillListing,
+  parsePluginSkillListingOverrides,
+  pluginSkillListingPreferenceKey,
+  type SkillListing,
+} from "@agentic-kanban/shared/lib/plugin-skill-listing";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import type { Database } from "../db/index.js";
 import { listPluginRows } from "../repositories/plugins.repository.js";
+import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { marketplaceCatalogPath, buildMarketplaceEntries, type PluginMarketplaceEntry, type InstalledPluginRow } from "./plugin-marketplace.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+
+/** A per-project resolved listing mode for one plugin-declared skill (#1252 Plugins-view picker). */
+export interface ResolvedSkillListing {
+  name: string;
+  mode: SkillListing;
+  /** Where the resolved mode came from — for display, not decision-making. */
+  source: "project" | "manifest" | "default";
+  /** The manifest author's own hint, if any (undefined = no opinion declared). */
+  manifestHint: SkillListing | undefined;
+  /** `description.length` — a rough per-turn token-cost proxy for listing this skill "on". */
+  descriptionSize: number;
+}
 
 /**
  * Read-side listing of installed plugins: the short-TTL memoized `listPlugins`, the
@@ -87,10 +108,43 @@ export function createPluginListingOps(deps: {
     }
   }
 
+  /**
+   * Resolve every skill a plugin declares to its effective listing mode + source, for the
+   * Plugins-view picker (#1252). One pref read per COMPUTE (not per plugin) since
+   * `resolvePluginSkillListing` only needs the shared prefMap and this runs per
+   * installed plugin per memo-miss request.
+   */
+  function resolveSkillListings(
+    manifest: PluginManifest,
+    pluginSlug: string,
+    projectId: string,
+    prefSource: Map<string, string>,
+  ): ResolvedSkillListing[] {
+    const overrideKey = pluginSkillListingPreferenceKey(pluginSlug, projectId);
+    const projectOverrides = parsePluginSkillListingOverrides(prefSource.get(overrideKey)).overrides;
+    const globalDefault = prefSource.get("plugin_skill_listing_default");
+    return (manifest.skills ?? []).map((skill) => {
+      const name = pluginSkillName(skill.dir);
+      const mode = resolvePluginSkillListing({
+        skillName: name,
+        projectOverrides,
+        manifestListing: skill.listing,
+        globalDefault,
+      });
+      const source: ResolvedSkillListing["source"] = projectOverrides[name]
+        ? "project"
+        : skill.listing
+          ? "manifest"
+          : "default";
+      return { name, mode, source, manifestHint: skill.listing, descriptionSize: (skill.description ?? "").length };
+    });
+  }
+
   async function computePluginList(projectId?: string) {
     const rows = await listPluginRows(database);
     const enabledMap = projectId ? await enabledSlugsByProject() : null;
     const enabledSlugs = enabledMap?.get(projectId!) ?? new Set<string>();
+    const prefSource = projectId ? toPrefMap(await getAllPreferences(database)) : null;
     return Promise.all(rows.map(async (row) => {
       let manifest: PluginManifest | null = null;
       let manifestError: string | null = null;
@@ -101,6 +155,9 @@ export function createPluginListingOps(deps: {
       }
       // A peek only — never creates the sidecar repo (that happens on enable/run/setOutputLocation).
       const outputLocation = projectId ? await readOutputLocationPref(row.pluginId, projectId) : undefined;
+      const skillListings = projectId && manifest && prefSource
+        ? resolveSkillListings(manifest, row.pluginId, projectId, prefSource)
+        : undefined;
       // Drift (#295): the cached manifest is what the board RUNS; the file on disk is what the
       // author EDITED. They only reconcile on POST /:id/update, and until then edits silently do
       // nothing — so say so instead of letting the author chase a phantom bug.
@@ -112,7 +169,7 @@ export function createPluginListingOps(deps: {
         manifest,
         manifestError,
         manifestDrift,
-        ...(projectId ? { enabled: enabledSlugs.has(row.pluginId), outputLocation } : {}),
+        ...(projectId ? { enabled: enabledSlugs.has(row.pluginId), outputLocation, skillListings } : {}),
       };
     }));
   }
