@@ -20,7 +20,8 @@ import {
   verifyChainSemaphoreQueueLength,
   type VerifyChainPriority,
 } from "./verify-chain-semaphore.js";
-import { decideFlakeRetry, retryScopeEnvValue } from "./verify-flake-retry.js";
+import { type FailedSuite, decideFlakeRetry, parseFailedSuites as parseFlakeRetrySuites, retryScopeEnvValue } from "./verify-flake-retry.js";
+import { type FailedSuiteClassification, classifyFailedSuites } from "./verify-failed-suites.js";
 import { isSelfProjectRepo } from "./self-project.js";
 import {
   clearProbeYieldStreak,
@@ -122,6 +123,12 @@ export interface BaseBranchVerifyResult {
   failedSuites?: string[] | null;
   /** Set when a targeted re-run cleared a small failed-suite set (#1110) — see the retry below. */
   flaky?: boolean;
+  /**
+   * The repo-relative suite(s) a targeted flake retry was attempted for (#1242 follow-up),
+   * whether the re-run cleared them or confirmed the failure. Absent when no retry ran (nothing
+   * attributable, a guard failure, too broad, or an unscoped project).
+   */
+  retried?: string[];
   /** Machine-load context around this probe (#1110) — see `captureCapacitySample`. */
   contention?: ProbeContentionSnapshot | null;
   /**
@@ -288,6 +295,35 @@ export interface RetryRunResult {
 }
 
 /**
+ * The failing suites in the form `decideFlakeRetry` needs: attributed to a package (#1242, and
+ * this ticket's own follow-up — mirrors `attributeForRetry` in `verify-retry-strategies.ts`,
+ * which the pre-merge gate already applies).
+ *
+ * Vitest 4 prints its `FAIL` summary on stderr and the runner's `[test:mine] <pkg>:` headers on
+ * stdout, so on `stderr + "\n" + stdout` text every FAIL line precedes every header and the
+ * header-based parse in `verify-flake-retry.ts` labels nothing — which made the base/rc sweep
+ * refuse every retry on this repo's own output. `classifyFailedSuites` places each unlabelled
+ * suite by which single `packages/<pkg>/` holds it ON DISK (the probe clone's checkout, `dest`),
+ * which is available here because the sweep clones the branch before running verify. A suite it
+ * cannot place (ambiguous across packages, or `workingDir` absent) keeps its null label, so
+ * `decideFlakeRetry` refuses it for the reason it always had.
+ */
+function attributeForRetry(
+  parsed: FailedSuite[],
+  classify: (suites: FailedSuite[]) => FailedSuiteClassification,
+): { suites: FailedSuite[]; guardSuites: string[] } {
+  const classified = classify(parsed);
+  const suites = parsed.map((suite) => {
+    if (suite.packageLabel) return suite;
+    const file = suite.file.replace(/\\/g, "/").replace(/^\.\//, "");
+    const placed = classified.files.find((f) => f.endsWith(`/${file}`));
+    const m = placed ? /^packages\/([^/]+)\//.exec(placed) : null;
+    return m ? { packageLabel: m[1]!, file } : suite;
+  });
+  return { suites, guardSuites: classified.guardSuites };
+}
+
+/**
  * A run's `verify_script` failed — decide the final verdict, applying at most one targeted
  * flake retry (#1110, the base-health twin of the pre-merge gate's #894 retry — see
  * `verify-retry-strategies.ts` for the fuller version this mirrors, minus its install retry,
@@ -311,18 +347,30 @@ export async function resolveRedProbeOutcome(input: {
   /** Whether this project's verify_script honours `KANBAN_RETRY_TEST_FILES` at all. */
   scoped: boolean;
   runRetry: (retryScopeEnv: string) => Promise<RetryRunResult>;
+  /**
+   * The probe clone's checkout root, so failing suites can be attributed by DISK the same way
+   * the pre-merge gate does (#1242 follow-up). Absent means header-only attribution, same as
+   * before this fix.
+   */
+  workingDir?: string | null;
+  /** Injected for tests; defaults to `classifyFailedSuites(workingDir, suites)`. */
+  classifySuites?: (suites: FailedSuite[]) => FailedSuiteClassification;
   /** Epoch ms for the pure `durationMs` arithmetic below (not persisted) — injected for tests. */
   nowMs?: number;
 }): Promise<BaseBranchVerifyResult> {
   const { projectId, sha, branch, exitCode, combined, startedAt, scoped, runRetry } = input;
   const now = () => input.nowMs ?? Date.now();
-  const flake = decideFlakeRetry({ output: combined, timedOut: false, scoped });
+  const parsed = parseFlakeRetrySuites(combined);
+  const classify = input.classifySuites ?? ((suites: FailedSuite[]) => classifyFailedSuites(input.workingDir ?? null, suites));
+  const attributed = attributeForRetry(parsed, classify);
+  const flake = decideFlakeRetry({ ...attributed, timedOut: false, scoped });
   if (flake.retry) {
     const names = flake.suites.map((s) => `${s.packageLabel}/${s.file}`).join(", ");
     console.log(
       `[base-branch-health] verify_script failed on ${flake.suites.length} suite(s) for project ${projectId} `
         + `— re-running just those before declaring the base red: ${names}`,
     );
+    const retriedNames = flake.suites.map((s) => (s.packageLabel ? `packages/${s.packageLabel}/${s.file}` : s.file));
     const retryRun = await runRetry(retryScopeEnvValue(flake.suites));
     if (retryRun.exitCode === 0 && !retryRun.timedOut) {
       console.log(
@@ -337,6 +385,7 @@ export async function resolveRedProbeOutcome(input: {
         flaky: true,
         message: `${flake.suites.length} suite(s) failed under load and passed on a targeted re-run: ${names}`,
         failedSuites: [],
+        retried: retriedNames,
       };
     }
     const retryCombined = [retryRun.stderr, retryRun.stdout].filter(Boolean).join("\n").trim();
@@ -351,6 +400,7 @@ export async function resolveRedProbeOutcome(input: {
       // through a vitest run, and the 40-line tail that becomes `message` routinely keeps
       // none of them.
       failedSuites: failedSuitesForOutcome("red", combined),
+      retried: retriedNames,
     };
   }
   return {
@@ -603,6 +653,10 @@ ${tail(combined)}`,
         combined,
         startedAt,
         scoped: isSelfProjectRepo(project.repoPath),
+        // #1242 follow-up — the probe clone's own checkout, so a failing suite can be attributed
+        // by DISK the same way the pre-merge gate does, instead of by the vitest-4-hostile
+        // header parse that never matches this repo's stderr-first output.
+        workingDir: dest,
         runRetry: (retryScopeEnv) => runUnderVerifyChainSemaphore(
           () => runSetupScript(dest, verifyScript, {
             timeoutMs: VERIFY_TIMEOUT_MS,
@@ -628,6 +682,12 @@ ${tail(combined)}`,
     // plain green all describe the same primary run, and a timeout has no step line to parse
     // (the exit handler that prints it never ran), which `probeScopeFromOutput` returns as null.
     result.scope = probeScopeFromOutput(combined);
+    // #1242 follow-up — the sweep log's own record of what the retry touched, since the
+    // `base_branch_health` row has no column for it. `retried` is only ever set alongside a
+    // `red`/`green(flaky)` verdict that actually attempted one.
+    if (result.retried && result.retried.length > 0) {
+      console.log(`[base-branch-health] project ${projectId} sweep retried: [${result.retried.join(", ")}]`);
+    }
   } catch (e) {
     result = {
       outcome: "red",
