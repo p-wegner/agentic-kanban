@@ -43,6 +43,16 @@ export const pluginOutputLocationBody = z.object({
 }).passthrough();
 
 /**
+ * `POST /api/plugins/:id/skills/:name/listing` (#1252). `mode` keeps NO predicate here — the
+ * service (`setSkillListingMode`) validates it against `SKILL_LISTINGS` and throws
+ * `PluginError("BAD_REQUEST")` with the exact allowed values, same shape as `output-location`.
+ */
+export const pluginSkillListingBody = z.object({
+  projectId,
+  mode: unchecked<string>(),
+}).passthrough();
+
+/**
  * `POST /api/plugins/:id/loops/:name/gate/resolve`.
  *
  * `gateId` and `actionId` share ONE message because the guard was a single

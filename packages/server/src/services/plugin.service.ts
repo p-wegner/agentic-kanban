@@ -152,7 +152,7 @@ export function createPluginService(deps: {
 
   // Per-project enable/disable + skill fan-out extracted to its own module
   // (god-module ceiling) — see plugin-enablement.service.ts.
-  const { fanOutSkills, enableForProject, disableForProject } = createPluginEnablementOps({
+  const { fanOutSkills, enableForProject, disableForProject, setSkillListingModeForProject } = createPluginEnablementOps({
     database, requirePlugin, requireProject, resolveOutputRepoPath, setOutputLocation,
   });
 
@@ -320,6 +320,7 @@ export function createPluginService(deps: {
     removePlugin: invalidatesPluginList(removePlugin),
     enableForProject: invalidatesPluginList(enableForProject),
     disableForProject: invalidatesPluginList(disableForProject),
+    setSkillListingModeForProject: invalidatesPluginList(setSkillListingModeForProject),
     getButlerFragments,
     listViews,
     listProjectViews,

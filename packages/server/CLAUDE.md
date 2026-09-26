@@ -112,6 +112,16 @@ ship as a per-provider module with a mirrored export shape:
 | usage-limit detection | `services/<name>-rate-limit.ts` | claude, codex |
 | interactive login | `services/<name>-login.service.ts` | claude, codex |
 | auth rotation | `claude-subscription-ring.ts` / `codex-license-ring.ts`, both over the generic `auth-rotation-ring.ts` | claude, codex |
+| skill-listing filter (#1251/#1252) | none — declared `unsupported` for all five, each with its own reason | none |
+
+**Skill-listing filter is the one row where "unsupported" does not mean "missing".** Claude Code
+hides a skill's description from implicit invocation via its own native `skillOverrides` key
+(`plugin-skill-listing-settings.ts` writes it); Pi's equivalent is centralized board logic
+(`materializedSkillFiles` in `agent.service.ts`, gating which `--skill` flags Pi's launch
+receives) rather than a `pi-provider.ts`-resident module; Copilot and Herdr have no skills
+concept to filter. **Codex CLI has no equivalent lever at all** — its context comes from
+`AGENTS.md` as a whole, with no per-skill visibility flag or config key — so it is the one
+provider this capability is genuinely absent for, not just differently implemented.
 
 **The rule: a capability is either PRESENT for a provider or DECLARED absent — never just
 missing.** A four-provider registry with two-provider adapters is fine; what is not fine is
