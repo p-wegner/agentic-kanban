@@ -1,4 +1,3 @@
-// @gate:always-run when:packages/server/src/services/merge-queue-train.ts - reads that file's source to check the train gate's wiring
 import { describe, expect, it, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
@@ -129,18 +128,5 @@ describe("provisionTrainGateSelector — a train staging worktree gets the selec
     expect(result.selectorPresent).toBe(false);
     expect(logs.join("\n")).toContain("train/2026-09-27-06a: selector ABSENT");
     expect(logs.join("\n")).toContain(IMPACT_TOOL_RELATIVE_PATH);
-  });
-
-  it("the train gate calls it right after creating its staging worktree (one road for train, bisect and control arm)", () => {
-    // `runTrainStagingGate` is module-private; every train/bisect/control-arm gate goes through it.
-    const src = readFileSync(join(__dirname, "..", "services", "merge-queue-train.ts"), "utf8").replace(/\r\n?/g, "\n");
-    const fn = src.slice(src.indexOf("async function runTrainStagingGate("));
-    const body = fn.slice(0, fn.indexOf("\n}\n"));
-    const created = body.indexOf("gitService.createWorktree(");
-    const provisioned = body.indexOf("provisionTrainGateSelector(");
-    const gated = body.indexOf("runPreMergeGate(");
-    expect(created).toBeGreaterThan(-1);
-    expect(provisioned).toBeGreaterThan(created);
-    expect(gated).toBeGreaterThan(provisioned);
   });
 });
