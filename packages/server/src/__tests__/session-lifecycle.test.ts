@@ -156,6 +156,9 @@ describe("session-lifecycle", () => {
     const capped = Number(request.extraEnv?.KANBAN_TEST_MAX_WORKERS);
     expect(Number.isInteger(capped)).toBe(true);
     expect(capped).toBeGreaterThanOrEqual(1);
+    expect(capped).toBeLessThanOrEqual(4);
+    // A direct `pnpm exec vitest run` (the impact selector's printed line) reads this one.
+    expect(request.extraEnv?.VITEST_MAX_WORKERS).toBe(String(capped));
   });
 
   it("does NOT cap a non-builder (review) session's test run — it never ran an uncapped one anyway", async () => {
@@ -167,6 +170,7 @@ describe("session-lifecycle", () => {
 
     const request = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(request.extraEnv?.KANBAN_TEST_MAX_WORKERS).toBeUndefined();
+    expect(request.extraEnv?.VITEST_MAX_WORKERS).toBeUndefined();
   });
 
   it("records the workspace's skill (id + snapshotted name) on the session row", async () => {

@@ -34,7 +34,7 @@ export function isBuilderSession(triggerType: string | undefined, planMode: bool
  * test:mine` — so the ceiling is a flat constant rather than `verify_max_workers_<projectId>`,
  * which stays scoped to the gate it was measured against.
  */
-const BUILDER_TEST_WORKERS_CEILING = 8;
+const BUILDER_TEST_WORKERS_CEILING = 4;
 
 /**
  * #909: cap a BUILDER's own `pnpm test:mine` the same way the merge gate caps its verify run —
@@ -47,6 +47,12 @@ const BUILDER_TEST_WORKERS_CEILING = 8;
  * their own env already, and inflating a review agent's test cap buys nothing) and only
  * best-effort — a capacity-read failure just means the env var stays absent, exactly as it
  * always was pre-#909, never a blocked launch.
+ *
+ * The cap is exported twice: `KANBAN_TEST_MAX_WORKERS` for `test:mine`, and `VITEST_MAX_WORKERS`,
+ * which every package's `vitest.config.ts` reads, for the `pnpm exec vitest run …` line the impact
+ * selector prints. A builder following that inner loop bypassed the cap and ran cpus/2 forks
+ * (8 here, ~1.9 GB, seen on #1259's relaunch 2026-09-27). The ceiling is 4: with WIP 4 that is
+ * already 16 forks on a 16-core box.
  */
 export function withBuilderTestWorkerCap(
   extraEnv: Record<string, string> | undefined,
@@ -56,7 +62,7 @@ export function withBuilderTestWorkerCap(
   try {
     const tier0 = readTier0Capacity();
     const workers = deriveVerifyWorkers({ cpuCount: os.cpus().length, freeGb: tier0.freeGb, ceiling: BUILDER_TEST_WORKERS_CEILING });
-    return { ...extraEnv, KANBAN_TEST_MAX_WORKERS: String(workers) };
+    return { ...extraEnv, KANBAN_TEST_MAX_WORKERS: String(workers), VITEST_MAX_WORKERS: String(workers) };
   } catch {
     return extraEnv;
   }
