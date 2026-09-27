@@ -55,9 +55,11 @@ touched suites; drizzle snapshot baseline. The rc sweep for the promotion is the
 - **Kernel-pool growth**: non-paged pool 1.9 GB and paged 1.8 GB only 30 min after boot (19 h
   earlier: 3.4 / 7.0 GB). No pool-tag tool on the box; attributing it needs Sysinternals RAMMap or
   poolmon installed (a user decision).
-- Stale siding rows: `GET /api/merge-queue/trains` lists ~11 `workspace_train_siding` rows from
-  2026-09-18..27 with `sidedBranchSha: null` (released, never cleared because the member never
-  landed through the train). Cosmetic in the panel; nothing holds on them.
+- **Stale siding rows: fixed on master** (after `-4`, not yet promoted). `GET /api/merge-queue/trains`
+  listed 9 `workspace_train_siding` rows, all for `closed` workspaces that landed outside the
+  train and so never hit `clearTrainSidingState`. The live-siding read now skips closed
+  workspaces (rows stay in the DB, harmless). Check: new case in `merge-train-siding.test.ts`
+  (24/24) + `pnpm typecheck`. Goes live with the next `pnpm promote`.
 - ~18k `ak-*`/`kanban-*` fixture dirs in %TEMP% are "not yet stale enough" for the reaper; the
   `.worktrees/agentic-kanban/scratch-train-repro` and ~9 locked `feature_*-msz8*` test worktrees are
   still for the `cleanup` skill.

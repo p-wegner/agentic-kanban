@@ -455,4 +455,15 @@ describe("listTrainSidingStatesForProject (#1198)", () => {
       .toEqual([[newer.workspaceId, 3, true]]);
     expect(await listTrainSidingStatesForProject(fresh.projectId, db)).toEqual([]);
   });
+
+  it("leaves out a closed workspace's row, which nothing clears when it lands outside the train", async () => {
+    const { db } = createTestDb();
+    const member = await seedMember(db);
+    await setTrainSidingState(member.workspaceId, {
+      sidings: 1, sidedBranchSha: null, conflictTrainTipSha: "tip", lastSidedAt: "2026-09-18T01:00:00.000Z", cappedAt: null,
+    }, db);
+    expect(await listTrainSidingStatesForProject(member.projectId, db)).toHaveLength(1);
+    await db.update(workspaces).set({ status: "closed" }).where(eq(workspaces.id, member.workspaceId));
+    expect(await listTrainSidingStatesForProject(member.projectId, db)).toEqual([]);
+  });
 });

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { issues, workspaces, workspaceTrainSiding } from "@agentic-kanban/shared/schema";
 import type { MergeTrainSidingDto, TrainSidingKind } from "@agentic-kanban/shared";
 import { db } from "../db/index.js";
@@ -60,7 +60,8 @@ export async function clearTrainSidingState(workspaceId: string, database: Datab
 /**
  * Every live siding in a project (#1198), via workspace -> issue -> project: the siding table
  * carries only the workspace id. Oldest siding first, so a member held the longest is listed
- * first.
+ * first. A closed workspace's row is not live: a member that landed outside the train (or was
+ * abandoned) never reaches `clearTrainSidingState`, and its row would otherwise stay listed.
  */
 export async function listTrainSidingStatesForProject(
   projectId: string,
@@ -79,7 +80,7 @@ export async function listTrainSidingStatesForProject(
     .from(workspaceTrainSiding)
     .innerJoin(workspaces, eq(workspaces.id, workspaceTrainSiding.workspaceId))
     .innerJoin(issues, eq(issues.id, workspaces.issueId))
-    .where(eq(issues.projectId, projectId))
+    .where(and(eq(issues.projectId, projectId), ne(workspaces.status, "closed")))
     .orderBy(workspaceTrainSiding.lastSidedAt);
   return rows;
 }
