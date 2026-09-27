@@ -1,6 +1,7 @@
 import { readBoardEnv } from "../lib/env-registry.js";
-import { parseSessionStatsBlob, readUsageLimitStats } from "@agentic-kanban/shared";
-import { isBuilderCycleTrigger } from "@agentic-kanban/shared/lib/session-trigger";
+import { parseSessionStatsBlob, readUsageLimitStats, readSessionStats } from "@agentic-kanban/shared";
+import { isBuilderCycleTrigger, triggerRole } from "@agentic-kanban/shared/lib/session-trigger";
+import { hasPositiveSeverity } from "../lib/review-effectiveness-report.js";
 import type { WorkspaceCandidate } from "../startup/monitor-cycle.js";
 import { implementExitHoldReason } from "./implement-exit-check-state.js";
 
@@ -62,6 +63,43 @@ export function hasRepeatedFailedCommand(stats: string | null): boolean {
  */
 export function isBuilderSession(sess: LatestSession): boolean {
   return isBuilderCycleTrigger(sess.triggerType);
+}
+
+/** The minimal session-row shape the review-loop breaker needs, newest first. */
+export type ReviewLoopSessionRow = {
+  id: string;
+  triggerType: string | null;
+  stats: string | null;
+};
+
+/**
+ * Did this review session report a blocking finding? Reads the same self-reported
+ * `agentSummary` text the deep review-effectiveness report parses (#1259's review
+ * prompt asks the agent to state plainly when it found none), and reuses that
+ * report's negation-aware severity check rather than re-deriving it.
+ */
+function reviewSessionHadBlockingFindings(row: ReviewLoopSessionRow): boolean {
+  return hasPositiveSeverity(readSessionStats(row.stats).agentSummary ?? "");
+}
+
+/**
+ * #1259: the review-loop breaker must count consecutive REVIEW sessions that each
+ * ended with a blocking finding — not just "5 sessions total while In Review", which
+ * closed a workspace mid-merge after its last review had already passed cleanly.
+ *
+ * Walks back from the newest row and stops at the first non-review session or the
+ * first review that did NOT report a blocking finding — so a build, a chat turn, or a
+ * clean review anywhere in the recent history breaks the streak. Returns the ids of
+ * the sessions counted (newest first) so the caller can log exactly what it counted.
+ */
+export function consecutiveBlockingReviewSessions(rows: ReviewLoopSessionRow[]): string[] {
+  const counted: string[] = [];
+  for (const row of rows) {
+    if (triggerRole(row.triggerType) !== "review") break;
+    if (!reviewSessionHadBlockingFindings(row)) break;
+    counted.push(row.id);
+  }
+  return counted;
 }
 
 /** A `blocked` workspace parked there by a provider usage limit, and whether its wait is over. */
