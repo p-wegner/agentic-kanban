@@ -3,13 +3,14 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
-## 2026-09-27 afternoon — board empty, eight direct fixes, promoted as stable-20260927-3
+## 2026-09-27 afternoon — board empty, ten direct fixes, promoted as stable-20260927-4
 
 **State.** Every agentic-kanban ticket is Done; none open. #1253 and #1261 landed in train
-`2026-09-27-11` (1 gate run) after `-10` went red. Stable board runs `stable-20260927-3` (`738ddc0307`), promoted 2026-09-27 13:19 UTC
-by `pnpm promote` WITHOUT `--force-sweep`: rc `rc/20260927` got a full green sweep (scope full, 22 min), smoke
-passed. The stuck `rc/20260926` was abandoned by the new supersession rule (below). Posture `flow`, WIP 4,
-auto-merge on.
+`2026-09-27-11` (1 gate run) after `-10` went red. Stable board runs `stable-20260927-4` (`de111e6c5f`, master's tip as of this pass),
+promoted 14:13 UTC by `pnpm promote` WITHOUT `--force-sweep` (rc `rc/20260927-2`, full green sweep,
+smoke passed; no merge-back, since the rc held nothing beyond master). `stable-20260927-3` (`738ddc0307`)
+went out at 13:19 the same way; the stuck `rc/20260926` was abandoned by the supersession rule below.
+Posture `flow`, WIP 4, auto-merge on.
 
 **Direct-master fixes (the user asked for fixes, not tickets), each with its check:**
 - **#1261's mirror** (on its branch, `a11f2e02e9`): the server budget-cap mirror lacked #1262's
@@ -37,7 +38,7 @@ auto-merge on.
   A candidate the stable board already contains is now abandoned and a fresh one cut.
 - **Empty merge-back** (`b24ae9bd30`): after a promotion whose rc healed nothing (rc tip already in
   master), `promote` still asked the board for a merge-back; the board launched a builder into the
-  zero-commit workspace (#1263: plan mode, no plan, blocked, relaunched). `promote` now skips it.
+  zero-commit workspace (#1263: plan mode, no plan, blocked, relaunched). `promote` now skips it (exercised live on `-4`).
   #1263 itself was closed with the board's `reconcile-as-done` (`adoptMainCheckout`, rc tip = master).
 - **update-base killed its own gate** (`18c97f912c`): #1263's merge gate went red on a tree that
   had just swept green. Master moved mid-gate, the monitor's pre-relaunch rebase ran `update-base`,
