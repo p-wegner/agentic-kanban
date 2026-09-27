@@ -28,8 +28,9 @@
  * about the branch.
  *
  * Callers: `runGateWithEvidence` (every solo gate: pre-lock merge, review-exit, both monitor merge
- * paths). The merge train refuses to land when its base moved (`landMergeTrain`); it can call
- * {@link assessBaseMove} with the train ref as `branchSha` to make the same decision.
+ * paths), and a lone merge-train attempt whose base moved during its gate
+ * (`reassembleAfterNeutralBaseMove` in `merge-train.service.ts`, with the train sha as `branchSha`):
+ * on keep it re-assembles the gated members onto the new base and lands without a re-gate.
  */
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";

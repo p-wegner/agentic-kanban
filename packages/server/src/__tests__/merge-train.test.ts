@@ -333,6 +333,70 @@ describe("merge train assembly", () => {
     await expect(revParse(repo, trainRefDuringGate)).rejects.toBeTruthy();
   });
 
+  /**
+   * A Bullseye save commits only `scripts/board-monitor/objective.md` to the base. When that lands
+   * during a 25-40 min train gate, the move cannot change the verdict (base-move-relevance.ts), so
+   * the gated members are re-assembled onto the new base and land without a second gate. A move
+   * that touches a gate input still refuses, exactly as before.
+   */
+  it("lands without a re-gate when the base moved only by objective.md during the gate", async () => {
+    await git(["branch", "f1"]);
+    await commitFile("f1", "a.txt", "a\n");
+    await git(["checkout", "-q", "main"]);
+
+    let gateRuns = 0;
+    const closed: string[] = [];
+    const result = await runMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members: [{ workspaceId: "w1", branch: "f1" }],
+      label: "t-neutral",
+      runGate: async () => {
+        gateRuns++;
+        await git(["checkout", "-q", "main"]);
+        mkdirSync(join(repo, "scripts", "board-monitor"), { recursive: true });
+        writeFileSync(join(repo, "scripts", "board-monitor", "objective.md"), "# objective\n", "utf8");
+        await git(["add", "scripts/board-monitor/objective.md"]);
+        await git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "chore(monitor): sync objective.md"]);
+        return { passed: true, message: "ok" };
+      },
+      closeMember: async (id) => { closed.push(id); },
+    });
+
+    expect(gateRuns).toBe(1);
+    expect(result.gateRuns).toBe(1);
+    expect(result.landed.map((m) => m.branch)).toEqual(["f1"]);
+    expect(closed).toEqual(["w1"]);
+    expect(await isAncestor(repo, await revParse(repo, "f1"), "main")).toBe(true);
+    // The Bullseye commit is still on the base, under the landed train.
+    const baseLog = String(await git(["log", "--format=%s", "main"]));
+    expect(baseLog).toContain("chore(monitor): sync objective.md");
+  });
+
+  it("still refuses when the base moved by a code file during the gate", async () => {
+    await git(["branch", "f1"]);
+    await commitFile("f1", "a.txt", "a\n");
+    await git(["checkout", "-q", "main"]);
+
+    let gateRuns = 0;
+    await expect(
+      runMergeTrain({
+        repoPath: repo,
+        baseBranch: "main",
+        members: [{ workspaceId: "w1", branch: "f1" }],
+        label: "t-relevant",
+        runGate: async () => {
+          gateRuns++;
+          await commitFile("main", "code.ts", "export const x = 1;\n");
+          return { passed: true, message: "ok" };
+        },
+        closeMember: async () => {},
+      }),
+    ).rejects.toThrow(/base 'main' moved/);
+    expect(gateRuns).toBe(1);
+    expect(await isAncestor(repo, await revParse(repo, "f1"), "main")).toBe(false);
+  });
+
   it("deletes the train ref on the ordinary exits too (gate failure, success)", async () => {
     await git(["branch", "f1"]);
     await commitFile("f1", "a.txt", "a\n");
