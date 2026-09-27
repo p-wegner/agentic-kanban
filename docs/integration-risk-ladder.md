@@ -93,7 +93,8 @@ base; each partition becomes one train, and a branch alone in its partition ride
    integration ref (`kanban/train/<date>-N`) cut from the current base, ordered to minimise overlap.
    A member that conflicts with another member is **deferred** to the next train, and the pair is
    recorded as a candidate ticket group. A member that conflicts with the base goes back for a
-   rebase.
+   rebase, automatically and at once: it leaves the ready set, its builder gets one turn to rebase
+   and re-test, and review re-arms it for a later train. After two send-backs it gets a merge hold.
 2. **Gate once.** The posture's gate runs on the assembled tree: the exact tree that will land.
 3. **Green: land.** One merge commit lands the whole train (`Merge train 2026-09-26-03: #1256`),
    and every member closes as merged.
