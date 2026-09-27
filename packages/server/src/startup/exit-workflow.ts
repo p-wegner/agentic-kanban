@@ -24,7 +24,7 @@ import { isSpecPlanningStageName, transitionIssueStatus } from "@agentic-kanban/
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { RUN_GATE } from "../services/pre-merge-gate.service.js";
-import { runGateWithEvidence } from "../services/merge-gate-evidence.js";
+import { buildReviewExitEvidence, runReviewExitGate } from "./exit/review-exit-gate.js";
 import { getAutoLandLoopTicket } from "../services/plugin-loop-hooks.service.js";
 import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
 import { issues, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workspaces } from "@agentic-kanban/shared/schema";
@@ -337,7 +337,8 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
   async function armReadyForMerge(
     workspaceId: string,
     projectId: string,
-    evidence: { ranAt: string; stage: string; source: string; branchSha: string | null; baseSha: string | null; message?: string | null; trustworthy: boolean },
+    /** `ranAt`/`stage` are null for a typecheck-only review-exit (#1260): what ran, but no test pass. */
+    evidence: { ranAt: string | null; stage: string | null; source: string; branchSha: string | null; baseSha: string | null; message?: string | null; trustworthy: boolean },
     /** The worktree the gate ran in, for the #958 selector component — see `resolveGateVerification`.
      *  Must be the same worktree `reusePersistedGateVerdict` will read against, or the key it
      *  stamps here can never match and the whole reuse path silently stops firing. */
@@ -345,14 +346,14 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
   ): Promise<void> {
     await db.update(workspaces).set({
       readyForMerge: true,
-      updatedAt: evidence.ranAt,
+      updatedAt: evidence.ranAt ?? new Date().toISOString(),
     }).where(eq(workspaces.id, workspaceId));
     // #815: the five `merge_gate_*` columns moved to `workspace_merge_gate`. Same values,
     // same trustworthiness rule — an upsert, because a workspace can be re-gated.
     // #893: also stamp the verification-tier key, so the HTTP merge path's bounded
     // cross-restart reuse can accept this pass too. Best-effort — a null key only means
     // "not reusable by that path", never a blocked merge.
-    const verificationKey = evidence.trustworthy
+    const verificationKey = evidence.trustworthy && evidence.ranAt
       ? await resolveGateVerification(projectId, db, { workingDir }).then((v) => v.verificationKey).catch(() => null)
       : null;
     await setMergeGateEvidence(workspaceId, {
@@ -429,19 +430,15 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     // 30-45 minutes earlier on a repo whose verify gate is a full suite + build — evidence
     // stamped with it was born older than MERGE_GATE_EVIDENCE_MAX_AGE_MS and could never be
     // accepted, so every merge re-ran the whole gate).
-    const preMergeGate = await runGateWithEvidence({
-      workspace: gateWorkspace,
-      projectId,
-      source: "review-exit gate",
-      database: db,
-    });
+    // #1260: under a posture whose merge path gates anyway, this runs the typecheck only and the
+    // test step runs once, at merge. `strict`/`standard` get the full gate exactly as before.
+    const preMergeGate = await runReviewExitGate({ workspace: gateWorkspace, projectId, issueId, prefMap, database: db });
     if (!preMergeGate.passed) {
       console.log(`[workflow] pre-merge gate failed (${preMergeGate.stage}) for workspace ${workspaceId} — withholding readyForMerge: ${preMergeGate.message}`);
       boardEvents.broadcast(projectId, "workflow_error");
       emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Pre-merge gate failed (${preMergeGate.stage}) for workspace ${workspaceId}; not approved for merge. ${preMergeGate.message.slice(0, 300)}` });
       return;
     }
-    const gateRanAt = preMergeGate.ranAt;
     // Content-key the persisted evidence (0108), so the monitor's later merge trigger can
     // trust a pass whose only sin is age while still re-gating when the base has moved. A gate
     // whose worktree moved under it produced no trustworthy proof — the whole evidence quartet
@@ -464,14 +461,8 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     // Persist the REAL gate evidence (ranAt/stage) alongside readyForMerge — this is what the
     // monitor's later auto-merge trigger reads to build honest `MergeGateEvidence` instead of
     // fabricating `ranAt: new Date()` at merge time (#182).
-    const evidence = {
-      ranAt: gateRanAt,
-      stage: preMergeGate.stage,
-      source: "review-exit gate",
-      branchSha: gateShas.branchSha ?? null,
-      baseSha: gateShas.baseSha ?? null,
-      message: preMergeGate.message,
-    };
+    // #1260: a typecheck-only run persists what ran but no ranAt/stage — never a test pass.
+    const evidence = buildReviewExitEvidence(preMergeGate, gateShas);
     await armReadyForMerge(workspaceId, projectId, { ...evidence, trustworthy: !tipMovedDuringGate }, workspace.workingDir);
     const learningAfterReview = getBool(prefMap, "learning_step_after_review") && workspace.workingDir ? launchLearningStep(learningStepDeps, workspace, prefMap, "after review", true, projectId) : Promise.resolve();
     if (autoMergeEnabled) {

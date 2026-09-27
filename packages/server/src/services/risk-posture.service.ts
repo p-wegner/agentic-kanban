@@ -203,7 +203,7 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         builderStopChecks: "typecheck-only",
         contentionMode: "warn",
         placementBias: "remote-preferred",
-        summary: "fast: skips per-ticket review (reviews the train instead), gate once per train, red base allowed if it is known debt, builder tests skipped (typecheck only)",
+        summary: "fast: skips per-ticket review (reviews the train instead), gate once per train, red base allowed if it is known debt, builder tests skipped (typecheck only); review-exit gate is typecheck only (tests run once, at merge)",
       };
     case "sprint":
       return {
@@ -222,7 +222,7 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         builderStopChecks: "none",
         contentionMode: "off",
         placementBias: "remote-preferred",
-        summary: "sprint: no per-ticket review, guards-only gate, red base allowed (files a debt ticket), builder self-tests off, contention off",
+        summary: "sprint: no per-ticket review, guards-only gate, red base allowed (files a debt ticket), builder self-tests off, contention off; review-exit gate is typecheck only (tests run once, at merge)",
       };
     case "iterate":
       return {
@@ -248,7 +248,7 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         builderStopChecks: "tests-capacity-gated",
         contentionMode: "serialize",
         placementBias: "host-preferred",
-        summary: "iterate: per-merge gate is the test-impact selection (a ranked guess, narrower than scoped); the FULL suite runs nightly on the base instead, its misses are recorded, and a red base files a heal ticket rather than holding the train window",
+        summary: "iterate: per-merge gate is the test-impact selection (a ranked guess, narrower than scoped); the FULL suite runs nightly on the base instead, its misses are recorded, and a red base files a heal ticket rather than holding the train window; review-exit gate is typecheck only (tests run once, at merge)",
       };
     case "flow":
       return {
@@ -273,7 +273,7 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         builderStopChecks: "tests-capacity-gated",
         contentionMode: "serialize",
         placementBias: "host-preferred",
-        summary: "flow: merge gate = typecheck + impact selection + the diff's own tests; no guard floor at merge; red base reported, never blocking; the full suite runs on the release candidate only",
+        summary: "flow: merge gate = typecheck + impact selection + the diff's own tests; no guard floor at merge; red base reported, never blocking; the full suite runs on the release candidate only; review-exit gate is typecheck only (tests run once, at merge)",
       };
     case "standard":
     default:
