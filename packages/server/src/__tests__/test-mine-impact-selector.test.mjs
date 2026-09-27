@@ -15,6 +15,8 @@ import {
   runImpactSelector,
   formatImpactSelectorSpawnFailure,
   selectorFileScopeUnionNote,
+  capSelectionToBudget,
+  parseBudgetMs,
   PACKAGES,
 } from "../../../../scripts/test-mine.mjs";
 
@@ -411,11 +413,13 @@ describe("the selection's time budget", () => {
     return { status: 0, stdout: "packages/server:src/__tests__/a.test.ts\n", stderr: "" };
   };
 
+  // #1260: with a budget the runner asks for `--json` (scores + durations) so it can cap the WHOLE
+  // selection itself; see "the budget caps the whole selection" below.
   it("passes --budget alongside the floor, after the positional base", () => {
     const sink = {};
     runImpactSelector(selectorOpts({ cli, base: "master", budget: "60s", spawnFn: spawnCapturing(sink) }));
     expect(sink.args.slice(1)).toEqual([
-      "select", "master", "--format", "pkgfile", "--min-score", "1.0", "--budget", "60s",
+      "select", "master", "--json", "--min-score", "1.0", "--budget", "60s",
     ]);
   });
 
@@ -426,7 +430,7 @@ describe("the selection's time budget", () => {
     const sink = {};
     runImpactSelector(selectorOpts({ cli, budget: "120s", spawnFn: spawnCapturing(sink) }));
     expect(sink.args.slice(1)).toEqual([
-      "select", "--format", "pkgfile", "--min-score", "1.0", "--budget", "120s",
+      "select", "--json", "--min-score", "1.0", "--budget", "120s",
     ]);
   });
 
@@ -465,7 +469,7 @@ describe("the union hand-off to select --union", () => {
       spawnFn: spawnCapturing(sink),
     }));
     expect(sink.args.slice(1)).toEqual([
-      "select", "master", "--format", "pkgfile", "--min-score", "1.0", "--budget", "60s",
+      "select", "master", "--json", "--min-score", "1.0", "--budget", "60s",
       "--union", "-",
     ]);
     // Newline-separated: the shape `readUnionList` splits on for the `-` form.
@@ -494,6 +498,109 @@ describe("the union hand-off to select --union", () => {
     expect(sink.args.slice(1)).toEqual(["select", "--format", "pkgfile", "--min-score", "1.0"]);
     // No stdin either — an unrelated caller's spawn options are unchanged.
     expect(sink.input).toBeUndefined();
+  });
+});
+
+/**
+ * #1260 — the budget caps the WHOLE selection. `impact.mjs --budget` exempts the diff's own tests
+ * from its cut without charging them against the rest, and fills greedily, so a 120s budget kept
+ * 277 suites at est 190s on a 71-file diff (measured 2026-09-27) and the gate's test step ran
+ * 602-1036 s. The runner now re-cuts: own tests first (kept, charged), then rank order, and
+ * everything after the first suite that does not fit is dropped.
+ */
+describe("the budget caps the whole selection (#1260)", () => {
+  const suite = (test, score, durationMs, signals = []) => ({
+    test, score, durationMs, signals, pkgFile: `packages/server:${test.replace("packages/server/", "")}`,
+  });
+
+  it("parses the selector's own budget units", () => {
+    expect(parseBudgetMs("120s")).toBe(120_000);
+    expect(parseBudgetMs("90000ms")).toBe(90_000);
+    expect(parseBudgetMs("1500")).toBe(1500);
+    expect(parseBudgetMs("2m")).toBeNull();
+    expect(parseBudgetMs("")).toBeNull();
+  });
+
+  it("drops the lowest-ranked suites first, and a cheap low-ranked one cannot jump the queue", () => {
+    const { kept, cut, keptMs, cutMs } = capSelectionToBudget([
+      suite("packages/server/src/__tests__/low-cheap.test.ts", 1.0, 100),
+      suite("packages/server/src/__tests__/top.test.ts", 5.0, 40_000),
+      suite("packages/server/src/__tests__/mid.test.ts", 3.0, 70_000),
+      suite("packages/server/src/__tests__/union.test.ts", 0, 1_000, ["external"]),
+    ], 60_000);
+    expect(kept.map((s) => s.test)).toEqual(["packages/server/src/__tests__/top.test.ts"]);
+    // `mid` does not fit, so it and everything ranked below it is cut — including the 0.1 s one a
+    // greedy fill would have kept, and the union entry (score 0), which ranks last.
+    expect(cut.map((s) => s.test)).toEqual([
+      "packages/server/src/__tests__/mid.test.ts",
+      "packages/server/src/__tests__/low-cheap.test.ts",
+      "packages/server/src/__tests__/union.test.ts",
+    ]);
+    expect(keptMs).toBe(40_000);
+    expect(cutMs).toBe(71_100);
+  });
+
+  it("keeps the diff's own tests and charges them FIRST against the budget", () => {
+    const { kept, cut, ownCount } = capSelectionToBudget([
+      suite("packages/server/src/__tests__/ranked.test.ts", 4.0, 30_000),
+      suite("packages/server/src/__tests__/new.test.ts", 99, 50_000),
+      suite("packages/server/src/__tests__/edited.test.ts", 1.2, 20_000, ["self"]),
+    ], 60_000);
+    expect(ownCount).toBe(2);
+    expect(kept.map((s) => s.test)).toEqual([
+      "packages/server/src/__tests__/new.test.ts",
+      "packages/server/src/__tests__/edited.test.ts",
+    ]);
+    expect(cut.map((s) => s.test)).toEqual(["packages/server/src/__tests__/ranked.test.ts"]);
+  });
+
+  it("never cuts to zero — an empty selection would fall back to the WIDER `vitest related` run", () => {
+    const { kept, cut } = capSelectionToBudget([suite("packages/server/src/__tests__/huge.test.ts", 2, 500_000)], 60_000);
+    expect(kept).toHaveLength(1);
+    expect(cut).toHaveLength(0);
+  });
+
+  it("prices an unmeasured suite at the selector's own 3 s assumption", () => {
+    const { kept } = capSelectionToBudget([
+      { test: "a", score: 2, pkgFile: "packages/server:a" },
+      { test: "b", score: 1, pkgFile: "packages/server:b" },
+    ], 5_000);
+    expect(kept.map((s) => s.test)).toEqual(["a"]);
+  });
+
+  it("runImpactSelector applies the cap to the selector's --json output and logs what it cut", () => {
+    const cli = resolve("/repo", ".claude/skills/test-impact/tools/impact.mjs");
+    const json = JSON.stringify({
+      selected: [
+        suite("packages/server/src/__tests__/top.test.ts", 5.0, 40_000),
+        suite("packages/server/src/__tests__/mid.test.ts", 3.0, 70_000),
+        suite("packages/server/src/__tests__/low.test.ts", 1.0, 100),
+      ],
+    });
+    const logs = [];
+    const log = console.log;
+    console.log = (...args) => logs.push(args.join(" "));
+    let scope;
+    try {
+      scope = runImpactSelector(selectorOpts({ cli, budget: "60s", spawnFn: () => ({ status: 0, stdout: json, stderr: "" }) }));
+    } finally {
+      console.log = log;
+    }
+    expect(scope.get("server")).toEqual(["src/__tests__/top.test.ts"]);
+    const line = logs.find((l) => l.includes("caps the WHOLE selection"));
+    expect(line).toContain("kept 1 suite(s)/~40s est");
+    expect(line).toContain("cut 2 lowest-ranked suite(s)/~70s est");
+  });
+
+  it("falls back (null -> `vitest related`) when the --json output is unreadable", () => {
+    const cli = resolve("/repo", ".claude/skills/test-impact/tools/impact.mjs");
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      expect(runImpactSelector(selectorOpts({ cli, budget: "60s", spawnFn: () => ({ status: 0, stdout: "not json", stderr: "" }) }))).toBeNull();
+    } finally {
+      console.warn = warn;
+    }
   });
 });
 

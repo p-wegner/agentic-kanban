@@ -1070,7 +1070,10 @@ export function runImpactSelector({
   // The base is POSITIONAL and must come before the flags — `cmdSelect` reads `positional[0]` and
   // never looks at a `--base` flag. See `impactBase` for what an absent base silently costs at
   // gate time.
-  const args = [cli, "select", ...(base ? [base] : []), "--format", "pkgfile", "--min-score", String(minScore)];
+  // #1260 — with a budget, ask for `--json` (scores and per-suite durations) so the cap below can
+  // hold over the WHOLE selection; without one the argv is the pre-#1260 pkgfile call, unchanged.
+  const budgetMs = budget ? parseBudgetMs(budget) : null;
+  const args = [cli, "select", ...(base ? [base] : []), ...(budgetMs ? ["--json"] : ["--format", "pkgfile"]), "--min-score", String(minScore)];
   // #966 — the floor is applied first and the budget second, by the tool. Omitted entirely when
   // unset, so a project with no budget gets byte-identical argv to the pre-#966 runner.
   if (budget) args.push("--budget", String(budget));
@@ -1113,7 +1116,9 @@ export function runImpactSelector({
     console.warn(`[test:mine] impact selector exited ${res.status} — falling back to \`vitest related\`.`);
     return null;
   }
-  const { byLabel, unknown } = parseImpactSelection(res.stdout ?? "");
+  const selectionStdout = budgetMs ? capJsonSelectionToBudget(res.stdout ?? "", budgetMs, budget) : res.stdout;
+  if (selectionStdout === null) return null;
+  const { byLabel, unknown } = parseImpactSelection(selectionStdout ?? "");
   if (unknown.length > 0) {
     console.warn(
       `[test:mine] impact selector named ${unknown.length} suite(s) in package(s) this runner does not run — ` +
@@ -1149,6 +1154,79 @@ export function runImpactSelector({
     }
   }
   return byLabel;
+}
+
+/**
+ * `KANBAN_TEST_BUDGET` as milliseconds, with the selector's own units: `120s`, `90000ms`, and a bare
+ * number is ms. Null for anything else (the caller then keeps the pre-#1260 pkgfile call).
+ */
+export function parseBudgetMs(budget) {
+  const m = /^(\d+(?:\.\d+)?)(ms|s)?$/i.exec(String(budget ?? "").trim());
+  if (!m) return null;
+  const n = Number(m[1]);
+  return (m[2] || "ms").toLowerCase() === "s" ? n * 1000 : n;
+}
+
+/** The selector's own price for a suite with no measured duration (`CFG.defaultDurationMs`). */
+const UNMEASURED_SUITE_MS = 3000;
+
+/**
+ * Cap a selection to the budget over the WHOLE set (#1260), dropping the lowest-ranked first.
+ *
+ * `impact.mjs --budget` fills its seconds greedily and exempts the diff's own tests (score 99 /
+ * the `self` signal) from the cut, but still counts them nowhere against the rest. So a selection
+ * whose own tests cost more than the budget came back unchanged, and the greedy fill kept a long
+ * tail of cheap low-ranked suites after a costly one no longer fitted. Measured 2026-09-27 on a
+ * 71-file diff with `--budget 120s`: 277 suites kept at est 190s.
+ *
+ * Here the diff's own tests are kept (flow's definition is "the impact selection + the diff's own
+ * tests") and their cost is charged FIRST; the rest is taken in rank order (score, highest first)
+ * while it fits, and everything after the first suite that does not fit is cut, so a cheap
+ * low-ranked suite can never displace a costlier higher-ranked one. Union entries (`--union`,
+ * score 0) rank last and so go first. At least one suite is always kept: an empty selection makes
+ * the runner fall back to `vitest related`, which is WIDER, not narrower.
+ *
+ * Only ever removes suites the selector already chose; never adds one.
+ */
+export function capSelectionToBudget(selected, budgetMs) {
+  const isOwn = (s) => (s.score ?? 0) >= 99 || (s.signals || []).includes("self");
+  const cost = (s) => (typeof s.durationMs === "number" ? s.durationMs : UNMEASURED_SUITE_MS);
+  const own = selected.filter(isOwn);
+  const ranked = selected.filter((s) => !isOwn(s)).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const kept = [...own];
+  let keptMs = own.reduce((n, s) => n + cost(s), 0);
+  let i = 0;
+  for (; i < ranked.length; i++) {
+    if (kept.length > 0 && keptMs + cost(ranked[i]) > budgetMs) break;
+    kept.push(ranked[i]);
+    keptMs += cost(ranked[i]);
+  }
+  const cut = ranked.slice(i);
+  return { kept, cut, keptMs, cutMs: cut.reduce((n, s) => n + cost(s), 0), ownCount: own.length };
+}
+
+/**
+ * `select --json` stdout -> the pkgfile lines `parseImpactSelection` reads, after
+ * {@link capSelectionToBudget}. Logs what was cut. Returns null (the caller falls back to
+ * `vitest related`, the wider run) when the JSON cannot be read.
+ */
+export function capJsonSelectionToBudget(stdout, budgetMs, budgetLabel = `${budgetMs}ms`) {
+  let parsed;
+  try {
+    parsed = JSON.parse(stdout.slice(Math.max(0, stdout.indexOf("{"))));
+  } catch (err) {
+    console.warn(`[test:mine] impact selector --json output was unreadable (${err?.message ?? err}) — falling back to \`vitest related\`.`);
+    return null;
+  }
+  const selected = Array.isArray(parsed?.selected) ? parsed.selected : [];
+  const { kept, cut, keptMs, cutMs, ownCount } = capSelectionToBudget(selected, budgetMs);
+  const sec = (ms) => Math.round(ms / 1000);
+  console.log(
+    `[test:mine] impact budget ${budgetLabel} caps the WHOLE selection (#1260): kept ${kept.length} suite(s)/~${sec(keptMs)}s est ` +
+      `(${ownCount} of them the diff's own tests, never cut), cut ${cut.length} lowest-ranked suite(s)/~${sec(cutMs)}s est` +
+      ` — est = the impact map's per-suite durations, not a stopwatch.`,
+  );
+  return kept.map((s) => s.pkgFile).filter(Boolean).join("\n");
 }
 
 /**
