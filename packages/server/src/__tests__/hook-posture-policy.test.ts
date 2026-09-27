@@ -16,12 +16,15 @@ import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { RISK_POSTURES } from "@agentic-kanban/shared/lib/risk-posture";
 
 const require = createRequire(import.meta.url);
 const HOOKS_DIR = resolve(import.meta.dirname, "..", "..", "..", "..", ".claude", "hooks");
 const runnerPath = join(HOOKS_DIR, "smart-hooks-runner.js");
 
 const posture = require(join(HOOKS_DIR, "hook-posture.js")) as {
+  POSTURES: string[];
+  POLICIES: Record<string, { typecheck: boolean; tests: boolean; generatedRules: boolean; capacityGated: boolean }>;
   normalizePosture: (v: unknown) => string;
   parsePostureFromTicketContext: (text: string) => string | null;
   policyFor: (p: string) => { typecheck: boolean; tests: boolean; generatedRules: boolean; capacityGated: boolean };
@@ -81,6 +84,50 @@ describe("hook posture resolution (#913)", () => {
     for (const [label, slug] of [["Iterate", "iterate"], ["Flow", "flow"]] as const) {
       const rendered = `## Risk posture\n\nThis project runs under **${label}** risk posture. Some detail.\n`;
       expect(posture.parsePostureFromTicketContext(rendered)).toBe(slug);
+    }
+  });
+});
+
+/**
+ * #1244 — `hook-posture.js` claims to mirror `RISK_POSTURES` (`packages/shared/src/lib/
+ * risk-posture.ts`) but its own table used to list only `strict`/`standard`/`fast`/`sprint`,
+ * so `normalizePosture` silently mapped `iterate` and `flow` (decision 017's 2026-09-24
+ * amendments) onto `standard`'s row. Harmless today because both levels want `standard`'s
+ * `tests-capacity-gated` builder Stop-chain policy, but a future level with a DIFFERENT
+ * policy would be misread by every scaffolded hook, and the header comment claiming parity
+ * would be false.
+ *
+ * `hook-posture.js` cannot `require()` the shared TS module at runtime — it is copied
+ * byte-for-byte into a scaffolded worktree's `.claude/hooks/`, outside any build step — so
+ * the two tables cannot be unified into one declaration. This is the lockstep check instead:
+ * it iterates the real `RISK_POSTURES` and fails the moment a level is missing from the
+ * hook's own `POSTURES` list or `POLICIES` table. Folded into this file rather than its own
+ * suite so it inherits the existing `@gate:always-run when:.claude/**` marker instead of
+ * adding a second one — a new marker on its own would grow the always-run runtime floor by
+ * a full guard suite just to check four object lookups.
+ */
+describe("hook-posture.js stays in lockstep with RISK_POSTURES (#1244)", () => {
+  it("lists every RISK_POSTURES level in its own POSTURES table", () => {
+    for (const level of RISK_POSTURES) {
+      expect(posture.POSTURES, `POSTURES is missing "${level}"`).toContain(level);
+    }
+  });
+
+  it("has a POLICIES row for every RISK_POSTURES level", () => {
+    for (const level of RISK_POSTURES) {
+      expect(posture.POLICIES[level], `POLICIES is missing a row for "${level}"`).toBeDefined();
+    }
+  });
+
+  it("normalizePosture returns each level unchanged rather than falling through to standard", () => {
+    for (const level of RISK_POSTURES) {
+      expect(posture.normalizePosture(level), `normalizePosture("${level}")`).toBe(level);
+    }
+  });
+
+  it("has no stray POLICIES rows for a level RISK_POSTURES no longer has", () => {
+    for (const level of Object.keys(posture.POLICIES)) {
+      expect(RISK_POSTURES as readonly string[], `POLICIES has a row for unknown level "${level}"`).toContain(level);
     }
   });
 });
