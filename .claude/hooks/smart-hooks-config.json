@@ -49,30 +49,6 @@
         "blocking": true,
         "timeout": 10,
         "alwaysRun": true
-      },
-      {
-        "name": "Typecheck (edited packages only)",
-        "command": "node .claude/hooks/scoped-typecheck.js",
-        "filePatterns": [
-          "packages/**/*.ts",
-          "packages/**/*.tsx"
-        ],
-        "enabled": true,
-        "blocking": true,
-        "timeout": 300,
-        "containerSkippable": true
-      },
-      {
-        "name": "Vitest (edited files only)",
-        "command": "node .claude/hooks/scoped-vitest.js",
-        "filePatterns": [
-          "packages/**/*.ts",
-          "packages/**/*.tsx"
-        ],
-        "enabled": true,
-        "blocking": true,
-        "timeout": 300,
-        "containerSkippable": true
       }
     ]
   }

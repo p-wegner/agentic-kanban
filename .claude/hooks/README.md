@@ -75,9 +75,13 @@ Set `ALLOW_WRITE_WITHOUT_READ=1`.
 
 ## smart-hooks-config.json
 
-Config file for the smart-hooks-runner pattern (if you add it later). Currently empty —
-add PreToolUse / Stop hook entries here and wire `smart-hooks-runner.js` in
-`.claude/settings.json` to activate them.
+The checks `smart-hooks-runner.js` runs for PreToolUse and Stop. Hooks are **cheap safety only**:
+command safety, the vital-file and cross-worktree guards, uncommitted work, the reminders.
+A costly check (typecheck, tests) does not belong here: a Stop hook fires on every agent stop,
+cannot see the workflow phase or the ticket group, and bypasses verify-chain admission. The
+board runs those once per phase instead, as the posture's implement-exit check
+(`packages/server/src/startup/exit/implement-exit-check.ts`); `stop-hook-chain-ordering.test.ts`
+keeps them out of this file.
 
 ## check-conflict-markers.js
 

@@ -77,25 +77,16 @@ describe("Stop hook chain — outer/inner timeout budget (#480)", () => {
     expect(outer.timeout!).toBeGreaterThanOrEqual(worstCaseInnerBudget);
   });
 
-  it("runs the Uncommitted worktree changes check before the expensive Vitest/typecheck checks", () => {
-    const names = loadStopChecks().map((c) => c.name);
-    // Match on WHAT the check is, not on its exact label. The labels are prose and have been
-    // renamed before ("TypeScript typecheck" -> "Typecheck (edited packages only)" in
-    // 9e60a3987c), which turned this ordering guard red on master while the ordering it
-    // guards was still perfectly correct — a rename cannot be allowed to read as a defect.
-    const findIdx = (re: RegExp) => names.findIndex((n) => re.test(n));
-    const uncommittedIdx = findIdx(/uncommitted/i);
-    const vitestIdx = findIdx(/vitest/i);
-    const typecheckIdx = findIdx(/typecheck/i);
-
-    expect(uncommittedIdx).toBeGreaterThanOrEqual(0);
-    expect(vitestIdx).toBeGreaterThanOrEqual(0);
-    expect(typecheckIdx).toBeGreaterThanOrEqual(0);
-
-    // Cheap/critical gate first — defense in depth against any future under-provisioned
-    // outer timeout: even a tight budget still lets this gate run and report.
-    expect(uncommittedIdx).toBeLessThan(vitestIdx);
-    expect(uncommittedIdx).toBeLessThan(typecheckIdx);
+  it("keeps the Stop chain to cheap safety checks: typecheck and tests run in the board, once per phase", () => {
+    // The scoped typecheck/Vitest Stop checks fired on EVERY agent stop (mid-phase turns,
+    // clarifying questions, review sessions), could not see the workflow phase or the ticket
+    // group, and bypassed verify-chain admission. The board's implement-exit check replaced
+    // them (startup/exit/implement-exit-check.ts). Match on WHAT a check is, not its label.
+    const checks = loadStopChecks();
+    const names = checks.map((c) => c.name);
+    expect(names.some((n) => /uncommitted/i.test(n))).toBe(true);
+    const costly = checks.filter((c) => /vitest|typecheck|\btests?\b/i.test(`${c.name} ${c.command}`));
+    expect(costly.map((c) => c.name)).toEqual([]);
   });
 });
 
