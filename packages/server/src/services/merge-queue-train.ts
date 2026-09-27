@@ -27,6 +27,7 @@ import {
 import { runMergeTrain, formatTrainLabel, trainDateStamp, trainRefName, type OnTrainDropped } from "./merge-train.service.js";
 import { isMergeTrainLabelLive, registerLiveMergeTrain, unregisterLiveMergeTrain } from "./merge-train-live-registry.js";
 import { cleanupTrainWorktreesForLabel } from "./merge-train-worktrees.js";
+import { provisionTrainGateSelector } from "./merge-train-gate-selector.js";
 import { runPreMergeGate, looksLikeMissingDepsFailure } from "./pre-merge-gate.service.js";
 import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { randomUUID } from "node:crypto";
@@ -374,6 +375,8 @@ async function runTrainStagingGate(args: {
       pathNamespace: "train",
       ...(await resolveWorktreeClaims(database, { label: "merge-train-gate" })),
     });
+    // The test-impact selector + map, by the builder's own road (#1039); logs `selector ABSENT` when it cannot.
+    await provisionTrainGateSelector({ database, repoPath, projectId, worktreePath: gateWorktree, attemptLabel });
     // #1154: a builder's worktree gets the project's setup/install script run against
     // it before anything else touches it (`workspace-provision.service.ts`); this
     // staging worktree is created fresh by `createWorktree` above with none of that -
