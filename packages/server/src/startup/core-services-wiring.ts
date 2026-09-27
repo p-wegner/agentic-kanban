@@ -8,6 +8,7 @@ import { createBoardEvents } from "../services/board-events.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { createWorkflowEngine } from "./exit-workflow.js";
 import { createWorkflowForkService } from "../services/workflow-fork.service.js";
+import { createWorkspaceSessionService } from "../services/workspace-session.service.js";
 import { createAutoMerge } from "./merge-workflow.js";
 import { invalidateAgentQuestionsCache } from "../services/agent-questions.service.js";
 import { attachButlerEventFeed } from "../services/butler-event-feed.js";
@@ -77,11 +78,15 @@ export function wireCoreServices(app: Hono): CoreServicesWiring {
   // lost or lost the race against a session-exit status write.
   const forkService = createWorkflowForkService({ database: db, getSessionManager: () => sessionManager, boardEvents });
 
+  const builderTurns = createWorkspaceSessionService({ database: db, boardEvents, getSessionManager: () => sessionManager });
   const workflow = createWorkflowEngine({
     sessionManager,
     boardEvents,
     autoMerge: (...args) => autoMerge(...args),
     reconcileForkChildOnExit: (workspaceId) => forkService.reconcileJoinedForkChild(workspaceId),
+    // The implement-exit check's feedback turn resumes the builder's own session, exactly as a
+    // `POST /api/workspaces/:id/turn` does.
+    implementExit: { sendBuilderTurn: (workspaceId, content) => builderTurns.sendTurn(workspaceId, content) },
   });
   autoMerge = createAutoMerge({ sessionManager, boardEvents, learningSessionIds: workflow.learningSessionIds });
   runWorkflowOnExit = workflow.runWorkflowOnExit;

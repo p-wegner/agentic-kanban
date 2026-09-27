@@ -82,6 +82,13 @@ export type RiskPostureLevel = (typeof RISK_POSTURES)[number];
 export type RedBasePolicy = "block" | "allow-known-debt" | "allow-file-debt-ticket" | "report";
 
 /**
+ * The implement-exit check level (see `RiskPosture.implementExitCheck`): `none` skips it,
+ * `typecheck` runs the project's typecheck command, `impact` runs the verify script with the
+ * test-impact selection (the `impact` gate tier's env), `full` runs the verify script unscoped.
+ */
+export type ImplementExitCheckLevel = "none" | "typecheck" | "impact" | "full";
+
+/**
  * The EFFECTIVE periodic base-branch sweep for one project (#1031) — reported on
  * `GET /api/projects/:id/base-branch-health` (`sweep`) and per project on
  * `GET /api/projects/health` (`baseSweep`), so an operator can see which projects run the
@@ -134,8 +141,14 @@ export interface RiskPosture {
   mergesPerCycle: number;
   /** How many stalled builders one monitor cycle may relaunch for this project (#919). */
   relaunchesPerCycle: number;
-  /** What the builder's own Stop hook checks before allowing exit. */
-  builderStopChecks: "tests-and-typecheck" | "tests-capacity-gated" | "typecheck-only" | "none";
+  /**
+   * What the BOARD checks once when a builder's implementation phase ends, before it launches
+   * review (the implement-exit check). Run as an admitted verify chain and recorded in the
+   * outcome ledger with source `implement-exit`; never wider than the posture's merge gate.
+   * Replaced `builderStopChecks`, which described a Claude Code Stop hook: hooks fire on every
+   * agent stop, cannot see the phase, the group or the box, and never reach the ledger.
+   */
+  implementExitCheck: ImplementExitCheckLevel;
   contentionMode: "off" | "warn" | "serialize";
   placementBias: "host-half" | "host-preferred" | "remote-preferred";
   /** One line naming what this posture skips relative to `standard`, for gate/merge

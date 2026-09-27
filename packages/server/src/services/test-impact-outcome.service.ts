@@ -867,6 +867,7 @@ export async function recordVerifyGateOutcome(args: {
    */
   outcome: { failure: { timedOut?: boolean; message?: string } | null; failedSuites: FailedSuiteLike[]; retriedSuites?: FailedSuiteLike[] };
   tierInfo: GateTierInfo | null;
+  source?: string; // the row's origin: the merge gate's `ci` by default, `implement-exit` for that check
   runCommand?: RunImpactCommand;
   log?: (message: string) => void;
 }): Promise<RecordGateOutcomeResult> {
@@ -891,7 +892,7 @@ export async function recordVerifyGateOutcome(args: {
       failedSuites: classified.files,
       parsedFailedSuiteCount: outcome.failedSuites.length,
       tierInfo: args.tierInfo,
-      source: "ci",
+      source: args.source ?? "ci",
       guardFailure: classified.guardFailure, retried: attributeFailedSuites(args.workingDir, outcome.retriedSuites ?? []),
       runCommand: args.runCommand,
       log,
@@ -900,7 +901,7 @@ export async function recordVerifyGateOutcome(args: {
   };
   if (result.recorded) {
     console.log(
-      `[test-impact] recorded gate outcome for workspace ${workspaceId}: ${passed ? "pass" : "fail"}, ` +
+      `[test-impact] recorded ${args.source ?? "gate"} outcome for workspace ${workspaceId}: ${passed ? "pass" : "fail"}, ` +
         `ran ${result.ran}, ${result.changedCount} changed file(s), selection tier ${result.tier} would have ` +
         `picked ${result.selectedCount} test file(s)`,
     );

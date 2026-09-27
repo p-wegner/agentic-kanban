@@ -21,7 +21,7 @@ import {
   MAX_SESSIONS,
   NON_TRIVIAL_WORKTREE_DIFF_CHARS,
   classifyQuotaBlock,
-  hasRepeatedFailedCommand,
+  hasRepeatedFailedCommand, heldByImplementExitCheck,
   isBuilderSession,
   isZeroDiffInReviewAwaiting,
   orderCandidatesForWalk,
@@ -887,7 +887,7 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
         ));
       const sessionCount = Number(sessionCountRows[0]?.count ?? 0);
 
-      if (ws.wsStatus === "idle") {
+      if (ws.wsStatus === "idle" && !heldByImplementExitCheck(ws.wsId)) {
         await handleIdleWorkspace(ws, sess, sessionCount, ctx);
       } else if (ws.wsStatus === "reviewing") {
         await handleReviewingWorkspace(ws, sess, ctx);

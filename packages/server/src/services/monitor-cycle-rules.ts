@@ -2,6 +2,7 @@ import { readBoardEnv } from "../lib/env-registry.js";
 import { parseSessionStatsBlob, readUsageLimitStats } from "@agentic-kanban/shared";
 import { isBuilderCycleTrigger } from "@agentic-kanban/shared/lib/session-trigger";
 import type { WorkspaceCandidate } from "../startup/monitor-cycle.js";
+import { implementExitHoldReason } from "./implement-exit-check-state.js";
 
 export const MAX_SESSIONS = 10;
 export const DEFAULT_STUCK_BUILDER_TIMEOUT_MS = 9 * 60 * 1000;
@@ -145,6 +146,18 @@ export function orderCandidatesForWalk<T extends { wsStatus: string }>(candidate
   const rest: T[] = [];
   for (const candidate of candidates) (candidate.wsStatus === "blocked" ? cheap : rest).push(candidate);
   return cheap.length === 0 ? candidates : [...cheap, ...rest];
+}
+
+/**
+ * Whether the implement-exit check holds this idle workspace — its check is running, or the board
+ * marked it for attention after the feedback cap — logging why. An idle In-Progress workspace in
+ * that state is not a stalled builder: relaunching it would race the check's own feedback turn,
+ * and the stale-base path would try to merge work the board has not let into review.
+ */
+export function heldByImplementExitCheck(workspaceId: string): boolean {
+  const reason = implementExitHoldReason(workspaceId);
+  if (reason) console.log(`[monitor] Leaving idle workspace ${workspaceId} alone — ${reason}`);
+  return reason !== null;
 }
 
 export function isZeroDiffInReviewAwaiting(ws: WorkspaceCandidate): boolean {

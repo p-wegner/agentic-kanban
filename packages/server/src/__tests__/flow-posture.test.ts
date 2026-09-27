@@ -55,14 +55,14 @@ describe("the `flow` risk posture (#1240)", () => {
       trainMaxWaitMs: 0,
       mergesPerCycle: 2,
       relaunchesPerCycle: 2,
-      builderStopChecks: "tests-capacity-gated",
+      implementExitCheck: "impact",
       contentionMode: "serialize",
       placementBias: "host-preferred",
       summary: "flow: merge gate = typecheck + impact selection + the diff's own tests; no guard floor at merge; red base reported, never blocking; the full suite runs on the release candidate only; review-exit gate is typecheck only (tests run once, at merge)",
     });
     // Everything `iterate` has that is not one of the three named differences is the same.
     const iterate = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: "iterate" }), PID);
-    for (const key of ["gateTier", "reviewMode", "trainMaxSize", "trainMaxWaitMs", "mergesPerCycle", "relaunchesPerCycle", "builderStopChecks", "contentionMode", "placementBias"] as const) {
+    for (const key of ["gateTier", "reviewMode", "trainMaxSize", "trainMaxWaitMs", "mergesPerCycle", "relaunchesPerCycle", "implementExitCheck", "contentionMode", "placementBias"] as const) {
       expect(p[key], key).toEqual(iterate[key]);
     }
   });

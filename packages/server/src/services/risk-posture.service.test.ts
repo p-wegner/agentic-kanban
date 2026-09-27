@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
+import { RISK_POSTURES } from "@agentic-kanban/shared/lib/risk-posture";
 import {
   RED_BASE_POLICY_RANK,
   describeBaseSweep,
   formatIntervalHuman,
+  implementExitCheckForLevel,
   redBasePolicyPrefKey,
   resolveBaseSweepIntervalMs,
   resolveRiskPosture,
@@ -49,19 +51,19 @@ describe("resolveRiskPosture", () => {
     expect(p.redBasePolicy).toBe("allow-known-debt");
     expect(p.trainMaxSize).toBe(8);
     expect(p.trainMaxWaitMs).toBe(20 * 60 * 1000);
-    expect(p.builderStopChecks).toBe("typecheck-only");
+    expect(p.implementExitCheck).toBe("typecheck");
     expect(p.contentionMode).toBe("warn");
     expect(p.placementBias).toBe("remote-preferred");
   });
 
-  it("sprint: guards-only gate, no review, contention off, no builder self-tests", () => {
+  it("sprint: guards-only gate, no review, contention off, no implement-exit check", () => {
     const p = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: "sprint" }), PID);
     expect(p.level).toBe("sprint");
     expect(p.gateTier).toBe("scoped-base-watch");
     expect(p.reviewMode).toBe("none");
     expect(p.redBasePolicy).toBe("allow-file-debt-ticket");
     expect(p.trainMaxSize).toBe(12);
-    expect(p.builderStopChecks).toBe("none");
+    expect(p.implementExitCheck).toBe("none");
     expect(p.contentionMode).toBe("off");
   });
 
@@ -287,5 +289,32 @@ describe("red-base policy under iterate, and the report policy (#1233)", () => {
       PID,
     );
     expect(ignored.redBasePolicy).toBe("allow-file-debt-ticket");
+  });
+});
+
+describe("implementExitCheckForLevel — the check the board runs once when implementation ends", () => {
+  const WIDTH = { none: 0, typecheck: 1, impact: 2, full: 3 } as const;
+  const GATE_WIDTH = { "scoped-base-watch": 1, scoped: 2, impact: 2, full: 3 } as const;
+
+  it.each([
+    ["strict", "full"],
+    ["standard", "impact"],
+    ["iterate", "impact"],
+    ["flow", "impact"],
+    ["fast", "typecheck"],
+    ["sprint", "none"],
+  ] as const)("%s -> %s", (level, expected) => {
+    expect(implementExitCheckForLevel(level)).toBe(expected);
+    expect(resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: level }), PID).implementExitCheck).toBe(expected);
+  });
+
+  it("is never wider than the level's merge gate, and at least a typecheck except on sprint", () => {
+    for (const level of RISK_POSTURES) {
+      const posture = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: level }), PID);
+      const width = WIDTH[posture.implementExitCheck];
+      expect(width, level).toBeLessThanOrEqual(GATE_WIDTH[posture.gateTier]);
+      if (level === "sprint") expect(width).toBe(0);
+      else expect(width, level).toBeGreaterThanOrEqual(WIDTH.typecheck);
+    }
   });
 });
