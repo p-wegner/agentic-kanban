@@ -927,7 +927,10 @@ function listRcBranches() {
 function resolveRcCandidate({ masterTip, dryRun }) {
   let state = readRcState(stableCheckout);
   const existing = listRcBranches();
-  const plan = planRcCandidate({ dateStamp: stableTagDate(), state, existingBranches: existing, cadenceMs: DEFAULT_RC_CADENCE_MS });
+  const stableHead = git(["rev-parse", "HEAD"], stableCheckout).stdout;
+  // A candidate the stable board already contains is superseded (rc-state.mjs, planRcCandidate).
+  const isShipped = (sha) => Boolean(stableHead) && git(["merge-base", "--is-ancestor", sha, stableHead], MAIN_CHECKOUT).code === 0;
+  const plan = planRcCandidate({ dateStamp: stableTagDate(), state, existingBranches: existing, cadenceMs: DEFAULT_RC_CADENCE_MS, isShipped });
   const at = new Date().toISOString();
   if (plan.abandon) {
     log(`[promote] rc: ABANDONING ${plan.abandon} — ${plan.reason}`);

@@ -121,12 +121,15 @@ export function planRcCandidate({
   existingBranches = [],
   nowMs = Date.now(),
   cadenceMs = DEFAULT_RC_CADENCE_MS,
+  isShipped = () => false,
 }: {
   dateStamp: string;
   state: RcStateFile;
   existingBranches?: readonly string[];
   nowMs?: number;
   cadenceMs?: number;
+  /** Does the stable board already contain this sha? Such a candidate is superseded (see the script). */
+  isShipped?: (sha: string) => boolean;
 }): RcCandidatePlan {
   const inFlight = state.candidates
     .filter((c) => !isTerminalRcState(c.state) && existingBranches.includes(c.branch))
@@ -135,6 +138,14 @@ export function planRcCandidate({
   const candidate = newestInFlight ? findRcCandidate(state, newestInFlight) : null;
 
   if (candidate) {
+    if (candidate.sha && isShipped(candidate.sha)) {
+      return {
+        action: "cut",
+        branch: nextRcBranch(dateStamp, existingBranches),
+        abandon: candidate.branch,
+        reason: `${candidate.branch} (${candidate.sha.slice(0, 10)}) is already contained in what the stable board runs — superseded, abandoning it and cutting a fresh candidate from master's tip`,
+      };
+    }
     const sinceMs = candidate.updatedAt ? Date.parse(candidate.updatedAt) : Number.NaN;
     const ageMs = Number.isFinite(sinceMs) ? nowMs - sinceMs : Number.NaN;
     const stuckRed = candidate.state === "red" && Number.isFinite(ageMs) && ageMs > cadenceMs;

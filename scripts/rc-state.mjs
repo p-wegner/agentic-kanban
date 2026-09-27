@@ -166,10 +166,15 @@ export function upsertRcCandidate(state, branch, patch, atIso = new Date().toISO
  *    first: a red candidate older than `cadenceMs` — it is stuck, not healing, and decision 019
  *    says the next cadence cuts afresh and carries the heal ticket forward.
  *
+ *  - a candidate whose sha the stable board already contains (`isShipped`) is superseded, whatever
+ *    its state: a `--force-sweep`/`--recover` promotion moved stable past it without retiring it.
+ *    rc/20260926 sat `sweeping` on a timed-out sweep that way, and every later run reused it and
+ *    then refused it as "not a descendant of the stable checkout's HEAD" (2026-09-27).
+ *
  * An rc from an EARLIER day that is still in flight is reused too: a candidate is a candidate
  * until it is promoted or abandoned, and the date in its name is when it was cut, not a TTL.
  */
-export function planRcCandidate({ dateStamp, state, existingBranches = [], nowMs = Date.now(), cadenceMs = DEFAULT_RC_CADENCE_MS } = {}) {
+export function planRcCandidate({ dateStamp, state, existingBranches = [], nowMs = Date.now(), cadenceMs = DEFAULT_RC_CADENCE_MS, isShipped = () => false } = {}) {
   const inFlight = state.candidates
     .filter((c) => !isTerminalRcState(c.state) && existingBranches.includes(c.branch))
     .map((c) => c.branch);
@@ -177,6 +182,14 @@ export function planRcCandidate({ dateStamp, state, existingBranches = [], nowMs
   const candidate = newestInFlight ? findRcCandidate(state, newestInFlight) : null;
 
   if (candidate) {
+    if (candidate.sha && isShipped(candidate.sha)) {
+      return {
+        action: "cut",
+        branch: nextRcBranch(dateStamp, existingBranches),
+        abandon: candidate.branch,
+        reason: `${candidate.branch} (${candidate.sha.slice(0, 10)}) is already contained in what the stable board runs — superseded, abandoning it and cutting a fresh candidate from master's tip`,
+      };
+    }
     const sinceMs = candidate.updatedAt ? Date.parse(candidate.updatedAt) : Number.NaN;
     const ageMs = Number.isFinite(sinceMs) ? nowMs - sinceMs : Number.NaN;
     const stuckRed = candidate.state === "red" && Number.isFinite(ageMs) && ageMs > cadenceMs;
