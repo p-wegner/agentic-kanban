@@ -224,8 +224,8 @@ export type MergeQueueEvent =
   | { type: "skipped"; workspaceId: string; issueNumber: number | null; issueTitle: string; reason: string; failedSuites?: string[]; guardFailure?: boolean }
   | { type: "done"; merged: string[]; failed: string[]; skipped: string[] };
 
-// #1210: wires the train runner's siding-nudge ports (sendTurn + the rebase-first
-// resolveConflicts fallback for a workspace whose agent has already exited) — pulled out of
+// #1210: wires the train runner's siding-nudge ports (sendTurn + a builder relaunch for a
+// workspace whose agent has already exited) — pulled out of
 // createMergeQueueService so that function's own nloc stays flat as this wiring grows.
 function wireMergeTrainRunner(
   database: Database,
@@ -237,10 +237,11 @@ function wireMergeTrainRunner(
     database,
     reconcileAlreadyMerged: (workspaceId) => mergeService.reconcileAlreadyMerged(workspaceId),
     sendTurn: (workspaceId, content) => sessionService.sendTurn(workspaceId, content),
-    // #1210: a siding drop against a workspace whose agent has already exited routes through
-    // the rebase-first resolveConflicts instead of a /turn that would spawn into a clean tree.
+    // A base-conflict send-back to a workspace whose agent has already exited relaunches its
+    // builder (`POST /:id/launch`) with the rebase prompt; the builder's exit then runs review
+    // and the review-exit gate, which re-arm readyForMerge for a later train.
     hasLiveSession: async (workspaceId) => Boolean(await findRunningSession(workspaceId, database)),
-    resolveConflicts: (workspaceId) => mergeService.resolveConflicts(workspaceId),
+    relaunch: (workspaceId, prompt) => sessionService.launchSession(workspaceId, { prompt }),
     boardEvents,
   });
 }

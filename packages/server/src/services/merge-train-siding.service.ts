@@ -35,14 +35,30 @@
  * fresh `startSession` with `resumeFromId` set, launched straight into whatever the worktree
  * already is — the exact #1209 bug (agent sees a clean tree, reports "nothing to resolve"),
  * recurring via the siding path specifically because nothing here ever rebases the worktree
- * first. When no live session exists, `recordTrainSidingDrop` now calls `resolveConflicts`
- * instead — the rebase-first fix from `workspace-resolve-conflicts.service.ts` — which puts
- * the worktree into the real conflicted state before spawning a fresh agent into it.
+ * first. #1210 answered that with `resolveConflicts` (rebase-first, then a fix-conflicts agent).
+ *
+ * **Base-conflict send-back (live gap 2026-09-27):** a conflict drop now carries `trainRef` and
+ * is a SEND-BACK (`merge-train-send-back.ts`). It runs the moment assembly drops the member
+ * (`createTrainDropSendBack`, called from inside the train), not after the whole gate and bisect;
+ * it takes the member out of the ready set with a visible reason; and it gives the builder ONE
+ * instruction that names the rebase itself, as a `/turn` to a live session or a builder relaunch
+ * (`relaunch`, the `POST /:id/launch` path) when the agent is gone. The relaunch replaced
+ * `resolveConflicts` here because a fix-conflicts session exits through fix-and-merge, which
+ * lands the branch on its own, outside the train; a builder session exits through review and
+ * the review-exit gate, which re-arm `readyForMerge` so the member rejoins a later train. Past
+ * the cap the member gets a merge hold (needs attention) instead of another send-back.
  */
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { revParse } from "@agentic-kanban/shared/lib/git-service";
+import {
+  conflictFilesFromReason,
+  formatBaseConflictSendBackPrompt,
+  holdAfterSendBackCap,
+  restoreReadyAfterFailedSendBack,
+  withholdForSendBack,
+} from "./merge-train-send-back.js";
 import {
   clearTrainSidingState,
   getTrainSidingState,
@@ -118,20 +134,18 @@ export interface TrainSidingDeps {
   /**
    * #1210 — is there a live/running session to receive a `/turn` at all? Defaults to a real
    * check (`findRunningSession`). Injected so tests can force either branch without a session
-   * table. When absent (agent gone), `recordTrainSidingDrop` routes through `resolveConflicts`
+   * table. When absent (agent gone), `recordTrainSidingDrop` routes through `relaunch`
    * instead of `sendTurn`.
    */
   hasLiveSession?: (workspaceId: string) => Promise<boolean>;
   /**
-   * #1210 — the rebase-first fix (`workspace-resolve-conflicts.service.ts`'s `resolveConflicts`,
-   * #1209): puts the worktree into the real conflicted state relative to base before spawning a
-   * fresh agent into it. Used instead of `sendTurn` when the member has no live session, so an
-   * idle/agentless workspace nudged by a siding gets the same rebase preflight a live one's
-   * `/turn` would eventually trigger via a manual `update-base`. Optional so existing callers
-   * that never hit the agentless branch (e.g. tests exercising only the live path) need not
-   * supply it; if it IS needed and absent, the drop still records and just skips the nudge.
+   * Relaunch the member's builder with `prompt` (the `POST /:id/launch` path) when it has no live
+   * session. The prompt names the rebase itself, so a fresh session on an un-rebased tree still
+   * has something to do (see the module doc for why this replaced `resolveConflicts`). Optional
+   * so callers that never hit the agentless branch need not supply it; if it IS needed and
+   * absent, the drop still records and just skips the nudge.
    */
-  resolveConflicts?: (workspaceId: string) => Promise<unknown>;
+  relaunch?: (workspaceId: string, prompt: string) => Promise<unknown>;
 }
 
 async function defaultGetBranchHeadSha(repoPath: string, branch: string): Promise<string | null> {
@@ -203,10 +217,15 @@ export async function partitionSidedMembers<M extends SidingMember>(
  * A member just got dropped from assembly for a conflict. Record the siding, nudge its agent
  * (unless the cap is already burned), and tag the workspace — all best-effort: telemetry and a
  * nudge must never throw back into the train's drop-handling loop.
+ *
+ * With `trainRef` set the drop is a base-conflict SEND-BACK (`merge-train-send-back.ts`): the
+ * member also leaves the ready set with a visible reason, the nudge carries the rebase
+ * instruction, one `[merge-train] sent back …` line is logged, and past the cap it gets a merge
+ * hold. Without it (the train review's siding, #1194) the behaviour is exactly as before.
  */
 export async function recordTrainSidingDrop(
   member: SidingMember,
-  args: { reason: string; baseBranch: string; trainTipSha: string; repoPath: string },
+  args: { reason: string; baseBranch: string; trainTipSha: string; repoPath: string; trainRef?: string },
   deps: TrainSidingDeps,
 ): Promise<void> {
   const database = deps.database ?? db;
@@ -246,49 +265,131 @@ export async function recordTrainSidingDrop(
             `Last conflict: ${args.reason.slice(0, 500)}`,
         }, database).catch(() => undefined);
       }
+      if (args.trainRef) {
+        await holdAfterSendBackCap({ workspaceId: member.workspaceId, drops: sidings, reason: args.reason, now: nowIso, database })
+          .catch((err) => console.warn(`[merge-train-siding] could not place the needs-attention hold on ${member.workspaceId}: ${errorMessage(err).slice(0, 200)}`));
+      }
       console.warn(
         `[merge-train-siding] ${member.workspaceId}${member.issueNumber ? ` (#${member.issueNumber})` : ""} ` +
-          `capped at ${sidings} siding(s) — no further nudge`,
+          `capped at ${sidings} siding(s) — no further nudge` + (args.trainRef ? "; merge hold placed (needs attention)" : ""),
       );
       return;
     }
 
-    // #1210: route an agentless member through the rebase-first `resolveConflicts` instead of
-    // `sendTurn` — a `/turn` to a dead session falls through to a fresh `startSession` that
-    // spawns straight into whatever the worktree already is, never rebasing first (the #1209
-    // bug, recurring here for exactly the same reason it recurred on the sequential path).
-    const checkLiveSession = deps.hasLiveSession ?? ((workspaceId: string) => defaultHasLiveSession(workspaceId, database));
-    const isLive = await checkLiveSession(member.workspaceId).catch(() => true);
-    if (!isLive) {
-      if (!deps.resolveConflicts) {
-        console.warn(`[merge-train-siding] ${member.workspaceId} has no live session and no resolveConflicts port was supplied — siding recorded, no nudge sent`);
-        return;
-      }
-      try {
-        await deps.resolveConflicts(member.workspaceId);
-      } catch (err) {
-        console.warn(`[merge-train-siding] could not resolve-conflicts for idle ${member.workspaceId} (non-fatal): ${errorMessage(err).slice(0, 200)}`);
-      }
+    if (!args.trainRef) {
+      await deliverSidingNudge(member, formatSidingTurnPrompt({
+        branch: member.branch,
+        baseBranch: args.baseBranch,
+        conflictTrainTipSha: args.trainTipSha,
+        reason: args.reason,
+      }), deps, database);
       return;
     }
-
-    const prompt = formatSidingTurnPrompt({
-      branch: member.branch,
-      baseBranch: args.baseBranch,
-      conflictTrainTipSha: args.trainTipSha,
-      reason: args.reason,
-    });
-    try {
-      await deps.sendTurn(member.workspaceId, prompt);
-    } catch (err) {
-      // 409-safe: an agent that is busy right now is not an error — the siding record is
-      // already written, so the branch stays withheld until it moves regardless of whether
-      // this particular nudge was delivered.
-      console.warn(`[merge-train-siding] could not nudge ${member.workspaceId} (non-fatal): ${errorMessage(err).slice(0, 200)}`);
-    }
+    await sendBackForRebase(member, { ...args, trainRef: args.trainRef, sendBack: sidings, now: nowIso }, deps, database);
   } catch (err) {
     console.warn(`[merge-train-siding] could not record siding for ${member.workspaceId} (non-fatal): ${errorMessage(err).slice(0, 200)}`);
   }
+}
+
+/**
+ * Deliver one nudge: a `/turn` to a live session, or a builder relaunch when the agent is gone
+ * (a `/turn` to a dead session falls through to a fresh `startSession` in an un-rebased tree,
+ * #1209/#1210; the relaunch prompt names the rebase, so that tree is the expected start).
+ * Returns how it was delivered, or null when it was not. Never throws.
+ */
+async function deliverSidingNudge(
+  member: SidingMember,
+  prompt: string,
+  deps: TrainSidingDeps,
+  database: Database,
+): Promise<"turn" | "relaunch" | null> {
+  const checkLiveSession = deps.hasLiveSession ?? ((workspaceId: string) => defaultHasLiveSession(workspaceId, database));
+  const isLive = await checkLiveSession(member.workspaceId).catch(() => true);
+  if (!isLive) {
+    if (!deps.relaunch) {
+      console.warn(`[merge-train-siding] ${member.workspaceId} has no live session and no relaunch port was supplied — siding recorded, no nudge sent`);
+      return null;
+    }
+    try {
+      await deps.relaunch(member.workspaceId, prompt);
+      return "relaunch";
+    } catch (err) {
+      console.warn(`[merge-train-siding] could not relaunch the builder of idle ${member.workspaceId} (non-fatal): ${errorMessage(err).slice(0, 200)}`);
+      return null;
+    }
+  }
+  try {
+    await deps.sendTurn(member.workspaceId, prompt);
+    return "turn";
+  } catch (err) {
+    // 409-safe: an agent that is busy right now is not an error — the siding record is
+    // already written, so the branch stays withheld until it moves regardless of whether
+    // this particular nudge was delivered.
+    console.warn(`[merge-train-siding] could not nudge ${member.workspaceId} (non-fatal): ${errorMessage(err).slice(0, 200)}`);
+    return null;
+  }
+}
+
+/**
+ * The base-conflict send-back: withhold `readyForMerge` (visible reason), send the builder the
+ * rebase instruction, log one line. A send-back that could not be delivered puts the flag back,
+ * so the member is exactly where the siding alone would have left it (held until its tip moves).
+ */
+async function sendBackForRebase(
+  member: SidingMember,
+  args: { reason: string; baseBranch: string; trainRef: string; sendBack: number; now: string },
+  deps: TrainSidingDeps,
+  database: Database,
+): Promise<void> {
+  const maxSendBacks = TRAIN_SIDING_MAX_ATTEMPTS - 1;
+  await withholdForSendBack({
+    workspaceId: member.workspaceId, issueId: member.issueId, branch: member.branch, trainRef: args.trainRef,
+    reason: args.reason, sendBack: args.sendBack, maxSendBacks, now: args.now, database,
+  });
+  const prompt = formatBaseConflictSendBackPrompt({ branch: member.branch, baseBranch: args.baseBranch, trainRef: args.trainRef, reason: args.reason });
+  const delivered = await deliverSidingNudge(member, prompt, deps, database);
+  const who = `${member.branch}${member.issueNumber ? ` (#${member.issueNumber})` : ""}`;
+  if (!delivered) {
+    await restoreReadyAfterFailedSendBack(member.workspaceId, args.now, database).catch(() => undefined);
+    console.warn(`[merge-train] could not send back ${who} from train ${args.trainRef} — readyForMerge restored, still held on its siding until the branch moves`);
+    return;
+  }
+  const files = conflictFilesFromReason(args.reason);
+  console.log(
+    `[merge-train] sent back ${who} from train ${args.trainRef} (send-back ${args.sendBack}/${maxSendBacks}): ` +
+      `base conflict in ${files.length > 0 ? files.join(", ") : "unnamed files"} — readyForMerge withheld, ` +
+      (delivered === "turn" ? "builder nudged with a /turn" : "builder relaunched"),
+  );
+}
+
+type TrainDrop = { member: { workspaceId: string }; reason: string; deferred?: boolean };
+
+/**
+ * One train's send-back port (live gap 2026-09-27). `runMergeTrain` calls `onDropped` the moment
+ * an assembly drops members, and the train strategy calls it again with the final result, so a
+ * member is sent back at most ONCE per train (a bisect or a re-assembly re-drops the same
+ * member). Only a drop the author must rebase out of is sent back: a `deferred` drop (#1191,
+ * member-vs-member) is left for the next train untouched, exactly as before.
+ */
+export function createTrainDropSendBack(args: {
+  members: SidingMember[];
+  baseBranch: string;
+  repoPath: string;
+  deps: TrainSidingDeps;
+}): { onDropped: (dropped: TrainDrop[], at: { trainRef: string; tipSha: string }) => Promise<void> } {
+  const sentBack = new Set<string>();
+  async function onDropped(dropped: TrainDrop[], at: { trainRef: string; tipSha: string }): Promise<void> {
+    for (const d of dropped) {
+      if (!isSidingDrop(d) || sentBack.has(d.member.workspaceId)) continue;
+      const member = args.members.find((m) => m.workspaceId === d.member.workspaceId);
+      if (!member) continue;
+      sentBack.add(member.workspaceId);
+      await recordTrainSidingDrop(member, {
+        reason: d.reason, baseBranch: args.baseBranch, trainTipSha: at.tipSha, repoPath: args.repoPath, trainRef: at.trainRef,
+      }, args.deps);
+    }
+  }
+  return { onDropped };
 }
 
 /** A member landed (or was otherwise resolved) — drop any siding memory for it. */
