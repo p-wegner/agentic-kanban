@@ -11,6 +11,10 @@ import {
   smartHooksRulesPath,
   deriveTestScaffold,
 } from "../services/stack-profile.service.js";
+import {
+  readHandAuthoredStopChecks,
+  scopedQuickTestCommand,
+} from "../services/stack-profile/smart-hooks-rules.js";
 
 async function tmp(): Promise<string> {
   return mkdtemp(join(tmpdir(), "kanban-stack-"));
@@ -254,7 +258,7 @@ function profile(overrides: Partial<StackProfile>): StackProfile {
 describe("buildSmartHooksRules", () => {
   it("emits a typecheck + quick-test rule for a node project, scoped to JS/TS source patterns", () => {
     const out = buildSmartHooksRules(
-      profile({ stack: "node", typecheckCommand: "pnpm tsc --noEmit", quickTestCommand: "pnpm test:mine", testCommand: "pnpm test" }),
+      profile({ stack: "node", typecheckCommand: "pnpm tsc --noEmit", quickTestCommand: "pnpm test:fast", testCommand: "pnpm test" }),
     );
     expect(out.generated).toBe(true);
     expect(out.stack).toBe("node");
@@ -278,10 +282,59 @@ describe("buildSmartHooksRules", () => {
     expect(tc.filePatterns).toEqual(["**/*.rs"]);
   });
 
-  it("falls back to the full test command when no quick variant exists", () => {
+  it("emits NO test rule when the only candidate is the full test command (no whole-suite fallback)", () => {
+    // The generator has no measured runtime for a full suite, so any timeout it picks can be
+    // shorter than the run. Not generating the rule beats one that can only ever be killed.
     const out = buildSmartHooksRules(profile({ stack: "go", testCommand: "go test ./...", typecheckCommand: null }));
-    expect(out.rules.map((r) => r.name)).toEqual(["Tests"]);
-    expect(out.rules[0].command).toBe("go test ./...");
+    expect(out.rules).toEqual([]);
+  });
+
+  it("emits NO test rule when the quick command is identical to the full test command", () => {
+    const out = buildSmartHooksRules(
+      profile({ stack: "rust", typecheckCommand: "cargo check", testCommand: "cargo test", quickTestCommand: "cargo test" }),
+    );
+    expect(out.rules.map((r) => r.name)).toEqual(["Typecheck"]);
+  });
+
+  it("emits NO test rule for an unscoped `test:mine`, which runs every package (26-42 min here)", () => {
+    // The stale generated file on this repo ran `pnpm test:mine` under a 180s timeout, so every
+    // Stop was killed before the suite could answer.
+    for (const quick of ["pnpm test:mine", "npm run test:mine", "yarn test:mine", "bun run test:mine"]) {
+      const out = buildSmartHooksRules(
+        profile({ stack: "node", typecheckCommand: null, quickTestCommand: quick, testCommand: "pnpm test" }),
+      );
+      expect(out.rules, quick).toEqual([]);
+    }
+  });
+
+  it("scopedQuickTestCommand keeps a quick command that is scoped or a real subset", () => {
+    expect(scopedQuickTestCommand(profile({ quickTestCommand: "pnpm test:mine -- --changed HEAD", testCommand: "pnpm test" })))
+      .toBe("pnpm test:mine -- --changed HEAD");
+    expect(scopedQuickTestCommand(profile({ quickTestCommand: "npm run test:unit", testCommand: "npm test" })))
+      .toBe("npm run test:unit");
+    expect(scopedQuickTestCommand(profile({ quickTestCommand: null, testCommand: "npm test" }))).toBeNull();
+  });
+
+  it("no generated test rule ever runs the profile's full testCommand or an unscoped test:mine", () => {
+    const profiles = [
+      profile({ stack: "node", testCommand: "pnpm test" }),
+      profile({ stack: "node", testCommand: "pnpm test", quickTestCommand: "pnpm test" }),
+      profile({ stack: "node", testCommand: "pnpm test", quickTestCommand: "pnpm test:mine" }),
+      profile({ stack: "go", testCommand: "go test ./..." }),
+      profile({ stack: "python", testCommand: "pytest", quickTestCommand: "pytest" }),
+    ];
+    for (const p of profiles) {
+      const commands = buildSmartHooksRules(p).rules.map((r) => r.command);
+      expect(commands).not.toContain(p.testCommand);
+      expect(commands).not.toContain("pnpm test:mine");
+    }
+  });
+
+  it("omits a generated rule for a bucket the project's own hook config already runs", () => {
+    const p = profile({ stack: "node", typecheckCommand: "pnpm typecheck", quickTestCommand: "pnpm test:fast", testCommand: "pnpm test" });
+    expect(buildSmartHooksRules(p, { typecheck: true, tests: true }).rules).toEqual([]);
+    expect(buildSmartHooksRules(p, { typecheck: true, tests: false }).rules.map((r) => r.name)).toEqual(["Quick tests"]);
+    expect(buildSmartHooksRules(p, { typecheck: false, tests: true }).rules.map((r) => r.name)).toEqual(["Typecheck"]);
   });
 
   it("produces no rules when the profile has no usable command", () => {
@@ -312,16 +365,10 @@ describe("buildSmartHooksRules", () => {
     // Typecheck was kept per-edit as "the cheap signal" — then measured at a median 5m37s
     // per edit on a monorepo (the command is never file-scoped). Stop-only as well.
     const out = buildSmartHooksRules(
-      profile({ stack: "node", typecheckCommand: "pnpm tsc --noEmit", quickTestCommand: "pnpm test:mine", testCommand: "pnpm test" }),
+      profile({ stack: "node", typecheckCommand: "pnpm tsc --noEmit", quickTestCommand: "pnpm test:fast", testCommand: "pnpm test" }),
     );
     expect(out.rules.find((r) => r.name === "Quick tests")!.events).toEqual(["Stop"]);
     expect(out.rules.find((r) => r.name === "Typecheck")!.events).toEqual(["Stop"]);
-  });
-
-  it("marks the full-suite fallback test rule Stop-only too", () => {
-    const out = buildSmartHooksRules(profile({ stack: "go", testCommand: "go test ./...", typecheckCommand: null }));
-    expect(out.rules[0].name).toBe("Tests");
-    expect(out.rules[0].events).toEqual(["Stop"]);
   });
 
   it("keeps a Java compileJava typecheck rule but downgrades it to non-blocking (gradle is slow)", () => {
@@ -375,11 +422,70 @@ describe("writeSmartHooksRules", () => {
   afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 
   it("writes .claude/smart-hooks-rules.json derived from the profile", async () => {
-    writeSmartHooksRules(dir, profile({ stack: "go", testCommand: "go test ./...", typecheckCommand: "go build ./..." }));
+    writeSmartHooksRules(
+      dir,
+      profile({ stack: "go", testCommand: "go test ./...", quickTestCommand: "go test -short ./...", typecheckCommand: "go build ./..." }),
+    );
     const written = JSON.parse(await readFile(smartHooksRulesPath(dir), "utf8"));
     expect(written.generated).toBe(true);
     expect(written.stack).toBe("go");
-    expect(written.rules.some((r: { command: string }) => r.command === "go test ./...")).toBe(true);
+    expect(written.rules.map((r: { command: string }) => r.command)).toEqual(["go build ./...", "go test -short ./..."]);
+  });
+
+  it("writes no typecheck/test rule for a repo whose own config runs scoped ones (this repo's shape)", async () => {
+    // The stale file deleted by hand here: `pnpm typecheck` (600s) + `pnpm test:mine` (180s)
+    // generated beside the hand-authored scoped-typecheck.js / scoped-vitest.js.
+    await mkdir(join(dir, ".claude", "hooks"), { recursive: true });
+    await writeFile(join(dir, ".claude", "hooks", "smart-hooks-config.json"), JSON.stringify({
+      version: "1.0.0",
+      hooks: {
+        Stop: [
+          { name: "Remind Cleanup", command: "node .claude/hooks/remind-cleanup.js", enabled: true, alwaysRun: true },
+          { name: "Typecheck (edited packages only)", command: "node .claude/hooks/scoped-typecheck.js", enabled: true },
+          { name: "Vitest (edited files only)", command: "node .claude/hooks/scoped-vitest.js", enabled: true },
+        ],
+      },
+    }));
+    writeSmartHooksRules(dir, profile({
+      stack: "node", isMonorepo: true, typecheckCommand: "pnpm typecheck",
+      quickTestCommand: "pnpm test:fast", testCommand: "pnpm test",
+    }));
+    const written = JSON.parse(await readFile(smartHooksRulesPath(dir), "utf8"));
+    expect(written.rules).toEqual([]);
+  });
+});
+
+describe("readHandAuthoredStopChecks", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await tmp(); });
+  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+
+  async function writeConfig(stop: unknown): Promise<void> {
+    await mkdir(join(dir, ".claude", "hooks"), { recursive: true });
+    await writeFile(join(dir, ".claude", "hooks", "smart-hooks-config.json"), JSON.stringify({ hooks: { Stop: stop } }));
+  }
+
+  it("reports none when the config is absent or unparseable", async () => {
+    expect(readHandAuthoredStopChecks(dir)).toEqual({ typecheck: false, tests: false });
+    await mkdir(join(dir, ".claude", "hooks"), { recursive: true });
+    await writeFile(join(dir, ".claude", "hooks", "smart-hooks-config.json"), "{ not json");
+    expect(readHandAuthoredStopChecks(dir)).toEqual({ typecheck: false, tests: false });
+  });
+
+  it("ignores safety (alwaysRun) and disabled checks", async () => {
+    await writeConfig([
+      { name: "Typecheck guard", command: "node guard.js", alwaysRun: true },
+      { name: "Vitest (edited files only)", command: "node .claude/hooks/scoped-vitest.js", enabled: false },
+    ]);
+    expect(readHandAuthoredStopChecks(dir)).toEqual({ typecheck: false, tests: false });
+  });
+
+  it("recognises a check by its command or its name", async () => {
+    await writeConfig([
+      { command: "node .claude/hooks/scoped-typecheck.js" },
+      { name: "Unit tests", command: "make check" },
+    ]);
+    expect(readHandAuthoredStopChecks(dir)).toEqual({ typecheck: true, tests: true });
   });
 
   it("regenerates (overwrites) the file when the profile changes", async () => {

@@ -273,7 +273,9 @@ stack profile whenever the profile changes. To refresh it, re-detect the stack p
 
 Optional hand-authored hooks for the runner (PreToolUse / Stop entries), merged with the
 generated rules. Currently empty — add entries here for project-specific checks the generated
-rules don't cover.
+rules don't cover. A Stop check here whose name or command marks it as a typecheck or a test
+run replaces the generated rule of that kind (the generator skips it). The generated test
+rule never runs the whole suite: with no scoped quick-test command there is none.
 
 ## disclose-context.mjs
 
