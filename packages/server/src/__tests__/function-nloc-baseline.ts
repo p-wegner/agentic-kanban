@@ -332,7 +332,10 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // would not be ceremony. Raised rather than worked around, per the header's rule: a named
   // cause and a ticket, or it is just a budget. Disclosed in the eleventh movement above.
   // 720 -> 723 (#1254), disclosed in the sixteenth movement above.
-  "cli/commands/issue.ts::registerIssueCommand": 723,
+  // 723 -> 719, a banked SHRINK (2026-09-27): the issue WRITES (create/update/move, incl. the
+  // AK-535 terminal-move guard) moved into `cli/commands/issue-writes.ts`, which routes them
+  // through a running board server when it serves the same DB, so an open board broadcasts.
+  "cli/commands/issue.ts::registerIssueCommand": 719,
   // 621 -> 623, a DELIBERATE raise (#815). The eight `latest_setup_*` columns moved off
   // `workspaces` into `workspace_setup_run`, and writing a child row costs an
   // `insertWorkspaceSetupRun(...)` call where eight inline field assignments used to sit.

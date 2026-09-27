@@ -7,12 +7,16 @@
  */
 import { GIT_HEAVY_TEST_TIMEOUT_MS } from "./helpers/timeouts.js";
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as schema from "@agentic-kanban/shared/schema";
+import { spawn } from "node:child_process";
+import { writeFileSync, rmSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import {
   runCli, createCliTestDb, sharedReadOnlyDb, seedProject, seedIssue, seedWorkspace, openDb,
-  type CliTestDb,
+  builtCliPath, PKG_DIR, type CliTestDb, type CliResult,
 } from "./helpers/cli-harness.js";
 
 // ── issue commands ────────────────────────────────────────────────────────────
@@ -344,5 +348,149 @@ describe("CLI issue move terminal-move guard (#854)", () => {
     const result = runCli(["issue", "move", issue.id, "In Progress"], ctx.dbPath);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Moved issue to 'In Progress'");
+  });
+});
+
+// ── issue writes go through a running board server (so an open board shows them) ──
+
+interface SeenRequest { method: string; url: string; body: unknown }
+
+/**
+ * A FAKE board on listen(0) — never the real 3001. Its /api/health reports `dbPath` as the DB
+ * it serves, which is what the CLI matches against its own before routing a write here.
+ */
+async function startFakeBoard(dbPath: string, answer: (r: SeenRequest) => { status: number; body: unknown }) {
+  const seen: SeenRequest[] = [];
+  const server: Server = createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c: Buffer) => { raw += c.toString("utf8"); });
+    req.on("end", () => {
+      const r: SeenRequest = { method: req.method ?? "", url: req.url ?? "", body: raw ? JSON.parse(raw) : null };
+      const out = r.url === "/api/health"
+        ? { status: 200, body: { status: "ok", db: { path: dbPath } } }
+        : (seen.push(r), answer(r));
+      res.writeHead(out.status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(out.body));
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+  const port = (server.address() as AddressInfo).port;
+  return { port, seen, close: () => new Promise<void>((r) => server.close(() => r())) };
+}
+
+/** Async spawn: `runCli`'s spawnSync would block the fake server in this same process. */
+function runCliAsync(args: string[], dbPath: string, port: number): Promise<CliResult> {
+  const env: Record<string, string | undefined> = { ...process.env, DB_URL: `file:${dbPath}`, KANBAN_BOARD_SERVER_PORT: String(port) };
+  delete env.KANBAN_CLI_WRITE_TRANSPORT;
+  return new Promise((resolveRun) => {
+    const child = spawn(process.execPath, [builtCliPath(), ...args], { env, cwd: PKG_DIR, windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (c: Buffer) => { stdout += c.toString("utf8"); });
+    child.stderr.on("data", (c: Buffer) => { stderr += c.toString("utf8"); });
+    child.on("close", (code) => resolveRun({ stdout: stdout.trim(), stderr: stderr.trim(), status: code ?? 1 }));
+  });
+}
+
+describe("CLI issue writes route through a running board server", () => {
+  let ctx: CliTestDb;
+  let projectId: string;
+  let board: Awaited<ReturnType<typeof startFakeBoard>> | null = null;
+
+  beforeEach(async () => {
+    ctx = createCliTestDb();
+    projectId = (await seedProject(ctx.dbPath)).id;
+  });
+  afterEach(async () => {
+    if (board) await board.close();
+    board = null;
+    ctx.cleanup();
+  });
+
+  async function statusId(name: string): Promise<string> {
+    const { db: database, close } = openDb(ctx.dbPath);
+    try {
+      const [row] = await database.select({ id: schema.projectStatuses.id }).from(schema.projectStatuses)
+        .where(and(eq(schema.projectStatuses.projectId, projectId), eq(schema.projectStatuses.name, name))).limit(1);
+      return row.id;
+    } finally { close(); }
+  }
+
+  it("issue create POSTs /api/issues (tags included) and keeps the 'Created issue #N' output", async () => {
+    board = await startFakeBoard(ctx.dbPath, () => ({ status: 201, body: { id: "srv-id-1", issueNumber: 42 } }));
+    const result = await runCliAsync(["issue", "create", "Via server", "--tag", "no-auto-start", "--tag", "urgent", "-p", "high", "-s", "Todo"], ctx.dbPath, board.port);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("Created issue #42: Via server");
+    expect(result.stdout).toContain("id: srv-id-1");
+    expect(result.stderr).not.toContain("wrote to the database directly");
+    expect(board.seen).toEqual([{
+      method: "POST",
+      url: "/api/issues",
+      body: expect.objectContaining({ projectId, statusId: await statusId("Todo"), title: "Via server", priority: "high", tags: ["no-auto-start", "urgent"] }),
+    }]);
+    // The server owns the write: nothing landed in the DB behind its back.
+    const { db: database, close } = openDb(ctx.dbPath);
+    try {
+      expect(await database.select().from(schema.issues)).toHaveLength(0);
+    } finally { close(); }
+  });
+
+  it("issue move PATCHes statusId (not a name), and prints the server's refusal on a 409", async () => {
+    const issue = await seedIssue(ctx.dbPath, projectId, { title: "Move me" });
+    board = await startFakeBoard(ctx.dbPath, () => ({ status: 200, body: { id: issue.id } }));
+    const moved = await runCliAsync(["issue", "move", issue.id, "In Progress"], ctx.dbPath, board.port);
+    expect(moved.status, moved.stderr).toBe(0);
+    expect(moved.stdout).toContain("Moved issue to 'In Progress'");
+    expect(board.seen).toEqual([{ method: "PATCH", url: `/api/issues/${issue.id}`, body: { statusId: await statusId("In Progress") } }]);
+
+    await board.close();
+    board = await startFakeBoard(ctx.dbPath, () => ({ status: 409, body: { error: "Cannot move to Done: branch has not been merged" } }));
+    const refused = await runCliAsync(["issue", "move", issue.id, "Done"], ctx.dbPath, board.port);
+    expect(refused.status, refused.stderr).toBe(1);
+    expect(refused.stderr).toContain("Cannot move to Done: branch has not been merged");
+    expect(refused.stdout).not.toContain("Moved issue");
+  });
+
+  it("issue update PATCHes only the recognised fields it was given", async () => {
+    const issue = await seedIssue(ctx.dbPath, projectId, { title: "Old" });
+    board = await startFakeBoard(ctx.dbPath, () => ({ status: 200, body: { id: issue.id } }));
+    const result = await runCliAsync(["issue", "update", issue.id, "--title", "New", "-p", "low"], ctx.dbPath, board.port);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("(title, priority)");
+    expect(board.seen).toEqual([{ method: "PATCH", url: `/api/issues/${issue.id}`, body: { title: "New", priority: "low" } }]);
+  });
+
+  it("issue dependency add POSTs /api/issues/:id/dependencies; update-batch POSTs the batch route", async () => {
+    const a = await seedIssue(ctx.dbPath, projectId, { title: "A" });
+    const b = await seedIssue(ctx.dbPath, projectId, { title: "B" });
+    board = await startFakeBoard(ctx.dbPath, (r) => r.url.endsWith("/batch")
+      ? { status: 200, body: { added: 1, removed: 0, skipped: [] } }
+      : { status: 201, body: { id: "dep-srv-1", type: "blocked_by" } });
+    const added = await runCliAsync(["issue", "dependency", "add", a.id, b.id, "-t", "blocked_by"], ctx.dbPath, board.port);
+    expect(added.status, added.stderr).toBe(0);
+    expect(added.stdout).toContain(`Added 'blocked_by' dependency: ${a.id} -> ${b.id}`);
+    expect(added.stdout).toContain("id: dep-srv-1");
+
+    const edgesFile = `${ctx.dbPath}.edges.json`;
+    writeFileSync(edgesFile, JSON.stringify([{ issueId: b.id, dependsOnId: a.id, type: "related_to", action: "add" }]));
+    const batch = await runCliAsync(["issue", "dependency", "update-batch", edgesFile], ctx.dbPath, board.port)
+      .finally(() => rmSync(edgesFile, { force: true }));
+    expect(batch.status, batch.stderr).toBe(0);
+    expect(batch.stdout).toContain("Added: 1, Removed: 0, Skipped: 0");
+    expect(board.seen).toEqual([
+      { method: "POST", url: `/api/issues/${a.id}/dependencies`, body: { dependsOnId: b.id, type: "blocked_by" } },
+      { method: "POST", url: "/api/issues/dependencies/batch", body: { edges: [{ issueId: b.id, dependsOnId: a.id, type: "related_to", action: "add" }] } },
+    ]);
+  });
+
+  it("falls back to the direct DB write, with ONE notice, when the server serves a different database", async () => {
+    board = await startFakeBoard("/some/other/kanban.db", () => ({ status: 500, body: { error: "must not be called" } }));
+    const result = await runCliAsync(["issue", "create", "Direct"], ctx.dbPath, board.port);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("Created issue #1: Direct");
+    expect(board.seen).toEqual([]);
+    const notices = result.stderr.split(/\r?\n/).filter((l) => l.includes("will not show this change until it is reloaded"));
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain("serves a different database");
   });
 });
