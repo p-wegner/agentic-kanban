@@ -58,7 +58,7 @@ describe("the `flow` risk posture (#1240)", () => {
       builderStopChecks: "tests-capacity-gated",
       contentionMode: "serialize",
       placementBias: "host-preferred",
-      summary: "flow: merge gate = typecheck + impact selection + the diff's own tests; no guard floor at merge; red base reported, never blocking; the full suite runs on the release candidate only",
+      summary: "flow: merge gate = typecheck + impact selection + the diff's own tests; no guard floor at merge; red base reported, never blocking; the full suite runs on the release candidate only; review-exit gate is typecheck only (tests run once, at merge)",
     });
     // Everything `iterate` has that is not one of the three named differences is the same.
     const iterate = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: "iterate" }), PID);
@@ -70,7 +70,7 @@ describe("the `flow` risk posture (#1240)", () => {
   it("the summary names every skip the ticket lists", () => {
     const { summary } = resolveRiskPosture(flowPrefs(), PID);
     expect(summary.startsWith("flow:")).toBe(true);
-    for (const phrase of ["typecheck", "impact selection", "the diff's own tests", "no guard floor at merge", "red base reported, never blocking", "release candidate only"]) {
+    for (const phrase of ["typecheck", "impact selection", "the diff's own tests", "no guard floor at merge", "red base reported, never blocking", "release candidate only", "review-exit gate is typecheck only"]) {
       expect(summary).toContain(phrase);
     }
   });
@@ -110,7 +110,7 @@ describe("the `flow` risk posture (#1240)", () => {
     expect(message).toContain("tier: impact-selected");
     expect(message).toContain("guards: 12 intersecting of 192 (180 deferred to the base sweep)");
     expect(message).toContain("[risk posture: flow: merge gate = typecheck + impact selection");
-    expect(message).toContain("the full suite runs on the release candidate only (source: risk_posture)]");
+    expect(message).toContain("the full suite runs on the release candidate only; review-exit gate is typecheck only (tests run once, at merge) (source: risk_posture)]");
   });
 
   it("schedules no master sweep by design, and the wire struct says so rather than 'no posture chosen'", () => {
