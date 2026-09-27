@@ -1171,6 +1171,19 @@ export function parseBudgetMs(budget) {
 const UNMEASURED_SUITE_MS = 3000;
 
 /**
+ * Per-suite fork/import/transform overhead (#1262), added on top of the impact map's
+ * `durationMs` — which is vitest's `endTime - startTime` off `testResults[]`, i.e. in-test time
+ * ONLY. Median measured in-test duration is 19 ms across 1174 suites (`docs/tests/impact-map.json`,
+ * 2026-09-27), while vitest's own console reporter shows the per-file collect+import cost running
+ * to SECONDS (a 12-file batch: `Duration 12.02s (import 12.44s, tests 6.28s)`, ~1s/file). Pricing
+ * `durationMs` alone underpriced a 120s-budgeted selection by several-fold: est 190s, actual gate
+ * step 602-1036s (2026-09-26). This constant is a floor, not a precise per-file measurement — the
+ * true fix (recording real per-file wall time in `capture-test-durations.mjs`) is tracked
+ * separately; this makes the existing estimate directionally honest in the meantime.
+ */
+const SUITE_OVERHEAD_MS = 1000;
+
+/**
  * Cap a selection to the budget over the WHOLE set (#1260), dropping the lowest-ranked first.
  *
  * `impact.mjs --budget` fills its seconds greedily and exempts the diff's own tests (score 99 /
@@ -1190,7 +1203,8 @@ const UNMEASURED_SUITE_MS = 3000;
  */
 export function capSelectionToBudget(selected, budgetMs) {
   const isOwn = (s) => (s.score ?? 0) >= 99 || (s.signals || []).includes("self");
-  const cost = (s) => (typeof s.durationMs === "number" ? s.durationMs : UNMEASURED_SUITE_MS);
+  const cost = (s) =>
+    (typeof s.durationMs === "number" ? s.durationMs : UNMEASURED_SUITE_MS) + SUITE_OVERHEAD_MS;
   const own = selected.filter(isOwn);
   const ranked = selected.filter((s) => !isOwn(s)).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   const kept = [...own];
@@ -1224,7 +1238,7 @@ export function capJsonSelectionToBudget(stdout, budgetMs, budgetLabel = `${budg
   console.log(
     `[test:mine] impact budget ${budgetLabel} caps the WHOLE selection (#1260): kept ${kept.length} suite(s)/~${sec(keptMs)}s est ` +
       `(${ownCount} of them the diff's own tests, never cut), cut ${cut.length} lowest-ranked suite(s)/~${sec(cutMs)}s est` +
-      ` — est = the impact map's per-suite durations, not a stopwatch.`,
+      ` — est = the impact map's per-suite durations plus a ${sec(SUITE_OVERHEAD_MS)}s/suite fork/import floor (#1262), not a stopwatch.`,
   );
   return kept.map((s) => s.pkgFile).filter(Boolean).join("\n");
 }
