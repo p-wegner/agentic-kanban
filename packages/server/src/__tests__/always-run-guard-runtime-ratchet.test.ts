@@ -332,9 +332,11 @@ const STALE_SLACK_MS = 30_000;
  *
  * Raised 25 -> 26 with #1221's `pre-merge-gate-admission-mock-ratchet.test.ts`, added at the
  * assumed duration (unmeasured until the next `durations.json` capture). 26 -> 29 with #1232's
- * three guards (see the tenth movement above), same caveat.
+ * three guards (see the tenth movement above), same caveat. 29 -> 30 with the thirteenth and
+ * fourteenth movements above (`base-move-relevance-allowlist-ratchet.test.ts` and
+ * `test-impact-budget-cap-lockstep.test.mjs`, both landing the same day), same caveat.
  */
-const MAX_ASSUMED_FILES = 29;
+const MAX_ASSUMED_FILES = 30;
 
 const REPO_ROOT = path.resolve(import.meta.dirname!, "..", "..", "..", "..");
 
