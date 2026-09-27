@@ -15,6 +15,7 @@ import {
 } from "@agentic-kanban/shared/lib/machine-capacity";
 import { resolveGateBusy } from "../services/base-branch-health-reprobe.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { getImplementExitAttention } from "../services/implement-exit-check-state.js";
 
 /** How long a workspace must be in 'active' with a live PID before we reconcile it (hung agent). */
 const HUNG_AGENT_THRESHOLD_MS = 30 * 60 * 1000;
@@ -216,6 +217,8 @@ export async function reconcileCompletionStates(
     // Auto-recover blocked workspaces whose most-recent session completed with
     // committed changes. The propose_transition MCP call can fail silently, leaving
     // a workspace blocked even though work was done (#712).
+    // An implement-exit attention mark is a deliberate `blocked`, not a lost transition: keep it.
+    if (c.workspaceStatus === "blocked" && getImplementExitAttention(c.workspaceId)) continue;
     if (c.workspaceStatus === "blocked" && (c.sessionStatus === "completed" || c.sessionStatus === "stopped")) {
       if (!c.workingDir || !c.baseBranch) continue;
       const hasCommits = await checkCommits(

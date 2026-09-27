@@ -1,6 +1,6 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { RISK_POSTURES } from "@agentic-kanban/shared/lib/risk-posture";
-import type { BaseSweepInfo, RedBasePolicy, RiskPosture, RiskPostureLevel } from "@agentic-kanban/shared/types";
+import type { BaseSweepInfo, ImplementExitCheckLevel, RedBasePolicy, RiskPosture, RiskPostureLevel } from "@agentic-kanban/shared/types";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getIssueTagRows } from "../repositories/tag.repository.js";
@@ -14,7 +14,7 @@ import { getIssueTagRows } from "../repositories/tag.repository.js";
  * `risk-posture-raw-read-ratchet.test.ts`.
  *
  *  - `strict`   — release branches, client repos with allowlists. Full per-ticket gate + review,
- *                 no train, red base always blocks, builder self-tests run in full.
+ *                 no train, red base always blocks, the implement-exit check runs the full suite.
  *  - `standard` — normal feature work. **Defined to reproduce today's behaviour exactly** —
  *                 every field below is today's actual default, not the proposal's target state
  *                 (e.g. `trainMaxSize: 1`, not the proposal's "≤4", since #905 owns raising that
@@ -32,7 +32,7 @@ import { getIssueTagRows } from "../repositories/tag.repository.js";
  *                 not each ticket, red base allowed if the red set is known debt, contention
  *                 downgraded to a warning, placement prefers remote.
  *  - `sprint`   — greenfield/prototype. Guards-only gate, no per-ticket review, red base allowed
- *                 with a debt ticket, builder self-tests off, contention off.
+ *                 with a debt ticket, no implement-exit check, contention off.
  *  - `flow`     — the fastest honest cycle (#1240, decision 019 part 3), below `iterate` on the
  *                 ladder (`docs/integration-risk-ladder.md`). Per-merge gate = typecheck + the
  *                 test-impact selection + the diff's own tests, with NO guard floor at merge
@@ -166,6 +166,29 @@ export function resolveRiskPosture(
   );
 }
 
+/**
+ * The implement-exit check a level asks for — the check the BOARD runs once when a builder's
+ * implementation phase ends, before review (`startup/exit/implement-exit-check.ts`). Read from the
+ * table below, so there is one definition. The rule the table follows: never wider than the level's
+ * merge gate, and at least a typecheck, except `sprint` (guards-only gate, no per-ticket review),
+ * which runs none.
+ *
+ * | level    | merge gate (`gateTier`)  | implement-exit |
+ * |----------|--------------------------|----------------|
+ * | strict   | full                     | full           |
+ * | standard | full                     | impact         |
+ * | iterate  | impact                   | impact         |
+ * | flow     | impact                   | impact         |
+ * | fast     | scoped (once per train)  | typecheck      |
+ * | sprint   | scoped-base-watch        | none           |
+ *
+ * `standard` stops at `impact` because its review-exit and merge gates both run the full suite
+ * already; a third full run per ticket would buy nothing the selection does not catch sooner.
+ */
+export function implementExitCheckForLevel(level: RiskPostureLevel): ImplementExitCheckLevel {
+  return postureForLevel(level, "default").implementExitCheck;
+}
+
 /** The pure level -> posture table. Everything a LEVEL implies lives here; per-field project
  *  overrides are applied by the caller, so this table stays the definition of the level. */
 function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"]): RiskPosture {
@@ -184,7 +207,7 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         // #919: strict lands one at a time on purpose — every merge carries a full gate.
         mergesPerCycle: 1,
         relaunchesPerCycle: 1,
-        builderStopChecks: "tests-and-typecheck",
+        implementExitCheck: "full",
         contentionMode: "serialize",
         placementBias: "host-half",
         summary: "strict: full gate + thorough review per ticket, no train, red base blocks all merges",
@@ -200,10 +223,10 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         trainMaxWaitMs: 20 * 60 * 1000,
         mergesPerCycle: 4,
         relaunchesPerCycle: 4,
-        builderStopChecks: "typecheck-only",
+        implementExitCheck: "typecheck",
         contentionMode: "warn",
         placementBias: "remote-preferred",
-        summary: "fast: skips per-ticket review (reviews the train instead), gate once per train, red base allowed if it is known debt, builder tests skipped (typecheck only); review-exit gate is typecheck only (tests run once, at merge)",
+        summary: "fast: skips per-ticket review (reviews the train instead), gate once per train, red base allowed if it is known debt, implement-exit check is typecheck only; review-exit gate is typecheck only (tests run once, at merge)",
       };
     case "sprint":
       return {
@@ -219,10 +242,10 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         // than dribbling two per cycle behind a train it already gated as a unit.
         mergesPerCycle: 8,
         relaunchesPerCycle: 6,
-        builderStopChecks: "none",
+        implementExitCheck: "none",
         contentionMode: "off",
         placementBias: "remote-preferred",
-        summary: "sprint: no per-ticket review, guards-only gate, red base allowed (files a debt ticket), builder self-tests off, contention off; review-exit gate is typecheck only (tests run once, at merge)",
+        summary: "sprint: no per-ticket review, guards-only gate, red base allowed (files a debt ticket), no implement-exit check, contention off; review-exit gate is typecheck only (tests run once, at merge)",
       };
     case "iterate":
       return {
@@ -245,7 +268,7 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         trainMaxWaitMs: 0,
         mergesPerCycle: 2,
         relaunchesPerCycle: 2,
-        builderStopChecks: "tests-capacity-gated",
+        implementExitCheck: "impact",
         contentionMode: "serialize",
         placementBias: "host-preferred",
         summary: "iterate: per-merge gate is the test-impact selection (a ranked guess, narrower than scoped); the FULL suite runs nightly on the base instead, its misses are recorded, and a red base files a heal ticket rather than holding the train window; review-exit gate is typecheck only (tests run once, at merge)",
@@ -270,7 +293,7 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         trainMaxWaitMs: 0,
         mergesPerCycle: 2,
         relaunchesPerCycle: 2,
-        builderStopChecks: "tests-capacity-gated",
+        implementExitCheck: "impact",
         contentionMode: "serialize",
         placementBias: "host-preferred",
         summary: "flow: merge gate = typecheck + impact selection + the diff's own tests; no guard floor at merge; red base reported, never blocking; the full suite runs on the release candidate only; review-exit gate is typecheck only (tests run once, at merge)",
@@ -300,7 +323,7 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         // #919: today's board-wide constants, so `standard` still reproduces current behaviour.
         mergesPerCycle: 2,
         relaunchesPerCycle: 2,
-        builderStopChecks: "tests-capacity-gated",
+        implementExitCheck: "impact",
         contentionMode: "serialize",
         placementBias: "host-preferred",
         summary: "standard: today's default behaviour, nothing skipped",

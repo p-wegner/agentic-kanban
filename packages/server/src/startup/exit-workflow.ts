@@ -9,6 +9,7 @@
  *   ./exit/review-launch.ts       starting a review session (reservation, profile ladder, #529)
  *   ./exit/clean-clone-checks.ts  clean-clone buildability of the branch (#812 repair, #792 gate)
  *   ./exit/learning-step.ts       the compounding-engineering learning step
+ *   ./exit/implement-exit-check.ts the board's check at the end of the implementation phase
  *   ./exit/exit-context.ts        the snapshot type the dispatcher hands every handler
  *
  * Each of those is a factory taking an explicit deps object, so the boundary is a real dependency
@@ -55,6 +56,7 @@ import { createFixAndMergeExitHandler } from "./exit/fix-and-merge-exit.js";
 import { createReviewLauncher } from "./exit/review-launch.js";
 import { createUsageLimitExitHandler, findUsageLimitProvider } from "./exit/usage-limit-exit.js";
 import { launchLearningStep } from "./exit/learning-step.js";
+import { createImplementExitGate, type ImplementExitGateDeps } from "./exit/implement-exit-check.js";
 import type { AutoMergeFn, ExitContext, WorkspaceRow } from "./exit/exit-context.js";
 import { describeWithheldReviewArm, graphOwnsPostExitReview, graphOwnsReviewSessionExit, reviewerMovedIssueToInProgress, START_NODE_TYPE } from "./exit/workflow-ownership.js";
 import { isWorkspaceTerminalOnExit, terminalGuardCasStatus } from "./exit/workspace-terminal-guard.js";
@@ -83,6 +85,14 @@ export interface WorkflowDeps {
    * importer of that module in the same file.
    */
   gitService?: GitService;
+  /**
+   * The implement-exit check (./exit/implement-exit-check.ts): its builder-turn channel
+   * (`workspaceSessionService.sendTurn`, which hands a red result back to the builder once) and
+   * test seams. The server always wires it (`core-services-wiring.ts`); a test that does not
+   * exercise the check omits it, and then no check runs — the same contract as
+   * `reconcileForkChildOnExit`, so the engine's other tests never spawn a verify script.
+   */
+  implementExit?: Omit<ImplementExitGateDeps, "database" | "boardEvents">;
 }
 
 async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: string | null, workspaceId: string, database: Database) {
@@ -133,7 +143,7 @@ async function graphOwnsReviewExit(database: Database, workspaceId: string) {
   return { owned: graphOwnsReviewSessionExit(node), node };
 }
 
-export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, reconcileForkChildOnExit, database, gitService: injectedGitService }: WorkflowDeps) {
+export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, reconcileForkChildOnExit, database, gitService: injectedGitService, implementExit }: WorkflowDeps) {
   const db = database ?? defaultDb;
   const gitService = injectedGitService ?? realGitService;
   const reviewSessionIds = new Set<string>(), fixAndMergeSessionIds = new Set<string>(), learningSessionIds = new Set<string>();
@@ -143,6 +153,9 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
   const { applyBuildApprovalRepair, runColdCloneGate } = createCleanCloneChecks({ database: db, gitService, boardEvents });
   const { launchAutoReview } = createReviewLauncher({ database: db, gitService, sessionManager, boardEvents, reviewSessionIds });
   const learningStepDeps = { database: db, sessionManager, learningSessionIds };
+  const gateImplementExit = implementExit
+    ? createImplementExitGate({ ...implementExit, database: db, boardEvents })
+    : async () => "proceed" as const;
 
   async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCode: number | null, wasPlanMode?: boolean) {
     try {
@@ -568,6 +581,10 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       console.log(`[workflow] agent session ${sessionId} completed but no committed changes  leaving issue in current status`);
       return;
     }
+    // The implementation phase ends here: the board runs the posture's implement-exit check once,
+    // before In Review. Red sends the builder one feedback turn (or marks the workspace for
+    // attention at the cap) and stops this exit; see ./exit/implement-exit-check.ts.
+    if (await gateImplementExit(ctx) === "stop") return;
     console.log(`[workflow] agent session ${sessionId} completed with committed changes  moving to In Review`);
     const inReview = findStatus("In Review");
     if (inReview) {

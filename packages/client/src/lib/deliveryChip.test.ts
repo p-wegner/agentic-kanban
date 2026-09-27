@@ -30,7 +30,7 @@ function posture(overrides: Partial<RiskPosture> = {}): RiskPosture {
     trainMaxWaitMs: 0,
     mergesPerCycle: 2,
     relaunchesPerCycle: 2,
-    builderStopChecks: "tests-capacity-gated",
+    implementExitCheck: "impact",
     contentionMode: "serialize",
     placementBias: "host-preferred",
     summary: "iterate: per-merge gate is the test-impact selection",
