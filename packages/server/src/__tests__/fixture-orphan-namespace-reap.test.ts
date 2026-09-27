@@ -5,7 +5,7 @@ vi.mock("../services/process-exec.js", () => ({
   taskkillTree: vi.fn(async () => {}),
 }));
 
-import { reapOrphanedFixtureServers } from "./helpers/reap-fixture-child-servers.js";
+import { FRESH_FIXTURE_GRACE_MS, reapOrphanedFixtureServers } from "./helpers/reap-fixture-child-servers.js";
 import { listOsProcesses, taskkillTree } from "../services/process-exec.js";
 
 /** Build an OS process record; `ppid` defaults to a pid that is never in the list. */
@@ -88,6 +88,16 @@ describe("reapOrphanedFixtureServers — namespace-matched orphans (#1121)", () 
 
     expect(await reapOrphanedFixtureServers([namespaceDir])).toBe(0);
     expect(vi.mocked(taskkillTree)).not.toHaveBeenCalled();
+  });
+
+  it("spares a namespace-matched orphan while its fixture dir is young (a live detached fixture)", async () => {
+    const namespaceDir = "C:\\Temp\\ak-verify-gate-test-live";
+    vi.mocked(listOsProcesses).mockResolvedValue([
+      proc(6000, `node ${namespaceDir}\\listener-worker.js`, 4242),
+    ]);
+
+    expect(await reapOrphanedFixtureServers([namespaceDir], async () => 5_000)).toBe(0);
+    expect(await reapOrphanedFixtureServers([namespaceDir], async () => FRESH_FIXTURE_GRACE_MS + 1)).toBe(1);
   });
 
   it("returns 0 and does not throw when process enumeration fails", async () => {

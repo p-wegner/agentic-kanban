@@ -93,7 +93,28 @@ export const SWEPT_TEMP_NAMESPACES: Array<{ prefixes: string[]; minAgeMs: number
  * regardless of age) is a SECOND, name-independent way in: a process is also an orphan candidate
  * when its command line references a path inside one of them.
  */
-export async function reapOrphanedFixtureServers(namespaceDirs: string[] = []): Promise<number> {
+/**
+ * A namespace-matched orphan is spared while the fixture dir it references is younger than this.
+ * A parentless process is how several fixtures WORK, not only how they leak:
+ * `verify-gate-runner.test.ts`'s #172 case detaches a listener on purpose and asserts it survives
+ * for 5 s. Every server vitest run sweeps at setup and teardown, so any concurrent run on the box
+ * (another gate, a builder, a bisect half) killed that live listener; train 2026-09-27-06's red
+ * and 2026-09-27-10's red control arm were this. A real leak is reaped by a later sweep instead.
+ */
+export const FRESH_FIXTURE_GRACE_MS = 10 * 60_000;
+
+async function defaultDirAgeMs(dir: string): Promise<number | null> {
+  try {
+    return Date.now() - (await stat(dir)).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+export async function reapOrphanedFixtureServers(
+  namespaceDirs: string[] = [],
+  dirAgeMs: (dir: string) => Promise<number | null> = defaultDirAgeMs,
+): Promise<number> {
   let procs: Awaited<ReturnType<typeof listOsProcesses>>;
   try {
     procs = await listOsProcesses();
@@ -101,16 +122,22 @@ export async function reapOrphanedFixtureServers(namespaceDirs: string[] = []): 
     return 0; // enumeration is best-effort; never fail the test run over hygiene
   }
   const livePids = new Set(procs.map((p) => p.pid));
-  const orphans = procs.filter((proc) => {
-    if (proc.pid === process.pid) return false;
+  const orphans: typeof procs = [];
+  for (const proc of procs) {
+    if (proc.pid === process.pid) continue;
     const cmd = proc.commandLine || "";
     const matchesKnownMarker = FIXTURE_SERVER_MARKERS.some((marker) => cmd.includes(marker));
-    const matchesFixtureNamespace = namespaceDirs.some((dir) => cmd.includes(dir));
-    if (!matchesKnownMarker && !matchesFixtureNamespace) return false;
+    const namespaceDir = namespaceDirs.find((dir) => cmd.includes(dir));
+    if (!matchesKnownMarker && !namespaceDir) continue;
     // ppid 0 means "unknown" from the enumerator, not "orphan" — never guess.
-    if (!proc.ppid) return false;
-    return !livePids.has(proc.ppid);
-  });
+    if (!proc.ppid || livePids.has(proc.ppid)) continue;
+    if (!matchesKnownMarker && namespaceDir) {
+      // Unreadable age (dir already gone) counts as old: nothing live can still need it.
+      const age = await dirAgeMs(namespaceDir);
+      if (age !== null && age < FRESH_FIXTURE_GRACE_MS) continue;
+    }
+    orphans.push(proc);
+  }
 
   let killed = 0;
   for (const orphan of orphans) {
