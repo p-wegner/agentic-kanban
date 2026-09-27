@@ -39,6 +39,8 @@ export interface TrainMember {
   issueNumber?: number | null;
   /** The branch tip sha at landing time, for the merge commit body (#1190). Not set until then. */
   tipSha?: string;
+  /** Repo-relative paths the branch changes vs the base; lets a red train name a suite's owner. */
+  changedFiles?: readonly string[] | null;
 }
 
 /**

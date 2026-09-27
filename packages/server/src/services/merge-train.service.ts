@@ -17,6 +17,7 @@ import {
   type TrainAssemblyResult,
   type TrainMember,
 } from "./merge-train-assembly.js";
+import { decideSuiteOwnerShortcut, formatSuiteOwnerReason } from "./merge-train-suite-owner.js";
 
 /**
  * Release trains: gate N tickets ONCE instead of N times.
@@ -284,6 +285,8 @@ export interface TrainRunResult {
    * ran (a green train, an environment failure, or a caller that wires no port).
    */
   baseVerdict?: MergeTrainBaseVerdict;
+  /** The suites a red gate named, repo-relative; absent on a green run or when none were named. */
+  failedSuites?: string[];
 }
 
 /**
@@ -308,6 +311,8 @@ export type TrainGate = (ctx: {
   passed: boolean;
   message: string;
   sided?: Array<{ workspaceId: string; reason: string }>;
+  /** On a red run, the suites the gate named (repo-relative), for the suite-owner shortcut. */
+  failedSuites?: string[];
 }>;
 
 export async function runMergeTrain(args: {
@@ -423,7 +428,9 @@ export async function runMergeTrain(args: {
    * `gateRejected` so the caller can tell its author. A red train of several is a question,
    * and halving answers it: each half is assembled against the base as it stands THEN, so a
    * green first half lands before the second half is even built. That is what keeps the good
-   * branches moving past a bad one.
+   * branches moving past a bad one. Before halving, a red whose named suites all belong to ONE
+   * member rejects that member and re-gates the rest once (`merge-train-suite-owner.ts`;
+   * observed on `train/2026-09-27-10`, which bisected over a suite only #1261 added).
    *
    * Cost: 1 gate run when the batch is green (the case this feature exists for). With k bad
    * branches out of n it is bounded by O(k log n) runs — worse than n only when nearly
@@ -486,6 +493,27 @@ export async function runMergeTrain(args: {
       // member, the rest were re-assembled and either landed or conflicted (both attributed). There
       // is nothing red left to search for, so splitting would only re-gate green code.
       if (attempt.sided.length > 0) return attempt;
+      // Suite-owner shortcut (`merge-train-suite-owner.ts`): every failing suite belongs to one
+      // included member, so reject it and re-gate the rest once instead of control arm + halving.
+      const aboard = subset.filter((m) => !attempt.dropped.some((d) => d.member.workspaceId === m.workspaceId));
+      const shortcut = bisect && subset.length > 1 ? decideSuiteOwnerShortcut(attempt.failedSuites, aboard) : null;
+      if (shortcut) {
+        const rest = await landGreenest(subset.filter((m) => m.workspaceId !== shortcut.owner.workspaceId), `${subLabel}r`, waitForPredecessor);
+        return {
+          trainRef: attempt.trainRef,
+          landed: rest.landed,
+          dropped: [...attempt.dropped, ...rest.dropped],
+          gateRejected: [{ member: shortcut.owner, reason: formatSuiteOwnerReason(shortcut.suites, attempt.gateFailure) }, ...rest.gateRejected],
+          sided: rest.sided,
+          closeFailures: rest.closeFailures,
+          gateRuns: attempt.gateRuns + rest.gateRuns,
+          attempts: [...attempt.attempts, ...rest.attempts],
+          mergeSha: rest.mergeSha,
+          conflictClusters: dedupeConflictClusters([...(attempt.conflictClusters ?? []), ...(rest.conflictClusters ?? [])]),
+          ...(rest.landed.length === 0 ? { gateFailure: attempt.gateFailure } : {}),
+          ...(rest.cancelled ? { cancelled: true as const } : {}),
+        };
+      }
       // #1204 — the CONTROL ARM, at the TOP of the search only (`subLabel === label`) and only
       // when there is a search to do. Every half of a bisect is assembled against the SAME base,
       // so a base that is red on its own makes every re-gate reproduce the base's failures and
@@ -678,7 +706,10 @@ async function runTrainAttempt(args: {
       }
       // #1154/#1189: an environment failure is the train's, not a member's — its own leaf kind.
       const verdict: MergeTrainAttemptVerdict = args.isEnvironmentFailure(gate.message) ? "env_failure" : "red";
-      return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], sided: [], gateRuns: 1, gateFailure: gate.message }, verdict);
+      return await finish({
+        trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], sided: [], gateRuns: 1, gateFailure: gate.message,
+        ...(gate.failedSuites && gate.failedSuites.length > 0 ? { failedSuites: gate.failedSuites } : {}),
+      }, verdict);
     }
 
     // #1193: wait for an earlier concurrently-gated half to finish its own landing (or decide

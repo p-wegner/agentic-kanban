@@ -770,4 +770,41 @@ describe("runMergeTrain — a member sided by the train review is withheld, the 
     expect(await isAncestor(repo, await revParse(repo, "f2"), "main")).toBe(false);
     expect(await isAncestor(repo, await revParse(repo, "f-red"), "main")).toBe(false);
   });
+
+  it("a red naming only one member's own suite rejects it and re-gates the rest once: no control arm, no halving", async () => {
+    await seedTwoGreen();
+    await git(["branch", "f-red"]);
+    await commitFile("f-red", "red.test.ts", "red\n");
+    await git(["checkout", "-q", "main"]);
+    const runGate = vi.fn(async ({ trainRef }: { trainRef: string }) => {
+      const tree = await gitExecOrThrow(["ls-tree", "-r", "--name-only", trainRef], { cwd: repo });
+      return tree.split(/\r?\n/).includes("red.test.ts")
+        ? { passed: false, message: "verify failed", failedSuites: ["red.test.ts"] }
+        : { passed: true, message: "ok" };
+    });
+    const gateBaseAlone = vi.fn(async () => ({ verdict: "green" as const, gateRuns: 1 }));
+
+    const result = await runMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members: [
+        { workspaceId: "w1", branch: "f1", changedFiles: ["a.txt"] },
+        { workspaceId: "w-red", branch: "f-red", changedFiles: ["red.test.ts"] },
+        { workspaceId: "w2", branch: "f2", changedFiles: ["b.txt"] },
+      ],
+      label: "t-suite-owner",
+      runGate,
+      gateBaseAlone,
+      closeMember: async () => {},
+    });
+
+    expect(runGate).toHaveBeenCalledTimes(2);
+    expect(result.gateRuns).toBe(2);
+    expect(gateBaseAlone).not.toHaveBeenCalled();
+    expect(result.landed.map((x) => x.workspaceId).sort()).toEqual(["w1", "w2"]);
+    expect(result.gateRejected.map((r) => r.member.workspaceId)).toEqual(["w-red"]);
+    expect(result.gateRejected[0].reason).toContain("red.test.ts");
+    expect(result.gateFailure).toBeUndefined();
+    expect(await isAncestor(repo, await revParse(repo, "f-red"), "main")).toBe(false);
+  });
 }, 240000);
