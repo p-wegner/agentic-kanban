@@ -291,6 +291,9 @@ export interface TrainRunResult {
  * attributed a blocking finding to specific members. Only meaningful when `passed` is true: a
  * review finding pulls its member into a siding, it does not fail the gate for everyone else.
  */
+/** An assembly dropped these members from `trainRef` (built on `tipSha`); see `runMergeTrain`'s `onDropped`. */
+export type OnTrainDropped = (dropped: DroppedTrainMember[], at: { trainRef: string; tipSha: string }) => Promise<void>;
+
 export type TrainGate = (ctx: {
   trainRef: string;
   trainSha: string;
@@ -353,6 +356,12 @@ export async function runMergeTrain(args: {
    * fails the train — the merge already happened (or did not) regardless of the bookkeeping.
    */
   onAttempt?: (attempt: MergeTrainAttemptDto) => Promise<void>;
+  /**
+   * Called right after an attempt's assembly drops members, BEFORE its gate runs, so a member
+   * that conflicts with the base is sent back to its builder at once rather than after the
+   * whole gate and bisect (or never, when the job dies first). Best-effort: a throw is logged.
+   */
+  onDropped?: OnTrainDropped;
   /**
    * #1193 — how many verify-chain slots are free RIGHT NOW, so a red bisect can gate both
    * halves of a split at once instead of one after another. Defaults to a live read of the
@@ -578,6 +587,7 @@ async function runTrainAttempt(args: {
   shouldLand?: () => Promise<string | null>;
   isEnvironmentFailure: (message: string) => boolean;
   onAttempt?: (attempt: MergeTrainAttemptDto) => Promise<void>;
+  onDropped?: OnTrainDropped;
   /**
    * #1193 — resolved once it is this attempt's turn to LAND (a no-op when absent, i.e. every
    * caller before #1193). Awaited only immediately before `landMergeTrain`, never before
@@ -591,6 +601,10 @@ async function runTrainAttempt(args: {
   const { repoPath, baseBranch, members, label, trainId, runGate, closeMember } = args;
 
   const asm = await assembleMergeTrain({ repoPath, baseBranch, members, label });
+  if (asm.dropped.length > 0 && args.onDropped) {
+    await args.onDropped(asm.dropped, { trainRef: asm.trainRef, tipSha: asm.baseSha })
+      .catch((err) => console.warn(`[merge-train] ${label}: send-back of dropped members failed (non-fatal): ${errorMessage(err).slice(0, 200)}`));
+  }
   const closeFailures: TrainRunResult["closeFailures"] = [];
   let gateStartedAt: string | null = null;
   let gateFinishedAt: string | null = null;

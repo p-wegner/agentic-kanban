@@ -24,7 +24,7 @@ import {
   listActiveMergeTrainsForProject,
   updateMergeTrainState,
 } from "../repositories/merge-train.repository.js";
-import { runMergeTrain, formatTrainLabel, trainDateStamp, trainRefName } from "./merge-train.service.js";
+import { runMergeTrain, formatTrainLabel, trainDateStamp, trainRefName, type OnTrainDropped } from "./merge-train.service.js";
 import { isMergeTrainLabelLive, registerLiveMergeTrain, unregisterLiveMergeTrain } from "./merge-train-live-registry.js";
 import { cleanupTrainWorktreesForLabel } from "./merge-train-worktrees.js";
 import { runPreMergeGate, looksLikeMissingDepsFailure } from "./pre-merge-gate.service.js";
@@ -39,14 +39,13 @@ import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban
 import { noteMergeGatePhase } from "./merge-job.service.js";
 import { formatIneligibleNote, trainMemberIneligibility } from "./merge-release-partition.js";
 import { resolveTrainReviewDecision, runTrainReview, type TrainReviewMember } from "./merge-train-review.service.js";
-import { clearTrainSiding, isSidingDrop, partitionSidedMembers, recordTrainSidingDrop } from "./merge-train-siding.service.js";
+import { clearTrainSiding, createTrainDropSendBack, partitionSidedMembers } from "./merge-train-siding.service.js";
 import { BRANCH_ALONE_FAILURE_PREFIX } from "./auto-merge-breaker.js";
 import { describeFailedSuites } from "./verify-failed-suites.js";
 import {
   buildTrainGateEvidence,
   recordBoardingComments,
   recordFinishComments,
-  uniqueByWorkspace,
 } from "./train-finish-evidence.service.js";
 
 /**
@@ -536,8 +535,10 @@ async function runDoomedTrainJob(args: {
    * process is currently running.
    */
   abortController: AbortController;
+  /** Sends a base-conflict member back to its builder as soon as an assembly drops it. */
+  onDropped: OnTrainDropped;
 }): Promise<{ ok: true; result: Awaited<ReturnType<typeof runMergeTrain>> } | { ok: false; reason: string }> {
-  const { database, boardEvents, reconcileAlreadyMerged, sendTurn, reviewTrain, repoPath, baseBranch, members, label, trainId, projectId, reviewEvidenceRef, abortController } = args;
+  const { database, boardEvents, reconcileAlreadyMerged, sendTurn, reviewTrain, repoPath, baseBranch, members, label, trainId, projectId, reviewEvidenceRef, abortController, onDropped } = args;
 
   let repoLock: Awaited<ReturnType<typeof acquireQueueRepoLock>>;
   try {
@@ -578,6 +579,7 @@ async function runDoomedTrainJob(args: {
       // cancel therefore ends the job after the current gate's child process is killed, at the
       // latest, rather than continuing through the rest of a bisect tree.
       signal: abortController.signal,
+      onDropped,
       runGate: async ({ trainRef, included, label: attemptLabel }) => {
         // Gate the TREE THAT LANDS. A per-member gate never tests the merge commit, which is
         // how two individually-green branches can produce a red base with no conflict.
@@ -702,15 +704,15 @@ export function createMergeTrainRunner(deps: {
    */
   hasLiveSession?: (workspaceId: string) => Promise<boolean>;
   /**
-   * #1210 — routes a siding drop through the rebase-first fix (#1209) when the member's agent
-   * is gone, instead of a `/turn` that would fall through to a clean-tree spawn.
+   * Relaunches a base-conflict member's builder with the send-back prompt when its agent is gone
+   * (`merge-train-siding.service.ts`: why a builder relaunch, not resolve-conflicts).
    */
-  resolveConflicts?: (workspaceId: string) => Promise<unknown>;
+  relaunch?: (workspaceId: string, prompt: string) => Promise<unknown>;
   /** #1186 — broadcasts `merge_train_changed` at every `merge_trains` row state write, so a
    * departure-board "live train" panel does not need to poll. */
   boardEvents?: BoardEventSink;
 }) {
-  const { database, reconcileAlreadyMerged, sendTurn, hasLiveSession, resolveConflicts, boardEvents } = deps;
+  const { database, reconcileAlreadyMerged, sendTurn, hasLiveSession, relaunch, boardEvents } = deps;
   const reviewTrain = deps.reviewTrain ?? runTrainReview;
 
   /**
@@ -757,6 +759,11 @@ export function createMergeTrainRunner(deps: {
       return;
     }
     const members = admitted;
+    // A member that conflicts with the base is sent back to its builder the moment assembly
+    // drops it (`onDropped` inside the train), not after the whole gate and bisect: observed
+    // live (#1253/#1261), a drop recorded only at the end never reached the builder when the
+    // train job outlived the window or died, and the next train dropped the same member again.
+    const sendBack = createTrainDropSendBack({ members, baseBranch, repoPath, deps: { database, sendTurn, hasLiveSession, relaunch } });
     const first = plan.order.find((ws) => ws.id === members[0].workspaceId) ?? plan.order[0];
 
     const trainStart = await beginMergeTrain(first, members.map((m) => m.workspaceId), database, boardEvents);
@@ -806,6 +813,7 @@ export function createMergeTrainRunner(deps: {
       repoPath, baseBranch, members, label, trainId, projectId,
       reviewEvidenceRef,
       abortController,
+      onDropped: sendBack.onDropped,
     });
     reviewEvidence = reviewEvidenceRef.current;
     if (!outcome.ok) {
@@ -843,14 +851,10 @@ export function createMergeTrainRunner(deps: {
       // correctness dependency of the siding mechanism itself (which keys on the MEMBER's own
       // branch tip, not this one).
       const trainTipSha = result.mergeSha ?? (await gitService.revParse(repoPath, baseBranch).catch(() => baseBranch));
-      // Only a drop the author must rebase out of gets a siding. A `deferred` drop (#1191:
-      // member-vs-member overlap, re-collected untouched by the next window) is not sided —
-      // its tip was never asked to move, so the sha-gate would just hold it for nothing.
-      const uniqueDrops = uniqueByWorkspace(result.dropped.filter(isSidingDrop));
-      for (const d of uniqueDrops) {
-        const member = members.find((m) => m.workspaceId === d.workspaceId);
-        if (member) await recordTrainSidingDrop(member, { reason: d.reason, baseBranch, trainTipSha, repoPath }, { database, sendTurn, hasLiveSession, resolveConflicts });
-      }
+      // Most base-conflict drops were already sent back the moment assembly dropped them
+      // (`onDropped`); this catches the rest (a re-assembly after a base move or a siding).
+      // `deferred` drops (#1191, member-vs-member) are never sent back.
+      await sendBack.onDropped(result.dropped, { trainRef: result.trainRef, tipSha: trainTipSha });
     }
     for (const d of result.dropped) {
       if (seenEvent.has(d.member.workspaceId)) continue;

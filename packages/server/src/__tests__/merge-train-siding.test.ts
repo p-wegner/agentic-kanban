@@ -146,22 +146,22 @@ describe("recordTrainSidingDrop (#1192)", () => {
   });
 });
 
-describe("recordTrainSidingDrop — agent is gone (#1210)", () => {
-  it("routes through resolveConflicts instead of sendTurn when the workspace has no live session", async () => {
+describe("recordTrainSidingDrop — agent is gone (#1210: a builder relaunch)", () => {
+  it("relaunches the builder instead of sendTurn when the workspace has no live session", async () => {
     const { db } = createTestDb();
     const { workspaceId, issueId } = await seedMember(db);
     const sendTurn = vi.fn().mockResolvedValue({ type: "sent" });
-    const resolveConflicts = vi.fn().mockResolvedValue({ resolved: "rebase-clean" });
+    const relaunch = vi.fn().mockResolvedValue({ sessionId: "s-relaunch" });
     const getBranchHeadSha = vi.fn().mockResolvedValue("member-sha-1");
 
     await recordTrainSidingDrop(
       { workspaceId, issueId, issueNumber: 1, branch: "feature/ak-1" },
       { reason: "Merge conflict in: src/foo.ts", baseBranch: "master", trainTipSha: "traintip1", repoPath: "/repo" },
-      { database: db, sendTurn, resolveConflicts, getBranchHeadSha, hasLiveSession: async () => false },
+      { database: db, sendTurn, relaunch, getBranchHeadSha, hasLiveSession: async () => false },
     );
 
-    expect(resolveConflicts).toHaveBeenCalledTimes(1);
-    expect(resolveConflicts.mock.calls[0][0]).toBe(workspaceId);
+    expect(relaunch).toHaveBeenCalledTimes(1);
+    expect(relaunch.mock.calls[0][0]).toBe(workspaceId);
     expect(sendTurn).not.toHaveBeenCalled();
 
     // The siding record and tag still land — only which port delivers the nudge changed.
@@ -172,7 +172,7 @@ describe("recordTrainSidingDrop — agent is gone (#1210)", () => {
     expect(tagRows).toHaveLength(1);
   });
 
-  it("still records the siding and never throws when no resolveConflicts port is wired", async () => {
+  it("still records the siding and never throws when no relaunch port is wired", async () => {
     const { db } = createTestDb();
     const { workspaceId, issueId } = await seedMember(db);
     const sendTurn = vi.fn().mockResolvedValue({ type: "sent" });
@@ -190,21 +190,21 @@ describe("recordTrainSidingDrop — agent is gone (#1210)", () => {
     expect(row?.sidings).toBe(1);
   });
 
-  it("never throws when resolveConflicts itself throws — the siding is still recorded", async () => {
+  it("never throws when the relaunch itself throws — the siding is still recorded", async () => {
     const { db } = createTestDb();
     const { workspaceId, issueId } = await seedMember(db);
     const sendTurn = vi.fn().mockResolvedValue({ type: "sent" });
-    const resolveConflicts = vi.fn().mockRejectedValue(new Error("worktree busy"));
+    const relaunch = vi.fn().mockRejectedValue(new Error("worktree busy"));
 
     await expect(
       recordTrainSidingDrop(
         { workspaceId, issueId, branch: "feature/ak-1" },
         { reason: "Merge conflict in: src/foo.ts", baseBranch: "master", trainTipSha: "traintip1", repoPath: "/repo" },
-        { database: db, sendTurn, resolveConflicts, hasLiveSession: async () => false },
+        { database: db, sendTurn, relaunch, hasLiveSession: async () => false },
       ),
     ).resolves.toBeUndefined();
 
-    expect(resolveConflicts).toHaveBeenCalledTimes(1);
+    expect(relaunch).toHaveBeenCalledTimes(1);
     const row = await getTrainSidingState(workspaceId, db);
     expect(row?.sidings).toBe(1);
   });
@@ -213,36 +213,36 @@ describe("recordTrainSidingDrop — agent is gone (#1210)", () => {
     const { db } = createTestDb();
     const { workspaceId, issueId } = await seedMember(db);
     const sendTurn = vi.fn().mockResolvedValue({ type: "sent" });
-    const resolveConflicts = vi.fn();
+    const relaunch = vi.fn();
 
     await recordTrainSidingDrop(
       { workspaceId, issueId, branch: "feature/ak-1" },
       { reason: "Merge conflict in: src/foo.ts", baseBranch: "master", trainTipSha: "traintip1", repoPath: "/repo" },
-      { database: db, sendTurn, resolveConflicts, hasLiveSession: async () => { throw new Error("process table unreadable"); } },
+      { database: db, sendTurn, relaunch, hasLiveSession: async () => { throw new Error("process table unreadable"); } },
     );
 
     expect(sendTurn).toHaveBeenCalledTimes(1);
-    expect(resolveConflicts).not.toHaveBeenCalled();
+    expect(relaunch).not.toHaveBeenCalled();
   });
 
-  it("does not resolve-conflicts once the cap is already burned", async () => {
+  it("does not relaunch once the cap is already burned", async () => {
     const { db } = createTestDb();
     const { workspaceId, issueId } = await seedMember(db);
     const sendTurn = vi.fn().mockResolvedValue({ type: "sent" });
-    const resolveConflicts = vi.fn().mockResolvedValue({ resolved: "rebase-clean" });
+    const relaunch = vi.fn().mockResolvedValue({ sessionId: "s-relaunch" });
     const getBranchHeadSha = vi.fn().mockResolvedValue("stuck-sha");
 
     for (let i = 0; i < TRAIN_SIDING_MAX_ATTEMPTS + 1; i++) {
       await recordTrainSidingDrop(
         { workspaceId, issueId, branch: "feature/ak-1" },
         { reason: `Merge conflict in: src/foo${i}.ts`, baseBranch: "master", trainTipSha: `tip${i}`, repoPath: "/repo" },
-        { database: db, sendTurn, resolveConflicts, getBranchHeadSha, hasLiveSession: async () => false },
+        { database: db, sendTurn, relaunch, getBranchHeadSha, hasLiveSession: async () => false },
       );
     }
 
-    // One resolveConflicts call per attempt up to and including the one that crosses the cap,
+    // One relaunch per attempt up to and including the one that crosses the cap,
     // none after — the same shape the sendTurn cap test asserts for the live-agent path.
-    expect(resolveConflicts).toHaveBeenCalledTimes(TRAIN_SIDING_MAX_ATTEMPTS - 1);
+    expect(relaunch).toHaveBeenCalledTimes(TRAIN_SIDING_MAX_ATTEMPTS - 1);
     expect(sendTurn).not.toHaveBeenCalled();
 
     const row = await getTrainSidingState(workspaceId, db);
