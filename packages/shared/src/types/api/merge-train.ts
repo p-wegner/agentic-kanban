@@ -36,7 +36,11 @@ export interface MergeTrainSidingDto {
   conflictTrainTipSha: string | null;
   lastSidedAt: string | null;
   cappedAt: string | null;
+  /** Why it was sided: `conflict` or `review`; null on a row older than migration 0158. */
+  kind?: TrainSidingKind | null;
 }
+
+export type TrainSidingKind = "conflict" | "review";
 
 /** `GET /api/merge-queue/trains?projectId=` — the project's train history plus its live sidings (#1198). */
 export interface MergeTrainsResponse {

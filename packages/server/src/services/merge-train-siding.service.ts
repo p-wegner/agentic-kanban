@@ -49,9 +49,10 @@
  * the cap the member gets a merge hold (needs attention) instead of another send-back.
  */
 import type { Database } from "../db/index.js";
+import type { TrainSidingKind } from "@agentic-kanban/shared";
 import { db } from "../db/index.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { revParse } from "@agentic-kanban/shared/lib/git-service";
+import { detectConflictsByBranch, revParse } from "@agentic-kanban/shared/lib/git-service";
 import {
   conflictFilesFromReason,
   formatBaseConflictSendBackPrompt,
@@ -146,6 +147,14 @@ export interface TrainSidingDeps {
    * absent, the drop still records and just skips the nudge.
    */
   relaunch?: (workspaceId: string, prompt: string) => Promise<unknown>;
+  /**
+   * Would `branch` still conflict with the CURRENT base? `true` conflicts, `false` merges
+   * cleanly, `null` could not tell. `partitionSidedMembers` asks it for a `conflict` siding whose
+   * tip has not moved: the base can stop conflicting on its own (the member it clashed with was
+   * dropped, or landed and the overlap resolved), and the tip-only rule then held a mergeable
+   * branch until someone ran `update-base` by hand (#1253/#1261, 2026-09-27). Absent = tip-only.
+   */
+  probeBaseConflict?: (repoPath: string, branch: string) => Promise<boolean | null>;
 }
 
 async function defaultGetBranchHeadSha(repoPath: string, branch: string): Promise<string | null> {
@@ -154,6 +163,17 @@ async function defaultGetBranchHeadSha(repoPath: string, branch: string): Promis
   } catch {
     return null;
   }
+}
+
+/** The real base probe for `partitionSidedMembers`: read-only `git merge-tree` against `baseBranch`. */
+export function baseConflictProbe(baseBranch: string): NonNullable<TrainSidingDeps["probeBaseConflict"]> {
+  return async (repoPath, branch) => {
+    try {
+      return (await detectConflictsByBranch(repoPath, branch, baseBranch)).hasConflicts;
+    } catch {
+      return null;
+    }
+  };
 }
 
 /** #1210: real "is there a live session" check — a `sessions` row with `status === "running"`. */
@@ -185,14 +205,24 @@ export async function partitionSidedMembers<M extends SidingMember>(
       continue;
     }
     const currentSha = await getBranchHeadSha(repoPath, member.branch);
-    if (isStillSided(row, currentSha)) {
+    const stillSided = isStillSided(row, currentSha);
+    const cleanOnBase = stillSided && row.kind === "conflict" && deps.probeBaseConflict
+      ? (await deps.probeBaseConflict(repoPath, member.branch).catch(() => null)) === false
+      : false;
+    if (cleanOnBase) {
+      console.log(
+        `[merge-train-siding] ${member.workspaceId}${member.issueNumber ? ` (#${member.issueNumber})` : ""} ` +
+          `released from siding ${row.sidings}: tip unchanged, but it now merges cleanly onto the base`,
+      );
+    }
+    if (stillSided && !cleanOnBase) {
       const reason = isSidingCapped(row)
         ? `withheld after ${row.sidings} siding(s) — waiting for a human or a rebase, not retried automatically`
         : `still on siding ${row.sidings} — waiting for its branch to move before rejoining the train`;
       held.push({ member, reason });
       continue;
     }
-    // The tip moved (or we could not tell — fail open, admit it). Clear the branch-sha GATE
+    // The tip moved, the base no longer conflicts, or we could not tell (fail open, admit it). Clear the branch-sha GATE
     // so the member is no longer held — but keep `sidings`/`cappedAt`. Deleting the whole row
     // here would reset the cap counter to zero on every successful rebase, so a branch that
     // genuinely rebases each time but keeps landing on a NEW conflict with the train would
@@ -205,6 +235,7 @@ export async function partitionSidedMembers<M extends SidingMember>(
       conflictTrainTipSha: row.conflictTrainTipSha,
       lastSidedAt: row.lastSidedAt ?? new Date(0).toISOString(),
       cappedAt: row.cappedAt,
+      kind: row.kind ?? null,
     }, database).catch(() => undefined);
     await removeIssueTag(member.issueId, TRAIN_SIDING_TAG, database).catch(() => undefined);
     admitted.push(member);
@@ -225,7 +256,7 @@ export async function partitionSidedMembers<M extends SidingMember>(
  */
 export async function recordTrainSidingDrop(
   member: SidingMember,
-  args: { reason: string; baseBranch: string; trainTipSha: string; repoPath: string; trainRef?: string },
+  args: { reason: string; baseBranch: string; trainTipSha: string; repoPath: string; trainRef?: string; kind?: TrainSidingKind },
   deps: TrainSidingDeps,
 ): Promise<void> {
   const database = deps.database ?? db;
@@ -246,6 +277,8 @@ export async function recordTrainSidingDrop(
       conflictTrainTipSha: args.trainTipSha,
       lastSidedAt: nowIso,
       cappedAt: capped ? (existing?.cappedAt ?? nowIso) : null,
+      // A send-back (trainRef) is a conflict drop; the review siding passes `kind: "review"`.
+      kind: args.kind ?? (args.trainRef ? "conflict" : "review"),
     }, database);
 
     await applyIssueTag(member.issueId, TRAIN_SIDING_TAG, TRAIN_SIDING_TAG_COLOR, database).catch(() => undefined);

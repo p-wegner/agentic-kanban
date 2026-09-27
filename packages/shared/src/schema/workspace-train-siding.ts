@@ -34,6 +34,12 @@ export const workspaceTrainSiding = sqliteTable("workspace_train_siding", {
   lastSidedAt: text("last_sided_at"),
   /** Set once, when `sidings` reaches the cap — from then on the member is left withheld, no further nudge. */
   cappedAt: text("capped_at"),
+  /**
+   * `conflict` (assembly dropped it for a merge conflict) or `review` (#1194's train review
+   * sided it). Only a conflict siding is re-probed against the current base while its tip is
+   * unchanged; NULL (a row older than 0158) keeps the tip-only rule.
+   */
+  kind: text("kind", { enum: ["conflict", "review"] }),
 });
 
 export const workspaceTrainSidingRelations = relations(workspaceTrainSiding, ({ one }) => ({

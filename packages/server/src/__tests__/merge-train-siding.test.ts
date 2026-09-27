@@ -341,6 +341,72 @@ describe("partitionSidedMembers (#1192)", () => {
   });
 });
 
+// #1253/#1261 (2026-09-27): both sat on a siding at an unchanged tip although master no longer
+// conflicted with them, until someone ran update-base by hand.
+describe("partitionSidedMembers — base re-probe for an unchanged tip", () => {
+  async function sided(kind: "conflict" | "review") {
+    const { db } = createTestDb();
+    const { workspaceId, issueId } = await seedMember(db);
+    const sendTurn = vi.fn().mockResolvedValue({ type: "sent" });
+    const member = { workspaceId, issueId, branch: "feature/ak-1" };
+    await recordTrainSidingDrop(
+      member,
+      { reason: "Merge conflict in: src/foo.ts", baseBranch: "master", trainTipSha: "tip1", repoPath: "/repo", kind },
+      { database: db, sendTurn, getBranchHeadSha: async () => "unchanged-sha", hasLiveSession: async () => true },
+    );
+    return { db, sendTurn, member, workspaceId };
+  }
+
+  it("releases a conflict siding whose unchanged tip now merges cleanly onto the base", async () => {
+    const { db, sendTurn, member, workspaceId } = await sided("conflict");
+    const probe = vi.fn().mockResolvedValue(false);
+    const { admitted, held } = await partitionSidedMembers([member], "/repo", {
+      database: db, sendTurn, getBranchHeadSha: async () => "unchanged-sha", probeBaseConflict: probe,
+    });
+    expect(admitted).toEqual([member]);
+    expect(held).toEqual([]);
+    expect(probe).toHaveBeenCalledWith("/repo", "feature/ak-1");
+    const row = await getTrainSidingState(workspaceId, db);
+    expect(row?.sidedBranchSha).toBeNull();
+    expect(row?.sidings).toBe(1);
+    expect(row?.kind).toBe("conflict");
+  });
+
+  it("keeps holding a conflict siding that still conflicts, or when the probe cannot tell", async () => {
+    for (const answer of [true, null]) {
+      const { db, sendTurn, member } = await sided("conflict");
+      const { admitted, held } = await partitionSidedMembers([member], "/repo", {
+        database: db, sendTurn, getBranchHeadSha: async () => "unchanged-sha", probeBaseConflict: async () => answer,
+      });
+      expect(admitted).toEqual([]);
+      expect(held).toHaveLength(1);
+    }
+  });
+
+  it("never re-probes a review siding: a clean merge does not answer a review finding", async () => {
+    const { db, sendTurn, member } = await sided("review");
+    const probe = vi.fn().mockResolvedValue(false);
+    const { admitted, held } = await partitionSidedMembers([member], "/repo", {
+      database: db, sendTurn, getBranchHeadSha: async () => "unchanged-sha", probeBaseConflict: probe,
+    });
+    expect(admitted).toEqual([]);
+    expect(held).toHaveLength(1);
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it("records a drop with neither kind nor trainRef as a review siding", async () => {
+    const { db } = createTestDb();
+    const a = await seedMember(db, "feature/ak-a");
+    const sendTurn = vi.fn().mockResolvedValue({ type: "sent" });
+    await recordTrainSidingDrop(
+      { workspaceId: a.workspaceId, issueId: a.issueId, branch: "feature/ak-a" },
+      { reason: "review finding", baseBranch: "master", trainTipSha: "tip1", repoPath: "/repo" },
+      { database: db, sendTurn, getBranchHeadSha: async () => "sha", hasLiveSession: async () => true },
+    );
+    expect((await getTrainSidingState(a.workspaceId, db))?.kind).toBe("review");
+  });
+});
+
 describe("clearTrainSiding", () => {
   it("removes the siding row and the tag", async () => {
     const { db } = createTestDb();
@@ -383,7 +449,7 @@ describe("listTrainSidingStatesForProject (#1198)", () => {
 
     // seedMember creates a project per member, so each project sees exactly its own siding.
     expect(await listTrainSidingStatesForProject(older.projectId, db)).toEqual([
-      { workspaceId: older.workspaceId, sidings: 1, sidedBranchSha: "sha-1", conflictTrainTipSha: "tip", lastSidedAt: "2026-09-18T01:00:00.000Z", cappedAt: null },
+      { workspaceId: older.workspaceId, sidings: 1, sidedBranchSha: "sha-1", conflictTrainTipSha: "tip", lastSidedAt: "2026-09-18T01:00:00.000Z", cappedAt: null, kind: null },
     ]);
     expect((await listTrainSidingStatesForProject(newer.projectId, db)).map((r) => [r.workspaceId, r.sidings, Boolean(r.cappedAt)]))
       .toEqual([[newer.workspaceId, 3, true]]);

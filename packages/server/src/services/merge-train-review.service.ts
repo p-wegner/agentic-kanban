@@ -324,7 +324,7 @@ export async function recordTrainReviewSiding(
   if (!args.sided) return;
   await recordTrainSidingDrop(
     { workspaceId: member.workspaceId, issueId: member.issueId, issueNumber: member.issueNumber, branch: member.branch },
-    { reason: args.reason ?? `train review (#1194): ${args.findings.length} blocking finding(s)`, baseBranch: args.baseBranch, trainTipSha: args.trainTipSha, repoPath: args.repoPath },
+    { reason: args.reason ?? `train review (#1194): ${args.findings.length} blocking finding(s)`, baseBranch: args.baseBranch, trainTipSha: args.trainTipSha, repoPath: args.repoPath, kind: "review" },
     {
       database, sendTurn: deps.sendTurn ?? noSessionPort, getBranchHeadSha: deps.getBranchHeadSha, now: args.now,
       // #1210 is scoped to the conflict-drop siding path (merge-queue-train.ts); this review

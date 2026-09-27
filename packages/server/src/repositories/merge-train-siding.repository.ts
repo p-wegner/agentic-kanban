@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { issues, workspaces, workspaceTrainSiding } from "@agentic-kanban/shared/schema";
-import type { MergeTrainSidingDto } from "@agentic-kanban/shared";
+import type { MergeTrainSidingDto, TrainSidingKind } from "@agentic-kanban/shared";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -31,6 +31,7 @@ export async function setTrainSidingState(
     conflictTrainTipSha: string | null;
     lastSidedAt: string;
     cappedAt: string | null;
+    kind?: TrainSidingKind | null;
   },
   database: Database = db,
 ): Promise<void> {
@@ -46,6 +47,7 @@ export async function setTrainSidingState(
         conflictTrainTipSha: values.conflictTrainTipSha,
         lastSidedAt: values.lastSidedAt,
         cappedAt: values.cappedAt,
+        kind: values.kind ?? null,
       },
     });
 }
@@ -72,6 +74,7 @@ export async function listTrainSidingStatesForProject(
       conflictTrainTipSha: workspaceTrainSiding.conflictTrainTipSha,
       lastSidedAt: workspaceTrainSiding.lastSidedAt,
       cappedAt: workspaceTrainSiding.cappedAt,
+      kind: workspaceTrainSiding.kind,
     })
     .from(workspaceTrainSiding)
     .innerJoin(workspaces, eq(workspaces.id, workspaceTrainSiding.workspaceId))

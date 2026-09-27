@@ -40,7 +40,7 @@ import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban
 import { noteMergeGatePhase } from "./merge-job.service.js";
 import { formatIneligibleNote, trainMemberIneligibility } from "./merge-release-partition.js";
 import { resolveTrainReviewDecision, runTrainReview, type TrainReviewMember } from "./merge-train-review.service.js";
-import { clearTrainSiding, createTrainDropSendBack, partitionSidedMembers } from "./merge-train-siding.service.js";
+import { baseConflictProbe, clearTrainSiding, createTrainDropSendBack, partitionSidedMembers } from "./merge-train-siding.service.js";
 import { BRANCH_ALONE_FAILURE_PREFIX } from "./auto-merge-breaker.js";
 import { describeFailedSuites } from "./verify-failed-suites.js";
 import {
@@ -747,7 +747,7 @@ export function createMergeTrainRunner(deps: {
     // #1192: hold back any member still on a siding from a prior drop — its branch tip has
     // not moved since it was asked to rebase, so re-assembling it would just reproduce the
     // same conflict. Re-admission (the tip moving) is checked and cleared as a side effect.
-    const { admitted, held } = await partitionSidedMembers(allMembers, repoPath, { database, sendTurn });
+    const { admitted, held } = await partitionSidedMembers(allMembers, repoPath, { database, sendTurn, probeBaseConflict: baseConflictProbe(baseBranch) });
     for (const h of held) {
       yield {
         type: "skipped",
