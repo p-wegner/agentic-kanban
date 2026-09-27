@@ -369,6 +369,99 @@ describe("processWorkspaceCandidates — idle + readyForMerge=false", () => {
   });
 });
 
+// #1259: the review-loop breaker used to close ANY idle+"In Review" workspace with >=5 total
+// sessions, however those sessions ended — closing #1256's workspace while its last review had
+// just passed and its merge was in flight, stranding the branch until a hand reopen. It must
+// now count only CONSECUTIVE review sessions that each ended with a blocking finding, and never
+// fire on a workspace that is readyForMerge or has a gate/merge job in flight.
+describe("processWorkspaceCandidates — review-loop breaker (#1259)", () => {
+  function reviewRow(id: string, agentSummary: string) {
+    return { id, triggerType: "review", stats: JSON.stringify({ agentSummary }) };
+  }
+
+  it("does not close a workspace with 5 sessions ending in a clean review, even if not yet readyForMerge", async () => {
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ // latest session
+        id: "sess-5", status: "stopped", startedAt: new Date().toISOString(), triggerType: "review", stats: null,
+      }]))
+      .mockReturnValueOnce(makeSelectChain([{ count: 5 }])) // session count
+      .mockReturnValueOnce(makeSelectChain([ // recent session rows, newest first
+        reviewRow("sess-5", "No critical or major issues."),
+        reviewRow("sess-4", "Chat turn, no findings."),
+        reviewRow("sess-3", "No critical or major issues."),
+        { id: "sess-2", triggerType: "agent", stats: null },
+        reviewRow("sess-1", "Found a CRITICAL bug in X."),
+      ]));
+    vi.mocked(db.select).mockReturnValue(makeSelectChain([])); // getMergeRun etc. fall through
+
+    const deps = makeDeps();
+    const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: false, issueStatusName: "In Review" };
+    const stats = await processWorkspaceCandidates([candidate], deps);
+
+    expect(stats).toEqual({ relaunched: 0, merged: 0, nudged: 0, deferredProjectIds: [], completedProjectIds: ["proj-1"], notStartedProjectIds: [] });
+    expectNoWorkspaceAction(deps);
+    const logCalls = vi.mocked(deps.logMonitorAction).mock.calls;
+    expect(logCalls.some(([, action]) => action === "mark_idle")).toBe(false);
+  });
+
+  it("does not close a readyForMerge workspace even with 5 consecutive blocking reviews", async () => {
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{
+        id: "sess-5", status: "stopped", startedAt: new Date().toISOString(), triggerType: "review", stats: null,
+      }]))
+      .mockReturnValueOnce(makeSelectChain([{ count: 5 }]));
+    vi.mocked(db.select).mockReturnValue(makeSelectChain([]));
+
+    const deps = makeDeps();
+    // readyForMerge=true takes the merge branch before the breaker is ever reached.
+    const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: true, issueStatusName: "In Review" };
+    const stats = await processWorkspaceCandidates([candidate], deps);
+
+    expect(stats.merged).toBe(1);
+    const logCalls = vi.mocked(deps.logMonitorAction).mock.calls;
+    expect(logCalls.some(([, action]) => action === "mark_idle")).toBe(false);
+  });
+
+  it("closes a workspace with 5 consecutive review sessions that each had blocking findings, and names the counted sessions", async () => {
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{
+        id: "sess-5", status: "stopped", startedAt: new Date().toISOString(), triggerType: "review", stats: null,
+      }]))
+      .mockReturnValueOnce(makeSelectChain([{ count: 5 }]))
+      .mockReturnValueOnce(makeSelectChain([
+        reviewRow("sess-5", "Found a MAJOR issue in Y."),
+        reviewRow("sess-4", "CRITICAL: still broken."),
+        reviewRow("sess-3", "MAJOR: same bug persists."),
+        reviewRow("sess-2", "CRITICAL bug not fixed."),
+        reviewRow("sess-1", "Found a CRITICAL bug in X."),
+      ]))
+      // getMergeRun (isMergeInFlight) — no merge in flight.
+      .mockReturnValueOnce(makeSelectChain([]))
+      // getWorkspaceCloseState (inside closeWorkspace) reads the workspace row.
+      .mockReturnValueOnce(makeSelectChain([{
+        id: "ws-1", status: "reviewing", closedAt: null, mergedAt: null, readyForMerge: false, workingDir: "/path/to/dir",
+      }]));
+    vi.mocked(db.select).mockReturnValue(makeSelectChain([]));
+
+    const deps = makeDeps();
+    const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: false, issueStatusName: "In Review" };
+    const stats = await processWorkspaceCandidates([candidate], deps);
+
+    expect(stats).toEqual({ relaunched: 0, merged: 0, nudged: 0, deferredProjectIds: [], completedProjectIds: ["proj-1"], notStartedProjectIds: [] });
+    expectNoWorkspaceAction(deps);
+    const logCalls = vi.mocked(deps.logMonitorAction).mock.calls;
+    const closeCall = logCalls.find(([, action, wsId]) => action === "mark_idle" && wsId === "ws-1");
+    expect(closeCall).toBeDefined();
+    const [, , , , extra] = closeCall!;
+    expect(extra?.responseSummary).toContain("sess-5");
+    expect(extra?.responseSummary).toContain("sess-1");
+    expect(extra?.responseSummary).toContain("5 consecutive blocking reviews");
+  });
+});
+
 describe("processWorkspaceCandidates — auto_merge_in_review (not-ready In Review)", () => {
   it("does NOT merge or relaunch a zero-diff In-Review workspace awaiting attention", async () => {
     const deps = { ...makeDeps(), monitorOwnsMerge: true, autoMergeInReview: true };
