@@ -116,7 +116,8 @@ const KNOWN_UNSWEPT: Record<string, string> = {
     "`tmpdir()` itself so the parent always exists). Minting inside an `ak-` directory would " +
     "break that contract, and libsql will not create a missing parent. Renaming it `ak-…` would " +
     "make this guard green while changing nothing — it is a loose FILE, and the reaper only " +
-    "sweeps directories. Left as-is deliberately rather than fixed cosmetically (#840).",
+    "sweeps directories. Left as-is deliberately rather than fixed cosmetically (#840). Swept " +
+    "since 2026-09-27 by `scripts/sweep-loose-test-db-files.mjs` (dead pid, older than an hour).",
 };
 
 interface Site {

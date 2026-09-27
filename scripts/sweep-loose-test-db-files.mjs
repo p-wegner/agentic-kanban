@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Drain the board's leaked loose `test-db-*.db` files from `%TEMP%` (#843).
+ * Drain the board's leaked loose `test-db-*.db` files from `%TEMP%` (#843), and the per-process
+ * `agentic-kanban-vitest-<pid>.db` throwaways (see `VITEST_THROWAWAY_RE`).
  *
  * `createTestDb()` (`packages/server/src/__tests__/helpers/test-db.ts`) used to mint each
  * scratch DB directly in `%TEMP%` as `test-db-<uuid>.db` (+ `-wal`/`-shm` siblings). #840
@@ -47,6 +48,26 @@ const UUID_RE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
  */
 const LOOSE_SCRATCH_DB_RE = new RegExp(`^[A-Za-z0-9._-]*${UUID_RE}\\.db(-wal|-shm|-journal)?$`, "i");
 
+/**
+ * The second family: `resolveDbLocation`'s per-PROCESS throwaway (`packages/shared/src/lib/db-path.ts`,
+ * #231), `agentic-kanban-vitest-<pid>.db` plus siblings. One per vitest worker process, never
+ * removed; measured 2026-09-27 at ~28k entries, the largest family no sweep covered. Named by a
+ * pid, not a uuid, so it is swept only when that pid is not a live process AND the file is over
+ * an hour old: a pid Windows has reused is skipped (harmless, caught next run), and a worker
+ * that is still running keeps its file.
+ */
+const VITEST_THROWAWAY_RE = /^agentic-kanban-vitest-(\d+)\.db(-wal|-shm|-journal)?$/;
+const THROWAWAY_MIN_AGE_MS = 60 * 60 * 1000;
+
+function pidIsLive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+}
+
 const args = process.argv.slice(2);
 const apply = args.includes("--apply");
 
@@ -89,7 +110,9 @@ let failed = 0;
 let bytes = 0;
 
 for (const name of entries) {
-  if (!LOOSE_SCRATCH_DB_RE.test(name)) continue;
+  const throwaway = VITEST_THROWAWAY_RE.exec(name);
+  if (!throwaway && !LOOSE_SCRATCH_DB_RE.test(name)) continue;
+  if (throwaway && pidIsLive(Number(throwaway[1]))) continue;
   const full = join(root, name);
   let st;
   try {
@@ -98,6 +121,7 @@ for (const name of entries) {
     continue;
   }
   if (st.isDirectory()) continue; // never touch the ak-test-db-* namespace the reaper owns
+  if (throwaway && Date.now() - st.mtimeMs < THROWAWAY_MIN_AGE_MS) continue;
   matched++;
   bytes += st.size;
   if (!apply) continue;
