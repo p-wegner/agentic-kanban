@@ -135,9 +135,15 @@ export interface CliResult {
 }
 
 /** Run the bundled CLI against `dbPath`. */
+/**
+ * `KANBAN_CLI_WRITE_TRANSPORT=direct`: issue writes never probe a board server, so a board
+ * running on this machine is never contacted by a test (cli/board-server-writes.ts).
+ */
+export const CLI_TEST_ENV = { KANBAN_CLI_WRITE_TRANSPORT: "direct" } as const;
+
 export function runCli(args: string[], dbPath: string): CliResult {
   const result = spawnSync(process.execPath, [builtCliPath(), ...args], {
-    env: { ...process.env, DB_URL: `file:${dbPath}` },
+    env: { ...process.env, ...CLI_TEST_ENV, DB_URL: `file:${dbPath}` },
     cwd: PKG_DIR,
     encoding: "utf-8",
     windowsHide: true,
@@ -170,7 +176,7 @@ export function runPnpmCli(args: string[], dbPath: string): CliResult & { error?
     }
   }
   const result = spawnSync(pnpm, ["cli", "--", ...args], {
-    env: { ...process.env, DB_URL: `file:${dbPath}` },
+    env: { ...process.env, ...CLI_TEST_ENV, DB_URL: `file:${dbPath}` },
     cwd: REPO_ROOT,
     encoding: "utf-8",
   });

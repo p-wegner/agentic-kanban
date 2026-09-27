@@ -18,8 +18,9 @@ import {
   deleteDependencyByIdReturning,
   applyDependencyEdgeBatch,
 } from "../../repositories/issue-service.repository.js";
-import { validateBatchEdges, formatBatchEdgeResult } from "../../lib/dependency-batch.js";
+import { validateBatchEdges, formatBatchEdgeResult, type BatchEdgeResult } from "../../lib/dependency-batch.js";
 import { buildApiUrl } from "./workspace-api-url.js";
+import { resolveIssueWriteTransport, boardServerWrite, directWriteNotice } from "../board-server-writes.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { isDirectionalDependencyType, DIRECTIONAL_DEPENDENCY_TYPES } from "@agentic-kanban/shared/lib/dependency-type-traits";
 
@@ -110,6 +111,16 @@ Examples:
         console.error("This dependency already exists.");
         process.exit(1);
       }
+
+      // Through the running server when it serves this DB, so an open board shows the edge.
+      const transport = await resolveIssueWriteTransport();
+      if (transport.mode === "server") {
+        const created = await boardServerWrite<{ id: string }>(transport, "POST", `/api/issues/${encodeURIComponent(issueId)}/dependencies`, { dependsOnId: targetId, type: depType });
+        console.log(`Added '${depType}' dependency: ${issueId} -> ${targetId}`);
+        console.log(`  id: ${created.id}`);
+        process.exit(0);
+      }
+      console.warn(directWriteNotice(transport.reason));
 
       const id = randomUUID();
       try {
@@ -256,6 +267,15 @@ Valid actions: add, remove
         console.error(validationError);
         process.exit(1);
       }
+
+      // Through the running server when it serves this DB (same atomic batch + cycle check).
+      const transport = await resolveIssueWriteTransport();
+      if (transport.mode === "server") {
+        const result = await boardServerWrite<BatchEdgeResult>(transport, "POST", "/api/issues/dependencies/batch", { edges });
+        for (const line of formatBatchEdgeResult(result, options.json ?? false)) console.log(line);
+        process.exit(0);
+      }
+      console.warn(directWriteNotice(transport.reason));
 
       const issueIds = [...new Set(edges.flatMap((e) => [e.issueId, e.dependsOnId]))];
       const issueRows = issueIds.length === 0 ? [] : await getIssueIdsAndProjectsForBatch(issueIds);

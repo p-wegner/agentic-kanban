@@ -1,9 +1,10 @@
 import type { Command } from "commander";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { parseSessionSummary, isTerminalStatusName, type SessionSummary } from "@agentic-kanban/shared";
+import { parseSessionSummary, type SessionSummary } from "@agentic-kanban/shared";
 import { resolveProjectIdArg, describeIssueNumberMiss, resolveIssueArg, cliAction } from "../shared.js";
 import { cliPathArg } from "../cli-path.js";
+import { createIssueOnBoard, updateIssueOnBoard, moveIssueOnBoard } from "./issue-writes.js";
 import { isAnalyticsNoise } from "../../services/session-filter.js";
 import { getWorkspaceDiffStats, type WorkspaceDiffStats } from "../../services/workspace-diff-stats.js";
 import {
@@ -11,29 +12,24 @@ import {
   getIssueHeaderByNumber,
   getIssueByNumberOrId,
   getIssueIdByNumberInProject,
-  createIssueWithNextNumber,
-  moveIssueToStatus,
   createSubIssueWithParentLink,
   getIssuesTouchedFilesByNumbers,
   getIssueSummary,
   getIssueTags,
 } from "../../repositories/issue.repository.js";
 import {
-  updateIssueById,
   insertIssueArtifact,
   deleteIssueCascade,
   createIssuesBatchWithDepsAndTags,
 } from "../../repositories/issue-service.repository.js";
 import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "../../repositories/issue-number.repository.js";
 import { getProjectStatuses, getProjectById } from "../../repositories/project.repository.js";
-import { getWorkspacesByIssueId, findOpenUnmergedWorkspace } from "../../repositories/workspace.repository.js";
-import { isWorkspaceBranchFullyContained } from "../../services/branch-containment.service.js";
+import { getWorkspacesByIssueId } from "../../repositories/workspace.repository.js";
 import { getSessionsForWorkspacesDesc } from "../../repositories/workspace-launch-failures.repository.js";
 import { getSessionMessagesByIdDesc } from "../../repositories/session.repository.js";
 import { getWorkspaceArtifactTarget } from "../../repositories/phase-artifacts.repository.js";
 import { buildIssueSummaryLines, buildIssueStatusLines, validateAttachArtifactOptions, formatAttachArtifactOutput, buildIssueSummaryJson, buildIssueStatusJson, formatResolvedProjectLine } from "../../lib/issue-cli-format.js";
 import { extractLastAgentMessageFromRows } from "../../lib/session-message-extraction.js";
-import { openWorkspaceBlockMessage } from "../../lib/terminal-move-guard.js";
 import { registerIssueDependencyCommands } from "./issue-dependency.js";
 import { normalizeBatchInput, validateBatchIssueInputs, formatBatchCreateResult } from "../../lib/batch-create-issues.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -187,7 +183,8 @@ Examples:
         }
       }
 
-      const { id, issueNumber } = await createIssueWithNextNumber({
+      // Through the running server when it serves this DB, so an open board shows the card.
+      const { id, issueNumber } = await createIssueOnBoard({
         projectId,
         statusId,
         title,
@@ -280,10 +277,9 @@ Tip: to change an issue's STATUS, use 'issue move' instead.
         process.exit(1);
       }
 
-      updates.updatedAt = new Date().toISOString();
-      await updateIssueById(issue.id, updates);
+      await updateIssueOnBoard(issue.id, updates);
 
-      const changed = Object.keys(updates).filter((k) => k !== "updatedAt");
+      const changed = Object.keys(updates);
       const num = issue.issueNumber != null ? `#${issue.issueNumber}` : issue.id;
       console.log(`Updated issue ${num} (${changed.join(", ")}).`);
       process.exit(0);
@@ -316,19 +312,11 @@ Tip: Use 'issue list' to find the issue ID and see available status names.
         process.exit(1);
       }
 
-      // AK-535 guard: don't strand an open, non-direct, unmerged branch by moving
-      // the issue to a terminal status. Same guard as the server PATCH route and MCP.
-      if (isTerminalStatusName(statusName)) {
-        const openWs = await findOpenUnmergedWorkspace(issue.id);
-        // #1205: a branch fully contained in the base (0 ahead) has nothing left to
-        // merge — don't let it block the move.
-        if (openWs && !(await isWorkspaceBranchFullyContained(openWs.id))) {
-          console.error(openWorkspaceBlockMessage(statusName, openWs.branch));
-          process.exit(1);
-        }
+      const refused = await moveIssueOnBoard(issue.id, target.id, statusName);
+      if (refused) {
+        console.error(refused);
+        process.exit(1);
       }
-
-      await moveIssueToStatus(issue.id, target.id);
 
       console.log(`Moved issue to '${statusName}'`);
       process.exit(0);
