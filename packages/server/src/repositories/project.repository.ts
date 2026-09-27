@@ -240,6 +240,14 @@ export async function getProjectRepoFields(
   return project;
 }
 
+/** `{id, repoPath}` for every project with a non-empty repoPath (#1253) — a per-project sweep's candidate set. */
+export async function getProjectIdsWithRepoPath(
+  database: Database = db,
+): Promise<Array<{ id: string; repoPath: string }>> {
+  const rows = await database.select({ id: projects.id, repoPath: projects.repoPath }).from(projects);
+  return rows.filter((r): r is { id: string; repoPath: string } => !!r.repoPath);
+}
+
 /**
  * A project's default branch, or null when the project does not exist (#502).
  *

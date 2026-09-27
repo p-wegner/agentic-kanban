@@ -103,3 +103,6 @@ export { mergeGateDiscards, mergeGateDiscardsRelations } from "./merge-gate-disc
 // #1164: an operator-placed per-workspace hold, honored by the monitor walk, the auto-merge
 // orchestrator, and the merge-train reconciler — see the module header for why.
 export { workspaceMergeHold, workspaceMergeHoldRelations } from "./workspace-merge-hold.js";
+// #1253: the moment a workspace became ready-for-merge, read by the queue-pressure signal
+// instead of `updatedAt` — see the module header for why.
+export { workspaceReadyForMerge, workspaceReadyForMergeRelations } from "./workspace-ready-for-merge.js";

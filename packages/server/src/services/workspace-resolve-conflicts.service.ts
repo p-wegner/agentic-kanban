@@ -9,6 +9,7 @@ import {
   getWorkspaceById,
   updateWorkspaceStatus,
 } from "../repositories/workspace.repository.js";
+import { stampWorkspaceReadyForMergeAt } from "../repositories/workspace-ready-for-merge.repository.js";
 import {
   getConflictingFiles,
   buildConflictResolutionPrompt,
@@ -95,6 +96,7 @@ export function createWorkspaceResolveConflictsService(deps: ResolveConflictsDep
     if (rebaseResult.success) {
       // The rebase itself resolved it — no conflict remains, so no agent is needed.
       await updateWorkspaceStatus(id, "idle", { readyForMerge: true }, database);
+      await stampWorkspaceReadyForMergeAt(id, new Date().toISOString(), database);
       const cleanProjectId = await resolveProjectId(id, database);
       if (cleanProjectId) boardEvents?.broadcast(cleanProjectId, "board_changed");
       console.log(`[workspace-merge] resolve-conflicts: workspaceId=${id} rebase onto '${baseBranch}' completed cleanly — nothing to resolve`);
