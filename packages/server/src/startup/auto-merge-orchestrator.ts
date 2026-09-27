@@ -24,6 +24,7 @@ import {
 import { verifyChainSemaphoreActive } from "../services/verify-chain-semaphore.js";
 import { resolveBaseRedVeto, type BaseRedVeto } from "../services/merge-train-base-veto.js";
 import { applyTickBreakerOutcomes, resolveAutoMergeBreakerHold } from "../services/auto-merge-breaker.js";
+import { releaseMovedAutoMergeBranchHolds } from "../services/auto-merge-branch-hold.js";
 import {
   clearTrainWindow,
   readTrainWindowsFromPrefMap,
@@ -359,6 +360,9 @@ export function createAutoMergeOrchestrator(deps: {
     // #1164 — an operator-held workspace must be skipped here too: this orchestrator's
     // `executeQueue` is a SEPARATE entry point from the monitor walk's `canStartMerge`, so a
     // hold that only lived there would be silently bypassed by this path.
+    // #1207 follow-up: a branch the same-failure breaker held (its OWN gate kept failing the same
+    // way) is released first when its head has moved, so a pushed fix rejoins in this very tick.
+    await releaseMovedAutoMergeBranchHolds(database).catch(() => []);
     const heldWorkspaceIds = await getHeldWorkspaceIds(database);
 
     const statusNames = autoMergeInReview
@@ -821,7 +825,8 @@ export function createAutoMergeOrchestrator(deps: {
       const strandedIds = outcome.strandedIds;
 
       // #1207: fold this tick's outcomes into the per-project breakers — a landing clears the
-      // streak, and the third consecutive identical signature pauses auto-merge for the project.
+      // streak, and the third consecutive identical signature holds the ONE branch it is
+      // attributable to (a branch-alone gate failure), else pauses auto-merge for the project.
       await applyTickBreakerOutcomes({
         failures: outcome.firstFailurePerProject,
         succeeded: outcome.succeededProjects,

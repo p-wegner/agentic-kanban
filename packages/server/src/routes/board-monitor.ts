@@ -22,6 +22,7 @@ import { requireProject } from "../services/require-project.js";
 import { previewNextStartCandidates } from "../services/start-score-preview.service.js";
 import { getAutopilotStatus, type AutopilotStatusDeps } from "../services/autopilot-status.service.js";
 import { clearAutoMergeBreaker, readAutoMergeBreaker } from "../services/auto-merge-breaker.js";
+import { clearAutoMergeBranchHoldsForProject } from "../services/auto-merge-branch-hold.js";
 import { getDeliveryStatus } from "../services/delivery-status.service.js";
 import { latestFlush, readFlushState, sortFlushes } from "../services/flush-state.js";
 import { resolveStableCheckoutFor } from "../services/rc-state.js";
@@ -129,7 +130,9 @@ export function createBoardMonitorRoute(
     await requireProject(projectId, database);
     const breaker = await readAutoMergeBreaker(projectId, database);
     await clearAutoMergeBreaker(projectId, database);
-    return c.json({ ok: true, cleared: breaker !== null, breaker });
+    // The branch-scoped trips too: "I fixed it, try again" covers the branches the breaker held.
+    const releasedBranchHolds = await clearAutoMergeBranchHoldsForProject(projectId, database);
+    return c.json({ ok: true, cleared: breaker !== null, breaker, releasedBranchHolds });
   });
 
   // #1155: one glance for the header chip — the EFFECTIVE risk posture plus the EFFECTIVE

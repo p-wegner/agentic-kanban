@@ -25,6 +25,20 @@ import { getSetupRunForGate } from "../repositories/workspace-setup-run.reposito
 import { revParse } from "@agentic-kanban/shared/lib/git-service";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { Database } from "../db/index.js";
+import { placeAutoMergeBranchHold } from "./auto-merge-branch-hold.js";
+
+/**
+ * The prefix `merge-queue-train.ts` puts on a member the bisect proved red ON ITS OWN (#492). A
+ * failure carrying it is attributable to exactly one workspace, which is what lets the breaker hold
+ * that branch instead of the project. Declared here (and imported by the train) so the breaker
+ * does not pull the train's import graph in for one string.
+ */
+export const BRANCH_ALONE_FAILURE_PREFIX = "gate failed for this branch alone";
+
+/** Is this gate failure attributable to the ONE branch that carried it? */
+export function isBranchAloneFailure(message: string): boolean {
+  return message.trimStart().startsWith(BRANCH_ALONE_FAILURE_PREFIX);
+}
 
 /** Consecutive identical failures before auto-merge is paused for the project. */
 export const AUTO_MERGE_BREAKER_THRESHOLD = 3;
@@ -55,6 +69,21 @@ export interface AutoMergeBreakerState {
   workspaceId?: string | null;
   /** That workspace's setup-run verdict at pause time; a change clears the breaker. */
   setupVerdict?: string | null;
+  /**
+   * The ONE workspace every failure in this streak was attributable to (a branch-alone gate
+   * failure), or null as soon as one failure was not attributable or named a different workspace.
+   * A streak that reaches the threshold with this set holds THAT branch, not the project.
+   */
+  attributedWorkspaceId?: string | null;
+  /** ISO — set when the streak reached the threshold with a single attributed workspace. */
+  branchHeldAt?: string;
+}
+
+/** What a streak that reached the threshold trips (pure): one branch, the whole project, or nothing yet. */
+export function classifyBreakerTrip(state: AutoMergeBreakerState | null): "branch" | "project" | null {
+  if (state?.branchHeldAt && state.attributedWorkspaceId) return "branch";
+  if (state?.pausedAt) return "project";
+  return null;
 }
 
 export function autoMergeBreakerKey(projectId: string): string {
@@ -90,12 +119,25 @@ export function normalizeFailureSignature(message: string): string {
  */
 export function recordBreakerFailure(
   previous: AutoMergeBreakerState | null,
-  failure: { signature: string; baseSha?: string | null; workspaceId?: string | null; setupVerdict?: string | null },
+  failure: {
+    signature: string;
+    baseSha?: string | null;
+    workspaceId?: string | null;
+    setupVerdict?: string | null;
+    /** Set when this failure is attributable to exactly this one workspace (a branch-alone gate failure). */
+    attributedWorkspaceId?: string | null;
+  },
   now: string,
   threshold = AUTO_MERGE_BREAKER_THRESHOLD,
 ): AutoMergeBreakerState {
   const continues = previous?.signature === failure.signature;
   const count = continues ? previous.count + 1 : 1;
+  const attributed = failure.attributedWorkspaceId ?? null;
+  // One attribution for the WHOLE streak: the same signature on two different branches (or once
+  // unattributed) is a project problem — a shared suite, the base, the environment.
+  const attributedWorkspaceId = continues
+    ? (attributed !== null && previous.attributedWorkspaceId === attributed ? attributed : null)
+    : attributed;
   const next: AutoMergeBreakerState = {
     signature: failure.signature,
     count,
@@ -103,9 +145,16 @@ export function recordBreakerFailure(
     baseSha: failure.baseSha ?? null,
     workspaceId: failure.workspaceId ?? null,
     setupVerdict: failure.setupVerdict ?? null,
+    attributedWorkspaceId,
   };
+  if (count < threshold) return next;
+  // A streak that is ONE branch's own failure holds that branch; the project keeps merging.
+  if (attributedWorkspaceId) {
+    next.branchHeldAt = now;
+    return next;
+  }
   // Latch on the run that REACHES the threshold, and keep the original `pausedAt` afterwards.
-  if (count >= threshold) next.pausedAt = continues ? (previous.pausedAt ?? now) : now;
+  next.pausedAt = continues ? (previous.pausedAt ?? now) : now;
   return next;
 }
 
@@ -151,6 +200,8 @@ export function parseBreakerState(raw: string | null | undefined): AutoMergeBrea
     if (typeof parsed.baseSha === "string") state.baseSha = parsed.baseSha;
     if (typeof parsed.workspaceId === "string") state.workspaceId = parsed.workspaceId;
     if (typeof parsed.setupVerdict === "string") state.setupVerdict = parsed.setupVerdict;
+    if (typeof parsed.attributedWorkspaceId === "string") state.attributedWorkspaceId = parsed.attributedWorkspaceId;
+    if (typeof parsed.branchHeldAt === "string") state.branchHeldAt = parsed.branchHeldAt;
     return state;
   } catch {
     return null;
@@ -218,13 +269,26 @@ export async function recordAutoMergeGateFailure(args: {
     baseSha: await currentBaseSha(projectId, database),
     workspaceId,
     setupVerdict: workspaceId ? await currentSetupVerdict(workspaceId, database) : null,
+    attributedWorkspaceId: workspaceId && isBranchAloneFailure(message) ? workspaceId : null,
   }, now);
+
+  if (classifyBreakerTrip(next) === "branch" && next.attributedWorkspaceId) {
+    const held = await holdAttributedBranch(projectId, next, database, now);
+    if (held) {
+      args.broadcast?.(projectId);
+      return next;
+    }
+    // The hold could not be written: persisting the streak lets the next identical failure
+    // try again, rather than believing a branch is held that nothing will skip.
+  }
+
   await writeAutoMergeBreaker(projectId, next, database).catch((err) =>
     console.warn(`[auto-merge] circuit breaker persist failed for project ${projectId} (non-fatal): ${errorMessage(err)}`));
 
   const newlyPaused = breakerIsPaused(next) && !breakerIsPaused(previous);
   if (newlyPaused) {
-    const summary = `auto-merge paused for this project: ${next.count} consecutive gate runs failed with the same signature (${next.signature})`;
+    const why = describeProjectScope(previous, next);
+    const summary = `auto-merge paused for this project: ${next.count} consecutive gate runs failed with the same signature (${next.signature}) — scope: project, ${why}`;
     console.log(`[auto-merge] ${summary} — no further gate runs until POST /api/projects/${projectId}/auto-merge/resume, the base sha moves, or the failing workspace's setup verdict changes`);
     await logBoardHealthEvent({
       projectId,
@@ -232,11 +296,49 @@ export async function recordAutoMergeGateFailure(args: {
       eventType: "error",
       category: "merge",
       summary,
-      details: { signature: next.signature, count: next.count, since: next.since, baseSha: next.baseSha, workspaceId: next.workspaceId },
+      details: { scope: "project", signature: next.signature, count: next.count, since: next.since, baseSha: next.baseSha, workspaceId: next.workspaceId },
     }, database).catch((err) => console.warn(`[auto-merge] breaker board-health event failed (non-fatal): ${errorMessage(err)}`));
     args.broadcast?.(projectId);
   }
   return next;
+}
+
+/** Why a tripped streak is the PROJECT's, for the pause line — the operator's first question. */
+function describeProjectScope(previous: AutoMergeBreakerState | null, next: AutoMergeBreakerState): string {
+  if (next.signature === SETUP_BLOCKED_SIGNATURE) return "a setup/dependency failure is the environment, not one branch";
+  const branchAlone = next.signature.startsWith(BRANCH_ALONE_FAILURE_PREFIX);
+  if (branchAlone && previous?.workspaceId && next.workspaceId && previous.workspaceId !== next.workspaceId) {
+    return "the same branch-alone failure repeated on DIFFERENT branches";
+  }
+  return branchAlone
+    ? "the streak was not one branch's alone"
+    : "the failure is not attributable to a single branch (a whole-train or base/infra failure)";
+}
+
+/**
+ * The streak is ONE branch's own failure: hold that branch and reset the project's streak, so
+ * auto-merge keeps running for everything else. Returns false when the hold could not be written.
+ */
+async function holdAttributedBranch(projectId: string, next: AutoMergeBreakerState, database: Database, now: string): Promise<boolean> {
+  const workspaceId = next.attributedWorkspaceId as string;
+  try {
+    const hold = await placeAutoMergeBranchHold({ projectId, workspaceId, signature: next.signature, count: next.count, database, now });
+    await clearAutoMergeBreaker(projectId, database).catch(() => undefined);
+    const summary = `auto-merge holding workspace ${workspaceId} (branch ${hold.branch ?? "?"}) — scope: branch, ${next.count} consecutive gate runs failed for this branch alone with the same signature (${next.signature})`;
+    console.log(`[auto-merge] ${summary} — the rest of project ${projectId} keeps auto-merging; released when the branch head moves off ${hold.branchSha?.slice(0, 8) ?? "an unreadable sha (release by hand)"}, via DELETE /api/workspaces/${workspaceId}/merge-hold, or POST /api/projects/${projectId}/auto-merge/resume`);
+    await logBoardHealthEvent({
+      projectId,
+      cycleId: `auto-merge-breaker-${now}`,
+      eventType: "action",
+      category: "merge",
+      summary,
+      details: { scope: "branch", signature: next.signature, count: next.count, since: next.since, workspaceId, branch: hold.branch, branchSha: hold.branchSha },
+    }, database).catch((err) => console.warn(`[auto-merge] breaker board-health event failed (non-fatal): ${errorMessage(err)}`));
+    return true;
+  } catch (err) {
+    console.warn(`[auto-merge] could not hold workspace ${workspaceId} for its repeating branch-alone failure (non-fatal, streak kept): ${errorMessage(err)}`);
+    return false;
+  }
 }
 
 /** The project's base-branch tip right now, or null when it cannot be read (never a throw). */
