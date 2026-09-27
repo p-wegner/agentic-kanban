@@ -92,7 +92,7 @@ async function statusName(db: Db, issueId: string): Promise<string> {
 function engine(db: Db, verdicts: ImplementExitCheckResult[]) {
   const sessionManager = { startSession: vi.fn(async () => randomUUID()) };
   const runCheck = vi.fn(async (_args: RunImplementExitCheckArgs) => verdicts.shift() ?? GREEN);
-  const sendBuilderTurn = vi.fn(async () => ({ type: "resumed" }));
+  const sendBuilderTurn = vi.fn(async (_workspaceId: string, _content: string) => ({ type: "resumed" }));
   const boardEvents = { broadcast: vi.fn(), broadcastActivity: vi.fn() };
   const { runWorkflowOnExit } = createWorkflowEngine({
     sessionManager: sessionManager as never,
