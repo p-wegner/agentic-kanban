@@ -37,7 +37,7 @@ import {
   type PreMergeGateWorkspace,
 } from "./pre-merge-gate.service.js";
 import { resolveGateVerification } from "./pre-merge-gate-tier.js";
-import { runGateWithEvidence } from "./merge-gate-evidence.js";
+import { gateEvidenceShas, runGateWithEvidence } from "./merge-gate-evidence.js";
 import { countBehindCommits } from "./git.service.js";
 
 // The #243 sha comparison moved next to the protocol that uses it (#540). Re-exported here
@@ -803,8 +803,9 @@ export async function runPreLockGate(args: {
     ranAt: preGate.ranAt,
     stage: preGate.stage,
     source: "pre-lock-merge",
-    branchSha: preGate.shasBefore.branchSha ?? null,
-    baseSha: preGate.shasBefore.baseSha ?? null,
+    // Keyed like the token: the new base when a verdict-neutral base move was kept.
+    branchSha: gateEvidenceShas(preGate).branchSha ?? null,
+    baseSha: gateEvidenceShas(preGate).baseSha ?? null,
     durationMs: preGate.durationMs,
     message: preGate.message,
     database,

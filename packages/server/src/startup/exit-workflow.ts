@@ -447,7 +447,8 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     if (tipMovedDuringGate) {
       console.warn(`[workflow] pre-merge gate passed for workspace ${workspaceId} but the ${tipMovedDuringGate} moved DURING the run — persisting no gate evidence (#243)`);
     }
-    const gateShas = tipMovedDuringGate ? {} : preMergeGate.shasBefore;
+    // A pass kept across a verdict-neutral base move is keyed to the NEW base (base-move-relevance.ts).
+    const gateShas = tipMovedDuringGate ? {} : (preMergeGate.evidenceShas ?? preMergeGate.shasBefore);
     if (!(await runColdCloneGate(ctx))) return;
     // #629 Guard: re-verify the branch still has committed changes ahead of base.
     // A race (e.g. branch reset/rebased to equal base between review start and exit)
