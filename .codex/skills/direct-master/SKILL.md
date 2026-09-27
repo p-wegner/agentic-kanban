@@ -79,8 +79,10 @@ Grouping the gates NEVER means holding uncommitted work — see the dirty-tree r
 Keep a group to what you can still debug as a unit — roughly 3–6 tickets, or fewer if any
 is behaviour-changing rather than mechanical.
 
-**Per-ticket you still get a safety net for free:** the PostToolUse hook typechecks on every
-edit, so a broken ticket surfaces immediately, not at group end. That is exactly what makes
+**Per-ticket, run the cheap net yourself:** no hook typechecks on edit any more (hooks are
+safety-only since 2026-09-27; the board's implement-exit check replaced them for builders, and
+direct-master has no such phase). Run `pnpm typecheck` and the impact selection after each
+ticket, so a broken ticket surfaces before the next one builds on it. That is what makes
 deferring the *expensive* gates safe.
 
 **Sequence for a group:**
