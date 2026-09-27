@@ -69,6 +69,7 @@ mechanism below is a trade between them and risk.
 |---|---|---|---|---|
 | Test-impact selection instead of full suite | much less per gate | — | faster gates | a missed suite lands; measured as the miss rate |
 | Typecheck-only review-exit gate (#1260) | one test run per ticket instead of two | — | ready sooner | none: the merge still gates |
+| Implement-exit check in the board, not in hooks | one admitted run per phase instead of one per agent stop | a red result goes back to the builder once, before a review is spent | review starts on green work | none: it adds a check, the merge still gates |
 | Merge train (gate N branches once) | 1 gate per N | no rebase cascade | N land together | a red member delays the others by bisect runs |
 | Ticket groups (#661) | 1 gate per group | one builder holds the coupled intent | fewer conflicts | a bigger change per review |
 | Verdict-neutral base moves keep the gate | no re-gate | no re-review | no requeue | none: only paths no gate reads |
@@ -162,17 +163,32 @@ test run per ticket only doubled the cost.
 ## What else a rung sets
 
 The gate is one field of the posture. The same dial sets how work is batched, how fast the
-monitor lands and relaunches, what a builder checks before it stops, and where it runs. Values
-from `postureForLevel` in `risk-posture.service.ts`:
+monitor lands and relaunches, what the board checks when a builder's implementation phase ends,
+and where it runs. Values from `postureForLevel` in `risk-posture.service.ts`:
 
-| Level | Review-exit gate | Train window | Merges / relaunches per cycle | Builder self-check | File contention | Placement |
+| Level | Implement-exit check | Review-exit gate | Train window | Merges / relaunches per cycle | File contention | Placement |
 |---|---|---|---|---|---|---|
-| strict | full gate | none (1) | 1 / 1 | tests + typecheck | serialize | host, half the box |
-| standard | full gate | none (1) | 2 / 2 | tests, capacity-gated | serialize | host preferred |
-| fast | typecheck | 8, 20 min | 4 / 4 | typecheck only | warn | remote preferred |
-| sprint | typecheck | 12, 30 min | 8 / 6 | none | off | remote preferred |
-| iterate | typecheck | none (1) | 2 / 2 | tests, capacity-gated | serialize | host preferred |
-| flow | typecheck | none (1) | 2 / 2 | tests, capacity-gated | serialize | host preferred |
+| strict | full | full gate | none (1) | 1 / 1 | serialize | host, half the box |
+| standard | impact | full gate | none (1) | 2 / 2 | serialize | host preferred |
+| fast | typecheck | typecheck | 8, 20 min | 4 / 4 | warn | remote preferred |
+| sprint | none | typecheck | 12, 30 min | 8 / 6 | off | remote preferred |
+| iterate | impact | typecheck | none (1) | 2 / 2 | serialize | host preferred |
+| flow | impact | typecheck | none (1) | 2 / 2 | serialize | host preferred |
+
+**The implement-exit check** (`implementExitCheck`, `startup/exit/implement-exit-check.ts`) is
+what the board runs once when a builder session ends with committed work, before the ticket goes
+to In Review. The rule behind the column: never wider than the level's merge gate, at least a
+typecheck, except `sprint`, which has no per-ticket review to protect. `standard` stops at
+`impact` because its review-exit and merge gates already run the full suite. `typecheck` runs the
+project's typecheck command; `impact` runs the verify script with the merge gate's `impact`-tier
+env (`KANBAN_IMPACT_BASE`, `KANBAN_TEST_NEW_FILES`, the test-impact budget); `full` runs it
+unscoped. On red the board launches no review: it sends the builder one follow-up turn naming the
+failing suites or typecheck errors and re-runs the check when that session ends. After two such
+turns the workspace is marked for attention (`blocked`, an issue comment, a butler event). A ticket
+group is one builder session, so it is checked once, after its last member. The check replaced
+the builder's typecheck and Vitest Stop hooks: a hook fired on every agent stop, could not see the
+phase or the group, ran outside verify-chain admission and never reached the ledger. Hooks are now
+cheap safety only (command safety, vital files, worktree scope, uncommitted work).
 
 "Train window none (1)" means the posture does not ask for batching. The auto-merge window still
 collects ready branches, with its own defaults: up to **4** members, released after **10 min**
@@ -208,7 +224,11 @@ the per-suite durations in the impact map are in-test time only, without vitest'
 startup, so a 120 s budget still runs several minutes of wall clock.
 
 **The cost of one ticket** is (gate runs per ticket) × (gate cost). Before #1260 the low rungs paid
-two full test runs per ticket, one at review exit and one in the train. Now they pay one.
+two full test runs per ticket, one at review exit and one in the train. Now they pay one, plus the
+implement-exit check: one admitted run per implementation phase (the impact selection on
+`standard`/`iterate`/`flow`, a typecheck on `fast`), recorded in the outcome ledger with source
+`implement-exit` so its cost and miss rate sit beside the merge gate's `ci` rows without counting
+as merges.
 
 **What yields to what.**
 
@@ -216,6 +236,7 @@ two full test runs per ticket, one at review exit and one in the train. Now they
 |---|---|---|
 | merge gate, train gate | gate | never |
 | review-exit gate | gate | never (typecheck only on the low rungs) |
+| implement-exit check | background priority | queues behind waiting gates; runs once per phase, never per agent stop |
 | scheduled base sweep | background | yes: gives up its slot to a queued gate and discards its run (#989) |
 | sweep someone waits on (`pnpm promote`'s reprobe) | background, explicit waiter | no (#1256) |
 
@@ -313,10 +334,15 @@ the rc), and the heal work is real work that the cadence makes visible instead o
 - Work in your worktree on your branch, against whatever master was when you branched.
 - Run the impact selection, not the package suite: `node .claude/skills/test-impact/tools/
   impact.mjs select --min-score 1.0 --format vitest`, then what it prints, plus your own new
-  tests. Make those pass. That is your gate.
-- Mark ready. The board's merge gate re-runs the same selection on the merged tree plus
-  typecheck, and lands the branch. A red suite you did not touch is a finding for the heal
-  ticket, not your task. Do not widen your run to prove master.
+  tests. Make those pass. That is your inner loop.
+- Commit and end your session. The board runs the implement-exit check once for the phase (the
+  impact selection on `iterate`/`flow`, a typecheck on `fast`, nothing on `sprint`), admitted as
+  a verify chain and recorded in the ledger. Red comes back to you as one follow-up turn with the
+  failing suites; green goes to review. No Stop hook runs tests or a typecheck any more: hooks are
+  safety only.
+- After review, the board's merge gate re-runs the selection on the merged tree plus typecheck,
+  and lands the branch. A red suite you did not touch is a finding for the heal ticket, not your
+  task. Do not widen your run to prove master.
 - Never move the base branch, never rebase onto a remote ref, never fix master from a
   worktree. The guard from #1237 blocks the first two; the third is what heal tickets are for.
 
@@ -376,6 +402,7 @@ The trigger is measured first (queue depth, oldest age, arrivals vs gate runs), 
 | Stale-base recovery under the merge queue | landed, #1258 |
 | Same-failure breaker holds one branch; red train logs its suites; verdict-neutral base moves keep the verdict | landed on master 2026-09-27 (`board fix:` commits) |
 | Review-loop breaker spares a passed, mid-merge workspace | #1259 |
+| Implement-exit check in the board (replaces the builder's typecheck/Vitest Stop hooks) | landed 2026-09-27 (`implementExitCheck` on the posture; one feedback turn per red, two before attention) |
 
 A ratchet keeps this table honest: `integration-risk-ladder-doc.test.ts` (#1240) fails when a
 posture level exists in the resolver (`RISK_POSTURES` and the `case` labels of

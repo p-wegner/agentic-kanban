@@ -54,7 +54,7 @@ interface RiskPosture {
 - **`strict` / `fast` / `sprint`** trade rigor for speed as documented in the proposal
   (`docs/proposals/2026-08-25-risk-posture-and-merge-train.md` §3): `fast` reviews the merge
   train instead of each ticket and allows a known-red base; `sprint` skips per-ticket review
-  entirely, runs a guards-only gate, and turns builder self-tests off.
+  entirely, runs a guards-only gate, and runs no implement-exit check (amendment 2026-09-27).
 - **Per-ticket override**: an issue tag `risk:strict|standard|fast|sprint` wins for that
   ticket's workspace over the project's pref (`getIssueRiskTag` / `resolveIssueRiskPosture`,
   prefix-scanned so the tag NAME carries the level, mirroring `hasSkipAutoStartTag`'s shape).
@@ -113,7 +113,8 @@ interface RiskPosture {
   (#915/#916) and the builder Stop-hook policy plumbing (#913/#914) are separate,
   not-yet-landed tickets; the struct emits both fields now so those tickets consume them
   rather than inventing their own vocabulary. (`redBasePolicy` gained its consumer in #1015 —
-  see the amendment below; `builderStopChecks` still has none.)
+  see the amendment below. `builderStopChecks` never gained one and was replaced by
+  `implementExitCheck` on 2026-09-27, see the last amendment.)
 
 Builds on decision 008 (Start Mode consolidation) and decision 006 (board-monitor orchestrator,
 for the `objective.md` render path #912 adds). Proposal:
@@ -336,3 +337,31 @@ Not changed, and deliberately: the dev board's own posture pref. Switching it to
 operator's call, made through Settings -> Workflow once #1238 (the rc cadence) is in place —
 until then `flow` on a project with no rc means no full-suite run anywhere, which the summary
 says but nothing prevents.
+
+## Amendment 2026-09-27: the implement-exit check replaces `builderStopChecks`; the review-exit gate is per rung
+
+**`builderStopChecks` is gone; `implementExitCheck: none | typecheck | impact | full` replaces it.**
+The old field described a Claude Code Stop hook and never had a consumer. The costly checks it
+named moved out of hooks and into the board: when a builder session ends with committed work,
+`startup/exit/implement-exit-check.ts` runs the posture's check once, before the issue moves to
+In Review, as an admitted verify chain, recorded in the outcome ledger with source
+`implement-exit`. Red sends the builder one follow-up turn and re-checks when it ends; after two
+turns the workspace is marked for attention. Hooks keep only the cheap safety checks.
+
+| Level | `gateTier` | `implementExitCheck` |
+|---|---|---|
+| `strict` | `full` | `full` |
+| `standard` | `full` | `impact` |
+| `iterate` | `impact` | `impact` |
+| `flow` | `impact` | `impact` |
+| `fast` | `scoped` | `typecheck` |
+| `sprint` | `scoped-base-watch` | `none` |
+
+Rule: never wider than the level's merge gate, at least a typecheck except on `sprint`.
+`implementExitCheckForLevel` reads the table; `risk-posture.service.test.ts` pins the rows and
+the rule. Where the `flow` table above says "builder stop checks `tests-capacity-gated`", read
+`implementExitCheck: impact`, the same for `iterate` and `flow`.
+
+**The review-exit gate is not the full gate on every rung.** Since #1260 it runs the full gate on
+`strict` and `standard` only; on `fast`, `sprint`, `iterate` and `flow` it runs the typecheck,
+because the merge path gates the tree that lands anyway (`startup/exit/review-exit-gate.ts`).
