@@ -536,8 +536,9 @@ describe("the budget caps the whole selection (#1260)", () => {
       "packages/server/src/__tests__/low-cheap.test.ts",
       "packages/server/src/__tests__/union.test.ts",
     ]);
-    expect(keptMs).toBe(40_000);
-    expect(cutMs).toBe(71_100);
+    // #1262 — each suite's price is durationMs plus the 1s/suite fork/import overhead floor.
+    expect(keptMs).toBe(41_000);
+    expect(cutMs).toBe(71_100 + 3 * 1_000);
   });
 
   it("keeps the diff's own tests and charges them FIRST against the budget", () => {
@@ -588,8 +589,9 @@ describe("the budget caps the whole selection (#1260)", () => {
     }
     expect(scope.get("server")).toEqual(["src/__tests__/top.test.ts"]);
     const line = logs.find((l) => l.includes("caps the WHOLE selection"));
-    expect(line).toContain("kept 1 suite(s)/~40s est");
-    expect(line).toContain("cut 2 lowest-ranked suite(s)/~70s est");
+    // #1262 — est includes the 1s/suite fork/import overhead floor: 40s + 1s, (70s + 1s) + (0.1s + 1s).
+    expect(line).toContain("kept 1 suite(s)/~41s est");
+    expect(line).toContain("cut 2 lowest-ranked suite(s)/~72s est");
   });
 
   it("falls back (null -> `vitest related`) when the --json output is unreadable", () => {
@@ -601,6 +603,29 @@ describe("the budget caps the whole selection (#1260)", () => {
     } finally {
       console.warn = warn;
     }
+  });
+
+  /**
+   * #1262 — `durationMs` is vitest's in-test time only (`endTime - startTime` off
+   * `testResults[]`); it excludes the per-file fork/transform/import cost, which vitest's own
+   * console reporter shows running to SECONDS per file. Pricing `durationMs` alone let a wide,
+   * many-small-suites selection fit a budget its real wall clock blew through several-fold
+   * (measured: a 120s-budgeted selection ran 602-1036s). A per-suite overhead floor added to the
+   * price admits fewer suites for the same budget on a wide, many-cheap-suites selection — the
+   * shape that most understates wall clock — while a single expensive suite is barely affected.
+   */
+  it("prices a wide many-cheap-suites selection tighter than a naive sum of durationMs (#1262)", () => {
+    // 200 suites at the impact map's OWN measured median (19ms, docs/tests/impact-map.json,
+    // 2026-09-27). Naive durationMs-only pricing would admit all 200 into a 100s budget with
+    // 96.2s to spare — exactly the underpricing shape the ticket measured on the stable board.
+    const manySuites = Array.from({ length: 200 }, (_, i) => suite(`packages/server/src/__tests__/s${i}.test.ts`, 200 - i, 19));
+    const naiveSumMs = manySuites.reduce((n, s) => n + s.durationMs, 0);
+    expect(naiveSumMs).toBe(3_800);
+    const { kept, cut } = capSelectionToBudget(manySuites, 100_000);
+    // With the per-suite overhead floor priced in, a 100s budget cannot admit all 200 — some must
+    // be cut, where naive durationMs-only pricing cut none.
+    expect(cut.length).toBeGreaterThan(0);
+    expect(kept.length).toBeLessThan(manySuites.length);
   });
 });
 
