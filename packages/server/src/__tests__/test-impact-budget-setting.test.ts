@@ -303,13 +303,28 @@ describe("the selection the message describes is the selection the run makes", (
         seenArgs = args;
         return {
           exitCode: 0,
-          stdout: JSON.stringify({ tier: "impact", selected: ["a.test.ts"], changed: ["x.ts"], dropped: ["b.test.ts"], estMs: 58_000 }),
+          stdout: JSON.stringify({
+            tier: "impact",
+            // #1261 — the tool's own `selected` array carries score/durationMs, and the
+            // whole-set re-cut (not the tool's `dropped`, which is its OWN greedy-fill cut) is
+            // what now prices `budgetDroppedCount`/`estMs`: `b` does not fit alongside `a` in a
+            // 60s budget, so it is the one the re-cut drops.
+            selected: [
+              { test: "a.test.ts", score: 5, durationMs: 58_000, signals: [] },
+              { test: "b.test.ts", score: 1, durationMs: 10_000, signals: [] },
+            ],
+            changed: ["x.ts"],
+            dropped: ["b.test.ts"],
+            estMs: 68_000,
+          }),
           stderr: "",
         };
       },
     });
     // Base FIRST and positional (#963), then the floor, then the budget.
     expect(seenArgs.slice(1)).toEqual(["select", "master", "--json", "--always-run", "--min-score", "1.0", "--budget", "60s"]);
+    // #1261 — priced by the WHOLE-SET cap, not the tool's raw `dropped`/`estMs`: `a` alone
+    // fits the 60s budget, `b` does not, so the description matches what the runner would keep.
     expect(selection).toMatchObject({ budget: "60s", budgetDroppedCount: 1, estMs: 58_000 });
   });
 

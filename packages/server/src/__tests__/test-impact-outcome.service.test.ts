@@ -307,6 +307,56 @@ describe("parseSelection / emptyChangeSetReason", () => {
     }
   });
 
+  /**
+   * #1261 — without a whole-set re-cut, `select --budget`'s own greedy fill can keep MORE suites
+   * than `scripts/test-mine.mjs`'s runner actually executes for the same budget (#1260's finding),
+   * so a caller passing `budgetMs` must see the NARROWER, runner-matching count.
+   */
+  describe("re-cuts the selection to a budget over the WHOLE set (#1261)", () => {
+    const suite = (test: string, score: number, durationMs: number, signals: string[] = []) =>
+      ({ test, score, durationMs, signals });
+
+    it("keeps only what the whole-set budget cap would keep, not the tool's raw `selected` array", () => {
+      const payload = JSON.stringify({
+        tier: "impact",
+        changed: ["packages/server/src/services/x.ts"],
+        selected: [
+          suite("packages/server/src/__tests__/low-cheap.test.ts", 1.0, 100),
+          suite("packages/server/src/__tests__/top.test.ts", 5.0, 40_000),
+          suite("packages/server/src/__tests__/mid.test.ts", 3.0, 70_000),
+        ],
+      });
+      const uncapped = parseSelection(payload);
+      expect(uncapped!.selected).toHaveLength(3);
+
+      const capped = parseSelection(payload, 60_000);
+      // Only `top` fits the whole-set cap; `mid` does not, so it and everything ranked below it —
+      // including the cheap `low-cheap` a greedy fill would have kept — is cut.
+      expect(capped!.selected).toEqual(["packages/server/src/__tests__/top.test.ts"]);
+      expect(capped!.budgetDroppedCount).toBe(2);
+      expect(capped!.estMs).toBe(40_000);
+    });
+
+    it("with no budget, behaves exactly as before (unchanged for every unbudgeted project)", () => {
+      const payload = selectionJson("impact", ["a.test.ts", "b.test.ts"]);
+      expect(parseSelection(payload, null)).toEqual(parseSelection(payload));
+      expect(parseSelection(payload, undefined)).toEqual(parseSelection(payload));
+    });
+
+    it("never cuts a suite exempt from the budget (the diff's own tests)", () => {
+      const payload = JSON.stringify({
+        tier: "impact",
+        changed: ["packages/server/src/services/x.ts"],
+        selected: [
+          suite("packages/server/src/__tests__/ranked.test.ts", 4.0, 30_000),
+          suite("packages/server/src/__tests__/edited.test.ts", 1.2, 20_000, ["self"]),
+        ],
+      });
+      const capped = parseSelection(payload, 10_000);
+      expect(capped!.selected).toEqual(["packages/server/src/__tests__/edited.test.ts"]);
+    });
+  });
+
   it("flags an empty change set, and names whether a base was even available", () => {
     expect(emptyChangeSetReason({ changed: ["src/a.ts"], baseBranch: "master" })).toBeNull();
     expect(emptyChangeSetReason({ changed: [], baseBranch: "master" })).toContain("against master");
@@ -352,6 +402,66 @@ describe("recordGateOutcome", () => {
       const recordArgs = calls[1]!;
       expect(recordArgs[recordArgs.indexOf("--outcomes") + 1]).toBe(join(repos.main, OUTCOMES_RELATIVE_PATH));
       expect(recordArgs[recordArgs.indexOf("--result") + 1]).toBe("pass");
+    } finally {
+      repos.cleanup();
+    }
+  });
+
+  /**
+   * #1261 — the ledger's OWN `select` call had no `--budget` at all before this fix, so under a
+   * budgeted run it recorded a WIDER "selected" set than the runner (`scripts/test-mine.mjs`)
+   * actually executed. The ledger must now pass the SAME budget the run used (carried on
+   * `tierInfo.impactSelection.budget`) and re-cut to the whole-set rule, so the recorded row
+   * agrees with what ran.
+   */
+  it("passes the run's own budget to `select` and records the whole-set-capped selection, not the tool's raw one", async () => {
+    const repos = makeRepos();
+    try {
+      const wideSelectionJson = JSON.stringify({
+        tier: "impact",
+        changed: ["packages/server/src/services/x.ts"],
+        selected: [
+          { test: "packages/server/src/__tests__/top.test.ts", score: 5.0, durationMs: 40_000, signals: [] },
+          { test: "packages/server/src/__tests__/mid.test.ts", score: 3.0, durationMs: 70_000, signals: [] },
+          { test: "packages/server/src/__tests__/low.test.ts", score: 1.0, durationMs: 100, signals: [] },
+        ],
+      });
+      const { run, calls } = fakeRunner({ select: { stdout: wideSelectionJson } });
+      const result = await recordGateOutcome({
+        workingDir: repos.worktree,
+        repoPath: repos.main,
+        passed: true,
+        failedSuites: [],
+        tierInfo: tierInfo({ selector: "impact", impactSelection: { selectedCount: 3, belowFloorCount: 0, stale: false, budget: "60s" } }),
+        runCommand: run,
+      });
+
+      const selectArgs = calls[0]!;
+      expect(selectArgs).toContain("--budget");
+      expect(selectArgs[selectArgs.indexOf("--budget") + 1]).toBe("60s");
+      // The whole-set cap at 60s keeps only `top` — the same set `capJsonSelectionToBudget` in
+      // `scripts/test-mine.mjs` would keep for this selection and budget.
+      expect(result).toMatchObject({ recorded: true, selectedCount: 1 });
+      const recordArgs = calls[1]!;
+      expect(recordArgs[recordArgs.indexOf("--selected") + 1]).toBe("packages/server/src/__tests__/top.test.ts");
+    } finally {
+      repos.cleanup();
+    }
+  });
+
+  it("with no budget on the run, calls `select` without --budget exactly as before", async () => {
+    const repos = makeRepos();
+    try {
+      const { run, calls } = fakeRunner({ select: { stdout: selectionJson("impact", ["a.test.ts", "b.test.ts"]) } });
+      await recordGateOutcome({
+        workingDir: repos.worktree,
+        repoPath: repos.main,
+        passed: true,
+        failedSuites: [],
+        tierInfo: tierInfo(),
+        runCommand: run,
+      });
+      expect(calls[0]).not.toContain("--budget");
     } finally {
       repos.cleanup();
     }

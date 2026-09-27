@@ -182,6 +182,61 @@ describe("resolveGateSelection — the args it asks impact.mjs for", () => {
   });
 });
 
+/**
+ * #1261 — under a budget, the message must report what `scripts/test-mine.mjs`'s runner actually
+ * kept (the whole-set re-cut), not `select --budget`'s own greedy-fill cut, which can keep MORE
+ * suites for the same budget (#1260's measured finding: 277 suites/190s est vs. what the runner
+ * ran).
+ */
+describe("resolveGateImpactSelection re-cuts to the budget over the whole set (#1261)", () => {
+  const withTool = () => {
+    const dir = mkdtempSync(join(tmpdir(), "ak-gate-impact-budget-"));
+    const tool = join(dir, ".claude/skills/test-impact/tools/impact.mjs");
+    mkdirSync(dirname(tool), { recursive: true });
+    writeFileSync(tool, "// stub\n");
+    return dir;
+  };
+  const suite = (test: string, score: number, durationMs: number) => ({ test, score, durationMs, signals: [] });
+
+  it("reports the SAME kept count as the whole-set cap would produce, not the tool's raw selected length", async () => {
+    const toolSelected = [
+      suite("packages/server/src/__tests__/top.test.ts", 5.0, 40_000),
+      suite("packages/server/src/__tests__/mid.test.ts", 3.0, 70_000),
+      suite("packages/server/src/__tests__/low.test.ts", 1.0, 100),
+    ];
+    const selection = await resolveGateImpactSelection({
+      applies: true,
+      workingDir: withTool(),
+      baseBranch: "master",
+      budget: "60s",
+      runCommand: async () => ({
+        exitCode: 0,
+        stdout: JSON.stringify({ tier: "impact", selected: toolSelected, changed: ["x.ts"] }),
+        stderr: "",
+      }),
+    });
+    // The tool's own array has 3 entries; the whole-set cap at 60s keeps only `top`.
+    expect(selection?.selectedCount).toBe(1);
+    expect(selection?.budgetDroppedCount).toBe(2);
+    expect(selection?.estMs).toBe(40_000);
+  });
+
+  it("with no budget, reports the tool's selection unchanged", async () => {
+    const toolSelected = [suite("a.test.ts", 5.0, 40_000), suite("b.test.ts", 3.0, 70_000)];
+    const selection = await resolveGateImpactSelection({
+      applies: true,
+      workingDir: withTool(),
+      baseBranch: "master",
+      runCommand: async () => ({
+        exitCode: 0,
+        stdout: JSON.stringify({ tier: "impact", selected: toolSelected, changed: ["x.ts"] }),
+        stderr: "",
+      }),
+    });
+    expect(selection?.selectedCount).toBe(2);
+  });
+});
+
 describe("resolveGateImpactSelection", () => {
   it("returns undefined — not null — when the run is not impact-selected", () => {
     // The two are deliberately different: `undefined` means "there is no selection to describe",
