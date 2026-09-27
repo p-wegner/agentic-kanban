@@ -6,11 +6,10 @@
  * merge path mocks `resolveMergeGate` on that module; folding this protocol in beside it would
  * make the call intra-module and silently bypass those mocks (measured — five suites went red).
  */
-import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
-import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { Database } from "../db/index.js";
 import { recordMergeGateDiscard } from "../repositories/merge-gate-discard.repository.js";
+import { assessBaseMove, readBaseMoveFiles, readBranchFiles } from "./base-move-relevance.js";
 import {
   noteMergeGateAttemptStarted,
   noteMergeGateAttemptFinished,
@@ -81,6 +80,14 @@ export interface GateWithEvidence {
   held?: boolean;
   /** The tips read BEFORE the run — the state the gate actually verified. */
   shasBefore: MergeGateShas;
+  /**
+   * The tips the minted evidence is KEYED to: `shasBefore`, except when the base moved during
+   * the run by verdict-neutral paths only and the verdict was kept — then the base is the new
+   * tip. Absent on a hand-built result; read it through {@link gateEvidenceShas}.
+   */
+  evidenceShas?: MergeGateShas;
+  /** Set when a base move was judged unable to affect the verdict and the pass was kept. */
+  baseMoveKept?: { from: string; to: string; paths: string[] } | null;
   /** Which tip moved WHILE the gate ran, if any. */
   moved: "branch" | "base" | null;
   /**
@@ -148,6 +155,8 @@ export async function runGateWithEvidence(args: {
    * repo. Defaults to `git diff --name-only <before> <after>` in the worktree.
    */
   readBaseMoveFiles?: (workingDir: string, baseShaBefore: string, baseShaAfter: string) => Promise<string[] | null>;
+  /** Injectable reader for the branch's own file list against the pinned base, same reason. */
+  readBranchFiles?: (workingDir: string, baseShaBefore: string, branchSha: string) => Promise<string[] | null>;
 }): Promise<GateWithEvidence> {
   const { workspace, projectId, source, database } = args;
   const readShas = args.readShas ?? resolveMergeGateShas;
@@ -174,17 +183,49 @@ export async function runGateWithEvidence(args: {
   const durationMs = Date.now() - startedAtMs;
   const ranAt = new Date().toISOString();
   const shasAfter = await readShas(workspace);
-  const moved = movedDuringGate(shasBefore, shasAfter);
+  let moved = movedDuringGate(shasBefore, shasAfter);
   // #979 — the shas, always, whenever movement is claimed. Without them the discard is
   // unfalsifiable from outside the process.
   const movedDetail = describeTipMovement(shasBefore, shasAfter);
+  const readMoved = args.readBaseMoveFiles ?? readBaseMoveFiles;
+
+  // A PASS whose base (and only the base: `movedDuringGate` reports a branch move first) moved by
+  // paths no gate input reads is kept and re-keyed to the new base (base-move-relevance.ts). Any
+  // other move, or any failure to list the paths, discards below exactly as before.
+  let evidenceShas: MergeGateShas = shasBefore;
+  let baseMoveKept: GateWithEvidence["baseMoveKept"] = null;
+  /** The base move's file list once read here, so the discard record does not read it twice. */
+  let baseMovePaths: string[] | null | undefined;
+  if (result.passed && moved === "base") {
+    const assessment = await assessBaseMove({
+      cwd: workspace.workingDir,
+      baseBefore: shasBefore.baseSha!,
+      baseAfter: shasAfter.baseSha!,
+      branchSha: shasBefore.branchSha,
+      readMoved,
+      readBranch: args.readBranchFiles ?? readBranchFiles,
+    });
+    baseMovePaths = assessment.movedPaths;
+    if (assessment.keep) {
+      evidenceShas = { ...shasBefore, baseSha: shasAfter.baseSha };
+      baseMoveKept = { from: shasBefore.baseSha!, to: shasAfter.baseSha!, paths: assessment.movedPaths ?? [] };
+      moved = null;
+      console.log(
+        `[merge-gate] workspace ${workspace.id}: gate attempt ${attempt?.attempt ?? "?"} (${source}) PASSED after `
+          + `${Math.round(durationMs / 1000)}s and its verdict is KEPT although ${movedDetail} moved during the run: `
+          + `${assessment.reason}. Evidence re-keyed to the new base (#243).`,
+      );
+    } else {
+      console.warn(`[merge-gate] workspace ${workspace.id}: base move during the gate cannot be ruled irrelevant — ${assessment.reason}`);
+    }
+  }
 
   // Minted for any PASS whose tips held still — including a pass with nothing to gate on
   // (stage "none"). Callers that only want proof of a REAL run check `ran` first, as the
   // pre-lock gate does; the monitor and review-exit paths deliberately carry the no-op pass
   // forward so the executor does not re-ask a question already answered.
   const token = result.passed && !moved
-    ? gateAlreadyPassed({ ranAt, stage: result.stage, source, branchSha: shasBefore.branchSha, baseSha: shasBefore.baseSha })
+    ? gateAlreadyPassed({ ranAt, stage: result.stage, source, branchSha: evidenceShas.branchSha, baseSha: evidenceShas.baseSha })
     : null;
 
   // #936 acceptance: "a gate that completes without merging logs WHY, at the workspace level".
@@ -202,7 +243,7 @@ export async function runGateWithEvidence(args: {
     // a discard used to leave, and the dev log it lands in is truncated on every `pnpm dev`.
     await persistDiscard({
       workspace, source, database, result, attempt, moved, durationMs, ranAt, shasBefore, shasAfter,
-      readBaseMoveFiles: args.readBaseMoveFiles ?? readBaseMoveFilesFromGit,
+      readBaseMoveFiles: baseMovePaths !== undefined ? async () => baseMovePaths ?? null : readMoved,
     });
   }
   noteMergeGateAttemptFinished(workspace.id, attempt, {
@@ -222,18 +263,18 @@ export async function runGateWithEvidence(args: {
       : moved
         ? `gate passed but a tip moved during the run (${movedDetail ?? moved}) — verdict discarded, the gate must run again (#243)`
         : result.ran
-          ? result.message
+          ? baseMoveKept
+            ? `${result.message} (verdict kept across ${movedDetail}: verdict-neutral paths only)`
+            : result.message
           : undefined,
   });
 
-  return { ...result, shasBefore, moved, movedDetail, ranAt, token, durationMs };
+  return { ...result, shasBefore, evidenceShas, baseMoveKept, moved, movedDetail: baseMoveKept ? null : movedDetail, ranAt, token, durationMs };
 }
 
-/** `git diff --name-only <before> <after>` in the worktree; null when git cannot answer. */
-async function readBaseMoveFilesFromGit(workingDir: string, before: string, after: string): Promise<string[] | null> {
-  const res = await gitExec(["diff", "--name-only", before, after], { cwd: workingDir });
-  if (!execSucceeded(res)) return null;
-  return res.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+/** The tips a gate result's evidence is keyed to (see {@link GateWithEvidence.evidenceShas}). */
+export function gateEvidenceShas(gate: Pick<GateWithEvidence, "shasBefore" | "evidenceShas">): MergeGateShas {
+  return gate.evidenceShas ?? gate.shasBefore;
 }
 
 /**

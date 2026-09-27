@@ -13,6 +13,11 @@
  * still withholds `readyForMerge` on a red typecheck (a non-compiling branch is not worth a merge
  * slot), but the test step is skipped here and runs exactly once, at merge.
  *
+ * A FULL gate whose base moved during the run by verdict-neutral paths only (e.g. a Bullseye save
+ * committing just `scripts/board-monitor/objective.md`) keeps its verdict, re-keyed to the new
+ * base, inside `runGateWithEvidence` (`services/base-move-relevance.ts`); any other base move
+ * still discards it.
+ *
  * The typecheck-only run must never read as a passed test gate downstream. It produces NO token
  * and its persisted evidence carries no `ranAt`/`stage`, so:
  *  - the monitor's `gateTokenFromWorkspaceEvidence` (which needs both) returns `RUN_GATE`;
@@ -159,6 +164,8 @@ export async function runReviewExitGate(args: RunReviewExitGateArgs): Promise<Re
     stage: "verify",
     message,
     shasBefore: {},
+    evidenceShas: {},
+    baseMoveKept: null,
     moved: null,
     movedDetail: null,
     ranAt: new Date().toISOString(),
