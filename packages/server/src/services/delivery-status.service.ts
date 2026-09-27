@@ -13,7 +13,8 @@ import { resolveTrainWindowConfig } from "./merge-train-window.js";
 import { readImpactMissRate } from "./test-impact-miss-rate.js";
 import { currentRcCandidate, readRcState, resolveStableCheckoutFor, toRcCandidateSummary } from "./rc-state.js";
 import { rcHealSummary } from "./rc-heal-ticket.service.js";
-import { getQueuePressure } from "./queue-pressure.service.js";
+import { getQueuePressure, readQueuePressureMembers } from "./queue-pressure.service.js";
+import { getMergeActivity } from "./merge-activity.service.js";
 import { latestFlush, readFlushState } from "./flush-state.js";
 
 const trainMaxSizePref = projectPref("train_max_size");
@@ -41,6 +42,8 @@ export async function getDeliveryStatus(projectId: string, database: Database = 
   const trainSizeFromOverride = Number.isFinite(explicitTrainSize) && explicitTrainSize > 0;
   const baseHealth = await getLatestBaseBranchHealth(projectId, database);
   const lastProbeAt = baseHealth?.createdAt ?? null;
+  // Read once: the ready-for-merge rows feed both `queuePressure` and `mergeActivity.waiting`.
+  const queueMembers = await readQueuePressureMembers(projectId, database);
 
   return {
     projectId,
@@ -61,8 +64,10 @@ export async function getDeliveryStatus(projectId: string, database: Database = 
     rc: await withRcHeal(projectId, toRcCandidateSummary(currentRcCandidate(readRcState(resolveStableCheckoutFor(project.repoPath)))), database),
     // #1246 — the pressure signal, and the most recent flush's heal state, off the same stable
     // checkout's `.kanban/` directory the rc summary above already reads.
-    queuePressure: await getQueuePressure(projectId, project.repoPath, database),
+    queuePressure: await getQueuePressure(projectId, project.repoPath, database, Date.now(), queueMembers),
     flush: latestFlush(readFlushState(resolveStableCheckoutFor(project.repoPath))),
+    // The live merge state the chip leads with: the running train, the last finished one, the waiting branches.
+    mergeActivity: await getMergeActivity(projectId, queueMembers, database),
   };
 }
 

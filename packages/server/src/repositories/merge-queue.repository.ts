@@ -19,9 +19,9 @@ const trainMaxSizePref = projectPref("train_max_size");
 export async function getQueuePressureMemberRows(
   projectId: string,
   database: Database = db,
-): Promise<{ workspaceId: string; readySince: string }[]> {
+): Promise<{ workspaceId: string; readySince: string; issueNumber: number | null; title: string | null }[]> {
   const rows = await database
-    .select({ workspaceId: workspaces.id, issueId: workspaces.issueId, updatedAt: workspaces.updatedAt })
+    .select({ workspaceId: workspaces.id, updatedAt: workspaces.updatedAt, issueNumber: issues.issueNumber, title: issues.title })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
     .where(and(
@@ -31,7 +31,8 @@ export async function getQueuePressureMemberRows(
       eq(workspaces.readyForMerge, true),
       eq(workspaces.status, "idle"),
     ));
-  return rows.map((row) => ({ workspaceId: row.workspaceId, readySince: row.updatedAt }));
+  // The ticket ref rides along (same join, no extra query) for the Delivery panel's waiting list.
+  return rows.map((row) => ({ workspaceId: row.workspaceId, readySince: row.updatedAt, issueNumber: row.issueNumber ?? null, title: row.title ?? null }));
 }
 
 export async function getMergeQueueWorkspaceRows(

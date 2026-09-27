@@ -655,7 +655,11 @@ async function runDoomedTrainJob(args: {
       isEnvironmentFailure: looksLikeMissingDepsFailure,
       // #1189: persist each bisect node as it finishes, so the row shows partial progress
       // while the train is still gating. Evidence column only — never the state (#1153).
-      onAttempt: (attempt) => appendMergeTrainAttempt(trainId, { ...attempt }, database),
+      // The broadcast lets the Delivery chip flip to "Bisecting" as soon as a red node lands.
+      onAttempt: async (attempt) => {
+        await appendMergeTrainAttempt(trainId, { ...attempt }, database);
+        boardEvents?.broadcast(projectId, "merge_train_changed");
+      },
     });
     return { ok: true, result };
   } catch (err) {

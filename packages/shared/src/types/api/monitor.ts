@@ -13,6 +13,7 @@
  * consumer, since `types/` is an `export type *` barrel and cannot carry values.
  */
 import type { MonitorActionName } from "../../lib/monitor-action.js";
+import type { MergeTrainState } from "../../schema/merge-trains.js";
 import type { MonitorTunables } from "../../lib/strategy-objective-file.js";
 import type { RISK_POSTURES } from "../../lib/risk-posture.js";
 import type { DiskHealthSignal } from "../../lib/machine-capacity.js";
@@ -263,6 +264,44 @@ export interface FlushesResponse {
   history: FlushRecord[];
 }
 
+/** One ticket in the Delivery chip's merge activity: a train member or a waiting branch. */
+export interface MergeActivityTicket {
+  workspaceId: string;
+  /** `null` when the workspace or its issue is gone. */
+  issueNumber: number | null;
+  title: string | null;
+}
+
+/** A merge train as the Delivery chip shows it: live (`assembling`/`gating`/`landing`) or just finished. */
+export interface MergeActivityTrain {
+  /** `train/<date>-NN` (older rows: `q<ms>`). */
+  label: string;
+  state: MergeTrainState;
+  /** A live gating train that has already split a red batch (its evidence holds a red attempt). */
+  bisecting: boolean;
+  /** Members in train order, workspace ids resolved to tickets. */
+  members: MergeActivityTicket[];
+  startedAt: string;
+  finishedAt: string | null;
+  /** Landed members, for a finished train whose evidence records it; else `null`. */
+  landedCount: number | null;
+  /** For a red/abandoned train: the first line of the gate failure (or the reconciler's reason), else `null`. */
+  failureSummary: string | null;
+}
+
+/**
+ * What is merging right now (`GET /api/projects/:id/delivery` → `mergeActivity`): the live
+ * train, the most recent train that finished within `recentWindowMs`, and the ready-for-merge
+ * branches NOT aboard the live train. `waiting.length` can be below `queuePressure.queueDepth`,
+ * which counts every ready branch, train members included.
+ */
+export interface MergeActivitySummary {
+  current: MergeActivityTrain | null;
+  lastFinished: MergeActivityTrain | null;
+  waiting: Array<MergeActivityTicket & { readySince: string }>;
+  recentWindowMs: number;
+}
+
 export interface DeliveryStatusResponse {
   projectId: string;
   posture: RiskPosture;
@@ -306,6 +345,11 @@ export interface DeliveryStatusResponse {
    * never flushed. Optional on the wire for an older server.
    */
   flush?: FlushRecord | null;
+  /**
+   * What is merging now: the live train, the last one finished within a few hours, and the
+   * ready branches waiting. Optional on the wire for an older server.
+   */
+  mergeActivity?: MergeActivitySummary;
 }
 
 /** One release candidate's lifecycle state (#1238). Mirrors `scripts/rc-state.mjs`. */

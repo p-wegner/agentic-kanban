@@ -34,13 +34,22 @@ function readLedgerRows(repoPath: string | null | undefined): LedgerRow[] {
   }
 }
 
+export type QueuePressureMemberRow = Awaited<ReturnType<typeof getQueuePressureMemberRows>>[number];
+
+/** The ready-for-merge queue rows; never throws (an unreadable queue reads as empty). */
+export function readQueuePressureMembers(projectId: string, database: Database = db): Promise<QueuePressureMemberRow[]> {
+  return getQueuePressureMemberRows(projectId, database).catch(() => []);
+}
+
 export async function getQueuePressure(
   projectId: string,
   repoPath: string | null | undefined,
   database: Database = db,
   nowMs: number = Date.now(),
+  /** Already-read queue rows (the delivery read model reuses them for its waiting list); read here when absent. */
+  preloadedMembers?: QueuePressureMemberRow[],
 ): Promise<QueuePressureSummary> {
-  const members = await getQueuePressureMemberRows(projectId, database).catch(() => []);
+  const members = preloadedMembers ?? await readQueuePressureMembers(projectId, database);
   const arrivalRows: QueuePressureLedgerRow[] = members.map((m) => ({ at: m.readySince, isGateRun: false }));
   const gateRows: QueuePressureLedgerRow[] = readLedgerRows(repoPath)
     .filter((row) => isGateRow(row) && !isSuspectGateRow(row) && typeof row.at === "string")

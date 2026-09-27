@@ -145,6 +145,24 @@ export async function listMergeTrainsForProject(
     .orderBy(desc(mergeTrains.startedAt));
 }
 
+/**
+ * The project's most recent trains, newest first, bounded — the Delivery chip's merge activity
+ * reads only the live train and the last finished one, so it never scans a long history on a
+ * polled endpoint the way `listMergeTrainsForProject` would.
+ */
+export async function listRecentMergeTrainsForProject(
+  projectId: string,
+  limit: number,
+  database: Database = db,
+): Promise<MergeTrainRow[]> {
+  return database
+    .select()
+    .from(mergeTrains)
+    .where(eq(mergeTrains.projectId, projectId))
+    .orderBy(desc(mergeTrains.startedAt))
+    .limit(limit);
+}
+
 /** Rows in the given states, across all projects — what the startup reconciler sweeps. */
 export async function listMergeTrainsInStates(
   states: MergeTrainState[],
@@ -259,6 +277,22 @@ export async function getIssueNumbersByWorkspaceIds(
   for (const r of rows) {
     if (r.issueNumber !== null) result.set(r.workspaceId, r.issueNumber);
   }
+  return result;
+}
+
+/** `(workspaceId -> { issueNumber, title })` — the Delivery panel's `#N title` rows for train members. */
+export async function getIssueRefsByWorkspaceIds(
+  workspaceIds: string[],
+  database: Database = db,
+): Promise<Map<string, { issueNumber: number | null; title: string | null }>> {
+  const result = new Map<string, { issueNumber: number | null; title: string | null }>();
+  if (workspaceIds.length === 0) return result;
+  const rows = await database
+    .select({ workspaceId: workspaces.id, issueNumber: issues.issueNumber, title: issues.title })
+    .from(workspaces)
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(inArray(workspaces.id, workspaceIds));
+  for (const r of rows) result.set(r.workspaceId, { issueNumber: r.issueNumber ?? null, title: r.title ?? null });
   return result;
 }
 
