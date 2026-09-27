@@ -411,6 +411,26 @@ describe("MergeService — updateBase rebase uses preferLocalBase", () => {
     );
   });
 
+  it("refuses while a merge job is running for the workspace, and never kills its gate's processes", async () => {
+    // #1263's merge-back (2026-09-27): the monitor's pre-relaunch rebase ran update-base under the
+    // board's own in-flight gate, and its process kill took the gate's vitest down with it.
+    resetMergeJobs();
+    const { workspaceId } = await seedWorkspace(db, { status: "idle" });
+    const rebaseOntoBase = vi.fn(async () => ({ success: true }));
+    const processKiller = vi.fn(async () => 0);
+    const svc = createWorkspaceMergeService({ database: db, gitService: makeGit({ rebaseOntoBase }) as never, createBackup: async () => {}, processKiller });
+    startMergeJob(workspaceId);
+
+    await expect(svc.updateBase(workspaceId, "rebase")).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(processKiller).not.toHaveBeenCalled();
+    expect(rebaseOntoBase).not.toHaveBeenCalled();
+
+    // The merge job's own pre-gate rebase (#1169) is the one caller allowed through.
+    await svc.updateBase(workspaceId, "rebase", { fromMergeJob: true });
+    expect(rebaseOntoBase).toHaveBeenCalledTimes(1);
+    resetMergeJobs();
+  });
+
   it("rebases the leading worktree AND every sibling worktree onto its own base (#72)", async () => {
     const { workspaceId, projectId } = await seedWorkspace(db, { status: "idle" });
     await insertWorkspaceRepo(

@@ -118,6 +118,12 @@ export function createMonitorWorkspaceActions(deps: {
       await workspaceService.deleteWorkspace(workspaceId);
     },
     async updateBase(workspaceId, mode) {
+      // Same rule as `launch` above: the monitor's pre-relaunch rebase (#324) is part of the
+      // relaunch, so a `no-auto-start` ticket is left alone here too.
+      const ws = await getWorkspaceById(workspaceId, deps.database);
+      if (ws && await hasSkipAutoStartTag(ws.issueId, SKIP_AUTO_START_TAG, deps.database)) {
+        throw new Error("issue carries the no-auto-start tag");
+      }
       await workspaceService.updateBase(workspaceId, mode);
     },
   };

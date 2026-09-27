@@ -13,6 +13,7 @@ import { refreshWorkspaceBuildArtifacts } from "./workspace-build-refresh.servic
 import { getAllWorkspaceRepos } from "./workspace-all-repos.js";
 import { WorkspaceError, requireBaseBranch, type GitService } from "./workspace-internals.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { getMergeJob } from "./merge-job.service.js";
 
 /**
  * The REBASE half of the workspace-merge service (#802), extracted as a cohesive sub-module.
@@ -36,9 +37,16 @@ export function createWorkspaceRebaseService(deps: {
 }) {
   const { database, gitService, boardEvents, killWorktreeProcesses } = deps;
 
-  async function updateBase(id: string, mode: "rebase" | "merge") {
+  async function updateBase(id: string, mode: "rebase" | "merge", opts: { fromMergeJob?: boolean } = {}) {
     const workspace = await getWorkspaceById(id, database);
     if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    // A running merge job gates THIS worktree: rebasing it moves the tree under the running tests,
+    // and the process kill around the rebase below killed the gate's own vitest (#1263's merge-back,
+    // 2026-09-27: the monitor's pre-relaunch rebase turned a green tree red). Only the merge job's
+    // own pre-gate rebase (#1169) may run while it is in flight.
+    if (!opts.fromMergeJob && getMergeJob(id)?.state === "running") {
+      throw new WorkspaceError("A merge is in flight for this workspace; its gate runs in this worktree. Retry once it finishes.", "CONFLICT");
+    }
     if (!workspace.workingDir || workspace.isDirect) {
       throw new WorkspaceError("Not supported for direct workspaces", "BAD_REQUEST");
     }

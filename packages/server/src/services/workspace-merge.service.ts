@@ -280,7 +280,7 @@ export function createWorkspaceMergeService(deps: {
       token: opts.gate ?? RUN_GATE,
       database, recordMergeAttempt,
       // #1169 — a badly-stale branch is rebased by the board before the gate, not refused.
-      rebaseOntoBase: (wsId) => updateBase(wsId, "rebase"),
+      rebaseOntoBase: (wsId) => updateBase(wsId, "rebase", { fromMergeJob: true }),
     });
 
     // Install the lock and run the merge via the shared primitive (#944) so the
