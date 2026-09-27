@@ -40,6 +40,8 @@ import { noteMergeGatePhase } from "./merge-job.service.js";
 import { formatIneligibleNote, trainMemberIneligibility } from "./merge-release-partition.js";
 import { resolveTrainReviewDecision, runTrainReview, type TrainReviewMember } from "./merge-train-review.service.js";
 import { clearTrainSiding, isSidingDrop, partitionSidedMembers, recordTrainSidingDrop } from "./merge-train-siding.service.js";
+import { BRANCH_ALONE_FAILURE_PREFIX } from "./auto-merge-breaker.js";
+import { describeFailedSuites } from "./verify-failed-suites.js";
 import {
   buildTrainGateEvidence,
   recordBoardingComments,
@@ -300,6 +302,41 @@ async function finishMergeTrain(
   await recordFinishComments(trainId, label, result, members, database);
 }
 
+/** What one staging gate reports back. `stage`/`failedSuites` ride along on a red run only. */
+interface TrainStagingGateResult {
+  passed: boolean;
+  message: string;
+  sided?: Array<{ workspaceId: string; reason: string }>;
+  /** Which stage decided a red run: the gate's own `verify`/`smoke`, the worktree `setup`, or `none` (could not run). */
+  stage?: "verify" | "smoke" | "setup" | "none";
+  failedSuites?: string[];
+  guardFailure?: boolean;
+}
+
+/**
+ * The ONE line the board log gets when a train's gate goes red (pure). MEASURED motivation:
+ * `train/2026-09-26-01` went red and bisected with no line naming the failing suites — the only
+ * trace was the control arm's `gated the bare base … - green` later. The per-branch path already
+ * names suites (`describeVerifyFailedSkip`); this is the train's equivalent, in the same
+ * `failing suite(s): …` vocabulary, for the whole train and for each bisect half.
+ */
+export function describeTrainGateRed(args: {
+  label: string;
+  attemptLabel: string;
+  members: ReadonlyArray<{ workspaceId: string; issueNumber?: number | null }>;
+  stage?: string;
+  failedSuites?: readonly string[];
+  guardFailure?: boolean;
+  message: string;
+}): string {
+  const scope = args.attemptLabel === args.label ? "whole train" : `bisect attempt ${args.attemptLabel}`;
+  const who = args.members.map((m) => (m.issueNumber != null ? `#${m.issueNumber}` : m.workspaceId.slice(0, 8))).join(", ") || "no members";
+  const named = describeFailedSuites({ files: args.failedSuites ?? [], guardFailure: args.guardFailure === true });
+  const firstLine = args.message.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? "no gate output";
+  const what = named || `no failing suite could be named; ${firstLine.slice(0, 200)}`;
+  return `${args.label}: train gate RED (${scope}, ${args.members.length} member(s): ${who}) - stage ${args.stage ?? "unknown"} - ${what}`;
+}
+
 /**
  * ONE staging gate: a fresh worktree at `ref`, the project's setup script run against it the way
  * a real workspace's is, then `runPreMergeGate`. Extracted to module scope (#1204) because the
@@ -328,7 +365,7 @@ async function runTrainStagingGate(args: {
    * nothing to cancel).
    */
   signal?: AbortSignal;
-}): Promise<{ passed: boolean; message: string; sided?: Array<{ workspaceId: string; reason: string }> }> {
+}): Promise<TrainStagingGateResult> {
   const { database, repoPath, baseBranch, projectId, ref, attemptLabel, signal } = args;
   let gateWorktree: string | null = null;
   try {
@@ -359,6 +396,7 @@ async function runTrainStagingGate(args: {
       if (setup.exitCode !== 0 && !setup.timedOut) {
         return {
           passed: false,
+          stage: "setup",
           message:
             `train staging worktree setup failed (exit ${setup.exitCode}) before the gate could run - ` +
             `dependencies were never installed for this tree, so the gate could not verify anything: ` +
@@ -383,12 +421,19 @@ async function runTrainStagingGate(args: {
       // letting it run to completion before the row's `abandoned` state is noticed.
       signal,
     );
-    if (!gate.passed) return { passed: false, message: gate.message };
+    if (!gate.passed) {
+      return {
+        passed: false,
+        message: gate.message,
+        stage: gate.stage,
+        ...(gate.failedSuites ? { failedSuites: gate.failedSuites, guardFailure: gate.guardFailure === true } : {}),
+      };
+    }
     const extra = await args.afterGreen?.({ gateWorktree, gateMessage: gate.message });
     return { passed: true, message: gate.message, ...(extra?.sided && extra.sided.length > 0 ? { sided: extra.sided } : {}) };
   } catch (err) {
     // Fail CLOSED: a gate we could not run is not a gate that passed.
-    return { passed: false, message: `train gate could not run: ${errorMessage(err)}` };
+    return { passed: false, stage: "none", message: `train gate could not run: ${errorMessage(err)}` };
   } finally {
     // Route the teardown through the #394 co-residency guard rather than deleting
     // outright: this leaf lives under the same `.worktrees` root as every live
@@ -553,7 +598,7 @@ async function runDoomedTrainJob(args: {
         // the attempt races to notice the signal.
         await updateMergeTrainState(trainId, { state: "gating", guardStates: ["assembling", "gating"] }, database).catch(() => undefined);
         boardEvents?.broadcast(projectId, "merge_train_changed");
-        return await runTrainStagingGate({
+        const gate = await runTrainStagingGate({
           database, repoPath, baseBranch, projectId,
           ref: trainRef,
           attemptLabel,
@@ -584,6 +629,12 @@ async function runDoomedTrainJob(args: {
             return { sided: review.sided };
           },
         });
+        if (!gate.passed) {
+          // Name the red: train, members, stage and suite(s), for the whole train and each half.
+          const gatedMembers = included.map((m) => members.find((x) => x.workspaceId === m.workspaceId) ?? { workspaceId: m.workspaceId });
+          console.log(`[merge-train] ${describeTrainGateRed({ label, attemptLabel, members: gatedMembers, stage: gate.stage, failedSuites: gate.failedSuites, guardFailure: gate.guardFailure, message: gate.message })}`);
+        }
+        return gate;
       },
       // #1204 — the CONTROL ARM, asked once before a red full train is halved: is the BARE
       // BASE red? If it is, the failure belongs to master and no member may be blamed for it.
@@ -808,7 +859,7 @@ export function createMergeTrainRunner(deps: {
     for (const r of result.gateRejected) {
       if (seenEvent.has(r.member.workspaceId)) continue;
       seenEvent.add(r.member.workspaceId);
-      yield { type: "error", workspaceId: r.member.workspaceId, issueNumber: r.member.issueNumber ?? null, issueTitle: "", error: `gate failed for this branch alone (bisected out of the train): ${r.reason.slice(0, 300)}` };
+      yield { type: "error", workspaceId: r.member.workspaceId, issueNumber: r.member.issueNumber ?? null, issueTitle: "", error: `${BRANCH_ALONE_FAILURE_PREFIX} (bisected out of the train): ${r.reason.slice(0, 300)}` };
     }
     // #1194 - a member the train review sided did NOT land, but its train did (or would have):
     // the findings are already on its ticket, and its branch is untouched. `skipped`, like a
