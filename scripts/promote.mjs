@@ -1313,6 +1313,13 @@ async function main() {
         // the rc, base = master, the normal gate); the freshly restarted stable board is asked for
         // it, and the hand command is printed only when it did not answer.
         recordRc(rc.branch, { state: "promoted", tag, sha });
+        // Nothing was healed on the rc when its tip is already in master: a merge-back would be a
+        // zero-commit workspace, and the board launched a builder into it with nothing to do
+        // (#1263, 2026-09-27: plan mode produced no plan, marked blocked, relaunched).
+        if (git(["merge-base", "--is-ancestor", rc.branch, baseBranch], MAIN_CHECKOUT).code === 0) {
+          log(`[promote] rc: ${rc.branch} is promoted as ${tag}. Its tip is already in ${baseBranch} (nothing was healed on it) — no merge-back needed.`);
+          return;
+        }
         const mergeBack = await requestMergeBack(sweep?.projectId ?? null, rc.branch, tag);
         if (mergeBack) {
           log(`[promote] rc: ${rc.branch} is promoted as ${tag}. Merge-back #${mergeBack.issueNumber ?? "?"} on workspace ${mergeBack.workspaceId}${mergeBack.created ? "" : " (already open)"} — the board lands it into ${baseBranch} and closes the heal tickets.`);
