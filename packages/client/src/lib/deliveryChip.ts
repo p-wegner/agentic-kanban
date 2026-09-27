@@ -8,6 +8,10 @@
  * what a posture level implies, the way the old client-side `resolveRiskPosture` had to.
  */
 import type { DeliveryStatusResponse, RiskPostureLevel } from "@agentic-kanban/shared/types";
+import { buildMergeActivityChip, describeMergeActivity } from "./deliveryMergeActivity.js";
+
+/** The dot for a red train, a bisect in progress, or a red base holding the queue — distinct from any posture dot by its ring. */
+export const MERGE_WARNING_DOT = "bg-red-500 ring-2 ring-red-300 dark:ring-red-700";
 
 export const RISK_POSTURE_DOT: Record<RiskPostureLevel, string> = {
   strict: "bg-blue-500",
@@ -29,9 +33,12 @@ export const RISK_POSTURE_LABELS: Record<RiskPostureLevel, string> = {
 
 export interface DeliveryChipView {
   dotClass: string;
-  /** `iterate · train 1` — `train 1` reads as "no batching", which is the whole point. */
+  /**
+   * Live merge state first, posture second: `Merging train-05 · 4 tickets · 12m · Iterate`.
+   * An older server without `mergeActivity` gets the config-only `Iterate · train 1 (no batching)`.
+   */
   label: string;
-  /** What fits a phone toolbar: `Iterate · 1`. */
+  /** What fits a phone toolbar: the live state alone (`Merging 4 · 12m`), else `Iterate · 1`. */
   compactLabel: string;
   /** Multi-line tooltip: the behaviour matrix this posture level implies. */
   title: string;
@@ -42,12 +49,17 @@ function trainSegment(trainMaxSize: number): string {
   return trainMaxSize <= 1 ? "train 1 (no batching)" : `train ${trainMaxSize}`;
 }
 
-export function buildDeliveryChipView(status: DeliveryStatusResponse): DeliveryChipView {
+export function buildDeliveryChipView(status: DeliveryStatusResponse, nowMs: number = Date.now()): DeliveryChipView {
   const { posture } = status;
   const trainLabel = trainSegment(status.trainWindowMaxSize);
   const sourceNote = status.trainSizeFromOverride ? " (project override)" : "";
 
+  const live = status.mergeActivity
+    ? buildMergeActivityChip(status.mergeActivity, status.redBase, status.trainWindowMaxSize, nowMs)
+    : null;
+
   const titleLines = [
+    ...(status.mergeActivity ? [...describeMergeActivity(status.mergeActivity, nowMs), ""] : []),
     `Risk posture: ${RISK_POSTURE_LABELS[posture.level]} (source: ${posture.source})`,
     posture.summary,
     "",
@@ -63,6 +75,14 @@ export function buildDeliveryChipView(status: DeliveryStatusResponse): DeliveryC
   if (status.flush) titleLines.push(describeFlush(status.flush));
   titleLines.push("", "Click for the Delivery controls.");
 
+  if (live) {
+    return {
+      dotClass: live.warning ? MERGE_WARNING_DOT : RISK_POSTURE_DOT[posture.level],
+      label: `${live.label} · ${RISK_POSTURE_LABELS[posture.level]}`,
+      compactLabel: live.compactLabel,
+      title: titleLines.join("\n"),
+    };
+  }
   return {
     dotClass: RISK_POSTURE_DOT[posture.level],
     label: `${RISK_POSTURE_LABELS[posture.level]} · ${trainLabel}`,

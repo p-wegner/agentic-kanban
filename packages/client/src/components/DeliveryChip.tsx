@@ -21,6 +21,7 @@ import {
   describeRedBase,
 } from "../lib/deliveryChip.js";
 import { setProjectPref } from "../lib/settingsStore.js";
+import { DeliveryMergeActivityBody } from "./DeliveryMergeActivity.js";
 import { showToast } from "../lib/toast.js";
 
 const trainMaxSizePref = projectPref("train_max_size");
@@ -167,6 +168,7 @@ function DeliveryPanelBody({
 
   return (
     <>
+      {status.mergeActivity && <DeliveryMergeActivityBody activity={status.mergeActivity} nowMs={Date.now()} />}
       <div>
         <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-faint dark:text-gray-500">Risk posture</div>
         <select

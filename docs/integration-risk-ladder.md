@@ -345,6 +345,11 @@ The trigger is measured first (queue depth, oldest age, arrivals vs gate runs), 
 
 - The delivery view (and `pnpm cli -- tracker`): master's last verdict, the rc's verdict, the
   inherited-red count, the open heal tickets, and the impact miss rate.
+- The header Delivery chip leads with the live merge state (`mergeActivity` on the delivery
+  read model): the running train with its tickets and elapsed time (`Merging train-05 · 4
+  tickets · 12m`), else a just-red train, else the ready branches waiting (and whether a red
+  base holds them), else the last landed train or `Queue idle`. Red, bisecting or held turns
+  its dot to a warning; it refetches on `merge_train_changed`, so a state change shows within a second.
 - `pnpm promote --dry-run`: which rc, which sweep row, its scope, and the ledger evidence
   since the last green (labelled as the weaker measurement it is).
 - The Sentinel's one line names the rc state when a cadence is configured.
