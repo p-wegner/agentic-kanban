@@ -280,8 +280,20 @@ import {
  * guard suite that starts reading one of them must fail somewhere, and only a scan of the guard
  * suites' own sources can see that. `when:packages/**\/__tests__/**` plus the module, so a diff
  * outside the test trees does not pay it; the next capture should give the 3 s back.
+ *
+ * -- Fourteenth movement, UP (2026-09-27, #1261) — 565,000 -> 568,000 ----------------------
+ *
+ * One guard, `test-impact-budget-cap-lockstep.test.mjs`, arrived at the ASSUMED 3,000 ms (not
+ * yet in `docs/tests/durations.json`). The argument for the seconds: it reaches outside its own
+ * import graph — comparing `capSelectionToBudget`/`parseBudgetMs` in `scripts/test-mine.mjs`
+ * against the server's own mirror in `services/test-impact-outcome/budget-cap.ts`, the same
+ * two-implementations-bound-by-behaviour shape `always-run-dirs-lockstep.test.ts` already uses —
+ * so dependency-based selection cannot see it needs to run. It carries a `when:` territory of the
+ * three files it exercises, so an ordinary diff elsewhere does not pay it; this unconditional
+ * total is what the repo commits to for a diff that touches one of those three. Should shrink to
+ * its real cost (well under the 3,000 ms assumption) at the next `durations.json` capture.
  */
-const BASELINE_TOTAL_MS = 565_000;
+const BASELINE_TOTAL_MS = 568_000;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative
@@ -320,9 +332,11 @@ const STALE_SLACK_MS = 30_000;
  *
  * Raised 25 -> 26 with #1221's `pre-merge-gate-admission-mock-ratchet.test.ts`, added at the
  * assumed duration (unmeasured until the next `durations.json` capture). 26 -> 29 with #1232's
- * three guards (see the tenth movement above), same caveat.
+ * three guards (see the tenth movement above), same caveat. 29 -> 30 with the thirteenth and
+ * fourteenth movements above (`base-move-relevance-allowlist-ratchet.test.ts` and
+ * `test-impact-budget-cap-lockstep.test.mjs`, both landing the same day), same caveat.
  */
-const MAX_ASSUMED_FILES = 29;
+const MAX_ASSUMED_FILES = 30;
 
 const REPO_ROOT = path.resolve(import.meta.dirname!, "..", "..", "..", "..");
 
