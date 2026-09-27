@@ -3,84 +3,65 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-27 afternoon — board empty, eight direct fixes, promoted as stable-20260927-3
 
-## 2026-09-27 — merge mechanism repaired and live; handoff before a reboot
+**State.** Every agentic-kanban ticket is Done; none open. #1253 and #1261 landed in train
+`2026-09-27-11` (1 gate run) after `-10` went red. Stable board runs `stable-20260927-3` (`738ddc0307`), promoted 2026-09-27 13:19 UTC
+by `pnpm promote` WITHOUT `--force-sweep`: rc `rc/20260927` got a full green sweep (scope full, 22 min), smoke
+passed. The stuck `rc/20260926` was abandoned by the new supersession rule (below). Posture `flow`, WIP 4,
+auto-merge on.
 
-**Why the reboot.** After 19 h uptime about 10 GB of RAM sat in the Windows kernel pools (paged
-7.0 GB, non-paged 3.4 GB; healthy is under 1-2 GB), committed memory 31.6 GB on 27.6 GB physical,
-and Claude Code reaped background jobs twice. Suspected cause, not verified: filesystem churn from
-test runs (`%TEMP%` ~114k entries) through Defender's filter and NTFS metadata. Diagnose with
-Sysinternals RAMMap (pool tags) if it climbs again.
+**Direct-master fixes (the user asked for fixes, not tickets), each with its check:**
+- **#1261's mirror** (on its branch, `a11f2e02e9`): the server budget-cap mirror lacked #1262's
+  1 s per-suite floor, so its lockstep test went red in `-10`. Landed with the train.
+- **Test-reaper killed live fixtures** (`b55093d6ef`): every server vitest run's setup/teardown
+  sweep killed any parentless process naming a fixture temp dir, however young.
+  `verify-gate-runner.test.ts`'s #172 case detaches a listener on purpose, so any concurrent server
+  run killed it. This was train `-06`'s unexplained red AND `-10`'s red control arm on a green
+  master. Now spared while the dir is < 10 min old. Check: `fixture-orphan-namespace-reap` +
+  `verify-gate-runner` green.
+- **Suite-owner shortcut** (`061505c321`): a red train whose failing suites all belong to one member
+  rejects that member and re-gates the rest once, instead of control arm + halving. Check: table
+  test + a real-git train test showing 2 gate runs.
+- **Siding re-probe** (`19ca652c73`, migration 0159 `workspace_train_siding.kind`): a CONFLICT siding
+  whose tip has not moved is released once `git merge-tree` says it merges cleanly onto the current
+  base (#1253/#1261 needed a hand `update-base`). Review sidings stay tip-keyed. Check: siding suite.
+- **Builder vitest cap** (`9ffda28e83`): builders now get `VITEST_MAX_WORKERS` as well (the impact
+  selector's printed `pnpm exec vitest run` line bypassed `KANBAN_TEST_MAX_WORKERS`); ceiling 8 -> 4.
+- **Control-arm worktree** (`128b32947d`): `<label>-base` is attributed to its train row (was
+  logged as an orphan, and never reaped after a crash).
+- **%TEMP%** (`3a4e2b7b17`): `sweep-loose-test-db-files.mjs` also removes `agentic-kanban-vitest-<pid>.db*`
+  (dead pid, > 1 h). Ran it: 26,709 files removed, %TEMP% 114k -> 88k entries.
+- **Stuck release candidate** (`738ddc0307`): `rc/20260926` sat `sweeping` on a timed-out sweep after
+  two `--force-sweep` promotions moved stable past it; every `pnpm promote` reused it and refused it.
+  A candidate the stable board already contains is now abandoned and a fresh one cut.
+- **Empty merge-back** (`b24ae9bd30`): after a promotion whose rc healed nothing (rc tip already in
+  master), `promote` still asked the board for a merge-back; the board launched a builder into the
+  zero-commit workspace (#1263: plan mode, no plan, blocked, relaunched). `promote` now skips it.
+  #1263 itself was closed with the board's `reconcile-as-done` (`adoptMainCheckout`, rc tip = master).
+- **update-base killed its own gate** (`18c97f912c`): #1263's merge gate went red on a tree that
+  had just swept green. Master moved mid-gate, the monitor's pre-relaunch rebase ran `update-base`,
+  and its process kill took down the gate's server vitest (no summary, exit 1). `updateBase` now
+  refuses while the workspace's merge job runs (the job's own #1169 rebase passes `fromMergeJob`),
+  and the monitor's rebase honours `no-auto-start` like its launch. Check: new refusal test +
+  workspace-merge/monitor suites.
+- `direct-master` skill no longer claims a hook typechecks on edit (`f1e4059e31`).
 
-**State of the board.** Stable board runs `stable-20260927-2` (sha `4401279111`) on 3001, UI on
-3001. Master is ahead of it by the landed tickets below (`0ccd6f87ad`+). Posture `flow` (set by a
-Bullseye save 2026-09-26 20:04), WIP 4, `merge_strategy` `merge_queue`, auto-merge ON for
-`agentic-kanban` (it was paused 2026-09-27 ~12:40-13:15 for the promotion and re-enabled; the
-autopilot endpoint confirmed `enabled: true`). `train_max_wait_ms_<id>` = 120000.
-
-**Landed 2026-09-26/27** (on master, verified by `git log`): #1245, #1246, #1247 (+ coupled #1248,
-#1249), #1252, #1254, #1255, #1256, #1258, #1260, #1244 + #1262 (train `-07`), #1259 (train `-08`).
-Cancelled: #1257 (a false alarm its own filer retracted; built only because I moved it to Todo by
-mistake).
-
-**Direct-master board fixes** (the user asked for fixes, not tickets), all on master and live in
-`stable-20260927-2`:
-- The same-failure breaker holds ONE branch, not the whole project; a red train logs its suites.
-- A passed gate or train survives a base move that touches only verdict-neutral paths
-  (`base-move-relevance.ts`; e.g. Bullseye `objective.md` syncs, `CONTINUE.md`).
-- CLI issue writes go through the running server so the open board updates.
-- The Delivery chip leads with the live merge state (`Merging train-NN · …`, `N ready`, `Last: …`).
-- Train, bisect and control-arm worktrees get the test-impact selector and map. Before this every
-  `flow` train gate fell back to `vitest related` (~950 files, 30-90 min); train `-07` took 13.5 min,
-  `-08` 4.5 min.
-- Train verify logs are real files (`%TEMP%\kanban-verify-train-train-<date>-N.log`); before, the `:`
-  in the key wrote them into NTFS alternate data streams of an empty `kanban-verify-train` file.
-- A train member dropped for a base conflict is sent back to its builder at once (cap 2, then a
-  merge hold). Verified live: #1259 sent back from `-07`, landed in `-08`.
-- Costly checks left the hooks: the board runs one implement-exit check per phase before review
-  (`implementExitCheck`: strict full, standard/iterate/flow impact, fast typecheck, sprint none;
-  ledger source `implement-exit`); Stop hooks are safety only; the stack-profile generator no
-  longer emits a whole-suite Stop rule. The stale untracked `.claude/smart-hooks-rules.json` (full
-  `test:mine` on Stop with a 180 s timeout) was deleted.
-- `docs/integration-risk-ladder.md` now explains the whole strategy for a classical-CI reader: why
-  agents move the bottleneck to integration, the three resources (compute, tokens, velocity), the
-  merge queue and train, the release candidate as the place to heal, per-rung knobs, the resource
-  side, the recovery mechanisms, and choosing a rung.
-
-Verified by: full `typecheck` + `check:arch` + `gate:always-run` + full `test:mine` (0 failures) at
-`e064d3b62f` and again at `4401279111` before each promotion; `pnpm promote --force-sweep` smoke
-passed both times (`--force-sweep` deliberately, because the rc sweep could not finish on the old
-code; those two full runs are the evidence).
-
-### After the reboot, in order
-1. `pnpm stable:start` from this checkout (restart-only door; it refuses if 3001 is held). Check
-   `http://127.0.0.1:3001/health` and the Delivery chip.
-2. The queue resumes by itself. #1253 and #1261 were rebased onto master by `update-base` at 13:50
-   and should ride the next train; a train cut off by the reboot is reassembled by the reconciler.
-   Watch `GET /api/merge-queue/trains?projectId=d1c5d9c1-4897-4e1b-acc3-2aa96de04117`.
-3. Promote once they land: `pnpm promote --dry-run`, then `pnpm promote`. Under `flow` it cuts an
-   rc and wants a full sweep; with #1256 live the sweep no longer yields to gates, so try without
-   `--force-sweep` first.
-4. Clean up: the four scratch worktrees `../ak-direct-{stop-hooks,phase-checks,train-rebase,train-selector}`
-   and their `direct/*` branches are landed (fast-forwarded) and can go (`git worktree remove`);
-   `.worktrees/agentic-kanban/scratch-train-repro` (detached, holds the BOM commit `34444859dd`)
-   and ~9 locked `feature_*-msz8*` test worktrees are older leftovers for the `cleanup` skill.
+Verified before landing: `typecheck`, `check:arch`, `gate:always-run` green; 394 tests across the
+touched suites; drizzle snapshot baseline. The rc sweep for the promotion is the full-suite check.
 
 ### Open, not done
-- A sided train member that becomes mergeable because master changed stays held until its own tip
-  moves (seen on #1253/#1261; released by hand with `update-base`). Fix: re-check merge-tree against
-  the current base before honouring the siding hold.
-- Builders run vitest with 8 fork workers (seen on #1259's relaunch, ~1.9 GB); cap it like the gate.
-- ~28k `agentic-*` entries in `%TEMP%` are not covered by any sweep script.
-- The kernel-pool growth itself (see above).
-- `direct-master/SKILL.md` still says a PostToolUse hook typechecks on every edit; it no longer does.
-- Train `-06` went red on `verify-gate-runner.test.ts`, which passes on master and on every member
-  branch; never explained (the train ran on the old fallback selection and was cancelled).
-- Carried from 2026-09-26, untouched since: `git pull --ff-only` in the ki-team
-  `refactor-safety-net` (GitLab answered HTTP 500) and then Update the plugin
-  (`POST /api/plugins/d9eae2ad-…/update`); decide whether `reqextract` moves to
-  `ki-team/software-modernization/reqextract`.
-
+- **Kernel-pool growth**: non-paged pool 1.9 GB and paged 1.8 GB only 30 min after boot (19 h
+  earlier: 3.4 / 7.0 GB). No pool-tag tool on the box; attributing it needs Sysinternals RAMMap or
+  poolmon installed (a user decision).
+- Stale siding rows: `GET /api/merge-queue/trains` lists ~11 `workspace_train_siding` rows from
+  2026-09-18..27 with `sidedBranchSha: null` (released, never cleared because the member never
+  landed through the train). Cosmetic in the panel; nothing holds on them.
+- ~18k `ak-*`/`kanban-*` fixture dirs in %TEMP% are "not yet stale enough" for the reaper; the
+  `.worktrees/agentic-kanban/scratch-train-repro` and ~9 locked `feature_*-msz8*` test worktrees are
+  still for the `cleanup` skill.
+- Carried from 2026-09-26: `git pull --ff-only` in the ki-team `refactor-safety-net` then Update the
+  plugin; decide whether `reqextract` moves to `ki-team/software-modernization/reqextract`.
 
 ## Archive
 
@@ -88,6 +69,8 @@ Passes older than today have been moved **verbatim, newest first** into
 [`docs/archive/CONTINUE-archive.md`](docs/archive/CONTINUE-archive.md). Nothing is re-verified or
 edited on the way in, so each pass records what that session believed at the time. The archive
 holds:
+- **2026-09-27 morning (moved 2026-09-27 afternoon):** the merge mechanism repair (breaker, neutral
+  base moves, train selector, train logs, send-back, phase-exit checks) and the pre-reboot handoff.
 - **2026-09-26 (moved 2026-09-27):** the CLAUDE.md token pass, #1251 plugin skill listings, the
   `refactor-safety-net` plugin re-pointed to the ki-team checkout.
 - **2026-09-24/25 (moved 2026-09-26):** the #1228 gate loop and the rebase-onto-stale-origin incident,
