@@ -63,6 +63,11 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // JSON record (`lastFiredAt`, the pid it spawned), the same split `conductor_cron` uses.
   "promote_cadence",
   "promote_cadence_state",
+  // Flush activity-log cursor (#1253, #1246 follow-up): `flush_activity_log_state_<id>` is a
+  // JSON record of the last flush id + state the board-health-event sweep already logged for
+  // this project, so a re-read of `flush-state.json` (there is no push notification — the
+  // writer is #1247/#1248, not this ticket) logs each transition exactly once.
+  "flush_activity_log_state",
   // Heal-ticket review posture (#1239): `heal_review_posture_<id>` names a risk level
   // (`standard` is the intended value) that every rc heal ticket is born tagged with
   // (`risk:<level>`), pinning its per-ticket review. Unset = the project's own posture.

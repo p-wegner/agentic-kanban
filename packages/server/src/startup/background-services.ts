@@ -44,6 +44,7 @@ import { DB_LOCATION } from "../db/data-dir.js";
 import { startStaleTempSweeper, stopStaleTempSweeper } from "./stale-temp-sweep.js";
 import { startNonBlockingSetupRetryReconciler, stopNonBlockingSetupRetryReconciler } from "./non-blocking-setup-retry-reconciler.js";
 import { startCommitMsgHookBackfill, stopCommitMsgHookBackfill } from "./commit-msg-hook-backfill.js";
+import { startFlushActivityLogReconciler, stopFlushActivityLogReconciler } from "./flush-activity-log-reconciler.js";
 
 /**
  * Background-service (start/stop) plugin registry — the append target for periodic
@@ -417,6 +418,16 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start({ db }) {
       startCommitMsgHookBackfill({ database: db });
       return stopCommitMsgHookBackfill;
+    },
+  },
+  {
+    // #1253 (#1246 follow-up) — logs every flush and heal-state transition to board_health_events.
+    // See the module header: flush-state.json has no writer yet and no push notification, so this
+    // is a periodic re-read + diff against a per-project cursor.
+    name: "flush-activity-log-reconciler",
+    start({ db }) {
+      startFlushActivityLogReconciler({ database: db });
+      return stopFlushActivityLogReconciler;
     },
   },
 ];

@@ -45,6 +45,7 @@ import type { GateImpactSelection, GateTierInfo } from "./pre-merge-gate-tier.js
 import { impactRunnerFellBack } from "./impact-selection-note.js";
 import { attributeFailedSuites, classifyFailedSuites } from "./verify-failed-suites.js";
 import { gateRowExtras, patchLastRow } from "./test-impact-outcome/guard-tag.js";
+import { parseBudgetMs } from "./test-impact-outcome/budget-cap.js";
 
 /**
  * Path of `impact.mjs` relative to a repo root, as the board materializes the skill into a
@@ -333,107 +334,13 @@ const defaultRunCommand: RunImpactCommand = ({ cwd, args, timeoutMs, stdin }) =>
   });
 
 /**
- * The `select --json` payload, narrowed to what a ledger row needs.
- *
- * Deliberately tolerant: this parses the output of a TOOL that lives outside this package (the
- * skill is materialized into worktrees and updated independently), so an unexpected shape must
- * degrade to "no measurement" rather than throw inside the merge path.
+ * `select --json` payload parsing (`ParsedSelection`, `parseSelection`) moved to
+ * `./test-impact-outcome/select-payload.ts` when #1261's whole-set budget re-cut pushed this file
+ * past the 1000-line god-module ceiling — the same seam #998/#1098 used. Imported AND re-exported
+ * so existing importers (this module's own callers below, and the tests) are unaffected.
  */
-interface SelectPayload {
-  tier?: unknown;
-  selected?: unknown;
-  changed?: unknown;
-  belowFloor?: unknown;
-  dropped?: unknown;
-  estMs?: unknown;
-  stale?: unknown;
-  signalCounts?: unknown;
-}
-
-export interface ParsedSelection {
-  tier: string;
-  selected: string[];
-  changed: string[];
-  /**
-   * How many candidate suites the selection ranked out BELOW the score floor (#956).
-   *
-   * This is the number the `impact` gate tier's honesty depends on — it is the size of the tail
-   * the tier is betting against — so it is parsed here rather than left to a second reader.
-   * Absent (an older tool) reads as 0; the payload has carried it since the skill's 2026-08-30
-   * build, and a wrong-low 0 is visible beside `selectedCount` rather than silently distorting a
-   * rate the way a missing `changed` would.
-   */
-  belowFloorCount: number;
-  /**
-   * How many suites the BUDGET dropped (#966) — they cleared the score floor but did not fit in
-   * the allotted time. `impact.mjs` reports these in its own `dropped` array, separately from
-   * `belowFloor`, and the two must stay separate here: they name different knobs, and a reader
-   * who cannot tell them apart cannot tell whether to raise the budget or lower the floor.
-   * Absent (no budget, or an older tool) reads as 0.
-   */
-  budgetDroppedCount: number;
-  /**
-   * The tool's own measured estimate of what the selection kept, in ms — the figure the budget
-   * is compared against. Undefined when the payload carried none.
-   */
-  estMs?: number;
-  /**
-   * Was the impact map stale when the selection was computed? The skill widens to the package
-   * tier and prints `[inventory STALE]` in that case, so a stale selection is a DIFFERENT
-   * artifact from a fresh one and the gate message must not report them identically. Absent reads
-   * as `false` — the honest default is "the tool did not say", and the `selectionTier` printed
-   * beside it is what would show the widening.
-   */
-  stale: boolean;
-  /**
-   * How many kept entries came from `--union` rather than from the impact ranking (#967) —
-   * `signalCounts.external`, the code `impact.mjs` tags every external entry with.
-   *
-   * Undefined when no union was passed. Read off `signalCounts` rather than counted from
-   * `selected[].signals` so a payload shape change on the tool side degrades to "unknown" instead
-   * of to a wrong-low number: the tool computes this count once, and re-deriving it here is a
-   * second place for the two to disagree.
-   */
-  externalCount?: number;
-}
-
-export function parseSelection(stdout: string): ParsedSelection | null {
-  let payload: SelectPayload;
-  try {
-    payload = JSON.parse(stdout) as SelectPayload;
-  } catch {
-    return null;
-  }
-  if (!payload || typeof payload !== "object" || !Array.isArray(payload.selected)) return null;
-  const selected = payload.selected
-    .map((entry) => (entry && typeof entry === "object" ? (entry as { test?: unknown }).test : entry))
-    .filter((test): test is string => typeof test === "string" && test.length > 0);
-  // `changed` is what makes the row auditable (#963): a selection computed from an EMPTY change
-  // set is the always-run baseline wearing the selection's name, and nothing else in the row says
-  // so. Absent (an older tool) reads as an empty array, which the guard below treats the same way
-  // as an observed-empty one — conservative, since neither can be shown to have seen the diff.
-  const changed = Array.isArray(payload.changed)
-    ? payload.changed.filter((file): file is string => typeof file === "string" && file.length > 0)
-    : [];
-  // #967 — `signalCounts.external` exists only when `--union` contributed something. Absent means
-  // "no union entered this selection", which is a real answer and must stay distinguishable from
-  // "a union entered and added zero": the latter is reported as 0 by the tool.
-  const signalCounts =
-    payload.signalCounts && typeof payload.signalCounts === "object"
-      ? (payload.signalCounts as Record<string, unknown>)
-      : null;
-  const external = signalCounts?.external;
-  return {
-    tier: typeof payload.tier === "string" ? payload.tier : "unknown",
-    selected,
-    changed,
-    belowFloorCount: Array.isArray(payload.belowFloor) ? payload.belowFloor.length : 0,
-    budgetDroppedCount: Array.isArray(payload.dropped) ? payload.dropped.length : 0,
-    ...(typeof payload.estMs === "number" && Number.isFinite(payload.estMs) ? { estMs: payload.estMs } : {}),
-    stale: payload.stale === true,
-    ...(typeof external === "number" && Number.isFinite(external) ? { externalCount: external } : {}),
-  };
-}
+import { parseSelection, type ParsedSelection } from "./test-impact-outcome/select-payload.js";
+export { parseSelection, type ParsedSelection };
 
 /**
  * The score floor the gate's verify run will actually apply (#956).
@@ -535,7 +442,11 @@ export async function resolveGateSelection(input: {
       ...(union.length > 0 ? { stdin: `${union.join("\n")}\n` } : {}),
     });
     if (result.exitCode !== 0) return null;
-    return parseSelection(result.stdout);
+    // #1261 — re-cut over the WHOLE set before this call's `selectedCount`/`estMs`/
+    // `budgetDroppedCount` reach the message, the same rule `scripts/test-mine.mjs`'s runner
+    // applies to what it actually executes. Without this the tool's own `--budget` greedy-fill cut
+    // could name MORE suites than the runner keeps, so the pass message overstated the selection.
+    return parseSelection(result.stdout, budget ? parseBudgetMs(budget) : null);
   } catch {
     return null;
   }
@@ -699,9 +610,21 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
     // `select --json --always-run --base master` → `changed: 0`, `select master --json --always-run`
     // → `changed: 9`.
     const baseBranch = input.baseBranch?.trim() || null;
+    // #1261 — the SAME budget the run actually applied (carried on `tierInfo.impactSelection.budget`,
+    // #966's own spelling), so this call's `selected` can be re-cut to match what the runner kept
+    // rather than reporting the tool's unbudgeted (or tool-greedy-cut) superset as "selected".
+    const ledgerBudget = input.tierInfo?.impactSelection?.budget?.trim() || null;
+    const ledgerBudgetMs = ledgerBudget ? parseBudgetMs(ledgerBudget) : null;
     const selection = await run({
       cwd: workingDir,
-      args: [toolPath, "select", ...(baseBranch ? [baseBranch] : []), "--json", "--always-run"],
+      args: [
+        toolPath,
+        "select",
+        ...(baseBranch ? [baseBranch] : []),
+        "--json",
+        "--always-run",
+        ...(ledgerBudget ? ["--budget", ledgerBudget] : []),
+      ],
       timeoutMs: IMPACT_COMMAND_TIMEOUT_MS,
     });
     if (selection.exitCode !== 0) {
@@ -721,7 +644,7 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
         reason: `select exited ${selection.exitCode}: ${(selection.stderr || selection.stdout).trim().split("\n").slice(-1)[0] ?? ""}`,
       };
     }
-    const parsed = parseSelection(selection.stdout);
+    const parsed = parseSelection(selection.stdout, ledgerBudgetMs);
     if (!parsed) return { recorded: false, reason: "could not parse `select --json` output" };
 
     const ran = gateRanScope(input.tierInfo);

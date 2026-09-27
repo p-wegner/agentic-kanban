@@ -17,7 +17,7 @@ export const BOARD_HEALTH_EVENT_TYPES = ["cycle_start", "cycle_end", "observatio
 export type BoardHealthEventType = (typeof BOARD_HEALTH_EVENT_TYPES)[number];
 
 /** Business-level grouping shown in the notification center filter bar. */
-export const BOARD_HEALTH_EVENT_CATEGORIES = ["merge", "launch", "server", "refill", "smoke_check"] as const;
+export const BOARD_HEALTH_EVENT_CATEGORIES = ["merge", "launch", "server", "refill", "smoke_check", "flush"] as const;
 export type BoardHealthEventCategory = (typeof BOARD_HEALTH_EVENT_CATEGORIES)[number];
 
 export function isBoardHealthEventType(value: unknown): value is BoardHealthEventType {

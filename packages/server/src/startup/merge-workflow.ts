@@ -27,6 +27,7 @@ import { createSessionManager } from "../services/session.manager.js";
 import { resolveAgentSettings } from "../services/agent-settings.service.js";
 import { insertIssueComment, listRecentIssueComments } from "../repositories/issue-comments.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { clearWorkspaceReadyForMergeAt } from "../repositories/workspace-ready-for-merge.repository.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 import { assertProjectNotQuiesced } from "../services/quiesce.service.js";
 import { resolveMergeGate, type MergeGateToken } from "../services/pre-merge-gate.service.js";
@@ -593,6 +594,7 @@ Server: http://localhost:${serverPort}`;
         now: closedAt,
         set: { readyForMerge: false, closedAt, ...(merge.landed ? { mergedAt: merge.landed.mergedAt } : {}) },
       });
+      await clearWorkspaceReadyForMergeAt(workspace.id, db);
       // Verify the bookkeeping rather than assume it (#356's own suggested direction): a merge
       // that landed but left `mergedAt` null must not be reported as a success, because nothing
       // downstream can tell that state apart from "never merged".

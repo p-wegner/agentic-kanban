@@ -9,6 +9,7 @@ import { setWorkspaceWorkingDir as setWorkspaceWorkingDirShared } from "@agentic
 import { getAllPreferences as canonicalGetAllPreferences } from "./preferences.repository.js";
 import { issueIdentityColumns } from "./projections.js";
 import { updateWorkspaceSetupRun } from "./workspace-setup-run.repository.js";
+import { stampWorkspaceReadyForMergeAt } from "./workspace-ready-for-merge.repository.js";
 
 export async function updateLatestSetupRunFields(
   workspaceId: string,
@@ -258,6 +259,7 @@ export async function setWorkspaceReadyForMerge(
   database: Database = db,
 ): Promise<void> {
   await database.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, workspaceId));
+  await stampWorkspaceReadyForMergeAt(workspaceId, now, database);
 }
 
 export async function getIssueProjectIdById(

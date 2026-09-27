@@ -16,6 +16,7 @@ const CATEGORY_OPTIONS: { value: CategoryFilter; label: string }[] = [
   { value: "server", label: "Server" },
   { value: "refill", label: "Refill" },
   { value: "smoke_check", label: "Smoke check" },
+  { value: "flush", label: "Flush" },
 ];
 
 const CATEGORY_BADGE_CLASSES: Record<BoardHealthEventCategory, string> = {
@@ -24,6 +25,7 @@ const CATEGORY_BADGE_CLASSES: Record<BoardHealthEventCategory, string> = {
   server: "bg-violet-100 dark:bg-violet-900 text-violet-700 dark:text-violet-300",
   refill: "bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300",
   smoke_check: "bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300",
+  flush: "bg-rose-100 dark:bg-rose-900 text-rose-700 dark:text-rose-300",
 };
 
 const LEVEL_DOT_CLASSES: Record<BoardHealthEvent["level"], string> = {
