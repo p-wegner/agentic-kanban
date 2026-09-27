@@ -334,7 +334,8 @@ describe("parseSelection / emptyChangeSetReason", () => {
       // including the cheap `low-cheap` a greedy fill would have kept — is cut.
       expect(capped!.selected).toEqual(["packages/server/src/__tests__/top.test.ts"]);
       expect(capped!.budgetDroppedCount).toBe(2);
-      expect(capped!.estMs).toBe(40_000);
+      // 40s measured + the 1s per-suite floor (#1262).
+      expect(capped!.estMs).toBe(41_000);
     });
 
     it("with no budget, behaves exactly as before (unchanged for every unbudgeted project)", () => {

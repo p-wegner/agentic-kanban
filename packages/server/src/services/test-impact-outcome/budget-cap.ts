@@ -40,7 +40,14 @@ export interface BudgetCapResult<T extends BudgetCapEntry> {
 }
 
 const isOwn = (s: BudgetCapEntry): boolean => (s.score ?? 0) >= 99 || (s.signals ?? []).includes("self");
-const costOf = (s: BudgetCapEntry): number => (typeof s.durationMs === "number" ? s.durationMs : UNMEASURED_SUITE_MS);
+/**
+ * Per-suite fork/import floor added to every suite's price, mirroring `SUITE_OVERHEAD_MS` in
+ * `scripts/test-mine.mjs` (#1262): `durationMs` measures in-test time only, while vitest's per-file
+ * collect+import runs to about a second.
+ */
+export const SUITE_OVERHEAD_MS = 1000;
+const costOf = (s: BudgetCapEntry): number =>
+  (typeof s.durationMs === "number" ? s.durationMs : UNMEASURED_SUITE_MS) + SUITE_OVERHEAD_MS;
 
 /**
  * Cap a `select --json` selection to `budgetMs` over the WHOLE set (#1260/#1261), dropping the

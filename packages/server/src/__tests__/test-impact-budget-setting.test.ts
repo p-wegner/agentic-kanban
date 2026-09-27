@@ -325,7 +325,8 @@ describe("the selection the message describes is the selection the run makes", (
     expect(seenArgs.slice(1)).toEqual(["select", "master", "--json", "--always-run", "--min-score", "1.0", "--budget", "60s"]);
     // #1261 — priced by the WHOLE-SET cap, not the tool's raw `dropped`/`estMs`: `a` alone
     // fits the 60s budget, `b` does not, so the description matches what the runner would keep.
-    expect(selection).toMatchObject({ budget: "60s", budgetDroppedCount: 1, estMs: 58_000 });
+    // `a` is 58s measured + the 1s per-suite floor (#1262).
+    expect(selection).toMatchObject({ budget: "60s", budgetDroppedCount: 1, estMs: 59_000 });
   });
 
   it("omits --budget entirely when the project has none", async () => {

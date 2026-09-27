@@ -218,7 +218,8 @@ describe("resolveGateImpactSelection re-cuts to the budget over the whole set (#
     // The tool's own array has 3 entries; the whole-set cap at 60s keeps only `top`.
     expect(selection?.selectedCount).toBe(1);
     expect(selection?.budgetDroppedCount).toBe(2);
-    expect(selection?.estMs).toBe(40_000);
+    // 40s measured + the 1s per-suite floor both sides price (#1262).
+    expect(selection?.estMs).toBe(41_000);
   });
 
   it("with no budget, reports the tool's selection unchanged", async () => {
