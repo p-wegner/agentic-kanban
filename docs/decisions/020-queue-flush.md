@@ -1,6 +1,7 @@
 # 020 — The queue flush: when merges stall, land everything and heal afterwards
 
-**Status:** accepted 2026-09-24, not yet implemented (#1246–#1249). Builds on 017 (risk posture)
+**Status:** accepted 2026-09-24, implemented 2026-09-26 (#1246–#1249; the activity-log entry and
+Sentinel line are #1253, still in the merge queue). Builds on 017 (risk posture)
 and 019 (release-candidate promotion).
 
 ## The problem this answers
