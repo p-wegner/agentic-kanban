@@ -6,6 +6,123 @@ truth for the values; this page explains the ladder and the release-candidate mo
 decision 019 puts under it. Read decision 017 for how one dial fans out, and
 `docs/two-boards.md` §8 for the promotion mechanics._
 
+_Written for someone who knows classical CI and trunk-based development and wants to know what
+changes when the developers are agents. The first three sections are that argument; the rest is
+the reference._
+
+## Why integration changes when agents write the code
+
+**The classical setup.** A developer branches, opens a pull request, CI runs the full suite, a
+colleague reviews, the PR merges to trunk. A merge queue (GitHub merge queue, Bors, Zuul) keeps
+trunk green by testing each PR against the trunk it will land on, one after the other. That design
+rests on four assumptions: developers are the scarce resource, a PR takes days, CI minutes are
+cheap compared with developer hours, and a red trunk is expensive, because a human has to stop,
+find out which change broke it and reload a context they left days ago. Under those assumptions,
+paying the full suite for every PR is a bargain.
+
+**What agents change.** On this board a builder is an agent in its own worktree. Builders cost
+minutes, run in parallel, and several of them finish a ticket per hour. CI does not scale with
+them. On the one machine this board runs on, a full-suite gate takes 25-40 minutes and at most 3
+gates run at once (see "The resource side"), so the machine can prove only a handful of merges per
+hour. Every merge moves trunk, which stales every other ready branch and starts a rebase, a
+re-review and a re-gate. **The bottleneck moves from writing code to integrating it.**
+
+**What agents are good at.** Fixing a broken integration is cheap for an agent and expensive for a
+human. The agent that resolves a red trunk after ten tickets landed together has all ten
+intentions at hand: the tickets, the commits, the diffs. It needs no archaeology and no meeting.
+If a heal session for a ten-ticket red takes an agent half an hour, that is cheaper than ten
+branches each paying a full gate and a rebase cascade to stay green on the way in. So the
+classical trade reverses: **lower the barrier for each individual change, integrate in batches, and
+fix what breaks downstream**, where one agent fixes it once for the whole batch.
+
+**Downstream needs a place that does not block trunk.** That place is the release branch. Trunk
+keeps merging on narrow gates; on a cadence the board cuts a release candidate (`rc/<date>`) from
+trunk, runs the full suite on it once, and when it is red, heal agents fix it **on the candidate**
+while trunk keeps moving. The green candidate is promoted to the stable board, and its fixes merge
+back into trunk. The full suite then costs one run per release instead of one per merge, and the
+fixing is batched per release. This is the classical release branch with the roles swapped: in a
+classical shop the release branch is where changes are frozen and hardened by hand; here it is
+where agents pay the integration debt the narrow gates deferred ("The release-candidate model"
+below).
+
+This page is the set of dials for making that trade on purpose, per project and per ticket, from
+"prove everything before landing" (classical) to "prove your own change, heal the rest on the
+release candidate".
+
+## Three resources, and which mechanism spends which
+
+Integration here optimizes three resources at once. They pull in different directions, so every
+mechanism below is a trade between them and risk.
+
+- **Compute.** CPU and RAM on one device. A full suite is the most expensive thing the board does,
+  and every gate that runs is a slot another gate waits for.
+- **Tokens.** Agent work. The costly pattern is the **rebase cascade**: with N ready branches
+  landed one at a time, each landing moves trunk, and each of the remaining branches rebases,
+  re-resolves its conflicts, gets re-reviewed and re-gated. That is roughly N²/2 agent sessions of
+  integration work. One combined merge plus one fix session is a fraction of that.
+- **Velocity.** Wall-clock time from "ticket ready" to "on trunk". Parallel worktrees only help
+  while integration keeps up. When the gate is the bottleneck, more parallel builders add queue
+  depth, conflicts and rebases, and the tickets land no sooner than if they had been built one
+  after the other with less compute and fewer tokens.
+
+| Mechanism | Compute | Tokens | Velocity | Risk accepted |
+|---|---|---|---|---|
+| Test-impact selection instead of full suite | much less per gate | — | faster gates | a missed suite lands; measured as the miss rate |
+| Typecheck-only review-exit gate (#1260) | one test run per ticket instead of two | — | ready sooner | none: the merge still gates |
+| Merge train (gate N branches once) | 1 gate per N | no rebase cascade | N land together | a red member delays the others by bisect runs |
+| Ticket groups (#661) | 1 gate per group | one builder holds the coupled intent | fewer conflicts | a bigger change per review |
+| Verdict-neutral base moves keep the gate | no re-gate | no re-review | no requeue | none: only paths no gate reads |
+| Branch-scoped breaker, siding | no re-gating a known red | — | the rest keeps landing | none |
+| Full suite on the release candidate only (`flow`) | one full suite per release | heal once per release, on the candidate | trunk never waits | trunk may be red between releases |
+| Release cadence (`promote_cadence_<id>`) | one sweep per cut | smaller heals when cuts are frequent | red found within one cadence | red older than one cadence is abandoned for a fresh cut |
+| Flush (decision 020) | arch + typecheck only | one heal pass for the batch | the whole queue lands now | trunk is red until healed |
+| Fewer builders (WIP) | fewer gates queued | fewer rebases | same landings when the gate is the limit | none |
+
+## The merge queue and the merge train
+
+**The queue.** A branch enters the merge queue when its review passed and its review-exit gate
+passed (`readyForMerge`). The auto-merge orchestrator does not merge each branch as it arrives. It
+collects ready branches in a **window** that closes at a size or a wait (`train_max_size_<id>`,
+`train_max_wait_ms_<id>`; defaults 4 and 10 minutes). The released set is partitioned by repo and
+base; each partition becomes one train, and a branch alone in its partition rides alone.
+
+**The train** (`merge-train.service.ts`, `merge-train-assembly.ts`):
+
+1. **Assemble.** The members are merged, `--no-ff` and never squashed or rebased, onto an
+   integration ref (`kanban/train/<date>-N`) cut from the current base, ordered to minimise overlap.
+   A member that conflicts with another member is **deferred** to the next train, and the pair is
+   recorded as a candidate ticket group. A member that conflicts with the base goes back for a
+   rebase.
+2. **Gate once.** The posture's gate runs on the assembled tree: the exact tree that will land.
+3. **Green: land.** One merge commit lands the whole train (`Merge train 2026-09-26-03: #1256`),
+   and every member closes as merged.
+4. **Red: find the culprit.** The train first gates the bare base (the control arm). If the base
+   alone is red, the members are not blamed (and on `iterate`/`flow` a red base does not hold the
+   train). If the base is green, a member broke it: the train splits into halves and gates each,
+   down to the member that is red on its own. That member goes to the **siding** until its branch
+   changes; the green members land.
+
+**Why trains.**
+
+- **Cost.** N tickets pay one gate instead of N. With 30-minute gates and 3 slots the machine
+  proves at most 6 single-branch merges an hour; with green trains of 4, up to 24.
+- **Correctness.** A per-branch gate tests the branch as it is, un-rebased. It never tests the
+  merge that actually lands, so two branches that are each green can merge into a red trunk with
+  no textual conflict at all (a semantic conflict). A train gates the assembled tree, which is what
+  lands. This is the same reason GitHub's merge queue and Zuul test speculative merges.
+- **Tokens.** Members are not rebased one by one behind each other's landings, so the rebase
+  cascade does not happen.
+- **Blame.** Bisect names the member that broke the train, at the cost of about log₂(N) extra
+  gate runs, and only when the train is red.
+
+**Where it differs from a classical merge queue.** A classical queue sends a failing PR back to
+its human author and blocks or rebuilds the queue behind it. Here the failing member is sided, the
+rest lands, and the failure goes to an agent: the builder is relaunched with the failing suites, or
+on the low rungs a heal ticket fixes it downstream. What a narrow train gate misses surfaces in
+the release candidate's full sweep and is healed there, not in the queue. The flush (decision 020)
+is the far end of the same idea: a train with no size cap, no bisect and no test gate, healed
+afterwards on the candidate or on trunk.
+
 ## The idea in one paragraph
 
 Every integration style answers the same three questions: **what does a merge prove**, **what
