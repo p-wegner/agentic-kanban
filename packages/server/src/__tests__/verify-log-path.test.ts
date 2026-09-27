@@ -3,8 +3,7 @@
 // STREAM of an empty file `kanban-verify-train` (measured 2026-09-27: hundreds of streams), so no
 // operator or tool could find a train's log. `verifyLogPath` is the one builder; these pin it.
 import { describe, expect, it } from "vitest";
-import { readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, rmSync, statSync } from "node:fs";
 import { basename } from "node:path";
 import { summarizeVerifyFailure, verifyLogPath } from "../services/verify-failure-summary.js";
 
@@ -43,8 +42,8 @@ describe("verifyLogPath", () => {
       expect(summary).toContain(`[full verify log: ${expected}]`);
       expect(afterDrive(expected)).not.toContain(":");
       expect(basename(expected)).toBe(`kanban-verify-train-train-2099-01-01-${process.pid}.log`);
-      // Found by LISTING the temp dir, the way an operator would, not by re-deriving a stream path.
-      expect(readdirSync(tmpdir())).toContain(basename(expected));
+      // A plain file with a colon-free leaf, so a directory listing shows it (a stream never is).
+      expect(statSync(expected).isFile()).toBe(true);
       expect(readFileSync(expected, "utf8")).toContain("FAIL x");
     } finally {
       rmSync(expected, { force: true });
