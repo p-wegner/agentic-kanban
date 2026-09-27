@@ -358,11 +358,12 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
      *  stamps here can never match and the whole reuse path silently stops firing. */
     workingDir: string | null,
   ): Promise<void> {
+    const readySince = evidence.ranAt ?? new Date().toISOString();
     await db.update(workspaces).set({
       readyForMerge: true,
-      updatedAt: evidence.ranAt ?? new Date().toISOString(),
+      updatedAt: readySince,
     }).where(eq(workspaces.id, workspaceId));
-    await stampWorkspaceReadyForMergeAt(workspaceId, evidence.ranAt, db);
+    await stampWorkspaceReadyForMergeAt(workspaceId, readySince, db);
     // #815: the five `merge_gate_*` columns moved to `workspace_merge_gate`. Same values,
     // same trustworthiness rule — an upsert, because a workspace can be re-gated.
     // #893: also stamp the verification-tier key, so the HTTP merge path's bounded

@@ -295,6 +295,14 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       json: '[{"name":"Tests","score":10,"maxScore":10,"signal":"green"}]', computedAt: c.now,
     });
   },
+  // #1253: the moment a workspace became ready-for-merge, read by `getQueuePressureMemberRows`
+  // instead of `workspaces.updatedAt`. Same `onDelete: cascade` shape as the other extracted
+  // column families, so seeding it proves the cascade fires.
+  workspace_ready_for_merge: async (c) => {
+    await c.db.insert(schema.workspaceReadyForMerge).values({
+      workspaceId: c.workspaceId, readySince: c.now,
+    });
+  },
   sessions: async (c) => {
     await c.db.insert(schema.sessions).values({
       id: c.sessionId, workspaceId: c.workspaceId, status: "running", startedAt: c.now,
