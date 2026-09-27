@@ -11,6 +11,55 @@ First archive pass: 2026-08-27, cutting at the 2026-08-24 boundary (`CONTINUE.md
 
 ---
 
+<!-- moved 2026-09-27 from CONTINUE.md, verbatim -->
+
+## 2026-09-26 — context token pass, plugin skill listings (#1251), safety-net plugin re-pointed
+
+**Context cost.** The root `CLAUDE.md` went from ~18.5k to ~4.5k tokens (o200k estimate; `cea9b26aed`):
+rules stay inline, the moved detail sits verbatim in `docs/agent-guide/*.md`, and the private-index
+commit recipe became the `shared-checkout-commit` skill. Verified by the two `claude-md-*-invariants`
+suites (10/10). 26 tracked project skills are now user-invoked (`disable-model-invocation`) and the
+stray `--help` skill is gone (`d2045372dd`); `test-impact` got the same flag in its own repo
+(`382e37a`, pushed to GitHub and GitLab).
+
+**#1251 (this commit, In Progress on the board until promoted).** Plugin skills no longer load their
+descriptions into every session: the board writes Claude Code `skillOverrides` (confirmed present in
+Claude Code 2.1.282) into `.claude/settings.local.json` at enable/disable and into every worktree at
+provisioning, default `name-only`, overridable per project (`plugin_skill_listing_<slug>_<projectId>`,
+a JSON map) and hinted per skill in the manifest (`skills[].listing`). A TRACKED settings file is
+never written; this repo's is tracked, so it carries a hand-set `name-only` block for its 23 plugin
+skills. Pi omits `user-invocable-only`/`off` skills from `--skill`. Verified by
+`plugin-skill-listing.test.ts` (shared, 11) and `plugin-skill-overrides.test.ts` (server, 6) plus the
+provisioning/plugin-service/agent.service suites (95 total), `check-god-modules` OK, `lint:arch` 0
+errors. Left out on purpose and filed as #1252: the Plugins-view selector, and Codex. **Not live**:
+the stable board still runs `stable-20260925`.
+
+**Operational change on the stable board.** The `refactor-safety-net` plugin row now points at
+`C:\projects\andrena\ki-team\software-modernization\refactor-safety-net` (v0.4.0, was the papershift
+client copy at v0.3.0). Both projects that enable it (agentic-kanban, comet/documentation) had their 10
+papershift junctions removed (links only) and re-linked to 11 skills, incl. the new
+`safety-net-bootstrap`. That checkout is 21 commits behind origin: `git pull` got HTTP 500 from
+code.andrena.de on 2026-09-26. The `reqextract` plugin still points at `C:\projects\papershift\reqextract`.
+
+**Carried forward from 2026-09-24 (archived):** settings that matter: posture `iterate`,
+`verify_gate_strategy` `impact`, `merge_strategy` `merge_queue`, Start Mode `monitor`, WIP 2.
+`.sentinel-issues.json` (untracked, 3.6 MB, from a sentinel run) is not ours to delete. A full sweep
+is owed on the promoted board (`<stable>/.kanban/promote-recovery.json`).
+
+### Next steps, in order
+1. `pnpm promote --dry-run` — carries #1250 and #1251; the rc lane should cut `rc/<date>` and ask
+   the promoted board for its sweep.
+2. When GitLab answers: `git pull --ff-only` in the ki-team `refactor-safety-net`, then Update the
+   plugin (`POST /api/plugins/d9eae2ad-…/update`) so the board re-reads its manifest.
+3. Decide whether `reqextract` also moves to `ki-team/software-modernization/reqextract`.
+4. #1252 (listing selector, Codex). Carried: the dev board's posture (`flow` needs
+   `promote_cadence_<id>`), #1246–#1249, #1244, #1245, the `tsz-*` missing-path projects.
+
+### Verified by
+`git log --oneline 00e098a0e5..HEAD`; the test files named above; on the stable board,
+`GET /api/plugins` shows `refactor-safety-net` at the ki-team path, and
+`Get-ChildItem .claude\skills -Attributes ReparsePoint` in both projects shows no papershift target.
+
 <!-- moved 2026-09-26 from CONTINUE.md, verbatim -->
 
 ## 2026-09-24 — review of the last landings, the #1228 gate loop, and the Yegge follow-ups
