@@ -271,8 +271,17 @@ import {
  * so it cannot be folded into an existing suite: nothing else scans for that spelling. The
  * eleventh movement left ~0.3 s of headroom under 561 s; the new 0.7 s crosses it, and the
  * next `durations.json` capture is what should give it back.
+ *
+ * -- Thirteenth movement, UP (2026-09-27) — 562,000 -> 565,000 -----------------------------
+ *
+ * One guard, `base-move-relevance-allowlist-ratchet.test.ts`, at the ASSUMED 3,000 ms (18 ms of
+ * test time measured). It is what keeps `services/base-move-relevance.ts`'s verdict-neutral
+ * allowlist honest: a passed gate is KEPT across a base move that touched only those paths, so a
+ * guard suite that starts reading one of them must fail somewhere, and only a scan of the guard
+ * suites' own sources can see that. `when:packages/**\/__tests__/**` plus the module, so a diff
+ * outside the test trees does not pay it; the next capture should give the 3 s back.
  */
-const BASELINE_TOTAL_MS = 562_000;
+const BASELINE_TOTAL_MS = 565_000;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative
