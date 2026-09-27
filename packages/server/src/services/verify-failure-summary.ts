@@ -227,6 +227,22 @@ function detectVerifyCrash(body: string): { leadLine: string } | null {
 }
 
 /**
+ * The ONE path of a gate's full verify log: `<tmp>/kanban-verify-<key>.log`, with the key made
+ * safe for a filename. A train gate's key is `train:<label>` and its label holds a `/`
+ * (`train:train/2026-09-27-06`): used raw on NTFS, the `:` turned the path into an ALTERNATE DATA
+ * STREAM on an empty file `kanban-verify-train` (measured 2026-09-27: hundreds of streams on it),
+ * so no operator or tool could find a train's log. Every character Windows reserves in a filename
+ * (`<>:"/\|?*` and control characters) becomes `-`; a trailing dot or space, which Windows strips,
+ * does too. Readers take the path from the gate message's `[full verify log: <path>]` trailer, so
+ * they get this same path without rebuilding it.
+ */
+export function verifyLogPath(workspaceKey: string, dir: string = tmpdir()): string {
+  // eslint-disable-next-line no-control-regex -- control characters are exactly what must go
+  const safe = workspaceKey.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/[. ]+$/, (m) => "-".repeat(m.length));
+  return join(dir, `kanban-verify-${safe}.log`);
+}
+
+/**
  * Build the human-facing summary of a failed verify run (#221): filter known-benign git
  * noise, keep the TAIL (vitest prints failures and its summary at the END), and persist the
  * FULL untruncated output to a log file whose path the message references — so the gate is
@@ -241,7 +257,7 @@ export function summarizeVerifyFailure(
       // Deterministic per workspace (no timestamp): the latest failure overwrites, and the
       // resulting message stays STABLE so recordGateFailureNote's dedup-by-gateMessage (#170)
       // still recognises an unchanged failure repeating across orchestrator ticks.
-      const path = join(tmpdir(), `kanban-verify-${workspaceId}.log`);
+      const path = verifyLogPath(workspaceId);
       writeFileSync(path, content, "utf8");
       return path;
     } catch {
