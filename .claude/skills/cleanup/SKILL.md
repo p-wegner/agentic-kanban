@@ -36,7 +36,16 @@ Server runs at http://localhost:3001. Run the cleanup tasks marked below.
 
 ## TASK 1 — Stale git worktrees [always run unless --sessions or --e2e only]
 
-Worktrees live at C:\the-organisation\.worktrees\.
+Worktrees live in `<worktreesRoot>` = `<repo parent>\.worktrees\<project>` (here
+`C:\projects\the-organisation\.worktrees\agentic-kanban`).
+
+**Guards before ANY removal:** do not run while `pnpm promote` is waiting on a sweep or a merge
+train is gating (heavy deletes slow the sweep toward its timeout). Steps 4a/4b apply ONLY to
+worktrees under `<worktreesRoot>`: `git worktree list` also shows the stable board's checkout
+(`../agentic-kanban-stable`), `gitlab-master` and hand-made worktrees, none of which has a
+workspace row, and 4b would force-remove the live stable board. A `locked` worktree needs
+`git worktree unlock` first; a `Filename too long` failure leaves the dir behind, so finish it
+with `node scripts/safe-rmdir.mjs <dir>`.
 
 1. Get all workspaces: GET http://localhost:3001/api/workspaces
    Active = status in (idle, active, reviewing). Others = closed/merged.
@@ -59,7 +68,7 @@ list` / `git worktree prune` — and therefore steps 2–5 — are blind to it. 
 accumulate fast: each carries a ~300–500 MB `node_modules`, and a busy board can leave
 300+ of them (~74 GB) silently filling the disk until the server crashes with ENOSPC.
 
-Detect: count `C:\the-organisation\.worktrees\feature_ak-*` dirs and compare to `git worktree list`
+Detect: count `<worktreesRoot>\feature_ak-*` dirs and compare to `git worktree list`
 (it'll show ~8 while disk has hundreds). The gap is the orphan set.
 
 Sweep them with the dedicated, idempotent, triple-guarded script (re-derives the active set
@@ -94,7 +103,7 @@ node "$(git rev-parse --show-toplevel)\scripts\prune-worktree-husks.mjs" "<workt
 
 Run once with `--dry-run` first and report what it *would* delete; only drop `--dry-run` once
 the list looks right. `<worktreesRoot>` is the directory holding worktree leaf dirs directly
-(e.g. `C:\the-organisation\.worktrees\agentic-kanban`). Omit `--db` to use the default resolution
+(e.g. `C:\projects\the-organisation\.worktrees\agentic-kanban`). Omit `--db` to use the default resolution
 (`<repo>/packages/server/kanban.db`, falling back to `~/.agentic-kanban/kanban.db`); pass it
 explicitly if the board's DB lives elsewhere.
 
@@ -118,20 +127,23 @@ that in reserve; pruning dead worktrees addresses the actual driver.
 Session dirs: %USERPROFILE%\.claude\projects\ (i.e. the current user's home — do not hardcode a username)
 
 1. List subdirs whose names contain "worktrees" or "feature--ak" or "feature_ak".
-2. Decode dir name back to path: replace "--" with "\" and leading "C-" with "C:\"
-   e.g. "C--the-organisation--worktrees-feature_ak-132-..." → "C:\the-organisation\.worktrees\feature_ak-132-..."
-3. For each: if the decoded path does NOT exist on disk → delete the whole session dir.
-4. Report: N deleted, N kept.
+2. Take each dir's real path from the first `"cwd":"..."` field in one of its `*.jsonl` files.
+   Never decode the dir NAME: `-`, `.` and `\` all encode to `-`, so the decode is lossy.
+3. For each dir whose cwd does NOT exist on disk: these transcripts are the corpus
+   `session-inspector`/fleet-analysis read. Ask before deleting; the default is to zip them into
+   `~/.claude/session-archive/worktree-sessions-<date>.zip` (`tar.exe -a -c -f <zip> -T <list>`),
+   verify the zip's file and dir counts against the scan, then remove the dirs.
+4. Report: N archived/deleted, N kept.
 
 ## TASK 3 — E2E test data [always run unless --worktrees or --sessions only]
 
 Test artifacts are issues/projects created by Playwright tests that leaked into the main project.
-Active project ID: 24c4b3f2-bab8-478c-9ce9-5f87478e20b6
+Main project: resolve its id by name (`agentic-kanban`) from `GET /api/projects`; never hardcode it.
 
 1. GET http://localhost:3001/api/projects — delete any project whose name matches:
    - Starts with "e2e-" or "E2E"
    - Matches /^[a-z]{2,4}[0-9a-z]{6,10}$/ (random slug pattern like "mpic1234")
-   Keep: the main project (id 24c4b3f2-bab8-478c-9ce9-5f87478e20b6) and named projects.
+   Keep: the main project and named projects.
 
 2. GET issues for main project, delete any whose title matches:
    - Starts with "e2e-", "E2E", "mpib", "mpic", "mpid", "mpie"

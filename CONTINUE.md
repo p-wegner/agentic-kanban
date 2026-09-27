@@ -6,7 +6,7 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
 ## 2026-09-27 afternoon — board empty, ten direct fixes, promoted as stable-20260927-4
 
 **State.** Every agentic-kanban ticket is Done; none open. #1253 and #1261 landed in train
-`2026-09-27-11` (1 gate run) after `-10` went red. Stable board runs `stable-20260927-4` (`de111e6c5f`, master's tip as of this pass),
+`2026-09-27-11` (1 gate run) after `-10` went red. Stable board runs `stable-20260927-5` (`c8f8896dfb`, see Evening below; `-4` below was the afternoon's),
 promoted 14:13 UTC by `pnpm promote` WITHOUT `--force-sweep` (rc `rc/20260927-2`, full green sweep,
 smoke passed; no merge-back, since the rc held nothing beyond master). `stable-20260927-3` (`738ddc0307`)
 went out at 13:19 the same way; the stuck `rc/20260926` was abandoned by the supersession rule below.
@@ -51,18 +51,30 @@ Posture `flow`, WIP 4, auto-merge on.
 Verified before landing: `typecheck`, `check:arch`, `gate:always-run` green; 394 tests across the
 touched suites; drizzle snapshot baseline. The rc sweep for the promotion is the full-suite check.
 
+### Evening: `stable-20260927-5` and a cleanup pass
+- **Stale siding rows** (`c8f8896dfb`): `GET /api/merge-queue/trains` listed 9 siding rows, all
+  for `closed` workspaces that landed outside the train and never hit `clearTrainSidingState`.
+  The live-siding read now skips closed workspaces. Check: new case in `merge-train-siding.test.ts`
+  (24/24), typecheck, and live: the endpoint now lists 0.
+- **Promoted `stable-20260927-5`** (22:57 UTC, no `--force-sweep`): rc `rc/20260927-3` swept full
+  and green, smoke passed, no merge-back.
+- **`/cleanup` run by hand**, because the skill as written was unsafe: its step 4b force-removes
+  every worktree without an active workspace, which includes `agentic-kanban-stable`. The skill
+  now scopes 4b to `<worktreesRoot>`, holds off during a sweep or train, reads session cwds
+  instead of decoding dir names, and resolves the project id by name. Result: 8 locked
+  `feature_*-msz8*` test worktrees removed (1 pruned), `scratch-train-repro` + 6 husks + 2 stale
+  `train/` dirs removed via `safe-rmdir`; 938 orphaned session dirs (1.25 GB) archived to
+  `~/.claude/session-archive/worktree-sessions-2026-09-27.zip` (counts verified) and removed;
+  0 E2E leaks; pnpm store 0 link-ceiling offenders.
+
 ### Open, not done
 - **Kernel-pool growth**: non-paged pool 1.9 GB and paged 1.8 GB only 30 min after boot (19 h
   earlier: 3.4 / 7.0 GB). No pool-tag tool on the box; attributing it needs Sysinternals RAMMap or
   poolmon installed (a user decision).
-- **Stale siding rows: fixed on master** (after `-4`, not yet promoted). `GET /api/merge-queue/trains`
-  listed 9 `workspace_train_siding` rows, all for `closed` workspaces that landed outside the
-  train and so never hit `clearTrainSidingState`. The live-siding read now skips closed
-  workspaces (rows stay in the DB, harmless). Check: new case in `merge-train-siding.test.ts`
-  (24/24) + `pnpm typecheck`. Goes live with the next `pnpm promote`.
-- ~18k `ak-*`/`kanban-*` fixture dirs in %TEMP% are "not yet stale enough" for the reaper; the
-  `.worktrees/agentic-kanban/scratch-train-repro` and ~9 locked `feature_*-msz8*` test worktrees are
-  still for the `cleanup` skill.
+- ~18k `ak-*`/`kanban-*` fixture dirs in %TEMP% are "not yet stale enough" for the reaper.
+- Kept on purpose in `.worktrees/agentic-kanban`: `.corrupt-quarantine` (the 2026-09-13 pnpm-store
+  incident's evidence; delete when no longer wanted) and `ak-1081` (624 reparse points elsewhere
+  point into it, so deleting it would break them; find the owners first).
 - Carried from 2026-09-26: `git pull --ff-only` in the ki-team `refactor-safety-net` then Update the
   plugin; decide whether `reqextract` moves to `ki-team/software-modernization/reqextract`.
 
