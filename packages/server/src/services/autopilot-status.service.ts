@@ -23,7 +23,8 @@ import { resolveStartPolicy } from "./start-policy.service.js";
 import { resolveMonitorTunables } from "./strategy-objective.service.js";
 import { resolveWipLimit } from "./wip-limit.service.js";
 import { hostOverflowHasFleetCapacity, projectCanDispatch } from "./worker-fleet.service.js";
-import { breakerIsPaused, readAutoMergeBreaker } from "./auto-merge-breaker.js";
+import { breakerIsPaused, readAutoMergeBreaker, type AutoMergeBreakerState } from "./auto-merge-breaker.js";
+import { listAutoMergeBranchHolds, type AutoMergeBranchHold } from "./auto-merge-branch-hold.js";
 
 /**
  * `GET /api/projects/:id/autopilot` — the toolbar Autopilot chip's one read (#1102).
@@ -48,6 +49,33 @@ import { breakerIsPaused, readAutoMergeBreaker } from "./auto-merge-breaker.js";
  *
  * Read-only: nothing here writes, launches, or records a skip.
  */
+
+/**
+ * Which way the same-failure breaker is holding auto-merge (#1207 follow-up): `project` — paused
+ * for everything, because the repeating failure was not attributable to one branch; `branch` —
+ * the project keeps merging and only the listed workspaces are held until their heads move;
+ * `none` — nothing tripped. Server-side extension of `AutopilotStatusResponse` (the client's
+ * schema is a `looseObject`), so a curl or the CLI can answer "why is nothing landing" without
+ * reading `board.log`.
+ */
+export interface AutoMergeBreakerStatus {
+  scope: "project" | "branch" | "none";
+  /** The paused project's signature; null unless `scope` is `project`. */
+  signature: string | null;
+  heldBranches: Array<Pick<AutoMergeBranchHold, "workspaceId" | "branch" | "branchSha" | "signature" | "count" | "heldAt">>;
+}
+
+export type AutopilotStatusWithBreaker = AutopilotStatusResponse & { autoMergeBreaker: AutoMergeBreakerStatus };
+
+/** DECISION (pure): the breaker's scope from the project row and the branch holds. A project pause wins. */
+export function describeAutoMergeBreakerStatus(
+  breaker: AutoMergeBreakerState | null,
+  holds: readonly AutoMergeBranchHold[],
+): AutoMergeBreakerStatus {
+  const heldBranches = holds.map(({ workspaceId, branch, branchSha, signature, count, heldAt }) => ({ workspaceId, branch, branchSha, signature, count, heldAt }));
+  if (breakerIsPaused(breaker)) return { scope: "project", signature: breaker?.signature ?? null, heldBranches };
+  return { scope: heldBranches.length > 0 ? "branch" : "none", signature: null, heldBranches };
+}
 
 /** At most this many ready tickets are confirmed per pass; the chip needs "enough", not a census. */
 const ELIGIBLE_SCAN_LIMIT = 25;
@@ -127,7 +155,7 @@ export function decideAutopilotHoldReason(input: {
   return "no_ready_tickets";
 }
 
-export async function getAutopilotStatus(projectId: string, deps: AutopilotStatusDeps): Promise<AutopilotStatusResponse> {
+export async function getAutopilotStatus(projectId: string, deps: AutopilotStatusDeps): Promise<AutopilotStatusWithBreaker> {
   const { database } = deps;
   await requireProject(projectId, database);
 
@@ -141,6 +169,8 @@ export async function getAutopilotStatus(projectId: string, deps: AutopilotStatu
   // project reads `paused_same_failure` even though every preference still says "enabled" —
   // which is exactly the question an operator has when nothing is landing.
   const breaker = await readAutoMergeBreaker(projectId, database);
+  // A branch-scoped trip leaves `autoMerge` enabled (it IS still merging); it shows here instead.
+  const branchHolds = await listAutoMergeBranchHolds(database, projectId);
   // The same two predicates `monitor-setup.ts` hands `runAutoStart`.
   const autoStart = policy.autoStartUnblocked;
   const allowFeatureTypes = policy.mode !== "manual";
@@ -210,6 +240,7 @@ export async function getAutopilotStatus(projectId: string, deps: AutopilotStatu
     autoMerge: breakerIsPaused(breaker)
       ? { enabled: false, source: "paused_same_failure" as const }
       : { enabled: autoMerge.enabled, source: autoMerge.source },
+    autoMergeBreaker: describeAutoMergeBreakerStatus(breaker, branchHolds),
     nextCycleAt: deps.nextCycleAt?.() ?? null,
   };
 }
