@@ -4,7 +4,7 @@
 // the same incremental PostToolUse/Stop feedback board builders get. Re-exported
 // byte-identically through ../stack-profile.service.ts.
 
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { StackProfile } from "@agentic-kanban/shared";
 
@@ -41,6 +41,77 @@ export interface SmartHooksRulesFile {
   rules: SmartHooksRule[];
 }
 
+/**
+ * Which expensive Stop checks the project's OWN hook config already runs
+ * (`.claude/hooks/smart-hooks-config.json`). A generated rule for the same bucket is a second,
+ * usually wider, copy of it: on this repo the stale generated file ran `pnpm typecheck` and the
+ * whole `pnpm test:mine` suite beside the hand-authored `scoped-typecheck.js` / `scoped-vitest.js`.
+ */
+export interface HandAuthoredStopChecks {
+  typecheck: boolean;
+  tests: boolean;
+}
+
+const NO_HAND_AUTHORED_CHECKS: HandAuthoredStopChecks = { typecheck: false, tests: false };
+
+/**
+ * Bucket one hand-authored check. Mirrors `classifyCheck` in `.claude/hooks/hook-posture.js`
+ * (that file is plain node copied into worktrees, so it cannot be imported here): a safety
+ * check (`alwaysRun`) is never a typecheck/test check, and the NAME counts as well as the
+ * command, since a project can point either bucket at its own script.
+ */
+function classifyHandAuthoredCheck(check: unknown): "typecheck" | "tests" | null {
+  if (!check || typeof check !== "object") return null;
+  const c = check as { alwaysRun?: unknown; enabled?: unknown; command?: unknown; name?: unknown };
+  if (c.alwaysRun === true || c.enabled === false) return null;
+  const command = String(c.command ?? "");
+  const name = String(c.name ?? "");
+  if (/scoped-typecheck\.js/.test(command) || /\btypecheck\b/i.test(name)) return "typecheck";
+  if (/scoped-vitest\.js/.test(command) || /\b(vitest|tests?)\b/i.test(name)) return "tests";
+  return null;
+}
+
+/** Read the project's own Stop checks. Absent/unparseable config = none (generate as before). */
+export function readHandAuthoredStopChecks(repoPath: string): HandAuthoredStopChecks {
+  let stop: unknown;
+  try {
+    const raw = readFileSync(join(repoPath, ".claude", "hooks", "smart-hooks-config.json"), "utf8");
+    stop = (JSON.parse(raw) as { hooks?: { Stop?: unknown } }).hooks?.Stop;
+  } catch {
+    return NO_HAND_AUTHORED_CHECKS;
+  }
+  if (!Array.isArray(stop)) return NO_HAND_AUTHORED_CHECKS;
+  const kinds = stop.map(classifyHandAuthoredCheck);
+  return { typecheck: kinds.includes("typecheck"), tests: kinds.includes("tests") };
+}
+
+/**
+ * Quick-test scripts known to run the WHOLE suite when called with no scope. `test:mine` is the
+ * board's own runner (`scripts/test-mine.mjs`): with no scope env it runs every package — 26-42
+ * min on this repo — which is exactly what the stack detector picks as the "quick" command.
+ */
+const UNSCOPED_WHOLE_SUITE_SCRIPTS = /(^|\s)(?:(?:npm|bun)\s+run|pnpm|yarn)\s+test:mine\s*$/;
+
+/**
+ * The quick-test command a generated Stop rule may run, or null for "generate no test rule".
+ *
+ * A generated rule has no measured runtime to size its timeout from, so it may only run a
+ * command that is plausibly quick. Three cases are the whole suite by construction and get NO
+ * rule — not generating it beats a timeout that can only ever expire (the always-killed
+ * `test:mine` rule, 180 s against a 26-42 min suite):
+ *  - no `quickTestCommand`: the only candidate is the full `testCommand`,
+ *  - a `quickTestCommand` identical to `testCommand`: it IS the full suite (`cargo test`),
+ *  - a known unscoped whole-suite runner (`UNSCOPED_WHOLE_SUITE_SCRIPTS`).
+ * The merge gate runs the full suite either way; the hook never needed to.
+ */
+export function scopedQuickTestCommand(profile: StackProfile): string | null {
+  const quick = profile.quickTestCommand?.trim();
+  if (!quick) return null;
+  if (quick === profile.testCommand?.trim()) return null;
+  if (UNSCOPED_WHOLE_SUITE_SCRIPTS.test(quick)) return null;
+  return quick;
+}
+
 /** Per-stack source-file glob patterns that should trigger an edit-time quick check. */
 const STACK_SOURCE_PATTERNS: Record<string, string[]> = {
   node: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs"],
@@ -62,12 +133,16 @@ function sourcePatternsForStack(stack: string | null): string[] {
 /**
  * Build the generated edit-time feedback rules from a stack profile. Pure — no I/O.
  *
- * Prefers the cheapest signal available: typecheck (fastest), else quick test, else the full
- * test command. Each non-null command becomes a rule that fires when a source file for the
- * stack is edited. Project-agnostic: every command comes from the profile, nothing hard-coded
- * to a particular repo. Returns an empty `rules` list when the profile has no usable command.
+ * Emits a typecheck rule and a quick-test rule, each only when the profile has a usable
+ * command and `handAuthored` (the project's own hook config) does not already run that bucket.
+ * Never a full-suite test rule (see `scopedQuickTestCommand`). Each rule fires when a source
+ * file for the stack is edited. Project-agnostic: every command comes from the profile.
+ * Returns an empty `rules` list when nothing qualifies.
  */
-export function buildSmartHooksRules(profile: StackProfile): SmartHooksRulesFile {
+export function buildSmartHooksRules(
+  profile: StackProfile,
+  handAuthored: HandAuthoredStopChecks = NO_HAND_AUTHORED_CHECKS,
+): SmartHooksRulesFile {
   const patterns = sourcePatternsForStack(profile.stack);
   const rules: SmartHooksRule[] = [];
 
@@ -94,7 +169,7 @@ export function buildSmartHooksRules(profile: StackProfile): SmartHooksRulesFile
   // the verify-gate/dev-server derivation elsewhere), so it is the cheapest available signal
   // for "this typecheck spans multiple packages" without inventing a new measured-runtime
   // mechanism. A monorepo gets a 5x budget instead of a doomed 120s one.
-  if (profile.typecheckCommand) {
+  if (profile.typecheckCommand && !handAuthored.typecheck) {
     rules.push({
       name: "Typecheck",
       command: profile.typecheckCommand,
@@ -105,11 +180,11 @@ export function buildSmartHooksRules(profile: StackProfile): SmartHooksRulesFile
     });
   }
 
-  // Quick/affected tests give behavioral feedback. Fall back to the full test command only
-  // when there is no quick variant (and no typecheck already covering the edit). Skipped for the
-  // slow JVM family (see above) — too slow to run on every edit.
-  const testCommand = profile.quickTestCommand ?? profile.testCommand;
-  if (testCommand && !isSlowJvm) {
+  // Quick/affected tests give behavioral feedback. Skipped for the slow JVM family (see above),
+  // for any command that is the whole suite (`scopedQuickTestCommand`), and when the project's
+  // own hook config already runs a test check on Stop.
+  const testCommand = scopedQuickTestCommand(profile);
+  if (testCommand && !isSlowJvm && !handAuthored.tests) {
     // #487 — "quick" is an assumption about the project's own script, not a fact this
     // generator can check. On a large monorepo the configured quick command can BE the whole
     // suite (measured: `pnpm test:mine` = 10+ min on this repo) under a 180s budget, so the
@@ -117,10 +192,9 @@ export function buildSmartHooksRules(profile: StackProfile): SmartHooksRulesFile
     // regardless of what changed — a gate that is always red carries no signal at all, and it
     // reprinted its own truncated output each time.
     //
-    // Two layers now stop that. The runner treats a TIMEOUT as inconclusive for non-safety
-    // checks rather than a block (see smart-hooks-runner.js), and the fallback FULL test
-    // command — the case we know is not scoped to the edit — is emitted as advisory only.
-    // A genuine `quickTestCommand` keeps the blocking per-edit loop it was designed for.
+    // The runner treats a TIMEOUT as inconclusive for non-safety checks rather than a block
+    // (see smart-hooks-runner.js), and a whole-suite command gets no rule at all
+    // (`scopedQuickTestCommand`). A genuine quick command keeps the blocking loop.
     // Those two layers still left the per-EDIT cost in place, and it is the dominant one:
     // measured over 3 days on this repo, the PostToolUse chain ran a median of 5m50s per
     // Write/Edit — typecheck and tests each running to their timeout and being killed — for
@@ -128,13 +202,12 @@ export function buildSmartHooksRules(profile: StackProfile): SmartHooksRulesFile
     // the one file just edited, so running it per-edit buys nothing an end-of-turn run doesn't
     // already give. Test rules are therefore Stop-only; the runner defaults an absent `events`
     // to both, so older generated files are unaffected.
-    const isFullSuiteFallback = !profile.quickTestCommand;
     rules.push({
-      name: profile.quickTestCommand ? "Quick tests" : "Tests",
+      name: "Quick tests",
       command: testCommand,
       filePatterns: patterns,
-      blocking: !isFullSuiteFallback,
-      timeout: isFullSuiteFallback ? 600 : 180,
+      blocking: true,
+      timeout: 180,
       events: ["Stop"],
     });
   }
@@ -161,7 +234,7 @@ export function smartHooksRulesPath(repoPath: string): string {
  */
 export function writeSmartHooksRules(repoPath: string, profile: StackProfile): void {
   try {
-    const rulesFile = buildSmartHooksRules(profile);
+    const rulesFile = buildSmartHooksRules(profile, readHandAuthoredStopChecks(repoPath));
     const outPath = smartHooksRulesPath(repoPath);
     mkdirSync(join(repoPath, ".claude"), { recursive: true });
     writeFileSync(outPath, JSON.stringify(rulesFile, null, 2) + "\n", "utf8");
