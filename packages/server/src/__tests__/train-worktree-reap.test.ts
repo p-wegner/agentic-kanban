@@ -107,6 +107,11 @@ describe("findTrainRowForAttemptLabel (#1235)", () => {
     expect(findTrainRowForAttemptLabel("train/2026-09-19-03babb", rows)?.label).toBe("train/2026-09-19-03");
   });
 
+  it("matches the control arm's `-base` attempt to its row, and nothing else after a dash", () => {
+    expect(findTrainRowForAttemptLabel("train/2026-09-19-03-base", rows)?.label).toBe("train/2026-09-19-03");
+    expect(findTrainRowForAttemptLabel("train/2026-09-19-03-other", rows)).toBeUndefined();
+  });
+
   it("does not let a shorter label claim a different row's attempt", () => {
     // `…-030` is its own row, not a bisect child of `…-03` (a digit is not a bisect letter).
     expect(findTrainRowForAttemptLabel("train/2026-09-19-030", rows)?.label).toBe("train/2026-09-19-030");

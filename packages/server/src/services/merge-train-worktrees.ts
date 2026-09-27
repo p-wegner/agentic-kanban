@@ -68,6 +68,10 @@ export function trainAttemptLabelFromBranch(branch: string | null | undefined): 
  * letters) because the pre-#1190 `q<base36 timestamp>` labels END in letters themselves —
  * stripping them mangles the row's own label and nothing matches. The LONGEST matching row
  * label wins, so a row `q1a` does not claim the worktree of a row `q1ab`.
+ *
+ * The #1204 control arm gates the base alone as `<row label>-base`; it belongs to its row too.
+ * Before that was accepted, a live control arm read as "matches no merge_trains row" (train
+ * 2026-09-27-10), and one orphaned by a crash or reboot was kept forever instead of reaped.
  */
 export function findTrainRowForAttemptLabel<R extends { label: string }>(
   attemptLabel: string,
@@ -77,7 +81,7 @@ export function findTrainRowForAttemptLabel<R extends { label: string }>(
   for (const row of rows) {
     if (attemptLabel === row.label) return row;
     if (!attemptLabel.startsWith(row.label)) continue;
-    if (!/^[a-z]+$/.test(attemptLabel.slice(row.label.length))) continue;
+    if (!/^(?:[a-z]+|-base)$/.test(attemptLabel.slice(row.label.length))) continue;
     if (!best || row.label.length > best.label.length) best = row;
   }
   return best;
