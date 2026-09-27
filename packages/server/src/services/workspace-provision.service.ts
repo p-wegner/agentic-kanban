@@ -227,26 +227,20 @@ async function materializeEnabledPluginSkillsImpl(
 }
 
 /**
- * The ONE skill-materialization step, shared by provisioning (`resolveAgentPromptAndSkill`,
- * at workspace-create time) and relaunch (`workspace-session.service.ts`'s `launchSession`,
- * #892). Skills are only written into a worktree at provisioning time; a resume/relaunch
- * used to skip this entirely and hand the agent a worktree copy that could be stale — edited
- * in the DB, or changed on disk in the main checkout — since the workspace was first
- * provisioned. Re-running it here means both seams honor the exact same inputs: the resolved
- * skill (DB row or disk skill) plus every skill an ENABLED plugin declares.
+ * Everything a worktree needs for the test-impact selector to run in it: every skill an ENABLED
+ * plugin declares (test-impact among them) plus the gitignored impact map (#1018). The ONE road
+ * (#1039) by which the selector reaches ANY worktree a gate runs in: a builder's worktree at
+ * provisioning and relaunch (via {@link materializeWorkspaceSkillsImpl}) and a merge train's
+ * staging worktree - the full train, each bisect half, the control arm - in
+ * `merge-queue-train.ts`. Before the train called it, every impact-tier train gate ran without
+ * the tool and fell back to `vitest related`. Best-effort, never throws; the caller reads
+ * `missing` to say so loudly.
  */
-async function materializeWorkspaceSkillsImpl(
+export async function materializeGateSelectorArtifacts(
   database: Database,
-  params: {
-    skillId: string | null;
-    diskSkillName: string | null;
-    worktreePath: string;
-    repoPath: string;
-    projectId: string;
-  },
-): Promise<{ skillName: string | null; pluginSkills: PluginSkillMaterialization }> {
-  const { skillId, diskSkillName, worktreePath, repoPath, projectId } = params;
-  const skillName = await resolveSkillFileImpl(database, skillId, diskSkillName, worktreePath, repoPath);
+  params: { worktreePath: string; repoPath: string; projectId: string },
+): Promise<PluginSkillMaterialization> {
+  const { worktreePath, repoPath, projectId } = params;
   const pluginSkills = await materializeEnabledPluginSkillsImpl(database, worktreePath, repoPath, projectId);
   // #1018 — the test-impact map is no longer committed, so a worktree no longer inherits one by
   // branching. It rides along with the skills because it is the same kind of thing: a read-only
@@ -267,6 +261,31 @@ async function materializeWorkspaceSkillsImpl(
         `${IMPACT_TOOL_RELATIVE_PATH} is absent — the map ships without the tool that reads it (#1039)`,
     );
   }
+  return pluginSkills;
+}
+
+/**
+ * The ONE skill-materialization step, shared by provisioning (`resolveAgentPromptAndSkill`,
+ * at workspace-create time) and relaunch (`workspace-session.service.ts`'s `launchSession`,
+ * #892). Skills are only written into a worktree at provisioning time; a resume/relaunch
+ * used to skip this entirely and hand the agent a worktree copy that could be stale — edited
+ * in the DB, or changed on disk in the main checkout — since the workspace was first
+ * provisioned. Re-running it here means both seams honor the exact same inputs: the resolved
+ * skill (DB row or disk skill) plus every skill an ENABLED plugin declares.
+ */
+async function materializeWorkspaceSkillsImpl(
+  database: Database,
+  params: {
+    skillId: string | null;
+    diskSkillName: string | null;
+    worktreePath: string;
+    repoPath: string;
+    projectId: string;
+  },
+): Promise<{ skillName: string | null; pluginSkills: PluginSkillMaterialization }> {
+  const { skillId, diskSkillName, worktreePath, repoPath, projectId } = params;
+  const skillName = await resolveSkillFileImpl(database, skillId, diskSkillName, worktreePath, repoPath);
+  const pluginSkills = await materializeGateSelectorArtifacts(database, { worktreePath, repoPath, projectId });
   return { skillName, pluginSkills };
 }
 
