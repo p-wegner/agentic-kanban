@@ -32,7 +32,7 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 - **HARNESS_SHARE = 100%** - at most this share of the WIP may run `harness`-tagged tickets (gate, guards, ratchets, impact map, hooks, merge path); the rest goes to product work. 100% disables the budget.
 
 ## RISK POSTURE (generated - do not hand-edit)
-- **RISK POSTURE = flow** - The fastest honest cycle (decision 019, #1240): the per-merge gate is typecheck + the test-impact SELECTION + the diff's own tests, with NO always-run guard floor at merge; a red base is reported, never blocking and never ticketed; and the full suite runs on the release candidate ONLY — master has no scheduled sweep by design. Per-ticket review as Standard. For a repo whose only deployment is a promoted release candidate (this board's own development); wrong wherever master itself must be green. Set via Settings -> Workflow; a ticket may override with a `risk:<posture>` tag.
+- **RISK POSTURE = strict** - Skips nothing — thorough per-ticket review, full pre-merge gate, no red base ever, no train batching. For release branches and client repos with allowlists. Set via Settings -> Workflow; a ticket may override with a `risk:<posture>` tag.
 
 ## STRATEGY WEIGHTS (generated - do not hand-edit)
 - Frontend: weight 5/5, area, provider claude
@@ -55,8 +55,8 @@ The host's measured headroom is a brake on EVERY start, above every target in th
 - If `capacity.hold` is **true**: start ZERO new builders and do not relaunch idle ones; let running sessions finish and keep at most ONE merge-gate run in flight. A gate run on a saturated box dies on fork-worker timeouts, so starting more work makes every lane lose.
 - Otherwise cap this cycle's new starts at `capacity.maxNewStarts` (never above MAX_NEW_STARTS_PER_CYCLE). `null` means the cheap tier could not measure headroom — the target applies unchanged.
 - Whatever you decide, write `capacity.reason` into this cycle's state.md line so the hold is auditable by its measured numbers, not by a token.
-- **CAPACITY_HOLD = false** - last measured when this block was generated (tier 0: 8.6GB free). Stale by definition: the live read above is authoritative.
-- **FREE_GB = 8.6** - MAX_NEW_STARTS this cycle would be 1.
+- **CAPACITY_HOLD = false** - last measured when this block was generated (tier 0: 4.5GB free). Stale by definition: the live read above is authoritative.
+- **FREE_GB = 4.5** - MAX_NEW_STARTS this cycle would be 1.
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
 ## FOCUS POLICY (operator directive 2026-09-06 - authoritative)
