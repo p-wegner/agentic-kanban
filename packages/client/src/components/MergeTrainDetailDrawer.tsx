@@ -32,8 +32,25 @@ function parseAttempts(row: MergeTrainRowDto | null): ReturnType<typeof buildBis
   }
 }
 
+/** #1277: the red-handling strategy the train ran under, from its persisted gate evidence. */
+function parseRedStrategy(row: MergeTrainRowDto | null): string | null {
+  if (!row?.gateEvidence) return null;
+  try {
+    const parsed = JSON.parse(row.gateEvidence) as { redStrategy?: unknown };
+    return typeof parsed.redStrategy === "string" ? parsed.redStrategy : null;
+  } catch {
+    return null;
+  }
+}
+
 function verdictLabel(verdict: MergeTrainAttemptVerdict): string {
   switch (verdict) {
+    case "agent_fix_green":
+      return "Fix agent: green";
+    case "agent_fix_red":
+      return "Fix agent: red";
+    case "agent_fix_capped":
+      return "Fix agent: capped";
     case "landed":
       return "Landed";
     case "red":
@@ -52,9 +69,12 @@ function verdictLabel(verdict: MergeTrainAttemptVerdict): string {
 function verdictClasses(verdict: MergeTrainAttemptVerdict): string {
   switch (verdict) {
     case "landed":
+    case "agent_fix_green":
       return "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300";
     case "red":
+    case "agent_fix_red":
       return "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300";
+    case "agent_fix_capped":
     case "env_failure":
       return "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300";
     case "land_refused":
@@ -90,6 +110,19 @@ function TreeNode({ node, highlighted }: { node: BisectTreeNode; highlighted: Se
         <span className="text-gray-400 dark:text-gray-500">
           {node.durationMs != null ? formatDuration(node.durationMs) : "no gate"}
         </span>
+        {attempt.agentFix && (
+          <span
+            className="text-gray-500 dark:text-gray-400"
+            title={attempt.agentFix.briefUrl ?? "no brief recorded"}
+            data-testid="agent-fix-detail"
+          >
+            agent {formatDuration(attempt.agentFix.durationMs)}
+            {attempt.agentFix.costUsd != null && ` · $${attempt.agentFix.costUsd.toFixed(2)}`}
+            {attempt.agentFix.tokens != null && ` · ${attempt.agentFix.tokens} tok`}
+            {attempt.agentFix.capped && ` · ${attempt.agentFix.capped}`}
+            {attempt.agentFix.sessionId && ` · session ${attempt.agentFix.sessionId.slice(0, 8)}`}
+          </span>
+        )}
         {attempt.failureHead && (
           <span
             className="text-red-500 dark:text-red-400 truncate max-w-[280px] font-mono"
@@ -151,6 +184,7 @@ export function MergeTrainDetailDrawer({ projectId, trainId, onClose }: MergeTra
   const roots = parseAttempts(row);
   const stats = computeBisectTreeStats(roots);
   const highlighted = culpritPathLabels(roots);
+  const redStrategy = parseRedStrategy(row);
   const isLive = row ? LIVE_STATES.has(row.state) : false;
 
   return (
@@ -200,6 +234,11 @@ export function MergeTrainDetailDrawer({ projectId, trainId, onClose }: MergeTra
                 {formatDuration(stats.sequentialCounterfactualMs)}
               </strong>
             </span>
+            {redStrategy && (
+              <span title="merge_train_red_strategy (Settings → Workflow → Merge train)">
+                Red strategy: <strong className="font-medium text-gray-800 dark:text-gray-100">{redStrategy}</strong>
+              </span>
+            )}
             {stats.culpritCount > 0 && (
               <span className="text-red-600 dark:text-red-400">
                 Culprits: <strong className="font-medium">{stats.culpritCount}</strong>

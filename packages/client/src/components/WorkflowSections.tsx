@@ -1,6 +1,18 @@
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { DEFAULT_SETTINGS, getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { RISK_POSTURES, RISK_POSTURE_DEFAULT, RISK_POSTURE_DESCRIPTIONS, RISK_POSTURE_LABELS, resolveRiskPosture, riskPosturePref } from "@agentic-kanban/shared/lib/risk-posture";
+import {
+  MERGE_TRAIN_AGENT_FIX_DEFAULT_COST_CAP_USD,
+  MERGE_TRAIN_AGENT_FIX_DEFAULT_MAX_TURNS,
+  MERGE_TRAIN_AGENT_FIX_DEFAULT_TIMEOUT_MS,
+  MERGE_TRAIN_RED_STRATEGIES,
+  mergeTrainAgentFixCostCapUsdPref,
+  mergeTrainAgentFixMaxTurnsPref,
+  mergeTrainAgentFixTimeoutMsPref,
+  mergeTrainRedStrategyPref,
+  resolveMergeTrainRedPolicy,
+  type MergeTrainRedStrategy,
+} from "@agentic-kanban/shared/lib/merge-train-red-strategy";
 import { Field, Toggle } from "./SettingsPrimitives.js";
 import { SlowRequestsPanel } from "./SlowRequestsPanel.js";
 import type { Settings, MonitorTunables } from "../lib/settings-shared.js";
@@ -77,6 +89,57 @@ export function WorkflowRiskPostureSection({
       <p className="mt-1.5 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
         Train size, train wait and red-base policy live in the board header's Delivery chip, next to the project selector.
       </p>
+      <WorkflowTrainRedStrategy settings={settings} set={set} activeProjectId={activeProjectId} />
+    </div>
+  );
+}
+
+const TRAIN_RED_STRATEGY_LABELS: Record<MergeTrainRedStrategy, string> = {
+  "agent-fix-then-bisect": "Fix agent, then bisect (default)",
+  "agent-fix": "Fix agent only — a second red is final",
+  bisect: "Bisect only — no fix agent",
+};
+
+/** #1277 — what a merge train does when its assembled tree goes red, and the caps on the fix agent. */
+function WorkflowTrainRedStrategy({ settings, set, activeProjectId }: Pick<WorkflowSectionProps, "settings" | "set"> & { activeProjectId: string }) {
+  const policy = resolveMergeTrainRedPolicy(new Map(Object.entries(settings).filter((e): e is [string, string] => typeof e[1] === "string")), activeProjectId);
+  const strategyKey = mergeTrainRedStrategyPref.key(activeProjectId) as keyof Settings;
+  const capInput = (pref: typeof mergeTrainAgentFixMaxTurnsPref, label: string, hint: string, fallback: number) => {
+    const key = pref.key(activeProjectId) as keyof Settings;
+    return (
+      <Field label={label} hint={hint}>
+        <input
+          type="number"
+          min={1}
+          value={settings[key] ?? ""}
+          placeholder={String(fallback)}
+          onChange={(e) => set(key)(e.target.value)}
+          disabled={!policy.agentFix}
+          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+        />
+      </Field>
+    );
+  };
+  return (
+    <div className="mt-3 space-y-3" data-testid="train-red-strategy">
+      <Field
+        label="Merge-train red strategy"
+        hint="When a train's assembled tree goes red: a fix agent works on the whole tree in the train worktree (usually minutes), instead of bisecting members one gate at a time (tens of minutes). 'Fix agent only' fails the train on a second red; the default falls back to bisect, which is also the fallback whenever a cap below trips."
+      >
+        <select
+          value={policy.strategy}
+          onChange={(e) => set(strategyKey)(e.target.value)}
+          data-testid="train-red-strategy-select"
+          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
+        >
+          {MERGE_TRAIN_RED_STRATEGIES.map((s) => (
+            <option key={s} value={s}>{TRAIN_RED_STRATEGY_LABELS[s]}</option>
+          ))}
+        </select>
+      </Field>
+      {capInput(mergeTrainAgentFixMaxTurnsPref, "Fix agent: max turns", "Agent turns (each followed by a gate re-run) before giving up.", MERGE_TRAIN_AGENT_FIX_DEFAULT_MAX_TURNS)}
+      {capInput(mergeTrainAgentFixTimeoutMsPref, "Fix agent: timeout (ms)", "Wall-clock budget for the whole fix attempt.", MERGE_TRAIN_AGENT_FIX_DEFAULT_TIMEOUT_MS)}
+      {capInput(mergeTrainAgentFixCostCapUsdPref, "Fix agent: cost cap (USD)", "Enforced when the provider reports usage; a one-shot run reports none.", MERGE_TRAIN_AGENT_FIX_DEFAULT_COST_CAP_USD)}
     </div>
   );
 }

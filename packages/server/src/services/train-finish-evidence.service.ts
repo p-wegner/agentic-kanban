@@ -194,6 +194,8 @@ export function buildTrainGateEvidence(
       // #1204: the control arm's verdict on the bare base, so the panel can render "base red,
       // nothing attributable to members" instead of an unexplained red train with no rejections.
       ...(result.baseVerdict ? { baseVerdict: result.baseVerdict } : {}),
+      // #1277: the red-handling strategy, so the train detail names it.
+      ...(result.redStrategy ? { redStrategy: result.redStrategy } : {}),
     },
     gateRejected,
   };
@@ -214,6 +216,8 @@ export function annotateConcurrentGates(
   attempts: MergeTrainAttemptDto[],
 ): { attempts: MergeTrainAttemptDto[]; concurrentGateSavedMs: number } {
   const windows = attempts.map((a) => {
+    // #1277: a fix agent runs INSIDE its attempt's gate window; it is not a concurrent gate.
+    if (a.kind === "agent_fix") return null;
     const start = a.gateStartedAt ? Date.parse(a.gateStartedAt) : NaN;
     const end = a.gateFinishedAt ? Date.parse(a.gateFinishedAt) : NaN;
     return Number.isFinite(start) && Number.isFinite(end) && end >= start ? { start, end } : null;

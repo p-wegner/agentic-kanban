@@ -70,6 +70,12 @@ export interface ProviderLaunchOptions {
    * to reimplement outside the provider abstraction.
    */
   oneShotText?: boolean;
+  /**
+   * With `oneShotText`: let the one-shot run edit files and shell out (#1277, the merge-train fix
+   * agent). Claude's `-p` mode otherwise denies every write; codex's one-shot already bypasses
+   * approvals. Ignored without `oneShotText`.
+   */
+  oneShotAllowEdits?: boolean;
 }
 
 export type { ParsedStreamEvent };
