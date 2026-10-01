@@ -142,3 +142,11 @@ export function barPercent(value: number | null, max: number): number {
   if (value === null || max <= 0) return 0;
   return Math.max(0, Math.min(100, (value / max) * 100));
 }
+
+/** Query string (without `?`) for `GET /api/projects/:id/contributions`. */
+export function contributionsParams(groupBy: string, window: { from?: string; to?: string }): string {
+  const params = new URLSearchParams({ groupBy });
+  if (window.from) params.set("from", window.from);
+  if (window.to) params.set("to", window.to);
+  return params.toString();
+}

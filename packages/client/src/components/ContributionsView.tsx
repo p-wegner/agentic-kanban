@@ -9,7 +9,7 @@ import {
   CONTRIBUTION_RANGES,
   DEFAULT_CHART_METRIC,
   barPercent,
-  buildRangeSearch,
+  contributionsParams,
   formatMetric,
   parseRangeSearch,
   resolveRangeWindow,
@@ -24,17 +24,10 @@ interface ContributionsViewProps {
   projectId: string;
 }
 
-function contributionsPath(projectId: string, groupBy: ContributionGroupBy, window: { from?: string; to?: string }): string {
-  const params = new URLSearchParams({ groupBy });
-  if (window.from) params.set("from", window.from);
-  if (window.to) params.set("to", window.to);
-  return `/api/projects/${projectId}/contributions?${params.toString()}`;
-}
-
 /**
- * Contributions (#1264): who contributed how much — a sortable per-actor table plus a bar
+ * Contributions (#1264): who contributed how much â€” a sortable per-actor table plus a bar
  * chart of one metric. The grouping is the URL tab (`/contributions/<groupBy>`); the time
- * range is `?range=7d|30d|custom&from=&to=` (the route sync preserves the search string).
+ * range is component state, seeded from `?range=7d|30d|custom&from=&to=` on mount.
  * Both filters are applied by the server.
  */
 export function ContributionsView({ projectId }: ContributionsViewProps) {
@@ -45,18 +38,12 @@ export function ContributionsView({ projectId }: ContributionsViewProps) {
   const [sort, setSort] = useState<ContributionSort>({ key: DEFAULT_CHART_METRIC, dir: "desc" });
   const [chartMetric, setChartMetric] = useState<ContributionMetricKey>(DEFAULT_CHART_METRIC);
 
-  const updateSelection = (next: RangeSelection) => {
-    setSelection(next);
-    if (typeof window !== "undefined") {
-      const search = buildRangeSearch(window.location.search, next);
-      window.history.replaceState(window.history.state, "", `${window.location.pathname}${search}${window.location.hash}`);
-    }
-  };
+  const updateSelection = setSelection;
 
   const window_ = useMemo(() => resolveRangeWindow(selection, Date.now()), [selection]);
   const { data, isLoading, error } = useQuery({
     queryKey: ["projects", projectId, "contributions", groupBy, window_.from ?? null, window_.to ?? null],
-    queryFn: () => apiFetch<ContributionsResponse>(contributionsPath(projectId, groupBy, window_)),
+    queryFn: () => apiFetch<ContributionsResponse>(`/api/projects/${projectId}/contributions?${contributionsParams(groupBy, window_)}`, { method: "GET" }),
     staleTime: 15_000,
   });
 
@@ -66,7 +53,7 @@ export function ContributionsView({ projectId }: ContributionsViewProps) {
 
   const toggleSort = (key: ContributionSort["key"]) =>
     setSort((s) => (s.key === key ? { key, dir: s.dir === "desc" ? "asc" : "desc" } : { key, dir: key === "actor" ? "asc" : "desc" }));
-  const arrow = (key: ContributionSort["key"]) => (sort.key === key ? (sort.dir === "desc" ? " ▾" : " ▴") : "");
+  const arrow = (key: ContributionSort["key"]) => (sort.key === key ? (sort.dir === "desc" ? " â–¾" : " â–´") : "");
 
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden" data-testid="contributions-view">
@@ -93,7 +80,7 @@ export function ContributionsView({ projectId }: ContributionsViewProps) {
                 onChange={(e) => updateSelection({ ...selection, customFrom: e.target.value })}
                 className="px-2 py-1 rounded border border-gray-700 bg-gray-900 text-gray-200"
               />
-              <span className="text-gray-500">–</span>
+              <span className="text-gray-500">â€“</span>
               <input
                 type="date"
                 aria-label="To date"
@@ -105,7 +92,7 @@ export function ContributionsView({ projectId }: ContributionsViewProps) {
           )}
         </div>
 
-        {isLoading && <p className="text-sm text-gray-400">Loading contributions…</p>}
+        {isLoading && <p className="text-sm text-gray-400">Loading contributionsâ€¦</p>}
         {error && <p className="text-sm text-red-400">Could not load contributions: {(error as Error).message}</p>}
         {data && rows.length === 0 && (
           <p className="text-sm text-gray-400" data-testid="contributions-empty">

@@ -9,6 +9,7 @@ import {
   type ContributionWindow,
   type WorkspaceGroupBy,
 } from "../repositories/contribution.repository.js";
+import { resolveWorkspaceBaseOrNull } from "./workspace-base.js";
 import * as realGitService from "./git.service.js";
 import type { GitService } from "./workspace-internals.js";
 
@@ -99,7 +100,7 @@ export function createContributionService(deps: { database?: Database; gitServic
 
     const seenCommits = new Set<string>();
     for (const ws of merged) {
-      const baseRef = ws.baseCommitSha || ws.baseBranch || project.defaultBranch;
+      const baseRef = ws.baseCommitSha || resolveWorkspaceBaseOrNull(ws, project);
       const tip = ws.mergedHeadSha || ws.branch;
       if (!baseRef || !tip) continue;
       for (const commit of await commitStats(project.repoPath, baseRef, tip)) {
