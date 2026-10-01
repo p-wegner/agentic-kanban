@@ -25,8 +25,11 @@ export type ButlerEvent =
   | { type: "turn-start" }
   | { type: "user"; text: string }
   | { type: "text"; text: string }
-  | { type: "tool"; name: string; toolId?: string; input?: Record<string, unknown> }
-  | { type: "tool-result"; toolId?: string; output?: string; isError?: boolean }
+  /** `parentToolId` is set when a sub-agent (Agent/Task tool call with that id) made the call. */
+  | { type: "tool"; name: string; toolId?: string; input?: Record<string, unknown>; parentToolId?: string }
+  | { type: "tool-result"; toolId?: string; output?: string; isError?: boolean; parentToolId?: string }
+  /** A complete text message from a sub-agent (its deltas are not streamed into the butler's reply). */
+  | { type: "subagent-text"; parentToolId: string; text: string }
   | { type: "result"; text?: string; isError?: boolean }
   | { type: "usage"; contextTokens: number }
   | { type: "meta"; model?: string; contextWindow?: number; mcpConnected?: boolean }
@@ -66,6 +69,8 @@ export interface ButlerSession {
   busy: boolean;
   contextTokens: number;
   transcript: ButlerTurn[];
+  /** Assistant text streamed so far in the in-flight turn (reset at turn-start/result). */
+  partialText?: string;
   model?: string;
   contextWindow?: number;
   mcpConnected?: boolean;

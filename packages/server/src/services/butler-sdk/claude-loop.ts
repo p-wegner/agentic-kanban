@@ -116,7 +116,16 @@ function handleButlerInit(session: ButlerSession, msg: Record<string, unknown>):
   broadcast(session, { type: "meta", model: session.model, contextWindow: session.contextWindow, mcpConnected: session.mcpConnected });
 }
 
+/** Id of the Agent/Task tool call a sub-agent message belongs to; undefined for the butler's own messages. */
+function parentToolIdOf(msg: Record<string, unknown>): string | undefined {
+  const id = (msg as { parent_tool_use_id?: string | null }).parent_tool_use_id;
+  return typeof id === "string" && id ? id : undefined;
+}
+
 function handleButlerStreamEvent(session: ButlerSession, msg: Record<string, unknown>): void {
+  // Sub-agent token deltas must not leak into the butler's own streamed reply; the
+  // sub-agent's finished text arrives as a `subagent-text` event from its assistant message.
+  if (parentToolIdOf(msg)) return;
   const ev = (msg as { event?: { type?: string; delta?: { type?: string; text?: string } } }).event;
   if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta" && ev.delta.text) {
     broadcast(session, { type: "text", text: ev.delta.text });
@@ -124,10 +133,13 @@ function handleButlerStreamEvent(session: ButlerSession, msg: Record<string, unk
 }
 
 function handleButlerAssistant(session: ButlerSession, msg: Record<string, unknown>): void {
-  const content = (msg as { message?: { content?: Array<{ type?: string; name?: string; id?: string; input?: Record<string, unknown> }> } }).message?.content ?? [];
+  const content = (msg as { message?: { content?: Array<{ type?: string; text?: string; name?: string; id?: string; input?: Record<string, unknown> }> } }).message?.content ?? [];
+  const parentToolId = parentToolIdOf(msg);
   for (const block of content) {
     if (block.type === "tool_use" && block.name) {
-      broadcast(session, { type: "tool", name: block.name, toolId: block.id, input: block.input });
+      broadcast(session, { type: "tool", name: block.name, toolId: block.id, input: block.input, parentToolId });
+    } else if (parentToolId && block.type === "text" && block.text) {
+      broadcast(session, { type: "subagent-text", parentToolId, text: block.text });
     }
   }
 }
@@ -136,9 +148,10 @@ function handleButlerToolResults(session: ButlerSession, msg: Record<string, unk
   // Tool results arrive as a synthetic user message whose content holds
   // tool_result blocks. Surface each so the UI can pair it with its tool call.
   const content = (msg as { message?: { content?: Array<{ type?: string; tool_use_id?: string; is_error?: boolean; content?: unknown }> } }).message?.content ?? [];
+  const parentToolId = parentToolIdOf(msg);
   for (const block of content) {
     if (block.type === "tool_result") {
-      broadcast(session, { type: "tool-result", toolId: block.tool_use_id, output: stringifyToolResult(block.content), isError: block.is_error });
+      broadcast(session, { type: "tool-result", toolId: block.tool_use_id, output: stringifyToolResult(block.content), isError: block.is_error, parentToolId });
     }
   }
 }
