@@ -29,8 +29,8 @@ export function buildClientFromEnv({ argv = process.argv, env = process.env } = 
     ...credentials,
     fetchImpl: selfTest ? createDefaultFixtureFetch() : undefined,
   });
-  const projectKey = env.JIRA_PROJECT_KEY ?? (selfTest ? "ENG" : undefined);
-  const jql = env.JIRA_JQL || undefined;
+  const projectKey = env.JIRA_PROJECT_KEY || env.SYNC_CONFIG_PROJECTKEY || (selfTest ? "ENG" : undefined);
+  const jql = env.JIRA_JQL || env.SYNC_CONFIG_JQL || undefined;
   return { client, credentials, projectKey, jql, selfTest };
 }
 

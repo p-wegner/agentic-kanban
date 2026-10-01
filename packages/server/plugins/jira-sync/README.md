@@ -45,8 +45,11 @@ __tests__/                  unit tests (node:test) — auth, pagination, backoff
 
 ## Credentials
 
-Never persisted anywhere by this plugin. Set as environment variables wherever `bootstrap`,
-`plan`, `pull` or `push` run:
+Never persisted by this plugin. Enter the site URL, project key, JQL, email and API token in
+Settings → Plugins → Jira Sync (with a **Test connection** button): the board keeps the secrets
+encrypted in `kanban.db` and injects them, plus the config as `SYNC_CONFIG_*`, into `bootstrap`,
+`plan`, `pull` and `push`. For a headless run, set these environment variables instead (they
+win over the injected values):
 
 - `JIRA_SITE_URL`, `JIRA_PROJECT_KEY`, `JIRA_JQL` (optional — defaults to the whole project)
 - `JIRA_EMAIL` + `JIRA_API_TOKEN` for Jira Cloud (basic auth), or just `JIRA_API_TOKEN` for a
@@ -56,9 +59,8 @@ Never persisted anywhere by this plugin. Set as environment variables wherever `
   `{{boardUrl}}`/`{{projectId}}` once something invokes `sync.pull` through the board (still
   unwired — see "Known gaps" below); set them by hand for a manual run.
 
-The board does not yet resolve `sync.config`/`sync.secrets` into these for you (see the `sync`
-"Known gaps" note in `docs/plugin-development.md`) — this plugin reads them directly from its
-own process environment.
+`JIRA_SITE_URL`, `JIRA_PROJECT_KEY` and `JIRA_JQL` fall back to `SYNC_CONFIG_SITEURL`,
+`SYNC_CONFIG_PROJECTKEY` and `SYNC_CONFIG_JQL` when unset.
 
 ## Inbound sync (`sync/pull.mjs`)
 

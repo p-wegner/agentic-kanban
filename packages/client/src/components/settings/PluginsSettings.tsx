@@ -5,6 +5,7 @@ import { apiFetch, apiPost, apiDelete } from "../../lib/api.js";
 import { getViewRoutePath } from "../../lib/appRoutes.js";
 import { showToast } from "../../lib/toast.js";
 import type { Settings, SettingsTextSetter } from "../SettingsPanel.shared.js";
+import { PluginSyncSettings } from "./PluginSyncSettings.js";
 import { PluginSkillListingSelector, type ResolvedSkillListing } from "./PluginSkillListingSelector.js";
 
 /** One row from GET /api/plugins?projectId= — DB row + parsed manifest + enabled flag. */
@@ -356,6 +357,15 @@ export function PluginsSettings({ activeProjectId, settings, set }: PluginsSetti
                       by default — for a single-repo project that IS the repo. Sidecar creates/uses a dedicated
                       "{plugin.pluginId}-requirements" repo, added to this project.
                     </p>
+                  </div>
+                )}
+
+                {/* Sync settings — generic form over manifest sync.config + sync.secrets (#1275) */}
+                {activeProjectId && plugin.enabled && !plugin.manifestError
+                  && ((plugin.manifest?.sync?.config?.length ?? 0) > 0 || (plugin.manifest?.sync?.secrets?.length ?? 0) > 0) && (
+                  <div className="border-t border-gray-100 dark:border-gray-800 pt-2 space-y-1.5">
+                    <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">Sync settings</div>
+                    <PluginSyncSettings pluginRowId={plugin.id} projectId={activeProjectId} />
                   </div>
                 )}
 

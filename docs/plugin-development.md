@@ -1060,7 +1060,11 @@ other's row. Namespace it.
   when validation fails; `GET /api/plugins/:id/sync/status` is the last-run record (time,
   direction, outcome, and — best-effort, parsed from the command's own stdout — counts, per-issue
   links and conflicts) a sync-status plugin view reads. Matching `pnpm cli -- plugin-sync ...`
-  subcommands exist. A secret NAME resolves against the board's own process env, nothing more —
-  there is still no dedicated credential store, and nothing runs `pull`/`push` on a schedule or
-  from a button in the main board UI; only the REST/CLI surface above and whatever a plugin's own
-  view chooses to call.
+  subcommands exist. A secret NAME resolves first against the per-project store the board's
+  settings form writes (#1275: `POST /api/plugins/:id/sync/secrets`, AES-256-GCM in `kanban.db`,
+  key in `plugin-secrets.key` beside the DB, write-only over HTTP), then against the board's own
+  process env. The form (Settings → Plugins, any plugin declaring `sync.config`/`sync.secrets`)
+  also has a **Test connection** button (`POST .../sync/test-connection`) that runs the
+  manifest's `bootstrap` script. `sync.config` values reach every script of such a plugin, and
+  `pull`/`push`, as `SYNC_CONFIG_<KEY>` env vars, with resolved secrets under their own names.
+  Nothing runs `pull`/`push` on a schedule or from a button in the main board UI.

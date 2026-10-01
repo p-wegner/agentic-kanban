@@ -1,6 +1,6 @@
-// Credential resolution. No credential store exists in this board yet (see
-// docs/plugin-development.md's "sync" known-gap note) — the board does not resolve
-// sync.secrets into env for these commands, so they read the environment directly.
+// Credential resolution. The board injects the settings form's values into the env:
+// sync.secrets under their own names (JIRA_API_TOKEN, JIRA_EMAIL) and sync.config as
+// SYNC_CONFIG_<KEY>. A hand-set JIRA_* variable still wins, so a headless setup keeps working.
 // Never persist a credential to disk; never log one.
 
 export class JiraAuthError extends Error {
@@ -17,7 +17,7 @@ export class JiraAuthError extends Error {
  * Tokens authenticate.
  */
 export function resolveCredentialsFromEnv(env = process.env) {
-  const siteUrl = env.JIRA_SITE_URL;
+  const siteUrl = env.JIRA_SITE_URL || env.SYNC_CONFIG_SITEURL;
   const apiToken = env.JIRA_API_TOKEN;
   const email = env.JIRA_EMAIL || null;
 

@@ -17,15 +17,14 @@ ordered by last-updated)
 
 ## Credentials
 
-Never written here. Set these as environment variables wherever `pull`/`push` run:
+Never written here. Enter the site URL, project key, JQL, account email and API token in the
+board's plugin settings (Settings → Plugins → Jira Sync). The token and email are stored
+encrypted in `kanban.db` and handed to `bootstrap`/`plan`/`pull`/`push` as environment
+variables; no board restart or shell environment is needed.
 
-- `JIRA_SITE_URL` — same value as above, read by the tools directly (the board does not yet
-  resolve `sync.config` into env for you — see `sync` in `kanban-plugin.json`)
 - `JIRA_EMAIL` — the Atlassian account email (Jira Cloud basic auth)
 - `JIRA_API_TOKEN` — an API token (Jira Cloud) or a Personal Access Token (Jira Server/Data
-  Center — omit `JIRA_EMAIL` in that case, the token is sent as a bearer token instead)
-- `JIRA_PROJECT_KEY` — same value as above
-- `JIRA_JQL` — optional, same value as above
+  Center)
 
-TODO: confirm the credential env vars above are set in the environment `pull`/`push` run in,
-never committed to this repo or to `kanban.db`
+A hand-set `JIRA_SITE_URL` / `JIRA_PROJECT_KEY` / `JIRA_JQL` / `JIRA_EMAIL` / `JIRA_API_TOKEN` in
+the board host's environment still works for headless setups.

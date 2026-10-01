@@ -14,6 +14,7 @@ import type { PluginRow } from "../repositories/plugins.repository.js";
 import type { PluginRunContext } from "./plugin-loop-types.js";
 import { runPluginCommand } from "./plugin-exec.js";
 import { PluginError } from "./plugin-errors.js";
+import { createPluginSecretStore } from "./plugin-secret-store.js";
 
 /**
  * Board-side surface over a plugin's declarative `sync` capability (#1076): per-project config
@@ -23,8 +24,9 @@ import { PluginError } from "./plugin-errors.js";
  * Fails CLOSED: `validateSync`/`triggerSync` never run `pull`/`push` when a required config field
  * is empty or a declared secret is unresolvable, and they say exactly which — by NAME, never by
  * value. Secret VALUES never appear in a config read, a validation result, or a status record;
- * they are resolved from the board's own process env at trigger time only, injected as env vars
- * into the plugin's command, and discarded.
+ * they are resolved at trigger time only — from the encrypted per-project store the settings form
+ * writes (#1275), falling back to the board's own process env — injected as env vars into the
+ * plugin's command, and discarded.
  */
 
 export interface PluginSyncConfigFieldValue {
@@ -54,6 +56,16 @@ export interface PluginSyncValidationResult {
   missingConfig: string[];
   missingSecrets: string[];
   error?: string;
+}
+
+/** Outcome of the "Test connection" button: the `bootstrap` script's run, secrets masked. */
+export interface PluginSyncConnectionTest {
+  ok: boolean;
+  error?: string;
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
 }
 
 /** Best-effort structured facts a pull/push command's own stdout reported about its run. */
@@ -100,6 +112,21 @@ export function createPluginSyncOps(deps: {
   ) => Promise<PluginRunContext>;
 }) {
   const { database, requirePlugin, requireProject, resolvePluginRunContext } = deps;
+  const secretStore = createPluginSecretStore({ database });
+
+  /**
+   * Every declared secret the board can resolve for this project: a value entered in the board
+   * (encrypted at rest) wins, the board host's process env is the fallback for headless setups.
+   */
+  async function resolveSecretValues(sync: PluginSyncDef, pluginSlug: string, projectId: string): Promise<Record<string, string>> {
+    const stored = await secretStore.read(pluginSlug, projectId);
+    const out: Record<string, string> = {};
+    for (const name of sync.secrets ?? []) {
+      const value = stored[name]?.trim() || process.env[name]?.trim();
+      if (value) out[name] = value;
+    }
+    return out;
+  }
 
   function requireSyncDef(plugin: PluginRow & { manifest: PluginManifest }): PluginSyncDef {
     const sync = plugin.manifest.sync;
@@ -124,8 +151,65 @@ export function createPluginSyncOps(deps: {
   }
 
   /** Which of the sync's declared secrets the board can currently resolve — names only, never values. */
-  function resolveSecretPresence(sync: PluginSyncDef): PluginSyncSecretStatus[] {
-    return (sync.secrets ?? []).map((name) => ({ name, present: Boolean(process.env[name]?.trim()) }));
+  async function resolveSecretPresence(sync: PluginSyncDef, pluginSlug: string, projectId: string): Promise<PluginSyncSecretStatus[]> {
+    const resolved = await resolveSecretValues(sync, pluginSlug, projectId);
+    return (sync.secrets ?? []).map((name) => ({ name, present: name in resolved }));
+  }
+
+  /**
+   * The env a plugin subprocess gets from the board's sync settings: `SYNC_CONFIG_<KEY>` per
+   * config field plus every resolved secret under its declared name. `secretValues` lets the
+   * caller redact them from captured output.
+   */
+  async function resolveSyncEnv(
+    plugin: PluginRow & { manifest: PluginManifest },
+    projectId: string,
+  ): Promise<{ env: Record<string, string>; secretValues: string[] }> {
+    const sync = plugin.manifest.sync;
+    if (!sync) return { env: {}, secretValues: [] };
+    const values = await readSyncConfigValues(plugin.pluginId, projectId);
+    const env: Record<string, string> = {};
+    for (const field of sync.config ?? []) {
+      const v = values[field.key];
+      if (v !== undefined) env[`SYNC_CONFIG_${field.key.toUpperCase()}`] = v;
+    }
+    // Secret VALUES are injected for this one process and never stored or echoed back — the
+    // config/status views only ever see the secret's NAME.
+    const secrets = await resolveSecretValues(sync, plugin.pluginId, projectId);
+    Object.assign(env, secrets);
+    return { env, secretValues: Object.values(secrets) };
+  }
+
+  /** Masks every secret value in captured process output. */
+  function redactSecrets(text: string, secretValues: string[]): string {
+    let out = text;
+    for (const value of secretValues) if (value.length >= 4) out = out.split(value).join("***");
+    return out;
+  }
+
+  /**
+   * Stores secret VALUES entered in the board (encrypted at rest). MERGES onto what is stored;
+   * an empty string clears that one secret. Returns the same name-only view as `getSyncConfig`.
+   */
+  async function setSyncSecrets(
+    pluginRowId: string,
+    projectId: string,
+    values: Record<string, unknown>,
+  ): Promise<PluginSyncConfigView> {
+    const plugin = await requirePlugin(pluginRowId);
+    const sync = requireSyncDef(plugin);
+    await requireProject(projectId);
+    const declared = new Set(sync.secrets ?? []);
+    const clean: Record<string, string> = {};
+    for (const [key, value] of Object.entries(values ?? {})) {
+      if (!declared.has(key)) {
+        throw new PluginError(`"${key}" is not a declared sync secret for "${plugin.pluginId}"`, "BAD_REQUEST");
+      }
+      if (typeof value !== "string") throw new PluginError(`sync secret "${key}" must be a string`, "BAD_REQUEST");
+      clean[key] = value.trim();
+    }
+    await secretStore.write(plugin.pluginId, projectId, clean);
+    return getSyncConfig(pluginRowId, projectId);
   }
 
   async function getSyncConfig(pluginRowId: string, projectId: string): Promise<PluginSyncConfigView> {
@@ -143,7 +227,7 @@ export function createPluginSyncOps(deps: {
         required: Boolean(f.required),
         value: values[f.key] ?? "",
       })),
-      secrets: resolveSecretPresence(sync),
+      secrets: await resolveSecretPresence(sync, plugin.pluginId, projectId),
     };
   }
 
@@ -182,7 +266,7 @@ export function createPluginSyncOps(deps: {
     const parts: string[] = [];
     if (missingConfig.length) parts.push(`missing required config: ${missingConfig.join(", ")}`);
     if (missingSecrets.length) {
-      parts.push(`missing credentials: ${missingSecrets.join(", ")} (set as environment variables on the board host)`);
+      parts.push(`missing credentials: ${missingSecrets.join(", ")} (enter them in the plugin's settings, or set them as environment variables on the board host)`);
     }
     return `Sync is not configured — ${parts.join("; ")}.`;
   }
@@ -195,7 +279,8 @@ export function createPluginSyncOps(deps: {
     const missingConfig = (sync.config ?? [])
       .filter((f) => f.required && !values[f.key]?.trim())
       .map((f) => f.key);
-    const missingSecrets = (sync.secrets ?? []).filter((name) => !process.env[name]?.trim());
+    const resolvedSecrets = await resolveSecretValues(sync, plugin.pluginId, projectId);
+    const missingSecrets = (sync.secrets ?? []).filter((name) => !(name in resolvedSecrets));
     const ok = missingConfig.length === 0 && missingSecrets.length === 0;
     return {
       ok,
@@ -302,21 +387,12 @@ export function createPluginSyncOps(deps: {
       return record;
     }
 
-    const values = await readSyncConfigValues(plugin.pluginId, projectId);
-    const configEnv: Record<string, string> = {};
-    for (const field of sync.config ?? []) {
-      const v = values[field.key];
-      if (v !== undefined) configEnv[`SYNC_CONFIG_${field.key.toUpperCase()}`] = v;
-    }
-    // Secret VALUES are resolved here, injected as env vars for this one process, and never
-    // stored or echoed back — the config/status views only ever see the secret's NAME.
-    const secretEnv: Record<string, string> = {};
-    for (const name of sync.secrets ?? []) secretEnv[name] = process.env[name] ?? "";
+    const { env: syncEnv } = await resolveSyncEnv(plugin, projectId);
     const dryRunEnv: Record<string, string> = opts.dryRun ? { SYNC_DRY_RUN: "1" } : {};
 
     const ctx = await resolvePluginRunContext(pluginRowId, projectId);
     const cwd = cmdDef.cwd === "repo" ? ctx.outputRepoPath : plugin.localPath;
-    const env = { ...substitutePluginEnv(cmdDef.env, ctx.vars), ...configEnv, ...secretEnv, ...dryRunEnv };
+    const env = { ...substitutePluginEnv(cmdDef.env, ctx.vars), ...syncEnv, ...dryRunEnv };
     const command = substitutePluginPlaceholders(cmdDef.command, ctx.vars);
 
     const result = await runPluginCommand(command, { cwd, env });
@@ -337,5 +413,5 @@ export function createPluginSyncOps(deps: {
     return record;
   }
 
-  return { getSyncConfig, setSyncConfig, validateSync, triggerSync, getSyncStatus };
+  return { getSyncConfig, setSyncConfig, setSyncSecrets, validateSync, triggerSync, getSyncStatus, resolveSyncEnv, redactSecrets };
 }

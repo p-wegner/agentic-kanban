@@ -16,6 +16,7 @@ import {
   pluginScaffoldSaveBody,
   pluginSkillListingBody,
   pluginSyncConfigBody,
+  pluginSyncSecretsBody,
   pluginSyncTriggerBody,
 } from "./plugin-body-schemas.js";
 import { getPluginService, PluginError } from "../services/plugin.service.js";
@@ -81,6 +82,11 @@ import { listPluginDocs, readPluginDoc } from "../services/plugin-docs.service.j
  *            (never a secret VALUE) + which declared secrets the board can currently resolve
  *   POST   /api/plugins/:id/sync/config { projectId, values: { [configKey]: string } } — MERGES
  *            onto the existing config, so setting one field never erases the others
+ *   POST   /api/plugins/:id/sync/secrets { projectId, values: { [secretName]: string } } (#1275) —
+ *            stores the values encrypted in kanban.db (MERGE; "" clears one); returns the
+ *            name-only config view, never a value
+ *   POST   /api/plugins/:id/sync/test-connection { projectId } → { ok, error?, code, stdout,
+ *            stderr, timedOut } — runs the manifest's `bootstrap` script with the resolved env
  *   POST   /api/plugins/:id/sync/validate { projectId } → { ok, missingConfig, missingSecrets,
  *            error? } — fails CLOSED (ok:false with a readable reason) rather than throwing,
  *            since "not configured yet" is an expected state, not a server error
@@ -353,6 +359,17 @@ export function createPluginsRoute(
     // `values` carries `.default({})` in `pluginSyncConfigBody`, so it is never undefined at
     // runtime; the coalesce is for the INPUT-vs-OUTPUT type of the parsed body, not a real case.
     return c.json(await service.setSyncConfig(c.req.param("id"), body.projectId, body.values ?? {}));
+  });
+
+  // Secret VALUES go in, never out: the response is the same name-only config view.
+  router.post("/:id/sync/secrets", async (c) => {
+    const body = await parsePluginBody(c, pluginSyncSecretsBody);
+    return c.json(await service.setSyncSecrets(c.req.param("id"), body.projectId, body.values ?? {}));
+  });
+
+  router.post("/:id/sync/test-connection", async (c) => {
+    const projectId = await requireProjectId(c);
+    return c.json(await service.testSyncConnection(c.req.param("id"), projectId));
   });
 
   router.post("/:id/sync/validate", async (c) => {

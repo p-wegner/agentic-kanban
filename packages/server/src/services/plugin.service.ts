@@ -24,6 +24,7 @@ import { createPluginLifecycleOps } from "./plugin-lifecycle.service.js";
 import { createPluginListingOps } from "./plugin-listing.service.js";
 import { createPluginProjectSurfaceOps } from "./plugin-project-surface.service.js";
 import { createPluginSyncOps } from "./plugin-sync.service.js";
+import type { PluginSyncConnectionTest } from "./plugin-sync.service.js";
 import { buildButlerFragments } from "./plugin/butler-fragments.js";
 import {
   resolveLoopRunContext as resolveLoopRunContextIn,
@@ -188,11 +189,28 @@ export function createPluginService(deps: {
     const script = (plugin.manifest.scripts ?? []).find((s) => s.name === scriptName);
     if (!script) throw new PluginError(`Script "${scriptName}" not found in plugin manifest`, "NOT_FOUND");
     const { outputRepoPath, vars } = await resolvePluginRunContext(pluginRowId, projectId, { requireScaffoldFor: "scripts" });
-    return runPluginCommand(substitutePluginPlaceholders(script.command, vars), {
+    // A plugin with a `sync` block gets its board-held config + secrets in every script's env
+    // (#1275); one without is untouched. Secret values are masked in the captured output.
+    const { env: syncEnv, secretValues } = await resolveSyncEnv(plugin, projectId);
+    const result = await runPluginCommand(substitutePluginPlaceholders(script.command, vars), {
       cwd: script.cwd === "plugin" ? plugin.localPath : outputRepoPath,
-      env: substitutePluginEnv(script.env, vars),
+      env: { ...syncEnv, ...substitutePluginEnv(script.env, vars) },
       onProgress: opts?.onProgress,
     });
+    if (secretValues.length === 0) return result;
+    return { ...result, stdout: redactSecrets(result.stdout, secretValues), stderr: redactSecrets(result.stderr, secretValues) };
+  }
+
+  /**
+   * "Test connection": validates the sync settings fail-closed, then runs the manifest's
+   * `bootstrap` script with the resolved env — no board restart needed.
+   */
+  async function testSyncConnection(pluginRowId: string, projectId: string): Promise<PluginSyncConnectionTest> {
+    const validation = await validateSync(pluginRowId, projectId);
+    if (!validation.ok) return { ok: false, error: validation.error, code: null, stdout: "", stderr: "", timedOut: false };
+    const result = await runScript(pluginRowId, "bootstrap", projectId);
+    const ok = !result.timedOut && result.code === 0;
+    return { ok, error: ok ? undefined : (result.timedOut ? "bootstrap timed out" : `bootstrap exited with code ${result.code}`), ...result };
   }
 
   /**
@@ -251,7 +269,9 @@ export function createPluginService(deps: {
 
   // External-issue-tracker sync (#1076 declares it, #1081 wires it up) — extracted to its own
   // module (god-module ceiling), same shape as the output-location ops above.
-  const { getSyncConfig, setSyncConfig, validateSync, triggerSync, getSyncStatus } = createPluginSyncOps({
+  const {
+    getSyncConfig, setSyncConfig, setSyncSecrets, validateSync, triggerSync, getSyncStatus, resolveSyncEnv, redactSecrets,
+  } = createPluginSyncOps({
     database, requirePlugin, requireProject, resolvePluginRunContext,
   });
 
@@ -333,6 +353,8 @@ export function createPluginService(deps: {
     setOutputLocation: invalidatesPluginList(setOutputLocation),
     getSyncConfig,
     setSyncConfig,
+    setSyncSecrets,
+    testSyncConnection,
     validateSync,
     triggerSync,
     getSyncStatus,
