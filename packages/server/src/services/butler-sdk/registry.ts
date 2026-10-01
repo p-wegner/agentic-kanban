@@ -39,6 +39,11 @@ const listenersByKey = new Map<string, Set<Listener>>();
 const interactiveListenersByKey = new Map<string, Set<Listener>>();
 
 export function broadcast(s: ButlerSession, e: ButlerEvent): void {
+  // Track the in-flight reply even with no listener attached: leaving the Butler
+  // view closes its SSE stream, and the text streamed meanwhile is otherwise lost
+  // (the transcript only gets the assistant turn once it completes).
+  if (e.type === "turn-start" || e.type === "result") s.partialText = "";
+  else if (e.type === "text") s.partialText = (s.partialText ?? "") + e.text;
   const ls = listenersByKey.get(s.key);
   if (!ls) return;
   for (const l of ls) {
@@ -77,7 +82,11 @@ export function getButlerCommands(projectId: string, butlerId: string = "default
 
 /** Conversation history for the active session (empty if none) — replayed by the UI on reload. */
 export function getButlerTranscript(projectId: string, butlerId: string = "default"): ButlerTurn[] {
-  return sessions.get(butlerSessionKey(projectId, butlerId))?.transcript ?? [];
+  const s = sessions.get(butlerSessionKey(projectId, butlerId));
+  if (!s) return [];
+  // A reply still streaming is shown as far as it got, so a remounted chat isn't cut off.
+  if (s.busy && s.partialText) return [...s.transcript, { role: "assistant", text: s.partialText, ts: Date.now() }];
+  return s.transcript;
 }
 
 export function subscribeButler(
