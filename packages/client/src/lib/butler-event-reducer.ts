@@ -31,8 +31,9 @@ export type ButlerEvent =
   | { type: "turn-start" }
   | { type: "user"; text: string }
   | { type: "text"; text: string }
-  | { type: "tool"; name: string; toolId?: string; input?: Record<string, unknown> }
-  | { type: "tool-result"; toolId?: string; output?: string; isError?: boolean }
+  | { type: "tool"; name: string; toolId?: string; input?: Record<string, unknown>; parentToolId?: string }
+  | { type: "tool-result"; toolId?: string; output?: string; isError?: boolean; parentToolId?: string }
+  | { type: "subagent-text"; parentToolId: string; text: string }
   | { type: "result"; text?: string; isError?: boolean }
   | { type: "usage"; contextTokens: number }
   | { type: "meta"; model?: string; contextWindow?: number; mcpConnected?: boolean }
@@ -54,6 +55,8 @@ export interface ButlerChatMessage {
   ts: number;
   tool?: ButlerToolCall;
   question?: ButlerQuestionPrompt;
+  /** Set when a sub-agent produced this message (id of the Agent/Task tool call that spawned it). */
+  parentToolId?: string;
 }
 
 /** Accumulator for streamed assistant text within a single turn. */
@@ -115,6 +118,61 @@ function appendAssistantText<S extends ButlerChatState>(
     ? [...msgs.slice(0, -1), { ...last, text }]
     : [...msgs, { id: msgId, role: "assistant", text, ts: deps.now() }];
   return { state: { ...state, chatMessages: newMsgs }, buf: nextBuf };
+}
+
+function appendSubagentText<S extends ButlerChatState>(
+  state: S,
+  buf: AssistantBuf,
+  event: Extract<ButlerEvent, { type: "subagent-text" }>,
+  deps: ReducerDeps,
+): { state: S; buf: AssistantBuf } {
+  // Sub-agent output must not touch the butler's own text buffer.
+  return {
+    state: {
+      ...state,
+      chatMessages: [...state.chatMessages, {
+        id: `subtext-${deps.now()}-${deps.rand()}`,
+        role: "assistant",
+        text: event.text,
+        ts: deps.now(),
+        parentToolId: event.parentToolId,
+      }],
+    },
+    buf,
+  };
+}
+
+function appendToolCall<S extends ButlerChatState>(
+  state: S,
+  buf: AssistantBuf,
+  event: Extract<ButlerEvent, { type: "tool" }>,
+  deps: ReducerDeps,
+): { state: S; buf: AssistantBuf } {
+  // AskUserQuestion is rendered as its own question card (the `question` event),
+  // so a generic tool card for it would be a confusing duplicate. The buffer is
+  // left ALONE on purpose: the SDK dispatches the assistant message carrying this
+  // tool_use only after canUseTool resolved, i.e. mid-way through the reply that
+  // follows the answer — resetting there splits that reply into two bubbles.
+  if (event.name === "AskUserQuestion") return { state, buf };
+  const id = event.toolId ? `tool-${event.toolId}` : `tool-${deps.now()}-${deps.rand()}`;
+  // Reset the streamed-text accumulator (a tool call ends the current text run)
+  // but preserve textSeen — it gates the final "result" text.
+  // A sub-agent's tool call is not part of the butler's own text run, so it leaves the buffer alone.
+  const nextBuf: AssistantBuf = event.parentToolId ? buf : { buf: "", msgId: null, textSeen: buf.textSeen };
+  return {
+    state: {
+      ...state,
+      chatMessages: [...state.chatMessages, {
+        id,
+        role: "tool",
+        text: formatToolLabel(event.name),
+        ts: deps.now(),
+        tool: { name: event.name, input: event.input, status: "pending" },
+        ...(event.parentToolId ? { parentToolId: event.parentToolId } : {}),
+      }],
+    },
+    buf: nextBuf,
+  };
 }
 
 function settlePendingTools<S extends ButlerChatState>(state: S): S {
@@ -197,31 +255,10 @@ export function reduceButlerEvent<S extends ButlerChatState>(
       next[idx] = { ...msg, question: { ...msg.question!, resolved: { answers: event.answers, reason: event.reason } } };
       return { state: { ...state, chatMessages: next }, buf };
     }
-    case "tool": {
-      // AskUserQuestion is rendered as its own question card (the `question` event),
-      // so a generic tool card for it would be a confusing duplicate. The buffer is
-      // left ALONE on purpose: the SDK dispatches the assistant message carrying this
-      // tool_use only after canUseTool resolved, i.e. mid-way through the reply that
-      // follows the answer — resetting there splits that reply into two bubbles.
-      if (event.name === "AskUserQuestion") return { state, buf };
-      const id = event.toolId ? `tool-${event.toolId}` : `tool-${deps.now()}-${deps.rand()}`;
-      // Reset the streamed-text accumulator (a tool call ends the current text run)
-      // but preserve textSeen — it gates the final "result" text.
-      const nextBuf: AssistantBuf = { buf: "", msgId: null, textSeen: buf.textSeen };
-      return {
-        state: {
-          ...state,
-          chatMessages: [...state.chatMessages, {
-            id,
-            role: "tool",
-            text: formatToolLabel(event.name),
-            ts: deps.now(),
-            tool: { name: event.name, input: event.input, status: "pending" },
-          }],
-        },
-        buf: nextBuf,
-      };
-    }
+    case "subagent-text":
+      return appendSubagentText(state, buf, event, deps);
+    case "tool":
+      return appendToolCall(state, buf, event, deps);
     case "tool-result": {
       const targetId = event.toolId ? `tool-${event.toolId}` : undefined;
       let idx = -1;
