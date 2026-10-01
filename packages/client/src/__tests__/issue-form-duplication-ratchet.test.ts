@@ -53,16 +53,16 @@ const SCOPE = [
  * Each cap sits ~5 points above the measured value so an unrelated edit elsewhere in the
  * client (which can make a window newly shared) does not fail the gate spuriously.
  *
- * ONE entry is deliberately NOT "well under 50 %", and saying so is the point of a ratchet
- * rather than a threshold:
- *  - `CreateIssuePanel.tsx` (50 %) is the slide-over shell. #772 checked and REFUTED the
+ * One entry sits just under 50 %, and saying why is the point of a ratchet rather than a
+ * threshold:
+ *  - `CreateIssuePanel.tsx` (49 %, was 50 % until #1270) is the slide-over shell. #772 checked and REFUTED the
  *    premise that it and `CreateIssueForm` are "the same form twice" — inline board card vs
  *    slide-over, ~9 mode flags apart, different submit payloads. Merging them is worse than
  *    the remaining duplication; their shared PARTS are already extracted. Do not re-attempt it.
  */
 const MAX_DUP_PERCENT: Record<string, number> = {
   "components/CreateIssueForm.tsx": 39, // measured 34
-  "components/CreateIssuePanel.tsx": 55, // measured 50
+  "components/CreateIssuePanel.tsx": 54, // measured 49 — was 50/cap 55 before #1270
   "components/IssueEditFooter.tsx": 40, // measured 35
   "components/WorkspaceEmptyState.tsx": 44, // measured 39
   "components/WorkspacePanelHeader.tsx": 46, // measured 41 — was 62/cap 67 before <Icon>
@@ -189,11 +189,11 @@ describe("issue-form duplication is down-only (#810)", () => {
   }, SCAN_TIMEOUT_MS);
 
   it("no scoped file has climbed back to #732's 50% threshold, bar the one named exception", () => {
-    // `CreateIssuePanel` sits exactly at 50 %, for the reason recorded on MAX_DUP_PERCENT.
-    // Everything else must stay clear of the line — `WorkspacePanelHeader` graduated off this
+    // Every scoped file must stay clear of the line. `WorkspacePanelHeader` graduated off this
     // list in #810 part 1 (62 % -> 41 %) when the `<Icon>` primitive retired the heroicons
-    // wrapper it was sharing with ~100 other components.
-    const EXPECTED_AT_OR_OVER = ["components/CreateIssuePanel.tsx"];
+    // wrapper it was sharing with ~100 other components; `CreateIssuePanel` graduated in
+    // #1270 (50 % -> 49 %).
+    const EXPECTED_AT_OR_OVER: string[] = [];
     const offenders = SCOPE.filter((f) => dup[f] >= 50 && !EXPECTED_AT_OR_OVER.includes(f)).map(
       (f) => `${f}: ${dup[f]}%`,
     );
