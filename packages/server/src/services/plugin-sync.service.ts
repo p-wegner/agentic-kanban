@@ -8,6 +8,7 @@ import {
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
 import { extractModelJson } from "@agentic-kanban/shared/lib/model-json";
+import type { PluginSyncConnectionTest } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import type { PluginRow } from "../repositories/plugins.repository.js";
@@ -58,15 +59,7 @@ export interface PluginSyncValidationResult {
   error?: string;
 }
 
-/** Outcome of the "Test connection" button: the `bootstrap` script's run, secrets masked. */
-export interface PluginSyncConnectionTest {
-  ok: boolean;
-  error?: string;
-  code: number | null;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
-}
+export type { PluginSyncConnectionTest };
 
 /** Best-effort structured facts a pull/push command's own stdout reported about its run. */
 export interface PluginSyncRunSummary {
