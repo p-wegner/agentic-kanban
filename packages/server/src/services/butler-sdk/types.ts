@@ -66,6 +66,8 @@ export interface ButlerSession {
   busy: boolean;
   contextTokens: number;
   transcript: ButlerTurn[];
+  /** Assistant text streamed so far in the in-flight turn (reset at turn-start/result). */
+  partialText?: string;
   model?: string;
   contextWindow?: number;
   mcpConnected?: boolean;
