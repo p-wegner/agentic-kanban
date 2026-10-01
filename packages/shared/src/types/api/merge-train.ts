@@ -113,6 +113,11 @@ export interface MergeTrainGateEvidenceDto {
    * train, an environment failure, a train too small to bisect, or a row written before #1204).
    */
   baseVerdict?: MergeTrainBaseVerdict;
+  /**
+   * #1277 - the red-handling strategy this train ran under (`merge_train_red_strategy_<id>`),
+   * so the train detail names it. Absent on rows written before #1277.
+   */
+  redStrategy?: MergeTrainRedStrategyDto;
 }
 
 /** #1204 - what the control-arm gate said about the bare base sha the train was assembled on. */
@@ -123,10 +128,36 @@ export type MergeTrainBaseVerdict = "red" | "green";
  * member's ticket (a train review's finding, #1194), not the batch; the other failures are
  * the train's.
  */
-export type MergeTrainAttemptVerdict = "landed" | "red" | "assembly_empty" | "land_refused" | "env_failure" | "sided";
+export type MergeTrainAttemptVerdict =
+  | "landed" | "red" | "assembly_empty" | "land_refused" | "env_failure" | "sided"
+  // #1277 — a fix-agent attempt: the re-gate on the fixed tree was green / red / never ran
+  // (a cap tripped or the agent produced nothing).
+  | "agent_fix_green" | "agent_fix_red" | "agent_fix_capped";
 
-/** One node of a train's bisect tree (#1189) — one `runTrainAttempt`. */
+/** #1277 — what a train's red-handling policy was, shown in the train detail. */
+export type MergeTrainRedStrategyDto = "agent-fix" | "bisect" | "agent-fix-then-bisect";
+
+/** #1277 — the fix-agent facts on an attempt row of `kind: "agent_fix"`. */
+export interface MergeTrainAgentFixDto {
+  /** The agent session that did the work, when the runner reports one. */
+  sessionId?: string;
+  /** Where to read the brief the agent was given (the failing suites, output tail, members). */
+  briefUrl?: string;
+  /** What ended it: the re-gate verdict, or the cap that tripped. */
+  outcome: "green" | "red" | "capped";
+  /** The cap that tripped, when `outcome` is `capped`. */
+  capped?: "timeout" | "cost" | "no-change";
+  durationMs: number;
+  /** Absent when the provider reports no usage (a one-shot text run). */
+  tokens?: number;
+  costUsd?: number;
+}
+
+/** One node of a train's attempt tree (#1189) — one `runTrainAttempt`, or (#1277) one fix-agent run. */
 export interface MergeTrainAttemptDto {
+  /** `agent_fix` for a fix-agent row (#1277); absent for every assemble → gate → land attempt. */
+  kind?: "agent_fix";
+  agentFix?: MergeTrainAgentFixDto;
   /** The attempt's train label; a bisect child's label is its parent's plus `a`/`b`. */
   label: string;
   /** Workspace ids this attempt was asked to assemble. */

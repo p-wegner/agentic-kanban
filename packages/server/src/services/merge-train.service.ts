@@ -2,6 +2,7 @@ import { isAncestor, mergeBranch, revParse } from "@agentic-kanban/shared/lib/gi
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { MergeTrainAttemptDto, MergeTrainAttemptVerdict, MergeTrainBaseVerdict } from "@agentic-kanban/shared/types";
+import type { MergeTrainRedStrategy } from "@agentic-kanban/shared/lib/merge-train-red-strategy";
 import { assessBaseMove } from "./base-move-relevance.js";
 import { verifyChainSemaphoreActive, verifyChainSemaphoreConcurrency } from "./verify-chain-semaphore.js";
 import {
@@ -287,6 +288,8 @@ export interface TrainRunResult {
   baseVerdict?: MergeTrainBaseVerdict;
   /** The suites a red gate named, repo-relative; absent on a green run or when none were named. */
   failedSuites?: string[];
+  /** #1277 — the red-handling strategy the train ran under, for the persisted evidence. */
+  redStrategy?: MergeTrainRedStrategy;
 }
 
 /**
@@ -313,6 +316,13 @@ export type TrainGate = (ctx: {
   sided?: Array<{ workspaceId: string; reason: string }>;
   /** On a red run, the suites the gate named (repo-relative), for the suite-owner shortcut. */
   failedSuites?: string[];
+  /**
+   * #1277 — set when a fix agent ran in the gate's worktree after a red. `attempt` is its row
+   * (persisted beside the bisect rows); `fixedTrainSha` is set only when the re-gate on the fixed
+   * tree passed, and is then the tip of `trainRef` that must land. A red `passed: false` result
+   * with this set carries the RE-GATE's message: the failure the fallback should reason about.
+   */
+  agentFix?: { attempt: MergeTrainAttemptDto; fixedTrainSha?: string };
 }>;
 
 export async function runMergeTrain(args: {
@@ -398,6 +408,13 @@ export async function runMergeTrain(args: {
    * every existing caller (a lone per-workspace gate has nothing to cancel) is unaffected.
    */
   signal?: AbortSignal;
+  /**
+   * #1277 — the project's red-handling strategy. The fix agent itself runs inside `runGate` (it
+   * needs the gate's installed worktree); this only decides what happens AFTER it: under
+   * `agent-fix` a red root attempt is final (no control arm, no bisect), otherwise the search
+   * proceeds as before. Absent = `bisect`, today's behaviour. Echoed on the result.
+   */
+  redStrategy?: MergeTrainRedStrategy;
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, runGate, closeMember } = args;
   const bisect = args.bisectOnFailure !== false;
@@ -493,6 +510,9 @@ export async function runMergeTrain(args: {
       // member, the rest were re-assembled and either landed or conflicted (both attributed). There
       // is nothing red left to search for, so splitting would only re-gate green code.
       if (attempt.sided.length > 0) return attempt;
+      // #1277: `agent-fix` means the fix agent's red IS the verdict — an operator who picked it
+      // wants a hard failure on a second red, not a bisect behind their back.
+      if (args.redStrategy === "agent-fix" && subLabel === label) return attempt;
       // Suite-owner shortcut (`merge-train-suite-owner.ts`): every failing suite belongs to one
       // included member, so reject it and re-gate the rest once instead of control arm + halving.
       const aboard = subset.filter((m) => !attempt.dropped.some((d) => d.member.workspaceId === m.workspaceId));
@@ -593,14 +613,37 @@ export async function runMergeTrain(args: {
   // The control arm's run is a real gate run and is counted as one; its verdict rides along so
   // the persisted evidence can say "base red, nothing attributable to members".
   const probe = baseProbe.current;
-  return probe
+  const withProbe = probe
     ? { ...result, gateRuns: result.gateRuns + probe.gateRuns, baseVerdict: probe.verdict }
     : result;
+  return args.redStrategy ? { ...withProbe, redStrategy: args.redStrategy } : withProbe;
 }
 
 /** The live default for `freeVerifySlots` — how many verify chains could start on this box right now. */
 function defaultFreeVerifySlots(): number {
   return Math.max(0, verifyChainSemaphoreConcurrency() - verifyChainSemaphoreActive());
+}
+
+/**
+ * #1277: after a green gate that went through a fix agent, the train ref's tip IS the fixed tree —
+ * make that the sha the landing verifies against. True when it did.
+ */
+function adoptFixedTrainTip(asm: { trainSha: string | null }, gate: Awaited<ReturnType<TrainGate>>): boolean {
+  const fixed = gate.passed ? gate.agentFix?.fixedTrainSha : undefined;
+  if (fixed) asm.trainSha = fixed;
+  return !!fixed;
+}
+
+/** Hand each attempt row to the caller's persistence port, in order. Best-effort: a throw is logged (#1189). */
+async function persistAttempts(records: MergeTrainAttemptDto[], onAttempt?: (attempt: MergeTrainAttemptDto) => Promise<void>): Promise<void> {
+  if (!onAttempt) return;
+  for (const r of records) {
+    try {
+      await onAttempt(r);
+    } catch (err) {
+      console.warn(`[merge-train] could not record attempt ${r.label} (non-fatal): ${errorMessage(err).slice(0, 200)}`);
+    }
+  }
 }
 
 /** ONE assemble → gate → land → close cycle. The bisect driver above composes these. */
@@ -636,6 +679,8 @@ async function runTrainAttempt(args: {
   const closeFailures: TrainRunResult["closeFailures"] = [];
   let gateStartedAt: string | null = null;
   let gateFinishedAt: string | null = null;
+  /** #1277: the fix-agent row this attempt's gate produced, if one ran; persisted beside this node. */
+  let agentFixAttempt: MergeTrainAttemptDto | null = null;
 
   /**
    * #1189: stamp this attempt as one node of the bisect tree and hand it to `onAttempt`
@@ -664,14 +709,10 @@ async function runTrainAttempt(args: {
       ...(result.mergeSha ? { mergeSha: result.mergeSha } : {}),
       ...(result.sided.length > 0 ? { sided: result.sided.map((s) => ({ workspaceId: s.member.workspaceId, reason: s.reason.slice(0, 300) })) } : {}),
     };
-    if (args.onAttempt) {
-      try {
-        await args.onAttempt(record);
-      } catch (err) {
-        console.warn(`[merge-train] could not record attempt ${label} (non-fatal): ${errorMessage(err).slice(0, 200)}`);
-      }
-    }
-    return { ...result, attempts: [record], conflictClusters: asm.conflictClusters };
+    // #1277: the fix agent's own row first (it happened first), and its re-gate counts as a run.
+    const records = [agentFixAttempt, record].filter((r): r is MergeTrainAttemptDto => r !== null);
+    await persistAttempts(records, args.onAttempt);
+    return { ...result, gateRuns: result.gateRuns + (agentFixAttempt?.gateRuns ?? 0), attempts: records, conflictClusters: asm.conflictClusters };
   }
 
   // The train ref is scratch state, so its cleanup belongs in a `finally` rather than at each
@@ -697,6 +738,10 @@ async function runTrainAttempt(args: {
     gateStartedAt = new Date().toISOString();
     const gate = await runGate({ trainRef: asm.trainRef, trainSha: asm.trainSha, included: asm.included, label });
     gateFinishedAt = new Date().toISOString();
+    // #1277: the fix agent ran inside the gate's worktree. On a green re-gate the train ref now
+    // carries its commits, so THAT tip is what was verified and what lands.
+    agentFixAttempt = gate.agentFix?.attempt ?? null;
+    const fixLanded = adoptFixedTrainTip(asm, gate);
     if (!gate.passed) {
       // #1203: the gate itself was killed by the SAME signal a cancel aborts (`runGate`'s own
       // closure passes it into `runSetupScript`) — this failure is the cancel, not a verdict
@@ -739,6 +784,15 @@ async function runTrainAttempt(args: {
     // path below, since each of them lands the same gated evidence.
     const commitEvidence = trainId ? { evidence: { trainId, gateRuns: 1, gateMessage: gate.message } } : {};
 
+    // #1277: a sided member is landed by re-assembling WITHOUT it, which would discard the fix
+    // agent's commits. Nothing verified would land, so this is red; the fallback decides what next.
+    if (fixLanded && sidedIds.size > 0) {
+      return await finish({
+        trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], sided: [], gateRuns: 1,
+        gateFailure: "the train review sided member(s) after the fix agent's change; re-assembling without them would discard the fix",
+      }, "red");
+    }
+
     if (sidedIds.size === 0) {
       // #1193: when this attempt was coordinated as part of a concurrent bisect split (it was
       // handed a `waitForLandTurn`), an earlier sibling landing while we waited is an EXPECTED,
@@ -761,7 +815,9 @@ async function runTrainAttempt(args: {
       let landAsm = asm;
       const additionalDropped: TrainRunResult["dropped"] = [];
       const currentBase = await revParse(repoPath, baseBranch);
-      if (!args.waitForLandTurn && currentBase !== asm.baseSha) {
+      // #1277: never for a fixed tree — re-assembling the members would drop the agent's commits
+      // and land the very red tree the fix was for. A base move then refuses in `landMergeTrain`.
+      if (!args.waitForLandTurn && !fixLanded && currentBase !== asm.baseSha) {
         // A lone attempt whose base moved during the gate: keep the verdict only when the move
         // was verdict-neutral (base-move-relevance.ts); otherwise `landMergeTrain` refuses.
         const neutral = await reassembleAfterNeutralBaseMove({ repoPath, baseBranch, asm, currentBase, label });

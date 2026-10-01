@@ -17,6 +17,12 @@ export interface ClaudeCliOptions {
    * tree being reviewed. Default: the server's own cwd, as before.
    */
   cwd?: string;
+  /**
+   * The one-shot may edit files in `cwd` (#1277, the merge-train fix agent). Needs `cwd`: it is
+   * also exported as `KANBAN_WORKTREE_DIR`, so the cross-worktree write guard (#369) confines the
+   * run to that tree.
+   */
+  allowEdits?: boolean;
 }
 
 /**
@@ -34,6 +40,7 @@ export async function invokeClaudePrompt(
   opts: ClaudeCliOptions = {}
 ): Promise<string> {
   const { timeout = 60000, database = db, model, cwd } = opts;
+  const allowEdits = opts.allowEdits === true && !!cwd;
 
   let agentCommand: string | undefined;
   let providerPref: string | undefined;
@@ -52,6 +59,7 @@ export async function invokeClaudePrompt(
   const { command, args, env, useShell } = buildAgentLaunchConfig({
     provider: toExecutorProvider(providerName),
     oneShotText: true,
+    ...(allowEdits ? { oneShotAllowEdits: true } : {}),
     agentCommand,
     model,
     ...(profileName ? { profile: { provider: providerName, name: profileName } } : {}),
@@ -64,7 +72,7 @@ export async function invokeClaudePrompt(
       shell: useShell,
       windowsHide: true,
       maxBuffer: 1024 * 1024,
-      env,
+      env: allowEdits ? { ...env, KANBAN_WORKTREE_DIR: cwd as string } : env,
       ...(cwd ? { cwd } : {}),
     }, (err, stdout, stderr) => {
       if (err) reject(describeCliFailure(err, stderr, timeout));
