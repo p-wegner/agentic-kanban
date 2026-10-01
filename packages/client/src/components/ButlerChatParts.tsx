@@ -223,6 +223,23 @@ export function ChatBubble({ msg, onAnswerQuestion }: {
     return <QuestionCard prompt={msg.question} onAnswer={onAnswerQuestion} />;
   }
 
+  // Sub-agent output (its text and tool calls) is shown indented under a marker so it
+  // reads as the sub-agent's work, not the butler's own reply.
+  if (msg.parentToolId) {
+    return (
+      <div className="ml-6 pl-3 border-l-2 border-violet-300 dark:border-violet-700" data-testid="butler-subagent-message">
+        <p className="text-[10px] uppercase tracking-wide text-violet-500 dark:text-violet-400 mb-0.5">Sub-agent</p>
+        {msg.role === "tool" && msg.tool ? (
+          <ToolCallCard tool={msg.tool} />
+        ) : (
+          <div className="text-sm text-gray-700 dark:text-gray-300 prose prose-sm dark:prose-invert max-w-none mb-3">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (msg.role === "user") {
     return (
       <div className="flex justify-end mb-3">

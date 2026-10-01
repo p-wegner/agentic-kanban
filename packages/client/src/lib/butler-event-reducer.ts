@@ -31,8 +31,9 @@ export type ButlerEvent =
   | { type: "turn-start" }
   | { type: "user"; text: string }
   | { type: "text"; text: string }
-  | { type: "tool"; name: string; toolId?: string; input?: Record<string, unknown> }
-  | { type: "tool-result"; toolId?: string; output?: string; isError?: boolean }
+  | { type: "tool"; name: string; toolId?: string; input?: Record<string, unknown>; parentToolId?: string }
+  | { type: "tool-result"; toolId?: string; output?: string; isError?: boolean; parentToolId?: string }
+  | { type: "subagent-text"; parentToolId: string; text: string }
   | { type: "result"; text?: string; isError?: boolean }
   | { type: "usage"; contextTokens: number }
   | { type: "meta"; model?: string; contextWindow?: number; mcpConnected?: boolean }
@@ -54,6 +55,8 @@ export interface ButlerChatMessage {
   ts: number;
   tool?: ButlerToolCall;
   question?: ButlerQuestionPrompt;
+  /** Set when a sub-agent produced this message (id of the Agent/Task tool call that spawned it). */
+  parentToolId?: string;
 }
 
 /** Accumulator for streamed assistant text within a single turn. */
@@ -197,6 +200,21 @@ export function reduceButlerEvent<S extends ButlerChatState>(
       next[idx] = { ...msg, question: { ...msg.question!, resolved: { answers: event.answers, reason: event.reason } } };
       return { state: { ...state, chatMessages: next }, buf };
     }
+    case "subagent-text":
+      // Sub-agent output must not touch the butler's own text buffer.
+      return {
+        state: {
+          ...state,
+          chatMessages: [...state.chatMessages, {
+            id: `subtext-${deps.now()}-${deps.rand()}`,
+            role: "assistant",
+            text: event.text,
+            ts: deps.now(),
+            parentToolId: event.parentToolId,
+          }],
+        },
+        buf,
+      };
     case "tool": {
       // AskUserQuestion is rendered as its own question card (the `question` event),
       // so a generic tool card for it would be a confusing duplicate. The buffer is
@@ -207,7 +225,8 @@ export function reduceButlerEvent<S extends ButlerChatState>(
       const id = event.toolId ? `tool-${event.toolId}` : `tool-${deps.now()}-${deps.rand()}`;
       // Reset the streamed-text accumulator (a tool call ends the current text run)
       // but preserve textSeen — it gates the final "result" text.
-      const nextBuf: AssistantBuf = { buf: "", msgId: null, textSeen: buf.textSeen };
+      // A sub-agent's tool call is not part of the butler's own text run, so it leaves the buffer alone.
+      const nextBuf: AssistantBuf = event.parentToolId ? buf : { buf: "", msgId: null, textSeen: buf.textSeen };
       return {
         state: {
           ...state,
@@ -217,6 +236,7 @@ export function reduceButlerEvent<S extends ButlerChatState>(
             text: formatToolLabel(event.name),
             ts: deps.now(),
             tool: { name: event.name, input: event.input, status: "pending" },
+            ...(event.parentToolId ? { parentToolId: event.parentToolId } : {}),
           }],
         },
         buf: nextBuf,

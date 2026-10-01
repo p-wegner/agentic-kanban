@@ -143,6 +143,23 @@ describe("reduceButlerEvent — tool calls", () => {
   });
 });
 
+describe("reduceButlerEvent — sub-agent events (#1276)", () => {
+  it("subagent-text is appended as a tagged message and leaves the butler's text buffer alone", () => {
+    const buf = { buf: "partial", msgId: "asst-1", textSeen: true };
+    const { state: s, buf: nb } = reduceButlerEvent(state(), buf, { type: "subagent-text", parentToolId: "p1", text: "found it" }, deps());
+    expect(s.chatMessages).toHaveLength(1);
+    expect(s.chatMessages[0]).toMatchObject({ role: "assistant", text: "found it", parentToolId: "p1" });
+    expect(nb).toBe(buf);
+  });
+
+  it("a sub-agent tool call is tagged with parentToolId and does not reset the text buffer", () => {
+    const buf = { buf: "partial", msgId: "asst-1", textSeen: true };
+    const { state: s, buf: nb } = reduceButlerEvent(state(), buf, { type: "tool", name: "Grep", toolId: "t9", parentToolId: "p1" }, deps());
+    expect(s.chatMessages[0]).toMatchObject({ id: "tool-t9", role: "tool", parentToolId: "p1" });
+    expect(nb).toBe(buf);
+  });
+});
+
 describe("reduceButlerEvent — result / error terminal events", () => {
   it("result appends final text only when none was streamed (textSeen=false)", () => {
     const { state: s, buf } = reduceButlerEvent(state(), emptyAssistantBuf(), { type: "result", text: "Final answer" }, deps());
