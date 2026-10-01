@@ -284,6 +284,53 @@ export async function getCommitsForBranch(
   }
 }
 
+/** One commit's author plus its added/removed line counts (binary files count as 0). */
+export interface CommitStat {
+  sha: string;
+  author: string;
+  added: number;
+  removed: number;
+}
+
+/**
+ * Per-commit author and `--numstat` line totals for `baseRef..tip`, merge commits excluded
+ * (#1264). One `git log` per range. Returns [] when the refs cannot be resolved, same as
+ * `getCommitsForBranch`.
+ */
+export async function getCommitStatsForRange(
+  repoPath: string,
+  baseRef: string,
+  tip: string,
+): Promise<CommitStat[]> {
+  try {
+    // Each commit starts with a \x1e-prefixed "sha\x1fauthor" header, followed by its
+    // numstat lines ("added<TAB>removed<TAB>path").
+    const output = await execGit(
+      ["log", "--no-merges", "--numstat", "--format=%x1e%H%x1f%an", `${baseRef}..${tip}`],
+      repoPath,
+    );
+    return output
+      .split("\x1e")
+      .filter((rec) => rec.trim())
+      .map((rec) => {
+        const [header = "", ...rest] = rec.split("\n");
+        const [sha = "", author = ""] = header.split("\x1f");
+        let added = 0;
+        let removed = 0;
+        for (const line of rest) {
+          const [a, r] = line.split("\t");
+          // Binary files report "-" for both columns.
+          if (/^\d+$/.test(a ?? "")) added += Number(a);
+          if (/^\d+$/.test(r ?? "")) removed += Number(r);
+        }
+        return { sha, author, added, removed };
+      })
+      .filter((c) => c.sha);
+  } catch {
+    return [];
+  }
+}
+
 /** Stage and commit specific paths in repoPath. Returns true when a commit was created. */
 export async function commitPaths(
   repoPath: string,

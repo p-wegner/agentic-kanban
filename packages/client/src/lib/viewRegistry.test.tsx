@@ -39,7 +39,8 @@ describe("VIEW_REGISTRY", () => {
     // the `v` and `e` single-key shortcuts.
     // 27 → 18 is history; 18 → 19 (#1089): Runners (connected compute workers,
     // dispatch log, git transport, connect) replaces the retired `WorkerFleetPanel` overlay.
-    expect(VIEW_REGISTRY).toHaveLength(19);
+    // 19 → 20 (#1264): Contributions (per-actor issues/sessions/commits/tokens/cost).
+    expect(VIEW_REGISTRY).toHaveLength(20);
   });
 
   it("preserves the existing view ids", () => {
@@ -48,7 +49,7 @@ describe("VIEW_REGISTRY", () => {
       "strategy", "focus", "butler", "workflows", "swimlane",
       "runtime", "drive", "runbooks", "activity",
       "analytics", "calendar",
-      "plugin-views", "runners",
+      "plugin-views", "runners", "contributions",
     ];
     expect(VIEW_IDS.slice().sort()).toEqual(expected.slice().sort());
   });
@@ -120,7 +121,7 @@ describe("VIEW_REGISTRY", () => {
       [
         "focus", "swimlane",
         "runbooks", "activity",
-        "analytics", "runners",
+        "analytics", "runners", "contributions",
       ].sort(),
     );
   });

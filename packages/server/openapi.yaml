@@ -6048,6 +6048,29 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{id}/contributions:
+    get:
+      summary: — per-actor issue/workspace/session/commit/token totals, aggregated in SQL; ETag'd.
+      tags:
+        - projects
+      operationId: get_api_projects_id_contributions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/dashboard/throughput-by-provider:
     get:
       summary: Returns count + median lead time per provider.

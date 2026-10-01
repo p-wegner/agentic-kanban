@@ -318,6 +318,47 @@ export type TimelineScaleId = "day" | "week" | "month" | "quarter";
 export const TIMELINE_TAB_IDS = TIMELINE_TABS.map((t) => t.id as TimelineScaleId);
 
 // ---------------------------------------------------------------------------
+// #1264 — Contributions: who contributed how much. Like the timeline, ONE component
+// for every tab — the tab is the `groupBy` of GET /api/projects/:id/contributions, so
+// the grouping lives in the URL path (`/p/<slug>/contributions/model`).
+// ---------------------------------------------------------------------------
+
+export const CONTRIBUTIONS_VIEW_ID = "contributions";
+
+export const CONTRIBUTIONS_TABS: readonly ViewTabDescriptor[] = [
+  {
+    id: "provider",
+    label: "Provider",
+    paletteLabel: "By Provider",
+    paletteIcon: "P",
+    paletteDescription: "Contributions grouped by agent provider (Claude Code, Codex, Copilot, Pi)",
+  },
+  {
+    id: "profile",
+    label: "Profile",
+    paletteLabel: "By Profile",
+    paletteIcon: "A",
+    paletteDescription: "Contributions grouped by auth profile / account",
+  },
+  {
+    id: "model",
+    label: "Model",
+    paletteLabel: "By Model",
+    paletteIcon: "M",
+    paletteDescription: "Contributions grouped by model",
+  },
+  {
+    id: "author",
+    label: "Git author",
+    paletteLabel: "By Git Author",
+    paletteIcon: "G",
+    paletteDescription: "Merged commits and lines grouped by git commit author",
+  },
+];
+
+export type ContributionsTabId = "provider" | "profile" | "model" | "author";
+
+// ---------------------------------------------------------------------------
 // #446 — the tab as a URL dimension.
 //
 // The router needs to answer "does this view have tabs, which ones, and what is
@@ -349,6 +390,7 @@ export const VIEW_TAB_REGISTRY: Readonly<Record<string, ViewTabSet>> = {
   [FOCUS_VIEW_ID]: { tabs: FOCUS_TABS, defaultTab: "focus" },
   [RUNNERS_VIEW_ID]: { tabs: RUNNERS_TABS, defaultTab: "runners" },
   [TIMELINE_VIEW_ID]: { tabs: TIMELINE_TABS, defaultTab: "month" },
+  [CONTRIBUTIONS_VIEW_ID]: { tabs: CONTRIBUTIONS_TABS, defaultTab: "provider" },
 };
 
 /** True when `viewId` is a tabbed container view. Plain views have no tab dimension. */

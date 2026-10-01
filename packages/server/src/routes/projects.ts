@@ -20,6 +20,8 @@ import {
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../lib/ai-operation.js";
 import { getProjectActivity } from "../services/project-activity.service.js";
+import { createContributionService } from "../services/contribution.service.js";
+import { parseContributionQuery } from "../lib/contribution-query.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionLauncher } from "../services/session.manager.js";
 import { createWorkspaceSummaryCache } from "../services/workspace-summary-cache.service.js";
@@ -215,7 +217,8 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   }
 
   const workspaceSummaryCache = createWorkspaceSummaryCache();
-  const projectService = createProjectService({ database, workspaceSummaryCache });
+  const contributionService = createContributionService({ database });
+  const projectService = createProjectService({ database,workspaceSummaryCache });
   const onboardingIssueService = createIssueService({
     database,
     boardEvents: options?.boardEvents,
@@ -656,6 +659,16 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
       status: 200,
       headers: { "Content-Type": "application/json", ETag: etag },
     });
+  });
+
+  // GET /api/projects/:id/contributions?from=&to=&groupBy=provider|profile|model|author (#1264)
+  // — per-actor issue/workspace/session/commit/token totals, aggregated in SQL; ETag'd.
+  router.get("/:id/contributions", async (c) => {
+    const parsed = parseContributionQuery(c.req.query());
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+    const result = await contributionService.getContributions(c.req.param("id"), parsed.groupBy, parsed.window);
+    if (!result) return c.json({ error: "Project not found" }, 404);
+    return conditionalJsonResponse(JSON.stringify(result), c.req.header("if-none-match"));
   });
 
   // GET /api/projects/:id/graph

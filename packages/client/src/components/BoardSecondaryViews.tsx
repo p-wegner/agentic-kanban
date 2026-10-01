@@ -8,7 +8,7 @@ import {
   GraphView, TableView, AgentGrid, TimelineView,
   ButlerView, WorkflowsView,
   BoardFeedView, RuntimeFeedView, FocusHubView,
-  RunnersView,
+  RunnersView, ContributionsView,
   StrategyTargetsView, SwimlaneView,
   RunbooksView,
   AnalyticsView, CalendarView,
@@ -195,6 +195,11 @@ export function BoardSecondaryViews({
       {viewMode === "runners" && (
         <BoardErrorBoundary columnName="Runners">
           <RunnersView projectId={activeProjectId} />
+        </BoardErrorBoundary>
+      )}
+      {viewMode === "contributions" && activeProjectId && (
+        <BoardErrorBoundary columnName="Contributions">
+          <ContributionsView projectId={activeProjectId} />
         </BoardErrorBoundary>
       )}
       {viewMode === "analytics" && activeProjectId && (

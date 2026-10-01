@@ -118,6 +118,13 @@ export const VIEW_ICONS: Record<ViewMode, ReactNode> = {
       <path d="M6 6h.01M6 18h.01" />
     </Icon>
   ),
+  // Pie chart — contribution shares.
+  contributions: (
+    <Icon className="w-3.5 h-3.5">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-9-9v9h9z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 3.5A9 9 0 0120.5 9H15z" />
+    </Icon>
+  ),
 };
 
 /** The glyph for a view id. */

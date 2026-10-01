@@ -19,6 +19,8 @@ import {
   RUNNERS_VIEW_ID,
   TIMELINE_TABS,
   TIMELINE_VIEW_ID,
+  CONTRIBUTIONS_TABS,
+  CONTRIBUTIONS_VIEW_ID,
 } from "../lib/viewTabs.js";
 import { viewTabActions } from "../stores/viewTabStore.js";
 import { markProgrammaticNavigation } from "../lib/navigationBurst.js";
@@ -384,6 +386,7 @@ export function useBoardKeyboardShortcuts(
       { viewId: FOCUS_VIEW_ID, view: "focus", prefix: "Focus", tabs: FOCUS_TABS },
       { viewId: RUNNERS_VIEW_ID, view: "runners", prefix: "Runners", tabs: RUNNERS_TABS },
       { viewId: TIMELINE_VIEW_ID, view: "timeline", prefix: "Timeline", tabs: TIMELINE_TABS },
+      { viewId: CONTRIBUTIONS_VIEW_ID, view: "contributions", prefix: "Contributions", tabs: CONTRIBUTIONS_TABS },
     ];
     for (const { viewId, view, prefix, tabs } of containerTabActions) {
       for (const tab of tabs) {
