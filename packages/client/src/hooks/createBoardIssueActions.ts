@@ -11,11 +11,7 @@ import { runCreateIssueFlow, type CreateIssuePayload } from "../lib/createIssueS
 import type { ExpandedCreatePanel } from "../lib/boardTypes.js";
 import type { IssueWithStatus, UpdateIssueRequest, StatusWithIssues } from "@agentic-kanban/shared";
 import { resolveWorkspaceLaunchDefaults } from "../lib/workspaceLaunchDefaults.js";
-import {
-  boardSelectionActions,
-  captureWorkspaceAutoOpenSelection,
-  openWorkspacePanelIfUndisturbed,
-} from "../stores/boardSelectionStore.js";
+import { boardSelectionActions } from "../stores/boardSelectionStore.js";
 import { boardBulkSelectionActions } from "../stores/boardBulkSelectionStore.js";
 import { isPlanModePriority } from "../lib/priorityTraits.js";
 import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
@@ -47,9 +43,6 @@ export function createBoardIssueActions(deps: BoardIssueActionsDeps) {
   // it directly instead of receiving injected setters from BoardPage.
   const { setPendingIssueIds, setPendingWorkspaceIssueIds } = boardBulkSelectionActions;
   async function handleCreateIssue(data: CreateIssuePayload) {
-    // #973: snapshot before the create+launch round trip; the flow consults the
-    // guard below only once it is about to open the workspace panel.
-    const selectionBeforeCreate = captureWorkspaceAutoOpenSelection();
     await runCreateIssueFlow(data, {
       columns,
       columnsRef,
@@ -65,15 +58,9 @@ export function createBoardIssueActions(deps: BoardIssueActionsDeps) {
       setWorkspaceIssue,
       setWorkspaceInitial,
       refetchBoard,
-      // The issue did not exist when the snapshot was taken, so there is no
-      // "already on this issue" case to allow — only "the user has not moved".
-      shouldOpenWorkspacePanel: () => {
-        const after = captureWorkspaceAutoOpenSelection();
-        return (
-          after.selectedIssueId === selectionBeforeCreate.selectedIssueId &&
-          after.workspaceIssueId === selectionBeforeCreate.workspaceIssueId
-        );
-      },
+      // #1269: a started ticket never takes over the side panel — it interrupts
+      // the user's flow. The workspace is created either way.
+      shouldOpenWorkspacePanel: () => false,
     });
   }
 
@@ -122,9 +109,6 @@ export function createBoardIssueActions(deps: BoardIssueActionsDeps) {
     }
 
     setPendingWorkspaceIssueIds((prev: Set<string>) => new Set([...prev, issue.id]));
-    // #973: remember where the user was BEFORE the launch round trip, so a panel
-    // that pops open seconds later cannot land on top of something newer.
-    const selectionBeforeLaunch = captureWorkspaceAutoOpenSelection();
     try {
       const s = await getSettings();
       const { provider, profileName, model } = resolveWorkspaceLaunchDefaults(s);
@@ -140,16 +124,10 @@ export function createBoardIssueActions(deps: BoardIssueActionsDeps) {
       };
       if (model) body.model = model;
 
-      const result = await apiPost<{ id: string; sessionId?: string }>("/api/workspaces", body);
+      await apiPost<{ id: string; sessionId?: string }>("/api/workspaces", body);
       await refetchBoard();
-      // Open the new workspace in the panel — unless the user moved on (#973).
-      const opened = openWorkspacePanelIfUndisturbed(selectionBeforeLaunch, issue, {
-        workspaceId: result.id,
-        sessionId: result.sessionId ?? "",
-      });
-      if (!opened) {
-        showToast(`Workspace started for #${issue.issueNumber ?? issue.title}`, "success");
-      }
+      // #1269: do not open the side panel for a started ticket.
+      showToast(`Workspace started for #${issue.issueNumber ?? issue.title}`, "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to start workspace", "error");
     } finally {
