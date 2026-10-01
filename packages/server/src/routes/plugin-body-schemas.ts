@@ -122,6 +122,12 @@ export const pluginSyncConfigBody = z.object({
   values: z.record(z.string(), z.unknown()).default({}),
 }).passthrough();
 
+/** `POST /api/plugins/:id/sync/secrets` (#1275): `{ [declaredSecretName]: value }`, "" clears one. */
+export const pluginSyncSecretsBody = z.object({
+  projectId,
+  values: z.record(z.string(), z.unknown()).default({}),
+}).passthrough();
+
 /** `POST /api/plugins/:id/sync/trigger` (#1081). */
 export const pluginSyncTriggerBody = z.object({
   projectId,

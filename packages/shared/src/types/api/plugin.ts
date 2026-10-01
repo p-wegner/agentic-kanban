@@ -31,6 +31,16 @@ export interface PluginScriptRunResult {
   stdoutTruncated: boolean;
 }
 
+/** `POST /api/plugins/:id/sync/test-connection` (#1275): the `bootstrap` run, secrets masked. */
+export interface PluginSyncConnectionTest {
+  ok: boolean;
+  error?: string;
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+}
+
 /**
  * Periodic progress snapshot for a still-running plugin script (#1229) — elapsed time, the
  * streamed output tail so far, and the timeout limit, so a caller can show both before the

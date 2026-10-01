@@ -53,6 +53,7 @@ export {
   DEFAULT_PLUGIN_OUTPUT_LOCATION,
   pluginSyncConfigPreferenceKey,
   pluginSyncStatusPreferenceKey,
+  pluginSyncSecretsPreferenceKey,
 } from "./plugin-keys.js";
 export type { PluginOutputLocation } from "./plugin-keys.js";
 // …and used here, so the parser's own skill-name derivation is the same one every consumer uses.

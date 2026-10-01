@@ -153,6 +153,16 @@ export function pluginSyncStatusPreferenceKey(pluginSlug: string, projectId: str
   return `plugin_sync_status_${pluginSlug}_${projectId}`;
 }
 
+/**
+ * Per-project sync SECRETS pref key (#1275): `plugin_sync_secrets_<pluginSlug>_<projectId>`,
+ * holding ONE AES-256-GCM ciphertext envelope of the secret values the user entered in the
+ * board (see the server's `plugin-secret-store.ts`). Deliberately NOT a recognized dynamic
+ * settings key: it must not be listed by, or writable through, the generic settings API.
+ */
+export function pluginSyncSecretsPreferenceKey(pluginSlug: string, projectId: string): string {
+  return `plugin_sync_secrets_${pluginSlug}_${projectId}`;
+}
+
 // Per-project skill-listing override key (#1251) is `pluginSkillListingPreferenceKey` in
 // `plugin-skill-listing.ts`, alongside `SkillListing`/`SKILL_LISTINGS` — the listing vocabulary
 // lives there, not here, so this module stays pure key-derivation.
