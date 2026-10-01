@@ -45,7 +45,10 @@ export function ButlerTabBar({
   onManage,
 }: ButlerTabBarProps) {
   return (
-    <div className="shrink-0 flex items-stretch border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 overflow-x-auto">
+    <div className="shrink-0 flex items-stretch border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50">
+      {/* Only the tabs scroll: overflow-x on the whole strip clips the add-tab
+          dropdown (overflow-y computes to auto), so "open second butler" showed nothing. */}
+      <div className="flex items-stretch min-w-0 overflow-x-auto">
       {openTabs.map((tabId) => {
         const ts = tabStates[tabId];
         const isActive = tabId === activeTabId;
@@ -100,6 +103,7 @@ export function ButlerTabBar({
           </div>
         );
       })}
+      </div>
 
       {/* Add tab dropdown — click-controlled (a hover-only menu dropped its
           :hover crossing the gap to the menu, so the click never landed, #842) */}
