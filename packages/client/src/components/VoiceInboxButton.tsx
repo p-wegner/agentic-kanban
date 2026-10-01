@@ -14,7 +14,7 @@ interface VoiceInboxButtonProps {
   onIssueCreated?: () => void;
 }
 
-type RecordingState = "idle" | "recording" | "review" | "processing";
+type RecordingState = "idle" | "recording" | "review";
 type VoiceCaptureResult =
   | { type: "issue"; issueId: string; issueNumber: number; title: string }
   | { type: "action"; action: "move_issue"; issueId: string; issueNumber: number; title: string; targetStatus: string; message: string };
@@ -68,6 +68,9 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
   const [voiceLanguage] = useState(loadVoiceLanguage);
   // Editable transcript shown in the review dialog after recording stops.
   const [reviewText, setReviewText] = useState("");
+  // Number of submitted instructions still being processed server-side. These
+  // run in parallel and never block recording a new one.
+  const [pendingCount, setPendingCount] = useState(0);
   const recognitionRef = useRef<SpeechRecognitionType | null>(null);
   const transcriptRef = useRef<string>("");
   // Set when the user cancels mid-recording so the onend/onerror handler skips
@@ -105,7 +108,13 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
       return;
     }
     const speechRecognitionLanguage = resolveVoiceLanguage(voiceLanguage);
-    setState("processing");
+    // Submit in the background: the button returns to idle immediately so the
+    // user can record the next instruction while earlier ones are still processing.
+    setPendingCount((n) => n + 1);
+    setState("idle");
+    setInterimText("");
+    setReviewText("");
+    transcriptRef.current = "";
     try {
       const result = await apiPost<VoiceCaptureResult>(`/api/projects/${projectId}/voice-capture`, {
             transcript,
@@ -123,10 +132,7 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
       const message = errorMessage(err);
       showToast(`Voice capture failed: ${message}`, "error");
     } finally {
-      setState("idle");
-      setInterimText("");
-      setReviewText("");
-      transcriptRef.current = "";
+      setPendingCount((n) => Math.max(0, n - 1));
     }
   }, [projectId, onIssueCreated, voiceLanguage]);
 
@@ -262,13 +268,13 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
 
   const isRecording = state === "recording";
   const isReviewing = state === "review";
-  const isProcessing = state === "processing";
-  const isDisabled = !projectId || isProcessing || isReviewing;
+  const isProcessing = pendingCount > 0 && !isRecording && !isReviewing;
+  const isDisabled = !projectId || isReviewing;
 
   const title = isRecording
     ? "Recording… click to stop and review before submitting"
     : isProcessing
-    ? "Processing voice note…"
+    ? `Processing ${pendingCount} voice note${pendingCount === 1 ? "" : "s"}… click to record another`
     : isReviewing
     ? "Review the transcript before creating an issue or running a command"
     : "Voice inbox — record an idea or quick board command (shift+v)";
@@ -284,7 +290,7 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
           isRecording
             ? "bg-red-50 dark:bg-red-950 border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900"
             : isProcessing
-            ? "bg-brand-50 dark:bg-brand-900/40 border-brand-200 dark:border-brand-700 text-brand-600 dark:text-brand-400 opacity-80 cursor-wait"
+            ? "bg-brand-50 dark:bg-brand-900/40 border-brand-200 dark:border-brand-700 text-brand-600 dark:text-brand-400 opacity-80"
             : "bg-surface-raised dark:bg-surface-raised-dark border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed",
         ].join(" ")}
       >
@@ -310,7 +316,7 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
             <line x1="8" y1="23" x2="16" y2="23" strokeLinecap="round" />
           </Icon>
         )}
-        <span className="hidden sm:inline">{isProcessing ? "Processing…" : isRecording ? "Stop" : "Voice"}</span>
+        <span className="hidden sm:inline">{isProcessing ? `Processing (${pendingCount})…` : isRecording ? "Stop" : "Voice"}</span>
       </button>
 
       {/* Cancel (abort) button — only while recording. Discards the capture
