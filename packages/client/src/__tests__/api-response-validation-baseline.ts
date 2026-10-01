@@ -107,7 +107,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "POST /api/plugins/:param/output-location",
   "POST /api/plugins/:param/scaffold",
   // #1275 sync settings form — name-only config view and connection-test result, not schematised yet.
-  "GET /api/plugins/:param/sync/config",
   "POST /api/plugins/:param/sync/config",
   "POST /api/plugins/:param/sync/secrets",
   "POST /api/plugins/:param/sync/test-connection",
