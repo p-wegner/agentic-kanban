@@ -866,8 +866,30 @@ const compiled: CompiledRoute[] = API_RESPONSE_SCHEMAS.map((r) => {
   return { ...r, segments, literalCount: segments.filter((s) => !s.startsWith(":")).length };
 });
 
+/**
+ * Literal `GET /api/workspaces/<name>` collection routes. The server registers them before
+ * `/:id`, so `:id` must never claim them here either — otherwise e.g. `cost-over-time` was
+ * validated against the single-workspace schema and failed with "id: missing; issueId: missing…".
+ */
+const WORKSPACE_LITERAL_SEGMENTS = new Set([
+  "provider-mix",
+  "cost-over-time",
+  "scorecard-distribution",
+  "stale-worktrees",
+  "cleanup-warnings",
+]);
+
 function matchTemplate(route: CompiledRoute, segments: string[]): boolean {
   if (route.segments.length !== segments.length) return false;
+  if (
+    route.segments[0] === "api" &&
+    route.segments[1] === "workspaces" &&
+    route.segments[2] === ":id" &&
+    segments[1] === "workspaces" &&
+    WORKSPACE_LITERAL_SEGMENTS.has(segments[2] ?? "")
+  ) {
+    return false;
+  }
   return route.segments.every((s, i) => s.startsWith(":") || s === segments[i]);
 }
 

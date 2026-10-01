@@ -215,6 +215,14 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // one would let an operator set a size cap with no wait bound (or vice versa) with no error.
   "train_max_size",
   "train_max_wait_ms",
+  // Merge-train red handling (#1277): `merge_train_red_strategy_<id>` is `agent-fix |
+  // bisect | agent-fix-then-bisect` (default the last); the three `merge_train_agent_fix_*`
+  // keys cap the fix agent (turns, wall-clock, cost) and any trip falls back to bisect. Read
+  // only through `resolveMergeTrainRedPolicy` (shared/lib/merge-train-red-strategy.ts).
+  "merge_train_red_strategy",
+  "merge_train_agent_fix_max_turns",
+  "merge_train_agent_fix_timeout_ms",
+  "merge_train_agent_fix_cost_cap_usd",
   // Merge-train batching window STATE (#1186): `train_window_<id>` is the JSON record of the
   // per-project accumulator the auto-merge orchestrator used to keep in memory only — pending
   // workspace ids, `firstSeenAt`, the last verdict + reason, and the operator controls

@@ -64,6 +64,7 @@ export class ClaudeProvider implements AgentProvider {
           textArgs.push("--settings", settingsPath);
         }
       }
+      if (options.oneShotAllowEdits) textArgs.push("--dangerously-skip-permissions");
       textArgs.push("-p");
       return {
         command,

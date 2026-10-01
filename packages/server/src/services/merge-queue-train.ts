@@ -33,7 +33,9 @@ import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanb
 import { randomUUID } from "node:crypto";
 import { acquireQueueRepoLock, MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS } from "./merge-queue-repo-lock.js";
 import type { MergeQueueEvent, MergeQueuePlan } from "./merge-queue.service.js";
-import type { MergeTrainBaseVerdict, MergeTrainGateEvidenceDto } from "@agentic-kanban/shared/types";
+import type { MergeTrainAttemptDto, MergeTrainBaseVerdict, MergeTrainGateEvidenceDto } from "@agentic-kanban/shared/types";
+import { resolveMergeTrainRedPolicy, type MergeTrainRedPolicy } from "@agentic-kanban/shared/lib/merge-train-red-strategy";
+import { createOneShotAgentRunner, runAgentFix, type AgentFixGateVerdict, type AgentFixOutcome, type TrainAgentRunner } from "./merge-train-agent-fix.js";
 import { getBaseBranchHealthForSha, isBaseHealthAnswer } from "../repositories/base-branch-health.repository.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
@@ -311,6 +313,8 @@ interface TrainStagingGateResult {
   stage?: "verify" | "smoke" | "setup" | "none";
   failedSuites?: string[];
   guardFailure?: boolean;
+  /** #1277 — the fix agent's row (and, when its re-gate was green, the fixed train tip); see `TrainGate`. */
+  agentFix?: { attempt: MergeTrainAttemptDto; fixedTrainSha?: string };
 }
 
 /**
@@ -358,6 +362,16 @@ async function runTrainStagingGate(args: {
   /** The REAL workspaces whose deferred installs this gate must clear; empty for a control arm. */
   includedWorkspaceIds: string[];
   afterGreen?: (ctx: { gateWorktree: string; gateMessage: string }) => Promise<{ sided?: Array<{ workspaceId: string; reason: string }> }>;
+  /**
+   * #1277 — runs INSIDE the worktree's lifetime when the gate went red: the in-train fix agent.
+   * `regate` re-runs the same gate on the worktree's current tree. Returns null to decline.
+   */
+  onRed?: (ctx: {
+    gateWorktree: string;
+    message: string;
+    failedSuites?: string[];
+    regate: () => Promise<AgentFixGateVerdict>;
+  }) => Promise<AgentFixOutcome | null>;
   /**
    * #1203 — real cancellation. Passed into the setup script AND the verify gate, so a cancel
    * kills whichever child process is currently running rather than letting it finish before the
@@ -408,10 +422,10 @@ async function runTrainStagingGate(args: {
     }
     // `memberWorkspaceIds`: the synthetic `train:<label>` id matches no `repos` row, so
     // without it the #628 deferred-install check passes vacuously for the whole train.
-    const gate = await runPreMergeGate(
+    const gateOnce = () => runPreMergeGate(
       {
         id: `train:${attemptLabel}`,
-        workingDir: gateWorktree,
+        workingDir: gateWorktree as string,
         baseBranch,
         // The INCLUDED members (#676) - a member dropped during assembly is not in this
         // tree, so its outstanding install must not withhold the train.
@@ -423,16 +437,39 @@ async function runTrainStagingGate(args: {
       // letting it run to completion before the row's `abandoned` state is noticed.
       signal,
     );
+    let gate = await gateOnce();
+    // #1277: a red tree gets one directed fix agent, in THIS worktree (deps already installed),
+    // before anything is bisected. Each re-gate it asks for runs the same gate; `gate` always
+    // holds the latest verdict, so a fixed tree flows on to `afterGreen` like any green one.
+    let agentFix: TrainStagingGateResult["agentFix"];
+    if (!gate.passed && args.onRed && !signal?.aborted) {
+      const fix = await args.onRed({
+        gateWorktree,
+        message: gate.message,
+        failedSuites: gate.failedSuites,
+        regate: async () => {
+          gate = await gateOnce();
+          return { passed: gate.passed, message: gate.message, failedSuites: gate.failedSuites };
+        },
+      });
+      if (fix) agentFix = { attempt: fix.attempt, ...(fix.fixedTrainSha ? { fixedTrainSha: fix.fixedTrainSha } : {}) };
+    }
     if (!gate.passed) {
       return {
         passed: false,
         message: gate.message,
         stage: gate.stage,
         ...(gate.failedSuites ? { failedSuites: gate.failedSuites, guardFailure: gate.guardFailure === true } : {}),
+        ...(agentFix ? { agentFix } : {}),
       };
     }
     const extra = await args.afterGreen?.({ gateWorktree, gateMessage: gate.message });
-    return { passed: true, message: gate.message, ...(extra?.sided && extra.sided.length > 0 ? { sided: extra.sided } : {}) };
+    return {
+      passed: true,
+      message: gate.message,
+      ...(extra?.sided && extra.sided.length > 0 ? { sided: extra.sided } : {}),
+      ...(agentFix ? { agentFix } : {}),
+    };
   } catch (err) {
     // Fail CLOSED: a gate we could not run is not a gate that passed.
     return { passed: false, stage: "none", message: `train gate could not run: ${errorMessage(err)}` };
@@ -508,6 +545,36 @@ async function gateBaseAloneOnce(args: {
 }
 
 /**
+ * #1277 — the fix-agent hook for ONE attempt's staging gate, or undefined when this attempt gets
+ * none. Only the WHOLE train's gate (`attemptLabel === label`) is ever fixed: a bisect half is
+ * already a search, and the fix agent is the alternative to starting one. A missing-dependency red
+ * is the staging worktree's environment (#1154), which no code edit repairs.
+ */
+function buildTrainOnRed(args: {
+  policy: MergeTrainRedPolicy;
+  agentRunner: TrainAgentRunner;
+  label: string;
+  attemptLabel: string;
+  baseBranch: string;
+  included: ReadonlyArray<{ workspaceId: string }>;
+  members: ReadonlyArray<{ workspaceId: string; branch: string; issueNumber?: number | null }>;
+}): Parameters<typeof runTrainStagingGate>[0]["onRed"] {
+  const { policy, label, attemptLabel } = args;
+  if (!policy.agentFix || attemptLabel !== label) return undefined;
+  const aboard = args.included.flatMap((m) => args.members.filter((x) => x.workspaceId === m.workspaceId));
+  return async ({ gateWorktree, message, failedSuites, regate }) => {
+    if (looksLikeMissingDepsFailure(message)) return null;
+    console.log(`[merge-train] ${label}: gate RED - spawning the fix agent in ${gateWorktree} (strategy ${policy.strategy}, timeout ${policy.caps.timeoutMs}ms, ${policy.caps.maxTurns} turn(s))`);
+    const outcome = await runAgentFix({
+      worktree: gateWorktree, label, baseBranch: args.baseBranch, members: aboard,
+      initialFailure: { message, failedSuites }, caps: policy.caps, runAgent: args.agentRunner, regate,
+    });
+    console.log(`[merge-train] ${label}: fix agent finished - ${outcome.attempt.verdict}${outcome.attempt.failureHead ? `: ${outcome.attempt.failureHead.slice(0, 160)}` : ""}${policy.bisectAfter && !outcome.fixedTrainSha ? "; falling back to the bisect" : ""}`);
+    return outcome;
+  };
+}
+
+/**
  * Acquire the repo lock and run the gated train, treating a repo-lock timeout and a THROW out
  * of `runMergeTrain` as the same shape of failure: a train job that died before finishing.
  * Both used to be handled differently (see the #1215 call-site comment) — this is the ONE place
@@ -540,8 +607,10 @@ async function runDoomedTrainJob(args: {
   abortController: AbortController;
   /** Sends a base-conflict member back to its builder as soon as an assembly drops it. */
   onDropped: OnTrainDropped;
+  /** #1277 — runs the in-train fix agent's turns. */
+  agentRunner: TrainAgentRunner;
 }): Promise<{ ok: true; result: Awaited<ReturnType<typeof runMergeTrain>> } | { ok: false; reason: string }> {
-  const { database, boardEvents, reconcileAlreadyMerged, sendTurn, reviewTrain, repoPath, baseBranch, members, label, trainId, projectId, reviewEvidenceRef, abortController, onDropped } = args;
+  const { database, boardEvents, reconcileAlreadyMerged, sendTurn, reviewTrain, repoPath, baseBranch, members, label, trainId, projectId, reviewEvidenceRef, abortController, onDropped, agentRunner } = args;
 
   let repoLock: Awaited<ReturnType<typeof acquireQueueRepoLock>>;
   try {
@@ -566,12 +635,15 @@ async function runDoomedTrainJob(args: {
   const heartbeat = setInterval(() => repoLock.heartbeat(), 15_000);
 
   try {
+    // #1277: the project's red-handling policy, read once per train through the preference layer.
+    const policy = resolveMergeTrainRedPolicy(toPrefMap(await getAllPreferencesCached(database).catch(() => [])), projectId);
     const result = await runMergeTrain({
       repoPath,
       baseBranch,
       members,
       label,
       trainId,
+      redStrategy: policy.strategy,
       // #1181: an operator cancel or a reconciler verdict can mark this row `abandoned` while
       // the job is still gating (there is no cancellation token into `runMergeTrain`). The
       // gate work is sunk cost either way, but a train whose row says abandoned must not
@@ -610,6 +682,7 @@ async function runDoomedTrainJob(args: {
           includedWorkspaceIds: included.map((m) => m.workspaceId),
           // #1203: same token — a cancel mid-gate kills the running install/verify child process.
           signal: abortController.signal,
+          onRed: buildTrainOnRed({ policy, agentRunner, label, attemptLabel, baseBranch, included, members }),
           afterGreen: async ({ gateWorktree }) => {
             // #1194: review ONCE, on the tree that just proved green - the assembled diff vs the
             // base, one reviewer, every member's criteria in `{{members}}`. A blocking finding
@@ -707,6 +780,11 @@ export function createMergeTrainRunner(deps: {
    */
   hasLiveSession?: (workspaceId: string) => Promise<boolean>;
   /**
+   * #1277 — one fix-agent turn in a train worktree. Injected so tests stand in a canned agent;
+   * the default is the board's one-shot provider path (`createOneShotAgentRunner`).
+   */
+  agentFixRunner?: TrainAgentRunner;
+  /**
    * Relaunches a base-conflict member's builder with the send-back prompt when its agent is gone
    * (`merge-train-siding.service.ts`: why a builder relaunch, not resolve-conflicts).
    */
@@ -717,6 +795,7 @@ export function createMergeTrainRunner(deps: {
 }) {
   const { database, reconcileAlreadyMerged, sendTurn, hasLiveSession, relaunch, boardEvents } = deps;
   const reviewTrain = deps.reviewTrain ?? runTrainReview;
+  const agentRunner = deps.agentFixRunner ?? createOneShotAgentRunner({ database });
 
   /**
    * Run the whole batch as one release train: assemble → gate ONCE → land → close each member.
@@ -817,6 +896,7 @@ export function createMergeTrainRunner(deps: {
       reviewEvidenceRef,
       abortController,
       onDropped: sendBack.onDropped,
+      agentRunner,
     });
     reviewEvidence = reviewEvidenceRef.current;
     if (!outcome.ok) {

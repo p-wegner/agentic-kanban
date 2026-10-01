@@ -155,6 +155,13 @@ describe("the unvalidated path is explicit, not accidental", () => {
     expect(findApiResponseSchema("POST", "/api/tags/merge")).toBeDefined();
   });
 
+  it("GET /api/workspaces/<analytics literal> is not claimed by /api/workspaces/:id", () => {
+    for (const name of ["cost-over-time", "provider-mix", "scorecard-distribution", "stale-worktrees", "cleanup-warnings"]) {
+      expect(findApiResponseSchema("GET", `/api/workspaces/${name}?projectId=p&days=7`)).toBeUndefined();
+    }
+    expect(findApiResponseSchema("GET", "/api/workspaces/abc")).toBeDefined();
+  });
+
   it("prefers a literal segment over a :param at the same position", () => {
     // `/api/projects/create` and `/api/projects/:id` have the same shape; the literal wins.
     expect(findApiResponseSchema("POST", "/api/projects/create")).toBe(
