@@ -74,6 +74,7 @@ import type { MergeTrainRowDto, MergeTrainSidingDto, MergeTrainsResponse } from 
 import { MERGE_JOB_ROUTES } from "./mergeJobSchemas.js";
 import { PLUGIN_SKILL_LISTING_ROUTES } from "./pluginSkillListingSchemas.js";
 import { WORKER_RUNNERS_ROUTES } from "./workerRunnersSchemas.js";
+import { CONTRIBUTION_ROUTES } from "./contributionSchemas.js";
 
 export type ApiMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -830,6 +831,7 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
   { method: "POST", template: "/api/issues/group-scan", schema: groupScanResult },
 
   ...WORKER_RUNNERS_ROUTES, // #1089 — the Runners view's four tabs
+  ...CONTRIBUTION_ROUTES, // #1264 — the Contributions view
 
   ...PLUGIN_SKILL_LISTING_ROUTES, // #1252 — per-skill listing-mode picker (the Plugins-view selector)
 

@@ -41,7 +41,8 @@ export type ViewMode =
   | "analytics"
   | "calendar"
   | "plugin-views"
-  | "runners";
+  | "runners"
+  | "contributions";
 
 export interface ViewDescriptor {
   /** Stable view id — matches BoardPage's `viewMode` state. */
@@ -285,6 +286,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     tooltip: "Runners — connected compute workers, dispatch log, git transport, and how to connect one",
     paletteIcon: "⧉",
     paletteDescription: "Worker fleet: identity/status/capabilities/load and current work, dispatch log, held git-transport refs, and connect instructions as tabs",
+    group: "secondary",
+  },
+  {
+    // #1264 — who contributed how much, grouped by provider / profile / model / git author
+    // (the grouping is the URL tab; the time range is a `?range=` query param).
+    id: "contributions",
+    toolbarLabel: "Contributions",
+    label: "Contributions",
+    tooltip: "Contributions — issues, sessions, commits, tokens and cost per provider, profile, model or git author",
+    paletteIcon: "◔",
+    paletteDescription: "Who contributed how much: done and merged issues, sessions, commits, lines, tokens, cost and runtime per actor",
     group: "secondary",
   },
 ];
