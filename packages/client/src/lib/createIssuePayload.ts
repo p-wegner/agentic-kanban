@@ -36,6 +36,8 @@ export interface CreateIssuePayloadInput {
   selectedProfile: string;
   selectedModel: string;
   skillId: string;
+  /** Optional workflow template to start the issue in; empty = the type's default. */
+  workflowTemplateId?: string;
   /** Whether a model override applies (Claude/Codex selected). */
   modelApplies: boolean;
   settings: Record<string, string>;
@@ -52,6 +54,7 @@ export function buildCreateIssuePayload(i: CreateIssuePayloadInput): CreateIssue
     issueType: i.issueType,
     statusId: i.statusId,
     projectId: i.projectId,
+    workflowTemplateId: i.workflowTemplateId || undefined,
     startWorkspace: i.start || undefined,
     planMode: (i.start && i.planMode) || undefined,
     skipAutoReview: (i.start && i.skipAutoReview) || undefined,

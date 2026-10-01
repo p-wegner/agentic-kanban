@@ -32,6 +32,7 @@ export interface CreateIssueFormState {
   planMode: boolean;
   skipAutoReview: boolean;
   skillId?: string;
+  workflowTemplateId?: string;
 }
 
 /** Inline create-issue panel expanded under a column. */

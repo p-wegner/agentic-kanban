@@ -84,6 +84,8 @@ export function CreateIssuePanel({
   const [isDirect, setIsDirect] = useState(false);
   const [skillId, setSkillId] = useState<string>(initialState?.skillId ?? "");
   const [skills, setSkills] = useState<AgentSkillOption[]>([]);
+  const [workflowTemplateId, setWorkflowTemplateId] = useState<string>(initialState?.workflowTemplateId ?? "");
+  const [workflowTemplates, setWorkflowTemplates] = useState<{ id: string; name: string }[]>([]);
   const [descriptionMode, setDescriptionMode] = useState<"edit" | "preview">("edit");
   const [submitting, setSubmitting] = useState(false);
   const { enhancing, preEnhanceSnapshot, enhance, undoEnhance } = useIssueEnhance({
@@ -97,6 +99,13 @@ export function CreateIssuePanel({
   useEffect(() => {
     titleRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    if (!projectId) return;
+    apiFetch<{ id: string; name: string }[]>(`/api/workflows/templates?projectId=${projectId}`)
+      .then(setWorkflowTemplates)
+      .catch(() => {});
+  }, [projectId]);
 
   useEffect(() => {
     if (!startWorkspace || !projectId) return;
@@ -138,7 +147,7 @@ export function CreateIssuePanel({
         title, description: descriptionWithImages, issueType,
         statusId: selectedStatusId, projectId,
         start, planMode, skipAutoReview, isDirect,
-        selectedProfile, selectedModel, skillId,
+        selectedProfile, selectedModel, skillId, workflowTemplateId,
         modelApplies: isClaudeSelected || isCodexSelected,
         settings,
         reposTouched: isMultiRepo ? reposTouched : undefined,
@@ -260,6 +269,22 @@ export function CreateIssuePanel({
                 className={`w-full ${FIELD_SELECT_CLASS}`}
               />
             </div>
+            {workflowTemplates.length > 0 && (
+              <div className="flex flex-col gap-1.5 flex-1">
+                <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Workflow</label>
+                <select
+                  value={workflowTemplateId}
+                  onChange={(e) => setWorkflowTemplateId(e.target.value)}
+                  className={`w-full ${FIELD_SELECT_CLASS}`}
+                  aria-label="Workflow"
+                >
+                  <option value="">Default workflow</option>
+                  {workflowTemplates.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {isMultiRepo && (
