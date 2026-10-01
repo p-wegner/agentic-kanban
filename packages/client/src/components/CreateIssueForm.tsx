@@ -323,7 +323,7 @@ export function CreateIssueForm({
         {onExpand && (
           <button
             type="button"
-            onClick={() => onExpand({ title, description, pastedImages, issueType, startWorkspace, planMode, skipAutoReview, skillId })}
+            onClick={() => onExpand({ title, description, pastedImages, issueType, startWorkspace, planMode, skipAutoReview, skillId, workflowTemplateId })}
             className="ml-auto text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded"
             title="Expand form"
           >

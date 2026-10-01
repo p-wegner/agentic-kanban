@@ -31,6 +31,12 @@ describe("buildCreateIssuePayload", () => {
     expect(buildCreateIssuePayload(base({ description: "   " })).description).toBeUndefined();
   });
 
+  it("passes the chosen workflow regardless of start; empty falls back to undefined", () => {
+    expect(buildCreateIssuePayload(base({ workflowTemplateId: "wf1" })).workflowTemplateId).toBe("wf1");
+    expect(buildCreateIssuePayload(base({ workflowTemplateId: "" })).workflowTemplateId).toBeUndefined();
+    expect(buildCreateIssuePayload(base()).workflowTemplateId).toBeUndefined();
+  });
+
   it("omits all launch fields when start is false", () => {
     const p = buildCreateIssuePayload(base({ start: false, planMode: true, isDirect: true, skillId: "sk", selectedProfile: "claude:anth", selectedModel: "opus", modelApplies: true }));
     expect(p.startWorkspace).toBeUndefined();
