@@ -553,6 +553,92 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
     ],
   },
   {
+    builtinKey: "plan-strong-build-cheap",
+    name: "Plan Strong, Build Cheap",
+    description:
+      "Model-stratified pipeline within one provider: a strong model (Claude Opus) writes the plan, a cheaper model (Claude Sonnet) implements it, then Review. The plan hands off through PLAN.md. Change the per-node Agent model in the builder to use other models.",
+    ticketType: null,
+    isDefault: false,
+    nodes: [
+      {
+        key: "plan",
+        name: "Plan",
+        nodeType: "start",
+        statusName: "In Progress",
+        agent: { provider: "claude", model: "claude-opus-4-7" },
+        guidance:
+          "PLAN-ONLY: do NOT implement or modify any product code. Read the ticket and the relevant code, then write a concrete implementation plan to `PLAN.md` in the worktree root: approach and why, files to change, ordered steps, risks, and test strategy. Detailed enough that a smaller model can implement it without further design decisions. Commit ONLY that file, then advance to Implement.",
+      },
+      {
+        key: "implement",
+        name: "Implement",
+        nodeType: "normal",
+        statusName: "In Progress",
+        agent: { provider: "claude", model: "claude-sonnet-4-6" },
+        guidance:
+          "Implement `PLAN.md` step by step. Follow the plan; if it is wrong or incomplete, note the deviation in your commit message rather than redesigning. Run the relevant tests and commit. Advance to Review when done.",
+      },
+      {
+        key: "review",
+        name: "Review",
+        nodeType: "normal",
+        statusName: "In Review",
+        skillName: "code-review",
+        guidance: "Review the implementation against PLAN.md. Propose Done when satisfied, or send back to Implement.",
+      },
+      { key: "done", name: "Done", nodeType: "end", statusName: "Done" },
+    ],
+    edges: [
+      { from: "plan", to: "implement", condition: "manual", label: "plan ready" },
+      { from: "implement", to: "review", condition: "manual", label: "implemented" },
+      { from: "review", to: "done", condition: "manual", label: "approved" },
+      { from: "review", to: "implement", condition: "manual", label: "changes requested", isLoop: true },
+    ],
+  },
+  {
+    builtinKey: "plan-strong-build-cheap-codex",
+    name: "Plan Strong, Build Cheap (Codex)",
+    description:
+      "Codex variant of Plan Strong, Build Cheap: gpt-5 writes the plan, gpt-5-codex implements it, then Review. The plan hands off through PLAN.md.",
+    ticketType: null,
+    isDefault: false,
+    nodes: [
+      {
+        key: "plan",
+        name: "Plan",
+        nodeType: "start",
+        statusName: "In Progress",
+        agent: { provider: "codex", model: "gpt-5" },
+        guidance:
+          "PLAN-ONLY: do NOT implement or modify any product code. Read the ticket and the relevant code, then write a concrete implementation plan to `PLAN.md` in the worktree root: approach and why, files to change, ordered steps, risks, and test strategy. Commit ONLY that file, then advance to Implement.",
+      },
+      {
+        key: "implement",
+        name: "Implement",
+        nodeType: "normal",
+        statusName: "In Progress",
+        agent: { provider: "codex", model: "gpt-5-codex" },
+        guidance:
+          "Implement `PLAN.md` step by step. Follow the plan; note any deviation in your commit message. Run the relevant tests and commit. Advance to Review when done.",
+      },
+      {
+        key: "review",
+        name: "Review",
+        nodeType: "normal",
+        statusName: "In Review",
+        skillName: "code-review",
+        guidance: "Review the implementation against PLAN.md. Propose Done when satisfied, or send back to Implement.",
+      },
+      { key: "done", name: "Done", nodeType: "end", statusName: "Done" },
+    ],
+    edges: [
+      { from: "plan", to: "implement", condition: "manual", label: "plan ready" },
+      { from: "implement", to: "review", condition: "manual", label: "implemented" },
+      { from: "review", to: "done", condition: "manual", label: "approved" },
+      { from: "review", to: "implement", condition: "manual", label: "changes requested", isLoop: true },
+    ],
+  },
+  {
     builtinKey: "migration-with-ai",
     name: "Migration with AI",
     description:
