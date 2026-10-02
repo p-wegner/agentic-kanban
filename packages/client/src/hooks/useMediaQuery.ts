@@ -21,6 +21,11 @@ export function useMediaQuery(query: string): boolean {
   return matches;
 }
 
+/** True from `sm` up to below `lg` (640–1023px) — tablet-width screens. */
+export function useIsTablet(): boolean {
+  return useMediaQuery("(min-width: 640px) and (max-width: 1023px)");
+}
+
 /** True below Tailwind's `sm` breakpoint (<640px) — i.e. phone-width screens. */
 export function useIsNarrow(): boolean {
   return useMediaQuery("(max-width: 639px)");

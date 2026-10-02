@@ -8,7 +8,7 @@ import { CompletedGrid } from "./CompletedGrid.js";
 import { CreateIssueForm } from "./CreateIssueForm.js";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
-import { useIsNarrow } from "../hooks/useMediaQuery.js";
+import { useIsNarrow, useIsTablet } from "../hooks/useMediaQuery.js";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import { Icon } from "./Icon.js";
@@ -168,7 +168,11 @@ export function BoardKanbanView({
   // Below sm, columns stack vertically and the board scrolls down through them
   // (instead of a horizontal one-column-at-a-time swipe, where an empty column
   // wastes the whole screen). Stacked columns are full-width and auto-height.
-  const isNarrow = useIsNarrow();
+  // On tablets (640–1023px) the columns wrap into a two-up grid for the same
+  // reason: four 18rem columns would force horizontal scrolling.
+  const isPhone = useIsNarrow();
+  const isTablet = useIsTablet();
+  const isNarrow = isPhone || isTablet;
 
   const draggedColumnId = useRef<string | null>(null);
   const [columnDragOverId, setColumnDragOverId] = useState<string | null>(null);
@@ -244,7 +248,7 @@ export function BoardKanbanView({
       {/* The mobile column quick-jump strip was removed: with columns stacked
           vertically each header is visible inline and the pulse shows live counts,
           so the strip was redundant chrome eating a row. */}
-      <div className={`flex flex-1 min-h-0 board-columns-scroll ${isNarrow ? "flex-col gap-2 overflow-y-auto" : "gap-0 overflow-x-auto"}`}>
+      <div className={`flex flex-1 min-h-0 board-columns-scroll ${isPhone ? "flex-col gap-2 overflow-y-auto" : isTablet ? "grid grid-cols-2 auto-rows-min items-start gap-2 overflow-y-auto" : "gap-0 overflow-x-auto"}`}>
         {activeColumns.map((col, colIdx) => {
           if (focusMode && col.issues.length === 0) {
             return (
