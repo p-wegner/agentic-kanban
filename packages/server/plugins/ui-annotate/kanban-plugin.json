@@ -1,0 +1,51 @@
+{
+  "id": "ui-annotate",
+  "name": "UI Annotate",
+  "version": "0.1.0",
+  "description": "Click through any web UI, mark elements, comment them, and collect the notes as a structured ticket or hand them to an agent (long-poll endpoint, CLI, Butler). Works on any web app via a script tag or bookmarklet; pairs with App Runner for apps the board runs.",
+  "views": [
+    {
+      "id": "dashboard",
+      "label": "UI Annotate",
+      "kind": "iframe",
+      "description": "Collector dashboard: overlay snippet/bookmarklet, the collected annotations, copy-as-ticket, agent long-poll URL.",
+      "serve": {
+        "command": "node tools/serve.mjs",
+        "cwd": "plugin",
+        "portEnv": "PORT",
+        "healthPath": "/health",
+        "env": {
+          "UI_ANNOTATE_REPO": "{{leadingRepoPath}}",
+          "UI_ANNOTATE_PROJECT": "{{projectName}}"
+        }
+      }
+    }
+  ],
+  "scripts": [
+    {
+      "name": "export",
+      "label": "Export as ticket markdown",
+      "description": "Read-only: print the open annotations as ticket-ready markdown.",
+      "command": "node tools/export.mjs",
+      "cwd": "plugin",
+      "env": { "UI_ANNOTATE_REPO": "{{leadingRepoPath}}" }
+    },
+    {
+      "name": "poll",
+      "label": "Long-poll for feedback",
+      "description": "Block until annotations change (or 25s), print them as JSON. For agent terminals.",
+      "command": "node tools/poll.mjs",
+      "cwd": "plugin",
+      "env": { "UI_ANNOTATE_REPO": "{{leadingRepoPath}}" }
+    },
+    {
+      "name": "selftest",
+      "label": "Self-test",
+      "description": "Offline self-test: boots the collector, drives the API, long-poll and export.",
+      "command": "node tools/selftest.mjs",
+      "cwd": "plugin",
+      "audience": "developer"
+    }
+  ],
+  "butler": { "promptFragment": "butler-fragment.md" }
+}
