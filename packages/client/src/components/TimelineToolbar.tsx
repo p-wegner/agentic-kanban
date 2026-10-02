@@ -58,7 +58,7 @@ function TimelineFilterMenu({
         )}
       </button>
       {open && (
-        <div role="menu" className="absolute left-0 top-full z-30 mt-1 w-56 rounded-md border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900 flex flex-col gap-3">
+        <div role="menu" className="absolute left-0 top-full z-30 mt-1 w-56 max-w-[calc(100vw-2rem)] rounded-md border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900 flex flex-col gap-3">
           <div className="flex flex-col gap-1">
             <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Priority</label>
             <div className="flex items-center gap-1 flex-wrap">

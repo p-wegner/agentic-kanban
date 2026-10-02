@@ -398,7 +398,7 @@ export function TableView({
               Set due date ▾
             </button>
             {bulkDueDateOpen && (
-              <div className="absolute right-0 top-full mt-1 z-50 w-56 rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark shadow-lg p-2">
+              <div className="absolute right-0 top-full mt-1 z-50 w-56 max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark shadow-lg p-2">
                 <input
                   type="date"
                   value={bulkDueDate}

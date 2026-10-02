@@ -204,7 +204,7 @@ export function NotificationBell({
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-80 rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
+        <div className="absolute right-0 top-full z-50 mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
           <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 px-3 py-2">
             <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">Activity</span>
             {events.length > 0 && (

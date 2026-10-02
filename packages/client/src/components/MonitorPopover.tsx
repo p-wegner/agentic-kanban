@@ -188,7 +188,7 @@ export function MonitorPopover({
       <div className="fixed inset-0 z-40" onClick={onClose} />
       <div
         id="monitor-popover"
-        className="fixed z-50 left-0 top-0 bottom-0 w-72 bg-surface-raised dark:bg-surface-raised-dark border-r border-gray-200 dark:border-gray-700 shadow-xl text-xs flex flex-col"
+        className="fixed z-50 left-0 top-0 bottom-0 w-72 max-w-full bg-surface-raised dark:bg-surface-raised-dark border-r border-gray-200 dark:border-gray-700 shadow-xl text-xs flex flex-col"
       >
         <MonitorHeader
           autoMonitor={autoMonitor}

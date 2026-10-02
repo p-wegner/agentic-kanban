@@ -358,7 +358,7 @@ export function MonitorActionReplayDrawer({ target, onClose, onOpenWorkspace }: 
     <>
       <div className="fixed inset-0 z-40 bg-black/20 dark:bg-black/40" onClick={onClose} />
       <div
-        className="fixed z-50 right-0 top-0 bottom-0 w-96 bg-white dark:bg-gray-950 border-l border-gray-200 dark:border-gray-700 shadow-2xl flex flex-col animate-slide-in-right"
+        className="fixed z-50 right-0 top-0 bottom-0 w-96 max-w-full bg-white dark:bg-gray-950 border-l border-gray-200 dark:border-gray-700 shadow-2xl flex flex-col animate-slide-in-right"
         role="dialog"
         aria-label="Monitor action replay"
       >
