@@ -141,7 +141,7 @@ export function ProjectScriptsMenu({ projectId }: ProjectScriptsMenuProps) {
         {open && (
           <div
             role="menu"
-            className="absolute top-full left-0 mt-1 w-72 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg z-30 p-1"
+            className="absolute top-full left-0 mt-1 w-72 max-w-[calc(100vw-2rem)] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg z-30 p-1"
           >
             {loading && <div className="px-3 py-2 text-xs text-gray-500">Loading scripts...</div>}
             {!loading && scripts.length === 0 && (
