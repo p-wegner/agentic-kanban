@@ -317,9 +317,11 @@ describe("Butler interrupt of an in-flight streaming turn", () => {
 
     await waitForCondition("follow-up streaming", () => textEvents(events).length >= 1);
     inst.release(); // let the follow-up complete normally
+    // Wait for idle too: while busy the transcript already shows the streamed partial (#1272).
     await waitForCondition(
       "follow-up reply landed",
-      () => getButlerTranscript(projectId).some((m) => m.role === "assistant"),
+      () => !getButlerSession(projectId).busy
+        && getButlerTranscript(projectId).some((m) => m.role === "assistant"),
     );
 
     const assistant = getButlerTranscript(projectId).filter((m) => m.role === "assistant");
