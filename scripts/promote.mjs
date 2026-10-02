@@ -392,13 +392,22 @@ async function acquireFreshSweep(projectId, previousRow, waitMs, branch) {
   // so a caller tailing the log sees WHY the wait is long without needing to correlate it against
   // the less-frequent reprobe lines above by timestamp.
   let lastYieldNote = "";
-  log(`[promote] requesting a fresh full sweep of ${branch} for project ${projectId} (waiting up to ${Math.round(waitMs / 60_000)} min)`);
-  while (Date.now() < deadline) {
+  // #1278 — the base budget is shorter than one loaded full-suite run (a probe that yields its
+  // verify slot to merge gates restarts its clock). While the board says THIS project's probe is
+  // live, the wait follows it, up to a hard ceiling well above one loaded run. The liveness is
+  // re-asked every PROBE_RECHECK_MS, so a dead stamp stops extending the wait.
+  const ceiling = Date.now() + Math.max(waitMs * 3, 120 * 60_000);
+  let probeLive = false;
+  let probeSince = "";
+  log(`[promote] requesting a fresh full sweep of ${branch} for project ${projectId} (waiting up to ${Math.round(waitMs / 60_000)} min, longer while the board's probe is live, ceiling ${Math.round((ceiling - Date.now()) / 60_000)} min)`);
+  while (Date.now() < deadline || (probeLive && Date.now() < ceiling)) {
     if (Date.now() >= nextAskAt) {
       try {
         const answer = await requestReprobe(projectId, branch);
         const probing = isProbingThisProject(answer);
         nextAskAt = Date.now() + (probing ? PROBE_RECHECK_MS : SWEEP_POLL_INTERVAL_MS);
+        probeLive = probing;
+        probeSince = probing && answer?.probeInFlightSince?.startedAt ? ` (in flight since ${answer.probeInFlightSince.startedAt})` : "";
         // #1223 — "probe_in_flight" alone cannot be told apart from a stamp whose owning process
         // was killed (the board now reaps those on boot, but this loop must not assume that ran
         // recently). When the response names the stamp's age/expiry, say so instead of the old
@@ -444,7 +453,14 @@ async function acquireFreshSweep(projectId, previousRow, waitMs, branch) {
       log(`[promote] still waiting for the sweep verdict (${Math.round(elapsed / 60_000)} min elapsed of ${Math.round(waitMs / 60_000)})${lastYieldNote}`);
     }
   }
-  return { row: null, reason: `no fresh verdict within ${Math.round(waitMs / 60_000)} min` };
+  const waitedMin = Math.round((Date.now() - (deadline - waitMs)) / 60_000);
+  return {
+    row: null,
+    probeLive,
+    reason: probeLive
+      ? `the board's probe is STILL RUNNING${probeSince} after ${waitedMin} min — it has not recorded a verdict yet; re-run later, it may still land`
+      : `no fresh verdict within ${waitedMin} min`,
+  };
 }
 
 // --- accumulated-gate evidence (#1045) -------------------------------------------------------
@@ -1077,6 +1093,7 @@ async function main() {
 
   // The trigger happens BEFORE the dry-run report only in a real run — a dry run must touch
   // nothing, so it says what it WOULD do and stops there.
+  let sweepNotLanded = null;
   if (acquisition.request && !opts.dryRun) {
     log(`[promote] sweep acquisition: ${acquisition.detail}`);
     if (rc) recordRc(rc.branch, { state: "sweeping", sha: rc.sha });
@@ -1087,6 +1104,7 @@ async function main() {
       // as one that happened on its own clock, so a red or timed-out probe still refuses.
       verdict = verdictFor(sweep);
     } else {
+      sweepNotLanded = acquired.reason;
       log(`[promote] the requested sweep did not land (${acquired.reason}) — falling through to the recorded verdict`);
     }
   }
@@ -1238,7 +1256,7 @@ async function main() {
     // advice when the run just spent 40 minutes asking for one — that is a board problem, and
     // reading it as "wait for the nightly" is what sends an operator to --force-sweep (#1044).
     const tried = acquisition.request
-      ? "This run requested a fresh sweep and it did not land — check the board's base-branch probe."
+      ? `This run requested a fresh sweep and it did not land${sweepNotLanded ? `: ${sweepNotLanded}` : ""} — check the board's base-branch probe.`
       : `No sweep was requested: ${acquisition.detail}`;
     fail(`${verdict.detail} (reason: ${verdict.reason}). ${tried} Or promote deliberately with --force-sweep.`);
   }
