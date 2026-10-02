@@ -95,7 +95,7 @@ export function BoardFilterMenu({
         <Icon className={`w-2.5 h-2.5 transition-transform ${open ? "rotate-180" : ""}`} d="M6 9l6 6 6-6" />
       </button>
       {open && (
-        <div role="menu" className="absolute left-0 top-full z-30 mt-1 w-64 rounded-md border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900 flex flex-col gap-3">
+        <div role="menu" className="absolute left-0 top-full z-30 mt-1 w-64 max-w-[calc(100vw-2rem)] rounded-md border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900 flex flex-col gap-3">
           <div className="flex flex-col gap-1">
             <label className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint dark:text-gray-500">Status</label>
             <select
