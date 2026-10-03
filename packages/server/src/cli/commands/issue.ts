@@ -318,8 +318,9 @@ Tip: Use 'issue list' to find the issue ID and see available status names.
         process.exit(1);
       }
 
-      console.log(`Moved issue to '${statusName}'`);
-      process.exit(0);
+      // Exit from the write callback: a bare process.exit right after console.log can drop
+      // piped stdout on Windows, which made a landed move look like a silent no-op (#1284).
+      process.stdout.write(`Moved issue to '${statusName}'\n`, () => process.exit(0));
     }));
 
   issueCmd

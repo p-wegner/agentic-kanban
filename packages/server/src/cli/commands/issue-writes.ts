@@ -51,10 +51,10 @@ export async function moveIssueOnBoard(issueId: string, statusId: string, status
   if (transport.mode === "server") {
     try {
       await boardServerWrite(transport, "PATCH", `/api/issues/${encodeURIComponent(issueId)}`, { statusId });
-      return null;
     } catch (err) {
       return errorMessage(err);
     }
+    return verifyMoveLanded(issueId, statusId, statusName);
   }
   console.warn(directWriteNotice(transport.reason));
   // AK-535 guard: don't strand an open, non-direct, unmerged branch by moving
@@ -68,5 +68,13 @@ export async function moveIssueOnBoard(issueId: string, statusId: string, status
     }
   }
   await moveIssueToStatus(issueId, statusId);
-  return null;
+  return verifyMoveLanded(issueId, statusId, statusName);
+}
+
+/** A move that did nothing must fail loudly (#1284): re-read the row and compare. */
+async function verifyMoveLanded(issueId: string, statusId: string, statusName: string): Promise<string | null> {
+  const { getIssueByNumberOrId } = await import("../../repositories/issue/cli-commands.repository.js");
+  const after = await getIssueByNumberOrId(issueId, undefined);
+  if (after && after.statusId === statusId) return null;
+  return `Move to '${statusName}' did not take effect: the issue is not in that status after the write.`;
 }
