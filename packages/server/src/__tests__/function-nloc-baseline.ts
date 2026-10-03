@@ -335,7 +335,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 723 -> 719, a banked SHRINK (2026-09-27): the issue WRITES (create/update/move, incl. the
   // AK-535 terminal-move guard) moved into `cli/commands/issue-writes.ts`, which routes them
   // through a running board server when it serves the same DB, so an open board broadcasts.
-  "cli/commands/issue.ts::registerIssueCommand": 719,
+  "cli/commands/issue.ts::registerIssueCommand": 718,
   // 621 -> 623, a DELIBERATE raise (#815). The eight `latest_setup_*` columns moved off
   // `workspaces` into `workspace_setup_run`, and writing a child row costs an
   // `insertWorkspaceSetupRun(...)` call where eight inline field assignments used to sit.
