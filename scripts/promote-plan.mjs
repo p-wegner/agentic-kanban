@@ -71,6 +71,7 @@ export const REPROBEABLE_SWEEP_REASONS = Object.freeze([
   "no-sweep",
   "stale",
   "not-an-answer",
+  "timeout",
   "no-sha",
   "wrong-branch",
   // #1231 — a green the runner itself reported as a NARROWED run. Since #1231 the probe's child
@@ -296,6 +297,13 @@ export function parseSweepVerdict(row, { branch = "master", nowMs = Date.now(), 
 
   if (rowBranch && rowBranch !== branch) {
     return { ok: false, reason: "wrong-branch", sha, outcome, at, branch: rowBranch, detail: `last sweep was on '${rowBranch}', not '${branch}' — ${stamp}` };
+  }
+  if (outcome === "timeout") {
+    // #1281 — the probe hit its verify budget. That is a budget problem, not "no verdict": the
+    // row's message names the budget and the worker count, so surface it instead of the generic
+    // not-an-answer.
+    const why = row.message ? ` (${String(row.message).trim()})` : "";
+    return { ok: false, reason: "timeout", sha, outcome, at, branch: rowBranch, detail: `last sweep hit the verify timeout${why} — raise verify_timeout_ms_<projectId> or verify_max_workers_<projectId> — ${stamp}`, message: row.message ?? null };
   }
   if (outcome !== "green" && outcome !== "red") {
     return { ok: false, reason: "not-an-answer", sha, outcome, at, branch: rowBranch, detail: `last sweep produced no verdict (${outcome}) — ${stamp}` };

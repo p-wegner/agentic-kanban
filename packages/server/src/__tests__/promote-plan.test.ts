@@ -244,12 +244,20 @@ describe("sweep-verdict parsing", () => {
   });
 
   it("refuses timeout/unverified — a non-answer is not a green (isBaseHealthAnswer)", () => {
-    for (const outcome of ["timeout", "unverified"]) {
-      const v = parseSweepVerdict(greenRow({ outcome }), { nowMs: NOW });
-      expect(v.ok).toBe(false);
-      expect(v.reason).toBe("not-an-answer");
-      expect(v.detail).toContain(outcome);
-    }
+    const v = parseSweepVerdict(greenRow({ outcome: "unverified" }), { nowMs: NOW });
+    expect(v.ok).toBe(false);
+    expect(v.reason).toBe("not-an-answer");
+    expect(v.detail).toContain("unverified");
+  });
+
+  it("reports a timed-out sweep as its own reason, naming the budget and worker count (#1281)", () => {
+    const message = "verify_script timed out after 2700000ms (probe ran 2856465ms with KANBAN_TEST_MAX_WORKERS=2)";
+    const v = parseSweepVerdict(greenRow({ outcome: "timeout", message }), { nowMs: NOW });
+    expect(v.ok).toBe(false);
+    expect(v.reason).toBe("timeout");
+    expect(v.detail).toContain("2700000ms");
+    expect(v.detail).toContain("KANBAN_TEST_MAX_WORKERS=2");
+    expect(REPROBEABLE_SWEEP_REASONS).toContain("timeout");
   });
 
   it("refuses a green sweep older than the age budget", () => {
