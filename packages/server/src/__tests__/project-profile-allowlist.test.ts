@@ -127,7 +127,7 @@ describe("per-project profile allowlist", () => {
   it("HOLDS when the only allowed profile is cooling", () => {
     const runtime = resolve(prefs({
       claude_profile: "the-organisation_team_5x_2",
-      claude_cooldown_the-organisation_team_5x_2: COOLING,
+      "claude_cooldown_the-organisation_team_5x_2": COOLING,
       [allowedProfilesPrefKey(PROJECT_ID)]: PINNED,
     }));
     expect(runtime.provider.profileHold).toContain("every allowed profile is cooling");

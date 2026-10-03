@@ -85,7 +85,7 @@ describe("per-project required data-handling tags", () => {
     // resolved profile to check against and must not pile on a second, misleading reason.
     const runtime = resolve(prefs({
       claude_profile: "the-organisation_team_5x_2",
-      claude_cooldown_the-organisation_team_5x_2: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      "claude_cooldown_the-organisation_team_5x_2": new Date(Date.now() + 60 * 60 * 1000).toISOString(),
       [allowedProfilesPrefKey(PROJECT_ID)]: JSON.stringify([{ provider: "claude", name: "the-organisation_team_5x_2" }]),
       [requiredDataLabelsPrefKey(PROJECT_ID)]: "no-training",
     }));

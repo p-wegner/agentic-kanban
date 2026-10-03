@@ -630,7 +630,7 @@ describe("check-uncommitted hook — harvester validity filter and pathspec spli
   it("rejects tokens containing quotes, parens, `::`, embedded colons, and literal escapes", () => {
     expect(isValidPathToken("packages/server/src/x.ts")).toBe(true);
     expect(isValidPathToken("C:/projects/the-organisation/agentic-kanban/packages/server/src/x.ts")).toBe(true);
-    expect(isValidPathToken("C:\\projects\\the-organisation\\x.ts")).toBe(true);
+    expect(isValidPathToken("C:\\projects\\acme\\x.ts")).toBe(true);
     expect(isValidPathToken("p.includes('session-lifecycle'))")).toBe(false);
     expect(isValidPathToken('say("hello/world.ts")')).toBe(false);
     expect(isValidPathToken("Foo::Bar/baz.ts")).toBe(false);

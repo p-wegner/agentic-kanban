@@ -217,7 +217,7 @@ describe("clampProfileToAllowlist", () => {
       allowlist: pinned,
       provider: "claude",
       profileName: "the-organisation_team_5x_2",
-      prefMap: prefs({ claude_cooldown_the-organisation_team_5x_2: COOLING }),
+      prefMap: prefs({ "claude_cooldown_the-organisation_team_5x_2": COOLING }),
       nowMs: NOW_MS,
     });
     expect(result.selection).toBeNull();
