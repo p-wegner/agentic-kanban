@@ -25,14 +25,14 @@ import { createDriveService } from "../services/drive.service.js";
 
 const DONE = "Done";
 
-async function seed(db: TestDb, repoPath = "/tmp/product-b2-crm") {
+async function seed(db: TestDb, repoPath = "/tmp/acme-crm") {
   const t0 = "2026-06-14T00:00:00.000Z"; // drive start
   const t1 = "2026-06-14T01:00:00.000Z"; // within window
   const t2 = "2026-06-14T02:00:00.000Z"; // drive finish
 
   const projectId = randomUUID();
   await db.insert(schema.projects).values({
-    id: projectId, name: "product-b2 CRM", repoPath, repoName: "product-b2-crm",
+    id: projectId, name: "Acme CRM", repoPath, repoName: "acme-crm",
     defaultBranch: "main", createdAt: t0, updatedAt: t0,
   });
 
@@ -48,7 +48,7 @@ async function seed(db: TestDb, repoPath = "/tmp/product-b2-crm") {
   const issA = randomUUID();
   const issB = randomUUID();
   await db.insert(schema.issues).values([
-    { id: metaId, issueNumber: 1, title: "Epic: build product-b2CRM", statusId: doneStatusId, projectId, createdAt: t0, updatedAt: t0 },
+    { id: metaId, issueNumber: 1, title: "Epic: build AcmeCRM", statusId: doneStatusId, projectId, createdAt: t0, updatedAt: t0 },
     { id: issA, issueNumber: 2, title: "Contacts module", statusId: doneStatusId, projectId, createdAt: t0, updatedAt: t0 },
     { id: issB, issueNumber: 3, title: "Reports module", statusId: backlogStatusId, projectId, createdAt: t0, updatedAt: t0 },
   ]);
@@ -82,7 +82,7 @@ async function seed(db: TestDb, repoPath = "/tmp/product-b2-crm") {
     id: randomUUID(),
     projectId,
     metaIssueId: metaId,
-    target: "Build product-b2CRM hands-off",
+    target: "Build AcmeCRM hands-off",
     completionContract: "All children Done",
     status: "completed",
     startedAt: t0,
@@ -102,10 +102,10 @@ describe("drive retro telemetry", () => {
     expect(t).not.toBeNull();
     if (!t) return;
 
-    expect(t.projectSlug).toBe("product-b2-crm");
+    expect(t.projectSlug).toBe("acme-crm");
     expect(t.issuesTotal).toBe(3);
     expect(t.issuesDone).toBe(2);
-    expect(t.meta).toEqual({ issueNumber: 1, title: "Epic: build product-b2CRM", done: true });
+    expect(t.meta).toEqual({ issueNumber: 1, title: "Epic: build AcmeCRM", done: true });
 
     // providers: claude-code (2 in-window sessions) ranks above codex (1 in-window); out-of-window excluded
     expect(t.providers).toEqual([
@@ -142,9 +142,9 @@ describe("drive retro telemetry", () => {
     const t = await gatherDriveTelemetry(drive, db);
     const md = renderDriveRetro(t!);
 
-    expect(md).toContain("# Board run — product-b2 CRM");
+    expect(md).toContain("# Board run — Acme CRM");
     expect(md).toContain("**2/3 Done.**");
-    expect(md).toContain("Meta/epic ticket #1 (Epic: build product-b2CRM): Done.");
+    expect(md).toContain("Meta/epic ticket #1 (Epic: build AcmeCRM): Done.");
     expect(md).toContain("`claude-code` — 2 sessions");
     expect(md).toContain("`codex` — 1 session");
     expect(md).toContain("**Total agent cost:** $2.50 across 3 sessions");
@@ -162,10 +162,10 @@ describe("drive retro telemetry", () => {
     });
 
     expect(result).not.toBeNull();
-    expect(result!.path).toBe(driveRetroPath("/tmp/product-b2-crm", "product-b2-crm"));
+    expect(result!.path).toBe(driveRetroPath("/tmp/acme-crm", "acme-crm"));
     expect(writes).toHaveLength(1);
     expect(writes[0].path).toBe(result!.path);
-    expect(writes[0].content).toContain("# Board run — product-b2 CRM");
+    expect(writes[0].content).toContain("# Board run — Acme CRM");
   });
 
   it("returns null when the project/repo can't be resolved", async () => {
@@ -177,7 +177,7 @@ describe("drive retro telemetry", () => {
   });
 
   it("projectSlug handles spaces, punctuation and empties", () => {
-    expect(projectSlug("product-b2 CRM")).toBe("product-b2-crm");
+    expect(projectSlug("Acme CRM")).toBe("acme-crm");
     expect(projectSlug("Star Raider (HTML5)!")).toBe("star-raider-html5");
     expect(projectSlug("   ")).toBe("project");
   });
@@ -196,7 +196,7 @@ describe("drive service finish → auto-writes retro (#804)", () => {
       await db.insert(schema.drives).values({ ...abandonDrive, status: "active", finishedAt: null });
       const abandoned = await service.finish(projectId, abandonDrive.id, "abandoned");
       expect(abandoned.status).toBe("abandoned");
-      expect(existsSync(join(repoPath, "docs", "board-runs", "product-b2-crm.md"))).toBe(false);
+      expect(existsSync(join(repoPath, "docs", "board-runs", "acme-crm.md"))).toBe(false);
 
       // Completed path: retro doc written from telemetry.
       const completeDrive = { ...drive, id: randomUUID() };
@@ -204,10 +204,10 @@ describe("drive service finish → auto-writes retro (#804)", () => {
       const completed = await service.finish(projectId, completeDrive.id, "completed");
       expect(completed.status).toBe("completed");
 
-      const retroFile = join(repoPath, "docs", "board-runs", "product-b2-crm.md");
+      const retroFile = join(repoPath, "docs", "board-runs", "acme-crm.md");
       expect(existsSync(retroFile)).toBe(true);
       const content = readFileSync(retroFile, "utf8");
-      expect(content).toContain("# Board run — product-b2 CRM");
+      expect(content).toContain("# Board run — Acme CRM");
       expect(content).toContain("**2/3 Done.**");
     } finally {
       rmSync(repoPath, { recursive: true, force: true });
