@@ -3,6 +3,26 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-10-03 — history rewritten; every commit hash before today changed
+
+**State.** The whole history was rewritten (`git filter-repo`) to remove confidential terms that
+had been public on GitHub. Local and `origin` are the SAME rewritten history (`master`
+`06c9ce4a6`). **Every hash quoted in this file, the docs, tickets and the board DB from before
+2026-10-03 refers to the old history and no longer resolves**; look commits up by subject or
+date. Tags kept their names (`stable-20261003` = the old `04dcb2a9d1` content). Old history:
+backup `D:\backup\agentic-kanban-git-2026-10-03` and the `gitlab` remote (archive: never push
+there, never merge from it). Repo-local `user.email` is now the GitHub noreply address.
+
+- **Board DB keeps the old hashes**; checked that every consumer fails safe (skips, refuses or
+  re-probes). Consequence: `pnpm promote` needs a fresh sweep (`--dry-run` first).
+- **Remote fleet worker clones** hold the old history: re-clone.
+- **Stable board** (`../agentic-kanban-stable`) is a worktree of this repo, moved to the
+  rewritten `stable-20261003`; its built artifact is unchanged. Board servers are stopped.
+- **Tests:** typecheck green; `test:mine` full scope green except
+  `vital-file-guard-backup.test.ts`, which fails since TEMP moved to `D:\tmp` (Dev Drive) and
+  passes with TEMP on C:. Not caused by the rewrite; ticket to file once the board runs.
+- Four tests the rewrite broke were repaired (`48103e48c`, `06c9ce4a6`).
+
 ## 2026-09-27 afternoon — board empty, ten direct fixes, promoted as stable-20260927-4
 
 **State.** Every agentic-kanban ticket is Done; none open. #1253 and #1261 landed in train
