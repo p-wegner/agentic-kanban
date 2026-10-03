@@ -43,7 +43,7 @@ import { getPreference, setPreference } from "../repositories/preferences.reposi
 import { getProjectById } from "../repositories/project.repository.js";
 import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
 import { buildVerifyResourceEnv } from "./verify-resource-env.js";
-import { resolveVerifyMaxWorkers } from "./verify-tunables.js";
+import { resolveVerifyMaxWorkers, resolveVerifyTimeoutMs } from "./verify-tunables.js";
 import { failedSuitesForOutcome } from "./failed-suite-parse.js";
 import { resolveEffectiveVerify, deriveSetupScriptFromProfile, getStackProfile } from "./stack-profile.service.js";
 import { recordBaseSweepOutcome } from "./test-impact-outcome.service.js";
@@ -70,7 +70,9 @@ const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 // returns a verdict still leaves the gate attributing branch failures to an unknown base.
 // The budget is now SHARED with the pre-merge gate (verify-budget.ts) — this file's own
 // premise is that the two run the same script and are "directly comparable", which two
-// different ceilings quietly made false.
+// different ceilings quietly made false. Since 2026-10-02 both resolve it per project
+// (`resolveVerifyTimeoutMs`: the pref override, else adaptive over recent probes); this
+// constant is only the floor that the default stamp expiry below is computed from.
 const VERIFY_TIMEOUT_MS = VERIFY_SCRIPT_TIMEOUT_MS;
 const INSTALL_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -85,7 +87,12 @@ const INSTALL_TIMEOUT_MS = 15 * 60 * 1000;
  *    permanently-timing-out project was due again the moment it finished timing out, i.e. it
  *    ran continuously.
  */
-export const PROBE_MAX_DURATION_MS = CLONE_TIMEOUT_MS + INSTALL_TIMEOUT_MS + VERIFY_TIMEOUT_MS;
+export const PROBE_MAX_DURATION_MS = probeMaxDurationMs(VERIFY_TIMEOUT_MS);
+
+/** {@link PROBE_MAX_DURATION_MS} for a probe that runs its verify under `verifyTimeoutMs`. */
+export function probeMaxDurationMs(verifyTimeoutMs: number): number {
+  return CLONE_TIMEOUT_MS + INSTALL_TIMEOUT_MS + verifyTimeoutMs;
+}
 
 /**
  * Preference key holding the ISO time at which a probe for this project STARTED, cleared when
@@ -563,6 +570,7 @@ ${tail(combined)}`,
     // Two full suites on one box is the #949 symptom regardless of which started first, and
     // sharing a worker cap does not help when there are two of everything.
     let probeMaxWorkers = 1;
+    const verifyTimeoutMs = await resolveVerifyTimeoutMs(projectId, database);
     const run = await runUnderVerifyChainSemaphore(
       async () => {
         probeMaxWorkers = (await resolveVerifyMaxWorkers(projectId, database)).workers;
@@ -630,7 +638,7 @@ ${tail(combined)}`,
         }, probeGatePollIntervalMs());
         poll.unref?.();
         return runSetupScript(dest, verifyScript, {
-          timeoutMs: VERIFY_TIMEOUT_MS,
+          timeoutMs: verifyTimeoutMs,
           // #1231 — allowlist from scratch (`buildBaseProbeEnv`), so no `KANBAN_TEST_*` /
           // `KANBAN_IMPACT_*` scoping var the board process carries can narrow this run. The
           // resource vars are the ONLY `KANBAN_TEST_*` keys the full run may see.
@@ -676,7 +684,7 @@ ${tail(combined)}`,
         // an unrelated Kotlin daemon and SearchIndexer had the cores and only 3 vitest workers
         // existed at all; the verdict recorded nothing that would have said so. A reader (or a
         // future heuristic) needs the budget and the worker cap the probe actually ran under.
-        message: `verify_script timed out after ${VERIFY_TIMEOUT_MS}ms `
+        message: `verify_script timed out after ${verifyTimeoutMs}ms `
           + `(probe ran ${durationMs}ms${queueNote} with KANBAN_TEST_MAX_WORKERS=${probeMaxWorkers}). `
           + `This is NOT a verdict about the base: the probe could not answer, so the base's health is UNKNOWN.`,
         failedSuites: failedSuitesForOutcome("timeout", combined),
@@ -696,7 +704,7 @@ ${tail(combined)}`,
         workingDir: dest,
         runRetry: (retryScopeEnv) => runUnderVerifyChainSemaphore(
           () => runSetupScript(dest, verifyScript, {
-            timeoutMs: VERIFY_TIMEOUT_MS,
+            timeoutMs: verifyTimeoutMs,
             // #1231 — same allowlist; `KANBAN_RETRY_TEST_FILES` is the one scoping key a probe
             // child may carry, and only on this retry path — it IS the retry.
             env: buildBaseProbeEnv({

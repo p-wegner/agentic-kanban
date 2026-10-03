@@ -14,6 +14,7 @@ import * as os from "node:os";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { readTier0Capacity, deriveVerifyWorkers } from "@agentic-kanban/shared/lib/machine-capacity";
 import type { Database } from "../db/index.js";
+import { listBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
 import { verifyChainMaxSlots, verifyChainSemaphoreActive } from "./verify-chain-semaphore.js";
@@ -45,11 +46,43 @@ export function verifyTimeoutPrefKey(projectId: string): string {
 const MIN_TIMEOUT_MS = 30 * 1000;
 const MAX_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 
+/** Headroom over the longest recent full run: a budget must follow the suite as it grows. */
+const ADAPTIVE_HEADROOM = 1.5;
+/** How many recent base-health probes per lane (base branch, rc) the adaptive budget reads. */
+const ADAPTIVE_SAMPLE = 10;
+
+/**
+ * The budget a project's own measurements call for: {@link ADAPTIVE_HEADROOM} times the longest
+ * recent probe, never below the shared default and never above the 3-hour bound. A `timeout`
+ * counts with the duration it burned, so a budget the suite has outgrown widens on the next run
+ * instead of timing out forever (2026-10-02: four full sweeps in a row hit the fixed 45 minutes
+ * while the suite needed ~47; a fixed ceiling below the measured cost only measures load).
+ */
+export function adaptiveVerifyTimeoutMs(recentDurationsMs: readonly number[]): number {
+  const longest = recentDurationsMs.reduce((max, d) => (Number.isFinite(d) && d > max ? d : max), 0);
+  const wanted = Math.ceil(longest * ADAPTIVE_HEADROOM);
+  return Math.min(MAX_TIMEOUT_MS, Math.max(DEFAULT_VERIFY_TIMEOUT_MS, wanted));
+}
+
+async function recentProbeDurationsMs(projectId: string, database: Database): Promise<number[]> {
+  // Both lanes run the same verify_script; reading only one would miss half the evidence.
+  const lanes = await Promise.all([
+    listBaseBranchHealth(projectId, ADAPTIVE_SAMPLE, database),
+    listBaseBranchHealth(projectId, ADAPTIVE_SAMPLE, database, { anyRc: true }),
+  ]).catch(() => [[], []]);
+  return lanes.flat().map((row) => row.durationMs ?? 0);
+}
+
+/**
+ * The verify budget for a project: the `verify_timeout_ms_<projectId>` override when set,
+ * else {@link adaptiveVerifyTimeoutMs} over the project's recent base-health probes. The
+ * pre-merge gate and the base-health probe both resolve it here, so they stay comparable.
+ */
 export async function resolveVerifyTimeoutMs(projectId: string, database: Database): Promise<number> {
   const raw = await getPreference(verifyTimeoutPrefKey(projectId), database).catch(() => null);
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   if (Number.isFinite(parsed) && parsed >= MIN_TIMEOUT_MS && parsed <= MAX_TIMEOUT_MS) return parsed;
-  return DEFAULT_VERIFY_TIMEOUT_MS;
+  return adaptiveVerifyTimeoutMs(await recentProbeDurationsMs(projectId, database));
 }
 
 /**

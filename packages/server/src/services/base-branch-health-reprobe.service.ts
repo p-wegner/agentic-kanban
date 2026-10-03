@@ -20,7 +20,9 @@ import {
   baseHealthProbeStartPrefKey,
   BASE_HEALTH_PROBE_START_PREF_PREFIX,
   PROBE_MAX_DURATION_MS,
+  probeMaxDurationMs,
 } from "./base-branch-health.service.js";
+import { resolveVerifyTimeoutMs } from "./verify-tunables.js";
 import {
   getLatestBaseBranchHealth,
   isBaseHealthAnswer,
@@ -124,6 +126,11 @@ export interface BaseHealthDueInput {
   /** ISO start stamp of a probe believed to still be running (empty/null = none). */
   probeStartedAt?: string | null;
   /**
+   * The longest this project's probe may run, from its resolved verify budget (the budget is
+   * per project and adaptive). Defaults to {@link PROBE_MAX_DURATION_MS}.
+   */
+  probeMaxDurationMs?: number;
+  /**
    * Is a pre-merge gate's heavyweight verify/build/smoke work running right now (#931)?
    * Read by the caller — kept as an input rather than read in here so this stays a pure decision
    * function. The probe is the least urgent of the three uncoordinated test-spawning paths
@@ -205,13 +212,14 @@ export function isBaseHealthProbeDue(input: BaseHealthDueInput): BaseHealthDueVe
   //    than the probe's own ceiling belongs to a process that was killed mid-run — trusting it
   //    forever would wedge the project permanently, so it EXPIRES rather than blocks.
   const startMs = input.probeStartedAt ? Date.parse(input.probeStartedAt) : NaN;
-  if (Number.isFinite(startMs) && startMs <= nowMs && nowMs - startMs < PROBE_MAX_DURATION_MS) {
+  const maxDurationMs = input.probeMaxDurationMs ?? PROBE_MAX_DURATION_MS;
+  if (Number.isFinite(startMs) && startMs <= nowMs && nowMs - startMs < maxDurationMs) {
     return {
       due: false,
       reason: "probe_in_flight",
       probeInFlightSince: {
         startedAt: input.probeStartedAt as string,
-        expiresAt: new Date(startMs + PROBE_MAX_DURATION_MS).toISOString(),
+        expiresAt: new Date(startMs + maxDurationMs).toISOString(),
       },
     };
   }
@@ -257,7 +265,7 @@ export function isBaseHealthProbeDue(input: BaseHealthDueInput): BaseHealthDueVe
   //    such a project was due again immediately on every pass — it ran continuously. Back it
   //    off by at least the runtime it just spent.
   const effectiveIntervalMs = input.lastOutcome === "timeout"
-    ? intervalMs + PROBE_MAX_DURATION_MS
+    ? intervalMs + maxDurationMs
     : intervalMs;
 
   if (ageMs < effectiveIntervalMs) return { due: false, reason: "recent_result" };
@@ -321,6 +329,7 @@ export async function resolveBaseHealthProbeDue(
     // yields null and so restores the interval-only behaviour; see `currentSha`'s comment.
     currentSha: await resolveBaseBranchSha(projectId, database),
     probeStartedAt,
+    probeMaxDurationMs: probeMaxDurationMs(await resolveVerifyTimeoutMs(projectId, database)),
     // #957 — the machine-wide reading, not just this process's. See `resolveGateBusy`.
     gateBusy: resolveGateBusy(),
   });
