@@ -59,9 +59,12 @@ function getProjectDir() {
 function loadVitalFiles(projectDir) {
   const files = new Set();
 
-  // 1. From env var (colon-separated, supports both / and \ as separator)
+  // 1. From env var (colon- or semicolon-separated, supports both / and \ as separator).
+  // A drive-letter colon (`D:\x`, `d:/x`) is part of the path, not a separator: splitting
+  // there turned `D:\…\kanban.db` into a bogus entry `D` that matched any command containing
+  // the letter, so the real file was never backed up.
   const envVar = process.env.VITAL_FILES || "";
-  for (const p of envVar.split(/[:;]/)) {
+  for (const p of envVar.split(/;|(?<!(?:^|[:;])[A-Za-z]):/)) {
     const trimmed = p.trim();
     if (trimmed) files.add(trimmed);
   }

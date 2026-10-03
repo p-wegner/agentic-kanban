@@ -87,4 +87,17 @@ describe("vital-file-guard — WAL-aware backup (#988)", () => {
     expect(backups).toHaveLength(1);
     expect(backups[0]).toMatch(/^vital\.db\.\d{4}-/);
   });
+
+  it("keeps a drive-letter colon inside the path when splitting VITAL_FILES", async () => {
+    // Splitting on every ':' cut `D:\…\vital.db` into `D` + `\…\vital.db`; the bare letter then
+    // matched any command containing it, and no backup was taken (red with TEMP on D:).
+    const db = join(projectDir, "vital.db");
+    const other = join(projectDir, "other.db");
+    await writeFile(db, "main-content");
+
+    const result = runGuard({ projectDir, vitalFile: `${other};${db}`, command: "rm vital.db" });
+
+    expect(result.status).toBe(1);
+    expect(JSON.parse(result.stdout.trim()).reason).toContain(db);
+  });
 });

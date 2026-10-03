@@ -18,9 +18,10 @@ there, never merge from it). Repo-local `user.email` is now the GitHub noreply a
 - **Remote fleet worker clones** hold the old history: re-clone.
 - **Stable board** (`../agentic-kanban-stable`) is a worktree of this repo, moved to the
   rewritten `stable-20261003`; its built artifact is unchanged. Board servers are stopped.
-- **Tests:** typecheck green; `test:mine` full scope green except
-  `vital-file-guard-backup.test.ts`, which fails since TEMP moved to `D:\tmp` (Dev Drive) and
-  passes with TEMP on C:. Not caused by the rewrite; ticket to file once the board runs.
+- **Tests:** typecheck green; `test:mine` full scope green (657 s, TEMP on `D:\tmp`). The
+  Dev Drive TEMP exposed a real `vital-file-guard` bug: `VITAL_FILES` was split on every `:`,
+  so a `D:\…` vital file became the bare entry `D`, which matched any command containing a
+  "d" and the real file was never backed up. Fixed in both copies, with a regression test.
 - Four tests the rewrite broke were repaired (`48103e48c`, `06c9ce4a6`).
 
 ## 2026-09-27 afternoon — board empty, ten direct fixes, promoted as stable-20260927-4
