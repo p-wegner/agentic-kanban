@@ -1,4 +1,4 @@
-import { resolve as resolvePath } from "node:path";
+import { samePath } from "@agentic-kanban/shared/lib/path-key";
 import type { GitService } from "./workspace-internals.js";
 import { emitButlerSystemEvent } from "./butler-event-feed.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -28,8 +28,7 @@ export async function warnIfWorktreePathNotRegistered(
     // means the check can't be trusted (e.g. a stubbed/mocked GitService in a test) rather
     // than a real "nothing registered" — skip instead of false-flagging every such create.
     if (registered.length === 0) return;
-    const target = resolvePath(worktreePath);
-    const found = registered.some((w) => resolvePath(w.path) === target);
+    const found = registered.some((w) => samePath(w.path, worktreePath));
     if (found) return;
     console.error(
       `[workspaces] RECONCILE: workspace ${workspaceId} was assigned workingDir "${worktreePath}", but ` +

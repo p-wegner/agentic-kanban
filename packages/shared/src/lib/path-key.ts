@@ -17,7 +17,8 @@
 // `@agentic-kanban/shared/lib/path-key`, never the client-reachable barrel.
 // `normalizeSlashes` is the platform-free half the client can use.
 
-import { resolve } from "node:path";
+import { realpathSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 
 /**
  * Forward-slash a path without resolving it. Platform-free and safe anywhere,
@@ -35,6 +36,28 @@ function stripTrailingSeparators(p: string): string {
 }
 
 /**
+ * `resolve`, then follow junctions/symlinks (#1289): `C:\projects\work` can be a
+ * junction to `D:\projects\work`, while git reports the real path. A path that does
+ * not exist yet resolves its deepest existing ancestor and re-appends the rest.
+ */
+function realResolve(p: string): string {
+  const abs = resolve(p);
+  let existing = abs;
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      const real = realpathSync.native(existing);
+      return tail.length ? join(real, ...tail.reverse()) : real;
+    } catch {
+      const parent = dirname(existing);
+      if (parent === existing) return abs;
+      tail.push(basename(existing));
+      existing = parent;
+    }
+  }
+}
+
+/**
  * A canonical comparison key for a filesystem path: absolute, forward-slashed,
  * no trailing separator, and case-folded ONLY on Windows.
  *
@@ -42,7 +65,7 @@ function stripTrailingSeparators(p: string): string {
  * for those. This is purely an equality key.
  */
 export function pathKey(p: string): string {
-  const canonical = stripTrailingSeparators(normalizeSlashes(resolve(p)));
+  const canonical = stripTrailingSeparators(normalizeSlashes(realResolve(p)));
   return process.platform === "win32" ? canonical.toLowerCase() : canonical;
 }
 
@@ -79,7 +102,9 @@ export function isPathInside(child: string, parent: string): boolean {
 export function rewritePathPrefix(p: string, fromPrefix: string, toPrefix: string): string | null {
   if (!isPathInside(p, fromPrefix)) return null;
   const usesBackslash = p.includes("\\");
-  const suffix = normalizeSlashes(resolve(p)).slice(stripTrailingSeparators(normalizeSlashes(resolve(fromPrefix))).length);
+  // Both sides through the same link resolution isPathInside used, or a prefix given via a
+  // junction and a path stored by its real location would slice at the wrong offset.
+  const suffix = normalizeSlashes(realResolve(p)).slice(stripTrailingSeparators(normalizeSlashes(realResolve(fromPrefix))).length);
   const rebased = stripTrailingSeparators(normalizeSlashes(resolve(toPrefix))) + suffix;
   return usesBackslash ? rebased.replace(/\//g, "\\") : rebased;
 }
