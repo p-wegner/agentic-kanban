@@ -1,4 +1,5 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import type { BuilderContext, BuilderEffort } from "./types.js";
 
 /**
  * Builder context policy (#1302): what a Claude Code builder inherits from the operator's
@@ -35,18 +36,12 @@ export const builderContextPref = projectPref("builder_context");
  */
 export const builderEffortPref = projectPref("builder_effort");
 export const builderAutocompactPref = projectPref("builder_autocompact");
-export const BUILDER_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
-export type BuilderEffort = (typeof BUILDER_EFFORT_LEVELS)[number];
+export const BUILDER_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const satisfies readonly BuilderEffort[];
 export const DEFAULT_BUILDER_EFFORT: BuilderEffort = "medium";
 export const DEFAULT_BUILDER_AUTOCOMPACT = "500000";
-
-/** What one Claude builder launch gets: the context policy plus the pinned session tuning. */
-export interface BuilderContext {
-  policy: BuilderContextPolicy;
-  effort?: BuilderEffort;
-  /** `auto` or a token count the CLI accepts (100k–1M). */
-  autocompact?: string;
-}
+// The types live in `types.ts`, which the worker binary imports: declaring them here would pull
+// this module (and its shared import) into the worker's graph (worker-cli-isolation.test.ts).
+export type { BuilderContext, BuilderEffort };
 
 export const BUILDER_CONTEXT_SUPPORT: Record<string, "supported" | string> = {
   claude: "supported",

@@ -1,5 +1,15 @@
 import type { ParsedStreamEvent } from "@agentic-kanban/shared/lib/agent-stream-parser";
-import type { BuilderContext } from "./builder-context.js";
+
+/** Claude CLI `--effort` levels a builder can be pinned to (#1307). */
+export type BuilderEffort = "low" | "medium" | "high" | "xhigh" | "max";
+
+/** What one Claude builder launch gets (#1302/#1307); resolved in `builder-context.ts`. */
+export interface BuilderContext {
+  policy: "isolated" | "inherit";
+  effort?: BuilderEffort;
+  /** `auto` or a token count the CLI accepts (100k–1M). */
+  autocompact?: string;
+}
 
 /** Sentinel markers wrapping the machine-readable plan block emitted by a plan-mode run. */
 export const PLAN_BEGIN_MARKER = "===PLAN BEGIN===";

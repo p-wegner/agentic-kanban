@@ -18,7 +18,7 @@ import type { AgentOutputCallback } from "./agent.service.js";
 import type { PlacementReason } from "../lib/placement-explain.types.js";
 import type { ProviderId, ProviderName } from "./agent-provider.js";
 import type { ContainerProvision } from "./devcontainer-workspace.service.js";
-import type { BuilderContext } from "./agent-provider/builder-context.js";
+import type { BuilderContext } from "./agent-provider/types.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { claimWorkerSlot, releaseWorkerSlot } from "./worker-slot-reservation.service.js";
 
