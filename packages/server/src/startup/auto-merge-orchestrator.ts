@@ -2,7 +2,7 @@ import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-
 import { isTerminalStatusView } from "@agentic-kanban/shared";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { issues, projects, projectStatuses, workspaces, workflowNodes, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
-import { and, count, eq, inArray, ne, or } from "drizzle-orm";
+import { and, count, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "../services/board-events.js";
@@ -300,6 +300,8 @@ export function createAutoMergeOrchestrator(deps: {
   let reconcileTick = 0;
   /** #1230 — last logged backoff reason per workspace, so a held candidate is logged once, not per tick. */
   const backoffLogState = new Map<string, string>();
+  /** #1292 — last logged red-base hold per project (`sha|count`), so the hold is logged on change only. */
+  const baseRedLogState = new Map<string, string>();
   const state: AutoMergeOrchestratorState = {
     running: false,
     timer: null,
@@ -391,6 +393,9 @@ export function createAutoMergeOrchestrator(deps: {
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
       .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
       .where(and(
+        // #1292 — an ARCHIVED project is absent from `GET /api/projects` but its row still joins;
+        // it must have no train and no base re-probe either.
+        isNull(projects.archivedAt),
         ne(workspaces.status, "closed"),
         eq(workspaces.isDirect, false),
         eq(workspaces.status, "idle"),
@@ -608,7 +613,11 @@ export function createAutoMergeOrchestrator(deps: {
       const baseRed = !breakerHold && verdict.release ? await checkBaseRedVeto(projectId, config.posture).catch(() => null) : null;
       const hold = decideWindowHold({ verdict, breakerPaused: breakerHold !== null, baseRed: baseRed !== null });
 
-      if (baseRed !== null) {
+      // Log the hold once per state change (#1292), not on every 30 s tick.
+      const baseRedKey = baseRed === null ? null : `${baseRed.healthSha}|${ids.length}`;
+      if (baseRedKey === null) baseRedLogState.delete(projectId);
+      if (baseRed !== null && baseRedLogState.get(projectId) !== baseRedKey) {
+        baseRedLogState.set(projectId, baseRedKey!);
         console.log(`[auto-merge] train window held: base_red for project ${projectId} — base is red at ${baseRed.healthSha.slice(0, 8)}, holding ${ids.length} workspace(s) rather than bisecting the base's own failures onto them${baseRed.message ? `: ${baseRed.message.slice(0, 200)}` : ""}`);
       }
       if (hold.release) {
