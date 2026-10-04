@@ -238,7 +238,7 @@ export interface TrainRunResult {
    * author's to rebase, a gate failure is the author's to FIX, and reporting one as the other
    * sends them to the wrong place.
    */
-  gateRejected: Array<{ member: TrainMember; reason: string }>;
+  gateRejected: Array<{ member: TrainMember; reason: string; /** #1298 — the suites that attributed it, for the builder turn. */ failedSuites?: string[] }>;
   /**
    * #1194 — members a TRAIN REVIEW attributed a blocking finding to (`runGate`'s `sided`).
    * Neither `dropped` (a conflict) nor `gateRejected` (the code itself failed the gate): the
@@ -523,7 +523,7 @@ export async function runMergeTrain(args: {
           trainRef: attempt.trainRef,
           landed: rest.landed,
           dropped: [...attempt.dropped, ...rest.dropped],
-          gateRejected: [{ member: shortcut.owner, reason: formatSuiteOwnerReason(shortcut.suites, attempt.gateFailure) }, ...rest.gateRejected],
+          gateRejected: [{ member: shortcut.owner, reason: formatSuiteOwnerReason(shortcut.suites, attempt.gateFailure), failedSuites: shortcut.suites }, ...rest.gateRejected],
           sided: rest.sided,
           closeFailures: rest.closeFailures,
           gateRuns: attempt.gateRuns + rest.gateRuns,
@@ -547,7 +547,7 @@ export async function runMergeTrain(args: {
         return {
           ...attempt,
           gateRejected: subset.length === 1
-            ? [{ member: subset[0], reason: attempt.gateFailure }]
+            ? [{ member: subset[0], reason: attempt.gateFailure, ...(attempt.failedSuites?.length ? { failedSuites: attempt.failedSuites } : {}) }]
             : attempt.gateRejected,
         };
       }

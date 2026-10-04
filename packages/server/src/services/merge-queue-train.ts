@@ -45,6 +45,7 @@ import { resolveTrainReviewDecision, runTrainReview, type TrainReviewMember } fr
 import { baseConflictProbe, clearTrainSiding, createTrainDropSendBack, partitionSidedMembers } from "./merge-train-siding.service.js";
 import { BRANCH_ALONE_FAILURE_PREFIX } from "./auto-merge-breaker.js";
 import { describeFailedSuites } from "./verify-failed-suites.js";
+import { sendTrainRedFeedback } from "./merge-train-red-feedback.js";
 import {
   buildTrainGateEvidence,
   recordBoardingComments,
@@ -913,6 +914,13 @@ export function createMergeTrainRunner(deps: {
       // now may a sweep treat it as it finds it. Idempotent with the lock-failure clear above.
       unregisterLiveMergeTrain(trainId);
     }
+
+    // #1298: a bisected-out member, or every implicated member of an agent-fix train that stayed
+    // red, gets the same one builder turn a single-workspace gate red does (#1293).
+    await sendTrainRedFeedback(result, members, {
+      sendTurn,
+      headSha: (branch) => gitService.revParse(repoPath, branch),
+    });
 
     // #1191: the member-vs-member conflict clusters are persisted in the evidence above; the
     // deterministic `group-scan` mode `train-conflicts` (`propose_ticket_groups`) reads them
