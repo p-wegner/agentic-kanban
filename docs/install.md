@@ -4,18 +4,18 @@
 
 | Requirement | Version | Install |
 |-------------|---------|---------|
-| [Node.js](https://nodejs.org/) | 22+ (LTS 22 recommended) | `winget install OpenJS.NodeJS.LTS` |
-| [pnpm](https://pnpm.io/) | 10.12.1 | `corepack enable && corepack prepare pnpm@10.12.1 --activate` |
+| [Node.js](https://nodejs.org/) | 22+ (LTS 24 recommended) | `winget install OpenJS.NodeJS.LTS` |
+| [pnpm](https://pnpm.io/) | 10.34.6 | `corepack enable && corepack prepare pnpm@10.34.6 --activate` |
 | [Git](https://git-scm.com/) | 2.20+ | `winget install Git.Git` |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | latest | `npm install -g @anthropic-ai/claude-code` |
 
-> Node.js **LTS 22** is the supported floor (`engines.node` = `>=22`, and both Dockerfile stages run `node:22-bookworm-slim`). Node 20 reached end of support on 2026-04-30 and is no longer supported here. Avoid odd-numbered releases: Node 23.x has a known issue where `tsx watch` of the full server hangs on Windows (see gotcha #3 below).
+> Node.js **LTS 22** is the supported floor (`engines.node` = `>=22`); CI and both Dockerfile stages run **LTS 24** (`node:24-bookworm-slim`). Node 20 reached end of support on 2026-04-30 and is no longer supported here. Avoid odd-numbered releases: Node 23.x has a known issue where `tsx watch` of the full server hangs on Windows (see gotcha #3 below).
 
 ### Verify
 
 ```bash
-node --version      # v20.x or later
-pnpm --version      # 10.12.1
+node --version      # v22.x or later (v24 recommended)
+pnpm --version      # 10.34.6
 git --version
 claude --version
 ```
@@ -126,7 +126,7 @@ Work through these in order if the app won't start on a fresh clone.
 
 **Status: fixed.** The launcher/preflight scripts no longer spawn a bare `pnpm` binary. They re-invoke pnpm through `process.env.npm_execpath` (pnpm's own JS entry, set whenever a script runs under `pnpm run`), with a shell fallback on Windows — see `scripts/pnpm-exec.mjs`. Any pnpm install method (npm -g, corepack, Scoop, standalone) now works; no `pnpm.exe` needed.
 
-If you still see it, pnpm itself is missing from PATH entirely: `corepack enable && corepack prepare pnpm@10.12.1 --activate` (or `scoop install pnpm`).
+If you still see it, pnpm itself is missing from PATH entirely: `corepack enable && corepack prepare pnpm@10.34.6 --activate` (or `scoop install pnpm`).
 
 ### 2. Client: `Failed to resolve entry for "@agentic-kanban/shared"`
 

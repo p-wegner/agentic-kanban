@@ -439,7 +439,7 @@ sudo systemctl start agentic-kanban
 
 ### Docker
 
-The repo ships a production `Dockerfile` (multi-stage, `node:22-bookworm-slim` — Debian/glibc is required by `@libsql/client` and the Claude Agent SDK native binary) and a `docker-compose.yml`. The image bundles git, pnpm, and the `claude` CLI; the server serves the built client UI on one port.
+The repo ships a production `Dockerfile` (multi-stage, `node:24-bookworm-slim` — Debian/glibc is required by `@libsql/client` and the Claude Agent SDK native binary) and a `docker-compose.yml`. The image bundles git, pnpm, and the `claude` CLI; the server serves the built client UI on one port.
 
 ```bash
 # .env next to docker-compose.yml (or export in the shell):

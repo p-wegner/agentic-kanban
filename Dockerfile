@@ -3,7 +3,7 @@
 # native binary do not run on musl/alpine.
 
 # ---- build stage: full workspace, pnpm build ----
-FROM node:22-bookworm-slim AS build
+FROM node:24-bookworm-slim AS build
 RUN corepack enable
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc tsconfig.base.json ./
@@ -14,7 +14,7 @@ RUN pnpm install --frozen-lockfile
 RUN pnpm build
 
 # ---- runtime stage: dist bundle + Linux-native runtime deps ----
-FROM node:22-bookworm-slim
+FROM node:24-bookworm-slim
 # docker CLI + compose plugin: per-workspace service stacks (decision 011) let a project
 # declare a Docker Compose sidecar (e.g. a postgres). The agents run INSIDE this container and
 # shell out to `docker compose up` for that stack, so the client + `compose` plugin must exist
@@ -37,7 +37,7 @@ RUN apt-get update \
  && corepack enable \
  # Pre-activate pnpm (worktree setup scripts run `pnpm install -r`) so first use doesn't
  # hit corepack's interactive download prompt at runtime.
- && COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack prepare pnpm@10.12.1 --activate \
+ && COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack prepare pnpm@10.34.6 --activate \
  && npm install -g @anthropic-ai/claude-code \
  # Bind-mounted repos are owned by arbitrary host UIDs; without this every git call fails
  # with "dubious ownership".

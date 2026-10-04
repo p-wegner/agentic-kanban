@@ -3,7 +3,7 @@ stages:
 
 ai-code-review:
   stage: review
-  image: node:22-alpine
+  image: node:24-alpine
   variables:
     ANTHROPIC_BASE_URL: "https://an-internal-api-gateway-host/ai-gateway"
     REVIEW_MR_IID: "1"

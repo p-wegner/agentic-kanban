@@ -37,7 +37,7 @@ source: "packages/client/src, packages/server/src, packages/mcp-server/src, docs
 | Requirement | Version | Install |
 |-------------|---------|---------|
 | [Node.js](https://nodejs.org/) | 22+ (LTS 22 recommended) | `winget install OpenJS.NodeJS.LTS` |
-| [pnpm](https://pnpm.io/) | 10.12.1 | `corepack enable && corepack prepare pnpm@10.12.1 --activate` |
+| [pnpm](https://pnpm.io/) | 10.34.6 | `corepack enable && corepack prepare pnpm@10.34.6 --activate` |
 | [Git](https://git-scm.com/) | 2.20+ | `winget install Git.Git` |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | latest | `npm install -g @anthropic-ai/claude-code` |
 
@@ -47,7 +47,7 @@ source: "packages/client/src, packages/server/src, packages/mcp-server/src, docs
 
 ```bash
 node --version      # v20.x or later
-pnpm --version      # 10.12.1
+pnpm --version      # 10.34.6
 git --version
 claude --version
 ```
@@ -884,7 +884,7 @@ if ($proc) { Stop-Process -Id $proc -Force }
 
 pnpm is missing from PATH. Run:
 ```bash
-corepack enable && corepack prepare pnpm@10.12.1 --activate
+corepack enable && corepack prepare pnpm@10.34.6 --activate
 ```
 
 ### `EBUSY: resource busy or locked`
