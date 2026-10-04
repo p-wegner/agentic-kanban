@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runPluginCommand, type PluginCommandProgress } from "../services/plugin-exec.js";
@@ -78,4 +78,26 @@ describe("plugin-exec progress + timeout", () => {
     expect(events[0].timeoutMs).toBe(timeoutMs);
     expect(events[0].elapsedMs).toBeLessThan(500);
   }, 10_000);
+
+  it("the timeout kills the command's whole tree, not just the shell", async () => {
+    // The kill used to race: cmd.exe died before `taskkill /T` could walk its children, and
+    // every run of the test above left a `node hang.mjs` alive for good.
+    const pidFile = join(dir, "hang.pid");
+    const hang = join(dir, "hang-pid.mjs");
+    writeFileSync(
+      hang,
+      `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetInterval(() => {}, 1000);\n`,
+      "utf8",
+    );
+    const result = await runPluginCommand(`node ${hang}`, { cwd: process.cwd(), env: {}, timeoutMs: 1500 });
+    expect(result.timedOut).toBe(true);
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    expect(pid).toBeGreaterThan(0);
+    const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    const deadline = Date.now() + 5_000;
+    while (alive() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+    const survived = alive();
+    if (survived) process.kill(pid); // clean up, then fail
+    expect(survived).toBe(false);
+  }, 15_000);
 });

@@ -91,8 +91,12 @@ export function runPluginCommand(command: string, options: PluginCommandOptions)
       if (settled) return;
       settled = true;
       if (progressTimer) clearInterval(progressTimer);
-      if (process.platform === "win32" && child.pid) void taskkillTree(child.pid).catch(() => {});
-      try { child.kill(); } catch { /* already gone */ }
+      const killShell = () => { try { child.kill(); } catch { /* already gone */ } };
+      // The tree kill must finish BEFORE the shell dies: `taskkill /T` walks children of a LIVE
+      // pid, so killing cmd.exe first orphaned its grandchild forever (one `hang.mjs` per run
+      // of plugin-exec-progress.test.ts, found alive hours later).
+      if (process.platform === "win32" && child.pid) void taskkillTree(child.pid).catch(() => {}).finally(killShell);
+      else killShell();
       resolveRun({ code: null, stdout, stderr, timedOut: true, stdoutTruncated });
     }, timeoutMs);
     timer.unref();
