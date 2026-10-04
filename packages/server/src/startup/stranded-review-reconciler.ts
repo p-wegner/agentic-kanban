@@ -20,6 +20,7 @@ import { clearReviewPreflightBlockRow, setReviewPreflightBlock } from "../reposi
 import { resolveProjectReviewMode } from "../services/review-mode-pref.js";
 import { formatPostureNote } from "../services/risk-posture.service.js";
 import { stampWorkspaceReadyForMergeAt } from "../repositories/workspace-ready-for-merge.repository.js";
+import { isGateWithheldForHead } from "./exit/gate-withheld-marker.js";
 
 /**
  * How many times the reconciler may attempt a review preflight for the SAME pair of
@@ -264,6 +265,10 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
       const mergeAttempt = await database.select({ id: issueComments.id }).from(issueComments)
         .where(and(eq(issueComments.workspaceId, c.wsId), eq(issueComments.kind, "merge-attempt"))).limit(1);
       if (mergeAttempt.length > 0) continue;
+      // #1299: the review-exit gate just withheld THIS head. A clean review exit is not a green
+      // gate, and arming here sent auto-merge to re-gate the same red commit.
+      const head = await Promise.resolve().then(() => gitService.revParse(c.workingDir!, "HEAD")).then((s) => s.trim()).catch(() => null);
+      if (head && await isGateWithheldForHead(database, c.wsId, head)) continue;
       armAfterCleanReview = true;
     }
 
