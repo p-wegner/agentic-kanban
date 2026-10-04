@@ -5684,6 +5684,10 @@ paths:
               properties:
                 content:
                   type: string
+                images:
+                  type: array
+                  items:
+                    type: string
               required:
                 - content
               additionalProperties: true

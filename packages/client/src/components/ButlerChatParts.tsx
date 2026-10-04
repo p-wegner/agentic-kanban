@@ -214,6 +214,28 @@ export function QuestionCard({
   );
 }
 
+/** Removable thumbnails of images pasted into the composer, sent with the next message. */
+export function PendingImages({ images, onChange }: { images?: string[]; onChange: (images: string[]) => void }) {
+  if (!images?.length) return null;
+  return (
+    <div className="flex flex-wrap gap-2 mb-2" data-testid="butler-pending-images">
+      {images.map((src, i) => (
+        <div key={i} className="relative">
+          <img src={src} alt={`pasted image ${i + 1}`} className="h-16 w-16 rounded-lg border border-gray-300 dark:border-gray-600 object-cover" />
+          <button
+            type="button"
+            onClick={() => onChange(images.filter((_, j) => j !== i))}
+            className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gray-800 text-white text-[10px] leading-none flex items-center justify-center hover:bg-red-600"
+            title="Remove image"
+          >
+            ×
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** Renders one chat message (user / assistant-markdown / tool-call / question / activity line). */
 export function ChatBubble({ msg, onAnswerQuestion }: {
   msg: ChatMessage;
@@ -244,6 +266,13 @@ export function ChatBubble({ msg, onAnswerQuestion }: {
     return (
       <div className="flex justify-end mb-3">
         <div className="max-w-[80%] bg-brand-600 text-white rounded-2xl rounded-tr-md px-4 py-2.5 shadow-sm">
+          {msg.images && msg.images.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {msg.images.map((src, i) => (
+                <img key={i} src={src} alt={`attachment ${i + 1}`} className="max-h-40 max-w-full rounded-lg border border-brand-400 object-contain" />
+              ))}
+            </div>
+          )}
           <p className="text-sm whitespace-pre-wrap break-words">{msg.text}</p>
           <p className="text-[10px] text-brand-200 mt-1 text-right">{formatRelativeTs(msg.ts)}</p>
         </div>

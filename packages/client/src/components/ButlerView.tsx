@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, apiPost, apiPut, apiDelete } from "../lib/api.js";
+import { turnText } from "../lib/pastedImages.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import { type ButlerVoiceButtonHandle } from "./ButlerVoiceButton.js";
@@ -573,14 +574,14 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
 
   async function handleSend(explicitContent?: string) {
     if (!tab) return;
-    const content = (explicitContent ?? inputValuesRef.current[activeTabId] ?? "").trim();
+    const content = turnText(explicitContent ?? inputValuesRef.current[activeTabId] ?? "", tab.pendingImages);
     if (!content || tab.sending || !tab.butlerState?.active) return;
 
-    const userMsg: ChatMessage = { id: `user-${Date.now()}`, role: "user", text: content, ts: Date.now() };
+    const userMsg: ChatMessage = { id: `user-${Date.now()}`, role: "user", text: content, ts: Date.now(), images: tab.pendingImages };
     setTabStates((prev) => {
       const cur = prev[activeTabId];
       if (!cur) return prev;
-      return { ...prev, [activeTabId]: { ...cur, chatMessages: [...cur.chatMessages, userMsg], input: "", sending: true } };
+      return { ...prev, [activeTabId]: { ...cur, chatMessages: [...cur.chatMessages, userMsg], input: "", pendingImages: [], sending: true } };
     });
     inputValuesRef.current[activeTabId] = "";
     hasDictatedRef.current = false;
@@ -590,7 +591,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     buf.textSeen = false;
 
     try {
-      await apiPost<{ ok: boolean }>(butlerUrl(activeTabId, "/message"), { content });
+      await apiPost<{ ok: boolean }>(butlerUrl(activeTabId, "/message"), { content, images: tab.pendingImages });
     } catch (err) {
       setTabStates((prev) => {
         const cur = prev[activeTabId];

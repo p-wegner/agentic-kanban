@@ -524,7 +524,8 @@ export function createButlerRoute(
       const session = await startSession(projectId, butlerId);
       if (!session) return c.json({ error: "Project not found" }, 404);
     }
-    const ok = sendButlerTurn(projectId, body.content, { butlerId });
+    const images = Array.isArray(body.images) ? body.images.filter((x): x is string => typeof x === "string") : undefined;
+    const ok = sendButlerTurn(projectId, body.content, { butlerId, images });
     if (!ok) return c.json({ error: "Butler is already processing a turn" }, 409);
     return c.json({ ok });
   });
