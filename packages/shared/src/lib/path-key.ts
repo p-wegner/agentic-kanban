@@ -102,7 +102,9 @@ export function isPathInside(child: string, parent: string): boolean {
 export function rewritePathPrefix(p: string, fromPrefix: string, toPrefix: string): string | null {
   if (!isPathInside(p, fromPrefix)) return null;
   const usesBackslash = p.includes("\\");
-  const suffix = normalizeSlashes(resolve(p)).slice(stripTrailingSeparators(normalizeSlashes(resolve(fromPrefix))).length);
+  // Both sides through the same link resolution isPathInside used, or a prefix given via a
+  // junction and a path stored by its real location would slice at the wrong offset.
+  const suffix = normalizeSlashes(realResolve(p)).slice(stripTrailingSeparators(normalizeSlashes(realResolve(fromPrefix))).length);
   const rebased = stripTrailingSeparators(normalizeSlashes(resolve(toPrefix))) + suffix;
   return usesBackslash ? rebased.replace(/\//g, "\\") : rebased;
 }
