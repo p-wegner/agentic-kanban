@@ -18,6 +18,7 @@ import type { AgentOutputCallback } from "./agent.service.js";
 import type { PlacementReason } from "../lib/placement-explain.types.js";
 import type { ProviderId, ProviderName } from "./agent-provider.js";
 import type { ContainerProvision } from "./devcontainer-workspace.service.js";
+import type { BuilderContext } from "./agent-provider/builder-context.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { claimWorkerSlot, releaseWorkerSlot } from "./worker-slot-reservation.service.js";
 
@@ -147,8 +148,8 @@ export interface AgentLaunchRequest {
   model?: string;
   contextFiles?: string[];
   systemInstructions?: string;
-  /** Builder context policy (#1302); see `agent-provider/builder-context.ts`. */
-  builderContext?: "isolated" | "inherit";
+  /** Builder context policy and pinned tuning (#1302); see `agent-provider/builder-context.ts`. */
+  builderContext?: BuilderContext;
   /**
    * When present the agent runs INSIDE this provisioned devcontainer instead of on the
    * host. Provisioning is async and happens in the caller; launching stays synchronous.

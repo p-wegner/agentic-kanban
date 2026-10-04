@@ -25,6 +25,29 @@ export const BUILDER_CONTEXT_SETTING_SOURCES = "project,local";
 
 export const builderContextPref = projectPref("builder_context");
 
+/**
+ * Session tuning the board pins on a Claude builder's command line, so it is a board decision
+ * and not whatever `effortLevel` / `autoCompactWindow` the operator's user settings carry.
+ * Isolation drops the user settings, so without these an isolated builder silently ran on the
+ * CLI defaults instead of the values the user scope used to supply. Under `isolated` the
+ * defaults below apply; under `inherit` only a pref the operator set is passed, so the default
+ * inherit launch stays byte-identical to the pre-#1302 one.
+ */
+export const builderEffortPref = projectPref("builder_effort");
+export const builderAutocompactPref = projectPref("builder_autocompact");
+export const BUILDER_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type BuilderEffort = (typeof BUILDER_EFFORT_LEVELS)[number];
+export const DEFAULT_BUILDER_EFFORT: BuilderEffort = "medium";
+export const DEFAULT_BUILDER_AUTOCOMPACT = "500000";
+
+/** What one Claude builder launch gets: the context policy plus the pinned session tuning. */
+export interface BuilderContext {
+  policy: BuilderContextPolicy;
+  effort?: BuilderEffort;
+  /** `auto` or a token count the CLI accepts (100k–1M). */
+  autocompact?: string;
+}
+
 export const BUILDER_CONTEXT_SUPPORT: Record<string, "supported" | string> = {
   claude: "supported",
   codex: "unsupported: context comes from AGENTS.md and CODEX_HOME as a whole, no per-source switch",
@@ -42,11 +65,29 @@ export async function resolveBuilderContext(
   projectId: string,
   workspaceId: string,
   readPref: (key: string) => Promise<string | null | undefined>,
-): Promise<BuilderContextPolicy | undefined> {
+): Promise<BuilderContext | undefined> {
   if (!applies) return undefined;
-  const policy = parseBuilderContextPolicy(projectId ? await readPref(builderContextPref.key(projectId)) : undefined);
-  console.log(`[session] builder context: ${policy} workspaceId=${workspaceId}`);
-  return policy;
+  const read = async (key: string) => (projectId ? await readPref(key) : undefined);
+  const policy = parseBuilderContextPolicy(await read(builderContextPref.key(projectId)));
+  const isolated = policy === "isolated";
+  const effort = parseBuilderEffort(await read(builderEffortPref.key(projectId))) ?? (isolated ? DEFAULT_BUILDER_EFFORT : undefined);
+  const autocompact = parseBuilderAutocompact(await read(builderAutocompactPref.key(projectId))) ?? (isolated ? DEFAULT_BUILDER_AUTOCOMPACT : undefined);
+  console.log(`[session] builder context: ${policy} effort=${effort ?? "-"} autocompact=${autocompact ?? "-"} workspaceId=${workspaceId}`);
+  return { policy, ...(effort ? { effort } : {}), ...(autocompact ? { autocompact } : {}) };
+}
+
+/** A recognised effort level, or undefined (unset or unknown: the default decides). */
+export function parseBuilderEffort(value: string | null | undefined): BuilderEffort | undefined {
+  const v = (value ?? "").trim().toLowerCase();
+  return (BUILDER_EFFORT_LEVELS as readonly string[]).includes(v) ? (v as BuilderEffort) : undefined;
+}
+
+/** `auto` or an integer token count in the CLI's 100k–1M range, or undefined. */
+export function parseBuilderAutocompact(value: string | null | undefined): string | undefined {
+  const v = (value ?? "").trim().toLowerCase();
+  if (v === "auto") return v;
+  const n = Number(v);
+  return v !== "" && Number.isInteger(n) && n >= 100_000 && n <= 1_000_000 ? String(n) : undefined;
 }
 
 /** Unset or unrecognised values fall back to the default, never to a surprise. */

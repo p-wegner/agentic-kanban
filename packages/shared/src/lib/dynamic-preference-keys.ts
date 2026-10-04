@@ -92,8 +92,12 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // Builder context policy (#1302): `builder_context_<id>` is `isolated` (default) | `inherit`.
   // Isolated Claude builders launch with `--setting-sources project,local`, so the operator's
   // user settings/hooks, user CLAUDE.md and user skills stay out. See
-  // server `agent-provider/builder-context.ts`.
+  // server `agent-provider/builder-context.ts`. `builder_effort_<id>` (low..max) and
+  // `builder_autocompact_<id>` (auto | 100000..1000000) pin those two on the builder's command
+  // line; isolated builders default to medium / 500000.
   "builder_context",
+  "builder_effort",
+  "builder_autocompact",
   "cold_clone_check",
   "project_stack_profile",
   "auto_merge_disabled",

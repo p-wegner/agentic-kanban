@@ -1,4 +1,5 @@
 import type { ParsedStreamEvent } from "@agentic-kanban/shared/lib/agent-stream-parser";
+import type { BuilderContext } from "./builder-context.js";
 
 /** Sentinel markers wrapping the machine-readable plan block emitted by a plan-mode run. */
 export const PLAN_BEGIN_MARKER = "===PLAN BEGIN===";
@@ -77,11 +78,12 @@ export interface ProviderLaunchOptions {
    */
   oneShotAllowEdits?: boolean;
   /**
-   * Builder context policy (#1302). `isolated` makes the Claude provider add
-   * `--setting-sources project,local`; undefined or `inherit` leaves the launch args as before.
-   * Other providers ignore it (see `BUILDER_CONTEXT_SUPPORT`).
+   * Builder context (#1302). Policy `isolated` makes the Claude provider add
+   * `--setting-sources project,local`; `effort` / `autocompact` become `--effort` /
+   * `--autocompact`. Undefined leaves the launch args as before. Other providers ignore it
+   * (see `BUILDER_CONTEXT_SUPPORT`).
    */
-  builderContext?: "isolated" | "inherit";
+  builderContext?: BuilderContext;
 }
 
 export type { ParsedStreamEvent };

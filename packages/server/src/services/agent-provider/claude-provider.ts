@@ -100,9 +100,12 @@ export class ClaudeProvider implements AgentProvider {
           args.push("--settings", settingsPath);
         }
       }
-      if (options.builderContext === "isolated") {
+      const builder = options.builderContext;
+      if (builder?.policy === "isolated") {
         args.push("--setting-sources", BUILDER_CONTEXT_SETTING_SOURCES);
       }
+      if (builder?.effort) args.push("--effort", builder.effort);
+      if (builder?.autocompact) args.push("--autocompact", builder.autocompact);
       // Pass the selected model tier — but not for profiles routed to a custom endpoint
       // (e.g. z.ai/glm), which don't understand Claude aliases and supply their own model via env.
       if (model && !profileDefinesCustomEndpoint(effectiveProfileName, this.fs)) {

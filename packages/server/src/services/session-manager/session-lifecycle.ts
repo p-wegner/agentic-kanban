@@ -271,7 +271,9 @@ export function createSessionLifecycle(
     const builderContext = await resolveBuilderContext(executor === "claude-code" && builderSession, projectId, workspaceId, (key) => lifecycleRepo.getPreferenceValue(key, db));
     const launchDiagnostics = {
       launch: {
-        builderContext: builderContext ?? null,
+        builderContext: builderContext?.policy ?? null,
+        builderEffort: builderContext?.effort ?? null,
+        builderAutocompact: builderContext?.autocompact ?? null,
         provider: executor,
         profile: profile?.name ?? null,
         resolvedModel: effectiveModel ?? null,
