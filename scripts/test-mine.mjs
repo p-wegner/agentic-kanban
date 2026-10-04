@@ -158,6 +158,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
 
 /**
+ * #1295: the CLI spawn suites exercise `src/cli/**` end to end, so a diff there must run them
+ * (#1284 changed `cli/commands/issue-writes.ts` and merged green over a broken cli-issue.test.ts).
+ * Unrelated diffs keep the exclusion.
+ */
+const CLI_LIFT_WHEN = [
+  "packages/server/src/cli/**",
+  "packages/server/src/__tests__/helpers/cli-harness.ts",
+  "packages/server/src/__tests__/cli-*.test.ts",
+];
+
+/**
  * An exclusion must say WHY it is one (#679).
  *
  * `ae6de9b34d` pointed the verify gate at `test:mine` and, in the SAME commit, added 12
@@ -173,7 +184,10 @@ const ROOT = resolve(__dirname, "..");
  * something the gate box may not have or cannot share — a real `git` process, a docker
  * daemon, a spawned CLI binary. "It is slow" is not a reason; scope it or speed it up.
  *
- * @type {{ dir: string, label: string, exclude: { glob: string, reason: string }[] }[]}
+ * An entry may carry `file` (package-relative path) + `liftWhen` (#1295): the exclusion is lifted,
+ * and the suite forced, when the change set intersects those globs. See `liftedExclusions`.
+ *
+ * @type {{ dir: string, label: string, exclude: { glob: string, reason: string, file?: string, liftWhen?: string[] }[] }[]}
  */
 export const PACKAGES = [
   {
@@ -216,12 +230,12 @@ export const PACKAGES = [
     exclude: [
       // #1236: the one cli.test.ts, split per command group. Five entries for one suite —
       // each still spawns a child process per case, so each keeps the exclusion.
-      { glob: "**/cli-dispatch.test.ts", reason: "spawns the CLI binary as a child process" },
-      { glob: "**/cli-project.test.ts", reason: "spawns the CLI binary as a child process" },
-      { glob: "**/cli-issue.test.ts", reason: "spawns the CLI binary as a child process" },
-      { glob: "**/cli-workspace.test.ts", reason: "spawns the CLI binary as a child process" },
-      { glob: "**/cli-skill.test.ts", reason: "spawns the CLI binary as a child process" },
-      { glob: "**/cli-butler.test.ts", reason: "spawns the CLI binary as a child process" },
+      { glob: "**/cli-dispatch.test.ts", reason: "spawns the CLI binary as a child process", file: "src/__tests__/cli-dispatch.test.ts", liftWhen: CLI_LIFT_WHEN },
+      { glob: "**/cli-project.test.ts", reason: "spawns the CLI binary as a child process", file: "src/__tests__/cli-project.test.ts", liftWhen: CLI_LIFT_WHEN },
+      { glob: "**/cli-issue.test.ts", reason: "spawns the CLI binary as a child process", file: "src/__tests__/cli-issue.test.ts", liftWhen: CLI_LIFT_WHEN },
+      { glob: "**/cli-workspace.test.ts", reason: "spawns the CLI binary as a child process", file: "src/__tests__/cli-workspace.test.ts", liftWhen: CLI_LIFT_WHEN },
+      { glob: "**/cli-skill.test.ts", reason: "spawns the CLI binary as a child process", file: "src/__tests__/cli-skill.test.ts", liftWhen: CLI_LIFT_WHEN },
+      { glob: "**/cli-butler.test.ts", reason: "spawns the CLI binary as a child process", file: "src/__tests__/cli-butler.test.ts", liftWhen: CLI_LIFT_WHEN },
       { glob: "**/git.service.test.ts", reason: "drives real `git` processes against temp repos" },
       {
         glob: "**/api-workspace.test.ts",
@@ -943,6 +957,8 @@ export function matchesPathGlob(glob, relPath) {
  * Neither is a signal about the change, so the exclusion is applied HERE, loudly.
  */
 export function partitionExcluded({ dir, exclude }, files) {
+  const lifted = new Set(liftedExclusions({ exclude }).map((e) => e.glob));
+  exclude = exclude.filter((e) => !lifted.has(e.glob));
   const kept = [];
   const excluded = [];
   for (const file of files) {
@@ -1407,6 +1423,26 @@ export function planPackageScope(pkg, files = scopedFiles, exists = (p) => exist
   };
 }
 
+/**
+ * The exclusions this run lifts (#1295): entries carrying `liftWhen` whose territory the change
+ * set intersects. An UNKNOWN change set lifts nothing (the opposite of `guardAppliesToChanges`):
+ * a plain `pnpm test:mine` is a full run, and these suites stay out of it as before.
+ */
+export function liftedExclusions({ exclude }, changedFiles = scopedFiles) {
+  if (!changedFiles || changedFiles.length === 0) return [];
+  return exclude.filter(
+    (e) => e.liftWhen?.length && changedFiles.some((f) => e.liftWhen.some((g) => matchesPathGlob(g, f))),
+  );
+}
+
+/** Guard suites plus the lifted exclusions (package-relative), which must run on top of any selection. */
+function topUpSuites(pkg) {
+  const lifted = liftedExclusions(pkg).flatMap((e) => (e.file ? [e.file] : []));
+  return [...new Set([...(ALWAYS_RUN_TESTS[pkg.label] ?? []), ...lifted])].filter((f) =>
+    existsSync(resolve(ROOT, pkg.dir, f)),
+  );
+}
+
 function runPackage({ dir, label, exclude }, mode = null) {
   return new Promise((resolvePromise) => {
     const pkgDir = resolve(ROOT, dir);
@@ -1418,7 +1454,8 @@ function runPackage({ dir, label, exclude }, mode = null) {
       resolvePromise(1);
       return;
     }
-    const excludeArgs = exclude.flatMap(({ glob }) => ["--exclude", glob]);
+    const lifted = new Set(liftedExclusions({ exclude }).map((e) => e.glob));
+    const excludeArgs = exclude.filter((e) => !lifted.has(e.glob)).flatMap(({ glob }) => ["--exclude", glob]);
     const modeArgs = mode?.kind === "related"
       ? ["related", ...mode.files, "--run", "--passWithNoTests"]
       : mode?.kind === "guards"
@@ -2154,7 +2191,7 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     // asserts a property of the tree, so it must run for every package in scope regardless of
     // whether the selector named anything there (#538).
     for (const pkg of toRun) {
-      const guards = (ALWAYS_RUN_TESTS[pkg.label] ?? []).filter((f) => existsSync(resolve(ROOT, pkg.dir, f)));
+      const guards = topUpSuites(pkg);
       if (guards.length > 0 && (await runPackage(pkg, { kind: "guards", files: guards })).code !== 0) failed = true;
     }
     if (reportTreeDrift(treeBefore)) failed = true;
@@ -2183,7 +2220,7 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     } else {
       console.log(`\n[test:mine] ${pkg.label}: no affected package inputs; running its applicable guards only.`);
     }
-    const guards = (ALWAYS_RUN_TESTS[pkg.label] ?? []).filter((f) => existsSync(resolve(ROOT, pkg.dir, f)));
+    const guards = topUpSuites(pkg);
     if (guards.length > 0 && (await runPackage(pkg, { kind: "guards", files: guards })).code !== 0) failed = true;
   }
 

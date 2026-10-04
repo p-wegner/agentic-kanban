@@ -25,7 +25,21 @@ import {
   alwaysRunFloor,
   PACKAGES,
   ALWAYS_RUN_TESTS_DIR,
+  liftedExclusions,
 } from "../../../../scripts/test-mine.mjs";
+
+describe("test:mine lifts the CLI spawn exclusions for an intersecting diff (#1295)", () => {
+  const server = PACKAGES.find((p) => p.label === "server");
+  const lifted = (files) => liftedExclusions(server, files).map((e) => e.file);
+
+  it("lifts cli-issue.test.ts when a file under src/cli/commands changes", () => {
+    expect(lifted(["packages/server/src/cli/commands/issue-writes.ts"])).toContain("src/__tests__/cli-issue.test.ts");
+  });
+  it("keeps the exclusion for an unrelated diff or an unknown change set", () => {
+    expect(lifted(["packages/server/src/services/x.service.ts", "packages/client/src/a.ts"])).toEqual([]);
+    expect(lifted([])).toEqual([]);
+  });
+});
 
 describe("parseGuardsMode", () => {
   it("defaults to `all` and accepts the two spellings case-insensitively", () => {
