@@ -16,7 +16,9 @@ import { clearMergeBackoff, recordMergeFailure, shouldSkipMergeForBackoff, type 
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
-import { isPreMergeGateFailure, isLockContentionFailure } from "../services/workspace-merge-gate.js";
+import { isPreMergeGateFailure, isLockContentionFailure, preMergeGateFailedSuites } from "../services/workspace-merge-gate.js";
+import { escalateVerifyFailedSkip } from "../services/verify-failed-escalation.js";
+import { resetGateRedFeedback } from "../services/gate-red-feedback.js";
 import { logMonitorLockContentionSkip } from "../services/merge-lock-contention.js";
 import { getMergeRun } from "../repositories/merge-run.repository.js";
 import { peekMergeJob } from "../services/merge-job.service.js";
@@ -266,6 +268,7 @@ export async function mergeWorkspaceWithFixFallback(
   try {
     await workspaceActions.merge(ws.wsId, gate);
     await clearMergeBackoff((backoff?.database ?? db), ws.wsId);
+    resetGateRedFeedback(ws.wsId);
     console.log(logs.successMsg);
     logAction("merge", ws.wsId, ws.issueId, {
       endpoint: `POST /api/workspaces/${ws.wsId}/merge`,
@@ -309,6 +312,24 @@ export async function mergeWorkspaceWithFixFallback(
         endpoint: `POST /api/workspaces/${ws.wsId}/merge`,
         responseSummary: `verify_failed (no fix-and-merge fallback): ${mergeError.slice(0, 160)}`,
         verificationResult: "failed",
+      });
+      // #1293: the red goes back to the builder (one turn per head, capped), and only escalates
+      // once the cap is spent. The backoff row was written above, so it is not written twice.
+      const { failedSuites, guardFailure } = preMergeGateFailedSuites(err);
+      const sendTurn = workspaceActions.sendTurn?.bind(workspaceActions);
+      await escalateVerifyFailedSkip({
+        workspaceId: ws.wsId,
+        projectId: ws.projectId,
+        workingDir: ws.workingDir,
+        issueNumber: ws.issueNumber,
+        reason: `verify_failed: ${mergeError}`,
+        failedSuites,
+        guardFailure,
+      }, {
+        database: backoff?.database ?? db,
+        broadcast: backoff?.broadcast,
+        sendBuilderTurn: sendTurn,
+        backoffRecorded: true,
       });
       return;
     }

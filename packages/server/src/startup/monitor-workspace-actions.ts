@@ -57,6 +57,12 @@ export interface MonitorWorkspaceActions {
    * against a stale tree. (POST /api/workspaces/:id/update-base)
    */
   updateBase(workspaceId: string, mode: "rebase" | "merge"): Promise<void>;
+  /**
+   * Send the workspace's builder a follow-up turn (#1293: a red pre-merge gate hands its failing
+   * suites back). Optional so a test double that never reaches a red gate need not implement it;
+   * absent means no feedback turn, and the escalation rules apply as before.
+   */
+  sendTurn?(workspaceId: string, content: string): Promise<void>;
 }
 
 export function createMonitorWorkspaceActions(deps: {
@@ -125,6 +131,9 @@ export function createMonitorWorkspaceActions(deps: {
         throw new Error("issue carries the no-auto-start tag");
       }
       await workspaceService.updateBase(workspaceId, mode);
+    },
+    async sendTurn(workspaceId, content) {
+      await workspaceService.sendTurn(workspaceId, content);
     },
   };
 }

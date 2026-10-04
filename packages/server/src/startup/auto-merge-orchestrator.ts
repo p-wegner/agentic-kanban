@@ -8,6 +8,8 @@ import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import { createMergeQueueService, type MergeQueueEvent } from "../services/merge-queue.service.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
+import { createWorkspaceSessionService } from "../services/workspace-session.service.js";
+import { resetGateRedFeedback } from "../services/gate-red-feedback.js";
 import { buildStrandedBatch, pickIntegrationWorkspace } from "../services/reconciler.service.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { resolveMergePolicy } from "./merge-strategy.js";
@@ -218,7 +220,12 @@ function noteFirstFailure(outcome: TickOutcome, projectOfWorkspace: Map<string, 
  * and the log line names the failing suite(s) instead of printing the verify tail.
  */
 function applyQueueEvent(
-  ctx: { state: AutoMergeOrchestratorState; database: Database; boardEvents?: BoardEventSink },
+  ctx: {
+    state: AutoMergeOrchestratorState;
+    database: Database;
+    boardEvents?: BoardEventSink;
+    sendBuilderTurn?: (workspaceId: string, content: string) => Promise<unknown>;
+  },
   event: MergeQueueEvent,
   projectOfWorkspace: Map<string, string>,
   workspaceInfo: Map<string, { workingDir: string | null; issueNumber: number | null }>,
@@ -233,6 +240,7 @@ function applyQueueEvent(
     const mergedProjectId = projectOfWorkspace.get(event.workspaceId);
     if (mergedProjectId) outcome.succeededProjects.add(mergedProjectId);
     void clearMergeBackoff(database, event.workspaceId);
+    resetGateRedFeedback(event.workspaceId);
     return;
   }
   if (event.type === "conflict" || event.type === "error") {
@@ -266,6 +274,7 @@ function applyQueueEvent(
     if (!skip.projectId) return;
     outcome.deferred.push(escalateVerifyFailedSkip(skip, {
       database,
+      sendBuilderTurn: ctx.sendBuilderTurn,
       broadcast: (projectId, reason) => boardEvents?.broadcast(projectId, reason),
     }));
   }
@@ -320,6 +329,14 @@ export function createAutoMergeOrchestrator(deps: {
     getSessionManager,
   });
   const mergeService = createWorkspaceMergeService({ database, boardEvents, getSessionManager });
+  // #1293: the channel a red pre-merge gate hands its failing suites back to the builder through
+  // (the same 409-safe path `POST /:id/turn` uses). Absent without a session manager: no turn.
+  const sessionService = getSessionManager
+    ? createWorkspaceSessionService({ database, boardEvents, getSessionManager })
+    : undefined;
+  const sendBuilderTurn = sessionService
+    ? (workspaceId: string, content: string) => sessionService.sendTurn(workspaceId, content)
+    : undefined;
 
   async function isEnabled() {
     // Short-TTL cached full scan (#402) — shared with findCompletedWorkspaceIds in
@@ -826,7 +843,7 @@ export function createAutoMergeOrchestrator(deps: {
           skipOnConflict: true,
           strategy: batch.strategy,
         })) {
-          applyQueueEvent({ state, database, boardEvents }, event, projectOfWorkspace, workspaceInfo, outcome);
+          applyQueueEvent({ state, database, boardEvents, sendBuilderTurn }, event, projectOfWorkspace, workspaceInfo, outcome);
         }
       }
       // #1230 — the per-skip backoff/escalation writes land inside this tick (each is total).

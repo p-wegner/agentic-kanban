@@ -126,6 +126,19 @@ describe("implement-exit check at the builder -> review transition", () => {
     expect(e.sendBuilderTurn.mock.calls[0][1]).toContain("packages/server/src/__tests__/broken.test.ts");
   });
 
+  it("#1293 red on an always-run guard suite reaches the builder before review is spent", async () => {
+    const { issueId, workspaceId, sessionId } = await seed(db);
+    const guard = "packages/server/src/__tests__/startup-persistence-boundary-ratchet.test.ts";
+    const e = engine(db, [{ ...RED, failureDetail: `Failing suites:\n- ${guard}` }]);
+
+    await e.runWorkflowOnExit(workspaceId, sessionId, 0);
+
+    expect(e.sessionManager.startSession).not.toHaveBeenCalled();
+    expect(await statusName(db, issueId)).toBe("In Progress");
+    expect(e.sendBuilderTurn).toHaveBeenCalledTimes(1);
+    expect(e.sendBuilderTurn.mock.calls[0][1]).toContain(guard);
+  });
+
   it("green: moves to In Review and launches review as before", async () => {
     const { issueId, workspaceId, sessionId } = await seed(db);
     const e = engine(db, [GREEN]);
