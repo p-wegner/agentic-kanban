@@ -145,4 +145,31 @@ describe("resolveRedProbeOutcome (#1110, #1242 follow-up)", () => {
     expect(out.outcome).toBe("red");
     expect(h.calls.retry).toBe(0);
   });
+
+  it("keeps the runner's stderr verdict and names the full log when every visible suite passed (#1303)", async () => {
+    // The rc/20261004-3 shape: stdout ends in a later package's PASSING summary, the runner's
+    // own verdict is on stderr, and `combined` (stderr first) tails to passing lines only.
+    const stdout = Array.from({ length: 60 }, (_, i) => ` ✓ src/lib/s${i}.test.ts (2 tests) 4ms`).join("\n")
+      + "\n Test Files  202 passed (202)\n[gate:step] name=tests seconds=841 scope=full";
+    const stderr = "[test:mine] tree drift: packages/server/src/generated.json modified by the run\n"
+      + "[test:mine] One or more packages had failing tests.";
+    const logged: string[] = [];
+    const h = harness({
+      combined: `${stderr}\n${stdout}`,
+      stdout,
+      stderr,
+      summarizeFailure: (o, e) => {
+        logged.push(`${e}\n${o}`);
+        return `${o.slice(-200)}\n[full verify log: /tmp/kanban-verify-base-health.log]`;
+      },
+    });
+    const out = await resolveRedProbeOutcome(h.input);
+    expect(out.outcome).toBe("red");
+    expect(out.message).toContain("tree drift: packages/server/src/generated.json");
+    expect(out.message).toContain("One or more packages had failing tests");
+    expect(out.message).toContain("[full verify log: /tmp/kanban-verify-base-health.log]");
+    // The FULL output reached the log writer, not a tail of it.
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain("s0.test.ts");
+  });
 });

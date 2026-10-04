@@ -45,6 +45,7 @@ import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
 import { buildVerifyResourceEnv } from "./verify-resource-env.js";
 import { resolveVerifyMaxWorkers, resolveVerifyTimeoutMs } from "./verify-tunables.js";
 import { failedSuitesForOutcome } from "./failed-suite-parse.js";
+import { summarizeVerifyFailure } from "./verify-failure-summary.js";
 import { resolveEffectiveVerify, deriveSetupScriptFromProfile, getStackProfile } from "./stack-profile.service.js";
 import { recordBaseSweepOutcome } from "./test-impact-outcome.service.js";
 import { recordSweepJoin } from "./test-impact-misses.js";
@@ -392,6 +393,18 @@ export async function resolveRedProbeOutcome(input: {
   classifySuites?: (suites: FailedSuite[]) => FailedSuiteClassification;
   /** Epoch ms for the pure `durationMs` arithmetic below (not persisted) — injected for tests. */
   nowMs?: number;
+  /**
+   * The primary run's streams, kept apart. When present, a plain red's `message` is built by
+   * the pre-merge gate's `summarizeVerifyFailure`: the FULL output goes to a log file named in
+   * a `[full verify log: …]` trailer, and failure lines from before the tail are lifted out.
+   * `combined` is stderr FIRST, so its 40-line tail is always the end of stdout — and
+   * `test:mine` writes its own verdict (a failing package, tree drift) to stderr. Two red
+   * sweeps of `rc/20261004-3` recorded only passing suites and `ELIFECYCLE exit 1` that way.
+   */
+  stdout?: string;
+  stderr?: string;
+  /** Writes the full log and returns the message; defaults to `summarizeVerifyFailure`. */
+  summarizeFailure?: (stdout: string, stderr: string) => string;
 }): Promise<BaseBranchVerifyResult> {
   const { projectId, sha, branch, exitCode, combined, startedAt, scoped, runRetry } = input;
   const now = () => input.nowMs ?? Date.now();
@@ -438,14 +451,23 @@ export async function resolveRedProbeOutcome(input: {
       retried: retriedNames,
     };
   }
+  const hasStreams = input.stdout !== undefined || input.stderr !== undefined;
+  const summarize = input.summarizeFailure
+    ?? ((stdout: string, stderr: string) => summarizeVerifyFailure(stdout, stderr, `base-health-${projectId}-${branch}`));
   return {
     outcome: "red",
     sha,
     branch,
     durationMs: now() - startedAt,
-    message: tail(combined),
+    message: hasStreams ? withStderrLead(input.stderr ?? "", summarize(input.stdout ?? "", input.stderr ?? "")) : tail(combined),
     failedSuites: failedSuitesForOutcome("red", combined),
   };
+}
+
+/** The runner's own verdict is on stderr; put its last lines ahead of the stdout-ending tail. */
+function withStderrLead(stderr: string, summary: string): string {
+  const lead = tail(stderr.trim(), 15);
+  return lead ? `[stderr, last lines]\n${lead}\n\n${summary}` : summary;
 }
 
 async function runBaseBranchProbe(
@@ -696,6 +718,8 @@ ${tail(combined)}`,
         branch,
         exitCode: run.exitCode,
         combined,
+        stdout: run.stdout ?? "",
+        stderr: run.stderr ?? "",
         startedAt,
         scoped: isSelfProjectRepo(project.repoPath),
         // #1242 follow-up — the probe clone's own checkout, so a failing suite can be attributed
