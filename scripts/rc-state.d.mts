@@ -64,6 +64,8 @@ export declare function planRcCandidate(opts: {
   cadenceMs?: number;
   /** Does the stable board already contain this sha? Such a candidate is superseded. */
   isShipped?: (sha: string) => boolean;
+  /** Is this sha neither in nor ahead of what the stable board runs? Such a candidate is abandoned. */
+  isDiverged?: (sha: string) => boolean;
 }): RcCandidatePlan;
 export declare function rcStatePath(stableCheckout: string): string;
 export declare function readRcState(stableCheckout: string): RcStateFile;
