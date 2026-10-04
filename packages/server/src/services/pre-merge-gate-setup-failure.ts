@@ -2,6 +2,8 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Database } from "../db/index.js";
 import { getSetupRunForGate } from "../repositories/workspace-setup-run.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { createWorkspaceSetupRetryService } from "./workspace-setup-retry.service.js";
 
 /**
  * #1123 — a workspace whose latest `workspace_setup_run` FAILED must never reach a merge,
@@ -35,6 +37,8 @@ import { getSetupRunForGate } from "../repositories/workspace-setup-run.reposito
 export async function describeFailedSetupRun(
   workspaceId: string,
   database: Database,
+  /** #1297 — injectable for tests; defaults to the board's own `retrySetup`. */
+  retry: SetupRetry = (id) => createWorkspaceSetupRetryService({ database }).retrySetup(id).then((r) => r.latestSetup),
 ): Promise<string | null> {
   const run = await getSetupRunForGate(workspaceId, database).catch(() => undefined);
   if (!run || run.state !== "failed") return null;
@@ -42,14 +46,29 @@ export async function describeFailedSetupRun(
   const corroboration = run.workingDir ? checkBinDir(run.workingDir) : null;
   if (corroboration?.depsPresent) return null;
 
-  const age = run.endedAt ? ` (recorded ${run.endedAt}, trusted without re-checking the tree)` : "";
+  // #1297 — a recorded failure can outlive its cause (e.g. a removed tool dir fixed by a restart),
+  // and nothing else ever restamps it. The setup is idempotent, so retry ONCE before refusing and
+  // refuse only if the retry fails too.
+  let retryOutcome: string;
+  try {
+    const retried = await retry(workspaceId);
+    if (retried.state === "success") return null;
+    retryOutcome = `exit ${retried.exitCode ?? "?"}${retried.stderrTail ? `: ${retried.stderrTail.slice(-500)}` : ""}`;
+  } catch (err) {
+    retryOutcome = `could not run (${errorMessage(err)})`;
+  }
+
+  const age = run.endedAt ? ` (recorded ${run.endedAt})` : "";
   return `pre-merge gate blocked: this workspace's dependency setup script FAILED`
-    + `${run.command ? ` (${run.command})` : ""} and was never retried successfully${age} — the`
+    + `${run.command ? ` (${run.command})` : ""}${age} and the automatic retry failed too — the`
     + ` branch was built without its dependencies and could not have run a single test.`
     + `${corroboration ? ` ${corroboration.description}` : ""}`
-    + `${run.stderrTail ? ` Last error: ${run.stderrTail.slice(-500)}` : ""}`
+    + ` Automatic retry: ${retryOutcome}.`
+    + `${run.stderrTail ? ` Original error: ${run.stderrTail.slice(-500)}` : ""}`
     + ` Fix the install and relaunch before merging.`;
 }
+
+type SetupRetry = (workspaceId: string) => Promise<{ state: string; exitCode: number | null; stderrTail: string | null }>;
 
 /**
  * A cheap corroborating check (#1123, widened #1172): does `node_modules/.bin` back up the
