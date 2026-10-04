@@ -560,7 +560,7 @@ export function buildPromotionPlan({
     step1,
     { n: 2, title: `tag ${tag} on ${sha}${rc ? ` (the tip of ${rc.branch})` : ""}`, detail: `git -C ${repoRoot} tag ${tag} ${sha}   (rollback target: ${previousTag ?? "<none — first promotion>"})` },
     { n: 3, title: "stable checkout: fetch + fast-forward", detail: `git -C ${stableCheckout} fetch origin --tags && git -C ${stableCheckout} merge --ff-only ${tag}` },
-    { n: 4, title: "install only if pnpm-lock.yaml changed", detail: `pnpm install -r --prefer-offline in ${stableCheckout}` },
+    { n: 4, title: "install only if pnpm-lock.yaml changed", detail: `stop the stable board first (it holds files in node_modules open), then pnpm install -r --prefer-offline in ${stableCheckout}` },
     { n: 5, title: "build", detail: `pnpm build in ${stableCheckout}` },
     { n: 6, title: "run migrations", detail: `pnpm --filter agentic-kanban db:migrate in ${stableCheckout} with KANBAN_DB_URL=${dbUrl}` },
     { n: 7, title: `restart the stable board on port ${stablePort}`, detail: `stop the port-${stablePort} listener whose command line belongs to ${stableCheckout} (signature only, never kill-all-node), then spawn packages/server/dist/cli/index.js` },

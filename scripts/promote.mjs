@@ -23,7 +23,8 @@
  *      the heal instruction; the branch stays for the heal ticket (#1239).
  *   2. tags `stable-YYYYMMDD` (`-2`, `-3`, … if the day already has one) on the green RC sha,
  *   3. in the stable checkout: fetch, fast-forward to the tag, install only if the lockfile
- *      moved, build, migrate, restart,
+ *      moved (stopping the board first: it holds files in node_modules open), build, migrate,
+ *      restart,
  *   4. smokes `/health`, `GET /api/projects` (non-empty) and one board-status call; on failure
  *      fast-forwards back to the previous `stable-*` tag, rebuilds, restarts and says so.
  *   5. records the rc as `promoted` and asks the board for the MERGE-BACK workspace
@@ -747,6 +748,11 @@ function deployRef(ref, { hard = false } = {}) {
   log(`[promote] ${stableCheckout} ${hard ? "reset" : "fast-forwarded"} to ${ref} (${gitOrThrow(["rev-parse", "HEAD"], stableCheckout)})`);
   const lockAfter = lockHash(stableCheckout);
   if (shouldReinstall(lockBefore, lockAfter)) {
+    // The running board holds files INSIDE node_modules open (libsql's native module, the Agent
+    // SDK's claude.exe). On Windows pnpm's modules purge cannot delete those and waits forever:
+    // stable-20261004-4's install sat idle for 11 minutes, with the old board degraded, until
+    // both were stopped by hand. The board is restarted after the deploy anyway.
+    stopStableBoard();
     pnpmInStable(["install", "-r", "--prefer-offline"], "pnpm install");
   } else {
     log("[promote] pnpm-lock.yaml unchanged — skipping install");
