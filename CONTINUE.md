@@ -3,13 +3,23 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
-## 2026-10-04 afternoon — after the reboot: stable-20261004-5 live, three board flaws fixed
+## 2026-10-04 afternoon — after the reboot: stable-20261004-6 live, board empty
 
-**State.** Stable board runs `stable-20261004-5` (`9adcdda3d` = `master` = `origin/master`),
-which carries #1295–#1298 and #1303–#1305. `stable-20261004-4` (`8c386cc73`) went live first, on
-a green sweep of `rc/20261004-3` at 14:41 UTC. Each push range was scrubbed against the
-confidential-terms list (0 hits; the parse was checked against a known term first). Board:
-agentic-kanban has #1290 (placeholder) and #1302 (feature, Backlog) open.
+**State.** Stable board runs `stable-20261004-6` (`7e2f3cad7` = `master` = `origin/master`),
+which carries #1295–#1299 and #1302–#1305 (`-4` and `-5` went live earlier the same afternoon).
+Each push range was scrubbed against the confidential-terms list (0 hits; the parse was
+checked against a known term first). Board: no open agentic-kanban ticket.
+
+- **#1302** (board builder, merged): per-project `builder_context_<projectId>`, default
+  `isolated` = `--setting-sources project,local`. Verified by hand with headless runs: skills
+  123 → 91, user skills and user SessionStart hooks gone, project PreToolUse/Stop hooks still
+  run (debug log). Gap: `effortLevel`/`autoCompactWindow` came from user settings and no longer
+  reach builders; not pinned explicitly (no ticket yet).
+- **#1299** (board builder, merged): a review-exit gate red is stored per head as a
+  `gate-decision` comment and the #932 reconciler will not arm that head; a `check:arch` red
+  names its files so #1293 sends the builder one turn.
+- **Deleted #1285–#1288, #1291:** `cli-issue.test.ts` fixtures that leaked into the real DB on
+  2026-10-03 17:07 UTC. Current code does not leak: the suite (29/29) left the DB count unchanged.
 
 - **#1306 closed, a real red, healed on the candidate.** `rc/20261004-4` failed `check:arch` in
   20 s: #1303 had pushed `base-branch-health.service.ts` to 1023 lines, over the god-module
