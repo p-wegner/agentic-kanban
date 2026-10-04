@@ -51,4 +51,16 @@ describe("findUnreportedSuites (#1309)", () => {
   it("answers nothing when the lister cannot tell (vitest list failed)", () => {
     expect(findUnreportedSuites(run(CRASH), lister({}))).toEqual([]);
   });
+
+  it("answers nothing when vitest did not list the passing files, even if the arithmetic closes", () => {
+    // Seen locally: output to a file prints no per-file lines, so EVERY included file looks
+    // unreported, and `vitest list` returning exactly the total closed the count by coincidence.
+    const unlisted = [
+      "[test:mine] server: node vitest run --maxWorkers=4",
+      CRASH,
+      " Test Files  2 passed (3)",
+    ].join("\n");
+    const suites = findUnreportedSuites(unlisted, lister({ server: ["a.test.ts", "b.test.ts", "c.test.ts"] }));
+    expect(suites).toEqual([]);
+  });
 });

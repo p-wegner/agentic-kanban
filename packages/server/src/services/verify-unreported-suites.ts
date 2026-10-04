@@ -17,7 +17,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { join, relative } from "node:path";
-import type { FailedSuite } from "./verify-flake-retry.js";
+import { type FailedSuite, MAX_RETRYABLE_SUITES } from "./verify-flake-retry.js";
 
 // eslint-disable-next-line no-control-regex -- stripping real ANSI SGR sequences
 const ANSI = /\x1b\[[0-9;]*m/g;
@@ -42,10 +42,15 @@ export function findUnreportedSuites(output: string, listTests: PackageTestListe
   let label: string | null = null;
   let excludes: string[] = [];
   let reported = new Set<string>();
-  const closeSection = (total: number | null): boolean => {
-    if (!label || total === null) return true;
-    const missingCount = total - reported.size;
+  const closeSection = (total: number, summaryReported: number): boolean => {
+    if (!label) return true;
+    // The count comes from vitest's own summary, never from how many file lines we matched.
+    const missingCount = total - summaryReported;
     if (missingCount <= 0) return true;
+    // The per-file lines must account for every file the summary says reported: vitest does not
+    // list passing files when its output is not a TTY-like stream, and an empty listing would
+    // otherwise make "every included file" look unreported.
+    if (reported.size !== summaryReported || missingCount > MAX_RETRYABLE_SUITES) return false;
     const missing = listTests(label, excludes).filter((f) => !reported.has(f));
     if (missing.length !== missingCount) return false; // cannot attribute exactly: no answer
     for (const file of missing) out.push({ packageLabel: label, file });
@@ -68,7 +73,8 @@ export function findUnreportedSuites(output: string, listTests: PackageTestListe
     }
     const summary = TEST_FILES_SUMMARY.exec(line);
     if (summary) {
-      if (!closeSection(Number(summary[1]))) return [];
+      const summaryReported = [...line.matchAll(/(\d+)\s+(?:passed|failed|skipped|todo)/gi)].reduce((n, m) => n + Number(m[1]), 0);
+      if (!closeSection(Number(summary[1]), summaryReported)) return [];
       label = null;
     }
   }
