@@ -11,7 +11,7 @@ First archive pass: 2026-08-27, cutting at the 2026-08-24 boundary (`CONTINUE.md
 
 ---
 
-<!-- moved 2026-09-27 afternoon from CONTINUE.md, verbatim -->
+<!-- moved 2026-10-04 evening from CONTINUE.md, verbatim -->
 
 ## 2026-10-03 — history rewritten; every commit hash before today changed
 
@@ -33,6 +33,8 @@ there, never merge from it). Repo-local `user.email` is now the GitHub noreply a
   so a `D:\…` vital file became the bare entry `D`, which matched any command containing a
   "d" and the real file was never backed up. Fixed in both copies, with a regression test.
 - Four tests the rewrite broke were repaired (`48103e48c`, `06c9ce4a6`).
+
+<!-- moved 2026-09-27 afternoon from CONTINUE.md, verbatim -->
 
 ## 2026-09-27 afternoon — board empty, ten direct fixes, promoted as stable-20260927-4
 
