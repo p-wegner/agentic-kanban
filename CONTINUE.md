@@ -3,12 +3,30 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
-## 2026-10-04 afternoon — after the reboot: stable-20261004-6 live, board empty
+## 2026-10-04 afternoon — after the reboot: stable-20261004-8 live, board empty
 
-**State.** Stable board runs `stable-20261004-6` (`7e2f3cad7` = `master` = `origin/master`),
-which carries #1295–#1299 and #1302–#1305 (`-4` and `-5` went live earlier the same afternoon).
-Each push range was scrubbed against the confidential-terms list (0 hits; the parse was
+**State.** Stable board runs `stable-20261004-8` (`806b6a164` = `master` = `origin/master`),
+which carries #1295–#1299, #1302–#1305, #1307 and #1309 (`-4` … `-7` went live earlier the same
+day). Each push range was scrubbed against the confidential-terms list (0 hits; the parse was
 checked against a known term first). Board: no open agentic-kanban ticket.
+
+- **The unexplained "all passed, exit 1" sweeps were a crashing vitest worker.** First red with
+  #1303's log (rc/20261004-6): `[vitest-pool]: Worker forks emitted error … Worker exited
+  unexpectedly`, server 1025 + 1 skipped of 1027, `project-relocate.service.test.ts` never
+  reported (passes alone 3/3; no board kill in the window). Seen again locally in 2 of 3 full
+  server runs, then 0 of 2 with a JSON reporter: intermittent, cause still unknown.
+- **#1309** a crashed worker no longer reds a sweep blindly: `verify-unreported-suites.ts` names
+  the file(s) it never reported (vitest's own summary count, the per-file lines, and `vitest list
+  --filesOnly` with the run's excludes must agree exactly, else no answer), and the existing flake
+  retry re-runs them once. The crash lead line now sums every package summary through ANSI codes
+  and names vitest's worker error, not an app `unhandled error` log line. Check: real sweep log →
+  exactly `project-relocate.service.test.ts`; a log without per-file lines → none.
+- **#1307** isolated builders get `--effort medium --autocompact 500000` (per-project prefs
+  `builder_effort_<id>`, `builder_autocompact_<id>`); `inherit` passes only explicit prefs.
+  Check: a real `claude -p` accepts the full flag set.
+- Open thread, no ticket: the gate's own flake retry (#894) has the same blind spot for a worker
+  crash; and `test:mine`'s impact selector resolves to a bogus `D:\repo\…` path and falls back to
+  `vitest related` on every run.
 
 - **#1302** (board builder, merged): per-project `builder_context_<projectId>`, default
   `isolated` = `--setting-sources project,local`. Verified by hand with headless runs: skills
