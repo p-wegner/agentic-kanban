@@ -103,7 +103,9 @@ export function createContributionService(deps: { database?: Database; gitServic
       const baseRef = ws.baseCommitSha || resolveWorkspaceBaseOrNull(ws, project);
       const tip = ws.mergedHeadSha || ws.branch;
       if (!baseRef || !tip) continue;
-      for (const commit of await commitStats(project.repoPath, baseRef, tip)) {
+      // A range git cannot resolve (pruned branch, moved repo) must not blank the whole table.
+      const commits = await commitStats(project.repoPath, baseRef, tip).catch(() => []);
+      for (const commit of commits) {
         if (seenCommits.has(commit.sha)) continue;
         seenCommits.add(commit.sha);
         const row = groupBy === "author" ? rowFor(commit.author) : rowFor(ws.actor);
