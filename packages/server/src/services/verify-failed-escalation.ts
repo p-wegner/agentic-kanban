@@ -142,7 +142,7 @@ export async function escalateVerifyFailedSkip(
     // #1293 — a red gate that named suites goes back to the builder BEFORE any escalation; only
     // once the turn cap is spent (and the head moved without going green) does a human hear.
     const feedback = await sendGateRedFeedback(
-      { workspaceId: skip.workspaceId, headSha, failedSuites, guardFailure },
+      { workspaceId: skip.workspaceId, headSha, failedSuites, guardFailure, gateMessage: skip.reason },
       { sendBuilderTurn: deps.sendBuilderTurn },
     );
     if (feedback.decision === "send" || feedback.decision === "await-builder") {

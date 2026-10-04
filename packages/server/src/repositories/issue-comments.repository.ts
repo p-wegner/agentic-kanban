@@ -127,6 +127,18 @@ async function collapseIntoPreviousComment(
   return { ...prev, repeatCount, lastRepeatedAt: createdAt };
 }
 
+/** The raw `payload` JSON of a workspace's comments of one kind, newest first (#1299). */
+export async function listWorkspaceCommentPayloadsByKind(
+  workspaceId: string,
+  kind: IssueCommentKind,
+  database: Database = db,
+): Promise<(string | null)[]> {
+  const rows = await database.select({ payload: issueComments.payload }).from(issueComments)
+    .where(and(eq(issueComments.workspaceId, workspaceId), eq(issueComments.kind, kind)))
+    .orderBy(desc(issueComments.createdAt));
+  return rows.map((r) => r.payload);
+}
+
 /** Most recent comment of a given kind for an issue, or null. Used to dedup repeated system notes. */
 export async function getLatestIssueCommentByKind(
   issueId: string,

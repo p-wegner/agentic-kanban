@@ -148,6 +148,38 @@ export function describeFailedSuites(classification: { files: readonly string[];
 }
 
 /**
+ * The files a deterministic `check:arch` red names (#1299): the god-module gate's offender lines
+ * (an indented list under each `[god-module gate] …` header) and dependency-cruiser's
+ * `error <rule>: <file> → …` lines. A red `check:arch` names FILES, not test suites, so
+ * `parseFailedSuites` finds nothing — yet it is exactly as much the builder's to fix and exactly
+ * as deterministic. Empty when the message carries neither shape. The gate's own degraded
+ * "UNVERIFIED" block is a finding it cannot trust, so it names nothing.
+ */
+export function parseArchOffenders(message: string): string[] {
+  const found = new Set<string>();
+  let inBlock = false;
+  let seenOffender = false;
+  for (const line of message.split(/\r?\n/)) {
+    if (/\[god-module gate\]/.test(line)) {
+      inBlock = !/UNVERIFIED|\bFAILED\b|\bOK\b/.test(line);
+      seenOffender = false;
+      continue;
+    }
+    // The advice lines between a header and its list are unindented; the list is 2-space indented.
+    const offender = inBlock ? /^ {2}(\S+)/.exec(line) : null;
+    if (offender) {
+      found.add(normalize(offender[1]!));
+      seenOffender = true;
+    } else if (inBlock && seenOffender) {
+      inBlock = false;
+    }
+    const dep = /^\s*error\s+[\w-]+:\s+(\S+)/.exec(line);
+    if (dep) found.add(normalize(dep[1]!));
+  }
+  return [...found];
+}
+
+/**
  * Carry the named failures onto a failed gate result and lead its message with them, so the
  * merge path, the issue comment and the board log all name the file(s) without opening
  * `%TEMP%\kanban-verify-<ws>.log`. Since #1250 the message also ENDS with the one-line fix
@@ -159,8 +191,12 @@ export function withFailedSuites<T extends { message: string }>(
   result: T,
   named: { failedSuites?: string[]; guardFailure?: boolean },
 ): T & { failedSuites?: string[]; guardFailure?: boolean; fixHint?: MergeFixHint } {
-  const files = named.failedSuites ?? [];
+  const suites = named.failedSuites ?? [];
+  // #1299: a red check:arch names files, not suites — deterministic, so it counts as a guard failure.
+  const archFiles = suites.length === 0 ? parseArchOffenders(result.message) : [];
+  const files = suites.length > 0 ? suites : archFiles;
   if (files.length === 0) return withMergeFixHint(result);
-  const lead = describeFailedSuites({ files, guardFailure: named.guardFailure === true });
-  return withMergeFixHint({ ...result, message: `${lead}. ${result.message}`, failedSuites: files, guardFailure: named.guardFailure === true });
+  const guardFailure = archFiles.length > 0 || named.guardFailure === true;
+  const lead = describeFailedSuites({ files, guardFailure });
+  return withMergeFixHint({ ...result, message: `${lead}. ${result.message}`, failedSuites: files, guardFailure });
 }

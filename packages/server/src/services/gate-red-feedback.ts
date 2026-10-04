@@ -82,12 +82,15 @@ export function buildGateRedFeedbackPrompt(input: {
   attempt: number;
   cap: number;
   logPath?: string;
+  /** The gate's own message (#1299): for a check:arch red it carries the rule and the advice. */
+  gateMessage?: string;
 }): string {
   const named = describeFailedSuites({ files: input.failedSuites, guardFailure: input.guardFailure });
   return [
     "The board's pre-merge gate ran on your branch after review and it failed, so the branch was NOT merged.",
     "",
     named,
+    ...(input.gateMessage ? ["", "Gate message:", input.gateMessage.slice(0, 1500)] : []),
     `Full verify log: ${input.logPath ?? verifyLogPath(input.workspaceId)}`,
     "",
     "Fix these failures, commit, and end your turn. The board runs its implement-exit check, review and the gate again on your new commit.",
@@ -107,7 +110,7 @@ export interface GateRedFeedbackResult {
  * delivered (builder busy, no channel) is not counted, so the next tick tries again. Never throws.
  */
 export async function sendGateRedFeedback(
-  input: { workspaceId: string; headSha: string | null; failedSuites: readonly string[]; guardFailure: boolean },
+  input: { workspaceId: string; headSha: string | null; failedSuites: readonly string[]; guardFailure: boolean; gateMessage?: string },
   deps: { sendBuilderTurn?: (workspaceId: string, content: string) => Promise<unknown>; cap?: number },
 ): Promise<GateRedFeedbackResult> {
   const cap = deps.cap ?? GATE_RED_MAX_FEEDBACK_TURNS;
@@ -129,6 +132,7 @@ export async function sendGateRedFeedback(
         workspaceId: input.workspaceId,
         failedSuites: input.failedSuites,
         guardFailure: input.guardFailure,
+        gateMessage: input.gateMessage,
         attempt,
         cap,
       }),
