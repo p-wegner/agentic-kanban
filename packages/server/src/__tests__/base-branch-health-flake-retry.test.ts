@@ -172,4 +172,36 @@ describe("resolveRedProbeOutcome (#1110, #1242 follow-up)", () => {
     expect(logged).toHaveLength(1);
     expect(logged[0]).toContain("s0.test.ts");
   });
+
+  it("a crashed vitest worker gets ONE retry of exactly the file it never reported (#1309)", async () => {
+    const stdout = [
+      "[test:mine] server: node vitest run --maxWorkers=4",
+      " ✓ src/__tests__/one.test.ts (3 tests) 5ms",
+      "Error: [vitest-pool]: Worker forks emitted error.",
+      "Caused by: Error: Worker exited unexpectedly",
+      " Test Files  1 passed (2)",
+    ].join("\n");
+    const h = harness({
+      combined: stdout,
+      stdout,
+      stderr: "",
+      listTests: () => ["src/__tests__/one.test.ts", "src/__tests__/project-relocate.service.test.ts"],
+    });
+    const out = await resolveRedProbeOutcome(h.input);
+    expect(h.calls.retry).toBe(1);
+    expect(h.scopes).toEqual(["server:src/__tests__/project-relocate.service.test.ts"]);
+    expect(out.outcome).toBe("green");
+    expect(out.flaky).toBe(true);
+    expect(out.message).toContain("left unreported by a crashed vitest worker");
+    expect(out.retried).toEqual(["packages/server/src/__tests__/project-relocate.service.test.ts"]);
+
+    const again = harness({
+      combined: stdout,
+      stdout,
+      stderr: "",
+      listTests: () => ["src/__tests__/one.test.ts", "src/__tests__/project-relocate.service.test.ts"],
+      runRetry: async () => ({ exitCode: 1, stdout: "", stderr: "" }),
+    });
+    expect((await resolveRedProbeOutcome(again.input)).outcome).toBe("red");
+  });
 });

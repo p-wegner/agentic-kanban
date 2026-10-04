@@ -217,3 +217,34 @@ describe("summarizeVerifyFailure — a failing line pushed out of the tail by la
     expect(summary).not.toContain("earlier in the log than the kept tail");
   });
 });
+
+describe("summarizeVerifyFailure — a worker crash in a later package of a coloured multi-package run (#1309)", () => {
+  // The rc/20261004-6 shape: coloured vitest output, one summary per package, the server's
+  // summary one file short, and app error-handler LOGS that contain "unhandled error".
+  const C = "\x1b[2m";
+  const R = "\x1b[22m";
+  const out = [
+    "[test:mine] shared: node vitest run --maxWorkers=4",
+    `${C} Test Files ${R} 125 passed (125)`,
+    "[test:mine] server: node vitest run --maxWorkers=4",
+    "[server] unhandled error: Error: git branch --all failed: fatal: not a git repository",
+    "⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯",
+    "Error: [vitest-pool]: Worker forks emitted error.",
+    "Caused by: Error: Worker exited unexpectedly",
+    `${C} Test Files ${R} 1025 passed | 1 skipped (1027)`,
+    "     Errors  1 error",
+    "[test:mine] client: node vitest run --maxWorkers=4",
+    `${C} Test Files ${R} 202 passed (202)`,
+  ].join("\n");
+
+  it("counts the missing file across every package summary, through the colour codes", () => {
+    const summary = summarizeVerifyFailure(out, "", "ws-1309", () => null);
+    expect(summary).toContain("1 of 1354 test file(s) never reported");
+  });
+
+  it("names vitest's own worker error, not the app's 'unhandled error' log line", () => {
+    const lead = summarizeVerifyFailure(out, "", "ws-1309", () => null).split("\n")[0]!;
+    expect(lead).toContain("[vitest-pool]: Worker forks emitted error");
+    expect(lead).not.toContain("not a git repository");
+  });
+});

@@ -9,6 +9,7 @@ import { type FailedSuite, decideFlakeRetry, parseFailedSuites as parseFlakeRetr
 import { type FailedSuiteClassification, classifyFailedSuites } from "./verify-failed-suites.js";
 import { failedSuitesForOutcome } from "./failed-suite-parse.js";
 import { summarizeVerifyFailure } from "./verify-failure-summary.js";
+import { type PackageTestLister, checkoutTestLister, findUnreportedSuites } from "./verify-unreported-suites.js";
 
 /** What a retry run reports — the shape `runSetupScript` returns, narrowed to what this needs. */
 export interface RetryRunResult {
@@ -93,10 +94,17 @@ export async function resolveRedProbeOutcome(input: {
   stderr?: string;
   /** Writes the full log and returns the message; defaults to `summarizeVerifyFailure`. */
   summarizeFailure?: (stdout: string, stderr: string) => string;
+  /** Injected for tests; defaults to asking the probe clone's vitest (`checkoutTestLister`). */
+  listTests?: PackageTestLister;
 }): Promise<BaseBranchVerifyResult> {
   const { projectId, sha, branch, exitCode, combined, startedAt, scoped, runRetry } = input;
   const now = () => input.nowMs ?? Date.now();
-  const parsed = parseFlakeRetrySuites(combined);
+  // #1309: a crashed vitest worker leaves no FAIL line, only a file that never reported.
+  const failed = parseFlakeRetrySuites(combined);
+  const lister = input.listTests ?? (input.workingDir ? checkoutTestLister(input.workingDir) : null);
+  const crashed = failed.length === 0 && lister ? findUnreportedSuites(input.stdout ?? combined, lister) : [];
+  const parsed = failed.length > 0 ? failed : crashed;
+  const cause = crashed.length > 0 ? "were left unreported by a crashed vitest worker" : "failed under load";
   const classify = input.classifySuites ?? ((suites: FailedSuite[]) => classifyFailedSuites(input.workingDir ?? null, suites));
   const attributed = attributeForRetry(parsed, classify);
   const flake = decideFlakeRetry({ ...attributed, timedOut: false, scoped });
@@ -110,7 +118,7 @@ export async function resolveRedProbeOutcome(input: {
     const retryRun = await runRetry(retryScopeEnvValue(flake.suites));
     if (retryRun.exitCode === 0 && !retryRun.timedOut) {
       console.log(
-        `[base-branch-health] ${flake.suites.length} suite(s) failed under load and PASSED on a targeted `
+        `[base-branch-health] ${flake.suites.length} suite(s) ${cause} and PASSED on a targeted `
           + `re-run for project ${projectId}: ${names} — recording GREEN (flaky)`,
       );
       return {
@@ -119,7 +127,7 @@ export async function resolveRedProbeOutcome(input: {
         branch,
         durationMs: now() - startedAt,
         flaky: true,
-        message: `${flake.suites.length} suite(s) failed under load and passed on a targeted re-run: ${names}`,
+        message: `${flake.suites.length} suite(s) ${cause} and passed on a targeted re-run: ${names}`,
         failedSuites: [],
         retried: retriedNames,
       };

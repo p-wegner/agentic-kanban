@@ -41,22 +41,36 @@ const WORKER_CRASH_SIGNATURE =
 /** Vitest's own attribution line for an error that killed a worker mid-file (#490). */
 const ORIGINATED_IN_FILE = /originated in ["']([^"']+)["'] test file/gi;
 
-/** Parses vitest's `Test Files  N passed | M failed (T)` summary line, if present. */
+/**
+ * Parses vitest's `Test Files  N passed | M failed (T)` summary lines, if present — ALL of them,
+ * summed (#1309). `test:mine` runs one vitest per package, so a multi-package run prints one
+ * summary per package; reading only the first (`shared`, 125/125) hid a server worker crash
+ * that left 1 of 1027 files unreported.
+ */
 function parseTestFilesSummary(body: string): { reported: number; failed: number; total: number } | null {
-  const line = body.split(/\r?\n/).find((l) => /^\s*Test Files\b/i.test(l));
-  if (!line) return null;
-  const totalMatch = line.match(/\((\d+)\)/);
-  if (!totalMatch) return null;
-  const total = Number.parseInt(totalMatch[1], 10);
+  // Colour codes too: a sweep's vitest output is coloured, and `\x1b[2m Test Files` never matched.
+  // eslint-disable-next-line no-control-regex -- stripping real ANSI SGR sequences
+  const lines = body.replace(/\x1b\[[0-9;]*m/g, "").split(/\r?\n/).filter((l) => /^\s*Test Files\b/i.test(l));
+  let seen = false;
+  let total = 0;
   let reported = 0;
   let failed = 0;
-  for (const m of line.matchAll(/(\d+)\s+(passed|failed|skipped|todo)/gi)) {
-    const count = Number.parseInt(m[1], 10);
-    reported += count;
-    if (m[2].toLowerCase() === "failed") failed = count;
+  for (const line of lines) {
+    const totalMatch = line.match(/\((\d+)\)/);
+    if (!totalMatch) continue;
+    seen = true;
+    total += Number.parseInt(totalMatch[1], 10);
+    for (const m of line.matchAll(/(\d+)\s+(passed|failed|skipped|todo)/gi)) {
+      const count = Number.parseInt(m[1], 10);
+      reported += count;
+      if (m[2].toLowerCase() === "failed") failed += count;
+    }
   }
-  return { reported, failed, total };
+  return seen ? { reported, failed, total } : null;
 }
+
+/** Vitest's own report of a dead worker — preferred over app logs that merely say "unhandled error". */
+const VITEST_POOL_CRASH = /\[vitest-pool\]: Worker \w+ emitted error|Worker exited unexpectedly/i;
 
 /**
  * A verdict line — something in the output showing a CHECK actually reached a conclusion.
@@ -220,7 +234,8 @@ function detectVerifyCrash(body: string): { leadLine: string } | null {
   }
   if (hasErrorsLine) parts.push(errorsLineMatch![0].trim());
   if (hasCrashMarker) {
-    const markerLine = body.split(/\r?\n/).find((l) => WORKER_CRASH_SIGNATURE.test(l));
+    const bodyLines = body.split(/\r?\n/);
+    const markerLine = bodyLines.find((l) => VITEST_POOL_CRASH.test(l)) ?? bodyLines.find((l) => WORKER_CRASH_SIGNATURE.test(l));
     if (markerLine) parts.push(markerLine.trim());
   }
   return { leadLine: parts.join(" ") };
