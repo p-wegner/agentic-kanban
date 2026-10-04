@@ -98,6 +98,13 @@ supportedArchitectures:
     - current
     - x64
 
+# Every install here runs WITHOUT a TTY (builder setup scripts, the base-health sweep, `pnpm
+# promote` in the stable checkout). When pnpm decides node_modules must be rebuilt (a pnpm
+# version or settings change), it otherwise ASKS and, with no TTY, aborts with
+# ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY — which rolled back a promotion on 2026-10-04.
+# Rebuilding node_modules is always safe here; the next install restores it.
+confirmModulesPurge: false
+
 # Moved here from package.json's "pnpm" field, which pnpm no longer reads — it was
 # being silently ignored and warned about on every command.
 onlyBuiltDependencies:
