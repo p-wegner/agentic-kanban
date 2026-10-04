@@ -54,7 +54,43 @@ describe("describeFailedSetupRun (#1123)", () => {
     expect(msg).toContain("ERESOLVE could not resolve dependency tree");
     expect(msg).toContain("could not have run a single test");
     expect(msg).toContain("2026-09-16T00:32:22.657Z");
-    expect(msg).toContain("trusted without re-checking");
+    expect(msg).toContain("automatic retry failed too");
+  });
+
+  // #1297 — a stale FAILED record whose cause is gone must pass without a manual retry-setup.
+  it("#1297: retries once and passes when the retry succeeds", async () => {
+    getSetupRunMock.mockResolvedValue({ state: "failed", command: "pnpm install -r", stderrTail: "old", workingDir: null, endedAt: "2026-10-04T09:51:00Z" });
+    const retry = vi.fn().mockResolvedValue({ state: "success", exitCode: 0, stderrTail: null });
+    expect(await describeFailedSetupRun("w1", db, retry)).toBeNull();
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(retry).toHaveBeenCalledWith("w1");
+  });
+
+  it("#1297: refuses with the retry's stderr when the retry fails too", async () => {
+    getSetupRunMock.mockResolvedValue({ state: "failed", command: "pnpm install -r", stderrTail: "old", workingDir: null, endedAt: null });
+    const retry = vi.fn().mockResolvedValue({ state: "failed", exitCode: 1, stderrTail: "tool dir missing" });
+    const msg = await describeFailedSetupRun("w1", db, retry);
+    expect(msg).toContain("Automatic retry: exit 1: tool dir missing");
+  });
+
+  it("#1297: names a retry that could not run at all", async () => {
+    getSetupRunMock.mockResolvedValue({ state: "failed", command: null, stderrTail: null, workingDir: null, endedAt: null });
+    const retry = vi.fn().mockRejectedValue(new Error("no worktree"));
+    expect(await describeFailedSetupRun("w1", db, retry)).toContain("could not run (no worktree)");
+  });
+
+  it("#1297: does not retry when the tree already corroborates success", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kanban-setup-failure-"));
+    mkdirSync(join(dir, "node_modules", ".bin"), { recursive: true });
+    writeFileSync(join(dir, "node_modules", ".bin", "vitest"), "");
+    try {
+      getSetupRunMock.mockResolvedValue({ state: "failed", command: null, stderrTail: null, workingDir: dir, endedAt: null });
+      const retry = vi.fn();
+      expect(await describeFailedSetupRun("w1", db, retry)).toBeNull();
+      expect(retry).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("corroborates with an empty node_modules/.bin when the worktree confirms it", async () => {
