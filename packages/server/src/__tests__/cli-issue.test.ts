@@ -359,16 +359,17 @@ interface SeenRequest { method: string; url: string; body: unknown }
  * A FAKE board on listen(0) — never the real 3001. Its /api/health reports `dbPath` as the DB
  * it serves, which is what the CLI matches against its own before routing a write here.
  */
-async function startFakeBoard(dbPath: string, answer: (r: SeenRequest) => { status: number; body: unknown }) {
+type FakeAnswer = { status: number; body: unknown };
+async function startFakeBoard(dbPath: string, answer: (r: SeenRequest) => FakeAnswer | Promise<FakeAnswer>) {
   const seen: SeenRequest[] = [];
   const server: Server = createServer((req, res) => {
     let raw = "";
     req.on("data", (c: Buffer) => { raw += c.toString("utf8"); });
-    req.on("end", () => {
+    req.on("end", async () => {
       const r: SeenRequest = { method: req.method ?? "", url: req.url ?? "", body: raw ? JSON.parse(raw) : null };
       const out = r.url === "/api/health"
         ? { status: 200, body: { status: "ok", db: { path: dbPath } } }
-        : (seen.push(r), answer(r));
+        : (seen.push(r), await answer(r));
       res.writeHead(out.status, { "Content-Type": "application/json" });
       res.end(JSON.stringify(out.body));
     });
@@ -437,7 +438,15 @@ describe("CLI issue writes route through a running board server", () => {
 
   it("issue move PATCHes statusId (not a name), and prints the server's refusal on a 409", async () => {
     const issue = await seedIssue(ctx.dbPath, projectId, { title: "Move me" });
-    board = await startFakeBoard(ctx.dbPath, () => ({ status: 200, body: { id: issue.id } }));
+    // A 200 means the server applied the write; #1284's read-back checks that it did, so the
+    // fake applies it too, exactly as the real PATCH route would.
+    board = await startFakeBoard(ctx.dbPath, async (r) => {
+      const { db: database, close } = openDb(ctx.dbPath);
+      try {
+        await database.update(schema.issues).set({ statusId: (r.body as { statusId: string }).statusId }).where(eq(schema.issues.id, issue.id));
+      } finally { close(); }
+      return { status: 200, body: { id: issue.id } };
+    });
     const moved = await runCliAsync(["issue", "move", issue.id, "In Progress"], ctx.dbPath, board.port);
     expect(moved.status, moved.stderr).toBe(0);
     expect(moved.stdout).toContain("Moved issue to 'In Progress'");
