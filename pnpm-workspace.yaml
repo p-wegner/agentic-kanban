@@ -56,7 +56,12 @@ overrides:
   # is in-range and cannot pull anything else with it. 2.1.4 is the last 2.x release;
   # the newer GHSA-3jxr-9vmj-r5cp only covers the 1.x/3.x-4.x lines, which this
   # `@2`-scoped override does not touch (#760).
-  "brace-expansion@2": "^2.1.4"
+  #
+  # Raised to 2.1.6 on 2026-10-04: two further highs against the 2.x line had failed the
+  # `security-scan` workflow on every push since 2026-10-03 — GHSA-6j4f-fj2g-mc7p
+  # (>=2.0.0 <2.1.5) and GHSA-qhr7-859c-m2p7 (>=2.0.0 <2.1.6), both DoS via uncontrolled
+  # recursion. Still in range for minimatch's ^2.0.2.
+  "brace-expansion@2": "^2.1.6"
   # 10.3.1 fixes the production high GHSA-mwp4-54f8-5fhr (leading-zero octet
   # decoding) plus the two moderates GHSA-4xrf-jv44-h6hh and GHSA-22jq-vg5j-6vgg,
   # under @modelcontextprotocol/sdk>express-rate-limit (#760).
