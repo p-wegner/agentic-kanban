@@ -102,33 +102,14 @@ agentic-kanban ticket open except #1290 (owner's placeholder, `no-auto-start`).
   Full write-up outside the repo.
 
 
-## 2026-10-03 — history rewritten; every commit hash before today changed
-
-**State.** The whole history was rewritten (`git filter-repo`) to remove confidential terms that
-had been public on GitHub. Local and `origin` are the SAME rewritten history (`master`
-`06c9ce4a6`). **Every hash quoted in this file, the docs, tickets and the board DB from before
-2026-10-03 refers to the old history and no longer resolves**; look commits up by subject or
-date. Tags kept their names (`stable-20261003` = the old `04dcb2a9d1` content). Old history:
-backup `D:\backup\agentic-kanban-git-2026-10-03` and the `gitlab` remote (archive: never push
-there, never merge from it). Repo-local `user.email` is now the GitHub noreply address.
-
-- **Board DB keeps the old hashes**; checked that every consumer fails safe (skips, refuses or
-  re-probes). Consequence: `pnpm promote` needs a fresh sweep (`--dry-run` first).
-- **Remote fleet worker clones** hold the old history: re-clone.
-- **Stable board** (`../agentic-kanban-stable`) is a worktree of this repo, moved to the
-  rewritten `stable-20261003`; its built artifact is unchanged. Board servers are stopped.
-- **Tests:** typecheck green; `test:mine` full scope green (657 s, TEMP on `D:\tmp`). The
-  Dev Drive TEMP exposed a real `vital-file-guard` bug: `VITAL_FILES` was split on every `:`,
-  so a `D:\…` vital file became the bare entry `D`, which matched any command containing a
-  "d" and the real file was never backed up. Fixed in both copies, with a regression test.
-- Four tests the rewrite broke were repaired (`48103e48c`, `06c9ce4a6`).
-
 ## Archive
 
 Passes older than today have been moved **verbatim, newest first** into
 [`docs/archive/CONTINUE-archive.md`](docs/archive/CONTINUE-archive.md). Nothing is re-verified or
 edited on the way in, so each pass records what that session believed at the time. The archive
 holds:
+- **2026-10-03 (moved 2026-10-04 evening):** the history rewrite; every commit hash before 2026-10-03
+  changed (look commits up by subject or date), board DB keeps old hashes, fleet workers must re-clone.
 - **2026-09-27 afternoon (moved 2026-10-04):** ten direct fixes on an empty board, the
   supersession rule for a stuck rc, `stable-20260927-4`/`-5`.
 - **2026-09-27 morning (moved 2026-09-27 afternoon):** the merge mechanism repair (breaker, neutral
