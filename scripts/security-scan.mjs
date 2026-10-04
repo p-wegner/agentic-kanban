@@ -114,6 +114,20 @@ function runPnpmJson(args) {
     console.error("[security-scan] Refusing to report zero findings for a scan that did not run.");
     process.exit(2);
   }
+  // pnpm can also answer with parseable JSON that is an ERROR, e.g. `pnpm licenses` when
+  // node_modules lags the lockfile: `{"error":{"code":"ERR_PNPM_MISSING_PACKAGE_INDEX_FILE",…}}`.
+  // Read as data, that became a licence named "error" and crashed licenceSummary.
+  const pnpmError = parsed.error && typeof parsed.error === "object" && !Array.isArray(parsed.error) ? parsed.error : null;
+  if (pnpmError && (pnpmError.code || pnpmError.message) && Object.keys(parsed).length === 1) {
+    console.error(
+      `\n[security-scan] SCAN DID NOT RUN: 'pnpm ${args.join(" ")}' returned an error: ${pnpmError.code ?? ""} ${pnpmError.message ?? ""}`.trimEnd(),
+    );
+    if (pnpmError.code === "ERR_PNPM_MISSING_PACKAGE_INDEX_FILE") {
+      console.error("[security-scan] node_modules is behind pnpm-lock.yaml: run `pnpm install`, then scan again.");
+    }
+    console.error("[security-scan] Refusing to report zero findings for a scan that did not run.");
+    process.exit(2);
+  }
   return parsed;
 }
 
