@@ -530,7 +530,7 @@ export function createRemoteAgentService(
       worktreePath, sessionId, prompt, agentArgs, onOutput,
       providerSessionId, agentCommand, keepAlive, permissionPromptTool,
       planMode, provider, profile, extraEnv, skipPermissions,
-      model, contextFiles, systemInstructions, placement, onDeferredLaunchFailure,
+      model, contextFiles, systemInstructions, placement, onDeferredLaunchFailure, builderContext,
     } = request;
     if (placement?.kind !== "remote") {
       throw new Error("remote agent service requires a remote placement");
@@ -555,6 +555,7 @@ export function createRemoteAgentService(
       prompt: effectivePrompt,
       contextFiles,
       skipPermissions,
+      builderContext,
     });
     const devPorts = resolveWorktreeDevPorts(worktreePath);
     const ports = resolveLaunchPorts(

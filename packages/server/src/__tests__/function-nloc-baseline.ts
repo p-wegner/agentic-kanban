@@ -187,6 +187,14 @@
  * value has to be passed at the point in the flow where it exists. All three factories
  * still want splitting for their own sake; this is not the ticket that does it.
  *
+ * -- #1302 builder context policy (2026-10-04) ------------------------------------------
+ *
+ *   createSessionLifecycle      621 -> 623  (+2)
+ *   createRemoteAgentService    638 -> 639  (+1)
+ *
+ * Hand-offs only: the decision lives in `agent-provider/builder-context.ts`; these lines
+ * resolve it once per Claude builder launch and carry the value into the launch request.
+ *
  * -- Ninth disclosed movement (2026-09-04, #1027 worker profile attestation) -----------
  *
  *   createRemoteAgentService    637 -> 638  (+1)
@@ -353,7 +361,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // async check plus its comment line landing inside the existing `if` body.
   "services/issue.service.ts::createIssueService": 629,
   // 618 -> 620 (#968), disclosed in the sixth movement above.
-  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 621,
+  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 623,
   "services/workflow-fork.service.ts::createWorkflowForkService": 581,
   // 573 -> 577 (#1047), disclosed in the tenth movement above. 577 -> 578 (#1164), disclosed
   // in the fourteenth movement above. 578 -> 616 (#1206, rebase): a new `workspace reopen
@@ -363,7 +371,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // are present after the rebase, so the number is the sum of the two additions, re-measured.
   "cli/commands/workspace.ts::registerWorkspaceCommand": 616,
   // 637 -> 638 (#1027), disclosed in the ninth movement above.
-  "services/agent-remote.service.ts::createRemoteAgentService": 638,
+  "services/agent-remote.service.ts::createRemoteAgentService": 639,
   "cli/commands/session.ts::registerSessionCommand": 569,
   // 564 -> 536 (#992): the PATCH field `if` chain became the table in
   // `services/project-update-fields.ts`, which is also what derives the recognized-key set.

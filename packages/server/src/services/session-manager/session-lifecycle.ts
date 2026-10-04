@@ -16,6 +16,7 @@ import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
 import { emitButlerSystemEvent } from "../butler-event-feed.js";
 import { narrowProviderName, type ProviderName } from "../agent-provider.js";
+import { resolveBuilderContext } from "../agent-provider/builder-context.js";
 import { getProviderExitBehavior } from "../agent-provider/provider-exit-behavior.js";
 import { type AgentOutputMessage, modelBelongsToProvider } from "@agentic-kanban/shared";
 import { teardownSessionState } from "./types.js";
@@ -266,8 +267,11 @@ export function createSessionLifecycle(
       effectiveSystemInstructions =
         getProviderExitBehavior("codex").injectBuilderInstructions(effectiveSystemInstructions) ?? effectiveSystemInstructions;
     }
+    // #1302: builder context policy, Claude builders only (see agent-provider/builder-context.ts).
+    const builderContext = await resolveBuilderContext(executor === "claude-code" && builderSession, projectId, workspaceId, (key) => lifecycleRepo.getPreferenceValue(key, db));
     const launchDiagnostics = {
       launch: {
+        builderContext: builderContext ?? null,
         provider: executor,
         profile: profile?.name ?? null,
         resolvedModel: effectiveModel ?? null,
@@ -666,7 +670,7 @@ export function createSessionLifecycle(
         provider, profile: launchProfile, extraEnv: effectiveExtraEnv, skipPermissions,
         model: effectiveModel, contextFiles,
         systemInstructions: (effectiveSystemInstructions ?? "").trim() || undefined,
-        containerProvision, placement: effectivePlacement,
+        containerProvision, placement: effectivePlacement, builderContext,
         onOutput: (event) => {
           if (event.type === "exit") {
             if (state.sessionExitHandled.has(sessionId)) {

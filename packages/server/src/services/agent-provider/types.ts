@@ -76,6 +76,12 @@ export interface ProviderLaunchOptions {
    * approvals. Ignored without `oneShotText`.
    */
   oneShotAllowEdits?: boolean;
+  /**
+   * Builder context policy (#1302). `isolated` makes the Claude provider add
+   * `--setting-sources project,local`; undefined or `inherit` leaves the launch args as before.
+   * Other providers ignore it (see `BUILDER_CONTEXT_SUPPORT`).
+   */
+  builderContext?: "isolated" | "inherit";
 }
 
 export type { ParsedStreamEvent };
