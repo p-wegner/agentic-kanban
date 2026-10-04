@@ -54,7 +54,24 @@ export function decideTrainRedFeedbackTargets(result: TrainRunResult, members: r
   return targets;
 }
 
-/** Send each target its one turn. Never throws. */
+/**
+ * #1191: the member-vs-member conflict clusters are persisted in the train evidence; the
+ * deterministic `group-scan` mode `train-conflicts` (`propose_ticket_groups`) reads them back as
+ * candidate `coupled_with` groups — proposed, never auto-applied, since coupling two tickets is
+ * an operator's call (decision 015). Moved here from `merge-queue-train.ts` (god-module ceiling).
+ */
+export function logTrainConflictClusters(label: string, result: Pick<TrainRunResult, "conflictClusters">): void {
+  if (result.conflictClusters && result.conflictClusters.length > 0) {
+    console.log(`[merge-train] ${label}: ${result.conflictClusters.length} member-vs-member conflict cluster(s) recorded — ` +
+      `run propose_ticket_groups mode=train-conflicts to review them as candidate ticket groups`);
+  }
+}
+
+/**
+ * Send each target its one turn. Never throws. #1298: a bisected-out member, or every implicated
+ * member of an agent-fix train that stayed red, gets the same one builder turn a single-workspace
+ * gate red does (#1293).
+ */
 export async function sendTrainRedFeedback(
   result: TrainRunResult,
   members: readonly TrainMember[],
