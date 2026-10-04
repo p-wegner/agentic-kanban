@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseAgentProviderStreamLine, parseAgentProviderStreamLineObserved } from "@agentic-kanban/shared/lib/agent-stream-parser";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
+import { BUILDER_CONTEXT_SETTING_SOURCES } from "./builder-context.js";
 import { getMcpConfigPath, buildSpawnEnv, spliceAgentArgs, nodeFileSystem, profileDefinesCustomEndpoint, resolveMockLaunch, commandCarriesArgs } from "./helpers.js";
 
 export class ClaudeProvider implements AgentProvider {
@@ -98,6 +99,9 @@ export class ClaudeProvider implements AgentProvider {
         if (this.fs.existsSync(settingsPath)) {
           args.push("--settings", settingsPath);
         }
+      }
+      if (options.builderContext === "isolated") {
+        args.push("--setting-sources", BUILDER_CONTEXT_SETTING_SOURCES);
       }
       // Pass the selected model tier — but not for profiles routed to a custom endpoint
       // (e.g. z.ai/glm), which don't understand Claude aliases and supply their own model via env.

@@ -429,7 +429,7 @@ export function launch(request: AgentLaunchRequest): ChildProcess {
     worktreePath, sessionId, prompt, agentArgs, onOutput,
     providerSessionId, agentCommand, keepAlive, permissionPromptTool,
     planMode, provider, profile, extraEnv, skipPermissions,
-    model, contextFiles, systemInstructions, containerProvision,
+    model, contextFiles, systemInstructions, containerProvision, builderContext,
   } = request;
   // #524: shared with the remote path, which used to skip this entirely.
   const effectivePrompt = resolveEffectivePrompt(prompt, provider, contextFiles);
@@ -449,6 +449,7 @@ export function launch(request: AgentLaunchRequest): ChildProcess {
     piExtensionPaths: provider === "pi" ? piExtensionFiles(worktreePath) : undefined,
     piSkillPaths: provider === "pi" ? materializedSkillFiles(worktreePath) : undefined,
     skipPermissions,
+    builderContext,
   });
   const ports = resolveLaunchPorts(process.env, resolveWorktreeDevPorts(worktreePath));
   // Converge the two env pipelines (#167): compute the FULL child env (provider

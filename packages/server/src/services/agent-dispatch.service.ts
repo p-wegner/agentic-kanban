@@ -147,6 +147,8 @@ export interface AgentLaunchRequest {
   model?: string;
   contextFiles?: string[];
   systemInstructions?: string;
+  /** Builder context policy (#1302); see `agent-provider/builder-context.ts`. */
+  builderContext?: "isolated" | "inherit";
   /**
    * When present the agent runs INSIDE this provisioned devcontainer instead of on the
    * host. Provisioning is async and happens in the caller; launching stays synchronous.
