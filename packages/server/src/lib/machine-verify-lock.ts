@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -176,6 +177,12 @@ export interface MachineLockContents {
   holder: string;
   acquiredAt: string;
   heartbeatAt: string;
+  /**
+   * Unique per acquisition. pid + acquiredAt alone is not unique: one process can release and
+   * re-acquire inside the same millisecond, and a stale handle then deleted the new lock (seen
+   * on the Linux CI runner). Optional so a lockfile from an older writer still parses.
+   */
+  token?: string;
 }
 
 export interface MachineLockHandle {
@@ -344,6 +351,7 @@ export function attemptMachineVerifyLock(
     holder,
     acquiredAt: new Date(nowMs).toISOString(),
     heartbeatAt: new Date(nowMs).toISOString(),
+    token: randomUUID(),
   };
 
   try {
@@ -433,7 +441,9 @@ function writeLockFile(lockPath: string, contents: MachineLockContents, flag?: "
 function buildHandle(lockPath: string, contents: MachineLockContents): MachineLockHandle {
   const stillOurs = () => {
     const current = readLockContents(lockPath);
-    return !!current && current.pid === contents.pid && current.acquiredAt === contents.acquiredAt;
+    return !!current && (current.token !== undefined || contents.token !== undefined
+      ? current.token === contents.token
+      : current.pid === contents.pid && current.acquiredAt === contents.acquiredAt);
   };
   return {
     path: lockPath,

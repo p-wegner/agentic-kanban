@@ -125,10 +125,13 @@ describe("machine verify lock: shared module vs scripts/ mirror", () => {
   });
 
   it("the script releases only its own lock, never the shared module's", () => {
-    const theirs = script.attemptMachineVerifyLock("a-builder");
+    // ONE millisecond for both acquisitions, in one process: pid + acquiredAt then match, which is
+    // what the Linux CI runner hit by being fast. Only the per-acquisition token tells them apart.
+    const sameMs = Date.now();
+    const theirs = script.attemptMachineVerifyLock("a-builder", sameMs);
     if (theirs.outcome !== "acquired") throw new Error("expected to acquire");
     theirs.handle.release();
-    const mine = attemptMachineVerifyLock(MACHINE_VERIFY_ROLES.gate, "the-gate");
+    const mine = attemptMachineVerifyLock(MACHINE_VERIFY_ROLES.gate, "the-gate", sameMs);
     if (mine.outcome !== "acquired") throw new Error("expected to acquire");
     // The script's stale handle must not remove the gate's lock.
     theirs.handle.release();

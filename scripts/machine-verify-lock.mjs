@@ -18,6 +18,7 @@
 // the `builder-test` role) and no skip path (a builder always proceeds).
 
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -140,6 +141,9 @@ export function attemptMachineVerifyLock(holder, nowMs = Date.now(), env = proce
     holder,
     acquiredAt: new Date(nowMs).toISOString(),
     heartbeatAt: new Date(nowMs).toISOString(),
+    // Unique per acquisition: pid + acquiredAt collide when one process re-acquires inside the
+    // same millisecond (mirrors packages/server/src/lib/machine-verify-lock.ts).
+    token: randomUUID(),
   };
   try {
     mkdirSync(join(lockPath, ".."), { recursive: true });
@@ -206,7 +210,9 @@ function writeLockFile(lockPath, contents, flag) {
 function buildHandle(lockPath, contents) {
   const stillOurs = () => {
     const current = readLockContents(lockPath);
-    return !!current && current.pid === contents.pid && current.acquiredAt === contents.acquiredAt;
+    return !!current && (current.token !== undefined || contents.token !== undefined
+      ? current.token === contents.token
+      : current.pid === contents.pid && current.acquiredAt === contents.acquiredAt);
   };
   return {
     path: lockPath,
