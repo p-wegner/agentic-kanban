@@ -54,6 +54,8 @@ export interface TabState {
   selectedModel: string;
   sending: boolean;
   input: string;
+  /** Pasted screenshots (data URLs) waiting to be sent with the next message. */
+  pendingImages?: string[];
   profiles: string[];
   selectedProfile: string;
   globalProfile: string;

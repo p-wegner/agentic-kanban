@@ -57,6 +57,8 @@ export interface ButlerChatMessage {
   question?: ButlerQuestionPrompt;
   /** Set when a sub-agent produced this message (id of the Agent/Task tool call that spawned it). */
   parentToolId?: string;
+  /** Pasted screenshots (data URLs) attached to a user message. */
+  images?: string[];
 }
 
 /** Accumulator for streamed assistant text within a single turn. */

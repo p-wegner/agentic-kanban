@@ -45,6 +45,8 @@ import { required, arrayOnly, requiredTrimmed, unchecked, optionalStringOrNull }
  */
 export const butlerMessageBody = z.object({
   content: required("content is required"),
+  /** Pasted screenshots as `data:image/...;base64,` URLs; invalid entries are dropped by the turn. */
+  images: unchecked<string[]>(),
 }).passthrough();
 
 /**

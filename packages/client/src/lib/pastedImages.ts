@@ -37,6 +37,11 @@ export function handleImagePaste(
   return false;
 }
 
+/** Text of a chat turn: the trimmed input, or a stand-in when only images were pasted. */
+export function turnText(input: string, images?: string[]): string {
+  return input.trim() || (images?.length ? "(see attached image)" : "");
+}
+
 /**
  * Merge a description with any pasted images, appending each image as a markdown
  * reference (`![screenshot-N](dataUrl)`). Mirrors the detail-panel save logic so

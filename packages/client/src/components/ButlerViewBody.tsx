@@ -10,12 +10,13 @@ import type { ButlerVoiceButtonHandle } from "./ButlerVoiceButton.js";
 import { AgentQuestionsPanel } from "./AgentQuestionsPanel.js";
 import { ButlerVoiceButton } from "./ButlerVoiceButton.js";
 import { ButlerManageModal } from "./ButlerManageModal.js";
-import { ChatBubble } from "./ButlerChatParts.js";
+import { ChatBubble, PendingImages } from "./ButlerChatParts.js";
 import { HistoryTranscriptMessages } from "./ButlerHistoryTranscript.js";
 import type { ButlerQuestionAnswer } from "../lib/butler-event-reducer.js";
 import { ActivityStrip } from "./ButlerChrome.js";
 import { ButlerTabBar } from "./ButlerTabBar.js";
 import { Icon, Spinner } from "./Icon.js";
+import { handleImagePaste } from "../lib/pastedImages.js";
 
 interface ButlerViewBodyProps {
   activeModelOptions: readonly { value: string; label: string }[];
@@ -275,10 +276,7 @@ export function ButlerViewBody({
                 onClick={openCustomize}
                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shadow-sm"
                 title="Customize the butler's behavior (edits the project's butler skill)"
-              >
-                <span aria-hidden>Config</span>
-                <span>Customize</span>
-              </button>
+              >Customize</button>
               <button
                 onClick={() => void openHistory()}
                 className={`inline-flex items-center gap-1 px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shadow-sm ${tab.historyOpen ? "bg-gray-100 dark:bg-gray-700" : ""}`}
@@ -412,6 +410,7 @@ export function ButlerViewBody({
           <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark px-4 py-3">
             <div className="max-w-3xl mx-auto flex items-end gap-2">
               <div className="flex-1 relative">
+                <PendingImages images={tab.pendingImages} onChange={(pendingImages) => updateTab(activeTabId, { pendingImages })} />
                 {commandMenuOpen && (
                   <div className="absolute bottom-full mb-2 left-0 right-0 max-h-60 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark shadow-lg z-10 py-1">
                     <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500">Commands</div>
@@ -435,9 +434,10 @@ export function ButlerViewBody({
                   value={tab.input}
                   onChange={(e) => setTabInput(activeTabId, e.target.value)}
                   onKeyDown={handleKeyDown}
+                  onPaste={(e) => handleImagePaste(e, (url) => updateTab(activeTabId, { pendingImages: [...(tab.pendingImages ?? []), url] }))}
                   disabled={tab.sending}
                   rows={1}
-                  placeholder="Message the butler... (Enter or Ctrl+Enter to send, Shift+Enter for new line, / for commands)"
+                  placeholder="Message the butler... (paste images, Enter or Ctrl+Enter to send, Shift+Enter for new line, / for commands)"
                   className="block w-full resize-none rounded-xl border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-4 py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:focus:ring-brand-600 transition-all disabled:opacity-50"
                   style={{ minHeight: "42px", maxHeight: "160px", overflowY: "auto" }}
                   onInput={(e) => {
@@ -465,7 +465,7 @@ export function ButlerViewBody({
               ) : (
                 <button
                   onClick={() => void handleSend()}
-                  disabled={!tab.input.trim()}
+                  disabled={!tab.input.trim() && !(tab.pendingImages?.length)}
                   className="shrink-0 p-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm"
                   title="Send message"
                 >

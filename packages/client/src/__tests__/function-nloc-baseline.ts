@@ -48,7 +48,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "components/settings/ProjectSettings.tsx::ProjectSettings": 465,
   "components/AllWorkspacesPanel.tsx::AllWorkspacesPanel": 438,
   "components/CreateIssuePanel.tsx::CreateIssuePanel": 342,
-  "components/ButlerViewBody.tsx::ButlerViewBody": 415,
+  "components/ButlerViewBody.tsx::ButlerViewBody": 414,
   // 410 -> 411 (#1135): threads boardDriveOptions into BoardFilterMenu.
   "components/BoardPageView.tsx::BoardPageView": 411,
   "components/TableView.tsx::TableView": 371,
