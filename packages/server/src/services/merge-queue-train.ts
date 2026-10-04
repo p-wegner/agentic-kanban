@@ -45,6 +45,7 @@ import { resolveTrainReviewDecision, runTrainReview, type TrainReviewMember } fr
 import { baseConflictProbe, clearTrainSiding, createTrainDropSendBack, partitionSidedMembers } from "./merge-train-siding.service.js";
 import { BRANCH_ALONE_FAILURE_PREFIX } from "./auto-merge-breaker.js";
 import { describeFailedSuites } from "./verify-failed-suites.js";
+import { logTrainConflictClusters, sendTrainRedFeedback } from "./merge-train-red-feedback.js";
 import {
   buildTrainGateEvidence,
   recordBoardingComments,
@@ -914,14 +915,8 @@ export function createMergeTrainRunner(deps: {
       unregisterLiveMergeTrain(trainId);
     }
 
-    // #1191: the member-vs-member conflict clusters are persisted in the evidence above; the
-    // deterministic `group-scan` mode `train-conflicts` (`propose_ticket_groups`) reads them
-    // back as candidate `coupled_with` groups — proposed, never auto-applied, since coupling
-    // two tickets is an operator's call (decision 015).
-    if (result.conflictClusters && result.conflictClusters.length > 0) {
-      console.log(`[merge-train] ${label}: ${result.conflictClusters.length} member-vs-member conflict cluster(s) recorded — ` +
-        `run propose_ticket_groups mode=train-conflicts to review them as candidate ticket groups`);
-    }
+    await sendTrainRedFeedback(result, members, { sendTurn, headSha: (branch) => gitService.revParse(repoPath, branch) });
+    logTrainConflictClusters(label, result);
 
     // #1184: one event per member — a bisect re-drops a base-conflicting member in every
     // sub-attempt that contains it, and the queue must not hear "skipped" N times for one ticket.
