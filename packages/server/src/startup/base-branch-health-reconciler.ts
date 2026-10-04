@@ -21,6 +21,7 @@
  * `startup/`. See that file's header for the layering argument.
  */
 
+import { isNull } from "drizzle-orm";
 import { projects as projectsTable } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -80,7 +81,9 @@ export async function runBaseBranchHealthCheckOnce(
   try {
     const rows = await database
       .select({ id: projectsTable.id })
-      .from(projectsTable);
+      .from(projectsTable)
+      // #1292: an archived project is not listed and has no base to keep healthy.
+      .where(isNull(projectsTable.archivedAt));
     const prefMap = toPrefMap(await getAllPreferencesCached(database).catch(() => []));
     for (const { id } of rows) {
       try {

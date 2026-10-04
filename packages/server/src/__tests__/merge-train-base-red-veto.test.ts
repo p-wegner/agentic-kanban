@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -115,6 +116,41 @@ describe("the train departure window holds on a red base (#1204)", () => {
 
     expect(released).toHaveLength(4);
     expect(orchestrator.state.trainWindows.get(projectId)).toBeUndefined();
+  });
+
+  it("an archived project has no candidates, so no train and no veto read (#1292)", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusId } = await seedProject(db, "/tmp/repo");
+    for (let i = 0; i < 4; i++) await seedReady(db, projectId, statusId);
+    await db.update(projects).set({ archivedAt: new Date().toISOString() }).where(eq(projects.id, projectId));
+
+    const veto = vi.fn(async () => ({ healthSha: "deadbeefcafe", message: "red" }));
+    const orchestrator = createAutoMergeOrchestrator({ database: db, checkBaseRedVeto: veto });
+    const rows = await orchestrator.findCompletedWorkspaceRows();
+    await orchestrator.applyTrainWindow(rows, new Date().toISOString());
+
+    expect(rows).toEqual([]);
+    expect(veto).not.toHaveBeenCalled();
+  });
+
+  it("logs the base_red hold once per state change, not every tick (#1292)", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusId } = await seedProject(db, "/tmp/repo");
+    for (let i = 0; i < 4; i++) await seedReady(db, projectId, statusId);
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const orchestrator = createAutoMergeOrchestrator({
+        database: db,
+        checkBaseRedVeto: async () => ({ healthSha: "deadbeefcafe", message: "red" }),
+      });
+      for (let i = 0; i < 3; i++) {
+        await orchestrator.applyTrainWindow(await orchestrator.findCompletedWorkspaceRows(), new Date().toISOString());
+      }
+      const held = log.mock.calls.filter((c) => String(c[0]).includes("train window held: base_red"));
+      expect(held).toHaveLength(1);
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it("resolveBaseRedVeto reads the project's latest row and vetoes on an unresolvable repo", async () => {
