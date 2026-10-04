@@ -8,7 +8,7 @@ const WIN = process.platform === "win32";
 
 describe("pathKey through a junction (#1289)", () => {
   it("treats a path via a link and its real path as the same, including not-yet-existing children", () => {
-    const root = mkdtempSync(join(tmpdir(), "pathkey-link-"));
+    const root = mkdtempSync(join(tmpdir(), "kanban-pathkey-link-"));
     try {
       const real = join(root, "real");
       const link = join(root, "link");
