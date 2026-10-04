@@ -44,6 +44,7 @@ import {
   type MergeBackoffWorkspaceRef,
 } from "./merge-backoff.service.js";
 import { describeFailedSuites } from "./verify-failed-suites.js";
+import { GATE_RED_MAX_FEEDBACK_TURNS, sendGateRedFeedback } from "./gate-red-feedback.js";
 
 /** Identical guard failures on one commit before the workspace is taken out of the loop. */
 export const DETERMINISTIC_GUARD_REPEATS = 2;
@@ -68,13 +69,19 @@ export interface VerifyFailedEscalationDeps {
   now?: string;
   /** Injectable for tests; defaults to `git rev-parse HEAD` in the worktree. */
   getBranchHeadSha?: (workingDir: string) => Promise<string | null>;
+  /** #1293: delivers the red-gate feedback turn to the builder (`workspaceSessionService.sendTurn`). */
+  sendBuilderTurn?: (workspaceId: string, content: string) => Promise<unknown>;
+  /** The caller already wrote this failure's backoff row (the monitor path); do not write a second. */
+  backoffRecorded?: boolean;
 }
 
 export interface VerifyFailedEscalation {
   /** How many identical failures the backoff row now counts (null when nothing was recorded). */
   failures: number | null;
-  /** True when this call took the workspace out of the loop (deterministic rule fired). */
+  /** True when this call took the workspace out of the loop (deterministic rule or turn cap). */
   escalated: boolean;
+  /** #1293: the builder feedback turn number sent by this call (null when none, or already sent for this head). */
+  feedbackTurn?: number | null;
 }
 
 /**
@@ -123,7 +130,8 @@ export async function escalateVerifyFailedSkip(
       workingDir: skip.workingDir,
       issueNumber: skip.issueNumber,
     };
-    const recorded = await recordMergeFailure(ref, skip.reason, {
+    // The monitor path records its own backoff row before it gets here (#1293).
+    const recorded = deps.backoffRecorded ? null : await recordMergeFailure(ref, skip.reason, {
       database,
       now: () => new Date(now),
       broadcast: deps.broadcast,
@@ -131,16 +139,29 @@ export async function escalateVerifyFailedSkip(
       signatureKey: verifyFailedSignatureKey(headSha, failedSuites, skip.reason),
     });
     const failures = recorded?.failures ?? null;
-    if (!shouldEscalateDeterministicFailure({ guardFailure, failures })) return { failures, escalated: false };
+    // #1293 — a red gate that named suites goes back to the builder BEFORE any escalation; only
+    // once the turn cap is spent (and the head moved without going green) does a human hear.
+    const feedback = await sendGateRedFeedback(
+      { workspaceId: skip.workspaceId, headSha, failedSuites, guardFailure },
+      { sendBuilderTurn: deps.sendBuilderTurn },
+    );
+    if (feedback.decision === "send" || feedback.decision === "await-builder") {
+      return { failures, escalated: false, feedbackTurn: feedback.attempt ?? null };
+    }
+    const capReached = feedback.decision === "cap-reached";
+    if (!capReached && !shouldEscalateDeterministicFailure({ guardFailure, failures })) return { failures, escalated: false };
 
     await exhaustMergeBackoff(database, skip.workspaceId);
     await clearWorkspaceReadyForMerge(skip.workspaceId, now, database);
-    const named = describeFailedSuites({ files: failedSuites, guardFailure: true });
-    const summary =
-      `Auto-merge stopped re-gating workspace ${skip.workspaceId}${skip.issueNumber != null ? ` (#${skip.issueNumber})` : ""}: ` +
-      `${named} failed ${failures}x on the same commit${headSha ? ` (${headSha.slice(0, 8)})` : ""}. ` +
-      "A guard/ratchet fails the same way every run, so the gate will not run again until the branch gains new work — " +
-      "fix the guard failure and push, or land it by hand.";
+    const named = describeFailedSuites({ files: failedSuites, guardFailure });
+    const who = `workspace ${skip.workspaceId}${skip.issueNumber != null ? ` (#${skip.issueNumber})` : ""}`;
+    const summary = capReached
+      ? `Auto-merge stopped re-gating ${who}: the pre-merge gate is still red after ${GATE_RED_MAX_FEEDBACK_TURNS} builder feedback turn(s) — ${named}` +
+        `${headSha ? ` (${headSha.slice(0, 8)})` : ""}. The gate will not run again until the branch gains new work — fix the failure and push, or land it by hand.`
+      : `Auto-merge stopped re-gating ${who}: ` +
+        `${named} failed ${failures}x on the same commit${headSha ? ` (${headSha.slice(0, 8)})` : ""}. ` +
+        "A guard/ratchet fails the same way every run, so the gate will not run again until the branch gains new work — " +
+        "fix the guard failure and push, or land it by hand.";
     const workspace = await getWorkspaceIssueContext(skip.workspaceId, database).catch(() => undefined);
     if (workspace) {
       await insertIssueComment({

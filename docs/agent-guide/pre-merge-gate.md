@@ -100,6 +100,30 @@ fan-out (`fanOutPluginSkills`, which also replaces a dangling junction) before c
 `selector ABSENT (<path> is not in the worktree …)` instead of a bare `selection UNKNOWN`, and
 `test-mine.mjs` names a `$HOME` hit.
 
+**A red gate goes back to the builder (#1293).** Measured on #1292: implement-exit green, review
+green, then the gate failed an always-run guard and the board only logged `merge backoff active` —
+a human sent the builder the turn. Now both red verdicts take the same road:
+
+- **Implement-exit** (`impact`/`full` levels) runs the verify script with the gate's own env, so
+  the `@gate:always-run` guard top-up runs on top of the selection (`test-mine.mjs`), and
+  `guards_at_merge` is honoured the same way (`intersecting` defers bare markers to the base
+  sweep, `all` forces the floor). A red names its failing suites in ONE feedback turn
+  (`startup/exit/implement-exit-check.ts`, cap 2). The `typecheck`/`none` posture levels run no
+  tests by design, so they never carried guards; the gate is their only guard run.
+- **Pre-merge gate** (`services/gate-red-feedback.ts`, called from `escalateVerifyFailedSkip` for
+  the auto-merge `verify_failed` skip and from the monitor's `isPreMergeGateFailure` branch): a red
+  that NAMED failing suites sends the builder ONE turn with `describeFailedSuites` and the full
+  verify log path. One turn per branch head (a backoff re-gate of the same head never re-sends and
+  does not escalate), at most 2 per workspace, count reset on a landing. The builder's new commit
+  goes through implement-exit, review and the gate again. Past the cap, today's escalation:
+  readyForMerge cleared, backoff pinned, comment + drive obstacle.
+- **No turn for infra-class reds**: `verify_timeout`, `verify_infra_missing` and a process-kill exit
+  carry no `failedSuites`, so `decideGateRedFeedback` returns `not-actionable`.
+- **Never a merge path.** The feedback only talks to the builder; a red gate still routes to
+  neither fix-and-merge nor an ungated merge (#638). An undeliverable turn (builder busy) is not
+  counted and falls back to the older deterministic-guard rule. State is in memory (a restart
+  allows one more round). Tests: `gate-red-feedback.test.ts`.
+
 
 ## Inner loop, test:mine and typecheck (from Common Commands)
 - **Inner loop (default while editing) — the impact selection, not the package suite (#953).** `test:mine` with no scope runs WHOLE packages, so the "fast loop" on a server-side ticket is thousands of tests; the test-impact skill picks ~6 files in ~0.4s from the same change. Run from the worktree root, guarded because the copy is best-effort:
