@@ -3,9 +3,47 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
-## 2026-10-04 — #1289/#1292/#1293 live, a red gate goes back to the builder, master pushed
+## 2026-10-04 afternoon — after the reboot: stable-20261004-4 live, three board flaws fixed
 
-**State.** Stable board runs `stable-20261004-2` (`98d5d2156`), promoted by `pnpm promote` on a
+**State.** Stable board runs `stable-20261004-4` (`8c386cc73`, adds #1295–#1298 and the
+afternoon direct fixes), promoted on a green full sweep of `rc/20261004-3` at 14:41 UTC.
+`origin/master` = `master`; the push range was scrubbed against the confidential-terms list
+(0 hits; the parse was checked against a known term first). **The master commits for
+#1303–#1305 are NOT on the stable board yet**: they go live with the next promotion. Board:
+agentic-kanban has #1290 (placeholder) and #1302 (feature, not started) open.
+
+- **#1300 closed, no code change.** Two board sweeps of `rc/20261004-3` (12:37 and 13:35 UTC)
+  went red with every visible suite passing and `failedSuites: null`. Not memory: 11–14 GB were
+  free both times. Both ran beside an active builder. The same sha was green three times: in
+  a worktree, as a faithful single-branch clone with `buildBaseProbeEnv` (887 s), and in a
+  third board sweep on a quiet box. The cause of the two reds is unknown, because the sweep
+  threw its evidence away (next item). If a sweep goes red again, read its log first.
+- **#1303** a red sweep stored only `tail(stderr + stdout, 40)`, i.e. the end of stdout, while
+  `test:mine` writes its verdict to stderr. It now goes through `summarizeVerifyFailure`
+  (full log `<tmp>/kanban-verify-base-health-<project>-<branch>.log`, named in the
+  `[full verify log: …]` trailer) and leads with the last 15 stderr lines. Check: new case in
+  `base-branch-health-flake-retry.test.ts` (9/9 green); server `tsc` clean.
+- **#1304** `runPluginCommand`'s timeout killed `cmd.exe` before `taskkill /T` walked its
+  children, so the grandchild lived on. Every `plugin-exec-progress.test.ts` run left a `node
+  hang.mjs` behind. Check: new tree-kill test fails on the old order and passes on the fix.
+- **#1305** `pnpm promote` hung in `pnpm install` when the lockfile changed. On Windows the
+  running board holds libsql's native module and the Agent SDK's `claude.exe` open inside
+  `node_modules`, and the modules purge waits on them forever (11 min idle today, old board
+  `degraded`, unblocked by stopping both by hand). `deployRef` now stops the board first.
+  Check: `--dry-run` + promote-plan tests (88/88). Not yet seen live: the next promotion that
+  changes the lockfile is its proof.
+- **#1302 filed:** lean, controlled context for Claude Code builders. Today every builder
+  inherits the user scope (ACP and Herdr hooks, user CLAUDE.md, ~20 user skills), because
+  `--settings` adds to `~/.claude/settings.json` instead of replacing it.
+- **Box:** Fast Startup is off, so a shutdown frees the Defender kernel-pool leak. Nonpaged pool
+  was already 1.9 GB about an hour after the reboot.
+
+**Next:** watch the first real red pre-merge gate (#1293: the builder must get the turn without
+a human), and promote again so #1303–#1305 go live.
+
+## 2026-10-04 morning — #1289/#1292/#1293 live, a red gate goes back to the builder, master pushed
+
+**State (superseded by the afternoon pass above).** Stable board ran `stable-20261004-2` (`98d5d2156`), promoted by `pnpm promote` on a
 full green sweep of `rc/20261004-2`; `origin/master` = `master` = `98d5d2156`. Board: no
 agentic-kanban ticket open except #1290 (owner's placeholder, `no-auto-start`).
 
@@ -30,7 +68,6 @@ agentic-kanban ticket open except #1290 (owner's placeholder, `no-auto-start`).
   time on C: (0.24 entries per file; 0.02 on the Dev Drive). The idle board is at 44–76/min.
   Full write-up outside the repo.
 
-**Next:** watch the first real red pre-merge gate: the builder must get the turn without a human.
 
 ## 2026-10-03 — history rewritten; every commit hash before today changed
 
