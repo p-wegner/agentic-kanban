@@ -24,8 +24,14 @@ describe("findHuskDirs (#1126)", () => {
     expect(husks).toEqual(["/w/husk"]);
   });
 
-  it("normalizes case/trailing separators (Windows paths) before comparing", () => {
+  // Case folding is Windows-only by design (`normKey`): POSIX paths are case-sensitive.
+  it.runIf(process.platform === "win32")("normalizes case/trailing separators (Windows paths) before comparing", () => {
     const husks = findHuskDirs(["C:/w/ak-1"], ["c:\\w\\ak-1\\"], []);
+    expect(husks).toEqual([]);
+  });
+
+  it("ignores a trailing separator before comparing", () => {
+    const husks = findHuskDirs(["/w/ak-1"], ["/w/ak-1/"], []);
     expect(husks).toEqual([]);
   });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../services/process-exec.js", () => ({
   listOsProcesses: vi.fn(async () => []),
@@ -24,6 +24,17 @@ describe("reapOrphanedFixtureServers — namespace-matched orphans (#1121)", () 
   beforeEach(() => {
     vi.mocked(taskkillTree).mockClear();
     vi.mocked(listOsProcesses).mockReset();
+    // Off Windows the reaper kills with process.kill(pid, "SIGKILL") instead of taskkillTree.
+    // Route that to the same mock, so the fake pids are never signalled for real and every
+    // assertion below holds on both platforms (CI runs Linux).
+    const realKill = process.kill.bind(process);
+    vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: string | number) => {
+      if (signal === "SIGKILL") { void taskkillTree(pid); return true; }
+      return realKill(pid, signal);
+    }) as typeof process.kill);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("kills an orphan whose command line references a recognised fixture namespace dir, even with an unmarked script name", async () => {
