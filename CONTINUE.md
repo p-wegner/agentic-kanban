@@ -3,14 +3,19 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
-## 2026-10-04 afternoon — after the reboot: stable-20261004-4 live, three board flaws fixed
+## 2026-10-04 afternoon — after the reboot: stable-20261004-5 live, three board flaws fixed
 
-**State.** Stable board runs `stable-20261004-4` (`8c386cc73`, adds #1295–#1298 and the
-afternoon direct fixes), promoted on a green full sweep of `rc/20261004-3` at 14:41 UTC.
-`origin/master` = `master`; the push range was scrubbed against the confidential-terms list
-(0 hits; the parse was checked against a known term first). **The master commits for
-#1303–#1305 are NOT on the stable board yet**: they go live with the next promotion. Board:
-agentic-kanban has #1290 (placeholder) and #1302 (feature, not started) open.
+**State.** Stable board runs `stable-20261004-5` (`9adcdda3d` = `master` = `origin/master`),
+which carries #1295–#1298 and #1303–#1305. `stable-20261004-4` (`8c386cc73`) went live first, on
+a green sweep of `rc/20261004-3` at 14:41 UTC. Each push range was scrubbed against the
+confidential-terms list (0 hits; the parse was checked against a known term first). Board:
+agentic-kanban has #1290 (placeholder) and #1302 (feature, Backlog) open.
+
+- **#1306 closed, a real red, healed on the candidate.** `rc/20261004-4` failed `check:arch` in
+  20 s: #1303 had pushed `base-branch-health.service.ts` to 1023 lines, over the god-module
+  ceiling (unit tests and `tsc` were run before that commit, `check:arch` was not). The red
+  verdict logic moved to `base-branch-red-outcome.ts` (service 868 lines, re-exports kept);
+  the rc was fast-forwarded to that commit, swept green and promoted.
 
 - **#1300 closed, no code change.** Two board sweeps of `rc/20261004-3` (12:37 and 13:35 UTC)
   went red with every visible suite passing and `failedSuites: null`. Not memory: 11–14 GB were
@@ -39,7 +44,7 @@ agentic-kanban has #1290 (placeholder) and #1302 (feature, not started) open.
   was already 1.9 GB about an hour after the reboot.
 
 **Next:** watch the first real red pre-merge gate (#1293: the builder must get the turn without
-a human), and promote again so #1303–#1305 go live.
+a human); the first red sweep on `-5` should name its cause via the #1303 log.
 
 ## 2026-10-04 morning — #1289/#1292/#1293 live, a red gate goes back to the builder, master pushed
 
