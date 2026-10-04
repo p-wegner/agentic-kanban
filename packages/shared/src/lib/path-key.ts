@@ -17,7 +17,8 @@
 // `@agentic-kanban/shared/lib/path-key`, never the client-reachable barrel.
 // `normalizeSlashes` is the platform-free half the client can use.
 
-import { resolve } from "node:path";
+import { realpathSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 
 /**
  * Forward-slash a path without resolving it. Platform-free and safe anywhere,
@@ -35,6 +36,28 @@ function stripTrailingSeparators(p: string): string {
 }
 
 /**
+ * `resolve`, then follow junctions/symlinks (#1289): `C:\projects\work` can be a
+ * junction to `D:\projects\work`, while git reports the real path. A path that does
+ * not exist yet resolves its deepest existing ancestor and re-appends the rest.
+ */
+function realResolve(p: string): string {
+  const abs = resolve(p);
+  let existing = abs;
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      const real = realpathSync.native(existing);
+      return tail.length ? join(real, ...tail.reverse()) : real;
+    } catch {
+      const parent = dirname(existing);
+      if (parent === existing) return abs;
+      tail.push(basename(existing));
+      existing = parent;
+    }
+  }
+}
+
+/**
  * A canonical comparison key for a filesystem path: absolute, forward-slashed,
  * no trailing separator, and case-folded ONLY on Windows.
  *
@@ -42,7 +65,7 @@ function stripTrailingSeparators(p: string): string {
  * for those. This is purely an equality key.
  */
 export function pathKey(p: string): string {
-  const canonical = stripTrailingSeparators(normalizeSlashes(resolve(p)));
+  const canonical = stripTrailingSeparators(normalizeSlashes(realResolve(p)));
   return process.platform === "win32" ? canonical.toLowerCase() : canonical;
 }
 

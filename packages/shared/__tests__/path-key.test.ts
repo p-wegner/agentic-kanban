@@ -1,8 +1,27 @@
 import { describe, it, expect } from "vitest";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
+import { mkdtempSync, mkdirSync, symlinkSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { pathKey, samePath, isPathInside, normalizeSlashes, rewritePathPrefix } from "../src/lib/path-key.js";
 
 const WIN = process.platform === "win32";
+
+describe("pathKey through a junction (#1289)", () => {
+  it("treats a path via a link and its real path as the same, including not-yet-existing children", () => {
+    const root = mkdtempSync(join(tmpdir(), "pathkey-link-"));
+    try {
+      const real = join(root, "real");
+      const link = join(root, "link");
+      mkdirSync(join(real, "wt"), { recursive: true });
+      symlinkSync(real, link, "junction");
+      expect(samePath(join(link, "wt"), join(real, "wt"))).toBe(true);
+      expect(samePath(join(link, "missing", "x"), join(real, "missing", "x"))).toBe(true);
+      expect(samePath(join(link, "wt"), join(real, "other"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("pathKey (#532)", () => {
   it("is stable across trailing separators", () => {
