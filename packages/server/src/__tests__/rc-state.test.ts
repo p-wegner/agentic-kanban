@@ -144,6 +144,16 @@ describe("reuse vs cut vs abandon (#1238 items 1 and 4)", () => {
     expect(planRcCandidate({ dateStamp: "20260924", state, existingBranches: branches, nowMs: NOW, isShipped: () => false }).action).toBe("reuse");
   });
 
+  it("ABANDONS an in-flight candidate that has diverged from what the stable board runs", () => {
+    // rc/20261002 after the 2026-10-03 history rewrite: `sweeping` on a pre-rewrite sha that stable
+    // neither contains nor precedes. Reused on every run, then refused as not-a-descendant.
+    const state = upsertRcCandidate(fixture(), "rc/20260923", { state: "sweeping", sha: "def1234567890" }, hoursAgo(2));
+    const plan = planRcCandidate({ dateStamp: "20260924", state, existingBranches: branches, nowMs: NOW, isDiverged: (sha) => sha === "def1234567890" });
+    expect(plan).toMatchObject({ action: "cut", branch: "rc/20260924", abandon: "rc/20260923" });
+    expect(plan.reason).toContain("diverged");
+    expect(planRcCandidate({ dateStamp: "20260924", state, existingBranches: branches, nowMs: NOW, isDiverged: () => false }).action).toBe("reuse");
+  });
+
   it("does not reuse a candidate whose branch no longer exists in git", () => {
     const state = upsertRcCandidate(fixture(), "rc/20260923", { state: "cut" }, hoursAgo(1));
     const plan = planRcCandidate({ dateStamp: "20260924", state, existingBranches: ["rc/20260922"], nowMs: NOW });
@@ -184,6 +194,8 @@ describe("the server mirror (services/rc-state.ts) agrees with the script on one
     expect(server.planRcCandidate(reuseInput)).toEqual(planRcCandidate(reuseInput));
     const shippedInput = { ...reuseInput, isShipped: () => true };
     expect(server.planRcCandidate(shippedInput)).toEqual(planRcCandidate(shippedInput));
+    const divergedInput = { ...reuseInput, isDiverged: () => true };
+    expect(server.planRcCandidate(divergedInput)).toEqual(planRcCandidate(divergedInput));
     expect(server.nextRcBranch("20260924", ["rc/20260924"])).toBe(nextRcBranch("20260924", ["rc/20260924"]));
     expect(server.sortRcBranches(["rc/20260923", "rc/20260924-2", "rc/20260924"])).toEqual(sortRcBranches(["rc/20260923", "rc/20260924-2", "rc/20260924"]));
     expect([...server.RC_STATES]).toEqual([...RC_STATES]);

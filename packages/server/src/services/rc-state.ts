@@ -122,6 +122,7 @@ export function planRcCandidate({
   nowMs = Date.now(),
   cadenceMs = DEFAULT_RC_CADENCE_MS,
   isShipped = () => false,
+  isDiverged = () => false,
 }: {
   dateStamp: string;
   state: RcStateFile;
@@ -130,6 +131,8 @@ export function planRcCandidate({
   cadenceMs?: number;
   /** Does the stable board already contain this sha? Such a candidate is superseded (see the script). */
   isShipped?: (sha: string) => boolean;
+  /** Is this sha neither in nor ahead of what the stable board runs? Such a candidate is abandoned (see the script). */
+  isDiverged?: (sha: string) => boolean;
 }): RcCandidatePlan {
   const inFlight = state.candidates
     .filter((c) => !isTerminalRcState(c.state) && existingBranches.includes(c.branch))
@@ -144,6 +147,14 @@ export function planRcCandidate({
         branch: nextRcBranch(dateStamp, existingBranches),
         abandon: candidate.branch,
         reason: `${candidate.branch} (${candidate.sha.slice(0, 10)}) is already contained in what the stable board runs — superseded, abandoning it and cutting a fresh candidate from master's tip`,
+      };
+    }
+    if (candidate.sha && isDiverged(candidate.sha)) {
+      return {
+        action: "cut",
+        branch: nextRcBranch(dateStamp, existingBranches),
+        abandon: candidate.branch,
+        reason: `${candidate.branch} (${candidate.sha.slice(0, 10)}) has diverged from what the stable board runs (neither contained in it nor descending from it, e.g. after a history rewrite) and can never be promoted — abandoning it and cutting a fresh candidate from master's tip`,
       };
     }
     const sinceMs = candidate.updatedAt ? Date.parse(candidate.updatedAt) : Number.NaN;

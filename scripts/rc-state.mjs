@@ -170,11 +170,14 @@ export function upsertRcCandidate(state, branch, patch, atIso = new Date().toISO
  *    its state: a `--force-sweep`/`--recover` promotion moved stable past it without retiring it.
  *    rc/20260926 sat `sweeping` on a timed-out sweep that way, and every later run reused it and
  *    then refused it as "not a descendant of the stable checkout's HEAD" (2026-09-27).
+ *  - a candidate whose sha has diverged from the stable board's HEAD (`isDiverged`) is abandoned too: the
+ *    2026-10-03 history rewrite left rc/20261002 `sweeping` on a pre-rewrite sha, and every
+ *    run reused it and then refused it as not-a-descendant.
  *
  * An rc from an EARLIER day that is still in flight is reused too: a candidate is a candidate
  * until it is promoted or abandoned, and the date in its name is when it was cut, not a TTL.
  */
-export function planRcCandidate({ dateStamp, state, existingBranches = [], nowMs = Date.now(), cadenceMs = DEFAULT_RC_CADENCE_MS, isShipped = () => false } = {}) {
+export function planRcCandidate({ dateStamp, state, existingBranches = [], nowMs = Date.now(), cadenceMs = DEFAULT_RC_CADENCE_MS, isShipped = () => false, isDiverged = () => false } = {}) {
   const inFlight = state.candidates
     .filter((c) => !isTerminalRcState(c.state) && existingBranches.includes(c.branch))
     .map((c) => c.branch);
@@ -188,6 +191,14 @@ export function planRcCandidate({ dateStamp, state, existingBranches = [], nowMs
         branch: nextRcBranch(dateStamp, existingBranches),
         abandon: candidate.branch,
         reason: `${candidate.branch} (${candidate.sha.slice(0, 10)}) is already contained in what the stable board runs — superseded, abandoning it and cutting a fresh candidate from master's tip`,
+      };
+    }
+    if (candidate.sha && isDiverged(candidate.sha)) {
+      return {
+        action: "cut",
+        branch: nextRcBranch(dateStamp, existingBranches),
+        abandon: candidate.branch,
+        reason: `${candidate.branch} (${candidate.sha.slice(0, 10)}) has diverged from what the stable board runs (neither contained in it nor descending from it, e.g. after a history rewrite) and can never be promoted — abandoning it and cutting a fresh candidate from master's tip`,
       };
     }
     const sinceMs = candidate.updatedAt ? Date.parse(candidate.updatedAt) : Number.NaN;

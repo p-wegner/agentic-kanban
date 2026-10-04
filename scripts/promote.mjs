@@ -946,7 +946,9 @@ function resolveRcCandidate({ masterTip, dryRun }) {
   const stableHead = git(["rev-parse", "HEAD"], stableCheckout).stdout;
   // A candidate the stable board already contains is superseded (rc-state.mjs, planRcCandidate).
   const isShipped = (sha) => Boolean(stableHead) && git(["merge-base", "--is-ancestor", sha, stableHead], MAIN_CHECKOUT).code === 0;
-  const plan = planRcCandidate({ dateStamp: stableTagDate(), state, existingBranches: existing, cadenceMs: DEFAULT_RC_CADENCE_MS, isShipped });
+  // A candidate that does not descend from stable's HEAD can never be promoted (diverged, e.g. a rewrite).
+  const isDiverged = (sha) => Boolean(stableHead) && git(["merge-base", "--is-ancestor", stableHead, sha], MAIN_CHECKOUT).code !== 0;
+  const plan = planRcCandidate({ dateStamp: stableTagDate(), state, existingBranches: existing, cadenceMs: DEFAULT_RC_CADENCE_MS, isShipped, isDiverged });
   const at = new Date().toISOString();
   if (plan.abandon) {
     log(`[promote] rc: ABANDONING ${plan.abandon} — ${plan.reason}`);
