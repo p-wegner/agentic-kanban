@@ -1,6 +1,7 @@
 import { parseAgentProviderStreamLine, parseAgentProviderStreamLineObserved } from "@agentic-kanban/shared/lib/agent-stream-parser";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
 import { PLAN_BEGIN_MARKER, PLAN_END_MARKER } from "./types.js";
+import { codexIsolationConfigArgs } from "./builder-context.js";
 import { resolveCodexDirect, spliceAgentArgs, nodeFileSystem, resolveMockLaunch, commandCarriesArgs } from "./helpers.js";
 
 export class CodexProvider implements AgentProvider {
@@ -82,6 +83,10 @@ export class CodexProvider implements AgentProvider {
       }
       if (model) {
         args.push("--model", model);
+      }
+      // #1310: isolated builders drop the operator's user scope. Still before `resume`.
+      if (options.builderContext?.policy === "isolated") {
+        args.push(...codexIsolationConfigArgs(options.builderContext.codexUserScope));
       }
       // Denied-flag stripping is applied centrally (see DENIED_ARGS); codex has no
       // denied flags today, but routing through spliceAgentArgs keeps the guard uniform.

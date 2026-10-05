@@ -9,6 +9,12 @@ export interface BuilderContext {
   effort?: BuilderEffort;
   /** `auto` or a token count the CLI accepts (100k–1M). */
   autocompact?: string;
+  /**
+   * Codex only (#1310): the operator's user-scope MCP servers and skills found under the launch's
+   * CODEX_HOME, which an isolated builder switches off by name/path. Codex has no "drop the user
+   * scope" key, so the board has to name what to drop.
+   */
+  codexUserScope?: { mcpServers: string[]; skillPaths: string[] };
 }
 
 /** Sentinel markers wrapping the machine-readable plan block emitted by a plan-mode run. */
