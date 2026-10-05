@@ -1,3 +1,6 @@
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import type { BuilderContext, BuilderEffort } from "./types.js";
 
@@ -13,8 +16,9 @@ import type { BuilderContext, BuilderEffort } from "./types.js";
  *   `--settings settings_<profile>.json` is a separate flag source that still applies.
  * - `inherit`: the previous launch args, unchanged.
  *
- * Provider scope: Claude CLI builders only. Codex, Copilot and Pi have no settings-source
- * lever (declared unsupported, see `BUILDER_CONTEXT_SUPPORT`); the Butler and other
+ * Provider scope: Claude CLI builders (`--setting-sources`) and Codex builders (`-c` overrides,
+ * see `codexIsolationConfigArgs`, #1310). Copilot and Pi have no such lever (declared
+ * unsupported, see `BUILDER_CONTEXT_SUPPORT`); the Butler and other
  * in-process Agent SDK sessions are out of scope (they are not builders and own their
  * `settingSources`).
  */
@@ -45,15 +49,86 @@ export type { BuilderContext, BuilderEffort };
 
 export const BUILDER_CONTEXT_SUPPORT: Record<string, "supported" | string> = {
   claude: "supported",
-  codex: "unsupported: context comes from AGENTS.md and CODEX_HOME as a whole, no per-source switch",
+  codex: "supported",
   copilot: "unsupported: no settings-source switch",
   pi: "unsupported: skills and extensions are already passed explicitly by the board",
   herdr: "unsupported: Herdr hosts a pane, it is not a builder provider",
 };
 
 /**
+ * Codex isolated builder (#1310): `-c` overrides, verified against codex 0.154.0 by their effect
+ * (`codex mcp list`, `codex debug prompt-input`, a real `codex exec --json`), not by exit code.
+ * Auth, `--profile`/`--model`/`model_provider`, the project's `.codex/hooks.json` and its skills
+ * are untouched, and `CODEX_HOME` stays whatever the license ring chose, so no auth is copied.
+ *
+ * - `notify=[]`: no external notifier exe per turn.
+ * - `features.plugins=false`: no installed plugins, which also removes their MCP servers
+ *   (`codex_app`, `cua_repl`) and plugin skills.
+ * - `skills.bundled.enabled=false`: no bundled `.system` skills.
+ * - per user MCP server `mcp_servers.<name>.enabled=false`, per user skill `skills.config`.
+ *   Codex cannot be told "none of the user scope", so `discoverCodexUserScope` names them.
+ *
+ * Values avoid double quotes and whitespace: Windows spawns codex through a shell when the
+ * direct entry point cannot be resolved, and node does not escape arguments there.
+ */
+export const CODEX_ISOLATION_BASE_OVERRIDES = ["notify=[]", "features.plugins=false", "skills.bundled.enabled=false"] as const;
+const SHELL_SAFE_VALUE = /^[\w.:\\/-]+$/;
+// The board's own MCP server must survive isolation.
+const KEPT_CODEX_MCP_SERVERS = new Set(["agentic-kanban"]);
+
+export function codexIsolationConfigArgs(scope?: BuilderContext["codexUserScope"]): string[] {
+  const overrides: string[] = [...CODEX_ISOLATION_BASE_OVERRIDES];
+  for (const name of scope?.mcpServers ?? []) overrides.push(`mcp_servers.${name}.enabled=false`);
+  // One array: repeated `-c skills.config=` overrides replace each other (last wins), measured.
+  if (scope?.skillPaths.length) overrides.push(`skills.config=[${scope.skillPaths.map((p) => `{path='${p}',enabled=false}`).join(",")}]`);
+  return overrides.flatMap((value) => ["-c", value]);
+}
+
+/**
+ * User-scope MCP servers (bare-key `[mcp_servers.<name>]` headers of `<codexHome>/config.toml`) and
+ * skills (`<codexHome>/skills/<dir>/SKILL.md`, excluding the bundled `.system`). Names and paths
+ * only: no value from the config is read or logged. Best effort: anything unreadable yields none.
+ */
+export function discoverCodexUserScope(codexHome: string): NonNullable<BuilderContext["codexUserScope"]> {
+  const mcpServers = new Set<string>();
+  try {
+    for (const m of readFileSync(join(codexHome, "config.toml"), "utf8").matchAll(/^\s*\[mcp_servers\.([\w-]+)[\].]/gm)) {
+      if (!KEPT_CODEX_MCP_SERVERS.has(m[1])) mcpServers.add(m[1]);
+    }
+  } catch { /* no config.toml: nothing to switch off */ }
+  const skillPaths: string[] = [];
+  try {
+    // Not `withFileTypes`: a linked skill dir is a symlink/junction, which is not `isDirectory()`.
+    for (const name of readdirSync(join(codexHome, "skills"))) {
+      if (name.startsWith(".")) continue;
+      const path = join(codexHome, "skills", name, "SKILL.md");
+      if (SHELL_SAFE_VALUE.test(path) && existsSync(path)) skillPaths.push(path);
+    }
+  } catch { /* no user skills dir */ }
+  return { mcpServers: [...mcpServers].sort(), skillPaths };
+}
+
+/** The CODEX_HOME a launch runs under: the rotation's choice, else the inherited one, else `~/.codex`. */
+export function effectiveCodexHome(extraEnv: Record<string, string> | undefined, env: NodeJS.ProcessEnv = process.env): string {
+  return extraEnv?.CODEX_HOME?.trim() || env.CODEX_HOME?.trim() || join(homedir(), ".codex");
+}
+
+/** Whether the builder context policy covers this executor (`BUILDER_CONTEXT_SUPPORT`). */
+export function builderContextApplies(executor: string, builderSession: boolean): boolean {
+  return builderSession && (executor === "claude-code" || executor === "codex");
+}
+
+/** Codex has no "drop the user scope" key: name what to drop for the CODEX_HOME this launch runs under. Returns extraEnv untouched. */
+export function applyCodexUserScope(executor: string, builderContext: BuilderContext | undefined, extraEnv: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (executor === "codex" && builderContext?.policy === "isolated") {
+    builderContext.codexUserScope = discoverCodexUserScope(effectiveCodexHome(extraEnv));
+  }
+  return extraEnv;
+}
+
+/**
  * The effective policy for one launch, logged so the operator can see it. Undefined when the
- * launch is not a Claude builder (the policy does not apply to it).
+ * launch is not a builder of a supported provider (the policy does not apply to it).
  */
 export async function resolveBuilderContext(
   applies: boolean,

@@ -16,7 +16,7 @@ import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
 import { emitButlerSystemEvent } from "../butler-event-feed.js";
 import { narrowProviderName, type ProviderName } from "../agent-provider.js";
-import { resolveBuilderContext } from "../agent-provider/builder-context.js";
+import { applyCodexUserScope, builderContextApplies, resolveBuilderContext } from "../agent-provider/builder-context.js";
 import { getProviderExitBehavior } from "../agent-provider/provider-exit-behavior.js";
 import { type AgentOutputMessage, modelBelongsToProvider } from "@agentic-kanban/shared";
 import { teardownSessionState } from "./types.js";
@@ -267,8 +267,8 @@ export function createSessionLifecycle(
       effectiveSystemInstructions =
         getProviderExitBehavior("codex").injectBuilderInstructions(effectiveSystemInstructions) ?? effectiveSystemInstructions;
     }
-    // #1302: builder context policy, Claude builders only (see agent-provider/builder-context.ts).
-    const builderContext = await resolveBuilderContext(executor === "claude-code" && builderSession, projectId, workspaceId, (key) => lifecycleRepo.getPreferenceValue(key, db));
+    // #1302/#1310: builder context policy, Claude and Codex builders (see agent-provider/builder-context.ts).
+    const builderContext = await resolveBuilderContext(builderContextApplies(executor, builderSession), projectId, workspaceId, (key) => lifecycleRepo.getPreferenceValue(key, db));
     const launchDiagnostics = {
       launch: {
         builderContext: builderContext ?? null,
@@ -361,7 +361,8 @@ export function createSessionLifecycle(
       loadClaudeSubscriptionRing,
       getProviderExitBehavior,
     });
-    const effectiveExtraEnv = rotation.extraEnv;
+    // #1310: after rotation, so a license ring's CODEX_HOME is the one inspected.
+    const effectiveExtraEnv = applyCodexUserScope(executor, builderContext, rotation.extraEnv);
     const launchProfile = rotation.profile;
 
     // ── Exit state-machine terminal handlers ──────────────────────────────────
