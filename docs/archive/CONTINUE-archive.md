@@ -11,6 +11,35 @@ First archive pass: 2026-08-27, cutting at the 2026-08-24 boundary (`CONTINUE.md
 
 ---
 
+<!-- moved 2026-10-06 from CONTINUE.md, verbatim -->
+
+## 2026-10-04 morning — #1289/#1292/#1293 live, a red gate goes back to the builder, master pushed
+
+**State (superseded by the afternoon pass above).** Stable board ran `stable-20261004-2` (`98d5d2156`), promoted by `pnpm promote` on a
+full green sweep of `rc/20261004-2`; `origin/master` = `master` = `98d5d2156`. Board: no
+agentic-kanban ticket open except #1290 (owner's placeholder, `no-auto-start`).
+
+- **#1289** path comparisons resolve junctions (`pathKey`), so a project registered via
+  `C:\projects\…` (a junction to `D:\…`) no longer logs false RECONCILE warnings.
+- **#1292** unlisted projects get no train or base probe; the red-base hold logs once per change.
+  Check: 0 `base_red … c94e30c4` lines in 3 min on the promoted board (was ~2/min, 10,642 total).
+- **#1293** a red pre-merge gate that names failing suites sends the builder ONE feedback turn per
+  branch head (cap 2, then the old escalation); infra reds get none; never a merge path (#638).
+  Not yet seen live on a real red gate; the first one is its proof.
+- **Direct fix** `c7a4c31c8` + `449976d2d`: `planRcCandidate` abandons an rc that diverged from
+  the stable HEAD (the pre-rewrite `rc/20261002` blocked every promote). #1294 is its Done
+  record. `449976d2d` repaired the `.d.mts` declaration that `c7a4c31c8` forgot (server
+  typecheck was red on master for ~10 min).
+- **Second local rewrite before the push:** a #1289 code comment named the organisation in an
+  example path. Only `origin/master..master` (16 commits) plus `stable-20261004*` and
+  `rc/20261004*` were rewritten (`filter-repo --refs ^origin/master …`); the stable worktree
+  moved to the new `stable-20261004-2`. Refs before: `D:\backup\refs-before-push-2026-10-04.txt`.
+  **Scan only the range you push** (`log -p origin/master..master` + identities): old local rc
+  and feature branches still hold pre-rewrite history and make an all-refs scan red.
+- **Defender pool leak** (box-level, not the board): it grows with files opened for the FIRST
+  time on C: (0.24 entries per file; 0.02 on the Dev Drive). The idle board is at 44–76/min.
+  Full write-up outside the repo.
+
 <!-- moved 2026-10-04 evening from CONTINUE.md, verbatim -->
 
 ## 2026-10-03 — history rewritten; every commit hash before today changed

@@ -3,6 +3,30 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-10-06 — lean builders measured; project hooks were failing open in builders
+
+**State.** Stable board runs `stable-20261004-8` (restarted by `pnpm stable:start` on
+2026-10-05). `master` is ahead of `origin` and not promoted: it carries #1310 and #1311.
+
+- **#1311 (direct fix, critical) — every project hook failed OPEN in headless builders.**
+  `claude -p` on Windows runs hook commands through PowerShell, which reads a bare
+  `$CLAUDE_PROJECT_DIR` as an undefined variable. smart-hooks-runner (command safety), the
+  #959 cross-worktree guard, require-read-before-write and the Stop checks all
+  MODULE_NOT_FOUND'd with a non-blocking exit. Fix: `${CLAUDE_PROJECT_DIR}/` everywhere; the
+  scaffold heals old entries in place. Check: probe worktree with `KANBAN_WORKTREE_DIR`, write
+  into main → created with the old spelling, `Cross-worktree write blocked` with the new; 3
+  suites 77/77, typecheck clean. **Live only after `pnpm promote`.**
+- **#1310 (board builder, merged)** — Codex builders isolated via `-c` overrides; builder's
+  live check: prompt 30,232 → 9,893 chars, user skills 17 → 0.
+- **Lean Claude builder levers measured** (lean base 40.0k first-request tokens): auto-memory
+  off −7.8k (builders also load the operator's private MEMORY.md), tool trim −5.0k, non-core
+  skills name-only −2.4k, claude.ai connectors off −1.7k → combined 23.1k (−42%). Skills fully
+  off makes it BIGGER (the Workflow tool inlines its guide). Filed **#1312** (lean profile
+  with per-project add-backs) and **#1313** (slim CLAUDE.md for builders, −7.0k measured).
+
+**Next:** `pnpm promote --dry-run`, promote (puts #1311's guard fix live), scrub, push; then
+let a builder take #1312.
+
 ## 2026-10-04 afternoon — after the reboot: stable-20261004-8 live, board empty
 
 **State.** Stable board runs `stable-20261004-8` (`806b6a164` = `master` = `origin/master`),
@@ -73,34 +97,6 @@ checked against a known term first). Board: no open agentic-kanban ticket.
 
 **Next:** watch the first real red pre-merge gate (#1293: the builder must get the turn without
 a human); the first red sweep on `-5` should name its cause via the #1303 log.
-
-## 2026-10-04 morning — #1289/#1292/#1293 live, a red gate goes back to the builder, master pushed
-
-**State (superseded by the afternoon pass above).** Stable board ran `stable-20261004-2` (`98d5d2156`), promoted by `pnpm promote` on a
-full green sweep of `rc/20261004-2`; `origin/master` = `master` = `98d5d2156`. Board: no
-agentic-kanban ticket open except #1290 (owner's placeholder, `no-auto-start`).
-
-- **#1289** path comparisons resolve junctions (`pathKey`), so a project registered via
-  `C:\projects\…` (a junction to `D:\…`) no longer logs false RECONCILE warnings.
-- **#1292** unlisted projects get no train or base probe; the red-base hold logs once per change.
-  Check: 0 `base_red … c94e30c4` lines in 3 min on the promoted board (was ~2/min, 10,642 total).
-- **#1293** a red pre-merge gate that names failing suites sends the builder ONE feedback turn per
-  branch head (cap 2, then the old escalation); infra reds get none; never a merge path (#638).
-  Not yet seen live on a real red gate; the first one is its proof.
-- **Direct fix** `c7a4c31c8` + `449976d2d`: `planRcCandidate` abandons an rc that diverged from
-  the stable HEAD (the pre-rewrite `rc/20261002` blocked every promote). #1294 is its Done
-  record. `449976d2d` repaired the `.d.mts` declaration that `c7a4c31c8` forgot (server
-  typecheck was red on master for ~10 min).
-- **Second local rewrite before the push:** a #1289 code comment named the organisation in an
-  example path. Only `origin/master..master` (16 commits) plus `stable-20261004*` and
-  `rc/20261004*` were rewritten (`filter-repo --refs ^origin/master …`); the stable worktree
-  moved to the new `stable-20261004-2`. Refs before: `D:\backup\refs-before-push-2026-10-04.txt`.
-  **Scan only the range you push** (`log -p origin/master..master` + identities): old local rc
-  and feature branches still hold pre-rewrite history and make an all-refs scan red.
-- **Defender pool leak** (box-level, not the board): it grows with files opened for the FIRST
-  time on C: (0.24 entries per file; 0.02 on the Dev Drive). The idle board is at 44–76/min.
-  Full write-up outside the repo.
-
 
 ## Archive
 
