@@ -89,9 +89,11 @@ describe("CLAUDE.md git/worktree invariants (#598)", () => {
     ).toEqual([]);
   });
 
-  it("every hook command in .claude/settings.json is $CLAUDE_PROJECT_DIR-anchored with forward slashes", () => {
+  it("every hook command in .claude/settings.json is ${CLAUDE_PROJECT_DIR}-anchored with forward slashes", () => {
     // A hardcoded absolute path breaks on every other clone and machine; a bare relative
-    // path breaks on a CWD shift; a backslash makes node throw MODULE_NOT_FOUND.
+    // path breaks on a CWD shift; a backslash makes node throw MODULE_NOT_FOUND. The anchor
+    // must be BRACED (#1311): headless sessions run hooks through PowerShell, which reads a
+    // bare `$CLAUDE_PROJECT_DIR` as an undefined variable, so the guard fails open.
     const raw = readIfExists(".claude/settings.json");
     expect(raw, ".claude/settings.json is missing").not.toBeNull();
     const settings = JSON.parse(raw ?? "{}") as { hooks?: Record<string, unknown> };
@@ -122,11 +124,13 @@ describe("CLAUDE.md git/worktree invariants (#598)", () => {
     // exception.
     const EXEMPT_COMMANDS = new Set([DISCLOSE_CONTEXT_COMMAND]);
     const bad = commands.filter(
-      (c) => !EXEMPT_COMMANDS.has(c) && (!c.includes("$CLAUDE_PROJECT_DIR/") || c.includes("\\")),
+      (c) =>
+        !EXEMPT_COMMANDS.has(c) &&
+        (!c.includes("${CLAUDE_PROJECT_DIR}/") || /\$CLAUDE_PROJECT_DIR\b/.test(c) || c.includes("\\")),
     );
     expect(
       bad,
-      `hook commands must be "$CLAUDE_PROJECT_DIR/..."-anchored with forward slashes:\n${bad.join("\n")}`,
+      `hook commands must be "\${CLAUDE_PROJECT_DIR}/..."-anchored with forward slashes:\n${bad.join("\n")}`,
     ).toEqual([]);
 
     // The exception is REQUIRED, not merely tolerated (#1000). Exempting one spelling alone let

@@ -245,7 +245,7 @@ describe("project-scaffold", () => {
         const runnerCmd = commands.find((c) => c.includes("smart-hooks-runner.js PreToolUse"));
         expect(runnerCmd).toBeTruthy();
         // Must use $CLAUDE_PROJECT_DIR, not an absolute platform path
-        expect(runnerCmd).toContain("$CLAUDE_PROJECT_DIR");
+        expect(runnerCmd).toContain("${CLAUDE_PROJECT_DIR}/");
         expect(runnerCmd).not.toMatch(/^node [A-Z]:/i);
         expect(runnerCmd).not.toMatch(/^node \/(?!.*\$CLAUDE_PROJECT_DIR)/);
 
@@ -355,6 +355,30 @@ describe("project-scaffold", () => {
       }
     });
 
+    it("heals an existing unbraced $CLAUDE_PROJECT_DIR hook in place instead of twinning it (#1311)", async () => {
+      const dir = await tmp();
+      try {
+        await gitInit(dir);
+        await mkdir(join(dir, ".claude"), { recursive: true });
+        const stale = {
+          hooks: {
+            Stop: [{ hooks: [{ type: "command", command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/smart-hooks-runner.js Stop" }] }],
+          },
+        };
+        await writeFile(join(dir, ".claude", "settings.json"), JSON.stringify(stale, null, 2), "utf8");
+
+        ensureHookScaffold(dir, { includeWorktreeGuard: false });
+
+        const settings = JSON.parse(await readFile(join(dir, ".claude", "settings.json"), "utf8"));
+        const stopRunners = (settings.hooks.Stop as { hooks?: { command: string }[] }[])
+          .flatMap((e) => (e.hooks ?? []).map((h) => h.command))
+          .filter((c) => c.includes("smart-hooks-runner.js Stop"));
+        expect(stopRunners).toEqual(["node ${CLAUDE_PROJECT_DIR}/.claude/hooks/smart-hooks-runner.js Stop"]);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
     it("includes the worktree guard by default even when the repo has no worktrees yet (#216)", async () => {
       const dir = await tmp();
       try {
@@ -452,7 +476,7 @@ describe("project-scaffold", () => {
         const stopRunner = stopCmds.find((c: string) => c.includes("smart-hooks-runner.js Stop"));
         expect(postRunner).toBeTruthy();
         expect(stopRunner).toBeTruthy();
-        expect(postRunner).toContain("$CLAUDE_PROJECT_DIR");
+        expect(postRunner).toContain("${CLAUDE_PROJECT_DIR}/");
         expect(postRunner).not.toMatch(/^node [A-Z]:/i);
       } finally {
         await rm(dir, { recursive: true, force: true });

@@ -38,7 +38,7 @@ afterEach(() => {
   for (const dir of created.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-const GUARD_CMD = "node $CLAUDE_PROJECT_DIR/.claude/hooks/prevent-cross-worktree-writes.js";
+const GUARD_CMD = "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/prevent-cross-worktree-writes.js";
 
 function makeRepo(opts: { script?: boolean; matchers?: string[] }): string {
   const root = mkdtempSync(join(tmpdir(), "ak-hook-audit-"));

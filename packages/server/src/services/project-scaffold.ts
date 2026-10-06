@@ -368,7 +368,7 @@ function mergeSmartHooksGuardChecks(
 /**
  * Normalise a hook command for the dedupe comparison in `mergeSettingsHooks` (#1000).
  *
- * `node $CLAUDE_PROJECT_DIR/.claude/hooks/x.mjs` and `node .claude/hooks/x.mjs` name the SAME
+ * `node ${CLAUDE_PROJECT_DIR}/.claude/hooks/x.mjs` and `node .claude/hooks/x.mjs` name the SAME
  * script — the anchor only changes how the path resolves at spawn time. Comparing them as
  * distinct strings is what let a stale anchored `disclose-context.mjs` entry (re-introduced on
  * master after #922 had deliberately made it relative) gain a second, relative twin in every
@@ -421,14 +421,19 @@ function mergeSettingsHooks(
     // needs two matchers (the worktree guard runs on Write|Edit|… *and* on Bash|PowerShell),
     // and command-only dedupe dropped the second one without a word — leaving the shell
     // vector uncovered while the settings file looked like the guard was installed.
-    const alreadyPresent = arr.some((e) => {
-      if ((e.matcher ?? undefined) !== matcher) return false;
-      const innerHooks = (e.hooks as Record<string, unknown>[] | undefined) ?? [];
-      return innerHooks.some(
-        (h) => typeof h.command === "string" && normalizeHookCommand(h.command) === normalizeHookCommand(command),
-      );
-    });
-    if (alreadyPresent) continue;
+    const existing = arr
+      .filter((e) => (e.matcher ?? undefined) === matcher)
+      .flatMap((e) => (e.hooks as Record<string, unknown>[] | undefined) ?? [])
+      .find((h) => typeof h.command === "string" && normalizeHookCommand(h.command) === normalizeHookCommand(command));
+    if (existing) {
+      // Heal the unbraced anchor in place (#1311): Claude Code runs hooks through PowerShell in
+      // headless sessions, where `$CLAUDE_PROJECT_DIR` is an undefined PS variable and the
+      // guard fails open. `${CLAUDE_PROJECT_DIR}` resolves in both shells.
+      if (typeof existing.command === "string" && /\$CLAUDE_PROJECT_DIR\b/.test(existing.command)) {
+        existing.command = existing.command.replace(/\$CLAUDE_PROJECT_DIR\b/g, "${CLAUDE_PROJECT_DIR}");
+      }
+      continue;
+    }
 
     arr.push(wrapperEntry);
   }
@@ -582,14 +587,14 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
       newEntries.push({
         event: "PreToolUse",
         matcher: "Bash|PowerShell",
-        command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/vital-file-guard.js",
+        command: "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/vital-file-guard.js",
       });
     }
     if (includeWorktree) {
       newEntries.push({
         event: "PreToolUse",
         matcher: "Write|Edit|MultiEdit|NotebookEdit",
-        command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/prevent-cross-worktree-writes.js",
+        command: "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/prevent-cross-worktree-writes.js",
       });
       // Shell vector (#369): the incident commit was made by `cd <main checkout>; git commit -F`,
       // which the Write/Edit matcher above never sees. With the runner present that vector is
@@ -598,7 +603,7 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
         newEntries.push({
           event: "PreToolUse",
           matcher: "Bash|PowerShell",
-          command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/prevent-cross-worktree-writes.js",
+          command: "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/prevent-cross-worktree-writes.js",
         });
       }
     }
@@ -608,16 +613,16 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
       newEntries.push({
         event: "PreToolUse",
         matcher: "Bash|PowerShell",
-        command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/smart-hooks-runner.js PreToolUse",
+        command: "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/smart-hooks-runner.js PreToolUse",
       });
       newEntries.push({
         event: "PostToolUse",
         matcher: "Write|Edit|MultiEdit",
-        command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/smart-hooks-runner.js PostToolUse",
+        command: "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/smart-hooks-runner.js PostToolUse",
       });
       newEntries.push({
         event: "Stop",
-        command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/smart-hooks-runner.js Stop",
+        command: "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/smart-hooks-runner.js Stop",
       });
     }
     // disclose-context.mjs (#922, revised #1069) — see DISCLOSE_CONTEXT_COMMAND's own doc

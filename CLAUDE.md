@@ -54,7 +54,7 @@ Start Mode, Conductor, worker fleet, bundled skills, plugins, promotion: `docs/a
 - **A builder writes ONLY in its own worktree** (#959) — any other repo is hard-blocked; if a card needs a change elsewhere, file a ticket against that project.
 - **Commit messages: no UTF-8 BOM** (#976) — write the `-F` file with Bash, never a PowerShell redirect.
 - **Time-dependent code:** inject `now?: string` (ISO, persisted) or `nowMs?: number` (arithmetic) — no other spelling (`time-injection-spelling-ratchet.test.ts`); seed test timestamps relative to `Date.now()`, never hardcoded ISO.
-- **Hooks:** `settings.json` hook commands use forward slashes and `$CLAUDE_PROJECT_DIR/`-prefixed paths. New Claude safety hooks must also handle Codex input (`.codex/hooks.json`; `tool_name`, `tool_input.command`, patch/write, `cwd`). Git tests: `.trim()` and assert keywords, not exact strings.
+- **Hooks:** `settings.json` hook commands use forward slashes and `${CLAUDE_PROJECT_DIR}/`-prefixed paths (braced: headless sessions run hooks through PowerShell, where the bare form is empty and the guard fails open, #1311). New Claude safety hooks must also handle Codex input (`.codex/hooks.json`; `tool_name`, `tool_input.command`, patch/write, `cwd`). Git tests: `.trim()` and assert keywords, not exact strings.
 - **Resilience:** agent subprocess callbacks are try/catch'd in `agent.service.ts`; `auto_monitor` is force-disabled on every boot.
 
 Detail and incidents: `docs/agent-guide/architecture-notes.md`.
