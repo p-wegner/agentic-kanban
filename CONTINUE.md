@@ -5,8 +5,8 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
 
 ## 2026-10-06 — lean builders measured; project hooks were failing open in builders
 
-**State.** Stable board runs `stable-20261004-8` (restarted by `pnpm stable:start` on
-2026-10-05). `master` is ahead of `origin` and not promoted: it carries #1310 and #1311.
+**State.** Stable board runs `stable-20261006` (`7b271da82`, full green sweep of `rc/20261006`,
+promoted 2026-10-06), carrying #1310 and #1311. `master` is ahead of `origin` (not pushed).
 
 - **#1311 (direct fix, critical) — every project hook failed OPEN in headless builders.**
   `claude -p` on Windows runs hook commands through PowerShell, which reads a bare
@@ -15,7 +15,7 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
   MODULE_NOT_FOUND'd with a non-blocking exit. Fix: `${CLAUDE_PROJECT_DIR}/` everywhere; the
   scaffold heals old entries in place. Check: probe worktree with `KANBAN_WORKTREE_DIR`, write
   into main → created with the old spelling, `Cross-worktree write blocked` with the new; 3
-  suites 77/77, typecheck clean. **Live only after `pnpm promote`.**
+  suites 77/77, typecheck clean. Live in `stable-20261006`.
 - **#1310 (board builder, merged)** — Codex builders isolated via `-c` overrides; builder's
   live check: prompt 30,232 → 9,893 chars, user skills 17 → 0.
 - **Lean Claude builder levers measured** (lean base 40.0k first-request tokens): auto-memory
@@ -24,7 +24,7 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
   off makes it BIGGER (the Workflow tool inlines its guide). Filed **#1312** (lean profile
   with per-project add-backs) and **#1313** (slim CLAUDE.md for builders, −7.0k measured).
 
-**Next:** `pnpm promote --dry-run`, promote (puts #1311's guard fix live), scrub, push; then
+**Next:** scrub against the confidential-terms list and push master; then
 let a builder take #1312.
 
 ## 2026-10-04 afternoon — after the reboot: stable-20261004-8 live, board empty
