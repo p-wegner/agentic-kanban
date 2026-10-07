@@ -98,6 +98,10 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "builder_context",
   "builder_effort",
   "builder_autocompact",
+  // Lean Claude builder profile (#1312): `builder_profile_<id>` is a JSON object of add-backs to
+  // the lean isolated base (`autoMemory`, `tools.add`, `skills.full`, `mcp.claudeAi`,
+  // `mcp.configs`, `plugins`). See server `agent-provider/builder-lean-profile.ts`.
+  "builder_profile",
   "cold_clone_check",
   "project_stack_profile",
   "auto_merge_disabled",

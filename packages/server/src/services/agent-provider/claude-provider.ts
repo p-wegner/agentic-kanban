@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { parseAgentProviderStreamLine, parseAgentProviderStreamLineObserved } from "@agentic-kanban/shared/lib/agent-stream-parser";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
 import { BUILDER_CONTEXT_SETTING_SOURCES } from "./builder-context.js";
+import { leanProfileArgs, leanProfileEnv } from "./builder-lean-profile.js";
 import { getMcpConfigPath, buildSpawnEnv, spliceAgentArgs, nodeFileSystem, profileDefinesCustomEndpoint, resolveMockLaunch, commandCarriesArgs } from "./helpers.js";
 
 export class ClaudeProvider implements AgentProvider {
@@ -104,6 +105,7 @@ export class ClaudeProvider implements AgentProvider {
       if (builder?.policy === "isolated") {
         args.push("--setting-sources", BUILDER_CONTEXT_SETTING_SOURCES);
       }
+      if (builder?.policy === "isolated" && builder.lean) args.push(...leanProfileArgs(builder.lean));
       if (builder?.effort) args.push("--effort", builder.effort);
       if (builder?.autocompact) args.push("--autocompact", builder.autocompact);
       // Pass the selected model tier — but not for profiles routed to a custom endpoint
@@ -132,7 +134,12 @@ export class ClaudeProvider implements AgentProvider {
       args,
       useShell: (isWindows && (isMockAgent || !!agentCommand)) || commandCarriesArgs(command),
       isMockAgent,
-      env: buildSpawnEnv(effectiveProfileName, this.fs),
+      env: {
+        ...buildSpawnEnv(effectiveProfileName, this.fs),
+        ...(!isMockAgent && options.builderContext?.policy === "isolated" && options.builderContext.lean
+          ? leanProfileEnv(options.builderContext.lean)
+          : {}),
+      },
       keepStdinOpen,
     };
   }

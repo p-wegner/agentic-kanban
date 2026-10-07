@@ -15,6 +15,18 @@ export interface BuilderContext {
    * scope" key, so the board has to name what to drop.
    */
   codexUserScope?: { mcpServers: string[]; skillPaths: string[] };
+  /** Claude only, isolated only (#1312): the lean profile with the project's add-backs applied. */
+  lean?: BuilderLeanProfile;
+}
+
+/** What the lean Claude builder drops and re-adds; see `builder-lean-profile.ts`. */
+export interface BuilderLeanProfile {
+  autoMemory: boolean;
+  disallowedTools: string[];
+  skillsFull: string[];
+  claudeAiMcp: boolean;
+  mcpConfigs: string[];
+  pluginDirs: string[];
 }
 
 /** Sentinel markers wrapping the machine-readable plan block emitted by a plan-mode run. */
