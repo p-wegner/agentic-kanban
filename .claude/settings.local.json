@@ -26,7 +26,6 @@
       "C:\\the-organisation\\claude_code\\claude-marketplace"
     ]
   },
-  "spinnerTipsEnabled": true,
   "skillOverrides": {
     "api-inventory": "name-only",
     "arch-improvement": "name-only",
@@ -50,6 +49,19 @@
     "safety-net-bootstrap": "name-only",
     "safety-net-operate": "name-only",
     "test-strategy": "name-only",
-    "ui-sdk": "name-only"
-  }
+    "ui-sdk": "name-only",
+    "anthropic-skills:built-in-browser": "user-invocable-only",
+    "anthropic-skills:chrome-browser": "user-invocable-only",
+    "anthropic-skills:computer-use": "user-invocable-only",
+    "anthropic-skills:docs": "user-invocable-only",
+    "anthropic-skills:docx": "user-invocable-only",
+    "anthropic-skills:google-workspace": "user-invocable-only",
+    "anthropic-skills:import-memory": "user-invocable-only",
+    "anthropic-skills:morning": "user-invocable-only",
+    "anthropic-skills:pdf": "user-invocable-only",
+    "anthropic-skills:pptx": "user-invocable-only",
+    "anthropic-skills:skill-creator": "user-invocable-only",
+    "anthropic-skills:xlsx": "user-invocable-only"
+  },
+  "spinnerTipsEnabled": true
 }
