@@ -423,7 +423,8 @@ Examples:
         // The number-or-id decision is the API's (#701), so the ref goes through as typed
         // rather than being resolved twice with two chances to disagree.
         const body: Record<string, unknown> = { issueId: issueRef };
-        if (options.project) body.projectId = options.project;
+        // The API takes only an id; resolve a project NAME here like every other --project flag.
+        if (options.project) body.projectId = await resolveProjectIdArg(options.project);
         if (options.base) body.baseBranch = options.base;
         if (options.profile) body.claudeProfile = options.profile;
 
