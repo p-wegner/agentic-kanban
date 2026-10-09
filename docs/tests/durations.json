@@ -3576,6 +3576,11 @@
       "endTime": 95.0
     },
     {
+      "name": "packages/server/src/__tests__/claude-md-builder-budget.test.ts",
+      "startTime": 0,
+      "endTime": 3.2
+    },
+    {
       "name": "packages/server/src/__tests__/workspace-base-read-ratchet.test.ts",
       "startTime": 0,
       "endTime": 700.0
