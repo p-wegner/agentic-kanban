@@ -3,10 +3,27 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-10-10 — board drained: #1312, #1313, #1314 Done
+
+**State.** Stable board restarted after a reboot (`pnpm stable:start`, smoke passed) and still
+runs `stable-20261006`; `master` carries #1312 and #1313 on top and is NOT promoted and NOT
+pushed. Board: no open agentic-kanban ticket.
+
+- **#1312 merged** (lean Claude builder profile). Its first gate run had died with exit 130;
+  the re-run was first refused by a dirty main checkout, then went green.
+- **#1313 merged** (root CLAUDE.md slimmed for builders, operator material moved to
+  `docs/agent-guide/operator-reference.md`, budget guard). Gate was red on
+  `always-run-guard-runtime-ratchet`: the new guard counted at the assumed 3,000 ms. Fixed by
+  banking its measured 3 ms in `docs/tests/durations.json`; neither limit moved.
+- **#1314 (direct fix)** `workspace start --project <name>` sent the name as `projectId`; now
+  resolved via `resolveProjectIdArg`. Check: a name resolves to the id, an unknown name errors.
+
+**Next:** `pnpm promote --dry-run`, then promote; scrub and push master.
+
 ## 2026-10-06 — lean builders measured; project hooks were failing open in builders
 
 **State.** Stable board runs `stable-20261006` (`7b271da82`, full green sweep of `rc/20261006`,
-promoted 2026-10-06), carrying #1310 and #1311. `master` is ahead of `origin` (not pushed).
+promoted 2026-10-06), carrying #1310 and #1311. `master` was pushed after this pass.
 
 - **#1311 (direct fix, critical) — every project hook failed OPEN in headless builders.**
   `claude -p` on Windows runs hook commands through PowerShell, which reads a bare
