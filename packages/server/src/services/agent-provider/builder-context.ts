@@ -2,7 +2,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
-import type { BuilderContext, BuilderEffort } from "./types.js";
+import type { BuilderContext, BuilderEffort, BuilderLeanProfile } from "./types.js";
+import { builderProfilePref, describeBuilderLeanProfile, parseBuilderLeanProfile } from "./builder-lean-profile.js";
 
 /**
  * Builder context policy (#1302): what a Claude Code builder inherits from the operator's
@@ -135,6 +136,8 @@ export async function resolveBuilderContext(
   projectId: string,
   workspaceId: string,
   readPref: (key: string) => Promise<string | null | undefined>,
+  claudeLean = false,
+  onLean?: (lean: BuilderLeanProfile) => Promise<void>,
 ): Promise<BuilderContext | undefined> {
   if (!applies) return undefined;
   const read = async (key: string) => (projectId ? await readPref(key) : undefined);
@@ -142,8 +145,10 @@ export async function resolveBuilderContext(
   const isolated = policy === "isolated";
   const effort = parseBuilderEffort(await read(builderEffortPref.key(projectId))) ?? (isolated ? DEFAULT_BUILDER_EFFORT : undefined);
   const autocompact = parseBuilderAutocompact(await read(builderAutocompactPref.key(projectId))) ?? (isolated ? DEFAULT_BUILDER_AUTOCOMPACT : undefined);
-  console.log(`[session] builder context: ${policy} effort=${effort ?? "-"} autocompact=${autocompact ?? "-"} workspaceId=${workspaceId}`);
-  return { policy, ...(effort ? { effort } : {}), ...(autocompact ? { autocompact } : {}) };
+  const lean = isolated && claudeLean ? parseBuilderLeanProfile(await read(builderProfilePref.key(projectId))) : undefined;
+  if (lean) await onLean?.(lean);
+  console.log(`[session] builder context: ${policy} effort=${effort ?? "-"} autocompact=${autocompact ?? "-"}${lean ? ` lean: ${describeBuilderLeanProfile(lean)}` : ""} workspaceId=${workspaceId}`);
+  return { policy, ...(effort ? { effort } : {}), ...(autocompact ? { autocompact } : {}), ...(lean ? { lean } : {}) };
 }
 
 /** A recognised effort level, or undefined (unset or unknown: the default decides). */
