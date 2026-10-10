@@ -285,8 +285,15 @@ async function materializeWorkspaceSkillsImpl(
   },
 ): Promise<{ skillName: string | null; pluginSkills: PluginSkillMaterialization }> {
   const { skillId, diskSkillName, worktreePath, repoPath, projectId } = params;
+  // #1356: split timing so the next slow create names its sub-step.
+  const t0 = Date.now();
   const skillName = await resolveSkillFileImpl(database, skillId, diskSkillName, worktreePath, repoPath);
+  const t1 = Date.now();
   const pluginSkills = await materializeGateSelectorArtifacts(database, { worktreePath, repoPath, projectId });
+  console.log(
+    `[workspaces-timing] resolve-prompt-skill sub-phase skill-file=${t1 - t0}ms ` +
+      `plugin-skills+impact-map=${Date.now() - t1}ms (${pluginSkills.materialized.length} plugin skills)`,
+  );
   return { skillName, pluginSkills };
 }
 
@@ -828,6 +835,7 @@ export function createWorkspaceProvisionService(deps: {
     // Resolve the issue's configurable workflow (if any). The start node's
     // guidance + valid transitions are injected into the prompt, and its
     // attached skill is used when the caller didn't pick one explicitly.
+    const tDb = Date.now();
     const workflowStart = await resolveWorkflowStart(database, input.issueId);
     let effectiveSkillId = skillId;
     let effectiveDiskSkill = input.skillName ?? null;
@@ -864,6 +872,8 @@ export function createWorkspaceProvisionService(deps: {
     // resolved above) — a plugin-loop ticket's skill, and any other safety-net skill a
     // plugin offers, must be readable in this worktree regardless of which agent
     // provider/machine launches it (#204). Shared with the relaunch seam (#892).
+    const tMaterialize = Date.now();
+    console.log(`[workspaces-timing] resolve-prompt-skill sub-phase db-reads+prompt=${tMaterialize - tDb}ms`);
     const skillName = worktreePath
       ? (await materializeWorkspaceSkills({
           skillId: effectiveSkillId,
