@@ -7,7 +7,7 @@
  */
 
 /** The command a worker owner runs to read the guide. Cited by every doctor remedy. */
-export const WORKER_SETUP_HELP = "`agentic-kanban worker setup`";
+export const WORKER_SETUP_HELP = "`agentic-kanban-worker setup`";
 
 /**
  * Exact commands for a machine that has only node: download the board-served build with the
@@ -17,6 +17,7 @@ export function renderBootstrapSteps(fleetUrl: string, pairingToken: string): st
   const base = fleetUrl.replace(/\/+$/, "");
   return [
     "On a FRESH machine with only node installed (no worker yet):",
+    "  (Windows: type curl.exe, not curl; in Windows PowerShell 5.1 `curl` is Invoke-WebRequest and rejects these flags.)",
     `  1. Fetch the build manifest (note "sha256"):`,
     `       curl -fsS -H "Authorization: Bearer ${pairingToken}" ${base}/api/workers/build`,
     `  2. Download the tarball (the pairing token is NOT consumed by this):`,

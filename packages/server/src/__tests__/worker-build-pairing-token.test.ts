@@ -13,7 +13,7 @@ import type { Database } from "../db/index.js";
 import { createWorkerRegistry } from "../services/worker-registry.service.js";
 import { createFleetWorkersRoute } from "../routes/workers.js";
 import type { WorkerBuildService } from "../services/worker-build.service.js";
-import { renderBootstrapSteps, renderWorkerSetupGuide } from "../cli/commands/worker-setup-guide.js";
+import { renderBootstrapSteps, renderWorkerSetupGuide, WORKER_SETUP_HELP } from "../cli/commands/worker-setup-guide.js";
 
 describe("pairing token on the build routes (#1358)", () => {
   let db: Database;
@@ -90,6 +90,12 @@ describe("worker pair bootstrap output + setup guide (#1358)", () => {
     expect(out).toContain("sha256");
     expect(out).toContain("npm i -g");
     expect(out).toContain("start --board http://100.1.2.3:3002 --token TOK123");
+    // #1364: `curl -fsS -H "..."` fails in Windows PowerShell 5.1, where `curl` is Invoke-WebRequest.
+    expect(out).toContain("curl.exe");
+  });
+
+  it("cites the setup verb a WORKER machine actually has (#1364)", () => {
+    expect(WORKER_SETUP_HELP).toBe("`agentic-kanban-worker setup`");
   });
 
   it("ships a setup guide with the sections doctor remedies cite", () => {

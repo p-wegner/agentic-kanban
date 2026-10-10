@@ -291,7 +291,7 @@ export function checkWebSocket(
             "websocket upgrade",
             `no open within ${timeoutMs} ms at ${wsUrl}`,
             "Something between the machines is not forwarding the Upgrade header. A path-based reverse " +
-              "proxy in front of the fleet port is the usual cause (`agentic-kanban worker setup`, section 8).",
+              "proxy in front of the fleet port is the usual cause (`agentic-kanban-worker setup`, section 8).",
           ),
         ),
       timeoutMs,
@@ -870,7 +870,7 @@ export function renderDoctorReport(report: DoctorReport): string {
   if (report.side === "worker") {
     lines.push(
       "This half cannot see how the board views this machine — the owner routes are loopback-only " +
-        "(`agentic-kanban worker setup`, section 1). Run `agentic-kanban worker doctor-board` on the board for that half.",
+        "(`agentic-kanban-worker setup`, section 1). Run `agentic-kanban worker doctor-board` on the board for that half.",
     );
   }
   return lines.join("\n");
