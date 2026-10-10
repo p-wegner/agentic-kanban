@@ -3,13 +3,33 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-10-10 (afternoon) — tailnet worker round: the desktop as a remote worker
+
+**State.** `master` carries #1324 (durable fleet config), #1325 (bind retry), #1338 (worker
+self-update) and #1339 (worktree admin lock); a promote to `stable-20261010-3` is in flight. The
+stable board before it still has the #1339 race: **never merge while a workspace is being
+provisioned, and start builders one at a time.**
+
+- **Setup.** Dev board with the fleet/git listeners bound to this box's tailnet address, firewall
+  rules for 3103/3102 scoped to `100.64.0.0/10` on the Tailscale adapter. The desktop runs the
+  worker (installed from a `pack-worker.mjs` tarball handed over with `acp blob put`); its Claude
+  session (`projects-desktop-opus55` on the ACP bus) runs the worker side and reports.
+- **Verified on the desktop:** pair, both doctors, build+review sessions over git transport,
+  2-way concurrency, merge with tests green; tailnet down 60 s mid-session (agent survives,
+  re-adopted, result lands); daemon kill (board detaches at 180 s, restart reaps, `worker lost`).
+- **Filed from this round:** #1330 (`behind board` mislabel), #1331 (expired profiles attested),
+  #1332 (bridge cannot find its own issue), #1333 (no transcript for remote sessions), #1334
+  (daemon log hygiene), #1335 (no WS keepalive; no close frame on restart), #1336 (orphaned agent
+  children), #1337 (DECISION: plain LAN with Tailscale fallback; recommendation: stay on the
+  tailnet, which already takes the direct LAN path), #1338/#1339 above. #1327 cancelled (in #1338).
+
+**Next:** finish the #1338 live test on the desktop (bootstrap done by hand, then a board commit
+should make the daemon update itself), then build #1335, #1333, #1336, #1332, #1331, #1330, #1334,
+#1326, #1328 one at a time.
+
 ## 2026-10-10 (later) — fleet worker e2e: six local rounds clean, Tailscale prep filed
 
-**State.** Stable board runs `stable-20261010-2` (`0b7e7965d`, full green sweep of
-`rc/20261010-2`, promoted 2026-10-10, smoke passed; rollback `stable-20261010`), carrying
-#1315-#1323. `master` pushed after a clean confidential-terms scan of the range and of every
-changed file in full. Board: #1324-#1329 open (Tailscale prep, Todo; #1329 is operator-run and
-tagged `no-auto-start`).
+**State (at the time).** `stable-20261010-2` promoted with #1315-#1323; #1324-#1329 filed.
 
 - **Local fleet e2e, verified.** Dev board with `KANBAN_FLEET_PORT=3103 KANBAN_GIT_HTTP_PORT=3102`,
   a scratch node:test fixture registered as `wfx`, strict worker dispatch, a FRESH worker per
@@ -26,7 +46,7 @@ tagged `no-auto-start`).
   stable board only gets fleet env from the calling shell), bind retry, tailnet-scoped firewall
   script, board-served worker build, per-phase timings, and the operator-run tailnet lab checklist.
 
-**Next:** build #1324 and #1325 before anything connects over the tailnet.
+**Next (at the time):** build #1324 and #1325.
 
 ## 2026-10-10 — board drained: #1312, #1313, #1314 Done
 
