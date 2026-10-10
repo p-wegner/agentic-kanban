@@ -53,8 +53,7 @@ import { attestProviderAuth } from "../cli/commands/worker-doctor.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { createDaemonSelfUpdate, type DaemonSelfUpdate } from "./worker-daemon-update.js";
-import type { NpmRunner } from "./worker-updater.js";
-import { isWorkerLogInherited, teeLogToFile, workerLogFileFor } from "./worker-log.js";
+import { isWorkerLogInherited, teeLogToFile, workerLogFileFor, type NpmRunner } from "./worker-updater.js";
 
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const RECONNECT_MIN_MS = 1000;

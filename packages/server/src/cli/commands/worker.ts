@@ -9,9 +9,8 @@ import {
   WorkerRegistrationRefused,
   type WorkerDaemonHandle,
 } from "../../worker/worker-daemon.js";
-import { isSupervised, relaunchWorker } from "../../worker/worker-updater.js";
+import { isSupervised, relaunchWorker, workerLogFileFor } from "../../worker/worker-updater.js";
 import { resolveDelegation, runDelegated } from "../../worker/worker-delegate.js";
-import { workerLogFileFor } from "../../worker/worker-log.js";
 import type { WorkerUpdateReport } from "../../lib/worker-update.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "../../worker/worker-repo.js";
 import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
