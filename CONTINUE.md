@@ -3,6 +3,29 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-10-10 (evening) — tailnet round 2: self-update hardened, worktree race instrumented
+
+**State.** Stable runs `stable-20261010-4`; master adds #1330-#1336, #1340, #1343-#1353 (not
+promoted). The stable board still has the worktree race: **start builders only after the previous
+merge's `deleted branch feature/ak-N` line is in `.kanban/board.log`.** #1353 (every prune
+age-bounded, worker-repo under the admin lock, every worktree admin op logged) is the fix; if
+the race recurs after the promote, the new `worktree-admin` log lines name the destroyer.
+
+- **Verified live on the desktop worker (`desktop-fresh`, dev board over the tailnet):**
+  self-update across several board builds (#1338), hold while updating (#1347), relaunch log
+  lines timestamped (#1351/#1352), keepalive reconnect ~3.6 s after the network returns
+  (#1335/#1344), daemon kill reaps the agent tree (#1336), board tools (#1332), transcripts
+  (#1333), credential states (#1331).
+- **Two self-update failures** came from adverts sent before the board's tarball was ready right
+  after a restart; #1352 makes the board wait and the worker retry. Old-updater evidence only;
+  the first commit after f3ccb281 is the live check.
+- **Open:** #1354 (no close frame on board restart), #1326 (firewall script), #1355 (worker-side
+  update verb), #1328 (per-phase timings). **#1337 is a decision for Peter** (plain LAN with
+  Tailscale fallback). The stable fleet ports 3003/3002 still need firewall rules on this box.
+
+**Next:** merge #1354/#1326, build #1355 and #1328, promote, then one fresh-worker round on the
+desktop.
+
 ## 2026-10-10 (afternoon) — tailnet worker round: the desktop as a remote worker
 
 **State.** `master` carries #1324 (durable fleet config), #1325 (bind retry), #1338 (worker
