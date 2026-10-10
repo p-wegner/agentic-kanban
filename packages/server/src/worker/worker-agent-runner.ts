@@ -14,6 +14,7 @@ import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { resolveAgentHangTimeoutMs, startHangWatchdog } from "../lib/agent-launch-env.js";
 import { killProcessTree } from "../services/process-exec.js";
 import type {
+  BoardToWorkerMessage,
   WorkerLaunchSpec,
   WorkerRepoOpAuth,
   WorkerRepoOpKind,
@@ -660,3 +661,48 @@ export type WorkerAgentRunner = ReturnType<typeof createWorkerAgentRunner>;
 // Re-exported so existing importers keep their path; the declarations moved to the
 // retention leaf (#899), which is where they are actually used.
 export type { PushOutcome, UnpushedResult };
+
+/** ws's RawData is Buffer | ArrayBuffer | Buffer[]; a bare `.toString()` on the array case yields garbage. */
+export function rawDataToBuffer(data: unknown): Buffer {
+  if (Array.isArray(data)) return Buffer.concat(data as readonly Uint8Array[]);
+  return Buffer.isBuffer(data) ? data : Buffer.from(new Uint8Array(data as ArrayBuffer));
+}
+
+/** Route one parsed board frame to the agent runner. Throws propagate to the caller's guard (#870). */
+export function dispatchBoardMessage(
+  message: BoardToWorkerMessage,
+  runner: WorkerAgentRunner,
+  sendToBoard: (message: WorkerToBoardMessage) => void,
+  draining: boolean,
+): void {
+  switch (message.type) {
+    case "assign":
+      // #1338: a draining daemon (an update waiting for its last session) takes no new
+      // work — the board stops assigning on its next heartbeat, this covers the race.
+      if (draining) {
+        sendToBoard({ type: "assign_failed", sessionId: message.sessionId, error: "worker is draining (self-update or shutdown in progress)" });
+        break;
+      }
+      if (message.repo) runner.assignWithRepo(message.sessionId, message.spec, message.repo);
+      else runner.assign(message.sessionId, message.spec);
+      break;
+    case "input":
+      runner.input(message.sessionId, message.data);
+      break;
+    case "close_stdin":
+      runner.closeStdin(message.sessionId);
+      break;
+    case "stop":
+      runner.stop(message.sessionId);
+      break;
+    case "sync_repo":
+      runner.repoOp("sync", message.sessionId, message.requestId, message.auth);
+      break;
+    case "push_head":
+      runner.repoOp("push", message.sessionId, message.requestId, message.auth);
+      break;
+    case "probe_session":
+      runner.probeSession(message.sessionId, message.requestId);
+      break;
+  }
+}
