@@ -21,6 +21,7 @@
 //   node scripts/pack-worker.mjs --skip-build    # pack what is already in dist/
 //   node scripts/pack-worker.mjs --blob          # also put it on the ACP relay
 //   node scripts/pack-worker.mjs --print-acp     # resolve the ACP CLI, print it, exit
+//   node scripts/pack-worker.mjs --out-dir <dir> --json   # board's worker-build service (#1338)
 //
 // The default build DELIBERATELY SKIPS the React client (#845). The worker daemon is
 // `packages/server/dist/worker.js`; it never loads the UI, so a client-only failure —
@@ -43,9 +44,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const pkgDir = join(root, "packages", "server");
 const pkgJsonPath = join(pkgDir, "package.json");
-const outDir = join(root, "dist-worker-pack");
+// `--out-dir <dir>` (#1338): the board's own worker-build service packs into its cache dir.
+const outDirFlag = process.argv.indexOf("--out-dir");
+const outDir = outDirFlag !== -1 && process.argv[outDirFlag + 1] ? resolve(process.argv[outDirFlag + 1]) : join(root, "dist-worker-pack");
 
 const args = new Set(process.argv.slice(2));
+const asJson = args.has("--json");
 const skipBuild = args.has("--skip-build");
 const withClient = args.has("--with-client");
 const toBlob = args.has("--blob");
@@ -230,6 +234,9 @@ if (!skipBuild && !withClient) {
 }
 console.log(`[pack-worker] install on the worker machine:  npm i -g "${tarball}"`);
 console.log(`[pack-worker] then verify:  agentic-kanban-worker --version`);
+console.log(`[pack-worker] or let the worker update itself from the board: start it with --auto-update (docs/worker-fleet.md, "Updating workers")`);
+// Machine-readable result for the board's worker-build service (#1338): ONE line, last.
+if (asJson) console.log(`[pack-worker-json] ${JSON.stringify({ tarball, version: stamped })}`);
 
 if (toBlob) {
   const res = run(acpCli.command, [...acpCli.args, "blob", "put", tarball, "--mime", "application/gzip"], root);

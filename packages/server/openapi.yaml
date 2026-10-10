@@ -9182,6 +9182,50 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/workers/build:
+    get:
+      summary: GET /api/workers/build
+      tags:
+        - workers
+      operationId: get_api_workers_build
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "202":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "401":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "503":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workers/build/tarball:
+    get:
+      summary: GET /api/workers/build/tarball
+      tags:
+        - workers
+      operationId: get_api_workers_build_tarball
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "401":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/workers/connect-info:
     get:
       summary: "Owner-only: it names the board's own configured hosts/ports."
@@ -9506,9 +9550,33 @@ paths:
                   type: number
                 workerVersion:
                   type: string
+                update: {}
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workers/{id}/update:
+    post:
+      summary: needs an inbound connection to the worker.
+      tags:
+        - workers
+      operationId: post_api_workers_id_update
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
           content:
             application/json:
               schema: {}

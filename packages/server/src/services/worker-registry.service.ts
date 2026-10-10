@@ -31,6 +31,7 @@ import {
   type WorkerProfileAttestation,
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { recordWorkerEvent } from "./worker-events.service.js";
+import type { WorkerUpdateReport } from "../lib/worker-update.js";
 
 export const PAIRING_TOKEN_TTL_MS = 10 * 60 * 1000;
 /** A worker whose last heartbeat is older than this reads as offline. */
@@ -101,6 +102,14 @@ export interface WorkerView extends Omit<WorkerRow, "tokenHash"> {
    * column would be read as a permission.
    */
   profiles?: WorkerProfileAttestation[];
+  /**
+   * What this worker last said about its self-update (#1338): `current`, `updating` (with the
+   * phase) or `failed` (with the reason). In memory like `capacity`: a property of the running
+   * peer, re-sent on every heartbeat, so a board restart re-learns it within one beat.
+   */
+  update?: WorkerUpdateReport;
+  /** A board-side `worker update` is waiting for this worker's next heartbeat to pick it up. */
+  updateRequested?: boolean;
 }
 
 /** Constant-time compare that does not leak length via an early return. */
@@ -142,6 +151,10 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   /** This worker's attested profiles (#1027). See WorkerView for why not a column. */
   const reportedProfiles = new Map<string, WorkerProfileAttestation[]>();
+
+  /** Self-update state each worker last reported, and the workers asked to update NOW (#1338). */
+  const reportedUpdates = new Map<string, WorkerUpdateReport>();
+  const updateRequests = new Set<string>();
 
   /**
    * Last EFFECTIVE status observed per worker, so `status_change` can be emitted on a
@@ -253,8 +266,10 @@ export function createWorkerRegistry(database: Database = realDb) {
       capabilities?: WorkerCapabilities;
       protocolVersion?: number;
       workerVersion?: string;
+      /** #1338: the worker's self-update state. */
+      update?: WorkerUpdateReport;
     },
-  ): Promise<{ ok: boolean; error?: string }> {
+  ): Promise<{ ok: boolean; error?: string; updateNow?: boolean }> {
     if (!(await authenticateWorker(workerId, token))) {
       return { ok: false, error: "unauthorized" };
     }
@@ -296,7 +311,32 @@ export function createWorkerRegistry(database: Database = realDb) {
       // permission on the board within one heartbeat rather than at the next re-pairing.
       noteAttestedProfiles(workerId, opts.capabilities.profiles);
     }
-    return { ok: true };
+    if (opts?.update) {
+      reportedUpdates.set(workerId, opts.update);
+      // The request is delivered once the worker is on it (updating) or has given up (failed).
+      if (opts.update.state !== "current") updateRequests.delete(workerId);
+    }
+    return { ok: true, updateNow: updateRequests.has(workerId) };
+  }
+
+  /** Ask one worker to update on its next heartbeat (#1338). False = no such worker. */
+  async function requestUpdate(workerId: string): Promise<boolean> {
+    const row = await workerRepo.getWorkerById(workerId, database);
+    if (!row) return false;
+    updateRequests.add(workerId);
+    return true;
+  }
+
+  /** Does this bearer token belong to ANY registered worker? (For endpoints with no worker id.) */
+  async function authenticateAnyWorker(token: string): Promise<boolean> {
+    if (!token) return false;
+    const digest = sha256Hex(token);
+    const rows = await workerRepo.listWorkers(database);
+    let match = false;
+    for (const row of rows) {
+      if (tokensMatch(digest, row.tokenHash)) match = true;
+    }
+    return match;
   }
 
   async function listWorkersView(now?: string): Promise<WorkerView[]> {
@@ -309,6 +349,7 @@ export function createWorkerRegistry(database: Database = realDb) {
       noteEffectiveStatus(row, current);
       const capacity = reportedCapacity.get(row.id);
       const profiles = reportedProfiles.get(row.id);
+      const update = reportedUpdates.get(row.id);
       return {
         ...safe,
         effectiveStatus: current,
@@ -316,6 +357,8 @@ export function createWorkerRegistry(database: Database = realDb) {
         ...(reported?.workerVersion !== undefined ? { workerVersion: reported.workerVersion } : {}),
         ...(capacity ? { capacity } : {}),
         ...(profiles ? { profiles } : {}),
+        ...(update ? { update } : {}),
+        ...(updateRequests.has(row.id) ? { updateRequested: true } : {}),
       };
     });
   }
@@ -362,6 +405,8 @@ export function createWorkerRegistry(database: Database = realDb) {
     reportedVersions.delete(workerId);
     reportedCapacity.delete(workerId);
     reportedProfiles.delete(workerId);
+    reportedUpdates.delete(workerId);
+    updateRequests.delete(workerId);
     lastEffectiveStatus.delete(workerId);
     // Deleting the row only stops NEW authentications. A revoked worker also
     // holds a live socket and (for git transport) working git tokens — both must
@@ -379,6 +424,7 @@ export function createWorkerRegistry(database: Database = realDb) {
   return {
     mintPairingToken, registerWorker, authenticateWorker, heartbeat, touchHeartbeat,
     listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles,
+    requestUpdate, authenticateAnyWorker,
   };
 }
 

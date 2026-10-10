@@ -91,8 +91,12 @@ describe("agentic-kanban-worker binary isolation", () => {
     // `server-cli` (cli/commands/worker.ts), so `buildWorkerConnectSteps` moved to pure
     // server-lib and this CLI module now imports it instead of defining it — one more
     // node in this graph, same pure shape (only the shared step-shape type).
+    // Raised 27 → 31 in #1338 for worker self-update: `worker/worker-updater.ts`,
+    // `worker/worker-versions.ts`, `worker/worker-daemon-update.ts` and `lib/worker-update.ts`.
+    // All four import only node builtins, `@agentic-kanban/shared/lib/*` and each other —
+    // the FORBIDDEN_* assertions below are what guard the db-free property.
     expect(files.size).toBeGreaterThan(3);
-    expect(files.size).toBeLessThan(27);
+    expect(files.size).toBeLessThan(31);
   });
 
   it("never reaches the database or board-service layer", () => {

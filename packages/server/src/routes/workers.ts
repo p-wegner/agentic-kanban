@@ -33,6 +33,10 @@ import { getPreferenceValue } from "../repositories/session-lifecycle.repository
 import { listWorkerBranchAssignments } from "../repositories/worker.repository.js";
 import type { ProviderName } from "../services/agent-provider.js";
 import { resolveOwnPackageVersion } from "../lib/worker-build.js";
+import { createReadStream } from "node:fs";
+import { Readable } from "node:stream";
+import { parseWorkerUpdateReport } from "../lib/worker-update.js";
+import { getWorkerBuildService, type WorkerBuildService } from "../services/worker-build.service.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import { buildWorkerConnectSteps } from "../lib/worker-connect-steps.js";
 import { resolveFleetPort, resolveFleetHost } from "../services/fleet-listener.service.js";
@@ -298,6 +302,16 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
     });
   });
 
+  // #1338: ask ONE worker to update to the board's build now (drain + update). Owner-only:
+  // it is delivered on the worker's next heartbeat (<= 30 s) as `updateNow`, so the board never
+  // needs an inbound connection to the worker.
+  router.post("/:id/update", async (c) => {
+    const workerId = c.req.param("id");
+    if (!(await reg.requestUpdate(workerId))) return c.json({ error: "worker not found" }, 404);
+    boardEvents?.broadcastToAllProjects("workers_changed");
+    return c.json({ ok: true, workerId, note: "delivered on the worker's next heartbeat (within ~30s)" });
+  });
+
   router.delete("/:id", async (c) => {
     const workerId = c.req.param("id");
     const ok = await reg.revokeWorker(workerId);
@@ -347,7 +361,15 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
  * HTTP surface safe to expose off-loopback, and the fleet listener serves
  * exactly this and nothing else.
  */
-function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry, database: Database, boardEvents?: BoardEventSink): void {
+function registerWorkerFacingRoutes(
+  router: Hono,
+  reg: WorkerRegistry,
+  database: Database,
+  boardEvents?: BoardEventSink,
+  buildService?: WorkerBuildService,
+): void {
+  /** Injected in tests; otherwise the board's process-wide service (lazy: it resolves paths). */
+  const buildServiceFor = async (): Promise<WorkerBuildService> => buildService ?? getWorkerBuildService();
   router.post("/register", async (c) => {
     const body = await parseOptionalJsonBody<{
       pairingToken?: string;
@@ -433,10 +455,13 @@ function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry, database:
       capabilities?: unknown;
       protocolVersion?: number;
       workerVersion?: string;
+      update?: unknown;
     }>(c);
     const capabilities = parseWorkerCapabilities(body.capabilities);
+    const update = parseWorkerUpdateReport(body.update);
     const result = await reg.heartbeat(c.req.param("id"), token ?? "", {
       status: body.status,
+      ...(update ? { update } : {}),
       ...(capabilities ? { capabilities } : {}),
       // Only forward the key when the worker sent one: `"protocolVersion" in opts` is how
       // the registry distinguishes "declared nothing" (a legacy caller, e.g. the board's
@@ -469,16 +494,65 @@ function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry, database:
       }
       return c.json({ error: result.error, boardProtocolVersion: reg.boardProtocolVersion() }, status);
     }
-    return c.json({ ok: true });
+    // #1338: the board advertises its build on every heartbeat, and `updateNow` carries a
+    // board-side `worker update`. An older worker ignores both (it reads only `ok`).
+    let boardBuildId: string | null = null;
+    try {
+      boardBuildId = await (await buildServiceFor()).currentBuildId();
+    } catch {
+      /* no source tree / git unavailable: advertise nothing, the heartbeat still succeeds */
+    }
+    return c.json({ ok: true, boardBuildId, updateNow: result.updateNow === true });
+  });
+
+  // #1338 (subsumes #1327): the board serves its own worker build to a paired worker. Both
+  // routes need a valid WORKER bearer token — a build is code a machine will run, and the
+  // manifest fingerprints the board (same reasoning as update-check above). They carry no
+  // worker id in the path, so the check is "this token belongs to some registered worker".
+  const requireWorker = async (c: Context): Promise<Response | null> => {
+    if (await reg.authenticateAnyWorker(bearerFrom(c) ?? "")) return null;
+    return c.json({ error: "unauthorized" }, 401);
+  };
+
+  router.get("/build", async (c) => {
+    const denied = await requireWorker(c);
+    if (denied) return denied;
+    const lookup = await (await buildServiceFor()).getBuild();
+    if (lookup.state === "ready") return c.json(lookup.manifest);
+    // 202: not an error — the board is packing this commit's tarball; the worker polls.
+    if (lookup.state === "building") return c.json({ state: "building" }, 202);
+    return c.json({ error: lookup.reason }, 503);
+  });
+
+  router.get("/build/tarball", async (c) => {
+    const denied = await requireWorker(c);
+    if (denied) return denied;
+    const lookup = await (await buildServiceFor()).getBuild();
+    if (lookup.state !== "ready") {
+      return c.json({ error: lookup.state === "building" ? "the build is not ready yet" : lookup.reason }, lookup.state === "building" ? 409 : 503);
+    }
+    return new Response(Readable.toWeb(createReadStream(lookup.tarballPath)) as unknown as ReadableStream, {
+      headers: {
+        "content-type": "application/gzip",
+        "content-length": String(lookup.manifest.size),
+        "x-build-sha256": lookup.manifest.sha256,
+        "x-build-id": lookup.manifest.buildId,
+      },
+    });
   });
 }
 
 /** The full surface, mounted on the main (loopback) app at /api/workers. */
-export function createWorkersRoute(database: Database, registry?: WorkerRegistry, boardEvents?: BoardEventSink) {
+export function createWorkersRoute(
+  database: Database,
+  registry?: WorkerRegistry,
+  boardEvents?: BoardEventSink,
+  buildService?: WorkerBuildService,
+) {
   const router = createRouter();
   const reg = registry ?? getWorkerRegistry(database);
   registerOwnerRoutes(router, reg, database, boardEvents);
-  registerWorkerFacingRoutes(router, reg, database, boardEvents);
+  registerWorkerFacingRoutes(router, reg, database, boardEvents, buildService);
   return router;
 }
 
@@ -490,8 +564,8 @@ export function createWorkersRoute(database: Database, registry?: WorkerRegistry
  * mounted where, instead of a warning in the docs that a misconfiguration can
  * quietly violate.
  */
-export function createFleetWorkersRoute(database: Database, registry?: WorkerRegistry) {
+export function createFleetWorkersRoute(database: Database, registry?: WorkerRegistry, buildService?: WorkerBuildService) {
   const router = createRouter();
-  registerWorkerFacingRoutes(router, registry ?? getWorkerRegistry(database), database);
+  registerWorkerFacingRoutes(router, registry ?? getWorkerRegistry(database), database, undefined, buildService);
   return router;
 }

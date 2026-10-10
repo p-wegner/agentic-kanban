@@ -10,9 +10,10 @@
  * the board?" and prints the exact manual steps.
  *
  * SCOPE, deliberately: REPORT, NEVER APPLY. No download, no install, no restart — the
- * process running this check may be executing on the very worker it would update, and a
- * live self-update is its own (deferred) design with its own drain semantics (§P5). The
- * remediation text is the shared `WORKER_UPDATE_REMEDIATION` — the SAME constant the 409
+ * process running this check may be executing on the very worker it would update. The
+ * applying half is the DAEMON's self-update (#1338: `worker start --auto-update`, or
+ * `worker update <name>` on the board; docs/worker-fleet.md "Updating workers"), and the
+ * remediation text points there first. The remediation text is the shared `WORKER_UPDATE_REMEDIATION` — the SAME constant the 409
  * protocol-refusal message uses — so the two can never drift on what the fix is.
  *
  * The board's side is `GET /api/workers/:id/update-check` on the worker-facing surface
