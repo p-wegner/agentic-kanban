@@ -37,7 +37,7 @@ import { join } from "node:path";
 import WebSocket from "ws";
 import { defaultWorkerWorkRoot } from "../../worker/worker-repo.js";
 
-export type CheckStatus = "pass" | "fail" | "skip" | "unknown";
+export type CheckStatus = "pass" | "fail" | "skip" | "unknown" | "warn";
 
 export interface DoctorCheck {
   name: string;
@@ -581,6 +581,23 @@ interface BoardWorkerRow {
   eligible: boolean;
   ineligibleReason: string | null;
   workerVersion?: string;
+  lastHeartbeatAt?: string | null;
+}
+
+/** Offline longer than this earns a "consider `worker revoke`" hint. */
+const STALE_OFFLINE_DAYS = 7;
+
+function describeLastSeen(lastHeartbeatAt: string | null | undefined, nowMs: number): { text: string; days: number | null } {
+  if (!lastHeartbeatAt) return { text: "never seen", days: null };
+  const ms = Date.parse(lastHeartbeatAt);
+  if (Number.isNaN(ms)) return { text: "last seen at an unreadable time", days: null };
+  const ageMs = Math.max(0, nowMs - ms);
+  const days = ageMs / 86_400_000;
+  const text =
+    ageMs < 3_600_000 ? `last seen ${Math.round(ageMs / 60_000)}m ago`
+    : ageMs < 86_400_000 ? `last seen ${Math.round(ageMs / 3_600_000)}h ago`
+    : `last seen ${Math.floor(days)}d ago`;
+  return { text, days };
 }
 
 /**
@@ -591,6 +608,7 @@ export async function runBoardDoctor(opts: {
   boardUrl: string;
   projectId?: string;
   provider?: string;
+  nowMs?: number;
 }): Promise<DoctorReport> {
   const boardUrl = opts.boardUrl.replace(/\/+$/, "");
   const checks: DoctorCheck[] = [];
@@ -643,15 +661,32 @@ export async function runBoardDoctor(opts: {
   }
   checks.push(ok("workers registered", `${workers.length} worker(s) registered`));
 
+  // An offline worker (sleeping laptop, machine switched off) is only a failure when nothing
+  // else can take work; otherwise the exit code would stay red for a retired machine (#1323).
+  const reachableEligible = workers.filter((w) => w.effectiveStatus === "online" && w.connected && w.eligible);
+
   for (const w of workers) {
     if (w.effectiveStatus !== "online") {
-      checks.push(
-        bad(
-          `worker ${w.name}`,
-          `effectiveStatus is ${w.effectiveStatus} — the last heartbeat is older than 90 s, or it is draining`,
-          "Run `worker doctor` on that machine; if the daemon is up, the fleet port is what to check.",
-        ),
-      );
+      const seen = describeLastSeen(w.lastHeartbeatAt, opts.nowMs ?? Date.now());
+      const stale = seen.days !== null && seen.days > STALE_OFFLINE_DAYS;
+      const detail = `effectiveStatus is ${w.effectiveStatus} (${seen.text}) — the last heartbeat is older than 90 s, or it is draining`;
+      const revokeHint = stale || seen.days === null ? ` Offline for a long time — consider \`agentic-kanban worker revoke ${w.name}\`.` : "";
+      if (reachableEligible.length > 0) {
+        checks.push({
+          name: `worker ${w.name}`,
+          status: "warn",
+          detail,
+          remedy: `Other eligible capacity is reachable, so this is not a failure. If it should be up, run \`worker doctor\` on that machine.${revokeHint}`,
+        });
+      } else {
+        checks.push(
+          bad(
+            `worker ${w.name}`,
+            detail,
+            `Run \`worker doctor\` on that machine; if the daemon is up, the fleet port is what to check.${revokeHint}`,
+          ),
+        );
+      }
       continue;
     }
     if (!w.connected) {
@@ -679,6 +714,16 @@ export async function runBoardDoctor(opts: {
     checks.push(ok(`worker ${w.name}`, `online, connected, eligible — ${w.freeSlots}/${w.maxConcurrency} slots free`));
   }
 
+  if (reachableEligible.length === 0) {
+    checks.push(
+      bad(
+        "reachable eligible capacity",
+        `none of the ${workers.length} registered worker(s) is online, connected and eligible`,
+        "Fix the worker(s) above, or `worker pair` a new one.",
+      ),
+    );
+  }
+
   if (body?.fleet) {
     const { freeSlots, eligible, registered } = body.fleet;
     checks.push(
@@ -695,7 +740,7 @@ export async function runBoardDoctor(opts: {
   return { side: "board", boardUrl, checks, ok: checks.every((c) => c.status !== "fail") };
 }
 
-const ICONS: Record<CheckStatus, string> = { pass: "PASS", fail: "FAIL", skip: "SKIP", unknown: "UNKN" };
+const ICONS: Record<CheckStatus, string> = { pass: "PASS", fail: "FAIL", skip: "SKIP", unknown: "UNKN", warn: "WARN" };
 
 /** Human-readable report. Deliberately plain text — this gets pasted into an issue. */
 export function renderDoctorReport(report: DoctorReport): string {
@@ -711,11 +756,12 @@ export function renderDoctorReport(report: DoctorReport): string {
     if (c.remedy && c.status !== "pass") lines.push(`         -> ${c.remedy}`);
   }
   lines.push("");
+  const warned = report.checks.filter((c) => c.status === "warn").length;
   const failed = report.checks.filter((c) => c.status === "fail").length;
   const unknown = report.checks.filter((c) => c.status === "unknown").length;
   lines.push(
     failed === 0
-      ? `All ${report.checks.length} checks passed or were skipped${unknown > 0 ? ` (${unknown} indeterminate — see above)` : ""}.`
+      ? `All ${report.checks.length} checks passed or were skipped${unknown > 0 ? ` (${unknown} indeterminate — see above)` : ""}${warned > 0 ? ` (${warned} warning(s) — see above)` : ""}.`
       : `${failed} check(s) failed.`,
   );
   if (report.side === "worker") {
