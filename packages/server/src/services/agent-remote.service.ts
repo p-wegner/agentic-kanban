@@ -64,6 +64,7 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { getProjectByRepoPath } from "../repositories/project.repository.js";
 import { createRemoteSessionEventRecorder, type BoardEndedReason } from "./agent-remote-events.js";
 import { createRemoteLiveness } from "./agent-remote-liveness.js";
+import { deliverRemoteOutput } from "./agent-remote-transcript.js";
 import type { WorkerRepoOpKind, WorkerRepoOpResult } from "@agentic-kanban/shared/lib/worker-protocol";
 
 /**
@@ -280,11 +281,7 @@ export function createRemoteAgentService(
       // information rather than a race (see WORKER_ASSIGN_SETTLE_MS).
       liveness.noteObserved(message.event.sessionId);
       if (message.event.type !== "exit") {
-        try {
-          session.onOutput(message.event);
-        } catch (err) {
-          console.error(`[agent-remote] output callback error: sessionId=${message.event.sessionId}`, err);
-        }
+        deliverRemoteOutput(session.onOutput, message.event);
         return;
       }
       // Exit: for a git-transport session the worker has already pushed to the
