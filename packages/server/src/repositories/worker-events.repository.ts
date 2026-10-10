@@ -110,6 +110,38 @@ export async function getBoardEndedReasons(
   return out;
 }
 
+/**
+ * session id -> the per-phase durations recorded on its `session_exit` row (#1328). Only numeric
+ * fields survive; a session with no recorded phases (host, older worker) is absent from the map.
+ */
+export async function getSessionPhaseTimings(
+  sessionIds: string[],
+  database: Database = db,
+): Promise<Map<string, Record<string, number | string>>> {
+  const out = new Map<string, Record<string, number | string>>();
+  if (sessionIds.length === 0) return out;
+  const rows = await database
+    .select({ sessionId: workerEvents.sessionId, payloadJson: workerEvents.payloadJson })
+    .from(workerEvents)
+    .where(and(eq(workerEvents.type, "session_exit"), inArray(workerEvents.sessionId, sessionIds)));
+  for (const r of rows) {
+    if (!r.sessionId || !r.payloadJson) continue;
+    try {
+      const phases = (JSON.parse(r.payloadJson) as { phases?: unknown }).phases;
+      if (!phases || typeof phases !== "object" || Array.isArray(phases)) continue;
+      const clean: Record<string, number | string> = {};
+      for (const [k, v] of Object.entries(phases as Record<string, unknown>)) {
+        if (typeof v === "number" && Number.isFinite(v)) clean[k] = v;
+        else if (k === "fetchKind" && (v === "clone" || v === "fetch")) clean[k] = v;
+      }
+      if (Object.keys(clean).length > 0) out.set(r.sessionId, clean);
+    } catch {
+      // A hand-edited payload is "not recorded", not an error.
+    }
+  }
+  return out;
+}
+
 /** How many events this worker currently holds — the number the retention cap is against. */
 export async function countWorkerEvents(workerId: string, database: Database = db): Promise<number> {
   const rows = await database

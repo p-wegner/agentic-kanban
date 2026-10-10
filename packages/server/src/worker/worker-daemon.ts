@@ -53,6 +53,7 @@ import { attestProviderAuth } from "../cli/commands/worker-doctor.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { createDaemonSelfUpdate, type DaemonSelfUpdate } from "./worker-daemon-update.js";
+import { startWorkerControlServer } from "./worker-control.js";
 import { isWorkerLogInherited, setWorkerLogSink, stampConsoleWithTimestamps, teeLogToFile, workerLogFileFor, type NpmRunner } from "./worker-updater.js";
 
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
@@ -668,6 +669,18 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       })
     : null;
 
+  // #1355: a loopback control endpoint so `update-check --apply` on this machine can ask THIS daemon
+  // to update. Only a daemon that can update itself opens one.
+  const controlServer = selfUpdate
+    ? await startWorkerControlServer({
+        stateFile,
+        boardUrl,
+        workerVersion,
+        log,
+        handlers: { updateNow: () => selfUpdate.updateNow(), status: () => selfUpdate.controlStatus() },
+      })
+    : null;
+
   let resolveConnected!: () => void;
   const connected = new Promise<void>((resolve) => { resolveConnected = resolve; });
 
@@ -944,6 +957,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       }
       stopped = true;
       selfUpdate?.dispose();
+      void controlServer?.close();
       clearInterval(heartbeatTimer);
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (stopOpts?.killAgents) runner.stopAll();

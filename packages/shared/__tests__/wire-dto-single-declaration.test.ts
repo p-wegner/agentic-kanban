@@ -156,7 +156,6 @@ const GRANDFATHERED_STRUCTURAL = new Set<string>([
   "client:ProviderEntry|server:ProviderThroughput",
   "client:SkillRunResult|server:PluginSkillRunResult",
   "client:StatusRow|shared:StatusOrderRow",
-  "server:AgentOutputEvent|shared:WorkerAgentEvent",
   "server:RottedSuite|shared:RottedSuiteEntry",
 ]);
 

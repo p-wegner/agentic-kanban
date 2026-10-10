@@ -17,6 +17,7 @@ import { killProcessTree } from "../services/process-exec.js";
 import type {
   BoardToWorkerMessage,
   WorkerLaunchSpec,
+  WorkerPhaseTimings,
   WorkerRepoOpAuth,
   WorkerRepoOpKind,
   WorkerRepoTransport,
@@ -122,6 +123,8 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     pushHead: options.repoOps?.pushHead ?? pushWorkerHead,
   };
   const processes = new Map<string, ChildProcess>();
+  /** Epoch ms each agent was spawned, for the per-phase timings on its exit (#1328). */
+  const agentStartedAtMs = new Map<string, number>();
   const exited = new Set<string>();
   /** Sessions whose work lives in a worker-side checkout that must be pushed back. */
   const checkouts = new Map<string, PendingResult>();
@@ -274,6 +277,9 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     if (exited.has(sessionId)) return;
     exited.add(sessionId);
     seen.noteExit(sessionId, exitCode);
+    const startedAt = agentStartedAtMs.get(sessionId);
+    agentStartedAtMs.delete(sessionId);
+    const agentMs = startedAt === undefined ? undefined : Date.now() - startedAt;
     processes.delete(sessionId);
     provisioning.delete(sessionId);
     stdinOpen.delete(sessionId);
@@ -293,6 +299,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     checkouts.delete(sessionId);
     const push = (async () => {
       let effectiveExit = exitCode;
+      const pushStart = Date.now();
       try {
         const outcome = await undelivered.pushWithRetry(sessionId, pending);
         if (outcome.ok) {
@@ -324,7 +331,13 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         }
         effectiveExit = exitCode === 0 || exitCode === null ? 1 : exitCode;
       }
-      safeSend({ type: "event", event: { type: "exit", sessionId, exitCode: effectiveExit } });
+      const phases: WorkerPhaseTimings = {
+        ...pending.checkout.phases,
+        ...(agentMs !== undefined ? { agentMs } : {}),
+        pushMs: Date.now() - pushStart,
+      };
+      workerLog(`[worker] phases for session ${sessionId}: ${JSON.stringify(phases)}`);
+      safeSend({ type: "event", event: { type: "exit", sessionId, exitCode: effectiveExit, phases } });
     })().finally(() => {
       inFlightPushes.delete(sessionId);
     });
@@ -460,6 +473,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       return;
     }
     processes.set(sessionId, proc);
+    agentStartedAtMs.set(sessionId, Date.now());
     workerLog(`[worker] launched agent: sessionId=${sessionId} pid=${proc.pid} command=${launch.command}`);
     if (proc.pid) tree.track(sessionId, proc.pid, spec.cwd);
 

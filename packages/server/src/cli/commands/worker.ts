@@ -12,6 +12,7 @@ import {
 import { isSupervised, relaunchWorker, stampConsoleWithTimestamps, workerLogFileFor } from "../../worker/worker-updater.js";
 import { resolveDelegation, runDelegated } from "../../worker/worker-delegate.js";
 import { installShim } from "../../worker/worker-shim.js";
+import { applyWorkerUpdate } from "../../worker/worker-control.js";
 import type { WorkerUpdateReport } from "../../lib/worker-update.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "../../worker/worker-repo.js";
 import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
@@ -295,6 +296,23 @@ export function registerWorkerCommand(program: Command) {
  * `[completed]` alone hides a worker-lost run (#1319): the board finalizes it completed / exit 1
  * and an operator reading the list must not mistake it for a success.
  */
+/** `fetch 4.2s · setup 61s · agent 8m12s ...` — recorded phases only, in pipeline order (#1328). */
+export function formatPhaseTimings(phases: NonNullable<SessionPlacementRecord["phases"]>): string {
+  const fmt = (ms: number): string => (ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`);
+  const parts: Array<[string, number | undefined]> = [
+    [phases.fetchKind ?? "fetch", phases.fetchMs],
+    ["worktree", phases.worktreeMs],
+    ["setup", phases.setupMs],
+    ["agent", phases.agentMs],
+    ["push", phases.pushMs],
+    ["land", phases.landMs],
+  ];
+  return parts
+    .filter((p): p is [string, number] => p[1] !== undefined)
+    .map(([label, ms]) => `${label} ${fmt(ms)}`)
+    .join(" · ");
+}
+
 export function formatPlacementState(p: Pick<SessionPlacementRecord, "status" | "exitCode" | "endedBy">): string {
   if (!p.endedBy) return `[${p.status}]`;
   const why = p.endedBy === "abandoned" ? "worker abandoned" : "worker lost";
@@ -662,7 +680,8 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       "Ask one worker (id or name) to update to the board's build NOW (#1338): it drains, downloads the " +
         "board's worker tarball, verifies its sha256, installs side by side and restarts on it; a failure " +
         "rolls back and shows as 'update failed' in `worker list`. Board machine only. Works without " +
-        "--auto-update on the worker; needs a worker build that has self-update (a manual update gets it there once).",
+        "--auto-update on the worker; needs a worker build that has self-update (a manual update gets it there once). " +
+        "Run ON THE WORKER instead? Use `agentic-kanban-worker update-check --apply`.",
     )
     .option("--board <url>", "Board base URL — the board's API port (default), not the fleet port", DEFAULT_BOARD_URL)
     .action(runWorkerUpdate);
@@ -745,6 +764,8 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         // started stamping its verdict, and absent for an explicit placement that was never
         // resolved; printing nothing in those cases is the honest answer, not a default.
         if (p.placementReason) console.log(`      why: ${p.placementReason} — ${p.placementDetail ?? ""}`);
+        // #1328 — where the wall-clock went; absent for host sessions and unfinished runs.
+        if (p.phases) console.log(`      phases: ${formatPhaseTimings(p.phases)}`);
       }
     });
   // #774 (remaining #755 item 4) — TWO commands, not one, and the split is forced rather
@@ -819,12 +840,27 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       "Run ON THE WORKER MACHINE: report whether this install's build is behind the board's, and " +
         "print the exact manual update steps if so. Read-only — never downloads, installs, or " +
         "restarts anything (the process running this may be executing on the very worker it would " +
-        "update). Exits non-zero only when the check itself could not be completed.",
+        "update). Exits non-zero only when the check itself could not be completed. " +
+        "With --apply (#1355) it instead asks the RUNNING daemon on this machine — found through the " +
+        "state file, talking to the board it is paired with — to update to the board's build now: it " +
+        "drains, verifies, installs and relaunches, and this command prints 'already current', " +
+        "'updated from X to Y' or 'failed in <phase>: <cause>'. For the board-side counterpart see " +
+        "`worker update <name>` (board machine only).",
     )
-    .option("--board <url>", "Board base URL — the FLEET port on a cross-machine setup", DEFAULT_BOARD_URL)
+    .option("--board <url>", "Board base URL — the FLEET port on a cross-machine setup (ignored with --apply: the daemon's own board is used)", DEFAULT_BOARD_URL)
     .option("--state-file <path>", `Pairing state file, relative to the directory you run the command in (default: ${defaultWorkerStateFile()})`, cliPathArg)
+    .option("--apply", "Worker machine: update the running daemon to the board's build now (needs a daemon started with self-update, i.e. 'worker start')")
     .option("--json", "Output the report as JSON")
-    .action(async (options: { board: string; stateFile?: string; json?: boolean }) => {
+    .action(async (options: { board: string; stateFile?: string; json?: boolean; apply?: boolean }) => {
+      if (options.apply) {
+        const outcome = await applyWorkerUpdate({
+          stateFile: options.stateFile ?? defaultWorkerStateFile(),
+          print: (line) => console.log(line),
+        });
+        console.log(options.json ? JSON.stringify(outcome) : outcome.summary);
+        if (!outcome.ok) process.exit(1);
+        return;
+      }
       const report = await runWorkerUpdateCheck({
         boardUrl: options.board,
         stateFile: options.stateFile ?? defaultWorkerStateFile(),

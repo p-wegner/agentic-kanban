@@ -235,12 +235,50 @@ export interface WorkerSessionProbe {
   stdinOpen?: boolean;
 }
 
+/**
+ * Wall-clock milliseconds a git-transport session spent in each phase on the WORKER (#1328).
+ * Every field is optional: a phase that did not run (no setup script) or did not finish
+ * (provisioning failed) is absent, never 0 — absence and "instant" must stay distinguishable.
+ * The board adds `landMs` (the incoming-ref fast-forward) itself when it records the exit.
+ */
+export interface WorkerPhaseTimings {
+  /** Which repo step `fetchMs` timed: the first-time clone, or the fetch into the cached clone. */
+  fetchKind?: "clone" | "fetch";
+  fetchMs?: number;
+  worktreeMs?: number;
+  setupMs?: number;
+  /** Agent spawn to agent exit. */
+  agentMs?: number;
+  /** Result push to the board's incoming ref, retries included. */
+  pushMs?: number;
+}
+
+/** The worker's phase durations plus the board's incoming-ref fast-forward (#1328). */
+export type SessionPhaseTimings = WorkerPhaseTimings & { landMs?: number };
+
 /** Mirrors agent.service's AgentOutputEvent so events plug into broadcast as-is. */
 export interface WorkerAgentEvent {
   type: "stdout" | "stderr" | "exit";
   sessionId: string;
   data?: string;
   exitCode?: number | null;
+  /** `exit` of a git-transport session only (#1328). */
+  phases?: WorkerPhaseTimings;
+}
+
+const PHASE_KEYS = ["fetchMs", "worktreeMs", "setupMs", "agentMs", "pushMs"] as const;
+
+/** Lenient parse of a worker-reported timings object; anything unrecognised is dropped. */
+export function parseWorkerPhaseTimings(raw: unknown): WorkerPhaseTimings | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const rec = raw as Record<string, unknown>;
+  const out: WorkerPhaseTimings = {};
+  for (const key of PHASE_KEYS) {
+    const v = rec[key];
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0) out[key] = Math.round(v);
+  }
+  if (rec.fetchKind === "clone" || rec.fetchKind === "fetch") out.fetchKind = rec.fetchKind;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /**
@@ -690,6 +728,9 @@ export function parseWorkerToBoardMessage(raw: unknown): WorkerToBoardMessage | 
           sessionId: event.sessionId,
           data: typeof event.data === "string" ? event.data : undefined,
           exitCode: typeof event.exitCode === "number" || event.exitCode === null ? event.exitCode : undefined,
+          ...(event.type === "exit" && parseWorkerPhaseTimings(event.phases)
+            ? { phases: parseWorkerPhaseTimings(event.phases) }
+            : {}),
         },
       };
     }

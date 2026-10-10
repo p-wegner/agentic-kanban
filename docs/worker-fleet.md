@@ -919,6 +919,24 @@ retries it. A worker that was draining for an update that failed returns to rota
 update (`WORKER_UPDATE_REMEDIATION`: `node scripts/pack-worker.mjs`, copy, `npm i -g`, restart);
 after that it updates itself. `worker update-check` stays read-only and points at this path.
 
+**Reading a session's phase timings (#1328).** `worker placements` prints a `phases:` line under each
+git-transport session (the same data is `phases` on `GET /api/workers/placements`, and as
+`payload.phases` on that session's `session_exit` row in `worker events`):
+
+    phases: fetch 4.2s · worktree 310ms · setup 61.0s · agent 8m12s · push 2.1s · land 180ms
+
+- **fetch** (`clone` the first time a worker sees a project, `fetch` after) · **worktree** · **setup**
+  · **agent** (spawn to exit) · **push** (result to the incoming ref, retries included) — measured on
+  the worker. **land** is the board fast-forwarding the real branch from the incoming ref.
+- A phase that did not run is *absent*, not 0 (no setup script → no `setup`). A host session, a
+  session lost before its exit, or one from a worker build older than #1328 has no `phases` line.
+- Over a tailnet, `fetch` and `push` scale with link quality (a DERP-relayed path shows here first);
+  `setup` is the install and dominates on a real monorepo; `agent` is the work itself. `land` should be
+  small — a large one means the board's repo, not the network. A `clone` row is a cold cache; compare
+  `fetch` rows only with each other.
+- Setup repeats for every session, review sessions included. These numbers are what a follow-up (a
+  worker-side package store, reusing the build checkout for its review) is decided from.
+
 ## 11. Board tools on a worker — what a remote agent CAN and CANNOT do (#769, #799)
 
 A remote builder used to have no `mcp__agentic-kanban__*` tools at all: the board's own

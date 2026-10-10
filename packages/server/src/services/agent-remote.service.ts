@@ -43,6 +43,7 @@ import { incomingRefFor } from "./worker-remote-sync.service.js";
 import { REMOTE_SESSION_ABANDON_MS } from "./remote-session-liveness.js";
 import { WORKER_HEARTBEAT_STALE_MS } from "./worker-registry.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import type { WorkerPhaseTimings } from "@agentic-kanban/shared/lib/worker-protocol";
 import { createRemoteSessionEventRecorder, type BoardEndedReason } from "./agent-remote-events.js";
 import { createRemoteLiveness } from "./agent-remote-liveness.js";
 import { buildRemoteAssignSpec, dispatchGitTransportAssignment } from "./agent-remote-launch.js";
@@ -131,12 +132,16 @@ export function createRemoteAgentService(
     sessionId: string,
     session: RemoteSession,
     reportedExitCode: number | null, endedBy?: BoardEndedReason,
+    workerPhases?: WorkerPhaseTimings,
   ): Promise<void> {
     liveness.cancel(sessionId);
     sessions.delete(sessionId);
     fleetMcp.revokeSessionTokens(sessionId);
+    const landStart = Date.now();
     const exitCode = await landSessionBranch(sessionId, session, reportedExitCode);
-    noteSessionExit(sessionId, session, exitCode, "landed and finalized", endedBy);
+    // #1328: the board's own half of the timeline — the incoming-ref fast-forward — beside what the worker sent.
+    const phases = session.repo ? { ...workerPhases, landMs: Date.now() - landStart } : undefined;
+    noteSessionExit(sessionId, session, exitCode, "landed and finalized", endedBy, phases);
     try {
       session.onOutput({ type: "exit", sessionId, exitCode });
     } catch (err) {
@@ -233,7 +238,7 @@ export function createRemoteAgentService(
         }
         return;
       }
-      void landAndFinish(sessionId, session, exitEvent.exitCode ?? null);
+      void landAndFinish(sessionId, session, exitEvent.exitCode ?? null, undefined, exitEvent.phases);
       return;
     }
     if (message.type === "hello") {

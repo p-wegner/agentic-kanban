@@ -329,6 +329,18 @@
  * `options.tag` into `createIssueWithNextNumber`. Same `registerXCommand` shape this file's
  * header names as architecture rather than tangle — nothing here is extractable without
  * ceremony. Disclosed rather than worked around, per this file's own rule.
+ *
+ * -- Seventeenth disclosed movement (2026-10-10, #1328 per-phase timings) ----------------
+ *
+ *   services/agent-remote.service.ts::createRemoteAgentService   289 -> 292  (+3)
+ *   worker/worker-agent-runner.ts::createWorkerAgentRunner       358 -> 370  (+12)
+ *
+ * Found by merge train 2026-10-10-04. The worker times the agent run and the result push
+ * where they happen (spawn and push sit inside the runner) and sends them on the `exit`
+ * event; the board adds its own `landMs` around the incoming-ref fast-forward in
+ * `landAndFinish`. The phase type and its parser live in `worker-protocol.ts`; these lines
+ * are the start stamps and the hand-off. Both factories still want splitting; this is not
+ * the ticket that does it.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 718 -> 720, a DISCLOSED raise (#1107, landed 2026-09-12 in d90659d081). `issue get` gained
@@ -371,7 +383,8 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // are present after the rebase, so the number is the sum of the two additions, re-measured.
   "cli/commands/workspace.ts::registerWorkspaceCommand": 616,
   // 637 -> 638 (#1027), disclosed in the ninth movement above.
-  "services/agent-remote.service.ts::createRemoteAgentService": 289,
+  // 289 -> 292 (#1328), disclosed in the seventeenth movement above.
+  "services/agent-remote.service.ts::createRemoteAgentService": 292,
   "cli/commands/session.ts::registerSessionCommand": 569,
   // 564 -> 536 (#992): the PATCH field `if` chain became the table in
   // `services/project-update-fields.ts`, which is also what derives the recognized-key set.
@@ -437,7 +450,8 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "routes/workspace-actions.ts::createWorkspaceActionsRoute": 388,
   // 349 -> 351 (#841): POSIX-only `detached: true` for a shell launch, closing the #836 gap.
   // 351 -> 358 (#1027), disclosed in the ninth movement above.
-  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 358,
+  // 358 -> 370 (#1328), disclosed in the seventeenth movement above.
+  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 370,
 };
 
 /**
