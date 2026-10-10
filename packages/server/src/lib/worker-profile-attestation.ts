@@ -54,6 +54,11 @@ export function attestedRole(entry: WorkerProfileAttestation): ProfileRole {
   return isProfileRole(entry.role) ? entry.role : DEFAULT_PROFILE_ROLE;
 }
 
+/** False when the worker attests the profile but knows its credentials are expired or missing (#1331). */
+export function isRunnableAttestation(entry: WorkerProfileAttestation): boolean {
+  return entry.credentials === undefined;
+}
+
 /** `provider:name` for an attestation, in the roster's own spelling. */
 export function attestationRefId(entry: WorkerProfileAttestation): string {
   return profileRefId({ provider: narrowProvider(entry.provider), name: entry.name });
@@ -103,7 +108,11 @@ export function intersectRosterWithAttestation(
   attestations: readonly WorkerProfileAttestation[] | null | undefined,
 ): ParsedRoster {
   const attested = new Map<string, WorkerProfileAttestation>();
-  for (const entry of attestations ?? []) attested.set(attestationRefId(entry), entry);
+  // A profile the worker itself reports as expired/missing cannot log in there (#1331), so
+  // it is not supply: placing on it would pay for dispatch, setup and clone and then fail.
+  for (const entry of attestations ?? []) {
+    if (isRunnableAttestation(entry)) attested.set(attestationRefId(entry), entry);
+  }
 
   const entries: RosterEntry[] = [];
   for (const entry of roster.entries) {

@@ -397,7 +397,15 @@ export interface WorkerProfileAttestation {
   dedicatedProject?: string | null;
   /** The worker's own quota reading for this profile. Absent = never measured. */
   quota?: WorkerProfileQuota;
+  /**
+   * #1331: set when the worker KNOWS it cannot log in as this profile — its OAuth credentials
+   * are `expired` or `missing`. Absent = usable (or not an OAuth login, so unknowable). A
+   * profile carrying this is listed for visibility but is not runnable: placement skips it.
+   */
+  credentials?: WorkerProfileCredentialState;
 }
+
+export type WorkerProfileCredentialState = "expired" | "missing";
 
 export interface WorkerCapabilities {
   labels?: string[];
@@ -516,6 +524,9 @@ export function parseWorkerProfileAttestations(raw: unknown): WorkerProfileAttes
         ? { dedicatedProject: rec.dedicatedProject.trim() }
         : {}),
       ...(quota ? { quota } : {}),
+      ...(rec.credentials === "expired" || rec.credentials === "missing"
+        ? { credentials: rec.credentials }
+        : {}),
     });
   }
   return out.length > 0 ? out : undefined;

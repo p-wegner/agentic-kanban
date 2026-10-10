@@ -36,6 +36,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { defaultWorkerWorkRoot } from "../../worker/worker-repo.js";
+import { discoverLocalProfiles } from "../../lib/local-profile-discovery.js";
+import { credentialStateOf, quotaPollableProfiles } from "../../worker/worker-profiles.js";
 
 export type CheckStatus = "pass" | "fail" | "skip" | "unknown" | "warn";
 
@@ -551,6 +553,26 @@ export interface WorkerDoctorOptions {
   workRoot?: string;
 }
 
+/**
+ * One WARN per local Claude profile whose credentials are expired or missing (#1331). Such a
+ * profile is attested to the board as not runnable, so it silently receives no work — WARN
+ * (not fail): the machine is healthy, the operator just has a login to renew.
+ */
+export function checkProfileCredentials(home?: string, nowMs: number = Date.now()): DoctorCheck[] {
+  const checks: DoctorCheck[] = [];
+  for (const ref of quotaPollableProfiles(discoverLocalProfiles(home))) {
+    const state = credentialStateOf(ref.configDir, nowMs);
+    if (!state) continue;
+    checks.push({
+      name: `profile ${ref.profile}`,
+      status: "warn",
+      detail: `credentials ${state} - attested as not runnable, no work is placed on it (${ref.configDir})`,
+      remedy: `log in again: CLAUDE_CONFIG_DIR="${ref.configDir}" claude /login`,
+    });
+  }
+  return checks;
+}
+
 /** The worker-machine half. Runs every hop this side can actually prove. */
 export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<DoctorReport> {
   const boardUrl = opts.boardUrl.replace(/\/+$/, "");
@@ -566,6 +588,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   for (const provider of opts.providers) {
     checks.push(...(await checkProvider(provider, opts.home)));
   }
+  checks.push(...checkProfileCredentials(opts.home));
   return { side: "worker", boardUrl, checks, ok: checks.every((c) => c.status !== "fail") };
 }
 
