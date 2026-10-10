@@ -41,11 +41,13 @@ import { readProfileAttributes } from "../lib/profile-attributes.js";
 import {
   OAuthQuotaPoller,
   quotaReadingOf,
+  readOAuthCredentials,
   type OAuthProfileRef,
 } from "../lib/oauth-quota-core.js";
 import type {
   WorkerLaunchSpec,
   WorkerProfileAttestation,
+  WorkerProfileCredentialState,
 } from "@agentic-kanban/shared/lib/worker-protocol";
 
 /** `--profiles none` — an explicit "attest nothing", distinct from "flag absent". */
@@ -123,6 +125,17 @@ export function narrowDeclaredProfiles(
   return out;
 }
 
+/**
+ * Can this config dir's OAuth login run at all? `undefined` = yes, or not knowable without
+ * a request. Reads the file only; the same reader the quota probe uses, so the attestation
+ * and the "skipped (expired)" log line cannot disagree.
+ */
+export function credentialStateOf(configDir: string, nowMs: number): WorkerProfileCredentialState | undefined {
+  const read = readOAuthCredentials(configDir, nowMs);
+  if (read.err === undefined) return undefined;
+  return read.err === "expired" ? "expired" : "missing";
+}
+
 export function createWorkerProfileAttestor(
   options: WorkerProfileAttestorOptions = {},
 ): WorkerProfileAttestor {
@@ -146,10 +159,12 @@ export function createWorkerProfileAttestor(
         });
         const dir = configDirOf.get(profile.name);
         const reading = dir ? quotaReadingOf(poller.record(dir), nowMs) : undefined;
+        const credentials = dir ? credentialStateOf(dir, nowMs) : undefined;
         return {
           provider: profile.provider,
           name: profile.name,
           role: attributes.role,
+          ...(credentials ? { credentials } : {}),
           ...(attributes.dedicatedProject ? { dedicatedProject: attributes.dedicatedProject } : {}),
           ...(reading
             ? {
