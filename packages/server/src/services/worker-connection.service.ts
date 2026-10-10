@@ -339,6 +339,9 @@ function extractToken(c: Context): string | null {
   return extractBearer(c.req.header("authorization"));
 }
 
+/** Request header marking a probe-only upgrade that must not register or evict (#1316). */
+export const WORKER_PROBE_HEADER = "x-worker-probe";
+
 /**
  * GET /ws/workers/:id — token-authed WebSocket upgrade for a fleet worker.
  * Auth happens BEFORE the upgrade; an unauthenticated caller gets 401, never
@@ -351,6 +354,16 @@ export function createWorkerWsRoute(
 ) {
   const upgrade = upgradeWebSocket((c: Context) => {
     const workerId = c.req.param("id")!;
+    // `worker doctor` proves the upgrade path with a probe-only socket (#1316): authenticated
+    // like any other, but never registered — registering it would evict the live daemon's
+    // socket (a newer connection wins) and blame the worker for "overlapping sockets".
+    if (c.req.header(WORKER_PROBE_HEADER) === "1") {
+      return {
+        onOpen(_event: Event, ws: WSContext) {
+          try { ws.close(1000, "probe"); } catch { /* already gone */ }
+        },
+      };
+    }
     return {
       onOpen(_event: Event, ws: WSContext) {
         manager.handleOpen(workerId, ws);

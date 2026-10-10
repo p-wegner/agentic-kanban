@@ -568,17 +568,20 @@ export function registerWorkerSubcommands(workerCmd: Command) {
     .option("--providers <csv>", "Provider CLIs to check on this machine", "claude")
     .option("--git-port <n>", "KANBAN_GIT_HTTP_PORT, to check the git transport too", (v) => parseInt(v, 10))
     .option("--state-file <path>", `Pairing state file, relative to the directory you run the command in (default: ${defaultWorkerStateFile()})`, cliPathArg)
+    .option("--work-root <path>", "Worker work root (same as `worker start`), relative to the directory you run the command in (default: ~/.agentic-kanban/worker)", cliPathArg)
     .option("--json", "Output the report as JSON")
     .action(async (options: {
       board: string;
       providers: string;
       gitPort?: number;
       stateFile?: string;
+      workRoot?: string;
       json?: boolean;
     }) => {
       const report = await runWorkerDoctor({
         boardUrl: options.board,
         stateFile: options.stateFile ?? defaultWorkerStateFile(),
+        workRoot: options.workRoot ?? defaultWorkerWorkRoot(),
         providers: splitList(options.providers) ?? ["claude"],
         ...(options.gitPort === undefined || Number.isNaN(options.gitPort) ? {} : { gitPort: options.gitPort }),
       });

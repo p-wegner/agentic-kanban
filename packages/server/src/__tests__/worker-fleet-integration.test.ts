@@ -21,6 +21,7 @@ import {
   createWorkerWsRoute,
   type WorkerConnectionManager,
 } from "../services/worker-connection.service.js";
+import { checkWebSocket } from "../cli/commands/worker-doctor.js";
 import { startWorkerDaemon, type WorkerDaemonHandle } from "../worker/worker-daemon.js";
 import type { WorkerToBoardMessage } from "@agentic-kanban/shared/lib/worker-protocol";
 import type { Database } from "../db/index.js";
@@ -114,6 +115,34 @@ describe("worker fleet integration (board <-> daemon <-> agent)", () => {
     expect(await registry.revokeWorker(registered.workerId)).toBe(true);
     expect(manager.isConnected(registered.workerId)).toBe(false);
     await closed;
+  }, 20000);
+
+  it("doctor's websocket probe passes without evicting the live socket (#1316)", async () => {
+    const { pairingToken } = registry.mintPairingToken();
+    const registered = await registry.registerWorker({ pairingToken, name: "probe-me" });
+    if (!registered.ok) throw new Error(registered.error);
+    const live = new WebSocket(`${boardUrl.replace("http", "ws")}/ws/workers/${registered.workerId}`, {
+      headers: { authorization: `Bearer ${registered.workerToken}` },
+    });
+    await new Promise<void>((resolve, reject) => {
+      live.on("open", () => resolve());
+      live.on("error", reject);
+    });
+    await vi.waitFor(() => expect(manager.isConnected(registered.workerId)).toBe(true));
+    let liveClosed = false;
+    live.on("close", () => { liveClosed = true; });
+
+    const check = await checkWebSocket(boardUrl, {
+      workerId: registered.workerId,
+      workerToken: registered.workerToken,
+      name: "probe-me",
+    });
+    expect(check.status).toBe("pass");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(liveClosed).toBe(false);
+    expect(manager.isConnected(registered.workerId)).toBe(true);
+    // Revoked so later tests that count registered workers still see only their own.
+    await registry.revokeWorker(registered.workerId);
   }, 20000);
 
   it("pairs, connects, and says hello", async () => {
