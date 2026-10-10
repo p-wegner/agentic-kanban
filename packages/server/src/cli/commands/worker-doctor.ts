@@ -263,7 +263,12 @@ export function checkWebSocket(
   const wsUrl = `${boardUrl.replace(/^http/, "ws")}/ws/workers/${identity.workerId}`;
   return new Promise((resolve) => {
     let settled = false;
-    const socket = new WebSocket(wsUrl, { headers: { authorization: `Bearer ${identity.workerToken}` } });
+    // `x-worker-probe` (WORKER_PROBE_HEADER in worker-connection.service.ts — a literal here,
+    // this file is part of the standalone worker binary): the board accepts the upgrade and
+    // closes it WITHOUT registering, so a live daemon's socket is not evicted (#1316).
+    const socket = new WebSocket(wsUrl, {
+      headers: { authorization: `Bearer ${identity.workerToken}`, "x-worker-probe": "1" },
+    });
     const finish = (check: DoctorCheck): void => {
       if (settled) return;
       settled = true;
