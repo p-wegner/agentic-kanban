@@ -180,7 +180,11 @@ export function createWorkerBuildService(deps: WorkerBuildServiceDeps): WorkerBu
     if (!buildId) return { state: "unavailable", reason: "could not determine the board's commit" };
     const cached = readCached(buildId);
     if (cached) return { state: "ready", ...cached };
-    if (inFlight && inFlight.buildId === buildId) return { state: "building" };
+    // ONE pack at a time, even when HEAD moved mid-build: pack-worker rewrites package.json and
+    // runs the build in the board's own tree, so two overlapping runs corrupt each other (the
+    // second can capture the first's stamped version as the "original" and leave it behind).
+    // The stale build fails its own sha check; the next request starts the current commit.
+    if (inFlight) return { state: "building" };
     const nowMs = deps.nowMs ?? Date.now();
     if (lastFailure && lastFailure.buildId === buildId && nowMs - lastFailure.atMs < BUILD_FAILURE_RETRY_MS) {
       return { state: "unavailable", reason: `the last build failed: ${lastFailure.reason}` };
