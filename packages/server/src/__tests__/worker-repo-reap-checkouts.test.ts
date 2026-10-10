@@ -44,13 +44,37 @@ describe("reapOrphanedCheckouts", () => {
     mkdirSync(orphanCheckout, { recursive: true });
     writeFileSync(join(orphanCheckout, "stray-file.txt"), "leftover\n");
 
-    const report = await reapOrphanedCheckouts(workRoot);
+    // sess-live is owned by "this daemon" here, so only the unregistered dir goes.
+    const report = await reapOrphanedCheckouts(workRoot, () => {}, { owned: new Set(["sess-live"]) });
 
     expect(report.scanned).toBe(2);
     expect(report.reaped).toEqual([orphanCheckout]);
     expect(report.errored).toEqual([]);
     expect(existsSync(orphanCheckout)).toBe(false);
     expect(existsSync(liveCheckout)).toBe(true);
+  });
+
+  it("#1321: reaps a registered-but-ownerless checkout and its kanban/<sessionId> branch", async () => {
+    const cacheDir = join(workRoot, "repos", "proj-1");
+    mkdirSync(cacheDir, { recursive: true });
+    await gitExecOrThrow(["init", "-b", "master", cacheDir], {});
+    writeFileSync(join(cacheDir, "README.md"), "hello\n");
+    await gitExecOrThrow(["add", "."], { cwd: cacheDir });
+    await gitExecOrThrow(["-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-m", "init"], { cwd: cacheDir });
+    const dead = join(workRoot, "checkouts", "sess-dead");
+    await gitExecOrThrow(["worktree", "add", "-b", "kanban/sess-dead", dead, "master"], { cwd: cacheDir });
+
+    const stranded = await reapOrphanedCheckouts(workRoot, () => {}, { leaveAgents: true });
+    expect(stranded.stranded).toEqual([dead]);
+    expect(existsSync(dead)).toBe(true);
+
+    const report = await reapOrphanedCheckouts(workRoot);
+    expect(report.reaped).toEqual([dead]);
+    expect(existsSync(dead)).toBe(false);
+    const branches = await gitExecOrThrow(["branch", "--list", "kanban/sess-dead"], { cwd: cacheDir });
+    expect(String(branches).trim()).toBe("");
+    const wts = await gitExecOrThrow(["worktree", "list", "--porcelain"], { cwd: cacheDir });
+    expect(String(wts)).not.toContain("sess-dead");
   });
 
   it("treats every checkout as orphaned when its project cache is gone entirely", async () => {
@@ -85,6 +109,6 @@ describe("reapOrphanedCheckouts", () => {
 
   it("is a no-op when there is no checkouts directory yet", async () => {
     const report = await reapOrphanedCheckouts(workRoot);
-    expect(report).toEqual({ scanned: 0, reaped: [], errored: [] });
+    expect(report).toEqual({ scanned: 0, reaped: [], errored: [], stranded: [] });
   });
 });
