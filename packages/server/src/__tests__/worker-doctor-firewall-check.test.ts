@@ -44,11 +44,35 @@ describe("normalizeRemoteAddress", () => {
 });
 
 describe("buildPsList", () => {
-  it("queries from the port side and does not pipe every inbound rule", () => {
+  it("queries from the port side, adds the script's own rules, and captures errors", () => {
     const ps = buildPsList([3003, 3002]);
-    expect(ps).toContain("Get-NetFirewallPortFilter -Protocol TCP");
     expect(ps).toContain("'3003','3002'");
+    expect(ps).toContain("Get-NetFirewallRule -DisplayName 'agentic-kanban*'");
+    expect(ps).toContain("-ErrorVariable");
+    expect(ps).not.toContain("Get-NetFirewallPortFilter -Protocol TCP");
     expect(ps).not.toContain("Get-NetFirewallRule -Direction Inbound");
+  });
+});
+
+describe("checkTailnetFirewall partial results (#1361)", () => {
+  it("reports UNKN with the reason, never 'no rule', when the read was denied", async () => {
+    const out = await checkTailnetFirewall(listeners, "win32", async () => ({
+      partial: true,
+      rules: [],
+      reason: "Zugriff verweigert",
+    }));
+    expect(out.map((c) => c.status)).toEqual(["unknown", "unknown"]);
+    expect(out[0]?.detail).toContain("Zugriff verweigert");
+    expect(out[0]?.detail).not.toContain("no inbound firewall rule");
+  });
+
+  it("still passes a port whose scoped rule was seen despite a partial read", async () => {
+    const out = await checkTailnetFirewall(listeners, "win32", async () => ({
+      partial: true,
+      rules: [rule({ ports: ["3003"] })],
+      reason: "Zugriff verweigert",
+    }));
+    expect(out.map((c) => c.status)).toEqual(["pass", "unknown"]);
   });
 });
 
