@@ -9,7 +9,7 @@ import {
   WorkerRegistrationRefused,
   type WorkerDaemonHandle,
 } from "../../worker/worker-daemon.js";
-import { isSupervised, relaunchWorker, workerLogFileFor } from "../../worker/worker-updater.js";
+import { isSupervised, relaunchWorker, stampConsoleWithTimestamps, workerLogFileFor } from "../../worker/worker-updater.js";
 import { resolveDelegation, runDelegated } from "../../worker/worker-delegate.js";
 import { installShim } from "../../worker/worker-shim.js";
 import type { WorkerUpdateReport } from "../../lib/worker-update.js";
@@ -413,6 +413,9 @@ async function runWorkerStart(options: WorkerStartOptions): Promise<void> {
     }
     // #1350: a fixed-path launcher that always resolves current.json, so a manual restart never
     // depends on the global install (which self-update never refreshes).
+    // #1352: the lines below print before the daemon's timestamped logger exists; on a relaunch
+    // stdout IS worker.log, so they used to land there with no timestamp. (Idempotent.)
+    stampConsoleWithTimestamps();
     const shim = installShim({ stateFile: options.stateFile ?? defaultWorkerStateFile(), fallbackEntry: entry });
     if (shim) console.log(`[worker] stable restart command: ${shim} start …`);
     const logFile = workerLogFileFor(options.stateFile ?? defaultWorkerStateFile());

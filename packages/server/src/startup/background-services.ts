@@ -45,6 +45,7 @@ import { startStaleTempSweeper, stopStaleTempSweeper } from "./stale-temp-sweep.
 import { startNonBlockingSetupRetryReconciler, stopNonBlockingSetupRetryReconciler } from "./non-blocking-setup-retry-reconciler.js";
 import { startCommitMsgHookBackfill, stopCommitMsgHookBackfill } from "./commit-msg-hook-backfill.js";
 import { startFlushActivityLogReconciler, stopFlushActivityLogReconciler } from "./flush-activity-log-reconciler.js";
+import { getWorkerBuildService, startWorkerBuildPrewarm } from "../services/worker-build.service.js";
 
 /**
  * Background-service (start/stop) plugin registry — the append target for periodic
@@ -428,6 +429,17 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start({ db }) {
       startFlushActivityLogReconciler({ database: db });
       return stopFlushActivityLogReconciler;
+    },
+  },
+  {
+    // #1352 — the worker tarball was packed on the first worker request, so a self-updating
+    // worker sat DRAINING behind a 202 for minutes. Pack the current commit at boot and
+    // whenever HEAD moves, before any worker asks. Off under tests / KANBAN_WORKER_BUILD_PREWARM=0
+    // (pack-worker rewrites package.json in the tree it runs in).
+    name: "worker-build-prewarm",
+    async start() {
+      if (process.env.VITEST || process.env.NODE_ENV === "test" || process.env.KANBAN_WORKER_BUILD_PREWARM === "0") return;
+      return startWorkerBuildPrewarm(await getWorkerBuildService());
     },
   },
 ];

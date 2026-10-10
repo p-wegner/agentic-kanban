@@ -57,6 +57,32 @@ export class BuildChecksumError extends Error {
   }
 }
 
+/**
+ * #1352: a failure that says nothing about the BUILD — the network dropped, or the board is
+ * starting / packing. Retried with backoff; never pins the build as failed.
+ */
+export class TransientUpdateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TransientUpdateError";
+  }
+}
+
+/** HTTP statuses that mean "the board is not ready / briefly unwell", not "this build is bad". */
+export function isTransientStatus(status: number): boolean {
+  return status === 202 || status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+/** undici reports every network failure as `fetch failed`; the real reason is on `err.cause`. */
+export function describeFetchError(err: unknown): string {
+  const cause = err instanceof Error ? (err as Error & { cause?: unknown }).cause : undefined;
+  if (cause instanceof Error) {
+    const code = (cause as Error & { code?: string }).code;
+    return `${errorMessage(err)} (cause: ${code ? `${code}: ` : ""}${cause.message})`;
+  }
+  return cause !== undefined ? `${errorMessage(err)} (cause: ${String(cause)})` : errorMessage(err);
+}
+
 import { entryForBuild, removeQuietly } from "./worker-versions.js";
 export * from "./worker-versions.js";
 
@@ -164,19 +190,30 @@ export interface DownloadOptions {
   manifest: WorkerBuildManifest;
   destFile: string;
   fetchImpl?: typeof fetch;
+  /** #1352: phase log (`downloading <size>`, `sha256 ok`). */
+  log?: (line: string) => void;
 }
 
 /**
  * Stream the board's tarball to `destFile` and verify it against the manifest's sha256 (and
  * size). A mismatch DELETES the file and throws `BuildChecksumError` — a corrupt or tampered
- * archive is never handed to npm.
+ * archive is never handed to npm. Network/board-busy failures throw `TransientUpdateError`.
  */
 export async function downloadBuild(opts: DownloadOptions): Promise<void> {
   const doFetch = opts.fetchImpl ?? fetch;
-  const res = await doFetch(`${opts.boardUrl.replace(/\/+$/, "")}/api/workers/build/tarball`, {
-    headers: { authorization: `Bearer ${opts.workerToken}` },
-  });
-  if (!res.ok || !res.body) throw new Error(`tarball download failed: HTTP ${res.status}`);
+  const url = `${opts.boardUrl.replace(/\/+$/, "")}/api/workers/build/tarball`;
+  const startedMs = Date.now();
+  let res: Response;
+  try {
+    res = await doFetch(url, { headers: { authorization: `Bearer ${opts.workerToken}` } });
+  } catch (err) {
+    throw new TransientUpdateError(`GET ${url} failed: ${describeFetchError(err)}`);
+  }
+  if (!res.ok || !res.body) {
+    const msg = `tarball download failed: GET ${url} -> HTTP ${res.status}`;
+    throw isTransientStatus(res.status) ? new TransientUpdateError(msg) : new Error(msg);
+  }
+  opts.log?.(`[worker] update to build ${opts.manifest.buildId}: downloading ${(opts.manifest.size / (1024 * 1024)).toFixed(1)} MB`);
   mkdirSync(dirname(opts.destFile), { recursive: true });
   const hash = createHash("sha256");
   let size = 0;
@@ -189,7 +226,7 @@ export async function downloadBuild(opts: DownloadOptions): Promise<void> {
     await pipeline(source, createWriteStream(opts.destFile));
   } catch (err) {
     removeQuietly(opts.destFile);
-    throw new Error(`tarball download interrupted: ${errorMessage(err)}`);
+    throw new TransientUpdateError(`tarball download interrupted (GET ${url}): ${describeFetchError(err)}`);
   }
   const actual = hash.digest("hex");
   if (actual.toLowerCase() !== opts.manifest.sha256.toLowerCase()) {
@@ -200,6 +237,7 @@ export async function downloadBuild(opts: DownloadOptions): Promise<void> {
     removeQuietly(opts.destFile);
     throw new Error(`size mismatch: the board advertised ${opts.manifest.size} bytes, received ${size}`);
   }
+  opts.log?.(`[worker] update to build ${opts.manifest.buildId}: sha256 ok (downloaded in ${Math.round((Date.now() - startedMs) / 1000)}s)`);
 }
 
 export type NpmRunner = (args: string[], cwd: string) => Promise<void>;
@@ -364,7 +402,14 @@ export interface WorkerUpdaterDeps {
   manifestWaitMs?: number;
   /** A build id a previous attempt already failed on — not retried automatically. */
   failedBuild?: { buildId: string; reason: string };
+  /** #1352: persist a failure (build, phase, reason, transient) to `last-update.json`. */
+  recordFailure?: (failure: { buildId: string; phase: string; reason: string; transient: boolean }) => void;
+  /** #1352: waits between retries of a transient failure; its length is the retry count. */
+  retryBackoffMs?: readonly number[];
 }
+
+/** Transient failures (network, board starting/packing) retry after these waits, then give up until the next heartbeat. */
+export const DEFAULT_RETRY_BACKOFF_MS: readonly number[] = [5_000, 15_000, 30_000, 60_000];
 
 export interface WorkerUpdater {
   /** The board's advertised build id, from a heartbeat. `force` = a board-side `worker update`. */
@@ -399,32 +444,69 @@ export function createWorkerUpdater(deps: WorkerUpdaterDeps): WorkerUpdater {
     }
   }
 
-  async function waitForManifest(): Promise<WorkerBuildManifest> {
+  /**
+   * #1352: poll until the board has the build packed — BEFORE draining, so the worker keeps
+   * taking work while the board packs. The wait is logged with its elapsed seconds.
+   */
+  async function waitForManifest(target: string): Promise<WorkerBuildManifest> {
     const deadline = manifestWaitMs;
     let waited = 0;
+    let lastLoggedS = -1;
     for (;;) {
       const result = await deps.fetchManifest();
-      if (result !== "building") return result;
-      if (waited >= deadline) throw new Error(`the board did not finish building its worker tarball within ${Math.round(deadline / 1000)}s`);
+      if (result !== "building") {
+        if (waited > 0) deps.log(`[worker] update to build ${target}: board build ready after ${Math.round(waited / 1000)}s`);
+        return result;
+      }
+      const waitedS = Math.round(waited / 1000);
+      if (lastLoggedS < 0 || waitedS - lastLoggedS >= 10) {
+        lastLoggedS = waitedS;
+        deps.log(`[worker] update to build ${target}: waiting for board build (202, ${waitedS}s) — still taking work`);
+      }
+      if (waited >= deadline) {
+        throw new TransientUpdateError(`the board did not finish building its worker tarball within ${Math.round(deadline / 1000)}s`);
+      }
       await sleep(pollMs);
       waited += pollMs;
     }
   }
 
+  /** Re-run `fn` on a TRANSIENT failure with backoff; anything else (or running out of tries) throws. */
+  async function retrying<T>(target: string, phase: string, fn: () => Promise<T>): Promise<T> {
+    const backoff = deps.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        if (!(err instanceof TransientUpdateError)) throw err;
+        phaseOfFailure = phase;
+        if (attempt >= backoff.length) throw err;
+        deps.log(`[worker] update to build ${target}: ${phase} failed transiently (${err.message}); retry ${attempt + 1}/${backoff.length} in ${Math.round(backoff[attempt] / 1000)}s`);
+        await sleep(backoff[attempt]);
+      }
+    }
+  }
+
+  let phaseOfFailure = "update";
+
   async function run(target: string): Promise<void> {
-    set({ state: "updating", reason: "draining", targetBuild: target });
-    deps.log(`[worker] update to build ${target}: draining (the board stops assigning; running sessions finish first)`);
+    set({ state: "updating", reason: "fetching the board's build", targetBuild: target });
+    phaseOfFailure = "manifest";
     let drained = false;
     try {
+      const manifest = await retrying(target, "manifest", () => waitForManifest(target));
+      phaseOfFailure = "drain";
+      set({ state: "updating", reason: "draining", targetBuild: target });
+      deps.log(`[worker] update to build ${target}: board build available; draining (the board stops assigning; running sessions finish first)`);
       await deps.drain();
       drained = true;
       await waitForIdle(target);
       await deps.settle?.();
       deps.log(`[worker] update to build ${target}: drained, no sessions running and result pushes settled`);
-      set({ state: "updating", reason: "fetching the board's build", targetBuild: target });
-      const manifest = await waitForManifest();
+      phaseOfFailure = "download";
       set({ state: "updating", reason: "downloading", targetBuild: target });
-      const tarball = await deps.download(manifest);
+      const tarball = await retrying(target, "download", () => deps.download(manifest));
+      phaseOfFailure = "install";
       set({ state: "updating", reason: "installing", targetBuild: target });
       const entry = await deps.install(manifest, tarball);
       deps.activate(manifest, entry);
@@ -433,9 +515,18 @@ export function createWorkerUpdater(deps: WorkerUpdaterDeps): WorkerUpdater {
       await deps.restart(entry);
     } catch (err) {
       const reason = errorMessage(err);
-      failedFor = target;
+      const transient = err instanceof TransientUpdateError;
+      const phase = err instanceof BuildChecksumError ? "checksum" : phaseOfFailure;
+      // Only a build-level failure (checksum / install) pins the build as failed; a transient
+      // one is retried by the next heartbeat instead of waiting for `worker update`.
+      if (!transient) failedFor = target;
       set({ state: "failed", reason, targetBuild: target });
-      deps.log(`[worker] update to build ${target} FAILED (staying on the current build): ${reason}`);
+      try {
+        deps.recordFailure?.({ buildId: target, phase, reason, transient });
+      } catch {
+        /* the log line below is the fallback record */
+      }
+      deps.log(`[worker] update to build ${target} FAILED in ${phase} (${transient ? "transient, will retry on a later heartbeat" : "staying on the current build"}): ${reason}`);
       if (drained) {
         try {
           await deps.undrain();
