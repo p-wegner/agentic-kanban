@@ -18,13 +18,25 @@ import type { AgentOutputCallback } from "./agent.service.js";
 export function deliverRemoteOutput(
   onOutput: AgentOutputCallback,
   event: Parameters<AgentOutputCallback>[0],
+  persist: (event: { type: string; sessionId: string; data?: string }) => void = defaultRemoteSink,
 ): void {
-  persistRemoteStdout(event);
+  persist(event);
   try {
     onOutput(event);
   } catch (err) {
     console.error(`[agent-remote] output callback error: sessionId=${event.sessionId}`, err);
   }
+}
+
+/**
+ * The default sink. `KANBAN_REMOTE_TRANSCRIPT=off` makes it a no-op: the unit-test setup
+ * (`test-setup/remote-transcript-neutral.ts`) sets it so tests that drive the remote service
+ * never write the REAL `%TEMP%/kanban-session-<id>.out` (#1348) — a stray `s1` file there made
+ * `ingestSession` read it in preference to a test's own DB rows.
+ */
+function defaultRemoteSink(event: { type: string; sessionId: string; data?: string }): void {
+  if (process.env.KANBAN_REMOTE_TRANSCRIPT === "off") return;
+  persistRemoteStdout(event);
 }
 
 export function persistRemoteStdout(event: { type: string; sessionId: string; data?: string }): void {

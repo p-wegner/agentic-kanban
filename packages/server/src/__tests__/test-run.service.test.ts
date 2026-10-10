@@ -195,11 +195,14 @@ describe("ingestSession (DB-backed)", () => {
       type: "user",
       message: { content: [{ type: "tool_result", content: [{ type: "text", text: "✓ src/a.test.ts > g > t 1ms" }] }] },
     });
-    await seedSession(db, "s1");
-    await db.insert(sessionMessages).values({ sessionId: "s1", type: "stdout", data: line });
+    // Unique id: ingestSession prefers the real %TEMP%/kanban-session-<id>.out over DB rows, so a
+    // fixed "s1" collides with any stray file another suite left behind (#1348).
+    const sid = `s-${randomUUID()}`;
+    await seedSession(db, sid);
+    await db.insert(sessionMessages).values({ sessionId: sid, type: "stdout", data: line });
 
-    expect(await svc.ingestSession("s1")).toBe(1);
-    expect(await svc.ingestSession("s1")).toBe(0); // already ingested
+    expect(await svc.ingestSession(sid)).toBe(1);
+    expect(await svc.ingestSession(sid)).toBe(0); // already ingested
 
     const rows = await db.select({ id: testRuns.id }).from(testRuns);
     expect(rows).toHaveLength(1);
