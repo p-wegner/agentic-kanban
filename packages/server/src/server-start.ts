@@ -7,7 +7,10 @@ import * as agentService from "./services/agent.service.js";
 import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { resolveFleetHost, resolveFleetPort, startFleetListener } from "./services/fleet-listener.service.js";
-import { ensureGitHttpServer, stopGitHttpServer } from "./services/git-http.service.js";
+import {
+  ensureGitHttpServer, stopGitHttpServer, gitPortStabilityViolation, resolveConfiguredGitHost, resolveConfiguredGitPort,
+} from "./services/git-http.service.js";
+import { superviseBind } from "./services/listener-bind-supervisor.service.js";
 import { createFleetWorkersRoute } from "./routes/workers.js";
 import { setupApiNotFoundAndSpaFallback, setupRoutes } from "./startup/route-setup.js";
 import { BACKGROUND_SERVICES } from "./startup/background-services.js";
@@ -173,20 +176,27 @@ export async function startServer(port?: number, hostname?: string) {
   // board keeps running locally, just without remote workers.
   const fleetPort = resolveFleetPort();
   if (fleetPort !== null) {
-    try {
-      const fleetListener = await startFleetListener({
+    // #1325: a bind failure (tailnet address not up yet at boot) is retried with backoff
+    // instead of leaving the board fleet-less for its whole lifetime; the state is on /api/health.
+    const fleetHost = resolveFleetHost();
+    let fleetListener: Awaited<ReturnType<typeof startFleetListener>> | null = null;
+    const fleetSupervisor = await superviseBind({
+      name: "fleet-listener",
+      configuredHost: fleetHost,
+      configuredPort: fleetPort,
+      start: () => startFleetListener({
         database: db,
         port: fleetPort,
         createWorkersRoute: createFleetWorkersRoute,
-        host: resolveFleetHost(),
-      });
-      cleanupCallbacks.push(() => { void fleetListener.close(); });
-    } catch (err) {
-      console.error(
-        `[fleet-listener] failed to bind KANBAN_FLEET_PORT=${fleetPort}; remote workers cannot connect:`,
-        errorMessage(err),
-      );
-    }
+        host: fleetHost,
+      }),
+      describe: (h) => ({ host: h.host, port: h.port }),
+      onBound: (h) => { fleetListener = h; },
+    });
+    cleanupCallbacks.push(() => {
+      fleetSupervisor.stop();
+      void fleetListener?.close();
+    });
 
     // #855 — bind the git transport EAGERLY when a fleet is configured. It used to bind
     // lazily on the first git-transport dispatch only (`ensureGitHttpServer` in
@@ -200,15 +210,18 @@ export async function startServer(port?: number, hostname?: string) {
     // Failure is NON-FATAL: log and degrade to the lazy path — the dispatch-time
     // `ensureGitHttpServer` call sites remain (the failed memoized promise is reset, so
     // they retry; once this succeeds they are no-ops against the memoized handle).
-    try {
-      const git = await ensureGitHttpServer(db);
-      console.log(`[git-http] bound eagerly at startup for the fleet (port ${git.port})`);
-    } catch (err) {
-      console.warn(
-        "[git-http] eager startup bind failed — degrading to lazy bind on the first git-transport dispatch:",
-        errorMessage(err),
-      );
-    }
+    // #1325: the same retry as the fleet listener — a failed eager bind keeps retrying with
+    // backoff (the dispatch-time call sites still bind lazily in the meantime).
+    const gitSupervisor = await superviseBind({
+      name: "git-http",
+      configuredHost: resolveConfiguredGitHost(),
+      configuredPort: resolveConfiguredGitPort(),
+      start: () => ensureGitHttpServer(db),
+      describe: (h) => ({ host: resolveConfiguredGitHost(), port: h.port }),
+      isRetryable: () => gitPortStabilityViolation() === null,
+      onBound: (h) => console.log(`[git-http] bound eagerly at startup for the fleet (port ${h.port})`),
+    });
+    cleanupCallbacks.push(() => gitSupervisor.stop());
   }
 
   // #856 — release the git transport listener (bound eagerly above on a fleet-configured

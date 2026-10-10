@@ -2,6 +2,7 @@ import { createRouter } from "../middleware/create-router.js";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkHealthDeps } from "../services/health-deps.service.js";
+import { getListenerState } from "../services/listener-bind-supervisor.service.js";
 import { DB_LOCATION } from "../db/data-dir.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -34,7 +35,15 @@ export function createHealthRoute(repoRoot: string = defaultRepoRoot) {
   router.get("/", (c) => {
     const deps = checkHealthDeps(repoRoot);
     return c.json(
-      { status: deps.ok ? "ok" : "degraded", ok: deps.ok, checks: deps.checks, db: describeDb() },
+      {
+        status: deps.ok ? "ok" : "degraded",
+        ok: deps.ok,
+        checks: deps.checks,
+        db: describeDb(),
+        // #1325: bound host:port, or "retrying" with the last bind error.
+        fleetListener: getListenerState("fleet-listener"),
+        gitTransport: getListenerState("git-http"),
+      },
       deps.ok ? 200 : 503,
     );
   });

@@ -520,6 +520,8 @@ export function resolveConfiguredGitHost(env: NodeJS.ProcessEnv = process.env): 
   });
 }
 
+import { resolveBindHost } from "../lib/tailscale-host.js";
+
 export async function startGitHttpServer(opts?: {
   database?: Database;
   port?: number;
@@ -618,7 +620,8 @@ export async function startGitHttpServer(opts?: {
   http.headersTimeout = HEADERS_TIMEOUT_MS;
   http.requestTimeout = REQUEST_TIMEOUT_MS;
 
-  const host = opts?.host ?? resolveConfiguredGitHost();
+  // #1325: `KANBAN_GIT_HTTP_HOST=tailscale` resolves at bind time like the fleet host.
+  const host = resolveBindHost(opts?.host ?? resolveConfiguredGitHost());
   const port = await new Promise<number>((resolve, rejectListen) => {
     http.once("error", rejectListen);
     http.listen(opts?.port ?? resolveConfiguredGitPort(), host, () => {
