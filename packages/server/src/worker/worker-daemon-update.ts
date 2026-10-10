@@ -26,6 +26,7 @@ import {
   writePointer,
   type WorkerUpdater,
 } from "./worker-updater.js";
+import { installShim } from "./worker-shim.js";
 import type { WorkerSelfUpdateOptions } from "./worker-daemon.js";
 
 export interface DaemonSelfUpdateDeps {
@@ -148,6 +149,9 @@ export function createDaemonSelfUpdate(d: DaemonSelfUpdateDeps): DaemonSelfUpdat
         attempts: 0,
       });
       clearFailure(versionsDir);
+      // #1350: (re)write the stable launcher beside the state file so the restart path is
+      // available even where the global install predates delegation.
+      installShim({ stateFile: d.stateFile, fallbackEntry: opts.entry });
       const pruned = pruneVersions(versionsDir, opts.keepVersions ?? DEFAULT_KEPT_VERSIONS, [
         manifest.buildId,
         ownBuildId,

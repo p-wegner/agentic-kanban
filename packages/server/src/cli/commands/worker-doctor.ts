@@ -436,7 +436,7 @@ async function checkGit(): Promise<DoctorCheck> {
 // god-module gate's 20-declaration ceiling (#889), and the check pushed it to 21.
 import { checkNodeVersion } from "./worker-doctor-node-check.js";
 export { MIN_SUPPORTED_NODE_MAJOR, checkNodeVersion } from "./worker-doctor-node-check.js";
-import { checkWorkerBuild } from "./worker-doctor-build-check.js";
+import { checkGlobalLauncher, checkWorkerBuild } from "./worker-doctor-build-check.js";
 // #875's env-aware auth-dir resolution lives in its own module for the same reason.
 import { resolveProviderAuthDir } from "./worker-doctor-provider-auth.js";
 
@@ -588,6 +588,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   checks.push(await checkGit());
   checks.push(checkNodeVersion());
   checks.push(checkWorkerBuild(opts.stateFile, opts.runningEntry ?? null));
+  checks.push(checkGlobalLauncher({ stateFile: opts.stateFile, runningEntry: opts.runningEntry ?? null }));
   checks.push(checkWorkerCheckoutTrust(opts.workRoot ?? defaultWorkerWorkRoot(), opts.home ?? homedir()));
   for (const provider of opts.providers) {
     checks.push(...(await checkProvider(provider, opts.home)));

@@ -872,6 +872,20 @@ global install. `worker doctor` has a `worker build` check naming the running vs
 (a WARN, not a failure, when they differ). Needs a global build that includes #1346 — one manual
 update gets it there.
 
+**Stable restart command (#1350).** A self-update never touches the global `npm i -g` install, so a
+bootstrap build from before #1346 cannot delegate, and a fresh state dir has no `versions/` yet.
+`worker start` and every self-update therefore write a shim at a FIXED path beside the state file:
+
+```powershell
+~\.agentic-kanban\worker\bin\agentic-kanban-worker.cmd start --board http://<board>:3003 [same flags]   # or .ps1
+~/.agentic-kanban/worker/bin/agentic-kanban-worker start --board http://<board>:3003 [same flags]       # POSIX
+```
+
+(`<worker-home>` is the directory of `--state-file`; `worker start` prints the exact path.) The shim
+always runs the build `versions/current.json` names, falling back to the build that wrote it when
+there is no pointer or the pointed build was pruned. **Use this for a manual restart.** `worker
+doctor` WARNs (`global launcher`) when the global install is a different build than the running one.
+
 **Failure never leaves the worker offline.** A failed download, checksum, install — or a new build
 that does not connect to the board within 120 s, or restarts three times without connecting —
 rolls back to the previous version (`current.json` is pointed back, the broken install is removed)
