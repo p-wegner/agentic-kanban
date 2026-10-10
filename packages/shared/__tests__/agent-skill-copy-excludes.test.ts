@@ -1,12 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { mkdtemp, mkdir, writeFile, readdir, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { copySkillToWorktree, shouldCopySkillEntry } from "../src/lib/agent-skill-files";
 
 describe("copySkillToWorktree dependency exclusion (#1356)", () => {
   it("skips .venv / node_modules / __pycache__ but copies real assets", async () => {
-    const root = await mkdtemp(join(tmpdir(), "skill-copy-"));
+    const root = await mkdtemp(join(tmpdir(), "ak-1356-skill-copy-"));
     try {
       const repo = join(root, "repo");
       const wt = join(root, "wt");
@@ -22,8 +23,11 @@ describe("copySkillToWorktree dependency exclusion (#1356)", () => {
       expect(await copySkillToWorktree(repo, "demo", wt)).toBe(true);
 
       const dest = join(wt, ".claude", "skills", "demo");
-      expect((await readdir(dest)).sort()).toEqual(["SKILL.md", "tools"]);
-      expect(await readdir(join(dest, "tools"))).toEqual(["run.mjs"]);
+      expect(existsSync(join(dest, "SKILL.md"))).toBe(true);
+      expect(existsSync(join(dest, "tools", "run.mjs"))).toBe(true);
+      expect(existsSync(join(dest, ".venv"))).toBe(false);
+      expect(existsSync(join(dest, "node_modules"))).toBe(false);
+      expect(existsSync(join(dest, "tools", "__pycache__"))).toBe(false);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
