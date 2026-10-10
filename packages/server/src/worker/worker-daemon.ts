@@ -59,6 +59,23 @@ const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const RECONNECT_MIN_MS = 1000;
 const CONNECT_TIMEOUT_MS = 6000;
 const RECONNECT_MAX_MS = 30 * 1000;
+/** #1344: while the board was reachable this recently, retries stay quick so an outage that ends is noticed in seconds. */
+const RECONNECT_RECENT_WINDOW_MS = 5 * 60 * 1000;
+const RECONNECT_RECENT_MAX_MS = 5 * 1000;
+
+/** The backoff ceiling: low inside the recently-reachable window, the long cap after it. */
+export function reconnectCapMs(sinceReachableMs: number | null): number {
+  return sinceReachableMs !== null && sinceReachableMs < RECONNECT_RECENT_WINDOW_MS
+    ? RECONNECT_RECENT_MAX_MS
+    : RECONNECT_MAX_MS;
+}
+
+/** The delay to use now and the next stored backoff value (#1344). */
+export function nextReconnectDelay(current: number, sinceReachableMs: number | null): { delay: number; next: number } {
+  const cap = reconnectCapMs(sinceReachableMs);
+  const delay = Math.min(current, cap);
+  return { delay, next: Math.min(delay * 2, cap) };
+}
 /** Bounded queue of undeliverable-but-critical messages (exit/assign_failed). */
 const PENDING_QUEUE_CAP = 200;
 
@@ -481,6 +498,8 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   let repairAttempts = 0;
   let repairing = false;
   let reconnectDelay = RECONNECT_MIN_MS;
+  /** Last moment a socket to the board was open (#1344); null until the first successful connect. */
+  let lastReachableAt: number | null = null;
   /**
    * The one pending reconnect timer (#858). Held so a new trigger can tell that a retry is
    * already scheduled: before this, every close scheduled its own timer and the re-pairing
@@ -652,6 +671,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           reconnectTimer = null;
         }
         openedAt = Date.now();
+        lastReachableAt = openedAt;
         log(`[worker] connected to ${boardUrl}`);
         socket.send(JSON.stringify({
           type: "hello",
@@ -743,8 +763,10 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       // path racing a `close`, or an eviction landing beside a heartbeat 401) used to arm
       // two timers, each opening its own socket.
       if (reconnectTimer) return;
-      const delay = reconnectDelay;
-      reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
+      if (openedAt !== null) lastReachableAt = Date.now();
+      const { delay, next } = nextReconnectDelay(
+        reconnectDelay, lastReachableAt === null ? null : Date.now() - lastReachableAt);
+      reconnectDelay = next;
       // Say how long the connection lasted, not just when the next attempt is:
       // the retry delay resets to RECONNECT_MIN_MS on every successful open, so
       // a log of bare "retrying in 1s" lines reads like a socket that keeps
