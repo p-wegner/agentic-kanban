@@ -19,6 +19,7 @@
  * restored entry therefore carries an EMPTY token, and its failed retry is what routes the
  * session to the board as an `undelivered_result` report rather than as a silent loss.
  */
+import { workerLog } from "./worker-updater.js";
 import type { WorkerRepoTransport, WorkerToBoardMessage } from "@agentic-kanban/shared/lib/worker-protocol";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { WorkerCheckout } from "./worker-repo.js";
@@ -95,7 +96,7 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
       attempts: record.attempts,
       lastError: record.lastError || "restored after a daemon restart; not yet retried by this process",
     });
-    console.warn(
+    workerLog(
       `[worker] restored an undelivered result from ${workRoot}: sessionId=${record.sessionId} ` +
         `checkout=${record.checkoutPath} target=${record.incomingRef} — retrying on the next connect`,
     );
@@ -148,11 +149,11 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
       attempts += 1;
       try {
         await deps.push(deps.boardUrl, pending.repo, pending.checkout);
-        console.log(`[worker] pushed session result: sessionId=${sessionId} ref=${pending.repo.incomingRef}`);
+        workerLog(`[worker] pushed session result: sessionId=${sessionId} ref=${pending.repo.incomingRef}`);
         return { ok: true, attempts };
       } catch (err) {
         lastError = errorMessage(err);
-        console.error(`[worker] push failed (attempt ${attempts}): sessionId=${sessionId}: ${lastError}`);
+        workerLog(`[worker] push failed (attempt ${attempts}): sessionId=${sessionId}: ${lastError}`);
       }
       const delay = deps.retryDelaysMs[attempts - 1];
       if (delay === undefined || retriesSuspended) break;
@@ -219,14 +220,14 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
         entry.attempts += 1;
         entry.lastError = errorMessage(err);
         persist(sessionId); // keep the on-disk attempt count/error honest (#871)
-        console.warn(`[worker] retained result still cannot be pushed: sessionId=${sessionId}: ${entry.lastError}`);
+        workerLog(`[worker] retained result still cannot be pushed: sessionId=${sessionId}: ${entry.lastError}`);
         continue;
       }
       unpushed.delete(sessionId);
       removeUndelivered(workRoot, sessionId); // delivered — the persisted entry is cleared (#871)
       pushed.push(sessionId);
       await deps.cleanup(entry.pending.checkout).catch(() => {});
-      console.log(`[worker] retained result pushed on reconnect: sessionId=${sessionId}`);
+      workerLog(`[worker] retained result pushed on reconnect: sessionId=${sessionId}`);
       safeSend({
         type: "event",
         event: {

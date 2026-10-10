@@ -22,6 +22,7 @@
  * not one any live probe is asking about.
  */
 
+import { workerLog } from "./worker-updater.js";
 import type { WorkerToBoardMessage } from "@agentic-kanban/shared/lib/worker-protocol";
 
 /** How many session ids this worker remembers. See the module header for why a bound is safe. */
@@ -126,7 +127,7 @@ export function createWorkerSessionRegistry(deps: SessionRegistryDeps) {
    */
   function answerProbe(sessionId: string, requestId: string): void {
     const answer = probe(sessionId);
-    console.log(`[worker] session probe: sessionId=${sessionId} state=${answer.state}`);
+    workerLog(`[worker] session probe: sessionId=${sessionId} state=${answer.state}`);
     deps.safeSend({ type: "session_probe_result", sessionId, probe: { requestId, ...answer } });
   }
 

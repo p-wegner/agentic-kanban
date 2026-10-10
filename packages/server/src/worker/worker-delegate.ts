@@ -3,6 +3,7 @@
 // `agentic-kanban-worker` is still the bootstrap build. A manual restart through the global
 // binary must land on the CURRENT build, not the stale one (which would just self-update again).
 
+import { workerLog } from "./worker-updater.js";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -68,7 +69,7 @@ export function runDelegated(
   argv: readonly string[],
   deps: { execPath?: string; spawnImpl?: typeof spawn; log?: (line: string) => void } = {},
 ): Promise<number> {
-  const log = deps.log ?? ((line: string) => console.log(line));
+  const log = deps.log ?? ((line: string) => workerLog(line));
   log(
     `[worker] delegating to the current build ${target.buildId.slice(0, 12)} (${target.entry}) — ` +
       "pass --no-delegate to run this install instead",

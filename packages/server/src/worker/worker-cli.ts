@@ -14,6 +14,7 @@
 // board services silently re-introduces exactly what this file exists to avoid.
 // `worker-cli-isolation.test.ts` fails the build if that happens.
 
+import { workerLog } from "./worker-updater.js";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,10 +69,10 @@ function resolveVersion(): string {
  */
 function installProcessGuards(): void {
   process.on("uncaughtException", (err) => {
-    console.error("[worker] uncaught exception (daemon staying up — running agents keep their sessions):", err);
+    workerLog("[worker] uncaught exception (daemon staying up — running agents keep their sessions):", err);
   });
   process.on("unhandledRejection", (reason) => {
-    console.error("[worker] unhandled rejection (daemon staying up):", reason);
+    workerLog("[worker] unhandled rejection (daemon staying up):", reason);
   });
 }
 
