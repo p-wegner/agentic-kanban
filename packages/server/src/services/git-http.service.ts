@@ -504,7 +504,7 @@ export function gitPortStabilityViolation(env: NodeJS.ProcessEnv = process.env):
     `configured (KANBAN_FLEET_PORT=${fleetPort}). A worker holds the gitPort from its assign ` +
     "and rebuilds every clone/push URL from it, so an ephemeral port breaks after any board " +
     "restart or relisten with no visible cause. Set KANBAN_GIT_HTTP_PORT to a pinned port " +
-    "(see docs/worker-fleet.md section 6)."
+    "(see `agentic-kanban worker setup`, section 6)."
   );
 }
 

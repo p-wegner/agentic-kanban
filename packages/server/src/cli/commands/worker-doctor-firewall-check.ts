@@ -27,7 +27,9 @@ export interface FirewallListTimeout {
 }
 
 /** `null` = PowerShell/NetSecurity unavailable; `FirewallListTimeout` = it ran but was too slow. */
-export type FirewallRuleLister = (ports?: number[]) => Promise<FirewallRuleInfo[] | FirewallListTimeout | null>;
+export type FirewallRuleLister = (
+  ports?: number[],
+) => Promise<FirewallRuleInfo[] | FirewallListTimeout | FirewallListPartial | null>;
 
 /** Normalise a firewall remote address to `a.b.c.d/prefix` (CIDR or dotted-mask form); other values pass through. */
 export function normalizeRemoteAddress(addr: string): string {
@@ -64,16 +66,33 @@ export function isTailnetAddress(host: string | null | undefined): boolean {
  */
 export function buildPsList(ports: number[]): string {
   const list = ports.map((p) => `'${Math.trunc(p)}'`).join(",");
+  // #1361: unelevated, `Get-NetFirewallPortFilter -Protocol TCP` returns 0 objects and the
+  // unfiltered bulk call raises access-denied on part of the store, so neither can prove "no rule".
+  // Rules are therefore the union of (a) the script's own `agentic-kanban*` rules, resolved per rule
+  // (works unelevated, few rules) and (b) a bulk port-filter scan. Errors from either are captured and
+  // returned as `partial` instead of being swallowed.
   return (
-    `$w=@(${list});` +
-    "$pf=@(Get-NetFirewallPortFilter -Protocol TCP -ErrorAction SilentlyContinue | Where-Object {" +
+    `$w=@(${list});$e1=@();$e2=@();` +
+    "$pf=@(Get-NetFirewallPortFilter -ErrorAction SilentlyContinue -ErrorVariable e1 | Where-Object {" +
     "@($_.LocalPort | Where-Object { $w -contains [string]$_ }).Count -gt 0 });" +
-    "$o=@($pf | Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.Direction -eq 'Inbound' } | ForEach-Object {" +
+    "$r1=@($pf | Get-NetFirewallRule -ErrorAction SilentlyContinue -ErrorVariable +e1);" +
+    "$r2=@(Get-NetFirewallRule -DisplayName 'agentic-kanban*' -ErrorAction SilentlyContinue -ErrorVariable e2);" +
+    "$all=@(@($r1)+@($r2) | Where-Object { $_.Direction -eq 'Inbound' } | Sort-Object -Property Name -Unique);" +
+    "$o=@($all | ForEach-Object {" +
     "$p=($_|Get-NetFirewallPortFilter).LocalPort;$a=($_|Get-NetFirewallAddressFilter).RemoteAddress;" +
     "[pscustomobject]@{name=$_.DisplayName;enabled=($_.Enabled -eq 'True');allow=($_.Action -eq 'Allow');" +
     "ports=@($p|ForEach-Object{[string]$_});remote=@($a|ForEach-Object{[string]$_})}});" +
-    "ConvertTo-Json -InputObject $o -Compress -Depth 4"
+    "$errs=@(@($e1)+@($e2) | ForEach-Object { [string]$_.Exception.Message } | Select-Object -Unique);" +
+    "$errs=@($errs | Where-Object { $_ -notmatch 'No MSFT_NetFirewall' });" +
+    "[pscustomobject]@{rules=$o;errors=$errs} | ConvertTo-Json -Compress -Depth 5"
   );
+}
+
+/** The query ran but part of the store was unreadable (e.g. access denied when not elevated). */
+export interface FirewallListPartial {
+  partial: true;
+  rules: FirewallRuleInfo[];
+  reason: string;
 }
 
 const PS_TIMEOUT_MS = 20_000;
@@ -93,19 +112,20 @@ export const listFirewallRulesViaPowerShell: FirewallRuleLister = (ports = []) =
           return resolve(null);
         }
         try {
-          const raw = JSON.parse(stdout || "[]") as Array<{
-            name: string; enabled: boolean; allow: boolean; ports: string[]; remote: string[];
-          }>;
-          resolve(
-            raw.map((r) => ({
-              name: r.name,
-              enabled: r.enabled,
-              allow: r.allow,
-              inbound: true,
-              ports: r.ports ?? [],
-              remoteAddresses: r.remote ?? [],
-            })),
-          );
+          const parsed = JSON.parse(stdout || "{}") as {
+            rules?: Array<{ name: string; enabled: boolean; allow: boolean; ports: string[]; remote: string[] }> | null;
+            errors?: string[] | string | null;
+          };
+          const rules: FirewallRuleInfo[] = [parsed.rules ?? []].flat().map((r) => ({
+            name: r.name,
+            enabled: r.enabled,
+            allow: r.allow,
+            inbound: true,
+            ports: r.ports ?? [],
+            remoteAddresses: r.remote ?? [],
+          }));
+          const errors = [parsed.errors ?? []].flat().filter(Boolean);
+          resolve(errors.length > 0 ? { partial: true, rules, reason: errors[0] as string } : rules);
         } catch {
           resolve(null);
         }
@@ -138,7 +158,10 @@ export async function checkTailnetFirewall(
   if (platform !== "win32") return [];
   const targets = listeners.filter((l) => l.port && isTailnetAddress(l.host));
   if (targets.length === 0) return [];
-  const rules = await list(targets.map((t) => t.port as number));
+  const listed = await list(targets.map((t) => t.port as number));
+  const isPartial = listed !== null && !Array.isArray(listed) && "partial" in listed;
+  const partialReason = isPartial ? (listed as FirewallListPartial).reason : null;
+  const rules = isPartial ? (listed as FirewallListPartial).rules : (listed as FirewallRuleInfo[] | FirewallListTimeout | null);
   if (rules !== null && !Array.isArray(rules)) {
     return [
       {
@@ -163,19 +186,28 @@ export async function checkTailnetFirewall(
     const name = `firewall ${t.label} port ${t.port}`;
     const { found, scoped } = findTailnetRule(rules, t.port as number);
     if (scoped) return { name, status: "pass", detail: `inbound allow rule scoped to ${TAILNET_CIDR}` };
+    if (partialReason !== null) {
+      // A denied/partial read cannot prove absence: never report it as "no rule" (#1361).
+      return {
+        name,
+        status: "unknown",
+        detail: `could not read all Windows Firewall rules (${partialReason}) - no scoped rule seen for port ${t.port}, but absence is unproven`,
+        remedy: "Run `powershell scripts/fleet-firewall.ps1 -Status` (elevated) to check by hand.",
+      };
+    }
     if (found) {
       return {
         name,
         status: "warn",
         detail: `an inbound allow rule exists but is not scoped to ${TAILNET_CIDR} - it may expose the port to LAN/wifi`,
-        remedy: "Re-run `scripts/fleet-firewall.ps1 -Install` from an elevated shell, and remove the broader rule (docs/worker-fleet.md section 6).",
+        remedy: "Re-run `scripts/fleet-firewall.ps1 -Install` from an elevated shell, and remove the broader rule (`agentic-kanban worker setup`, section 6).",
       };
     }
     return {
       name,
       status: "warn",
       detail: `${t.host}:${t.port} is a tailnet address but no inbound firewall rule allows it - tailnet workers will time out`,
-      remedy: "Run `scripts/fleet-firewall.ps1 -Install` from an elevated PowerShell (docs/worker-fleet.md section 6).",
+      remedy: "Run `scripts/fleet-firewall.ps1 -Install` from an elevated PowerShell (`agentic-kanban worker setup`, section 6).",
     };
   });
 }

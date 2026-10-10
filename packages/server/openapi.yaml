@@ -9188,6 +9188,12 @@ paths:
       tags:
         - workers
       operationId: get_api_workers_build
+      parameters:
+        - name: token
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: Success
@@ -9196,11 +9202,6 @@ paths:
               schema: {}
         "202":
           description: Success
-          content:
-            application/json:
-              schema: {}
-        "401":
-          description: Error
           content:
             application/json:
               schema: {}
@@ -9215,14 +9216,15 @@ paths:
       tags:
         - workers
       operationId: get_api_workers_build_tarball
+      parameters:
+        - name: token
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: Success
-          content:
-            application/json:
-              schema: {}
-        "401":
-          description: Error
           content:
             application/json:
               schema: {}

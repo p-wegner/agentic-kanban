@@ -327,6 +327,17 @@ export function createWorkerRegistry(database: Database = realDb) {
     return true;
   }
 
+  /**
+   * Is this an unexpired pairing token? READ-ONLY: it does not consume the token, so a fresh
+   * machine can download the build with it and still pair with it afterwards (#1358). Only
+   * `/build` and `/build/tarball` accept this — every other worker endpoint wants a worker token.
+   */
+  function isPairingTokenValid(token: string, now?: string): boolean {
+    if (!token) return false;
+    const nowMs = now ? new Date(now).getTime() : Date.now();
+    return pendingPairings.resolve(token, nowMs) !== null;
+  }
+
   /** Does this bearer token belong to ANY registered worker? (For endpoints with no worker id.) */
   async function authenticateAnyWorker(token: string): Promise<boolean> {
     if (!token) return false;
@@ -424,7 +435,7 @@ export function createWorkerRegistry(database: Database = realDb) {
   return {
     mintPairingToken, registerWorker, authenticateWorker, heartbeat, touchHeartbeat,
     listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles,
-    requestUpdate, authenticateAnyWorker,
+    requestUpdate, authenticateAnyWorker, isPairingTokenValid,
   };
 }
 

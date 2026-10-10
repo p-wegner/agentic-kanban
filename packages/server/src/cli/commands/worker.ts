@@ -27,6 +27,8 @@ import type { IssuePlacementReport, SessionPlacementRecord } from "../../lib/pla
 // #774 — the connectivity self-test. Db-free on purpose: this module is also the standalone
 // worker binary's entry point (docs/worker-fleet.md §3).
 import { renderDoctorReport, runBoardDoctor, runWorkerDoctor } from "./worker-doctor.js";
+// #1358 — first-install guide + bootstrap commands. Pure strings, db-free.
+import { renderBootstrapSteps, renderWorkerSetupGuide } from "./worker-setup-guide.js";
 // #880 — the read-only update-check. Db-free like the doctor: also part of the
 // standalone worker binary.
 import { renderUpdateCheckReport, runWorkerUpdateCheck } from "./worker-update-check.js";
@@ -547,9 +549,17 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       const body = await res.json() as { pairingToken: string; expiresAt: string; fleetUrl?: string | null; fleetNote?: string | null };
       console.log(`Pairing token (single-use, expires ${body.expiresAt}):`);
       console.log(`  ${body.pairingToken}`);
-      console.log(`\nOn the worker machine:`);
+      console.log(`\nOn the worker machine (already installed):`);
       console.log(`  agentic-kanban-worker start --board ${body.fleetUrl || "<board-url>"} --token ${body.pairingToken}`);
+      console.log(`\n${renderBootstrapSteps(body.fleetUrl || "<board-url>", body.pairingToken)}`);
       if (body.fleetNote) console.log(`\nNote: ${body.fleetNote}`);
+    });
+
+  workerCmd
+    .command("setup")
+    .description("Print the first-install guide for a worker machine (works offline, ships in the package).")
+    .action(() => {
+      console.log(renderWorkerSetupGuide());
     });
 
   workerCmd

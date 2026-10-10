@@ -515,8 +515,19 @@ function registerWorkerFacingRoutes(
     return c.json({ error: "unauthorized" }, 401);
   };
 
+  // #1358: a fresh machine has no worker token yet, so these two ALSO accept an unexpired
+  // pairing token (checked, never consumed, so the same token still pairs afterwards). The
+  // header is `Authorization: Bearer <token>`, `x-pairing-token`, or `?token=` (curl-friendly).
+  const requireWorkerOrPairing = async (c: Context): Promise<Response | null> => {
+    const candidates = [bearerFrom(c), c.req.header("x-pairing-token"), c.req.query("token")];
+    for (const t of candidates) {
+      if (t && reg.isPairingTokenValid(t)) return null;
+    }
+    return requireWorker(c);
+  };
+
   router.get("/build", async (c) => {
-    const denied = await requireWorker(c);
+    const denied = await requireWorkerOrPairing(c);
     if (denied) return denied;
     const lookup = await (await buildServiceFor()).getBuild();
     if (lookup.state === "ready") return c.json(lookup.manifest);
@@ -526,7 +537,7 @@ function registerWorkerFacingRoutes(
   });
 
   router.get("/build/tarball", async (c) => {
-    const denied = await requireWorker(c);
+    const denied = await requireWorkerOrPairing(c);
     if (denied) return denied;
     const lookup = await (await buildServiceFor()).getBuild();
     if (lookup.state !== "ready") {
