@@ -40,6 +40,15 @@ describe("credential state attestation (#1331)", () => {
     if (gone) expect(gone.credentials).toBe("missing");
   });
 
+  it("does not mark an apiKeyHelper config dir as missing credentials", () => {
+    const h = mkdtempSync(join(tmpdir(), "ak-1331-gw-"));
+    mkdirSync(join(h, ".claude-gw"), { recursive: true });
+    writeFileSync(join(h, ".claude-gw", "settings.json"), JSON.stringify({ apiKeyHelper: "node key.js" }));
+    const attestor = createWorkerProfileAttestor({ home: h, log: () => {} });
+    const gw = attestor.current(NOW).find((a) => a.name === "gw");
+    if (gw) expect(gw.credentials).toBeUndefined();
+  });
+
   it("survives the wire parse and drops unknown values", () => {
     const parsed = parseWorkerProfileAttestations([
       { provider: "claude", name: "a", credentials: "expired" },

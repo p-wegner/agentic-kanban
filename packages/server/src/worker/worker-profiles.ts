@@ -31,6 +31,8 @@
  * entirely (the machine then behaves exactly as a protocol-1 worker: it attests nothing
  * and restricted projects do not reach it).
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   discoverLocalProfiles,
   findLocalProfile,
@@ -125,6 +127,23 @@ export function narrowDeclaredProfiles(
   return out;
 }
 
+/** A config dir that authenticates by apiKeyHelper / an API key or token in its settings has no OAuth file by design. */
+function usesNonOAuthAuth(configDir: string): boolean {
+  try {
+    const settings = JSON.parse(readFileSync(join(configDir, "settings.json"), "utf8")) as {
+      apiKeyHelper?: unknown;
+      env?: Record<string, unknown>;
+    };
+    return (
+      typeof settings.apiKeyHelper === "string" ||
+      Boolean(settings.env?.ANTHROPIC_API_KEY) ||
+      Boolean(settings.env?.ANTHROPIC_AUTH_TOKEN)
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Can this config dir's OAuth login run at all? `undefined` = yes, or not knowable without
  * a request. Reads the file only; the same reader the quota probe uses, so the attestation
@@ -133,6 +152,7 @@ export function narrowDeclaredProfiles(
 export function credentialStateOf(configDir: string, nowMs: number): WorkerProfileCredentialState | undefined {
   const read = readOAuthCredentials(configDir, nowMs);
   if (read.err === undefined) return undefined;
+  if (read.err === "no-creds" && usesNonOAuthAuth(configDir)) return undefined;
   return read.err === "expired" ? "expired" : "missing";
 }
 
