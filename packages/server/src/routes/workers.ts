@@ -78,13 +78,34 @@ async function resolveRefOwner(
 }
 
 /**
+ * The fleet URL a worker's `--board` must point at: `http://<KANBAN_FLEET_HOST or 127.0.0.1>:<port>`,
+ * or `fleetUrl: null` plus a reason when no fleet listener is configured. A wildcard bind
+ * (0.0.0.0 / ::) is not a dialable address, so it is rendered as a `<board-host>` placeholder.
+ */
+export function describeFleetUrl(env: NodeJS.ProcessEnv = process.env): { fleetUrl: string | null; fleetNote: string | null } {
+  const port = resolveFleetPort(env);
+  if (port === null) {
+    return { fleetUrl: null, fleetNote: "fleet listener disabled: set KANBAN_FLEET_PORT" };
+  }
+  const host = resolveFleetHost(env);
+  const wildcard = host === "0.0.0.0" || host === "::" || host === "[::]";
+  const shown = wildcard ? "<board-host>" : host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+  return {
+    fleetUrl: `http://${shown}:${port}`,
+    fleetNote: wildcard ? "fleet listener binds every interface; substitute this machine's reachable address for <board-host>" : null,
+  };
+}
+
+/**
  * Owner-only endpoints. These stay on the LOOPBACK app forever: minting a
  * pairing token, listing the fleet and revoking a worker are administrative
  * actions with no credential of their own — they ride the board's
  * "only reachable from this machine" trust, exactly like the rest of /api.
  */
 function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Database, boardEvents?: BoardEventSink): void {
-  router.post("/pairing-token", (c) => c.json(reg.mintPairingToken(), 201));
+  router.post("/pairing-token", (c) =>
+    // #1318: also names the fleet URL, which is what `worker start --board` needs.
+    c.json({ ...reg.mintPairingToken(), ...describeFleetUrl() }, 201));
 
   // #774 - the list route used to answer the raw `workers` rows, so `connected`, `load`
   // and free-slot count were all unavailable, and `WorkerFleetPanel` derived "capacity" as

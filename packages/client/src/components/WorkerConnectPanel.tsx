@@ -7,6 +7,14 @@ import { useWorkerConnectInfoQuery } from "../hooks/useWorkerFleetQueries.js";
 
 const PLACEHOLDER_TOKEN = "<pairing-token>";
 
+/** `fleetUrl` (#1318): the fleet listener URL the board actually binds; null when disabled. */
+interface PairingResponse {
+  pairingToken: string;
+  expiresAt: string;
+  fleetUrl?: string | null;
+  fleetNote?: string | null;
+}
+
 const WHERE_LABEL: Record<WorkerConnectStep["where"], string> = {
   worker: "on the WORKER machine",
   board: "on the BOARD machine",
@@ -22,14 +30,14 @@ const WHERE_LABEL: Record<WorkerConnectStep["where"], string> = {
 export function WorkerConnectPanel() {
   const { data: info, error: queryError } = useWorkerConnectInfoQuery();
   const [error, setError] = useState<string | null>(null);
-  const [pairing, setPairing] = useState<{ pairingToken: string; expiresAt: string } | null>(null);
+  const [pairing, setPairing] = useState<PairingResponse | null>(null);
   const [minting, setMinting] = useState(false);
 
   const mintPairingToken = async () => {
     setMinting(true);
     setError(null);
     try {
-      setPairing(await apiPost<{ pairingToken: string; expiresAt: string }>("/api/workers/pairing-token"));
+      setPairing(await apiPost<PairingResponse>("/api/workers/pairing-token"));
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -72,6 +80,16 @@ export function WorkerConnectPanel() {
             <code className="block break-all rounded bg-gray-100 dark:bg-gray-800 px-2 py-1.5 text-xs text-ink dark:text-stone-100">
               {pairing.pairingToken}
             </code>
+            <div className="text-xs text-gray-500 dark:text-gray-400">
+              {pairing.fleetUrl ? (
+                <>
+                  Worker <code>--board</code> value: <code>{pairing.fleetUrl}</code>
+                </>
+              ) : (
+                pairing.fleetNote
+              )}
+              {pairing.fleetUrl && pairing.fleetNote ? ` — ${pairing.fleetNote}` : null}
+            </div>
           </div>
         )}
       </div>
