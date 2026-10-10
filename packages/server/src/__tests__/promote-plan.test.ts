@@ -42,7 +42,42 @@ import {
   shouldReinstall,
   sortStableTags,
   stableTagDate,
+  resolveFleetConfigPath,
+  parseFleetConfig,
+  buildStableSpawnEnv,
+  planFleetSmokeTargets,
 } from "../../../../scripts/promote-plan.mjs";
+
+describe("durable fleet config (#1324)", () => {
+  it("lives next to the operated DB", () => {
+    expect(resolveFleetConfigPath({ env: {}, homeDir: "/h" }).replace(/\\/g, "/")).toMatch(/\/h\/\.agentic-kanban\/fleet\.json$/);
+  });
+
+  it("spawn env includes the persisted fleet keys; explicit env wins", () => {
+    const fleetConfig = parseFleetConfig(
+      JSON.stringify({ fleetPort: 3003, fleetHost: "100.1.2.3", gitHttpPort: 3002, gitHttpHost: "100.1.2.3" }),
+    );
+    const env = buildStableSpawnEnv({ baseEnv: { KANBAN_FLEET_HOST: "100.9.9.9" }, dbUrl: "file:x.db", port: 3001, fleetConfig });
+    expect(env.KANBAN_FLEET_PORT).toBe("3003");
+    expect(env.KANBAN_GIT_HTTP_PORT).toBe("3002");
+    expect(env.KANBAN_GIT_HTTP_HOST).toBe("100.1.2.3");
+    expect(env.KANBAN_FLEET_HOST).toBe("100.9.9.9");
+    expect(env.PORT).toBe("3001");
+    expect(env.KANBAN_HOST).toBe("127.0.0.1");
+  });
+
+  it("accepts env-var names and rejects malformed config", () => {
+    expect(parseFleetConfig('{"KANBAN_FLEET_PORT":"3003"}')).toEqual({ KANBAN_FLEET_PORT: "3003" });
+    expect(() => parseFleetConfig("[1]")).toThrow();
+    expect(() => parseFleetConfig("{nope")).toThrow();
+  });
+
+  it("smoke targets exist only when a fleet is configured", () => {
+    expect(planFleetSmokeTargets({})).toEqual([]);
+    const t = planFleetSmokeTargets({ KANBAN_FLEET_PORT: "3003", KANBAN_FLEET_HOST: "100.1.2.3", KANBAN_GIT_HTTP_PORT: "3002" });
+    expect(t.map((x) => x.url)).toEqual(["http://100.1.2.3:3003/health", "http://127.0.0.1:3002/health"]);
+  });
+});
 
 const HOUR = 3600_000;
 const NOW = Date.parse("2026-09-04T12:00:00.000Z");

@@ -50,6 +50,16 @@ export declare const REPROBEABLE_SWEEP_REASONS: readonly string[];
 export declare function resolveStableCheckout(opts?: { env?: Record<string, string | undefined>; repoRoot?: string }): string;
 export declare function resolveBoardUrl(env?: Record<string, string | undefined>): string;
 export declare function resolveOperatedDbPath(opts?: { env?: Record<string, string | undefined>; homeDir?: string }): string;
+export declare function resolveFleetConfigPath(opts?: { env?: Record<string, string | undefined>; homeDir?: string }): string;
+export declare const FLEET_CONFIG_ENV_KEYS: Readonly<Record<string, string>>;
+export declare function parseFleetConfig(text: string): Record<string, string>;
+export declare function buildStableSpawnEnv(opts: {
+  baseEnv?: Record<string, string | undefined>;
+  dbUrl: string;
+  port: number | string;
+  fleetConfig?: Record<string, string>;
+}): Record<string, string | undefined>;
+export declare function planFleetSmokeTargets(spawnEnv: Record<string, string | undefined>): { label: string; url: string }[];
 export declare function resolveMaxSweepAgeMs(env?: Record<string, string | undefined>): number;
 export declare function resolveProjectName(env?: Record<string, string | undefined>): string;
 export declare function resolveSweepWaitMs(env?: Record<string, string | undefined>): number;

@@ -117,6 +117,10 @@ import {
   resolveBoardUrl,
   resolveMaxSweepAgeMs,
   resolveOperatedDbPath,
+  resolveFleetConfigPath,
+  parseFleetConfig,
+  buildStableSpawnEnv,
+  planFleetSmokeTargets,
   resolveProjectName,
   resolveStableCheckout,
   resolveSweepWaitMs,
@@ -647,6 +651,21 @@ function stopStableBoard() {
  * Sentinel reads (see {@link BOARD_LOG_RELPATH} for what that cost once). `windowsHide` and
  * `detached`+`unref` keep it from flashing a window or dying with this script.
  */
+/** #1324 — spawn env = process env + the persisted fleet config (`fleet.json`); explicit env wins. */
+function stableSpawnEnv() {
+  const fleetPath = resolveFleetConfigPath({ env });
+  let fleetConfig = {};
+  if (existsSync(fleetPath)) {
+    try {
+      fleetConfig = parseFleetConfig(readFileSync(fleetPath, "utf8"));
+      log(`[promote] fleet config ${fleetPath}: ${Object.keys(fleetConfig).join(", ") || "(empty)"}`);
+    } catch (e) {
+      throw new Error(`unreadable fleet config ${fleetPath}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return buildStableSpawnEnv({ baseEnv: process.env, dbUrl, port: stablePort, fleetConfig });
+}
+
 function startStableBoard() {
   const cli = join(stableCheckout, "packages", "server", "dist", "cli", "index.js");
   if (!existsSync(cli)) throw new Error(`built CLI missing: ${cli} (did the build step run?)`);
@@ -654,7 +673,7 @@ function startStableBoard() {
   const out = openSync(boardLogPath, "a");
   const child = spawn(process.execPath, [cli, "dev", "--port", String(stablePort), "--no-open"], {
     cwd: stableCheckout,
-    env: { ...process.env, KANBAN_DB_URL: dbUrl, KANBAN_HOST: "127.0.0.1", PORT: String(stablePort) },
+    env: stableSpawnEnv(),
     windowsHide: true,
     detached: true,
     stdio: ["ignore", out, out],
@@ -712,7 +731,17 @@ async function smoke() {
   if (!issuesRes || issuesRes.status !== 200 || !(Array.isArray(issuesBody) || Array.isArray(issuesBody?.issues))) {
     return { ok: false, failed: "GET /api/issues (board status)", detail: `status ${issuesRes?.status ?? "none"} for project ${project.id}` };
   }
-  return { ok: true, detail: `${projects.length} project(s); board status answered for '${project.name}'` };
+  // #1324 — a configured fleet must actually be listening, or every paired worker is offline.
+  const fleetNotes = [];
+  for (const target of planFleetSmokeTargets(stableSpawnEnv())) {
+    const res = await fetch(target.url, { signal: AbortSignal.timeout(5000) }).catch(() => null);
+    if (!res || res.status !== 200) {
+      return { ok: false, failed: `${target.label} ${target.url}`, detail: `status ${res?.status ?? "none"} — the fleet is configured but not answering` };
+    }
+    fleetNotes.push(target.label);
+  }
+  const fleetDetail = fleetNotes.length ? `; ${fleetNotes.join(" + ")} answered` : "";
+  return { ok: true, detail: `${projects.length} project(s); board status answered for '${project.name}'${fleetDetail}` };
 }
 
 // --- build / install / migrate --------------------------------------------------------------
