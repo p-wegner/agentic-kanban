@@ -10,6 +10,9 @@ import {
 import { buildProjectStatusRows, statusIdsByName } from "@agentic-kanban/shared/lib/project-statuses";
 import type { WSContext } from "hono/ws";
 import { Hono } from "hono";
+import { eq } from "drizzle-orm";
+import { insertWorkerEvent } from "../repositories/worker-events.repository.js";
+import { formatPlacementState } from "../cli/commands/worker.js";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkersRoute } from "../routes/workers.js";
 import type { Database } from "../db/index.js";
@@ -312,6 +315,31 @@ describe("per-session placement (#755)", () => {
     // can tell "revoked worker" from "ran on the host". Collapsing both to null is
     // exactly the ambiguity that made #699 unreconstructable.
     expect(rows[0]!.workerName).toBeNull();
+  });
+
+  // #1319 — a worker-lost run is finalized completed / exit 1; `[completed]` alone made it read
+  // as a success. The board-ended reason rides the `session_exit` event the finalizer wrote.
+  it("tells a board-ended (worker-lost) session apart from an agent's own exit 0", async () => {
+    await seedIssueWithSessions("worker-gone");
+    await db.update(sessions).set({ exitCode: "0" }).where(eq(sessions.id, "sess-1"));
+    const [clean] = await listSessionPlacements({ database: db, issueId: "issue-1" });
+    expect(clean).toMatchObject({ exitCode: 0, endedBy: null });
+    expect(formatPlacementState(clean!)).toBe("[completed]");
+
+    await db.update(sessions).set({ exitCode: "1" }).where(eq(sessions.id, "sess-1"));
+    await insertWorkerEvent(
+      {
+        workerId: "worker-gone",
+        type: "session_exit",
+        sessionId: "sess-1",
+        summary: "session sess-1 ended on this worker",
+        payloadJson: JSON.stringify({ exitCode: 1, how: "landed and finalized", endedBy: "worker-lost" }),
+      },
+      db,
+    );
+    const [lost] = await listSessionPlacements({ database: db, issueId: "issue-1" });
+    expect(lost).toMatchObject({ exitCode: 1, endedBy: "worker-lost", status: "completed" });
+    expect(formatPlacementState(lost!)).toBe("[completed, exit 1, worker lost]");
   });
 
   it("answers 'why was #N not dispatched' for a real issue, with its session history", async () => {

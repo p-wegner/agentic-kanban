@@ -16,6 +16,12 @@
 import type { Database } from "../db/index.js";
 import { recordWorkerEvent } from "./worker-events.service.js";
 
+/**
+ * Why the BOARD (not the agent) ended a session (#1319): the worker came back without it, or the
+ * abandon bound passed. Recorded on the `session_exit` payload so `placements` can say so.
+ */
+export type BoardEndedReason = "worker-lost" | "abandoned";
+
 /** What the session's transport was, as it appears in the recorded payload. */
 export type RemoteSessionTransport = "git" | "shared-filesystem";
 
@@ -28,6 +34,7 @@ export interface RemoteSessionEventRecorder {
     session: { workerId: string; repo?: { branch: string } },
     exitCode: number | null,
     how: string,
+    endedBy?: BoardEndedReason,
   ): void;
   /**
    * A worker reports a COMPLETED session whose result it still cannot push (#871): even
@@ -60,7 +67,7 @@ export function createRemoteSessionEventRecorder(database: Database): RemoteSess
       });
     },
 
-    noteSessionExit(sessionId, session, exitCode, how) {
+    noteSessionExit(sessionId, session, exitCode, how, endedBy) {
       // Called from BOTH finalizers, so a session that ended by exiting, by being lost, by
       // being abandoned or by refusing to launch all leave the same kind of row. Without
       // that, the log records what a worker took and never what became of it — which is
@@ -74,6 +81,7 @@ export function createRemoteSessionEventRecorder(database: Database): RemoteSess
         payload: {
           exitCode,
           how,
+          ...(endedBy ? { endedBy } : {}),
           ...(session.repo
             ? { branch: session.repo.branch, transport: "git" satisfies RemoteSessionTransport }
             : { transport: "shared-filesystem" satisfies RemoteSessionTransport }),

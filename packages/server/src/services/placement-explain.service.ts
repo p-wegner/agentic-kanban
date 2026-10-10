@@ -49,6 +49,7 @@ import {
   getWorkerNamesByIds,
   listSessionPlacementRows,
 } from "../repositories/placement-observability.repository.js";
+import { getBoardEndedReasons } from "../repositories/worker-events.repository.js";
 import type { WorkerAssignment } from "../lib/placement-explain.types.js";
 import type { ProviderName } from "./agent-provider.js";
 import type {
@@ -583,6 +584,16 @@ export async function explainPlacement(params: {
  * ------------------------------------------------------------------ */
 
 
+function boardEndedReason(raw: string | undefined): SessionPlacementRecord["endedBy"] {
+  return raw === "worker-lost" || raw === "abandoned" ? raw : null;
+}
+
+function parseExitCode(raw: string | null | undefined): number | null {
+  if (raw === null || raw === undefined || raw.trim() === "") return null;
+  const n = Number(raw);
+  return Number.isInteger(n) ? n : null;
+}
+
 export async function listSessionPlacements(
   opts: {
     database?: Database;
@@ -614,8 +625,14 @@ export async function listSessionPlacements(
     rows.map((r) => r.workerId),
     database,
   );
+  const endedByIds = await getBoardEndedReasons(
+    rows.map((r) => r.sessionId),
+    database,
+  );
   return rows.map((r) => ({
     ...r,
+    exitCode: parseExitCode(r.exitCode),
+    endedBy: boardEndedReason(endedByIds.get(r.sessionId)),
     // #801: WHY, beside WHERE. Narrowed back to the id union here rather than in the
     // repository — the column is free text to SQLite, and a row written by an older build
     // (or hand-edited) must not silently claim to be a valid reason id.

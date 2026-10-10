@@ -126,6 +126,8 @@ const sessionPlacementRow = looseObject({
   executor: str,
   startedAt: str,
   endedAt: nullable(str),
+  exitCode: nullable(num),
+  endedBy: nullable(str),
   placement: str,
   workerId: nullable(str),
   workerName: nullable(str),
