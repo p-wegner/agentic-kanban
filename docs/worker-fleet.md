@@ -858,6 +858,20 @@ as a planned handover (no backoff), resolves the newest version from `versions/c
 relaunches. Without a supervisor the daemon spawns the new build detached and hidden (`windowsHide`)
 and exits.
 
+**Manual restart (#1346).** After a crash, a reboot without the scheduled task or a killed daemon,
+just run the globally installed binary again — no versioned path to copy:
+
+```powershell
+agentic-kanban-worker start --board http://<board>:3003 [same flags as before]
+```
+
+At start it reads `<worker-home>/versions/current.json`; when that names an installed build other
+than the one it is running from, it logs `delegating to the current build <sha>` and re-runs that
+build's `bin/worker.js` with the same arguments (exit code mirrored). `--no-delegate` forces the
+global install. `worker doctor` has a `worker build` check naming the running vs current build
+(a WARN, not a failure, when they differ). Needs a global build that includes #1346 — one manual
+update gets it there.
+
 **Failure never leaves the worker offline.** A failed download, checksum, install — or a new build
 that does not connect to the board within 120 s, or restarts three times without connecting —
 rolls back to the previous version (`current.json` is pointed back, the broken install is removed)

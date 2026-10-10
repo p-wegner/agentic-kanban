@@ -98,7 +98,9 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 31 → 34 in #1336 for `worker/agent-process-tree.ts`, `worker/worker-agent-registry.ts`
     // and `worker/worker-job-holder.ts` (node builtins, `process-exec` and the shared error helper).
     expect(files.size).toBeGreaterThan(3);
-    expect(files.size).toBeLessThan(34);
+    // Raised 34 → 36 in #1346 for `worker/worker-delegate.ts` and
+    // `cli/commands/worker-doctor-build-check.ts` (node builtins + `worker-versions`).
+    expect(files.size).toBeLessThan(36);
   });
 
   it("never reaches the database or board-service layer", () => {
