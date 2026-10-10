@@ -168,14 +168,14 @@ export async function checkTailnetFirewall(
         name,
         status: "warn",
         detail: `an inbound allow rule exists but is not scoped to ${TAILNET_CIDR} - it may expose the port to LAN/wifi`,
-        remedy: "Re-run `scripts/fleet-firewall.ps1 -Install` from an elevated shell, and remove the broader rule (docs/worker-fleet.md section 6).",
+        remedy: "Re-run `scripts/fleet-firewall.ps1 -Install` from an elevated shell, and remove the broader rule (`agentic-kanban worker setup`, section 6).",
       };
     }
     return {
       name,
       status: "warn",
       detail: `${t.host}:${t.port} is a tailnet address but no inbound firewall rule allows it - tailnet workers will time out`,
-      remedy: "Run `scripts/fleet-firewall.ps1 -Install` from an elevated PowerShell (docs/worker-fleet.md section 6).",
+      remedy: "Run `scripts/fleet-firewall.ps1 -Install` from an elevated PowerShell (`agentic-kanban worker setup`, section 6).",
     };
   });
 }

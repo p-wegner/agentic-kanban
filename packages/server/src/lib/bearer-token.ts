@@ -215,7 +215,7 @@ export function resolveListenHost(opts: {
   console.warn(
     `${opts.logPrefix} binding 127.0.0.1: this listener is plaintext and no interface was named. ` +
       "For a cross-machine fleet name it explicitly (e.g. the tailnet address) — " +
-      "or set KANBAN_FLEET_INSECURE=1 to accept every interface. See docs/worker-fleet.md section 6.",
+      "or set KANBAN_FLEET_INSECURE=1 to accept every interface. See `agentic-kanban worker setup`, section 6.",
   );
   return "127.0.0.1";
 }
