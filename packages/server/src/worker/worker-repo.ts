@@ -388,9 +388,20 @@ export async function pushWorkerHead(
   return { ok: true, status: "pushed", sha };
 }
 
-/** Best-effort teardown of the per-session worktree (cache clone stays). */
+/**
+ * Best-effort teardown of the per-session worktree (cache clone stays).
+ *
+ * `git worktree remove` can leave the directory behind holding only the `.codex/skills`
+ * link/shell `writeAgentSkillFile` materializes (#1320), so the directory itself is
+ * removed afterwards — one leaked shell per session otherwise, reaped only at next boot.
+ */
 export async function cleanupWorkerCheckout(checkout: WorkerCheckout): Promise<void> {
   await gitExec(["worktree", "remove", "--force", checkout.cwd], { cwd: checkout.cacheDir });
+  try {
+    rmSync(checkout.cwd, { recursive: true, force: true });
+  } catch (err) {
+    console.warn(`[worker] could not remove checkout directory ${checkout.cwd}: ${String(err)}`);
+  }
 }
 
 /** Outcome of a {@link reapOrphanedCheckouts} pass. */
