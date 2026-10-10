@@ -105,10 +105,32 @@ describe("reapOrphanedCheckouts", () => {
     await cleanupWorkerCheckout({ cwd: checkout, cacheDir });
 
     expect(existsSync(checkout)).toBe(false);
+    // #1322: the session branch goes with the checkout.
+    const branches = await gitExecOrThrow(["branch", "--list", "kanban/*"], { cwd: cacheDir });
+    expect(String(branches).trim()).toBe("");
+  });
+
+  it("#1322: the startup sweep deletes unheld kanban/* branches but keeps one a worktree holds", async () => {
+    const cacheDir = join(workRoot, "repos", "proj-1");
+    mkdirSync(cacheDir, { recursive: true });
+    await gitExecOrThrow(["init", "-b", "master", cacheDir], {});
+    writeFileSync(join(cacheDir, "README.md"), "hello\n");
+    await gitExecOrThrow(["add", "."], { cwd: cacheDir });
+    await gitExecOrThrow(["-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-m", "init"], { cwd: cacheDir });
+    await gitExecOrThrow(["branch", "kanban/sess-old"], { cwd: cacheDir });
+    const live = join(workRoot, "checkouts", "sess-live");
+    await gitExecOrThrow(["worktree", "add", "-b", "kanban/sess-live", live, "master"], { cwd: cacheDir });
+
+    const report = await reapOrphanedCheckouts(workRoot, () => {}, { owned: new Set(["sess-live"]) });
+
+    expect(report.branchesDeleted).toEqual(["kanban/sess-old"]);
+    const branches = String(await gitExecOrThrow(["branch", "--list", "kanban/*"], { cwd: cacheDir }));
+    expect(branches).toContain("kanban/sess-live");
+    expect(branches).not.toContain("kanban/sess-old");
   });
 
   it("is a no-op when there is no checkouts directory yet", async () => {
     const report = await reapOrphanedCheckouts(workRoot);
-    expect(report).toEqual({ scanned: 0, reaped: [], errored: [], stranded: [] });
+    expect(report).toEqual({ scanned: 0, reaped: [], errored: [], stranded: [], branchesDeleted: [] });
   });
 });

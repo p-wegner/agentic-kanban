@@ -15,7 +15,7 @@ import { mkdirSync, writeFileSync, existsSync, readdirSync, rmSync, appendFileSy
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { TICKET_CONTEXT_FILENAME } from "@agentic-kanban/shared/lib/ticket-context";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import {
@@ -402,6 +402,40 @@ export async function cleanupWorkerCheckout(checkout: WorkerCheckout): Promise<v
   } catch (err) {
     console.warn(`[worker] could not remove checkout directory ${checkout.cwd}: ${String(err)}`);
   }
+  // #1322: the checkout dir is named for the session id; drop its `kanban/<sessionId>` branch
+  // (git refuses while the worktree is registered, hence after the remove + prune).
+  await gitExec(["worktree", "prune"], { cwd: checkout.cacheDir });
+  await gitExec(["branch", "-D", `kanban/${basename(checkout.cwd)}`], { cwd: checkout.cacheDir });
+}
+
+/**
+ * #1322: delete `kanban/*` branches in a cached clone that no worktree holds — the
+ * leftovers of sessions that ended before branch deletion existed. A branch checked out
+ * in a live worktree is skipped (git would refuse anyway).
+ */
+async function sweepUnheldSessionBranches(
+  cacheDir: string,
+  log: (line: string) => void,
+  report: ReapCheckoutsReport,
+): Promise<void> {
+  const listed = await gitExec(["for-each-ref", "--format=%(refname:short)", "refs/heads/kanban/"], { cwd: cacheDir });
+  if (!execSucceeded(listed)) return;
+  const branches = listed.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (branches.length === 0) return;
+  await gitExec(["worktree", "prune"], { cwd: cacheDir });
+  const wt = await gitExec(["worktree", "list", "--porcelain"], { cwd: cacheDir });
+  if (!execSucceeded(wt)) return;
+  const held = new Set(
+    wt.stdout.split("\n").filter((l) => l.startsWith("branch ")).map((l) => l.slice(7).trim().replace(/^refs\/heads\//, "")),
+  );
+  for (const branch of branches) {
+    if (held.has(branch)) continue;
+    const del = await gitExec(["branch", "-D", branch], { cwd: cacheDir });
+    if (execSucceeded(del)) {
+      report.branchesDeleted.push(branch);
+      log(`[worker] deleted unheld session branch ${branch} in ${cacheDir}`);
+    }
+  }
 }
 
 /** Outcome of a {@link reapOrphanedCheckouts} pass. */
@@ -414,6 +448,8 @@ export interface ReapCheckoutsReport {
   errored: string[];
   /** #1321: registered, ownerless checkouts deliberately left (`leaveAgents`). */
   stranded: string[];
+  /** #1322: `kanban/*` branches deleted because no worktree held them. */
+  branchesDeleted: string[];
 }
 
 export interface ReapCheckoutsOptions {
@@ -472,9 +508,28 @@ export async function reapOrphanedCheckouts(
   log: (line: string) => void = () => {},
   opts: ReapCheckoutsOptions = {},
 ): Promise<ReapCheckoutsReport> {
+  const report: ReapCheckoutsReport = { scanned: 0, reaped: [], errored: [], stranded: [], branchesDeleted: [] };
+  await reapCheckoutDirs(workRoot, log, opts, report);
+  // #1322: after the checkouts are gone, `kanban/*` branches no worktree holds are leftovers.
+  try {
+    const reposDir = join(workRoot, "repos");
+    for (const e of readdirSync(reposDir, { withFileTypes: true })) {
+      if (e.isDirectory()) await sweepUnheldSessionBranches(join(reposDir, e.name), log, report);
+    }
+  } catch {
+    // no repos directory — nothing to sweep
+  }
+  return report;
+}
+
+async function reapCheckoutDirs(
+  workRoot: string,
+  log: (line: string) => void,
+  opts: ReapCheckoutsOptions,
+  report: ReapCheckoutsReport,
+): Promise<ReapCheckoutsReport> {
   const checkoutsDir = join(workRoot, "checkouts");
   const reposDir = join(workRoot, "repos");
-  const report: ReapCheckoutsReport = { scanned: 0, reaped: [], errored: [], stranded: [] };
 
   let checkoutNames: string[];
   try {
