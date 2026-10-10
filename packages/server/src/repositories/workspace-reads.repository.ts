@@ -210,6 +210,7 @@ export async function getWorkspaceDetails(
   const sess = await firstRow(
     database
       .select({
+        id: sessions.id,
         status: sessions.status,
         startedAt: sessions.startedAt,
         endedAt: sessions.endedAt,

@@ -5,6 +5,21 @@ import type { ServiceStackState } from "../service-stack.js";
 import type { GateActivity } from "../../lib/gate-activity.js";
 import type { TrainBoardingPassDto } from "./merge-train.js";
 
+/**
+ * A remote session held because its fleet worker is unreachable (#1317). The recorded session
+ * status stays `running` — the board has not failed it — so this is the only place the card can
+ * learn the agent is not actually being watched, and when the board will give up on it.
+ */
+export interface DetachedWorkerInfo {
+  workerId: string;
+  /** The worker's registered name; null when the worker row no longer exists. */
+  workerName: string | null;
+  /** ISO time the board lost sight of the session. */
+  detachedSince: string;
+  /** ISO time the board abandons the session if the worker has not returned. */
+  abandonAt: string;
+}
+
 export interface MainWorkspaceInfo {
   id: string;
   branch: string;
@@ -47,6 +62,8 @@ export interface MainWorkspaceInfo {
    * it names the worker and demotes the pick to a tooltip, exactly as the detail chip does.
    */
   remotePlacement?: { workerId: string } | null;
+  /** Set while the latest session is DETACHED — its fleet worker is unreachable (#1317). */
+  detachedWorker?: DetachedWorkerInfo | null;
   /**
    * #944 — set while a merge for this workspace is IN FLIGHT, so the card can show that a
    * 30-45 minute pre-merge gate is running instead of the amber `idle` dot it would otherwise
