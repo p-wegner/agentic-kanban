@@ -12,6 +12,20 @@
  */
 import { appendFileSync } from "node:fs";
 import { sessionOutputPath } from "@agentic-kanban/shared/lib/session-files";
+import type { AgentOutputCallback } from "./agent.service.js";
+
+/** Persist a streamed event's stdout, then hand it to the session's output callback; a throwing callback is logged, never propagated. */
+export function deliverRemoteOutput(
+  onOutput: AgentOutputCallback,
+  event: Parameters<AgentOutputCallback>[0],
+): void {
+  persistRemoteStdout(event);
+  try {
+    onOutput(event);
+  } catch (err) {
+    console.error(`[agent-remote] output callback error: sessionId=${event.sessionId}`, err);
+  }
+}
 
 export function persistRemoteStdout(event: { type: string; sessionId: string; data?: string }): void {
   if (event.type !== "stdout" || !event.data) return;
