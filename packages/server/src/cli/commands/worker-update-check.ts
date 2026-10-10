@@ -269,8 +269,8 @@ export function renderUpdateCheckReport(report: UpdateCheckReport): string {
       lines.push("  To update this machine's daemon now: agentic-kanban-worker update-check --apply");
     } else {
       lines.push(`  Verdict: ${label} — a newer worker build exists on the board.`);
+      lines.push(`  To update (manual, in this order): ${report.remediation}.`);
     }
-    lines.push(`  To update (manual, in this order): ${report.remediation}.`);
   } else if (report.freshness === "ahead-of-board") {
     lines.push(
       "  Verdict: ahead of board — this install is NEWER than the board's checkout. Normal on a " +
@@ -279,8 +279,9 @@ export function renderUpdateCheckReport(report: UpdateCheckReport): string {
   } else if (report.freshness === "different-build") {
     lines.push(
       "  Verdict: different build from board — this install was packed from another commit than " +
-        "the one the board runs. Not an ordering claim; re-pack from the board's commit to match.",
+        "the one the board runs. Not an ordering claim.",
     );
+    lines.push("  To switch this machine's daemon to the board's build: agentic-kanban-worker update-check --apply");
   } else if (report.freshness === "in-sync") {
     lines.push("  Verdict: in sync — this install matches the board's build.");
   } else {
