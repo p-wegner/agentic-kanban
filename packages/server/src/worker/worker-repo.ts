@@ -412,6 +412,43 @@ export interface ReapCheckoutsReport {
   reaped: string[];
   /** Directories a removal attempt failed for (logged, left in place). */
   errored: string[];
+  /** #1321: registered, ownerless checkouts deliberately left (`leaveAgents`). */
+  stranded: string[];
+}
+
+export interface ReapCheckoutsOptions {
+  /** Session ids (directory names) whose agent THIS daemon owns — never reaped. */
+  owned?: ReadonlySet<string>;
+  /** `--leave-agents`: report registered ownerless checkouts instead of removing them. */
+  leaveAgents?: boolean;
+}
+
+/**
+ * #1321: remove a dead session's checkout that git still has registered —
+ * `worktree remove --force`, delete `kanban/<sessionId>`, `worktree prune`.
+ */
+async function reapRegisteredCheckout(
+  dir: string,
+  sessionId: string,
+  cacheDirs: string[],
+  log: (line: string) => void,
+  report: ReapCheckoutsReport,
+): Promise<void> {
+  try {
+    for (const cacheDir of cacheDirs) {
+      const listed = await gitExec(["worktree", "list", "--porcelain"], { cwd: cacheDir });
+      if (!execSucceeded(listed) || !listed.stdout.split("\n").some((l) => l.startsWith("worktree ") && resolve(l.slice(9).trim()) === resolve(dir))) continue;
+      await gitExec(["worktree", "remove", "--force", dir], { cwd: cacheDir });
+      await gitExec(["branch", "-D", `kanban/${sessionId}`], { cwd: cacheDir });
+      await gitExec(["worktree", "prune"], { cwd: cacheDir });
+    }
+    rmSync(dir, { recursive: true, force: true });
+    report.reaped.push(dir);
+    log(`[worker] reaped dead session checkout (worktree still registered): ${dir}`);
+  } catch (err) {
+    report.errored.push(dir);
+    log(`[worker] could not reap dead session checkout ${dir}: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /**
@@ -433,10 +470,11 @@ export interface ReapCheckoutsReport {
 export async function reapOrphanedCheckouts(
   workRoot: string = defaultWorkerWorkRoot(),
   log: (line: string) => void = () => {},
+  opts: ReapCheckoutsOptions = {},
 ): Promise<ReapCheckoutsReport> {
   const checkoutsDir = join(workRoot, "checkouts");
   const reposDir = join(workRoot, "repos");
-  const report: ReapCheckoutsReport = { scanned: 0, reaped: [], errored: [] };
+  const report: ReapCheckoutsReport = { scanned: 0, reaped: [], errored: [], stranded: [] };
 
   let checkoutNames: string[];
   try {
@@ -469,7 +507,19 @@ export async function reapOrphanedCheckouts(
 
   for (const name of checkoutNames) {
     const dir = join(checkoutsDir, name);
-    if (known.has(resolve(dir))) continue;
+    if (known.has(resolve(dir))) {
+      // #1321: still registered, but no agent of THIS daemon owns it (a daemon owns its
+      // checkouts only after it provisions them, and this runs before any provisioning),
+      // so it is a dead session's — a crash leaves the worktree registered.
+      if (opts.owned?.has(name)) continue;
+      if (opts.leaveAgents) {
+        report.stranded.push(dir);
+        log(`[worker] ownerless checkout left in place (--leave-agents; its agent may still be running): ${dir}`);
+        continue;
+      }
+      await reapRegisteredCheckout(dir, name, projectDirs, log, report);
+      continue;
+    }
     try {
       rmSync(dir, { recursive: true, force: true });
       report.reaped.push(dir);

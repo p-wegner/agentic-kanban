@@ -658,20 +658,21 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         "sweep without starting the daemon.",
     )
     .option("--work-root <path>", "Root for git-transport clones/checkouts, relative to the directory you run the command in (default: ~/.agentic-kanban/worker)", cliPathArg)
+    .option("--leave-agents", "Do not remove checkouts that are still registered as worktrees (a dead session's, or one whose agent is still alive); report them as stranded (#1321)")
     .option("--json", "Output the report as JSON")
-    .action(async (options: { workRoot?: string; json?: boolean }) => {
+    .action(async (options: { workRoot?: string; json?: boolean; leaveAgents?: boolean }) => {
       const workRoot = options.workRoot ?? defaultWorkerWorkRoot();
       const lines: string[] = [];
-      const report = await reapOrphanedCheckouts(workRoot, (line) => lines.push(line));
+      const report = await reapOrphanedCheckouts(workRoot, (line) => lines.push(line), { leaveAgents: options.leaveAgents });
       if (options.json) {
         console.log(JSON.stringify({ workRoot, ...report }, null, 2));
         return;
       }
       for (const line of lines) console.log(line);
       console.log(
-        report.reaped.length === 0 && report.errored.length === 0
+        report.reaped.length === 0 && report.errored.length === 0 && report.stranded.length === 0
           ? `Scanned ${report.scanned} checkout(s) under ${workRoot} — none orphaned.`
-          : `Scanned ${report.scanned} checkout(s): reaped ${report.reaped.length}, ${report.errored.length} could not be removed.`,
+          : `Scanned ${report.scanned} checkout(s): reaped ${report.reaped.length}, ${report.stranded.length} stranded (left), ${report.errored.length} could not be removed.`,
       );
       if (report.errored.length > 0) process.exit(1);
     });
