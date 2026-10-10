@@ -11,6 +11,80 @@ First archive pass: 2026-08-27, cutting at the 2026-08-24 boundary (`CONTINUE.md
 
 ---
 
+
+<!-- moved 2026-10-10 from CONTINUE.md, verbatim -->
+
+## 2026-10-04 afternoon — after the reboot: stable-20261004-8 live, board empty
+
+**State.** Stable board runs `stable-20261004-8` (`806b6a164` = `master` = `origin/master`),
+which carries #1295–#1299, #1302–#1305, #1307 and #1309 (`-4` … `-7` went live earlier the same
+day). Each push range was scrubbed against the confidential-terms list (0 hits; the parse was
+checked against a known term first). Board: no open agentic-kanban ticket.
+
+- **The unexplained "all passed, exit 1" sweeps were a crashing vitest worker.** First red with
+  #1303's log (rc/20261004-6): `[vitest-pool]: Worker forks emitted error … Worker exited
+  unexpectedly`, server 1025 + 1 skipped of 1027, `project-relocate.service.test.ts` never
+  reported (passes alone 3/3; no board kill in the window). Seen again locally in 2 of 3 full
+  server runs, then 0 of 2 with a JSON reporter: intermittent, cause still unknown.
+- **#1309** a crashed worker no longer reds a sweep blindly: `verify-unreported-suites.ts` names
+  the file(s) it never reported (vitest's own summary count, the per-file lines, and `vitest list
+  --filesOnly` with the run's excludes must agree exactly, else no answer), and the existing flake
+  retry re-runs them once. The crash lead line now sums every package summary through ANSI codes
+  and names vitest's worker error, not an app `unhandled error` log line. Check: real sweep log →
+  exactly `project-relocate.service.test.ts`; a log without per-file lines → none.
+- **#1307** isolated builders get `--effort medium --autocompact 500000` (per-project prefs
+  `builder_effort_<id>`, `builder_autocompact_<id>`); `inherit` passes only explicit prefs.
+  Check: a real `claude -p` accepts the full flag set.
+- Open thread, no ticket: the gate's own flake retry (#894) has the same blind spot for a worker
+  crash; and `test:mine`'s impact selector resolves to a bogus `D:\repo\…` path and falls back to
+  `vitest related` on every run.
+
+- **#1302** (board builder, merged): per-project `builder_context_<projectId>`, default
+  `isolated` = `--setting-sources project,local`. Verified by hand with headless runs: skills
+  123 → 91, user skills and user SessionStart hooks gone, project PreToolUse/Stop hooks still
+  run (debug log). Gap: `effortLevel`/`autoCompactWindow` came from user settings and no longer
+  reach builders; not pinned explicitly (no ticket yet).
+- **#1299** (board builder, merged): a review-exit gate red is stored per head as a
+  `gate-decision` comment and the #932 reconciler will not arm that head; a `check:arch` red
+  names its files so #1293 sends the builder one turn.
+- **Deleted #1285–#1288, #1291:** `cli-issue.test.ts` fixtures that leaked into the real DB on
+  2026-10-03 17:07 UTC. Current code does not leak: the suite (29/29) left the DB count unchanged.
+
+- **#1306 closed, a real red, healed on the candidate.** `rc/20261004-4` failed `check:arch` in
+  20 s: #1303 had pushed `base-branch-health.service.ts` to 1023 lines, over the god-module
+  ceiling (unit tests and `tsc` were run before that commit, `check:arch` was not). The red
+  verdict logic moved to `base-branch-red-outcome.ts` (service 868 lines, re-exports kept);
+  the rc was fast-forwarded to that commit, swept green and promoted.
+
+- **#1300 closed, no code change.** Two board sweeps of `rc/20261004-3` (12:37 and 13:35 UTC)
+  went red with every visible suite passing and `failedSuites: null`. Not memory: 11–14 GB were
+  free both times. Both ran beside an active builder. The same sha was green three times: in
+  a worktree, as a faithful single-branch clone with `buildBaseProbeEnv` (887 s), and in a
+  third board sweep on a quiet box. The cause of the two reds is unknown, because the sweep
+  threw its evidence away (next item). If a sweep goes red again, read its log first.
+- **#1303** a red sweep stored only `tail(stderr + stdout, 40)`, i.e. the end of stdout, while
+  `test:mine` writes its verdict to stderr. It now goes through `summarizeVerifyFailure`
+  (full log `<tmp>/kanban-verify-base-health-<project>-<branch>.log`, named in the
+  `[full verify log: …]` trailer) and leads with the last 15 stderr lines. Check: new case in
+  `base-branch-health-flake-retry.test.ts` (9/9 green); server `tsc` clean.
+- **#1304** `runPluginCommand`'s timeout killed `cmd.exe` before `taskkill /T` walked its
+  children, so the grandchild lived on. Every `plugin-exec-progress.test.ts` run left a `node
+  hang.mjs` behind. Check: new tree-kill test fails on the old order and passes on the fix.
+- **#1305** `pnpm promote` hung in `pnpm install` when the lockfile changed. On Windows the
+  running board holds libsql's native module and the Agent SDK's `claude.exe` open inside
+  `node_modules`, and the modules purge waits on them forever (11 min idle today, old board
+  `degraded`, unblocked by stopping both by hand). `deployRef` now stops the board first.
+  Check: `--dry-run` + promote-plan tests (88/88). Not yet seen live: the next promotion that
+  changes the lockfile is its proof.
+- **#1302 filed:** lean, controlled context for Claude Code builders. Today every builder
+  inherits the user scope (ACP and Herdr hooks, user CLAUDE.md, ~20 user skills), because
+  `--settings` adds to `~/.claude/settings.json` instead of replacing it.
+- **Box:** Fast Startup is off, so a shutdown frees the Defender kernel-pool leak. Nonpaged pool
+  was already 1.9 GB about an hour after the reboot.
+
+**Next:** watch the first real red pre-merge gate (#1293: the builder must get the turn without
+a human); the first red sweep on `-5` should name its cause via the #1303 log.
+
 <!-- moved 2026-10-06 from CONTINUE.md, verbatim -->
 
 ## 2026-10-04 morning — #1289/#1292/#1293 live, a red gate goes back to the builder, master pushed
