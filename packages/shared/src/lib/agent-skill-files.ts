@@ -283,6 +283,22 @@ export function listLocalSkillNamesSync(repoPath: string): string[] {
 }
 
 /**
+ * Dependency / cache directories that never belong in a materialized skill (#1356). A skill such as
+ * `code-metrics` carries a Python `.venv` (tens of thousands of files in site-packages); copying it
+ * into every worktree took 15-95 s inside `POST /api/workspaces`. Names are matched at ANY depth.
+ */
+export const SKILL_COPY_EXCLUDED_DIRS: ReadonlySet<string> = new Set([
+  ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+  ".tox", ".git",
+]);
+
+/** `cp` filter: false for a path whose own name is an excluded dependency/cache directory. */
+export function shouldCopySkillEntry(srcPath: string): boolean {
+  const name = srcPath.split(/[\\/]/).pop() ?? "";
+  return !SKILL_COPY_EXCLUDED_DIRS.has(name);
+}
+
+/**
  * Copy a disk-only skill from the project repo into a worktree.
  *
  * Copies the WHOLE skill directory, not just `SKILL.md`. A skill bundle routinely
@@ -298,6 +314,8 @@ export function listLocalSkillNamesSync(repoPath: string): string[] {
  * `SKILL.md` is copied first and is the success criterion — a skill whose extra
  * assets fail to copy still launches (degraded), whereas a missing SKILL.md is a
  * genuine "skill not found".
+ *
+ * Dependency/cache directories (`.venv`, `node_modules`, `__pycache__`, …) are skipped (#1356).
  */
 export async function copySkillToWorktree(repoPath: string, skillName: string, worktreePath: string): Promise<boolean> {
   // Reject names that could escape the skills directory via path traversal
@@ -316,11 +334,12 @@ export async function copySkillToWorktree(repoPath: string, skillName: string, w
 
   try {
     for (const entry of await readdir(srcDir, { withFileTypes: true })) {
-      if (entry.name === "SKILL.md") continue;
+      if (entry.name === "SKILL.md" || !shouldCopySkillEntry(entry.name)) continue;
       await cp(join(srcDir, entry.name), join(destDir, entry.name), {
         recursive: true,
         dereference: true,
         force: true,
+        filter: shouldCopySkillEntry,
       });
     }
   } catch (err) {

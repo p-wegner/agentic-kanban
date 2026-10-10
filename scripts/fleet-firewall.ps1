@@ -64,6 +64,19 @@ function Get-OurRules {
   return @(Get-NetFirewallRule -DisplayName "$RulePrefix *" -ErrorAction SilentlyContinue)
 }
 
+# Windows returns the scope as 100.64.0.0/255.192.0.0 (mask form); normalise to a.b.c.d/prefix.
+function Normalize-Remote([string]$a) {
+  if ($a -match '^(\d+(?:\.\d+){3})/(\d+(?:\.\d+){3})$') {
+    $bits = 0
+    foreach ($o in $Matches[2].Split('.')) {
+      $v = [int]$o
+      while ($v -gt 0) { $bits += ($v -band 1); $v = $v -shr 1 }
+    }
+    return "$($Matches[1])/$bits"
+  }
+  return $a
+}
+
 function Show-Status {
   $rules = Get-OurRules
   if ($rules.Count -eq 0) {
@@ -75,7 +88,8 @@ function Show-Status {
     $addr = ($r | Get-NetFirewallAddressFilter).RemoteAddress
     $iface = ($r | Get-NetFirewallInterfaceFilter).InterfaceAlias
     Write-Host ("{0}  enabled={1} action={2} dir={3} port={4} remote={5} interface={6}" -f $r.DisplayName, $r.Enabled, $r.Action, $r.Direction, $port, ($addr -join ","), ($iface -join ","))
-    if (($addr -join ",") -ne $TailnetRange) {
+    $norm = @($addr | ForEach-Object { Normalize-Remote ([string]$_) }) -join ","
+    if ($norm -ne $TailnetRange) {
       Write-Warning "  remote address is not $TailnetRange - this rule may be reachable from outside the tailnet."
     }
   }

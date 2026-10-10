@@ -341,6 +341,16 @@
  * `landAndFinish`. The phase type and its parser live in `worker-protocol.ts`; these lines
  * are the start stamps and the hand-off. Both factories still want splitting; this is not
  * the ticket that does it.
+ *
+ * -- Eighteenth disclosed movement (2026-10-10, #1356 resolve-prompt-skill timing) --------
+ *
+ *   services/workspace-provision.service.ts::createWorkspaceProvisionService   394 -> 397  (+3)
+ *
+ * Found by merge train 2026-10-10-05. Workspace create blocked 15-95 s inside the
+ * resolve-prompt-skill phase with no clue which sub-step was slow; the three lines are the
+ * `tDb` / `tMaterialize` stamps and one `[workspaces-timing]` log for the db-reads+prompt
+ * sub-phase. The materialize sub-phase is timed in `materializeWorkspaceSkillsImpl`, outside
+ * the factory. The factory still wants splitting; this is not the ticket that does it.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 718 -> 720, a DISCLOSED raise (#1107, landed 2026-09-12 in d90659d081). `issue get` gained
@@ -440,7 +450,8 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // re-growing every time that shared logic changes. The factory now holds thin delegators.
   // 393 -> 407 (#1025) -> 409 (#1026), disclosed in the seventh and eighth movements above.
   // 409 -> 394 (#1214), a SHRINK banked per the fourteenth movement above.
-  "services/workspace-provision.service.ts::createWorkspaceProvisionService": 394,
+  // 394 -> 397 (#1356), disclosed in the eighteenth movement above.
+  "services/workspace-provision.service.ts::createWorkspaceProvisionService": 397,
   // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.
   // 399 -> 384, banked (#1164), disclosed in the fourteenth movement above. 384 -> 388
   // (#1206, rebase): a new `POST /:id/reopen` route, one more `router.post(...)` block in the

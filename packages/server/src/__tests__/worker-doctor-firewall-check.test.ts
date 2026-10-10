@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildPsList,
   checkTailnetFirewall,
   isTailnetAddress,
+  normalizeRemoteAddress,
   type FirewallRuleInfo,
 } from "../cli/commands/worker-doctor-firewall-check.js";
 
@@ -28,6 +30,25 @@ describe("isTailnetAddress", () => {
     expect(isTailnetAddress("100.128.0.1")).toBe(false);
     expect(isTailnetAddress("127.0.0.1")).toBe(false);
     expect(isTailnetAddress(null)).toBe(false);
+  });
+});
+
+describe("normalizeRemoteAddress", () => {
+  it("normalises CIDR and dotted-mask forms to the same value", () => {
+    expect(normalizeRemoteAddress("100.64.0.0/255.192.0.0")).toBe("100.64.0.0/10");
+    expect(normalizeRemoteAddress("100.64.0.0/10")).toBe("100.64.0.0/10");
+    expect(normalizeRemoteAddress("10.0.0.0/255.0.0.0")).toBe("10.0.0.0/8");
+    expect(normalizeRemoteAddress("Any")).toBe("Any");
+    expect(normalizeRemoteAddress("100.64.0.0/255.0.255.0")).toBe("100.64.0.0/255.0.255.0");
+  });
+});
+
+describe("buildPsList", () => {
+  it("queries from the port side and does not pipe every inbound rule", () => {
+    const ps = buildPsList([3003, 3002]);
+    expect(ps).toContain("Get-NetFirewallPortFilter -Protocol TCP");
+    expect(ps).toContain("'3003','3002'");
+    expect(ps).not.toContain("Get-NetFirewallRule -Direction Inbound");
   });
 });
 
@@ -66,6 +87,27 @@ describe("checkTailnetFirewall", () => {
       rule({ allow: false }),
     ]);
     expect(out[0]?.status).toBe("warn");
+  });
+
+  it("accepts the dotted-mask form Windows returns for the /10 range", async () => {
+    const out = await checkTailnetFirewall(listeners.slice(0, 1), "win32", async () => [
+      rule({ remoteAddresses: ["100.64.0.0/255.192.0.0"] }),
+    ]);
+    expect(out[0]?.status).toBe("pass");
+  });
+
+  it("reports a timeout as a timeout with the elapsed time, not as unavailable", async () => {
+    const out = await checkTailnetFirewall(listeners, "win32", async () => ({ timedOut: true, elapsedMs: 20_400 }));
+    expect(out).toHaveLength(1);
+    expect(out[0]?.status).toBe("unknown");
+    expect(out[0]?.detail).toContain("timed out after 20.4s");
+    expect(out[0]?.detail).not.toContain("unavailable");
+  });
+
+  it("passes the listener ports to the lister", async () => {
+    let seen: number[] | undefined;
+    await checkTailnetFirewall(listeners, "win32", async (p) => ((seen = p), []));
+    expect(seen).toEqual([3003, 3002]);
   });
 
   it("reports unknown when rules cannot be read", async () => {
