@@ -54,6 +54,7 @@ import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worke
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { createDaemonSelfUpdate, type DaemonSelfUpdate } from "./worker-daemon-update.js";
 import type { NpmRunner } from "./worker-updater.js";
+import { isWorkerLogInherited, teeLogToFile, workerLogFileFor } from "./worker-log.js";
 
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const RECONNECT_MIN_MS = 1000;
@@ -447,9 +448,14 @@ function retryRetainedResults(
 }
 
 export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<WorkerDaemonHandle> {
-  const log = opts.log ?? ((line: string) => console.log(line));
-  const boardUrl = normalizeBoardUrl(opts.boardUrl);
   const stateFile = opts.stateFile ?? defaultWorkerStateFile();
+  // #1340: an injected `log` (tests) is left alone; the real daemon also keeps a log file.
+  const log = opts.log ?? teeLogToFile(
+    (line: string) => console.log(line),
+    workerLogFileFor(stateFile),
+    { inherited: isWorkerLogInherited() },
+  );
+  const boardUrl = normalizeBoardUrl(opts.boardUrl);
   const name = opts.name ?? hostname();
 
   // #895: `providers` as DECLARED (--providers) is kept separate from `providers` as

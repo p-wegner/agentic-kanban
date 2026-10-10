@@ -11,6 +11,7 @@ import {
 } from "../../worker/worker-daemon.js";
 import { isSupervised, relaunchWorker } from "../../worker/worker-updater.js";
 import { resolveDelegation, runDelegated } from "../../worker/worker-delegate.js";
+import { workerLogFileFor } from "../../worker/worker-log.js";
 import type { WorkerUpdateReport } from "../../lib/worker-update.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "../../worker/worker-repo.js";
 import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
@@ -410,6 +411,8 @@ async function runWorkerStart(options: WorkerStartOptions): Promise<void> {
     if (!entry && options.autoUpdate) {
       console.warn("[worker] --auto-update ignored: cannot locate this install's bin/worker.js");
     }
+    const logFile = workerLogFileFor(options.stateFile ?? defaultWorkerStateFile());
+    console.log(`[worker] logging to ${logFile}`);
     // Read by `restart` below, which can fire (a rollback) before the await resolves.
     let daemonRef: WorkerDaemonHandle | undefined;
     const daemon = await startWorkerDaemon({
@@ -445,6 +448,7 @@ async function runWorkerStart(options: WorkerStartOptions): Promise<void> {
                   argv: relaunchArgvOf(process.argv.slice(2)),
                   execPath: process.execPath,
                   supervised: isSupervised(),
+                  logFile,
                   exit: (code) => process.exit(code),
                 });
               },

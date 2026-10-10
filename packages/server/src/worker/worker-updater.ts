@@ -17,9 +17,11 @@
 import { createHash } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import {
+  closeSync,
   createWriteStream,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -54,6 +56,7 @@ export class BuildChecksumError extends Error {
 }
 
 import { entryForBuild, removeQuietly } from "./worker-versions.js";
+import { WORKER_LOG_INHERITED_ENV } from "./worker-log.js";
 export * from "./worker-versions.js";
 
 
@@ -189,6 +192,9 @@ export interface RelaunchDeps {
   supervised: boolean;
   spawnImpl?: typeof spawn;
   exit: (code: number) => void;
+  /** #1340: the daemon log file; the unsupervised child's stdout/stderr are appended to it. */
+  logFile?: string;
+  openLog?: (file: string) => number;
 }
 
 /**
@@ -202,13 +208,29 @@ export function relaunchWorker(entry: string, deps: RelaunchDeps): { command: st
     return undefined;
   }
   const cmd = buildRelaunchCommand(deps.argv, entry, deps.execPath);
+  // #1340: stdio "ignore" made the new daemon log nowhere. Give it the log file instead.
+  let stdio: "ignore" | ["ignore", number, number] = "ignore";
+  let env: NodeJS.ProcessEnv = process.env;
+  let fd: number | undefined;
+  if (deps.logFile) {
+    try {
+      fd = (deps.openLog ?? ((f: string) => openSync(f, "a")))(deps.logFile);
+      stdio = ["ignore", fd, fd];
+      env = { ...process.env, [WORKER_LOG_INHERITED_ENV]: "1" };
+    } catch {
+      /* no log file is better than no relaunch */
+    }
+  }
   const child = (deps.spawnImpl ?? spawn)(cmd.command, cmd.args, {
     detached: true,
-    stdio: "ignore",
+    stdio,
     windowsHide: true,
-    env: process.env,
+    env,
   });
   child.unref();
+  if (fd !== undefined && !deps.openLog) {
+    try { closeSync(fd); } catch { /* the child holds its own copy */ }
+  }
   deps.exit(0);
   return cmd;
 }
@@ -302,6 +324,7 @@ export function createWorkerUpdater(deps: WorkerUpdaterDeps): WorkerUpdater {
       drained = true;
       await waitForIdle(target);
       await deps.settle?.();
+      deps.log(`[worker] update to build ${target}: drained, no sessions running and result pushes settled`);
       set({ state: "updating", reason: "fetching the board's build", targetBuild: target });
       const manifest = await waitForManifest();
       set({ state: "updating", reason: "downloading", targetBuild: target });
