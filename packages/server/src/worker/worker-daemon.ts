@@ -48,6 +48,7 @@ import {
 import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
 import { createWorkerAgentRunner } from "./worker-agent-runner.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
+import { sweepLeftoverAgents } from "./worker-agent-registry.js";
 import { attestProviderAuth } from "../cli/commands/worker-doctor.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -460,6 +461,13 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // disconnected, or crashed mid-session) is reaped before anything else runs, so a
   // long-lived worker never accumulates whole repo clones from abandoned sessions.
   // Best-effort — a scan failure must never block pairing/connecting.
+  // #1336: kill what a previous daemon's agents left running (its children outlive it) BEFORE
+  // their checkouts are reaped, and log each kill. Agents left on purpose are skipped.
+  try {
+    await sweepLeftoverAgents(opts.workRoot ?? defaultWorkerWorkRoot(), log);
+  } catch (err) {
+    log(`[worker] leftover-agent sweep failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
+  }
   try {
     const reaped = await reapOrphanedCheckouts(opts.workRoot ?? defaultWorkerWorkRoot(), log);
     if (reaped.reaped.length > 0) {
@@ -924,6 +932,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       clearInterval(heartbeatTimer);
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (stopOpts?.killAgents) runner.stopAll();
+      else runner.releaseAgents(); // #1336: --leave-agents — the trees survive on purpose
       // The kill above only sends the signal. The result push is kicked off by the
       // agent's `exit` handler, so exiting now is precisely the bug: wait for it.
       const drained = await runner.drainPushes(timeoutMs);

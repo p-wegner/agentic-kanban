@@ -83,7 +83,8 @@ describe("assign() passes detached: true on POSIX only, and only for a shell lau
       const workerAgentRunner = await import("../worker/worker-agent-runner.js");
       const { runner } = collector(workerAgentRunner);
       runner.assign("s1", nodeSpec("process.exit(0)", spec));
-      expect(spawnMock).toHaveBeenCalledTimes(1);
+      // #1336: on win32 the kill-on-close job helper is a second spawn; the agent is the first.
+      expect(spawnMock.mock.calls.length).toBeGreaterThanOrEqual(1);
       return spawnMock.mock.calls[0]![2] as Record<string, unknown>;
     } finally {
       Object.defineProperty(process, "platform", { value: realPlatform, configurable: true });
@@ -96,9 +97,9 @@ describe("assign() passes detached: true on POSIX only, and only for a shell lau
     expect(options.shell).toBe(true);
   });
 
-  it("does NOT detach a POSIX non-shell launch (useShell: false) — nothing to detach from", async () => {
+  it("detaches a POSIX non-shell launch too (#1336) — its own group is what a restarted daemon sweeps", async () => {
     const options = await assignAndCaptureOptions("linux", { useShell: false });
-    expect(options.detached).toBe(false);
+    expect(options.detached).toBe(true);
   });
 
   it("does NOT detach on win32 even for a shell launch — measured hang", async () => {
