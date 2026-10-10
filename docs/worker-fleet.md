@@ -27,7 +27,7 @@ verbs talk to the board's *owner* surface and only work on the board machine.**
 |---|---|---|---|
 | `worker pair` | **board machine only** | `POST /api/workers/pairing-token` | Owner route. Mounted only on the loopback board app (`registerOwnerRoutes`, `packages/server/src/routes/workers.ts`). |
 | `worker list` | **board machine only** | `GET /api/workers` | Same — an owner route. |
-| Revoke (`DELETE /api/workers/:id`) | **board machine only** | — | Same. |
+| `worker revoke <workerId\|name>` | **board machine only** | `GET /api/workers`, `DELETE /api/workers/:id` | Same. Resolves the id/name, prints which worker it revoked. |
 | `worker start` | worker machine | `POST /api/workers/register`, `POST /api/workers/:id/heartbeat`, `GET /ws/workers/:id` | Worker-facing routes; each authenticates for itself, so these are the only ones exposed off-loopback. |
 | `worker explain` / `worker placements` / `worker events` | **board machine only** | `GET /api/workers/explain`, `/placements`, `/:id/events` | Owner routes. |
 | `worker doctor-board` | **board machine only** | `GET /api/workers` | Owner route — that is exactly why it is a separate command from `worker doctor`. |

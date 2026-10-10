@@ -1,8 +1,8 @@
 ---
 name: agentic-kanban
 description: Operate the agentic-kanban board — a kanban board where each card is an AI coding session in its own git worktree. Use when asked to work a ticket, drive a project hands-off, review or merge agent work, inspect what agents are doing, or wire the board into another tool. Covers the MCP tools, CLI, board views, statuses, and the review/merge gate.
-commit: 30fd4554f0
-generated: 2026-10-01
+commit: f46f0ca2a
+generated: 2026-10-10
 ---
 
 # agentic-kanban
@@ -163,7 +163,7 @@ Top-level: `cleanup`, `create`, `delete-status`, `dev`, `export-backlog`, `impor
 | `skill` | `list`, `get`, `create`, `export`, `verify` |
 | `tag` | `list`, `create` |
 | `train` | `list`, `show`, `cancel`, `depart` |
-| `worker` | `pair`, `start`, `instructions`, `list`, `explain`, `placements`, `doctor`, `doctor-board`, `update-check`, `cleanup`, `events` |
+| `worker` | `revoke`, `pair`, `start`, `instructions`, `list`, `explain`, `placements`, `doctor`, `doctor-board`, `update-check`, `cleanup`, `events` |
 | `workflow` | `list`, `get`, `export`, `create`, `import`, `delete` |
 | `workspace` | `list`, `create`, `launch`, `resume`, `reopen`, `wait`, `review`, `start`, `diff`, `scorecard`, `merge`, `close`, `stop`, `delete`, `relaunch`, `mark-ready`, `propose-transition`, `clarify`, `analyze-touched`, `terminal`, `comment-list`, `comment-add`, `handoff-bundle`, `approve-tool`, `merge-cancel`, `merge-hold`, `merge-hold-release` |
 

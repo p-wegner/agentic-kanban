@@ -221,6 +221,33 @@ describe("worker doctor-board — what the board sees", () => {
     expect(report.checks.find((c) => c.name === "free capacity")?.status).toBe("pass");
   });
 
+  const onlineRow = { id: "w5", name: "w5", effectiveStatus: "online", connected: true, load: 0, maxConcurrency: 2, freeSlots: 2, eligible: true, ineligibleReason: null };
+  const offlineRow = (lastHeartbeatAt: string | null) => ({
+    id: "w1", name: "w1", effectiveStatus: "offline", connected: false, load: 0, maxConcurrency: 2, freeSlots: 0, eligible: false, ineligibleReason: null, lastHeartbeatAt,
+  });
+
+  it("warns (not fails) for an offline worker when other eligible capacity is reachable", async () => {
+    const nowMs = Date.now();
+    stubFleet({
+      workers: [offlineRow(new Date(nowMs - 10 * 86_400_000).toISOString()), onlineRow],
+      fleet: { freeSlots: 2, eligible: 1, registered: 2 },
+    });
+    const report = await runBoardDoctor({ boardUrl: "http://127.0.0.1:3001", nowMs });
+    expect(report.ok).toBe(true);
+    const row = report.checks.find((c) => c.name === "worker w1");
+    expect(row?.status).toBe("warn");
+    expect(row?.detail).toContain("last seen 10d ago");
+    expect(row?.remedy).toContain("worker revoke w1");
+  });
+
+  it("fails an offline worker when it is the only eligible capacity", async () => {
+    stubFleet({ workers: [offlineRow(null)], fleet: { freeSlots: 0, eligible: 0, registered: 1 } });
+    const report = await runBoardDoctor({ boardUrl: "http://127.0.0.1:3001" });
+    expect(report.ok).toBe(false);
+    expect(report.checks.find((c) => c.name === "worker w1")?.status).toBe("fail");
+    expect(report.checks.find((c) => c.name === "reachable eligible capacity")?.status).toBe("fail");
+  });
+
   it("explains a 404 as 'you pointed this at the fleet port'", async () => {
     stubFleet({ error: "not found" }, 404);
     const report = await runBoardDoctor({ boardUrl: "http://board:3003" });

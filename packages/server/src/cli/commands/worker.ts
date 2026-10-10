@@ -244,7 +244,7 @@ export function renderWorkerConnectMarkdown(
 export function registerWorkerCommand(program: Command) {
   const workerCmd = program
     .command("worker")
-    .description("Fleet worker: connect this machine to a board and execute assigned agent sessions.\n\nSubcommands: pair, start, instructions, list, explain, placements, doctor, doctor-board, update-check, cleanup, events");
+    .description("Fleet worker: connect this machine to a board and execute assigned agent sessions.\n\nSubcommands: pair, start, instructions, list, revoke, explain, placements, doctor, doctor-board, update-check, cleanup, events");
   registerWorkerSubcommands(workerCmd);
 }
 
@@ -266,6 +266,45 @@ export function formatPlacementState(p: Pick<SessionPlacementRecord, "status" | 
   if (!p.endedBy) return `[${p.status}]`;
   const why = p.endedBy === "abandoned" ? "worker abandoned" : "worker lost";
   return `[${p.status}, exit ${p.exitCode ?? "?"}, ${why}]`;
+}
+
+async function runWorkerRevoke(worker: string, options: { board: string }): Promise<void> {
+  const base = options.board.replace(/\/+$/, "");
+  const listRes = await fetch(`${base}/api/workers`);
+  if (!listRes.ok) {
+    console.error(describeWorkerListFailure(listRes.status, options.board));
+    process.exit(1);
+  }
+  const { workers } = await listRes.json() as { workers: Array<{ id: string; name: string; effectiveStatus: string }> };
+  const matches = workers.filter((w) => w.id === worker);
+  const resolved = matches.length > 0 ? matches : workers.filter((w) => w.name === worker);
+  if (resolved.length === 0) {
+    console.error(`No worker with id or name '${worker}'. Run \`agentic-kanban worker list\` to see registered workers.`);
+    process.exit(1);
+  }
+  if (resolved.length > 1) {
+    console.error(`'${worker}' is ambiguous — ${resolved.length} workers share that name. Revoke by id:\n` +
+      resolved.map((w) => `  ${w.name} id=${w.id} [${w.effectiveStatus}]`).join("\n"));
+    process.exit(1);
+  }
+  const target = resolved[0]!;
+  const res = await fetch(`${base}/api/workers/${encodeURIComponent(target.id)}`, { method: "DELETE" });
+  if (!res.ok) {
+    console.error(`Revoke of ${target.name} (id=${target.id}) failed: HTTP ${res.status}`);
+    process.exit(1);
+  }
+  console.log(`Revoked worker ${target.name} (id=${target.id}, was ${target.effectiveStatus}).`);
+}
+
+function registerWorkerRevoke(workerCmd: Command): void {
+  workerCmd
+    .command("revoke <worker>")
+    .description(
+      "Revoke (retire) a registered worker by id or name. Board machine only — DELETE /api/workers/:id " +
+        "is an owner route. Prints which worker it resolved. The machine must re-pair with a fresh token to return.",
+    )
+    .option("--board <url>", "Board base URL — the board's API port (default), not the fleet port", DEFAULT_BOARD_URL)
+    .action(runWorkerRevoke);
 }
 
 export function registerWorkerSubcommands(workerCmd: Command) {
@@ -480,7 +519,10 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         const build = ` protocol=${w.protocolVersion ?? "?"} build=${w.workerVersion ?? "?"}${freshness ? ` (${freshness})` : ""}`;
         console.log(`  ${w.name} [${w.effectiveStatus}] id=${w.id} os=${w.os ?? "?"} maxConcurrency=${w.maxConcurrency}${labels}${build} lastHeartbeat=${w.lastHeartbeatAt ?? "never"}`);
       }
+      console.log("\nRetire a worker with: agentic-kanban worker revoke <workerId|name>");
     });
+
+  registerWorkerRevoke(workerCmd);
 
   workerCmd
     .command("explain <issue>")
