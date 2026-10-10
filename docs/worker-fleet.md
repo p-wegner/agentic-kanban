@@ -858,7 +858,11 @@ whose `dist/` is what it runs). Every heartbeat response carries `boardBuildId`.
 agentic-kanban-worker start --board http://<board>:3003 --auto-update      # opt in
 .\ak-worker-service.ps1 -Install -Board http://<board>:3003 -AutoUpdate    # same, as the Windows service
 agentic-kanban worker update <name|id>                                     # board machine: update ONE worker now
+agentic-kanban-worker update-check --apply                                 # worker machine: update the RUNNING daemon now (#1355)
 ```
+
+`--auto-update` is opt-in and has no `--no-` form. A self-update restarts with the same argv, so the
+flag carries over; to turn it off, stop the daemon and start it again without the flag.
 
 When the advertised build differs from the daemon's own (the commit in its `-dev.<sha>` version
 stamp; an unstamped build never self-updates) and `--auto-update` is on — or the board asked via
@@ -917,7 +921,10 @@ retries it. A worker that was draining for an update that failed returns to rota
 
 **Bootstrapping.** A worker build that predates #1338 has no self-update, so it needs ONE manual
 update (`WORKER_UPDATE_REMEDIATION`: `node scripts/pack-worker.mjs`, copy, `npm i -g`, restart);
-after that it updates itself. `worker update-check` stays read-only and points at this path.
+after that it updates itself. `worker update-check` without `--apply` stays read-only and points at
+this path; with `--apply` it asks the running daemon (loopback control endpoint, per-start token in
+`worker-control.json` beside the state file) to update to the paired board's build, with or without
+`--auto-update`.
 
 **Reading a session's phase timings (#1328).** `worker placements` prints a `phases:` line under each
 git-transport session (the same data is `phases` on `GET /api/workers/placements`, and as
