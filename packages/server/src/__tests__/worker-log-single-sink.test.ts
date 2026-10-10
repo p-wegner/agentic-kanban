@@ -1,11 +1,12 @@
-// @gate:always-run
+// @gate:always-run when:packages/server/src/worker/** — scans the worker tree for console.* calls; imports nothing it scans (#1351/#1041).
 // #1351: every `[worker]` line goes through the one logger that writes worker.log. A relaunched
 // unsupervised worker has stdout on null, so a stray console.* in the runner / repo ops / result
 // push silently loses the session lifecycle lines (setup, launch, exit, push).
-import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { walkRepoTree } from "../../../../scripts/lib/repo-tree.mjs";
 import { setWorkerLogSink, workerLog } from "../worker/worker-updater.js";
 
 const WORKER_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "worker");
@@ -19,8 +20,9 @@ describe("worker modules log through the single worker.log sink (#1351)", () => 
 
   it("no worker module calls console.* directly", () => {
     const offenders: string[] = [];
-    for (const f of readdirSync(WORKER_DIR).filter((n) => n.endsWith(".ts"))) {
-      const src = readFileSync(join(WORKER_DIR, f), "utf8");
+    for (const abs of walkRepoTree(WORKER_DIR, { extensions: [".ts"], maxDepth: 0 })) {
+      const f = basename(abs);
+      const src = readFileSync(abs, "utf8");
       const n = (src.match(/\bconsole\.(log|warn|error|info|debug)\s*\(/g) ?? []).length;
       if (n > (ALLOWED[f] ?? 0)) offenders.push(`${f}: ${n}`);
     }
