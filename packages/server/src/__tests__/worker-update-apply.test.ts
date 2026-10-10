@@ -94,7 +94,7 @@ describe("worker update-check --apply against a running daemon", () => {
     const before = readControlFile(stateFile())!;
     const { outcome } = await run();
     expect(outcome.ok).toBe(true);
-    expect(outcome.summary).toBe(`updated from ${OLD} to 0.1.9-dev.${NEW_BUILD.slice(0, 7)}`);
+    expect(outcome.summary).toBe(`updated from ${OLD} to ${NEW_BUILD.slice(0, 7)}`);
     expect(restarted).toHaveBeenCalledOnce();
     expect(readControlFile(stateFile())!.token).not.toBe(before.token);
   });
