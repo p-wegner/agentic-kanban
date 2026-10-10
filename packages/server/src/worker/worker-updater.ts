@@ -72,7 +72,7 @@ export const WORKER_LOG_MAX_BYTES = 5 * 1024 * 1024;
 export const WORKER_LOG_INHERITED_ENV = "KANBAN_WORKER_LOG_INHERITED";
 
 export function isWorkerLogInherited(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env[WORKER_LOG_INHERITED_ENV] === "1";
+  return env.KANBAN_WORKER_LOG_INHERITED === "1";
 }
 
 /** `<worker-home>/worker.log` — beside the state file, so `--state-file` moves both together. */
