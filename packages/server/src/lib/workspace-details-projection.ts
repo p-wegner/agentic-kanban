@@ -1,4 +1,4 @@
-import type { WorkspaceSetupRun, WorkspaceSymlinkRun, ServiceStackState } from "@agentic-kanban/shared";
+import type { WorkspaceSetupRun, WorkspaceSymlinkRun, ServiceStackState, DetachedWorkerInfo } from "@agentic-kanban/shared";
 import { parseServiceStackState } from "@agentic-kanban/shared/lib/service-stack-codec";
 
 // Pure row -> DTO projection for getWorkspaceDetails. The repository owns the two
@@ -34,6 +34,10 @@ export interface WorkspaceDetails {
   scorecard: { score: number } | null;
   lastSessionAt: string | null;
   sessionStatus: string | null;
+  /** Id of the latest session, so a caller can join in-memory state about it (#1317). */
+  lastSessionId: string | null;
+  /** Set while the latest session is held because its fleet worker is unreachable (#1317). */
+  detachedWorker?: DetachedWorkerInfo | null;
   lastSessionTriggerType: string | null;
   contextTokens: number | null;
   lastTool: string | null;
@@ -108,6 +112,7 @@ export interface WorkspaceDetailsRow {
 
 /** The latest session fields the projection reads. */
 export interface WorkspaceDetailsSession {
+  id?: string;
   status: string;
   startedAt: string | null;
   endedAt: string | null;
@@ -259,6 +264,7 @@ export function mapWorkspaceDetailsRow(row: WorkspaceDetailsRow, sess: Workspace
     scorecard: row.scorecardScore !== null && row.scorecardScore !== undefined ? { score: row.scorecardScore } : null,
     lastSessionAt,
     sessionStatus: sess?.status ?? null,
+    lastSessionId: sess?.id ?? null,
     lastSessionTriggerType: sess?.triggerType ?? null,
     contextTokens,
     lastTool,

@@ -96,6 +96,7 @@ export const WORKER_ASSIGN_SETTLE_MS = 30 * 1000;
 // placement-explain.types.ts for the precedent).
 import type { RemoteSession, RemoteSessionRepo, RemoteRepoOpOutcome, RemoteAgentService } from "./agent-remote.types.js";
 export type { RemoteSessionRepo, RemoteRepoOpOutcome, RemoteAgentService } from "./agent-remote.types.js";
+import { listDetachedSessions } from "./agent-remote-detached.js";
 
 /**
  * How long the board waits for a worker's answer to a repo operation (#783).
@@ -224,7 +225,7 @@ export function createRemoteAgentService(
     if (session.lostCheckTimer) clearTimeout(session.lostCheckTimer);
     console.warn(
       `[agent-remote] worker ${workerId} is connected but does not list session ${sessionId} ` +
-        `(daemon restart or crash); its exit can never arrive — landing any pushed result and failing it`,
+        `(daemon restart or crash); its exit can never arrive — landing any pushed result and finalizing it with exit 1 (recorded completed/exitCode 1, not a verified success)`,
     );
     report(
       sessionId,
@@ -982,6 +983,6 @@ export function createRemoteAgentService(
   return {
     launch, kill, sendInput, closeStdin, isStdinOpen, getProcess, getPid, isPidAlive,
     adoptSession, trackedSessionIds, remoteSessionInfo, remoteGitTransportSessions, requestRepoOp,
-    probeStdinIdle, tracksSession: isPidAlive,
+    probeStdinIdle, tracksSession: isPidAlive, detachedSessions: () => listDetachedSessions(sessions, graceMs, abandonMs),
   };
 }

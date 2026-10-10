@@ -119,6 +119,13 @@ describe("a remote session survives a socket gap (#746)", () => {
       // And the board still considers the session live: it has no evidence of death.
       expect(service.isPidAlive("s1")).toBe(true);
       expect(service.trackedSessionIds()).toContain("s1");
+      // #1317: the hold is also visible to read paths, with the abandon deadline.
+      const detached = service.detachedSessions();
+      expect(detached).toHaveLength(1);
+      expect(detached[0]).toMatchObject({ sessionId: "s1", workerId: "w1" });
+      expect(detached[0].abandonAtMs).toBeGreaterThan(detached[0].detachedSinceMs);
+      fm.fireConnect("w1");
+      expect(service.detachedSessions()).toEqual([]);
     } finally {
       vi.useRealTimers();
     }

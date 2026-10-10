@@ -28,6 +28,7 @@ import { notifySummaryWriteThrough } from "./summary-write-through-notifier.js";
 import { resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
 import { unlandedRemoteBranches } from "./worker-remote-sync.service.js";
 import { resolveRemoteUnlandedPort } from "./remote-unlanded-port.js";
+import { resolveDetachedWorkers } from "./remote-detached-port.js";
 import { peekMergeJob } from "./merge-job.service.js";
 import { deriveGateActivity } from "@agentic-kanban/shared/lib/gate-activity";
 import { resolveTrainBoardingPasses } from "./train-boarding-pass.service.js";
@@ -573,10 +574,13 @@ async function attachSessionData(
   const { lastToolBySession, lastAssistantMsgBySession } =
     await collectLastToolAndMessages(latestSessionIds, database);
 
+  const detachedBySession = await resolveDetachedWorkers(database);
+
   for (const [, summary] of workspaceSummaryMap) {
     if (!summary.main) continue;
     const sess = latestByWs.get(summary.main.id);
     if (!sess) continue;
+    summary.main.detachedWorker = sess.status === "running" ? (detachedBySession.get(sess.id) ?? null) : null;
     summary.main.lastSessionAt = sess.status === "running" ? sess.startedAt : sess.endedAt;
     summary.main.sessionStatus = sess.status;
     summary.main.lastSessionTriggerType = sess.triggerType;

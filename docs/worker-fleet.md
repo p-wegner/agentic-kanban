@@ -606,11 +606,24 @@ offline so session finalization is not lost. The limits of that, precisely:
 - Live stdout/stderr during a gap is **dropped** — no replay, deliberately.
 - The queue is in-memory and capped at 200 messages (`PENDING_QUEUE_CAP`). A daemon
   *restart* loses it.
-- The board waits `WORKER_RECONNECT_GRACE_MS` (60 s). Past that it finalizes every session
-  on that worker with a synthesized stderr line and `exit(1)` — even though the agent is
-  still running on the worker. A gap longer than a minute therefore destroys the run rather
-  than pausing it. That is a known defect, not intended behaviour.
-
+- **What the board does with the gap (#746, #1317).** A lost socket is a lost *view*, not a dead
+  agent, so the board never finalizes a session just because the worker went quiet:
+  1. **Detach** after `WORKER_RECONNECT_GRACE_MS` (180 s, twice the heartbeat-stale window). The
+     session is marked DETACHED, a line is written into its own transcript, and the board logs
+     `session … is DETACHED (held, not failed)`. Its recorded status stays `running`, so the
+     workspace API (`GET /api/workspaces/:id`) and the board summary carry a `detachedWorker`
+     object — `workerId`, `workerName`, `detachedSince`, `abandonAt` — and the card shows a
+     "worker lost" badge with the abandon time in its tooltip.
+  2. **Hold** until `REMOTE_SESSION_ABANDON_MS` (30 min) after the disconnect. Nothing is failed.
+  3. **Re-adopt** if the worker reconnects and still lists the session: the callbacks were never
+     torn down, so streaming resumes and `detachedWorker` clears.
+  4. **Fail on reconnect without the session.** If the worker comes back (e.g. a daemon restart)
+     and its `hello` does not list the session, its exit can never arrive. The board lands any
+     result the worker pushed, then finalizes with exit code 1. The row is stored
+     `completed` with `exitCode: 1` — the board never observed the agent's own verdict — and the
+     log says it is *finalizing* it that way, not "failing" it.
+  5. **Abandon** at the 30-minute bound if the worker never returns: land anything pushed, then
+     finalize with exit 1 the same way.
 ### Mid-session, board-to-worker: the checkout is not write-once (#783, #784)
 
 Everything above is the worker pushing at exit. Two board-to-worker operations act

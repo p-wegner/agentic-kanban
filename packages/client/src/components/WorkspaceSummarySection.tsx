@@ -160,6 +160,16 @@ export function WorkspaceSummarySection(props: {
               {ws.main.remoteUnlanded.label}
             </span>
           )}
+          {/* #1317 — a detached session still reads `running`; say the worker is lost and when
+              the board gives up, so the card does not look like a working agent. */}
+          {ws.main.detachedWorker && (
+            <span
+              className="order-last inline-flex items-center px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400 text-[10px] font-medium shrink-0"
+              title={`The board lost contact with fleet worker ${ws.main.detachedWorker.workerName ?? ws.main.detachedWorker.workerId} at ${new Date(ws.main.detachedWorker.detachedSince).toLocaleTimeString("en-US")}. The agent may still be running there; the session is held, not failed, and resumes if the worker reconnects. The board abandons it at ${new Date(ws.main.detachedWorker.abandonAt).toLocaleTimeString("en-US")}.`}
+            >
+              worker lost
+            </span>
+          )}
           {boardingPass && (
             <span
               className="order-last inline-flex max-w-full items-center truncate px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 text-[10px] font-medium shrink"
