@@ -272,20 +272,11 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         console.error(`Failed to mint pairing token (${res.status}). Is the board running at ${options.board}?`);
         process.exit(1);
       }
-      const body = await res.json() as {
-        pairingToken: string;
-        expiresAt: string;
-        fleetUrl?: string | null;
-        fleetNote?: string | null;
-      };
+      const body = await res.json() as { pairingToken: string; expiresAt: string; fleetUrl?: string | null; fleetNote?: string | null };
       console.log(`Pairing token (single-use, expires ${body.expiresAt}):`);
       console.log(`  ${body.pairingToken}`);
       console.log(`\nOn the worker machine:`);
-      if (body.fleetUrl) {
-        console.log(`  agentic-kanban-worker start --board ${body.fleetUrl} --token ${body.pairingToken}`);
-      } else {
-        console.log(`  agentic-kanban-worker start --board <board-url> --token ${body.pairingToken}`);
-      }
+      console.log(`  agentic-kanban-worker start --board ${body.fleetUrl || "<board-url>"} --token ${body.pairingToken}`);
       if (body.fleetNote) console.log(`\nNote: ${body.fleetNote}`);
     });
 
