@@ -7,6 +7,32 @@ import { parseIssueNumberFromBranch } from "../branch.js";
 import { ensureOnBranch } from "./branch-attach.js";
 
 /**
+ * Per-repo mutex over every worktree ADMIN mutation (add / remove / prune) (#1339).
+ *
+ * `git worktree add` registers `.git/worktrees/<name>` (with a `gitdir` file naming
+ * `<wt>/.git`) BEFORE it has written that `.git` file and checked out the tree. A
+ * `git worktree prune` landing in that window sees a registration whose gitdir target does
+ * not exist and deletes it — the half-created worktree loses its admin dir and its checkout
+ * is torn down. The post-merge cleanup of workspace A (`removeWorktree` + `pruneWorktrees`)
+ * did exactly that to workspaces B and C being provisioned at the same moment. Serializing
+ * the three operations per repo closes the window for every in-process caller.
+ */
+const worktreeAdminTails = new Map<string, Promise<unknown>>();
+
+export async function withWorktreeAdminLock<T>(repoPath: string, work: () => Promise<T>): Promise<T> {
+  const key = resolve(repoPath).toLowerCase();
+  const previous = worktreeAdminTails.get(key) ?? Promise.resolve();
+  const run = previous.then(work, work);
+  const tail = run.catch(() => undefined);
+  worktreeAdminTails.set(key, tail);
+  try {
+    return await run;
+  } finally {
+    if (worktreeAdminTails.get(key) === tail) worktreeAdminTails.delete(key);
+  }
+}
+
+/**
  * List current git worktrees as an array of { path, branch } objects.
  */
 export async function listWorktrees(
@@ -149,6 +175,18 @@ export async function createWorktree(
     isPathClaimed?: (worktreePath: string) => boolean;
   } = {},
 ): Promise<string> {
+  return withWorktreeAdminLock(repoPath, () => createWorktreeLocked(repoPath, branch, baseBranch, opts));
+}
+
+async function createWorktreeLocked(
+  repoPath: string,
+  branch: string,
+  baseBranch: string | undefined,
+  opts: {
+    pathNamespace?: string;
+    isPathClaimed?: (worktreePath: string) => boolean;
+  },
+): Promise<string> {
   // Read the registrations BEFORE pruning (#699). `pruneWorktrees` unregisters any
   // worktree git can no longer resolve — including a LIVE one whose `.git` file has
   // become unreadable — so capturing the list afterwards means the leftover-cleanup
@@ -168,7 +206,7 @@ export async function createWorktree(
 
   // Prune stale worktree references (directories deleted but git still tracks them).
   // This is critical on Windows where locked directories can survive removal.
-  try { await pruneWorktrees(repoPath); } catch { /* best effort */ }
+  try { await execGit(["worktree", "prune"], repoPath); } catch { /* best effort */ }
 
   // Check if a worktree for this branch already exists — reuse if healthy
   const existing = await listWorktrees(repoPath);
@@ -325,6 +363,13 @@ export async function removeWorktree(
   repoPath: string,
   worktreePath: string,
 ): Promise<void> {
+  return withWorktreeAdminLock(repoPath, () => removeWorktreeLocked(repoPath, worktreePath));
+}
+
+async function removeWorktreeLocked(
+  repoPath: string,
+  worktreePath: string,
+): Promise<void> {
   // Break junctions first (top-level AND nested packages/<pkg>/node_modules) so
   // neither git nor the fs.rm fallback can traverse into the main checkout via a
   // Windows junction and delete the shared store (data-loss bugs #518 / #780).
@@ -347,7 +392,7 @@ export async function removeWorktree(
 
 /** Prune stale worktree references (worktrees whose directories no longer exist). */
 export async function pruneWorktrees(repoPath: string): Promise<void> {
-  await execGit(["worktree", "prune"], repoPath);
+  await withWorktreeAdminLock(repoPath, () => execGit(["worktree", "prune"], repoPath).then(() => undefined));
 }
 
 /**
