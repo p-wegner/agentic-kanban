@@ -352,7 +352,40 @@ export function guardMcpMessage(message: unknown, scope: ResolvedFleetMcpScope):
     };
   }
   if (name === "add_comment") return guardAddComment(message, params, scope);
+  if (name === "get_issue" || name === "list_issues") return pinReadScope(message, params, name, scope);
   return { kind: "forward", payload: message };
+}
+
+/**
+ * `get_issue` / `list_issues` default to the assignment's own project and issue (#1332).
+ *
+ * Without this a remote builder could not find its own ticket: `get_issue` by NUMBER falls back
+ * to the board's ACTIVE project (numbers are per-project), which is not the project being built,
+ * and `list_issues` requires a `projectId` the agent has no way to know. Only the project is
+ * pinned — reads stay open to other issues of that project, since `get_issue` is a read and an
+ * explicit UUID is unambiguous — but a caller naming a DIFFERENT project is refused rather than
+ * silently re-aimed, matching `create_issue`.
+ */
+function pinReadScope(message: JsonRecord, params: JsonRecord, tool: string, scope: ResolvedFleetMcpScope): McpGuardOutcome {
+  const args = isRecord(params.arguments) ? params.arguments : {};
+  const requested = typeof args.projectId === "string" && args.projectId ? args.projectId : undefined;
+  if (requested && requested !== scope.projectId) {
+    const reason = `${tool} refused: projectId ${requested} is not this assignment's project`;
+    return {
+      kind: "deny",
+      reason,
+      response: denial(
+        message.id,
+        `${reason} (${scope.projectId}). A remote worker may only read the project it was dispatched for.`,
+      ),
+    };
+  }
+  const pinned: JsonRecord = { ...args, projectId: scope.projectId };
+  // No issueId at all means "my own ticket" — the one identity the agent should never have to guess.
+  if (tool === "get_issue" && (typeof args.issueId !== "string" || !args.issueId) && scope.issueId) {
+    pinned.issueId = scope.issueId;
+  }
+  return { kind: "forward", payload: { ...message, params: { ...params, arguments: pinned } } };
 }
 
 /**

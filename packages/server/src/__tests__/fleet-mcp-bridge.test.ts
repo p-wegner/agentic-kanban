@@ -111,6 +111,31 @@ describe("fleet MCP bridge — the allowlist (#769)", () => {
     expect(payload.params.arguments.projectId).toBe("proj-a");
   });
 
+  // #1332 — a remote agent could not find its own issue.
+  it("pins get_issue-by-number to the assignment's project", () => {
+    const outcome = guardMcpRequest(call("get_issue", { issueId: "16" }), RESOLVED);
+    expect(outcome.kind).toBe("forward");
+    if (outcome.kind !== "forward") return;
+    const args = (outcome.payload as { params: { arguments: Record<string, unknown> } }).params.arguments;
+    expect(args).toEqual({ issueId: "16", projectId: "proj-a" });
+  });
+
+  it("defaults get_issue to the assignment's own issue and list_issues to its project", () => {
+    const own = guardMcpRequest(call("get_issue", {}), RESOLVED);
+    const list = guardMcpRequest(call("list_issues"), RESOLVED);
+    if (own.kind !== "forward" || list.kind !== "forward") throw new Error("expected forward");
+    expect((own.payload as { params: { arguments: unknown } }).params.arguments).toEqual({
+      issueId: "issue-a",
+      projectId: "proj-a",
+    });
+    expect((list.payload as { params: { arguments: unknown } }).params.arguments).toEqual({ projectId: "proj-a" });
+  });
+
+  it.each(["get_issue", "list_issues"])("refuses %s aimed at another project", (tool) => {
+    const outcome = guardMcpRequest(call(tool, { issueId: "1", projectId: "proj-b" }), RESOLVED);
+    expect(outcome.kind).toBe("deny");
+  });
+
   it("refuses create_issue aimed at another project", () => {
     const outcome = guardMcpRequest(call("create_issue", { title: "x", projectId: "proj-b" }), RESOLVED);
     expect(outcome.kind).toBe("deny");

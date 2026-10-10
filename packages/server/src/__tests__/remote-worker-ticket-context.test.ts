@@ -147,3 +147,14 @@ describe("buildRemoteContextFiles (#749)", () => {
     expect(parsed.repo?.contextFiles?.map((f) => f.name)).toEqual([TICKET_CONTEXT_FILENAME]);
   });
 });
+
+describe("announceRemoteAssignmentIdentity (#1332)", () => {
+  it("names the issue number, issue id and project id under the heading", async () => {
+    const { announceRemoteAssignmentIdentity } = await import("../services/remote-context-files.js");
+    const out = announceRemoteAssignmentIdentity("<!-- c -->\n# Ticket #16: Thing\n\nbody", { projectId: "proj-a", issueId: "issue-a" });
+    expect(out).toContain("issue number: #16");
+    expect(out).toContain("issue id: issue-a");
+    expect(out).toContain("project id: proj-a");
+    expect(out.indexOf("project id")).toBeLessThan(out.indexOf("body"));
+  });
+});

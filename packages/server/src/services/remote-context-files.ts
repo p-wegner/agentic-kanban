@@ -30,6 +30,34 @@ export interface RemoteContextFile {
   content: string;
 }
 
+/**
+ * Name the assignment's own issue and project in the brief (#1332).
+ *
+ * A host builder's `CLAUDE.local.md` is rendered with its ticket identity; the retargeted remote
+ * copy had the number in its heading at best and never the UUIDs, so an agent told to "read your
+ * issue and comment" had nothing to look it up by. The bridge pins the project and defaults
+ * `get_issue` to this issue, so these ids are a convenience, not a requirement — but an agent
+ * that can see them does not need to guess. Inserted straight after the `# Ticket #N: …` heading.
+ */
+export function announceRemoteAssignmentIdentity(
+  markdown: string,
+  ids: { projectId: string; issueId?: string | null },
+): string {
+  const heading = /^# .*$/m.exec(markdown);
+  if (!heading) return markdown;
+  const number = /^# Ticket #(\d+)/.exec(heading[0])?.[1];
+  const lines = [
+    "",
+    "",
+    "**Your assignment on the board** (the board tools default to these — you rarely need to pass them):",
+    ...(number ? [`- issue number: #${number}`] : []),
+    ...(ids.issueId ? [`- issue id: ${ids.issueId}`] : []),
+    `- project id: ${ids.projectId}`,
+  ];
+  const at = heading.index + heading[0].length;
+  return markdown.slice(0, at) + lines.join("\n") + markdown.slice(at);
+}
+
 export interface BuildRemoteContextFilesOptions {
   /** Where a board bug goes when the reporter has no board tools. Defaults to the board's. */
   issuesUrl?: string;

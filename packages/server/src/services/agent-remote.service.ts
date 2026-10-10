@@ -1,7 +1,8 @@
 import type { AgentLaunchRequest } from "./agent-dispatch.service.js";
 import { resolveEffectivePrompt } from "./agent-provider/context-files-prompt.js";
 import { buildRemoteLaunchSpec } from "./remote-launch-spec.js";
-import { buildRemoteContextFiles } from "./remote-context-files.js";
+import { announceRemoteAssignmentIdentity, buildRemoteContextFiles } from "./remote-context-files.js";
+import { findFleetMcpAssignment } from "../repositories/worker.repository.js";
 import {
   REMOTE_BOARD_TOOLS,
   buildRemoteMcpConfigFile,
@@ -655,7 +656,10 @@ export function createRemoteAgentService(
             // wastes a session.
             for (const file of remoteContextFiles) {
               if (file.name !== TICKET_CONTEXT_FILENAME) continue;
-              file.content = announceRemoteBoardTools(file.content, { boardTools: REMOTE_BOARD_TOOLS });
+              file.content = announceRemoteAssignmentIdentity(
+                announceRemoteBoardTools(file.content, { boardTools: REMOTE_BOARD_TOOLS }),
+                { projectId: repo.projectId, issueId: (await findFleetMcpAssignment(sessionId, database).catch(() => null))?.issueId },
+              );
             }
           } else {
             console.log(
