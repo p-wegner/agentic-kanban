@@ -11,6 +11,7 @@
 // `--leave-agents` marks every live entry `leftOnPurpose` so the sweep leaves it alone.
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { uptime } from "node:os";
 import { join, resolve } from "node:path";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { killProcessTree, listOsProcesses, type OsProcessRecord } from "../services/process-exec.js";
@@ -144,6 +145,7 @@ export async function sweepLeftoverAgents(
   const report: SweepReport = { scanned: 0, killed: [], leftOnPurpose: [] };
   const platform = deps.platform ?? process.platform;
   const ownPid = deps.ownPid ?? process.pid;
+  const bootTimeMs = Date.now() - uptime() * 1000;
   const kill = deps.kill ?? (async (pid: number, group: boolean) => {
     await killProcessTree(pid, { timeout: 5000, group });
   });
@@ -165,6 +167,14 @@ export async function sweepLeftoverAgents(
       continue;
     }
     if (record.daemonPid === ownPid) continue; // ours, not a predecessor's
+    // A record older than the last boot names pids the OS has since recycled: killing them
+    // (or their "children") would hit unrelated processes. Everything it started died with the boot.
+    const startedMs = Date.parse(record.startedAt);
+    if (Number.isFinite(startedMs) && startedMs < bootTimeMs) {
+      log(`[worker] dropping stale agent record of session ${record.sessionId}: it predates the last boot`);
+      forgetAgent(workRoot, record.sessionId);
+      continue;
+    }
     try {
       if (platform === "win32") {
         processes ??= await (deps.listProcesses ?? listOsProcesses)();
