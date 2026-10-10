@@ -46,14 +46,14 @@ import {
   type WorkerToBoardMessage,
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
-import { createWorkerAgentRunner } from "./worker-agent-runner.js";
+import { createWorkerAgentRunner, dispatchBoardMessage, rawDataToBuffer, type UnpushedResult } from "./worker-agent-runner.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
 import { cleanUpBeforeStart } from "./agent-process-tree.js";
 import { attestProviderAuth } from "../cli/commands/worker-doctor.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { createDaemonSelfUpdate, type DaemonSelfUpdate } from "./worker-daemon-update.js";
-import type { NpmRunner } from "./worker-updater.js";
+import { isWorkerLogInherited, teeLogToFile, workerLogFileFor, type NpmRunner } from "./worker-updater.js";
 
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const RECONNECT_MIN_MS = 1000;
@@ -446,10 +446,42 @@ function retryRetainedResults(
   });
 }
 
+function logShutdownReport(
+  report: DrainReport,
+  retained: UnpushedResult[],
+  timeoutMs: number,
+  log: (line: string) => void,
+): void {
+  for (const result of retained) {
+    // #750/#775: the checkout was NOT removed, so this is recoverable by hand — but
+    // only if the operator is told where it is before the process goes away.
+    log(
+      `[worker] KEPT an unpushed result: sessionId=${result.sessionId} is in ` +
+        `${result.checkoutPath} on branch ${result.localBranch} (target ${result.incomingRef}); ` +
+        `last push error: ${result.lastError}`,
+    );
+  }
+  if (report.pushesAbandoned > 0 || report.criticalMessagesLost > 0) {
+    log(
+      `[worker] shutdown INCOMPLETE: ${report.pushesAbandoned} result push(es) abandoned after ` +
+        `${Math.round(timeoutMs / 1000)}s and ${report.criticalMessagesLost} undelivered ` +
+        `exit/assign_failed message(s) lost (the queue is in memory only). The board will fall ` +
+        `back to its disconnect grace for those sessions.`,
+    );
+  } else {
+    log(`[worker] drained cleanly: ${report.pushesCompleted} result push(es) completed`);
+  }
+}
+
 export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<WorkerDaemonHandle> {
-  const log = opts.log ?? ((line: string) => console.log(line));
-  const boardUrl = normalizeBoardUrl(opts.boardUrl);
   const stateFile = opts.stateFile ?? defaultWorkerStateFile();
+  // #1340: an injected `log` (tests) is left alone; the real daemon also keeps a log file.
+  const log = opts.log ?? teeLogToFile(
+    (line: string) => console.log(line),
+    workerLogFileFor(stateFile),
+    { inherited: isWorkerLogInherited() },
+  );
+  const boardUrl = normalizeBoardUrl(opts.boardUrl);
   const name = opts.name ?? hostname();
 
   // #895: `providers` as DECLARED (--providers) is kept separate from `providers` as
@@ -697,47 +729,13 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     socket.on("message", (data) => {
       // `data` is ws's RawData: Buffer | ArrayBuffer | Buffer[]. A bare `.toString()` on the
       // array case yields comma-joined garbage rather than the frame (no-base-to-string).
-      const raw = Array.isArray(data)
-        ? Buffer.concat(data as readonly Uint8Array[])
-        : Buffer.isBuffer(data)
-          ? data
-          : Buffer.from(new Uint8Array(data as ArrayBuffer));
-      const message = parseBoardToWorkerMessage(raw.toString("utf8"));
+      const message = parseBoardToWorkerMessage(rawDataToBuffer(data).toString("utf8"));
       if (!message) {
         log(`[worker] dropping malformed board message`);
         return;
       }
       try {
-        switch (message.type) {
-          case "assign":
-            // #1338: a draining daemon (an update waiting for its last session) takes no new
-            // work — the board stops assigning on its next heartbeat, this covers the race.
-            if (draining) {
-              sendToBoard({ type: "assign_failed", sessionId: message.sessionId, error: "worker is draining (self-update or shutdown in progress)" });
-              break;
-            }
-            if (message.repo) runner.assignWithRepo(message.sessionId, message.spec, message.repo);
-            else runner.assign(message.sessionId, message.spec);
-            break;
-          case "input":
-            runner.input(message.sessionId, message.data);
-            break;
-          case "close_stdin":
-            runner.closeStdin(message.sessionId);
-            break;
-          case "stop":
-            runner.stop(message.sessionId);
-            break;
-          case "sync_repo":
-            runner.repoOp("sync", message.sessionId, message.requestId, message.auth);
-            break;
-          case "push_head":
-            runner.repoOp("push", message.sessionId, message.requestId, message.auth);
-            break;
-          case "probe_session":
-            runner.probeSession(message.sessionId, message.requestId);
-            break;
-        }
+        dispatchBoardMessage(message, runner, sendToBoard, draining);
       } catch (err) {
         // #870: a throw out of a ws event handler is a process-level uncaught exception —
         // one bad message must not take down every agent on this machine.
@@ -954,25 +952,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         criticalMessagesLost,
         resultsRetained: retained.length,
       };
-      for (const result of retained) {
-        // #750/#775: the checkout was NOT removed, so this is recoverable by hand — but
-        // only if the operator is told where it is before the process goes away.
-        log(
-          `[worker] KEPT an unpushed result: sessionId=${result.sessionId} is in ` +
-            `${result.checkoutPath} on branch ${result.localBranch} (target ${result.incomingRef}); ` +
-            `last push error: ${result.lastError}`,
-        );
-      }
-      if (report.pushesAbandoned > 0 || report.criticalMessagesLost > 0) {
-        log(
-          `[worker] shutdown INCOMPLETE: ${report.pushesAbandoned} result push(es) abandoned after ` +
-            `${Math.round(timeoutMs / 1000)}s and ${report.criticalMessagesLost} undelivered ` +
-            `exit/assign_failed message(s) lost (the queue is in memory only). The board will fall ` +
-            `back to its disconnect grace for those sessions.`,
-        );
-      } else {
-        log(`[worker] drained cleanly: ${report.pushesCompleted} result push(es) completed`);
-      }
+      logShutdownReport(report, retained, timeoutMs, log);
       try { ws?.close(); } catch { /* already closed */ }
       ws = null;
       return report;
