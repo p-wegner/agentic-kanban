@@ -98,7 +98,7 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
     });
     workerLog(
       `[worker] restored an undelivered result from ${workRoot}: sessionId=${record.sessionId} ` +
-        `checkout=${record.checkoutPath} target=${record.incomingRef} — retrying on the next connect`,
+        `checkout=${record.checkoutPath} target=${record.incomingRef} - retrying on the next connect`,
     );
   }
 
@@ -236,7 +236,7 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
           data:
             `The worker's retained result for this session has now been pushed to ` +
             `${entry.pending.repo.incomingRef}. This session was already closed as failed because the ` +
-            `board never saw the work — land the ref from the Worker Fleet incoming view ` +
+            `board never saw the work - land the ref from the Worker Fleet incoming view ` +
             `(POST /api/workers/incoming/land) to bring it onto ${entry.pending.repo.branch}.`,
         },
       });

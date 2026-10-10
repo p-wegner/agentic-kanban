@@ -19,17 +19,18 @@ export function renderBootstrapSteps(fleetUrl: string, pairingToken: string): st
     "On a FRESH machine with only node installed (no worker yet):",
     "  (The commands are for Windows: curl.exe ships with Windows 10+ and also works in PowerShell 7, while in",
     "   Windows PowerShell 5.1 plain `curl` is Invoke-WebRequest and rejects these flags. macOS/Linux: type curl.)",
-    `  1. Fetch the build manifest (note "sha256"):`,
-    `       curl.exe -fsS -H "Authorization: Bearer ${pairingToken}" ${base}/api/workers/build`,
+    `  1. Fetch the build manifest (note "sha256"; waits up to 120 s while the board packs this commit):`,
+    `       curl.exe -fsS -H "Authorization: Bearer ${pairingToken}" "${base}/api/workers/build?wait=120"`,
     `  2. Download the tarball (the pairing token is NOT consumed by this):`,
-    `       curl.exe -fL -H "Authorization: Bearer ${pairingToken}" -o agentic-kanban-worker.tgz ${base}/api/workers/build/tarball`,
+    `       curl.exe -fL -H "Authorization: Bearer ${pairingToken}" -o agentic-kanban-worker.tgz "${base}/api/workers/build/tarball?wait=120"`,
     `  3. Verify it equals the sha256 from step 1:`,
     `       node -e "console.log(require('crypto').createHash('sha256').update(require('fs').readFileSync('agentic-kanban-worker.tgz')).digest('hex'))"`,
     `  4. Install:`,
     `       npm i -g ./agentic-kanban-worker.tgz`,
     `  5. Pair and run:`,
     `       agentic-kanban-worker start --board ${base} --token ${pairingToken}`,
-    "(If the board is still building this commit's tarball, step 1 answers 202 \"building\" - retry in a minute.)",
+    "(Steps 1 and 2 wait for the board to finish packing its build; if it takes longer than 120 s they fail with",
+    " HTTP 504 and a non-zero exit - stop there and re-run that step, do not continue to step 3.)",
   ].join("\n");
 }
 

@@ -229,7 +229,7 @@ export async function provisionWorkerCheckout(
       const detail = (result.stderr || result.stdout).slice(-400);
       throw new Error(
         result.timedOut
-          ? `setup (${setupCommand}) timed out Ã¢â‚¬â€ dependencies are incomplete, the agent could not verify its work`
+          ? `setup (${setupCommand}) timed out - dependencies are incomplete, the agent could not verify its work`
           : `setup script failed (exit ${result.exitCode}): ${detail}`,
       );
     }
@@ -255,7 +255,7 @@ function warnIfBinariesUnlinked(checkoutDir: string, setupCommand: string): void
   if (!existsSync(join(checkoutDir, "node_modules"))) return;
   if (existsSync(join(checkoutDir, "node_modules", ".bin"))) return;
   const warning =
-    `setup (${setupCommand}) completed but node_modules/.bin was not created Ã¢â‚¬â€ ` +
+    `setup (${setupCommand}) completed but node_modules/.bin was not created - ` +
     `package binaries (test runners, linters) may not resolve in this checkout`;
   workerLog(`[worker] ${warning}`);
   const contextFile = join(checkoutDir, TICKET_CONTEXT_FILENAME);
@@ -265,7 +265,7 @@ function warnIfBinariesUnlinked(checkoutDir: string, setupCommand: string): void
       contextFile,
       `\n\n## Worker checkout warning (#852)\n\n` +
         `${warning}. If you cannot run the project's tests here, say so explicitly in your ` +
-        `final summary and commit message ("unverified") instead of finishing silently Ã¢â‚¬â€ ` +
+        `final summary and commit message ("unverified") instead of finishing silently - ` +
         `the board re-verifies before merge, but it must know this work was not verified locally.\n`,
       "utf-8",
     );
@@ -376,7 +376,7 @@ export async function syncWorkerCheckout(
       status: "diverged",
       error:
         `the worker checkout (${head.stdout.trim().slice(0, 8)}) is not an ancestor of the board's ` +
-        `${auth.branch} (${sha.slice(0, 8)}); refusing to fast-forward Ã¢â‚¬â€ this needs a human`,
+        `${auth.branch} (${sha.slice(0, 8)}); refusing to fast-forward - this needs a human`,
     };
   }
   const merged = await gitExec(["merge", "--ff-only", sha], { cwd: checkout.cwd });

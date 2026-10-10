@@ -45,11 +45,11 @@ export function checkWorkerCheckoutTrust(workRoot: string, home: string): Doctor
     return {
       name,
       status: "skip",
-      detail: `${reposDir} does not exist yet — this machine has not been dispatched any git work, so there is no checkout to trust`,
+      detail: `${reposDir} does not exist yet - this machine has not been dispatched any git work, so there is no checkout to trust`,
     };
   }
   if (projectDirs.length === 0) {
-    return { name, status: "skip", detail: `${reposDir} holds no project clone yet — nothing to trust` };
+    return { name, status: "skip", detail: `${reposDir} holds no project clone yet - nothing to trust` };
   }
 
   // Claude Code reads .claude.json from CLAUDE_CONFIG_DIR, not from the home directory — and a
@@ -97,10 +97,10 @@ export function checkWorkerCheckoutTrust(workRoot: string, home: string): Doctor
     detail:
       `${untrusted.length} of ${projectDirs.length} worker checkout(s) ${where}, so every dispatch into them prints ` +
       '"this workspace has not been trusted" and ' +
-      `drops that repo's permission settings: ${described.join("; ")}. The agent still runs either way — the worker ` +
+      `drops that repo's permission settings: ${described.join("; ")}. The agent still runs either way - the worker ` +
       "launches it with permissions bypassed and the PreToolUse hooks fire regardless.",
     remedy:
-      "If you want the banner gone (and any deny/ask rules honoured), THIS MACHINE'S OPERATOR grants the trust — the " +
+      "If you want the banner gone (and any deny/ask rules honoured), THIS MACHINE'S OPERATOR grants the trust - the " +
       "board never will: run Claude Code interactively once in each directory above and accept the trust dialog, or set " +
       `projects["<that path, forward slashes>"].hasTrustDialogAccepted: true in ${lackingPaths}. ` +
       "Every config Claude Code might read here has to agree, because CLAUDE_CONFIG_DIR decides which one the agent " +
@@ -168,6 +168,6 @@ function describeLostRules(repoDir: string): string {
   }
   if (!read) return "no .claude settings found, so nothing is being dropped";
   return restrictive > 0
-    ? `${restrictive} deny/ask rule(s) here WOULD be dropped — worth acting on`
+    ? `${restrictive} deny/ask rule(s) here WOULD be dropped - worth acting on`
     : "allow-only settings, so the effect is a confusing banner and nothing more";
 }

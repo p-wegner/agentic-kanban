@@ -238,7 +238,7 @@ export function applyProfileToSpec(
       error:
         `${PROFILE_UNKNOWN_PREFIX} '${requested}' (provider ${provider || "unknown"}): this worker has no ` +
         `local login by that name, so it cannot run the assignment under it. The attestation the board ` +
-        `placed on is stale — re-check with 'agentic-kanban-worker doctor'.`,
+        `placed on is stale - re-check with 'agentic-kanban-worker doctor'.`,
     };
   }
   const adjustment = localProfileLaunchAdjustment(local);

@@ -525,13 +525,13 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     if (hangTimeoutMs > 0) {
       hangWatchdogs.set(sessionId, startHangWatchdog(`sessionId=${sessionId}`, hangTimeoutMs, () => {
         const seconds = Math.round(hangTimeoutMs / 1000);
-        workerLog(`[worker] hang watchdog fired: sessionId=${sessionId} pid=${proc.pid} — no output for ${seconds}s; killing`);
+        workerLog(`[worker] hang watchdog fired: sessionId=${sessionId} pid=${proc.pid} - no output for ${seconds}s; killing`);
         safeSend({
           type: "event",
           event: {
             type: "stderr",
             sessionId,
-            data: `Agent hang watchdog: no output for ${seconds}s — process killed on worker.`,
+            data: `Agent hang watchdog: no output for ${seconds}s - process killed on worker.`,
           },
         });
         stop(sessionId);

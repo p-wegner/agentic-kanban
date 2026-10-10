@@ -526,20 +526,43 @@ function registerWorkerFacingRoutes(
     return requireWorker(c);
   };
 
+  // #1366: `?wait=<seconds>` makes the lookup block while the tarball is packing, so a pasted
+  // `curl -f` step cannot "succeed" on a 202 body. On timeout the lookup stays "building" and each
+  // route answers a >= 400 (504). Without the flag the plain 202/409 answers are unchanged (the
+  // daemon's updater, #1352, polls on those). Fractional seconds are accepted; capped at 5 min.
+  const lookupBuild = async (c: Context) => {
+    const svc = await buildServiceFor();
+    let lookup = await svc.getBuild();
+    const waitSec = Number(c.req.query("wait"));
+    if (!(waitSec > 0)) return { lookup, waited: false };
+    const deadline = Date.now() + Math.min(waitSec, 300) * 1000;
+    while (lookup.state === "building" && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, Math.min(250, Math.max(10, deadline - Date.now()))));
+      lookup = await svc.getBuild();
+    }
+    return { lookup, waited: true };
+  };
+
   router.get("/build", async (c) => {
     const denied = await requireWorkerOrPairing(c);
     if (denied) return denied;
-    const lookup = await (await buildServiceFor()).getBuild();
+    const { lookup, waited } = await lookupBuild(c);
     if (lookup.state === "ready") return c.json(lookup.manifest);
-    // 202: not an error — the board is packing this commit's tarball; the worker polls.
-    if (lookup.state === "building") return c.json({ state: "building" }, 202);
+    if (lookup.state === "building") {
+      if (waited) return c.json({ error: "the build did not finish within the wait window; retry" }, 504);
+      // 202: not an error — the board is packing this commit's tarball; the worker polls.
+      return c.json({ state: "building" }, 202);
+    }
     return c.json({ error: lookup.reason }, 503);
   });
 
   router.get("/build/tarball", async (c) => {
     const denied = await requireWorkerOrPairing(c);
     if (denied) return denied;
-    const lookup = await (await buildServiceFor()).getBuild();
+    const { lookup, waited } = await lookupBuild(c);
+    if (lookup.state === "building" && waited) {
+      return c.json({ error: "the build did not finish within the wait window; retry" }, 504);
+    }
     if (lookup.state !== "ready") {
       return c.json({ error: lookup.state === "building" ? "the build is not ready yet" : lookup.reason }, lookup.state === "building" ? 409 : 503);
     }

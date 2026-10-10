@@ -208,7 +208,7 @@ async function checkHeartbeat(boardUrl: string, identity: SavedIdentity | null):
     return {
       name: "saved pairing authenticates",
       status: "skip",
-      detail: "no pairing saved for this board — nothing to authenticate yet",
+      detail: "no pairing saved for this board - nothing to authenticate yet",
       remedy: `Mint a token on the board (agentic-kanban worker pair) and run: worker start --board ${boardUrl} --token <token>`,
     };
   }
@@ -233,7 +233,7 @@ async function checkHeartbeat(boardUrl: string, identity: SavedIdentity | null):
   if (probe.status === 409) {
     return bad(
       "saved pairing authenticates",
-      "protocol version mismatch (409) — the token is fine, the build is not",
+      "protocol version mismatch (409) - the token is fine, the build is not",
       "Upgrade this machine's agentic-kanban worker to match the board's protocol version.",
     );
   }
@@ -259,7 +259,7 @@ export function checkWebSocket(
     return Promise.resolve({
       name: "websocket upgrade",
       status: "skip",
-      detail: "no pairing saved — the socket is authenticated per worker, so there is nothing to open",
+      detail: "no pairing saved - the socket is authenticated per worker, so there is nothing to open",
     });
   }
   const wsUrl = `${boardUrl.replace(/^http/, "ws")}/ws/workers/${identity.workerId}`;
@@ -306,7 +306,7 @@ export function checkWebSocket(
           "websocket upgrade",
           `${wsUrl} answered HTTP ${res.statusCode ?? "?"} instead of upgrading`,
           res.statusCode === 401
-            ? "The bearer token was rejected — re-pair this machine."
+            ? "The bearer token was rejected - re-pair this machine."
             : "The fleet listener does not serve this path; check the port.",
         ),
       ),
@@ -388,18 +388,18 @@ export async function checkGitTransport(boardUrl: string, gitPort?: number): Pro
           `${url} is routable but nothing is listening on port ${gitPort} (${probe.errno}). ` +
           "The board may not have bound the git transport yet: since #855 a fleet-configured " +
           "board (KANBAN_FLEET_PORT set) binds it at STARTUP, while a board without a fleet " +
-          "port — or an older board in every case — binds it on its first git-transport " +
+          "port - or an older board in every case - binds it on its first git-transport " +
           "dispatch. This machine cannot tell which kind of board it probed, so this is not a " +
-          "verdict — but if the board IS fleet-configured and freshly started, a refused port " +
+          "verdict - but if the board IS fleet-configured and freshly started, a refused port " +
           "here is a real failure.",
         remedy:
           "If the board is fleet-configured (KANBAN_FLEET_PORT set) and has finished starting, " +
           "treat this as real: check KANBAN_GIT_HTTP_PORT on the board, that KANBAN_GIT_HTTP_HOST " +
           "names an interface this machine can route to, and the board's startup log for a " +
           "'[git-http] eager startup bind failed' warning. On a board that binds lazily (no fleet " +
-          "port configured, or a pre-#855 build), nothing to do until the first git dispatch — " +
+          "port configured, or a pre-#855 build), nothing to do until the first git dispatch - " +
           "that is what a healthy fleet looks like from here. Never put a path-based reverse " +
-          "proxy in front of it (docs §8).",
+          "proxy in front of it (docs section 8).",
       };
     }
     // Everything else — DNS failure, timeout, no route — is a fault regardless of whether
@@ -408,7 +408,7 @@ export async function checkGitTransport(boardUrl: string, gitPort?: number): Pro
       "git transport reachable",
       `${url} could not be reached: ${probe.error}`,
       "Set KANBAN_GIT_HTTP_PORT on the board and make sure KANBAN_GIT_HTTP_HOST names an interface " +
-        "this machine can route to. Never put a path-based reverse proxy in front of it (docs §8).",
+        "this machine can route to. Never put a path-based reverse proxy in front of it (docs section 8).",
     );
   }
   // 401/404 are GOOD news: the listener is up and refusing an unauthenticated, project-less
@@ -436,7 +436,9 @@ async function checkGit(): Promise<DoctorCheck> {
 // god-module gate's 20-declaration ceiling (#889), and the check pushed it to 21.
 import { checkNodeVersion } from "./worker-doctor-node-check.js";
 export { MIN_SUPPORTED_NODE_MAJOR, checkNodeVersion } from "./worker-doctor-node-check.js";
-import { checkGlobalLauncher, checkWorkerBuild } from "./worker-doctor-build-check.js";
+import { checkGlobalLauncher, checkWorkerBuild, readEntryVersion } from "./worker-doctor-build-check.js";
+import { checkBoardBuild } from "./worker-board-build.js";
+import { resolveOwnPackageVersion } from "../../lib/worker-build.js";
 import { checkTailnetFirewall } from "./worker-doctor-firewall-check.js";
 // #875's env-aware auth-dir resolution lives in its own module for the same reason.
 import { resolveProviderAuthDir } from "./worker-doctor-provider-auth.js";
@@ -465,7 +467,7 @@ export async function checkProvider(
       bad(
         `${provider} CLI installed`,
         `'${provider}' is not on this machine's PATH`,
-        `Install the ${provider} CLI here. The board never ships it — a worker runs the provider locally.`,
+        `Install the ${provider} CLI here. The board never ships it - a worker runs the provider locally.`,
       ),
     );
     return checks;
@@ -506,7 +508,7 @@ export async function checkProvider(
     // chasing a login that is already fine.
     status: "unknown",
     detail:
-      `none of ${auth.files.join(", ")} found in ${dir} (consulted via ${resolved.source}) — ` +
+      `none of ${auth.files.join(", ")} found in ${dir} (consulted via ${resolved.source}) - ` +
       `either not logged in, or authenticated by an env API key this check cannot see`,
     remedy: `If sessions fail with an auth error, run: ${auth.loginCommand}`,
   });
@@ -615,6 +617,11 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   checks.push(checkNodeVersion());
   checks.push(checkWorkerBuild(opts.stateFile, opts.runningEntry ?? null));
   checks.push(checkGlobalLauncher({ stateFile: opts.stateFile, runningEntry: opts.runningEntry ?? null }));
+  checks.push(await checkBoardBuild({
+    boardUrl,
+    token: identity?.workerToken,
+    ownVersion: readEntryVersion(opts.runningEntry ?? null) ?? resolveOwnPackageVersion(),
+  }));
   checks.push(checkWorkerCheckoutTrust(opts.workRoot ?? defaultWorkerWorkRoot(), opts.home ?? homedir()));
   for (const provider of opts.providers) {
     checks.push(...(await checkProvider(provider, opts.home)));
@@ -669,7 +676,7 @@ export function listenerStateCheck(name: string, s: HealthListenerState | undefi
   if (s.status === "bound") return ok(name, `bound on ${s.host}:${s.port}`);
   return bad(
     name,
-    `NOT bound — retrying (${s.attempts ?? 0} failed attempt(s)); configured ${s.host}:${s.port}; last error: ${s.error ?? "unknown"}`,
+    `NOT bound - retrying (${s.attempts ?? 0} failed attempt(s)); configured ${s.host}:${s.port}; last error: ${s.error ?? "unknown"}`,
     "The configured host is not available yet (e.g. tailscaled not up). The board retries with backoff on its own; " +
       "check `tailscale status` and KANBAN_FLEET_HOST / KANBAN_GIT_HTTP_HOST.",
   );
@@ -741,7 +748,7 @@ export async function runBoardDoctor(opts: {
       bad(
         "owner surface reachable",
         `could not reach ${boardUrl}/api/workers: ${err instanceof Error ? err.message : String(err)}`,
-        "Run this ON THE BOARD MACHINE — the owner routes are mounted only on the loopback app.",
+        "Run this ON THE BOARD MACHINE - the owner routes are mounted only on the loopback app.",
       ),
     );
     return { side: "board", boardUrl, checks, ok: false };
@@ -772,8 +779,8 @@ export async function runBoardDoctor(opts: {
     if (w.effectiveStatus !== "online") {
       const seen = describeLastSeen(w.lastHeartbeatAt, opts.nowMs ?? Date.now());
       const stale = seen.days !== null && seen.days > STALE_OFFLINE_DAYS;
-      const detail = `effectiveStatus is ${w.effectiveStatus} (${seen.text}) — the last heartbeat is older than 90 s, or it is draining`;
-      const revokeHint = stale || seen.days === null ? ` Offline for a long time — consider \`agentic-kanban worker revoke ${w.name}\`.` : "";
+      const detail = `effectiveStatus is ${w.effectiveStatus} (${seen.text}) - the last heartbeat is older than 90 s, or it is draining`;
+      const revokeHint = stale || seen.days === null ? ` Offline for a long time - consider \`agentic-kanban worker revoke ${w.name}\`.` : "";
       if (reachableEligible.length > 0) {
         checks.push({
           name: `worker ${w.name}`,
@@ -798,7 +805,7 @@ export async function runBoardDoctor(opts: {
       checks.push(
         bad(
           `worker ${w.name}`,
-          "heartbeat is fresh but the board holds no WebSocket for it — it will never be picked",
+          "heartbeat is fresh but the board holds no WebSocket for it - it will never be picked",
           "Something between the machines is dropping the socket while letting HTTP through: run " +
             "`worker doctor` there and read the websocket-upgrade check.",
         ),
@@ -814,7 +821,7 @@ export async function runBoardDoctor(opts: {
       });
       continue;
     }
-    checks.push(ok(`worker ${w.name}`, `online, connected, eligible — ${w.freeSlots}/${w.maxConcurrency} slots free`));
+    checks.push(ok(`worker ${w.name}`, `online, connected, eligible - ${w.freeSlots}/${w.maxConcurrency} slots free`));
   }
 
   if (reachableEligible.length === 0) {
@@ -834,7 +841,7 @@ export async function runBoardDoctor(opts: {
         ? ok("free capacity", `${freeSlots} free slot(s) across ${eligible} eligible of ${registered} worker(s)`)
         : bad(
             "free capacity",
-            `0 free slots (${eligible} eligible of ${registered} registered) — every slot is in use`,
+            `0 free slots (${eligible} eligible of ${registered} registered) - every slot is in use`,
             "Nothing is broken; a strict-dispatch project will hold until a slot frees up.",
           ),
     );
@@ -864,12 +871,12 @@ export function renderDoctorReport(report: DoctorReport): string {
   const unknown = report.checks.filter((c) => c.status === "unknown").length;
   lines.push(
     failed === 0
-      ? `All ${report.checks.length} checks passed or were skipped${unknown > 0 ? ` (${unknown} indeterminate — see above)` : ""}${warned > 0 ? ` (${warned} warning(s) — see above)` : ""}.`
+      ? `All ${report.checks.length} checks passed or were skipped${unknown > 0 ? ` (${unknown} indeterminate - see above)` : ""}${warned > 0 ? ` (${warned} warning(s) - see above)` : ""}.`
       : `${failed} check(s) failed.`,
   );
   if (report.side === "worker") {
     lines.push(
-      "This half cannot see how the board views this machine — the owner routes are loopback-only " +
+      "This half cannot see how the board views this machine - the owner routes are loopback-only " +
         "(`agentic-kanban-worker setup`, section 1). Run `agentic-kanban worker doctor-board` on the board for that half.",
     );
   }

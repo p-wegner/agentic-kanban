@@ -9194,6 +9194,11 @@ paths:
           required: false
           schema:
             type: string
+        - name: wait
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: Success
@@ -9210,6 +9215,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "504":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/workers/build/tarball:
     get:
       summary: GET /api/workers/build/tarball
@@ -9222,9 +9232,19 @@ paths:
           required: false
           schema:
             type: string
+        - name: wait
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "504":
+          description: Error
           content:
             application/json:
               schema: {}

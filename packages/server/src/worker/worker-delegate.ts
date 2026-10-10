@@ -71,7 +71,7 @@ export function runDelegated(
 ): Promise<number> {
   const log = deps.log ?? ((line: string) => workerLog(line));
   log(
-    `[worker] delegating to the current build ${target.buildId.slice(0, 12)} (${target.entry}) — ` +
+    `[worker] delegating to the current build ${target.buildId.slice(0, 12)} (${target.entry}) - ` +
       "pass --no-delegate to run this install instead",
   );
   return new Promise((resolveCode) => {
@@ -90,7 +90,7 @@ export function runDelegated(
     process.on("SIGINT", forward("SIGINT"));
     process.on("SIGTERM", forward("SIGTERM"));
     child.on("error", (err: Error) => {
-      log(`[worker] delegation failed (${err.message}) — running this install instead`);
+      log(`[worker] delegation failed (${err.message}) - running this install instead`);
       resolveCode(-1);
     });
     child.on("exit", (code: number | null) => resolveCode(code ?? 1));

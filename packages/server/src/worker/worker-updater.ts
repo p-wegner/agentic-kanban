@@ -466,7 +466,7 @@ export function createWorkerUpdater(deps: WorkerUpdaterDeps): WorkerUpdater {
       const waitedS = Math.round(waited / 1000);
       if (lastLoggedS < 0 || waitedS - lastLoggedS >= 10) {
         lastLoggedS = waitedS;
-        deps.log(`[worker] update to build ${target}: waiting for board build (202, ${waitedS}s) — still taking work`);
+        deps.log(`[worker] update to build ${target}: waiting for board build (202, ${waitedS}s) - still taking work`);
       }
       if (waited >= deadline) {
         throw new TransientUpdateError(`the board did not finish building its worker tarball within ${Math.round(deadline / 1000)}s`);
