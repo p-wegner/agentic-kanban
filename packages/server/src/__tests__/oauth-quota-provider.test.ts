@@ -220,6 +220,25 @@ describe("OAuthQuotaProvider 429 handling", () => {
     expect(result.providers[0].status).toBe("auth");
     expect(result.providers[0].metrics).toEqual([]);
   });
+
+  it("logs an unchanged skipped profile once across consecutive polls, and again on a transition (#1334)", async () => {
+    const logs: string[] = [];
+    let err: "expired" | "no-creds" = "expired";
+    const provider = new OAuthQuotaProvider({
+      fetchImpl: (async () => okResponse(usageBody(1, 1))) as unknown as typeof fetch,
+      listProfiles: () => [PROFILES[0]],
+      readCredentials: () => ({ err, tier: "max 5x" }),
+      log: (line) => logs.push(line),
+    });
+
+    await provider.fetchUsage(T0);
+    await provider.fetchUsage(T0 + 600_000);
+    expect(logs.filter((l) => l.includes("skipped"))).toHaveLength(1);
+
+    err = "no-creds";
+    await provider.fetchUsage(T0 + 1_200_000);
+    expect(logs.filter((l) => l.includes("skipped"))).toHaveLength(2);
+  });
 });
 
 describe("measurement age", () => {

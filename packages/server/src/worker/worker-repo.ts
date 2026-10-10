@@ -107,7 +107,20 @@ export async function provisionWorkerCheckout(
   repo: WorkerRepoTransport,
   sessionId: string,
   workRoot: string = defaultWorkerWorkRoot(),
+  log: (line: string) => void = (line) => console.log(line),
 ): Promise<WorkerCheckout> {
+  // #1334: one line per repo phase, so a remote operator can time a session from the log.
+  const phase = async <T>(label: string, run: () => Promise<T>): Promise<T> => {
+    const t0 = Date.now();
+    try {
+      const out = await run();
+      log(`[worker] ${label} ${Date.now() - t0}ms`);
+      return out;
+    } catch (err) {
+      log(`[worker] ${label} FAILED after ${Date.now() - t0}ms`);
+      throw err;
+    }
+  };
   const gitUrl = composeGitUrl(boardUrl, repo);
   const cacheDir = join(workRoot, "repos", repo.projectId);
   const checkoutDir = join(workRoot, "checkouts", sessionId);
@@ -116,14 +129,16 @@ export async function provisionWorkerCheckout(
 
   const authEnv = gitAuthEnv(repo);
   if (!existsSync(join(cacheDir, ".git"))) {
-    await gitExecOrThrow(["clone", gitUrl, cacheDir], { timeout: 10 * 60 * 1000, env: authEnv });
+    await phase(`clone ${repo.projectId}`, () =>
+      gitExecOrThrow(["clone", gitUrl, cacheDir], { timeout: 10 * 60 * 1000, env: authEnv }));
   } else {
     // A token is per-assignment — always fetch with the CURRENT credential.
-    await gitExecOrThrow(["fetch", gitUrl, "+refs/heads/*:refs/remotes/origin/*", "--prune"], {
-      cwd: cacheDir,
-      timeout: 10 * 60 * 1000,
-      env: authEnv,
-    });
+    await phase(`fetch ${repo.projectId}`, () =>
+      gitExecOrThrow(["fetch", gitUrl, "+refs/heads/*:refs/remotes/origin/*", "--prune"], {
+        cwd: cacheDir,
+        timeout: 10 * 60 * 1000,
+        env: authEnv,
+      }));
   }
 
   // Stale worktree from a crashed prior session with the same id — remove it.
@@ -141,7 +156,8 @@ export async function provisionWorkerCheckout(
   const startPoint = execSucceeded(branchProbe)
     ? `refs/remotes/origin/${repo.branch}`
     : `refs/remotes/origin/${repo.baseBranch}`;
-  await gitExecOrThrow(["worktree", "add", "-b", localBranch, checkoutDir, startPoint], { cwd: cacheDir });
+  await phase("worktree add", () =>
+    gitExecOrThrow(["worktree", "add", "-b", localBranch, checkoutDir, startPoint], { cwd: cacheDir }));
 
   // #553: through the shared writer, not a raw writeFileSync. The hand-rolled version
   // had no `isSafeSkillName` guard and emitted no frontmatter, so a remote worker's
@@ -180,8 +196,13 @@ export async function provisionWorkerCheckout(
     const source = assignmentScript
       ? "assignment setup script"
       : "fallback install (assignment carried no setup script)";
-    console.log(`[worker] running ${source} for session ${sessionId}: ${setupCommand}`);
+    log(`[worker] setup start (${source}) for session ${sessionId}: ${setupCommand}`);
+    const setupStart = Date.now();
     const result = await runSetupScript(checkoutDir, setupCommand);
+    log(
+      `[worker] setup end for session ${sessionId}: exit ${result.exitCode}` +
+        `${result.timedOut ? " (timed out)" : ""} in ${Date.now() - setupStart}ms`,
+    );
     if (result.exitCode !== 0) {
       const detail = (result.stderr || result.stdout).slice(-400);
       throw new Error(

@@ -219,6 +219,7 @@ export interface OAuthQuotaPollerOptions {
 export class OAuthQuotaPoller {
   private readonly cache = new Map<string, QuotaCacheRecord>();
   private cursor = 0;
+  private readonly lastLogged = new Map<string, string>();
   private readonly fetchImpl: typeof fetch;
   private readonly readCredentials: (configDir: string, nowMs: number) => CredentialRead;
   private readonly log: (line: string) => void;
@@ -263,10 +264,17 @@ export class OAuthQuotaPoller {
     return nowMs - rec.ts >= refreshIntervalMs(rec);
   }
 
+  /** A profile's state line is logged on first sight and on a transition, never on every poll (#1334). */
+  private logOnChange(target: OAuthProfileRef, state: string, line: string): void {
+    if (this.lastLogged.get(target.configDir) === state) return;
+    this.lastLogged.set(target.configDir, state);
+    this.log(line);
+  }
+
   private async fetchOne(target: OAuthProfileRef, nowMs: number): Promise<FetchOutcome> {
     const cred = this.readCredentials(target.configDir, nowMs);
     if (cred.err) {
-      this.log(`${target.profile} skipped (${cred.err}) — no request sent`);
+      this.logOnChange(target, `skipped:${cred.err}`, `${target.profile} skipped (${cred.err}) — no request sent`);
       return FAILED(cred.err, cred.tier ?? null);
     }
 
@@ -277,7 +285,7 @@ export class OAuthQuotaPoller {
         headers: { authorization: `Bearer ${cred.token}`, "anthropic-beta": OAUTH_BETA },
         signal: ac.signal,
       });
-      this.log(`${target.profile} GET ${OAUTH_USAGE_URL} -> ${res.status}`);
+      this.logOnChange(target, `http:${res.status}`, `${target.profile} GET ${OAUTH_USAGE_URL} -> ${res.status}`);
       if (!res.ok) {
         const retryAfterSec = res.status === 429
           ? parseRetryAfter(res.headers?.get?.("retry-after") ?? null, nowMs)
@@ -294,7 +302,7 @@ export class OAuthQuotaPoller {
       };
     } catch (err) {
       const kind = (err as Error | null)?.name === "AbortError" ? "timeout" : "net";
-      this.log(`${target.profile} GET ${OAUTH_USAGE_URL} -> ${kind}`);
+      this.logOnChange(target, `net:${kind}`, `${target.profile} GET ${OAUTH_USAGE_URL} -> ${kind}`);
       return FAILED(kind, cred.tier ?? null);
     } finally {
       clearTimeout(timer);
