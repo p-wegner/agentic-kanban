@@ -783,7 +783,7 @@ export function createWorkspaceCreateService(deps: {
       const ticketContextPath = !isDirect && worktreePath
         ? await writeWorktreeTicketContext(
             worktreePath,
-            issue,
+            { ...issue, id: input.issueId },
             contextPrimer,
             siblingWorktrees.map((s) => ({ name: s.name, worktreePath: s.worktreePath })),
             null,
@@ -924,7 +924,7 @@ export function createWorkspaceCreateService(deps: {
           createdAt: now,
           siblings: siblingWorktrees,
           installTimeoutMs: siblingInstallTimeoutMs,
-          issue: { id: issue.id, issueNumber: issue.issueNumber, title: issue.title, description: issue.description, projectId: issue.projectId },
+          issue: { id: input.issueId, issueNumber: issue.issueNumber, title: issue.title, description: issue.description, projectId: issue.projectId },
           contextPrimer,
           groupTickets: groupMembers,
           timing,

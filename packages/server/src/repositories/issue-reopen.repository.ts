@@ -1,18 +1,21 @@
 import { and, eq, gt, isNotNull, lt, ne, asc, desc } from "drizzle-orm";
 import { issueComments, workspaces } from "@agentic-kanban/shared/schema";
 import { db as defaultDb, type Database } from "../db/index.js";
+import { firstRow } from "../lib/first-row.js";
 
 export type ReopenComment = { author: string; body: string; createdAt: string };
 
 /** ISO time of the newest merge of ANY workspace of the issue, or null if it never landed. */
 export async function getLastMergedAt(issueId: string, database: Database = defaultDb): Promise<string | null> {
-  const rows = await database
-    .select({ mergedAt: workspaces.mergedAt })
-    .from(workspaces)
-    .where(and(eq(workspaces.issueId, issueId), isNotNull(workspaces.mergedAt)))
-    .orderBy(desc(workspaces.mergedAt))
-    .limit(1);
-  return rows[0]?.mergedAt ?? null;
+  const row = await firstRow(
+    database
+      .select({ mergedAt: workspaces.mergedAt })
+      .from(workspaces)
+      .where(and(eq(workspaces.issueId, issueId), isNotNull(workspaces.mergedAt)))
+      .orderBy(desc(workspaces.mergedAt))
+      .limit(1),
+  );
+  return row?.mergedAt ?? null;
 }
 
 /**

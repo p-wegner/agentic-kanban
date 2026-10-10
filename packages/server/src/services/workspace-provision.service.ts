@@ -318,6 +318,17 @@ async function readVerifyCommandOverride(
   }
 }
 
+/** #1343: comments since the issue last merged are the reopen reason. Best-effort. */
+async function readReopenComments(issueId: string | undefined, database: Database) {
+  if (!issueId) return [];
+  try {
+    return await listCommentsSinceLastMerge(issueId, database);
+  } catch (err) {
+    console.warn(`[workspaces] reopen-comments read failed (non-fatal): ${errorMessage(err)}`);
+    return [];
+  }
+}
+
 async function readRiskPosture(projectId: string, database: Database): Promise<RiskPosture> {
   try {
     return resolveRiskPosture(await getPreference(riskPosturePref.key(projectId), database));
@@ -778,21 +789,11 @@ export function createWorkspaceProvisionService(deps: {
     } catch (err) {
       console.warn(`[workspaces] board-feedback routing failed (non-fatal): ${errorMessage(err)}`);
     }
-    const riskPosture = await readRiskPosture(issue.projectId, database);
-    // #1343: comments added since the issue last merged are the reopen reason. Best-effort.
-    let reopenComments: Awaited<ReturnType<typeof listCommentsSinceLastMerge>> = [];
-    if (issue.id) {
-      try {
-        reopenComments = await listCommentsSinceLastMerge(issue.id, database);
-      } catch (err) {
-        console.warn(`[workspaces] reopen-comments read failed (non-fatal): ${errorMessage(err)}`);
-      }
-    }
     return writeTicketContextFile(worktreePath, {
       issueNumber: issue.issueNumber,
       title: issue.title,
       description: issue.description,
-      reopenComments,
+      reopenComments: await readReopenComments(issue.id, database),
       contextPrimer,
       stackProfile,
       verifyCommandOverride,
@@ -800,7 +801,7 @@ export function createWorkspaceProvisionService(deps: {
       serviceStack,
       boardFeedback,
       groupTickets,
-      riskPosture,
+      riskPosture: await readRiskPosture(issue.projectId, database),
     });
   }
 
