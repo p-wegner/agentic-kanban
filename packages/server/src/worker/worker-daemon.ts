@@ -48,6 +48,7 @@ import {
 import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
 import { createWorkerAgentRunner } from "./worker-agent-runner.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
+import { cleanUpBeforeStart } from "./agent-process-tree.js";
 import { attestProviderAuth } from "../cli/commands/worker-doctor.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -460,14 +461,8 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // disconnected, or crashed mid-session) is reaped before anything else runs, so a
   // long-lived worker never accumulates whole repo clones from abandoned sessions.
   // Best-effort — a scan failure must never block pairing/connecting.
-  try {
-    const reaped = await reapOrphanedCheckouts(opts.workRoot ?? defaultWorkerWorkRoot(), log);
-    if (reaped.reaped.length > 0) {
-      log(`[worker] startup cleanup: reaped ${reaped.reaped.length} orphaned checkout(s) of ${reaped.scanned} scanned`);
-    }
-  } catch (err) {
-    log(`[worker] startup checkout cleanup failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
-  }
+  // #1336: a previous daemon's leftover agent trees are killed first (agent-process-tree.ts).
+  await cleanUpBeforeStart(opts.workRoot ?? defaultWorkerWorkRoot(), log);
 
   let identity = loadState(stateFile).boards[boardUrl];
   if (!identity) {
@@ -924,6 +919,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       clearInterval(heartbeatTimer);
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (stopOpts?.killAgents) runner.stopAll();
+      else runner.releaseAgents(); // #1336: --leave-agents — the trees survive on purpose
       // The kill above only sends the signal. The result push is kicked off by the
       // agent's `exit` handler, so exiting now is precisely the bug: wait for it.
       const drained = await runner.drainPushes(timeoutMs);

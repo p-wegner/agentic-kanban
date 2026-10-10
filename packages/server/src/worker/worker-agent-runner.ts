@@ -41,6 +41,7 @@ import { createWorkerSessionRegistry } from "./worker-session-registry.js";
 import { resolveSpecCommand } from "./worker-command-resolver.js";
 import { applyProfileToSpec } from "./worker-profiles.js";
 import { FLEET_MCP_TOKEN_ENV_VAR } from "@agentic-kanban/shared/lib/worker-protocol";
+import { createAgentTreeTracker } from "./agent-process-tree.js";
 
 export type SendToBoard = (message: WorkerToBoardMessage) => void;
 
@@ -147,6 +148,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   /** Per-session silence watchdogs; reset on every byte of agent output. */
   const hangWatchdogs = new Map<string, { reset(): void; close(): void }>();
   const maxConcurrency = options.maxConcurrency && options.maxConcurrency > 0 ? options.maxConcurrency : 1;
+  const tree = createAgentTreeTracker(workRoot); // #1336
 
   /**
    * Slots this machine currently holds. A provisioning session counts: it is already
@@ -175,11 +177,8 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   }
 
   function closeWatchdog(sessionId: string): void {
-    const watchdog = hangWatchdogs.get(sessionId);
-    if (watchdog) {
-      watchdog.close();
-      hangWatchdogs.delete(sessionId);
-    }
+    hangWatchdogs.get(sessionId)?.close();
+    hangWatchdogs.delete(sessionId);
   }
 
   /** Sleep that never keeps the event loop alive on its own. */
@@ -277,6 +276,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     provisioning.delete(sessionId);
     stdinOpen.delete(sessionId);
     closeWatchdog(sessionId);
+    tree.untrack(sessionId);
     const pending = checkouts.get(sessionId);
     if (!pending) {
       // safeSend, not send: this runs synchronously on the child's `exit` event, where a
@@ -436,7 +436,9 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     // the daemon (SIGKILL, crash) is unreapable — `stopAll()` still reaches it via the group
     // kill on a graceful shutdown, but there is no recovery otherwise; accepted, since the
     // alternative leaves the #833 gap open on every POSIX pipeline/`&&`/redirect launch.
-    const detach = process.platform !== "win32" && launch.useShell;
+    // #1336: on POSIX EVERY agent now leads its own process group (not just shell launches),
+    // so a recorded pgid names the whole tree for the next daemon's startup sweep. On win32
+    // the equivalent is the kill-on-close Job Object attached after the spawn below.
     let proc: ChildProcess;
     try {
       proc = spawn(launch.command, spec.args, {
@@ -447,7 +449,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         // provider config dir must stay this machine's (decision 012).
         env: { ...process.env, ...spec.env },
         shell: launch.useShell,
-        detached: detach,
+        detached: process.platform !== "win32",
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -457,6 +459,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     }
     processes.set(sessionId, proc);
     console.log(`[worker] launched agent: sessionId=${sessionId} pid=${proc.pid} command=${launch.command}`);
+    if (proc.pid) tree.track(sessionId, proc.pid, spec.cwd);
 
     // Every byte of agent output proves liveness, so it resets the silence
     // watchdog armed below.
@@ -599,6 +602,9 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     for (const sessionId of [...processes.keys(), ...provisioning]) stop(sessionId);
   }
 
+  /** `--leave-agents` (#1336): the agent trees survive this daemon ON PURPOSE. */
+  const releaseAgents = (): void => tree.release([...processes.keys()]);
+
   function runningSessionIds(): string[] {
     return [...new Set([...processes.keys(), ...provisioning])];
   }
@@ -641,7 +647,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   }
 
   return {
-    assign, assignWithRepo, input, closeStdin, stop, stopAll, runningSessionIds,
+    assign, assignWithRepo, input, closeStdin, stop, stopAll, releaseAgents, runningSessionIds,
     drainPushes, pendingPushCount, repoOp,
     probeSession: seen.answerProbe, rememberedSessionCount: seen.size,
     retryPendingPushes: undelivered.retryPending,

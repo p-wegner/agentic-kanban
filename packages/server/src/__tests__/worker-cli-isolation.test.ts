@@ -95,8 +95,10 @@ describe("agentic-kanban-worker binary isolation", () => {
     // `worker/worker-versions.ts`, `worker/worker-daemon-update.ts` and `lib/worker-update.ts`.
     // All four import only node builtins, `@agentic-kanban/shared/lib/*` and each other —
     // the FORBIDDEN_* assertions below are what guard the db-free property.
+    // Raised 31 → 34 in #1336 for `worker/agent-process-tree.ts`, `worker/worker-agent-registry.ts`
+    // and `worker/worker-job-holder.ts` (node builtins, `process-exec` and the shared error helper).
     expect(files.size).toBeGreaterThan(3);
-    expect(files.size).toBeLessThan(31);
+    expect(files.size).toBeLessThan(34);
   });
 
   it("never reaches the database or board-service layer", () => {
