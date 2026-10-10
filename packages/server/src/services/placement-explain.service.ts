@@ -38,7 +38,7 @@ import {
 } from "@agentic-kanban/shared/lib/profile-capabilities";
 import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
 import { compareWorkerBuild } from "@agentic-kanban/shared/lib/worker-build-freshness";
-import { resolveOwnPackageVersion } from "../lib/worker-build.js";
+import { resolveBoardCommit, resolveOwnPackageVersion } from "../lib/worker-build.js";
 
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -320,7 +320,7 @@ async function describeWorkers(
         ? {}
         : {
             workerVersion: w.workerVersion,
-            buildFreshness: compareWorkerBuild(w.workerVersion, resolveOwnPackageVersion()),
+            buildFreshness: compareWorkerBuild(w.workerVersion, resolveOwnPackageVersion(), resolveBoardCommit()),
           }),
       assignedSessionIds: fleet.connections.assignedSessionIds(w.id),
       assignments: fleet.connections

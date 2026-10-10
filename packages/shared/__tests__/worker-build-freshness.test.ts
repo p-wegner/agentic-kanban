@@ -52,6 +52,23 @@ describe("compareWorkerBuild — the two directions stay distinct", () => {
   });
 });
 
+describe("compareWorkerBuild — -dev.<sha> stamps are compared by commit (#1330)", () => {
+  const head = "e4dc2b054aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  it("a worker packed from the board's own commit is in sync", () => {
+    expect(compareWorkerBuild("0.1.9-dev.e4dc2b054", "0.1.9", head)).toBe("in-sync");
+  });
+  it("a worker packed from another commit is a different build, not behind", () => {
+    expect(compareWorkerBuild("0.1.9-dev.1234567", "0.1.9", head)).toBe("different-build");
+  });
+  it("keeps semver ordering between real releases and without a board commit", () => {
+    expect(compareWorkerBuild("0.1.8", "0.1.9", head)).toBe("behind-board");
+    expect(compareWorkerBuild("0.1.9-dev.e4dc2b054", "0.1.9")).toBe("behind-board");
+  });
+  it("words the verdict", () => {
+    expect(formatBuildFreshness("different-build", "0.1.9")).toBe("different build from board (board runs 0.1.9)");
+  });
+});
+
 describe("formatBuildFreshness — one wording for the panel and the CLI", () => {
   it("names each direction distinctly and includes the board's build when known", () => {
     expect(formatBuildFreshness("behind-board", "0.1.9")).toBe("behind board (board runs 0.1.9)");

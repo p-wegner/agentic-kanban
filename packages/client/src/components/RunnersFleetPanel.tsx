@@ -233,7 +233,7 @@ export function RunnersFleetPanel({ projectId }: RunnersFleetPanelProps) {
                     const label = formatBuildFreshness(worker.buildFreshness, fleet?.boardWorkerVersion);
                     if (!label) return null;
                     const tone =
-                      worker.buildFreshness === "behind-board"
+                      worker.buildFreshness === "behind-board" || worker.buildFreshness === "different-build"
                         ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
                         : "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400";
                     return <span className={`ml-1.5 rounded px-1.5 py-0.5 text-xs ${tone}`}>{label}</span>;

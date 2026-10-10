@@ -32,7 +32,7 @@ import { classifyWorkerDrop } from "../services/worker-drop-diagnosis.js";
 import { getPreferenceValue } from "../repositories/session-lifecycle.repository.js";
 import { listWorkerBranchAssignments } from "../repositories/worker.repository.js";
 import type { ProviderName } from "../services/agent-provider.js";
-import { resolveOwnPackageVersion } from "../lib/worker-build.js";
+import { resolveBoardCommit, resolveOwnPackageVersion } from "../lib/worker-build.js";
 import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
 import { parseWorkerUpdateReport } from "../lib/worker-update.js";
@@ -445,6 +445,7 @@ function registerWorkerFacingRoutes(
     return c.json({
       boardProtocolVersion: reg.boardProtocolVersion(),
       boardWorkerVersion: resolveOwnPackageVersion() ?? null,
+      boardCommit: resolveBoardCommit(),
     });
   });
 
