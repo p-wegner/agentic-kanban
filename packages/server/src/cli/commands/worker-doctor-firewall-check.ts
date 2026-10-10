@@ -21,7 +21,32 @@ export interface FirewallRuleInfo {
   remoteAddresses: string[];
 }
 
-export type FirewallRuleLister = () => Promise<FirewallRuleInfo[] | null>;
+export interface FirewallListTimeout {
+  timedOut: true;
+  elapsedMs: number;
+}
+
+/** `null` = PowerShell/NetSecurity unavailable; `FirewallListTimeout` = it ran but was too slow. */
+export type FirewallRuleLister = (ports?: number[]) => Promise<FirewallRuleInfo[] | FirewallListTimeout | null>;
+
+/** Normalise a firewall remote address to `a.b.c.d/prefix` (CIDR or dotted-mask form); other values pass through. */
+export function normalizeRemoteAddress(addr: string): string {
+  const m = /^(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,3}(?:\.\d{1,3}){3}|\d{1,2})$/.exec(addr.trim());
+  if (!m) return addr.trim();
+  const mask = m[2] as string;
+  if (!mask.includes(".")) return `${m[1]}/${Number(mask)}`;
+  let bits = 0;
+  let seenZero = false;
+  for (const octet of mask.split(".").map(Number)) {
+    for (let i = 7; i >= 0; i--) {
+      if ((octet >> i) & 1) {
+        if (seenZero) return addr.trim(); // non-contiguous mask
+        bits++;
+      } else seenZero = true;
+    }
+  }
+  return `${m[1]}/${bits}`;
+}
 
 /** 100.64.0.0/10 = 100.64.0.0 - 100.127.255.255. */
 export function isTailnetAddress(host: string | null | undefined): boolean {
@@ -32,22 +57,41 @@ export function isTailnetAddress(host: string | null | undefined): boolean {
   return a === 100 && b >= 64 && b <= 127;
 }
 
-const PS_LIST =
-  "$o=@(Get-NetFirewallRule -Direction Inbound -ErrorAction SilentlyContinue | ForEach-Object {" +
-  "$p=($_|Get-NetFirewallPortFilter).LocalPort;$a=($_|Get-NetFirewallAddressFilter).RemoteAddress;" +
-  "[pscustomobject]@{name=$_.DisplayName;enabled=($_.Enabled -eq 'True');allow=($_.Action -eq 'Allow');" +
-  "ports=@($p|ForEach-Object{[string]$_});remote=@($a|ForEach-Object{[string]$_})}});" +
-  "ConvertTo-Json -InputObject $o -Compress -Depth 4";
+/**
+ * Query from the port side (#1357): one bulk `Get-NetFirewallPortFilter -Protocol TCP`, narrowed to
+ * the ports we care about, then only those rules (per-rule piping of every inbound rule took ~65 s
+ * on a 372-rule box).
+ */
+export function buildPsList(ports: number[]): string {
+  const list = ports.map((p) => `'${Math.trunc(p)}'`).join(",");
+  return (
+    `$w=@(${list});` +
+    "$pf=@(Get-NetFirewallPortFilter -Protocol TCP -ErrorAction SilentlyContinue | Where-Object {" +
+    "@($_.LocalPort | Where-Object { $w -contains [string]$_ }).Count -gt 0 });" +
+    "$o=@($pf | Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.Direction -eq 'Inbound' } | ForEach-Object {" +
+    "$p=($_|Get-NetFirewallPortFilter).LocalPort;$a=($_|Get-NetFirewallAddressFilter).RemoteAddress;" +
+    "[pscustomobject]@{name=$_.DisplayName;enabled=($_.Enabled -eq 'True');allow=($_.Action -eq 'Allow');" +
+    "ports=@($p|ForEach-Object{[string]$_});remote=@($a|ForEach-Object{[string]$_})}});" +
+    "ConvertTo-Json -InputObject $o -Compress -Depth 4"
+  );
+}
 
-/** Real lister: null when PowerShell or the NetSecurity cmdlets are unavailable. */
-export const listFirewallRulesViaPowerShell: FirewallRuleLister = () =>
+const PS_TIMEOUT_MS = 20_000;
+
+/** Real lister: null when PowerShell or the NetSecurity cmdlets are unavailable; a timeout is reported as one. */
+export const listFirewallRulesViaPowerShell: FirewallRuleLister = (ports = []) =>
   new Promise((resolve) => {
+    const started = Date.now();
     execFile(
       "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-Command", PS_LIST],
-      { timeout: 20_000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
+      ["-NoProfile", "-NonInteractive", "-Command", buildPsList(ports)],
+      { timeout: PS_TIMEOUT_MS, windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
       (err, stdout) => {
-        if (err) return resolve(null);
+        if (err) {
+          const e = err as NodeJS.ErrnoException & { killed?: boolean; signal?: string | null };
+          if (e.killed || e.signal) return resolve({ timedOut: true, elapsedMs: Date.now() - started });
+          return resolve(null);
+        }
         try {
           const raw = JSON.parse(stdout || "[]") as Array<{
             name: string; enabled: boolean; allow: boolean; ports: string[]; remote: string[];
@@ -75,7 +119,7 @@ export function findTailnetRule(rules: FirewallRuleInfo[], port: number): { scop
     (r) => r.enabled && r.allow && r.inbound && r.ports.some((p) => p === String(port) || p === "Any"),
   );
   const scoped = hits.some(
-    (r) => r.ports.includes(String(port)) && r.remoteAddresses.length > 0 && r.remoteAddresses.every((a) => a === TAILNET_CIDR || a === "100.64.0.0/255.192.0.0"),
+    (r) => r.ports.includes(String(port)) && r.remoteAddresses.length > 0 && r.remoteAddresses.every((a) => normalizeRemoteAddress(a) === TAILNET_CIDR),
   );
   return { found: hits.length > 0, scoped };
 }
@@ -94,7 +138,17 @@ export async function checkTailnetFirewall(
   if (platform !== "win32") return [];
   const targets = listeners.filter((l) => l.port && isTailnetAddress(l.host));
   if (targets.length === 0) return [];
-  const rules = await list();
+  const rules = await list(targets.map((t) => t.port as number));
+  if (rules !== null && !Array.isArray(rules)) {
+    return [
+      {
+        name: "tailnet firewall rules",
+        status: "unknown",
+        detail: `reading Windows Firewall rules timed out after ${(rules.elapsedMs / 1000).toFixed(1)}s`,
+        remedy: "Run `powershell scripts/fleet-firewall.ps1 -Status` to check by hand.",
+      },
+    ];
+  }
   if (rules === null) {
     return [
       {
