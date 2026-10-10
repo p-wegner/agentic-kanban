@@ -94,10 +94,15 @@ unreachable from another machine by construction, not by convention.
 So on a cross-machine fleet the two commands take **different** `--board` values. The
 CLI's default (`http://127.0.0.1:3001`) is the same-machine case.
 
-Known drift, not yet fixed: the `agentic-kanban-worker --help` examples and the Worker
-Fleet UI panel still print a bare `--board <board-url>` / `:3001` without saying which
-port, and the `fleet-worker` skill's verification step still says `worker list` from the
-worker machine. Those are strings in source, tracked separately from this page.
+`worker pair`, the `mint_worker_pairing_token` MCP tool and the Worker Fleet Connect tab
+print the worker's `--board` for you: the pairing-token response carries `fleetUrl`
+(`http://<KANBAN_FLEET_HOST or 127.0.0.1>:<KANBAN_FLEET_PORT>`, or `null` plus a
+"fleet listener disabled: set KANBAN_FLEET_PORT" note when unset).
+
+Known drift, not yet fixed: the `agentic-kanban-worker --help` examples still print a bare
+`--board <board-url>` / `:3001` without saying which port, and the `fleet-worker` skill's
+verification step still says `worker list` from the worker machine. Those are strings in
+source, tracked separately from this page.
 
 ## 3. Pairing a machine
 
