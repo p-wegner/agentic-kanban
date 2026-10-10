@@ -5,6 +5,12 @@ import { gitExec } from "../git-exec.js";
 import { execGit } from "./internal.js";
 import { parseIssueNumberFromBranch } from "../branch.js";
 import { ensureOnBranch } from "./branch-attach.js";
+import { loggedWorktreeAdmin, runAsLockHolder, watchWorktreeGitFile, type WorktreeAdminOp } from "./worktree-admin-log.js";
+
+/** `git worktree <op>` through `execGit`, logged (#1353) — the only door for add/remove/prune here. */
+function worktreeAdminGit(op: WorktreeAdminOp, args: string[], repoPath: string, worktreePath: string | null = null): Promise<string> {
+  return loggedWorktreeAdmin(op, repoPath, worktreePath, () => execGit(["worktree", op, ...args], repoPath), args.filter((a) => a.startsWith("--expire")).join(" "));
+}
 
 /**
  * Per-repo mutex over every worktree ADMIN mutation (add / remove / prune) (#1339).
@@ -37,7 +43,8 @@ export const WORKTREE_PRUNE_MIN_AGE = "10.minutes.ago";
 export async function withWorktreeAdminLock<T>(repoPath: string, work: () => Promise<T>): Promise<T> {
   const key = resolve(repoPath).toLowerCase();
   const previous = worktreeAdminTails.get(key) ?? Promise.resolve();
-  const run = previous.then(work, work);
+  const guarded = () => runAsLockHolder(work);
+  const run = previous.then(guarded, guarded);
   const tail = run.catch(() => undefined);
   worktreeAdminTails.set(key, tail);
   try {
@@ -224,7 +231,7 @@ async function createWorktreeLocked(
   // Age-bounded (#1342): a sibling workspace's registration younger than the bound may still
   // be mid-provision (no `.git` file yet) and must survive this create. A genuinely dead
   // registration that blocks the add below is cleared by the retry there.
-  try { await execGit(["worktree", "prune", `--expire=${WORKTREE_PRUNE_MIN_AGE}`], repoPath); } catch { /* best effort */ }
+  try { await worktreeAdminGit("prune", [`--expire=${WORKTREE_PRUNE_MIN_AGE}`], repoPath); } catch { /* best effort */ }
 
   // Check if a worktree for this branch already exists — reuse if healthy
   const existing = await listWorktrees(repoPath);
@@ -242,7 +249,7 @@ async function createWorktreeLocked(
       // Wrap in try/catch: on Windows the directory may be EBUSY/locked;
       // failure here is non-fatal — pruneWorktrees below cleans up the registration.
       try {
-        await execGit(["worktree", "remove", "--force", match.path], repoPath);
+        await worktreeAdminGit("remove", ["--force", match.path], repoPath, match.path);
       } catch {
         // EBUSY or locked — fall through; pruneWorktrees will tidy the registration
       }
@@ -371,7 +378,7 @@ async function createWorktreeLocked(
     // A recent dead registration of this very path/branch (the bounded prune above kept it)
     // blocks the add; only then drop dangling registrations unconditionally and retry once.
     if (!/already registered|already checked out|already used by worktree|is a missing/i.test(String(err))) throw err;
-    await execGit(["worktree", "prune"], repoPath).catch(() => undefined);
+    await worktreeAdminGit("prune", [], repoPath).catch(() => undefined);
     await execGit(["worktree", "add", worktreePath, branch], repoPath);
   }
 
@@ -399,17 +406,17 @@ async function removeWorktreeLocked(
   await breakJunctionsRecursively(worktreePath).catch(() => undefined);
 
   try {
-    await execGit(["worktree", "remove", "--force", worktreePath], repoPath);
+    await worktreeAdminGit("remove", ["--force", worktreePath], repoPath, worktreePath);
   } catch (err) {
     if (await removeLeftoverWorktreeDirectory(repoPath, worktreePath)) {
-      await execGit(["worktree", "prune"], repoPath).catch(() => undefined);
+      await worktreeAdminGit("prune", [], repoPath).catch(() => undefined);
       return;
     }
     throw err;
   }
 
   if (await removeLeftoverWorktreeDirectory(repoPath, worktreePath)) {
-    await execGit(["worktree", "prune"], repoPath).catch(() => undefined);
+    await worktreeAdminGit("prune", [], repoPath).catch(() => undefined);
   }
 }
 
@@ -424,7 +431,7 @@ async function removeWorktreeLocked(
 export async function pruneWorktrees(repoPath: string): Promise<void> {
   await withWorktreeAdminLock(
     repoPath,
-    () => execGit(["worktree", "prune", `--expire=${WORKTREE_PRUNE_MIN_AGE}`], repoPath).then(() => undefined),
+    () => worktreeAdminGit("prune", [`--expire=${WORKTREE_PRUNE_MIN_AGE}`], repoPath).then(() => undefined),
   );
 }
 
