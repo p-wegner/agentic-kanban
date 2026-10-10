@@ -12,6 +12,51 @@ First archive pass: 2026-08-27, cutting at the 2026-08-24 boundary (`CONTINUE.md
 ---
 
 
+<!-- moved 2026-10-10 (night) from CONTINUE.md, verbatim -->
+
+## 2026-10-10 — board drained: #1312, #1313, #1314 Done
+
+**State.** Stable board runs `stable-20261010` (`cf5f7bda2`, full green sweep of `rc/20261010`,
+promoted 2026-10-10, smoke passed), carrying #1312, #1313 and #1314. `master` pushed to origin 2026-10-10 after a clean
+confidential-terms scan of the pushed range (26 terms, author identities included).
+Board: no open agentic-kanban ticket.
+
+- **#1312 merged** (lean Claude builder profile). Its first gate run had died with exit 130;
+  the re-run was first refused by a dirty main checkout, then went green.
+- **#1313 merged** (root CLAUDE.md slimmed for builders, operator material moved to
+  `docs/agent-guide/operator-reference.md`, budget guard). Gate was red on
+  `always-run-guard-runtime-ratchet`: the new guard counted at the assumed 3,000 ms. Fixed by
+  banking its measured 3 ms in `docs/tests/durations.json`; neither limit moved.
+- **#1314 (direct fix)** `workspace start --project <name>` sent the name as `projectId`; now
+  resolved via `resolveProjectIdArg`. Check: a name resolves to the id, an unknown name errors.
+
+**Next:** nothing open on this project's board; next work comes from `BACKLOG.md`.
+
+## 2026-10-06 — lean builders measured; project hooks were failing open in builders
+
+**State.** Stable board runs `stable-20261006` (`7b271da82`, full green sweep of `rc/20261006`,
+promoted 2026-10-06), carrying #1310 and #1311. `master` was pushed after this pass.
+
+- **#1311 (direct fix, critical) — every project hook failed OPEN in headless builders.**
+  `claude -p` on Windows runs hook commands through PowerShell, which reads a bare
+  `$CLAUDE_PROJECT_DIR` as an undefined variable. smart-hooks-runner (command safety), the
+  #959 cross-worktree guard, require-read-before-write and the Stop checks all
+  MODULE_NOT_FOUND'd with a non-blocking exit. Fix: `${CLAUDE_PROJECT_DIR}/` everywhere; the
+  scaffold heals old entries in place. Check: probe worktree with `KANBAN_WORKTREE_DIR`, write
+  into main → created with the old spelling, `Cross-worktree write blocked` with the new; 3
+  suites 77/77, typecheck clean. Live in `stable-20261006`.
+- **#1310 (board builder, merged)** — Codex builders isolated via `-c` overrides; builder's
+  live check: prompt 30,232 → 9,893 chars, user skills 17 → 0.
+- **Lean Claude builder levers measured** (lean base 40.0k first-request tokens): auto-memory
+  off −7.8k (builders also load the operator's private MEMORY.md), tool trim −5.0k, non-core
+  skills name-only −2.4k, claude.ai connectors off −1.7k → combined 23.1k (−42%). Skills fully
+  off makes it BIGGER (the Workflow tool inlines its guide). Filed **#1312** (lean profile
+  with per-project add-backs) and **#1313** (slim CLAUDE.md for builders, −7.0k measured).
+
+**Next:** scrub against the confidential-terms list and push master; then
+let a builder take #1312.
+
+
 <!-- moved 2026-10-10 from CONTINUE.md, verbatim -->
 
 ## 2026-10-04 afternoon — after the reboot: stable-20261004-8 live, board empty
