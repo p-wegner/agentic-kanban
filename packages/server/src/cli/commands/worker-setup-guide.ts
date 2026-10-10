@@ -17,18 +17,19 @@ export function renderBootstrapSteps(fleetUrl: string, pairingToken: string): st
   const base = fleetUrl.replace(/\/+$/, "");
   return [
     "On a FRESH machine with only node installed (no worker yet):",
-    "  (Windows: type curl.exe, not curl; in Windows PowerShell 5.1 `curl` is Invoke-WebRequest and rejects these flags.)",
+    "  (The commands are for Windows: curl.exe ships with Windows 10+ and also works in PowerShell 7, while in",
+    "   Windows PowerShell 5.1 plain `curl` is Invoke-WebRequest and rejects these flags. macOS/Linux: type curl.)",
     `  1. Fetch the build manifest (note "sha256"):`,
-    `       curl -fsS -H "Authorization: Bearer ${pairingToken}" ${base}/api/workers/build`,
+    `       curl.exe -fsS -H "Authorization: Bearer ${pairingToken}" ${base}/api/workers/build`,
     `  2. Download the tarball (the pairing token is NOT consumed by this):`,
-    `       curl -fL -H "Authorization: Bearer ${pairingToken}" -o agentic-kanban-worker.tgz ${base}/api/workers/build/tarball`,
+    `       curl.exe -fL -H "Authorization: Bearer ${pairingToken}" -o agentic-kanban-worker.tgz ${base}/api/workers/build/tarball`,
     `  3. Verify it equals the sha256 from step 1:`,
     `       node -e "console.log(require('crypto').createHash('sha256').update(require('fs').readFileSync('agentic-kanban-worker.tgz')).digest('hex'))"`,
     `  4. Install:`,
     `       npm i -g ./agentic-kanban-worker.tgz`,
     `  5. Pair and run:`,
     `       agentic-kanban-worker start --board ${base} --token ${pairingToken}`,
-    "(If the board is still building this commit's tarball, step 1 answers 202 \"building\" — retry in a minute.)",
+    "(If the board is still building this commit's tarball, step 1 answers 202 \"building\" - retry in a minute.)",
   ].join("\n");
 }
 
@@ -55,7 +56,8 @@ export function renderWorkerSetupGuide(): string {
     "5. Providers. Sign in to the agent CLIs (claude/codex/...) on THIS machine; `worker doctor`",
     "   reports missing or expired credentials.",
     "",
-    "6. Firewall / exposure. On the board machine scope the fleet port to the tailnet (100.64.0.0/10) with",
+    "6. Firewall / exposure. On the BOARD machine, from its agentic-kanban checkout (the script is not in",
+    "   this worker package), scope the fleet port to the tailnet (100.64.0.0/10) with",
     "   `scripts/fleet-firewall.ps1 -Install` (elevated). Never expose the fleet port publicly. Setting",
     "   KANBAN_FLEET_INSECURE=1 accepts every interface and is for trusted LANs only.",
     "",

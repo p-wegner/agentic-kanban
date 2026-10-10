@@ -437,7 +437,7 @@ async function runWorkerStart(options: WorkerStartOptions): Promise<void> {
     // stdout IS worker.log, so they used to land there with no timestamp. (Idempotent.)
     stampConsoleWithTimestamps();
     const shim = installShim({ stateFile: options.stateFile ?? defaultWorkerStateFile(), fallbackEntry: entry });
-    if (shim) console.log(`[worker] stable restart command: ${shim} start …`);
+    if (shim) console.log(`[worker] stable restart command: ${shim} start ...`);
     const logFile = workerLogFileFor(options.stateFile ?? defaultWorkerStateFile());
     console.log(`[worker] logging to ${logFile}`);
     // Read by `restart` below, which can fire (a rollback) before the await resolves.
