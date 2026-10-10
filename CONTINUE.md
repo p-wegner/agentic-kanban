@@ -3,6 +3,30 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-10-10 (later) — fleet worker e2e: six local rounds clean, Tailscale prep filed
+
+**State.** The stable board is still `stable-20261010`; #1315-#1323 are merged on `master` but
+NOT promoted and NOT pushed. Board: #1324-#1329 open (Tailscale prep, Todo; #1329 is
+operator-run and tagged `no-auto-start`).
+
+- **Local fleet e2e, verified.** Dev board with `KANBAN_FLEET_PORT=3103 KANBAN_GIT_HTTP_PORT=3102`,
+  a scratch node:test fixture registered as `wfx`, strict worker dispatch, a FRESH worker per
+  round (own `--state-file`/`--work-root`, git transport, no `--shares-filesystem`). Each round:
+  pair, doctors, build+review session on the worker, push, fast-forward, merge, tests green;
+  daemon hard-kill, detach, restart. Round 6 found nothing new.
+- **Frictions fixed by builders, each re-checked live with the next fresh worker:** #1315
+  (full-CLI `worker` created a kanban.db), #1316 (`worker doctor` evicted the live socket; no
+  `--work-root`), #1317 (detached session invisible; §9 stale), #1318 (`worker pair` prints the
+  fleet URL), #1319 (`placements` shows `exit 1, worker lost`), #1320 (empty checkout shells),
+  #1321 (dead session's registered checkout reaped at start and by `cleanup`), #1322
+  (`kanban/<sessionId>` branches deleted), #1323 (`worker revoke`; `doctor-board` WARNs offline).
+- **Tailscale prep (#1324-#1329):** durable fleet config for promote/stable:start (today the
+  stable board only gets fleet env from the calling shell), bind retry, tailnet-scoped firewall
+  script, board-served worker build, per-phase timings, and the operator-run tailnet lab checklist.
+
+**Next:** promote (`pnpm promote --dry-run` first), then build #1324 and #1325 before anything
+connects over the tailnet.
+
 ## 2026-10-10 — board drained: #1312, #1313, #1314 Done
 
 **State.** Stable board runs `stable-20261010` (`cf5f7bda2`, full green sweep of `rc/20261010`,
