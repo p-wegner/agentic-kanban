@@ -249,9 +249,33 @@ describe("getBaseBranchHealthAtMergeBase (#491)", () => {
     expect(result.ageMs).toBeGreaterThanOrEqual(3 * 60 * 60 * 1000 - 5000);
 
     const attribution = describeRedBaseAttribution(result);
-    expect(attribution).toContain("BASE BRANCH ALREADY RED");
-    expect(attribution).toContain("as of the last check");
+    // #1349 — master moved on past the red sha with no probe: the verdict is stale, not a blame.
+    expect(result.stale).toBe(true);
+    expect(attribution).not.toContain("BASE BRANCH ALREADY RED");
+    expect(attribution).toContain("STALE/UNKNOWN");
     expect(attribution).toContain("checked 3h ago");
+  });
+
+  it("a branch based on the fix B gets no base-red attribution when red was recorded at A (#1349)", async () => {
+    const repoPath = makeRepoPath();
+    const projectId = await seedProject(db, repoPath);
+
+    const { execFileSync } = await import("node:child_process");
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: repoPath, encoding: "utf8" });
+    git("init", "-q", "-b", "master");
+    git("config", "user.email", "test@example.com");
+    git("config", "user.name", "Test");
+    git("commit", "--allow-empty", "-q", "-m", "A: red");
+    const redSha = git("rev-parse", "HEAD").trim();
+    git("commit", "--allow-empty", "-q", "-m", "B: the fix");
+    git("checkout", "-q", "-b", "feature/w");
+    git("commit", "--allow-empty", "-q", "-m", "feature commit");
+
+    await recordBaseBranchHealth({ projectId, sha: redSha, branch: "master", outcome: "red", message: "A broke it" }, db);
+
+    const result = await getBaseBranchHealthAtMergeBase(projectId, repoPath, "feature/w", "master", db);
+    const attribution = describeRedBaseAttribution(result);
+    expect(attribution).not.toContain("ALREADY RED");
   });
 
   it("does NOT present a latest row that is NOT an ancestor of the merge-base — reports unknown instead of a stale red (#886)", async () => {

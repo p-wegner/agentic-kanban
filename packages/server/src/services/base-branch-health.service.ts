@@ -758,6 +758,11 @@ export interface BaseBranchHealthAtMergeBase {
   recordedSha?: string;
   /** How old `health` was at resolution time (`Date.now() - health.createdAt`, or the injected `nowMs`). */
   ageMs?: number;
+  /**
+   * #1349 — `health` was recorded at a strict ancestor of the merge-base, so it says nothing
+   * about the state the branch was built on: the base moved past it without a probe.
+   */
+  stale?: boolean;
 }
 
 /**
@@ -814,6 +819,9 @@ export async function getBaseBranchHealthAtMergeBase(
     health: latest,
     recordedSha: latest?.sha,
     ageMs: latest ? ageMsOf(latest.createdAt, nowMs) : undefined,
+    // #1349 — `latest` is at a STRICT ancestor of the merge-base (the exact-sha lookup above
+    // missed): commits landed after it that nothing probed, one of which may be the fix.
+    stale: !!(latest && mergeBaseSha && latest.sha !== mergeBaseSha),
   };
 }
 
@@ -847,6 +855,13 @@ export function describeRedBaseAttribution(info: BaseBranchHealthAtMergeBase): s
   const { health, mergeBaseSha, ageMs } = info;
   if (!health || health.outcome === "green") return null;
   const ageNote = ageMs !== undefined ? `, checked ${formatAge(ageMs)} ago` : "";
+  // #1349 — a red recorded BEFORE the merge-base, with no later probe, is not evidence about
+  // this branch's base: the fix may already be in it. Say so instead of blaming the base.
+  if (info.stale && isBaseHealthAnswer(health.outcome)) {
+    return `BASE BRANCH HEALTH STALE/UNKNOWN — last verdict was ${health.outcome.toUpperCase()} at ${health.sha.slice(0, 8)}${ageNote}, `
+      + `but the branch's merge-base is ${mergeBaseSha?.slice(0, 8)} and nothing was probed since, so this failure is NOT attributed to the base. `
+      + `Last base verify result: ${health.message ?? `outcome ${health.outcome}`}`;
+  }
   // A non-answer is an admission about the PROBE, not an accusation against the base. Saying
   // "BASE BRANCH ALREADY TIMEOUT"/"ALREADY UNVERIFIED" reads as the latter, and — worse — the
   // downstream readers of that verdict treat it as a red base: they suppress #638 fix-and-merge
