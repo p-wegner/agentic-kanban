@@ -21,13 +21,63 @@ import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import {
   TICKET_CONTEXT_FILENAME,
+  announceRemoteBoardTools,
   retargetTicketContextForRemoteWorker,
 } from "@agentic-kanban/shared/lib/ticket-context";
 import { BOARD_ISSUES_URL } from "./board-feedback-routing.js";
+import type { Database } from "../db/index.js";
+import { findFleetMcpAssignment } from "../repositories/worker.repository.js";
 
 export interface RemoteContextFile {
   name: string;
   content: string;
+}
+
+/**
+ * Rewrite the ticket brief for a remote worker that DOES have the board bridge (#749, #1332):
+ * name the tools that work and the assignment's own issue/project ids. A failed issue lookup
+ * only drops the issue id line; the bridge still defaults to it.
+ */
+export async function announceRemoteBridgeInBrief(
+  files: RemoteContextFile[],
+  boardTools: Parameters<typeof announceRemoteBoardTools>[1]["boardTools"],
+  projectId: string,
+  sessionId: string,
+  database: Database,
+): Promise<void> {
+  const issueId = (await findFleetMcpAssignment(sessionId, database).catch(() => null))?.issueId;
+  for (const file of files) {
+    if (file.name !== TICKET_CONTEXT_FILENAME) continue;
+    file.content = announceRemoteAssignmentIdentity(announceRemoteBoardTools(file.content, { boardTools }), { projectId, issueId });
+  }
+}
+
+/**
+ * Name the assignment's own issue and project in the brief (#1332).
+ *
+ * A host builder's `CLAUDE.local.md` is rendered with its ticket identity; the retargeted remote
+ * copy had the number in its heading at best and never the UUIDs, so an agent told to "read your
+ * issue and comment" had nothing to look it up by. The bridge pins the project and defaults
+ * `get_issue` to this issue, so these ids are a convenience, not a requirement — but an agent
+ * that can see them does not need to guess. Inserted straight after the `# Ticket #N: …` heading.
+ */
+export function announceRemoteAssignmentIdentity(
+  markdown: string,
+  ids: { projectId: string; issueId?: string | null },
+): string {
+  const heading = /^# .*$/m.exec(markdown);
+  if (!heading) return markdown;
+  const number = /^# Ticket #(\d+)/.exec(heading[0])?.[1];
+  const lines = [
+    "",
+    "",
+    "**Your assignment on the board** (the board tools default to these — you rarely need to pass them):",
+    ...(number ? [`- issue number: #${number}`] : []),
+    ...(ids.issueId ? [`- issue id: ${ids.issueId}`] : []),
+    `- project id: ${ids.projectId}`,
+  ];
+  const at = heading.index + heading[0].length;
+  return markdown.slice(0, at) + lines.join("\n") + markdown.slice(at);
 }
 
 export interface BuildRemoteContextFilesOptions {
