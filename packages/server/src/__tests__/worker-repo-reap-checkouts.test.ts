@@ -9,7 +9,7 @@ import { rmOrReportHolder } from "./helpers/rm-or-report-holder.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
-import { reapOrphanedCheckouts } from "../worker/worker-repo.js";
+import { reapOrphanedCheckouts, cleanupWorkerCheckout } from "../worker/worker-repo.js";
 
 describe("reapOrphanedCheckouts", () => {
   let workRoot: string;
@@ -64,6 +64,23 @@ describe("reapOrphanedCheckouts", () => {
     expect(report.scanned).toBe(1);
     expect(report.reaped).toEqual([orphanCheckout]);
     expect(existsSync(orphanCheckout)).toBe(false);
+  });
+
+  it("#1320: cleanupWorkerCheckout removes the whole checkout dir, including a leftover .codex/skills shell", async () => {
+    const cacheDir = join(workRoot, "repos", "proj-1");
+    mkdirSync(cacheDir, { recursive: true });
+    await gitExecOrThrow(["init", "-b", "master", cacheDir], {});
+    writeFileSync(join(cacheDir, "README.md"), "hello\n");
+    await gitExecOrThrow(["add", "."], { cwd: cacheDir });
+    await gitExecOrThrow(["-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-m", "init"], { cwd: cacheDir });
+
+    const checkout = join(workRoot, "checkouts", "sess-done");
+    await gitExecOrThrow(["worktree", "add", "-b", "kanban/sess-done", checkout, "master"], { cwd: cacheDir });
+    mkdirSync(join(checkout, ".codex", "skills"), { recursive: true });
+
+    await cleanupWorkerCheckout({ cwd: checkout, cacheDir });
+
+    expect(existsSync(checkout)).toBe(false);
   });
 
   it("is a no-op when there is no checkouts directory yet", async () => {
