@@ -102,7 +102,8 @@ describe("agentic-kanban-worker binary isolation", () => {
     // `cli/commands/worker-doctor-build-check.ts` (node builtins + `worker-versions`).
     // Raised 36 → 37 in #1350 for `worker/worker-shim.ts` (node builtins only).
     // Raised 37 → 38 in #1326 for `cli/commands/worker-doctor-firewall-check.ts` (node builtins only).
-    expect(files.size).toBeLessThan(38);
+    // Raised 38 → 39 in #1355 for `worker/worker-control.ts` (node:http/fs/crypto + shared error-message).
+    expect(files.size).toBeLessThan(39);
   });
 
   it("never reaches the database or board-service layer", () => {

@@ -414,6 +414,11 @@ export const DEFAULT_RETRY_BACKOFF_MS: readonly number[] = [5_000, 15_000, 30_00
 export interface WorkerUpdater {
   /** The board's advertised build id, from a heartbeat. `force` = a board-side `worker update`. */
   onBoardBuild(buildId: string | undefined, force?: boolean): void;
+  /**
+   * #1355: a worker-side "update NOW" for `target` (the board's build). `started` = an attempt is
+   * now in flight; `failed` = it could not even start (an unstamped build).
+   */
+  requestUpdate(target: string): "current" | "started" | "in-progress" | "failed";
   state(): WorkerUpdateReport;
   /** Resolves when no update attempt is in flight (tests, graceful shutdown). */
   idle(): Promise<void>;
@@ -563,6 +568,14 @@ export function createWorkerUpdater(deps: WorkerUpdaterDeps): WorkerUpdater {
       inFlight = run(buildId).finally(() => {
         inFlight = null;
       });
+    },
+    requestUpdate(target) {
+      const busy = (): boolean => inFlight !== null;
+      if (busy()) return "in-progress";
+      if (sameBuild(target, deps.ownBuildId)) return "current";
+      this.onBoardBuild(target, true);
+      if (busy()) return "started";
+      return report.state === "failed" ? "failed" : "current";
     },
     state: () => report,
     idle: () => inFlight ?? Promise.resolve(),
