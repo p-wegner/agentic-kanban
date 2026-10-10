@@ -117,6 +117,25 @@ export function teeLogToFile(
   };
 }
 
+/**
+ * #1334: prefix every `console.log/warn/error` line the daemon prints with an ISO timestamp, so a
+ * plain `worker start` (no supervisor) is timeable. Patches the global console, because the agent
+ * runner and repo provisioning print directly. Idempotent; returns a restore function.
+ */
+export function stampConsoleWithTimestamps(nowMs?: number): () => void {
+  const c = console as unknown as Record<string, unknown> & { __akStamped?: boolean };
+  if (c.__akStamped) return () => {};
+  c.__akStamped = true;
+  const levels = ["log", "warn", "error"] as const;
+  const originals = levels.map((l) => c[l] as (...a: unknown[]) => void);
+  levels.forEach((level, i) => {
+    c[level] = (...args: unknown[]) => originals[i].call(console, new Date(nowMs ?? Date.now()).toISOString(), ...args);
+  });
+  return () => {
+    levels.forEach((level, i) => { c[level] = originals[i]; });
+    c.__akStamped = false;
+  };
+}
 
 // --- download + install ----------------------------------------------------------------------
 
