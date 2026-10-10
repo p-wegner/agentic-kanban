@@ -5,8 +5,8 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
 
 ## 2026-10-10 (night) — tailnet rounds 3-4: newcomer install works, no frictions left
 
-**State.** `stable-20261010-5` (856dc521f) is live; a promote of `rc/20261010-6` (11dc8da40,
-adds #1356-#1362) is sweeping. Board: only **#1337 (DECISION for Peter: plain LAN with Tailscale
+**State.** `stable-20261010-6` (11dc8da40) is live (promoted after a green sweep of `rc/20261010-6`,
+adds #1356-#1362). Board: only **#1337 (DECISION for Peter: plain LAN with Tailscale
 fallback)** is open on this project. #1329 (tailnet lab) closed with the evidence list.
 
 - **Round 3 (fresh worker `desktop-r3`)** found: fleet doc unreachable from a worker machine and
@@ -22,10 +22,15 @@ fallback)** is open on this project. #1329 (tailnet lab) closed with the evidenc
 - **Worktree race:** no recurrence since `stable-20261010-5` (creates during merge trains clean).
   If it recurs, grep `[worktree-admin]` around the failing create.
 
-**Next:** finish the promote; read the resent install report (file anything PowerShell-specific);
-measure #1356; scrub against confidential-terms, then push master. Peter: decide #1337, and add
-the stable fleet firewall rules (`scripts/fleet-firewall.ps1 -Install`, elevated) before a worker
-targets the stable board.
+- **After the promote (`stable-20261010-6` live):** #1356 measured on a probe create:
+  `resolve-prompt-skill` 4.5 s (was 12-81 s), create 8.7 s; the rest is plugin skill listings
+  (29 skills, 4.4 s), noted on #1356. #1364 (direct): the printed bootstrap failed in Windows
+  PowerShell 5.1 (`curl` = Invoke-WebRequest); steps now name `curl.exe`, checked live (exit 0).
+  Master scrubbed (26 terms, CLEAN) and pushed.
+
+**Next:** if the desktop resends its round-4 install report, file anything beyond #1364. Peter:
+decide #1337, and add the stable fleet firewall rules (`scripts/fleet-firewall.ps1 -Install`,
+elevated) before a worker targets the stable board.
 
 ## 2026-10-10 (evening) — tailnet round 2: self-update hardened, worktree race instrumented
 
