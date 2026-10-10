@@ -134,7 +134,7 @@ export function createWorkspaceSessionService(deps: {
       });
       await provision.writeWorktreeTicketContext(
         ws0.workingDir,
-        { issueNumber: issue.issueNumber, title: issue.title, description: issue.description, projectId: issue.projectId },
+        { id: ws0.issueId, issueNumber: issue.issueNumber, title: issue.title, description: issue.description, projectId: issue.projectId },
         null,
       );
     } catch (err) {

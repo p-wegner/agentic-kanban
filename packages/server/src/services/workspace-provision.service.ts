@@ -26,6 +26,7 @@ import type { ProviderName } from "./agent-provider.js";
 import { runSetupScript } from "./setup-script.js";
 import type { SetupScriptContainer } from "@agentic-kanban/shared/lib/setup-script";
 import { getPreference } from "../repositories/preferences.repository.js";
+import { listCommentsSinceLastMerge } from "../repositories/issue-reopen.repository.js";
 import { resolveRiskPosture, riskPosturePref, type RiskPosture } from "@agentic-kanban/shared/lib/risk-posture";
 import { provisionContainerForWorkspace, resolveDevcontainerProvisionOptions } from "./devcontainer-workspace.service.js";
 import {
@@ -745,7 +746,7 @@ export function createWorkspaceProvisionService(deps: {
    */
   async function writeWorktreeTicketContext(
     worktreePath: string,
-    issue: { issueNumber: number | null; title: string; description: string | null; projectId: string },
+    issue: { id?: string; issueNumber: number | null; title: string; description: string | null; projectId: string },
     contextPrimer: string | null,
     additionalRepos?: Array<{ name: string | null; worktreePath: string }>,
     serviceStack?: {
@@ -778,10 +779,20 @@ export function createWorkspaceProvisionService(deps: {
       console.warn(`[workspaces] board-feedback routing failed (non-fatal): ${errorMessage(err)}`);
     }
     const riskPosture = await readRiskPosture(issue.projectId, database);
+    // #1343: comments added since the issue last merged are the reopen reason. Best-effort.
+    let reopenComments: Awaited<ReturnType<typeof listCommentsSinceLastMerge>> = [];
+    if (issue.id) {
+      try {
+        reopenComments = await listCommentsSinceLastMerge(issue.id, database);
+      } catch (err) {
+        console.warn(`[workspaces] reopen-comments read failed (non-fatal): ${errorMessage(err)}`);
+      }
+    }
     return writeTicketContextFile(worktreePath, {
       issueNumber: issue.issueNumber,
       title: issue.title,
       description: issue.description,
+      reopenComments,
       contextPrimer,
       stackProfile,
       verifyCommandOverride,

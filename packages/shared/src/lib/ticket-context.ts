@@ -8,6 +8,11 @@ export type TicketContext = {
   issueNumber?: number | null;
   title: string;
   description?: string | null;
+  /**
+   * Comments added after the issue last merged (#1343): the reason it was reopened.
+   * Rendered right after the description, labelled as what this attempt must address.
+   */
+  reopenComments?: Array<{ author: string; body: string; createdAt: string }> | null;
   /** Optional context primer from the context-packer service. Appended after the description. */
   contextPrimer?: string | null;
   /**
@@ -600,6 +605,21 @@ export function buildTicketContextMarkdown(ctx: TicketContext): string {
     ctx.description?.trim() ? ctx.description.trim() : "_(No description provided.)_",
     "",
   ];
+  const reopen = ctx.reopenComments?.filter((c) => c.body.trim()) ?? [];
+  if (reopen.length > 0) {
+    lines.push(
+      "## REOPENED — address this first",
+      "",
+      "This ticket already MERGED once and was then reopened. Your earlier-landed fix did not",
+      "resolve it: the comments below, added after that merge, are the reason. Treat them as new",
+      "requirements — do not conclude \"already fixed\" from the earlier commit; investigate the",
+      "evidence and the suspects named here.",
+      "",
+    );
+    for (const c of reopen) {
+      lines.push(`### ${c.author} · ${c.createdAt}`, "", c.body.trim(), "");
+    }
+  }
   if (group.length > 0) {
     lines.push(
       "## Ticket group — the other tickets in this workspace",
