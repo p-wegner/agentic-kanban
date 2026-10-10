@@ -73,10 +73,24 @@ export function checkGlobalLauncher(opts: {
  * build: `worker start` delegates to it by default, so the machine is healthy — the operator
  * just ought to know which build actually runs.
  */
-export function checkWorkerBuild(stateFile: string, runningEntry: string | null): DoctorCheck {
+export function checkWorkerBuild(
+  stateFile: string,
+  runningEntry: string | null,
+  runningVersion?: string | null,
+): DoctorCheck {
   const name = "worker build";
   const cmp = compareBuilds(stateFile, runningEntry);
   const running = runningEntry ?? "unknown";
+  // #1359: a differing PATH is not a differing BUILD — the global launcher and the versions-dir
+  // copy are the same commit. Compare build ids; only a real mismatch warns.
+  const runningBuild = parseBuildId(runningVersion === undefined ? readEntryVersion(runningEntry) : runningVersion);
+  if (cmp.current?.installed && cmp.differs && runningBuild && sameBuild(runningBuild, cmp.current.buildId)) {
+    return {
+      name,
+      status: "pass",
+      detail: `this install ${running} IS build ${cmp.current.buildId}; the daemon runs from the versions dir (${cmp.current.entry})`,
+    };
+  }
   if (!cmp.current) {
     return { name, status: "pass", detail: `this install (${running}); no self-update has happened (no versions/current.json)` };
   }

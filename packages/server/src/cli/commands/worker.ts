@@ -783,6 +783,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
     )
     .option("--board <url>", "Board base URL — the FLEET port on a cross-machine setup", DEFAULT_BOARD_URL)
     .option("--providers <csv>", "Provider CLIs to check on this machine", "claude")
+    .option("--profiles <csv>", "Profiles this worker runs with (same as `worker start --profiles`); only these are warned about")
     .option("--git-port <n>", "KANBAN_GIT_HTTP_PORT, to check the git transport too", (v) => parseInt(v, 10))
     .option("--state-file <path>", `Pairing state file, relative to the directory you run the command in (default: ${defaultWorkerStateFile()})`, cliPathArg)
     .option("--work-root <path>", "Worker work root (same as `worker start`), relative to the directory you run the command in (default: ~/.agentic-kanban/worker)", cliPathArg)
@@ -790,6 +791,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
     .action(async (options: {
       board: string;
       providers: string;
+      profiles?: string;
       gitPort?: number;
       stateFile?: string;
       workRoot?: string;
@@ -801,6 +803,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         workRoot: options.workRoot ?? defaultWorkerWorkRoot(),
         runningEntry: resolveWorkerEntry(),
         providers: splitList(options.providers) ?? ["claude"],
+        ...(options.profiles ? { profiles: splitList(options.profiles) ?? [] } : {}),
         ...(options.gitPort === undefined || Number.isNaN(options.gitPort) ? {} : { gitPort: options.gitPort }),
       });
       console.log(options.json ? JSON.stringify(report, null, 2) : renderDoctorReport(report));

@@ -548,6 +548,8 @@ export interface WorkerDoctorOptions {
   boardUrl: string;
   stateFile: string;
   providers: string[];
+  /** The worker's `--profiles` list; only these are warned about when their credentials lapse. */
+  profiles?: string[];
   gitPort?: number;
   home?: string;
   timeoutMs?: number;
@@ -562,16 +564,39 @@ export interface WorkerDoctorOptions {
  * profile is attested to the board as not runnable, so it silently receives no work — WARN
  * (not fail): the machine is healthy, the operator just has a login to renew.
  */
-export function checkProfileCredentials(home?: string, nowMs: number = Date.now()): DoctorCheck[] {
+export function checkProfileCredentials(
+  home?: string,
+  nowMs: number = Date.now(),
+  /** `--profiles` the worker runs with; profiles outside it get no placements, so no WARN (#1359). */
+  declared: string[] = [],
+  platform: NodeJS.Platform = process.platform,
+): DoctorCheck[] {
   const checks: DoctorCheck[] = [];
+  const used = new Set(declared.map((d) => d.trim()).filter(Boolean));
+  const unused: string[] = [];
   for (const ref of quotaPollableProfiles(discoverLocalProfiles(home))) {
     const state = credentialStateOf(ref.configDir, nowMs);
     if (!state) continue;
+    if (!used.has(ref.profile)) {
+      unused.push(`${ref.profile} (${state})`);
+      continue;
+    }
     checks.push({
       name: `profile ${ref.profile}`,
       status: "warn",
       detail: `credentials ${state} - attested as not runnable, no work is placed on it (${ref.configDir})`,
-      remedy: `log in again: CLAUDE_CONFIG_DIR="${ref.configDir}" claude /login`,
+      remedy: `log in again: ${
+        platform === "win32"
+          ? `$env:CLAUDE_CONFIG_DIR='${ref.configDir}'; claude /login`
+          : `CLAUDE_CONFIG_DIR="${ref.configDir}" claude /login`
+      }`,
+    });
+  }
+  if (unused.length > 0) {
+    checks.push({
+      name: "other profiles",
+      status: "pass",
+      detail: `${unused.length} local profile(s) with missing/expired credentials, not used for placements by this worker: ${unused.join(", ")} (pass --profiles to include)`,
     });
   }
   return checks;
@@ -594,7 +619,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   for (const provider of opts.providers) {
     checks.push(...(await checkProvider(provider, opts.home)));
   }
-  checks.push(...checkProfileCredentials(opts.home));
+  checks.push(...checkProfileCredentials(opts.home, undefined, opts.profiles));
   return { side: "worker", boardUrl, checks, ok: checks.every((c) => c.status !== "fail") };
 }
 

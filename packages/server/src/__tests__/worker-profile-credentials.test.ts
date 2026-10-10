@@ -79,10 +79,25 @@ describe("credential state attestation (#1331)", () => {
     expect(onlyExpired.selection).toBeNull();
   });
 
-  it("worker doctor WARNs once per unrunnable profile", () => {
-    const checks = checkProfileCredentials(home, NOW);
+  it("worker doctor WARNs once per unrunnable profile the worker uses", () => {
+    const checks = checkProfileCredentials(home, NOW, ["old", "live"], "linux");
     const old = checks.find((c) => c.name === "profile old");
     expect(old?.status).toBe("warn");
+    expect(old?.remedy).toContain('CLAUDE_CONFIG_DIR="');
     expect(checks.some((c) => c.name === "profile live")).toBe(false);
+  });
+
+  it("prints the PowerShell remedy on Windows (#1359)", () => {
+    const old = checkProfileCredentials(home, NOW, ["old"], "win32").find((c) => c.name === "profile old");
+    expect(old?.remedy).toContain("$env:CLAUDE_CONFIG_DIR='");
+    expect(old?.remedy).toContain("; claude /login");
+  });
+
+  it("does not WARN for profiles the worker never uses; lists them once at INFO (#1359)", () => {
+    const checks = checkProfileCredentials(home, NOW, []);
+    expect(checks.some((c) => c.status === "warn")).toBe(false);
+    const other = checks.filter((c) => c.name === "other profiles");
+    expect(other).toHaveLength(1);
+    expect(other[0]?.detail).toContain("old (expired)");
   });
 });
