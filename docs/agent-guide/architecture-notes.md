@@ -114,3 +114,7 @@ A red train gets ONE fix agent before any control arm or bisect. Per project, th
 ### In-flight workspace recovery
 Don't resume many stale workspaces at once — one, then at most two more once healthy. A transcript showing ~1 s with zero tokens = launch-failed/stale; stop it and rebuild the branch.
 
+
+## Board restart and worker close frames (#1354)
+
+A signalled shutdown (SIGTERM/SIGINT, `process-handlers.ts`) first sends every worker socket a 1001 `board restarting` close frame (`closeAllWorkerSockets`); the worker logs `board restarting, reconnecting` and retries after the short minimum delay. On Windows, `process.kill(pid, 'SIGTERM')` (what `tsx watch` uses for a dev-board hot-reload) is an unconditional TerminateProcess: no handler runs, so no close frame is sent and workers still see `1006 no close frame`. Only a signalled shutdown (Ctrl+C, POSIX SIGTERM, the board's own restart path) sends 1001; no pre-restart hook is possible for the watcher-driven kill.

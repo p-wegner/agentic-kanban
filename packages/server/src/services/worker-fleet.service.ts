@@ -82,6 +82,16 @@ export interface WorkerFleet {
 
 const fleetByDb = new WeakMap<object, WorkerFleet>();
 
+/**
+ * Tell every connected worker the board is going away (#1354): a 1001 close frame, so the
+ * worker logs a clean "board restarting" instead of `1006 no close frame`. A no-op (and no
+ * fleet construction) when this process never built a fleet for the database.
+ */
+export function closeAllWorkerSockets(database: Database = realDb, reason = "board restarting"): number {
+  const fleet = fleetByDb.get(database as object);
+  return fleet ? fleet.connections.closeAll(1001, reason) : 0;
+}
+
 export function getWorkerFleet(database: Database = realDb): WorkerFleet {
   let fleet = fleetByDb.get(database as object);
   if (!fleet) {

@@ -4,6 +4,7 @@ import { createBackup } from "../db/backup.js";
 import { isTransientNetworkError } from "../lib/transient-errors.js";
 import { activeMerges } from "../services/workspace-internals.js";
 import { stopMcpHttpBridge } from "../services/mcp-http-bridge.service.js";
+import { closeAllWorkerSockets } from "../services/worker-fleet.service.js";
 import { stopGitHttpServer } from "../services/git-http.service.js";
 import { stopAllPluginViewsAsync } from "../services/plugin.service.js";
 import { appendExitRecord, recordProcessStart } from "../lib/exit-record.js";
@@ -102,6 +103,15 @@ export function setupProcessHandlers(
     // worth diagnosing — a shutdown that never completed.
     appendExitRecord({ kind: "signal", signal });
     opts.cleanupStartupTimers?.();
+    // #1354: first thing, before slow work — a 1001 close frame to every worker so it logs a clean
+    // "board restarting" rather than `no close frame`. Synchronous and bounded: close() only queues
+    // the frame, it never waits on a peer.
+    try {
+      const closed = closeAllWorkerSockets();
+      if (closed > 0) console.log(`[shutdown] sent 1001 board restarting to ${closed} worker socket(s)`);
+    } catch (err) {
+      console.warn("[shutdown] closing worker sockets failed:", errorMessage(err));
+    }
     // Agent processes are spawned detached+unref'd — they survive hot-reload without being killed.
     // Only kill them on explicit SIGINT (user Ctrl+C) to avoid orphaning on intentional shutdown.
     const activeCount = signal === "SIGINT" ? agentServiceModule.killAll() : 0;

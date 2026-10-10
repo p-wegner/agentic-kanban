@@ -120,4 +120,15 @@ describe("worker daemon disconnect log", () => {
     expect(line).toContain("transport failed, no close frame");
     expect(line).not.toContain("closed by board");
   }, 30000);
+
+  it("treats 1001 as an expected board restart: one plain line, prompt reconnect (#1354)", async () => {
+    await vi.waitFor(() => expect(logs.filter((l) => l.includes("connected to")).length).toBeGreaterThanOrEqual(3), { timeout: 15000 });
+    const before = accepted.length;
+    const third = accepted[before - 1];
+    third.close(1001, "board restarting");
+
+    await vi.waitFor(() => expect(logs).toContain("[worker] board restarting, reconnecting"), { timeout: 15000 });
+    await vi.waitFor(() => expect(accepted.length).toBeGreaterThan(before), { timeout: 15000 });
+    expect(logs.some((l) => l.includes("code 1001"))).toBe(false);
+  }, 30000);
 });
