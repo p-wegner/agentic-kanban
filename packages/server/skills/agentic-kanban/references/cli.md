@@ -205,6 +205,7 @@ Fleet worker: connect this machine to a board and execute assigned agent session
 |---|---|
 | `worker revoke <worker>` | Revoke (retire) a registered worker by id or name |
 | `worker pair` | Mint a short-lived, single-use pairing token on the board (run this WHERE THE BOARD RUNS; |
+| `worker setup` | Print the first-install guide for a worker machine (works offline, ships in the package) |
 | `worker start` | Run the worker daemon: register with the board (first run needs --token from 'worker pair'), |
 | `worker instructions` | Print a step-by-step runbook for connecting THIS machine to a remote board as a worker |
 | `worker list` | List the board's registered workers with their effective status |
