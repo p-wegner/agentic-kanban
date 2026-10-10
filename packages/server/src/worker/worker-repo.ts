@@ -18,6 +18,14 @@ import { TICKET_CONTEXT_FILENAME } from "@agentic-kanban/shared/lib/ticket-conte
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
+import { withWorktreeAdminLock, WORKTREE_PRUNE_MIN_AGE } from "@agentic-kanban/shared/lib/git-service";
+
+/** Age-bounded prune of a cached clone, under the worktree admin lock (#1353). */
+const pruneCacheWorktrees = (cacheDir: string) =>
+  withWorktreeAdminLock(cacheDir, () => gitExec(["worktree", "prune", `--expire=${WORKTREE_PRUNE_MIN_AGE}`], { cwd: cacheDir }));
+/** `git worktree remove --force` of one checkout, under the worktree admin lock (#1353). */
+const removeCacheWorktree = (cacheDir: string, dir: string) =>
+  withWorktreeAdminLock(cacheDir, () => gitExec(["worktree", "remove", "--force", dir], { cwd: cacheDir }));
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import {
   isBareFileName,
@@ -144,7 +152,7 @@ export async function provisionWorkerCheckout(
 
   // Stale worktree from a crashed prior session with the same id Ã¢â‚¬â€ remove it.
   if (existsSync(checkoutDir)) {
-    await gitExec(["worktree", "remove", "--force", checkoutDir], { cwd: cacheDir });
+    await removeCacheWorktree(cacheDir, checkoutDir);
   }
   // A prior session for the SAME branch holds the branch name; a branch can be
   // checked out in at most one worktree, so reuse-or-recreate via a session-
@@ -158,7 +166,8 @@ export async function provisionWorkerCheckout(
     ? `refs/remotes/origin/${repo.branch}`
     : `refs/remotes/origin/${repo.baseBranch}`;
   await phase("worktree add", () =>
-    gitExecOrThrow(["worktree", "add", "-b", localBranch, checkoutDir, startPoint], { cwd: cacheDir }));
+    withWorktreeAdminLock(cacheDir, () =>
+      gitExecOrThrow(["worktree", "add", "-b", localBranch, checkoutDir, startPoint], { cwd: cacheDir })));
 
   // #553: through the shared writer, not a raw writeFileSync. The hand-rolled version
   // had no `isSafeSkillName` guard and emitted no frontmatter, so a remote worker's
@@ -418,7 +427,7 @@ export async function pushWorkerHead(
  * removed afterwards Ã¢â‚¬â€ one leaked shell per session otherwise, reaped only at next boot.
  */
 export async function cleanupWorkerCheckout(checkout: WorkerCheckout): Promise<void> {
-  await gitExec(["worktree", "remove", "--force", checkout.cwd], { cwd: checkout.cacheDir });
+  await removeCacheWorktree(checkout.cacheDir, checkout.cwd);
   try {
     rmSync(checkout.cwd, { recursive: true, force: true });
   } catch (err) {
@@ -426,7 +435,7 @@ export async function cleanupWorkerCheckout(checkout: WorkerCheckout): Promise<v
   }
   // #1322: the checkout dir is named for the session id; drop its `kanban/<sessionId>` branch
   // (git refuses while the worktree is registered, hence after the remove + prune).
-  await gitExec(["worktree", "prune"], { cwd: checkout.cacheDir });
+  await pruneCacheWorktrees(checkout.cacheDir);
   await gitExec(["branch", "-D", `kanban/${basename(checkout.cwd)}`], { cwd: checkout.cacheDir });
 }
 
@@ -444,7 +453,7 @@ async function sweepUnheldSessionBranches(
   if (!execSucceeded(listed)) return;
   const branches = listed.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
   if (branches.length === 0) return;
-  await gitExec(["worktree", "prune"], { cwd: cacheDir });
+  await pruneCacheWorktrees(cacheDir);
   const wt = await gitExec(["worktree", "list", "--porcelain"], { cwd: cacheDir });
   if (!execSucceeded(wt)) return;
   const held = new Set(
@@ -496,9 +505,9 @@ async function reapRegisteredCheckout(
     for (const cacheDir of cacheDirs) {
       const listed = await gitExec(["worktree", "list", "--porcelain"], { cwd: cacheDir });
       if (!execSucceeded(listed) || !listed.stdout.split("\n").some((l) => l.startsWith("worktree ") && resolve(l.slice(9).trim()) === resolve(dir))) continue;
-      await gitExec(["worktree", "remove", "--force", dir], { cwd: cacheDir });
+      await removeCacheWorktree(cacheDir, dir);
       await gitExec(["branch", "-D", `kanban/${sessionId}`], { cwd: cacheDir });
-      await gitExec(["worktree", "prune"], { cwd: cacheDir });
+      await pruneCacheWorktrees(cacheDir);
     }
     rmSync(dir, { recursive: true, force: true });
     report.reaped.push(dir);

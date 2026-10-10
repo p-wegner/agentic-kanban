@@ -49,7 +49,7 @@ describe("git service removeWorktree cleanup fallback", () => {
     expect(existsSync(worktreePath)).toBe(false);
     expect(execFileMock).toHaveBeenCalledTimes(2);
     expect(execFileMock.mock.calls[0][1]).toEqual(["worktree", "remove", "--force", worktreePath]);
-    expect(execFileMock.mock.calls[1][1]).toEqual(["worktree", "prune"]);
+    expect(execFileMock.mock.calls[1][1]).toEqual(["worktree", "prune", expect.stringMatching(/^--expire=/)]);
   });
 
   it("does not recursively remove paths outside the managed worktrees directory", async () => {
@@ -176,7 +176,7 @@ describe("git service removeWorktree cleanup fallback", () => {
     expect(existsSync(worktreePath)).toBe(false);
     expect(execFileMock).toHaveBeenCalledTimes(5);
     expect(execFileMock.mock.calls[0][1]).toEqual(["worktree", "remove", "--force", worktreePath]);
-    expect(execFileMock.mock.calls[1][1]).toEqual(["worktree", "prune"]);
+    expect(execFileMock.mock.calls[1][1]).toEqual(["worktree", "prune", expect.stringMatching(/^--expire=/)]);
     expect(execFileMock.mock.calls[2][1]).toEqual(["branch", "-d", "feature/ak-1-test"]);
     // the generic prune is age-bounded (#1342): it never unregisters a mid-provision sibling
     expect(execFileMock.mock.calls[3][1]).toEqual(["worktree", "prune", expect.stringMatching(/^--expire=/)]);

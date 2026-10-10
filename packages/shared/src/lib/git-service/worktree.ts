@@ -373,14 +373,15 @@ async function createWorktreeLocked(
   }
 
   try {
-    await execGit(["worktree", "add", worktreePath, branch], repoPath);
+    await worktreeAdminGit("add", [worktreePath, branch], repoPath, worktreePath);
   } catch (err) {
     // A recent dead registration of this very path/branch (the bounded prune above kept it)
-    // blocks the add; only then drop dangling registrations unconditionally and retry once.
+    // blocks the add. Override it with `--force` for THIS path only (#1353) — never an
+    // unbounded prune, which would also unregister a sibling workspace mid-provision.
     if (!/already registered|already checked out|already used by worktree|is a missing/i.test(String(err))) throw err;
-    await worktreeAdminGit("prune", [], repoPath).catch(() => undefined);
-    await execGit(["worktree", "add", worktreePath, branch], repoPath);
+    await worktreeAdminGit("add", ["--force", worktreePath, branch], repoPath, worktreePath);
   }
+  watchWorktreeGitFile(worktreePath);
 
   // Verify worktree is on the correct branch (not detached HEAD)
   await ensureOnBranch(worktreePath, branch);
@@ -409,14 +410,14 @@ async function removeWorktreeLocked(
     await worktreeAdminGit("remove", ["--force", worktreePath], repoPath, worktreePath);
   } catch (err) {
     if (await removeLeftoverWorktreeDirectory(repoPath, worktreePath)) {
-      await worktreeAdminGit("prune", [], repoPath).catch(() => undefined);
+      await worktreeAdminGit("prune", [`--expire=${WORKTREE_PRUNE_MIN_AGE}`], repoPath).catch(() => undefined);
       return;
     }
     throw err;
   }
 
   if (await removeLeftoverWorktreeDirectory(repoPath, worktreePath)) {
-    await worktreeAdminGit("prune", [], repoPath).catch(() => undefined);
+    await worktreeAdminGit("prune", [`--expire=${WORKTREE_PRUNE_MIN_AGE}`], repoPath).catch(() => undefined);
   }
 }
 
