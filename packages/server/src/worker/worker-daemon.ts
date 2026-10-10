@@ -56,6 +56,7 @@ import type { NpmRunner } from "./worker-updater.js";
 
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const RECONNECT_MIN_MS = 1000;
+const CONNECT_TIMEOUT_MS = 6000;
 const RECONNECT_MAX_MS = 30 * 1000;
 /** Bounded queue of undeliverable-but-critical messages (exit/assign_failed). */
 const PENDING_QUEUE_CAP = 200;
@@ -638,8 +639,9 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       return;
     }
     const wsUrl = `${boardUrl.replace(/^http/, "ws")}/ws/workers/${identity.workerId}`;
+    // #1335: handshakeTimeout fails a dead connect in seconds so backoff, not the OS ETIMEDOUT (~22s), sets the pace.
     const socket = new WebSocket(wsUrl, {
-      headers: { authorization: `Bearer ${identity.workerToken}` },
+      headers: { authorization: `Bearer ${identity.workerToken}` }, handshakeTimeout: CONNECT_TIMEOUT_MS,
     });
     ws = socket;
     let openedAt: number | null = null;
