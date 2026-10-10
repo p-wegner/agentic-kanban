@@ -17,7 +17,22 @@ import { ensureOnBranch } from "./branch-attach.js";
  * did exactly that to workspaces B and C being provisioned at the same moment. Serializing
  * the three operations per repo closes the window for every in-process caller.
  */
-const worktreeAdminTails = new Map<string, Promise<unknown>>();
+// Held on globalThis (#1342): a second copy of this module (a bundled build plus a deep-path
+// import, a vitest module reset) would otherwise get its own Map, i.e. its own lock, and the
+// two copies would run add and prune concurrently exactly as if no lock existed.
+const WORKTREE_ADMIN_TAILS_KEY = Symbol.for("agentic-kanban.worktreeAdminTails");
+const worktreeAdminTails: Map<string, Promise<unknown>> = ((globalThis as Record<symbol, unknown>)[WORKTREE_ADMIN_TAILS_KEY] ??=
+  new Map<string, Promise<unknown>>()) as Map<string, Promise<unknown>>;
+
+/**
+ * A worktree registration younger than this is never pruned by the generic `pruneWorktrees`
+ * (#1342). The lock above only serializes callers in THIS process; a registration still being
+ * provisioned (its `.git` file / checkout not yet written, the DB row not yet committed) looks
+ * exactly like a dead one to `git worktree prune`, so the age bound is the second, lock-independent
+ * line of defence. Git compares it against the mtime of `.git/worktrees/<name>/gitdir`, which
+ * `worktree add` writes first.
+ */
+export const WORKTREE_PRUNE_MIN_AGE = "10.minutes.ago";
 
 export async function withWorktreeAdminLock<T>(repoPath: string, work: () => Promise<T>): Promise<T> {
   const key = resolve(repoPath).toLowerCase();
@@ -206,7 +221,10 @@ async function createWorktreeLocked(
 
   // Prune stale worktree references (directories deleted but git still tracks them).
   // This is critical on Windows where locked directories can survive removal.
-  try { await execGit(["worktree", "prune"], repoPath); } catch { /* best effort */ }
+  // Age-bounded (#1342): a sibling workspace's registration younger than the bound may still
+  // be mid-provision (no `.git` file yet) and must survive this create. A genuinely dead
+  // registration that blocks the add below is cleared by the retry there.
+  try { await execGit(["worktree", "prune", `--expire=${WORKTREE_PRUNE_MIN_AGE}`], repoPath); } catch { /* best effort */ }
 
   // Check if a worktree for this branch already exists — reuse if healthy
   const existing = await listWorktrees(repoPath);
@@ -347,10 +365,15 @@ async function createWorktreeLocked(
     }
   }
 
-  await execGit(
-    ["worktree", "add", worktreePath, branch],
-    repoPath,
-  );
+  try {
+    await execGit(["worktree", "add", worktreePath, branch], repoPath);
+  } catch (err) {
+    // A recent dead registration of this very path/branch (the bounded prune above kept it)
+    // blocks the add; only then drop dangling registrations unconditionally and retry once.
+    if (!/already registered|already checked out|already used by worktree|is a missing/i.test(String(err))) throw err;
+    await execGit(["worktree", "prune"], repoPath).catch(() => undefined);
+    await execGit(["worktree", "add", worktreePath, branch], repoPath);
+  }
 
   // Verify worktree is on the correct branch (not detached HEAD)
   await ensureOnBranch(worktreePath, branch);
@@ -390,9 +413,19 @@ async function removeWorktreeLocked(
   }
 }
 
-/** Prune stale worktree references (worktrees whose directories no longer exist). */
+/**
+ * Prune stale worktree references (worktrees whose directories no longer exist).
+ *
+ * Age-bounded (#1342): registrations younger than {@link WORKTREE_PRUNE_MIN_AGE} are kept, so a
+ * post-merge cleanup (branch-delete fallback, cleanup service) can never unregister a worktree
+ * that another workspace is provisioning right now. Explicit removals go through
+ * `removeWorktree`, which unregisters its own path and does not rely on this.
+ */
 export async function pruneWorktrees(repoPath: string): Promise<void> {
-  await withWorktreeAdminLock(repoPath, () => execGit(["worktree", "prune"], repoPath).then(() => undefined));
+  await withWorktreeAdminLock(
+    repoPath,
+    () => execGit(["worktree", "prune", `--expire=${WORKTREE_PRUNE_MIN_AGE}`], repoPath).then(() => undefined),
+  );
 }
 
 /**
