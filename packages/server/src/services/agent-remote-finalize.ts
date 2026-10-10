@@ -1,0 +1,81 @@
+// Two leaves of the remote agent service's give-up/exit paths (#1345): landing a
+// session's pushed branch (`landSessionBranch`) and stopping sessions a worker reports
+// that this process does not track (`stopUntrackedSessions`).
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import type { Database } from "../db/index.js";
+import { getSessionLiveness } from "../repositories/worker.repository.js";
+import { syncIncomingBranch, clearIncomingRef } from "./worker-remote-sync.service.js";
+import type { WorkerConnectionManager } from "./worker-connection.service.js";
+import type { RemoteSession } from "./agent-remote.types.js";
+
+/**
+ * Land whatever the worker pushed onto the real branch (#743 `syncIncomingBranch`) and
+ * return the exit code to record. A sync failure downgrades the code, so a session whose
+ * work did not land is never recorded as a clean success.
+ */
+export async function landSessionBranch(
+  sessionId: string,
+  session: RemoteSession,
+  reportedExitCode: number | null,
+): Promise<number | null> {
+  let exitCode = reportedExitCode;
+  if (!session.repo) return exitCode;
+  try {
+    const result = await syncIncomingBranch(session.repo.repoPath, session.repo.branch);
+    if (result.ok) {
+      console.log(`[agent-remote] synced ${session.repo.branch} (${result.status}) for session ${sessionId}`);
+      await clearIncomingRef(session.repo.repoPath, session.repo.branch).catch(() => {});
+    } else if (result.status === "missing" && exitCode !== 0) {
+      // The agent failed before producing anything to push — nothing to sync.
+      console.warn(`[agent-remote] no incoming ref for failed session ${sessionId}; nothing to sync`);
+    } else {
+      session.onOutput({
+        type: "stderr",
+        sessionId,
+        data: `Worker result could not be landed on ${session.repo.branch}: ${result.error}`,
+      });
+      exitCode = exitCode === 0 || exitCode === null ? 1 : exitCode;
+    }
+  } catch (err) {
+    session.onOutput({ type: "stderr", sessionId, data: `Branch sync failed: ${errorMessage(err)}` });
+    exitCode = exitCode === 0 || exitCode === null ? 1 : exitCode;
+  }
+  return exitCode;
+}
+
+/** A hello listed sessions this process has no memory of: ask the DB, then stop only the genuine orphans. */
+export async function stopUntrackedSessions(deps: {
+  manager: WorkerConnectionManager;
+  database: Database;
+  workerId: string;
+  sessionIds: string[];
+}): Promise<void> {
+  const { manager, database, workerId, sessionIds } = deps;
+  for (const sessionId of sessionIds) {
+    let live: { status: string; workerId: string | null } | null = null;
+    try {
+      live = await getSessionLiveness(sessionId, database);
+    } catch (err) {
+      // Fail SAFE: if we cannot tell, do not kill. A stray agent is cheaper
+      // than destroying work we were unable to ask about.
+      console.error(
+        `[agent-remote] could not check session ${sessionId} reported by worker ${workerId}; leaving it running`,
+        err,
+      );
+      continue;
+    }
+    if (live && live.status === "running" && live.workerId === workerId) {
+      console.warn(
+        `[agent-remote] worker ${workerId} reports session ${sessionId}, which this process does not track ` +
+          `but the DB still has running on that worker — leaving it alone. Its output is not being streamed; ` +
+          `its result will land from the incoming ref on the next startup sweep.`,
+      );
+      continue;
+    }
+    const why = !live ? "no session row" : `row is ${live.status}` + (live.workerId === workerId ? "" : " on another worker");
+    console.warn(
+      `[agent-remote] worker ${workerId} reports unknown session ${sessionId} (${why}); stopping the orphan`,
+    );
+    manager.send(workerId, { type: "stop", sessionId });
+  }
+}

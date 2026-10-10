@@ -371,7 +371,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // are present after the rebase, so the number is the sum of the two additions, re-measured.
   "cli/commands/workspace.ts::registerWorkspaceCommand": 616,
   // 637 -> 638 (#1027), disclosed in the ninth movement above.
-  "services/agent-remote.service.ts::createRemoteAgentService": 632,
+  "services/agent-remote.service.ts::createRemoteAgentService": 289,
   "cli/commands/session.ts::registerSessionCommand": 569,
   // 564 -> 536 (#992): the PATCH field `if` chain became the table in
   // `services/project-update-fields.ts`, which is also what derives the recognized-key set.
