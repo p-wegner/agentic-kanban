@@ -46,7 +46,7 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { createRemoteSessionEventRecorder, type BoardEndedReason } from "./agent-remote-events.js";
 import { createRemoteLiveness } from "./agent-remote-liveness.js";
 import { buildRemoteAssignSpec, dispatchGitTransportAssignment } from "./agent-remote-launch.js";
-import { createRemoteRepoOps, REPO_OP_TIMEOUT_MS } from "./agent-remote-repo-ops.js";
+import { createRemoteRepoService, REPO_OP_TIMEOUT_MS } from "./agent-remote-repo-ops.js";
 import { installRemoteSessionHold } from "./agent-remote-hold.js";
 import { landSessionBranch, stopUntrackedSessions } from "./agent-remote-finalize.js";
 import { getFleetMcpBridge } from "./fleet-mcp-bridge.service.js";
@@ -98,7 +98,7 @@ export function createRemoteAgentService(
   // #769: the board-tool bridge for remote builders. Shared per database with the fleet
   // listener that serves it, so the token this path mints is the one that listener resolves.
   const fleetMcp = getFleetMcpBridge(database);
-  const repoOps = createRemoteRepoOps({ manager, database, sessions });
+  const repoOps = createRemoteRepoService({ manager, database, sessions });
   // #801 — the assignment's opening and closing rows. A separate module: see its header.
   const { noteAssigned, noteSessionExit, noteUndeliveredResult } = createRemoteSessionEventRecorder(database);
 

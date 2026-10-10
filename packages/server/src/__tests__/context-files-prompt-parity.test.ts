@@ -48,12 +48,16 @@ describe("resolveEffectivePrompt (#524)", () => {
   });
 });
 
+// #1345 moved the remote launch-config build out of agent-remote.service.ts into
+// agent-remote-launch.ts, so that is the remote file whose prompt path is checked.
+const LAUNCH_FILES = ["agent.service.ts", "agent-remote-launch.ts"];
+
 describe("host and remote apply the same prompt rule (#524)", () => {
   it("neither launch service open-codes the codex check", () => {
     // The original bug in one line: `provider === "codex" ? append(...) : prompt` lived
     // in agent.service.ts and nowhere else. If it reappears inline in either file, the
     // two paths can drift again exactly as they did.
-    for (const f of ["agent.service.ts", "agent-remote.service.ts"]) {
+    for (const f of [...LAUNCH_FILES, "agent-remote.service.ts"]) {
       const src = readFileSync(join(SERVICES, f), "utf-8");
       expect(src, `${f} re-implements the codex context-file rule inline`)
         .not.toMatch(/provider\s*===\s*"codex"\s*\r?\n?\s*\?\s*appendContextFilesToPrompt/);
@@ -63,7 +67,7 @@ describe("host and remote apply the same prompt rule (#524)", () => {
   it("BOTH services route their prompt through resolveEffectivePrompt", () => {
     // The assertion that would have caught the original defect: the remote file simply
     // never mentioned the helper.
-    for (const f of ["agent.service.ts", "agent-remote.service.ts"]) {
+    for (const f of LAUNCH_FILES) {
       const src = readFileSync(join(SERVICES, f), "utf-8");
       expect(src, `${f} does not call resolveEffectivePrompt — its prompt can lose context files`)
         .toContain("resolveEffectivePrompt(");

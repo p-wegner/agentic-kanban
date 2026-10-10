@@ -20,7 +20,8 @@ import type { RemoteSession, RemoteSessionRepo, RemoteRepoOpOutcome } from "./ag
  */
 export const REPO_OP_TIMEOUT_MS = 60 * 1000;
 
-export function createRemoteRepoOps(deps: {
+// `Service`, not `Ops`: that noun is reserved for the plugin sub-service family (#604).
+export function createRemoteRepoService(deps: {
   manager: WorkerConnectionManager;
   database: Database;
   sessions: Map<string, RemoteSession>;
