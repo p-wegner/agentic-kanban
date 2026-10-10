@@ -600,6 +600,41 @@ function describeLastSeen(lastHeartbeatAt: string | null | undefined, nowMs: num
   return { text, days };
 }
 
+interface HealthListenerState {
+  status?: string;
+  host?: string | null;
+  port?: number | null;
+  error?: string | null;
+  attempts?: number;
+  nextRetryAt?: string | null;
+}
+
+/** Turn one listener's /api/health state into a check; "disabled" or absent = no check. */
+export function listenerStateCheck(name: string, s: HealthListenerState | undefined): DoctorCheck | null {
+  if (!s || !s.status || s.status === "disabled") return null;
+  if (s.status === "bound") return ok(name, `bound on ${s.host}:${s.port}`);
+  return bad(
+    name,
+    `NOT bound — retrying (${s.attempts ?? 0} failed attempt(s)); configured ${s.host}:${s.port}; last error: ${s.error ?? "unknown"}`,
+    "The configured host is not available yet (e.g. tailscaled not up). The board retries with backoff on its own; " +
+      "check `tailscale status` and KANBAN_FLEET_HOST / KANBAN_GIT_HTTP_HOST.",
+  );
+}
+
+async function checkBoardListeners(boardUrl: string): Promise<DoctorCheck[]> {
+  try {
+    const res = await fetch(`${boardUrl}/api/health`);
+    if (!res.ok) return [];
+    const h = (await res.json()) as { fleetListener?: HealthListenerState; gitTransport?: HealthListenerState };
+    return [
+      listenerStateCheck("fleet listener", h.fleetListener),
+      listenerStateCheck("git transport listener", h.gitTransport),
+    ].filter((c): c is DoctorCheck => c !== null);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * The board-machine half: what the board SEES. Runs only where the owner routes are
  * mounted, which is why it is a separate command (docs §1).
@@ -648,6 +683,11 @@ export async function runBoardDoctor(opts: {
     );
     return { side: "board", boardUrl, checks, ok: false };
   }
+
+  // #1325: the fleet listener's own state — a board that came up before its tailnet address did
+  // is "retrying", and every worker-side check would just read as an unreachable port.
+  const listenerCheck = await checkBoardListeners(boardUrl);
+  checks.push(...listenerCheck);
 
   const workers = body?.workers ?? [];
   if (workers.length === 0) {

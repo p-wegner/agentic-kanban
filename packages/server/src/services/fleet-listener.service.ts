@@ -30,6 +30,7 @@ import { createWorkerWsRoute } from "./worker-connection.service.js";
 import { getWorkerFleet } from "./worker-fleet.service.js";
 import type { WorkerRegistry } from "./worker-registry.service.js";
 import { resolveConfiguredFleetPort, resolveListenHost } from "../lib/bearer-token.js";
+import { resolveBindHost } from "../lib/tailscale-host.js";
 import { FLEET_MCP_PATH, getFleetMcpBridge } from "./fleet-mcp-bridge.service.js";
 
 /**
@@ -42,6 +43,7 @@ export type CreateWorkersRoute = (database: Database, registry: WorkerRegistry) 
 
 export interface FleetListenerHandle {
   port: number;
+  host: string;
   close(): Promise<void>;
 }
 
@@ -94,7 +96,10 @@ export async function startFleetListener(opts: {
   /** Defaults to `resolveFleetHost()` — loopback unless an interface is named (#753). */
   host?: string;
 }): Promise<FleetListenerHandle> {
-  const { database, port, createWorkersRoute, host = resolveFleetHost() } = opts;
+  const { database, port, createWorkersRoute } = opts;
+  // #1325: `KANBAN_FLEET_HOST=tailscale` is resolved HERE, at bind time, and throws when the
+  // address is unavailable — the supervisor's retry loop turns that into "not up yet".
+  const host = resolveBindHost(opts.host ?? resolveFleetHost());
   const fleet = getWorkerFleet(database);
   const mcp = getFleetMcpBridge(database);
 
@@ -144,6 +149,7 @@ export async function startFleetListener(opts: {
 
   return {
     port: listening.port,
+    host,
     close: () =>
       new Promise<void>((resolve) =>
         listening.server.close(() => {

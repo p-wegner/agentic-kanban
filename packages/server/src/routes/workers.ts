@@ -36,6 +36,7 @@ import { resolveOwnPackageVersion } from "../lib/worker-build.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import { buildWorkerConnectSteps } from "../lib/worker-connect-steps.js";
 import { resolveFleetPort, resolveFleetHost } from "../services/fleet-listener.service.js";
+import { isTailscaleHost } from "../lib/tailscale-host.js";
 import { resolveConfiguredGitPort, resolveConfiguredGitHost } from "../services/git-http.service.js";
 
 function bearerFrom(c: Context): string | null {
@@ -89,10 +90,15 @@ export function describeFleetUrl(env: NodeJS.ProcessEnv = process.env): { fleetU
   }
   const host = resolveFleetHost(env);
   const wildcard = host === "0.0.0.0" || host === "::" || host === "[::]";
-  const shown = wildcard ? "<board-host>" : host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+  const tailscale = isTailscaleHost(host);
+  const shown = wildcard ? "<board-host>" : tailscale ? "<tailscale-ip>" : host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
   return {
     fleetUrl: `http://${shown}:${port}`,
-    fleetNote: wildcard ? "fleet listener binds every interface; substitute this machine's reachable address for <board-host>" : null,
+    fleetNote: wildcard
+      ? "fleet listener binds every interface; substitute this machine's reachable address for <board-host>"
+      : tailscale
+        ? "fleet listener binds the address `tailscale ip -4` reports; substitute it for <tailscale-ip>"
+        : null,
   };
 }
 
