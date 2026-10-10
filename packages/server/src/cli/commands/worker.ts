@@ -272,11 +272,12 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         console.error(`Failed to mint pairing token (${res.status}). Is the board running at ${options.board}?`);
         process.exit(1);
       }
-      const body = await res.json() as { pairingToken: string; expiresAt: string };
+      const body = await res.json() as { pairingToken: string; expiresAt: string; fleetUrl?: string | null; fleetNote?: string | null };
       console.log(`Pairing token (single-use, expires ${body.expiresAt}):`);
       console.log(`  ${body.pairingToken}`);
       console.log(`\nOn the worker machine:`);
-      console.log(`  agentic-kanban-worker start --board <board-url> --token ${body.pairingToken}`);
+      console.log(`  agentic-kanban-worker start --board ${body.fleetUrl || "<board-url>"} --token ${body.pairingToken}`);
+      if (body.fleetNote) console.log(`\nNote: ${body.fleetNote}`);
     });
 
   workerCmd
@@ -568,17 +569,20 @@ export function registerWorkerSubcommands(workerCmd: Command) {
     .option("--providers <csv>", "Provider CLIs to check on this machine", "claude")
     .option("--git-port <n>", "KANBAN_GIT_HTTP_PORT, to check the git transport too", (v) => parseInt(v, 10))
     .option("--state-file <path>", `Pairing state file, relative to the directory you run the command in (default: ${defaultWorkerStateFile()})`, cliPathArg)
+    .option("--work-root <path>", "Worker work root (same as `worker start`), relative to the directory you run the command in (default: ~/.agentic-kanban/worker)", cliPathArg)
     .option("--json", "Output the report as JSON")
     .action(async (options: {
       board: string;
       providers: string;
       gitPort?: number;
       stateFile?: string;
+      workRoot?: string;
       json?: boolean;
     }) => {
       const report = await runWorkerDoctor({
         boardUrl: options.board,
         stateFile: options.stateFile ?? defaultWorkerStateFile(),
+        workRoot: options.workRoot ?? defaultWorkerWorkRoot(),
         providers: splitList(options.providers) ?? ["claude"],
         ...(options.gitPort === undefined || Number.isNaN(options.gitPort) ? {} : { gitPort: options.gitPort }),
       });

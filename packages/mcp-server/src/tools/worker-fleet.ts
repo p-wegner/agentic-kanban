@@ -82,13 +82,15 @@ export function registerMintWorkerPairingToken(server: McpServer, _deps: ToolDep
       try {
         const { ok, statusText, data } = await boardApi("/api/workers/pairing-token", { method: "POST" });
         if (!ok) return mcpText(`Failed to mint a pairing token: ${boardErrorText(data, statusText)}`);
-        const token = (data as { pairingToken?: string } | null)?.pairingToken;
+        const info = data as { pairingToken?: string; fleetUrl?: string | null } | null;
+        const token = info?.pairingToken;
+        const board = info?.fleetUrl ?? "<board-url>";
         return mcpJson({
           ...(data as Record<string, unknown>),
           // The token alone is not actionable; the command is. Both, so an agent that
           // relays this to a human does not have to reconstruct the invocation.
-          command: `agentic-kanban worker start --board <board-url> --token ${token ?? "<pairing-token>"}`,
-          verifyOnWorker: "agentic-kanban worker doctor --board <board-url>",
+          command: `agentic-kanban worker start --board ${board} --token ${token ?? "<pairing-token>"}`,
+          verifyOnWorker: `agentic-kanban worker doctor --board ${board}`,
         });
       } catch (err) {
         return mcpUnreachable(err);
