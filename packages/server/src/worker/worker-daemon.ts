@@ -51,6 +51,8 @@ import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
 import { attestProviderAuth } from "../cli/commands/worker-doctor.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { createDaemonSelfUpdate, type DaemonSelfUpdate } from "./worker-daemon-update.js";
+import type { NpmRunner } from "./worker-updater.js";
 
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const RECONNECT_MIN_MS = 1000;
@@ -121,6 +123,31 @@ export interface WorkerDaemonOptions {
    * a red tray and a silent 30 s retry loop is the failure being removed.
    */
   onFatal?: (reason: string) => void;
+  /**
+   * Self-update (#1338). Absent = this daemon never updates itself (tests, and any caller that
+   * cannot restart). Present: the board may ask this worker to update (`worker update`), and
+   * with `auto` it updates on its own whenever the board advertises a different build.
+   */
+  selfUpdate?: WorkerSelfUpdateOptions;
+}
+
+export interface WorkerSelfUpdateOptions {
+  /** `--auto-update`: act on an advertised build without being asked. */
+  auto: boolean;
+  /**
+   * Hand over to `entry` (the new build's `bin/worker.js`) and end this process. Called with
+   * no sessions running, after the pointer + pending marker are written. Also used to roll
+   * back to the previous entry.
+   */
+  restart: (entry: string) => void | Promise<void>;
+  /** The `bin/worker.js` this process runs from — what a rollback returns to. */
+  entry: string;
+  versionsDir?: string;
+  keepVersions?: number;
+  /** How long a freshly-switched build gets to connect before it rolls itself back. */
+  confirmTimeoutMs?: number;
+  npm?: NpmRunner;
+  fetchImpl?: typeof fetch;
 }
 
 interface WorkerIdentity {
@@ -362,6 +389,44 @@ export interface DrainReport {
   resultsRetained: number;
 }
 
+/**
+ * #750: a result whose push failed while the board was unreachable can only be saved by an
+ * attempt made after it is back — this is that attempt, run on every (re)connect. The push
+ * lands in the incoming namespace, where the #752 operator surface can land it.
+ */
+function retryRetainedResults(
+  runner: ReturnType<typeof createWorkerAgentRunner>,
+  sendToBoard: (message: WorkerToBoardMessage) => void,
+  log: (line: string) => void,
+): void {
+  void runner.retryPendingPushes().then((outcome) => {
+    if (outcome.pushed.length > 0) {
+      log(`[worker] pushed ${outcome.pushed.length} retained result(s) after reconnecting`);
+    }
+    for (const retained of runner.unpushedResults()) {
+      log(
+        `[worker] still holding an unpushed result: sessionId=${retained.sessionId} ` +
+          `checkout=${retained.checkoutPath} branch=${retained.localBranch} ` +
+          `attempts=${retained.attempts} lastError=${retained.lastError}`,
+      );
+      // #871: a result whose reconnect retry ALSO failed is reported to the board, which is the
+      // one place an operator actually looks. Through sendToBoard so a socket that died again
+      // queues it as critical rather than dropping it.
+      sendToBoard({
+        type: "undelivered_result",
+        sessionId: retained.sessionId,
+        branch: retained.branch,
+        incomingRef: retained.incomingRef,
+        checkoutPath: retained.checkoutPath,
+        attempts: retained.attempts,
+        lastError: retained.lastError,
+      });
+    }
+  }).catch((err: unknown) => {
+    log(`[worker] retained-result retry failed unexpectedly (daemon staying up): ${err instanceof Error ? err.message : String(err)}`);
+  });
+}
+
 export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<WorkerDaemonHandle> {
   const log = opts.log ?? ((line: string) => console.log(line));
   const boardUrl = normalizeBoardUrl(opts.boardUrl);
@@ -521,6 +586,37 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     maxConcurrency: opts.maxConcurrency,
   });
 
+  /**
+   * #1338: a freshly started daemon says `online` on its FIRST heartbeat. A worker that was
+   * drained for an update comes back as a new process, and nothing else flips the board's
+   * stored `draining` status back — `status` was only ever sent when draining.
+   */
+  let announceOnline = true;
+  const selfUpdate: DaemonSelfUpdate | null = opts.selfUpdate
+    ? createDaemonSelfUpdate({
+        opts: opts.selfUpdate,
+        stateFile,
+        boardUrl,
+        workerToken: () => identity.workerToken,
+        workerVersion,
+        log,
+        runningCount: () => runner.runningSessionIds().length,
+        settle: async () => { await runner.drainPushes(opts.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS); },
+        drain: async () => {
+          if (draining) return;
+          draining = true;
+          await sendHeartbeat();
+        },
+        undrain: async () => {
+          if (!draining) return;
+          draining = false;
+          announceOnline = true;
+          log("[worker] back in rotation");
+          await sendHeartbeat();
+        },
+      })
+    : null;
+
   let resolveConnected!: () => void;
   const connected = new Promise<void>((resolve) => { resolveConnected = resolve; });
 
@@ -573,35 +669,8 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         while (pendingCritical.length > 0) {
           socket.send(JSON.stringify(pendingCritical.shift()));
         }
-        // #750: a result whose push failed while the board was unreachable can only be
-        // saved by an attempt made after it is back — this is that attempt. The push lands
-        // in the incoming namespace, where the #752 operator surface can land it.
-        void runner.retryPendingPushes().then((outcome) => {
-          if (outcome.pushed.length > 0) {
-            log(`[worker] pushed ${outcome.pushed.length} retained result(s) after reconnecting`);
-          }
-          for (const retained of runner.unpushedResults()) {
-            log(
-              `[worker] still holding an unpushed result: sessionId=${retained.sessionId} ` +
-                `checkout=${retained.checkoutPath} branch=${retained.localBranch} ` +
-                `attempts=${retained.attempts} lastError=${retained.lastError}`,
-            );
-            // #871: a result whose reconnect retry ALSO failed is reported to the board,
-            // which is the one place an operator actually looks. Through sendToBoard so a
-            // socket that died again queues it as critical rather than dropping it.
-            sendToBoard({
-              type: "undelivered_result",
-              sessionId: retained.sessionId,
-              branch: retained.branch,
-              incomingRef: retained.incomingRef,
-              checkoutPath: retained.checkoutPath,
-              attempts: retained.attempts,
-              lastError: retained.lastError,
-            });
-          }
-        }).catch((err: unknown) => {
-          log(`[worker] retained-result retry failed unexpectedly (daemon staying up): ${err instanceof Error ? err.message : String(err)}`);
-        });
+        retryRetainedResults(runner, sendToBoard, log);
+        selfUpdate?.onConnected();
         resolveConnected();
       } catch (err) {
         log(`[worker] open-handler error (daemon staying up): ${err instanceof Error ? err.message : String(err)}`);
@@ -624,6 +693,12 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       try {
         switch (message.type) {
           case "assign":
+            // #1338: a draining daemon (an update waiting for its last session) takes no new
+            // work — the board stops assigning on its next heartbeat, this covers the race.
+            if (draining) {
+              sendToBoard({ type: "assign_failed", sessionId: message.sessionId, error: "worker is draining (self-update or shutdown in progress)" });
+              break;
+            }
             if (message.repo) runner.assignWithRepo(message.sessionId, message.spec, message.repo);
             else runner.assign(message.sessionId, message.spec);
             break;
@@ -728,6 +803,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     });
   }
 
+  selfUpdate?.begin();
   connect();
 
   /**
@@ -770,14 +846,25 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           authorization: `Bearer ${identity.workerToken}`,
         },
         body: JSON.stringify({
-          ...(draining ? { status: "draining" } : {}),
+          ...(draining ? { status: "draining" } : announceOnline && selfUpdate ? { status: "online" } : {}),
           capabilities: capabilitiesOf(opts, attestedProfiles()),
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
+          ...(selfUpdate ? { update: selfUpdate.state() } : {}),
         }),
       });
     } catch {
       return; // board unreachable — the WS reconnect path owns visibility for that
+    }
+    if (res.ok && selfUpdate) {
+      announceOnline = false;
+      // #1338: the board advertises its build (and, for `worker update`, asks for NOW) in the
+      // heartbeat response. Never let a malformed body cost this daemon its heartbeat.
+      try {
+        selfUpdate.onHeartbeatResponse(await res.json());
+      } catch {
+        /* an older board answers {ok:true} only */
+      }
     }
     if (res.status === 401) {
       void handleUnauthorized("the heartbeat");
@@ -831,6 +918,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         await sendHeartbeat().catch(() => {});
       }
       stopped = true;
+      selfUpdate?.dispose();
       clearInterval(heartbeatTimer);
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (stopOpts?.killAgents) runner.stopAll();

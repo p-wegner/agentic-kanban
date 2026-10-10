@@ -32,6 +32,9 @@ interface WorkerRow {
   protocolVersion?: number;
   workerVersion?: string;
   buildFreshness?: WorkerBuildFreshness;
+  /** #1338: the worker's self-update state (`current` / `updating` / `failed`) from its last heartbeat. */
+  update?: { state: "current" | "updating" | "failed"; reason?: string; targetBuild?: string };
+  updateRequested?: boolean;
 }
 
 interface FleetSummary {
@@ -234,6 +237,35 @@ export function RunnersFleetPanel({ projectId }: RunnersFleetPanelProps) {
                         ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
                         : "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400";
                     return <span className={`ml-1.5 rounded px-1.5 py-0.5 text-xs ${tone}`}>{label}</span>;
+                  })()}
+                  {(() => {
+                    // #1338: self-update state. `current` is the quiet default and shows nothing.
+                    const u = worker.update;
+                    if (u?.state === "updating") {
+                      return (
+                        <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-xs text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                          updating{u.reason ? ` — ${u.reason}` : ""}
+                        </span>
+                      );
+                    }
+                    if (u?.state === "failed") {
+                      return (
+                        <span
+                          className="ml-1.5 rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-700 dark:bg-red-900/40 dark:text-red-300"
+                          title="The worker rolled back to its previous build and stays online."
+                        >
+                          update failed{u.reason ? ` — ${u.reason}` : ""}
+                        </span>
+                      );
+                    }
+                    if (worker.updateRequested) {
+                      return (
+                        <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-xs text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                          update requested
+                        </span>
+                      );
+                    }
+                    return null;
                   })()}
                 </div>
                 {!worker.eligible && worker.ineligibleReason && (

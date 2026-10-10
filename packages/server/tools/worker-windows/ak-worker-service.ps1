@@ -22,6 +22,9 @@ param(
   [Parameter(ParameterSetName = 'Install')][string]$Providers = 'claude',
   [Parameter(ParameterSetName = 'Install')][int]$MaxConcurrency = 2,
   [Parameter(ParameterSetName = 'Install')][string]$ClaudeConfigDir = $env:CLAUDE_CONFIG_DIR,
+  # #1338: the daemon keeps itself on the board's build (drain, download, verify, install
+  # side by side, exit 75 so ak-worker-run.ps1 relaunches the new version).
+  [Parameter(ParameterSetName = 'Install')][switch]$AutoUpdate,
   [Parameter(ParameterSetName = 'Install')][switch]$NoStart,
   [Parameter(ParameterSetName = 'Install')][switch]$Force,
 
@@ -257,7 +260,7 @@ switch ($PSCmdlet.ParameterSetName) {
     $json = @{
       board = $Board; name = $Name; labels = $Labels; providers = $Providers
       maxConcurrency = $MaxConcurrency; claudeConfigDir = $ClaudeConfigDir
-      workerCmd = $workerCmd
+      workerCmd = $workerCmd; autoUpdate = [bool]$AutoUpdate
     } | ConvertTo-Json
     [System.IO.File]::WriteAllText($ConfigFile, $json, (New-Object System.Text.UTF8Encoding($false)))
     Write-Output "config written: $ConfigFile"

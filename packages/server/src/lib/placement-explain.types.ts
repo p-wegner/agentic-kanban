@@ -19,6 +19,7 @@
 import type { ProviderName } from "../services/agent-provider/types.js";
 import type { WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
 import type { WorkerCapacityInfo, WorkerProfileAttestation } from "@agentic-kanban/shared/lib/worker-protocol";
+import type { WorkerUpdateReport } from "./worker-update.js";
 
 /**
  * The chain's check ids, as DATA so the union and the runtime list cannot drift (#801).
@@ -163,6 +164,14 @@ export interface WorkerEligibility {
    * refusal is `protocolVersion`'s job.
    */
   buildFreshness?: WorkerBuildFreshness;
+  /**
+   * #1338: the worker's self-update state from its last heartbeat — `current`, `updating`
+   * (reason = the phase) or `failed` (reason = why; the worker rolled back and stays online).
+   * Absent = a worker that has not reported one (an older build, or self-update not enabled).
+   */
+  update?: WorkerUpdateReport;
+  /** #1338: a board-side `worker update` is queued for this worker's next heartbeat. */
+  updateRequested?: boolean;
   /**
    * Agent profiles this worker ATTESTS it can authenticate as (#1027). In-memory from its
    * last `hello`/heartbeat, so absent means "this worker has said nothing" — which a

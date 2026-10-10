@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Command } from "commander";
 import {
@@ -7,7 +7,10 @@ import {
   defaultWorkerStateFile,
   DEFAULT_DRAIN_TIMEOUT_MS,
   WorkerRegistrationRefused,
+  type WorkerDaemonHandle,
 } from "../../worker/worker-daemon.js";
+import { isSupervised, relaunchWorker } from "../../worker/worker-updater.js";
+import type { WorkerUpdateReport } from "../../lib/worker-update.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "../../worker/worker-repo.js";
 import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
 // #879 — pure, so it stays safe for the standalone worker binary (no db graph).
@@ -89,6 +92,34 @@ export function describeWorkerListFailure(status: number, boardUrl: string): str
     );
   }
   return `Failed to list workers (${status}). Is the board running at ${boardUrl}?`;
+}
+
+/**
+ * The `bin/worker.js` this process runs from — the rollback target for a self-update (#1338).
+ * `agentic-kanban-worker` runs it directly; the main CLI's `worker start` runs `bin/cli.js`,
+ * whose sibling `worker.js` is the same package's worker entry. Null = cannot tell.
+ */
+export function resolveWorkerEntry(argv1: string | undefined = process.argv[1]): string | null {
+  if (!argv1) return null;
+  if (basename(argv1) === "worker.js") return argv1;
+  const sibling = join(dirname(argv1), "worker.js");
+  return existsSync(sibling) ? sibling : null;
+}
+
+/**
+ * The argv a relaunched worker gets. `agentic-kanban worker start …` (main CLI) carries a
+ * leading `worker`; the standalone worker binary the new build runs as has no such command.
+ */
+export function relaunchArgvOf(argv: string[]): string[] {
+  return argv[0] === "worker" ? argv.slice(1) : argv;
+}
+
+/** ` update=…` for `worker list` (#1338). Empty for a worker that reports no update state. */
+export function formatUpdateState(update: WorkerUpdateReport | undefined, requested?: boolean): string {
+  if (!update) return requested ? " update=requested" : "";
+  if (update.state === "current") return requested ? " update=requested" : " update=current";
+  if (update.state === "updating") return ` update=updating${update.reason ? ` (${update.reason})` : ""}`;
+  return ` update=FAILED${update.reason ? ` (${update.reason})` : ""} — rolled back, still on its previous build`;
 }
 
 function splitList(value?: string): string[] | undefined {
@@ -244,7 +275,7 @@ export function renderWorkerConnectMarkdown(
 export function registerWorkerCommand(program: Command) {
   const workerCmd = program
     .command("worker")
-    .description("Fleet worker: connect this machine to a board and execute assigned agent sessions.\n\nSubcommands: pair, start, instructions, list, revoke, explain, placements, doctor, doctor-board, update-check, cleanup, events");
+    .description("Fleet worker: connect this machine to a board and execute assigned agent sessions.\n\nSubcommands: pair, start, instructions, list, revoke, update, explain, placements, doctor, doctor-board, update-check, cleanup, events");
   registerWorkerSubcommands(workerCmd);
 }
 
@@ -268,11 +299,16 @@ export function formatPlacementState(p: Pick<SessionPlacementRecord, "status" | 
   return `[${p.status}, exit ${p.exitCode ?? "?"}, ${why}]`;
 }
 
-async function runWorkerRevoke(worker: string, options: { board: string }): Promise<void> {
-  const base = options.board.replace(/\/+$/, "");
+/** Resolve `<id|name>` to exactly one registered worker, or print why not and exit 1. */
+async function resolveOneWorker(
+  worker: string,
+  board: string,
+  verb: string,
+): Promise<{ id: string; name: string; effectiveStatus: string }> {
+  const base = board.replace(/\/+$/, "");
   const listRes = await fetch(`${base}/api/workers`);
   if (!listRes.ok) {
-    console.error(describeWorkerListFailure(listRes.status, options.board));
+    console.error(describeWorkerListFailure(listRes.status, board));
     process.exit(1);
   }
   const { workers } = await listRes.json() as { workers: Array<{ id: string; name: string; effectiveStatus: string }> };
@@ -283,11 +319,31 @@ async function runWorkerRevoke(worker: string, options: { board: string }): Prom
     process.exit(1);
   }
   if (resolved.length > 1) {
-    console.error(`'${worker}' is ambiguous — ${resolved.length} workers share that name. Revoke by id:\n` +
+    console.error(`'${worker}' is ambiguous — ${resolved.length} workers share that name. ${verb} by id:\n` +
       resolved.map((w) => `  ${w.name} id=${w.id} [${w.effectiveStatus}]`).join("\n"));
     process.exit(1);
   }
-  const target = resolved[0]!;
+  return resolved[0]!;
+}
+
+async function runWorkerUpdate(worker: string, options: { board: string }): Promise<void> {
+  const base = options.board.replace(/\/+$/, "");
+  const target = await resolveOneWorker(worker, options.board, "Update");
+  const res = await fetch(`${base}/api/workers/${encodeURIComponent(target.id)}/update`, { method: "POST" });
+  if (!res.ok) {
+    console.error(`Update request for ${target.name} (id=${target.id}) failed: HTTP ${res.status}`);
+    process.exit(1);
+  }
+  console.log(
+    `Asked worker ${target.name} (id=${target.id}, ${target.effectiveStatus}) to update to the board's build. ` +
+      "It picks the request up on its next heartbeat (<= 30s), then drains (no new sessions; running ones finish), " +
+      "downloads, verifies, installs and restarts. Follow it with: agentic-kanban worker list",
+  );
+}
+
+async function runWorkerRevoke(worker: string, options: { board: string }): Promise<void> {
+  const base = options.board.replace(/\/+$/, "");
+  const target = await resolveOneWorker(worker, options.board, "Revoke");
   const res = await fetch(`${base}/api/workers/${encodeURIComponent(target.id)}`, { method: "DELETE" });
   if (!res.ok) {
     console.error(`Revoke of ${target.name} (id=${target.id}) failed: HTTP ${res.status}`);
@@ -305,6 +361,131 @@ function registerWorkerRevoke(workerCmd: Command): void {
     )
     .option("--board <url>", "Board base URL — the board's API port (default), not the fleet port", DEFAULT_BOARD_URL)
     .action(runWorkerRevoke);
+}
+
+interface WorkerStartOptions {
+  board: string;
+  token?: string;
+  name?: string;
+  labels?: string;
+  providers?: string;
+  skipProviderAttestation?: boolean;
+  profiles?: string;
+  maxConcurrency?: number;
+  stateFile?: string;
+  workRoot?: string;
+  sharesFilesystem?: boolean;
+  leaveAgents?: boolean;
+  autoUpdate?: boolean;
+  drainTimeout?: number;
+}
+
+async function runWorkerStart(options: WorkerStartOptions): Promise<void> {
+  try {
+    const labels = splitList(options.labels) ?? [];
+    if (options.sharesFilesystem && !labels.includes(SHARES_FILESYSTEM_LABEL)) {
+      labels.push(SHARES_FILESYSTEM_LABEL);
+    }
+    // The reconnect timers are unref'd; this keeps the CLI process alive.
+    const keepAlive = setInterval(() => {}, 60_000);
+    const drainTimeoutMs = options.drainTimeout !== undefined && options.drainTimeout > 0
+      ? options.drainTimeout * 1000
+      : undefined;
+    // #1338: self-update needs to know which `bin/worker.js` it runs from (the rollback
+    // target) and to restart onto another. Absent entry = never self-update, say so.
+    const entry = resolveWorkerEntry();
+    if (!entry && options.autoUpdate) {
+      console.warn("[worker] --auto-update ignored: cannot locate this install's bin/worker.js");
+    }
+    // Read by `restart` below, which can fire (a rollback) before the await resolves.
+    let daemonRef: WorkerDaemonHandle | undefined;
+    const daemon = await startWorkerDaemon({
+      boardUrl: options.board,
+      pairingToken: options.token,
+      name: options.name,
+      labels: labels.length > 0 ? labels : undefined,
+      providers: splitList(options.providers),
+      attestProviders: !options.skipProviderAttestation,
+      // #1027. `undefined` (flag absent) means "attest what discovery finds"; an explicit
+      // list — including the single value `none` — is the operator's own narrowing, which
+      // is why the CLI does not substitute a default here.
+      profiles: splitList(options.profiles),
+      maxConcurrency: options.maxConcurrency,
+      stateFile: options.stateFile,
+      workRoot: options.workRoot,
+      drainTimeoutMs,
+      ...(entry
+        ? {
+            selfUpdate: {
+              auto: options.autoUpdate === true,
+              entry,
+              restart: async (nextEntry: string) => {
+                // No session is running (the updater waited), so this is a clean handover:
+                // close the socket, then start the next build / let the supervisor do it.
+                try {
+                  await daemonRef?.stop({ killAgents: false, drainTimeoutMs: 10_000 });
+                } catch {
+                  /* the handover matters more than a tidy close */
+                }
+                clearInterval(keepAlive);
+                relaunchWorker(nextEntry, {
+                  argv: relaunchArgvOf(process.argv.slice(2)),
+                  execPath: process.execPath,
+                  supervised: isSupervised(),
+                  exit: (code) => process.exit(code),
+                });
+              },
+            },
+          }
+        : {}),
+      // #754: a revoked worker, or one the board refuses on protocol grounds, used to
+      // retry every 30 s forever with a red tray and nothing in any log saying why.
+      // It is now a clean non-zero exit carrying the reason — which is also what makes
+      // a supervisor (the Windows scheduled task) stop restarting it into the same wall.
+      onFatal: (reason) => {
+        console.error(`[worker] ${reason}`);
+        clearInterval(keepAlive);
+        process.exit(2);
+      },
+    });
+    daemonRef = daemon;
+    let shuttingDown = false;
+    const shutdown = () => {
+      // Ctrl+C twice must still get you out, even if a push is hung on a slow link.
+      if (shuttingDown) {
+        console.log("[worker] second interrupt — exiting without waiting for the drain");
+        process.exit(130);
+      }
+      shuttingDown = true;
+      console.log("\n[worker] shutting down" + (options.leaveAgents ? " (leaving agents running)" : ""));
+      // #754: AWAIT the drain. This used to be a sync stop() followed immediately by
+      // process.exit(0), so with the agents killed the process was gone before their
+      // exit handlers could push the results back — completed work was silently lost
+      // and the board reported it as a failure 60 s later.
+      void daemon.stop({ killAgents: !options.leaveAgents }).then((report) => {
+        clearInterval(keepAlive);
+        if (options.leaveAgents && report.agentsLeftRunning > 0) {
+          console.log(
+            `[worker] ${report.agentsLeftRunning} agent(s) left running. Their results CANNOT be ` +
+              "pushed by a future daemon — the checkout mapping lives in this process only — so " +
+              "the board will fall back to its disconnect grace for them.",
+          );
+        }
+        process.exit(report.pushesAbandoned > 0 || report.criticalMessagesLost > 0 ? 1 : 0);
+      }, (err: unknown) => {
+        console.error(`[worker] drain failed: ${errorMessage(err)}`);
+        clearInterval(keepAlive);
+        process.exit(1);
+      });
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+  } catch (err) {
+    console.error(errorMessage(err));
+    // A build the board refuses is not a usage error and not a transient one: give it
+    // its own code so a supervisor can tell "fix the install" from "try again" (#754).
+    process.exit(err instanceof WorkerRegistrationRefused ? 2 : 1);
+  }
 }
 
 export function registerWorkerSubcommands(workerCmd: Command) {
@@ -365,99 +546,20 @@ export function registerWorkerSubcommands(workerCmd: Command) {
     .option("--work-root <path>", "Root for git-transport clones/checkouts, relative to the directory you run the command in (default: ~/.agentic-kanban/worker)", cliPathArg)
     .option("--leave-agents", "On Ctrl+C, leave running agent processes alive instead of killing them")
     .option(
+      "--auto-update",
+      "Keep this worker on the board's build by itself (#1338): when the board advertises a different " +
+        "build, drain (no new sessions; running ones finish), download it from the board, verify its " +
+        "sha256, install it side by side under <state-dir>/versions/<build>, and restart on it with the " +
+        "same arguments. A failed update rolls back and is reported. Opt-in; without it the worker " +
+        "still updates when the board asks ('worker update <name>').",
+    )
+    .option(
       "--drain-timeout <seconds>",
       "On Ctrl+C, how long to wait for finished agents' results to finish pushing to the board " +
         `(default ${Math.round(DEFAULT_DRAIN_TIMEOUT_MS / 1000)})`,
       (v) => parseInt(v, 10),
     )
-    .action(async (options: {
-      board: string;
-      token?: string;
-      name?: string;
-      labels?: string;
-      providers?: string;
-      skipProviderAttestation?: boolean;
-      profiles?: string;
-      maxConcurrency?: number;
-      stateFile?: string;
-      workRoot?: string;
-      sharesFilesystem?: boolean;
-      leaveAgents?: boolean;
-      drainTimeout?: number;
-    }) => {
-      try {
-        const labels = splitList(options.labels) ?? [];
-        if (options.sharesFilesystem && !labels.includes(SHARES_FILESYSTEM_LABEL)) {
-          labels.push(SHARES_FILESYSTEM_LABEL);
-        }
-        // The reconnect timers are unref'd; this keeps the CLI process alive.
-        const keepAlive = setInterval(() => {}, 60_000);
-        const drainTimeoutMs = options.drainTimeout !== undefined && options.drainTimeout > 0
-          ? options.drainTimeout * 1000
-          : undefined;
-        const daemon = await startWorkerDaemon({
-          boardUrl: options.board,
-          pairingToken: options.token,
-          name: options.name,
-          labels: labels.length > 0 ? labels : undefined,
-          providers: splitList(options.providers),
-          attestProviders: !options.skipProviderAttestation,
-          // #1027. `undefined` (flag absent) means "attest what discovery finds"; an explicit
-          // list — including the single value `none` — is the operator's own narrowing, which
-          // is why the CLI does not substitute a default here.
-          profiles: splitList(options.profiles),
-          maxConcurrency: options.maxConcurrency,
-          stateFile: options.stateFile,
-          workRoot: options.workRoot,
-          drainTimeoutMs,
-          // #754: a revoked worker, or one the board refuses on protocol grounds, used to
-          // retry every 30 s forever with a red tray and nothing in any log saying why.
-          // It is now a clean non-zero exit carrying the reason — which is also what makes
-          // a supervisor (the Windows scheduled task) stop restarting it into the same wall.
-          onFatal: (reason) => {
-            console.error(`[worker] ${reason}`);
-            clearInterval(keepAlive);
-            process.exit(2);
-          },
-        });
-        let shuttingDown = false;
-        const shutdown = () => {
-          // Ctrl+C twice must still get you out, even if a push is hung on a slow link.
-          if (shuttingDown) {
-            console.log("[worker] second interrupt — exiting without waiting for the drain");
-            process.exit(130);
-          }
-          shuttingDown = true;
-          console.log("\n[worker] shutting down" + (options.leaveAgents ? " (leaving agents running)" : ""));
-          // #754: AWAIT the drain. This used to be a sync stop() followed immediately by
-          // process.exit(0), so with the agents killed the process was gone before their
-          // exit handlers could push the results back — completed work was silently lost
-          // and the board reported it as a failure 60 s later.
-          void daemon.stop({ killAgents: !options.leaveAgents }).then((report) => {
-            clearInterval(keepAlive);
-            if (options.leaveAgents && report.agentsLeftRunning > 0) {
-              console.log(
-                `[worker] ${report.agentsLeftRunning} agent(s) left running. Their results CANNOT be ` +
-                  "pushed by a future daemon — the checkout mapping lives in this process only — so " +
-                  "the board will fall back to its disconnect grace for them.",
-              );
-            }
-            process.exit(report.pushesAbandoned > 0 || report.criticalMessagesLost > 0 ? 1 : 0);
-          }, (err: unknown) => {
-            console.error(`[worker] drain failed: ${errorMessage(err)}`);
-            clearInterval(keepAlive);
-            process.exit(1);
-          });
-        };
-        process.on("SIGINT", shutdown);
-        process.on("SIGTERM", shutdown);
-      } catch (err) {
-        console.error(errorMessage(err));
-        // A build the board refuses is not a usage error and not a transient one: give it
-        // its own code so a supervisor can tell "fix the install" from "try again" (#754).
-        process.exit(err instanceof WorkerRegistrationRefused ? 2 : 1);
-      }
-    });
+    .action(runWorkerStart);
 
   workerCmd
     .command("instructions")
@@ -496,7 +598,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         process.exit(1);
       }
       const body = await res.json() as {
-        workers: Array<{ id: string; name: string; effectiveStatus: string; status: string; os: string | null; labels: string | null; maxConcurrency: number; lastHeartbeatAt: string | null; protocolVersion?: number; workerVersion?: string; buildFreshness?: WorkerBuildFreshness }>;
+        workers: Array<{ id: string; name: string; effectiveStatus: string; status: string; os: string | null; labels: string | null; maxConcurrency: number; lastHeartbeatAt: string | null; protocolVersion?: number; workerVersion?: string; buildFreshness?: WorkerBuildFreshness; update?: WorkerUpdateReport; updateRequested?: boolean }>;
         fleet?: { boardWorkerVersion?: string | null };
       };
       if (options.json) {
@@ -516,13 +618,25 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         // "behind board" vs "ahead of board" stay distinct words (ahead is a normal
         // dev-machine state, not staleness), and a `?` build gets no verdict at all.
         const freshness = formatBuildFreshness(w.buildFreshness, body.fleet?.boardWorkerVersion);
-        const build = ` protocol=${w.protocolVersion ?? "?"} build=${w.workerVersion ?? "?"}${freshness ? ` (${freshness})` : ""}`;
+        const build = ` protocol=${w.protocolVersion ?? "?"} build=${w.workerVersion ?? "?"}${freshness ? ` (${freshness})` : ""}${formatUpdateState(w.update, w.updateRequested)}`;
         console.log(`  ${w.name} [${w.effectiveStatus}] id=${w.id} os=${w.os ?? "?"} maxConcurrency=${w.maxConcurrency}${labels}${build} lastHeartbeat=${w.lastHeartbeatAt ?? "never"}`);
       }
       console.log("\nRetire a worker with: agentic-kanban worker revoke <workerId|name>");
     });
 
   registerWorkerRevoke(workerCmd);
+
+  // #1338 — the board-side half of self-update: ask ONE worker to update now.
+  workerCmd
+    .command("update <worker>")
+    .description(
+      "Ask one worker (id or name) to update to the board's build NOW (#1338): it drains, downloads the " +
+        "board's worker tarball, verifies its sha256, installs side by side and restarts on it; a failure " +
+        "rolls back and shows as 'update failed' in `worker list`. Board machine only. Works without " +
+        "--auto-update on the worker; needs a worker build that has self-update (a manual update gets it there once).",
+    )
+    .option("--board <url>", "Board base URL — the board's API port (default), not the fleet port", DEFAULT_BOARD_URL)
+    .action(runWorkerUpdate);
 
   workerCmd
     .command("explain <issue>")

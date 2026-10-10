@@ -208,6 +208,7 @@ Fleet worker: connect this machine to a board and execute assigned agent session
 | `worker start` | Run the worker daemon: register with the board (first run needs --token from 'worker pair'), |
 | `worker instructions` | Print a step-by-step runbook for connecting THIS machine to a remote board as a worker |
 | `worker list` | List the board's registered workers with their effective status |
+| `worker update <worker>` | Ask one worker (id or name) to update to the board's build NOW (#1338): it drains, downloads the |
 | `worker explain <issue>` | Why was #N not dispatched to a worker? Walks the SAME ordered chain resolveWorkerPlacement |
 | `worker placements` | Which machine each recent session actually ran on (host, or a named worker) |
 | `worker doctor` | Run ON THE WORKER MACHINE: self-test the whole chain to the board — fleet port reachable, |

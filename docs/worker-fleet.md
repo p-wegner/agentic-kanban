@@ -808,6 +808,64 @@ dispatch path needs to know about versions.
 A version column on `workers` (and the panel showing it) is **not implemented**; the values
 live in board memory and are re-learned within 30 s of a restart.
 
+### Updating workers — the daemon updates itself (#1338)
+
+A worker no longer needs a person or an agent to copy a tarball. The board serves its own worker
+build; the daemon fetches it, installs it next to the running one, and restarts on it.
+
+**On the board.** Two routes on the **fleet listener** (worker-facing, so reachable from the
+worker machine), both requiring a valid worker bearer token (no token / wrong token = 401):
+
+| Route | Answers |
+|---|---|
+| `GET /api/workers/build` | the manifest `{ version, buildId (commit sha), sha256, size, boardWorkerVersion, protocolVersion }`; **202** while the tarball is still being packed; **503** + reason when the board has no source tree (an npm-installed board has no `scripts/pack-worker.mjs`) |
+| `GET /api/workers/build/tarball` | the tarball itself |
+
+The tarball is what `scripts/pack-worker.mjs` produces from the board's own tree, built **once per
+commit** and cached under `<data-dir>/worker-builds/<sha>/` (three newest kept). The build id is the
+commit sha; uncommitted edits do not change it. Set `KANBAN_WORKER_BUILD_SKIP_BUILD=1` to pack the
+board's existing `dist/` instead of rebuilding in-tree (the right call on a promoted stable board
+whose `dist/` is what it runs). Every heartbeat response carries `boardBuildId`.
+
+**On the worker.**
+
+```powershell
+agentic-kanban-worker start --board http://<board>:3003 --auto-update      # opt in
+.\ak-worker-service.ps1 -Install -Board http://<board>:3003 -AutoUpdate    # same, as the Windows service
+agentic-kanban worker update <name|id>                                     # board machine: update ONE worker now
+```
+
+When the advertised build differs from the daemon's own (the commit in its `-dev.<sha>` version
+stamp; an unstamped build never self-updates) and `--auto-update` is on — or the board asked via
+`worker update`, which works without the flag — the daemon:
+
+1. **drains**: reports `draining` (placement skips it), refuses any `assign` that raced in, and
+   **lets running sessions finish** — nothing is fetched or installed while one runs;
+2. downloads the tarball and **verifies its sha256** (and size) — a mismatch deletes the file and aborts;
+3. installs it **side by side** with `npm install --prefix <worker-home>/versions/<build>` —
+   never `npm i -g` over the package it is running from, which fails or half-installs on Windows
+   (files in use);
+4. writes `versions/current.json` (the build to run, plus the previous one for rollback) and
+   `versions/pending.json`, then **restarts with the same argv minus `--token`** — so the state
+   file, work root, name and labels carry over, and the saved pairing means **no re-pair**.
+   Versions beyond three are pruned; the current and previous are never pruned.
+
+**Restart.** Under `ak-worker-service.ps1` the daemon exits **75**; `ak-worker-run.ps1` treats it
+as a planned handover (no backoff), resolves the newest version from `versions/current.json` and
+relaunches. Without a supervisor the daemon spawns the new build detached and hidden (`windowsHide`)
+and exits.
+
+**Failure never leaves the worker offline.** A failed download, checksum, install — or a new build
+that does not connect to the board within 120 s, or restarts three times without connecting —
+rolls back to the previous version (`current.json` is pointed back, the broken install is removed)
+and is **reported**: `worker list` shows `update=FAILED (reason)`, the Runners panel an
+"update failed" badge. A build that failed is not retried on every heartbeat — only `worker update`
+retries it. A worker that was draining for an update that failed returns to rotation.
+
+**Bootstrapping.** A worker build that predates #1338 has no self-update, so it needs ONE manual
+update (`WORKER_UPDATE_REMEDIATION`: `node scripts/pack-worker.mjs`, copy, `npm i -g`, restart);
+after that it updates itself. `worker update-check` stays read-only and points at this path.
+
 ## 11. Board tools on a worker — what a remote agent CAN and CANNOT do (#769, #799)
 
 A remote builder used to have no `mcp__agentic-kanban__*` tools at all: the board's own

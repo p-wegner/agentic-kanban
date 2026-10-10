@@ -330,6 +330,9 @@ async function describeWorkers(
       freeSlots: Math.max(0, w.maxConcurrency - load),
       // #910: the headroom placement actually compared, not just its outcome.
       ...(w.capacity ? { capacity: w.capacity } : {}),
+      // #1338: self-update state, as the worker last reported it.
+      ...(w.update ? { update: w.update } : {}),
+      ...(w.updateRequested ? { updateRequested: true } : {}),
     };
   });
 }

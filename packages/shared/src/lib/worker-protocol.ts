@@ -275,15 +275,22 @@ export const MIN_SUPPORTED_WORKER_PROTOCOL_VERSION = 1;
  * ONE copy on purpose: this text used to live only inside the 409 protocol-refusal
  * message below, and `worker update-check` needs the same steps for the far more common
  * case of a compatible-but-old build — a second hand-written copy is exactly the kind
- * that drifts. Deliberately DESCRIBES and never performs: there is no update mechanism
- * (docs/fleet-version-freshness.md §2.2), and the process printing this may be running
- * on the very worker it would update.
+ * that drifts. Deliberately DESCRIBES and never performs — the process printing this may
+ * be running on the very worker it would update.
+ *
+ * #1338: the DAEMON now updates itself, so the first thing this points at is that path
+ * (`worker start --auto-update`, or `worker update <name>` on the board). The manual
+ * pack-and-copy steps stay as the fallback, and as the one-time bootstrap for a worker
+ * build that predates self-update.
  */
 export const WORKER_UPDATE_REMEDIATION =
-  "on the board machine run 'node scripts/pack-worker.mjs', copy the tarball to the worker " +
-  "machine and reinstall it there (npm i -g <path-to-tarball>), then restart the worker " +
-  "daemon (ak-worker-service.ps1 -Restart on a Windows service install, or re-run " +
-  "'worker start')";
+  "let the worker update itself from the board: restart it with 'worker start --auto-update' " +
+  "(or, on the board machine, run 'agentic-kanban worker update <worker-name>' and the daemon " +
+  "drains, downloads the board's build, verifies it, installs it side by side and restarts). " +
+  "A worker build that predates self-update needs ONE manual update first: on the board machine " +
+  "run 'node scripts/pack-worker.mjs', copy the tarball to the worker machine and reinstall it " +
+  "there (npm i -g <path-to-tarball>), then restart the worker daemon (ak-worker-service.ps1 " +
+  "-Restart on a Windows service install, or re-run 'worker start')";
 
 /**
  * What a worker that reports NO version is assumed to speak (#754).

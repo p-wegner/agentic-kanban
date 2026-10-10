@@ -89,18 +89,75 @@ $argList = @(
   '--providers', $cfg.providers,
   '--max-concurrency', [string]$cfg.maxConcurrency
 )
+if ($cfg.autoUpdate) { $argList += '--auto-update' }
 
-Write-Log "[run] supervisor starting: $exe (board $($cfg.board), name $($cfg.name), CLAUDE_CONFIG_DIR=$($env:CLAUDE_CONFIG_DIR)) ACP_AUTOCONNECT=0" $log
+# --- self-update (#1338) ---------------------------------------------------------------
+# The daemon installs a new build into <worker-home>\versions\<build> (NEVER over the package it
+# is running from - that fails or half-installs on Windows, files in use), records it in
+# versions\current.json and exits with code 75. This loop then relaunches on the newest
+# installed version instead of the global binary. worker-home is the directory of the worker
+# state file, which the daemon defaults to ~\.agentic-kanban.
+$UpdateExitCode = 75
+$versionsDir = Join-Path (Join-Path $HOME '.agentic-kanban') 'versions'
+# Tells the daemon a supervisor will relaunch it, so it exits 75 instead of spawning itself.
+$env:KANBAN_WORKER_SUPERVISED = '1'
+
+function Get-VersionPointer {
+  $p = Join-Path $versionsDir 'current.json'
+  if (-not (Test-Path $p)) { return $null }
+  try { return (Get-Content $p -Raw | ConvertFrom-Json) } catch { return $null }
+}
+
+# A switched build that restarts again and again without ever connecting is rolled back here
+# too (the daemon has the same guard for the starts that reach its own code): pending.json
+# is deleted once the new build connects, and its `attempts` counts the starts since the switch.
+function Invoke-PendingRollbackIfStuck {
+  $pendingFile = Join-Path $versionsDir 'pending.json'
+  if (-not (Test-Path $pendingFile)) { return }
+  try { $pending = Get-Content $pendingFile -Raw | ConvertFrom-Json } catch { return }
+  if ([int]$pending.attempts -lt 3 -or -not $pending.previousEntry) { return }
+  Write-Log "[run] build $($pending.buildId) restarted $($pending.attempts) times without connecting; rolling back to $($pending.previousEntry)" $log
+  $prev = @{ buildId = [string]$pending.previousBuildId; entry = [string]$pending.previousEntry } | ConvertTo-Json
+  [System.IO.File]::WriteAllText((Join-Path $versionsDir 'current.json'), $prev, (New-Object System.Text.UTF8Encoding($false)))
+  $fail = @{ buildId = [string]$pending.buildId; reason = "started $($pending.attempts) times without connecting"; at = (Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json
+  [System.IO.File]::WriteAllText((Join-Path $versionsDir 'last-update.json'), $fail, (New-Object System.Text.UTF8Encoding($false)))
+  Remove-Item $pendingFile -Force -ErrorAction SilentlyContinue
+}
+
+# The command line for this launch: the newest installed version when one is recorded and still
+# on disk, else the globally installed binary resolved above.
+function Resolve-Launch {
+  Invoke-PendingRollbackIfStuck
+  $ptr = Get-VersionPointer
+  if ($ptr -and $ptr.entry -and (Test-Path $ptr.entry)) {
+    $node = Get-Command node -ErrorAction SilentlyContinue
+    if ($node) { return @{ exe = $node.Source; pre = @([string]$ptr.entry); label = "version $($ptr.buildId) ($($ptr.entry))" } }
+  }
+  return @{ exe = $exe; pre = @(); label = "installed binary $exe" }
+}
+
+Write-Log "[run] supervisor starting: $exe (board $($cfg.board), name $($cfg.name), CLAUDE_CONFIG_DIR=$($env:CLAUDE_CONFIG_DIR)) ACP_AUTOCONNECT=0 autoUpdate=$([bool]$cfg.autoUpdate)" $log
 
 $delay = 2
 while ($true) {
   $started = Get-Date
+  $launch = Resolve-Launch
+  Write-Log "[run] launching $($launch.label)" $log
+  $exitCode = 0
   try {
     # 2>&1 merges the daemon's stderr so a crash reason reaches the log rather
     # than being discarded; every line is stamped as it arrives.
-    & $exe @argList 2>&1 | ForEach-Object { Write-Log $_ $log }
+    & $launch.exe @($launch.pre) @argList 2>&1 | ForEach-Object { Write-Log $_ $log }
+    $exitCode = $LASTEXITCODE
   } catch {
     Write-Log "[run] daemon threw: $($_.Exception.Message)" $log
+  }
+  if ($exitCode -eq $UpdateExitCode) {
+    # A planned handover to a freshly installed build: no backoff, no crash accounting.
+    Write-Log "[run] daemon exited $UpdateExitCode (self-update); relaunching on the newest installed version" $log
+    $delay = 2
+    Start-Sleep -Seconds 1
+    continue
   }
   $ranFor = [int]((Get-Date) - $started).TotalSeconds
   # A daemon that survived a while was healthy; reset the backoff so a normal
