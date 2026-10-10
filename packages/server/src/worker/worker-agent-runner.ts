@@ -9,6 +9,7 @@
 // buffering/replay is a phase 3 concern. Exit events are queued by the daemon
 // until the socket is back so session finalization is never lost.
 
+import { workerLog } from "./worker-updater.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { resolveAgentHangTimeoutMs, startHangWatchdog } from "../lib/agent-launch-env.js";
@@ -171,7 +172,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   }
 
   function refuseAtCapacity(sessionId: string): void {
-    console.warn(
+    workerLog(
       `[worker] refusing assign: sessionId=${sessionId} would exceed maxConcurrency=${maxConcurrency} (in use: ${occupiedSlots()})`,
     );
     send({ type: "assign_failed", sessionId, error: ASSIGN_REFUSED_AT_CAPACITY });
@@ -200,7 +201,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     try {
       send(message);
     } catch (err) {
-      console.error(`[worker] could not send a ${message.type} message to the board: ${errorMessage(err)}`);
+      workerLog(`[worker] could not send a ${message.type} message to the board: ${errorMessage(err)}`);
     }
   }
 
@@ -313,13 +314,13 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         // down with "[run] daemon threw". Retain the result like any exhausted retry and
         // hand it to the #871 undelivered tracking; the daemon stays up.
         const message = errorMessage(err);
-        console.error(
+        workerLog(
           `[worker] result push path failed unexpectedly (daemon staying up): sessionId=${sessionId}: ${message}`,
         );
         try {
           undelivered.retain(sessionId, pending, { ok: false, attempts: 0, lastError: message });
         } catch (retainErr) {
-          console.error(`[worker] could not retain the unpushed result: sessionId=${sessionId}`, retainErr);
+          workerLog(`[worker] could not retain the unpushed result: sessionId=${sessionId}`, retainErr);
         }
         effectiveExit = exitCode === 0 || exitCode === null ? 1 : exitCode;
       }
@@ -384,7 +385,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       } catch (err) {
         provisioning.delete(sessionId);
         const message = errorMessage(err);
-        console.error(`[worker] repo provisioning failed: sessionId=${sessionId}: ${message}`);
+        workerLog(`[worker] repo provisioning failed: sessionId=${sessionId}: ${message}`);
         safeSend({ type: "assign_failed", sessionId, error: `repo provisioning failed: ${message}` });
       }
     })();
@@ -407,9 +408,9 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     // refusing it: an attestation can be stale, and running the assignment under some
     // other local login is exactly the silent fallback #651 refused remote dispatch to
     // prevent. A rejection reaches the board as a launch failure it can re-place.
-    const resolvedProfile = applyProfileToSpec(specAsSent, { log: (line) => console.log(line) });
+    const resolvedProfile = applyProfileToSpec(specAsSent, { log: (line) => workerLog(line) });
     if (!resolvedProfile.ok) {
-      console.warn(`[worker] refusing assign: sessionId=${sessionId} ${resolvedProfile.error}`);
+      workerLog(`[worker] refusing assign: sessionId=${sessionId} ${resolvedProfile.error}`);
       send({ type: "assign_failed", sessionId, error: resolvedProfile.error });
       return;
     }
@@ -420,7 +421,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     // resolved HERE, against this platform — which is what makes a mixed-OS fleet possible.
     const launch = resolveSpecCommand(spec);
     if (spec.intent) {
-      console.log(
+      workerLog(
         `[worker] resolved launch intent: sessionId=${sessionId} provider=${spec.intent.provider} ` +
         `program=${spec.intent.program} -> ${launch.command} (${launch.source}, shell=${launch.useShell})`,
       );
@@ -459,7 +460,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       return;
     }
     processes.set(sessionId, proc);
-    console.log(`[worker] launched agent: sessionId=${sessionId} pid=${proc.pid} command=${launch.command}`);
+    workerLog(`[worker] launched agent: sessionId=${sessionId} pid=${proc.pid} command=${launch.command}`);
     if (proc.pid) tree.track(sessionId, proc.pid, spec.cwd);
 
     // Every byte of agent output proves liveness, so it resets the silence
@@ -483,7 +484,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     // immediately" case) was never handled anywhere in worker/.
     proc.stdin?.on("error", (err: Error & { code?: string }) => {
       const expected = err.code === "EPIPE" || err.code === "ERR_STREAM_DESTROYED";
-      console.warn(
+      workerLog(
         `[worker] stdin ${err.code ?? "error"} for sessionId=${sessionId}` +
           (expected ? " (agent exited before reading its prompt)" : `: ${err.message}`),
       );
@@ -495,7 +496,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       emitExit(sessionId, 1);
     });
     proc.on("exit", (code) => {
-      console.log(`[worker] agent exited: sessionId=${sessionId} code=${code}`);
+      workerLog(`[worker] agent exited: sessionId=${sessionId} code=${code}`);
       emitExit(sessionId, code);
     });
 
@@ -510,7 +511,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     if (hangTimeoutMs > 0) {
       hangWatchdogs.set(sessionId, startHangWatchdog(`sessionId=${sessionId}`, hangTimeoutMs, () => {
         const seconds = Math.round(hangTimeoutMs / 1000);
-        console.warn(`[worker] hang watchdog fired: sessionId=${sessionId} pid=${proc.pid} — no output for ${seconds}s; killing`);
+        workerLog(`[worker] hang watchdog fired: sessionId=${sessionId} pid=${proc.pid} — no output for ${seconds}s; killing`);
         safeSend({
           type: "event",
           event: {
@@ -537,7 +538,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         proc.stdin?.end((spec.stdinPrompt ?? "") + "\n");
       }
     } catch (err) {
-      console.warn(`[worker] could not write the prompt to sessionId=${sessionId}: ${errorMessage(err)}`);
+      workerLog(`[worker] could not write the prompt to sessionId=${sessionId}: ${errorMessage(err)}`);
     }
     // #900: mirrors the board's own `Boolean(config.keepStdinOpen && !config.suppressStdinPrompt)`
     // (agent-remote.service.ts) — the same rule, recorded on the machine that actually holds
@@ -552,7 +553,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     try {
       return proc.stdin.write(data.endsWith("\n") ? data : data + "\n");
     } catch (err) {
-      console.error(`[worker] input write failed: sessionId=${sessionId}`, err);
+      workerLog(`[worker] input write failed: sessionId=${sessionId}`, err);
       return false;
     }
   }
@@ -571,13 +572,13 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       // Stop during repo provisioning: cancel before the agent is launched.
       closeWatchdog(sessionId);
       if (provisioning.delete(sessionId)) {
-        console.log(`[worker] cancelled provisioning session: sessionId=${sessionId}`);
+        workerLog(`[worker] cancelled provisioning session: sessionId=${sessionId}`);
         emitExit(sessionId, null);
         return true;
       }
       return false;
     }
-    console.log(`[worker] stopping agent: sessionId=${sessionId} pid=${proc.pid}`);
+    workerLog(`[worker] stopping agent: sessionId=${sessionId} pid=${proc.pid}`);
     // #836: through the ONE kill seam (#832/#833) rather than a private
     // `process.platform` branch. What that buys is not reach — see the header note above
     // `assign`'s spawn — but assertability: the platform decision lives inside
@@ -594,7 +595,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     const pid = proc.pid;
     void killProcessTree(pid, { timeout: 5000, signal: "SIGTERM", group: true }).catch((err) => {
       if ((err as NodeJS.ErrnoException)?.code === "ESRCH") return; // already gone
-      console.warn(`[worker] kill failed: sessionId=${sessionId} pid=${pid}`, err);
+      workerLog(`[worker] kill failed: sessionId=${sessionId} pid=${pid}`, err);
     });
     return true;
   }

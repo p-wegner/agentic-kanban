@@ -20,6 +20,7 @@
 // nothing beyond node builtins and the shared protocol types
 // (`worker-cli-isolation.test.ts` enforces it).
 
+import { workerLog } from "./worker-updater.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -99,7 +100,7 @@ export function upsertUndelivered(workRoot: string, record: UndeliveredSessionRe
     const rest = loadUndelivered(workRoot).filter((r) => r.sessionId !== record.sessionId);
     save(workRoot, [...rest, record]);
   } catch (err) {
-    console.warn(
+    workerLog(
       `[worker] could not persist the undelivered-result record for sessionId=${record.sessionId}: ` +
         `${err instanceof Error ? err.message : String(err)} — the checkout is still kept, but a ` +
         `daemon restart will not know about it`,

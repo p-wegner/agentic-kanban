@@ -159,7 +159,8 @@ describe("worker stop() goes through the kill seam (#836)", () => {
   });
 
   it("logs a kill failure but stays quiet when the process was already gone", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // #1351: the runner logs through the worker log sink (stdout by default), not console.warn.
+    const warn = vi.spyOn(console, "log").mockImplementation(() => {});
     const { runner } = collector();
 
     killProcessTree.mockRejectedValueOnce(new Error("EPERM") as never);
@@ -167,7 +168,7 @@ describe("worker stop() goes through the kill seam (#836)", () => {
     await vi.waitFor(() => expect(runner.runningSessionIds()).toEqual(["s1"]));
     runner.stop("s1");
     await vi.waitFor(() =>
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining("kill failed"), expect.anything()),
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("kill failed")),
     );
 
     warn.mockClear();
@@ -177,7 +178,7 @@ describe("worker stop() goes through the kill seam (#836)", () => {
     runner.stop("s1");
     await Promise.resolve();
     await Promise.resolve();
-    expect(warn).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("kill failed"));
 
     runner.stopAll();
   });

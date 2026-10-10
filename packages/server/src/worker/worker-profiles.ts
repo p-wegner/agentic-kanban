@@ -31,6 +31,7 @@
  * entirely (the machine then behaves exactly as a protocol-1 worker: it attests nothing
  * and restricted projects do not reach it).
  */
+import { workerLog } from "./worker-updater.js";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -159,7 +160,7 @@ export function credentialStateOf(configDir: string, nowMs: number): WorkerProfi
 export function createWorkerProfileAttestor(
   options: WorkerProfileAttestorOptions = {},
 ): WorkerProfileAttestor {
-  const log = options.log ?? ((line: string) => console.log(line));
+  const log = options.log ?? ((line: string) => workerLog(line));
   const attested = narrowDeclaredProfiles(discoverLocalProfiles(options.home), options.declared, log);
   const pollable = quotaPollableProfiles(attested);
   const poller = new OAuthQuotaPoller({

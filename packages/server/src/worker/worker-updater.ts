@@ -80,6 +80,25 @@ export function workerLogFileFor(stateFile: string): string {
   return join(dirname(stateFile), "worker.log");
 }
 
+// The ONE process-wide `[worker]` logger (#1351). Runner / repo ops / result push log through
+// `workerLog`, never `console.*`, so their lines reach worker.log too. The daemon installs its
+// tee'd sink at start; until then (and in tests) it is plain stdout.
+let workerLogSink: (line: string) => void = (line) => console.log(line);
+
+export function setWorkerLogSink(sink: ((line: string) => void) | null): void {
+  workerLogSink = sink ?? ((line) => console.log(line));
+}
+
+/** Log one `[worker]` line; extra args (e.g. an Error) are appended to the line. */
+export function workerLog(line: string, ...extra: unknown[]): void {
+  const tail = extra.map((e) => (e instanceof Error ? (e.stack ?? e.message) : String(e))).join(" ");
+  try {
+    workerLogSink(tail ? `${line} ${tail}` : line);
+  } catch {
+    /* logging must never throw into the session path */
+  }
+}
+
 /** Keep one previous generation (`worker.log.1`) once the file passes `maxBytes`. */
 export function rotateWorkerLog(logFile: string, maxBytes = WORKER_LOG_MAX_BYTES): void {
   try {

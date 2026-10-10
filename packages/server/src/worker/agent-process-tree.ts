@@ -2,6 +2,7 @@
 // the Windows kill-on-close job, `--leave-agents` release, and the startup cleanup that kills a
 // previous daemon's leftovers before its checkouts are reaped.
 
+import { workerLog } from "./worker-updater.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { forgetAgent, markAgentsLeftOnPurpose, recordAgent, sweepLeftoverAgents } from "./worker-agent-registry.js";
 import { attachAgentJob, type AgentJob } from "./worker-job-holder.js";
@@ -21,7 +22,7 @@ export function createAgentTreeTracker(workRoot: string): AgentTreeTracker {
   return {
     track(sessionId, pid, cwd) {
       recordAgent(workRoot, { sessionId, pid, cwd, startedAt: new Date().toISOString(), daemonPid: process.pid });
-      const job = attachAgentJob(pid, (line) => console.log(line));
+      const job = attachAgentJob(pid, (line) => workerLog(line));
       if (job) jobs.set(sessionId, job);
     },
     untrack(sessionId) {

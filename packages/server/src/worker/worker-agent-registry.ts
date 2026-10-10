@@ -10,6 +10,7 @@
 // Entries live in `<workRoot>/agents/<sessionId>.json`. A graceful stop with
 // `--leave-agents` marks every live entry `leftOnPurpose` so the sweep leaves it alone.
 
+import { workerLog } from "./worker-updater.js";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { uptime } from "node:os";
 import { join, resolve } from "node:path";
@@ -53,7 +54,7 @@ export function recordAgent(workRoot: string, record: AgentRecord): void {
     mkdirSync(agentsDir(workRoot), { recursive: true });
     writeFileSync(recordPath(workRoot, record.sessionId), JSON.stringify(record));
   } catch (err) {
-    console.warn(`[worker] could not record agent ${record.sessionId}: ${errorMessage(err)}`);
+    workerLog(`[worker] could not record agent ${record.sessionId}: ${errorMessage(err)}`);
   }
 }
 

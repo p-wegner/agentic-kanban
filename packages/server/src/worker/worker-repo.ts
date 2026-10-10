@@ -5,12 +5,13 @@
 // a per-session git worktree out of it. The feature branch starts from
 // origin/<branch> when the board already has it (resume) and from
 // origin/<baseBranch> otherwise. After the agent exits the result is pushed to
-// the board's incoming namespace (refs/kanban/incoming/<branch>) — never to
-// refs/heads/* — and the board fast-forwards the real branch from there.
+// the board's incoming namespace (refs/kanban/incoming/<branch>) Ã¢â‚¬â€ never to
+// refs/heads/* Ã¢â‚¬â€ and the board fast-forwards the real branch from there.
 //
 // Every git call goes through the sanctioned @agentic-kanban/shared git-exec
 // adapter (single-spawn architecture gate).
 
+import { workerLog } from "./worker-updater.js";
 import { mkdirSync, writeFileSync, existsSync, readdirSync, rmSync, appendFileSync } from "node:fs";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { TICKET_CONTEXT_FILENAME } from "@agentic-kanban/shared/lib/ticket-context";
@@ -31,7 +32,7 @@ export function defaultWorkerWorkRoot(): string {
 }
 
 /**
- * The clone/fetch/push URL for a repo transport — WITHOUT the token.
+ * The clone/fetch/push URL for a repo transport Ã¢â‚¬â€ WITHOUT the token.
  *
  * The token used to be embedded (`http://x-token:<token>@host:port/...`), which
  * put it on the `git clone` command line (visible in any process listing) and
@@ -48,7 +49,7 @@ export function composeGitUrl(boardUrl: string, repo: WorkerRepoTransport): stri
 /**
  * Per-invocation git auth: the assignment token as an HTTP Authorization header,
  * injected through git's ENV-based config (`GIT_CONFIG_COUNT`/`_KEY_0`/`_VALUE_0`,
- * git >= 2.31). Env-based rather than `-c http.extraHeader=…` because the latter
+ * git >= 2.31). Env-based rather than `-c http.extraHeader=Ã¢â‚¬Â¦` because the latter
  * would still expose the token in the process's argv, and unlike a URL credential
  * it is never written into the clone's config.
  */
@@ -72,7 +73,7 @@ export interface WorkerCheckout {
  * setup script (#852).
  *
  * The board derives a stack-aware `setup_script` per project at registration (#810) and
- * the assignment carries it — but projects registered before that backfill have a null
+ * the assignment carries it Ã¢â‚¬â€ but projects registered before that backfill have a null
  * column, so the assignment arrives with no script and the worker used to install NOTHING.
  * The dispatched agent then ran `pnpm exec vitest` against a checkout with no linked
  * binaries, burned a turn on `Command "vitest" not found`, and shipped unverified work
@@ -80,7 +81,7 @@ export interface WorkerCheckout {
  *
  * Deliberately Node-only and deliberately tiny: the worker binary is isolated from the
  * board's service layer (`worker-cli-isolation`), so it cannot reuse the full
- * `detectStackProfile` cascade — and Node is the stack where a missing install is silent
+ * `detectStackProfile` cascade Ã¢â‚¬â€ and Node is the stack where a missing install is silent
  * (a JVM/Python agent fails loudly and immediately on a missing build). Non-Node stacks
  * are expected to travel via the assignment's setup script.
  */
@@ -107,7 +108,7 @@ export async function provisionWorkerCheckout(
   repo: WorkerRepoTransport,
   sessionId: string,
   workRoot: string = defaultWorkerWorkRoot(),
-  log: (line: string) => void = (line) => console.log(line),
+  log: (line: string) => void = workerLog,
 ): Promise<WorkerCheckout> {
   // #1334: one line per repo phase, so a remote operator can time a session from the log.
   const phase = async <T>(label: string, run: () => Promise<T>): Promise<T> => {
@@ -132,7 +133,7 @@ export async function provisionWorkerCheckout(
     await phase(`clone ${repo.projectId}`, () =>
       gitExecOrThrow(["clone", gitUrl, cacheDir], { timeout: 10 * 60 * 1000, env: authEnv }));
   } else {
-    // A token is per-assignment — always fetch with the CURRENT credential.
+    // A token is per-assignment Ã¢â‚¬â€ always fetch with the CURRENT credential.
     await phase(`fetch ${repo.projectId}`, () =>
       gitExecOrThrow(["fetch", gitUrl, "+refs/heads/*:refs/remotes/origin/*", "--prune"], {
         cwd: cacheDir,
@@ -141,14 +142,14 @@ export async function provisionWorkerCheckout(
       }));
   }
 
-  // Stale worktree from a crashed prior session with the same id — remove it.
+  // Stale worktree from a crashed prior session with the same id Ã¢â‚¬â€ remove it.
   if (existsSync(checkoutDir)) {
     await gitExec(["worktree", "remove", "--force", checkoutDir], { cwd: cacheDir });
   }
   // A prior session for the SAME branch holds the branch name; a branch can be
   // checked out in at most one worktree, so reuse-or-recreate via a session-
   // scoped branch would diverge from the board's branch name (the push target
-  // is a ref, so the LOCAL branch name is free) — use a detached-then-branch
+  // is a ref, so the LOCAL branch name is free) Ã¢â‚¬â€ use a detached-then-branch
   // form: check out the start point detached, then move to a session-local
   // branch name that can never collide.
   const localBranch = `kanban/${sessionId}`;
@@ -179,13 +180,13 @@ export async function provisionWorkerCheckout(
     if (!isBareFileName(file.name)) {
       // Defence in depth: the parser already drops these, but this write is what would
       // escape the checkout, so it refuses on its own account too.
-      console.warn(`[worker] refusing context file with a non-bare name: ${file.name}`);
+      workerLog(`[worker] refusing context file with a non-bare name: ${file.name}`);
       continue;
     }
     writeFileSync(join(checkoutDir, file.name), file.content, "utf-8");
   }
 
-  // #852: an assignment with no setup script used to mean NO install at all — the agent
+  // #852: an assignment with no setup script used to mean NO install at all Ã¢â‚¬â€ the agent
   // then discovered the missing dependencies by failing (`Command "vitest" not found`)
   // and shipped unverified work with exit 0. Honor the assignment's script when it
   // travels; otherwise fall back to a marker-derived install so the agent can verify
@@ -207,7 +208,7 @@ export async function provisionWorkerCheckout(
       const detail = (result.stderr || result.stdout).slice(-400);
       throw new Error(
         result.timedOut
-          ? `setup (${setupCommand}) timed out — dependencies are incomplete, the agent could not verify its work`
+          ? `setup (${setupCommand}) timed out Ã¢â‚¬â€ dependencies are incomplete, the agent could not verify its work`
           : `setup script failed (exit ${result.exitCode}): ${detail}`,
       );
     }
@@ -225,17 +226,17 @@ export async function provisionWorkerCheckout(
  * A warning rather than a throw: a root manifest whose few deps carry no bin entries
  * legitimately gets no `.bin`, and failing the whole dispatch on that heuristic would
  * permanently block such projects. Instead the note is appended to the ticket-context
- * file the agent reads at session start, so it is TOLD it may be unable to verify —
- * and told to say so — instead of discovering it by failure.
+ * file the agent reads at session start, so it is TOLD it may be unable to verify Ã¢â‚¬â€
+ * and told to say so Ã¢â‚¬â€ instead of discovering it by failure.
  */
 function warnIfBinariesUnlinked(checkoutDir: string, setupCommand: string): void {
   if (!existsSync(join(checkoutDir, "package.json"))) return;
   if (!existsSync(join(checkoutDir, "node_modules"))) return;
   if (existsSync(join(checkoutDir, "node_modules", ".bin"))) return;
   const warning =
-    `setup (${setupCommand}) completed but node_modules/.bin was not created — ` +
+    `setup (${setupCommand}) completed but node_modules/.bin was not created Ã¢â‚¬â€ ` +
     `package binaries (test runners, linters) may not resolve in this checkout`;
-  console.warn(`[worker] ${warning}`);
+  workerLog(`[worker] ${warning}`);
   const contextFile = join(checkoutDir, TICKET_CONTEXT_FILENAME);
   if (!existsSync(contextFile)) return;
   try {
@@ -243,12 +244,12 @@ function warnIfBinariesUnlinked(checkoutDir: string, setupCommand: string): void
       contextFile,
       `\n\n## Worker checkout warning (#852)\n\n` +
         `${warning}. If you cannot run the project's tests here, say so explicitly in your ` +
-        `final summary and commit message ("unverified") instead of finishing silently — ` +
+        `final summary and commit message ("unverified") instead of finishing silently Ã¢â‚¬â€ ` +
         `the board re-verifies before merge, but it must know this work was not verified locally.\n`,
       "utf-8",
     );
   } catch (err) {
-    console.warn(`[worker] could not append the .bin warning to ${contextFile}: ${String(err)}`);
+    workerLog(`[worker] could not append the .bin warning to ${contextFile}: ${String(err)}`);
   }
 }
 
@@ -281,7 +282,7 @@ export interface WorkerRepoOpOutcome {
 /**
  * The URL + auth for a mid-session operation, built from the FRESH per-request token
  * (#783). The assignment's own token is expiring and a board restart invalidates it
- * (#775), so the request's token is what travels — `branch`/`incomingRef` come with it so
+ * (#775), so the request's token is what travels Ã¢â‚¬â€ `branch`/`incomingRef` come with it so
  * a stale stored transport can never redirect the operation.
  */
 function opTransport(auth: WorkerRepoOpAuth): WorkerRepoTransport {
@@ -290,7 +291,7 @@ function opTransport(auth: WorkerRepoOpAuth): WorkerRepoTransport {
     gitPort: auth.gitPort,
     gitToken: auth.gitToken,
     branch: auth.branch,
-    // Never used by a mid-session operation — a sync is relative to the session's own
+    // Never used by a mid-session operation Ã¢â‚¬â€ a sync is relative to the session's own
     // branch and a push aims at the incoming ref. Present only to satisfy the shape.
     baseBranch: auth.branch,
     incomingRef: auth.incomingRef,
@@ -302,7 +303,7 @@ function opTransport(auth: WorkerRepoOpAuth): WorkerRepoTransport {
  * (#783).
  *
  * Between two turns of a remote session the board may have rebased the branch
- * (`update-base`), landed a fix-and-merge commit, or committed a review fix — all of which
+ * (`update-base`), landed a fix-and-merge commit, or committed a review fix Ã¢â‚¬â€ all of which
  * exist only board-side. Without this, the second turn runs against the tree the session
  * cloned and can rebuild on the wrong base.
  *
@@ -354,7 +355,7 @@ export async function syncWorkerCheckout(
       status: "diverged",
       error:
         `the worker checkout (${head.stdout.trim().slice(0, 8)}) is not an ancestor of the board's ` +
-        `${auth.branch} (${sha.slice(0, 8)}); refusing to fast-forward — this needs a human`,
+        `${auth.branch} (${sha.slice(0, 8)}); refusing to fast-forward Ã¢â‚¬â€ this needs a human`,
     };
   }
   const merged = await gitExec(["merge", "--ff-only", sha], { cwd: checkout.cwd });
@@ -367,7 +368,7 @@ export async function syncWorkerCheckout(
         `has not committed): ${(merged.stderr || merged.stdout).trim().slice(-400)}`,
     };
   }
-  console.log(`[worker] checkout fast-forwarded to ${sha.slice(0, 8)} for ${auth.branch}`);
+  workerLog(`[worker] checkout fast-forwarded to ${sha.slice(0, 8)} for ${auth.branch}`);
   return { ok: true, status: "updated", sha };
 }
 
@@ -377,8 +378,8 @@ export async function syncWorkerCheckout(
  *
  * Cheap and non-disturbing by construction: it reads HEAD and pushes, and touches neither
  * the index nor the working tree, so the running agent cannot observe it. Force is correct
- * for the same reason it is in {@link pushWorkerResult} — the incoming namespace is a
- * board-owned staging slot for exactly this branch — and the BOARD's landing is still
+ * for the same reason it is in {@link pushWorkerResult} Ã¢â‚¬â€ the incoming namespace is a
+ * board-owned staging slot for exactly this branch Ã¢â‚¬â€ and the BOARD's landing is still
  * fast-forward only, so a force here can never rewrite history the board has accepted.
  *
  * Only COMMITTED work travels. The worker will not commit on the agent's behalf, so a
@@ -414,14 +415,14 @@ export async function pushWorkerHead(
  *
  * `git worktree remove` can leave the directory behind holding only the `.codex/skills`
  * link/shell `writeAgentSkillFile` materializes (#1320), so the directory itself is
- * removed afterwards — one leaked shell per session otherwise, reaped only at next boot.
+ * removed afterwards Ã¢â‚¬â€ one leaked shell per session otherwise, reaped only at next boot.
  */
 export async function cleanupWorkerCheckout(checkout: WorkerCheckout): Promise<void> {
   await gitExec(["worktree", "remove", "--force", checkout.cwd], { cwd: checkout.cacheDir });
   try {
     rmSync(checkout.cwd, { recursive: true, force: true });
   } catch (err) {
-    console.warn(`[worker] could not remove checkout directory ${checkout.cwd}: ${String(err)}`);
+    workerLog(`[worker] could not remove checkout directory ${checkout.cwd}: ${String(err)}`);
   }
   // #1322: the checkout dir is named for the session id; drop its `kanban/<sessionId>` branch
   // (git refuses while the worktree is registered, hence after the remove + prune).
@@ -430,7 +431,7 @@ export async function cleanupWorkerCheckout(checkout: WorkerCheckout): Promise<v
 }
 
 /**
- * #1322: delete `kanban/*` branches in a cached clone that no worktree holds — the
+ * #1322: delete `kanban/*` branches in a cached clone that no worktree holds Ã¢â‚¬â€ the
  * leftovers of sessions that ended before branch deletion existed. A branch checked out
  * in a live worktree is skipped (git would refuse anyway).
  */
@@ -474,14 +475,14 @@ export interface ReapCheckoutsReport {
 }
 
 export interface ReapCheckoutsOptions {
-  /** Session ids (directory names) whose agent THIS daemon owns — never reaped. */
+  /** Session ids (directory names) whose agent THIS daemon owns Ã¢â‚¬â€ never reaped. */
   owned?: ReadonlySet<string>;
   /** `--leave-agents`: report registered ownerless checkouts instead of removing them. */
   leaveAgents?: boolean;
 }
 
 /**
- * #1321: remove a dead session's checkout that git still has registered —
+ * #1321: remove a dead session's checkout that git still has registered Ã¢â‚¬â€
  * `worktree remove --force`, delete `kanban/<sessionId>`, `worktree prune`.
  */
 async function reapRegisteredCheckout(
@@ -513,11 +514,11 @@ async function reapRegisteredCheckout(
  * registration is gone (#850).
  *
  * A daemon stopped, disconnected, or crashed mid-session leaves its per-session
- * checkout on disk while `git worktree` forgets it — nothing else in the worker
+ * checkout on disk while `git worktree` forgets it Ã¢â‚¬â€ nothing else in the worker
  * ever revisits `checkouts/`, so those directories (each a full clone's worth of
  * files) accumulate forever. A checkout is orphaned when its absolute path does
  * not appear in `git worktree list --porcelain` for ANY of this machine's cached
- * clones under `repos/` — including when the checkout's own project cache is
+ * clones under `repos/` Ã¢â‚¬â€ including when the checkout's own project cache is
  * itself gone, which is exactly the "git no longer knows about it" state this
  * ticket reports.
  *
@@ -538,7 +539,7 @@ export async function reapOrphanedCheckouts(
       if (e.isDirectory()) await sweepUnheldSessionBranches(join(reposDir, e.name), log, report);
     }
   } catch {
-    // no repos directory — nothing to sweep
+    // no repos directory Ã¢â‚¬â€ nothing to sweep
   }
   return report;
 }
@@ -558,7 +559,7 @@ async function reapCheckoutDirs(
       .filter((e) => e.isDirectory())
       .map((e) => e.name);
   } catch {
-    return report; // no checkouts directory yet — nothing to scan
+    return report; // no checkouts directory yet Ã¢â‚¬â€ nothing to scan
   }
   report.scanned = checkoutNames.length;
   if (checkoutNames.length === 0) return report;
@@ -575,7 +576,7 @@ async function reapCheckoutDirs(
   const known = new Set<string>();
   for (const cacheDir of projectDirs) {
     const listed = await gitExec(["worktree", "list", "--porcelain"], { cwd: cacheDir });
-    if (!execSucceeded(listed)) continue; // corrupt/missing cache — its checkouts fall through as orphaned
+    if (!execSucceeded(listed)) continue; // corrupt/missing cache Ã¢â‚¬â€ its checkouts fall through as orphaned
     for (const line of listed.stdout.split("\n")) {
       if (line.startsWith("worktree ")) known.add(resolve(line.slice("worktree ".length).trim()));
     }
@@ -586,7 +587,7 @@ async function reapCheckoutDirs(
     if (known.has(resolve(dir))) {
       // #1321: still registered, but no agent of THIS daemon owns it (a daemon owns its
       // checkouts only after it provisions them, and this runs before any provisioning),
-      // so it is a dead session's — a crash leaves the worktree registered.
+      // so it is a dead session's Ã¢â‚¬â€ a crash leaves the worktree registered.
       if (opts.owned?.has(name)) continue;
       if (opts.leaveAgents) {
         report.stranded.push(dir);
