@@ -1,16 +1,23 @@
+// @gate:always-run always - reads worker/*.ts and cli/commands/worker-*.ts as text, outside its import graph.
 // #1366: the standalone worker binary prints to a Windows PowerShell 5.1 console (OEM codepage), where
 // an em dash renders as mojibake. Every STRING the worker modules contain must be ASCII; comments
 // are not output and are exempt.
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import ts from "typescript";
+import { walkPackageSources } from "../../../shared/__tests__/helpers/guard-scan.js";
 
-// import.meta.glob keeps the scanned modules in this suite's import graph, so a change to any of
-// them selects this guard without an always-run marker or a private directory walker.
-const WORKER_SOURCES = import.meta.glob(["../worker/*.ts", "../cli/commands/worker-*.ts"], {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
+const SRC = path.resolve(import.meta.dirname, "..");
+const isWorkerSource = (abs: string): boolean => {
+  const rel = path.relative(SRC, abs).split(path.sep).join("/");
+  return /^worker\/[^/]+\.ts$/.test(rel) || /^cli\/commands\/worker-[^/]+\.ts$/.test(rel);
+};
+const WORKER_SOURCES: Record<string, string> = Object.fromEntries(
+  walkPackageSources(SRC)
+    .filter(isWorkerSource)
+    .map((abs) => [path.relative(SRC, abs).split(path.sep).join("/"), readFileSync(abs, "utf-8")]),
+);
 
 const workerModules = (): string[] => Object.keys(WORKER_SOURCES);
 /** Non-ASCII characters inside string/template literals (comments are not nodes, so never visited). */
