@@ -41,8 +41,7 @@ import { createWorkerSessionRegistry } from "./worker-session-registry.js";
 import { resolveSpecCommand } from "./worker-command-resolver.js";
 import { applyProfileToSpec } from "./worker-profiles.js";
 import { FLEET_MCP_TOKEN_ENV_VAR } from "@agentic-kanban/shared/lib/worker-protocol";
-import { forgetAgent, markAgentsLeftOnPurpose, recordAgent } from "./worker-agent-registry.js";
-import { attachAgentJob, type AgentJob } from "./worker-job-holder.js";
+import { createAgentTreeTracker } from "./agent-process-tree.js";
 
 export type SendToBoard = (message: WorkerToBoardMessage) => void;
 
@@ -149,8 +148,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   /** Per-session silence watchdogs; reset on every byte of agent output. */
   const hangWatchdogs = new Map<string, { reset(): void; close(): void }>();
   const maxConcurrency = options.maxConcurrency && options.maxConcurrency > 0 ? options.maxConcurrency : 1;
-  /** Windows kill-on-close job helpers by session (#1336). */
-  const jobs = new Map<string, AgentJob>();
+  const tree = createAgentTreeTracker(workRoot); // #1336
 
   /**
    * Slots this machine currently holds. A provisioning session counts: it is already
@@ -179,11 +177,8 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   }
 
   function closeWatchdog(sessionId: string): void {
-    const watchdog = hangWatchdogs.get(sessionId);
-    if (watchdog) {
-      watchdog.close();
-      hangWatchdogs.delete(sessionId);
-    }
+    hangWatchdogs.get(sessionId)?.close();
+    hangWatchdogs.delete(sessionId);
   }
 
   /** Sleep that never keeps the event loop alive on its own. */
@@ -281,8 +276,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     provisioning.delete(sessionId);
     stdinOpen.delete(sessionId);
     closeWatchdog(sessionId);
-    jobs.delete(sessionId);
-    forgetAgent(workRoot, sessionId);
+    tree.untrack(sessionId);
     const pending = checkouts.get(sessionId);
     if (!pending) {
       // safeSend, not send: this runs synchronously on the child's `exit` event, where a
@@ -445,7 +439,6 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     // #1336: on POSIX EVERY agent now leads its own process group (not just shell launches),
     // so a recorded pgid names the whole tree for the next daemon's startup sweep. On win32
     // the equivalent is the kill-on-close Job Object attached after the spawn below.
-    const detach = process.platform !== "win32";
     let proc: ChildProcess;
     try {
       proc = spawn(launch.command, spec.args, {
@@ -456,7 +449,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         // provider config dir must stay this machine's (decision 012).
         env: { ...process.env, ...spec.env },
         shell: launch.useShell,
-        detached: detach,
+        detached: process.platform !== "win32",
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -466,17 +459,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     }
     processes.set(sessionId, proc);
     console.log(`[worker] launched agent: sessionId=${sessionId} pid=${proc.pid} command=${launch.command}`);
-    if (proc.pid) {
-      recordAgent(workRoot, {
-        sessionId,
-        pid: proc.pid,
-        cwd: spec.cwd,
-        startedAt: new Date().toISOString(),
-        daemonPid: process.pid,
-      });
-      const job = attachAgentJob(proc.pid, (line) => console.log(line));
-      if (job) jobs.set(sessionId, job);
-    }
+    if (proc.pid) tree.track(sessionId, proc.pid, spec.cwd);
 
     // Every byte of agent output proves liveness, so it resets the silence
     // watchdog armed below.
@@ -619,17 +602,8 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     for (const sessionId of [...processes.keys(), ...provisioning]) stop(sessionId);
   }
 
-  /**
-   * `--leave-agents` (#1336): the agent trees survive this daemon ON PURPOSE. Clears each
-   * Windows job's kill-on-close flag and marks the registry entries so the next daemon's
-   * startup sweep leaves them alone.
-   */
-  function releaseAgents(): void {
-    const ids = [...processes.keys()];
-    for (const job of jobs.values()) job.release();
-    jobs.clear();
-    markAgentsLeftOnPurpose(workRoot, ids);
-  }
+  /** `--leave-agents` (#1336): the agent trees survive this daemon ON PURPOSE. */
+  const releaseAgents = (): void => tree.release([...processes.keys()]);
 
   function runningSessionIds(): string[] {
     return [...new Set([...processes.keys(), ...provisioning])];

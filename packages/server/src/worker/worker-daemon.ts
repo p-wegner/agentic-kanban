@@ -48,7 +48,7 @@ import {
 import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
 import { createWorkerAgentRunner } from "./worker-agent-runner.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
-import { sweepLeftoverAgents } from "./worker-agent-registry.js";
+import { cleanUpBeforeStart } from "./agent-process-tree.js";
 import { attestProviderAuth } from "../cli/commands/worker-doctor.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -461,21 +461,8 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // disconnected, or crashed mid-session) is reaped before anything else runs, so a
   // long-lived worker never accumulates whole repo clones from abandoned sessions.
   // Best-effort — a scan failure must never block pairing/connecting.
-  // #1336: kill what a previous daemon's agents left running (its children outlive it) BEFORE
-  // their checkouts are reaped, and log each kill. Agents left on purpose are skipped.
-  try {
-    await sweepLeftoverAgents(opts.workRoot ?? defaultWorkerWorkRoot(), log);
-  } catch (err) {
-    log(`[worker] leftover-agent sweep failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
-  }
-  try {
-    const reaped = await reapOrphanedCheckouts(opts.workRoot ?? defaultWorkerWorkRoot(), log);
-    if (reaped.reaped.length > 0) {
-      log(`[worker] startup cleanup: reaped ${reaped.reaped.length} orphaned checkout(s) of ${reaped.scanned} scanned`);
-    }
-  } catch (err) {
-    log(`[worker] startup checkout cleanup failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
-  }
+  // #1336: a previous daemon's leftover agent trees are killed first (agent-process-tree.ts).
+  await cleanUpBeforeStart(opts.workRoot ?? defaultWorkerWorkRoot(), log);
 
   let identity = loadState(stateFile).boards[boardUrl];
   if (!identity) {
