@@ -5,9 +5,9 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
 
 ## 2026-10-10 — board drained: #1312, #1313, #1314 Done
 
-**State.** Stable board restarted after a reboot (`pnpm stable:start`, smoke passed) and still
-runs `stable-20261006`; `master` carries #1312 and #1313 on top and is NOT promoted and NOT
-pushed. Board: no open agentic-kanban ticket.
+**State.** Stable board runs `stable-20261010` (`cf5f7bda2`, full green sweep of `rc/20261010`,
+promoted 2026-10-10, smoke passed), carrying #1312, #1313 and #1314. `master` is NOT pushed.
+Board: no open agentic-kanban ticket.
 
 - **#1312 merged** (lean Claude builder profile). Its first gate run had died with exit 130;
   the re-run was first refused by a dirty main checkout, then went green.
@@ -18,7 +18,7 @@ pushed. Board: no open agentic-kanban ticket.
 - **#1314 (direct fix)** `workspace start --project <name>` sent the name as `projectId`; now
   resolved via `resolveProjectIdArg`. Check: a name resolves to the id, an unknown name errors.
 
-**Next:** `pnpm promote --dry-run`, then promote; scrub and push master.
+**Next:** scrub against the confidential-terms list and push master.
 
 ## 2026-10-06 — lean builders measured; project hooks were failing open in builders
 
