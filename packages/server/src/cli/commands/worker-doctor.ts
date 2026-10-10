@@ -437,6 +437,7 @@ async function checkGit(): Promise<DoctorCheck> {
 import { checkNodeVersion } from "./worker-doctor-node-check.js";
 export { MIN_SUPPORTED_NODE_MAJOR, checkNodeVersion } from "./worker-doctor-node-check.js";
 import { checkGlobalLauncher, checkWorkerBuild } from "./worker-doctor-build-check.js";
+import { checkTailnetFirewall } from "./worker-doctor-firewall-check.js";
 // #875's env-aware auth-dir resolution lives in its own module for the same reason.
 import { resolveProviderAuthDir } from "./worker-doctor-provider-auth.js";
 
@@ -654,10 +655,19 @@ async function checkBoardListeners(boardUrl: string): Promise<DoctorCheck[]> {
     const res = await fetch(`${boardUrl}/api/health`);
     if (!res.ok) return [];
     const h = (await res.json()) as { fleetListener?: HealthListenerState; gitTransport?: HealthListenerState };
-    return [
+    const listenerChecks = [
       listenerStateCheck("fleet listener", h.fleetListener),
       listenerStateCheck("git transport listener", h.gitTransport),
     ].filter((c): c is DoctorCheck => c !== null);
+    // #1326: a tailnet-bound listener on Windows needs a tailnet-scoped inbound firewall rule.
+    const endpoints = [
+      { label: "fleet", s: h.fleetListener },
+      { label: "git", s: h.gitTransport },
+    ]
+      .filter((e) => e.s?.status === "bound")
+      .map((e) => ({ label: e.label, host: e.s?.host, port: e.s?.port }));
+    const firewall = await checkTailnetFirewall(endpoints);
+    return [...listenerChecks, ...firewall];
   } catch {
     return [];
   }
