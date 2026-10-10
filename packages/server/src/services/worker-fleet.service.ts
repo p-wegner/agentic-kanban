@@ -773,6 +773,68 @@ export async function projectCanDispatch(params: {
   }
 }
 
+/** Why a strict launch is being HELD rather than failed (#1347). */
+export type StrictHoldReason = "worker_updating" | "worker_reconnecting";
+
+/**
+ * The verdict on a STRICT-dispatch launch BEFORE a session row exists (#1347).
+ *
+ * - `proceed`: not a strict project, or an eligible worker exists — placement decides.
+ * - `hold`: nobody is eligible NOW, but a worker that would be (provider + labels match, not
+ *   at capacity) is draining for a self-update or is reconnecting inside its heartbeat grace
+ *   window. The launch waits for it instead of failing.
+ * - `refuse`: nobody is eligible and nobody is about to be — the strict failure, raised
+ *   before a host session row is ever written.
+ */
+export type StrictLaunchReadiness =
+  | { kind: "proceed" }
+  | { kind: "hold"; reason: StrictHoldReason; workerId: string }
+  | { kind: "refuse"; reason: string };
+
+export async function checkStrictLaunchReadiness(params: {
+  database: Database;
+  projectId: string;
+  providerName: ProviderName;
+  now?: string;
+  nowMs?: number;
+}): Promise<StrictLaunchReadiness> {
+  const { database, projectId, providerName, now, nowMs } = params;
+  try {
+    if ((await getPreferenceValue(workerDispatchPrefKey(projectId), database)) !== "true") return { kind: "proceed" };
+    if ((await getPreferenceValue(workerStrictPrefKey(projectId), database)) !== "true") return { kind: "proceed" };
+    const fleet = getWorkerFleet(database);
+    const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
+    const views = await fleet.registry.listWorkersView(now);
+    const eligible = filterEligibleWorkers(fleet, views, providerName, requiredLabels, nowMs);
+    if (eligible.length > 0) return { kind: "proceed" };
+    const wouldBeEligible = views.filter((w) => {
+      if (w.providers) {
+        try {
+          const list = JSON.parse(w.providers) as string[];
+          if (list.length > 0 && !list.includes(providerName)) return false;
+        } catch { /* unparseable = any */ }
+      }
+      const labels = parseLabels(w.labels);
+      if (!requiredLabels.every((required) => labels.includes(required))) return false;
+      return fleet.connections.assignedSessionIds(w.id, nowMs).length < w.maxConcurrency;
+    });
+    // Draining wins over reconnecting: a draining worker's daemon restarts, so the reconnect
+    // that follows is part of the same update and the better thing to tell the operator.
+    const updating = wouldBeEligible.find((w) => w.effectiveStatus === "draining");
+    if (updating) return { kind: "hold", reason: "worker_updating", workerId: updating.id };
+    // `online` (a fresh heartbeat, so inside the grace window) with no live socket.
+    const reconnecting = wouldBeEligible.find(
+      (w) => w.effectiveStatus === "online" && !fleet.connections.isConnected(w.id),
+    );
+    if (reconnecting) return { kind: "hold", reason: "worker_reconnecting", workerId: reconnecting.id };
+    const detail = requiredLabels.length > 0 ? ` with labels [${requiredLabels.join(",")}]` : "";
+    return { kind: "refuse", reason: `no eligible ${providerName} worker${detail} and worker dispatch is strict for project ${projectId}` };
+  } catch (err) {
+    console.error(`[worker-fleet] strict launch readiness check failed; leaving it to placement`, err);
+    return { kind: "proceed" };
+  }
+}
+
 /**
  * Can this project's fleet absorb the overflow from a SATURATED host right now (#908)?
  *

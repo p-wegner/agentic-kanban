@@ -345,25 +345,19 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
       recovered++;
     } catch (err) {
       const message = errorMessage(err);
+      // #1347: a strict-dispatch refusal says nothing about THESE commits — it is the fleet
+      // that is unavailable. Counting it against the preflight budget would eventually block
+      // the workspace for good; leave it untouched so the first tick with an eligible worker
+      // retries it.
+      if ((err as { data?: { code?: string } } | null)?.data?.code === "NO_AVAILABLE_WORKER") {
+        console.warn(`[reconcile] stranded workspace ${c.wsId} waits for an eligible worker (strict dispatch): ${message}`);
+        continue;
+      }
       console.warn(`[reconcile] failed to recover stranded workspace ${c.wsId}:`, message);
-      // #283 — remember the failure so the next cycle does not repeat it blindly.
-      signature ??= await computePreflightSignature(c.workingDir, c.baseBranch, gitService);
-      const failures = (c.preflightSignature === signature ? priorFailures : 0) + 1;
-      const exhausted = failures >= MAX_REVIEW_PREFLIGHT_ATTEMPTS;
-      // The old inline write also bumped `workspaces.updatedAt` because it was one `set({...})`.
-      // Kept as a separate statement rather than dropped: nothing in this repo asserts it, but
-      // `updatedAt` is read as an activity signal elsewhere, and an extraction is the wrong
-      // place to change what the board believes about a workspace's last activity.
-      await database.update(workspaces).set({ updatedAt: new Date().toISOString() })
-        .where(eq(workspaces.id, c.wsId)).catch(() => {});
-      await setReviewPreflightBlock(c.wsId, {
-        failures,
-        error: message.slice(0, 2000),
-        signature,
-        blockedAt: exhausted ? new Date().toISOString() : null,
-      }, database).catch((writeErr) => {
-        console.warn(`[reconcile] could not persist review-preflight failure for ${c.wsId}:`, writeErr instanceof Error ? writeErr.message : writeErr);
-      });
+      const { failures, exhausted, signature: failedSignature } = await persistPreflightFailure(
+        { database, gitService, candidate: c, signature, priorFailures, message },
+      );
+      signature = failedSignature;
       if (exhausted) {
         blocked++;
         console.warn(
@@ -383,6 +377,36 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
   if (recovered > 0) console.log(`[reconcile] recovered ${recovered} stranded In-Review workspace(s)`);
   if (blocked > 0) console.log(`[reconcile] ${blocked} stranded workspace(s) blocked on an unresolvable review preflight — not retried`);
   return recovered;
+}
+
+/** #283 — remember a failed review recovery so the next cycle does not repeat it blindly. */
+async function persistPreflightFailure(args: {
+  database: Database;
+  gitService: typeof realGitService;
+  candidate: { wsId: string; workingDir: string | null; baseBranch: string | null; preflightSignature: string | null };
+  signature: string | null;
+  priorFailures: number;
+  message: string;
+}): Promise<{ failures: number; exhausted: boolean; signature: string | null }> {
+  const { database, gitService, candidate: c, priorFailures, message } = args;
+  const signature = args.signature ?? await computePreflightSignature(c.workingDir!, c.baseBranch!, gitService);
+  const failures = (c.preflightSignature === signature ? priorFailures : 0) + 1;
+  const exhausted = failures >= MAX_REVIEW_PREFLIGHT_ATTEMPTS;
+  // The old inline write also bumped `workspaces.updatedAt` because it was one `set({...})`.
+  // Kept as a separate statement rather than dropped: `updatedAt` is read as an activity
+  // signal elsewhere, and an extraction is the wrong place to change what the board believes
+  // about a workspace's last activity.
+  await database.update(workspaces).set({ updatedAt: new Date().toISOString() })
+    .where(eq(workspaces.id, c.wsId)).catch(() => {});
+  await setReviewPreflightBlock(c.wsId, {
+    failures,
+    error: message.slice(0, 2000),
+    signature,
+    blockedAt: exhausted ? new Date().toISOString() : null,
+  }, database).catch((writeErr) => {
+    console.warn(`[reconcile] could not persist review-preflight failure for ${c.wsId}:`, writeErr instanceof Error ? writeErr.message : writeErr);
+  });
+  return { failures, exhausted, signature };
 }
 
 const DEFAULT_INTERVAL_MS = 60_000;

@@ -13,6 +13,9 @@ import { updateSessionPlacementReason } from "../../repositories/placement-obser
 import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
 import { WorkspaceError } from "../workspace-internals.js";
 
+// #1347: the strict-dispatch hold runs just before placement; re-exported so the lifecycle imports one module.
+export { awaitStrictLaunchWorker } from "./strict-launch-hold.js";
+
 /**
  * #801 — the recording seam for "why did THAT session run on the host".
  *
