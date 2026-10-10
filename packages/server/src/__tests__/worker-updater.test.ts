@@ -95,6 +95,24 @@ describe("build identity + relaunch argv", () => {
     expect(exit).toHaveBeenCalledWith(0);
   });
 
+  it("unsupervised with a log file: stdout/stderr are the file, not ignore (#1340)", () => {
+    const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+    const openLog = vi.fn(() => 42);
+    relaunchWorker("/v/new/bin/worker.js", {
+      argv: ["start"],
+      execPath: "node",
+      supervised: false,
+      spawnImpl: spawnImpl as never,
+      exit: vi.fn(),
+      logFile: "/home/worker.log",
+      openLog,
+    });
+    expect(openLog).toHaveBeenCalledWith("/home/worker.log");
+    const opts = (spawnImpl.mock.calls[0] as unknown as [string, string[], { stdio: unknown; env: NodeJS.ProcessEnv }])[2];
+    expect(opts.stdio).toEqual(["ignore", 42, 42]);
+    expect(opts.env.KANBAN_WORKER_LOG_INHERITED).toBe("1");
+  });
+
   it("supervised: exits with the dedicated code and spawns nothing", () => {
     const spawnImpl = vi.fn();
     const exit = vi.fn();

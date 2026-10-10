@@ -635,7 +635,7 @@ export async function runPreLockGate(args: {
         //
         // Fire-and-forget: it must never delay or fail this gate — the withhold below stands
         // either way, and the fresh verdict (if it runs) lands for the NEXT gate.
-        if (baseHealth.health && !isBaseHealthAnswer(baseHealth.health.outcome)) {
+        if (baseHealth.health && (baseHealth.stale || !isBaseHealthAnswer(baseHealth.health.outcome))) {
           console.log(
             `[workspace-merge] base health for project ${projectId} is a non-answer `
               + `('${baseHealth.health.outcome}') — requesting a fresh probe if due (#935)`,
