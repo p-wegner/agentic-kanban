@@ -120,7 +120,7 @@ foreach ($spec in @(@{ Kind = "fleet"; Port = $ports.Fleet }, @{ Kind = "git"; P
     Profile       = "Any"
   }
   if ($ts) { $ruleArgs.InterfaceAlias = $ts.Name }
-  New-NetFirewallRule @args | Out-Null
+  New-NetFirewallRule @ruleArgs | Out-Null
   Write-Host "Added '$($ruleArgs.DisplayName)' (remote $TailnetRange$(if ($ts) { ", interface $($ts.Name)" }))"
 }
 if (-not $ts) { Write-Host "No Tailscale interface found; rules are restricted by remote address only." }
