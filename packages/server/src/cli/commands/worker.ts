@@ -10,6 +10,7 @@ import {
   type WorkerDaemonHandle,
 } from "../../worker/worker-daemon.js";
 import { isSupervised, relaunchWorker } from "../../worker/worker-updater.js";
+import { resolveDelegation, runDelegated } from "../../worker/worker-delegate.js";
 import type { WorkerUpdateReport } from "../../lib/worker-update.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "../../worker/worker-repo.js";
 import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
@@ -377,10 +378,22 @@ interface WorkerStartOptions {
   sharesFilesystem?: boolean;
   leaveAgents?: boolean;
   autoUpdate?: boolean;
+  /** commander's `--no-delegate` negation: false when the flag was passed (#1346). */
+  delegate?: boolean;
   drainTimeout?: number;
 }
 
 async function runWorkerStart(options: WorkerStartOptions): Promise<void> {
+  // #1346: a global install that a self-update has left behind hands over to the current build.
+  const delegateTo = resolveDelegation({
+    stateFile: options.stateFile ?? defaultWorkerStateFile(),
+    runningEntry: resolveWorkerEntry(),
+    noDelegate: options.delegate === false,
+  });
+  if (delegateTo) {
+    const code = await runDelegated(delegateTo, process.argv.slice(2));
+    if (code >= 0) process.exit(code);
+  }
   try {
     const labels = splitList(options.labels) ?? [];
     if (options.sharesFilesystem && !labels.includes(SHARES_FILESYSTEM_LABEL)) {
@@ -552,6 +565,11 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         "sha256, install it side by side under <state-dir>/versions/<build>, and restart on it with the " +
         "same arguments. A failed update rolls back and is reported. Opt-in; without it the worker " +
         "still updates when the board asks ('worker update <name>').",
+    )
+    .option(
+      "--no-delegate",
+      "Run THIS install even when <state-dir>/versions/current.json points at a newer self-updated " +
+        "build (#1346). By default start re-execs that build with the same arguments.",
     )
     .option(
       "--drain-timeout <seconds>",
@@ -749,6 +767,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         boardUrl: options.board,
         stateFile: options.stateFile ?? defaultWorkerStateFile(),
         workRoot: options.workRoot ?? defaultWorkerWorkRoot(),
+        runningEntry: resolveWorkerEntry(),
         providers: splitList(options.providers) ?? ["claude"],
         ...(options.gitPort === undefined || Number.isNaN(options.gitPort) ? {} : { gitPort: options.gitPort }),
       });
