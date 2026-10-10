@@ -320,6 +320,23 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     return true;
   }
 
+  /**
+   * Close every worker socket with a real close frame (#1354). Used on a signalled board
+   * shutdown with 1001 (Going Away): without it the process exits with the sockets open and
+   * each worker logs `1006 no close frame`, indistinguishable from a network loss. Never
+   * waits on a peer — `close()` queues the frame and returns; the caller's exit timer bounds it.
+   */
+  function closeAll(code = 1001, reason = "board restarting"): number {
+    let closed = 0;
+    // Entries stay in the map: the socket's own close event runs `handleClose` (and the
+    // disconnect listeners) as for any other disconnect; the process is about to exit anyway.
+    for (const conn of [...connections.values()]) {
+      try { conn.ws.close(code, reason); closed++; } catch { /* already gone */ }
+    }
+    stopKeepaliveTimer();
+    return closed;
+  }
+
   function connectedWorkerIds(): string[] {
     return [...connections.keys()];
   }
@@ -384,6 +401,7 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     send,
     isConnected,
     closeConnection,
+    closeAll,
     keepaliveTick,
     connectedWorkerIds,
     runningSessionIds,

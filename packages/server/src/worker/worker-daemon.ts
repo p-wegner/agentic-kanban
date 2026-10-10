@@ -750,7 +750,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       }
     });
 
-    const scheduleReconnect = (cause: string) => {
+    const scheduleReconnect = (cause: string, boardRestarting = false) => {
       // `repairing` too: the re-pairing path calls connect() itself once it has a new
       // identity, and a backoff timer racing it opens a second socket with the OLD token.
       if (stopped || fatal || repairing) return;
@@ -766,6 +766,9 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       // two timers, each opening its own socket.
       if (reconnectTimer) return;
       if (openedAt !== null) lastReachableAt = Date.now();
+      // #1354: a 1001 close is the board announcing a restart — expected, so the first retry is
+      // the short minimum rather than wherever the error backoff had climbed to.
+      if (boardRestarting) reconnectDelay = RECONNECT_MIN_MS;
       const { delay, next } = nextReconnectDelay(
         reconnectDelay, lastReachableAt === null ? null : Date.now() - lastReachableAt);
       reconnectDelay = next;
@@ -774,7 +777,8 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       // a log of bare "retrying in 1s" lines reads like a socket that keeps
       // dying instantly, whatever its real lifetime was.
       const lifetime = openedAt === null ? "never opened" : `up ${Math.round((Date.now() - openedAt) / 1000)}s`;
-      log(`[worker] disconnected (${cause}; ${lifetime}); retrying in ${Math.round(delay / 1000)}s`);
+      if (boardRestarting) log("[worker] board restarting, reconnecting");
+      else log(`[worker] disconnected (${cause}; ${lifetime}); retrying in ${Math.round(delay / 1000)}s`);
       const timer = setTimeout(() => {
         reconnectTimer = null;
         connect();
@@ -794,7 +798,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       // reconnect/evict loop is indistinguishable from a flaky link.
       const detail = reason.length > 0 ? `: ${reason.toString("utf8").trim()}` : "";
       const kind = code === 1006 ? "transport failed, no close frame" : "closed by board";
-      scheduleReconnect(`code ${code}${detail} - ${kind}`);
+      scheduleReconnect(`code ${code}${detail} - ${kind}`, code === 1001);
     });
     socket.on("error", (err) => {
       log(`[worker] socket error: ${err.message}`);
