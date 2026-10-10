@@ -258,6 +258,16 @@ export function registerWorkerCommand(program: Command) {
  * database layer). Everything reachable from here must stay free of
  * board-server imports; see worker/worker-cli.ts.
  */
+/**
+ * `[completed]` alone hides a worker-lost run (#1319): the board finalizes it completed / exit 1
+ * and an operator reading the list must not mistake it for a success.
+ */
+export function formatPlacementState(p: Pick<SessionPlacementRecord, "status" | "exitCode" | "endedBy">): string {
+  if (!p.endedBy) return `[${p.status}]`;
+  const why = p.endedBy === "abandoned" ? "worker abandoned" : "worker lost";
+  return `[${p.status}, exit ${p.exitCode ?? "?"}, ${why}]`;
+}
+
 export function registerWorkerSubcommands(workerCmd: Command) {
   workerCmd
     .command("pair")
@@ -545,7 +555,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         // no longer exists" must stay distinguishable from "ran on the host".
         const where = p.placement === "remote" ? `worker ${p.workerName ?? `${p.workerId} (revoked)`}` : "host";
         const issue = p.issueNumber === null ? "" : ` #${p.issueNumber}`;
-        console.log(`  ${p.startedAt}${issue} ${p.executor} [${p.status}] on ${where}`);
+        console.log(`  ${p.startedAt}${issue} ${p.executor} ${formatPlacementState(p)} on ${where}`);
         // #801 — WHY, beside WHERE. Absent for a session dispatched before the resolver
         // started stamping its verdict, and absent for an explicit placement that was never
         // resolved; printing nothing in those cases is the honest answer, not a default.

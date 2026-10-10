@@ -263,6 +263,14 @@ export interface SessionPlacementRecord {
   executor: string;
   startedAt: string;
   endedAt: string | null;
+  /** The process exit code, null while running or when none was recorded. */
+  exitCode: number | null;
+  /**
+   * Set when the BOARD, not the agent, ended the session (#1319): the worker came back without
+   * it (`worker-lost`) or the abandon bound passed (`abandoned`). Such a run is recorded
+   * completed / exit 1 and must not read as a success.
+   */
+  endedBy: "worker-lost" | "abandoned" | null;
   placement: "remote" | "host";
   workerId: string | null;
   /** Null with a non-null workerId = the worker was revoked or removed since. */

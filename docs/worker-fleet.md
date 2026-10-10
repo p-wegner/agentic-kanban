@@ -526,6 +526,11 @@ agentic-kanban worker placements --limit 20
 
 Also on `GET /api/workers/placements` and in `explain_worker_placement`'s `sessions` array.
 
+Each row also carries `exitCode` and `endedBy` (#1319). `endedBy` is `worker-lost` (the worker
+came back without the session) or `abandoned` (the abandon bound passed) when the BOARD, not the
+agent, ended the run; otherwise null. Such a run is stored `completed` / exit 1, so the CLI
+renders it `[completed, exit 1, worker lost]` rather than a bare `[completed]`.
+
 Both columns are NULLABLE and stay null for a session dispatched before this landed, and for
 one whose placement was passed in explicitly rather than resolved — "not recorded" and "host
 by default" have to stay distinguishable, so nothing is backfilled and nothing is defaulted.

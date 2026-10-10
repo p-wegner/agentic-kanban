@@ -84,6 +84,32 @@ export async function listWorkerEventRows(
   return rows.map((r) => ({ ...r, sessionId: r.sessionId ?? null, payloadJson: r.payloadJson ?? null }));
 }
 
+/**
+ * session id -> why the BOARD ended it (#1319), read from the `session_exit` rows. A session the
+ * agent ended itself has no `endedBy`, so it is simply absent from the map.
+ */
+export async function getBoardEndedReasons(
+  sessionIds: string[],
+  database: Database = db,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (sessionIds.length === 0) return out;
+  const rows = await database
+    .select({ sessionId: workerEvents.sessionId, payloadJson: workerEvents.payloadJson })
+    .from(workerEvents)
+    .where(and(eq(workerEvents.type, "session_exit"), inArray(workerEvents.sessionId, sessionIds)));
+  for (const r of rows) {
+    if (!r.sessionId || !r.payloadJson) continue;
+    try {
+      const endedBy = (JSON.parse(r.payloadJson) as { endedBy?: unknown }).endedBy;
+      if (typeof endedBy === "string") out.set(r.sessionId, endedBy);
+    } catch {
+      // A hand-edited payload is "not recorded", not an error.
+    }
+  }
+  return out;
+}
+
 /** How many events this worker currently holds — the number the retention cap is against. */
 export async function countWorkerEvents(workerId: string, database: Database = db): Promise<number> {
   const rows = await database

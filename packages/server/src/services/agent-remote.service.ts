@@ -62,7 +62,7 @@ import { REMOTE_SESSION_ABANDON_MS } from "./remote-session-liveness.js";
 import { WORKER_HEARTBEAT_STALE_MS } from "./worker-registry.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { getProjectByRepoPath } from "../repositories/project.repository.js";
-import { createRemoteSessionEventRecorder } from "./agent-remote-events.js";
+import { createRemoteSessionEventRecorder, type BoardEndedReason } from "./agent-remote-events.js";
 import { createRemoteLiveness } from "./agent-remote-liveness.js";
 import type { WorkerRepoOpKind, WorkerRepoOpResult } from "@agentic-kanban/shared/lib/worker-protocol";
 
@@ -167,7 +167,7 @@ export function createRemoteAgentService(
   async function landAndFinish(
     sessionId: string,
     session: RemoteSession,
-    reportedExitCode: number | null,
+    reportedExitCode: number | null, endedBy?: BoardEndedReason,
   ): Promise<void> {
     liveness.cancel(sessionId);
     sessions.delete(sessionId);
@@ -195,7 +195,7 @@ export function createRemoteAgentService(
         exitCode = exitCode === 0 || exitCode === null ? 1 : exitCode;
       }
     }
-    noteSessionExit(sessionId, session, exitCode, "landed and finalized");
+    noteSessionExit(sessionId, session, exitCode, "landed and finalized", endedBy);
     try {
       session.onOutput({ type: "exit", sessionId, exitCode });
     } catch (err) {
@@ -234,7 +234,7 @@ export function createRemoteAgentService(
         `arrive (the worker's pending-result queue does not survive a daemon restart). Any result it ` +
         `pushed is being landed on the branch before this session is closed.`,
     );
-    void landAndFinish(sessionId, session, 1);
+    void landAndFinish(sessionId, session, 1, "worker-lost");
   }
 
   /**
@@ -492,7 +492,7 @@ export function createRemoteAgentService(
             `up on this session. If the worker pushed a result before it vanished it is being landed on the ` +
             `branch now; otherwise its work remains only in the worker's own clone.`,
         );
-        void landAndFinish(sessionId, session, 1);
+        void landAndFinish(sessionId, session, 1, "abandoned");
       }
     }, abandonMs);
     if (abandonTimer.unref) abandonTimer.unref();

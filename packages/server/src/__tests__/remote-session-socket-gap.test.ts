@@ -25,9 +25,18 @@ import type { BoardToWorkerMessage, WorkerToBoardMessage } from "@agentic-kanban
 import type { AgentOutputEvent } from "../services/agent.service.js";
 import { createTestDb } from "./helpers/test-db.js";
 import type { Database } from "../db/index.js";
+import { workers } from "@agentic-kanban/shared/schema";
+import { getBoardEndedReasons } from "../repositories/worker-events.repository.js";
 
 const syncCalls: Array<{ repoPath: string; branch: string }> = [];
 let syncResult: { ok: boolean; status: string; error?: string } = { ok: true, status: "fast-forward" };
+
+const recordedEvents: Array<{ type: string; payload?: Record<string, unknown> }> = [];
+vi.mock("../services/worker-events.service.js", () => ({
+  recordWorkerEvent: async (e: { type: string; payload?: Record<string, unknown> }) => {
+    recordedEvents.push(e);
+  },
+}));
 
 vi.mock("../services/worker-remote-sync.service.js", () => ({
   incomingRefFor: (branch: string) => `refs/kanban/incoming/${branch}`,
@@ -85,6 +94,7 @@ describe("a remote session survives a socket gap (#746)", () => {
   beforeEach(() => {
     db = createTestDb().db as unknown as Database;
     syncCalls.length = 0;
+    recordedEvents.length = 0;
     syncResult = { ok: true, status: "fast-forward" };
   });
 
@@ -185,6 +195,8 @@ describe("a remote session survives a socket gap (#746)", () => {
   });
 
   it("a worker that reconnects WITHOUT a session it was RUNNING finalizes it instead of hanging forever", async () => {
+    // The recorded `session_exit` row is FK'd to a real worker.
+    await db.insert(workers).values({ id: "w1", name: "w1", tokenHash: "x" } as typeof workers.$inferInsert);
     const fm = fakeManager(["w1"]);
     const service = createRemoteAgentService(fm.manager, db, { reconnectGraceMs: 1000, abandonMs: 10_000 });
     const events: AgentOutputEvent[] = [];
@@ -204,6 +216,12 @@ describe("a remote session survives a socket gap (#746)", () => {
     expect(events.find((e) => e.type === "exit")?.exitCode).toBe(1);
     expect(events.some((e) => e.type === "stderr" && String(e.data).includes("reconnected without this session"))).toBe(true);
     expect(service.trackedSessionIds()).not.toContain("s1");
+    // #1319: the session_exit row says the BOARD ended it, so `worker placements` can too.
+    // (The row itself is FK'd to a worker and session this fixture does not seed, so the
+    // recorder call is what is observable here; the read side is covered in placement-explain.test.ts.)
+    await vi.waitFor(() =>
+      expect(recordedEvents.find((e) => e.type === "session_exit")?.payload).toMatchObject({ endedBy: "worker-lost" }),
+    );
   });
 
   // The race the first cut of this fix introduced, caught by the worker-dispatch e2e: a
@@ -285,6 +303,7 @@ describe("a late LAUNCH failure reaches the dispatch proxy, not the exit code (#
   beforeEach(() => {
     db = createTestDb().db as unknown as Database;
     syncCalls.length = 0;
+    recordedEvents.length = 0;
   });
 
   function launchWithHook(

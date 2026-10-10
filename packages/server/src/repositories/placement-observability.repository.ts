@@ -23,6 +23,7 @@ export interface SessionPlacementRow {
   executor: string;
   startedAt: string;
   endedAt: string | null;
+  exitCode: string | null;
   workerId: string | null;
   /** The deciding check the resolver stamped at dispatch (#801). Null = not recorded. */
   placementReason: string | null;
@@ -72,6 +73,7 @@ export async function listSessionPlacementRows(
       executor: sessions.executor,
       startedAt: sessions.startedAt,
       endedAt: sessions.endedAt,
+      exitCode: sessions.exitCode,
       workerId: sessions.workerId,
       placementReason: sessions.placementReason,
       placementDetail: sessions.placementDetail,
