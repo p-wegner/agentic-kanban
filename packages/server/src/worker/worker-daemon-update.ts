@@ -30,6 +30,7 @@ import {
   type WorkerUpdater,
 } from "./worker-updater.js";
 import { installShim } from "./worker-shim.js";
+import type { UpdateNowResult, WorkerControlStatus } from "./worker-control.js";
 import type { WorkerSelfUpdateOptions } from "./worker-daemon.js";
 
 export interface DaemonSelfUpdateDeps {
@@ -52,6 +53,9 @@ export interface DaemonSelfUpdateDeps {
 export interface DaemonSelfUpdate {
   updater: WorkerUpdater;
   state(): WorkerUpdateReport;
+  /** #1355: ask the board for its current build and update to it now (the local control endpoint). */
+  updateNow(): Promise<UpdateNowResult>;
+  controlStatus(): WorkerControlStatus;
   /** Feed a heartbeat response body: `{ boardBuildId?, updateNow? }`. */
   onHeartbeatResponse(body: unknown): void;
   /** The first socket to the board opened: a pending switch is confirmed. */
@@ -93,6 +97,26 @@ export function createDaemonSelfUpdate(d: DaemonSelfUpdateDeps): DaemonSelfUpdat
     await opts.restart(pending.previousEntry);
   };
 
+  async function fetchManifest(): Promise<WorkerBuildManifest | "building"> {
+    const url = `${d.boardUrl}/api/workers/build`;
+    let res: Response;
+    try {
+      res = await (opts.fetchImpl ?? fetch)(url, { headers: { authorization: `Bearer ${d.workerToken()}` } });
+    } catch (err) {
+      throw new TransientUpdateError(`GET ${url} failed: ${describeFetchError(err)}`);
+    }
+    if (res.status === 202) return "building";
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      const msg = `GET ${url} -> HTTP ${res.status}${body.error ? ` (${body.error})` : ""}`;
+      // 5xx = the board is starting / restarting / cannot pack right now: worth retrying.
+      throw isTransientStatus(res.status) ? new TransientUpdateError(msg) : new Error(msg);
+    }
+    return (await res.json()) as WorkerBuildManifest;
+  }
+  /** The build the board last advertised on a heartbeat — the target when its tarball is still packing. */
+  let lastBoardBuild: string | undefined;
+
   const updater = createWorkerUpdater({
     ownBuildId,
     auto: opts.auto,
@@ -104,23 +128,7 @@ export function createDaemonSelfUpdate(d: DaemonSelfUpdateDeps): DaemonSelfUpdat
     pollMs: d.pollMs,
     failedBuild,
     recordFailure: (f) => writeFailure(versionsDir, { ...f, at: d.now ?? new Date().toISOString() }),
-    async fetchManifest() {
-      const url = `${d.boardUrl}/api/workers/build`;
-      let res: Response;
-      try {
-        res = await (opts.fetchImpl ?? fetch)(url, { headers: { authorization: `Bearer ${d.workerToken()}` } });
-      } catch (err) {
-        throw new TransientUpdateError(`GET ${url} failed: ${describeFetchError(err)}`);
-      }
-      if (res.status === 202) return "building";
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        const msg = `GET ${url} -> HTTP ${res.status}${body.error ? ` (${body.error})` : ""}`;
-        // 5xx = the board is starting / restarting / cannot pack right now: worth retrying.
-        throw isTransientStatus(res.status) ? new TransientUpdateError(msg) : new Error(msg);
-      }
-      return (await res.json()) as WorkerBuildManifest;
-    },
+    fetchManifest,
     async download(manifest) {
       const destFile = join(versionsDir, "downloads", `${manifest.buildId}.tgz`);
       await downloadBuild({
@@ -183,7 +191,36 @@ export function createDaemonSelfUpdate(d: DaemonSelfUpdateDeps): DaemonSelfUpdat
     onHeartbeatResponse(body) {
       if (typeof body !== "object" || body === null) return;
       const rec = body as { boardBuildId?: unknown; updateNow?: unknown };
+      if (typeof rec.boardBuildId === "string") lastBoardBuild = rec.boardBuildId;
       updater.onBoardBuild(typeof rec.boardBuildId === "string" ? rec.boardBuildId : undefined, rec.updateNow === true);
+    },
+    async updateNow() {
+      const from = ownBuildId;
+      let to: string | undefined;
+      try {
+        const manifest = await fetchManifest();
+        to = manifest === "building" ? lastBoardBuild : manifest.buildId;
+      } catch (err) {
+        return { result: "failed", from, phase: "manifest", reason: errorMessage(err) };
+      }
+      if (!to) {
+        return { result: "failed", from, phase: "manifest", reason: "the board is still building its worker tarball and has not advertised a build id yet; retry in a minute" };
+      }
+      const outcome = updater.requestUpdate(to);
+      if (outcome === "failed") {
+        const s = updater.state();
+        return { result: "failed", from, to, phase: "start", reason: s.reason ?? "could not start the update" };
+      }
+      return { result: outcome, from, to };
+    },
+    controlStatus() {
+      return {
+        pid: process.pid,
+        boardUrl: d.boardUrl,
+        workerVersion: d.workerVersion,
+        update: updater.state(),
+        failurePhase: readFailure(versionsDir)?.phase,
+      };
     },
     onConnected() {
       if (confirmTimer) {
