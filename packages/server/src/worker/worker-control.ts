@@ -143,6 +143,12 @@ export interface ApplyUpdateOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
+/** A build id shown the same way on both sides of "updated from X to Y" (#1360): 7-char short sha. */
+function shortBuild(id: string | undefined): string {
+  if (!id) return "?";
+  return /^[0-9a-f]{7,40}$/i.test(id) ? id.slice(0, 7) : id;
+}
+
 /** Exit-code-shaped outcome of `update-check --apply`. */
 export interface ApplyUpdateOutcome {
   ok: boolean;
@@ -205,7 +211,9 @@ export async function applyWorkerUpdate(o: ApplyUpdateOptions): Promise<ApplyUpd
     if (latest.token !== ctl.token) {
       // A new daemon start answers (its token is fresh per start): the restart happened.
       const now = status.workerVersion;
-      if (sameBuild(parseBuildId(now), to)) return { ok: true, summary: `updated from ${from ?? "?"} to ${now}` };
+      if (sameBuild(parseBuildId(now), to)) {
+        return { ok: true, summary: `updated from ${shortBuild(from)} to ${shortBuild(parseBuildId(now) ?? now)}` };
+      }
       if (status.update.state === "failed") {
         return fail(`failed in ${status.failurePhase ?? "update"}: ${status.update.reason ?? "unknown"} (now running ${now ?? "?"})`);
       }

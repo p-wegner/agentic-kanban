@@ -12,7 +12,8 @@
 //    never a worker that merely needs updating.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Hono } from "hono";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { startWorkerControlServer } from "../worker/worker-control.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -158,6 +159,63 @@ describe("runWorkerUpdateCheck — the worker's side (#880)", () => {
     expect(report.ok).toBe(false);
     expect(report.error).toContain("predates this command");
     expect(report.boardWorkerVersion).toBeNull();
+  });
+
+  describe("#1360 — build ids, and the daemon as the subject", () => {
+    const OLD = "856dc521f0000000000000000000000000000000";
+    const NEW = "d5ee40e23000000000000000000000000000000a";
+    const boardFetch = ((url: string) => {
+      if (String(url).endsWith("/api/workers/build")) {
+        return Promise.resolve(new Response(JSON.stringify({ version: `0.1.9-dev.${NEW.slice(0, 9)}`, buildId: NEW }), { status: 200 }));
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ boardProtocolVersion: WORKER_PROTOCOL_VERSION, boardWorkerVersion: "0.1.9" }), { status: 200 }),
+      );
+    }) as unknown as typeof fetch;
+    const launcher = `0.1.9-dev.${OLD.slice(0, 9)}`;
+
+    async function withDaemon(version: string, fn: () => Promise<void>): Promise<void> {
+      const server = await startWorkerControlServer({
+        stateFile, boardUrl: "http://board:3003", workerVersion: version, log: () => {},
+        handlers: { updateNow: async () => ({ result: "current" }), status: () => ({ pid: 1, boardUrl: "x", workerVersion: version, update: { state: "current" } }) },
+      });
+      try { await fn(); } finally { await server!.close(); }
+    }
+
+    it("a dev build one commit behind is OUTDATED, naming both build ids (semver alone says in sync)", async () => {
+      const report = await runWorkerUpdateCheck({ boardUrl: "http://board:3003", stateFile, workerVersion: launcher, fetchImpl: boardFetch });
+      expect(report.freshness).toBe("behind-board");
+      const text = renderUpdateCheckReport(report);
+      expect(text).toContain("outdated");
+      expect(text).toContain(OLD.slice(0, 9));
+      expect(text).toContain(NEW.slice(0, 9));
+    });
+
+    it("judges the RUNNING DAEMON, not the launcher; in sync once the daemon is on the board's build", async () => {
+      await withDaemon(`0.1.9-dev.${NEW.slice(0, 9)}`, async () => {
+        const report = await runWorkerUpdateCheck({ boardUrl: "http://board:3003", stateFile, workerVersion: launcher, fetchImpl: boardFetch });
+        expect(report.workerSource).toBe("daemon");
+        expect(report.freshness).toBe("in-sync");
+        expect(renderUpdateCheckReport(report)).toContain("running daemon's build");
+      });
+    });
+
+    it("with no daemon, falls back to versions/current.json and says so", async () => {
+      mkdirSync(join(dir, "versions"));
+      writeFileSync(join(dir, "versions", "current.json"), JSON.stringify({ buildId: OLD, entry: "x" }));
+      const report = await runWorkerUpdateCheck({ boardUrl: "http://board:3003", stateFile, workerVersion: launcher, fetchImpl: boardFetch });
+      expect(report.workerSource).toBe("current.json");
+      expect(report.freshness).toBe("behind-board");
+      expect(renderUpdateCheckReport(report)).toContain("versions/current.json");
+    });
+
+    it("falls back to semver when the board carries no build id", async () => {
+      const noBuild = (async () =>
+        new Response(JSON.stringify({ boardProtocolVersion: WORKER_PROTOCOL_VERSION, boardWorkerVersion: "9.9.9" }), { status: 200 })) as unknown as typeof fetch;
+      const report = await runWorkerUpdateCheck({ boardUrl: "http://board:3003", stateFile, workerVersion: "0.0.1", fetchImpl: noBuild });
+      expect(report.freshness).toBe("behind-board");
+      expect(report.boardBuildId).toBeNull();
+    });
   });
 
   it("keeps an absent own version as '?', never fabricating one", () => {

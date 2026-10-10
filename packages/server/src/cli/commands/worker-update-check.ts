@@ -30,14 +30,26 @@ import {
   type WorkerBuildFreshness,
 } from "@agentic-kanban/shared/lib/worker-build-freshness";
 import { resolveOwnPackageVersion } from "../../lib/worker-build.js";
+import { parseBuildId, sameBuild } from "../../lib/worker-update.js";
+import { readControlFile } from "../../worker/worker-control.js";
+import { readPointer, versionsDirFor } from "../../worker/worker-versions.js";
 import { readSavedIdentity } from "./worker-doctor.js";
+
+/** Which thing `workerVersion` describes (#1360). */
+export type UpdateCheckSubjectSource = "daemon" | "current.json" | "own-install";
 
 export interface UpdateCheckReport {
   boardUrl: string;
-  /** This install's own build — `null` renders as `?`, never as a fabricated version. */
+  /** The judged build (daemon > current.json > this launcher) — `null` renders as `?`, never fabricated. */
   workerVersion: string | null;
+  /** Commit id of the judged build, when it carries one. */
+  workerBuildId?: string | null;
+  /** Where `workerVersion` came from. */
+  workerSource?: UpdateCheckSubjectSource;
   /** The board's build, from the endpoint. `null` = board did not (or could not) say. */
   boardWorkerVersion: string | null;
+  /** The board's commit id from `/api/workers/build`, when it answered one. */
+  boardBuildId?: string | null;
   workerProtocolVersion: number;
   boardProtocolVersion: number | null;
   freshness: WorkerBuildFreshness;
@@ -72,7 +84,13 @@ export async function runWorkerUpdateCheck(opts: {
   stateFile: string;
   /** Test seam; defaults to this install's own resolved build. */
   workerVersion?: string;
+  /** Test seam for the board requests; defaults to the global fetch (read at call time). */
+  fetchImpl?: typeof fetch;
+  /** Test seam for the local daemon control endpoint. */
+  controlFetchImpl?: typeof fetch;
 }): Promise<UpdateCheckReport> {
+  const fetchImpl: typeof fetch = opts.fetchImpl ?? ((...a) => globalThis.fetch(...a));
+  const controlFetch: typeof fetch = opts.controlFetchImpl ?? ((...a) => globalThis.fetch(...a));
   const boardUrl = opts.boardUrl.replace(/\/+$/, "");
   const workerVersion = opts.workerVersion ?? resolveOwnPackageVersion() ?? null;
   const identity = readSavedIdentity(opts.stateFile, boardUrl);
@@ -88,7 +106,7 @@ export async function runWorkerUpdateCheck(opts: {
 
   let res: Response;
   try {
-    res = await fetch(`${boardUrl}/api/workers/${identity.workerId}/update-check`, {
+    res = await fetchImpl(`${boardUrl}/api/workers/${identity.workerId}/update-check`, {
       headers: { authorization: `Bearer ${identity.workerToken}` },
     });
   } catch (err) {
@@ -124,12 +142,30 @@ export async function runWorkerUpdateCheck(opts: {
     boardWorkerVersion?: string | null;
     boardCommit?: string | null;
   };
-  const boardWorkerVersion = body.boardWorkerVersion ?? null;
-  const freshness = compareWorkerBuild(workerVersion ?? undefined, boardWorkerVersion ?? undefined, body.boardCommit);
+
+  // #1360: compare BUILD IDS when both sides carry one — the base semver (`0.1.9`) is identical
+  // across every dev build, so it can never say a dev build is outdated.
+  const manifest = await fetchBoardManifest(boardUrl, identity.workerToken, fetchImpl);
+  const subject = await resolveSubject(opts, workerVersion, controlFetch);
+  const boardBuildId = manifest?.buildId?.toLowerCase() || undefined;
+  const boardWorkerVersion = manifest?.version ?? body.boardWorkerVersion ?? null;
+  let freshness: WorkerBuildFreshness;
+  if (subject.buildId && boardBuildId) {
+    freshness = sameBuild(subject.buildId, boardBuildId) ? "in-sync" : "behind-board";
+  } else {
+    freshness = compareWorkerBuild(
+      subject.version ?? undefined,
+      (body.boardWorkerVersion ?? boardWorkerVersion) ?? undefined,
+      body.boardCommit,
+    );
+  }
   return {
     boardUrl,
-    workerVersion,
+    workerVersion: subject.version,
+    workerBuildId: subject.buildId ?? null,
+    workerSource: subject.source,
     boardWorkerVersion,
+    boardBuildId: boardBuildId ?? null,
     workerProtocolVersion: WORKER_PROTOCOL_VERSION,
     boardProtocolVersion: body.boardProtocolVersion ?? null,
     freshness,
@@ -141,21 +177,99 @@ export async function runWorkerUpdateCheck(opts: {
   };
 }
 
+/** `GET /api/workers/build` — the board's build manifest. Null on any failure: it only sharpens the verdict. */
+async function fetchBoardManifest(
+  boardUrl: string,
+  workerToken: string,
+  fetchImpl: typeof fetch,
+): Promise<{ version?: string; buildId?: string } | null> {
+  try {
+    const res = await fetchImpl(`${boardUrl}/api/workers/build`, {
+      headers: { authorization: `Bearer ${workerToken}` },
+    });
+    if (res.status !== 200) return null;
+    const m = (await res.json()) as { version?: unknown; buildId?: unknown };
+    return {
+      ...(typeof m.version === "string" ? { version: m.version } : {}),
+      ...(typeof m.buildId === "string" && m.buildId ? { buildId: m.buildId } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+interface Subject {
+  version: string | null;
+  buildId: string | undefined;
+  source: UpdateCheckSubjectSource;
+}
+
+/**
+ * What the check judges: the RUNNING DAEMON (control endpoint), else `versions/current.json`
+ * (what the next start runs), else this launcher's own version — never silently the last.
+ */
+async function resolveSubject(
+  opts: { stateFile: string; controlFetchImpl?: typeof fetch },
+  ownVersion: string | null,
+  controlFetch: typeof fetch,
+): Promise<Subject> {
+  const ctl = readControlFile(opts.stateFile);
+  if (ctl) {
+    try {
+      const res = await controlFetch(`http://127.0.0.1:${ctl.port}/status`, {
+        headers: { "x-worker-control-token": ctl.token },
+      });
+      if (res.ok) {
+        const status = (await res.json()) as { workerVersion?: string };
+        if (status.workerVersion) {
+          return { version: status.workerVersion, buildId: parseBuildId(status.workerVersion), source: "daemon" };
+        }
+      }
+    } catch {
+      /* daemon not answering — fall through to the pointer */
+    }
+  }
+  const pointer = readPointer(versionsDirFor(opts.stateFile));
+  if (pointer?.buildId) {
+    const hex = /^[0-9a-f]{7,40}$/i.test(pointer.buildId) ? pointer.buildId.toLowerCase() : undefined;
+    return { version: pointer.buildId, buildId: hex, source: "current.json" };
+  }
+  return { version: ownVersion, buildId: parseBuildId(ownVersion), source: "own-install" };
+}
+
 /** Human-readable report. Plain text — this gets pasted into an issue, like the doctor's. */
 export function renderUpdateCheckReport(report: UpdateCheckReport): string {
   const lines: string[] = [];
   lines.push(`Worker update-check against ${report.boardUrl}`);
   lines.push("");
-  lines.push(`  this install's build: ${report.workerVersion ?? "?"} (protocol ${report.workerProtocolVersion})`);
+  const subjectLabel =
+    report.workerSource === "daemon"
+      ? "running daemon's build"
+      : report.workerSource === "current.json"
+        ? "installed build (versions/current.json; no daemon answered)"
+        : "this install's build";
+  const withId = (version: string | null, id: string | null | undefined) =>
+    `${version ?? "?"}${id && !version?.includes(id.slice(0, 7)) ? ` [build ${id.slice(0, 9)}]` : ""}`;
   lines.push(
-    `  board's worker build:  ${report.boardWorkerVersion ?? "?"} (protocol ${report.boardProtocolVersion ?? "?"})`,
+    `  ${subjectLabel}: ${withId(report.workerVersion, report.workerBuildId)} (protocol ${report.workerProtocolVersion})` +
+      (report.workerSource === "own-install" ? " — the launcher's own version; no daemon or versions/current.json found" : ""),
+  );
+  lines.push(
+    `  board's worker build:  ${withId(report.boardWorkerVersion, report.boardBuildId)} (protocol ${report.boardProtocolVersion ?? "?"})`,
   );
   lines.push("");
   if (report.error) {
     lines.push(`  CHECK FAILED: ${report.error}`);
   } else if (report.freshness === "behind-board") {
     const label = formatBuildFreshness(report.freshness, report.boardWorkerVersion);
-    lines.push(`  Verdict: ${label} — a newer worker build exists on the board.`);
+    if (report.workerBuildId && report.boardBuildId) {
+      lines.push(
+        `  Verdict: outdated — running build ${report.workerBuildId.slice(0, 9)}, board's build is ${report.boardBuildId.slice(0, 9)}.`,
+      );
+      lines.push("  To update this machine's daemon now: agentic-kanban-worker update-check --apply");
+    } else {
+      lines.push(`  Verdict: ${label} — a newer worker build exists on the board.`);
+    }
     lines.push(`  To update (manual, in this order): ${report.remediation}.`);
   } else if (report.freshness === "ahead-of-board") {
     lines.push(
