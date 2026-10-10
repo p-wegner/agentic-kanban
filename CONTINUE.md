@@ -28,7 +28,15 @@ fallback)** is open on this project. #1329 (tailnet lab) closed with the evidenc
   PowerShell 5.1 (`curl` = Invoke-WebRequest); steps now name `curl.exe`, checked live (exit 0).
   Master scrubbed (26 terms, CLEAN) and pushed.
 
-**Next:** if the desktop resends its round-4 install report, file anything beyond #1364. Peter:
+- **Rounds 5-7 (fresh worker each, Windows PowerShell 5.1, printed steps pasted literally):**
+  round 5 found the commands still saying `curl`, `…` mojibake and a firewall-script pointer
+  (#1365, direct); round 6 found the build window breaking the steps (202 + `curl -f` exit 0, then a
+  stale global binary pairing) and em dash mojibake (#1366: `?wait=120`, pairing build-mismatch
+  warning, ASCII-only worker console with a guard). **Round 7 clean:** no prior worker, step 1
+  waited 58 s through the packing window, desktop-r7 paired on f3d72ef1b, doctor 0 WARN/0 FAIL,
+  0 non-ASCII output; wfx #29 build+review clean. Loop closed.
+
+**Next:** promote master (#1364-#1366 not yet on stable). Peter:
 decide #1337, and add the stable fleet firewall rules (`scripts/fleet-firewall.ps1 -Install`,
 elevated) before a worker targets the stable board.
 
