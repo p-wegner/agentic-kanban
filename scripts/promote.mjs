@@ -733,7 +733,13 @@ async function smoke() {
   }
   // #1324 — a configured fleet must actually be listening, or every paired worker is offline.
   const fleetNotes = [];
-  for (const target of planFleetSmokeTargets(stableSpawnEnv())) {
+  let fleetTargets;
+  try {
+    fleetTargets = planFleetSmokeTargets(stableSpawnEnv());
+  } catch (err) {
+    return { ok: false, failed: "fleet host (tailscale)", detail: err instanceof Error ? err.message : String(err) };
+  }
+  for (const target of fleetTargets) {
     const res = await fetch(target.url, { signal: AbortSignal.timeout(5000) }).catch(() => null);
     if (!res || res.status !== 200) {
       return { ok: false, failed: `${target.label} ${target.url}`, detail: `status ${res?.status ?? "none"} — the fleet is configured but not answering` };

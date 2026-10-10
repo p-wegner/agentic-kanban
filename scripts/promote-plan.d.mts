@@ -59,7 +59,8 @@ export declare function buildStableSpawnEnv(opts: {
   port: number | string;
   fleetConfig?: Record<string, string>;
 }): Record<string, string | undefined>;
-export declare function planFleetSmokeTargets(spawnEnv: Record<string, string | undefined>): { label: string; url: string }[];
+export declare function resolveTailscaleIp4(exec?: () => string): string;
+export declare function planFleetSmokeTargets(spawnEnv: Record<string, string | undefined>, opts?: { resolveTailscale?: () => string }): { label: string; url: string }[];
 export declare function resolveMaxSweepAgeMs(env?: Record<string, string | undefined>): number;
 export declare function resolveProjectName(env?: Record<string, string | undefined>): string;
 export declare function resolveSweepWaitMs(env?: Record<string, string | undefined>): number;
