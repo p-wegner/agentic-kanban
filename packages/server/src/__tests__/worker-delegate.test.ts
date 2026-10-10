@@ -90,4 +90,14 @@ describe("worker doctor build check", () => {
     expect(compareBuilds(stateFile, entry).differs).toBe(false);
     expect(checkWorkerBuild(stateFile, entry).status).toBe("pass");
   });
+
+  it("PASSes when the paths differ but the build ids match (#1359)", () => {
+    const running = join(home, "global.js");
+    const entry = installBuildAt(NEW_BUILD, "");
+    writePointer(versionsDirFor(stateFile), { buildId: NEW_BUILD, entry });
+    const same = checkWorkerBuild(stateFile, running, "0.1.9-dev.2222222");
+    expect(same.status).toBe("pass");
+    expect(same.detail).toContain("versions dir");
+    expect(checkWorkerBuild(stateFile, running, "0.1.9-dev.3333333").status).toBe("warn");
+  });
 });
