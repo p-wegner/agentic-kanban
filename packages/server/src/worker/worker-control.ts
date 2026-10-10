@@ -141,7 +141,6 @@ export interface ApplyUpdateOptions {
   pollMs?: number;
   fetchImpl?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
-  nowMs?: () => number;
 }
 
 /** Exit-code-shaped outcome of `update-check --apply`. */
@@ -157,7 +156,6 @@ export interface ApplyUpdateOutcome {
 export async function applyWorkerUpdate(o: ApplyUpdateOptions): Promise<ApplyUpdateOutcome> {
   const fetchImpl = o.fetchImpl ?? fetch;
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const nowMs = o.nowMs ?? Date.now;
   const pollMs = o.pollMs ?? 1000;
   const timeoutMs = o.timeoutMs ?? 10 * 60 * 1000;
   const fail = (summary: string): ApplyUpdateOutcome => ({ ok: false, summary });
@@ -189,10 +187,10 @@ export async function applyWorkerUpdate(o: ApplyUpdateOptions): Promise<ApplyUpd
       : `Updating ${from ?? "?"} -> ${to ?? "?"}: the daemon drains (running sessions finish first), downloads, verifies, installs and restarts.`,
   );
 
-  const deadline = nowMs() + timeoutMs;
+  const deadline = Date.now() + timeoutMs;
   let lastReason = "";
   let current = ctl;
-  while (nowMs() < deadline) {
+  while (Date.now() < deadline) {
     await sleep(pollMs);
     const latest = readControlFile(o.stateFile) ?? current;
     let status: WorkerControlStatus;
