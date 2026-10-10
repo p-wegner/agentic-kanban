@@ -75,7 +75,24 @@ interface WorkerConnection {
    * dispatch that vanished without a trace cannot pin capacity forever.
    */
   pendingSessionIds: Map<string, number>;
+  /** Keepalive pings sent since the last pong/message (#1335). */
+  missedPings: number;
 }
+
+/** Minimal view of the underlying `ws` socket (`WSContext.raw`) the keepalive needs. */
+interface RawPingSocket {
+  ping?: () => void;
+  on?: (event: "pong", listener: () => void) => void;
+}
+
+function rawSocket(ws: WSContext): RawPingSocket | undefined {
+  return (ws as unknown as { raw?: RawPingSocket }).raw;
+}
+
+/** Board→worker WebSocket ping cadence (#1335). */
+export const WS_KEEPALIVE_INTERVAL_MS = 10_000;
+/** Pings left unanswered before the socket is declared dead: dropped within ~interval × (this + 1). */
+export const WS_KEEPALIVE_MAX_MISSED = 2;
 
 /**
  * How long an assigned-but-silent session counts against a worker's capacity.
@@ -122,18 +139,32 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     // logs (see closeConnection); this one is the gap.
     const existing = connections.get(workerId);
     if (existing) {
-      console.log(
-        `[worker-connection] evicting previous socket for id=${workerId} — a newer connection arrived. ` +
-          `If this repeats, the worker is opening overlapping sockets (reconnect firing while a connect is in flight), not losing the network.`,
-      );
+      // #1335: a socket that has missed a ping is a dead link the worker already gave up on
+      // (network loss), not an overlapping connect — say which, so the log does not blame the worker.
+      if (existing.missedPings > 0) {
+        console.log(
+          `[worker-connection] replacing dead link for id=${workerId} — the previous socket had stopped answering pings ` +
+            `(${existing.missedPings} missed), so this is a reconnect after a network loss, not a worker double-connecting.`,
+        );
+      } else {
+        console.log(
+          `[worker-connection] evicting previous socket for id=${workerId} — a newer connection arrived. ` +
+            `If this repeats, the worker is opening overlapping sockets (reconnect firing while a connect is in flight), not losing the network.`,
+        );
+      }
       try { existing.ws.close(); } catch { /* already gone */ }
     }
-    connections.set(workerId, {
+    const conn: WorkerConnection = {
       ws,
       runningSessionIds: new Set(),
       lastEventAt: new Map(),
       pendingSessionIds: new Map(),
-    });
+      missedPings: 0,
+    };
+    connections.set(workerId, conn);
+    const raw = rawSocket(ws);
+    raw?.on?.("pong", () => { conn.missedPings = 0; });
+    if (raw?.ping) ensureKeepaliveTimer();
     console.log(`[worker-connection] worker connected: id=${workerId}`);
     for (const listener of connectListeners) {
       try { listener(workerId); } catch (err) { console.error(`[worker-connection] connect-listener error`, err); }
@@ -148,6 +179,7 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     }
     const conn = connections.get(workerId);
     if (conn) {
+      conn.missedPings = 0; // any traffic proves the link is alive
       if (message.type === "hello") {
         // The worker just declared what it actually holds — that supersedes every
         // board-side guess, so the pending set is reconciled away entirely.
@@ -222,6 +254,41 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
       console.error(`[worker-connection] send failed: workerId=${workerId}`, err);
       return false;
     }
+  }
+
+  /**
+   * One keepalive pass (#1335): drop every socket that has left `WS_KEEPALIVE_MAX_MISSED`
+   * pings unanswered, ping the rest. Without it a half-open socket (network loss, no close
+   * frame) read `connected` until the worker reconnected, and an `assign` went into the void.
+   */
+  function keepaliveTick(): string[] {
+    const dropped: string[] = [];
+    for (const [workerId, conn] of [...connections]) {
+      if (conn.missedPings >= WS_KEEPALIVE_MAX_MISSED) {
+        closeConnection(workerId, `keepalive: no pong after ${conn.missedPings} pings`);
+        dropped.push(workerId);
+        continue;
+      }
+      const raw = rawSocket(conn.ws);
+      if (!raw?.ping) continue;
+      conn.missedPings++;
+      try { raw.ping(); } catch { /* the next tick drops it */ }
+    }
+    if (connections.size === 0) stopKeepaliveTimer();
+    return dropped;
+  }
+
+  let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  function ensureKeepaliveTimer(): void {
+    if (keepaliveTimer) return;
+    keepaliveTimer = setInterval(() => {
+      try { keepaliveTick(); } catch (err) { console.error(`[worker-connection] keepalive error`, err); }
+    }, WS_KEEPALIVE_INTERVAL_MS);
+    keepaliveTimer.unref?.();
+  }
+  function stopKeepaliveTimer(): void {
+    if (keepaliveTimer) clearInterval(keepaliveTimer);
+    keepaliveTimer = null;
   }
 
   function isConnected(workerId: string): boolean {
@@ -317,6 +384,7 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     send,
     isConnected,
     closeConnection,
+    keepaliveTick,
     connectedWorkerIds,
     runningSessionIds,
     assignedSessionIds,
