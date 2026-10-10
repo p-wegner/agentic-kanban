@@ -13,8 +13,11 @@ import {
   MAX_UNCONFIRMED_STARTS,
   clearFailure,
   clearPending,
+  TransientUpdateError,
   createWorkerUpdater,
+  describeFetchError,
   downloadBuild,
+  isTransientStatus,
   installBuild,
   pruneVersions,
   readFailure,
@@ -66,7 +69,7 @@ export function createDaemonSelfUpdate(d: DaemonSelfUpdateDeps): DaemonSelfUpdat
 
   const previousFailure = readFailure(versionsDir);
   const failedBuild =
-    previousFailure && !sameBuild(previousFailure.buildId, ownBuildId)
+    previousFailure && !previousFailure.transient && !sameBuild(previousFailure.buildId, ownBuildId)
       ? { buildId: previousFailure.buildId, reason: previousFailure.reason }
       : undefined;
 
@@ -74,7 +77,7 @@ export function createDaemonSelfUpdate(d: DaemonSelfUpdateDeps): DaemonSelfUpdat
     const pending = readPending(versionsDir);
     if (!pending) return;
     d.log(`[worker] build ${pending.buildId} did not come up (${reason}); rolling back to the previous build`);
-    writeFailure(versionsDir, { buildId: pending.buildId, reason, at: d.now ?? new Date().toISOString() });
+    writeFailure(versionsDir, { buildId: pending.buildId, reason, at: d.now ?? new Date().toISOString(), phase: "no-connect" });
     writePointer(versionsDir, {
       buildId: pending.previousBuildId ?? "previous",
       entry: pending.previousEntry,
@@ -100,14 +103,21 @@ export function createDaemonSelfUpdate(d: DaemonSelfUpdateDeps): DaemonSelfUpdat
     settle: d.settle,
     pollMs: d.pollMs,
     failedBuild,
+    recordFailure: (f) => writeFailure(versionsDir, { ...f, at: d.now ?? new Date().toISOString() }),
     async fetchManifest() {
-      const res = await (opts.fetchImpl ?? fetch)(`${d.boardUrl}/api/workers/build`, {
-        headers: { authorization: `Bearer ${d.workerToken()}` },
-      });
+      const url = `${d.boardUrl}/api/workers/build`;
+      let res: Response;
+      try {
+        res = await (opts.fetchImpl ?? fetch)(url, { headers: { authorization: `Bearer ${d.workerToken()}` } });
+      } catch (err) {
+        throw new TransientUpdateError(`GET ${url} failed: ${describeFetchError(err)}`);
+      }
       if (res.status === 202) return "building";
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(`could not fetch the board's build manifest: HTTP ${res.status}${body.error ? ` (${body.error})` : ""}`);
+        const msg = `GET ${url} -> HTTP ${res.status}${body.error ? ` (${body.error})` : ""}`;
+        // 5xx = the board is starting / restarting / cannot pack right now: worth retrying.
+        throw isTransientStatus(res.status) ? new TransientUpdateError(msg) : new Error(msg);
       }
       return (await res.json()) as WorkerBuildManifest;
     },
@@ -119,12 +129,16 @@ export function createDaemonSelfUpdate(d: DaemonSelfUpdateDeps): DaemonSelfUpdat
         manifest,
         destFile,
         fetchImpl: opts.fetchImpl,
+        log: d.log,
       });
       return destFile;
     },
     async install(manifest, tarball) {
+      const startedMs = Date.now();
       try {
-        return await installBuild({ versionsDir, buildId: manifest.buildId, tarball, npm: opts.npm });
+        const entry = await installBuild({ versionsDir, buildId: manifest.buildId, tarball, npm: opts.npm });
+        d.log(`[worker] update to build ${manifest.buildId}: npm install ${Math.round((Date.now() - startedMs) / 1000)}s`);
+        return entry;
       } finally {
         try {
           rmSync(tarball, { force: true });

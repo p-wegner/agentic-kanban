@@ -32,6 +32,7 @@ describe("worker build routes + update request (#1338)", () => {
   const service: WorkerBuildService = {
     currentBuildId: async () => BUILD_ID,
     getBuild: async () => lookup,
+    prewarm: async () => {},
   };
 
   beforeEach(() => {

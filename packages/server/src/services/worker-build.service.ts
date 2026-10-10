@@ -41,6 +41,8 @@ export interface WorkerBuildService {
   currentBuildId(): Promise<string | null>;
   /** The cached build for the current commit — starting one (once) when there is none. */
   getBuild(): Promise<WorkerBuildLookup>;
+  /** Start packing the current commit before any worker asks (#1352). Never throws. */
+  prewarm(): Promise<void>;
 }
 
 export interface WorkerBuildServiceDeps {
@@ -189,9 +191,13 @@ export function createWorkerBuildService(deps: WorkerBuildServiceDeps): WorkerBu
     if (lastFailure && lastFailure.buildId === buildId && nowMs - lastFailure.atMs < BUILD_FAILURE_RETRY_MS) {
       return { state: "unavailable", reason: `the last build failed: ${lastFailure.reason}` };
     }
+    const startedMs = Date.now();
     const promise = build(buildId)
       .then(() => {
         lastFailure = null;
+        const ready = readCached(buildId);
+        const size = ready ? formatBytes(ready.manifest.size) : "?";
+        console.log(`[worker-build] worker build ${buildId.slice(0, 7)} ready in ${Math.round((Date.now() - startedMs) / 1000)}s (${size})`);
       })
       .catch((err: unknown) => {
         lastFailure = { buildId, reason: errorMessage(err), atMs: deps.nowMs ?? Date.now() };
@@ -205,7 +211,45 @@ export function createWorkerBuildService(deps: WorkerBuildServiceDeps): WorkerBu
     return { state: "building" };
   }
 
-  return { currentBuildId, getBuild };
+  /**
+   * #1352: start packing the current commit NOW (boot / a new HEAD) instead of on the first
+   * worker request, which left the worker draining behind a 202 for minutes. A no-op when the
+   * build is cached or already in flight; never throws (a failure is logged by `getBuild`).
+   */
+  async function prewarm(): Promise<void> {
+    try {
+      await getBuild();
+    } catch (err) {
+      console.warn(`[worker-build] prewarm failed: ${errorMessage(err)}`);
+    }
+  }
+
+  return { currentBuildId, getBuild, prewarm };
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
+
+/** Re-check the board's commit on an interval and pack a new one eagerly. Returns the stopper. */
+export function startWorkerBuildPrewarm(service: WorkerBuildService, intervalMs = 60_000, firstDelayMs = 10_000): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
+  const tick = (): void => {
+    void service.prewarm().finally(() => {
+      if (stopped) return;
+      timer = setTimeout(tick, intervalMs);
+      timer.unref?.();
+    });
+  };
+  timer = setTimeout(tick, firstDelayMs);
+  timer.unref?.();
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  };
 }
 
 let singleton: WorkerBuildService | null = null;

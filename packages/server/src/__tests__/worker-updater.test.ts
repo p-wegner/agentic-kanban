@@ -21,7 +21,9 @@ import {
 } from "../lib/worker-update.js";
 import {
   BuildChecksumError,
+  TransientUpdateError,
   createWorkerUpdater,
+  describeFetchError,
   downloadBuild,
   entryForBuild,
   installBuild,
@@ -238,13 +240,14 @@ describe("createWorkerUpdater — drain, wait, verify, switch", () => {
     });
     updater.onBoardBuild(NEW_BUILD);
     await updater.idle();
-    const beforeEnd = h.calls.slice(0, h.calls.indexOf("manifest"));
-    expect(h.calls[0]).toBe("drain"); // stops taking work first
+    // #1352: the manifest is confirmed available first, THEN the worker drains
+    expect(h.calls.slice(0, 2)).toEqual(["manifest", "drain"]);
+    const beforeEnd = h.calls.slice(0, h.calls.indexOf("download"));
     expect(beforeEnd.filter((c) => c === "poll").length).toBeGreaterThanOrEqual(3); // it waited
     expect(h.calls).not.toContain("undrain");
-    // nothing was fetched/installed before the last session ended
-    expect(h.calls.indexOf("manifest")).toBeGreaterThan(h.calls.lastIndexOf("poll"));
-    expect(h.calls.slice(-5)).toEqual(["manifest", "download", "install", "activate", "restart"]);
+    // nothing was downloaded/installed before the last session ended
+    expect(h.calls.indexOf("download")).toBeGreaterThan(h.calls.lastIndexOf("poll"));
+    expect(h.calls.slice(-4)).toEqual(["download", "install", "activate", "restart"]);
     expect(h.states.some((s) => s.includes("waiting for 1 running session"))).toBe(true);
   });
 
@@ -336,6 +339,79 @@ describe("createWorkerUpdater — drain, wait, verify, switch", () => {
     await updater.idle();
     expect(polls).toBe(3);
     expect(h.calls).toContain("restart");
+  });
+
+  it("does NOT drain while the manifest answers 202 — assigns keep landing until it is 200 (#1352)", async () => {
+    let polls = 0;
+    const h = harness();
+    const drainedAtPoll: number[] = [];
+    const updater = createWorkerUpdater({
+      ...h.deps,
+      drain: async () => { drainedAtPoll.push(polls); h.calls.push("drain"); },
+      fetchManifest: async () => (++polls < 4 ? "building" : manifestFor(Buffer.from("t"))),
+    });
+    updater.onBoardBuild(NEW_BUILD);
+    await updater.idle();
+    expect(drainedAtPoll).toEqual([4]); // drained only after the 4th poll finally answered 200
+    expect(h.states.filter((s) => s.includes("draining"))).toHaveLength(1);
+  });
+
+  it("a transient failure is retried with backoff and never pins the build as failed (#1352)", async () => {
+    let tries = 0;
+    const recorded: unknown[] = [];
+    const h = harness();
+    const updater = createWorkerUpdater({
+      ...h.deps,
+      retryBackoffMs: [1, 1],
+      recordFailure: (f) => recorded.push(f),
+      download: async () => {
+        h.calls.push("download");
+        if (++tries < 3) throw new TransientUpdateError("GET http://b/x failed: fetch failed (cause: ECONNRESET: reset)");
+        return "/tmp/x.tgz";
+      },
+    });
+    updater.onBoardBuild(NEW_BUILD);
+    await updater.idle();
+    expect(tries).toBe(3);
+    expect(h.calls).toContain("restart");
+    expect(recorded).toEqual([]);
+
+    // retries exhausted: recorded as transient, back in rotation, next heartbeat tries again
+    const h2 = harness();
+    const rec2: Array<{ phase: string; transient: boolean; reason: string }> = [];
+    let tries2 = 0;
+    const u2 = createWorkerUpdater({
+      ...h2.deps,
+      retryBackoffMs: [1],
+      recordFailure: (f) => rec2.push(f),
+      download: async () => { tries2++; throw new TransientUpdateError("HTTP 503"); },
+    });
+    u2.onBoardBuild(NEW_BUILD);
+    await u2.idle();
+    expect(tries2).toBe(2);
+    expect(rec2).toEqual([expect.objectContaining({ phase: "download", transient: true })]);
+    expect(h2.calls).toContain("undrain");
+    u2.onBoardBuild(NEW_BUILD); // not pinned: the next heartbeat retries
+    await u2.idle();
+    expect(tries2).toBe(4);
+  });
+
+  it("records a checksum failure as non-transient with its phase (#1352)", async () => {
+    const rec: Array<{ phase: string; transient: boolean }> = [];
+    const h = harness();
+    const updater = createWorkerUpdater({
+      ...h.deps,
+      recordFailure: (f) => rec.push(f),
+      download: async () => { throw new BuildChecksumError("a", "b"); },
+    });
+    updater.onBoardBuild(NEW_BUILD);
+    await updater.idle();
+    expect(rec).toEqual([expect.objectContaining({ phase: "checksum", transient: false })]);
+  });
+
+  it("describeFetchError surfaces undici's err.cause (#1352)", () => {
+    const err = new TypeError("fetch failed", { cause: Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }) });
+    expect(describeFetchError(err)).toBe("fetch failed (cause: ECONNRESET: read ECONNRESET)");
   });
 });
 

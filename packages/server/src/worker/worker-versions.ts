@@ -36,6 +36,10 @@ export interface UpdateFailure {
   buildId: string;
   reason: string;
   at: string;
+  /** #1352: where it failed (manifest, download, checksum, install, no-connect…). */
+  phase?: string;
+  /** #1352: a network/board-busy failure — retried automatically, never pins the build as failed. */
+  transient?: boolean;
 }
 
 function readJson<T>(file: string): T | null {
