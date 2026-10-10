@@ -258,6 +258,9 @@ because the calling shell carried no env:
 { "fleetPort": 3003, "fleetHost": "100.x.y.z", "gitHttpPort": 3002, "gitHttpHost": "100.x.y.z" }
 ```
 
+`"tailscale"` is also a valid host value (#1325, resolved via `tailscale ip -4` at bind time); promote's
+smoke resolves it the same way before probing `/health`.
+
 It is merged into the spawn env; an explicit `KANBAN_FLEET_*` / `KANBAN_GIT_HTTP_*` in the shell
 still wins. When a fleet port resolves, promote's smoke also requires `/health` on the fleet port
 and the git port to answer, and fails (and rolls back) the promotion if they do not.

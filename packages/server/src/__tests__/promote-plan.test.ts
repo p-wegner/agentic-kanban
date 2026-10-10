@@ -46,6 +46,7 @@ import {
   parseFleetConfig,
   buildStableSpawnEnv,
   planFleetSmokeTargets,
+  resolveTailscaleIp4,
 } from "../../../../scripts/promote-plan.mjs";
 
 describe("durable fleet config (#1324)", () => {
@@ -76,6 +77,23 @@ describe("durable fleet config (#1324)", () => {
     expect(planFleetSmokeTargets({})).toEqual([]);
     const t = planFleetSmokeTargets({ KANBAN_FLEET_PORT: "3003", KANBAN_FLEET_HOST: "100.1.2.3", KANBAN_GIT_HTTP_PORT: "3002" });
     expect(t.map((x) => x.url)).toEqual(["http://100.1.2.3:3003/health", "http://127.0.0.1:3002/health"]);
+  });
+
+  it("resolves the #1325 `tailscale` host keyword through the injected resolver", () => {
+    const t = planFleetSmokeTargets(
+      { KANBAN_FLEET_PORT: "3003", KANBAN_FLEET_HOST: "tailscale", KANBAN_GIT_HTTP_PORT: "3002", KANBAN_GIT_HTTP_HOST: "Tailscale" },
+      { resolveTailscale: () => "100.64.0.9" },
+    );
+    expect(t.map((x) => x.url)).toEqual(["http://100.64.0.9:3003/health", "http://100.64.0.9:3002/health"]);
+    expect(() =>
+      planFleetSmokeTargets({ KANBAN_FLEET_PORT: "3003", KANBAN_FLEET_HOST: "tailscale" }, { resolveTailscale: () => { throw new Error("down"); } }),
+    ).toThrow("down");
+  });
+
+  it("resolveTailscaleIp4 takes the first IPv4 line and refuses on none", () => {
+    expect(resolveTailscaleIp4(() => "\n100.1.2.3\r\n100.1.2.4\n")).toBe("100.1.2.3");
+    expect(() => resolveTailscaleIp4(() => "")).toThrow(/no IPv4/);
+    expect(() => resolveTailscaleIp4(() => { throw new Error("ENOENT"); })).toThrow(/failed/);
   });
 });
 

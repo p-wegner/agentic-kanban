@@ -9,6 +9,7 @@
  * the ticket's own acceptance is "a dry run prints the sha, tag and each step", and a dry run
  * is exactly this module rendered to stdout.
  */
+import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -239,10 +240,33 @@ export function buildStableSpawnEnv({ baseEnv = process.env, dbUrl, port, fleetC
   return { ...baseEnv, ...fleet, KANBAN_DB_URL: dbUrl, KANBAN_HOST: "127.0.0.1", PORT: String(port) };
 }
 
-/** Health URLs the smoke must probe when a fleet is configured in the spawn env. */
-export function planFleetSmokeTargets(spawnEnv) {
+/**
+ * `tailscale ip -4`, first IPv4 line. Mirrors packages/server/src/lib/tailscale-host.ts (#1325) —
+ * this script is plain .mjs and cannot import the server's TS. Throws when there is no address.
+ */
+export function resolveTailscaleIp4(exec = () => execFileSync("tailscale", ["ip", "-4"], { encoding: "utf8", timeout: 5000, windowsHide: true })) {
+  let out;
+  try {
+    out = exec();
+  } catch (err) {
+    throw new Error(`\`tailscale ip -4\` failed (${err instanceof Error ? err.message.split("\n")[0] : String(err)})`);
+  }
+  const ip = String(out).split(/\r?\n/).map((l) => l.trim()).find((l) => /^\d{1,3}(\.\d{1,3}){3}$/.test(l));
+  if (!ip) throw new Error("`tailscale ip -4` printed no IPv4 address");
+  return ip;
+}
+
+/**
+ * Health URLs the smoke must probe when a fleet is configured in the spawn env. The #1325
+ * `tailscale` host keyword is resolved the way the server resolves it (`resolveTailscale` is the
+ * injectable seam); a resolution failure throws so the smoke fails visibly.
+ */
+export function planFleetSmokeTargets(spawnEnv, { resolveTailscale = resolveTailscaleIp4 } = {}) {
   const targets = [];
-  const hostFor = (h) => (!h || h === "0.0.0.0" || h === "::" ? "127.0.0.1" : h);
+  const hostFor = (h) => {
+    if (!h || h === "0.0.0.0" || h === "::") return "127.0.0.1";
+    return h.trim().toLowerCase() === "tailscale" ? resolveTailscale() : h;
+  };
   const fleetPort = Number(spawnEnv.KANBAN_FLEET_PORT);
   if (Number.isInteger(fleetPort) && fleetPort > 0) {
     targets.push({ label: "fleet listener", url: `http://${hostFor(spawnEnv.KANBAN_FLEET_HOST)}:${fleetPort}/health` });
@@ -253,7 +277,6 @@ export function planFleetSmokeTargets(spawnEnv) {
   }
   return targets;
 }
-
 export function resolveMaxSweepAgeMs(env = process.env) {
   const raw = Number(env.KANBAN_PROMOTE_MAX_SWEEP_AGE_H);
   const hours = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_MAX_SWEEP_AGE_HOURS;

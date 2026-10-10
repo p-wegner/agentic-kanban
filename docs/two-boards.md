@@ -610,7 +610,7 @@ there. See §2 for the day-to-day framing.
 
 The spawn env is `process.env` plus the keys in `fleet.json` (next to the operated DB; keys
 `fleetPort`, `fleetHost`, `gitHttpPort`, `gitHttpHost` → `KANBAN_FLEET_PORT`, `KANBAN_FLEET_HOST`,
-`KANBAN_GIT_HTTP_PORT`, `KANBAN_GIT_HTTP_HOST`). Explicit env wins. Without the file, a promote from
+`KANBAN_GIT_HTTP_PORT`, `KANBAN_GIT_HTTP_HOST`). Explicit env wins. A host may be the literal `tailscale` (#1325): the smoke resolves it with `tailscale ip -4`, as the server does, and fails the promotion visibly if that yields no address. Without the file, a promote from
 a plain shell restarts the board with no fleet listener and every paired worker goes offline. When
 a fleet port is configured the smoke also probes `/health` on the fleet and git ports and fails the
 promotion if either is silent. Format and the rest of the fleet setup: `docs/worker-fleet.md` §6.
