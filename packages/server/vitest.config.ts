@@ -53,6 +53,8 @@ export default defineConfig({
       // account usage decide which provider a launch resolves to. See that file: master's
       // sweep went red on two provider-selection suites for exactly that reason.
       path.resolve(__dirname, "../../test-setup/quota-neutral.ts"),
+      // #1348 — remote-session transcripts must not land in the real %TEMP%. See that file.
+      path.resolve(__dirname, "../../test-setup/remote-transcript-neutral.ts"),
     ],
     // #352 — reap orphaned fixture child servers (`serve.mjs`) and their temp dirs once before
     // the first fork and once after the last. NOT a setupFile: that runs per fork and would let
