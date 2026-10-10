@@ -31,6 +31,7 @@ import {
   isBareFileName,
   type WorkerRepoOpAuth,
   type WorkerRepoOpStatus,
+  type WorkerPhaseTimings,
   type WorkerRepoTransport,
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
@@ -74,6 +75,8 @@ export function gitAuthEnv(repo: WorkerRepoTransport): NodeJS.ProcessEnv {
 export interface WorkerCheckout {
   cwd: string;
   cacheDir: string;
+  /** What provisioning cost, per phase (#1328). Absent on a checkout rebuilt from disk. */
+  phases?: Pick<WorkerPhaseTimings, "fetchKind" | "fetchMs" | "worktreeMs" | "setupMs">;
 }
 
 /**
@@ -119,10 +122,13 @@ export async function provisionWorkerCheckout(
   log: (line: string) => void = workerLog,
 ): Promise<WorkerCheckout> {
   // #1334: one line per repo phase, so a remote operator can time a session from the log.
-  const phase = async <T>(label: string, run: () => Promise<T>): Promise<T> => {
+  // #1328: the same durations are also kept, so they reach the board on the session's exit.
+  const phases: NonNullable<WorkerCheckout["phases"]> = {};
+  const phase = async <T>(label: string, run: () => Promise<T>, record?: (ms: number) => void): Promise<T> => {
     const t0 = Date.now();
     try {
       const out = await run();
+      record?.(Date.now() - t0);
       log(`[worker] ${label} ${Date.now() - t0}ms`);
       return out;
     } catch (err) {
@@ -138,16 +144,20 @@ export async function provisionWorkerCheckout(
 
   const authEnv = gitAuthEnv(repo);
   if (!existsSync(join(cacheDir, ".git"))) {
+    phases.fetchKind = "clone";
     await phase(`clone ${repo.projectId}`, () =>
-      gitExecOrThrow(["clone", gitUrl, cacheDir], { timeout: 10 * 60 * 1000, env: authEnv }));
+      gitExecOrThrow(["clone", gitUrl, cacheDir], { timeout: 10 * 60 * 1000, env: authEnv }),
+      (ms) => { phases.fetchMs = ms; });
   } else {
     // A token is per-assignment Ã¢â‚¬â€ always fetch with the CURRENT credential.
+    phases.fetchKind = "fetch";
     await phase(`fetch ${repo.projectId}`, () =>
       gitExecOrThrow(["fetch", gitUrl, "+refs/heads/*:refs/remotes/origin/*", "--prune"], {
         cwd: cacheDir,
         timeout: 10 * 60 * 1000,
         env: authEnv,
-      }));
+      }),
+      (ms) => { phases.fetchMs = ms; });
   }
 
   // Stale worktree from a crashed prior session with the same id Ã¢â‚¬â€ remove it.
@@ -167,7 +177,8 @@ export async function provisionWorkerCheckout(
     : `refs/remotes/origin/${repo.baseBranch}`;
   await phase("worktree add", () =>
     withWorktreeAdminLock(cacheDir, () =>
-      gitExecOrThrow(["worktree", "add", "-b", localBranch, checkoutDir, startPoint], { cwd: cacheDir })));
+      gitExecOrThrow(["worktree", "add", "-b", localBranch, checkoutDir, startPoint], { cwd: cacheDir })),
+    (ms) => { phases.worktreeMs = ms; });
 
   // #553: through the shared writer, not a raw writeFileSync. The hand-rolled version
   // had no `isSafeSkillName` guard and emitted no frontmatter, so a remote worker's
@@ -209,6 +220,7 @@ export async function provisionWorkerCheckout(
     log(`[worker] setup start (${source}) for session ${sessionId}: ${setupCommand}`);
     const setupStart = Date.now();
     const result = await runSetupScript(checkoutDir, setupCommand);
+    phases.setupMs = Date.now() - setupStart;
     log(
       `[worker] setup end for session ${sessionId}: exit ${result.exitCode}` +
         `${result.timedOut ? " (timed out)" : ""} in ${Date.now() - setupStart}ms`,
@@ -224,7 +236,7 @@ export async function provisionWorkerCheckout(
     warnIfBinariesUnlinked(checkoutDir, setupCommand);
   }
 
-  return { cwd: checkoutDir, cacheDir };
+  return { cwd: checkoutDir, cacheDir, phases };
 }
 
 /**

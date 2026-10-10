@@ -20,6 +20,7 @@ import type { ProviderName } from "../services/agent-provider/types.js";
 import type { WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
 import type { WorkerCapacityInfo, WorkerProfileAttestation } from "@agentic-kanban/shared/lib/worker-protocol";
 import type { WorkerUpdateReport } from "./worker-update.js";
+import type { SessionPhaseTimings } from "@agentic-kanban/shared/lib/worker-protocol";
 
 /**
  * The chain's check ids, as DATA so the union and the runtime list cannot drift (#801).
@@ -292,6 +293,12 @@ export interface SessionPlacementRecord {
   placementReason: PlacementReasonId | null;
   /** The resolver's wording for that decision. Null whenever `placementReason` is. */
   placementDetail: string | null;
+  /**
+   * Where a git-transport session's wall-clock went (#1328): the worker's `fetchMs`/`worktreeMs`/
+   * `setupMs`/`agentMs`/`pushMs` plus the board's `landMs`. Null for a host session or one that
+   * ended before reporting; a phase that did not run is absent, not 0.
+   */
+  phases: SessionPhaseTimings | null;
 }
 
 export interface IssuePlacementReport {
