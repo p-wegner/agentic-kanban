@@ -203,11 +203,11 @@ Fleet worker: connect this machine to a board and execute assigned agent session
 
 | Command | Does |
 |---|---|
+| `worker revoke <worker>` | Revoke (retire) a registered worker by id or name |
 | `worker pair` | Mint a short-lived, single-use pairing token on the board (run this WHERE THE BOARD RUNS; |
 | `worker start` | Run the worker daemon: register with the board (first run needs --token from 'worker pair'), |
 | `worker instructions` | Print a step-by-step runbook for connecting THIS machine to a remote board as a worker |
 | `worker list` | List the board's registered workers with their effective status |
-| `worker revoke <worker>` | Revoke (retire) a registered worker by id or name |
 | `worker explain <issue>` | Why was #N not dispatched to a worker? Walks the SAME ordered chain resolveWorkerPlacement |
 | `worker placements` | Which machine each recent session actually ran on (host, or a named worker) |
 | `worker doctor` | Run ON THE WORKER MACHINE: self-test the whole chain to the board — fleet port reachable, |
