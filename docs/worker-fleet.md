@@ -301,6 +301,28 @@ interface, or set `KANBAN_FLEET_INSECURE=1` if every interface is genuinely what
 The direction is deliberate — the old default could only be too wide, and the new one fails
 visibly.
 
+### Windows firewall for a tailnet fleet (#1326)
+
+On a Windows board machine the fleet and git ports need inbound allow rules before a tailnet
+worker can connect, and those rules must NOT be profile-wide (a "Private network" rule also opens
+the port to LAN/wifi, where the `assign` frame is an RCE channel — see the threat model below).
+Use the script, from an **elevated** PowerShell:
+
+```powershell
+scripts\fleet-firewall.ps1 -Install   # exactly two TCP inbound allow rules
+scripts\fleet-firewall.ps1 -Status    # list them and flag any not scoped to the tailnet
+scripts\fleet-firewall.ps1 -Remove
+```
+
+Ports come from `~/.agentic-kanban/fleet.json`, then `KANBAN_FLEET_PORT` / `KANBAN_GIT_HTTP_PORT`;
+override with `-FleetPort` / `-GitPort`. The rules are named `agentic-kanban fleet <port>` and
+`agentic-kanban git <port>`, restricted to RemoteAddress `100.64.0.0/10` (and the `Tailscale*`
+interface alias when that adapter exists). From a non-elevated shell the script says so and changes
+nothing. Re-run `-Install` after changing a port; it replaces the old rules.
+
+`worker doctor-board` WARNs (Windows only) when a bound listener's host is a tailnet address and no
+enabled inbound allow rule scoped to `100.64.0.0/10` covers its port.
+
 ### Threat model: everything here is plaintext
 
 Both listeners are plain HTTP and neither supports TLS today. What that means concretely,
