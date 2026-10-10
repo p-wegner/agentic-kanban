@@ -45,7 +45,7 @@ board's API port it cannot connect at all from another machine, because that app
 
 **What a worker-side operator can actually check**, in order of usefulness:
 
-0. **`agentic-kanban worker doctor --board <fleet-url>`** (#774) — the whole chain this
+0. **`agentic-kanban-worker doctor --board <fleet-url>`** (#774) — the whole chain this
    side can prove, in one command: fleet port reachable, the SAVED PAIRING still
    authenticates (a `worker list` cannot tell you this from here), the WebSocket upgrade
    survives whatever sits between the machines, the git transport port answers
@@ -115,7 +115,7 @@ agentic-kanban-worker start --board http://<board-host>:3003 --token <pairing-to
   --name "$(hostname)" --labels docker,linux --providers claude --max-concurrency 2
 
 # 4. Worker machine — self-test the whole chain from here (#774)
-agentic-kanban worker doctor --board http://<board-host>:3003 --providers claude
+agentic-kanban-worker doctor --board http://<board-host>:3003 --providers claude
 
 # 5. Board machine — confirm the board sees it, and that it is actually PICKABLE
 agentic-kanban worker list
@@ -136,7 +136,8 @@ that "is ignored once paired".
 
 `agentic-kanban-worker` is the standalone binary for machines with no board: it loads
 only the daemon and never opens or creates a database. On a machine that also runs the
-board, `agentic-kanban worker <cmd>` is equivalent. `--version` reports the version from
+board, `agentic-kanban worker <cmd>` is equivalent — it is routed before the database
+module loads, so it too never opens or creates a database (#1315). `--version` reports the version from
 the installed manifest, so it is usable evidence of which build is installed (it was
 hardcoded to `0.0.1` in an earlier build; that is fixed).
 
