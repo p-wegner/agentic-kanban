@@ -75,19 +75,19 @@ registerServicesCommand(program);
 registerWorkerCommand(program);
 registerPluginSyncCommand(program);
 
-// â”€â”€ Split-brain guards (#112, #165): warn loudly whenever a CLI subcommand's
+// ── Split-brain guards (#112, #165): warn loudly whenever a CLI subcommand's
 // resolved DB might not be the one the user expects.
 // - #112: resolved to the home-fallback DB while a dev server started from a
 //   checkout would use the in-checkout packages/server/kanban.db instead.
 // - #165: resolved to a DIFFERENT database than the immediately preceding CLI
-//   invocation â€” the exact symptom that let an empty shadow DB go unnoticed
+//   invocation — the exact symptom that let an empty shadow DB go unnoticed
 //   across several calls in one session before this fix. db/index.ts already
-//   logs the resolved path/source on every invocation (stderr, unconditionally â€”
+//   logs the resolved path/source on every invocation (stderr, unconditionally —
 //   kept off stdout so it never corrupts `--json` output, see its own comment).
-// preAction only fires for action subcommands â€” never for --help/--version â€”
+// preAction only fires for action subcommands — never for --help/--version —
 // and both checks are non-fatal.
 program.hook("preAction", async (_thisCommand, actionCommand) => {
-  // `worker` commands are pure HTTP/WebSocket clients â€” a worker machine has no
+  // `worker` commands are pure HTTP/WebSocket clients — a worker machine has no
   // board checkout and no board database. Probing DB resolution there would
   // print the split-brain warning ("this CLI may be reading/writing a DIFFERENT
   // database") on a machine where no database is involved at all, which reads
@@ -99,7 +99,7 @@ program.hook("preAction", async (_thisCommand, actionCommand) => {
     const { DB_LOCATION, LOCAL_DB_CANDIDATES } = await import("../db/data-dir.js");
     // #733: the split-brain warning is conditional on an in-checkout kanban.db
     // actually existing. When none does, the home DB is the ONLY database and
-    // there is nothing to warn about â€” the old unconditional text asserted a
+    // there is nothing to warn about — the old unconditional text asserted a
     // divergence that did not exist and talked callers out of correct writes.
     const homeFallback = homeFallbackDbWarning(
       DB_LOCATION,
@@ -116,10 +116,10 @@ program.hook("preAction", async (_thisCommand, actionCommand) => {
   }
 });
 
-// â”€â”€ `pnpm cli -- <args>` forwards a literal "--" as the first script argument.
+// ── `pnpm cli -- <args>` forwards a literal "--" as the first script argument.
 // Commander treats a leading "--" as "end of options", so every token after it
 // (including --help, --version, --json, -d) is parsed as a positional operand
-// instead of a flag â€” which made `pnpm cli -- issue create --help` create an
+// instead of a flag — which made `pnpm cli -- issue create --help` create an
 // issue literally titled "--help", and broke --json through the wrapper. Strip a
 // single leading "--" (the wrapper artifact) so flags work as written. A bare
 // `pnpm cli --` then collapses to no args and starts the server, same as `pnpm cli`.
@@ -127,9 +127,9 @@ if (process.argv[2] === "--") {
   process.argv.splice(2, 1);
 }
 
-// â”€â”€ Default action: the bare `agentic-kanban` invocation (no args) auto-inits,
-// auto-registers the cwd repo, and starts the server. ANY args â€” a subcommand OR a
-// flag like --help / --version â€” are handed to commander instead. (Previously this
+// ── Default action: the bare `agentic-kanban` invocation (no args) auto-inits,
+// auto-registers the cwd repo, and starts the server. ANY args — a subcommand OR a
+// flag like --help / --version — are handed to commander instead. (Previously this
 // matched against a hand-maintained subcommand list, so --help/--version weren't
 // recognized and wrongly fell through to starting the server.)
 const hasArgs = process.argv.length > 2;
@@ -142,7 +142,7 @@ if (!hasArgs) {
 
       // Auto-init if no database
       if (!dbExists()) {
-        console.log("First run â€” setting up agentic-kanban...\n");
+        console.log("First run — setting up agentic-kanban...\n");
         ensureDataDir();
         await runMigrations();
         console.log("  Database created and migrated.");
@@ -159,7 +159,7 @@ if (!hasArgs) {
         try {
           const { gitExecOrThrow } = await import("@agentic-kanban/shared/lib/git-exec");
           await gitExecOrThrow(["-C", process.cwd(), "rev-parse", "--git-dir"], {});
-          // CWD is a git repo â€” register it
+          // CWD is a git repo — register it
           const { registerProject } = await import("../services/project-registration.js");
           const { project, created } = await registerProject(process.cwd());
           if (created) {
@@ -168,7 +168,7 @@ if (!hasArgs) {
             console.log("");
           }
         } catch {
-          // Not a git repo â€” skip registration, user can do it manually
+          // Not a git repo — skip registration, user can do it manually
           console.log("  No project registered (current directory is not a git repo).");
           console.log("  Run `agentic-kanban register <path>` to register one.\n");
         }
@@ -188,12 +188,12 @@ if (!hasArgs) {
       console.log(`    UI:  http://${host}:${port}`);
       console.log(`    API: http://${host}:${port}/api/projects\n`);
       console.log("  Useful commands:");
-      console.log("    agentic-kanban status              â€” board overview");
-      console.log("    agentic-kanban issue create \"Title\" â€” create an issue");
-      console.log("    agentic-kanban issue list           â€” list issues");
-      console.log("    agentic-kanban register <path>      â€” register another repo");
-      console.log("    agentic-kanban install-skill .       â€” write agent skills to cwd");
-      console.log("    agentic-kanban --help                â€” all commands\n");
+      console.log("    agentic-kanban status              — board overview");
+      console.log("    agentic-kanban issue create \"Title\" — create an issue");
+      console.log("    agentic-kanban issue list           — list issues");
+      console.log("    agentic-kanban register <path>      — register another repo");
+      console.log("    agentic-kanban install-skill .       — write agent skills to cwd");
+      console.log("    agentic-kanban --help                — all commands\n");
       console.log("  Press Ctrl+C to stop\n");
 
       // Open browser
