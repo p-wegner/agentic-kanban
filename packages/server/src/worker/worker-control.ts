@@ -170,7 +170,7 @@ export async function applyWorkerUpdate(o: ApplyUpdateOptions): Promise<ApplyUpd
   if (!ctl) {
     return fail(
       `no running worker daemon found (no ${controlFileFor(o.stateFile)}). Start it with ` +
-        "'agentic-kanban-worker start' — a daemon that predates #1355 has no control endpoint either; " +
+        "'agentic-kanban-worker start' - a daemon that predates #1355 has no control endpoint either; " +
         "restart it once through the stable shim.",
     );
   }

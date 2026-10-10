@@ -69,7 +69,7 @@ function resolveVersion(): string {
  */
 function installProcessGuards(): void {
   process.on("uncaughtException", (err) => {
-    workerLog("[worker] uncaught exception (daemon staying up — running agents keep their sessions):", err);
+    workerLog("[worker] uncaught exception (daemon staying up - running agents keep their sessions):", err);
   });
   process.on("unhandledRejection", (reason) => {
     workerLog("[worker] unhandled rejection (daemon staying up):", reason);

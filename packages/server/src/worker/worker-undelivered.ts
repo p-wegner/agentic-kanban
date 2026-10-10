@@ -102,7 +102,7 @@ export function upsertUndelivered(workRoot: string, record: UndeliveredSessionRe
   } catch (err) {
     workerLog(
       `[worker] could not persist the undelivered-result record for sessionId=${record.sessionId}: ` +
-        `${err instanceof Error ? err.message : String(err)} — the checkout is still kept, but a ` +
+        `${err instanceof Error ? err.message : String(err)} - the checkout is still kept, but a ` +
         `daemon restart will not know about it`,
     );
   }

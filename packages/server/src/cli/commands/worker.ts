@@ -32,6 +32,8 @@ import { renderBootstrapSteps, renderWorkerSetupGuide } from "./worker-setup-gui
 // #880 — the read-only update-check. Db-free like the doctor: also part of the
 // standalone worker binary.
 import { renderUpdateCheckReport, runWorkerUpdateCheck } from "./worker-update-check.js";
+import { compareWithBoardBuild, renderBuildMismatch } from "./worker-board-build.js";
+import { resolveOwnPackageVersion } from "../../lib/worker-build.js";
 // The step SHAPE lives in shared/lib (#1089, wire-dto-single-declaration) — a deep `lib/` path,
 // not the `types` barrel, because this file is reached by the `agentic-kanban-worker` binary's
 // isolation-tested import graph (`worker-cli-isolation.test.ts`), which permits only
@@ -440,6 +442,15 @@ async function runWorkerStart(options: WorkerStartOptions): Promise<void> {
     if (shim) console.log(`[worker] stable restart command: ${shim} start ...`);
     const logFile = workerLogFileFor(options.stateFile ?? defaultWorkerStateFile());
     console.log(`[worker] logging to ${logFile}`);
+    // #1366: pairing with a stale global install (the printed steps failed mid-build) must not pass silently.
+    if (options.token) {
+      const cmp = await compareWithBoardBuild({
+        boardUrl: options.board,
+        token: options.token,
+        ownVersion: resolveOwnPackageVersion(),
+      });
+      if (cmp.state === "differs") console.warn(`[worker] WARNING: ${renderBuildMismatch(cmp.own, cmp.board)}`);
+    }
     // Read by `restart` below, which can fire (a rollback) before the await resolves.
     let daemonRef: WorkerDaemonHandle | undefined;
     const daemon = await startWorkerDaemon({

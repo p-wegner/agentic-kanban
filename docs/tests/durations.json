@@ -1486,6 +1486,11 @@
       "endTime": 255.06787109375
     },
     {
+      "name": "packages/server/src/__tests__/worker-console-ascii.test.ts",
+      "startTime": 0,
+      "endTime": 600
+    },
+    {
       "name": "packages/server/src/__tests__/board-port-ladder-single-source.test.ts",
       "startTime": 0,
       "endTime": 461.59814453125

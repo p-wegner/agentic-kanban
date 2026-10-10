@@ -771,7 +771,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       // newer socket than the one this closure was created for, that newer attempt is
       // already connecting or connected â€” scheduling here would be the overlap.
       if (ws !== null && ws !== socket) {
-        log(`[worker] disconnected (${cause}); not retrying â€” a newer connection attempt already exists`);
+        log(`[worker] disconnected (${cause}); not retrying - a newer connection attempt already exists`);
         return;
       }
       // #858: one timer, ever. Two close-shaped events for the same lost link (an `error`

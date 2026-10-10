@@ -59,7 +59,7 @@ export function checkGlobalLauncher(opts: {
       detail: `the global agentic-kanban-worker is build ${globalBuild}, older than the running build ${runningBuild}; a self-update never refreshes it`,
       remedy: hasShim
         ? `Restart manually with the stable shim: ${shim} start ... (it always runs the current build).`
-        : `No stable shim yet (it is written on the next \`worker start\`). Until then use: agentic-kanban-worker start …  (delegates only if the global build includes #1346).`,
+        : `No stable shim yet (it is written on the next \`worker start\`). Until then use: agentic-kanban-worker start ...  (delegates only if the global build includes #1346).`,
     };
   }
   if (!hasShim) {

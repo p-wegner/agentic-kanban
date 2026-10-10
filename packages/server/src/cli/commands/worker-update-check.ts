@@ -98,7 +98,7 @@ export async function runWorkerUpdateCheck(opts: {
     return failed(
       boardUrl,
       workerVersion,
-      `no pairing saved for ${boardUrl} — the update-check authenticates with the per-worker token. ` +
+      `no pairing saved for ${boardUrl} - the update-check authenticates with the per-worker token. ` +
         `Pair first: mint a token on the board ('agentic-kanban worker pair') and run ` +
         `'worker start --board ${boardUrl} --token <token>'.`,
     );
@@ -120,7 +120,7 @@ export async function runWorkerUpdateCheck(opts: {
     return failed(
       boardUrl,
       workerVersion,
-      "the board rejected this machine's bearer token (401) — the worker was revoked, or the board's DB was replaced. Re-pair with a fresh token.",
+      "the board rejected this machine's bearer token (401) - the worker was revoked, or the board's DB was replaced. Re-pair with a fresh token.",
     );
   }
   if (res.status === 404) {
@@ -129,7 +129,7 @@ export async function runWorkerUpdateCheck(opts: {
     return failed(
       boardUrl,
       workerVersion,
-      "the board answered 404 for /update-check — it predates this command (or --board points at " +
+      "the board answered 404 for /update-check - it predates this command (or --board points at " +
         "a non-fleet URL), so its build cannot be read from here. The board is at least older than " +
         "this worker's own package in that case; upgrading the BOARD is what adds the endpoint.",
     );
@@ -252,7 +252,7 @@ export function renderUpdateCheckReport(report: UpdateCheckReport): string {
     `${version ?? "?"}${id && !version?.includes(id.slice(0, 7)) ? ` [build ${id.slice(0, 9)}]` : ""}`;
   lines.push(
     `  ${subjectLabel}: ${withId(report.workerVersion, report.workerBuildId)} (protocol ${report.workerProtocolVersion})` +
-      (report.workerSource === "own-install" ? " — the launcher's own version; no daemon or versions/current.json found" : ""),
+      (report.workerSource === "own-install" ? " - the launcher's own version; no daemon or versions/current.json found" : ""),
   );
   lines.push(
     `  board's worker build:  ${withId(report.boardWorkerVersion, report.boardBuildId)} (protocol ${report.boardProtocolVersion ?? "?"})`,
@@ -264,33 +264,33 @@ export function renderUpdateCheckReport(report: UpdateCheckReport): string {
     const label = formatBuildFreshness(report.freshness, report.boardWorkerVersion);
     if (report.workerBuildId && report.boardBuildId) {
       lines.push(
-        `  Verdict: outdated — running build ${report.workerBuildId.slice(0, 9)}, board's build is ${report.boardBuildId.slice(0, 9)}.`,
+        `  Verdict: outdated - running build ${report.workerBuildId.slice(0, 9)}, board's build is ${report.boardBuildId.slice(0, 9)}.`,
       );
       lines.push("  To update this machine's daemon now: agentic-kanban-worker update-check --apply");
     } else {
-      lines.push(`  Verdict: ${label} — a newer worker build exists on the board.`);
+      lines.push(`  Verdict: ${label} - a newer worker build exists on the board.`);
       lines.push(`  To update (manual, in this order): ${report.remediation}.`);
     }
   } else if (report.freshness === "ahead-of-board") {
     lines.push(
-      "  Verdict: ahead of board — this install is NEWER than the board's checkout. Normal on a " +
+      "  Verdict: ahead of board - this install is NEWER than the board's checkout. Normal on a " +
         "dev machine testing a fresh tarball; nothing to do here (upgrading the BOARD is a board-side step).",
     );
   } else if (report.freshness === "different-build") {
     lines.push(
-      "  Verdict: different build from board — this install was packed from another commit than " +
+      "  Verdict: different build from board - this install was packed from another commit than " +
         "the one the board runs. Not an ordering claim.",
     );
     lines.push("  To switch this machine's daemon to the board's build: agentic-kanban-worker update-check --apply");
   } else if (report.freshness === "in-sync") {
-    lines.push("  Verdict: in sync — this install matches the board's build.");
+    lines.push("  Verdict: in sync - this install matches the board's build.");
   } else {
     lines.push(
-      "  Verdict: unknown — one side's build could not be determined ('?' above names which), " +
+      "  Verdict: unknown - one side's build could not be determined ('?' above names which), " +
         "so no direction is claimed.",
     );
   }
   lines.push("");
-  lines.push("Report only — nothing was downloaded, installed, or restarted.");
+  lines.push("Report only - nothing was downloaded, installed, or restarted.");
   return lines.join("\n");
 }
