@@ -16,6 +16,25 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
+
+let cachedBoardCommit: string | null | undefined;
+
+/**
+ * The commit this board process runs from (`git rev-parse HEAD` of its source checkout),
+ * cached for the process — the sha a `-dev.<sha>` worker stamp is compared against (#1330).
+ * Null when there is no git checkout (an npm install): comparison then falls back to semver.
+ */
+export function resolveBoardCommit(startDir: string = dirname(fileURLToPath(import.meta.url))): string | null {
+  if (cachedBoardCommit !== undefined) return cachedBoardCommit;
+  try {
+    const sha = gitExecSync(["rev-parse", "HEAD"], { cwd: startDir, timeout: 5000 }).trim().toLowerCase();
+    cachedBoardCommit = /^[0-9a-f]{40}$/.test(sha) ? sha : null;
+  } catch {
+    cachedBoardCommit = null;
+  }
+  return cachedBoardCommit;
+}
 
 export function resolveOwnPackageVersion(moduleUrl: string = import.meta.url): string | undefined {
   try {

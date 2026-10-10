@@ -18,7 +18,7 @@
  * newer worker tarball), and labelling it stale would send an operator to "fix" a
  * machine that is fine.
  */
-export type WorkerBuildFreshness = "behind-board" | "ahead-of-board" | "in-sync" | "unknown";
+export type WorkerBuildFreshness = "behind-board" | "ahead-of-board" | "different-build" | "in-sync" | "unknown";
 
 interface ParsedBuild {
   major: number;
@@ -54,12 +54,22 @@ function parseBuild(version: string): ParsedBuild | null {
 export function compareWorkerBuild(
   workerVersion: string | undefined | null,
   boardVersion: string | undefined | null,
+  boardCommit?: string | null,
 ): WorkerBuildFreshness {
   if (!workerVersion || !boardVersion) return "unknown";
   if (workerVersion.trim() === boardVersion.trim()) return "in-sync";
   const worker = parseBuild(workerVersion);
   const board = parseBuild(boardVersion);
   if (!worker || !board) return "unknown";
+  // #1330: a pack-worker `-dev.<sha>` stamp names a COMMIT, not a point in semver order.
+  // Against the board's own commit it is either the same tree or a different one — never
+  // "behind" (semver would call every hand-packed worker behind its own release).
+  const devSha = worker.prerelease ? /^dev\.([0-9a-f]{7,40})$/i.exec(worker.prerelease)?.[1] : undefined;
+  const commit = boardCommit?.trim().toLowerCase();
+  if (devSha && commit && commit.length >= 7) {
+    const sha = devSha.toLowerCase();
+    return commit.startsWith(sha) || sha.startsWith(commit) ? "in-sync" : "different-build";
+  }
   const triple = (p: ParsedBuild): number[] => [p.major, p.minor, p.patch];
   const [w, b] = [triple(worker), triple(board)];
   for (let i = 0; i < 3; i++) {
@@ -85,5 +95,6 @@ export function formatBuildFreshness(
   const board = boardVersion ? ` (board runs ${boardVersion})` : "";
   if (freshness === "behind-board") return `behind board${board}`;
   if (freshness === "ahead-of-board") return `ahead of board${board}`;
+  if (freshness === "different-build") return `different build from board${board}`;
   return null;
 }

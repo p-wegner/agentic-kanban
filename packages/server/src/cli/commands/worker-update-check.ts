@@ -122,9 +122,10 @@ export async function runWorkerUpdateCheck(opts: {
   const body = (await res.json().catch(() => ({}))) as {
     boardProtocolVersion?: number;
     boardWorkerVersion?: string | null;
+    boardCommit?: string | null;
   };
   const boardWorkerVersion = body.boardWorkerVersion ?? null;
-  const freshness = compareWorkerBuild(workerVersion ?? undefined, boardWorkerVersion ?? undefined);
+  const freshness = compareWorkerBuild(workerVersion ?? undefined, boardWorkerVersion ?? undefined, body.boardCommit);
   return {
     boardUrl,
     workerVersion,
@@ -160,6 +161,11 @@ export function renderUpdateCheckReport(report: UpdateCheckReport): string {
     lines.push(
       "  Verdict: ahead of board — this install is NEWER than the board's checkout. Normal on a " +
         "dev machine testing a fresh tarball; nothing to do here (upgrading the BOARD is a board-side step).",
+    );
+  } else if (report.freshness === "different-build") {
+    lines.push(
+      "  Verdict: different build from board — this install was packed from another commit than " +
+        "the one the board runs. Not an ordering claim; re-pack from the board's commit to match.",
     );
   } else if (report.freshness === "in-sync") {
     lines.push("  Verdict: in sync — this install matches the board's build.");
