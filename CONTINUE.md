@@ -5,9 +5,11 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
 
 ## 2026-10-10 (later) — fleet worker e2e: six local rounds clean, Tailscale prep filed
 
-**State.** The stable board is still `stable-20261010`; #1315-#1323 are merged on `master` but
-NOT promoted and NOT pushed. Board: #1324-#1329 open (Tailscale prep, Todo; #1329 is
-operator-run and tagged `no-auto-start`).
+**State.** Stable board runs `stable-20261010-2` (`0b7e7965d`, full green sweep of
+`rc/20261010-2`, promoted 2026-10-10, smoke passed; rollback `stable-20261010`), carrying
+#1315-#1323. `master` pushed after a clean confidential-terms scan of the range and of every
+changed file in full. Board: #1324-#1329 open (Tailscale prep, Todo; #1329 is operator-run and
+tagged `no-auto-start`).
 
 - **Local fleet e2e, verified.** Dev board with `KANBAN_FLEET_PORT=3103 KANBAN_GIT_HTTP_PORT=3102`,
   a scratch node:test fixture registered as `wfx`, strict worker dispatch, a FRESH worker per
@@ -24,8 +26,7 @@ operator-run and tagged `no-auto-start`).
   stable board only gets fleet env from the calling shell), bind retry, tailnet-scoped firewall
   script, board-served worker build, per-phase timings, and the operator-run tailnet lab checklist.
 
-**Next:** promote (`pnpm promote --dry-run` first), then build #1324 and #1325 before anything
-connects over the tailnet.
+**Next:** build #1324 and #1325 before anything connects over the tailnet.
 
 ## 2026-10-10 — board drained: #1312, #1313, #1314 Done
 
