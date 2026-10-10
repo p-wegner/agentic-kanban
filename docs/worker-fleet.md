@@ -250,6 +250,18 @@ VITE_HOST=127.0.0.1 pnpm dev
 | `KANBAN_FLEET_HOST` / `KANBAN_GIT_HTTP_HOST` | Which interface each binds | **Unset = `127.0.0.1`** (#753). Naming the interface is how a listener leaves this machine |
 | `KANBAN_FLEET_INSECURE` | Nothing on its own. `=1` lets an unset host mean every interface again | Unset. Only the exact value `1` counts — `true` does not |
 
+**The operated (stable) board keeps these in `~/.agentic-kanban/fleet.json` (#1324)** — next to the
+operated DB — so `pnpm promote` and `pnpm stable:start` do not restart it with the fleet off just
+because the calling shell carried no env:
+
+```json
+{ "fleetPort": 3003, "fleetHost": "100.x.y.z", "gitHttpPort": 3002, "gitHttpHost": "100.x.y.z" }
+```
+
+It is merged into the spawn env; an explicit `KANBAN_FLEET_*` / `KANBAN_GIT_HTTP_*` in the shell
+still wins. When a fleet port resolves, promote's smoke also requires `/health` on the fleet port
+and the git port to answer, and fails (and rolls back) the promotion if they do not.
+
 **INVARIANT: a configured fleet listener requires a PINNED `KANBAN_GIT_HTTP_PORT` (#776).**
 A worker receives `gitPort` exactly once, in its `assign` frame, and rebuilds every clone and
 push URL as `scheme://<host>:<gitPort>/git/<projectId>` for the life of that assignment. With

@@ -606,6 +606,15 @@ turns out to belong to the stable checkout. That is what makes it a door a reboo
 when nobody is sure the board is really down: worst case it refuses and says who is already
 there. See §2 for the day-to-day framing.
 
+### The stable board's fleet config — `~/.agentic-kanban/fleet.json` (#1324)
+
+The spawn env is `process.env` plus the keys in `fleet.json` (next to the operated DB; keys
+`fleetPort`, `fleetHost`, `gitHttpPort`, `gitHttpHost` → `KANBAN_FLEET_PORT`, `KANBAN_FLEET_HOST`,
+`KANBAN_GIT_HTTP_PORT`, `KANBAN_GIT_HTTP_HOST`). Explicit env wins. Without the file, a promote from
+a plain shell restarts the board with no fleet listener and every paired worker goes offline. When
+a fleet port is configured the smoke also probes `/health` on the fleet and git ports and fails the
+promotion if either is silent. Format and the rest of the fleet setup: `docs/worker-fleet.md` §6.
+
 ### The two logs — and why they are two
 
 Every step is appended to **`<stable checkout>/.kanban/promote.log`** — that is the file the

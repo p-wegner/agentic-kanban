@@ -10,7 +10,7 @@
  * is exactly this module rendered to stdout.
  */
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 /** Default location of the stable checkout: a sibling of this one. */
 export const DEFAULT_STABLE_CHECKOUT_DIRNAME = "agentic-kanban-stable";
@@ -195,6 +195,63 @@ export function resolveBoardUrl(env = process.env) {
 export function resolveOperatedDbPath({ env = process.env, homeDir = homedir() } = {}) {
   if (env.KANBAN_PROMOTE_DB) return resolve(env.KANBAN_PROMOTE_DB);
   return join(homeDir, ".agentic-kanban", "kanban.db");
+}
+
+/**
+ * #1324 — durable fleet config for the OPERATED board: `fleet.json` next to the operated DB.
+ * Without it, promote/stable:start spawn the board with whatever fleet env the calling shell
+ * happens to carry, so a plain shell silently restarts it with the fleet listeners off.
+ */
+export function resolveFleetConfigPath({ env = process.env, homeDir = homedir() } = {}) {
+  return join(dirname(resolveOperatedDbPath({ env, homeDir })), "fleet.json");
+}
+
+/** fleet.json key -> the env var the board reads. */
+export const FLEET_CONFIG_ENV_KEYS = Object.freeze({
+  fleetPort: "KANBAN_FLEET_PORT",
+  fleetHost: "KANBAN_FLEET_HOST",
+  gitHttpPort: "KANBAN_GIT_HTTP_PORT",
+  gitHttpHost: "KANBAN_GIT_HTTP_HOST",
+});
+
+/**
+ * Parse fleet.json text into `{ KANBAN_FLEET_PORT: "3003", ... }`. Accepts the short keys above
+ * or the env-var names themselves. Throws on malformed JSON (a broken config must not silently
+ * disable the fleet); unknown keys are ignored.
+ */
+export function parseFleetConfig(text) {
+  const raw = JSON.parse(text);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("fleet config must be a JSON object");
+  const out = {};
+  for (const [short, envKey] of Object.entries(FLEET_CONFIG_ENV_KEYS)) {
+    const v = raw[short] ?? raw[envKey];
+    if (v !== undefined && v !== null && String(v) !== "") out[envKey] = String(v);
+  }
+  return out;
+}
+
+/** The env the stable board is spawned with: persisted fleet keys under process env, which wins. */
+export function buildStableSpawnEnv({ baseEnv = process.env, dbUrl, port, fleetConfig = {} }) {
+  const fleet = {};
+  for (const [k, v] of Object.entries(fleetConfig)) {
+    if (!baseEnv[k]) fleet[k] = v;
+  }
+  return { ...baseEnv, ...fleet, KANBAN_DB_URL: dbUrl, KANBAN_HOST: "127.0.0.1", PORT: String(port) };
+}
+
+/** Health URLs the smoke must probe when a fleet is configured in the spawn env. */
+export function planFleetSmokeTargets(spawnEnv) {
+  const targets = [];
+  const hostFor = (h) => (!h || h === "0.0.0.0" || h === "::" ? "127.0.0.1" : h);
+  const fleetPort = Number(spawnEnv.KANBAN_FLEET_PORT);
+  if (Number.isInteger(fleetPort) && fleetPort > 0) {
+    targets.push({ label: "fleet listener", url: `http://${hostFor(spawnEnv.KANBAN_FLEET_HOST)}:${fleetPort}/health` });
+    const gitPort = Number(spawnEnv.KANBAN_GIT_HTTP_PORT);
+    if (Number.isInteger(gitPort) && gitPort > 0) {
+      targets.push({ label: "git transport", url: `http://${hostFor(spawnEnv.KANBAN_GIT_HTTP_HOST)}:${gitPort}/health` });
+    }
+  }
+  return targets;
 }
 
 export function resolveMaxSweepAgeMs(env = process.env) {
