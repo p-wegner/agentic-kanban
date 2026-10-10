@@ -52,6 +52,7 @@ import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.servic
 import { isFoundationalBlocker } from "../services/foundational-merge.service.js";
 import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
 import { findUncommittedWork } from "./uncommitted-work-report.js";
+import { hasMergeBeforeWorkspace } from "../repositories/issue-reopen.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { createCleanCloneChecks } from "./exit/clean-clone-checks.js";
 import { createFixAndMergeExitHandler } from "./exit/fix-and-merge-exit.js";
@@ -555,6 +556,16 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       // move to Done so it doesn't block the Done transition (issue #603).
       const currentIssueRows2 = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
       const currentStatusName2 = currentIssueRows2.length > 0 ? statuses.find((s) => s.id === currentIssueRows2[0].statusId)?.name : undefined;
+      // #1343: a reopened ticket is new work. An EARLIER merge of the same issue (before this
+      // workspace existed) is not evidence that THIS workspace's work landed, so it must not
+      // be auto-closed as "already landed" — that silently re-closed the reopened bug.
+      const reopenedAttempt = currentStatusName2 === "In Review"
+        && await hasMergeBeforeWorkspace(issueId, workspaceId, workspace.createdAt, db);
+      if (reopenedAttempt) {
+        console.log(`[workflow] workspace ${workspaceId} exited with no committed changes on a reopened ticket (earlier merge predates it)  NOT auto-closing as already landed (#1343)`);
+        boardEvents.broadcast(projectId, "issue_updated");
+        return;
+      }
       if (currentStatusName2 === "In Review") {
         const doneStatus = findStatus("Done");
         // The issue only reaches In Review AFTER committedChanges was true (the builder

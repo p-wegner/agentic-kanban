@@ -127,7 +127,7 @@ export function createWorkspaceCreateService(deps: {
   }
 
   async function resolveIssueAndProject(issueId: string): Promise<{
-    issue: { projectId: string; issueNumber: number | null; title: string; description: string | null; priority: string | null; externalKey: string | null };
+    issue: { id?: string; projectId: string; issueNumber: number | null; title: string; description: string | null; priority: string | null; externalKey: string | null };
     project: { repoPath: string; defaultBranch: string | null; defaultSkillId: string | null; servicesConfig: string | null };
     setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean };
     symlinkConfig: { enabled: boolean; dirs: string[] };
@@ -372,7 +372,7 @@ export function createWorkspaceCreateService(deps: {
       siblings: SiblingWorktree[];
       /** #628 — the per-repo install timeout, for the deferred background install run. */
       installTimeoutMs?: number;
-      issue: { issueNumber: number | null; title: string; description: string | null; projectId: string };
+      issue: { id?: string; issueNumber: number | null; title: string; description: string | null; projectId: string };
       contextPrimer: string | null;
       /** Ticket group (#661): member tickets, preserved across the service-stack rewrite. */
       groupTickets?: Array<{ issueNumber: number | null; title: string; description: string | null }>;
@@ -783,7 +783,7 @@ export function createWorkspaceCreateService(deps: {
       const ticketContextPath = !isDirect && worktreePath
         ? await writeWorktreeTicketContext(
             worktreePath,
-            issue,
+            { ...issue, id: input.issueId },
             contextPrimer,
             siblingWorktrees.map((s) => ({ name: s.name, worktreePath: s.worktreePath })),
             null,
@@ -924,7 +924,7 @@ export function createWorkspaceCreateService(deps: {
           createdAt: now,
           siblings: siblingWorktrees,
           installTimeoutMs: siblingInstallTimeoutMs,
-          issue: { issueNumber: issue.issueNumber, title: issue.title, description: issue.description, projectId: issue.projectId },
+          issue: { id: input.issueId, issueNumber: issue.issueNumber, title: issue.title, description: issue.description, projectId: issue.projectId },
           contextPrimer,
           groupTickets: groupMembers,
           timing,
