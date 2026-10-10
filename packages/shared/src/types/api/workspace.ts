@@ -65,6 +65,12 @@ export interface MainWorkspaceInfo {
   /** Set while the latest session is DETACHED — its fleet worker is unreachable (#1317). */
   detachedWorker?: DetachedWorkerInfo | null;
   /**
+   * #1347 — set while this workspace's launch is HELD for a strict-dispatch worker that is
+   * draining for an update (`worker_updating`) or reconnecting (`worker_reconnecting`).
+   * In-memory on the board; null/absent once the launch proceeds or fails.
+   */
+  launchHold?: { reason: "worker_updating" | "worker_reconnecting"; workerId: string; since: string } | null;
+  /**
    * #944 — set while a merge for this workspace is IN FLIGHT, so the card can show that a
    * 30-45 minute pre-merge gate is running instead of the amber `idle` dot it would otherwise
    * render (the same dot a workspace nobody has touched in a week gets). Null whenever no

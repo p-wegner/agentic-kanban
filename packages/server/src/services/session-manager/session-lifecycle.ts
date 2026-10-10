@@ -8,7 +8,7 @@ import { createAgentDispatch, type AgentExecutionService } from "../agent-dispat
 import { getWorkerFleet, WorkerDispatchUnavailableError } from "../worker-fleet.service.js";
 // #938: placement — where a launch runs and the record of why — lives in its own module.
 // `startSession` keeps the launch; that keeps the decision.
-import { resolveSessionPlacement } from "./session-placement.js";
+import { resolveSessionPlacement, awaitStrictLaunchWorker } from "./session-placement.js";
 import { failLaunch, newLaunchTrace, type LaunchTrace } from "./launch-failure.js";
 import type { Placement } from "../agent-dispatch.service.js";
 import { extractPlanFromMessages } from "../plan-mode.service.js";
@@ -238,8 +238,9 @@ export function createSessionLifecycle(
       }
     }
 
-    const sessionId = randomUUID();
-    const now = new Date().toISOString();
+    await awaitStrictLaunchWorker({ database: db, workspaceId, projectId, providerName, explicitPlacement: !!placement }); // #1347: strict hold/refusal BEFORE any session row
+
+    const sessionId = randomUUID(), now = new Date().toISOString();
     console.log(`[session] starting: workspaceId=${workspaceId} sessionId=${sessionId} workingDir=${effectiveWorkingDir}`);
 
     // Capture the skill the workspace launched under so Insights "By Skill" can

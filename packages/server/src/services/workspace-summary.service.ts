@@ -3,6 +3,7 @@ import type { Database } from "../db/index.js";
 import { detectConflicts, getDiffShortstat } from "./git.service.js";
 import { isGitProjectionFresh, refreshWorkspaceGitProjection } from "./workspace-summary-projection.service.js";
 import type { ProviderName } from "./agent-provider.js";
+import { getLaunchHold } from "./session-manager/strict-launch-hold.js";
 import { isAnalyticsNoise } from "./session-filter.js";
 import { computeWorkspaceCodeMetrics, parseStoredWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import type { WorkspaceCodeMetrics, WorkspaceSummary } from "@agentic-kanban/shared";
@@ -578,6 +579,8 @@ async function attachSessionData(
 
   for (const [, summary] of workspaceSummaryMap) {
     if (!summary.main) continue;
+    // #1347: the hold exists before (and independent of) any session row.
+    summary.main.launchHold = getLaunchHold(summary.main.id) ?? null;
     const sess = latestByWs.get(summary.main.id);
     if (!sess) continue;
     summary.main.detachedWorker = sess.status === "running" ? (detachedBySession.get(sess.id) ?? null) : null;
