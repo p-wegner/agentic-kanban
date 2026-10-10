@@ -1,8 +1,7 @@
 import type { AgentLaunchRequest } from "./agent-dispatch.service.js";
 import { resolveEffectivePrompt } from "./agent-provider/context-files-prompt.js";
 import { buildRemoteLaunchSpec } from "./remote-launch-spec.js";
-import { announceRemoteAssignmentIdentity, buildRemoteContextFiles } from "./remote-context-files.js";
-import { findFleetMcpAssignment } from "../repositories/worker.repository.js";
+import { announceRemoteBridgeInBrief, buildRemoteContextFiles } from "./remote-context-files.js";
 import {
   REMOTE_BOARD_TOOLS,
   buildRemoteMcpConfigFile,
@@ -11,7 +10,6 @@ import {
   providerSupportsRemoteMcp,
   remoteMcpConfigArgs,
 } from "./fleet-mcp-bridge.service.js";
-import { TICKET_CONTEXT_FILENAME, announceRemoteBoardTools } from "@agentic-kanban/shared/lib/ticket-context";
 // Remote agent execution over a fleet worker's WebSocket (epic #1, phase 1c #5).
 //
 // Implements the AgentExecutionService seam (phase 0): `launch` builds the SAME
@@ -654,13 +652,7 @@ export function createRemoteAgentService(
             // now false for this assignment, so the section is rewritten to name the tools that
             // actually work — instructions that describe the wrong environment are how an agent
             // wastes a session.
-            for (const file of remoteContextFiles) {
-              if (file.name !== TICKET_CONTEXT_FILENAME) continue;
-              file.content = announceRemoteAssignmentIdentity(
-                announceRemoteBoardTools(file.content, { boardTools: REMOTE_BOARD_TOOLS }),
-                { projectId: repo.projectId, issueId: (await findFleetMcpAssignment(sessionId, database).catch(() => null))?.issueId },
-              );
-            }
+            await announceRemoteBridgeInBrief(remoteContextFiles, REMOTE_BOARD_TOOLS, repo.projectId, sessionId, database);
           } else {
             console.log(
               `[agent-remote] no board MCP bridge for session ${sessionId} ` +

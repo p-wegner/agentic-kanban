@@ -21,13 +21,35 @@ import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import {
   TICKET_CONTEXT_FILENAME,
+  announceRemoteBoardTools,
   retargetTicketContextForRemoteWorker,
 } from "@agentic-kanban/shared/lib/ticket-context";
 import { BOARD_ISSUES_URL } from "./board-feedback-routing.js";
+import type { Database } from "../db/index.js";
+import { findFleetMcpAssignment } from "../repositories/worker.repository.js";
 
 export interface RemoteContextFile {
   name: string;
   content: string;
+}
+
+/**
+ * Rewrite the ticket brief for a remote worker that DOES have the board bridge (#749, #1332):
+ * name the tools that work and the assignment's own issue/project ids. A failed issue lookup
+ * only drops the issue id line; the bridge still defaults to it.
+ */
+export async function announceRemoteBridgeInBrief(
+  files: RemoteContextFile[],
+  boardTools: Parameters<typeof announceRemoteBoardTools>[1]["boardTools"],
+  projectId: string,
+  sessionId: string,
+  database: Database,
+): Promise<void> {
+  const issueId = (await findFleetMcpAssignment(sessionId, database).catch(() => null))?.issueId;
+  for (const file of files) {
+    if (file.name !== TICKET_CONTEXT_FILENAME) continue;
+    file.content = announceRemoteAssignmentIdentity(announceRemoteBoardTools(file.content, { boardTools }), { projectId, issueId });
+  }
 }
 
 /**
