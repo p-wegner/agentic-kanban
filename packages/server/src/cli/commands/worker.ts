@@ -11,6 +11,7 @@ import {
 } from "../../worker/worker-daemon.js";
 import { isSupervised, relaunchWorker, workerLogFileFor } from "../../worker/worker-updater.js";
 import { resolveDelegation, runDelegated } from "../../worker/worker-delegate.js";
+import { installShim } from "../../worker/worker-shim.js";
 import type { WorkerUpdateReport } from "../../lib/worker-update.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "../../worker/worker-repo.js";
 import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
@@ -410,6 +411,10 @@ async function runWorkerStart(options: WorkerStartOptions): Promise<void> {
     if (!entry && options.autoUpdate) {
       console.warn("[worker] --auto-update ignored: cannot locate this install's bin/worker.js");
     }
+    // #1350: a fixed-path launcher that always resolves current.json, so a manual restart never
+    // depends on the global install (which self-update never refreshes).
+    const shim = installShim({ stateFile: options.stateFile ?? defaultWorkerStateFile(), fallbackEntry: entry });
+    if (shim) console.log(`[worker] stable restart command: ${shim} start …`);
     const logFile = workerLogFileFor(options.stateFile ?? defaultWorkerStateFile());
     console.log(`[worker] logging to ${logFile}`);
     // Read by `restart` below, which can fire (a rollback) before the await resolves.
