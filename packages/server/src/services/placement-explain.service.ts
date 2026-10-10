@@ -49,7 +49,8 @@ import {
   getWorkerNamesByIds,
   listSessionPlacementRows,
 } from "../repositories/placement-observability.repository.js";
-import { getBoardEndedReasons } from "../repositories/worker-events.repository.js";
+import { getBoardEndedReasons, getSessionPhaseTimings } from "../repositories/worker-events.repository.js";
+import type { SessionPhaseTimings } from "@agentic-kanban/shared/lib/worker-protocol";
 import type { WorkerAssignment } from "../lib/placement-explain.types.js";
 import type { ProviderName } from "./agent-provider.js";
 import type {
@@ -632,8 +633,13 @@ export async function listSessionPlacements(
     rows.map((r) => r.sessionId),
     database,
   );
+  const phaseIds = await getSessionPhaseTimings(
+    rows.map((r) => r.sessionId),
+    database,
+  );
   return rows.map((r) => ({
     ...r,
+    phases: (phaseIds.get(r.sessionId) as SessionPhaseTimings | undefined) ?? null,
     exitCode: parseExitCode(r.exitCode),
     endedBy: boardEndedReason(endedByIds.get(r.sessionId)),
     // #801: WHY, beside WHERE. Narrowed back to the id union here rather than in the

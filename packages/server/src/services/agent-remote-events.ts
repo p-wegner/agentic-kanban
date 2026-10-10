@@ -13,6 +13,7 @@
  * awaited into a caller's critical path, because a diagnostic that can fail a launch is
  * worse than a missing diagnostic.
  */
+import type { SessionPhaseTimings } from "@agentic-kanban/shared/lib/worker-protocol";
 import type { Database } from "../db/index.js";
 import { recordWorkerEvent } from "./worker-events.service.js";
 
@@ -35,6 +36,8 @@ export interface RemoteSessionEventRecorder {
     exitCode: number | null,
     how: string,
     endedBy?: BoardEndedReason,
+    /** Per-phase durations (#1328): the worker's, plus the board's own `landMs`. Git transport only. */
+    phases?: SessionPhaseTimings,
   ): void;
   /**
    * A worker reports a COMPLETED session whose result it still cannot push (#871): even
@@ -67,7 +70,7 @@ export function createRemoteSessionEventRecorder(database: Database): RemoteSess
       });
     },
 
-    noteSessionExit(sessionId, session, exitCode, how, endedBy) {
+    noteSessionExit(sessionId, session, exitCode, how, endedBy, phases) {
       // Called from BOTH finalizers, so a session that ended by exiting, by being lost, by
       // being abandoned or by refusing to launch all leave the same kind of row. Without
       // that, the log records what a worker took and never what became of it — which is
@@ -82,6 +85,7 @@ export function createRemoteSessionEventRecorder(database: Database): RemoteSess
           exitCode,
           how,
           ...(endedBy ? { endedBy } : {}),
+          ...(phases && Object.keys(phases).length > 0 ? { phases } : {}),
           ...(session.repo
             ? { branch: session.repo.branch, transport: "git" satisfies RemoteSessionTransport }
             : { transport: "shared-filesystem" satisfies RemoteSessionTransport }),

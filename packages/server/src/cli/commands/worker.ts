@@ -296,6 +296,23 @@ export function registerWorkerCommand(program: Command) {
  * `[completed]` alone hides a worker-lost run (#1319): the board finalizes it completed / exit 1
  * and an operator reading the list must not mistake it for a success.
  */
+/** `fetch 4.2s · setup 61s · agent 8m12s ...` — recorded phases only, in pipeline order (#1328). */
+export function formatPhaseTimings(phases: NonNullable<SessionPlacementRecord["phases"]>): string {
+  const fmt = (ms: number): string => (ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`);
+  const parts: Array<[string, number | undefined]> = [
+    [phases.fetchKind ?? "fetch", phases.fetchMs],
+    ["worktree", phases.worktreeMs],
+    ["setup", phases.setupMs],
+    ["agent", phases.agentMs],
+    ["push", phases.pushMs],
+    ["land", phases.landMs],
+  ];
+  return parts
+    .filter((p): p is [string, number] => p[1] !== undefined)
+    .map(([label, ms]) => `${label} ${fmt(ms)}`)
+    .join(" · ");
+}
+
 export function formatPlacementState(p: Pick<SessionPlacementRecord, "status" | "exitCode" | "endedBy">): string {
   if (!p.endedBy) return `[${p.status}]`;
   const why = p.endedBy === "abandoned" ? "worker abandoned" : "worker lost";
@@ -747,6 +764,8 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         // started stamping its verdict, and absent for an explicit placement that was never
         // resolved; printing nothing in those cases is the honest answer, not a default.
         if (p.placementReason) console.log(`      why: ${p.placementReason} — ${p.placementDetail ?? ""}`);
+        // #1328 — where the wall-clock went; absent for host sessions and unfinished runs.
+        if (p.phases) console.log(`      phases: ${formatPhaseTimings(p.phases)}`);
       }
     });
   // #774 (remaining #755 item 4) — TWO commands, not one, and the split is forced rather
