@@ -690,7 +690,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
       ownVersion: readEntryVersion(opts.runningEntry ?? null) ?? resolveOwnPackageVersion(),
     }));
   }
-  checks.push(checkWorkerCheckoutTrust(opts.workRoot ?? defaultWorkerWorkRoot(), opts.home ?? homedir()));
+  checks.push(checkWorkerCheckoutTrust(opts.workRoot ?? defaultWorkerWorkRoot(opts.stateFile), opts.home ?? homedir(), opts.harness?.dirFor("claude")));
   if (opts.harness) checks.push(...checkHarness(opts.harness, opts.providers, undefined, { notes: opts.harnessNotes, legacy: opts.harnessLegacy }));
   for (const provider of opts.providers) {
     checks.push(...(await checkProvider(provider, opts.home, undefined, opts.harness)));

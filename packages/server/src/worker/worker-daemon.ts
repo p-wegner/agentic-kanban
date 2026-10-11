@@ -514,14 +514,14 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // long-lived worker never accumulates whole repo clones from abandoned sessions.
   // Best-effort â€” a scan failure must never block pairing/connecting.
   // #1336: a previous daemon's leftover agent trees are killed first (agent-process-tree.ts).
-  await cleanUpBeforeStart(opts.workRoot ?? defaultWorkerWorkRoot(), log);
-  await refreshPackageManagers();
+  const workRoot = opts.workRoot ?? defaultWorkerWorkRoot(stateFile); // #1401: own root per non-default state file
+  await cleanUpBeforeStart(workRoot, log); await refreshPackageManagers();
 
   // #1370: the worker's own doctor, summarised. hello/register always carry the current summary; a
   // heartbeat carries it only when it differs from what the board last got (`pending`).
   const doctor = createDoctorSummaryTracker({
     enabled: opts.doctorSummary === true, log, boardUrl, stateFile, providers: declaredProviders ?? [],
-    profiles: opts.profiles, harness: opts.harness, home: opts.profileHome, workRoot: opts.workRoot,
+    profiles: opts.profiles, harness: opts.harness, home: opts.profileHome, workRoot,
     runningEntry: opts.selfUpdate?.entry ?? null,
   });
   await doctor.refresh();
@@ -639,7 +639,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // tracking capacity protects a well-behaved board, but the ceiling is this machine
   // owner's, so the worker enforces it locally instead of trusting the assigner.
   const runner = createWorkerAgentRunner(sendToBoard, {
-    boardUrl, workRoot: opts.workRoot, maxConcurrency: opts.maxConcurrency,
+    boardUrl, workRoot, maxConcurrency: opts.maxConcurrency,
     ...(opts.harness ? { harness: opts.harness } : {}),
     profileAliases, ...(opts.profileHome ? { profileHome: opts.profileHome } : {}),
   });

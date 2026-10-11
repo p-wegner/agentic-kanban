@@ -33,7 +33,7 @@ import type { DoctorCheck } from "./worker-doctor.js";
  * god-module gate's 20-declaration ceiling (#889) — same reason as
  * worker-doctor-node-check.ts and worker-doctor-provider-auth.ts.
  */
-export function checkWorkerCheckoutTrust(workRoot: string, home: string): DoctorCheck {
+export function checkWorkerCheckoutTrust(workRoot: string, home: string, harnessConfigDir?: string): DoctorCheck {
   const name = "worker checkouts trusted";
   const reposDir = join(workRoot, "repos");
   let projectDirs: string[];
@@ -64,7 +64,11 @@ export function checkWorkerCheckoutTrust(workRoot: string, home: string): Doctor
   // false FAIL costs a confusing message; a false PASS costs the operator their fix.
   // Only files that EXIST count — a machine with a single config must not fail because a
   // candidate path it never uses is absent.
-  const allCandidates = resolveTrustConfigPaths(home);
+  // #1401: a custom/clean harness pins the agent to its OWN config dir, so only that file counts -
+  // the user's ~/.claude is not what the dispatched agent reads.
+  const allCandidates = harnessConfigDir
+    ? [join(harnessConfigDir, ".claude.json")]
+    : resolveTrustConfigPaths(home);
   const present = allCandidates.filter((path) => existsSync(path));
   const trustCandidates = present.length > 0 ? present : allCandidates.slice(0, 1);
   const grantedBy = trustCandidates.map((path) => ({ path, trusted: readTrustedProjectPaths(path) }));
