@@ -649,6 +649,22 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   const boardUrl = opts.boardUrl.replace(/\/+$/, "");
   const identity = readSavedIdentity(opts.stateFile, boardUrl);
   const checks: DoctorCheck[] = [];
+  applyWorkerPath(opts.stateFile); // #1374: saved CLI dirs first, WSL /mnt entries off the PATH
+  if (!opts.local) {
+    checks.push(await checkReachable(boardUrl));
+    checks.push(await checkHeartbeat(boardUrl, identity));
+    checks.push(await checkWebSocket(boardUrl, identity, opts.timeoutMs));
+    checks.push(await checkGitTransport(boardUrl, opts.gitPort));
+  }
+  checks.push(await checkGitInstalled(probeCommand));
+  checks.push(await checkGitIdentity(probeCommand));
+  const safeDirectory = await checkGitSafeDirectory(probeCommand);
+  if (safeDirectory) checks.push(safeDirectory);
+  checks.push(await checkPackageManager());
+  checks.push(checkNodeVersion());
+  checks.push(checkWorkerBuild(opts.stateFile, opts.runningEntry ?? null));
+  const globalVersion = opts.globalVersion === undefined ? probeGlobalVersion() : opts.globalVersion;
+  checks.push(checkGlobalLauncher({ stateFile: opts.stateFile, runningEntry: opts.runningEntry ?? null, globalVersion }));
   if (!opts.local) {
     checks.push(await checkBoardBuild({
       daemonRunning: readControlFile(opts.stateFile) !== null,
