@@ -590,9 +590,7 @@ export interface WorkerDoctorOptions {
   workRoot?: string;
   /** `bin/worker.js` this process runs from, for the build check (#1346). */
   runningEntry?: string | null;
-  /** Version of the global gentic-kanban install; undefined = probe 
-pm root -g, 
-ull = none (tests). */
+  /** Version of the global agentic-kanban install; undefined = probe `npm root -g`, null = none (tests). */
   globalVersion?: string | null;
 }
 
