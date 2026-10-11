@@ -196,6 +196,7 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
         // than up to one heartbeat interval later.
         registry.noteAttestedProfiles(workerId, message.capabilities?.profiles);
         registry.notePackageManagers(workerId, message.capabilities?.packageManagers);
+        registry.noteProviderNotice(workerId, message.capabilities?.providerNotice);
       } else if (message.type === "event") {
         conn.pendingSessionIds.delete(message.event.sessionId);
         if (message.event.type === "exit") {

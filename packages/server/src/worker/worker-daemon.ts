@@ -32,7 +32,7 @@
 //    refuses with a sentence instead of failing as a silence.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir, hostname, platform, arch } from "node:os";
+import { homedir, platform, arch } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
@@ -51,7 +51,9 @@ import { createWorkerAgentRunner, dispatchBoardMessage, rawDataToBuffer, type Un
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
 import { packageManagersField, refreshPackageManagers } from "../cli/commands/worker-doctor-git-prereqs.js";
 import { cleanUpBeforeStart } from "./agent-process-tree.js";
-import { attestProviderAuth } from "../cli/commands/worker-doctor.js";
+import { attestAndNotice, attestProviders } from "./worker-provider-notice.js";
+export { attestProviders };
+import { defaultWorkerName } from "./worker-name.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
 import type { WorkerHarness } from "./worker-harness.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -233,8 +235,10 @@ function capacityOf(): WorkerCapacityInfo {
 function capabilitiesOf(
   opts: WorkerDaemonOptions,
   profiles?: WorkerProfileAttestation[],
+  providerNotice?: string,
 ): WorkerCapabilities {
   return {
+    ...(providerNotice ? { providerNotice } : {}),
     ...(opts.labels ? { labels: opts.labels } : {}),
     ...(opts.providers ? { providers: opts.providers } : {}),
     ...(opts.maxConcurrency !== undefined ? { maxConcurrency: opts.maxConcurrency } : {}),
@@ -243,36 +247,6 @@ function capabilitiesOf(
     // #1369: which package managers this machine has, so placement can name the one a lockfile needs.
     ...packageManagersField(),
   };
-}
-
-/**
- * Narrow a worker's declared `--providers` down to the ones this machine can actually PROVE
- * it is authenticated for (#895). Before this, `providers` was advertised exactly like
- * `--labels` â€” pure operator declaration, never checked â€” so a login that lapsed (as in the
- * live #895 repro) kept being advertised as eligible with a 100% dispatch-failure rate and no
- * signal anywhere. `log` receives one line per EXCLUDED provider, naming the reason
- * `checkProvider` found; a provider that attests is not logged here (see call sites for the
- * change-only summary line used on re-checks).
- */
-export async function attestProviders(
-  requested: string[],
-  log: (line: string) => void,
-  harness?: WorkerHarness,
-): Promise<string[]> {
-  const attested: string[] = [];
-  for (const provider of requested) {
-    const result = await attestProviderAuth(provider, undefined, undefined, harness);
-    if (result.attested) {
-      attested.push(provider);
-      continue;
-    }
-    const reason = result.checks.find((c) => c.status !== "pass")?.detail ?? "could not be confirmed";
-    log(
-      `[worker] NOT advertising provider '${provider}': ${reason}. This worker will not be dispatched ` +
-        `'${provider}' sessions until it re-attests as logged in (run 'agentic-kanban-worker doctor' for detail).`,
-    );
-  }
-  return attested;
 }
 
 /** This build's own version â€” the same value `--version` reports. Never fabricated. */
@@ -498,7 +472,8 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // #1351: the runner, repo ops and result push log through the same sink as the daemon.
   setWorkerLogSink(log);
   const boardUrl = normalizeBoardUrl(opts.boardUrl);
-  const name = opts.name ?? hostname();
+  // #1372: on WSL the hostname is the Windows host's, so the default carries the distro.
+  const name = opts.name ?? defaultWorkerName();
 
   // #895: `providers` as DECLARED (--providers) is kept separate from `providers` as
   // ADVERTISED (opts.providers, mutated below) so a re-check can always re-attest the full
@@ -517,9 +492,11 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
 
   const declaredProviders = opts.providers;
   let advertisedProviders = declaredProviders;
+  let providerNotice: string | undefined;
   if (opts.attestProviders !== false && declaredProviders && declaredProviders.length > 0) {
-    advertisedProviders = await attestProviders(declaredProviders, log, opts.harness);
+    ({ advertised: advertisedProviders, notice: providerNotice } = await attestAndNotice(declaredProviders, log, opts.harness));
     opts = { ...opts, providers: advertisedProviders };
+    if (providerNotice) log(`[worker] WARNING: ${providerNotice}`);
   }
 
   // #850: a checkout whose worktree registration is gone (a prior daemon that stopped,
@@ -534,7 +511,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   if (!identity) {
     identity = await registerWithBoard(opts, boardUrl, name, attestedProfiles());
     saveIdentity(stateFile, boardUrl, identity);
-    log(`[worker] registered with ${boardUrl} as '${identity.name}' (id=${identity.workerId})`);
+    log(`[worker] registered with ${boardUrl} as '${identity.name}' (id=${identity.workerId}); to use another name, pair again with --name <name>`);
   } else {
     log(`[worker] resuming pairing with ${boardUrl} as '${identity.name}' (id=${identity.workerId})`);
   }
@@ -742,7 +719,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           // gained docker (or changed its ceiling) says so without being re-paired.
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
-          capabilities: capabilitiesOf(opts, attestedProfiles()),
+          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice),
         } satisfies WorkerToBoardMessage));
         while (pendingCritical.length > 0) {
           socket.send(JSON.stringify(pendingCritical.shift()));
@@ -870,7 +847,9 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     // excluded provider's reason each beat (attestProviders already did that once, at
     // startup, and `worker doctor` gives the detail on demand).
     if (opts.attestProviders !== false && declaredProviders && declaredProviders.length > 0) {
-      const reattested = await attestProviders(declaredProviders, () => {}, opts.harness);
+      const att = await attestAndNotice(declaredProviders, () => {}, opts.harness);
+      const reattested = att.advertised;
+      providerNotice = att.notice;
       if (reattested.join(",") !== (advertisedProviders ?? []).join(",")) {
         log(
           `[worker] provider attestation changed: now advertising [${reattested.join(", ") || "none"}] ` +
@@ -900,7 +879,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           // Not gated on selfUpdate: a daemon restarted after a Ctrl+C drain without --auto-update
           // (every Linux worker until #1374) otherwise stayed `draining` on the board forever.
           ...(draining ? { status: "draining" } : announceOnline ? { status: "online" } : {}),
-          capabilities: capabilitiesOf(opts, attestedProfiles()),
+          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice),
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
           ...(selfUpdate ? { update: selfUpdate.state() } : {}),

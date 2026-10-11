@@ -9,7 +9,8 @@ import {
   type ResolvedHarnessConfig,
 } from "../../worker/worker-harness.js";
 import { readPointer, versionsDirFor } from "../../worker/worker-versions.js";
-import { shimCommandFor } from "../../worker/worker-shim.js";
+import { shimCommandFor, shimInstalled } from "../../worker/worker-shim.js";
+import type { DoctorCheck } from "./worker-doctor.js";
 
 /** The one-line fix for a global launcher that a self-update never refreshes (#1350). */
 export function globalLauncherFix(stateFile: string): string {
@@ -84,4 +85,36 @@ export function harnessUpdateNote(stateFile: string): string | null {
     "~/.claude and keeps advertising the same providers; run agentic-kanban-worker auth claude and restart with " +
     "--clean to switch to the worker's own folder."
   );
+}
+
+// #1372 (item 7) - which command a remedy should tell the reader to run. Bare `agentic-kanban-worker` resolves to the
+// global launcher, which a self-update never refreshes (#1350); while that is stale or absent, the stable shim
+// always runs the current build.
+const BARE = "agentic-kanban-worker";
+const VERBS = "setup|auth|start|doctor|update-check|pair|cleanup";
+
+/** The command to print in remedies: the shim path when the global launcher is stale or absent AND the shim exists. */
+export function launcherCommand(opts: {
+  stateFile: string;
+  globalVersion: string | null;
+  /** Build id (hex) of the running install; undefined = unknown. */
+  runningBuild: string | undefined;
+  hasShim?: boolean;
+}): string {
+  const hasShim = opts.hasShim ?? shimInstalled(opts.stateFile);
+  if (!hasShim) return BARE;
+  const globalBuild = parseBuildId(opts.globalVersion);
+  const runningBuild = opts.runningBuild;
+  // Absent global, or a global whose build id provably differs; an unreadable id proves nothing.
+  const stale = opts.globalVersion === null || (globalBuild !== undefined && runningBuild !== undefined && !sameBuild(globalBuild, runningBuild));
+  if (!stale) return BARE;
+  const shim = shimCommandFor(opts.stateFile);
+  return /\s/.test(shim) ? `"${shim}"` : shim;
+}
+
+/** Swap bare `agentic-kanban-worker <verb>` in remedies for `launcher`. Details and other prose are left alone. */
+export function useLauncherInRemedies(checks: DoctorCheck[], launcher: string): DoctorCheck[] {
+  if (launcher === BARE) return checks;
+  const re = new RegExp(`(^|[\\s\`'"(])${BARE}(?=\\s+(?:${VERBS})\\b)`, "g");
+  return checks.map((c) => (c.remedy ? { ...c, remedy: c.remedy.replace(re, (_m, pre: string) => `${pre}${launcher}`) } : c));
 }

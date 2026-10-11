@@ -113,7 +113,9 @@ describe("agentic-kanban-worker binary isolation", () => {
     // the package-manager probe the heartbeat reports; node builtins only). The probe is folded in, not a second file.
     // Raised 48 â†’ 49 in #1373 for `cli/commands/worker-update-notes.ts` (pure strings over modules already here).
     // Raised 49 -> 50 in #1376 for `worker/worker-socket-keepalive.ts` (ping/pong deadline; imports only `ws`).
-    expect(files.size).toBeLessThan(50);
+    // Raised 50 -> 53 in #1372 for cli/commands/worker-board-default.ts, worker/worker-name.ts and
+    // worker/worker-provider-notice.ts (node builtins and modules already here; the launcher helper lives in worker-update-notes).
+    expect(files.size).toBeLessThan(53);
   });
 
   it("never reaches the database or board-service layer", () => {

@@ -106,6 +106,8 @@ export interface WorkerView extends Omit<WorkerRow, "tokenHash"> {
   profiles?: WorkerProfileAttestation[];
   /** Package managers on this worker's PATH, as of its last hello/heartbeat (#1369). In memory like `capacity`. */
   packageManagers?: WorkerPackageManagers;
+  /** Why this worker advertises no usable provider, as of its last hello/heartbeat (#1372). In memory like `capacity`. */
+  providerNotice?: string;
   /**
    * What this worker last said about its self-update (#1338): `current`, `updating` (with the
    * phase) or `failed` (with the reason). In memory like `capacity`: a property of the running
@@ -158,6 +160,9 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   /** Package managers each worker has on PATH (#1369). See WorkerView for why not a column. */
   const reportedPackageManagers = new Map<string, WorkerPackageManagers>();
+
+  /** Why a worker advertises no usable provider (#1372); absent = nothing to say. */
+  const reportedProviderNotices = new Map<string, string>();
 
   /** Self-update state each worker last reported, and the workers asked to update NOW (#1338). */
   const reportedUpdates = new Map<string, WorkerUpdateReport>();
@@ -318,6 +323,7 @@ export function createWorkerRegistry(database: Database = realDb) {
       // permission on the board within one heartbeat rather than at the next re-pairing.
       noteAttestedProfiles(workerId, opts.capabilities.profiles);
       notePackageManagers(workerId, opts.capabilities.packageManagers);
+      noteProviderNotice(workerId, opts.capabilities.providerNotice);
     }
     if (opts?.update) {
       reportedUpdates.set(workerId, opts.update);
@@ -369,6 +375,7 @@ export function createWorkerRegistry(database: Database = realDb) {
       const capacity = reportedCapacity.get(row.id);
       const profiles = reportedProfiles.get(row.id);
       const packageManagers = reportedPackageManagers.get(row.id);
+      const providerNotice = reportedProviderNotices.get(row.id);
       const update = reportedUpdates.get(row.id);
       return {
         ...safe,
@@ -378,6 +385,7 @@ export function createWorkerRegistry(database: Database = realDb) {
         ...(capacity ? { capacity } : {}),
         ...(profiles ? { profiles } : {}),
         ...(packageManagers ? { packageManagers } : {}),
+        ...(providerNotice ? { providerNotice } : {}),
         ...(update ? { update } : {}),
         ...(updateRequests.has(row.id) ? { updateRequested: true } : {}),
       };
@@ -403,6 +411,12 @@ export function createWorkerRegistry(database: Database = realDb) {
     const parsed = parseWorkerPackageManagers(raw);
     if (parsed) reportedPackageManagers.set(workerId, parsed);
     else reportedPackageManagers.delete(workerId);
+  }
+
+  /** Record (or clear) why a worker advertises no usable provider (#1372). A REPLACE: absent = nothing to say. */
+  function noteProviderNotice(workerId: string, notice: string | undefined): void {
+    if (notice) reportedProviderNotices.set(workerId, notice);
+    else reportedProviderNotices.delete(workerId);
   }
 
   /**
@@ -434,6 +448,7 @@ export function createWorkerRegistry(database: Database = realDb) {
     reportedCapacity.delete(workerId);
     reportedProfiles.delete(workerId);
     reportedPackageManagers.delete(workerId);
+    reportedProviderNotices.delete(workerId);
     reportedUpdates.delete(workerId);
     updateRequests.delete(workerId);
     lastEffectiveStatus.delete(workerId);
@@ -452,7 +467,7 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   return {
     mintPairingToken, registerWorker, authenticateWorker, heartbeat, touchHeartbeat,
-    listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles, notePackageManagers,
+    listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles, notePackageManagers, noteProviderNotice,
     requestUpdate, authenticateAnyWorker, isPairingTokenValid,
   };
 }

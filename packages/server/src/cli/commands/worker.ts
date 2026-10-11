@@ -38,6 +38,7 @@ import { renderUpdateCheckReport, runWorkerUpdateCheck } from "./worker-update-c
 import { harnessUpdateNote, persistStartHarness, printLauncherWarning } from "./worker-update-notes.js";
 import { probeGlobalVersion } from "./worker-doctor-build-check.js";
 import { compareWithBoardBuild, renderBuildMismatch } from "./worker-board-build.js";
+import { boardOrExit, startBoard } from "./worker-board-default.js";
 import { resolveOwnPackageVersion } from "../../lib/worker-build.js";
 // The step SHAPE lives in shared/lib (#1089, wire-dto-single-declaration) — a deep `lib/` path,
 // not the `types` barrel, because this file is reached by the `agentic-kanban-worker` binary's
@@ -393,7 +394,7 @@ function registerWorkerRevoke(workerCmd: Command): void {
 }
 
 interface WorkerStartOptions {
-  board: string;
+  board?: string; // absent = the one board this worker is paired with (#1372)
   token?: string;
   name?: string;
   labels?: string;
@@ -416,7 +417,8 @@ interface WorkerStartOptions {
   drainTimeout?: number;
 }
 
-async function runWorkerStart(options: WorkerStartOptions): Promise<void> {
+async function runWorkerStart(rawOptions: WorkerStartOptions): Promise<void> {
+  const options = { ...rawOptions, board: startBoard(rawOptions, rawOptions.stateFile ?? defaultWorkerStateFile()) };
   // #1346: a global install that a self-update has left behind hands over to the current build.
   const delegateTo = resolveDelegation({
     stateFile: options.stateFile ?? defaultWorkerStateFile(),
@@ -599,9 +601,9 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         "hold a WebSocket for assignments, execute agent sessions locally, stream output back. " +
         "Runs until Ctrl+C; running agents are killed on exit unless --leave-agents.",
     )
-    .option("--board <url>", "Board base URL", DEFAULT_BOARD_URL)
+    .option("--board <url>", `Board base URL (default: the one board this worker is paired with, else ${DEFAULT_BOARD_URL})`)
     .option("--token <pairingToken>", "Pairing token for first registration (ignored once paired)")
-    .option("--name <name>", "Worker display name (default: hostname)")
+    .option("--name <name>", "Worker display name, fixed at first pairing (default: hostname; <hostname>-wsl-<distro> under WSL)")
     .option("--labels <csv>", "Capability labels, e.g. docker,windows")
     .option(
       "--shares-filesystem",
@@ -824,7 +826,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         "between, the git transport port answers, git on PATH, and each provider CLI installed AND " +
         "logged in HERE (the board never sends credentials). Exits non-zero if any check fails.",
     )
-    .option("--board <url>", "Board base URL — the FLEET port on a cross-machine setup", DEFAULT_BOARD_URL)
+    .option("--board <url>", `Board base URL — the FLEET port on a cross-machine setup (default: the one board this worker is paired with, else ${DEFAULT_BOARD_URL})`)
     .option("--providers <csv>", "Provider CLIs to check on this machine", "claude")
     .option("--profiles <csv>", "Profiles this worker runs with (same as `worker start --profiles`); only these are warned about")
     .option("--git-port <n>", "KANBAN_GIT_HTTP_PORT, to check the git transport too", (v) => parseInt(v, 10))
@@ -832,7 +834,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
     .option("--work-root <path>", "Worker work root (same as `worker start`), relative to the directory you run the command in (default: ~/.agentic-kanban/worker)", cliPathArg)
     .option("--json", "Output the report as JSON");
   addHarnessOptions(doctorCmd).action(async (options: {
-      board: string;
+      board?: string;
       providers: string;
       profiles?: string;
       gitPort?: number;
@@ -852,7 +854,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         codexHome: options.codexHome,
       });
       const report = await runWorkerDoctor({
-        boardUrl: options.board,
+        boardUrl: boardOrExit(doctorStateFile, options.board, options.json),
         stateFile: doctorStateFile,
         harness: createWorkerHarness(harnessCfg.options),
         harnessNotes: harnessCfg.differences,
@@ -907,11 +909,11 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         "'updated from X to Y' or 'failed in <phase>: <cause>'. For the board-side counterpart see " +
         "`worker update <name>` (board machine only).",
     )
-    .option("--board <url>", "Board base URL — the FLEET port on a cross-machine setup (ignored with --apply: the daemon's own board is used)", DEFAULT_BOARD_URL)
+    .option("--board <url>", "Board base URL — the FLEET port on a cross-machine setup (default: the one board this worker is paired with; ignored with --apply: the daemon's own board is used)")
     .option("--state-file <path>", `Pairing state file, relative to the directory you run the command in (default: ${defaultWorkerStateFile()})`, cliPathArg)
     .option("--apply", "Worker machine: update the running daemon to the board's build now (needs a daemon started with self-update, i.e. 'worker start')")
     .option("--json", "Output the report as JSON")
-    .action(async (options: { board: string; stateFile?: string; json?: boolean; apply?: boolean }) => {
+    .action(async (options: { board?: string; stateFile?: string; json?: boolean; apply?: boolean }) => {
       if (options.apply) {
         const applyStateFile = options.stateFile ?? defaultWorkerStateFile();
         const log = (line: string) => console.log(line);
@@ -923,11 +925,10 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         if (!outcome.ok) process.exit(1);
         return;
       }
-      const report = await runWorkerUpdateCheck({
-        boardUrl: options.board,
-        stateFile: options.stateFile ?? defaultWorkerStateFile(),
-      });
+      const checkStateFile = options.stateFile ?? defaultWorkerStateFile();
+      const report = await runWorkerUpdateCheck({ boardUrl: boardOrExit(checkStateFile, options.board, options.json), stateFile: checkStateFile });
       console.log(options.json ? JSON.stringify(report, null, 2) : renderUpdateCheckReport(report));
+      if (!options.json) printLauncherWarning(checkStateFile, probeGlobalVersion(), (line) => console.log(line));
       // Non-zero for a FAILED CHECK only. A stale build exits 0: this is visibility, not a
       // gate, and a supervisor must not treat "behind" as a crash.
       if (!report.ok) process.exit(1);

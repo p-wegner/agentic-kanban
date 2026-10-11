@@ -439,7 +439,9 @@ export { checkGitInstalled, checkGitIdentity, checkGitSafeDirectory, checkPackag
 // god-module gate's 20-declaration ceiling (#889), and the check pushed it to 21.
 import { checkNodeVersion } from "./worker-doctor-node-check.js";
 export { MIN_SUPPORTED_NODE_MAJOR, checkNodeVersion } from "./worker-doctor-node-check.js";
-import { checkGlobalLauncher, checkWorkerBuild, readEntryVersion } from "./worker-doctor-build-check.js";
+import { checkGlobalLauncher, checkWorkerBuild, probeGlobalVersion, readEntryVersion } from "./worker-doctor-build-check.js";
+import { installedBuildOf, launcherCommand, useLauncherInRemedies } from "./worker-update-notes.js";
+import { parseBuildId } from "../../lib/worker-update.js";
 import { checkBoardBuild } from "./worker-board-build.js";
 import { resolveOwnPackageVersion } from "../../lib/worker-build.js";
 import { checkTailnetFirewall } from "./worker-doctor-firewall-check.js";
@@ -588,6 +590,8 @@ export interface WorkerDoctorOptions {
   workRoot?: string;
   /** `bin/worker.js` this process runs from, for the build check (#1346). */
   runningEntry?: string | null;
+  /** Version of the global agentic-kanban install; undefined = probe `npm root -g`, null = none (tests). */
+  globalVersion?: string | null;
 }
 
 /**
@@ -649,7 +653,8 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   checks.push(await checkPackageManager());
   checks.push(checkNodeVersion());
   checks.push(checkWorkerBuild(opts.stateFile, opts.runningEntry ?? null));
-  checks.push(checkGlobalLauncher({ stateFile: opts.stateFile, runningEntry: opts.runningEntry ?? null }));
+  const globalVersion = opts.globalVersion === undefined ? probeGlobalVersion() : opts.globalVersion;
+  checks.push(checkGlobalLauncher({ stateFile: opts.stateFile, runningEntry: opts.runningEntry ?? null, globalVersion }));
   checks.push(await checkBoardBuild({
     boardUrl,
     token: identity?.workerToken,
@@ -661,7 +666,15 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
     checks.push(...(await checkProvider(provider, opts.home, undefined, opts.harness)));
   }
   checks.push(...checkProfileCredentials(opts.home, undefined, opts.profiles));
-  return { side: "worker", boardUrl, checks, ok: checks.every((c) => c.status !== "fail") };
+  // #1372: while the global launcher is stale or absent, remedies name the shim that always runs the current build.
+  const launcher = launcherCommand({
+    stateFile: opts.stateFile,
+    globalVersion,
+    runningBuild:
+      parseBuildId(readEntryVersion(opts.runningEntry ?? null)) ?? installedBuildOf(opts.stateFile) ?? parseBuildId(resolveOwnPackageVersion()),
+  });
+  const shown = useLauncherInRemedies(checks, launcher);
+  return { side: "worker", boardUrl, checks: shown, ok: shown.every((c) => c.status !== "fail") };
 }
 
 /** One row of the board's own fleet view, as `GET /api/workers` now answers it. */
