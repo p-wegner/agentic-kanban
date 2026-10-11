@@ -51,7 +51,13 @@ export interface OAuthProfileRef {
 /** Outcome of reading one profile's `.credentials.json`. Never throws. */
 export type CredentialRead =
   | { token: string; tier: string | null; err?: undefined }
-  | { err: "no-creds" | "bad-creds" | "no-token" | "expired"; tier?: string | null; token?: undefined };
+  | {
+      err: "no-creds" | "bad-creds" | "no-token" | "expired";
+      tier?: string | null;
+      token?: undefined;
+      /** #1399: `expired` only — a refresh token is on file, so claude renews it on its next run. */
+      refreshable?: boolean;
+    };
 
 /** One cached measurement for one profile. `dataTs` is the age anchor: when the NUMBERS were true. */
 export interface QuotaCacheRecord {
@@ -125,7 +131,8 @@ export function readOAuthCredentials(configDir: string, nowMs = Date.now()): Cre
   if (!oauth || typeof oauth.accessToken !== "string" || !oauth.accessToken) return { err: "no-token" };
   const expiresAt = Number(oauth.expiresAt);
   if (Number.isFinite(expiresAt) && expiresAt > 0 && nowMs >= expiresAt) {
-    return { err: "expired", tier: tierOf(oauth) };
+    const refreshable = typeof oauth.refreshToken === "string" && oauth.refreshToken.length > 0;
+    return { err: "expired", tier: tierOf(oauth), ...(refreshable ? { refreshable } : {}) };
   }
   return { token: oauth.accessToken, tier: tierOf(oauth) };
 }

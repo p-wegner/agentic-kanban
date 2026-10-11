@@ -72,7 +72,13 @@ export function checkHarness(
         );
       } else if (existsSync(dir)) {
         const read = readOAuthCredentials(dir, nowMs);
-        if (read.err === "expired") {
+        if (read.err === "expired" && read.refreshable) {
+          checks.push({
+            name: "claude credential",
+            status: "pass",
+            detail: `login present in ${dir} (access token expired; claude renews it with the stored refresh token)`,
+          });
+        } else if (read.err === "expired") {
           checks.push({
             name: "claude credential",
             status: "warn",

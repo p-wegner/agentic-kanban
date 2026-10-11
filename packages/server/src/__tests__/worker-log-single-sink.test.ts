@@ -12,8 +12,9 @@ import { setWorkerLogSink, workerLog } from "../worker/worker-updater.js";
 const WORKER_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "worker");
 // worker-daemon.ts holds the one sanctioned console.log: the base sink the file tee wraps.
 // worker-updater.ts holds the default stdout sink (two spellings of the same fallback).
-// worker-shim.ts is a dependency-free launcher that runs before any worker module loads.
-const ALLOWED: Record<string, number> = { "worker-daemon.ts": 1, "worker-updater.ts": 2, "worker-shim.ts": 1 };
+// worker-shim.ts is a dependency-free launcher that runs before any worker module loads: one line
+// for a missing build, one for a fallback install whose build changed since it was pinned (#1400).
+const ALLOWED: Record<string, number> = { "worker-daemon.ts": 1, "worker-updater.ts": 2, "worker-shim.ts": 2 };
 
 describe("worker modules log through the single worker.log sink (#1351)", () => {
   afterEach(() => setWorkerLogSink(null));
