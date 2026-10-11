@@ -7,7 +7,7 @@
  */
 
 /** The command a worker owner runs to read the guide. Cited by every doctor remedy. */
-export const WORKER_SETUP_HELP = "`agentic-kanban-worker setup`";
+export const WORKER_SETUP_HELP = "`agentic-kanban-worker setup --guide`";
 
 /**
  * Exact commands for a machine that has only node: download the board-served build with the
@@ -27,14 +27,15 @@ export function renderBootstrapSteps(fleetUrl: string, pairingToken: string): st
     `       node -e "console.log(require('crypto').createHash('sha256').update(require('fs').readFileSync('agentic-kanban-worker.tgz')).digest('hex'))"`,
     `  4. Install:`,
     `       npm i -g ./agentic-kanban-worker.tgz`,
-    `  5. Pair and run:`,
-    `       agentic-kanban-worker start --board ${base} --token ${pairingToken}`,
+    `  5. Set up and pair (installs git/claude/codex only after asking; add --yes for unattended, --no-install to only check):`,
+    `       agentic-kanban-worker setup --board ${base} --token ${pairingToken}`,
+    `     Then run the daemon: agentic-kanban-worker start --board ${base}`,
     "(Steps 1 and 2 wait for the board to finish packing its build; if it takes longer than 120 s they fail with",
     " HTTP 504 and a non-zero exit - stop there and re-run that step, do not continue to step 3.)",
   ].join("\n");
 }
 
-/** The offline setup guide printed by `worker setup`. Section numbers are what doctor remedies cite. */
+/** The offline setup guide printed by `worker setup --guide`. Section numbers are what doctor remedies cite. */
 export function renderWorkerSetupGuide(): string {
   return [
     "Agentic Kanban worker - setup guide",
@@ -45,7 +46,11 @@ export function renderWorkerSetupGuide(): string {
     "",
     "2. First install. On the BOARD machine run `agentic-kanban worker pair`. It prints a single-use",
     "   pairing token plus the exact commands for a fresh machine: download the build with the token,",
-    "   verify its sha256, `npm i -g <tarball>`, then `start --board <fleet-url> --token <token>`.",
+    "   verify its sha256, `npm i -g <tarball>`, then `agentic-kanban-worker setup --board <fleet-url>",
+    "   --token <token>`. setup runs, in order and each skippable (`--steps git,cli,auth,pair,doctor`): git",
+    "   >= 2.31, the claude/codex CLIs (y/N prompt, `--yes` unattended, `--no-install` only prints the",
+    "   commands), the worker's own config dir + login, pairing, then doctor. Re-running is safe.",
+    "   Dirty machine (your own ~/.claude in use): `setup --steps auth --config-dir <path>` touches nothing else.",
     "   The token may be used for the download without being consumed; pairing consumes it.",
     "",
     "3. Pairing is saved to a state file; later runs of `start` reuse it and need no token.",

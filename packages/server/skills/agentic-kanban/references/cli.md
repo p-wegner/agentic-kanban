@@ -205,7 +205,6 @@ Fleet worker: connect this machine to a board and execute assigned agent session
 |---|---|
 | `worker revoke <worker>` | Revoke (retire) a registered worker by id or name |
 | `worker pair` | Mint a short-lived, single-use pairing token on the board (run this WHERE THE BOARD RUNS; |
-| `worker setup` | Print the first-install guide for a worker machine (works offline, ships in the package) |
 | `worker instructions` | Print a step-by-step runbook for connecting THIS machine to a remote board as a worker |
 | `worker list` | List the board's registered workers with their effective status |
 | `worker update <worker>` | Ask one worker (id or name) to update to the board's build NOW (#1338): it drains, downloads the |
@@ -216,6 +215,7 @@ Fleet worker: connect this machine to a board and execute assigned agent session
 | `worker cleanup` | Run ON THE WORKER MACHINE: remove checkout directories under <work-root>/checkouts/ whose git |
 | `worker events <workerId>` | The board's recorded timeline for one worker (#774): registration, protocol mismatches and |
 | `worker auth [provider]` | Log a provider (claude\|codex) into THIS worker's own config dir with the provider's own login flow |
+| `worker setup` | Set this machine up as a worker, step by step (each step detects what is already there and can be |
 
 ## workflow
 
