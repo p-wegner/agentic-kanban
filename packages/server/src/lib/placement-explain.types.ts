@@ -19,6 +19,7 @@
 import type { ProviderName } from "../services/agent-provider/types.js";
 import type { WorkerSettingsEnvelope, WorkerSettingsReport } from "@agentic-kanban/shared/lib/worker-settings";
 import type { WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
+import type { WorkerToolchains } from "@agentic-kanban/shared/lib/worker-toolchains";
 import type { WorkerCapacityInfo, WorkerDoctorSummary, WorkerPackageManagers, WorkerProfileAttestation } from "@agentic-kanban/shared/lib/worker-protocol";
 import type { WorkerUpdateReport } from "./worker-update.js";
 import type { SessionPhaseTimings } from "@agentic-kanban/shared/lib/worker-protocol";
@@ -190,6 +191,8 @@ export interface WorkerEligibility {
   packageManagers?: WorkerPackageManagers;
   /** The worker's latest doctor summary (#1370). Absent = it has not sent one. */
   doctor?: WorkerDoctorSummary;
+  /** Toolchains this worker detected on PATH (#1382). Absent = it has not said (unknown, never "none"). */
+  toolchains?: WorkerToolchains;
   /** Sessions the board currently has assigned to this worker. `load` is its length. */
   assignedSessionIds: string[];
   /**

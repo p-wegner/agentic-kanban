@@ -137,6 +137,9 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // builder/reviewer sessions on the board host. Empty = inherit; `0` = host builds nothing
   // while an eligible worker is online.
   "host_builder_slots",
+  // Required toolchains (#1382): `required_toolchains_<id>` is a CSV like `pnpm, java>=21`. A worker
+  // that REPORTED its toolchains and misses one is not a candidate; one that reported nothing is unknown.
+  "required_toolchains",
   // Pre-merge verify-gate timeout override (#192): the runner's wall-clock budget was
   // a hardcoded 5 minutes with no per-project knob, which becomes a hard ceiling as a
   // compiled-stack project's clean build grows past it.

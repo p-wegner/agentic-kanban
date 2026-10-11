@@ -1,10 +1,8 @@
 ﻿// Wire protocol between the board and fleet workers (epic #1, phase 1b #4).
-//
-// Pure types + defensive parsers — no Node builtins, safe for any bundle. The
-// board sends work over the worker's WebSocket; the worker streams agent
-// output back as events shaped exactly like agent.service's AgentOutputEvent,
-// so the board-side remote execution service can feed them straight into the
-// normal session broadcast/exit machinery.
+// Pure types + defensive parsers — no Node builtins, safe for any bundle. The board sends work over
+// the worker's WebSocket; the worker streams agent output back as events shaped exactly like
+// agent.service's AgentOutputEvent, so the board-side remote execution service can feed them
+// straight into the normal session broadcast/exit machinery.
 
 // #1369: committer identity + package-manager vocabulary lives in its own module.
 import { parseWorkerCommitterIdentity, parseWorkerPackageManagers, type WorkerCommitterIdentity, type WorkerPackageManagers } from "./worker-prerequisites.js";
@@ -14,6 +12,7 @@ import { parseWorkerDoctorSummary, type WorkerDoctorSummary } from "./worker-doc
 export * from "./worker-profile-attestation.js";
 import { parseWorkerProfileAttestations, type WorkerProfileAttestation } from "./worker-profile-attestation.js";
 
+import { parseWorkerToolchains, type WorkerToolchains } from "./worker-toolchains.js"; // #1382
 
 /**
  * A worker carrying this label shares the board's filesystem, so its assignments
@@ -421,6 +420,7 @@ export interface WorkerCapabilities {
   profiles?: WorkerProfileAttestation[];
   /** #1369: package managers on this machine's PATH. Absent = unknown (older worker). */
   packageManagers?: WorkerPackageManagers;
+  toolchains?: WorkerToolchains; // #1382: detected on PATH (`{ java: "21.0.4" }`); absent = unknown
   providerNotice?: string; // #1372: why this worker advertises no usable provider (it gets no work)
   /**
    * #1370: the worker's own doctor results, compact. Sent on `hello` and again only when it
@@ -502,18 +502,20 @@ export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | unde
   const capacity = parseWorkerCapacityInfo(rec.capacity);
   const profiles = parseWorkerProfileAttestations(rec.profiles);
   const packageManagers = parseWorkerPackageManagers(rec.packageManagers);
+  const toolchains = parseWorkerToolchains(rec.toolchains);
   const providerNotice = typeof rec.providerNotice === "string" ? rec.providerNotice.trim().slice(0, 400) || undefined : undefined;
   const doctor = parseWorkerDoctorSummary(rec.doctor);
   if (
     labels === undefined &&
     providers === undefined &&
     maxConcurrency === undefined &&
-    capacity === undefined && profiles === undefined && packageManagers === undefined && providerNotice === undefined &&
+    capacity === undefined && profiles === undefined && packageManagers === undefined && toolchains === undefined && providerNotice === undefined &&
     doctor === undefined
   ) {
     return undefined;
   }
   return {
+    ...(toolchains ? { toolchains } : {}),
     ...(labels ? { labels } : {}),
     ...(providers ? { providers } : {}),
     ...(maxConcurrency !== undefined ? { maxConcurrency } : {}),

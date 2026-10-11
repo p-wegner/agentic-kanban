@@ -11,6 +11,7 @@ import type { CheckStatus } from "./worker-doctor.js";
 import { execFile } from "node:child_process";
 import { windowsOnlyMessage } from "../../worker/worker-path.js";
 import type { WorkerPackageManagers } from "@agentic-kanban/shared/lib/worker-protocol";
+import { parseToolVersion, type WorkerToolchains } from "@agentic-kanban/shared/lib/worker-toolchains";
 
 type DoctorCheckLike = { name: string; status: CheckStatus; detail: string; remedy?: string };
 export type ProbeFn = (command: string, args: string[]) => Promise<{ found: boolean; code: number | null; output: string }>;
@@ -190,4 +191,83 @@ export function resetPackageManagerCache(): void {
 export function packageManagersField(): { packageManagers?: WorkerPackageManagers } {
   refreshPackageManagersIfStale();
   return cached ? { packageManagers: cached } : {};
+}
+
+// Toolchains (#1382): what the worker can BUILD with, reported on the heartbeat so placement can route a
+// project that declares `required_toolchains` (`pnpm, java>=21`). Same cache/refresh shape as the
+// package managers above; kept in this module for the same import-graph reason.
+
+/** Run `command args`, resolving the combined output, or null when it cannot be spawned / exits non-zero. */
+export function runForOutput(command: string, args: string[], timeoutMs = 10_000): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(
+      command,
+      args,
+      { timeout: timeoutMs, windowsHide: true, shell: process.platform === "win32" },
+      (err, stdout, stderr) => resolve(err ? null : `${stdout}
+${stderr}`), // java prints its version on stderr
+    );
+  });
+}
+
+/** Per-toolchain probe: the command and args whose output carries the version. */
+const TOOLCHAIN_PROBES: ReadonlyArray<readonly [name: string, command: string, args: string[]]> = [
+  ["node", "node", ["--version"]],
+  ["pnpm", "pnpm", ["--version"]],
+  ["yarn", "yarn", ["--version"]],
+  ["bun", "bun", ["--version"]],
+  ["java", "java", ["-version"]],
+  ["gradle", "gradle", ["--version"]],
+  ["maven", "mvn", ["--version"]],
+  ["go", "go", ["version"]],
+  ["python", process.platform === "win32" ? "python" : "python3", ["--version"]],
+  ["uv", "uv", ["--version"]],
+  ["docker", "docker", ["--version"]],
+];
+
+/** Probe every known toolchain in parallel. A tool that is not found is simply absent from the result. */
+export async function detectToolchains(
+  run: (command: string, args: string[]) => Promise<string | null> = runForOutput,
+): Promise<WorkerToolchains> {
+  const found = await Promise.all(
+    TOOLCHAIN_PROBES.map(async ([name, command, args]) => [name, await run(command, args)] as const),
+  );
+  const out: WorkerToolchains = {};
+  for (const [name, output] of found) if (output !== null) out[name] = parseToolVersion(output);
+  return out;
+}
+
+let cachedToolchains: WorkerToolchains | undefined;
+let toolchainsRefreshedAtMs = 0;
+let toolchainsInFlight: Promise<void> | null = null;
+
+/** Probe now (awaitable), or return the probe already running. A failed probe keeps the previous reading. */
+export function refreshToolchains(
+  nowMs: number = Date.now(),
+  run?: (command: string, args: string[]) => Promise<string | null>,
+): Promise<void> {
+  if (toolchainsInFlight) return toolchainsInFlight;
+  toolchainsInFlight = detectToolchains(run)
+    .then((found) => {
+      cachedToolchains = found;
+      toolchainsRefreshedAtMs = nowMs;
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      toolchainsInFlight = null;
+    });
+  return toolchainsInFlight;
+}
+
+/** Test seam: forget the cached toolchains. */
+export function resetToolchainCache(): void {
+  cachedToolchains = undefined;
+  toolchainsRefreshedAtMs = 0;
+  toolchainsInFlight = null;
+}
+
+/** The heartbeat's toolchains field: re-probes in the background when stale, spreads nothing before the first reading. */
+export function toolchainsField(nowMs: number = Date.now()): { toolchains?: WorkerToolchains } {
+  if (!cachedToolchains || nowMs - toolchainsRefreshedAtMs >= REFRESH_INTERVAL_MS) void refreshToolchains(nowMs);
+  return cachedToolchains ? { toolchains: cachedToolchains } : {};
 }

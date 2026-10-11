@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
+import { parseRequiredToolchains } from "@agentic-kanban/shared/lib/worker-toolchains";
+import { apiFetch } from "../lib/api.js";
 
 /**
  * The only UI for `worker_dispatch_<projectId>` / `worker_dispatch_strict_<projectId>` /
@@ -30,6 +32,7 @@ export function dispatchPrefKeys(projectId: string) {
     strict: `worker_dispatch_strict_${projectId}`,
     labels: `worker_labels_${projectId}`,
     hostSlots: `host_builder_slots_${projectId}`,
+    toolchains: `required_toolchains_${projectId}`, // #1382
   };
 }
 
@@ -41,6 +44,8 @@ export function WorkerDispatchPrefs({ projectId, projectName, onSaved }: WorkerD
   // #1380: global `host_builder_slots` and this project's override; "" = unset.
   const [hostSlotsGlobal, setHostSlotsGlobal] = useState("");
   const [hostSlotsProject, setHostSlotsProject] = useState("");
+  const [toolchains, setToolchains] = useState("");
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,15 +65,23 @@ export function WorkerDispatchPrefs({ projectId, projectName, onSaved }: WorkerD
         setLabels(settings[keys.labels] ?? "");
         setHostSlotsGlobal(settings.host_builder_slots ?? "");
         setHostSlotsProject(settings[keys.hostSlots] ?? "");
+        setToolchains(settings[keys.toolchains] ?? "");
         setLoaded(true);
       })
       .catch((err) => {
         setError(errorMessage(err));
         setLoaded(true);
       });
-  }, [keys.dispatch, keys.strict, keys.labels, keys.hostSlots]);
+  }, [keys.dispatch, keys.strict, keys.labels, keys.hostSlots, keys.toolchains]);
 
   useEffect(load, [load]);
+
+  // #1382: what the repo's files imply (lockfile, gradlew, go.mod...). Failure just means no chips.
+  useEffect(() => {
+    apiFetch<{ suggestions: string[] }>(`/api/workers/toolchain-suggestions?projectId=${encodeURIComponent(projectId)}`)
+      .then((r) => setSuggestions(r.suggestions))
+      .catch(() => setSuggestions([]));
+  }, [projectId]);
 
   const save = async (next: {
     dispatch?: boolean;
@@ -76,6 +89,7 @@ export function WorkerDispatchPrefs({ projectId, projectName, onSaved }: WorkerD
     labels?: string;
     hostSlotsGlobal?: string;
     hostSlotsProject?: string;
+    toolchains?: string;
   }) => {
     const body = {
       host_builder_slots: next.hostSlotsGlobal ?? hostSlotsGlobal,
@@ -83,6 +97,7 @@ export function WorkerDispatchPrefs({ projectId, projectName, onSaved }: WorkerD
       [keys.dispatch]: String(next.dispatch ?? dispatch),
       [keys.strict]: String(next.strict ?? strict),
       [keys.labels]: next.labels ?? labels,
+      [keys.toolchains]: next.toolchains ?? toolchains,
     };
     setSaving(true);
     setError(null);
@@ -203,6 +218,48 @@ export function WorkerDispatchPrefs({ projectId, projectName, onSaved }: WorkerD
             className="w-1/2 rounded border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1 text-xs text-ink dark:text-stone-100"
           />
         </div>
+      </div>
+
+      <div className="text-xs text-gray-600 dark:text-gray-300">
+        <div className="font-medium">Required toolchains</div>
+        <div className="text-gray-500 dark:text-gray-400 mb-1">
+          <code>{keys.toolchains}</code> — e.g. <code>pnpm, java&gt;=21</code>. A worker that reports its
+          toolchains and misses one is not given this project&apos;s work.
+        </div>
+        <input
+          type="text"
+          value={toolchains}
+          disabled={saving}
+          placeholder="pnpm, java>=21"
+          onChange={(e) => setToolchains(e.target.value)}
+          onBlur={() => void save({ toolchains })}
+          className="w-full rounded border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1 text-xs text-ink dark:text-stone-100"
+        />
+        {(() => {
+          const have = new Set(parseRequiredToolchains(toolchains).map((r) => r.name));
+          const offered = suggestions.filter((sug) => !have.has(sug.split(">=")[0]!));
+          if (offered.length === 0) return null;
+          return (
+            <div className="mt-1 flex flex-wrap items-center gap-1">
+              <span className="text-gray-500 dark:text-gray-400">Detected in the repo:</span>
+              {offered.map((sug) => (
+                <button
+                  key={sug}
+                  type="button"
+                  disabled={saving}
+                  onClick={() => {
+                    const next = toolchains.trim() ? `${toolchains.trim().replace(/,$/, "")}, ${sug}` : sug;
+                    setToolchains(next);
+                    void save({ toolchains: next });
+                  }}
+                  className="rounded bg-accent-50 dark:bg-accent-900/40 px-1.5 py-0.5 text-accent-700 dark:text-accent-300 hover:underline"
+                >
+                  + {sug}
+                </button>
+              ))}
+            </div>
+          );
+        })()}
       </div>
 
       {error && <div className="text-xs text-red-600 dark:text-red-400">{error}</div>}
