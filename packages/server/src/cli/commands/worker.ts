@@ -579,9 +579,8 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       const body = await res.json() as { pairingToken: string; expiresAt: string; fleetUrl?: string | null; fleetNote?: string | null };
       console.log(`Pairing token (single-use, expires ${body.expiresAt}):`);
       console.log(`  ${body.pairingToken}`);
-      console.log(`\nOn the worker machine (already installed):`);
-      console.log(`  agentic-kanban-worker setup --board ${body.fleetUrl || "<board-url>"} --token ${body.pairingToken}`);
       const os = /^(unix|linux|macos)$/.test(options.os) ? "unix" : "windows";
+      console.log(`\nOn the worker machine (already installed):\n  agentic-kanban-worker setup --board ${body.fleetUrl || "<board-url>"} --token ${body.pairingToken}`);
       console.log(`\n${renderBootstrapSteps(body.fleetUrl || "<board-url>", body.pairingToken, os)}\n(${os === "windows" ? "Linux/macOS worker? re-run with --os unix." : "Windows worker? re-run without --os."})`);
       if (body.fleetNote) console.log(`\nNote: ${body.fleetNote}`);
     });

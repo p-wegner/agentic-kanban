@@ -62,6 +62,11 @@ export function createDoctorSummaryTracker(cfg: {
     current: (): WorkerDoctorSummary | undefined => summary,
     pending: (): WorkerDoctorSummary | undefined =>
       summary && doctorSignature(summary) !== sentSignature ? summary : undefined,
+    /** The current summary, recorded as sent: for hello/register, which always carry it. */
+    takeCurrent(): WorkerDoctorSummary | undefined {
+      if (summary) sentSignature = doctorSignature(summary);
+      return summary;
+    },
     markSent(sent: WorkerDoctorSummary): void {
       sentSignature = doctorSignature(sent);
     },

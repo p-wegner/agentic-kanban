@@ -1,6 +1,6 @@
 // Fleet worker daemon (epic #1, phase 1b #4).
 //
-// Pull model: the worker dials the board — REST to register (pairing token →
+// Pull model: the worker dials the board â€” REST to register (pairing token â†’
 // per-worker token, persisted locally) and heartbeat, a WebSocket for
 // assignments and output streaming. Socket loss never kills running agents:
 // the daemon keeps them, reconnects with backoff, re-announces them via
@@ -9,19 +9,19 @@
 // phase). Credentials stay worker-local: the daemon runs agents with this
 // machine's own logins and never receives board credentials.
 //
-// #754 — THIS IS A LONG-RUNNING PROCESS ON SOMEONE ELSE'S MACHINE, so every
+// #754 â€” THIS IS A LONG-RUNNING PROCESS ON SOMEONE ELSE'S MACHINE, so every
 // shutdown and every unrecoverable error is a data-loss bug until it is handled:
 //
 //  * `stop()` is ASYNC and DRAINS. It used to be sync and the CLI called
 //    `process.exit(0)` immediately after, so with `--kill-agents` the process was
-//    gone before `proc.on("exit")` → `emitExit` → `pushWorkerResult` could run:
+//    gone before `proc.on("exit")` â†’ `emitExit` â†’ `pushWorkerResult` could run:
 //    completed work was never pushed and the board learned about it via the 60 s
 //    grace, i.e. as a failure. Now: announce `draining` so the board stops
 //    assigning, stop accepting, then wait (bounded) for in-flight pushes and
 //    flush the critical queue before the socket closes.
 //  * `draining` is now actually SET. It was a declared status honoured by
 //    `eligibleWorkers` and coloured by the panel that nothing ever wrote, so the
-//    only way out of rotation was revoke — which kills in-flight tokens.
+//    only way out of rotation was revoke â€” which kills in-flight tokens.
 //  * A 401 is FATAL, not a retry. A revoked/forgotten worker used to reconnect
 //    every 30 s forever with a red tray and nothing in any log explaining it,
 //    while the identity in worker-state.json blocked re-pairing even with a fresh
@@ -98,7 +98,7 @@ export const DEFAULT_DRAIN_TIMEOUT_MS = 30 * 1000;
  * How many times a 401 may be answered by re-pairing before the daemon gives up (#754).
  *
  * Found by the test for this ticket: without a bound, "re-register on 401" is just a
- * faster version of the forever-loop it replaced — a board that hands out a token and then
+ * faster version of the forever-loop it replaced â€” a board that hands out a token and then
  * rejects it produced 940 registrations in two minutes. A pairing token is single-use, so
  * the honest number is small: the FIRST re-pairing is the recovery, and anything past it
  * means the board is refusing this machine for a reason a new token cannot fix.
@@ -116,13 +116,13 @@ export interface WorkerDaemonOptions {
    * Verify each declared provider can actually authenticate on THIS machine (#895) before
    * advertising it to the board, narrowing `providers` down to what `checkProvider` can
    * prove. Default true. Set false only when a provider is known-authenticated purely via
-   * an env API key the doctor check cannot see (its "unknown" case) — this is the
+   * an env API key the doctor check cannot see (its "unknown" case) â€” this is the
    * operator asserting that a false negative, not a real gap.
    */
   attestProviders?: boolean;
   /**
    * `--profiles anth,team5x` (#1027): the agent profiles this machine ATTESTS it can
-   * authenticate as. Names only — never a token, never a config dir.
+   * authenticate as. Names only â€” never a token, never a config dir.
    *
    * Absent = attest whatever local profile discovery finds, which is what makes a
    * freshly-upgraded worker useful to a profile-restricted project without extra
@@ -148,7 +148,7 @@ export interface WorkerDaemonOptions {
   /** How long `stop()` waits for in-flight result pushes (#754). */
   drainTimeoutMs?: number;
   /**
-   * Called once when this daemon can never work against this board again — a 401 with no
+   * Called once when this daemon can never work against this board again â€” a 401 with no
    * pairing token to recover with, or a protocol the board refuses (#754). The daemon has
    * already stopped reconnecting by then; the CLI turns this into a non-zero exit, because
    * a red tray and a silent 30 s retry loop is the failure being removed.
@@ -171,7 +171,7 @@ export interface WorkerSelfUpdateOptions {
    * back to the previous entry.
    */
   restart: (entry: string) => void | Promise<void>;
-  /** The `bin/worker.js` this process runs from — what a rollback returns to. */
+  /** The `bin/worker.js` this process runs from â€” what a rollback returns to. */
   entry: string;
   versionsDir?: string;
   keepVersions?: number;
@@ -205,7 +205,7 @@ export function loadState(stateFile: string): WorkerStateFile {
       return JSON.parse(readFileSync(stateFile, "utf8")) as WorkerStateFile;
     }
   } catch {
-    /* corrupt state — re-register */
+    /* corrupt state â€” re-register */
   }
   return { boards: {} };
 }
@@ -218,7 +218,7 @@ export function saveIdentity(stateFile: string, boardUrl: string, identity: Work
 }
 
 /**
- * This machine's live headroom (#910), folded onto every heartbeat. Tier 0 only — a
+ * This machine's live headroom (#910), folded onto every heartbeat. Tier 0 only â€” a
  * single sync `os.freemem()` read, cheap enough for the 30s heartbeat and the `hello`
  * handshake alike, unlike Tier 1's process spawn. Never throws: `readTier0Capacity`
  * and `resolveSpareCores` both fail open, so a capacity read never blocks a heartbeat.
@@ -231,10 +231,8 @@ function capacityOf(): WorkerCapacityInfo {
 /**
  * What this machine declares about itself, on every registration AND every beat (#754).
  *
- * `profiles` (#1027) rides the same channel for the same reason the others do: it is a
- * fact about the machine as it is NOW — a login can be added, removed or run out of quota
- * — and a value frozen at pairing time would be a claim the board keeps acting on after
- * it stopped being true.
+ * `profiles` (#1027) rides the same channel: a login can be added, removed or run out of quota,
+ * and a value frozen at pairing time would stay a claim the board acts on after it stopped being true.
  */
 function capabilitiesOf(
   opts: WorkerDaemonOptions,
@@ -255,7 +253,7 @@ function capabilitiesOf(
   };
 }
 
-/** This build's own version — the same value `--version` reports. Never fabricated. */
+/** This build's own version â€” the same value `--version` reports. Never fabricated. */
 function resolveWorkerVersion(): string | undefined {
   try {
     let dir = dirname(fileURLToPath(import.meta.url));
@@ -366,12 +364,12 @@ export interface WorkerDaemonHandle {
    * Awaitable and bounded: it announces `draining` to the board, stops reconnecting,
    * optionally kills the agents, then waits up to `drainTimeoutMs` for the result pushes
    * their exits kick off and flushes the critical queue before closing the socket. The
-   * report says what it saved and what it could not — see DrainReport.
+   * report says what it saved and what it could not â€” see DrainReport.
    */
   stop(opts?: { killAgents?: boolean; drainTimeoutMs?: number }): Promise<DrainReport>;
   /**
    * Leave rotation WITHOUT stopping: the board stops assigning, running agents finish.
-   * The planned-restart move — `draining` had no writer at all before this.
+   * The planned-restart move â€” `draining` had no writer at all before this.
    */
   drain(): Promise<void>;
 }
@@ -384,7 +382,7 @@ export interface WorkerDaemonHandle {
 export interface DrainReport {
   /** Result pushes that completed during the drain. */
   pushesCompleted: number;
-  /** Sessions still pushing when the drain timed out — their work stayed on the worker. */
+  /** Sessions still pushing when the drain timed out â€” their work stayed on the worker. */
   pushesAbandoned: number;
   /** Agents still running at exit (only possible with killAgents: false). */
   agentsLeftRunning: number;
@@ -396,7 +394,7 @@ export interface DrainReport {
   criticalMessagesLost: number;
   /**
    * Finished results still held on this machine because every push attempt failed (#750).
-   * Their checkouts are KEPT — the daemon logs each path — so they are recoverable by
+   * Their checkouts are KEPT â€” the daemon logs each path â€” so they are recoverable by
    * hand, but the in-memory retry list itself does not survive this process.
    */
   resultsRetained: number;
@@ -404,7 +402,7 @@ export interface DrainReport {
 
 /**
  * #750: a result whose push failed while the board was unreachable can only be saved by an
- * attempt made after it is back — this is that attempt, run on every (re)connect. The push
+ * attempt made after it is back â€” this is that attempt, run on every (re)connect. The push
  * lands in the incoming namespace, where the #752 operator surface can land it.
  */
 function retryRetainedResults(
@@ -447,7 +445,7 @@ function logShutdownReport(
   log: (line: string) => void,
 ): void {
   for (const result of retained) {
-    // #750/#775: the checkout was NOT removed, so this is recoverable by hand — but
+    // #750/#775: the checkout was NOT removed, so this is recoverable by hand â€” but
     // only if the operator is told where it is before the process goes away.
     log(
       `[worker] KEPT an unpushed result: sessionId=${result.sessionId} is in ` +
@@ -485,12 +483,12 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
 
   // #895: `providers` as DECLARED (--providers) is kept separate from `providers` as
   // ADVERTISED (opts.providers, mutated below) so a re-check can always re-attest the full
-  // requested set — a provider excluded now may attest again later (login restored) without
+  // requested set â€” a provider excluded now may attest again later (login restored) without
   // needing a restart.
   // #1027: what this machine can authenticate as. Built once here (discovery is a
   // filesystem walk) and re-read for quota on every beat; `current()` re-reads the ROLE
   // carriers each time, so a role a human just changed with claude-pick takes effect
-  // without restarting the daemon — the same freshness rule the board's own roster has.
+  // without restarting the daemon â€” the same freshness rule the board's own roster has.
   const profileAttestor: WorkerProfileAttestor = createWorkerProfileAttestor({
     ...(opts.profiles ? { declared: opts.profiles } : {}),
     ...(opts.profileHome ? { home: opts.profileHome } : {}),
@@ -510,7 +508,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // #850: a checkout whose worktree registration is gone (a prior daemon that stopped,
   // disconnected, or crashed mid-session) is reaped before anything else runs, so a
   // long-lived worker never accumulates whole repo clones from abandoned sessions.
-  // Best-effort — a scan failure must never block pairing/connecting.
+  // Best-effort â€” a scan failure must never block pairing/connecting.
   // #1336: a previous daemon's leftover agent trees are killed first (agent-process-tree.ts).
   await cleanUpBeforeStart(opts.workRoot ?? defaultWorkerWorkRoot(), log);
   await refreshPackageManagers();
@@ -518,23 +516,14 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // #1370: the worker's own doctor, summarised. hello/register always carry the current summary; a
   // heartbeat carries it only when it differs from what the board last got (`pending`).
   const doctor = createDoctorSummaryTracker({
-    enabled: opts.doctorSummary === true,
-    log,
-    boardUrl,
-    stateFile,
-    providers: declaredProviders ?? [],
-    profiles: opts.profiles,
-    harness: opts.harness,
-    home: opts.profileHome,
-    workRoot: opts.workRoot,
+    enabled: opts.doctorSummary === true, log, boardUrl, stateFile, providers: declaredProviders ?? [],
+    profiles: opts.profiles, harness: opts.harness, home: opts.profileHome, workRoot: opts.workRoot,
     runningEntry: opts.selfUpdate?.entry ?? null,
   });
   await doctor.refresh();
   let identity = loadState(stateFile).boards[boardUrl];
   if (!identity) {
-    identity = await registerWithBoard(opts, boardUrl, name, attestedProfiles(), doctor.current());
-    const registeredWith = doctor.current();
-    if (registeredWith) doctor.markSent(registeredWith);
+    identity = await registerWithBoard(opts, boardUrl, name, attestedProfiles(), doctor.takeCurrent());
     saveIdentity(stateFile, boardUrl, identity);
     log(`[worker] registered with ${boardUrl} as '${identity.name}' (id=${identity.workerId}); to use another name, pair again with --name <name>`);
   } else {
@@ -545,7 +534,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   let stopped = false;
   let draining = false;
   let fatal: string | null = null;
-  /** Re-pairings attempted, and whether one is in flight (#754 — see handleUnauthorized). */
+  /** Re-pairings attempted, and whether one is in flight (#754 â€” see handleUnauthorized). */
   let repairAttempts = 0;
   let repairing = false;
   let reconnectDelay = RECONNECT_MIN_MS;  /** Last moment a socket to the board was open (#1344); null until the first successful connect. */
@@ -554,7 +543,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
    * The one pending reconnect timer (#858). Held so a new trigger can tell that a retry is
    * already scheduled: before this, every close scheduled its own timer and the re-pairing
    * path called `connect()` directly, so a reconnect could fire while a connect attempt was
-   * still in flight — observed as 13 connects / 6 disconnects / 3 board-side evictions in
+   * still in flight â€” observed as 13 connects / 6 disconnects / 3 board-side evictions in
    * one log, each eviction closing the OLDER socket and feeding the loop.
    */
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -565,7 +554,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
    * Give up on this board for good (#754): stop reconnecting and tell the caller why.
    * The condition this replaces is a daemon that retried a 401 every 30 s forever while
    * `worker-state.json` blocked the documented recovery ("revoke and start with a fresh
-   * token") — so the advice could not be followed without hand-deleting the file the same
+   * token") â€” so the advice could not be followed without hand-deleting the file the same
    * line forbids editing.
    */
   const giveUp = (reason: string): void => {
@@ -608,7 +597,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       return;
     }
     // One repair at a time, and never re-entrantly: a 401 arrives on BOTH the heartbeat and
-    // the socket upgrade, so an unguarded handler runs the whole recovery twice per round —
+    // the socket upgrade, so an unguarded handler runs the whole recovery twice per round â€”
     // which is how the unbounded version reached 940 registrations in two minutes.
     repairing = true;
     repairAttempts += 1;
@@ -655,7 +644,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   /**
    * #1338: a freshly started daemon says `online` on its FIRST heartbeat. A worker that was
    * drained for an update comes back as a new process, and nothing else flips the board's
-   * stored `draining` status back — `status` was only ever sent when draining.
+   * stored `draining` status back â€” `status` was only ever sent when draining.
    */
   let announceOnline = true;
   const selfUpdate: DaemonSelfUpdate | null = opts.selfUpdate
@@ -725,7 +714,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
 
     socket.on("open", () => {
       // Wrapped whole (#870): this runs on a ws event, where a throw is a process-level
-      // uncaught exception — one bad frame during the flush must not kill every agent.
+      // uncaught exception â€” one bad frame during the flush must not kill every agent.
       try {
         reconnectDelay = RECONNECT_MIN_MS;
         // #858: a successful connect retires any reconnect timer still pending.
@@ -740,14 +729,12 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           type: "hello",
           workerId: identity.workerId,
           runningSessionIds: runner.runningSessionIds(),
-          // #754: declared on every connect, not frozen at first pairing — a machine that
+          // #754: declared on every connect, not frozen at first pairing â€” a machine that
           // gained docker (or changed its ceiling) says so without being re-paired.
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
-          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctor.current()),
+          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctor.takeCurrent()),
         } satisfies WorkerToBoardMessage));
-        const announced = doctor.current();
-        if (announced) doctor.markSent(announced);
         while (pendingCritical.length > 0) {
           socket.send(JSON.stringify(pendingCritical.shift()));
         }
@@ -771,7 +758,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       try {
         dispatchBoardMessage(message, runner, sendToBoard, draining);
       } catch (err) {
-        // #870: a throw out of a ws event handler is a process-level uncaught exception —
+        // #870: a throw out of a ws event handler is a process-level uncaught exception â€”
         // one bad message must not take down every agent on this machine.
         log(
           `[worker] error handling a ${message.type} message (daemon staying up): ` +
@@ -786,7 +773,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       if (stopped || fatal || repairing) return;
       // #858: a STALE socket's close must not restart the loop. When `ws` points at a
       // newer socket than the one this closure was created for, that newer attempt is
-      // already connecting or connected — scheduling here would be the overlap.
+      // already connecting or connected â€” scheduling here would be the overlap.
       if (ws !== null && ws !== socket) {
         log(`[worker] disconnected (${cause}); not retrying - a newer connection attempt already exists`);
         return;
@@ -796,7 +783,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       // two timers, each opening its own socket.
       if (reconnectTimer) return;
       if (openedAt !== null) lastReachableAt = Date.now();
-      // #1354: a 1001 close is the board announcing a restart � expected, so the first retry is
+      // #1354: a 1001 close is the board announcing a restart — expected, so the first retry is
       // the short minimum rather than wherever the error backoff had climbed to.
       if (boardRestarting) reconnectDelay = RECONNECT_MIN_MS;
       const { delay, next } = nextReconnectDelay(
@@ -834,7 +821,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       log(`[worker] socket error: ${err.message}`);
       // 'close' follows and schedules the reconnect.
     });
-    // A rejected UPGRADE is an HTTP response, not a socket failure — and it is the only
+    // A rejected UPGRADE is an HTTP response, not a socket failure â€” and it is the only
     // place the board's 401/409 is visible on the WS path (#754). Without this the status
     // is swallowed and the daemon reconnects forever against a board that will never
     // accept it.
@@ -863,12 +850,12 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
 
   /**
    * One heartbeat. Carries the capabilities and the protocol version every time (#754),
-   * and — unlike before — READS the status, because a 401 here is one of the two ways a
+   * and â€” unlike before â€” READS the status, because a 401 here is one of the two ways a
    * revoked worker finds out, and it was being swallowed entirely.
    */
   async function sendHeartbeat(): Promise<void> {
     if (stopped || fatal) return;
-    // #895: re-attest on every beat, not just at startup — the ticket's own example is a
+    // #895: re-attest on every beat, not just at startup â€” the ticket's own example is a
     // login that lapsed silently on a previously-healthy worker. Silent on an unchanged
     // result; a changed result gets exactly one summary line rather than re-explaining every
     // excluded provider's reason each beat (attestProviders already did that once, at
@@ -886,7 +873,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         opts.providers = advertisedProviders;
       }
     }
-    // #1027: ONE quota tick per beat — at most one request to the usage endpoint, over the
+    // #1027: ONE quota tick per beat â€” at most one request to the usage endpoint, over the
     // profiles that are due. Never throws: a quota read is diagnostics, and a rate limit
     // must not cost this machine its heartbeat (which is what would take it offline).
     try {
@@ -916,7 +903,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         }),
       });
     } catch {
-      return; // board unreachable — the WS reconnect path owns visibility for that
+      return; // board unreachable â€” the WS reconnect path owns visibility for that
     }
     if (res.ok) announceOnline = false;
     if (res.ok && doctorToSend) doctor.markSent(doctorToSend);
@@ -968,7 +955,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       if (draining) return;
       draining = true;
       log("[worker] draining: the board will stop assigning; running agents finish");
-      // Announce immediately rather than at the next 30 s tick — the whole value of
+      // Announce immediately rather than at the next 30 s tick â€” the whole value of
       // draining is that the board learns before it places the next session.
       await sendHeartbeat();
     },
@@ -987,7 +974,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       clearInterval(heartbeatTimer);
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (stopOpts?.killAgents) runner.stopAll();
-      else runner.releaseAgents(); // #1336: --leave-agents — the trees survive on purpose
+      else runner.releaseAgents(); // #1336: --leave-agents â€” the trees survive on purpose
       // The kill above only sends the signal. The result push is kicked off by the
       // agent's `exit` handler, so exiting now is precisely the bug: wait for it.
       const drained = await runner.drainPushes(timeoutMs);
