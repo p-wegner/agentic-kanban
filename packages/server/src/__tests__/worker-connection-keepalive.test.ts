@@ -4,7 +4,7 @@ import { createWorkerConnectionManager, WS_KEEPALIVE_MAX_MISSED } from "../servi
 import type { WorkerRegistry } from "../services/worker-registry.service.js";
 
 function fakeRegistry(): WorkerRegistry {
-  return { onRevoke: () => {}, touchHeartbeat: async () => {}, noteAttestedProfiles: () => {}, notePackageManagers: () => {}, noteProviderNotice: () => {}, noteDoctor: () => {} } as unknown as WorkerRegistry;
+  return { onRevoke: () => {}, touchHeartbeat: async () => {}, noteAttestedProfiles: () => {}, notePackageManagers: () => {}, noteProviderNotice: () => {}, noteDoctor: () => {}, noteCapabilities: async () => {} } as unknown as WorkerRegistry;
 }
 
 /** A socket whose peer is gone: pings are accepted, pongs never come back. */

@@ -446,6 +446,18 @@ export function createWorkerRegistry(database: Database = realDb) {
   }
 
   /**
+   * #1396: persist what a worker declares about itself (labels, providers, max concurrency) and its
+   * live capacity. Called from the socket `hello` so placement sees a restarted worker's `--labels`
+   * the moment it is online, instead of from the first heartbeat up to 30 s later.
+   */
+  async function noteCapabilities(workerId: string, capabilities: WorkerCapabilities | undefined, now?: string): Promise<void> {
+    if (!capabilities) return;
+    await workerRepo.updateWorkerCapabilities(workerId, capabilities, now ?? new Date().toISOString(), database);
+    if (capabilities.capacity) reportedCapacity.set(workerId, capabilities.capacity);
+    else reportedCapacity.delete(workerId);
+  }
+
+  /**
    * Internal heartbeat refresh for callers that have ALREADY authenticated the
    * worker (e.g. traffic on its upgraded WebSocket). Never exposed to routes.
    */
@@ -494,7 +506,7 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   return {
     mintPairingToken, registerWorker, authenticateWorker, heartbeat, touchHeartbeat,
-    listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles, notePackageManagers, noteProviderNotice, noteDoctor,
+    listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles, notePackageManagers, noteProviderNotice, noteDoctor, noteCapabilities,
     requestUpdate, authenticateAnyWorker, isPairingTokenValid,
   };
 }

@@ -139,6 +139,15 @@ describe("worker-registry (worker fleet phase 1a)", () => {
       expect((await registry.listWorkersView(t0))[0].effectiveStatus).toBe("online");
     });
 
+    it("noteCapabilities persists labels/providers/concurrency from a socket hello (#1396)", async () => {
+      const { workerId } = await registerOne();
+      await registry.noteCapabilities(workerId, { labels: ["wsl"], providers: ["claude"], maxConcurrency: 3 });
+      const [worker] = await registry.listWorkersView();
+      expect(JSON.parse(worker.labels as string)).toEqual(["wsl"]);
+      expect(JSON.parse(worker.providers as string)).toEqual(["claude"]);
+      expect(worker.maxConcurrency).toBe(3);
+    });
+
     it("rejects an invalid status", async () => {
       const { workerId, workerToken } = await registerOne();
       const result = await registry.heartbeat(workerId, workerToken, { status: "busy" as never });
