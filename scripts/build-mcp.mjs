@@ -25,7 +25,7 @@ await build({
   entryPoints: [resolve(root, "packages/mcp-server/src/index.ts")],
   outfile: resolve(root, "packages/server/dist/mcp.js"),
   banner: {
-    js: "#!/usr/bin/env node\nimport { createRequire } from \"node:module\"; const require = createRequire(import.meta.url);",
+    js: "#!/usr/bin/env node\nimport { createRequire as __bannerCreateRequire } from \"node:module\"; const require = __bannerCreateRequire(import.meta.url);",
   },
   plugins: [{
     name: "strip-shebang",

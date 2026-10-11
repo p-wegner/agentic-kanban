@@ -24,7 +24,7 @@ await build({
   entryPoints: [resolve(root, "packages/server/src/worker/worker-cli.ts")],
   outfile,
   banner: {
-    js: "#!/usr/bin/env node\nimport { createRequire } from \"node:module\"; const require = createRequire(import.meta.url);",
+    js: "#!/usr/bin/env node\nimport { createRequire as __bannerCreateRequire } from \"node:module\"; const require = __bannerCreateRequire(import.meta.url);",
   },
   plugins: [{
     name: "strip-shebang",
