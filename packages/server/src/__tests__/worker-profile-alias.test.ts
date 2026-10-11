@@ -17,7 +17,7 @@ import { loadProfileAliases, saveProfileAliases } from "../worker/worker-profile
 describe("profile alias (#1379)", () => {
   let home: string;
   beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), "alias-home-"));
+    home = mkdtempSync(join(tmpdir(), "ak-alias-home-"));
     mkdirSync(join(home, ".claude"), { recursive: true });
     writeFileSync(
       join(home, ".claude", ".credentials.json"),

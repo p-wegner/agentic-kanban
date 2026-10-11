@@ -50,6 +50,11 @@ import { applyHarnessToSpec, type WorkerHarness } from "./worker-harness.js";
 
 export type SendToBoard = (message: WorkerToBoardMessage) => void;
 
+/** #1379: the alias/home seams `applyProfileToSpec` resolves against. */
+function profileResolveOptions(o: { profileAliases?: ProfileAlias[]; profileHome?: string }) {
+  return { ...(o.profileAliases ? { aliases: o.profileAliases } : {}), ...(o.profileHome ? { home: o.profileHome } : {}) };
+}
+
 export interface WorkerAgentRunnerOptions {
   /** #1379: `--profile-alias` entries, so an assign naming an aliased profile resolves to its real dir. */
   profileAliases?: ProfileAlias[];
@@ -432,11 +437,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     // refusing it: an attestation can be stale, and running the assignment under some
     // other local login is exactly the silent fallback #651 refused remote dispatch to
     // prevent. A rejection reaches the board as a launch failure it can re-place.
-    const resolvedProfile = applyProfileToSpec(specAsSent, {
-      log: (line) => workerLog(line),
-      ...(options.profileAliases ? { aliases: options.profileAliases } : {}),
-      ...(options.profileHome ? { home: options.profileHome } : {}),
-    });
+    const resolvedProfile = applyProfileToSpec(specAsSent, { log: (line) => workerLog(line), ...profileResolveOptions(options) });
     if (!resolvedProfile.ok) {
       workerLog(`[worker] refusing assign: sessionId=${sessionId} ${resolvedProfile.error}`);
       send({ type: "assign_failed", sessionId, error: resolvedProfile.error });

@@ -119,7 +119,8 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 54 -> 55 in #1370 for `cli/commands/worker-doctor-daemon.ts` (the doctor-summary tracker; modules already here).
     // Raised 55 -> 56 in #1370 for `cli/commands/worker-pair-output.ts` (pair output split out of worker.ts for the
     // 1000-line ceiling; imports only modules already here).
-    expect(files.size).toBeLessThan(56);
+    // Raised 56 -> 57 in #1379 for `worker/worker-profile-aliases.ts` (alias persistence in the state file; node builtins only).
+    expect(files.size).toBeLessThan(57);
   });
 
   it("never reaches the database or board-service layer", () => {
