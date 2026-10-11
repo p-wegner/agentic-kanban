@@ -9532,6 +9532,29 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/workers/toolchain-suggestions:
+    get:
+      summary: go.mod, pyproject...), for one-click accept in settings. Suggestions only - nothing is saved.
+      tags:
+        - workers
+      operationId: get_api_workers_toolchain-suggestions
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "422":
+          description: Error (thrown UNPROCESSABLE, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/workers/{id}:
     delete:
       summary: DELETE /api/workers/{id}
