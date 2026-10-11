@@ -33,6 +33,7 @@ import {
   type WorkerRepoOpStatus,
   type WorkerPhaseTimings,
   type WorkerRepoTransport,
+  type WorkerCommitterIdentity,
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
@@ -110,6 +111,33 @@ export function deriveFallbackSetupCommand(checkoutDir: string): string | null {
 }
 
 /**
+ * Give the checkout the board's committer identity for whichever half it lacks (#1369).
+ *
+ * The worker never commits for the agent, so on a machine with no global `user.name` /
+ * `user.email` the AGENT's commit fails. The board therefore sends the project's identity in
+ * the assignment and it is set here with `git config --local` - but only for a key the
+ * checkout does not already resolve, so a worker owner's own global identity always wins.
+ * Best-effort: a failure is logged, never fatal to the assignment.
+ */
+export async function applyCommitterIdentity(
+  checkoutDir: string,
+  committer: WorkerCommitterIdentity | undefined,
+  log: (line: string) => void = workerLog,
+): Promise<void> {
+  if (!committer) return;
+  for (const [key, value] of [["user.name", committer.name], ["user.email", committer.email]] as const) {
+    try {
+      const current = await gitExec(["config", key], { cwd: checkoutDir });
+      if (execSucceeded(current) && current.stdout.trim()) continue;
+      await gitExecOrThrow(["config", "--local", key, value], { cwd: checkoutDir });
+      log(`[worker] no ${key} on this machine - set the board's project committer identity for ${checkoutDir}`);
+    } catch (err) {
+      log(`[worker] could not set ${key} in ${checkoutDir}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+}
+
+/**
  * Ensure the cached clone exists and is fresh, then create the per-session
  * worktree with the feature branch checked out. Throws with a descriptive
  * message on any git failure (surfaced to the board as assign_failed).
@@ -179,6 +207,8 @@ export async function provisionWorkerCheckout(
     withWorktreeAdminLock(cacheDir, () =>
       gitExecOrThrow(["worktree", "add", "-b", localBranch, checkoutDir, startPoint], { cwd: cacheDir })),
     (ms) => { phases.worktreeMs = ms; });
+
+  await applyCommitterIdentity(checkoutDir, repo.committer, log);
 
   // #553: through the shared writer, not a raw writeFileSync. The hand-rolled version
   // had no `isSafeSkillName` guard and emitted no frontmatter, so a remote worker's

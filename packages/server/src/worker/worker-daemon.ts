@@ -48,6 +48,7 @@ import {
 import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
 import { createWorkerAgentRunner, dispatchBoardMessage, rawDataToBuffer, type UnpushedResult } from "./worker-agent-runner.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
+import { cachedPackageManagers, refreshPackageManagers, refreshPackageManagersIfStale } from "./worker-toolchain.js";
 import { cleanUpBeforeStart } from "./agent-process-tree.js";
 import { attestProviderAuth } from "../cli/commands/worker-doctor.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
@@ -238,6 +239,13 @@ function capabilitiesOf(
     ...(opts.maxConcurrency !== undefined ? { maxConcurrency: opts.maxConcurrency } : {}),
     capacity: capacityOf(),
     ...(profiles && profiles.length > 0 ? { profiles } : {}),
+    // #1369: which package managers this machine has, so placement can name the one a
+    // project's lockfile needs. Re-probed (throttled, in the background) on every beat.
+    ...(() => {
+      refreshPackageManagersIfStale();
+      const packageManagers = cachedPackageManagers();
+      return packageManagers ? { packageManagers } : {};
+    })(),
   };
 }
 
@@ -524,6 +532,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // Best-effort â€” a scan failure must never block pairing/connecting.
   // #1336: a previous daemon's leftover agent trees are killed first (agent-process-tree.ts).
   await cleanUpBeforeStart(opts.workRoot ?? defaultWorkerWorkRoot(), log);
+  await refreshPackageManagers();
 
   let identity = loadState(stateFile).boards[boardUrl];
   if (!identity) {

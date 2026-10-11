@@ -195,6 +195,7 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
         // makes a reconnecting worker eligible for a restricted project immediately rather
         // than up to one heartbeat interval later.
         registry.noteAttestedProfiles(workerId, message.capabilities?.profiles);
+        registry.notePackageManagers(workerId, message.capabilities?.packageManagers);
       } else if (message.type === "event") {
         conn.pendingSessionIds.delete(message.event.sessionId);
         if (message.event.type === "exit") {

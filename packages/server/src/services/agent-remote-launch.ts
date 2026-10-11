@@ -25,6 +25,7 @@ import { resolveWorktreeDevPorts } from "./worktree-ports.js";
 import { listAgentSkills } from "../repositories/agent-skill.repository.js";
 import { ensureGitHttpServer } from "./git-http.service.js";
 import { incomingRefFor } from "./worker-remote-sync.service.js";
+import { resolveProjectCommitterIdentity } from "./project-committer-identity.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { WorkerConnectionManager } from "./worker-connection.service.js";
 import type { RemoteSession } from "./agent-remote.types.js";
@@ -172,6 +173,8 @@ export async function dispatchGitTransportAssignment(deps: GitTransportAssignmen
           "the worker's brief keeps saying it has no board tools",
       );
     }
+    // #1369: the board checkout's identity, so a worker with no global one can still commit.
+    const committer = await resolveProjectCommitterIdentity(repo.repoPath);
     const delivered = manager.send(workerId, {
       type: "assign",
       sessionId,
@@ -184,6 +187,7 @@ export async function dispatchGitTransportAssignment(deps: GitTransportAssignmen
         baseBranch: repo.baseBranch,
         incomingRef,
         setupScript: repo.setupScript,
+        ...(committer ? { committer } : {}),
         // #749: the ticket-context file travels as CONTENT (the board's path names
         // nothing on the worker) and is retargeted for a machine with no board MCP.
         // #769 appends the MCP config file to the same channel when a bridge is offered.

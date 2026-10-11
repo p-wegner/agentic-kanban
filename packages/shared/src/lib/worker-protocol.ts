@@ -6,6 +6,10 @@
 // so the board-side remote execution service can feed them straight into the
 // normal session broadcast/exit machinery.
 
+// #1369: committer identity + package-manager vocabulary lives in its own module.
+import { parseWorkerCommitterIdentity, parseWorkerPackageManagers, type WorkerCommitterIdentity, type WorkerPackageManagers } from "./worker-prerequisites.js";
+export { packageManagerForLockfiles, parseWorkerCommitterIdentity, parseWorkerPackageManagers, type WorkerCommitterIdentity, type WorkerPackageManagers } from "./worker-prerequisites.js";
+
 /**
  * A worker carrying this label shares the board's filesystem, so its assignments
  * skip git transport and run directly in the board-side worktree. Lives here —
@@ -141,6 +145,12 @@ export interface WorkerRepoTransport {
    * MCP client to configure at all.
    */
   boardMcpToken?: string;
+  /**
+   * The project's committer identity (#1369): the board checkout's effective `user.name` /
+   * `user.email`. Not a secret. A worker with no global identity cannot commit for the agent;
+   * it sets this per checkout (`git config --local`) ONLY for the half the checkout lacks.
+   */
+  committer?: WorkerCommitterIdentity;
 }
 
 /**
@@ -462,6 +472,8 @@ export interface WorkerCapabilities {
    * it. Absence is never read as "any profile".
    */
   profiles?: WorkerProfileAttestation[];
+  /** #1369: package managers on this machine's PATH. Absent = unknown (older worker). */
+  packageManagers?: WorkerPackageManagers;
 }
 
 export type ProtocolCompatibility =
@@ -584,12 +596,14 @@ export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | unde
       : undefined;
   const capacity = parseWorkerCapacityInfo(rec.capacity);
   const profiles = parseWorkerProfileAttestations(rec.profiles);
+  const packageManagers = parseWorkerPackageManagers(rec.packageManagers);
   if (
     labels === undefined &&
     providers === undefined &&
     maxConcurrency === undefined &&
     capacity === undefined &&
-    profiles === undefined
+    profiles === undefined &&
+    packageManagers === undefined
   ) {
     return undefined;
   }
@@ -599,6 +613,7 @@ export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | unde
     ...(maxConcurrency !== undefined ? { maxConcurrency } : {}),
     ...(capacity ? { capacity } : {}),
     ...(profiles ? { profiles } : {}),
+    ...(packageManagers ? { packageManagers } : {}),
   };
 }
 
@@ -909,6 +924,7 @@ function parseRepoTransport(raw: unknown): WorkerRepoTransport | null {
         .filter((f) => isBareFileName(f.name as string))
         .map((f) => ({ name: f.name as string, content: f.content as string }))
     : undefined;
+  const committer = parseWorkerCommitterIdentity(repo.committer);
   return {
     projectId: repo.projectId,
     gitPort: repo.gitPort,
@@ -917,6 +933,7 @@ function parseRepoTransport(raw: unknown): WorkerRepoTransport | null {
     baseBranch: repo.baseBranch,
     incomingRef: repo.incomingRef,
     setupScript: typeof repo.setupScript === "string" ? repo.setupScript : undefined,
+    ...(committer ? { committer } : {}),
     ...(skills && skills.length > 0 ? { skills } : {}),
     ...(contextFiles && contextFiles.length > 0 ? { contextFiles } : {}),
     ...(typeof repo.boardMcpToken === "string" && repo.boardMcpToken.length > 0
