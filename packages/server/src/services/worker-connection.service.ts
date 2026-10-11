@@ -222,8 +222,13 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     // #1394: `hello` is a new process announcing itself, so it also clears the previous process's
     // stored `draining`/`offline` (written by its shutdown heartbeat) — otherwise a restarted
     // worker reads offline until its first heartbeat and strict dispatch finds nobody.
-    void registry
-      .touchHeartbeat(workerId, undefined, message.type === "hello" ? "online" : undefined)
+    // #1396: and `hello` carries labels/providers/max concurrency, persisted before the status flip
+    // so placement never sees an online worker without the labels it was started with.
+    const declared = message.type === "hello"
+      ? registry.noteCapabilities(workerId, message.capabilities).catch(() => {})
+      : Promise.resolve();
+    void declared
+      .then(() => registry.touchHeartbeat(workerId, undefined, message.type === "hello" ? "online" : undefined))
       .catch(() => {});
     for (const listener of listeners) {
       try {
