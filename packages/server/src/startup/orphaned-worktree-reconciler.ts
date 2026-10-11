@@ -4,6 +4,7 @@ import { samePath as sharedSamePath } from "@agentic-kanban/shared/lib/path-key"
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
+import { currentBoardInstanceId, readWorktreeOwner } from "@agentic-kanban/shared/lib/git-service/worktree-owner";
 import type { Database } from "../db/index.js";
 import {
   decideTrainWorktreeAction,
@@ -392,6 +393,8 @@ export async function reconcileOrphanedWorktrees(args: {
   trainRows?: readonly TrainRowSummary[];
   /** Clock for the #1375 fresh-worktree grace; defaults to now. */
   nowMs?: number;
+  /** This board's identity for the #1375 ownership marker; defaults to the DB-derived id. */
+  boardId?: string;
 }): Promise<OrphanedWorktreeReport> {
   const report: OrphanedWorktreeReport = {
     removed: [], keptWithUnshippedWork: [], keptClaimed: [],
@@ -421,6 +424,16 @@ export async function reconcileOrphanedWorktrees(args: {
     const cheap = classifyWorktree({ ...args, worktreePath: worktree.path, mainCheckoutPath: args.repoPath, worktreeBranch: worktree.branch, hasUnshippedWork: false });
     if (cheap === "main_checkout" || cheap === "claimed") continue;
 
+    // #1375: a worktree marked as created by ANOTHER board (stable vs dev share this repo) is
+    // never ours to reap, whatever age or commit count it shows. A marker naming THIS board
+    // falls through to the normal sweep (its own orphan is still removed).
+    const owner = readWorktreeOwner(worktree.path);
+    const boardId = args.boardId ?? currentBoardInstanceId();
+    if (owner !== null && owner !== boardId) {
+      console.warn(`[worktree-reconcile] keeping worktree ${worktree.path} (${worktree.branch || "detached"}) - owned by board ${owner}, not this board ${boardId} (#1375)`);
+      report.keptClaimed.push(worktree.path);
+      continue;
+    }
     // #1235: a train worktree is decided by its row, never by the unshipped-work probe below
     // (which would keep it forever on its own integration merges). Only when the caller
     // supplied the rows — without them the ordinary, conservative path applies.
@@ -469,7 +482,7 @@ export async function reconcileOrphanedWorktrees(args: {
     // workspaces, so a fresh 0-commit worktree of the OTHER board looks orphaned here. A young
     // worktree is kept until it is old enough that no create or first builder turn can own it.
     const ageMs = worktreeAgeMs(worktree.path, args.nowMs ?? Date.now());
-    if (ageMs !== null && ageMs < FRESH_WORKTREE_GRACE_MS) {
+    if (owner === null && ageMs !== null && ageMs < FRESH_WORKTREE_GRACE_MS) {
       console.warn(
         `[worktree-reconcile] keeping unclaimed worktree ${worktree.path} (${worktree.branch || "detached"}) — created ` +
           `${Math.round(ageMs / 1000)}s ago, possibly by another board sharing this repo (#1375)`,
