@@ -14,19 +14,34 @@ export function checkHarness(
   harness: WorkerHarness,
   providers: string[],
   nowMs: number = Date.now(),
+  /** #1373: flags that disagree with the state file, and whether the pairing predates modes. */
+  extra: { notes?: string[]; legacy?: boolean } = {},
 ): DoctorCheck[] {
+  const customDirs = ["claude", "codex"].flatMap((p) => (harness.dirFor(p) && harness.mode === "custom" ? [`${p}: ${harness.dirFor(p)}`] : []));
   const modeDetail: Record<WorkerHarness["mode"], string> = {
     clean: `clean - sessions run in the worker's own config under ${harness.root} (no user hooks/plugins/skills)`,
-    custom: "custom - sessions run in the config folder you passed (--config-dir / --codex-home)",
+    custom: `custom - sessions run in the config folder recorded for ${harness.stateFile} (${customDirs.join("; ")})`,
     inherit:
       "inherit (dirty mode, --inherit-user-config) - sessions see this machine's own ~/.claude, hooks " +
       "and all, so results depend on the machine",
   };
   const checks: DoctorCheck[] = [
     harness.mode === "inherit"
-      ? { name: "harness mode", status: "warn", detail: modeDetail.inherit }
+      ? {
+          name: "harness mode",
+          status: "warn",
+          detail: extra.legacy
+            ? "inherit - this pairing predates harness modes, so this worker still uses your own ~/.claude"
+            : modeDetail.inherit,
+          ...(extra.legacy
+            ? { remedy: `agentic-kanban-worker auth claude${harness.authFlags("claude")}, then restart with --clean to switch` }
+            : {}),
+        }
       : { name: "harness mode", status: "pass", detail: modeDetail[harness.mode] },
   ];
+  for (const note of extra.notes ?? []) {
+    checks.push({ name: "harness flags", status: "warn", detail: note });
+  }
   for (const provider of providers) {
     const dir = harness.dirFor(provider);
     if (!dir) continue;
@@ -36,7 +51,7 @@ export function checkHarness(
         name,
         status: harness.mode === "custom" ? "fail" : "warn",
         detail: `${dir} does not exist${harness.mode === "clean" ? " yet (created on the first session or login)" : ""}`,
-        remedy: `agentic-kanban-worker auth ${provider}`,
+        remedy: `agentic-kanban-worker auth ${provider}${harness.authFlags(provider)}`,
       });
     } else {
       checks.push({ name, status: "pass", detail: dir });
@@ -51,7 +66,7 @@ export function checkHarness(
                 name: "claude credential",
                 status: "warn",
                 detail: `the token stored by the worker has expired${when}`,
-                remedy: "agentic-kanban-worker auth claude --token",
+                remedy: `agentic-kanban-worker auth claude --token${harness.authFlags(provider)}`,
               }
             : { name: "claude credential", status: "pass", detail: `token (stored by the worker)${when}` },
         );
@@ -62,14 +77,16 @@ export function checkHarness(
             name: "claude credential",
             status: "warn",
             detail: `the login in ${dir} has expired`,
-            remedy: "agentic-kanban-worker auth claude",
+            remedy: `agentic-kanban-worker auth claude${harness.authFlags(provider)}`,
           });
         } else if (read.err) {
           checks.push({
             name: "claude credential",
             status: "unknown",
             detail: `no OAuth login in ${dir} (${read.err}); an env API key would not be visible here`,
-            remedy: "agentic-kanban-worker auth claude   (or: auth claude --token)",
+            remedy:
+              `agentic-kanban-worker auth claude${harness.authFlags(provider)}   ` +
+              `(or: auth claude --token${harness.authFlags(provider)})`,
           });
         } else {
           checks.push({ name: "claude credential", status: "pass", detail: `login present in ${dir}` });
@@ -89,7 +106,7 @@ export function checkHarness(
         name: "codex credential",
         status: "unknown",
         detail: `no auth.json in ${dir}`,
-        remedy: "agentic-kanban-worker auth codex",
+        remedy: `agentic-kanban-worker auth codex${harness.authFlags(provider)}`,
       });
     }
   }

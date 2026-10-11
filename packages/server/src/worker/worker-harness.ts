@@ -16,7 +16,8 @@
  * Db-free: this ships in the standalone worker binary.
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import type { WorkerLaunchSpec } from "@agentic-kanban/shared/lib/worker-protocol";
 
@@ -66,6 +67,11 @@ export interface WorkerHarness {
   storeToken(provider: string, token: string, nowMs?: number): void;
   /** Create the dir (and a minimal settings.json for claude) when this worker owns it. */
   ensure(provider: string): void;
+  stateFile: string;
+  /** Where a stored token lives for the provider (beside this worker's state file). */
+  tokenPath(provider: string): string;
+  /** ` --config-dir X --state-file Y` as needed for a command to hit THIS worker's folder ('' = defaults). */
+  authFlags(provider: string): string;
   protector: SecretProtector;
 }
 
@@ -161,6 +167,16 @@ export function createWorkerHarness(
     mode,
     root,
     protector,
+    stateFile: options.stateFile,
+    tokenPath: tokenFile,
+    authFlags(provider) {
+      const parts: string[] = [];
+      if (mode === "custom" && custom[provider]) parts.push(`--config-dir ${quoteIfNeeded(custom[provider]!)}`);
+      if (resolve(options.stateFile) !== resolve(join(homedir(), ".agentic-kanban", "worker-state.json"))) {
+        parts.push(`--state-file ${quoteIfNeeded(options.stateFile)}`);
+      }
+      return parts.length > 0 ? ` ${parts.join(" ")}` : "";
+    },
     dirFor,
     envFor(provider) {
       const dir = dirFor(provider);
@@ -232,6 +248,178 @@ export function applyHarnessToSpec(spec: WorkerLaunchSpec, harness: WorkerHarnes
       ? [...spec.args, "--strict-mcp-config"]
       : spec.args;
   return { ...spec, env, args };
+}
+
+/** What `start` records in the state file (#1373) so doctor / auth read the same folders the daemon uses. */
+export interface PersistedHarness {
+  mode: HarnessMode;
+  claudeConfigDir?: string;
+  codexHome?: string;
+  /** Written by the legacy-keep path: the pairing predates harness modes. */
+  legacy?: boolean;
+}
+
+/** The CLI flags that pick a mode/dirs. `clean` = `--clean` (switch back to the worker's own dir). */
+export interface HarnessFlags {
+  inheritUserConfig?: boolean;
+  clean?: boolean;
+  configDir?: string;
+  codexHome?: string;
+}
+
+export interface ResolvedHarnessConfig {
+  options: WorkerHarnessOptions;
+  mode: HarnessMode;
+  persisted?: PersistedHarness;
+  /** A pairing exists whose state predates harness modes, and no flag chose one: stays `inherit`. */
+  legacyInherit: boolean;
+  /** Flags that differ from what the state file records. */
+  differences: string[];
+  /** What to write to the state file (start only). */
+  toPersist: PersistedHarness;
+}
+
+function readStateRaw(stateFile: string): { boards?: Record<string, unknown>; harness?: PersistedHarness } {
+  try {
+    if (existsSync(stateFile)) return JSON.parse(readFileSync(stateFile, "utf8")) ?? {};
+  } catch {
+    /* unreadable = no record */
+  }
+  return {};
+}
+
+export function readPersistedHarness(stateFile: string): PersistedHarness | undefined {
+  const h = readStateRaw(stateFile).harness;
+  return h && (h.mode === "clean" || h.mode === "custom" || h.mode === "inherit") ? h : undefined;
+}
+
+export function writePersistedHarness(stateFile: string, harness: PersistedHarness): void {
+  const state = readStateRaw(stateFile);
+  const next = { ...state, harness };
+  if (JSON.stringify(state.harness) === JSON.stringify(harness)) return;
+  mkdirSync(dirname(stateFile), { recursive: true });
+  writeFileSync(stateFile, JSON.stringify({ boards: {}, ...next }, null, 2));
+}
+
+function persistedOf(mode: HarnessMode, claudeConfigDir?: string, codexHome?: string): PersistedHarness {
+  return {
+    mode,
+    ...(mode === "custom" && claudeConfigDir ? { claudeConfigDir } : {}),
+    ...(mode === "custom" && codexHome ? { codexHome } : {}),
+  };
+}
+
+function describeConfig(h: PersistedHarness): string {
+  return h.mode === "custom"
+    ? `custom (${[h.claudeConfigDir && `--config-dir ${h.claudeConfigDir}`, h.codexHome && `--codex-home ${h.codexHome}`].filter(Boolean).join(" ")})`
+    : h.mode;
+}
+
+/**
+ * Decide the harness mode and dirs for a command (#1373): flags > what `start` recorded in the
+ * state file > (a pairing that predates modes keeps `inherit`) > clean. `differences` names every
+ * flag that disagrees with the record, so a caller reports it instead of silently using one.
+ */
+export function resolveHarnessConfig(stateFile: string, flags: HarnessFlags = {}): ResolvedHarnessConfig {
+  const state = readStateRaw(stateFile);
+  const persisted = readPersistedHarness(stateFile);
+  const paired = Object.keys(state.boards ?? {}).length > 0;
+  const flagMode: HarnessMode | undefined = flags.inheritUserConfig
+    ? "inherit"
+    : flags.configDir || flags.codexHome
+      ? "custom"
+      : flags.clean
+        ? "clean"
+        : undefined;
+  let mode: HarnessMode;
+  let claude: string | undefined;
+  let codex: string | undefined;
+  let legacyInherit = false;
+  if (flagMode) {
+    mode = flagMode;
+    // A flag for one provider keeps the other's recorded dir, so `--config-dir` alone does not drop `--codex-home`.
+    claude = flags.configDir ?? (persisted?.mode === "custom" ? persisted.claudeConfigDir : undefined);
+    codex = flags.codexHome ?? (persisted?.mode === "custom" ? persisted.codexHome : undefined);
+  } else if (persisted) {
+    mode = persisted.mode;
+    claude = persisted.claudeConfigDir;
+    codex = persisted.codexHome;
+  } else if (paired) {
+    mode = "inherit";
+    legacyInherit = true;
+  } else {
+    mode = "clean";
+  }
+  const toPersist = persistedOf(mode, claude, codex);
+  const differences: string[] = [];
+  if (flagMode && persisted && JSON.stringify(persistedOf(persisted.mode, persisted.claudeConfigDir, persisted.codexHome)) !== JSON.stringify(toPersist)) {
+    differences.push(`flags ask for ${describeConfig(toPersist)} but the state file records ${describeConfig(persisted)}`);
+  }
+  return {
+    options: { stateFile, inheritUserConfig: mode === "inherit", claudeConfigDir: claude, codexHome: codex },
+    mode,
+    ...(persisted ? { persisted } : {}),
+    legacyInherit,
+    differences,
+    toPersist: legacyInherit ? { ...toPersist, legacy: true } : toPersist,
+  };
+}
+
+/**
+ * `auth` / `doctor` (read side): the recorded config wins; a flag that disagrees is reported, not
+ * used - the daemon reads the state file, so a different folder here would log into the wrong place.
+ */
+export function resolveInspectedHarness(stateFile: string, flags: HarnessFlags = {}): ResolvedHarnessConfig {
+  const persisted = readPersistedHarness(stateFile);
+  if (persisted) {
+    const withFlags = resolveHarnessConfig(stateFile, flags);
+    const recorded = resolveHarnessConfig(stateFile, {});
+    return { ...recorded, differences: withFlags.differences.map((d) => `${d}; using the state file's`) };
+  }
+  return resolveHarnessConfig(stateFile, flags);
+}
+
+function quoteIfNeeded(p: string): string {
+  return /\s/.test(p) ? `"${p}"` : p;
+}
+
+/** Registry of state files `start` has been run with, so `auth --status` can list them (#1373 F2). */
+function registryFile(home: string): string {
+  return join(home, ".agentic-kanban", "worker-state-files.json");
+}
+
+export function registerStateFile(stateFile: string, home: string = homedir()): void {
+  try {
+    const file = registryFile(home);
+    const known = listRegisteredStateFiles(home);
+    if (known.includes(stateFile)) return;
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ stateFiles: [...known, stateFile] }, null, 2));
+  } catch {
+    /* the registry only aids discovery */
+  }
+}
+
+export function listRegisteredStateFiles(home: string = homedir()): string[] {
+  try {
+    const parsed = JSON.parse(readFileSync(registryFile(home), "utf8")) as { stateFiles?: unknown };
+    return Array.isArray(parsed.stateFiles) ? parsed.stateFiles.filter((s): s is string => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Default home state file (when present) plus every registered one that still exists. */
+export function findWorkerStateFiles(defaultStateFile: string, home: string = homedir()): string[] {
+  const all = [defaultStateFile, ...listRegisteredStateFiles(home)];
+  return [...new Set(all)].filter((f) => existsSync(f));
+}
+
+/** Does this state file's recorded dir for the provider equal `dir`? (case-insensitive: Windows paths) */
+export function stateFileUsesDir(stateFile: string, provider: string, dir: string): boolean {
+  const p = readPersistedHarness(stateFile);
+  const recorded = provider === "codex" ? p?.codexHome : p?.claudeConfigDir;
+  return Boolean(recorded) && resolve(recorded!).toLowerCase() === resolve(dir).toLowerCase();
 }
 
 /** Does this settings.json define hooks that would run code? Absent/unreadable = no. */

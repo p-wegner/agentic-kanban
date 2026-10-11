@@ -20,7 +20,7 @@ import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-proto
 import { formatBuildFreshness, type WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { cliPathArg } from "../cli-path.js";
-import { createWorkerHarness } from "../../worker/worker-harness.js";
+import { createWorkerHarness, resolveInspectedHarness } from "../../worker/worker-harness.js";
 import { addHarnessOptions, registerWorkerAuth } from "./worker-auth-command.js";
 // Type-only + a db-free formatter: this module is also the standalone worker
 // binary's entry point, which must never pull in the database graph.
@@ -35,6 +35,8 @@ import { registerWorkerSetup } from "./worker-setup.js";
 // #880 — the read-only update-check. Db-free like the doctor: also part of the
 // standalone worker binary.
 import { renderUpdateCheckReport, runWorkerUpdateCheck } from "./worker-update-check.js";
+import { harnessUpdateNote, persistStartHarness, printLauncherWarning } from "./worker-update-notes.js";
+import { probeGlobalVersion } from "./worker-doctor-build-check.js";
 import { compareWithBoardBuild, renderBuildMismatch } from "./worker-board-build.js";
 import { resolveOwnPackageVersion } from "../../lib/worker-build.js";
 // The step SHAPE lives in shared/lib (#1089, wire-dto-single-declaration) — a deep `lib/` path,
@@ -405,6 +407,7 @@ interface WorkerStartOptions {
   leaveAgents?: boolean;
   /** #1367 */
   inheritUserConfig?: boolean;
+  clean?: boolean;
   configDir?: string;
   codexHome?: string;
   autoUpdate?: boolean;
@@ -458,6 +461,8 @@ async function runWorkerStart(options: WorkerStartOptions): Promise<void> {
       });
       if (cmp.state === "differs") console.warn(`[worker] WARNING: ${renderBuildMismatch(cmp.own, cmp.board)}`);
     }
+    // #1373: the harness mode and dirs live in the state file, so doctor/auth read what the daemon uses.
+    const harnessCfg = persistStartHarness(options.stateFile ?? defaultWorkerStateFile(), options);
     // Read by `restart` below, which can fire (a rollback) before the await resolves.
     let daemonRef: WorkerDaemonHandle | undefined;
     const daemon = await startWorkerDaemon({
@@ -471,12 +476,7 @@ async function runWorkerStart(options: WorkerStartOptions): Promise<void> {
       // list — including the single value `none` — is the operator's own narrowing, which
       // is why the CLI does not substitute a default here.
       profiles: splitList(options.profiles),
-      harness: createWorkerHarness({
-        stateFile: options.stateFile ?? defaultWorkerStateFile(),
-        inheritUserConfig: options.inheritUserConfig,
-        claudeConfigDir: options.configDir,
-        codexHome: options.codexHome,
-      }),
+      harness: createWorkerHarness(harnessCfg.options),
       maxConcurrency: options.maxConcurrency,
       stateFile: options.stateFile,
       workRoot: options.workRoot,
@@ -839,19 +839,24 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       stateFile?: string;
       workRoot?: string;
       inheritUserConfig?: boolean;
+      clean?: boolean;
       configDir?: string;
       codexHome?: string;
       json?: boolean;
     }) => {
+      const doctorStateFile = options.stateFile ?? defaultWorkerStateFile();
+      const harnessCfg = resolveInspectedHarness(doctorStateFile, {
+        inheritUserConfig: options.inheritUserConfig,
+        clean: options.clean,
+        configDir: options.configDir,
+        codexHome: options.codexHome,
+      });
       const report = await runWorkerDoctor({
         boardUrl: options.board,
-        stateFile: options.stateFile ?? defaultWorkerStateFile(),
-        harness: createWorkerHarness({
-          stateFile: options.stateFile ?? defaultWorkerStateFile(),
-          inheritUserConfig: options.inheritUserConfig,
-          claudeConfigDir: options.configDir,
-          codexHome: options.codexHome,
-        }),
+        stateFile: doctorStateFile,
+        harness: createWorkerHarness(harnessCfg.options),
+        harnessNotes: harnessCfg.differences,
+        harnessLegacy: harnessCfg.legacyInherit,
         workRoot: options.workRoot ?? defaultWorkerWorkRoot(),
         runningEntry: resolveWorkerEntry(),
         providers: splitList(options.providers) ?? ["claude"],
@@ -908,11 +913,13 @@ export function registerWorkerSubcommands(workerCmd: Command) {
     .option("--json", "Output the report as JSON")
     .action(async (options: { board: string; stateFile?: string; json?: boolean; apply?: boolean }) => {
       if (options.apply) {
-        const outcome = await applyWorkerUpdate({
-          stateFile: options.stateFile ?? defaultWorkerStateFile(),
-          print: (line) => console.log(line),
-        });
+        const applyStateFile = options.stateFile ?? defaultWorkerStateFile();
+        const log = (line: string) => console.log(line);
+        const before = harnessUpdateNote(applyStateFile);
+        if (before) log(before);
+        const outcome = await applyWorkerUpdate({ stateFile: applyStateFile, print: log });
         console.log(options.json ? JSON.stringify(outcome) : outcome.summary);
+        if (!options.json) printLauncherWarning(applyStateFile, probeGlobalVersion(), log);
         if (!outcome.ok) process.exit(1);
         return;
       }

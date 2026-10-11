@@ -34,6 +34,8 @@ import { parseBuildId, sameBuild } from "../../lib/worker-update.js";
 import { readControlFile } from "../../worker/worker-control.js";
 import { readPointer, versionsDirFor } from "../../worker/worker-versions.js";
 import { readSavedIdentity } from "./worker-doctor.js";
+import { probeGlobalVersion } from "./worker-doctor-build-check.js";
+import { globalLauncherWarning, harnessUpdateNote } from "./worker-update-notes.js";
 
 /** Which thing `workerVersion` describes (#1360). */
 export type UpdateCheckSubjectSource = "daemon" | "current.json" | "own-install";
@@ -59,6 +61,8 @@ export interface UpdateCheckReport {
   remediation: string | null;
   /** False when the check could not be completed — never when the worker is merely stale. */
   ok: boolean;
+  /** #1373: stale global launcher, a pairing that predates harness modes. */
+  warnings?: string[];
 }
 
 function failed(
@@ -88,6 +92,8 @@ export async function runWorkerUpdateCheck(opts: {
   fetchImpl?: typeof fetch;
   /** Test seam for the local daemon control endpoint. */
   controlFetchImpl?: typeof fetch;
+  /** Test seam: the globally installed launcher's version (default: probe `npm root -g`). */
+  globalVersion?: string | null;
 }): Promise<UpdateCheckReport> {
   const fetchImpl: typeof fetch = opts.fetchImpl ?? ((...a) => globalThis.fetch(...a));
   const controlFetch: typeof fetch = opts.controlFetchImpl ?? ((...a) => globalThis.fetch(...a));
@@ -174,6 +180,14 @@ export async function runWorkerUpdateCheck(opts: {
     // in-sync worker gets none; unknown says what is missing instead of prescribing.
     remediation: freshness === "behind-board" ? WORKER_UPDATE_REMEDIATION : null,
     ok: true,
+    warnings: [
+      globalLauncherWarning({
+        stateFile: opts.stateFile,
+        globalVersion: opts.globalVersion === undefined ? probeGlobalVersion() : opts.globalVersion,
+        runningBuild: subject.buildId,
+      }),
+      harnessUpdateNote(opts.stateFile),
+    ].filter((w): w is string => Boolean(w)),
   };
 }
 
@@ -289,6 +303,10 @@ export function renderUpdateCheckReport(report: UpdateCheckReport): string {
       "  Verdict: unknown - one side's build could not be determined ('?' above names which), " +
         "so no direction is claimed.",
     );
+  }
+  for (const w of report.warnings ?? []) {
+    lines.push("");
+    lines.push(`  ${w}`);
   }
   lines.push("");
   lines.push("Report only - nothing was downloaded, installed, or restarted.");
