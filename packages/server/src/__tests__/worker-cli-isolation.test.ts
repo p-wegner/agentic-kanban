@@ -120,7 +120,8 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 55 -> 56 in #1370 for `cli/commands/worker-pair-output.ts` (pair output split out of worker.ts for the
     // 1000-line ceiling; imports only modules already here).
     // Raised 56 -> 57 in #1379 for `worker/worker-profile-aliases.ts` (alias persistence in the state file; node builtins only).
-    expect(files.size).toBeLessThan(57);
+    // Raised 57 -> 58 in #1402 for `worker/worker-repin.ts` (repins an old shim; node builtins + modules already here).
+    expect(files.size).toBeLessThan(58);
   });
 
   it("never reaches the database or board-service layer", () => {
