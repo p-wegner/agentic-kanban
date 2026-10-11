@@ -133,7 +133,6 @@ const GRANDFATHERED: Readonly<Record<string, string>> = {
   "ticket-group.ts": "server",
   "transcript-cwd-encoding.ts": "server",
   "ttl-memo.ts": "server",
-  "worker-protocol.ts": "server",
 };
 
 /** Top-level modules under `shared/src/lib` (the barrel layer; nested dirs are internals). */

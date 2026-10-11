@@ -27,6 +27,8 @@ import {
   WORKER_PROTOCOL_VERSION,
   parseWorkerProfileAttestations,
   parseWorkerPackageManagers,
+  parseWorkerDoctorSummary,
+  type WorkerDoctorSummary,
   type WorkerPackageManagers,
   type WorkerCapabilities,
   type WorkerCapacityInfo,
@@ -56,6 +58,8 @@ export interface RegisterWorkerInput {
   workerVersion?: string;
   /** #1027: agent profiles this machine attests it can authenticate as. Names, never secrets. */
   profiles?: WorkerProfileAttestation[];
+  /** #1370: the worker's doctor summary at registration. */
+  doctor?: WorkerDoctorSummary;
   /** Test seam for time-dependent behavior (pairing expiry). */
   now?: string;
 }
@@ -108,6 +112,8 @@ export interface WorkerView extends Omit<WorkerRow, "tokenHash"> {
   packageManagers?: WorkerPackageManagers;
   /** Why this worker advertises no usable provider, as of its last hello/heartbeat (#1372). In memory like `capacity`. */
   providerNotice?: string;
+  /** The worker's latest doctor summary (#1370). In memory like `capacity`; re-sent on hello and on change. */
+  doctor?: WorkerDoctorSummary;
   /**
    * What this worker last said about its self-update (#1338): `current`, `updating` (with the
    * phase) or `failed` (with the reason). In memory like `capacity`: a property of the running
@@ -163,6 +169,8 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   /** Why a worker advertises no usable provider (#1372); absent = nothing to say. */
   const reportedProviderNotices = new Map<string, string>();
+  /** Latest doctor summary each worker sent (#1370). See WorkerView for why not a column. */
+  const reportedDoctor = new Map<string, WorkerDoctorSummary>();
 
   /** Self-update state each worker last reported, and the workers asked to update NOW (#1338). */
   const reportedUpdates = new Map<string, WorkerUpdateReport>();
@@ -253,6 +261,7 @@ export function createWorkerRegistry(database: Database = realDb) {
     // #1027: a profile-restricted project can consider this machine from registration on,
     // rather than only after its first heartbeat lands (up to 30 s later).
     noteAttestedProfiles(workerId, input.profiles);
+    noteDoctor(workerId, input.doctor);
     console.log(
       `[worker-registry] registered worker: id=${workerId} name=${input.name.trim()} ` +
         `protocol=${input.protocolVersion ?? "?"} build=${input.workerVersion ?? "?"}`,
@@ -324,6 +333,7 @@ export function createWorkerRegistry(database: Database = realDb) {
       noteAttestedProfiles(workerId, opts.capabilities.profiles);
       notePackageManagers(workerId, opts.capabilities.packageManagers);
       noteProviderNotice(workerId, opts.capabilities.providerNotice);
+      noteDoctor(workerId, opts.capabilities.doctor);
     }
     if (opts?.update) {
       reportedUpdates.set(workerId, opts.update);
@@ -376,6 +386,7 @@ export function createWorkerRegistry(database: Database = realDb) {
       const profiles = reportedProfiles.get(row.id);
       const packageManagers = reportedPackageManagers.get(row.id);
       const providerNotice = reportedProviderNotices.get(row.id);
+      const doctor = reportedDoctor.get(row.id);
       const update = reportedUpdates.get(row.id);
       return {
         ...safe,
@@ -386,6 +397,7 @@ export function createWorkerRegistry(database: Database = realDb) {
         ...(profiles ? { profiles } : {}),
         ...(packageManagers ? { packageManagers } : {}),
         ...(providerNotice ? { providerNotice } : {}),
+        ...(doctor ? { doctor } : {}),
         ...(update ? { update } : {}),
         ...(updateRequests.has(row.id) ? { updateRequested: true } : {}),
       };
@@ -420,6 +432,15 @@ export function createWorkerRegistry(database: Database = realDb) {
   }
 
   /**
+   * Record a worker's doctor summary (#1370). Unlike profiles/package managers this is NOT replace-on-absent:
+   * the worker sends it only when it changes, so a beat without one means unchanged, not unknown.
+   */
+  function noteDoctor(workerId: string, raw: unknown): void {
+    const parsed = parseWorkerDoctorSummary(raw);
+    if (parsed) reportedDoctor.set(workerId, parsed);
+  }
+
+  /**
    * Internal heartbeat refresh for callers that have ALREADY authenticated the
    * worker (e.g. traffic on its upgraded WebSocket). Never exposed to routes.
    */
@@ -449,6 +470,7 @@ export function createWorkerRegistry(database: Database = realDb) {
     reportedProfiles.delete(workerId);
     reportedPackageManagers.delete(workerId);
     reportedProviderNotices.delete(workerId);
+    reportedDoctor.delete(workerId);
     reportedUpdates.delete(workerId);
     updateRequests.delete(workerId);
     lastEffectiveStatus.delete(workerId);
@@ -467,7 +489,7 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   return {
     mintPairingToken, registerWorker, authenticateWorker, heartbeat, touchHeartbeat,
-    listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles, notePackageManagers, noteProviderNotice,
+    listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles, notePackageManagers, noteProviderNotice, noteDoctor,
     requestUpdate, authenticateAnyWorker, isPairingTokenValid,
   };
 }

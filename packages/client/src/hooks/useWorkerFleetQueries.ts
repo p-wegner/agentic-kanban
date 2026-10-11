@@ -1,6 +1,7 @@
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api.js";
 import type { WorkerConnectStep } from "@agentic-kanban/shared/lib/worker-connect-steps";
+import type { BootstrapOs, WorkerBootstrap } from "@agentic-kanban/shared/lib/worker-bootstrap-steps";
 
 /**
  * Data hooks for the Runners view's Connect and Dispatch Log tabs (#1089).
@@ -21,6 +22,8 @@ export interface ConnectInfo {
   boardWorkerVersion: string | null;
   boardUrl: string;
   steps: WorkerConnectStep[];
+  /** #1370: the node-only bootstrap per worker OS, built by the same function `worker pair` prints. */
+  bootstrap?: Record<BootstrapOs, WorkerBootstrap>;
 }
 
 export function useWorkerConnectInfoQuery() {

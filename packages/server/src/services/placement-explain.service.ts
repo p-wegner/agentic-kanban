@@ -305,6 +305,8 @@ async function describeWorkers(
       // (a property of the running peer), so absent means "has not said" — never "any".
       ...(w.profiles ? { attestedProfiles: w.profiles } : {}),
       ...(w.packageManagers ? { packageManagers: w.packageManagers } : {}),
+      // #1370: the worker's own doctor results, so the Runners tab can show a setup checklist.
+      ...(w.doctor ? { doctor: w.doctor } : {}),
       // #774 — the identity half. `GET /api/workers` is served from this shape now, so the
       // route no longer hands out the raw row and the panel no longer computes a second,
       // wrong "capacity" from it.

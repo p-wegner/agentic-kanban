@@ -18,7 +18,7 @@
 // depend only on this file. Keep this module free of anything that reaches the db.
 import type { ProviderName } from "../services/agent-provider/types.js";
 import type { WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
-import type { WorkerCapacityInfo, WorkerPackageManagers, WorkerProfileAttestation } from "@agentic-kanban/shared/lib/worker-protocol";
+import type { WorkerCapacityInfo, WorkerDoctorSummary, WorkerPackageManagers, WorkerProfileAttestation } from "@agentic-kanban/shared/lib/worker-protocol";
 import type { WorkerUpdateReport } from "./worker-update.js";
 import type { SessionPhaseTimings } from "@agentic-kanban/shared/lib/worker-protocol";
 
@@ -181,6 +181,8 @@ export interface WorkerEligibility {
   attestedProfiles?: WorkerProfileAttestation[];
   /** Package managers this worker reported on PATH (#1369). Absent = it has not said. */
   packageManagers?: WorkerPackageManagers;
+  /** The worker's latest doctor summary (#1370). Absent = it has not sent one. */
+  doctor?: WorkerDoctorSummary;
   /** Sessions the board currently has assigned to this worker. `load` is its length. */
   assignedSessionIds: string[];
   /**

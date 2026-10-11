@@ -1,4 +1,4 @@
-﻿// Fleet worker daemon (epic #1, phase 1b #4).
+// Fleet worker daemon (epic #1, phase 1b #4).
 //
 // Pull model: the worker dials the board â€” REST to register (pairing token â†’
 // per-worker token, persisted locally) and heartbeat, a WebSocket for
@@ -43,6 +43,7 @@ import {
   WORKER_UPDATE_REMEDIATION,
   type WorkerCapabilities,
   type WorkerCapacityInfo,
+  type WorkerDoctorSummary,
   type WorkerProfileAttestation,
   type WorkerToBoardMessage,
 } from "@agentic-kanban/shared/lib/worker-protocol";
@@ -54,6 +55,7 @@ import { cleanUpBeforeStart } from "./agent-process-tree.js";
 import { attestAndNotice, attestProviders } from "./worker-provider-notice.js";
 export { attestProviders };
 import { defaultWorkerName } from "./worker-name.js";
+import { createDoctorSummaryTracker } from "../cli/commands/worker-doctor-daemon.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
 import type { WorkerHarness } from "./worker-harness.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -134,6 +136,8 @@ export interface WorkerDaemonOptions {
   profileHome?: string;
   /** The worker-owned provider config (#1367). Absent = inherit mode (today's behaviour). */
   harness?: WorkerHarness;
+  /** #1370: run the local doctor and send the board a compact summary (on hello, then on change). Opt-in. */
+  doctorSummary?: boolean;
   maxConcurrency?: number;
   /** Defaults to ~/.agentic-kanban/worker-state.json. */
   stateFile?: string;
@@ -227,15 +231,14 @@ function capacityOf(): WorkerCapacityInfo {
 /**
  * What this machine declares about itself, on every registration AND every beat (#754).
  *
- * `profiles` (#1027) rides the same channel for the same reason the others do: it is a
- * fact about the machine as it is NOW â€” a login can be added, removed or run out of quota
- * â€” and a value frozen at pairing time would be a claim the board keeps acting on after
- * it stopped being true.
+ * `profiles` (#1027) rides the same channel: a login can be added, removed or run out of quota,
+ * and a value frozen at pairing time would stay a claim the board acts on after it stopped being true.
  */
 function capabilitiesOf(
   opts: WorkerDaemonOptions,
   profiles?: WorkerProfileAttestation[],
   providerNotice?: string,
+  doctor?: WorkerDoctorSummary,
 ): WorkerCapabilities {
   return {
     ...(providerNotice ? { providerNotice } : {}),
@@ -246,6 +249,7 @@ function capabilitiesOf(
     ...(profiles && profiles.length > 0 ? { profiles } : {}),
     // #1369: which package managers this machine has, so placement can name the one a lockfile needs.
     ...packageManagersField(),
+    ...(doctor ? { doctor } : {}),
   };
 }
 
@@ -286,6 +290,7 @@ export async function registerWithBoard(
   boardUrl: string,
   name: string,
   attestedProfiles?: WorkerProfileAttestation[],
+  doctor?: WorkerDoctorSummary,
 ): Promise<WorkerIdentity> {
   if (!opts.pairingToken) {
     throw new Error(
@@ -307,6 +312,7 @@ export async function registerWithBoard(
       // #1027: attested profile NAMES, so a restricted project can consider this machine
       // from its very first heartbeat rather than only after the next one lands.
       ...(attestedProfiles && attestedProfiles.length > 0 ? { profiles: attestedProfiles } : {}),
+      ...(doctor ? { doctor } : {}),
       // #754: the handshake. A board that speaks a different protocol says so here, once,
       // instead of the mismatch surfacing later as dropped "malformed" messages.
       protocolVersion: WORKER_PROTOCOL_VERSION,
@@ -507,9 +513,17 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   await cleanUpBeforeStart(opts.workRoot ?? defaultWorkerWorkRoot(), log);
   await refreshPackageManagers();
 
+  // #1370: the worker's own doctor, summarised. hello/register always carry the current summary; a
+  // heartbeat carries it only when it differs from what the board last got (`pending`).
+  const doctor = createDoctorSummaryTracker({
+    enabled: opts.doctorSummary === true, log, boardUrl, stateFile, providers: declaredProviders ?? [],
+    profiles: opts.profiles, harness: opts.harness, home: opts.profileHome, workRoot: opts.workRoot,
+    runningEntry: opts.selfUpdate?.entry ?? null,
+  });
+  await doctor.refresh();
   let identity = loadState(stateFile).boards[boardUrl];
   if (!identity) {
-    identity = await registerWithBoard(opts, boardUrl, name, attestedProfiles());
+    identity = await registerWithBoard(opts, boardUrl, name, attestedProfiles(), doctor.takeCurrent());
     saveIdentity(stateFile, boardUrl, identity);
     log(`[worker] registered with ${boardUrl} as '${identity.name}' (id=${identity.workerId}); to use another name, pair again with --name <name>`);
   } else {
@@ -719,7 +733,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           // gained docker (or changed its ceiling) says so without being re-paired.
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
-          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice),
+          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctor.takeCurrent()),
         } satisfies WorkerToBoardMessage));
         while (pendingCritical.length > 0) {
           socket.send(JSON.stringify(pendingCritical.shift()));
@@ -867,6 +881,9 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     } catch (err) {
       log(`[worker] profile quota refresh failed (continuing): ${errorMessage(err)}`);
     }
+    // #1370: re-run the doctor in the background every few minutes; it never delays a beat.
+    doctor.refreshIfDue();
+    const doctorToSend = doctor.pending();
     let res: Response;
     try {
       res = await fetch(`${boardUrl}/api/workers/${identity.workerId}/heartbeat`, {
@@ -879,7 +896,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           // Not gated on selfUpdate: a daemon restarted after a Ctrl+C drain without --auto-update
           // (every Linux worker until #1374) otherwise stayed `draining` on the board forever.
           ...(draining ? { status: "draining" } : announceOnline ? { status: "online" } : {}),
-          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice),
+          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctorToSend),
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
           ...(selfUpdate ? { update: selfUpdate.state() } : {}),
@@ -889,6 +906,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       return; // board unreachable â€” the WS reconnect path owns visibility for that
     }
     if (res.ok) announceOnline = false;
+    if (res.ok && doctorToSend) doctor.markSent(doctorToSend);
     if (res.ok) {
       // #1338: the board advertises its build (and, for `worker update`, asks for NOW) in the
       // heartbeat response. Never let a malformed body cost this daemon its heartbeat.

@@ -31,7 +31,7 @@ import type { IssuePlacementReport, SessionPlacementRecord } from "../../lib/pla
 // worker binary's entry point (docs/worker-fleet.md §3).
 import { renderDoctorReport, runBoardDoctor, runWorkerDoctor } from "./worker-doctor.js";
 // #1358 — first-install guide + bootstrap commands. Pure strings, db-free.
-import { renderBootstrapSteps } from "./worker-setup-guide.js";
+import { runWorkerPair } from "./worker-pair-output.js";
 import { registerWorkerSetup } from "./worker-setup.js";
 // #880 — the read-only update-check. Db-free like the doctor: also part of the
 // standalone worker binary.
@@ -481,6 +481,7 @@ async function runWorkerStart(rawOptions: WorkerStartOptions): Promise<void> {
       // is why the CLI does not substitute a default here.
       profiles: splitList(options.profiles),
       harness: createWorkerHarness(harnessCfg.options),
+      doctorSummary: true, // #1370: the board shows this worker's setup checklist
       maxConcurrency: options.maxConcurrency,
       stateFile: options.stateFile,
       workRoot: options.workRoot,
@@ -568,20 +569,8 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         "the mint endpoint rides the board's loopback trust). Hand the token to 'worker start --token' on the worker machine.",
     )
     .option("--board <url>", "Board base URL", DEFAULT_BOARD_URL)
-    .action(async (options: { board: string }) => {
-      const res = await fetch(`${options.board.replace(/\/+$/, "")}/api/workers/pairing-token`, { method: "POST" });
-      if (!res.ok) {
-        console.error(`Failed to mint pairing token (${res.status}). Is the board running at ${options.board}?`);
-        process.exit(1);
-      }
-      const body = await res.json() as { pairingToken: string; expiresAt: string; fleetUrl?: string | null; fleetNote?: string | null };
-      console.log(`Pairing token (single-use, expires ${body.expiresAt}):`);
-      console.log(`  ${body.pairingToken}`);
-      console.log(`\nOn the worker machine (already installed):`);
-      console.log(`  agentic-kanban-worker setup --board ${body.fleetUrl || "<board-url>"} --token ${body.pairingToken}`);
-      console.log(`\n${renderBootstrapSteps(body.fleetUrl || "<board-url>", body.pairingToken)}`);
-      if (body.fleetNote) console.log(`\nNote: ${body.fleetNote}`);
-    });
+    .option("--os <os>", "OS of the WORKER machine for the bootstrap commands: windows (curl.exe, default) or unix (curl)", "windows")
+    .action(runWorkerPair);
 
   // #1368: `setup` does the setup (`setup --guide` prints the offline guide).
   registerWorkerSetup(workerCmd, {

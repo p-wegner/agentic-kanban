@@ -4,6 +4,9 @@ import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { WorkerConnectStep } from "@agentic-kanban/shared/lib/worker-connect-steps";
 import { useWorkerConnectInfoQuery } from "../hooks/useWorkerFleetQueries.js";
+import { BOOTSTRAP_OS_LABEL, BOOTSTRAP_TOKEN_PLACEHOLDER, type BootstrapOs } from "@agentic-kanban/shared/lib/worker-bootstrap-steps";
+import { fillBootstrapLine } from "../lib/workerSetup.js";
+import { CopyCommand } from "./CopyCommand.js";
 
 const PLACEHOLDER_TOKEN = "<pairing-token>";
 
@@ -32,6 +35,7 @@ export function WorkerConnectPanel() {
   const [error, setError] = useState<string | null>(null);
   const [pairing, setPairing] = useState<PairingResponse | null>(null);
   const [minting, setMinting] = useState(false);
+  const [os, setOs] = useState<BootstrapOs>("windows");
 
   const mintPairingToken = async () => {
     setMinting(true);
@@ -47,6 +51,17 @@ export function WorkerConnectPanel() {
 
   const token = pairing?.pairingToken ?? PLACEHOLDER_TOKEN;
   const withToken = (line: string) => line.split(PLACEHOLDER_TOKEN).join(token);
+  // The fleet URL the CLI would print (`worker pair`), swapped in for the best-guess URL connect-info embeds.
+  const fillBootstrap = (line: string) =>
+    pairing?.fleetUrl && info
+      ? fillBootstrapLine(line, {
+          placeholderToken: BOOTSTRAP_TOKEN_PLACEHOLDER,
+          token,
+          placeholderUrl: info.boardUrl,
+          url: pairing.fleetUrl,
+        })
+      : withToken(line);
+  const bootstrap = info?.bootstrap?.[os];
 
   return (
     <div className="space-y-4">
@@ -118,20 +133,97 @@ export function WorkerConnectPanel() {
         </div>
       )}
 
-      {info?.steps.map((step, i) => (
-        <div key={step.title} className="rounded border border-gray-200 dark:border-gray-700 p-3">
-          <div className="text-sm font-medium text-ink dark:text-stone-100">
-            {i + 1}. {step.title}{" "}
-            <span className="text-xs font-normal text-gray-500 dark:text-gray-400">({WHERE_LABEL[step.where]})</span>
+      {info?.steps.map((step, i) => {
+        if (step.id === "install" && bootstrap) {
+          return (
+            <div key={step.title} className="rounded border border-gray-200 dark:border-gray-700 p-3" data-testid="worker-bootstrap">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm font-medium text-ink dark:text-stone-100">
+                  {i + 1}. {step.title}{" "}
+                  <span className="text-xs font-normal text-gray-500 dark:text-gray-400">({WHERE_LABEL[step.where]})</span>
+                </div>
+                <div className="flex gap-1" role="tablist" aria-label="Worker operating system">
+                  {(Object.keys(BOOTSTRAP_OS_LABEL) as BootstrapOs[]).map((key) => (
+                    <button
+                      key={key}
+                      role="tab"
+                      aria-selected={os === key}
+                      onClick={() => setOs(key)}
+                      className={`rounded border px-2 py-0.5 text-xs ${
+                        os === key
+                          ? "border-accent-600 bg-accent-600 text-white"
+                          : "border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                      }`}
+                    >
+                      {BOOTSTRAP_OS_LABEL[key]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">{step.detail}</p>
+              {!pairing && (
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                  Mint a token above to have it filled into these commands.
+                </p>
+              )}
+              {bootstrap.intro.map((line) => (
+                <p key={line} className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {line.trim()}
+                </p>
+              ))}
+              <ol className="mt-2 space-y-2">
+                {bootstrap.steps.map((s, n) => (
+                  <li key={s.title} className="text-xs text-gray-700 dark:text-gray-200">
+                    <div className="mb-1">
+                      {i + 1}.{n + 1} {s.title}
+                    </div>
+                    <div className="space-y-1">
+                      {s.commands.map((command) => (
+                        <CopyCommand key={command} command={fillBootstrap(command)} />
+                      ))}
+                    </div>
+                    {s.note && <div className="mt-1 text-gray-500 dark:text-gray-400">{s.note}</div>}
+                  </li>
+                ))}
+              </ol>
+              {bootstrap.footer.map((line) => (
+                <p key={line} className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {line.trim()}
+                </p>
+              ))}
+            </div>
+          );
+        }
+        const body = (
+          <>
+            <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">{step.detail}</p>
+            {step.commands.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {step.commands.map((command) => (
+                  <CopyCommand key={command} command={withToken(command)} />
+                ))}
+              </div>
+            )}
+          </>
+        );
+        if (step.id === "repo-checkout") {
+          return (
+            <details key={step.title} className="rounded border border-gray-200 dark:border-gray-700 p-3">
+              <summary className="cursor-pointer text-sm font-medium text-ink dark:text-stone-100">{step.title}</summary>
+              {body}
+            </details>
+          );
+        }
+        return (
+          <div key={step.title} className="rounded border border-gray-200 dark:border-gray-700 p-3">
+            <div className="text-sm font-medium text-ink dark:text-stone-100">
+              {i + 1}. {step.title}{" "}
+              <span className="text-xs font-normal text-gray-500 dark:text-gray-400">({WHERE_LABEL[step.where]})</span>
+            </div>
+            {body}
           </div>
-          <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">{step.detail}</p>
-          {step.commands.length > 0 && (
-            <pre className="mt-2 overflow-x-auto rounded bg-gray-100 dark:bg-gray-800 px-2 py-1.5 text-xs text-ink dark:text-stone-100">
-              {step.commands.map(withToken).join("\n")}
-            </pre>
-          )}
-        </div>
-      ))}
+        );
+      })}
 
       <div className="rounded border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-900/20 p-3 text-xs text-amber-800 dark:text-amber-200">
         Never <code>KANBAN_HOST=0.0.0.0</code> — the board API has no authentication. Only the fleet and git-transport

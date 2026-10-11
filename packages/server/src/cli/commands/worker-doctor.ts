@@ -594,6 +594,11 @@ export interface WorkerDoctorOptions {
   runningEntry?: string | null;
   /** Version of the global agentic-kanban install; undefined = probe `npm root -g`, null = none (tests). */
   globalVersion?: string | null;
+  /**
+   * Machine-only checks (#1370): skip every probe that talks to the board — the daemon runs this
+   * itself to summarise for the board, and must not open a second socket under its own worker id.
+   */
+  local?: boolean;
 }
 
 /**
@@ -645,10 +650,12 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   const identity = readSavedIdentity(opts.stateFile, boardUrl);
   const checks: DoctorCheck[] = [];
   applyWorkerPath(opts.stateFile); // #1374: saved CLI dirs first, WSL /mnt entries off the PATH
-  checks.push(await checkReachable(boardUrl));
-  checks.push(await checkHeartbeat(boardUrl, identity));
-  checks.push(await checkWebSocket(boardUrl, identity, opts.timeoutMs));
-  checks.push(await checkGitTransport(boardUrl, opts.gitPort));
+  if (!opts.local) {
+    checks.push(await checkReachable(boardUrl));
+    checks.push(await checkHeartbeat(boardUrl, identity));
+    checks.push(await checkWebSocket(boardUrl, identity, opts.timeoutMs));
+    checks.push(await checkGitTransport(boardUrl, opts.gitPort));
+  }
   checks.push(await checkGitInstalled(probeCommand));
   checks.push(await checkGitIdentity(probeCommand));
   const safeDirectory = await checkGitSafeDirectory(probeCommand);
@@ -658,12 +665,14 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   checks.push(checkWorkerBuild(opts.stateFile, opts.runningEntry ?? null));
   const globalVersion = opts.globalVersion === undefined ? probeGlobalVersion() : opts.globalVersion;
   checks.push(checkGlobalLauncher({ stateFile: opts.stateFile, runningEntry: opts.runningEntry ?? null, globalVersion }));
-  checks.push(await checkBoardBuild({
-    daemonRunning: readControlFile(opts.stateFile) !== null,
-    boardUrl,
-    token: identity?.workerToken,
-    ownVersion: readEntryVersion(opts.runningEntry ?? null) ?? resolveOwnPackageVersion(),
-  }));
+  if (!opts.local) {
+    checks.push(await checkBoardBuild({
+      daemonRunning: readControlFile(opts.stateFile) !== null,
+      boardUrl,
+      token: identity?.workerToken,
+      ownVersion: readEntryVersion(opts.runningEntry ?? null) ?? resolveOwnPackageVersion(),
+    }));
+  }
   checks.push(checkWorkerCheckoutTrust(opts.workRoot ?? defaultWorkerWorkRoot(), opts.home ?? homedir()));
   if (opts.harness) checks.push(...checkHarness(opts.harness, opts.providers, undefined, { notes: opts.harnessNotes, legacy: opts.harnessLegacy }));
   for (const provider of opts.providers) {
