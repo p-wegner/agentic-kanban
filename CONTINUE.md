@@ -31,9 +31,18 @@ never leave it; clean config by default; setup installs claude+codex.
   on C: (~8 GB after 3 days); see `Documents\performance\2026-10-11-kernel-pool-leak-for-IT.md`.
   At < 4 GB free, gates get interrupted and background tasks reaped.
 
-**Next:** after the reboot (with `.wslconfig` memory=10GB, `autoMemoryReclaim` moved to
-`[experimental]`): resume #1370, rerun the #1372/#1374 gates, then WSL round 2 on a fresh import
-using only the UI steps, and desktop D3.
+- **Second reboot (16:xx local): git object writes on D: hung in the kernel** from 15:02 local
+  until the reboot. `git hash-object -w` in a fresh repo on D: stopped after writing `tmp_obj_*`
+  (one thread, wait reason Executive, unkillable); the same on C: was instant; plain writes,
+  renames and hardlinks on D: worked. Only WdFilter (Defender AV) is attached to the Dev Drive
+  (`fltmc instances -v D:`). Symptom chain: worker pushes to :3002 hung 600 s (board's
+  receive-pack/unpack-objects waited forever), then GCM popped a login prompt on the desktop
+  (#1383), gates and builders hung. Check first next time: a timed `git hash-object -w` on D:.
+- #1375 and #1379: the desktop's follow-up commits never landed (pushes hung); fetched as git
+  bundles over ACP instead of re-pushing, because their assignments are over.
+
+**Next:** land #1370 (merge triggered after the reboot), #1375/#1379/#1382; then WSL round 2 on a
+fresh import using only the UI steps, and desktop D3.
 
 ## 2026-10-10 (night) — tailnet rounds 3-4: newcomer install works, no frictions left
 
