@@ -41,8 +41,23 @@ never leave it; clean config by default; setup installs claude+codex.
 - #1375 and #1379: the desktop's follow-up commits never landed (pushes hung); fetched as git
   bundles over ACP instead of re-pushing, because their assignments are over.
 
-**Next:** land #1370 (merge triggered after the reboot), #1375/#1379/#1382; then WSL round 2 on a
-fresh import using only the UI steps, and desktop D3.
+- **WSL round 2 (`akw-r2`, build 17f5800fd, Connect-tab Linux steps pasted literally):** download,
+  sha256, install, setup (claude 2.1.296 + codex installed, PATH saved for the daemon), pair, doctor
+  0 FAIL work. wfx #31 built (agent 34 s) and reviewed (7 s, "no critical or major issues") on the
+  WSL worker, merged. The login was done by copying the main profile's `.credentials.json` into
+  `~/.agentic-kanban/harness/claude` (Peter's call; not read). Frictions: #1386 (high: setup leaves
+  harness mode `inherit`/legacy, so start uses an empty `~/.claude`; worked around with
+  `start --clean`), #1387 (Connect tab steps 1/2/4-7, numbering, "Expires just now"), #1388 (token
+  expires during login), #1389 (node:sqlite warning), #1390 (WSL worker named like the host). To
+  pin wfx to that worker: `--labels wsl` + `worker_labels_<wfx>=wsl`, strict.
+- Also filed: #1384 (pre-merge leftover commit stages `*.tmp.<pid>.<hex>`), #1385 (high: worker
+  startup cleanup deletes checkouts whose result is undelivered; seen on desktop-stable).
+- Merged: #1370 (cap 55 -> 56 by hand), #1375 (desktop's commits via git bundle). #1379 rebased by
+  hand (attestation types moved to `worker-profile-attestation.ts`; cap 57), daemon split by a
+  builder, gate running.
+
+**Next:** land #1379; build #1386 (running on desktop-stable) then #1387/#1388/#1390/#1389; verify
+live with WSL round 3 on a fresh import; desktop D3.
 
 ## 2026-10-10 (night) — tailnet rounds 3-4: newcomer install works, no frictions left
 
