@@ -8,7 +8,7 @@ import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { createWorktree } from "@agentic-kanban/shared/lib/git-service";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMergeTrain, updateMergeTrainState } from "../repositories/merge-train.repository.js";
-import { reconcileOrphanedWorktrees, realUnshippedWorkProbe } from "../startup/orphaned-worktree-reconciler.js";
+import { reconcileOrphanedWorktrees, FRESH_WORKTREE_GRACE_MS, realUnshippedWorkProbe } from "../startup/orphaned-worktree-reconciler.js";
 import * as gitService from "../services/git.service.js";
 import {
   cleanupTrainWorktreesForLabel,
@@ -91,6 +91,9 @@ async function reconcile(db: TestDb, trainRows: Array<{ label: string; state: st
     git: { ...gitService, ...realUnshippedWorkProbe },
     database: db,
     trainRows,
+    // These worktrees are created seconds before the sweep; this suite is about the reap
+    // decision, not #1375's fresh-worktree grace, so the clock is set past it.
+    nowMs: Date.now() + FRESH_WORKTREE_GRACE_MS + 60_000,
   });
 }
 

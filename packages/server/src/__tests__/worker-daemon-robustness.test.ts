@@ -289,7 +289,9 @@ describe("the daemon against a real board socket (#754 items 2,4,5,6)", () => {
     await daemon.connected;
     await vi.waitFor(() => expect(board!.heartbeats.length).toBeGreaterThan(1), { timeout: 10000 });
     expect(board.heartbeats[0]).toMatchObject({ status: "online" });
-    expect(board.heartbeats[1].status).toBeUndefined();
+    // Once a beat is accepted it stops announcing (under load an early beat can race the
+    // registration and be repeated, so only "eventually" is asserted).
+    await vi.waitFor(() => expect(board!.heartbeats.some((h) => h.status === undefined)).toBe(true), { timeout: 10000 });
   }, 30000);
 
   it("announces `draining` before it stops, so the board can stop assigning", async () => {
