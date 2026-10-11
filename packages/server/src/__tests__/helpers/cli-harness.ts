@@ -112,7 +112,7 @@ export function builtCliPath(): string {
       "ts-morph",
     ],
     banner: {
-      js: `import { createRequire } from "node:module"; const require = createRequire(import.meta.url);`,
+      js: `import { createRequire as __bannerCreateRequire } from "node:module"; const require = __bannerCreateRequire(import.meta.url);`,
     },
     logLevel: "silent",
   });
