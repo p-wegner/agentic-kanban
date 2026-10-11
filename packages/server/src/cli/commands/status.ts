@@ -25,12 +25,14 @@ Status indicators:
     .action(cliAction(async (options: { project?: string; all?: boolean; json?: boolean; watch?: boolean; interval?: string }) => {
       const { getBoardStatus } = await import("../../services/board-status.js");
 
-      const render = async () => {
-        const status = await getBoardStatus({
-          projectId: options.project,
-          includeClosed: options.all,
-          tailLines: 5,
-        });
+      const fetchStatus = () => getBoardStatus({
+        projectId: options.project,
+        includeClosed: options.all,
+        tailLines: 5,
+      });
+
+      const renderPlain = async () => {
+        const status = await fetchStatus();
 
         if (options.json) {
           console.log(JSON.stringify(status, null, 2));
@@ -120,12 +122,33 @@ Status indicators:
         }
       };
 
+      const renderScreen = async () => {
+        const status = await fetchStatus();
+        const { renderStatusScreen, frameToScreen } = await import("../status-screen.js");
+        const lines = renderStatusScreen(status, {
+          cols: process.stdout.columns || 120,
+          rows: process.stdout.rows || 40,
+          all: options.all,
+          intervalSec: Math.max(parseInt(options.interval ?? "5", 10), 2),
+        });
+        // Clear + home, then write the frame in one go (no scrollback growth).
+        process.stdout.write(frameToScreen(lines));
+      };
+
+      const render = options.watch && !options.json ? renderScreen : renderPlain;
+
       if (options.watch) {
         const intervalSec = Math.max(parseInt(options.interval ?? "5", 10), 2);
+        const screen = !options.json && process.stdout.isTTY;
+        if (screen) {
+          process.stdout.write("\x1b[?1049h\x1b[?25l");
+          const restore = () => process.stdout.write("\x1b[?25h\x1b[?1049l");
+          process.on("exit", restore);
+          process.on("SIGINT", () => process.exit(0));
+        }
         const renderAndClear = async () => {
-          console.clear();
+          if (!screen && !options.json) console.clear();
           await render();
-          console.log(`\n  Refreshing every ${intervalSec}s. Press Ctrl+C to exit.`);
         };
         await renderAndClear();
         setInterval(() => {

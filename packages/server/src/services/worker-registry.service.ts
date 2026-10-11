@@ -444,8 +444,8 @@ export function createWorkerRegistry(database: Database = realDb) {
    * Internal heartbeat refresh for callers that have ALREADY authenticated the
    * worker (e.g. traffic on its upgraded WebSocket). Never exposed to routes.
    */
-  async function touchHeartbeat(workerId: string, now?: string): Promise<void> {
-    await workerRepo.updateWorkerHeartbeat(workerId, now ?? new Date().toISOString(), undefined, database);
+  async function touchHeartbeat(workerId: string, now?: string, status?: WorkerStatus): Promise<void> {
+    await workerRepo.updateWorkerHeartbeat(workerId, now ?? new Date().toISOString(), status, database);
   }
 
   /**

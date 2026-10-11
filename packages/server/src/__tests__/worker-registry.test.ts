@@ -127,6 +127,18 @@ describe("worker-registry (worker fleet phase 1a)", () => {
       expect(worker.effectiveStatus).toBe("draining");
     });
 
+    it("touchHeartbeat with status online clears a previous process's draining state (#1394)", async () => {
+      const { workerId, workerToken } = await registerOne();
+      const t0 = new Date(Date.now() + 1000).toISOString();
+      await registry.heartbeat(workerId, workerToken, { status: "draining", now: t0 });
+      // Plain traffic keeps the stored status.
+      await registry.touchHeartbeat(workerId, t0);
+      expect((await registry.listWorkersView(t0))[0].effectiveStatus).toBe("draining");
+      // A socket hello restores it at once.
+      await registry.touchHeartbeat(workerId, t0, "online");
+      expect((await registry.listWorkersView(t0))[0].effectiveStatus).toBe("online");
+    });
+
     it("rejects an invalid status", async () => {
       const { workerId, workerToken } = await registerOne();
       const result = await registry.heartbeat(workerId, workerToken, { status: "busy" as never });
