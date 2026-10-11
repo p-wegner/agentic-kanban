@@ -143,7 +143,7 @@ describe("setup finds a CLI the installer put off-PATH (#1374)", () => {
   it("ends a full run with the start command", async () => {
     const { d } = deps();
     await runWorkerSetup({ board: "http://b/", yes: true, token: "T", providers: "claude", stateFile: join(dir, "s.json") }, d);
-    expect(out.join("\n")).toContain("agentic-kanban-worker start --board http://b --auto-update");
+    expect(out.join("\n")).toContain(`agentic-kanban-worker start --board http://b --state-file ${join(dir, "s.json")} --auto-update`);
   });
 });
 
