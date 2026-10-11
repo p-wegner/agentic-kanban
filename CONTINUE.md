@@ -78,8 +78,23 @@ never leave it; clean config by default; setup installs claude+codex.
   login was a copy of the main profile's `.credentials.json` (Peter's call) and `--labels wsl` to
   pin the test ticket.
 
-**Next:** desktop round D3 (partial setup: `--no-install --config-dir`, fresh state file) sent to
-the desktop agent over ACP; promote once the rc carries b85e3c277.
+- **Desktop partial path (D3-D5, used machine, `setup --no-install --config-dir
+  C:\Users\Peter\.claude-worker --state-file <fresh> --name --labels`):** D3 found #1398 (setup
+  ignored --token with --config-dir; hints dropped flags), #1399 (false "login expired"), #1400
+  (global install moved another worker's fallback build). D4 verified #1398/#1399, found #1401
+  (doctor trust check read ~/.claude; shared default work root) and #1402 (old shim not repinned).
+  Also fixed direct: the same createRequire banner in `cli-harness.ts` (cdfe9cf01). **D5 (master
+  ce74d0795): NO FRICTION** - setup asked nothing, printed commands carry all flags, doctor 19/19,
+  own work root; wfx #37 built + reviewed on desktop-d5, merged. Cosmetic only: work root named
+  `worker-state-work` (filed, low).
+- **Goal reached (2026-10-12 ~23:35Z):** a friction-free round on both machine types (WSL r6,
+  desktop D5).
+- **desktop-stable:** do NOT restart it before the stable build is reinstalled into its own
+  versions dir: its pre-#1400 shim would repin (#1402) to the global install, now the dev build.
+
+**Next:** promote (the rc `rc/20261011` is stuck at a0c77d70c with the broken bundle - see above),
+then reinstall desktop-stable's build; open: #1382 (21 test failures), #1384, #1385, #1391,
+#1392, #1395 (exit-130 withholds).
 
 ## 2026-10-10 (night) — tailnet rounds 3-4: newcomer install works, no frictions left
 
