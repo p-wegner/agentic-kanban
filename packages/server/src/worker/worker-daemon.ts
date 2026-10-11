@@ -56,8 +56,7 @@ import { attestAndNotice, attestProviders } from "./worker-provider-notice.js";
 export { attestProviders };
 import { defaultWorkerName } from "./worker-name.js";
 import { createDoctorSummaryTracker } from "../cli/commands/worker-doctor-daemon.js";
-import { parseProfileAliases } from "../lib/local-profile-discovery.js";
-import { loadProfileAliases, saveProfileAliases } from "./worker-profile-aliases.js";
+import { resolveProfileAliases } from "./worker-profile-aliases.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
 import type { WorkerHarness } from "./worker-harness.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -134,11 +133,7 @@ export interface WorkerDaemonOptions {
    * `--providers` is narrowed by attestation (#895).
    */
   profiles?: string[];
-  /**
-   * `--profile-alias default=anth` (#1379): attest a login that has no profile name of its own
-   * (the default `~/.claude`, or a custom dir) under a name. Entries are `<source>=<name>`.
-   * Given = replaces and persists the saved list (`[]` clears it); absent = the saved list is used.
-   */
+  /** `--profile-alias default=anth` (#1379): `<source>=<name>`; given = replaces + persists (`[]` clears), absent = saved list. */
   profileAliases?: string[];
   /** Override the home dir profile discovery reads. Test seam; a service install may set it. */
   profileHome?: string;
@@ -197,8 +192,6 @@ interface WorkerIdentity {
 
 interface WorkerStateFile {
   boards: Record<string, WorkerIdentity>;
-  /** #1379: `--profile-alias` entries (`default=anth`), persisted so a restart/service keeps them. */
-  profileAliases?: string[];
 }
 
 export function defaultWorkerStateFile(): string {
@@ -499,16 +492,10 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // filesystem walk) and re-read for quota on every beat; `current()` re-reads the ROLE
   // carriers each time, so a role a human just changed with claude-pick takes effect
   // without restarting the daemon â€” the same freshness rule the board's own roster has.
-  if (opts.profileAliases) saveProfileAliases(stateFile, opts.profileAliases);
-  const profileAliases = parseProfileAliases(opts.profileAliases ?? loadProfileAliases(stateFile));
-  if (profileAliases.length > 0) {
-    log(`[worker] profile aliases: ${profileAliases.map((a) => `${a.source}=${a.name}`).join(", ")}`);
-  }
+  const profileAliases = resolveProfileAliases(stateFile, opts.profileAliases, log);
   const profileAttestor: WorkerProfileAttestor = createWorkerProfileAttestor({
-    aliases: profileAliases,
-    ...(opts.profiles ? { declared: opts.profiles } : {}),
-    ...(opts.profileHome ? { home: opts.profileHome } : {}),
-    log,
+    aliases: profileAliases, log,
+    ...(opts.profiles ? { declared: opts.profiles } : {}), ...(opts.profileHome ? { home: opts.profileHome } : {}),
   });
   const attestedProfiles = (): WorkerProfileAttestation[] => profileAttestor.current();
 
@@ -651,12 +638,9 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // tracking capacity protects a well-behaved board, but the ceiling is this machine
   // owner's, so the worker enforces it locally instead of trusting the assigner.
   const runner = createWorkerAgentRunner(sendToBoard, {
-    boardUrl,
-    workRoot: opts.workRoot,
-    maxConcurrency: opts.maxConcurrency,
+    boardUrl, workRoot: opts.workRoot, maxConcurrency: opts.maxConcurrency,
     ...(opts.harness ? { harness: opts.harness } : {}),
-    profileAliases,
-    ...(opts.profileHome ? { profileHome: opts.profileHome } : {}),
+    profileAliases, ...(opts.profileHome ? { profileHome: opts.profileHome } : {}),
   });
 
   /**
