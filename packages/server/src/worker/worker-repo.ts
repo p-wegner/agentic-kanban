@@ -16,7 +16,7 @@ import { mkdirSync, writeFileSync, existsSync, readdirSync, rmSync, appendFileSy
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { TICKET_CONTEXT_FILENAME } from "@agentic-kanban/shared/lib/ticket-context";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { withWorktreeAdminLock, WORKTREE_PRUNE_MIN_AGE } from "@agentic-kanban/shared/lib/git-service";
 
@@ -37,8 +37,17 @@ import {
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
-export function defaultWorkerWorkRoot(): string {
-  return join(homedir(), ".agentic-kanban", "worker");
+export function defaultWorkerWorkRoot(stateFile?: string): string {
+  const shared = join(homedir(), ".agentic-kanban", "worker");
+  // #1401: workers paired with their own --state-file but no --work-root must not share one
+  // clone directory; put the root next to the non-default state file, named after it.
+  if (!stateFile || resolve(stateFile) === resolve(defaultWorkerStateFilePath())) return shared;
+  const base = basename(stateFile).replace(/\.[^.]*$/, "");
+  return join(dirname(resolve(stateFile)), `${base}-work`);
+}
+
+function defaultWorkerStateFilePath(): string {
+  return join(homedir(), ".agentic-kanban", "worker-state.json");
 }
 
 /**
