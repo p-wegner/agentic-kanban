@@ -25,7 +25,7 @@ export function currentBoardInstanceId(): string {
   try {
     id = `db:${resolveDbLocation().url}`;
   } catch {
-    id = `pid-data:${process.env.KANBAN_PORT ?? "?"}`;
+    id = `cwd:${process.cwd()}`;
   }
   cachedBoardId = id.replace(/\\/g, "/").toLowerCase();
   return cachedBoardId;
