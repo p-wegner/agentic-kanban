@@ -66,7 +66,8 @@ describe("git service removeWorktree cleanup fallback", () => {
     );
 
     expect(existsSync(join(unsafePath, "important", "data.txt"))).toBe(true);
-    expect(execFileMock).toHaveBeenCalledTimes(1);
+    // #1375: refused BEFORE any git call, so a refusal can never follow a destructive remove.
+    expect(execFileMock).not.toHaveBeenCalled();
   });
 
   it("does not delete junction target when recursively removing a worktree with a junction", async () => {

@@ -5,6 +5,7 @@ import { gitExec } from "../git-exec.js";
 import { execGit } from "./internal.js";
 import { parseIssueNumberFromBranch } from "../branch.js";
 import { ensureOnBranch } from "./branch-attach.js";
+import { writeWorktreeOwner } from "./worktree-owner.js";
 import { loggedWorktreeAdmin, runAsLockHolder, watchWorktreeGitFile, type WorktreeAdminOp } from "./worktree-admin-log.js";
 
 /** `git worktree <op>` through `execGit`, logged (#1353) — the only door for add/remove/prune here. */
@@ -382,6 +383,7 @@ async function createWorktreeLocked(
     await worktreeAdminGit("add", ["--force", worktreePath, branch], repoPath, worktreePath);
   }
   watchWorktreeGitFile(worktreePath);
+  await writeWorktreeOwner(worktreePath);
 
   // Verify worktree is on the correct branch (not detached HEAD)
   await ensureOnBranch(worktreePath, branch);
@@ -401,6 +403,13 @@ async function removeWorktreeLocked(
   repoPath: string,
   worktreePath: string,
 ): Promise<void> {
+  // #1375: refuse BEFORE touching anything. The containment guard used to run only after
+  // `git worktree remove --force` had already deleted the checkout, so a "refused" remove
+  // (ok=false) had in fact destroyed the directory. A failed remove must leave it intact.
+  if (existsSync(worktreePath) && !isInsideManagedWorktreesRoot(repoPath, worktreePath)) {
+    throw new Error(`Refusing to recursively remove unsafe worktree path: ${worktreePath}`);
+  }
+
   // Break junctions first (top-level AND nested packages/<pkg>/node_modules) so
   // neither git nor the fs.rm fallback can traverse into the main checkout via a
   // Windows junction and delete the shared store (data-loss bugs #518 / #780).
