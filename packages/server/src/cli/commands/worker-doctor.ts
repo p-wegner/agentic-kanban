@@ -498,7 +498,8 @@ export async function checkProvider(
   // directory comes from the provider's own rule, and the output ALWAYS names both the
   // path and what selected it: a check that inspects ~/.claude while the dispatched agent
   // authenticates from $CLAUDE_CONFIG_DIR is wrong precisely on the machines it is for.
-  const tokenState = harness?.tokenStatus(provider);
+  // Inherit mode never injects the stored token (applyHarnessToSpec), so it must not attest it.
+  const tokenState = harness && harness.mode !== "inherit" ? harness.tokenStatus(provider) : undefined;
   if (tokenState?.stored && !tokenState.expired) {
     checks.push(ok(`${provider} logged in`, "token (stored by the worker)"));
     return checks;
