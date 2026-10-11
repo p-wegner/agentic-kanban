@@ -69,7 +69,17 @@ never leave it; clean config by default; setup installs claude+codex.
   include b85e3c277 (or abandon it) - read `scripts/rc-state.mjs` / docs/two-boards.md "rc
   lifecycle". The stable board still runs stable-20261010-6.
 
-**Next:** finish round 5 (wfx #33); land #1396; promote once the rc carries b85e3c277; desktop D3.
+- Round 5 also found #1397 (remote review prompt names a branch the worker checkout lacks).
+  #1396/#1397 merged by auto-merge.
+- **Round 6 (`akw-r6`, dev build 02dc4ac8a): NO FRICTION.** Connect tab steps 1-6 + setup: pair
+  first (`AO-PF69VL7N-wsl-akw-r6`), claude/codex installed, clean harness recorded, doctor 0 FAIL,
+  no sqlite warning; a launch 2 s after `connected` was placed (#1394/#1396); wfx #34 built (24 s)
+  and reviewed on the worker with no branch complaint (#1397), merged. Outside the UI only: the
+  login was a copy of the main profile's `.credentials.json` (Peter's call) and `--labels wsl` to
+  pin the test ticket.
+
+**Next:** desktop round D3 (partial setup: `--no-install --config-dir`, fresh state file) sent to
+the desktop agent over ACP; promote once the rc carries b85e3c277.
 
 ## 2026-10-10 (night) — tailnet rounds 3-4: newcomer install works, no frictions left
 
