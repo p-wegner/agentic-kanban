@@ -11,6 +11,43 @@ First archive pass: 2026-08-27, cutting at the 2026-08-24 boundary (`CONTINUE.md
 
 ---
 
+## 2026-10-10 (night) — tailnet rounds 3-4: newcomer install works, no frictions left
+
+**State.** `stable-20261010-6` (11dc8da40) is live (promoted after a green sweep of `rc/20261010-6`,
+adds #1356-#1362). Board: only **#1337 (DECISION for Peter: plain LAN with Tailscale
+fallback)** is open on this project. #1329 (tailnet lab) closed with the evidence list.
+
+- **Round 3 (fresh worker `desktop-r3`)** found: fleet doc unreachable from a worker machine and
+  `/build` needing a worker token (#1358), doctor false WARNs (#1359), `update-check` judging the
+  global launcher by semver (#1360, plus the direct fix #1362), the firewall check timing out on
+  372 rules and then false-warning unelevated (#1357, #1361), and 15-95 s workspace creates from
+  skill materialization copying a `.venv` (#1356). All merged; each verified live except #1356
+  (measure `resolve-prompt-skill` on the next creates after this promote).
+- **Round 4 (`desktop-r4`)**: installed from ONLY the steps `worker pair` prints, paired on the
+  current build; wfx #28 build+review clean in 54 s. No frictions reported on the run. The
+  desktop's report on the install steps themselves was lost on the ACP bus (ids 68/70); asked
+  for a resend.
+- **Worktree race:** no recurrence since `stable-20261010-5` (creates during merge trains clean).
+  If it recurs, grep `[worktree-admin]` around the failing create.
+
+- **After the promote (`stable-20261010-6` live):** #1356 measured on a probe create:
+  `resolve-prompt-skill` 4.5 s (was 12-81 s), create 8.7 s; the rest is plugin skill listings
+  (29 skills, 4.4 s), noted on #1356. #1364 (direct): the printed bootstrap failed in Windows
+  PowerShell 5.1 (`curl` = Invoke-WebRequest); steps now name `curl.exe`, checked live (exit 0).
+  Master scrubbed (26 terms, CLEAN) and pushed.
+
+- **Rounds 5-7 (fresh worker each, Windows PowerShell 5.1, printed steps pasted literally):**
+  round 5 found the commands still saying `curl`, `…` mojibake and a firewall-script pointer
+  (#1365, direct); round 6 found the build window breaking the steps (202 + `curl -f` exit 0, then a
+  stale global binary pairing) and em dash mojibake (#1366: `?wait=120`, pairing build-mismatch
+  warning, ASCII-only worker console with a guard). **Round 7 clean:** no prior worker, step 1
+  waited 58 s through the packing window, desktop-r7 paired on f3d72ef1b, doctor 0 WARN/0 FAIL,
+  0 non-ASCII output; wfx #29 build+review clean. Loop closed.
+
+**Next:** promote master (#1364-#1366 not yet on stable). Peter:
+decide #1337, and add the stable fleet firewall rules (`scripts/fleet-firewall.ps1 -Install`,
+elevated) before a worker targets the stable board.
+
 ## 2026-10-10 (evening) — tailnet round 2: self-update hardened, worktree race instrumented
 
 **State (at the time).** Stable ran `stable-20261010-4`; master added #1330-#1336, #1340,
