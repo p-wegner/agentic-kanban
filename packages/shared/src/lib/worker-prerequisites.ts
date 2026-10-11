@@ -1,4 +1,4 @@
-// Worker prerequisites a clean machine may lack (#1369): the committer identity the board sends and
+﻿// Worker prerequisites a clean machine may lack (#1369): the committer identity the board sends and
 // the package managers a worker reports. Split out of worker-protocol.ts (god-module ceiling); the
 // protocol file imports the types and parsers it needs and re-exports them.
 
@@ -18,19 +18,6 @@ export interface WorkerPackageManagers {
   yarn: boolean;
   bun: boolean;
   corepack: boolean;
-}
-
-/**
- * What an assignment's fallback install needs for a project, from its lockfile (#1369):
- * the marker rules of `deriveFallbackSetupCommand`, as a name. `npm` ships with node, so it
- * is never a prerequisite worth reporting and maps to null.
- */
-export function packageManagerForLockfiles(files: ReadonlySet<string> | readonly string[]): "pnpm" | "yarn" | "bun" | null {
-  const has = (name: string): boolean => (files instanceof Set ? files.has(name) : (files as readonly string[]).includes(name));
-  if (has("pnpm-lock.yaml") || has("pnpm-workspace.yaml")) return "pnpm";
-  if (has("yarn.lock")) return "yarn";
-  if (has("bun.lockb") || has("bun.lock")) return "bun";
-  return null;
 }
 
 /** Shape-check a package-manager blob off the wire (#1369). Anything malformed reads as unknown. */

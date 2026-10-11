@@ -1,20 +1,19 @@
-// Placement's view of "does this worker have the package manager the project's lockfile
+﻿// Placement's view of "does this worker have the package manager the project's lockfile
 // needs" (#1369). Explanatory only: it never changes who is eligible, because the resolver
 // does not read it - the worker's setup would fail as `assign_failed`, and `worker explain`
 // is where an operator learns why, BEFORE dispatching instead of from that failure.
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { packageManagerForLockfiles } from "@agentic-kanban/shared/lib/worker-protocol";
+import { deriveFallbackSetupCommand } from "../worker/worker-repo.js";
 import type { WorkerEligibility } from "../lib/placement-explain.types.js";
 
-const LOCKFILE_MARKERS = ["pnpm-lock.yaml", "pnpm-workspace.yaml", "yarn.lock", "bun.lockb", "bun.lock"] as const;
-
-/** The package manager the project's fallback install would run, or null (npm / no manifest). */
+/**
+ * The package manager the project's fallback install would run, or null (npm / no manifest).
+ * Reuses the worker's own lockfile ladder, so board and worker can never disagree about it.
+ */
 export function requiredPackageManagerFor(repoPath: string | null | undefined): "pnpm" | "yarn" | "bun" | null {
   if (!repoPath) return null;
   try {
-    if (!existsSync(join(repoPath, "package.json"))) return null;
-    return packageManagerForLockfiles(LOCKFILE_MARKERS.filter((f) => existsSync(join(repoPath, f))));
+    const tool = deriveFallbackSetupCommand(repoPath)?.split(" ")[0];
+    return tool === "pnpm" || tool === "yarn" || tool === "bun" ? tool : null;
   } catch {
     return null;
   }

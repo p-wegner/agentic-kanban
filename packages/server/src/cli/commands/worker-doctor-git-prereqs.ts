@@ -1,4 +1,4 @@
-/**
+﻿/**
  * `worker doctor` prerequisites a clean machine lacks (#1369): the git version, the git
  * commit identity, the package manager, and a blanket `safe.directory`.
  *
@@ -8,7 +8,8 @@
  * without a git binary of a particular version.
  */
 import type { CheckStatus } from "./worker-doctor.js";
-import { detectPackageManagers } from "../../worker/worker-toolchain.js";
+import { execFile } from "node:child_process";
+import type { WorkerPackageManagers } from "@agentic-kanban/shared/lib/worker-protocol";
 
 type DoctorCheckLike = { name: string; status: CheckStatus; detail: string; remedy?: string };
 export type ProbeFn = (command: string, args: string[]) => Promise<{ found: boolean; code: number | null; output: string }>;
@@ -105,4 +106,81 @@ export async function checkPackageManager(
       `(yarn: ${have.yarn ? "present" : "absent"}, bun: ${have.bun ? "present" : "absent"}, corepack: ${have.corepack ? "present" : "absent"})`,
     remedy: have.corepack ? "corepack enable pnpm (or: npm i -g pnpm)" : "npm i -g pnpm (corepack is not available here)",
   };
+}
+
+// What the worker machine has on PATH, probed here so the heartbeat and doctor share one reading (#1369).
+// Kept in this module, not its own file: the worker binary's import graph is size-bounded.
+
+
+
+/** Does `command --version` run? Never throws; ENOENT (or any spawn failure) is "absent". */
+export function commandExists(command: string, timeoutMs = 10_000): Promise<boolean> {
+  return new Promise((resolve) => {
+    // `shell: true` on Windows: pnpm/yarn/corepack are `.cmd` shims there, which execFile
+    // cannot spawn directly. The command name is a fixed literal, never operator input.
+    execFile(
+      command,
+      ["--version"],
+      { timeout: timeoutMs, windowsHide: true, shell: process.platform === "win32" },
+      (err) => resolve(!err),
+    );
+  });
+}
+
+/** Probe pnpm / yarn / bun / corepack. */
+export async function detectPackageManagers(
+  exists: (command: string) => Promise<boolean> = commandExists,
+): Promise<WorkerPackageManagers> {
+  const [pnpm, yarn, bun, corepack] = await Promise.all([
+    exists("pnpm"),
+    exists("yarn"),
+    exists("bun"),
+    exists("corepack"),
+  ]);
+  return { pnpm, yarn, bun, corepack };
+}
+
+/** Re-probe at most this often from the heartbeat; an install made meanwhile shows up within it. */
+const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
+let cached: WorkerPackageManagers | undefined;
+let refreshedAtMs = 0;
+let inFlight: Promise<void> | null = null;
+
+/** The last probe result, or undefined before the first one finishes. Synchronous, for heartbeats. */
+export function cachedPackageManagers(): WorkerPackageManagers | undefined {
+  return cached;
+}
+
+/** Probe now (awaitable), or return immediately if a probe is already running. */
+export function refreshPackageManagers(
+  nowMs: number = Date.now(),
+  exists?: (command: string) => Promise<boolean>,
+): Promise<void> {
+  if (inFlight) return inFlight;
+  inFlight = detectPackageManagers(exists)
+    .then((found) => {
+      cached = found;
+      refreshedAtMs = nowMs;
+    })
+    .catch(() => {
+      /* keep the previous reading; absent stays "unknown" */
+    })
+    .finally(() => {
+      inFlight = null;
+    });
+  return inFlight;
+}
+
+/** Kick a background re-probe when the reading is older than the refresh interval. */
+export function refreshPackageManagersIfStale(nowMs: number = Date.now()): void {
+  if (cached && nowMs - refreshedAtMs < REFRESH_INTERVAL_MS) return;
+  void refreshPackageManagers(nowMs);
+}
+
+/** Test seam: forget the cached reading. */
+export function resetPackageManagerCache(): void {
+  cached = undefined;
+  refreshedAtMs = 0;
+  inFlight = null;
 }

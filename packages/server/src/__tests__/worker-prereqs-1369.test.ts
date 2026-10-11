@@ -1,4 +1,4 @@
-// #1369: doctor prerequisites, committer identity on the worker, package managers in placement.
+﻿// #1369: doctor prerequisites, committer identity on the worker, package managers in placement.
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,10 +12,9 @@ import {
   type ProbeFn,
 } from "../cli/commands/worker-doctor-git-prereqs.js";
 import { applyCommitterIdentity } from "../worker/worker-repo.js";
-import { detectPackageManagers } from "../worker/worker-toolchain.js";
+import { detectPackageManagers } from "../cli/commands/worker-doctor-git-prereqs.js";
 import { missingPackageManagerNotes, requiredPackageManagerFor } from "../services/placement-package-manager.js";
 import {
-  packageManagerForLockfiles,
   parseBoardToWorkerMessage,
   parseWorkerCapabilities,
 } from "@agentic-kanban/shared/lib/worker-protocol";
@@ -84,15 +83,8 @@ describe("package manager reporting + placement (#1369)", () => {
     expect(parseWorkerCapabilities({ packageManagers: { pnpm: "yes" } })).toBeUndefined();
   });
 
-  it("maps lockfiles to a manager (npm needs none)", () => {
-    expect(packageManagerForLockfiles(["pnpm-lock.yaml"])).toBe("pnpm");
-    expect(packageManagerForLockfiles(["yarn.lock"])).toBe("yarn");
-    expect(packageManagerForLockfiles(["bun.lock"])).toBe("bun");
-    expect(packageManagerForLockfiles(["package-lock.json"])).toBeNull();
-  });
-
   it("explain names the worker and the missing manager, with the fix", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pm-1369-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-pm-1369-"));
     try {
       writeFileSync(join(dir, "package.json"), "{}");
       writeFileSync(join(dir, "pnpm-lock.yaml"), "");
@@ -129,7 +121,7 @@ describe("committer identity (#1369)", () => {
   });
 
   it("sets a local identity only for the key the checkout lacks", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "id-1369-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-id-1369-"));
     const env = { GIT_CONFIG_GLOBAL: join(dir, "nonexistent-global"), GIT_CONFIG_NOSYSTEM: "1" };
     const saved = { ...process.env };
     Object.assign(process.env, env);

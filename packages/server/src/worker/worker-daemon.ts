@@ -1,4 +1,4 @@
-// Fleet worker daemon (epic #1, phase 1b #4).
+﻿// Fleet worker daemon (epic #1, phase 1b #4).
 //
 // Pull model: the worker dials the board â€” REST to register (pairing token â†’
 // per-worker token, persisted locally) and heartbeat, a WebSocket for
@@ -48,7 +48,7 @@ import {
 import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
 import { createWorkerAgentRunner, dispatchBoardMessage, rawDataToBuffer, type UnpushedResult } from "./worker-agent-runner.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
-import { cachedPackageManagers, refreshPackageManagers, refreshPackageManagersIfStale } from "./worker-toolchain.js";
+import { cachedPackageManagers, refreshPackageManagers, refreshPackageManagersIfStale } from "../cli/commands/worker-doctor-git-prereqs.js";
 import { cleanUpBeforeStart } from "./agent-process-tree.js";
 import { attestProviderAuth } from "../cli/commands/worker-doctor.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";

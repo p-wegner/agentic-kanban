@@ -1,4 +1,4 @@
-// #1354: a signalled board shutdown sends every connected worker a 1001 (Going Away) close
+﻿// #1354: a signalled board shutdown sends every connected worker a 1001 (Going Away) close
 // frame, so the worker logs a clean "board restarting" instead of `1006 no close frame`.
 import { describe, it, expect, vi, afterEach } from "vitest";
 import type { WSContext } from "hono/ws";
@@ -23,7 +23,7 @@ vi.mock("../lib/exit-record.js", () => ({ appendExitRecord: () => {}, recordProc
 import { setupProcessHandlers } from "../startup/process-handlers.js";
 
 function fakeRegistry(): WorkerRegistry {
-  return { onRevoke: () => {}, touchHeartbeat: async () => {}, noteAttestedProfiles: () => {} } as unknown as WorkerRegistry;
+  return { onRevoke: () => {}, touchHeartbeat: async () => {}, noteAttestedProfiles: () => {}, notePackageManagers: () => {} } as unknown as WorkerRegistry;
 }
 
 afterEach(() => vi.restoreAllMocks());

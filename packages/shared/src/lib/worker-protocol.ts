@@ -1,4 +1,4 @@
-// Wire protocol between the board and fleet workers (epic #1, phase 1b #4).
+﻿// Wire protocol between the board and fleet workers (epic #1, phase 1b #4).
 //
 // Pure types + defensive parsers — no Node builtins, safe for any bundle. The
 // board sends work over the worker's WebSocket; the worker streams agent
@@ -8,7 +8,7 @@
 
 // #1369: committer identity + package-manager vocabulary lives in its own module.
 import { parseWorkerCommitterIdentity, parseWorkerPackageManagers, type WorkerCommitterIdentity, type WorkerPackageManagers } from "./worker-prerequisites.js";
-export { packageManagerForLockfiles, parseWorkerCommitterIdentity, parseWorkerPackageManagers, type WorkerCommitterIdentity, type WorkerPackageManagers } from "./worker-prerequisites.js";
+export { parseWorkerCommitterIdentity, parseWorkerPackageManagers, type WorkerCommitterIdentity, type WorkerPackageManagers } from "./worker-prerequisites.js";
 
 /**
  * A worker carrying this label shares the board's filesystem, so its assignments
