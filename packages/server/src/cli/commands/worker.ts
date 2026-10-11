@@ -31,7 +31,7 @@ import type { IssuePlacementReport, SessionPlacementRecord } from "../../lib/pla
 // worker binary's entry point (docs/worker-fleet.md §3).
 import { renderDoctorReport, runBoardDoctor, runWorkerDoctor } from "./worker-doctor.js";
 // #1358 — first-install guide + bootstrap commands. Pure strings, db-free.
-import { renderBootstrapSteps } from "./worker-setup-guide.js";
+import { runWorkerPair } from "./worker-pair-output.js";
 import { registerWorkerSetup } from "./worker-setup.js";
 // #880 — the read-only update-check. Db-free like the doctor: also part of the
 // standalone worker binary.
@@ -570,20 +570,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
     )
     .option("--board <url>", "Board base URL", DEFAULT_BOARD_URL)
     .option("--os <os>", "OS of the WORKER machine for the bootstrap commands: windows (curl.exe, default) or unix (curl)", "windows")
-    .action(async (options: { board: string; os: string }) => {
-      const res = await fetch(`${options.board.replace(/\/+$/, "")}/api/workers/pairing-token`, { method: "POST" });
-      if (!res.ok) {
-        console.error(`Failed to mint pairing token (${res.status}). Is the board running at ${options.board}?`);
-        process.exit(1);
-      }
-      const body = await res.json() as { pairingToken: string; expiresAt: string; fleetUrl?: string | null; fleetNote?: string | null };
-      console.log(`Pairing token (single-use, expires ${body.expiresAt}):`);
-      console.log(`  ${body.pairingToken}`);
-      const os = /^(unix|linux|macos)$/.test(options.os) ? "unix" : "windows";
-      console.log(`\nOn the worker machine (already installed):\n  agentic-kanban-worker setup --board ${body.fleetUrl || "<board-url>"} --token ${body.pairingToken}`);
-      console.log(`\n${renderBootstrapSteps(body.fleetUrl || "<board-url>", body.pairingToken, os)}\n(${os === "windows" ? "Linux/macOS worker? re-run with --os unix." : "Windows worker? re-run without --os."})`);
-      if (body.fleetNote) console.log(`\nNote: ${body.fleetNote}`);
-    });
+    .action(runWorkerPair);
 
   // #1368: `setup` does the setup (`setup --guide` prints the offline guide).
   registerWorkerSetup(workerCmd, {
