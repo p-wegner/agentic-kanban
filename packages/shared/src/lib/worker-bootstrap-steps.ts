@@ -77,8 +77,8 @@ export function buildWorkerBootstrap(fleetUrl: string, pairingToken: string, os:
       commands: [`agentic-kanban-worker setup --board ${base} --token ${pairingToken}`],
     },
     {
-      title: "Then run the daemon:",
-      commands: [`agentic-kanban-worker start --board ${base}`],
+      title: "Then run the daemon (keeps itself on the board's build):",
+      commands: [`agentic-kanban-worker start --board ${base} --auto-update`],
     },
   ];
   return {
