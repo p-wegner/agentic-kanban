@@ -451,8 +451,7 @@ async function runWorkerStart(rawOptions: WorkerStartOptions): Promise<void> {
     // #1352: the lines below print before the daemon's timestamped logger exists; on a relaunch
     // stdout IS worker.log, so they used to land there with no timestamp. (Idempotent.)
     stampConsoleWithTimestamps();
-    // #1374: saved CLI install dirs first on PATH, WSL's /mnt/<drive> entries off it.
-    applyWorkerPath(options.stateFile ?? defaultWorkerStateFile());
+    applyWorkerPath(options.stateFile ?? defaultWorkerStateFile()); // #1374: saved CLI dirs first, WSL /mnt entries off
     const shim = installShim({ stateFile: options.stateFile ?? defaultWorkerStateFile(), fallbackEntry: entry });
     if (shim) console.log(`[worker] stable restart command: ${shim} start ...`);
     const logFile = workerLogFileFor(options.stateFile ?? defaultWorkerStateFile());
