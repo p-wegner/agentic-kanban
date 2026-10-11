@@ -189,7 +189,7 @@ export function hasCredential(harness: WorkerHarness, provider: AuthProvider, no
 
 function hasRefreshToken(dir: string): boolean {
   try {
-    const parsed = JSON.parse(readFileSync(join(dir, ".credentials.json"), "utf8").replace(/^﻿/, ""));
+    const parsed = JSON.parse(readFileSync(join(dir, ".credentials.json"), "utf8").replace(/^\uFEFF/, ""));
     const token = (parsed as { claudeAiOauth?: { refreshToken?: unknown } } | null)?.claudeAiOauth?.refreshToken;
     return typeof token === "string" && token.length > 0;
   } catch {
