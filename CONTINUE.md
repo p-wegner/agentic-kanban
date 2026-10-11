@@ -3,6 +3,38 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-10-11 — harness provisioning rounds (clean WSL worker + used desktop), paused for a reboot
+
+**Goal (Peter):** a node-only machine becomes a worker from the Worker Fleet UI steps plus
+`agentic-kanban-worker setup` (installs claude+codex, worker-owned clean config, login, pair,
+doctor); the desktop runs only the partial setup (custom claude folder + auth). Repeat with a fresh
+worker until a round finds nothing. Decisions taken: credentials are created on the worker and
+never leave it; clean config by default; setup installs claude+codex.
+
+- **Merged:** #1367 (clean harness dir, `auth`), #1368 (`setup`), #1369 (doctor prereqs, board git
+  identity), #1373 (persisted harness mode), #1376 (half-open WS detection). Direct fixes on
+  master: #1377 (`claude-code` intent id; restarted daemon stuck `draining`), #1375 stopgap (startup
+  reconcile keeps worktrees younger than 30 min: the dev board deleted the stable board's fresh
+  `ak-1373`), 439d4cde1 (master red from those two).
+- **Open, branches committed:** #1372 (doctor default board, WSL worker name, no-provider warning,
+  stale launcher) ready, gate queued; #1374 (Linux setup: PATH, /mnt entries, npm prefix, Linux
+  self-update, start hint) gate interrupted (exit 130, memory); #1370 (UI connect steps + setup
+  checklist) builder mid-session. Next: #1375 proper fix (ownership marker), #1371 (DESIGN:
+  per-project stack), #1378 (run this repo's builders on a local WSL worker).
+- **Rounds:** WSL round 0 (old product) -> #1372; round 1 (`akw-r1`, setup in a herdr pane,
+  browser login) -> #1374, #1377; wfx #30 built, reviewed and merged on the WSL worker. Desktop D1
+  -> #1373; D2 passed with three findings (added to #1372). Not yet: a round with no findings.
+- **WSL images:** base `D:\wsl-images\akw-base-node22.tar` (Ubuntu 24.04, user `worker`, node 22;
+  its /usr/local/lib/node_modules is user-owned, unlike an apt node). Import per round:
+  `wsl --import akw-rN D:\wsl-images\akw-rN D:\wsl-images\akw-base-node22.tar`.
+- **Laptop memory:** the Defender for Endpoint filter (MsSecFlt) leaks kernel pool per file opened
+  on C: (~8 GB after 3 days); see `Documents\performance\2026-10-11-kernel-pool-leak-for-IT.md`.
+  At < 4 GB free, gates get interrupted and background tasks reaped.
+
+**Next:** after the reboot (with `.wslconfig` memory=10GB, `autoMemoryReclaim` moved to
+`[experimental]`): resume #1370, rerun the #1372/#1374 gates, then WSL round 2 on a fresh import
+using only the UI steps, and desktop D3.
+
 ## 2026-10-10 (night) — tailnet rounds 3-4: newcomer install works, no frictions left
 
 **State.** `stable-20261010-6` (11dc8da40) is live (promoted after a green sweep of `rc/20261010-6`,
