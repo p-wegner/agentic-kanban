@@ -208,6 +208,16 @@ export async function provisionWorkerCheckout(
       gitExecOrThrow(["worktree", "add", "-b", localBranch, checkoutDir, startPoint], { cwd: cacheDir })),
     (ms) => { phases.worktreeMs = ms; });
 
+  // #1397: the ticket brief and review prompt name the board's branch (`repo.branch`), but this
+  // checkout sits on `kanban/<sessionId>`. Point the board's name at the same commit so
+  // `git diff <base>...<branch>` and `git log <branch>` resolve. It is NOT checked out here
+  // (HEAD stays on localBranch), so it never collides with another session's worktree; `-f`
+  // moves a stale pointer left in the shared cache by an earlier session. Best-effort.
+  if (repo.branch && repo.branch !== localBranch) {
+    const alias = await gitExec(["branch", "-f", repo.branch, "HEAD"], { cwd: checkoutDir });
+    if (!execSucceeded(alias)) log(`[worker] could not alias branch ${repo.branch} to the checkout HEAD (non-fatal)`);
+  }
+
   await applyCommitterIdentity(checkoutDir, repo.committer, log);
 
   // #553: through the shared writer, not a raw writeFileSync. The hand-rolled version
