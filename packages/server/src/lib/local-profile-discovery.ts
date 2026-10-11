@@ -46,6 +46,52 @@ export interface LocalProfile {
   kind: LocalProfileKind;
   /** The carrier that proved it exists — a settings file, a toml, or a config directory. */
   path: string;
+  /** #1379: set when this name is an operator ALIAS (`--profile-alias`) over a login that has no name of its own. */
+  aliasOf?: string;
+}
+
+/** One `--profile-alias <source>=<name>` entry. `source` is `default`, a profile name, or a config dir path. */
+export interface ProfileAlias {
+  source: string;
+  name: string;
+}
+
+/** Parse `default=anth,~/.claude-x=y` entries; malformed entries (no `=`, empty side) are dropped. */
+export function parseProfileAliases(raw: readonly string[] | undefined): ProfileAlias[] {
+  const out: ProfileAlias[] = [];
+  for (const item of raw ?? []) {
+    const idx = item.indexOf("=");
+    if (idx <= 0) continue;
+    const source = item.slice(0, idx).trim();
+    const name = item.slice(idx + 1).trim();
+    if (source && name && !out.some((a) => a.name === name)) out.push({ source, name });
+  }
+  return out;
+}
+
+/**
+ * The claude config dir an alias source points at: `default` = `~/.claude`, a path (contains a
+ * separator or starts with `~`) = that dir, anything else = the named sibling `~/.claude-<source>`.
+ */
+export function aliasSourceDir(source: string, home: string = homedir()): string {
+  if (source.toLowerCase() === "default") return join(home, ".claude");
+  if (source.startsWith("~")) return join(home, source.slice(1).replace(/^[\/]+/, ""));
+  if (/[\/]/.test(source) || /^[A-Za-z]:/.test(source)) return source;
+  return join(home, `.claude-${source}`);
+}
+
+/**
+ * Profiles produced by aliases: the real dir is the carrier (so launch sets `CLAUDE_CONFIG_DIR`
+ * to it and attestation checks ITS credentials). An alias whose dir does not exist is dropped.
+ */
+export function aliasedLocalProfiles(aliases: readonly ProfileAlias[], home: string = homedir()): LocalProfile[] {
+  const out: LocalProfile[] = [];
+  for (const alias of aliases) {
+    const dir = aliasSourceDir(alias.source, home);
+    if (!isDir(dir)) continue;
+    out.push({ provider: "claude", name: alias.name, kind: "claude-config-dir", path: dir, aliasOf: alias.source });
+  }
+  return out;
 }
 
 /** What running under this profile means, as env and/or extra argv. */
@@ -88,7 +134,7 @@ function codexDirHasLogin(dir: string): boolean {
  * attest, and "whatever this machine is logged into by default" is exactly the answer a
  * profile restriction exists to refuse.
  */
-export function discoverLocalProfiles(home: string = homedir()): LocalProfile[] {
+export function discoverLocalProfiles(home: string = homedir(), aliases: readonly ProfileAlias[] = []): LocalProfile[] {
   const out: LocalProfile[] = [];
   const seen = new Set<string>();
   const add = (profile: LocalProfile): void => {
@@ -126,7 +172,9 @@ export function discoverLocalProfiles(home: string = homedir()): LocalProfile[] 
       }
     }
   }
-  return out;
+  // #1379: an alias wins over a discovered profile of the same name (the operator said so explicitly).
+  const aliased = aliasedLocalProfiles(aliases, home);
+  return [...out.filter((p) => !aliased.some((a) => a.provider === p.provider && a.name === p.name)), ...aliased];
 }
 
 /**
@@ -137,12 +185,13 @@ export function findLocalProfile(
   provider: string,
   name: string,
   home: string = homedir(),
+  aliases: readonly ProfileAlias[] = [],
 ): LocalProfile | null {
   const wanted = name.trim();
   if (!wanted) return null;
   const wantedProvider = provider.trim().toLowerCase();
   return (
-    discoverLocalProfiles(home).find(
+    discoverLocalProfiles(home, aliases).find(
       (p) => p.name === wanted && (wantedProvider === "" || p.provider === wantedProvider),
     ) ?? null
   );

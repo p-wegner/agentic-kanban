@@ -36,7 +36,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { defaultWorkerWorkRoot } from "../../worker/worker-repo.js";
-import { discoverLocalProfiles } from "../../lib/local-profile-discovery.js";
+import { aliasSourceDir, aliasedLocalProfiles, discoverLocalProfiles, parseProfileAliases } from "../../lib/local-profile-discovery.js";
 import { credentialStateOf, quotaPollableProfiles } from "../../worker/worker-profiles.js";
 import { readControlFile } from "../../worker/worker-control.js";
 import { applyWorkerPath,windowsOnlyMessage } from "../../worker/worker-path.js";
@@ -579,6 +579,8 @@ export interface WorkerDoctorOptions {
   providers: string[];
   /** The worker's `--profiles` list; only these are warned about when their credentials lapse. */
   profiles?: string[];
+  /** #1379: effective `--profile-alias` entries (`<source>=<name>`), flag or saved. */
+  profileAliases?: string[];
   /** The worker-owned provider config (#1367); absent = not asked about (legacy callers). */
   harness?: WorkerHarness;
   /** #1373: flags that disagree with the state file's recorded harness (reported, not used). */
@@ -612,11 +614,26 @@ export function checkProfileCredentials(
   /** `--profiles` the worker runs with; profiles outside it get no placements, so no WARN (#1359). */
   declared: string[] = [],
   platform: NodeJS.Platform = process.platform,
+  aliasEntries: string[] = [],
 ): DoctorCheck[] {
   const checks: DoctorCheck[] = [];
   const used = new Set(declared.map((d) => d.trim()).filter(Boolean));
+  const aliases = parseProfileAliases(aliasEntries);
+  for (const a of aliases) used.add(a.name);
+  for (const a of aliases) {
+    const dir = aliasSourceDir(a.source, home);
+    const missing = !aliasedLocalProfiles([a], home).length;
+    checks.push({
+      name: `profile alias ${a.name}`,
+      status: missing ? "warn" : "pass",
+      detail: missing
+        ? `${a.source}=${a.name}: ${dir} does not exist, so '${a.name}' is NOT attested`
+        : `attests '${a.name}' for ${a.source} (${dir}); credentials are checked on that dir`,
+      ...(missing ? { remedy: `fix or drop --profile-alias ${a.source}=${a.name}` } : {}),
+    });
+  }
   const unused: string[] = [];
-  for (const ref of quotaPollableProfiles(discoverLocalProfiles(home))) {
+  for (const ref of quotaPollableProfiles(discoverLocalProfiles(home, aliases))) {
     const state = credentialStateOf(ref.configDir, nowMs);
     if (!state) continue;
     if (!used.has(ref.profile)) {
@@ -678,7 +695,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   for (const provider of opts.providers) {
     checks.push(...(await checkProvider(provider, opts.home, undefined, opts.harness)));
   }
-  checks.push(...checkProfileCredentials(opts.home, undefined, opts.profiles));
+  checks.push(...checkProfileCredentials(opts.home, undefined, opts.profiles, undefined, opts.profileAliases));
   // #1372: while the global launcher is stale or absent, remedies name the shim that always runs the current build.
   const launcher = launcherCommand({
     stateFile: opts.stateFile,

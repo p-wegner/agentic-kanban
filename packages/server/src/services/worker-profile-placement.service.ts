@@ -121,7 +121,11 @@ export async function resolveRemoteProfileAttestation(
       profile: { provider: c.profile.provider, name: c.profile.name },
       usedReserve: c.usedReserve,
     }));
-  return { restricted: true, permitted, candidates, detail: describeAttestation(workers.length, candidates) };
+  let detail = describeAttestation(workers.length, candidates);
+  if (permitted.length === 0 && workers.length > 0) {
+    detail += aliasHint(roster.entries.map((e) => `${e.provider}:${e.name}`));
+  }
+  return { restricted: true, permitted, candidates, detail };
 }
 
 /**
@@ -147,6 +151,17 @@ export function describeAttestation(
     .map((c) => `${c.workerId}: ${c.holdReason ?? "attests no profile this project permits"}`)
     .join("; ");
   return `no eligible worker attests a permitted profile (${reasons || "none attested anything"})`;
+}
+
+/**
+ * #1379: when the roster is the ONLY thing excluding the workers, name the profile(s) it
+ * permits and the fix — a worker whose default login IS that account can attest it by alias.
+ */
+export function aliasHint(permittedProfiles: readonly string[]): string {
+  const names = permittedProfiles.filter((p) => p.startsWith("claude:")).map((p) => p.slice("claude:".length));
+  if (names.length === 0) return "";
+  return `; the roster permits ${names.join(", ")} - a worker whose default login is that account can attest it ` +
+    `with 'worker start --profile-alias default=${names[0]}'`;
 }
 
 /** The profile one worker would run this project's work under, once it has been chosen. */

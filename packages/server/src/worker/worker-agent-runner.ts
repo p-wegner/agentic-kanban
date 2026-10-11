@@ -43,6 +43,7 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { createWorkerSessionRegistry } from "./worker-session-registry.js";
 import { resolveSpecCommand } from "./worker-command-resolver.js";
 import { applyProfileToSpec } from "./worker-profiles.js";
+import type { ProfileAlias } from "../lib/local-profile-discovery.js";
 import { FLEET_MCP_TOKEN_ENV_VAR } from "@agentic-kanban/shared/lib/worker-protocol";
 import { createAgentTreeTracker } from "./agent-process-tree.js";
 import { applyHarnessToSpec, type WorkerHarness } from "./worker-harness.js";
@@ -50,6 +51,10 @@ import { applyHarnessToSpec, type WorkerHarness } from "./worker-harness.js";
 export type SendToBoard = (message: WorkerToBoardMessage) => void;
 
 export interface WorkerAgentRunnerOptions {
+  /** #1379: `--profile-alias` entries, so an assign naming an aliased profile resolves to its real dir. */
+  profileAliases?: ProfileAlias[];
+  /** Test seam: home dir profile resolution reads. */
+  profileHome?: string;
   /** Board base URL — required to compose git-transport URLs for repo assignments. */
   boardUrl?: string;
   workRoot?: string;
@@ -427,7 +432,11 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     // refusing it: an attestation can be stale, and running the assignment under some
     // other local login is exactly the silent fallback #651 refused remote dispatch to
     // prevent. A rejection reaches the board as a launch failure it can re-place.
-    const resolvedProfile = applyProfileToSpec(specAsSent, { log: (line) => workerLog(line) });
+    const resolvedProfile = applyProfileToSpec(specAsSent, {
+      log: (line) => workerLog(line),
+      ...(options.profileAliases ? { aliases: options.profileAliases } : {}),
+      ...(options.profileHome ? { home: options.profileHome } : {}),
+    });
     if (!resolvedProfile.ok) {
       workerLog(`[worker] refusing assign: sessionId=${sessionId} ${resolvedProfile.error}`);
       send({ type: "assign_failed", sessionId, error: resolvedProfile.error });

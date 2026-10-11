@@ -48,6 +48,7 @@ export interface WorkerProfileAttestation {
   provider: string;
   /** The profile name, as `--profile`/the roster spells it. */
   name: string;
+  aliasOf?: string; // #1379: the local login this name aliases (display only)
   /** `pool` | `reserve` | `forbidden`, as the profile declares for itself. Absent = pool. */
   role?: string;
   /** `KANBAN_PROFILE_DEDICATED` — forbidden everywhere except this project slug. */
@@ -100,6 +101,7 @@ export function parseWorkerProfileAttestations(raw: unknown): WorkerProfileAttes
       provider,
       name,
       ...(typeof rec.role === "string" && rec.role.trim() ? { role: rec.role.trim() } : {}),
+      ...(typeof rec.aliasOf === "string" && rec.aliasOf.trim() ? { aliasOf: rec.aliasOf.trim() } : {}),
       ...(typeof rec.dedicatedProject === "string" && rec.dedicatedProject.trim()
         ? { dedicatedProject: rec.dedicatedProject.trim() }
         : {}),

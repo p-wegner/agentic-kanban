@@ -39,6 +39,7 @@ import {
   findLocalProfile,
   localProfileLaunchAdjustment,
   type LocalProfile,
+  type ProfileAlias,
 } from "../lib/local-profile-discovery.js";
 import { readProfileAttributes } from "../lib/profile-attributes.js";
 import {
@@ -68,6 +69,8 @@ export interface WorkerProfileAttestorOptions {
   declared?: string[];
   /** Override the home dir — the seam tests use, and a service install with its own HOME. */
   home?: string;
+  /** #1379: `--profile-alias` entries — names attested for logins that have none (the default `~/.claude`). */
+  aliases?: ProfileAlias[];
   log?: (line: string) => void;
   /** Injected for tests. Passed straight to the shared poller. */
   fetchImpl?: typeof fetch;
@@ -161,7 +164,7 @@ export function createWorkerProfileAttestor(
   options: WorkerProfileAttestorOptions = {},
 ): WorkerProfileAttestor {
   const log = options.log ?? ((line: string) => workerLog(line));
-  const attested = narrowDeclaredProfiles(discoverLocalProfiles(options.home), options.declared, log);
+  const attested = narrowDeclaredProfiles(discoverLocalProfiles(options.home, options.aliases), options.declared, log);
   const pollable = quotaPollableProfiles(attested);
   const poller = new OAuthQuotaPoller({
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
@@ -184,6 +187,7 @@ export function createWorkerProfileAttestor(
         return {
           provider: profile.provider,
           name: profile.name,
+          ...(profile.aliasOf ? { aliasOf: profile.aliasOf } : {}),
           role: attributes.role,
           ...(credentials ? { credentials } : {}),
           ...(attributes.dedicatedProject ? { dedicatedProject: attributes.dedicatedProject } : {}),
@@ -226,12 +230,12 @@ export type ProfileResolution =
  */
 export function applyProfileToSpec(
   spec: WorkerLaunchSpec,
-  options: { home?: string; log?: (line: string) => void } = {},
+  options: { home?: string; aliases?: ProfileAlias[]; log?: (line: string) => void } = {},
 ): ProfileResolution {
   const requested = spec.intent?.profile?.trim();
   if (!requested) return { ok: true, spec };
   const provider = spec.intent?.provider ?? "";
-  const local = findLocalProfile(provider, requested, options.home);
+  const local = findLocalProfile(provider, requested, options.home, options.aliases);
   if (!local) {
     return {
       ok: false,
