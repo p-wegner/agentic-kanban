@@ -37,3 +37,10 @@ export function defaultWorkerName(probe: NameProbe = liveProbe()): string {
   // Kernel string says WSL but no distro name known: `<host>-wsl` is still distinct from the host.
   return !slug || slug === "wsl" ? `${probe.hostname}-wsl` : `${probe.hostname}-wsl-${slug}`;
 }
+
+/** #1390: the board already lists other workers under this name; the Runners tab cannot tell them apart. */
+export function sameNamedNotice(name: string, others: { id: string }[]): string {
+  return `[pair] note: the board already lists ${others.length} other worker(s) named '${name}' ` +
+    `(${others.map((w) => w.id.slice(0, 8)).join(", ")}). If those are stale, revoke them ` +
+    `in the Runners tab, or pair again with --name <unique name>.`;
+}

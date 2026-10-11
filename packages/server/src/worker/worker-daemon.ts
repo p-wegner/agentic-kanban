@@ -54,7 +54,7 @@ import { packageManagersField, refreshPackageManagers } from "../cli/commands/wo
 import { cleanUpBeforeStart } from "./agent-process-tree.js";
 import { attestAndNotice, attestProviders } from "./worker-provider-notice.js";
 export { attestProviders };
-import { defaultWorkerName } from "./worker-name.js";
+import { defaultWorkerName, sameNamedNotice } from "./worker-name.js";
 import { createDoctorSummaryTracker } from "../cli/commands/worker-doctor-daemon.js";
 import { resolveProfileAliases } from "./worker-profile-aliases.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
@@ -326,8 +326,7 @@ export async function registerWithBoard(
     workerId?: string;
     workerToken?: string;
     error?: string;
-    boardProtocolVersion?: number;
-    sameNamed?: { id: string }[];
+    boardProtocolVersion?: number; sameNamed?: { id: string }[];
   };
   if (!res.ok || !body.workerId || !body.workerToken) {
     const detail = body.error ?? "unexpected response";
@@ -342,15 +341,7 @@ export async function registerWithBoard(
     }
     throw new Error(`Registration failed (${res.status}): ${detail}`);
   }
-  // #1390: an earlier pairing under this name still has a row on the board - say so, since
-  // the Runners tab cannot tell the two apart. Revoking is the owner's call (Runners tab).
-  if (body.sameNamed && body.sameNamed.length > 0) {
-    (opts.log ?? console.log)(
-      `[pair] note: the board already lists ${body.sameNamed.length} other worker(s) named '${name}' ` +
-        `(${body.sameNamed.map((w) => w.id.slice(0, 8)).join(", ")}). If those are stale, revoke them ` +
-        `in the Runners tab, or pair again with --name <unique name>.`,
-    );
-  }
+  if (body.sameNamed?.length) (opts.log ?? console.log)(sameNamedNotice(name, body.sameNamed)); // #1390
   return { workerId: body.workerId, workerToken: body.workerToken, name };
 }
 
