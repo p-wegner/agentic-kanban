@@ -179,7 +179,7 @@ describe("worker setup (#1368)", () => {
     expect(ran).toHaveLength(1);
     expect(ran[0]!.args).toContain("--prefix");
     expect(ran[0]!.display).not.toContain("sudo");
-    expect(out.join("\n")).toContain("root-owned");
+    expect(out.join("\n")).toContain("not writable by this user");
   });
 
   it("refuses an old git and reports the install command", async () => {

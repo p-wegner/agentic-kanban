@@ -49,6 +49,10 @@ export async function checkBoardBuild(opts: {
   token: string | undefined;
   ownVersion: string | null | undefined;
   fetchImpl?: typeof fetch;
+  /** A daemon's control file exists: `update-check --apply` has something to talk to (#1374). */
+  daemonRunning?: boolean;
+  /** The `start` line to print when no daemon runs yet. */
+  startCommand?: string;
 }): Promise<DoctorCheck> {
   const name = "board build";
   if (!opts.token) return { name, status: "pass", detail: "not paired with this board; build comparison skipped" };
@@ -59,7 +63,9 @@ export async function checkBoardBuild(opts: {
       name,
       status: "warn",
       detail: renderBuildMismatch(cmp.own, cmp.board),
-      remedy: "Run `agentic-kanban-worker update-check --apply`, then restart the worker.",
+      remedy: opts.daemonRunning === false
+        ? `No worker daemon runs yet, so update-check --apply has nothing to update. Start it with self-update on: ${opts.startCommand ?? `agentic-kanban-worker start --board ${opts.boardUrl} --auto-update`} (it moves to the board's build before taking work).`
+        : "Run `agentic-kanban-worker update-check --apply`, then restart the worker.",
     };
   }
   return { name, status: "pass", detail: `board build not compared (${cmp.reason})` };
