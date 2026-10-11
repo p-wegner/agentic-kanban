@@ -9,6 +9,7 @@
  */
 import type { CheckStatus } from "./worker-doctor.js";
 import { execFile } from "node:child_process";
+import { windowsOnlyMessage } from "../../worker/worker-path.js";
 import type { WorkerPackageManagers } from "@agentic-kanban/shared/lib/worker-protocol";
 
 type DoctorCheckLike = { name: string; status: CheckStatus; detail: string; remedy?: string };
@@ -36,7 +37,7 @@ export async function checkGitInstalled(probe: ProbeFn, platform: NodeJS.Platfor
     return {
       name: "git on PATH",
       status: "fail",
-      detail: "git is not on this machine's PATH",
+      detail: windowsOnlyMessage("git") ?? "git is not on this machine's PATH",
       remedy: `Install git >= ${MIN_GIT_VERSION.join(".")} and re-open the shell: ${upgradeGitCommand(platform)}`,
     };
   }

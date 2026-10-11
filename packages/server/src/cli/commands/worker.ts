@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { applyWorkerPath, workerEntryBehindSymlink } from "../../worker/worker-path.js";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Command } from "commander";
@@ -116,7 +117,7 @@ export function resolveWorkerEntry(argv1: string | undefined = process.argv[1]):
   if (!argv1) return null;
   if (basename(argv1) === "worker.js") return argv1;
   const sibling = join(dirname(argv1), "worker.js");
-  return existsSync(sibling) ? sibling : null;
+  return existsSync(sibling) ? sibling : workerEntryBehindSymlink(argv1);
 }
 
 /**
@@ -450,6 +451,7 @@ async function runWorkerStart(rawOptions: WorkerStartOptions): Promise<void> {
     // #1352: the lines below print before the daemon's timestamped logger exists; on a relaunch
     // stdout IS worker.log, so they used to land there with no timestamp. (Idempotent.)
     stampConsoleWithTimestamps();
+    applyWorkerPath(options.stateFile ?? defaultWorkerStateFile()); // #1374: saved CLI dirs first, WSL /mnt entries off
     const shim = installShim({ stateFile: options.stateFile ?? defaultWorkerStateFile(), fallbackEntry: entry });
     if (shim) console.log(`[worker] stable restart command: ${shim} start ...`);
     const logFile = workerLogFileFor(options.stateFile ?? defaultWorkerStateFile());

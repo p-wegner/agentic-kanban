@@ -115,7 +115,8 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 49 -> 50 in #1376 for `worker/worker-socket-keepalive.ts` (ping/pong deadline; imports only `ws`).
     // Raised 50 -> 53 in #1372 for cli/commands/worker-board-default.ts, worker/worker-name.ts and
     // worker/worker-provider-notice.ts (node builtins and modules already here; the launcher helper lives in worker-update-notes).
-    expect(files.size).toBeLessThan(53);
+    // Raised 53 -> 54 in #1374 for `worker/worker-path.ts` (WSL PATH policy + saved install dirs; node builtins only).
+    expect(files.size).toBeLessThan(54);
   });
 
   it("never reaches the database or board-service layer", () => {

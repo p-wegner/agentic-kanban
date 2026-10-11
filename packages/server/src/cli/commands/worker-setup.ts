@@ -6,7 +6,7 @@
  * Db-free: this is part of the standalone worker binary.
  */
 import { spawnSync } from "node:child_process";
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -16,6 +16,7 @@ import { readOAuthCredentials } from "../../lib/oauth-quota-core.js";
 import { defaultWorkerStateFile, type WorkerDaemonOptions } from "../../worker/worker-daemon.js";
 import { pairWorker } from "../../worker/worker-pair.js";
 import { createWorkerHarness, type WorkerHarness } from "../../worker/worker-harness.js";
+import { applyWorkerPath, prependPath, saveExtraPathDir } from "../../worker/worker-path.js";
 import { cliPathArg } from "../cli-path.js";
 import { AUTH_PROVIDERS, runWorkerAuth, type AuthProvider, type WorkerAuthOptions } from "./worker-auth-command.js";
 import {
@@ -70,6 +71,14 @@ export interface SetupDeps {
   /** `--start`: keep running as the daemon once paired. */
   start?: () => Promise<void>;
   nowMs?: number;
+  /** #1374: does this file exist (a CLI the installer dropped into a dir that is not on PATH)? */
+  fileExists?: (path: string) => boolean;
+  /** #1374: put `dir` first on this process's PATH and remember it for the daemon's spawn PATH. */
+  addPath?: (dir: string, stateFile: string) => void;
+  /** #1374: does the user's shell profile already add `dir` to PATH? */
+  profileAddsDir?: (dir: string) => boolean;
+  /** #1374: apply the worker's PATH policy (saved dirs, WSL /mnt entries off) before probing. */
+  applyPath?: (stateFile: string) => void;
 }
 
 const DEFAULT_BOARD_URL = "http://127.0.0.1:3001";
@@ -96,12 +105,40 @@ function readNpmPrefix(): NpmPrefixInfo | null {
   });
   const prefix = res.status === 0 ? String(res.stdout ?? "").trim() : "";
   if (!prefix) return null;
-  try {
-    accessSync(prefix, constants.W_OK);
-    return { prefix, writable: true };
-  } catch {
-    return { prefix, writable: false };
+  return { prefix, writable: npmPrefixWritable(prefix, process.platform) };
+}
+
+/**
+ * #1374: can `npm i -g` write here WITHOUT sudo? Not "who owns the prefix dir" (`/usr/local` is
+ * root-owned yet `lib/node_modules` and `bin` are often user-writable): check what npm writes into.
+ * On Windows the prefix itself is both.
+ */
+export function npmPrefixWritable(
+  prefix: string,
+  platform: NodeJS.Platform,
+  canWrite: (path: string) => boolean = (p) => {
+    try {
+      accessSync(p, constants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+): boolean {
+  if (platform === "win32") return canWrite(prefix);
+  return canWrite(join(prefix, "lib", "node_modules")) && canWrite(join(prefix, "bin"));
+}
+
+function profileMentions(home: string, dir: string): boolean {
+  const rel = dir.startsWith(home) ? dir.slice(home.length).replace(/^[\\/]+/, "") : dir;
+  for (const f of [".profile", ".bash_profile", ".bashrc", ".zprofile", ".zshrc"]) {
+    try {
+      if (readFileSync(join(home, f), "utf8").includes(rel)) return true;
+    } catch {
+      /* file absent */
+    }
   }
+  return false;
 }
 
 export function defaultSetupDeps(start?: () => Promise<void>): SetupDeps {
@@ -116,6 +153,13 @@ export function defaultSetupDeps(start?: () => Promise<void>): SetupDeps {
     confirm: askYesNo,
     print: (line) => console.log(line),
     npmPrefix: readNpmPrefix,
+    fileExists: (p) => existsSync(p),
+    addPath: (dir, stateFile) => {
+      prependPath(process.env, dir);
+      saveExtraPathDir(stateFile, dir);
+    },
+    profileAddsDir: (dir) => profileMentions(homedir(), dir),
+    applyPath: (stateFile) => applyWorkerPath(stateFile),
     pair: pairWorker,
     auth: (provider, opts) => runWorkerAuth(provider, opts),
     doctor: runWorkerDoctor,
@@ -152,6 +196,8 @@ async function runInstall(
   options: SetupOptions,
   plan: InstallPlan,
   verify: () => Promise<{ found: boolean; output: string }>,
+  /** #1374: where the installer is known to drop `program`, so a not-yet-on-PATH install is still used. */
+  locate?: { program: string; dirs: string[]; stateFile: string; addedDirs: Set<string> },
 ): Promise<{ outcome: Outcome; detail: string }> {
   deps.print(`  install command: ${plan.display}`);
   if (options.install === false || options.configDir) {
@@ -162,10 +208,25 @@ async function runInstall(
   }
   const status = deps.run(plan);
   if (status !== 0) return { outcome: "FAILED", detail: `installer exited ${status}` };
-  const after = await verify();
+  let after = await verify();
+  if (!after.found && locate && deps.fileExists && deps.addPath) {
+    const names = deps.os === "win32" ? [`${locate.program}.exe`, `${locate.program}.cmd`] : [locate.program];
+    const dir = locate.dirs.find((d) => names.some((n) => deps.fileExists!(join(d, n))));
+    if (dir) {
+      deps.addPath(dir, locate.stateFile);
+      locate.addedDirs.add(dir);
+      after = await verify();
+      if (after.found) {
+        return {
+          outcome: "done",
+          detail: `${after.output.split("\n")[0] ?? "installed"} (found in ${dir}; added to PATH for the rest of setup and saved for the worker daemon)`,
+        };
+      }
+    }
+  }
   return after.found
     ? { outcome: "done", detail: after.output.split("\n")[0] ?? "installed" }
-    : { outcome: "done", detail: "installed, but not on PATH in this shell yet - open a new shell and re-run setup" };
+    : { outcome: "done", detail: "installed, but its location could not be found, so it is not on PATH in this shell yet - open a new shell and re-run setup" };
 }
 
 async function stepGit(deps: SetupDeps, options: SetupOptions): Promise<Outcome> {
@@ -188,8 +249,14 @@ async function stepGit(deps: SetupDeps, options: SetupOptions): Promise<Outcome>
   return res.outcome;
 }
 
-async function stepCli(deps: SetupDeps, options: SetupOptions, providers: string[]): Promise<Outcome> {
+async function stepCli(
+  deps: SetupDeps,
+  options: SetupOptions,
+  providers: string[],
+  stateFile: string,
+): Promise<Outcome> {
   let worst: Outcome = "ok (already present)";
+  const addedDirs = new Set<string>();
   for (const provider of providers) {
     const probe = await deps.probe(provider, ["--version"]);
     if (probe.found) {
@@ -203,8 +270,8 @@ async function stepCli(deps: SetupDeps, options: SetupOptions, providers: string
       if (info && !info.writable) {
         userPrefix = join(deps.home, ".local");
         deps.print(
-          `  The npm global prefix ${info.prefix} is root-owned; not using sudo. Installing into ${userPrefix} ` +
-            `instead - add ${join(userPrefix, "bin")} to PATH.`,
+          `  The npm global prefix ${info.prefix} is not writable by this user (${join(info.prefix, "lib", "node_modules")} ` +
+            `/ ${join(info.prefix, "bin")}); not using sudo. Installing into ${userPrefix} instead.`,
         );
       }
     }
@@ -214,11 +281,26 @@ async function stepCli(deps: SetupDeps, options: SetupOptions, providers: string
       if (worst !== "FAILED") worst = "skipped";
       continue;
     }
-    const res = await runInstall(deps, options, plan, () => deps.probe(provider, ["--version"]));
+    // claude's installer drops into ~/.local/bin; npm --prefix <p> into <p>/bin.
+    const dirs = [join(deps.home, ".local", "bin"), ...(userPrefix ? [join(userPrefix, "bin")] : [])];
+    const res = await runInstall(deps, options, plan, () => deps.probe(provider, ["--version"]), {
+      program: provider,
+      dirs,
+      stateFile,
+      addedDirs,
+    });
     deps.print(`[cli ${provider}] ${res.outcome} - ${res.detail}`);
     if (res.outcome === "FAILED") worst = "FAILED";
     else if (res.outcome === "skipped" && worst !== "FAILED") worst = "skipped";
     else if (res.outcome === "done" && worst === "ok (already present)") worst = "done";
+  }
+  // Said once, not per CLI: does the login shell pick the dir up on its own?
+  for (const dir of addedDirs) {
+    if (deps.profileAddsDir?.(dir)) {
+      deps.print(`  Your shell profile already adds ${dir} to PATH (a new login shell will have it).`);
+    } else {
+      deps.print(`  To use these CLIs from your own shell too, add this line to your shell profile: export PATH="${dir}:$PATH"`);
+    }
   }
   return worst;
 }
@@ -339,8 +421,9 @@ export async function runWorkerSetup(options: SetupOptions, deps: SetupDeps): Pr
     });
   const results: Outcome[] = [];
 
+  deps.applyPath?.(stateFile);
   if (selected.has("git")) results.push(await stepGit(deps, options));
-  if (selected.has("cli")) results.push(await stepCli(deps, options, providers));
+  if (selected.has("cli")) results.push(await stepCli(deps, options, providers, stateFile));
   if (selected.has("auth")) results.push(await stepAuth(deps, options, providers, harnessFor, stateFile));
   if (selected.has("pair")) {
     results.push(await stepPair(deps, options, board, stateFile, providers, harnessFor("claude")));
@@ -355,6 +438,10 @@ export async function runWorkerSetup(options: SetupOptions, deps: SetupDeps): Pr
   }
   const failed = results.includes("FAILED");
   deps.print(failed ? "setup finished with FAILED steps (see above)." : "setup finished.");
+  if (!failed && selected.has("pair") && !options.start) {
+    deps.print("Next, start the worker (add --start to setup to do this automatically):");
+    deps.print(`  agentic-kanban-worker start --board ${board} --auto-update`);
+  }
   if (!failed && options.start && selected.has("pair") && deps.start) await deps.start();
   return failed ? 1 : 0;
 }

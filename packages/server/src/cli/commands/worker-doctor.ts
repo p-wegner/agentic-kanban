@@ -38,6 +38,8 @@ import WebSocket from "ws";
 import { defaultWorkerWorkRoot } from "../../worker/worker-repo.js";
 import { discoverLocalProfiles } from "../../lib/local-profile-discovery.js";
 import { credentialStateOf, quotaPollableProfiles } from "../../worker/worker-profiles.js";
+import { readControlFile } from "../../worker/worker-control.js";
+import { applyWorkerPath,windowsOnlyMessage } from "../../worker/worker-path.js";
 
 export type CheckStatus = "pass" | "fail" | "skip" | "unknown" | "warn";
 
@@ -475,7 +477,7 @@ export async function checkProvider(
     checks.push(
       bad(
         `${provider} CLI installed`,
-        `'${provider}' is not on this machine's PATH`,
+        windowsOnlyMessage(provider) ?? `'${provider}' is not on this machine's PATH`,
         `Install the ${provider} CLI here: agentic-kanban-worker setup --steps cli --providers ${provider} ` +
           "(the board never ships it - a worker runs the provider locally).",
       ),
@@ -642,6 +644,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   const boardUrl = opts.boardUrl.replace(/\/+$/, "");
   const identity = readSavedIdentity(opts.stateFile, boardUrl);
   const checks: DoctorCheck[] = [];
+  applyWorkerPath(opts.stateFile); // #1374: saved CLI dirs first, WSL /mnt entries off the PATH
   checks.push(await checkReachable(boardUrl));
   checks.push(await checkHeartbeat(boardUrl, identity));
   checks.push(await checkWebSocket(boardUrl, identity, opts.timeoutMs));
@@ -656,6 +659,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   const globalVersion = opts.globalVersion === undefined ? probeGlobalVersion() : opts.globalVersion;
   checks.push(checkGlobalLauncher({ stateFile: opts.stateFile, runningEntry: opts.runningEntry ?? null, globalVersion }));
   checks.push(await checkBoardBuild({
+    daemonRunning: readControlFile(opts.stateFile) !== null,
     boardUrl,
     token: identity?.workerToken,
     ownVersion: readEntryVersion(opts.runningEntry ?? null) ?? resolveOwnPackageVersion(),
