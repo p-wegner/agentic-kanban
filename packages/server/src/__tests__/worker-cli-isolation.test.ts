@@ -117,7 +117,9 @@ describe("agentic-kanban-worker binary isolation", () => {
     // worker/worker-provider-notice.ts (node builtins and modules already here; the launcher helper lives in worker-update-notes).
     // Raised 53 -> 54 in #1374 for `worker/worker-path.ts` (WSL PATH policy + saved install dirs; node builtins only).
     // Raised 54 -> 55 in #1370 for `cli/commands/worker-doctor-daemon.ts` (the doctor-summary tracker; modules already here).
-    expect(files.size).toBeLessThan(55);
+    // Raised 55 -> 56 in #1370 for `cli/commands/worker-pair-output.ts` (pair output split out of worker.ts for the
+    // 1000-line ceiling; imports only modules already here).
+    expect(files.size).toBeLessThan(56);
   });
 
   it("never reaches the database or board-service layer", () => {
