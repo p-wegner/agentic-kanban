@@ -219,7 +219,7 @@ export function createWorkerRegistry(database: Database = realDb) {
   }
 
   async function registerWorker(input: RegisterWorkerInput): Promise<
-    | { ok: true; workerId: string; workerToken: string }
+    | { ok: true; workerId: string; workerToken: string; sameNamed: { id: string; lastHeartbeatAt: string | null }[] }
     | { ok: false; error: string }
   > {
     const now = input.now ?? new Date().toISOString();
@@ -240,6 +240,11 @@ export function createWorkerRegistry(database: Database = realDb) {
     }
     const workerId = randomUUID();
     const workerToken = mintToken();
+    // #1390: earlier rounds on the same name show as indistinguishable rows in the Runners tab;
+    // name them in the answer so setup can offer to revoke the stale one.
+    const sameNamed = (await workerRepo.listWorkers(database))
+      .filter((w) => w.name === input.name.trim())
+      .map((w) => ({ id: w.id, lastHeartbeatAt: w.lastHeartbeatAt ?? null }));
     await workerRepo.insertWorker({
       id: workerId,
       name: input.name.trim(),
@@ -266,7 +271,7 @@ export function createWorkerRegistry(database: Database = realDb) {
       `[worker-registry] registered worker: id=${workerId} name=${input.name.trim()} ` +
         `protocol=${input.protocolVersion ?? "?"} build=${input.workerVersion ?? "?"}`,
     );
-    return { ok: true, workerId, workerToken };
+    return { ok: true, workerId, workerToken, sameNamed };
   }
 
   /** Bearer-token check for worker-called endpoints. A revoked worker fails closed. */

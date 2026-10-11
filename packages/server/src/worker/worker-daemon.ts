@@ -327,6 +327,7 @@ export async function registerWithBoard(
     workerToken?: string;
     error?: string;
     boardProtocolVersion?: number;
+    sameNamed?: { id: string }[];
   };
   if (!res.ok || !body.workerId || !body.workerToken) {
     const detail = body.error ?? "unexpected response";
@@ -340,6 +341,15 @@ export async function registerWithBoard(
       );
     }
     throw new Error(`Registration failed (${res.status}): ${detail}`);
+  }
+  // #1390: an earlier pairing under this name still has a row on the board - say so, since
+  // the Runners tab cannot tell the two apart. Revoking is the owner's call (Runners tab).
+  if (body.sameNamed && body.sameNamed.length > 0) {
+    (opts.log ?? console.log)(
+      `[pair] note: the board already lists ${body.sameNamed.length} other worker(s) named '${name}' ` +
+        `(${body.sameNamed.map((w) => w.id.slice(0, 8)).join(", ")}). If those are stale, revoke them ` +
+        `in the Runners tab, or pair again with --name <unique name>.`,
+    );
   }
   return { workerId: body.workerId, workerToken: body.workerToken, name };
 }

@@ -2,7 +2,7 @@
  * Pair with a board and save the identity WITHOUT starting the daemon (#1368 `setup`).
  * The same registration `startWorkerDaemon` does on first run; an existing pairing is kept.
  */
-import { hostname } from "node:os";
+import { defaultWorkerName } from "./worker-name.js";
 import {
   defaultWorkerStateFile,
   loadState,
@@ -36,7 +36,7 @@ export async function pairWorker(opts: WorkerDaemonOptions): Promise<{ alreadyPa
   const providers = opts.attestProviders === false
     ? declared
     : await attestProviders(declared, opts.log ?? console.log, opts.harness);
-  const identity = await registerWithBoard({ ...opts, providers }, boardUrl, opts.name ?? hostname());
+  const identity = await registerWithBoard({ ...opts, providers }, boardUrl, opts.name ?? defaultWorkerName());
   // #1386: record the harness this pairing was set up with BEFORE the pairing exists, so `start`
   // never mistakes a fresh pairing for one that predates harness modes (legacy inherit).
   // A state file that already has a pairing but no record is a legacy one: it stays inherit.
