@@ -165,7 +165,7 @@ describe("worker setup (#1368)", () => {
   });
 
   it("never runs an installer with --no-install, and prints the commands", async () => {
-    expect(await runWorkerSetup({ ...base(), install: false, yes: true, steps: "git,cli" }, makeDeps())).toBe(0);
+    expect(await runWorkerSetup({ ...base(), token: undefined, install: false, yes: true, steps: "git,cli" }, makeDeps())).toBe(0);
     expect(ran).toEqual([]);
     const text = out.join("\n");
     expect(text).toContain("install command: sudo apt-get install -y git");
@@ -175,13 +175,13 @@ describe("worker setup (#1368)", () => {
 
   it("asks y/N before installing and honours a no", async () => {
     answers = [false, true, false]; // git: no, claude: yes, codex: no
-    await runWorkerSetup({ ...base(), steps: "git,cli" }, makeDeps());
+    await runWorkerSetup({ ...base(), token: undefined, steps: "git,cli" }, makeDeps());
     expect(ran.map((p) => p.display)).toEqual(["curl -fsSL https://claude.ai/install.sh | bash"]);
     expect(out.join("\n")).toContain("[git] skipped");
   });
 
   it("uses the Windows code path: winget for git, powershell installer for claude, npm via shell", async () => {
-    await runWorkerSetup({ ...base(), yes: true, steps: "git,cli" }, makeDeps({ os: "win32" }));
+    await runWorkerSetup({ ...base(), token: undefined, yes: true, steps: "git,cli" }, makeDeps({ os: "win32" }));
     expect(ran.map((p) => p.command)).toEqual(["winget", "powershell", "npm"]);
     expect(ran[2]!.shell).toBe(true);
   });
@@ -190,7 +190,7 @@ describe("worker setup (#1368)", () => {
     installed.add("git");
     installed.add("claude");
     await runWorkerSetup(
-      { ...base(), yes: true, steps: "cli" },
+      { ...base(), token: undefined, yes: true, steps: "cli" },
       makeDeps({ npmPrefix: () => ({ prefix: "/usr", writable: false }) }),
     );
     expect(ran).toHaveLength(1);
@@ -202,14 +202,14 @@ describe("worker setup (#1368)", () => {
   it("refuses an old git and reports the install command", async () => {
     installed.add("git");
     const deps = makeDeps({ probe: async (c) => (c === "git" ? { found: true, output: "git version 2.20.1" } : { found: false, output: "" }) });
-    await runWorkerSetup({ ...base(), install: false, steps: "git" }, deps);
+    await runWorkerSetup({ ...base(), token: undefined, install: false, steps: "git" }, deps);
     expect(out.join("\n")).toContain("older than 2.31");
   });
 
   it("--steps auth --config-dir X touches nothing else", async () => {
     installed.add("claude");
     const custom = join(dir, "custom-claude");
-    expect(await runWorkerSetup({ ...base(), configDir: custom, yes: true }, makeDeps())).toBe(0);
+    expect(await runWorkerSetup({ ...base(), token: undefined, configDir: custom, yes: true }, makeDeps())).toBe(0);
     expect(ran).toEqual([]);
     expect(pairCalls).toBe(0);
     expect(authCalls).toEqual([{ provider: "claude", configDir: custom }]);
@@ -217,9 +217,26 @@ describe("worker setup (#1368)", () => {
     expect(out.join("\n")).not.toContain("[doctor]");
   });
 
+  it("--token with --config-dir pairs and doctors, and the start hint carries the flags (#1398)", async () => {
+    installed.add("claude");
+    const custom = join(dir, "custom-claude");
+    const opts = { ...base(), configDir: custom, yes: true, name: "desk top" };
+    expect(await runWorkerSetup(opts, makeDeps())).toBe(0);
+    expect(pairCalls).toBe(1);
+    const text = out.join("\n");
+    expect(text).toContain("[doctor]");
+    expect(text).toContain(`agentic-kanban-worker start --board http://b --config-dir ${custom} --state-file ${stateFile} --name "desk top" --auto-update`);
+  });
+
+  it("--token with --steps that exclude pair is refused (#1398)", async () => {
+    expect(await runWorkerSetup({ ...base(), steps: "git" }, makeDeps())).toBe(2);
+    expect(pairCalls).toBe(0);
+    expect(out.join("\n")).toContain("--token");
+  });
+
   it("an explicit --steps selection runs only those steps", async () => {
     installed.add("git");
-    await runWorkerSetup({ ...base(), steps: "git" }, makeDeps());
+    await runWorkerSetup({ ...base(), token: undefined, steps: "git" }, makeDeps());
     expect(out.join("\n")).toContain("[git] ok (already present)");
     expect(out.join("\n")).not.toContain("[cli");
     expect(pairCalls).toBe(0);

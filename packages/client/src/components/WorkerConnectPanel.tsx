@@ -243,6 +243,13 @@ export function WorkerConnectPanel() {
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
             For a machine that already has git and a logged-in provider CLI, or when you prefer to run each step yourself.
           </p>
+          <div className="mt-2 text-xs text-gray-500 dark:text-gray-400" data-testid="worker-custom-folder-variant">
+            Custom claude folder on a machine that is already in use (no installs; pairs, then runs doctor):
+            <code className="mt-1 block break-all rounded bg-gray-100 dark:bg-gray-800 px-2 py-1.5 text-ink dark:text-stone-100">
+              {`agentic-kanban-worker setup --board ${pairing?.fleetUrl ?? "<fleet-url>"} --token ${pairing?.pairingToken ?? "<token>"} --no-install --config-dir <claude-folder> --state-file <state-file> --name <worker-name>`}
+            </code>
+            Then start it with the same <code>--config-dir</code>, <code>--state-file</code> and <code>--name</code> that setup prints.
+          </div>
           <div className="mt-2 space-y-3">
             {manualSteps.map((step, n) => (
               <div key={step.title}>

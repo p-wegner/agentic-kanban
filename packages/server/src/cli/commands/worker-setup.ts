@@ -54,6 +54,7 @@ export interface SetupOptions {
   guide?: boolean;
   stateFile?: string;
   name?: string;
+  labels?: string;
 }
 
 export interface SetupDeps {
@@ -178,8 +179,22 @@ export function hasCredential(harness: WorkerHarness, provider: AuthProvider, no
   if (token?.stored && !token.expired) return true;
   const dir = harness.dirFor(provider);
   if (!dir) return false;
-  if (provider === "claude") return readOAuthCredentials(dir, nowMs).err === undefined;
+  if (provider === "claude") {
+    const read = readOAuthCredentials(dir, nowMs);
+    // An expired access token with a refresh token is still a login: claude refreshes it itself.
+    return read.err === undefined || (read.err === "expired" && hasRefreshToken(dir));
+  }
   return probeFile(join(dir, "auth.json"));
+}
+
+function hasRefreshToken(dir: string): boolean {
+  try {
+    const parsed = JSON.parse(readFileSync(join(dir, ".credentials.json"), "utf8").replace(/^﻿/, ""));
+    const token = (parsed as { claudeAiOauth?: { refreshToken?: unknown } } | null)?.claudeAiOauth?.refreshToken;
+    return typeof token === "string" && token.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 function probeFile(path: string): boolean {
@@ -189,6 +204,20 @@ function probeFile(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+function quoteArg(value: string): string {
+  return /[\s"]/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
+}
+
+/** The flags setup was given that change WHICH worker a follow-up command acts on (#1398). */
+export function followUpFlags(options: SetupOptions, opts: { name?: boolean } = {}): string {
+  const parts: string[] = [];
+  if (options.configDir) parts.push(`--config-dir ${quoteArg(options.configDir)}`);
+  if (options.stateFile) parts.push(`--state-file ${quoteArg(options.stateFile)}`);
+  if (opts.name && options.name) parts.push(`--name ${quoteArg(options.name)}`);
+  if (opts.name && options.labels) parts.push(`--labels ${quoteArg(options.labels)}`);
+  return parts.length > 0 ? ` ${parts.join(" ")}` : "";
 }
 
 /** Ask (unless --yes), run the installer, re-probe. The caller already printed the command. */
@@ -309,6 +338,10 @@ async function stepCli(
 /** Exit statuses of a login the operator interrupted with Ctrl+C (POSIX SIGINT, Windows STATUS_CONTROL_C_EXIT). */
 const INTERRUPT_STATUSES: ReadonlySet<number> = new Set([130, 3221225786, -1073741510]);
 
+function authFlags(options: SetupOptions, provider: AuthProvider): string {
+  return followUpFlags({ ...(options.stateFile ? { stateFile: options.stateFile } : {}), ...(options.configDir && provider === "claude" ? { configDir: options.configDir } : {}) });
+}
+
 async function stepAuth(
   deps: SetupDeps,
   options: SetupOptions,
@@ -335,7 +368,7 @@ async function stepAuth(
       continue;
     }
     if (!options.yes && !(await deps.confirm(`  Log ${provider} into ${dir} now?`))) {
-      deps.print(`[auth ${provider}] skipped - run: agentic-kanban-worker auth ${provider}`);
+      deps.print(`[auth ${provider}] skipped - run: agentic-kanban-worker auth ${provider}${authFlags(options, provider)}`);
       if (worst !== "FAILED") worst = "skipped";
       continue;
     }
@@ -347,10 +380,10 @@ async function stepAuth(
       deps.print(`[auth ${provider}] done - login in ${dir}`);
       if (worst === "ok (already present)") worst = "done";
     } else if (INTERRUPT_STATUSES.has(status)) {
-      deps.print(`[auth ${provider}] login skipped - run agentic-kanban-worker auth ${provider}`);
+      deps.print(`[auth ${provider}] login skipped - run agentic-kanban-worker auth ${provider}${authFlags(options, provider)}`);
       if (worst !== "FAILED") worst = "skipped";
     } else {
-      deps.print(`[auth ${provider}] FAILED - exit ${status}; retry: agentic-kanban-worker auth ${provider}`);
+      deps.print(`[auth ${provider}] FAILED - exit ${status}; retry: agentic-kanban-worker auth ${provider}${authFlags(options, provider)}`);
       worst = "FAILED";
     }
   }
@@ -383,6 +416,7 @@ async function stepPair(
       stateFile,
       ...(attest ? {} : { attestProviders: false }),
       ...(options.name ? { name: options.name } : {}),
+      ...(options.labels ? { labels: splitCsv(options.labels) } : {}),
       log: deps.print,
     });
     deps.print(`[pair] ${res.alreadyPaired ? "ok (already present)" : "done"} - paired with ${board} as '${res.name}'`);
@@ -419,7 +453,13 @@ export async function runWorkerSetup(options: SetupOptions, deps: SetupDeps): Pr
     deps.print(`unknown --steps value(s): ${unknown.join(", ")}; valid: ${SETUP_STEPS.join(",")}`);
     return 2;
   }
-  const selected = new Set<string>(requested.length > 0 ? requested : customDir ? ["auth"] : SETUP_STEPS);
+  if (options.token && requested.length > 0 && !requested.includes("pair")) {
+    deps.print("--token was given but --steps excludes 'pair', so it would be ignored; add 'pair' to --steps or drop --token");
+    return 2;
+  }
+  // --token always means "pair": a custom folder alone is auth-only, with a token it is auth,pair,doctor.
+  const defaultSteps: readonly string[] = customDir ? (options.token ? ["auth", "pair", "doctor"] : ["auth"]) : SETUP_STEPS;
+  const selected = new Set<string>(requested.length > 0 ? requested : defaultSteps);
   const providers = options.providers ? splitCsv(options.providers) : customDir ? ["claude"] : ["claude", "codex"];
   const board = (options.board ?? DEFAULT_BOARD_URL).replace(/\/+$/, "");
   const stateFile = options.stateFile ?? defaultWorkerStateFile();
@@ -457,7 +497,7 @@ export async function runWorkerSetup(options: SetupOptions, deps: SetupDeps): Pr
   deps.print(failed ? "setup finished with FAILED steps (see above)." : "setup finished.");
   if (!failed && selected.has("pair") && !options.start) {
     deps.print("Next, start the worker (add --start to setup to do this automatically):");
-    deps.print(`  agentic-kanban-worker start --board ${board} --auto-update`);
+    deps.print(`  agentic-kanban-worker start --board ${board}${followUpFlags(options, { name: true })} --auto-update`);
   }
   if (!failed && options.start && selected.has("pair") && deps.start) await deps.start();
   return failed ? 1 : 0;
@@ -489,6 +529,7 @@ export function registerWorkerSetup(
     .option("--start", "After pairing, keep running as the worker daemon")
     .option("--guide", "Print the offline setup guide and exit")
     .option("--name <name>", "Worker display name (default: hostname; <hostname>-wsl-<distro> under WSL)")
+    .option("--labels <csv>", "Capability labels, e.g. docker,windows")
     .option("--state-file <path>", "Pairing state file (default: ~/.agentic-kanban/worker-state.json)", cliPathArg)
     .action(async (options: SetupOptions) => {
       const code = await runWorkerSetup(options, defaultSetupDeps(() => ctx.start(options)));
