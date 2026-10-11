@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { checkGlobalLauncher } from "../cli/commands/worker-doctor-build-check.js";
 import { installShim, shimCommandFor, shimDirFor } from "../worker/worker-shim.js";
+import { repinLegacyShim } from "../worker/worker-repin.js";
 import { entryForBuild, versionsDirFor, writePointer } from "../worker/worker-versions.js";
 
 let home: string;
@@ -72,6 +73,46 @@ describe("installShim", () => {
     installShim({ stateFile, fallbackEntry: bootstrap });
     writePointer(versionsDirFor(stateFile), { buildId: NEW_BUILD, entry: join(home, "gone", "worker.js") });
     expect(runResolver(["start"]).stdout).toContain("RAN:bootstrap");
+  });
+});
+
+describe("repinLegacyShim (#1402)", () => {
+  const VERSION = "0.1.9-dev.2be110b39";
+  function globalInstall(version: string): string {
+    const root = join(home, "global", "agentic-kanban");
+    writeEntry(join(root, "bin", "worker.js"), `global-${version}`);
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "agentic-kanban", version }));
+    return join(root, "bin", "worker.js");
+  }
+  function legacyShim(): void {
+    mkdirSync(shimDirFor(stateFile), { recursive: true });
+    writeFileSync(join(shimDirFor(stateFile), "worker-shim.cjs"), "// pre-1400 resolver\n");
+    writeFileSync(shimCommandFor(stateFile), "launcher\n");
+  }
+
+  it("pins an old-style shim to a private copy that survives a later global install", () => {
+    const entry = globalInstall(VERSION);
+    legacyShim();
+    expect(repinLegacyShim(stateFile, entry)).toBe("2be110b39");
+    installShim({ stateFile, fallbackEntry: entry, fallbackVersion: VERSION });
+    // another board's npm i -g replaces the global install
+    globalInstall("0.1.9-dev.ad92d1b0e");
+    expect(runResolver(["start"]).stdout).toContain(`RAN:global-${VERSION}`);
+  });
+
+  it("doctor flags an unpinned old shim, and leaves a new one alone", () => {
+    legacyShim();
+    const check = checkGlobalLauncher({ stateFile, runningEntry: null, globalVersion: VERSION, runningVersion: VERSION });
+    expect(check.status).toBe("warn");
+    expect(check.detail).toContain("unpinned");
+    installShim({ stateFile, fallbackEntry: null });
+    expect(checkGlobalLauncher({ stateFile, runningEntry: null, globalVersion: VERSION, runningVersion: VERSION }).status).toBe("pass");
+  });
+
+  it("does nothing for a current shim or an already pinned one", () => {
+    const entry = globalInstall(VERSION);
+    installShim({ stateFile, fallbackEntry: entry, fallbackVersion: VERSION });
+    expect(repinLegacyShim(stateFile, entry)).toBeNull();
   });
 });
 

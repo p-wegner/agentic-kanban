@@ -43,7 +43,10 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string, 
         "The board serves its own worker build, so no repo checkout and no registry package is needed. Download it " +
         "with the pairing token (the download does not consume the token), verify the sha256, install it, then " +
         "`setup` pairs, logs the providers in and runs the doctor. `agentic-kanban worker pair` prints these same " +
-        "commands. An ERESOLVE peer warning about `zod` on install is EXPECTED and harmless.",
+        "commands. An ERESOLVE peer warning about `zod` on install is EXPECTED and harmless. " +
+        "WARNING: `npm i -g` replaces the one global agentic-kanban on this machine. If this machine already runs a " +
+        "worker for ANOTHER board, check its shim is pinned first (`agentic-kanban-worker doctor` flags an unpinned " +
+        "one; restarting that worker once pins it) — otherwise its next restart runs this board's build.",
       commands: buildWorkerBootstrap(boardUrl, pairingToken, os).steps.flatMap((s) => s.commands),
     },
     {

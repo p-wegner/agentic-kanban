@@ -6,6 +6,8 @@ import { dirname, join } from "node:path";
 import { parseBuildId, sameBuild } from "../../lib/worker-update.js";
 import { compareBuilds } from "../../worker/worker-delegate.js";
 import { shimCommandFor, shimInstalled } from "../../worker/worker-shim.js";
+import { hasLegacyShim } from "../../worker/worker-repin.js";
+import { readPointer, versionsDirFor } from "../../worker/worker-versions.js";
 import type { DoctorCheck } from "./worker-doctor.js";
 import { globalLauncherFix } from "./worker-update-notes.js";
 import { resolveOwnPackageVersion } from "../../lib/worker-build.js";
@@ -62,6 +64,15 @@ export function checkGlobalLauncher(opts: {
       remedy: hasShim
         ? `${globalLauncherFix(opts.stateFile)} (the shim always runs the current build).`
         : `No stable shim yet (it is written on the next \`worker start\`). Until then: npm i -g <path-to-agentic-kanban-*.tgz> (steps: agentic-kanban-worker setup --guide); the old global delegates only if its build includes #1346.`,
+    };
+  }
+  // #1402: a pre-#1400 shim with no versions/current.json runs whatever the global install is.
+  if (hasShim && hasLegacyShim(opts.stateFile) && !readPointer(versionsDirFor(opts.stateFile))) {
+    return {
+      name,
+      status: "warn",
+      detail: `the stable shim at ${shim} is unpinned (written before #1400, no versions/current.json): it runs the global install, which another board's npm i -g can replace`,
+      remedy: "Restart the worker once (`agentic-kanban-worker start ...`): it pins its own build into the versions dir and rewrites the shim.",
     };
   }
   if (!hasShim) {
