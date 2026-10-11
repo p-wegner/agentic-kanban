@@ -10,6 +10,7 @@ import {
   WorkerRegistrationRefused,
   type WorkerDaemonHandle,
 } from "../../worker/worker-daemon.js";
+import { loadProfileAliases } from "../../worker/worker-profile-aliases.js";
 import { isSupervised, relaunchWorker, stampConsoleWithTimestamps, workerLogFileFor } from "../../worker/worker-updater.js";
 import { resolveDelegation, runDelegated } from "../../worker/worker-delegate.js";
 import { installShim } from "../../worker/worker-shim.js";
@@ -402,6 +403,7 @@ interface WorkerStartOptions {
   providers?: string;
   skipProviderAttestation?: boolean;
   profiles?: string;
+  profileAlias?: string;
   maxConcurrency?: number;
   stateFile?: string;
   workRoot?: string;
@@ -476,10 +478,9 @@ async function runWorkerStart(rawOptions: WorkerStartOptions): Promise<void> {
       labels: labels.length > 0 ? labels : undefined,
       providers: splitList(options.providers),
       attestProviders: !options.skipProviderAttestation,
-      // #1027. `undefined` (flag absent) means "attest what discovery finds"; an explicit
-      // list — including the single value `none` — is the operator's own narrowing, which
-      // is why the CLI does not substitute a default here.
+      // #1027: undefined = attest what discovery finds; an explicit list (or `none`) is the operator's.
       profiles: splitList(options.profiles),
+      ...(options.profileAlias !== undefined ? { profileAliases: splitList(options.profileAlias) ?? [] } : {}),
       harness: createWorkerHarness(harnessCfg.options),
       doctorSummary: true, // #1370: the board shows this worker's setup checklist
       maxConcurrency: options.maxConcurrency,
@@ -610,12 +611,10 @@ export function registerWorkerSubcommands(workerCmd: Command) {
     .option(
       "--profiles <csv>",
       "Agent profiles this machine ATTESTS it can authenticate as, e.g. anth,team5x (#1027). " +
-        "Names only — no tokens ever leave this machine. This is what lets a board project " +
-        "restricted to specific profiles dispatch work here at all; without it such a project " +
-        "refuses remote dispatch (#651). Omit to attest whatever local profile discovery finds; " +
-        "pass 'none' to attest nothing. A declared name this machine has no login for is dropped " +
-        "with a log line.",
+        "Names only — no tokens leave this machine. Lets a profile-restricted project dispatch here " +
+        "(#651). Omit to attest what discovery finds; 'none' attests nothing. Unknown names are dropped.",
     )
+    .option("--profile-alias <csv>", "Attest a nameless login under a profile name (#1379), e.g. default=anth (source: 'default', a profile name or a config dir). Persisted; '' clears")
     .option("--max-concurrency <n>", "Max parallel agent sessions", (v) => parseInt(v, 10))
     .option("--state-file <path>", `Pairing state file, relative to the directory you run the command in (default: ${defaultWorkerStateFile()})`, cliPathArg)
     .option("--work-root <path>", "Root for git-transport clones/checkouts, relative to the directory you run the command in (default: ~/.agentic-kanban/worker)", cliPathArg)
@@ -854,6 +853,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         runningEntry: resolveWorkerEntry(),
         providers: splitList(options.providers) ?? ["claude"],
         ...(options.profiles ? { profiles: splitList(options.profiles) ?? [] } : {}),
+        profileAliases: loadProfileAliases(doctorStateFile),
         ...(options.gitPort === undefined || Number.isNaN(options.gitPort) ? {} : { gitPort: options.gitPort }),
       });
       console.log(options.json ? JSON.stringify(report, null, 2) : renderDoctorReport(report));
