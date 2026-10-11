@@ -277,6 +277,21 @@ describe("the daemon against a real board socket (#754 items 2,4,5,6)", () => {
     });
   }, 30000);
 
+  it("says online on its first beat even without self-update, so a drained worker comes back", async () => {
+    // Harness round 1: Ctrl+C drained a WSL worker; restarted without working self-update it
+    // never sent `online` again and stayed `draining` on the board.
+    board = await startFakeBoard();
+    daemon = await startWorkerDaemon({
+      boardUrl: board.url, pairingToken: "pair-1", name: "back-worker", providers: ["claude"],
+      attestProviders: false, stateFile: stateFile(), workRoot: freshWorkRoot(),
+      heartbeatIntervalMs: 60, log: () => {},
+    });
+    await daemon.connected;
+    await vi.waitFor(() => expect(board!.heartbeats.length).toBeGreaterThan(1), { timeout: 10000 });
+    expect(board.heartbeats[0]).toMatchObject({ status: "online" });
+    expect(board.heartbeats[1].status).toBeUndefined();
+  }, 30000);
+
   it("announces `draining` before it stops, so the board can stop assigning", async () => {
     board = await startFakeBoard();
     daemon = await startWorkerDaemon({

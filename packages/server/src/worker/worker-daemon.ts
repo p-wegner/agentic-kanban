@@ -896,7 +896,9 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           authorization: `Bearer ${identity.workerToken}`,
         },
         body: JSON.stringify({
-          ...(draining ? { status: "draining" } : announceOnline && selfUpdate ? { status: "online" } : {}),
+          // Not gated on selfUpdate: a daemon restarted after a Ctrl+C drain without --auto-update
+          // (every Linux worker until #1374) otherwise stayed `draining` on the board forever.
+          ...(draining ? { status: "draining" } : announceOnline ? { status: "online" } : {}),
           capabilities: capabilitiesOf(opts, attestedProfiles()),
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
@@ -906,8 +908,8 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     } catch {
       return; // board unreachable â€” the WS reconnect path owns visibility for that
     }
+    if (res.ok) announceOnline = false;
     if (res.ok && selfUpdate) {
-      announceOnline = false;
       // #1338: the board advertises its build (and, for `worker update`, asks for NOW) in the
       // heartbeat response. Never let a malformed body cost this daemon its heartbeat.
       try {
