@@ -352,6 +352,18 @@ function repoPathIsLinkedWorktree(repoPath: string): boolean {
   }
 }
 
+/** #1375: an unclaimed worktree younger than this is kept (it may belong to the other board). */
+export const FRESH_WORKTREE_GRACE_MS = 30 * 60_000;
+
+/** Age of a worktree from its `.git` file, written by `git worktree add`; null when unreadable. */
+function worktreeAgeMs(worktreePath: string, nowMs: number): number | null {
+  try {
+    return nowMs - statSync(join(worktreePath, ".git")).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Sweep one project's registered worktrees and remove the ones nothing claims.
  *
@@ -378,6 +390,8 @@ export async function reconcileOrphanedWorktrees(args: {
    * worktree takes the ordinary path, which keeps it — the safe direction.
    */
   trainRows?: readonly TrainRowSummary[];
+  /** Clock for the #1375 fresh-worktree grace; defaults to now. */
+  nowMs?: number;
 }): Promise<OrphanedWorktreeReport> {
   const report: OrphanedWorktreeReport = {
     removed: [], keptWithUnshippedWork: [], keptClaimed: [],
@@ -448,6 +462,19 @@ export async function reconcileOrphanedWorktrees(args: {
         console.warn(`[worktree-reconcile] could not remove train worktree ${worktree.path}: ${outcome.message}`);
         report.keptClaimed.push(worktree.path);
       }
+      continue;
+    }
+
+    // #1375 stopgap: two boards (stable + dev) share this repo, and neither knows the other's
+    // workspaces, so a fresh 0-commit worktree of the OTHER board looks orphaned here. A young
+    // worktree is kept until it is old enough that no create or first builder turn can own it.
+    const ageMs = worktreeAgeMs(worktree.path, args.nowMs ?? Date.now());
+    if (ageMs !== null && ageMs < FRESH_WORKTREE_GRACE_MS) {
+      console.warn(
+        `[worktree-reconcile] keeping unclaimed worktree ${worktree.path} (${worktree.branch || "detached"}) — created ` +
+          `${Math.round(ageMs / 1000)}s ago, possibly by another board sharing this repo (#1375)`,
+      );
+      report.keptClaimed.push(worktree.path);
       continue;
     }
 

@@ -481,3 +481,31 @@ describe("#361: classifyWorktree", () => {
     expect(classifyWorktree({ ...base, worktreePath: WT6, worktreeBranch: "", claims: [{ workingDir: null, branch: null, status: "active" }] })).toBe("orphaned");
   });
 });
+
+/**
+ * #1375 — the stable and dev boards share one repo, and the dev board's startup reconcile
+ * deleted the stable board's 39-second-old builder worktree as "orphaned". A young unclaimed
+ * worktree is kept; the same worktree past the grace is still removed.
+ */
+describe("#1375: a fresh unclaimed worktree is kept (it may belong to the other board)", () => {
+  it("keeps it inside the grace and removes it after", async () => {
+    const { mkdtemp, rm, writeFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { FRESH_WORKTREE_GRACE_MS } = await import("../startup/orphaned-worktree-reconciler.js");
+    const wt = await mkdtemp(join(tmpdir(), "kanban-1375-wt-"));
+    await writeFile(join(wt, ".git"), "gitdir: elsewhere\n");
+    try {
+      const git = makeGit({ listWorktrees: vi.fn(async () => [{ path: REPO, branch: "master" }, { path: wt, branch: "feature/ak-1373-x" }]) });
+      const fresh = await reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims: [], git, database: guardDb() });
+      expect(fresh.removed).toEqual([]);
+      expect(fresh.keptClaimed).toEqual([wt]);
+      expect(vi.mocked(git.removeWorktree)).not.toHaveBeenCalled();
+
+      const later = await reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims: [], git, database: guardDb(), nowMs: Date.now() + FRESH_WORKTREE_GRACE_MS + 60_000 });
+      expect(later.removed).toEqual([wt]);
+    } finally {
+      await rm(wt, { recursive: true, force: true });
+    }
+  });
+});
