@@ -7,6 +7,7 @@ import { parseBuildId, sameBuild } from "../../lib/worker-update.js";
 import { compareBuilds } from "../../worker/worker-delegate.js";
 import { shimCommandFor, shimInstalled } from "../../worker/worker-shim.js";
 import type { DoctorCheck } from "./worker-doctor.js";
+import { globalLauncherFix } from "./worker-update-notes.js";
 
 /** `version` of the package a `bin/worker.js` entry belongs to; null when unreadable. */
 export function readEntryVersion(entry: string | null): string | null {
@@ -58,8 +59,8 @@ export function checkGlobalLauncher(opts: {
       status: "warn",
       detail: `the global agentic-kanban-worker is build ${globalBuild}, older than the running build ${runningBuild}; a self-update never refreshes it`,
       remedy: hasShim
-        ? `Restart manually with the stable shim: ${shim} start ... (it always runs the current build).`
-        : `No stable shim yet (it is written on the next \`worker start\`). Until then use: agentic-kanban-worker start ...  (delegates only if the global build includes #1346).`,
+        ? `${globalLauncherFix(opts.stateFile)} (the shim always runs the current build).`
+        : `No stable shim yet (it is written on the next \`worker start\`). Until then: npm i -g <path-to-agentic-kanban-*.tgz> (steps: agentic-kanban-worker setup --guide); the old global delegates only if its build includes #1346.`,
     };
   }
   if (!hasShim) {

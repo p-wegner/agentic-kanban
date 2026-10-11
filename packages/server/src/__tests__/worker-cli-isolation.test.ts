@@ -1,4 +1,4 @@
-﻿// @gate:always-run when:packages/server/src/** — walks the server src import graph from the worker CLI entry; no import edge to it (#647).
+// @gate:always-run when:packages/server/src/** — walks the server src import graph from the worker CLI entry; no import edge to it (#647).
 // The `agentic-kanban-worker` binary exists so a worker machine can run the
 // daemon WITHOUT the board's command tree — no database layer, no server
 // services. That promise is an import-graph property, and import graphs rot
@@ -111,7 +111,8 @@ describe("agentic-kanban-worker binary isolation", () => {
     // `worker/worker-pair.ts` (node builtins, commander, and modules already in this graph).
     // Raised 47 -> 48 in #1369 for `cli/commands/worker-doctor-git-prereqs.ts` (git/identity/pnpm doctor checks plus
     // the package-manager probe the heartbeat reports; node builtins only). The probe is folded in, not a second file.
-    expect(files.size).toBeLessThan(48);
+    // Raised 48 → 49 in #1373 for `cli/commands/worker-update-notes.ts` (pure strings over modules already here).
+    expect(files.size).toBeLessThan(49);
   });
 
   it("never reaches the database or board-service layer", () => {

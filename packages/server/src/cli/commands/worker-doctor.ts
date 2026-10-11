@@ -530,8 +530,8 @@ export async function checkProvider(
       `none of ${authFiles.join(", ")} found in ${dir} (consulted via ${resolved.source}) - ` +
       `either not logged in, or authenticated by an env API key this check cannot see`,
     remedy: harnessDir
-      ? `Log in into the worker's own dir: agentic-kanban-worker auth ${provider}` +
-        (provider === "claude" ? " (or: auth claude --token)" : "")
+      ? `Log in into the worker's own dir: agentic-kanban-worker auth ${provider}${harness?.authFlags(provider) ?? ""}` +
+        (provider === "claude" ? ` (or: auth claude --token${harness?.authFlags(provider) ?? ""})` : "")
       : `If sessions fail with an auth error, run: ${auth.loginCommand}`,
   });
   return checks;
@@ -577,6 +577,10 @@ export interface WorkerDoctorOptions {
   profiles?: string[];
   /** The worker-owned provider config (#1367); absent = not asked about (legacy callers). */
   harness?: WorkerHarness;
+  /** #1373: flags that disagree with the state file's recorded harness (reported, not used). */
+  harnessNotes?: string[];
+  /** #1373: the pairing predates harness modes, so it stays `inherit`. */
+  harnessLegacy?: boolean;
   gitPort?: number;
   home?: string;
   timeoutMs?: number;
@@ -652,7 +656,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
     ownVersion: readEntryVersion(opts.runningEntry ?? null) ?? resolveOwnPackageVersion(),
   }));
   checks.push(checkWorkerCheckoutTrust(opts.workRoot ?? defaultWorkerWorkRoot(), opts.home ?? homedir()));
-  if (opts.harness) checks.push(...checkHarness(opts.harness, opts.providers));
+  if (opts.harness) checks.push(...checkHarness(opts.harness, opts.providers, undefined, { notes: opts.harnessNotes, legacy: opts.harnessLegacy }));
   for (const provider of opts.providers) {
     checks.push(...(await checkProvider(provider, opts.home, undefined, opts.harness)));
   }

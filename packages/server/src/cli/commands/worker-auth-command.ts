@@ -10,8 +10,15 @@ import { createInterface } from "node:readline";
 import { Writable } from "node:stream";
 import type { Command } from "commander";
 import { readOAuthCredentials } from "../../lib/oauth-quota-core.js";
-import { createWorkerHarness, type SecretProtector, type WorkerHarness } from "../../worker/worker-harness.js";
-import { defaultWorkerStateFile } from "../../worker/worker-daemon.js";
+import { homedir } from "node:os";
+import {
+  createWorkerHarness,
+  findWorkerStateFiles,
+  resolveInspectedHarness,
+  stateFileUsesDir,
+  type SecretProtector,
+  type WorkerHarness,
+} from "../../worker/worker-harness.js";
 import { cliPathArg } from "../cli-path.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -60,6 +67,8 @@ export interface AuthDeps {
   print: (line: string) => void;
   /** Test seam: how the token is sealed at rest. Default = DPAPI on Windows, 0600 file elsewhere. */
   protector?: SecretProtector;
+  /** Test seam: the home dir holding the default state file and the registry of state files. */
+  home?: string;
 }
 
 function defaultDeps(): AuthDeps {
@@ -104,27 +113,71 @@ export interface WorkerAuthOptions {
   stateFile?: string;
 }
 
-function harnessFor(
+interface LocatedHarness {
+  harness: WorkerHarness;
+  stateFile: string;
+  /** Lines to print first: flag/record disagreements, where the state file came from. */
+  notes: string[];
+  /** The pairing still runs in inherit mode: the login goes where `--clean` will read. */
+  legacyInherit: boolean;
+}
+
+/**
+ * The harness a worker really uses (#1373): the state file decides. Without `--state-file`, a
+ * `--config-dir` is matched to the registered state file that records it (the dir and the state
+ * file are linked), so the token and the login land where that worker reads them.
+ */
+function locateHarness(
   provider: AuthProvider | undefined,
   options: WorkerAuthOptions,
-  protector?: SecretProtector,
-): WorkerHarness {
-  return createWorkerHarness(
-    {
-      stateFile: options.stateFile ?? defaultWorkerStateFile(),
-      ...(options.configDir
-        ? provider === "codex"
-          ? { codexHome: options.configDir }
-          : { claudeConfigDir: options.configDir }
-        : {}),
-    },
-    protector,
-  );
+  deps: { home?: string; protector?: SecretProtector },
+  forLogin: boolean,
+): LocatedHarness {
+  const home = deps.home ?? homedir();
+  const defaultFile = join(home, ".agentic-kanban", "worker-state.json");
+  const notes: string[] = [];
+  let stateFile = options.stateFile;
+  if (!stateFile) {
+    const matched = options.configDir && provider
+      ? findWorkerStateFiles(defaultFile, home).find((f) => stateFileUsesDir(f, provider, options.configDir!))
+      : undefined;
+    stateFile = matched ?? defaultFile;
+    if (matched) notes.push(`--config-dir ${options.configDir} is the folder worker state ${matched} records; using that state file.`);
+  }
+  const flags = options.configDir
+    ? provider === "codex" ? { codexHome: options.configDir } : { configDir: options.configDir }
+    : {};
+  const cfg = resolveInspectedHarness(stateFile, flags);
+  notes.push(...cfg.differences);
+  // A pairing still in inherit mode has no folder of its own yet: log into the one `--clean` will use.
+  const options2 = forLogin && cfg.mode === "inherit" ? { ...cfg.options, inheritUserConfig: false } : cfg.options;
+  return {
+    harness: createWorkerHarness(options2, deps.protector),
+    stateFile,
+    notes,
+    legacyInherit: cfg.mode === "inherit",
+  };
+}
+
+/** `auth --status` with no `--state-file`: the worker state files this machine knows, with their modes. */
+export function listWorkerStateFiles(home: string = homedir()): string[] {
+  const defaultFile = join(home, ".agentic-kanban", "worker-state.json");
+  const files = findWorkerStateFiles(defaultFile, home);
+  if (files.length === 0) return [`no worker state file found (default home: ${defaultFile})`];
+  const lines = [`worker state files found (${files.length}):`];
+  for (const f of files) {
+    const cfg = resolveInspectedHarness(f);
+    const dirs = [cfg.options.claudeConfigDir && `claude ${cfg.options.claudeConfigDir}`, cfg.options.codexHome && `codex ${cfg.options.codexHome}`]
+      .filter(Boolean)
+      .join(", ");
+    lines.push(`  ${f}: ${cfg.legacyInherit ? "inherit (pairing predates harness modes)" : cfg.mode}${dirs ? ` (${dirs})` : ""}`);
+  }
+  return lines;
 }
 
 /** `auth --status`: which mode each provider uses and the expiry if known. Never the secret. */
 export function renderAuthStatus(harness: WorkerHarness, nowMs: number = Date.now()): string[] {
-  const lines: string[] = [`harness mode: ${harness.mode}`];
+  const lines: string[] = [`state file: ${harness.stateFile}`, `harness mode: ${harness.mode}`];
   for (const provider of AUTH_PROVIDERS) {
     const dir = harness.dirFor(provider);
     const token = harness.tokenStatus(provider, nowMs);
@@ -156,7 +209,14 @@ export async function runWorkerAuth(
   nowMs: number = Date.now(),
 ): Promise<number> {
   if (options.status) {
-    for (const line of renderAuthStatus(harnessFor(undefined, options, deps.protector), nowMs)) deps.print(line);
+    if (!options.stateFile) {
+      // #1373 F2: without --state-file this describes the default home, which no worker may use.
+      for (const line of listWorkerStateFiles(deps.home)) deps.print(line);
+      deps.print("showing the DEFAULT home below; pass --state-file <file> for a specific worker:");
+    }
+    const located = locateHarness(undefined, options, deps, false);
+    for (const note of located.notes) deps.print(`note: ${note}`);
+    for (const line of renderAuthStatus(located.harness, nowMs)) deps.print(line);
     return 0;
   }
   const provider = providerArg as AuthProvider | undefined;
@@ -164,7 +224,15 @@ export async function runWorkerAuth(
     deps.print(`usage: agentic-kanban-worker auth <${AUTH_PROVIDERS.join("|")}> [--config-dir <path>] [--token] [--device-auth] | auth --status`);
     return 2;
   }
-  const harness = harnessFor(provider, options, deps.protector);
+  const located = locateHarness(provider, options, deps, true);
+  const harness = located.harness;
+  for (const note of located.notes) deps.print(`note: ${note}`);
+  if (located.legacyInherit) {
+    deps.print(
+      "note: this worker still runs in inherit mode (your own ~/.claude). Logging into the worker's own folder " +
+        "below; restart with --clean to switch to it.",
+    );
+  }
   const dir = harness.dirFor(provider)!;
   harness.ensure(provider);
   const env: NodeJS.ProcessEnv = { ...process.env, [provider === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME"]: dir };
@@ -191,7 +259,10 @@ export async function runWorkerAuth(
       deps.print(`Could not store the token: ${errorMessage(err)}`);
       return 1;
     }
-    deps.print("Token stored by the worker (never logged, never sent to the board). Claude sessions get it as CLAUDE_CODE_OAUTH_TOKEN.");
+    deps.print(
+      `Token stored by the worker in ${harness.tokenPath(provider)} (state file ${harness.stateFile}; never logged, never sent ` +
+        "to the board). Claude sessions of the worker started with that state file get it as CLAUDE_CODE_OAUTH_TOKEN.",
+    );
     return 0;
   }
 
@@ -212,6 +283,12 @@ export function addHarnessOptions(cmd: Command): Command {
       "Dirty mode (#1367): run sessions with THIS machine's own ~/.claude / ~/.codex and env (user hooks, " +
         "plugins, skills, global CLAUDE.md) instead of the worker's clean harness config dir. " +
         "Results then depend on the machine.",
+    )
+    .option(
+      "--clean",
+      "Clean mode (#1373): run sessions in the worker's own <state-dir>/harness config. This is the default for " +
+        "a NEW pairing; a pairing that predates harness modes keeps inherit until you pass --clean. " +
+        "The chosen mode and folders are recorded in the state file by 'start'.",
     )
     .option(
       "--config-dir <path>",
