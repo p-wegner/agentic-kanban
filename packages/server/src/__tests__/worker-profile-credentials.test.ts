@@ -26,16 +26,19 @@ function homeWith(files: Record<string, unknown | null>): string {
 }
 
 const live = { claudeAiOauth: { accessToken: "t", expiresAt: NOW + 3_600_000 } };
+const refreshable = { claudeAiOauth: { accessToken: "t", refreshToken: "r", expiresAt: NOW - 3_600_000 } };
 const expired = { claudeAiOauth: { accessToken: "t", expiresAt: NOW - 3_600_000 } };
 
 describe("credential state attestation (#1331)", () => {
-  const home = homeWith({ ".claude-live": live, ".claude-old": expired, ".claude-gone": null });
+  const home = homeWith({ ".claude-live": live, ".claude-renew": refreshable, ".claude-old": expired, ".claude-gone": null });
 
   it("attests an expired credential file as not runnable and a live one as plain", () => {
     const attestor = createWorkerProfileAttestor({ home, log: () => {} });
     const byName = new Map(attestor.current(NOW).map((a) => [a.name, a]));
     expect(byName.get("old")?.credentials).toBe("expired");
     expect(byName.get("live")?.credentials).toBeUndefined();
+    // #1399: expired access token + refresh token is renewed by claude itself
+    expect(byName.get("renew")?.credentials).toBeUndefined();
     const gone = byName.get("gone");
     if (gone) expect(gone.credentials).toBe("missing");
   });

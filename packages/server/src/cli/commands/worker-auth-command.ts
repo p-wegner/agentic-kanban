@@ -189,7 +189,7 @@ export function renderAuthStatus(harness: WorkerHarness, nowMs: number = Date.no
       state = "inherited: this machine's own login/env (inherit mode)";
     } else if (provider === "claude") {
       const read = readOAuthCredentials(dir, nowMs);
-      state = read.err === undefined
+      state = read.err === undefined || (read.err === "expired" && read.refreshable)
         ? `login in ${dir}`
         : read.err === "expired"
           ? `login in ${dir} EXPIRED`
