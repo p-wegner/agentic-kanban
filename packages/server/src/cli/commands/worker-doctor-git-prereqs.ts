@@ -184,3 +184,9 @@ export function resetPackageManagerCache(): void {
   refreshedAtMs = 0;
   inFlight = null;
 }
+
+/** The heartbeat's capability field: re-probes in the background when stale, spreads nothing before the first reading. */
+export function packageManagersField(): { packageManagers?: WorkerPackageManagers } {
+  refreshPackageManagersIfStale();
+  return cached ? { packageManagers: cached } : {};
+}
