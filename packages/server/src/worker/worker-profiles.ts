@@ -157,6 +157,8 @@ export function credentialStateOf(configDir: string, nowMs: number): WorkerProfi
   const read = readOAuthCredentials(configDir, nowMs);
   if (read.err === undefined) return undefined;
   if (read.err === "no-creds" && usesNonOAuthAuth(configDir)) return undefined;
+  // #1399: an expired access token with a refresh token is renewed by claude itself — runnable.
+  if (read.err === "expired" && read.refreshable) return undefined;
   return read.err === "expired" ? "expired" : "missing";
 }
 
