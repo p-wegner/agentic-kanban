@@ -46,6 +46,19 @@ describe("installShim", () => {
     expect(runResolver(["start", "--board", "b"]).stdout).toContain("RAN:bootstrap:start --board b");
   });
 
+  it("refuses a fallback install whose package was replaced since the shim was written (#1400)", () => {
+    const root = join(home, "global");
+    const bootstrap = writeEntry(join(root, "bin", "worker.js"), "bootstrap");
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "agentic-kanban", version: "0.1.9-dev.2be110b39" }));
+    installShim({ stateFile, fallbackEntry: bootstrap, fallbackVersion: "0.1.9-dev.2be110b39" });
+    expect(runResolver(["start"]).stdout).toContain("RAN:bootstrap");
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "agentic-kanban", version: "0.1.9-dev.acbe355e7" }));
+    const r = runResolver(["start"]);
+    expect(r.status).toBe(1);
+    expect(r.stdout).not.toContain("RAN:");
+    expect(r.stderr).toContain("Refusing to run a different build");
+  });
+
   it("after a simulated self-update the restart command starts the current build", () => {
     const bootstrap = writeEntry(join(home, "global", "bin", "worker.js"), "bootstrap");
     installShim({ stateFile, fallbackEntry: bootstrap });

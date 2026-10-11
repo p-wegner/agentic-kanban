@@ -454,7 +454,7 @@ async function runWorkerStart(rawOptions: WorkerStartOptions): Promise<void> {
     // stdout IS worker.log, so they used to land there with no timestamp. (Idempotent.)
     stampConsoleWithTimestamps();
     applyWorkerPath(options.stateFile ?? defaultWorkerStateFile()); // #1374: saved CLI dirs first, WSL /mnt entries off
-    const shim = installShim({ stateFile: options.stateFile ?? defaultWorkerStateFile(), fallbackEntry: entry });
+    const shim = installShim({ stateFile: options.stateFile ?? defaultWorkerStateFile(), fallbackEntry: entry, fallbackVersion: resolveOwnPackageVersion() ?? null });
     if (shim) console.log(`[worker] stable restart command: ${shim} start ...`);
     const logFile = workerLogFileFor(options.stateFile ?? defaultWorkerStateFile());
     console.log(`[worker] logging to ${logFile}`);
