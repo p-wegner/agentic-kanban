@@ -12,7 +12,7 @@ export interface WorkerConnectStep {
    * Stable id for the steps the UI treats specially (#1370): `install` is replaced by the OS-switched,
    * copy-button bootstrap; `repo-checkout` is rendered collapsed.
    */
-  id?: "install" | "repo-checkout";
+  id?: "prereqs" | "mint" | "install" | "reachable" | "start" | "verify" | "opt-in" | "repo-checkout";
   title: string;
   detail: string;
   /** Commands to run for this step, in order. Empty for check-only steps. */

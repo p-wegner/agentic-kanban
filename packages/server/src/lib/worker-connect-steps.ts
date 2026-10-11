@@ -15,16 +15,19 @@ import { buildWorkerBootstrap, type BootstrapOs } from "@agentic-kanban/shared/l
 export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string, os: BootstrapOs = "windows"): WorkerConnectStep[] {
   return [
     {
+      id: "prereqs",
       title: "Verify the prerequisites on this machine",
       where: "worker",
       detail:
-        "A worker runs agents with ITS OWN credentials — the board never sends any. So the provider CLI must be " +
-        "installed here and already logged in, and git must be on PATH. No board checkout is needed and the " +
-        "board's database is never accessed: the worker speaks only HTTP/WebSocket.",
+        "Only for a machine you set up by hand (the node-only flow installs and logs in everything for you). A worker " +
+        "runs agents with ITS OWN credentials — the board never sends any. So the provider CLI must be installed " +
+        "here and already logged in, and git must be on PATH. No board checkout is needed and the board's " +
+        "database is never accessed: the worker speaks only HTTP/WebSocket.",
       commands: ["git --version", "claude --version   # or: codex --version / copilot --version"],
     },
     {
-      title: "Mint a pairing token (on the board machine)",
+      id: "mint",
+      title: "Mint a pairing token",
       where: "board",
       detail:
         "Pairing tokens are single-use and expire in 10 minutes. Mint one on the board host (the mint endpoint " +
@@ -44,6 +47,7 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string, 
       commands: buildWorkerBootstrap(boardUrl, pairingToken, os).steps.flatMap((s) => s.commands),
     },
     {
+      id: "reachable",
       title: "Confirm the board is reachable from here",
       where: "worker",
       detail:
@@ -53,13 +57,15 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string, 
       commands: [`curl -s -o /dev/null -w "%{http_code}\\n" ${boardUrl}/api/health`],
     },
     {
+      id: "start",
       title: "Start the worker daemon",
       where: "worker",
       detail:
         "Registers with the board, then holds a WebSocket open for assignments. The pairing token is exchanged for " +
-        "a per-worker token saved in ~/.agentic-kanban/worker-state.json, so later runs need no --token. Set " +
-        "--labels to advertise capabilities a project can require, --providers to declare which agent CLIs work " +
-        "here, and --max-concurrency for how many sessions this machine should take. Runs in the foreground until " +
+        "a per-worker token saved in ~/.agentic-kanban/worker-state.json, so later runs need no --token. " +
+        "--auto-update keeps the worker on the board's build. Optionally add --labels to advertise capabilities a " +
+        "project can require, --providers to declare which agent CLIs work here, and --max-concurrency for how " +
+        "many sessions this machine should take. Runs in the foreground until " +
         "Ctrl+C. `agentic-kanban-worker` is the standalone binary for worker machines — it loads only the " +
         "daemon and never touches a database; on a machine that also runs the board, `agentic-kanban " +
         "worker start` is equivalent.",
@@ -69,6 +75,7 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string, 
       ],
     },
     {
+      id: "verify",
       title: "Verify the board sees this worker",
       where: "either",
       detail:
@@ -77,6 +84,7 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string, 
       commands: [`agentic-kanban-worker list --board ${boardUrl}`],
     },
     {
+      id: "opt-in",
       title: "Opt a project into dispatching work here",
       where: "board",
       detail:

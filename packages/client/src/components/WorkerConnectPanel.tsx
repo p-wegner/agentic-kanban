@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { apiPost } from "../lib/api.js";
-import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { WorkerConnectStep } from "@agentic-kanban/shared/lib/worker-connect-steps";
 import { useWorkerConnectInfoQuery } from "../hooks/useWorkerFleetQueries.js";
@@ -16,6 +15,14 @@ interface PairingResponse {
   expiresAt: string;
   fleetUrl?: string | null;
   fleetNote?: string | null;
+}
+
+/** "in 10 min (14:05)" — the token's remaining lifetime; formatRelativeTime only speaks about the past. */
+function formatExpiry(expiresAt: string, nowMs: number = Date.now()): string {
+  const at = new Date(expiresAt);
+  const minutes = Math.ceil((at.getTime() - nowMs) / 60_000);
+  const clock = at.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+  return minutes > 0 ? `in ${minutes} min (${clock})` : `at ${clock} (expired)`;
 }
 
 const WHERE_LABEL: Record<WorkerConnectStep["where"], string> = {
@@ -62,6 +69,22 @@ export function WorkerConnectPanel() {
         })
       : withToken(line);
   const bootstrap = info?.bootstrap?.[os];
+  const installStep = info?.steps.find((step) => step.id === "install");
+  const optInStep = info?.steps.find((step) => step.id === "opt-in");
+  // Everything that is not part of the linear node-only runbook (mint -> install/setup/start -> verify -> opt-in).
+  const manualSteps = (info?.steps ?? []).filter((step) => step.id !== "install" && step.id !== "opt-in");
+  const renderStepBody = (step: WorkerConnectStep) => (
+    <>
+      <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">{step.detail}</p>
+      {step.commands.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {step.commands.map((command) => (
+            <CopyCommand key={command} command={withToken(command)} />
+          ))}
+        </div>
+      )}
+    </>
+  );
 
   return (
     <div className="space-y-4">
@@ -90,7 +113,7 @@ export function WorkerConnectPanel() {
         {pairing && (
           <div className="mt-3 space-y-1">
             <div className="text-xs text-gray-500 dark:text-gray-400">
-              Expires {formatRelativeTime(pairing.expiresAt)} — single use. Filled into the commands below.
+              Expires {formatExpiry(pairing.expiresAt)} — single use. Filled into the commands below.
             </div>
             <code className="block break-all rounded bg-gray-100 dark:bg-gray-800 px-2 py-1.5 text-xs text-ink dark:text-stone-100">
               {pairing.pairingToken}
@@ -133,97 +156,106 @@ export function WorkerConnectPanel() {
         </div>
       )}
 
-      {info?.steps.map((step, i) => {
-        if (step.id === "install" && bootstrap) {
-          return (
-            <div key={step.title} className="rounded border border-gray-200 dark:border-gray-700 p-3" data-testid="worker-bootstrap">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-sm font-medium text-ink dark:text-stone-100">
-                  {i + 1}. {step.title}{" "}
-                  <span className="text-xs font-normal text-gray-500 dark:text-gray-400">({WHERE_LABEL[step.where]})</span>
+      {info && bootstrap && (
+        <div className="rounded border border-gray-200 dark:border-gray-700 p-3" data-testid="worker-bootstrap">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-medium text-ink dark:text-stone-100">
+              Set up a node-only machine{" "}
+              <span className="text-xs font-normal text-gray-500 dark:text-gray-400">({WHERE_LABEL.worker})</span>
+            </div>
+            <div className="flex gap-1" role="tablist" aria-label="Worker operating system">
+              {(Object.keys(BOOTSTRAP_OS_LABEL) as BootstrapOs[]).map((key) => (
+                <button
+                  key={key}
+                  role="tab"
+                  aria-selected={os === key}
+                  onClick={() => setOs(key)}
+                  className={`rounded border px-2 py-0.5 text-xs ${
+                    os === key
+                      ? "border-accent-600 bg-accent-600 text-white"
+                      : "border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                  }`}
+                >
+                  {BOOTSTRAP_OS_LABEL[key]}
+                </button>
+              ))}
+            </div>
+          </div>
+          {installStep && <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">{installStep.detail}</p>}
+          {!pairing && (
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+              Mint a token above to have it filled into these commands.
+            </p>
+          )}
+          {bootstrap.intro.map((line) => (
+            <p key={line} className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {line.trim()}
+            </p>
+          ))}
+          <ol className="mt-2 space-y-2">
+            {bootstrap.steps.map((s, n) => (
+              <li key={s.title} className="text-xs text-gray-700 dark:text-gray-200">
+                <div className="mb-1">
+                  {n + 1}. {s.title}
                 </div>
-                <div className="flex gap-1" role="tablist" aria-label="Worker operating system">
-                  {(Object.keys(BOOTSTRAP_OS_LABEL) as BootstrapOs[]).map((key) => (
-                    <button
-                      key={key}
-                      role="tab"
-                      aria-selected={os === key}
-                      onClick={() => setOs(key)}
-                      className={`rounded border px-2 py-0.5 text-xs ${
-                        os === key
-                          ? "border-accent-600 bg-accent-600 text-white"
-                          : "border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-                      }`}
-                    >
-                      {BOOTSTRAP_OS_LABEL[key]}
-                    </button>
+                <div className="space-y-1">
+                  {s.commands.map((command) => (
+                    <CopyCommand key={command} command={fillBootstrap(command)} />
                   ))}
                 </div>
-              </div>
-              <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">{step.detail}</p>
-              {!pairing && (
-                <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                  Mint a token above to have it filled into these commands.
-                </p>
-              )}
-              {bootstrap.intro.map((line) => (
-                <p key={line} className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  {line.trim()}
-                </p>
-              ))}
-              <ol className="mt-2 space-y-2">
-                {bootstrap.steps.map((s, n) => (
-                  <li key={s.title} className="text-xs text-gray-700 dark:text-gray-200">
-                    <div className="mb-1">
-                      {i + 1}.{n + 1} {s.title}
-                    </div>
-                    <div className="space-y-1">
-                      {s.commands.map((command) => (
-                        <CopyCommand key={command} command={fillBootstrap(command)} />
-                      ))}
-                    </div>
-                    {s.note && <div className="mt-1 text-gray-500 dark:text-gray-400">{s.note}</div>}
-                  </li>
-                ))}
-              </ol>
-              {bootstrap.footer.map((line) => (
-                <p key={line} className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  {line.trim()}
-                </p>
-              ))}
-            </div>
-          );
-        }
-        const body = (
-          <>
-            <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">{step.detail}</p>
-            {step.commands.length > 0 && (
-              <div className="mt-2 space-y-1">
-                {step.commands.map((command) => (
-                  <CopyCommand key={command} command={withToken(command)} />
-                ))}
-              </div>
-            )}
-          </>
-        );
-        if (step.id === "repo-checkout") {
-          return (
-            <details key={step.title} className="rounded border border-gray-200 dark:border-gray-700 p-3">
-              <summary className="cursor-pointer text-sm font-medium text-ink dark:text-stone-100">{step.title}</summary>
-              {body}
-            </details>
-          );
-        }
-        return (
-          <div key={step.title} className="rounded border border-gray-200 dark:border-gray-700 p-3">
-            <div className="text-sm font-medium text-ink dark:text-stone-100">
-              {i + 1}. {step.title}{" "}
-              <span className="text-xs font-normal text-gray-500 dark:text-gray-400">({WHERE_LABEL[step.where]})</span>
-            </div>
-            {body}
+                {s.note && <div className="mt-1 text-gray-500 dark:text-gray-400">{s.note}</div>}
+              </li>
+            ))}
+          </ol>
+          {bootstrap.footer.map((line) => (
+            <p key={line} className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {line.trim()}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {info && (
+        <div className="rounded border border-gray-200 dark:border-gray-700 p-3">
+          <div className="text-sm font-medium text-ink dark:text-stone-100">Verify in the Runners tab</div>
+          <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
+            Open the Runners tab: the worker should appear as <code>online</code> within a few seconds. It reads{" "}
+            <code>offline</code> if its heartbeat is older than 90s — the daemon died or lost the connection.
+          </p>
+        </div>
+      )}
+
+      {optInStep && (
+        <div className="rounded border border-gray-200 dark:border-gray-700 p-3">
+          <div className="text-sm font-medium text-ink dark:text-stone-100">
+            {optInStep.title}{" "}
+            <span className="text-xs font-normal text-gray-500 dark:text-gray-400">({WHERE_LABEL[optInStep.where]})</span>
           </div>
-        );
-      })}
+          {renderStepBody(optInStep)}
+        </div>
+      )}
+
+      {manualSteps.length > 0 && (
+        <details className="rounded border border-gray-200 dark:border-gray-700 p-3" data-testid="worker-manual-steps">
+          <summary className="cursor-pointer text-sm font-medium text-ink dark:text-stone-100">
+            Manual setup / existing machine
+          </summary>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            For a machine that already has git and a logged-in provider CLI, or when you prefer to run each step yourself.
+          </p>
+          <div className="mt-2 space-y-3">
+            {manualSteps.map((step, n) => (
+              <div key={step.title}>
+                <div className="text-sm font-medium text-ink dark:text-stone-100">
+                  {n + 1}. {step.title}{" "}
+                  <span className="text-xs font-normal text-gray-500 dark:text-gray-400">({WHERE_LABEL[step.where]})</span>
+                </div>
+                {renderStepBody(step)}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
 
       <div className="rounded border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-900/20 p-3 text-xs text-amber-800 dark:text-amber-200">
         Never <code>KANBAN_HOST=0.0.0.0</code> — the board API has no authentication. Only the fleet and git-transport

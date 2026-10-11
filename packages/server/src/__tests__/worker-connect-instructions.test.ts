@@ -36,7 +36,7 @@ describe("worker connect instructions", () => {
     const supported = new Set([
       "--board", "--token", "--name", "--labels", "--providers",
       "--max-concurrency", "--state-file", "--work-root", "--shares-filesystem",
-      "--leave-agents", "--json",
+      "--leave-agents", "--auto-update", "--json",
     ]);
     // Scope to `agentic-kanban worker …` lines: the runbook also shows unrelated
     // commands (`git --version`, a provider CLI check) whose flags are not ours.
