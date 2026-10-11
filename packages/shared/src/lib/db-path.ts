@@ -2,7 +2,13 @@ import { homedir, tmpdir } from "node:os";
 import { existsSync as fsExistsSync, statSync as fsStatSync, renameSync as fsRenameSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DatabaseSync } from "node:sqlite";
+import { createRequire } from "node:module";
+import type { DatabaseSync } from "node:sqlite";
+
+// Loaded lazily: a static `node:sqlite` import prints "ExperimentalWarning: SQLite is an
+// experimental feature" at module load, which hit every process that merely imports this file
+// (the DB-less worker CLI included) even though it never probes a database.
+const nodeRequire = createRequire(import.meta.url);
 
 /**
  * Single source of truth for resolving the kanban.db location.
@@ -143,7 +149,8 @@ function isValidLocalDb(candidate: string, stat: (p: string) => { size: number }
 export function sqliteHasBoardContent(candidate: string): boolean {
   let db: InstanceType<typeof DatabaseSync> | undefined;
   try {
-    db = new DatabaseSync(candidate, { readOnly: true });
+    const { DatabaseSync: Db } = nodeRequire("node:sqlite") as typeof import("node:sqlite");
+    db = new Db(candidate, { readOnly: true });
     return db.prepare("select 1 from projects limit 1").get() !== undefined;
   } catch {
     return true;
