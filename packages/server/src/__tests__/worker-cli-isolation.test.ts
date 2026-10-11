@@ -1,8 +1,8 @@
-// @gate:always-run when:packages/server/src/** — walks the server src import graph from the worker CLI entry; no import edge to it (#647).
+// @gate:always-run when:packages/server/src/** â€” walks the server src import graph from the worker CLI entry; no import edge to it (#647).
 // The `agentic-kanban-worker` binary exists so a worker machine can run the
-// daemon WITHOUT the board's command tree — no database layer, no server
+// daemon WITHOUT the board's command tree â€” no database layer, no server
 // services. That promise is an import-graph property, and import graphs rot
-// silently: one convenient `import { thing } from "../services/…"` re-couples
+// silently: one convenient `import { thing } from "../services/â€¦"` re-couples
 // everything and nothing visibly breaks. So walk the graph and assert it.
 
 import { describe, it, expect } from "vitest";
@@ -83,36 +83,37 @@ describe("agentic-kanban-worker binary isolation", () => {
   it("reaches a small, self-contained module graph", () => {
     expect(existsSync(ENTRY)).toBe(true);
     // Sanity: the walk actually traversed (entry + worker modules + cli command).
-    // The ceiling is a smell bound, not the guarantee — that is the FORBIDDEN_LOCAL /
-    // FORBIDDEN_PACKAGES assertions below. Raised 25 → 26 in #1038 for `cli/cli-path.ts`,
+    // The ceiling is a smell bound, not the guarantee â€” that is the FORBIDDEN_LOCAL /
+    // FORBIDDEN_PACKAGES assertions below. Raised 25 â†’ 26 in #1038 for `cli/cli-path.ts`,
     // which imports only `node:path` and resolves CLI path arguments against INIT_CWD.
-    // Raised 26 → 27 in the arch loop (ak-1094) for `lib/worker-connect-steps.ts`: the
+    // Raised 26 â†’ 27 in the arch loop (ak-1094) for `lib/worker-connect-steps.ts`: the
     // pattern-language spec forbids `server-route` (routes/workers.ts) importing
     // `server-cli` (cli/commands/worker.ts), so `buildWorkerConnectSteps` moved to pure
-    // server-lib and this CLI module now imports it instead of defining it — one more
+    // server-lib and this CLI module now imports it instead of defining it â€” one more
     // node in this graph, same pure shape (only the shared step-shape type).
-    // Raised 27 → 31 in #1338 for worker self-update: `worker/worker-updater.ts`,
+    // Raised 27 â†’ 31 in #1338 for worker self-update: `worker/worker-updater.ts`,
     // `worker/worker-versions.ts`, `worker/worker-daemon-update.ts` and `lib/worker-update.ts`.
-    // All four import only node builtins, `@agentic-kanban/shared/lib/*` and each other —
+    // All four import only node builtins, `@agentic-kanban/shared/lib/*` and each other â€”
     // the FORBIDDEN_* assertions below are what guard the db-free property.
-    // Raised 31 → 34 in #1336 for `worker/agent-process-tree.ts`, `worker/worker-agent-registry.ts`
+    // Raised 31 â†’ 34 in #1336 for `worker/agent-process-tree.ts`, `worker/worker-agent-registry.ts`
     // and `worker/worker-job-holder.ts` (node builtins, `process-exec` and the shared error helper).
     expect(files.size).toBeGreaterThan(3);
-    // Raised 34 → 36 in #1346 for `worker/worker-delegate.ts` and
+    // Raised 34 â†’ 36 in #1346 for `worker/worker-delegate.ts` and
     // `cli/commands/worker-doctor-build-check.ts` (node builtins + `worker-versions`).
-    // Raised 36 → 37 in #1350 for `worker/worker-shim.ts` (node builtins only).
-    // Raised 37 → 38 in #1326 for `cli/commands/worker-doctor-firewall-check.ts` (node builtins only).
-    // Raised 38 → 39 in #1355 for `worker/worker-control.ts` (node:http/fs/crypto + shared error-message).
-    // Raised 39 → 40 in #1358 for `cli/commands/worker-setup-guide.ts` (pure strings).
-    // Raised 40 → 41 in #1366 for `cli/commands/worker-board-build.ts` (fetch + worker-update helpers).
-    // Raised 41 → 44 in #1367 for `worker/worker-harness.ts`, `cli/commands/worker-doctor-harness.ts`
+    // Raised 36 â†’ 37 in #1350 for `worker/worker-shim.ts` (node builtins only).
+    // Raised 37 â†’ 38 in #1326 for `cli/commands/worker-doctor-firewall-check.ts` (node builtins only).
+    // Raised 38 â†’ 39 in #1355 for `worker/worker-control.ts` (node:http/fs/crypto + shared error-message).
+    // Raised 39 â†’ 40 in #1358 for `cli/commands/worker-setup-guide.ts` (pure strings).
+    // Raised 40 â†’ 41 in #1366 for `cli/commands/worker-board-build.ts` (fetch + worker-update helpers).
+    // Raised 41 â†’ 44 in #1367 for `worker/worker-harness.ts`, `cli/commands/worker-doctor-harness.ts`
     // and `cli/commands/worker-auth-command.ts` (node builtins, commander, oauth-quota-core, shared error-message).
-    // Raised 44 → 47 in #1368 for `cli/commands/worker-setup.ts`, `worker-setup-installers.ts` and
+    // Raised 44 â†’ 47 in #1368 for `cli/commands/worker-setup.ts`, `worker-setup-installers.ts` and
     // `worker/worker-pair.ts` (node builtins, commander, and modules already in this graph).
     // Raised 47 -> 48 in #1369 for `cli/commands/worker-doctor-git-prereqs.ts` (git/identity/pnpm doctor checks plus
     // the package-manager probe the heartbeat reports; node builtins only). The probe is folded in, not a second file.
-    // Raised 48 → 49 in #1373 for `cli/commands/worker-update-notes.ts` (pure strings over modules already here).
-    expect(files.size).toBeLessThan(49);
+    // Raised 48 â†’ 49 in #1373 for `cli/commands/worker-update-notes.ts` (pure strings over modules already here).
+    // Raised 49 -> 50 in #1376 for `worker/worker-socket-keepalive.ts` (ping/pong deadline; imports only `ws`).
+    expect(files.size).toBeLessThan(50);
   });
 
   it("never reaches the database or board-service layer", () => {
@@ -122,7 +123,7 @@ describe("agentic-kanban-worker binary isolation", () => {
     expect(
       offenders,
       `The worker binary's import graph reached board-only modules:\n${offenders.join("\n")}\n` +
-        "That re-introduces the DB/server load this binary exists to avoid — break the import.",
+        "That re-introduces the DB/server load this binary exists to avoid â€” break the import.",
     ).toEqual([]);
   });
 
@@ -137,7 +138,7 @@ describe("agentic-kanban-worker binary isolation", () => {
   it("only uses shared subpaths that are dependency-free", () => {
     const sharedSpecs = [...packages].filter((p) => p.startsWith("@agentic-kanban/shared"));
     for (const spec of sharedSpecs) {
-      // Deep paths only — the barrel re-exports the whole library surface.
+      // Deep paths only â€” the barrel re-exports the whole library surface.
       expect(spec, `worker code must import shared deep paths, not the barrel: ${spec}`)
         .toMatch(/^@agentic-kanban\/shared\/lib\//);
     }

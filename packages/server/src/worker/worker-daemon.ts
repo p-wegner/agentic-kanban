@@ -36,6 +36,7 @@ import { homedir, hostname, platform, arch } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
+import { dropSocketIfBoardHasNone, startSocketKeepalive } from "./worker-socket-keepalive.js";
 import {
   parseBoardToWorkerMessage,
   WORKER_PROTOCOL_VERSION,
@@ -136,7 +137,7 @@ export interface WorkerDaemonOptions {
   stateFile?: string;
   /** Root for git-transport clones/checkouts. Defaults to ~/.agentic-kanban/worker. */
   workRoot?: string;
-  heartbeatIntervalMs?: number;
+  heartbeatIntervalMs?: number; pingIntervalMs?: number; pongTimeoutMs?: number; // #1376: WS ping cadence / pong deadline
   log?: (line: string) => void;
   /** How long `stop()` waits for in-flight result pushes (#754). */
   drainTimeoutMs?: number;
@@ -545,8 +546,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   /** Re-pairings attempted, and whether one is in flight (#754 â€” see handleUnauthorized). */
   let repairAttempts = 0;
   let repairing = false;
-  let reconnectDelay = RECONNECT_MIN_MS;
-  /** Last moment a socket to the board was open (#1344); null until the first successful connect. */
+  let reconnectDelay = RECONNECT_MIN_MS;  /** Last moment a socket to the board was open (#1344); null until the first successful connect. */
   let lastReachableAt: number | null = null;
   /**
    * The one pending reconnect timer (#858). Held so a new trigger can tell that a retry is
@@ -755,6 +755,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       }
     });
 
+    startSocketKeepalive(socket, opts, log); // #1376
     socket.on("message", (data) => {
       // `data` is ws's RawData: Buffer | ArrayBuffer | Buffer[]. A bare `.toString()` on the
       // array case yields comma-joined garbage rather than the frame (no-base-to-string).
@@ -909,11 +910,12 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       return; // board unreachable â€” the WS reconnect path owns visibility for that
     }
     if (res.ok) announceOnline = false;
-    if (res.ok && selfUpdate) {
+    if (res.ok) {
       // #1338: the board advertises its build (and, for `worker update`, asks for NOW) in the
       // heartbeat response. Never let a malformed body cost this daemon its heartbeat.
       try {
-        selfUpdate.onHeartbeatResponse(await res.json());
+        const body = dropSocketIfBoardHasNone(await res.json(), ws, opts.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS, log);
+        selfUpdate?.onHeartbeatResponse(body);
       } catch {
         /* an older board answers {ok:true} only */
       }

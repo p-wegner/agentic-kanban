@@ -28,6 +28,7 @@ import {
   listWorkerEvents,
   recordWorkerEvent,
 } from "../services/worker-events.service.js";
+import { getWorkerFleet } from "../services/worker-fleet.service.js";
 import { classifyWorkerDrop } from "../services/worker-drop-diagnosis.js";
 import { getPreferenceValue } from "../repositories/session-lifecycle.repository.js";
 import { listWorkerBranchAssignments } from "../repositories/worker.repository.js";
@@ -503,7 +504,15 @@ function registerWorkerFacingRoutes(
     } catch {
       /* no source tree / git unavailable: advertise nothing, the heartbeat still succeeds */
     }
-    return c.json({ ok: true, boardBuildId, updateNow: result.updateNow === true });
+    // #1376: does the board hold a WebSocket for this worker? `false` tells a worker whose socket
+    // is half-open (board restarted, RST never arrived) to drop it and reconnect now.
+    let socket = true;
+    try {
+      socket = getWorkerFleet(database).connections.isConnected(c.req.param("id"));
+    } catch {
+      /* fleet unavailable: say nothing rather than provoke a reconnect */
+    }
+    return c.json({ ok: true, boardBuildId, updateNow: result.updateNow === true, socket });
   });
 
   // #1338 (subsumes #1327): the board serves its own worker build to a paired worker. Both
