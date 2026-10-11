@@ -187,11 +187,11 @@ export function defaultWorkerStateFile(): string {
   return join(homedir(), ".agentic-kanban", "worker-state.json");
 }
 
-function normalizeBoardUrl(url: string): string {
+export function normalizeBoardUrl(url: string): string {
   return url.replace(/\/+$/, "");
 }
 
-function loadState(stateFile: string): WorkerStateFile {
+export function loadState(stateFile: string): WorkerStateFile {
   try {
     if (existsSync(stateFile)) {
       return JSON.parse(readFileSync(stateFile, "utf8")) as WorkerStateFile;
@@ -202,7 +202,7 @@ function loadState(stateFile: string): WorkerStateFile {
   return { boards: {} };
 }
 
-function saveIdentity(stateFile: string, boardUrl: string, identity: WorkerIdentity): void {
+export function saveIdentity(stateFile: string, boardUrl: string, identity: WorkerIdentity): void {
   const state = loadState(stateFile);
   state.boards[boardUrl] = identity;
   mkdirSync(dirname(stateFile), { recursive: true });
@@ -303,7 +303,7 @@ export class WorkerRegistrationRefused extends Error {
   }
 }
 
-async function registerWithBoard(
+export async function registerWithBoard(
   opts: WorkerDaemonOptions,
   boardUrl: string,
   name: string,

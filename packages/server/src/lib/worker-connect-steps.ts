@@ -78,7 +78,10 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string):
         "daemon and never touches a database; on a machine that also runs the board, `agentic-kanban " +
         "worker start` is equivalent.",
       commands: [
-        `agentic-kanban-worker start --board ${boardUrl} --token ${pairingToken} \\`,
+        `# first: sets up git/claude/codex (asks before installing), logs in, pairs, runs doctor`,
+        `agentic-kanban-worker setup --board ${boardUrl} --token ${pairingToken}`,
+        `# then run the daemon:`,
+        `agentic-kanban-worker start --board ${boardUrl} \\`,
         `  --name "$(hostname)" --labels docker,linux --providers claude --max-concurrency 2`,
       ],
     },

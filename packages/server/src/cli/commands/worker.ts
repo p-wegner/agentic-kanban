@@ -30,7 +30,8 @@ import type { IssuePlacementReport, SessionPlacementRecord } from "../../lib/pla
 // worker binary's entry point (docs/worker-fleet.md §3).
 import { renderDoctorReport, runBoardDoctor, runWorkerDoctor } from "./worker-doctor.js";
 // #1358 — first-install guide + bootstrap commands. Pure strings, db-free.
-import { renderBootstrapSteps, renderWorkerSetupGuide } from "./worker-setup-guide.js";
+import { renderBootstrapSteps } from "./worker-setup-guide.js";
+import { registerWorkerSetup } from "./worker-setup.js";
 // #880 — the read-only update-check. Db-free like the doctor: also part of the
 // standalone worker binary.
 import { renderUpdateCheckReport, runWorkerUpdateCheck } from "./worker-update-check.js";
@@ -573,17 +574,23 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       console.log(`Pairing token (single-use, expires ${body.expiresAt}):`);
       console.log(`  ${body.pairingToken}`);
       console.log(`\nOn the worker machine (already installed):`);
-      console.log(`  agentic-kanban-worker start --board ${body.fleetUrl || "<board-url>"} --token ${body.pairingToken}`);
+      console.log(`  agentic-kanban-worker setup --board ${body.fleetUrl || "<board-url>"} --token ${body.pairingToken}`);
       console.log(`\n${renderBootstrapSteps(body.fleetUrl || "<board-url>", body.pairingToken)}`);
       if (body.fleetNote) console.log(`\nNote: ${body.fleetNote}`);
     });
 
-  workerCmd
-    .command("setup")
-    .description("Print the first-install guide for a worker machine (works offline, ships in the package).")
-    .action(() => {
-      console.log(renderWorkerSetupGuide());
-    });
+  // #1368: `setup` does the setup (`setup --guide` prints the offline guide).
+  registerWorkerSetup(workerCmd, {
+    start: (o) =>
+      runWorkerStart({
+        board: o.board ?? DEFAULT_BOARD_URL,
+        token: o.token,
+        name: o.name,
+        providers: o.providers,
+        stateFile: o.stateFile,
+        configDir: o.configDir,
+      }),
+  });
 
   const startCmd = workerCmd
     .command("start")

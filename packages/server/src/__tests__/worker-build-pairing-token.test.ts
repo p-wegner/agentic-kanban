@@ -89,13 +89,13 @@ describe("worker pair bootstrap output + setup guide (#1358)", () => {
     expect(out).toContain("http://100.1.2.3:3002/api/workers/build/tarball");
     expect(out).toContain("sha256");
     expect(out).toContain("npm i -g");
-    expect(out).toContain("start --board http://100.1.2.3:3002 --token TOK123");
+    expect(out).toContain("setup --board http://100.1.2.3:3002 --token TOK123");
     // #1364: `curl -fsS -H "..."` fails in Windows PowerShell 5.1, where `curl` is Invoke-WebRequest.
     expect(out).toContain("curl.exe");
   });
 
   it("cites the setup verb a WORKER machine actually has (#1364)", () => {
-    expect(WORKER_SETUP_HELP).toBe("`agentic-kanban-worker setup`");
+    expect(WORKER_SETUP_HELP).toBe("`agentic-kanban-worker setup --guide`");
   });
 
   it("ships a setup guide with the sections doctor remedies cite", () => {

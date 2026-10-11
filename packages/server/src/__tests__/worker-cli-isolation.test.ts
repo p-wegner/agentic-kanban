@@ -107,7 +107,9 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 40 → 41 in #1366 for `cli/commands/worker-board-build.ts` (fetch + worker-update helpers).
     // Raised 41 → 44 in #1367 for `worker/worker-harness.ts`, `cli/commands/worker-doctor-harness.ts`
     // and `cli/commands/worker-auth-command.ts` (node builtins, commander, oauth-quota-core, shared error-message).
-    expect(files.size).toBeLessThan(44);
+    // Raised 44 → 47 in #1368 for `cli/commands/worker-setup.ts`, `worker-setup-installers.ts` and
+    // `worker/worker-pair.ts` (node builtins, commander, and modules already in this graph).
+    expect(files.size).toBeLessThan(47);
   });
 
   it("never reaches the database or board-service layer", () => {
