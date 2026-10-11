@@ -213,7 +213,8 @@ export function createWorkerHarness(
  */
 export function applyHarnessToSpec(spec: WorkerLaunchSpec, harness: WorkerHarness | undefined): WorkerLaunchSpec {
   if (!harness || harness.mode === "inherit") return spec;
-  const provider = spec.intent?.provider;
+  // The board's launch intent carries the legacy executor id "claude-code" for claude.
+  const provider = spec.intent?.provider === "claude-code" ? "claude" : spec.intent?.provider;
   if (!provider) return spec;
   const profiled = Boolean(spec.intent?.profile?.trim());
   const env: Record<string, string> = { ...(spec.env ?? {}) };

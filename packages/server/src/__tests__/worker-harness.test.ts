@@ -83,6 +83,15 @@ describe("worker harness (#1367)", () => {
     expect(settingsHaveHooks(settings)).toBe(false);
   });
 
+  it("clean mode also applies to the board's real claude intent id, 'claude-code'", () => {
+    // Round 1 on a fresh WSL worker: the board sends provider "claude-code", the harness keyed
+    // on "claude" only, so the session ran in ~/.claude and failed 'Not logged in'.
+    const harness = createWorkerHarness({ stateFile: stateFileIn() }, fakeProtector);
+    const out = applyHarnessToSpec(fakeSpec("claude-code", { ...cleanEnv, CLAUDE_CONFIG_DIR: "/home/owner/.claude" }), harness);
+    expect(out.env.CLAUDE_CONFIG_DIR).toBe(join(harness.root, "claude"));
+    expect(out.args).toContain("--strict-mcp-config");
+  });
+
   it("clean mode: codex gets CODEX_HOME in the worker's dir and no claude-only flag", async () => {
     const harness = createWorkerHarness({ stateFile: stateFileIn() }, fakeProtector);
     const dump = await runSession(fakeSpec("codex"), harness);
