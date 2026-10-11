@@ -20,6 +20,8 @@ import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-proto
 import { formatBuildFreshness, type WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { cliPathArg } from "../cli-path.js";
+import { createWorkerHarness } from "../../worker/worker-harness.js";
+import { addHarnessOptions, registerWorkerAuth } from "./worker-auth-command.js";
 // Type-only + a db-free formatter: this module is also the standalone worker
 // binary's entry point, which must never pull in the database graph.
 import { renderPlacementExplanation } from "../../lib/placement-explanation-format.js";
@@ -400,6 +402,10 @@ interface WorkerStartOptions {
   workRoot?: string;
   sharesFilesystem?: boolean;
   leaveAgents?: boolean;
+  /** #1367 */
+  inheritUserConfig?: boolean;
+  configDir?: string;
+  codexHome?: string;
   autoUpdate?: boolean;
   /** commander's `--no-delegate` negation: false when the flag was passed (#1346). */
   delegate?: boolean;
@@ -464,6 +470,12 @@ async function runWorkerStart(options: WorkerStartOptions): Promise<void> {
       // list — including the single value `none` — is the operator's own narrowing, which
       // is why the CLI does not substitute a default here.
       profiles: splitList(options.profiles),
+      harness: createWorkerHarness({
+        stateFile: options.stateFile ?? defaultWorkerStateFile(),
+        inheritUserConfig: options.inheritUserConfig,
+        claudeConfigDir: options.configDir,
+        codexHome: options.codexHome,
+      }),
       maxConcurrency: options.maxConcurrency,
       stateFile: options.stateFile,
       workRoot: options.workRoot,
@@ -573,7 +585,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       console.log(renderWorkerSetupGuide());
     });
 
-  workerCmd
+  const startCmd = workerCmd
     .command("start")
     .description(
       "Run the worker daemon: register with the board (first run needs --token from 'worker pair'), " +
@@ -627,7 +639,10 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         `(default ${Math.round(DEFAULT_DRAIN_TIMEOUT_MS / 1000)})`,
       (v) => parseInt(v, 10),
     )
-    .action(runWorkerStart);
+    ;
+  addHarnessOptions(startCmd).action(runWorkerStart);
+
+  registerWorkerAuth(workerCmd);
 
   workerCmd
     .command("instructions")
@@ -794,7 +809,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
   // board how it looks from there", because every owner route is mounted only on the
   // loopback board app. A single `doctor` claiming to check both ends would have to lie
   // about one of them.
-  workerCmd
+  const doctorCmd = workerCmd
     .command("doctor")
     .description(
       "Run ON THE WORKER MACHINE: self-test the whole chain to the board — fleet port reachable, " +
@@ -808,19 +823,28 @@ export function registerWorkerSubcommands(workerCmd: Command) {
     .option("--git-port <n>", "KANBAN_GIT_HTTP_PORT, to check the git transport too", (v) => parseInt(v, 10))
     .option("--state-file <path>", `Pairing state file, relative to the directory you run the command in (default: ${defaultWorkerStateFile()})`, cliPathArg)
     .option("--work-root <path>", "Worker work root (same as `worker start`), relative to the directory you run the command in (default: ~/.agentic-kanban/worker)", cliPathArg)
-    .option("--json", "Output the report as JSON")
-    .action(async (options: {
+    .option("--json", "Output the report as JSON");
+  addHarnessOptions(doctorCmd).action(async (options: {
       board: string;
       providers: string;
       profiles?: string;
       gitPort?: number;
       stateFile?: string;
       workRoot?: string;
+      inheritUserConfig?: boolean;
+      configDir?: string;
+      codexHome?: string;
       json?: boolean;
     }) => {
       const report = await runWorkerDoctor({
         boardUrl: options.board,
         stateFile: options.stateFile ?? defaultWorkerStateFile(),
+        harness: createWorkerHarness({
+          stateFile: options.stateFile ?? defaultWorkerStateFile(),
+          inheritUserConfig: options.inheritUserConfig,
+          claudeConfigDir: options.configDir,
+          codexHome: options.codexHome,
+        }),
         workRoot: options.workRoot ?? defaultWorkerWorkRoot(),
         runningEntry: resolveWorkerEntry(),
         providers: splitList(options.providers) ?? ["claude"],

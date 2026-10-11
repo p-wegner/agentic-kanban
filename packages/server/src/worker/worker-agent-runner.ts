@@ -45,6 +45,7 @@ import { resolveSpecCommand } from "./worker-command-resolver.js";
 import { applyProfileToSpec } from "./worker-profiles.js";
 import { FLEET_MCP_TOKEN_ENV_VAR } from "@agentic-kanban/shared/lib/worker-protocol";
 import { createAgentTreeTracker } from "./agent-process-tree.js";
+import { applyHarnessToSpec, type WorkerHarness } from "./worker-harness.js";
 
 export type SendToBoard = (message: WorkerToBoardMessage) => void;
 
@@ -76,6 +77,11 @@ export interface WorkerAgentRunnerOptions {
    * {@link DEFAULT_PUSH_RETRY_DELAYS_MS}.
    */
   pushRetryDelaysMs?: number[];
+  /**
+   * The worker-owned provider config (#1367). Absent = inherit mode: the session sees this
+   * machine's own `~/.claude` and env exactly as before.
+   */
+  harness?: WorkerHarness;
 }
 
 /**
@@ -427,7 +433,9 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       send({ type: "assign_failed", sessionId, error: resolvedProfile.error });
       return;
     }
-    const spec = resolvedProfile.spec;
+    // #1367: unless the worker runs in inherit mode, the session gets the worker's own clean
+    // harness config dir, the stored token (if any) and `--strict-mcp-config`.
+    const spec = applyHarnessToSpec(resolvedProfile.spec, options.harness);
 
     // #747: the board no longer decides how to invoke the agent on a machine it cannot
     // see. When the spec carries a launch INTENT, the executable and the shell decision are

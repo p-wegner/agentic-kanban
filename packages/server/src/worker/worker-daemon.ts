@@ -51,6 +51,7 @@ import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
 import { cleanUpBeforeStart } from "./agent-process-tree.js";
 import { attestProviderAuth } from "../cli/commands/worker-doctor.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
+import type { WorkerHarness } from "./worker-harness.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { createDaemonSelfUpdate, type DaemonSelfUpdate } from "./worker-daemon-update.js";
 import { startWorkerControlServer } from "./worker-control.js";
@@ -127,6 +128,8 @@ export interface WorkerDaemonOptions {
   profiles?: string[];
   /** Override the home dir profile discovery reads. Test seam; a service install may set it. */
   profileHome?: string;
+  /** The worker-owned provider config (#1367). Absent = inherit mode (today's behaviour). */
+  harness?: WorkerHarness;
   maxConcurrency?: number;
   /** Defaults to ~/.agentic-kanban/worker-state.json. */
   stateFile?: string;
@@ -247,10 +250,14 @@ function capabilitiesOf(
  * `checkProvider` found; a provider that attests is not logged here (see call sites for the
  * change-only summary line used on re-checks).
  */
-export async function attestProviders(requested: string[], log: (line: string) => void): Promise<string[]> {
+export async function attestProviders(
+  requested: string[],
+  log: (line: string) => void,
+  harness?: WorkerHarness,
+): Promise<string[]> {
   const attested: string[] = [];
   for (const provider of requested) {
-    const result = await attestProviderAuth(provider);
+    const result = await attestProviderAuth(provider, undefined, undefined, harness);
     if (result.attested) {
       attested.push(provider);
       continue;
@@ -507,7 +514,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   const declaredProviders = opts.providers;
   let advertisedProviders = declaredProviders;
   if (opts.attestProviders !== false && declaredProviders && declaredProviders.length > 0) {
-    advertisedProviders = await attestProviders(declaredProviders, log);
+    advertisedProviders = await attestProviders(declaredProviders, log, opts.harness);
     opts = { ...opts, providers: advertisedProviders };
   }
 
@@ -636,6 +643,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     boardUrl,
     workRoot: opts.workRoot,
     maxConcurrency: opts.maxConcurrency,
+    ...(opts.harness ? { harness: opts.harness } : {}),
   });
 
   /**
@@ -857,7 +865,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     // excluded provider's reason each beat (attestProviders already did that once, at
     // startup, and `worker doctor` gives the detail on demand).
     if (opts.attestProviders !== false && declaredProviders && declaredProviders.length > 0) {
-      const reattested = await attestProviders(declaredProviders, () => {});
+      const reattested = await attestProviders(declaredProviders, () => {}, opts.harness);
       if (reattested.join(",") !== (advertisedProviders ?? []).join(",")) {
         log(
           `[worker] provider attestation changed: now advertising [${reattested.join(", ") || "none"}] ` +
