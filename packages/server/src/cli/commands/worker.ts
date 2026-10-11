@@ -14,6 +14,7 @@ import { loadProfileAliases } from "../../worker/worker-profile-aliases.js";
 import { isSupervised, relaunchWorker, stampConsoleWithTimestamps, workerLogFileFor } from "../../worker/worker-updater.js";
 import { resolveDelegation, runDelegated } from "../../worker/worker-delegate.js";
 import { installShim } from "../../worker/worker-shim.js";
+import { repinLegacyShim } from "../../worker/worker-repin.js";
 import { applyWorkerUpdate } from "../../worker/worker-control.js";
 import type { WorkerUpdateReport } from "../../lib/worker-update.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "../../worker/worker-repo.js";
@@ -454,6 +455,9 @@ async function runWorkerStart(rawOptions: WorkerStartOptions): Promise<void> {
     // stdout IS worker.log, so they used to land there with no timestamp. (Idempotent.)
     stampConsoleWithTimestamps();
     applyWorkerPath(options.stateFile ?? defaultWorkerStateFile()); // #1374: saved CLI dirs first, WSL /mnt entries off
+    // #1402: an old-style shim (pre-#1400) is repinned to a private copy of this build before it is rewritten.
+    const pinned = repinLegacyShim(options.stateFile ?? defaultWorkerStateFile(), entry);
+    if (pinned) console.log(`[worker] pinned this build (${pinned}) in the versions dir; later global installs no longer change what the shim runs`);
     const shim = installShim({ stateFile: options.stateFile ?? defaultWorkerStateFile(), fallbackEntry: entry, fallbackVersion: resolveOwnPackageVersion() ?? null });
     if (shim) console.log(`[worker] stable restart command: ${shim} start ...`);
     const logFile = workerLogFileFor(options.stateFile ?? defaultWorkerStateFile());
