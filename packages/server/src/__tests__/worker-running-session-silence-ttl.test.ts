@@ -1,4 +1,4 @@
-// #883 — the running half of a worker's load had no liveness bound.
+﻿// #883 — the running half of a worker's load had no liveness bound.
 //
 // `assignedSessionIds()` is what capacity decisions read, and it is the union of two
 // sets that aged completely differently: `pendingSessionIds` expired on a TTL (#248,
@@ -28,6 +28,7 @@ function fakeRegistry(): WorkerRegistry {
     // #1027: `hello` reverse-reconciles the worker's attested profiles, so the stub has to
     // answer it — the `hello` case below drives the real `handleMessage`.
     noteAttestedProfiles: vi.fn(),
+    notePackageManagers: vi.fn(),
   } as unknown as WorkerRegistry;
 }
 

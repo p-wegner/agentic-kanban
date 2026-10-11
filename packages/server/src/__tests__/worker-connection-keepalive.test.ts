@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+﻿import { describe, it, expect, vi, afterEach } from "vitest";
 import type { WSContext } from "hono/ws";
 import { createWorkerConnectionManager, WS_KEEPALIVE_MAX_MISSED } from "../services/worker-connection.service.js";
 import type { WorkerRegistry } from "../services/worker-registry.service.js";
 
 function fakeRegistry(): WorkerRegistry {
-  return { onRevoke: () => {}, touchHeartbeat: async () => {}, noteAttestedProfiles: () => {} } as unknown as WorkerRegistry;
+  return { onRevoke: () => {}, touchHeartbeat: async () => {}, noteAttestedProfiles: () => {}, notePackageManagers: () => {} } as unknown as WorkerRegistry;
 }
 
 /** A socket whose peer is gone: pings are accepted, pongs never come back. */

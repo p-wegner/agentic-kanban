@@ -18,7 +18,7 @@
 // depend only on this file. Keep this module free of anything that reaches the db.
 import type { ProviderName } from "../services/agent-provider/types.js";
 import type { WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
-import type { WorkerCapacityInfo, WorkerProfileAttestation } from "@agentic-kanban/shared/lib/worker-protocol";
+import type { WorkerCapacityInfo, WorkerPackageManagers, WorkerProfileAttestation } from "@agentic-kanban/shared/lib/worker-protocol";
 import type { WorkerUpdateReport } from "./worker-update.js";
 import type { SessionPhaseTimings } from "@agentic-kanban/shared/lib/worker-protocol";
 
@@ -179,6 +179,8 @@ export interface WorkerEligibility {
    * profile-restricted project reads as #651's refusal, never as "any profile".
    */
   attestedProfiles?: WorkerProfileAttestation[];
+  /** Package managers this worker reported on PATH (#1369). Absent = it has not said. */
+  packageManagers?: WorkerPackageManagers;
   /** Sessions the board currently has assigned to this worker. `load` is its length. */
   assignedSessionIds: string[];
   /**

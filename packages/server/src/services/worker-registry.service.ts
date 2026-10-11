@@ -26,6 +26,8 @@ import {
   checkProtocolCompatibility,
   WORKER_PROTOCOL_VERSION,
   parseWorkerProfileAttestations,
+  parseWorkerPackageManagers,
+  type WorkerPackageManagers,
   type WorkerCapabilities,
   type WorkerCapacityInfo,
   type WorkerProfileAttestation,
@@ -102,6 +104,8 @@ export interface WorkerView extends Omit<WorkerRow, "tokenHash"> {
    * column would be read as a permission.
    */
   profiles?: WorkerProfileAttestation[];
+  /** Package managers on this worker's PATH, as of its last hello/heartbeat (#1369). In memory like `capacity`. */
+  packageManagers?: WorkerPackageManagers;
   /**
    * What this worker last said about its self-update (#1338): `current`, `updating` (with the
    * phase) or `failed` (with the reason). In memory like `capacity`: a property of the running
@@ -151,6 +155,9 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   /** This worker's attested profiles (#1027). See WorkerView for why not a column. */
   const reportedProfiles = new Map<string, WorkerProfileAttestation[]>();
+
+  /** Package managers each worker has on PATH (#1369). See WorkerView for why not a column. */
+  const reportedPackageManagers = new Map<string, WorkerPackageManagers>();
 
   /** Self-update state each worker last reported, and the workers asked to update NOW (#1338). */
   const reportedUpdates = new Map<string, WorkerUpdateReport>();
@@ -310,6 +317,7 @@ export function createWorkerRegistry(database: Database = realDb) {
       // #1027: re-declared every beat, so a login removed on the worker stops being a
       // permission on the board within one heartbeat rather than at the next re-pairing.
       noteAttestedProfiles(workerId, opts.capabilities.profiles);
+      notePackageManagers(workerId, opts.capabilities.packageManagers);
     }
     if (opts?.update) {
       reportedUpdates.set(workerId, opts.update);
@@ -360,6 +368,7 @@ export function createWorkerRegistry(database: Database = realDb) {
       noteEffectiveStatus(row, current);
       const capacity = reportedCapacity.get(row.id);
       const profiles = reportedProfiles.get(row.id);
+      const packageManagers = reportedPackageManagers.get(row.id);
       const update = reportedUpdates.get(row.id);
       return {
         ...safe,
@@ -368,6 +377,7 @@ export function createWorkerRegistry(database: Database = realDb) {
         ...(reported?.workerVersion !== undefined ? { workerVersion: reported.workerVersion } : {}),
         ...(capacity ? { capacity } : {}),
         ...(profiles ? { profiles } : {}),
+        ...(packageManagers ? { packageManagers } : {}),
         ...(update ? { update } : {}),
         ...(updateRequests.has(row.id) ? { updateRequested: true } : {}),
       };
@@ -386,6 +396,13 @@ export function createWorkerRegistry(database: Database = realDb) {
     const parsed = Array.isArray(profiles) ? parseWorkerProfileAttestations(profiles) : undefined;
     if (parsed && parsed.length > 0) reportedProfiles.set(workerId, parsed);
     else reportedProfiles.delete(workerId);
+  }
+
+  /** Record (or clear) a worker's reported package managers (#1369). A REPLACE: absent = unknown. */
+  function notePackageManagers(workerId: string, raw: unknown): void {
+    const parsed = parseWorkerPackageManagers(raw);
+    if (parsed) reportedPackageManagers.set(workerId, parsed);
+    else reportedPackageManagers.delete(workerId);
   }
 
   /**
@@ -416,6 +433,7 @@ export function createWorkerRegistry(database: Database = realDb) {
     reportedVersions.delete(workerId);
     reportedCapacity.delete(workerId);
     reportedProfiles.delete(workerId);
+    reportedPackageManagers.delete(workerId);
     reportedUpdates.delete(workerId);
     updateRequests.delete(workerId);
     lastEffectiveStatus.delete(workerId);
@@ -434,7 +452,7 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   return {
     mintPairingToken, registerWorker, authenticateWorker, heartbeat, touchHeartbeat,
-    listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles,
+    listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles, notePackageManagers,
     requestUpdate, authenticateAnyWorker, isPairingTokenValid,
   };
 }

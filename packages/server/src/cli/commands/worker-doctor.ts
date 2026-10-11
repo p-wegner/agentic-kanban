@@ -425,12 +425,15 @@ export {
   readTrustedProjectPaths,
 } from "./worker-doctor-checkout-trust.js";
 
-/** Check 5 — git on PATH. The transport is useless without it. */
-async function checkGit(): Promise<DoctorCheck> {
-  const probe = await probeCommand("git", ["--version"]);
-  if (!probe.found) return bad("git on PATH", "git is not on this machine's PATH", "Install git and re-open the shell.");
-  return ok("git on PATH", probe.output.split("\n")[0] ?? "git present");
-}
+// Check 5 — git on PATH (and new enough), plus the identity / safe.directory / pnpm prerequisites
+// a clean machine lacks (#1369) — lives in `worker-doctor-git-prereqs.ts`.
+import {
+  checkGitIdentity,
+  checkGitInstalled,
+  checkGitSafeDirectory,
+  checkPackageManager,
+} from "./worker-doctor-git-prereqs.js";
+export { checkGitInstalled, checkGitIdentity, checkGitSafeDirectory, checkPackageManager, parseGitVersion } from "./worker-doctor-git-prereqs.js";
 
 // #860's Node-floor check lives in its own module: this file sits exactly at the
 // god-module gate's 20-declaration ceiling (#889), and the check pushed it to 21.
@@ -635,7 +638,11 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   checks.push(await checkHeartbeat(boardUrl, identity));
   checks.push(await checkWebSocket(boardUrl, identity, opts.timeoutMs));
   checks.push(await checkGitTransport(boardUrl, opts.gitPort));
-  checks.push(await checkGit());
+  checks.push(await checkGitInstalled(probeCommand));
+  checks.push(await checkGitIdentity(probeCommand));
+  const safeDirectory = await checkGitSafeDirectory(probeCommand);
+  if (safeDirectory) checks.push(safeDirectory);
+  checks.push(await checkPackageManager());
   checks.push(checkNodeVersion());
   checks.push(checkWorkerBuild(opts.stateFile, opts.runningEntry ?? null));
   checks.push(checkGlobalLauncher({ stateFile: opts.stateFile, runningEntry: opts.runningEntry ?? null }));

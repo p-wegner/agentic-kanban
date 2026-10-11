@@ -30,6 +30,7 @@ import type {
   PlacementCheckOutcome,
   WorkerEligibility,
 } from "../lib/placement-explain.types.js";
+import { missingPackageManagerNotes, requiredPackageManagerFor } from "./placement-package-manager.js";
 import { remoteDispatchBlockedByRepoShape } from "./worker-transport-support.service.js";
 import {
   remoteDispatchBlockedByPlacementBias,
@@ -202,6 +203,10 @@ const checkEligibleWorker: Evaluator = async (ctx) => {
     };
   }
   ctx.workerId = workerId;
+  // #1369: a lockfile whose package manager the worker lacks fails setup at assign time.
+  const project = await getProjectById(ctx.projectId, ctx.database);
+  const required = requiredPackageManagerFor(project?.repoPath);
+  const pmNotes = missingPackageManagerNotes(required, ctx.workers.filter((w) => w.eligible));
   const chosen = ctx.workers.find((w) => w.workerId === workerId);
   ctx.sharesFilesystem = chosen?.sharesFilesystem === true;
   const eligibleCount = ctx.workers.filter((w) => w.eligible).length;
@@ -215,9 +220,12 @@ const checkEligibleWorker: Evaluator = async (ctx) => {
   return {
     outcome: "pass",
     detail:
-      `worker ${workerId} selected (highest headroom${headroomDetail}, of ${eligibleCount} eligible)`,
+      `worker ${workerId} selected (highest headroom${headroomDetail}, of ${eligibleCount} eligible)` +
+      (pmNotes.length > 0 ? `; WARNING: ${pmNotes.join("; ")}` : ""),
     observed: {
       ...observed,
+      requiredPackageManager: required,
+      missingPackageManager: pmNotes.length > 0,
       ...(chosen?.capacity
         ? {
             selectedFreeRamGb: chosen.capacity.freeRamGb,
