@@ -21,7 +21,7 @@ describe("#1401 work root default", () => {
 
 describe("#1401 trust check reads the harness config dir", () => {
   it("consults only the harness .claude.json when given", () => {
-    const root = mkdtempSync(join(tmpdir(), "t1401-"));
+    const root = mkdtempSync(join(tmpdir(), "ak-t1401-"));
     const workRoot = join(root, "w");
     const repo = join(workRoot, "repos", "p1");
     mkdirSync(repo, { recursive: true });
