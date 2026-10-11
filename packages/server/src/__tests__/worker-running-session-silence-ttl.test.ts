@@ -30,6 +30,7 @@ function fakeRegistry(): WorkerRegistry {
     noteAttestedProfiles: vi.fn(),
     notePackageManagers: vi.fn(),
     noteProviderNotice: vi.fn(),
+    noteDoctor: vi.fn(),
   } as unknown as WorkerRegistry;
 }
 

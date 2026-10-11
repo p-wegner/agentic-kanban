@@ -481,6 +481,7 @@ async function runWorkerStart(rawOptions: WorkerStartOptions): Promise<void> {
       // is why the CLI does not substitute a default here.
       profiles: splitList(options.profiles),
       harness: createWorkerHarness(harnessCfg.options),
+      doctorSummary: true, // #1370: the board shows this worker's setup checklist
       maxConcurrency: options.maxConcurrency,
       stateFile: options.stateFile,
       workRoot: options.workRoot,
@@ -568,7 +569,8 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         "the mint endpoint rides the board's loopback trust). Hand the token to 'worker start --token' on the worker machine.",
     )
     .option("--board <url>", "Board base URL", DEFAULT_BOARD_URL)
-    .action(async (options: { board: string }) => {
+    .option("--os <os>", "OS of the WORKER machine for the bootstrap commands: windows (curl.exe, default) or unix (curl)", "windows")
+    .action(async (options: { board: string; os: string }) => {
       const res = await fetch(`${options.board.replace(/\/+$/, "")}/api/workers/pairing-token`, { method: "POST" });
       if (!res.ok) {
         console.error(`Failed to mint pairing token (${res.status}). Is the board running at ${options.board}?`);
@@ -579,7 +581,8 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       console.log(`  ${body.pairingToken}`);
       console.log(`\nOn the worker machine (already installed):`);
       console.log(`  agentic-kanban-worker setup --board ${body.fleetUrl || "<board-url>"} --token ${body.pairingToken}`);
-      console.log(`\n${renderBootstrapSteps(body.fleetUrl || "<board-url>", body.pairingToken)}`);
+      const os = /^(unix|linux|macos)$/.test(options.os) ? "unix" : "windows";
+      console.log(`\n${renderBootstrapSteps(body.fleetUrl || "<board-url>", body.pairingToken, os)}\n(${os === "windows" ? "Linux/macOS worker? re-run with --os unix." : "Windows worker? re-run without --os."})`);
       if (body.fleetNote) console.log(`\nNote: ${body.fleetNote}`);
     });
 

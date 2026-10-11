@@ -7,6 +7,9 @@ import { startStaggeredPoll } from "../lib/pollScheduler.js";
 import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
 import { WorkerEventTimeline } from "./WorkerEventTimeline.js";
 import { WorkerDispatchPrefs } from "./WorkerDispatchPrefs.js";
+import { WorkerSetupSection } from "./WorkerSetupSection.js";
+import { workerSetupState } from "../lib/workerSetup.js";
+import type { WorkerDoctorSummary, WorkerProfileAttestation } from "@agentic-kanban/shared/lib/worker-protocol";
 import { useActiveProjectPreferenceQuery, useProjectsQuery } from "../hooks/useBoardDataQueries.js";
 
 /** Mirrors one row of the enriched `GET /api/workers` response (#774). */
@@ -35,6 +38,9 @@ interface WorkerRow {
   /** #1338: the worker's self-update state (`current` / `updating` / `failed`) from its last heartbeat. */
   update?: { state: "current" | "updating" | "failed"; reason?: string; targetBuild?: string };
   updateRequested?: boolean;
+  /** #1370: the worker's own doctor results, and the profiles it attests (names only). */
+  doctor?: WorkerDoctorSummary;
+  attestedProfiles?: WorkerProfileAttestation[];
 }
 
 interface FleetSummary {
@@ -200,14 +206,23 @@ export function RunnersFleetPanel({ projectId }: RunnersFleetPanelProps) {
       {workers?.map((worker) => {
         const expanded = expandedId === worker.id;
         const currentWork = currentWorkFor(worker.id);
+        const setup = workerSetupState(worker);
+        const needsSetup = setup.needsSetup;
         return (
           <div key={worker.id} className="rounded border border-gray-200 dark:border-gray-700 p-3">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-ink dark:text-stone-100 truncate">{worker.name}</span>
-                  <span className={`rounded px-1.5 py-0.5 text-xs ${STATUS_COLORS[worker.effectiveStatus] ?? STATUS_COLORS.offline}`}>
-                    {worker.effectiveStatus}
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-xs ${
+                      needsSetup
+                        ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
+                        : (STATUS_COLORS[worker.effectiveStatus] ?? STATUS_COLORS.offline)
+                    }`}
+                    title={needsSetup ? `Heartbeat is ${worker.effectiveStatus}, but: ${setup.reasons.join(", ")}` : undefined}
+                  >
+                    {needsSetup ? "needs setup" : worker.effectiveStatus}
                   </span>
                   {!worker.connected && (
                     <span className="rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-xs text-gray-500 dark:text-gray-400">
@@ -318,6 +333,7 @@ export function RunnersFleetPanel({ projectId }: RunnersFleetPanelProps) {
                 </button>
               </div>
             </div>
+            <WorkerSetupSection {...worker} />
             {expanded && <WorkerEventTimeline workerId={worker.id} />}
           </div>
         );

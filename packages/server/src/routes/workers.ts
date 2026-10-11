@@ -10,7 +10,7 @@ import {
   type WorkerRegistry,
   type WorkerStatus,
 } from "../services/worker-registry.service.js";
-import { parseWorkerProfileAttestations, parseWorkerCapabilities } from "@agentic-kanban/shared/lib/worker-protocol";
+import { parseWorkerProfileAttestations, parseWorkerCapabilities, parseWorkerDoctorSummary } from "@agentic-kanban/shared/lib/worker-protocol";
 import {
   listIncomingRefs,
   landIncomingRef,
@@ -40,6 +40,7 @@ import { parseWorkerUpdateReport } from "../lib/worker-update.js";
 import { getWorkerBuildService, type WorkerBuildService } from "../services/worker-build.service.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import { buildWorkerConnectSteps } from "../lib/worker-connect-steps.js";
+import { BOOTSTRAP_TOKEN_PLACEHOLDER, buildWorkerBootstrap } from "@agentic-kanban/shared/lib/worker-bootstrap-steps";
 import { resolveFleetPort, resolveFleetHost } from "../services/fleet-listener.service.js";
 import { isTailscaleHost } from "../lib/tailscale-host.js";
 import { resolveConfiguredGitPort, resolveConfiguredGitHost } from "../services/git-http.service.js";
@@ -342,7 +343,14 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
     // A placeholder token: this endpoint reports CONFIG, it does not mint. The Connect tab
     // fills the real value in client-side after `POST /pairing-token`, exactly like the CLI's
     // `worker instructions --token` flag does when a token isn't passed.
-    const steps = buildWorkerConnectSteps(boardUrl, "<pairing-token>");
+    const steps = buildWorkerConnectSteps(boardUrl, BOOTSTRAP_TOKEN_PLACEHOLDER);
+    // #1370: the node-only bootstrap, one block per worker OS, built by the same function `worker
+    // pair` prints. The Connect tab substitutes the minted token and the fleet URL it got from
+    // `POST /pairing-token` (the placeholder URL here is only a best guess), so its output equals the CLI's.
+    const bootstrap = {
+      windows: buildWorkerBootstrap(boardUrl, BOOTSTRAP_TOKEN_PLACEHOLDER, "windows"),
+      unix: buildWorkerBootstrap(boardUrl, BOOTSTRAP_TOKEN_PLACEHOLDER, "unix"),
+    };
     return c.json({
       fleetConfigured: fleetPort !== null,
       fleetPort,
@@ -352,6 +360,7 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
       boardWorkerVersion: resolveOwnPackageVersion() ?? null,
       boardUrl,
       steps,
+      bootstrap,
     });
   });
 }
@@ -383,6 +392,7 @@ function registerWorkerFacingRoutes(
       protocolVersion?: number;
       workerVersion?: string;
       profiles?: unknown;
+      doctor?: unknown;
     }>(c);
     const result = await reg.registerWorker({
       pairingToken: body.pairingToken ?? "",
@@ -397,6 +407,7 @@ function registerWorkerFacingRoutes(
       // #1027: parsed, never trusted — an attestation becomes a dispatch PERMISSION, so a
       // half-understood entry must not survive the boundary.
       profiles: parseWorkerProfileAttestations(body.profiles),
+      doctor: parseWorkerDoctorSummary(body.doctor),
     });
     if (!result.ok) {
       // 409 for a version mismatch (#754): it is neither a credential problem nor a

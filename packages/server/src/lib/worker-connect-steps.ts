@@ -1,4 +1,5 @@
 import type { WorkerConnectStep } from "@agentic-kanban/shared/lib/worker-connect-steps";
+import { buildWorkerBootstrap, type BootstrapOs } from "@agentic-kanban/shared/lib/worker-bootstrap-steps";
 
 /**
  * The connect runbook, as data. Exported so `worker instructions --json`, the
@@ -11,7 +12,7 @@ import type { WorkerConnectStep } from "@agentic-kanban/shared/lib/worker-connec
  * re-imports this same function rather than defining it, so `worker instructions` and
  * `GET /api/workers/connect-info` still render byte-identical steps.
  */
-export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string): WorkerConnectStep[] {
+export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string, os: BootstrapOs = "windows"): WorkerConnectStep[] {
   return [
     {
       title: "Verify the prerequisites on this machine",
@@ -23,30 +24,24 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string):
       commands: ["git --version", "claude --version   # or: codex --version / copilot --version"],
     },
     {
-      title: "Get the worker binary onto this machine",
+      title: "Mint a pairing token (on the board machine)",
+      where: "board",
+      detail:
+        "Pairing tokens are single-use and expire in 10 minutes. Mint one on the board host (the mint endpoint " +
+        "rides the board's loopback trust), or use the Runners view's Connect tab: command palette → \"Runners\" → " +
+        "Connect → Mint token. Copy the token to this machine.",
+      commands: ["agentic-kanban worker pair"],
+    },
+    {
+      id: "install",
+      title: "Install the worker (node-only: only node is needed on this machine)",
       where: "worker",
       detail:
-        "Do NOT assume `npm i -g agentic-kanban` provides it. The published package can lag this tree: 0.1.9 on " +
-        "the registry was released BEFORE the worker fleet landed, so its bin map has no `agentic-kanban-worker` " +
-        "key at all — the install succeeds and the binary is simply absent. Check the registry before relying on " +
-        "it (`npm view agentic-kanban bin`); if the worker key is missing, use the tarball fast track instead: on " +
-        "the BOARD machine run `node scripts/pack-worker.mjs`, which builds, refuses to pack a tarball whose bin " +
-        "map lacks the worker, and stamps a `<version>-dev.<sha>` prerelease so npm can never serve a cached " +
-        "same-version copy in its place. Copy the tarball here and install it by path. `--blob` additionally " +
-        "puts it on an ACP relay and prints a ref, for a machine you cannot copy files to directly. " +
-        "Verify the install: `--version` reports the version from the installed manifest, so it must echo the " +
-        "tarball's `-dev.<sha>` stamp back. A bare `0.0.1` means an old build (the version used to be hardcoded); " +
-        "the registry's plain `0.1.9` means npm served a cached copy instead of your file. " +
-        "An ERESOLVE peer warning about `zod` on install is EXPECTED and harmless: the agent SDK declares a " +
-        "`zod ^4` peer while this tree pins 3.x, but that peer is type-level only (no runtime file in the SDK " +
-        "imports zod) — see the note in pnpm-workspace.yaml. It does not affect the worker, which does not bundle " +
-        "the SDK at all.",
-      commands: [
-        "npm view agentic-kanban bin   # does the published bin map have agentic-kanban-worker?",
-        "npm i -g <path-to-agentic-kanban-*.tgz>",
-        "agentic-kanban-worker --version        # must print the tarball's version, not 0.0.1",
-        "npm ls -g --depth 0 agentic-kanban     # cross-check: catches npm serving a cached copy",
-      ],
+        "The board serves its own worker build, so no repo checkout and no registry package is needed. Download it " +
+        "with the pairing token (the download does not consume the token), verify the sha256, install it, then " +
+        "`setup` pairs, logs the providers in and runs the doctor. `agentic-kanban worker pair` prints these same " +
+        "commands. An ERESOLVE peer warning about `zod` on install is EXPECTED and harmless.",
+      commands: buildWorkerBootstrap(boardUrl, pairingToken, os).steps.flatMap((s) => s.commands),
     },
     {
       title: "Confirm the board is reachable from here",
@@ -56,15 +51,6 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string):
         `its API port — a remote worker never talks to the board API. If this refuses to connect, the board is ` +
         `not exposing a fleet listener yet (see the board-side note below).`,
       commands: [`curl -s -o /dev/null -w "%{http_code}\\n" ${boardUrl}/api/health`],
-    },
-    {
-      title: "Mint a pairing token (on the board machine)",
-      where: "board",
-      detail:
-        "Pairing tokens are single-use and expire in 10 minutes. Mint one on the board host (the mint endpoint " +
-        "rides the board's loopback trust), or use the Runners view's Connect tab: command palette → \"Runners\" → " +
-        "Connect → Mint token. Copy the token to this machine.",
-      commands: ["agentic-kanban worker pair"],
     },
     {
       title: "Start the worker daemon",
@@ -78,9 +64,6 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string):
         "daemon and never touches a database; on a machine that also runs the board, `agentic-kanban " +
         "worker start` is equivalent.",
       commands: [
-        `# first: sets up git/claude/codex (asks before installing), logs in, pairs, runs doctor`,
-        `agentic-kanban-worker setup --board ${boardUrl} --token ${pairingToken}`,
-        `# then run the daemon:`,
         `agentic-kanban-worker start --board ${boardUrl} \\`,
         `  --name "$(hostname)" --labels docker,linux --providers claude --max-concurrency 2`,
       ],
@@ -106,6 +89,18 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string):
         "agentic-kanban preferences set worker_labels_<projectId> docker,linux    # optional",
         "agentic-kanban preferences set worker_dispatch_strict_<projectId> true   # optional",
       ],
+    },
+    {
+      id: "repo-checkout",
+      title: "From a repo checkout (only if the board's own download is unavailable)",
+      where: "board",
+      detail:
+        "The default path above needs no checkout. If you have the repo checked out on the BOARD machine and want a " +
+        "tarball without the board serving it, `scripts/pack-worker.mjs` builds one, refuses to pack a tarball whose " +
+        "bin map lacks the worker, and stamps a `<version>-dev.<sha>` prerelease so npm can never serve a cached " +
+        "same-version copy. Copy the tarball to the worker machine and install it by path; `--blob` puts it on an " +
+        "ACP relay and prints a ref for a machine you cannot copy files to.",
+      commands: ["node scripts/pack-worker.mjs", "npm i -g <path-to-agentic-kanban-*.tgz>"],
     },
   ];
 }

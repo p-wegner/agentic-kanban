@@ -4,7 +4,6 @@
  */
 import { hostname } from "node:os";
 import {
-  attestProviders,
   defaultWorkerStateFile,
   loadState,
   normalizeBoardUrl,
@@ -12,6 +11,7 @@ import {
   saveIdentity,
   type WorkerDaemonOptions,
 } from "./worker-daemon.js";
+import { attestProviders } from "./worker-provider-notice.js";
 
 export async function pairWorker(opts: WorkerDaemonOptions): Promise<{ alreadyPaired: boolean; name: string }> {
   const stateFile = opts.stateFile ?? defaultWorkerStateFile();
