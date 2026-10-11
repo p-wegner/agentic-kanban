@@ -219,7 +219,12 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
       }
     }
     // Any authenticated traffic proves liveness — keep the registry heartbeat fresh.
-    void registry.touchHeartbeat(workerId).catch(() => {});
+    // #1394: `hello` is a new process announcing itself, so it also clears the previous process's
+    // stored `draining`/`offline` (written by its shutdown heartbeat) — otherwise a restarted
+    // worker reads offline until its first heartbeat and strict dispatch finds nobody.
+    void registry
+      .touchHeartbeat(workerId, undefined, message.type === "hello" ? "online" : undefined)
+      .catch(() => {});
     for (const listener of listeners) {
       try {
         listener(workerId, message);
