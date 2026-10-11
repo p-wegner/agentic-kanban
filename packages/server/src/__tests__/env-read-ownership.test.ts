@@ -147,6 +147,8 @@ const FOREIGN: Record<string, string> = {
   ProgramFiles: "Windows — a candidate Node install location",
   USERPROFILE: "Windows — the home directory; `test:mine` looks there for a machine-wide test-impact skill install",
   HOME: "POSIX — the home directory, the non-Windows half of the same lookup",
+  DISPLAY: "X11 — the display server's own variable; `worker auth codex` reads it to choose browser vs device login (#1367)",
+  WAYLAND_DISPLAY: "Wayland — the compositor's own variable; read alongside DISPLAY by `worker auth codex` (#1367)",
   "ProgramFiles(x86)": "Windows — the 32-bit program dir, the other candidate Node install location",
   // Node runtime / toolchain conventions
   UV_THREADPOOL_SIZE: "libuv — the board raises it when unset; documented under Runtime tuning",

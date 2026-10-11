@@ -442,6 +442,8 @@ import { resolveOwnPackageVersion } from "../../lib/worker-build.js";
 import { checkTailnetFirewall } from "./worker-doctor-firewall-check.js";
 // #875's env-aware auth-dir resolution lives in its own module for the same reason.
 import { resolveProviderAuthDir } from "./worker-doctor-provider-auth.js";
+import type { WorkerHarness } from "../../worker/worker-harness.js";
+import { checkHarness } from "./worker-doctor-harness.js";
 
 /**
  * Check 7 — the provider CLI, installed AND logged in.
@@ -459,6 +461,8 @@ export async function checkProvider(
   // #875: injectable so tests stay hermetic (the live env on a profile machine carries a
   // real CLAUDE_CONFIG_DIR — the exact condition this parameter exists to control).
   env: NodeJS.ProcessEnv = process.env,
+  /** #1367: the worker-owned config. The login is looked up in ITS dir, or its stored token counts. */
+  harness?: WorkerHarness,
 ): Promise<DoctorCheck[]> {
   const checks: DoctorCheck[] = [];
   const version = await probeCommand(provider, ["--version"]);
@@ -494,9 +498,19 @@ export async function checkProvider(
   // directory comes from the provider's own rule, and the output ALWAYS names both the
   // path and what selected it: a check that inspects ~/.claude while the dispatched agent
   // authenticates from $CLAUDE_CONFIG_DIR is wrong precisely on the machines it is for.
-  const resolved = resolveProviderAuthDir(provider, auth.dir, home, env);
+  const tokenState = harness?.tokenStatus(provider);
+  if (tokenState?.stored && !tokenState.expired) {
+    checks.push(ok(`${provider} logged in`, "token (stored by the worker)"));
+    return checks;
+  }
+  const harnessDir = harness?.dirFor(provider);
+  const resolved = harnessDir
+    ? { dir: harnessDir, source: `the worker's ${harness?.mode} harness dir` }
+    : resolveProviderAuthDir(provider, auth.dir, home, env);
   const dir = resolved.dir;
-  const present = auth.files.filter((f) => existsSync(join(dir, f)));
+  // The worker writes its own minimal settings.json into a clean harness dir, so that file proves nothing there.
+  const authFiles = harnessDir ? auth.files.filter((f) => f !== "settings.json") : auth.files;
+  const present = authFiles.filter((f) => existsSync(join(dir, f)));
   if (present.length > 0) {
     checks.push(ok(`${provider} logged in`, `${dir} holds ${present.join(", ")} (consulted via ${resolved.source})`));
     return checks;
@@ -508,9 +522,12 @@ export async function checkProvider(
     // chasing a login that is already fine.
     status: "unknown",
     detail:
-      `none of ${auth.files.join(", ")} found in ${dir} (consulted via ${resolved.source}) - ` +
+      `none of ${authFiles.join(", ")} found in ${dir} (consulted via ${resolved.source}) - ` +
       `either not logged in, or authenticated by an env API key this check cannot see`,
-    remedy: `If sessions fail with an auth error, run: ${auth.loginCommand}`,
+    remedy: harnessDir
+      ? `Log in into the worker's own dir: agentic-kanban-worker auth ${provider}` +
+        (provider === "claude" ? " (or: auth claude --token)" : "")
+      : `If sessions fail with an auth error, run: ${auth.loginCommand}`,
   });
   return checks;
 }
@@ -538,8 +555,9 @@ export async function attestProviderAuth(
   provider: string,
   home: string = homedir(),
   env: NodeJS.ProcessEnv = process.env,
+  harness?: WorkerHarness,
 ): Promise<{ attested: boolean; checks: DoctorCheck[] }> {
-  const checks = await checkProvider(provider, home, env);
+  const checks = await checkProvider(provider, home, env, harness);
   return {
     attested: checks.length > 0 && checks.every((c) => c.status === "pass" || c.status === "skip"),
     checks,
@@ -552,6 +570,8 @@ export interface WorkerDoctorOptions {
   providers: string[];
   /** The worker's `--profiles` list; only these are warned about when their credentials lapse. */
   profiles?: string[];
+  /** The worker-owned provider config (#1367); absent = not asked about (legacy callers). */
+  harness?: WorkerHarness;
   gitPort?: number;
   home?: string;
   timeoutMs?: number;
@@ -623,8 +643,9 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
     ownVersion: readEntryVersion(opts.runningEntry ?? null) ?? resolveOwnPackageVersion(),
   }));
   checks.push(checkWorkerCheckoutTrust(opts.workRoot ?? defaultWorkerWorkRoot(), opts.home ?? homedir()));
+  if (opts.harness) checks.push(...checkHarness(opts.harness, opts.providers));
   for (const provider of opts.providers) {
-    checks.push(...(await checkProvider(provider, opts.home)));
+    checks.push(...(await checkProvider(provider, opts.home, undefined, opts.harness)));
   }
   checks.push(...checkProfileCredentials(opts.home, undefined, opts.profiles));
   return { side: "worker", boardUrl, checks, ok: checks.every((c) => c.status !== "fail") };

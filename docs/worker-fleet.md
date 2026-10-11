@@ -213,8 +213,33 @@ a worker authenticates the agent with its own local login and the board delibera
 no credentials, so the board can pick a permitted profile but cannot make the worker honour
 it. `resolveWorkerPlacement` checks this *before* selecting a worker, so a strict project
 holds with the restriction as the reason rather than with a capacity message. Worker-side
-profile attestation would narrow this from "never" to "only to a worker that can prove it
-qualifies" — that is not implemented.
+profile attestation (#1027) narrows this from "never" to "only to a worker that attests the
+profile": a worker declares the profile names it can authenticate as (never a credential), and
+rejects an assignment naming a profile it does not hold.
+
+**The worker's harness config (#1367).** A session no longer inherits the machine owner's
+`~/.claude` / `~/.codex`. The worker owns `<state-dir>/harness/claude` and `.../codex` and
+launches every session with `CLAUDE_CONFIG_DIR` / `CODEX_HOME` pointing there (a minimal
+`settings.json`, no hooks or plugins), and claude gets `--strict-mcp-config` so only the board
+bridge's MCP config loads. A session whose assignment names a profile keeps that profile's own
+dir. Modes (`worker doctor` says which is active):
+
+- **clean** (default) — the worker's own dir.
+- **custom** — `start --config-dir <path>` (claude) / `--codex-home <path>`: an existing folder,
+  e.g. a dedicated `~/.claude-worker` on a machine whose owner also uses claude normally.
+- **inherit** — `start --inherit-user-config`: the old behaviour, "dirty mode". User hooks,
+  plugins, skills and the global CLAUDE.md apply, so results depend on the machine.
+
+Logging in happens ON the worker (auth model 1; the board stores and relays nothing):
+`agentic-kanban-worker auth <claude|codex> [--config-dir <path>]` runs the provider's own login
+with the env pointed at the worker's dir (`codex login`, `--device-auth` when there is no
+display; for claude `claude auth login` when the installed CLI has it, else it launches `claude`
+there for `/login`). `auth claude --token` runs `claude setup-token` (headless friendly), stores
+the token in the worker's state (Windows DPAPI, user scope; a 0600 file elsewhere; never logged)
+and injects it as `CLAUDE_CODE_OAUTH_TOKEN` into claude sessions only. `auth --status` prints
+the mode per provider and the token expiry, never the secret. Provider attestation accepts a
+stored token as authenticated (`worker doctor`: PASS `token (stored by the worker)`); a plain
+inherited env key is still reported `unknown`, as before.
 
 **The same is true of a data-handling requirement (#876).** `required_data_labels_<projectId>`
 (a CSV of tags such as `no-training`, `eu-data-residency`) names a property a launch's
@@ -1037,9 +1062,10 @@ Not a bug, not fixable by more plumbing — write it down so it is not re-opened
   the Strategy Bullseye's profile choice and the auth-rotation ring's quota-based rotation **do not
   reach a worker** — the worker authenticates with its own local login, whatever that is. This is
   the same boundary that already makes `resolveWorkerPlacement` refuse remote placement for an
-  allowlist-restricted project (#651). **Worker-side ATTESTATION** — a worker declaring which
-  profiles it can authenticate as, the way it already declares `--providers`/`--labels` — is the
-  only thing that narrows it.
+  allowlist-restricted project (#651). **Worker-side ATTESTATION** (#1027, implemented) — a worker
+  declaring which profiles it can authenticate as, the way it already declares
+  `--providers`/`--labels` — is what narrows it. Beyond profiles, the worker's own harness dir
+  and `auth` verb (#1367) mean even the default login is created on and local to the worker.
 - **`ANTHROPIC_MODEL` / `ANTHROPIC_BASE_URL` from a board profile never cross**, by design
   (`lib/remote-spec-env.ts`). Model selection travels in argv; the endpoint is the worker's.
 - **The bridge does not change either of those.** A capability token authorises board TOOL CALLS.
