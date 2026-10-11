@@ -488,7 +488,7 @@ export function registerWorkerSetup(
     )
     .option("--start", "After pairing, keep running as the worker daemon")
     .option("--guide", "Print the offline setup guide and exit")
-    .option("--name <name>", "Worker display name (default: hostname)")
+    .option("--name <name>", "Worker display name (default: hostname; <hostname>-wsl-<distro> under WSL)")
     .option("--state-file <path>", "Pairing state file (default: ~/.agentic-kanban/worker-state.json)", cliPathArg)
     .action(async (options: SetupOptions) => {
       const code = await runWorkerSetup(options, defaultSetupDeps(() => ctx.start(options)));

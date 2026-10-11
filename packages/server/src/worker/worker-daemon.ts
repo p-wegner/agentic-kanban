@@ -54,7 +54,7 @@ import { packageManagersField, refreshPackageManagers } from "../cli/commands/wo
 import { cleanUpBeforeStart } from "./agent-process-tree.js";
 import { attestAndNotice, attestProviders } from "./worker-provider-notice.js";
 export { attestProviders };
-import { defaultWorkerName } from "./worker-name.js";
+import { defaultWorkerName, sameNamedNotice } from "./worker-name.js";
 import { createDoctorSummaryTracker } from "../cli/commands/worker-doctor-daemon.js";
 import { resolveProfileAliases } from "./worker-profile-aliases.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
@@ -326,7 +326,7 @@ export async function registerWithBoard(
     workerId?: string;
     workerToken?: string;
     error?: string;
-    boardProtocolVersion?: number;
+    boardProtocolVersion?: number; sameNamed?: { id: string }[];
   };
   if (!res.ok || !body.workerId || !body.workerToken) {
     const detail = body.error ?? "unexpected response";
@@ -341,6 +341,7 @@ export async function registerWithBoard(
     }
     throw new Error(`Registration failed (${res.status}): ${detail}`);
   }
+  if (body.sameNamed?.length) (opts.log ?? console.log)(sameNamedNotice(name, body.sameNamed)); // #1390
   return { workerId: body.workerId, workerToken: body.workerToken, name };
 }
 
