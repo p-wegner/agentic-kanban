@@ -56,8 +56,20 @@ never leave it; clean config by default; setup installs claude+codex.
   hand (attestation types moved to `worker-profile-attestation.ts`; cap 57), daemon split by a
   builder, gate running.
 
-**Next:** land #1379; build #1386 (running on desktop-stable) then #1387/#1388/#1390/#1389; verify
-live with WSL round 3 on a fresh import; desktop D3.
+- **Rounds 3-5 (evening):** round 3 (`akw-r3`) verified #1386/#1387/#1388 live, found #1394.
+  Round 4 (`akw-r4`, master a0c77d70c) crashed at `agentic-kanban-worker setup`: #1389 added
+  `import { createRequire }` to db-path.ts and the bundle banner imports the same name
+  (`Identifier 'createRequire' has already been declared`). Fixed direct (b85e3c277: banner
+  aliased in build-worker/-server/-mcp; both bundles load). Round 5 (`akw-r5`): no sqlite warning
+  (#1389), distinct name `AO-PF69VL7N-wsl-akw-r5` (#1390), online at once (#1394) but labels
+  ~30 s late (#1396). Also filed: #1391 (shared /tmp), #1392 (remote output not live), #1393
+  (status --watch layout, merged), #1395 (high: verify exit 130 reported as failure).
+- **Promote NOT done:** `rc/20261011` is in flight at a0c77d70c (the broken bundle) and promote
+  reuses an in-flight rc. Stopped the promote at the sweep wait. Before promoting: get the rc to
+  include b85e3c277 (or abandon it) - read `scripts/rc-state.mjs` / docs/two-boards.md "rc
+  lifecycle". The stable board still runs stable-20261010-6.
+
+**Next:** finish round 5 (wfx #33); land #1396; promote once the rc carries b85e3c277; desktop D3.
 
 ## 2026-10-10 (night) — tailnet rounds 3-4: newcomer install works, no frictions left
 
