@@ -474,6 +474,7 @@ export interface WorkerCapabilities {
   profiles?: WorkerProfileAttestation[];
   /** #1369: package managers on this machine's PATH. Absent = unknown (older worker). */
   packageManagers?: WorkerPackageManagers;
+  providerNotice?: string; // #1372: why this worker advertises no usable provider (it gets no work)
 }
 
 export type ProtocolCompatibility =
@@ -597,13 +598,12 @@ export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | unde
   const capacity = parseWorkerCapacityInfo(rec.capacity);
   const profiles = parseWorkerProfileAttestations(rec.profiles);
   const packageManagers = parseWorkerPackageManagers(rec.packageManagers);
+  const providerNotice = typeof rec.providerNotice === "string" ? rec.providerNotice.trim().slice(0, 400) || undefined : undefined;
   if (
     labels === undefined &&
     providers === undefined &&
     maxConcurrency === undefined &&
-    capacity === undefined &&
-    profiles === undefined &&
-    packageManagers === undefined
+    capacity === undefined && profiles === undefined && packageManagers === undefined && providerNotice === undefined
   ) {
     return undefined;
   }
@@ -614,6 +614,7 @@ export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | unde
     ...(capacity ? { capacity } : {}),
     ...(profiles ? { profiles } : {}),
     ...(packageManagers ? { packageManagers } : {}),
+    ...(providerNotice ? { providerNotice } : {}),
   };
 }
 

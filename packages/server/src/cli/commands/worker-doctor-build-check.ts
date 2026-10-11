@@ -8,6 +8,7 @@ import { compareBuilds } from "../../worker/worker-delegate.js";
 import { shimCommandFor, shimInstalled } from "../../worker/worker-shim.js";
 import type { DoctorCheck } from "./worker-doctor.js";
 import { globalLauncherFix } from "./worker-update-notes.js";
+import { resolveOwnPackageVersion } from "../../lib/worker-build.js";
 
 /** `version` of the package a `bin/worker.js` entry belongs to; null when unreadable. */
 export function readEntryVersion(entry: string | null): string | null {
@@ -93,7 +94,12 @@ export function checkWorkerBuild(
     };
   }
   if (!cmp.current) {
-    return { name, status: "pass", detail: `this install (${running}); no self-update has happened (no versions/current.json)` };
+    // #1372: a plain tarball install names its build in its own package.json; say so rather than (unknown).
+    const version = runningVersion === undefined ? readEntryVersion(runningEntry) ?? resolveOwnPackageVersion() ?? null : runningVersion;
+    const id = parseBuildId(version);
+    const who = id ? `build ${id}` : version ? `version ${version} (no build id)` : "build unknown";
+    const where = runningEntry ? ` (${running})` : "";
+    return { name, status: "pass", detail: `this install is ${who}${where}; no self-update has happened (no versions/current.json)` };
   }
   if (!cmp.current.installed) {
     return {
