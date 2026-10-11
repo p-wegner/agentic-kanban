@@ -18,7 +18,7 @@ import { createWorkerHarness, readPersistedHarness, resolveHarnessConfig } from 
 let dir: string;
 let stateFile: string;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "pair-harness-"));
+  dir = mkdtempSync(join(tmpdir(), "ak-pair-harness-"));
   stateFile = join(dir, "worker-state.json");
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
