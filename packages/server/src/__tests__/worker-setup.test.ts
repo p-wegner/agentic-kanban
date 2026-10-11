@@ -124,6 +124,23 @@ describe("worker setup (#1368)", () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+  it("pairs before the slow install/login steps, and says so when a login is Ctrl+C'd (#1388)", async () => {
+    const order: string[] = [];
+    const deps = makeDeps();
+    const pair = deps.pair;
+    const code = await runWorkerSetup({ ...base(), yes: true }, {
+      ...deps,
+      pair: async (o) => { order.push("pair"); expect(o.attestProviders).toBe(false); return pair(o); },
+      run: (p) => { order.push("install"); return deps.run(p); },
+      auth: async () => { order.push("auth"); return 130; },
+    });
+    expect(order[0]).toBe("pair");
+    expect(order).toContain("auth");
+    expect(out.join("\n")).toContain("login skipped - run agentic-kanban-worker auth claude");
+    expect(out.join("\n")).not.toContain("[auth claude] FAILED");
+    expect(code).toBe(0);
+  });
+
   it("takes a node-only machine to a paired worker, then re-runs as all ok", async () => {
     const opts = { ...base(), yes: true };
     expect(await runWorkerSetup(opts, makeDeps())).toBe(0);

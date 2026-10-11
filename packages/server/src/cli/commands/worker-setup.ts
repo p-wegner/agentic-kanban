@@ -1,6 +1,7 @@
 /**
  * `agentic-kanban-worker setup` (#1368): turn a machine with only node into a paired worker, one
- * detecting, skippable step at a time: git -> provider CLIs -> harness dir + auth -> pair -> doctor.
+ * detecting, skippable step at a time: pair (first, #1388: the token expires) -> git -> provider CLIs
+ * -> harness dir + auth -> doctor.
  * Every step says `ok (already present)` / `done` / `skipped`, so re-running is idempotent.
  * Nothing is installed without a prompt (or --yes) and `--no-install` never runs an installer.
  * Db-free: this is part of the standalone worker binary.
@@ -305,6 +306,9 @@ async function stepCli(
   return worst;
 }
 
+/** Exit statuses of a login the operator interrupted with Ctrl+C (POSIX SIGINT, Windows STATUS_CONTROL_C_EXIT). */
+const INTERRUPT_STATUSES: ReadonlySet<number> = new Set([130, 3221225786, -1073741510]);
+
 async function stepAuth(
   deps: SetupDeps,
   options: SetupOptions,
@@ -342,6 +346,9 @@ async function stepAuth(
     if (status === 0) {
       deps.print(`[auth ${provider}] done - login in ${dir}`);
       if (worst === "ok (already present)") worst = "done";
+    } else if (INTERRUPT_STATUSES.has(status)) {
+      deps.print(`[auth ${provider}] login skipped - run agentic-kanban-worker auth ${provider}`);
+      if (worst !== "FAILED") worst = "skipped";
     } else {
       deps.print(`[auth ${provider}] FAILED - exit ${status}; retry: agentic-kanban-worker auth ${provider}`);
       worst = "FAILED";
@@ -357,6 +364,7 @@ async function stepPair(
   stateFile: string,
   providers: string[],
   harness: WorkerHarness,
+  attest = true,
 ): Promise<Outcome> {
   if (readSavedIdentity(stateFile, board.replace(/\/+$/, ""))) {
     deps.print(`[pair] ok (already present) - already paired with ${board}`);
@@ -373,6 +381,7 @@ async function stepPair(
       providers,
       harness,
       stateFile,
+      ...(attest ? {} : { attestProviders: false }),
       ...(options.name ? { name: options.name } : {}),
       log: deps.print,
     });
@@ -422,10 +431,18 @@ export async function runWorkerSetup(options: SetupOptions, deps: SetupDeps): Pr
   const results: Outcome[] = [];
 
   deps.applyPath?.(stateFile);
+  // The pairing token lives ~10 minutes and a browser login can outlast it (#1388): when slow
+  // interactive steps follow, exchange the token FIRST. Attestation is skipped then (nothing is
+  // installed yet, it would attest nothing); the closing doctor reports what is really usable.
+  const slowStepsFollow = selected.has("git") || selected.has("cli") || selected.has("auth");
+  const pairFirst = selected.has("pair") && slowStepsFollow;
+  if (pairFirst) {
+    results.push(await stepPair(deps, options, board, stateFile, providers, harnessFor("claude"), false));
+  }
   if (selected.has("git")) results.push(await stepGit(deps, options));
   if (selected.has("cli")) results.push(await stepCli(deps, options, providers, stateFile));
   if (selected.has("auth")) results.push(await stepAuth(deps, options, providers, harnessFor, stateFile));
-  if (selected.has("pair")) {
+  if (selected.has("pair") && !pairFirst) {
     results.push(await stepPair(deps, options, board, stateFile, providers, harnessFor("claude")));
   }
   if (selected.has("doctor")) {
