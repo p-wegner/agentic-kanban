@@ -126,3 +126,8 @@ export function renderStatusScreen(status: BoardStatusResponse, opts: StatusScre
   }
   return [...out, ...shown, footer];
 }
+
+/** Home + clear, then the frame, so each refresh repaints in place. */
+export function frameToScreen(lines: string[]): string {
+  return "\x1b[H\x1b[2J" + lines.join("\n");
+}
