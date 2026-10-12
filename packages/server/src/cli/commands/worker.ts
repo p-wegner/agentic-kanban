@@ -25,6 +25,7 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { cliPathArg } from "../cli-path.js";
 import { createWorkerHarness, resolveInspectedHarness } from "../../worker/worker-harness.js";
 import { addHarnessOptions, registerWorkerAuth } from "./worker-auth-command.js";
+import { addToolchainOptions, registerWorkerToolchain, toolchainDaemonOptions, type ToolchainStartOptions } from "./worker-toolchain-command.js";
 // Type-only + a db-free formatter: this module is also the standalone worker
 // binary's entry point, which must never pull in the database graph.
 import { renderPlacementExplanation } from "../../lib/placement-explanation-format.js";
@@ -422,7 +423,7 @@ interface WorkerStartOptions {
   drainTimeout?: number;
 }
 
-async function runWorkerStart(rawOptions: WorkerStartOptions): Promise<void> {
+async function runWorkerStart(rawOptions: WorkerStartOptions & ToolchainStartOptions): Promise<void> {
   const options = { ...rawOptions, board: startBoard(rawOptions, rawOptions.stateFile ?? defaultWorkerStateFile()) };
   const boardList = parseBoardList(options.board); options.board = boardList[0] ?? options.board;
   // #1346: a global install that a self-update has left behind hands over to the current build.
@@ -489,6 +490,7 @@ async function runWorkerStart(rawOptions: WorkerStartOptions): Promise<void> {
       harness: createWorkerHarness(harnessCfg.options),
       doctorSummary: true, // #1370: the board shows this worker's setup checklist
       maxConcurrency: options.maxConcurrency,
+      ...toolchainDaemonOptions(options),
       stateFile: options.stateFile,
       workRoot: options.workRoot,
       drainTimeoutMs,
@@ -648,9 +650,10 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       (v) => parseInt(v, 10),
     )
     ;
-  addHarnessOptions(startCmd).action(runWorkerStart);
+  addToolchainOptions(addHarnessOptions(startCmd)).action(runWorkerStart);
 
   registerWorkerAuth(workerCmd);
+  registerWorkerToolchain(workerCmd);
 
   workerCmd
     .command("instructions")
@@ -689,7 +692,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         process.exit(1);
       }
       const body = await res.json() as {
-        workers: Array<{ id: string; name: string; effectiveStatus: string; status: string; os: string | null; labels: string | null; maxConcurrency: number; lastHeartbeatAt: string | null; protocolVersion?: number; workerVersion?: string; buildFreshness?: WorkerBuildFreshness; update?: WorkerUpdateReport; updateRequested?: boolean }>;
+        workers: Array<{ id: string; name: string; effectiveStatus: string; status: string; os: string | null; labels: string | null; maxConcurrency: number; lastHeartbeatAt: string | null; protocolVersion?: number; workerVersion?: string; buildFreshness?: WorkerBuildFreshness; update?: WorkerUpdateReport; updateRequested?: boolean; toolchainInstall?: { state: string; toolchains: string[]; reason?: string } }>;
         fleet?: { boardWorkerVersion?: string | null };
       };
       if (options.json) {
@@ -709,7 +712,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         // "behind board" vs "ahead of board" stay distinct words (ahead is a normal
         // dev-machine state, not staleness), and a `?` build gets no verdict at all.
         const freshness = formatBuildFreshness(w.buildFreshness, body.fleet?.boardWorkerVersion);
-        const build = ` protocol=${w.protocolVersion ?? "?"} build=${w.workerVersion ?? "?"}${freshness ? ` (${freshness})` : ""}${formatUpdateState(w.update, w.updateRequested)}`;
+        const build = ` protocol=${w.protocolVersion ?? "?"} build=${w.workerVersion ?? "?"}${freshness ? ` (${freshness})` : ""}${formatUpdateState(w.update, w.updateRequested)}${w.toolchainInstall ? ` toolchain-install=${w.toolchainInstall.state}(${w.toolchainInstall.toolchains.join(",")})${w.toolchainInstall.reason ? `: ${w.toolchainInstall.reason}` : ""}` : ""}`;
         console.log(`  ${w.name} [${w.effectiveStatus}] id=${w.id} os=${w.os ?? "?"} maxConcurrency=${w.maxConcurrency}${labels}${build} lastHeartbeat=${w.lastHeartbeatAt ?? "never"}`);
       }
       console.log("\nRetire a worker with: agentic-kanban worker revoke <workerId|name>");

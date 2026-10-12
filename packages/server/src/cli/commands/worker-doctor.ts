@@ -439,6 +439,7 @@ import {
   checkGitSafeDirectory,
   checkPackageManager,
 } from "./worker-doctor-git-prereqs.js";
+import { checkMise } from "./worker-doctor-mise.js";
 export { checkGitInstalled, checkGitIdentity, checkGitSafeDirectory, checkPackageManager, parseGitVersion } from "./worker-doctor-git-prereqs.js";
 
 // #860's Node-floor check lives in its own module: this file sits exactly at the
@@ -686,6 +687,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   const safeDirectory = await checkGitSafeDirectory(probeCommand);
   if (safeDirectory) checks.push(safeDirectory);
   checks.push(await checkPackageManager());
+  checks.push(await checkMise(probeCommand)); // #1371
   checks.push(checkNodeVersion());
   checks.push(checkWorkerBuild(opts.stateFile, opts.runningEntry ?? null));
   const globalVersion = opts.globalVersion === undefined ? probeGlobalVersion() : opts.globalVersion;

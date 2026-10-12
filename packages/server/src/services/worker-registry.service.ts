@@ -35,6 +35,23 @@ import {
   type WorkerProfileAttestation,
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { parseWorkerToolchains, type WorkerToolchains } from "@agentic-kanban/shared/lib/worker-toolchains";
+import {
+  parseWorkerToolchainInstallInfo,
+  type ToolchainInstallState,
+  type ToolchainInstallStatus,
+  type WorkerToolchainInstallInfo,
+} from "@agentic-kanban/shared/lib/worker-toolchain-install";
+
+/** The board's record of the latest toolchain install it asked one worker for (#1371). */
+export interface ToolchainInstallRecord {
+  requestId: string;
+  /** Requirements as text (`go>=1.23`). */
+  toolchains: string[];
+  state: ToolchainInstallState;
+  reason?: string;
+  requestedAtMs: number;
+  updatedAtMs: number;
+}
 import { recordWorkerEvent } from "./worker-events.service.js";
 import type { WorkerUpdateReport } from "../lib/worker-update.js";
 
@@ -118,6 +135,10 @@ export interface WorkerView extends Omit<WorkerRow, "tokenHash" | "desiredSettin
   packageManagers?: WorkerPackageManagers;
   /** Toolchains (node/java/go/...) on this worker's PATH, as of its last hello/heartbeat (#1382). In memory like `capacity`. */
   toolchains?: WorkerToolchains;
+  /** The worker's own install policy for project toolchains (#1371): never|ask|auto, its allowlist, whether mise is present. */
+  toolchainInstallPolicy?: WorkerToolchainInstallInfo;
+  /** The latest install the board asked this worker for and how it is going (#1371): pending/installing/failed/done. */
+  toolchainInstall?: ToolchainInstallRecord;
   /** Why this worker advertises no usable provider, as of its last hello/heartbeat (#1372). In memory like `capacity`. */
   providerNotice?: string;
   /** The worker's latest doctor summary (#1370). In memory like `capacity`; re-sent on hello and on change. */
@@ -184,6 +205,9 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   /** Toolchains each worker detected on PATH (#1382). See WorkerView for why not a column. */
   const reportedToolchains = new Map<string, WorkerToolchains>();
+  /** Install policy each worker declared, and the latest install request per worker (#1371). In memory like toolchains. */
+  const reportedInstallInfo = new Map<string, WorkerToolchainInstallInfo>();
+  const toolchainInstalls = new Map<string, ToolchainInstallRecord>();
 
   /** Why a worker advertises no usable provider (#1372); absent = nothing to say. */
   const reportedProviderNotices = new Map<string, string>();
@@ -361,6 +385,7 @@ export function createWorkerRegistry(database: Database = realDb) {
       noteAttestedProfiles(workerId, opts.capabilities.profiles);
       notePackageManagers(workerId, opts.capabilities.packageManagers);
       noteToolchains(workerId, opts.capabilities.toolchains);
+      noteToolchainInstallInfo(workerId, opts.capabilities.toolchainInstall);
       noteProviderNotice(workerId, opts.capabilities.providerNotice);
       noteDoctor(workerId, opts.capabilities.doctor);
     }
@@ -445,6 +470,8 @@ export function createWorkerRegistry(database: Database = realDb) {
       const profiles = reportedProfiles.get(row.id);
       const packageManagers = reportedPackageManagers.get(row.id);
       const toolchains = reportedToolchains.get(row.id);
+      const toolchainInstallPolicy = reportedInstallInfo.get(row.id);
+      const toolchainInstall = toolchainInstalls.get(row.id);
       const providerNotice = reportedProviderNotices.get(row.id);
       const doctor = reportedDoctor.get(row.id);
       const update = reportedUpdates.get(row.id);
@@ -463,6 +490,8 @@ export function createWorkerRegistry(database: Database = realDb) {
         ...(profiles ? { profiles } : {}),
         ...(packageManagers ? { packageManagers } : {}),
         ...(toolchains ? { toolchains } : {}),
+        ...(toolchainInstallPolicy ? { toolchainInstallPolicy } : {}),
+        ...(toolchainInstall ? { toolchainInstall } : {}),
         ...(providerNotice ? { providerNotice } : {}),
         ...(doctor ? { doctor } : {}),
         ...(update ? { update } : {}),
@@ -513,6 +542,30 @@ export function createWorkerRegistry(database: Database = realDb) {
     const parsed = parseWorkerToolchains(raw);
     if (parsed) reportedToolchains.set(workerId, parsed);
     else reportedToolchains.delete(workerId);
+  }
+
+  /** Record (or clear) a worker's declared toolchain install policy (#1371). A REPLACE: absent = an older worker, treated as "never". */
+  function noteToolchainInstallInfo(workerId: string, raw: unknown): void {
+    const parsed = parseWorkerToolchainInstallInfo(raw);
+    if (parsed) reportedInstallInfo.set(workerId, parsed);
+    else reportedInstallInfo.delete(workerId);
+  }
+
+  /** The board just asked this worker to install `toolchains`: a fresh record, `pending` until the worker answers. */
+  function noteToolchainInstallRequested(workerId: string, requestId: string, toolchains: string[], nowMs: number = Date.now()): void {
+    toolchainInstalls.set(workerId, {
+      requestId, toolchains, state: "pending", reason: "requested; waiting for the worker", requestedAtMs: nowMs, updatedAtMs: nowMs,
+    });
+  }
+
+  /** The worker's progress on a request. A report for a request that is no longer the current one is dropped. */
+  function noteToolchainInstallStatus(workerId: string, status: ToolchainInstallStatus, nowMs: number = Date.now()): void {
+    const current = toolchainInstalls.get(workerId);
+    if (!current || current.requestId !== status.requestId) return;
+    toolchainInstalls.set(workerId, {
+      ...current, state: status.state, updatedAtMs: nowMs,
+      ...(status.reason ? { reason: status.reason } : { reason: undefined }),
+    });
   }
 
   /** Record (or clear) why a worker advertises no usable provider (#1372). A REPLACE: absent = nothing to say. */
@@ -572,6 +625,8 @@ export function createWorkerRegistry(database: Database = realDb) {
     reportedProfiles.delete(workerId);
     reportedPackageManagers.delete(workerId);
     reportedToolchains.delete(workerId);
+    reportedInstallInfo.delete(workerId);
+    toolchainInstalls.delete(workerId);
     reportedProviderNotices.delete(workerId);
     reportedDoctor.delete(workerId);
     reportedUpdates.delete(workerId);
@@ -593,7 +648,7 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   return {
     mintPairingToken, registerWorker, authenticateWorker, heartbeat, touchHeartbeat,
-    listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles, notePackageManagers, noteToolchains, noteProviderNotice, noteDoctor, noteCapabilities,
+    listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles, notePackageManagers, noteToolchains, noteToolchainInstallInfo, noteToolchainInstallRequested, noteToolchainInstallStatus, noteProviderNotice, noteDoctor, noteCapabilities,
     requestUpdate, authenticateAnyWorker, isPairingTokenValid, getDesiredSettings, setDesiredSettings,
   };
 }

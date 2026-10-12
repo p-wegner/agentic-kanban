@@ -89,6 +89,7 @@ export type {
   WorkerAssignment,
   WorkerEligibility,
 };
+import { describeInstallOutlook } from "./toolchain-install.service.js";
 import { missingToolchains, splitRequirements } from "@agentic-kanban/shared/lib/worker-toolchains";
 import { isPlacementReasonId } from "../lib/placement-explain.types.js";
 import { WorkerDispatchUnavailableError } from "./agent-dispatch.service.js";
@@ -238,6 +239,8 @@ function ineligibleReasonFor(
     missingLabels: string[];
     /** #1382: required toolchains the worker REPORTED and does not meet (`java>=21`). */
     missingToolchains: string[];
+    /** #1371: whether/why the board can have the worker install them (` (cannot install: ...)`). */
+    installOutlook?: string;
     providerName: ProviderName;
     unresponsive: string | null;
     /** #1381: why the board-side allowed/denied project lists bar the asked-about project. */
@@ -259,7 +262,7 @@ function ineligibleReasonFor(
     return `does not advertise provider '${ctx.providerName}' (has [${ctx.providers.join(",")}])`;
   }
   if (ctx.missingLabels.length > 0) return `missing required label(s) [${ctx.missingLabels.join(",")}]`;
-  if (ctx.missingToolchains.length > 0) return `lacks ${ctx.missingToolchains.join(", ")}`;
+  if (ctx.missingToolchains.length > 0) return `lacks ${ctx.missingToolchains.join(", ")}${ctx.installOutlook ?? ""}`;
   if (ctx.load >= worker.maxConcurrency) return `no free slot (${ctx.load}/${worker.maxConcurrency} in use)`;
   return null;
 }
@@ -310,6 +313,7 @@ async function describeWorkers(
       providers: parseJsonList(w.providers),
       missingLabels: wanted.labels.filter((l) => !labels.includes(l)),
       missingToolchains: missingToolchains(wanted.toolchains, w.toolchains),
+      installOutlook: ((m) => (m.length > 0 ? describeInstallOutlook(w, m) : undefined))(missingToolchains(wanted.toolchains, w.toolchains)),
       providerName,
       unresponsive: fleet.health.unresponsiveReason(w.id),
       authExpired: ((names) => (names.length > 0 ? describeAuthExpired(w.name, providerName, names) : null))(
@@ -334,6 +338,8 @@ async function describeWorkers(
       // #1370: the worker's own doctor results, so the Runners tab can show a setup checklist.
       ...(w.doctor ? { doctor: w.doctor } : {}),
       ...(w.toolchains ? { toolchains: w.toolchains } : {}),
+      ...(w.toolchainInstallPolicy ? { toolchainInstallPolicy: w.toolchainInstallPolicy } : {}),
+      ...(w.toolchainInstall ? { toolchainInstall: w.toolchainInstall } : {}),
       // #774 — the identity half. `GET /api/workers` is served from this shape now, so the
       // route no longer hands out the raw row and the panel no longer computes a second,
       // wrong "capacity" from it.

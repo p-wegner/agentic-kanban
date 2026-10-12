@@ -56,12 +56,13 @@ import {
   WORKER_PROTOCOL_VERSION,
   WORKER_UPDATE_REMEDIATION,
   type WorkerCapabilities,
-  type WorkerCapacityInfo,
   type WorkerDoctorSummary,
   type WorkerProfileAttestation,
   type WorkerToBoardMessage,
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
+import { createDaemonToolchainInstall } from "./worker-toolchain-install.js";
+import type { ToolchainInstallPolicy, WorkerToolchainInstallInfo } from "@agentic-kanban/shared/lib/worker-toolchain-install";
 import { createWorkerAgentRunner, dispatchBoardMessage, rawDataToBuffer, type UnpushedResult } from "./worker-agent-runner.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
 import { packageManagersField, refreshPackageManagers, refreshToolchains, toolchainsField } from "../cli/commands/worker-doctor-git-prereqs.js";
@@ -160,6 +161,8 @@ export interface WorkerDaemonOptions {
   /** #1370: run the local doctor and send the board a compact summary (on hello, then on change). Opt-in. */
   doctorSummary?: boolean;
   maxConcurrency?: number;
+  /** #1371 `--toolchain-install` (default never) and `--toolchain-allow`: may the board have this worker install toolchains via mise? */
+  toolchainInstall?: ToolchainInstallPolicy; toolchainAllow?: string[];
   /** Defaults to ~/.agentic-kanban/worker-state.json. */
   stateFile?: string;
   /** Root for git-transport clones/checkouts. Defaults to ~/.agentic-kanban/worker. */
@@ -192,17 +195,6 @@ export function defaultWorkerStateFile(): string {
 export { normalizeBoardUrl, loadState, saveIdentity };
 
 /**
- * This machine's live headroom (#910), folded onto every heartbeat. Tier 0 only â€” a
- * single sync `os.freemem()` read, cheap enough for the 30s heartbeat and the `hello`
- * handshake alike, unlike Tier 1's process spawn. Never throws: `readTier0Capacity`
- * and `resolveSpareCores` both fail open, so a capacity read never blocks a heartbeat.
- */
-function capacityOf(): WorkerCapacityInfo {
-  const snapshot = toWorkerCapacitySnapshot(readTier0Capacity());
-  return snapshot;
-}
-
-/**
  * What this machine declares about itself, on every registration AND every beat (#754).
  *
  * `profiles` (#1027) rides the same channel: a login can be added, removed or run out of quota,
@@ -213,13 +205,16 @@ function capabilitiesOf(
   profiles?: WorkerProfileAttestation[],
   providerNotice?: string,
   doctor?: WorkerDoctorSummary,
+  toolchainInstall?: WorkerToolchainInstallInfo,
 ): WorkerCapabilities {
   return {
+    ...(toolchainInstall ? { toolchainInstall } : {}),
     ...(providerNotice ? { providerNotice } : {}),
     ...(opts.labels ? { labels: opts.labels } : {}),
     ...(opts.providers ? { providers: opts.providers } : {}),
     ...(opts.maxConcurrency !== undefined ? { maxConcurrency: opts.maxConcurrency } : {}),
-    capacity: capacityOf(),
+    // #910: this machine's live headroom (Tier 0 only: one sync os.freemem() read, cheap for every beat; never throws)
+    capacity: toWorkerCapacitySnapshot(readTier0Capacity()),
     ...(profiles && profiles.length > 0 ? { profiles } : {}),
     // #1369/#1382: package managers + toolchains this machine has, so placement can name what a project needs.
     ...packageManagersField(), ...toolchainsField(),
@@ -499,7 +494,12 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // Best-effort â€” a scan failure must never block pairing/connecting.
   // #1336: a previous daemon's leftover agent trees are killed first (agent-process-tree.ts).
   const workRoot = opts.workRoot ?? defaultWorkerWorkRoot(stateFile); // #1401: own root per non-default state file
-  await cleanUpBeforeStart(workRoot, log); await Promise.all([refreshPackageManagers(), refreshToolchains()]);
+  await cleanUpBeforeStart(workRoot, log);
+  const toolchains = createDaemonToolchainInstall({ // #1371
+    policy: opts.toolchainInstall ?? "never", allow: opts.toolchainAllow ?? [], stateFile, log, sendToBoard: (m) => sendToBoard(m),
+    redetect: async () => { await refreshToolchains(Date.now() + 1); return toolchainsField().toolchains; }, heartbeat: () => sendHeartbeat(),
+  });
+  await Promise.all([refreshPackageManagers(), refreshToolchains(), toolchains.installer.refreshMise()]);
 
   // #1370: the worker's own doctor, summarised. hello/register always carry the current summary; a
   // heartbeat carries it only when it differs from what the board last got (`pending`).
@@ -720,7 +720,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           // gained docker (or changed its ceiling) says so without being re-paired.
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
-          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctor.takeCurrent()),
+          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctor.takeCurrent(), toolchains.installer.info()),
         } satisfies WorkerToBoardMessage));
         while (pendingCritical.length > 0) {
           socket.send(JSON.stringify(pendingCritical.shift()));
@@ -742,6 +742,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         log(`[worker] dropping malformed board message`);
         return;
       }
+      if (toolchains.handle(message)) return;
       try {
         dispatchBoardMessage(message, runner, sendToBoard, draining);
       } catch (err) {
@@ -902,7 +903,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           // Not gated on selfUpdate: a daemon restarted after a Ctrl+C drain without --auto-update
           // (every Linux worker until #1374) otherwise stayed `draining` on the board forever.
           ...(draining ? { status: "draining" } : announceOnline ? { status: "online" } : {}),
-          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctorToSend),
+          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctorToSend, toolchains.installer.info()),
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
           ...(selfUpdate ? { update: selfUpdate.state() } : {}),
@@ -941,6 +942,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
 
   const heartbeatTimer = setInterval(() => { void sendHeartbeat(); }, opts.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS);
   if (heartbeatTimer.unref) heartbeatTimer.unref();
+  const stopApprovalPolling = toolchains.startPolling(); // `toolchain approve <id>` is a file the CLI writes
 
   return {
     workerId: identity.workerId,
@@ -967,6 +969,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       selfUpdate?.dispose();
       void controlServer?.close();
       clearInterval(heartbeatTimer);
+      stopApprovalPolling();
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (stopOpts?.killAgents) runner.stopAll();
       else runner.releaseAgents(); // #1336: --leave-agents â€” the trees survive on purpose

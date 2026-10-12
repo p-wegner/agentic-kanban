@@ -125,8 +125,8 @@ describe("placement routes on required toolchains (#1382)", () => {
     const snapshot = await describeFleet({ database: db, projectId: PROJECT_ID });
     const byName = Object.fromEntries(snapshot.workers.map((w) => [w.name, w]));
     expect(byName["desktop-stable"]!.eligible).toBe(false);
-    expect(byName["desktop-stable"]!.ineligibleReason).toBe("lacks java>=21");
-    expect(byName["old-jdk"]!.ineligibleReason).toBe("lacks java>=21");
+    expect(byName["desktop-stable"]!.ineligibleReason).toContain("lacks java>=21");
+    expect(byName["old-jdk"]!.ineligibleReason).toContain("lacks java>=21");
     expect(byName["desktop-stable"]!.toolchains).toEqual({ node: "22.1.0", pnpm: "9.1.0" });
 
     const explained = await explainPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" });
@@ -154,7 +154,7 @@ describe("placement routes on required toolchains (#1382)", () => {
     const withPnpm = await addWorker("pnpm-box", { pnpm: "9.1.0" });
     const snapshot = await describeFleet({ database: db, projectId: PROJECT_ID });
     expect(snapshot.workers.find((w) => w.workerId === withPnpm)!.eligible).toBe(true);
-    expect(snapshot.workers.find((w) => w.name === "no-pnpm")!.ineligibleReason).toBe("lacks pnpm");
+    expect(snapshot.workers.find((w) => w.name === "no-pnpm")!.ineligibleReason).toContain("lacks pnpm");
   });
 
   it("a project with no requirement is unaffected", async () => {
