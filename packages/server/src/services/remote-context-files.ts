@@ -17,8 +17,8 @@
  * worker is an instruction to use tools that do not exist there. It is retargeted first —
  * see `retargetTicketContextForRemoteWorker`.
  */
-import { readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import {
   TICKET_CONTEXT_FILENAME,
   announceRemoteBoardTools,
@@ -78,6 +78,27 @@ export function announceRemoteAssignmentIdentity(
   ];
   const at = heading.index + heading[0].length;
   return markdown.slice(0, at) + lines.join("\n") + markdown.slice(at);
+}
+
+/**
+ * The context files a remote assignment ships, with the ticket brief ALWAYS among them (#1407).
+ *
+ * The brief reaches a launch only when its caller passes `contextFiles`. A relaunch with a
+ * custom prompt (`Implement the ticket`) passes none — it re-writes `CLAUDE.local.md` into the
+ * board worktree and relies on the agent finding it there — so a remote agent got a bare prompt
+ * and no ticket at all. The file the board already wrote is therefore picked up from the
+ * worktree itself, whatever the launch prompt or the caller.
+ */
+export function withTicketContextFile(
+  contextFiles: string[] | undefined,
+  worktreePath: string | undefined,
+  exists: (path: string) => boolean = existsSync,
+): string[] | undefined {
+  const files = contextFiles ?? [];
+  if (files.some((p) => basename(p.replace(/\\/g, "/")) === TICKET_CONTEXT_FILENAME)) return contextFiles;
+  if (!worktreePath) return contextFiles;
+  const candidate = join(worktreePath, TICKET_CONTEXT_FILENAME);
+  return exists(candidate) ? [...files, candidate] : contextFiles;
 }
 
 export interface BuildRemoteContextFilesOptions {

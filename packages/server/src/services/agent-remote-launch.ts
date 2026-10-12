@@ -9,7 +9,7 @@ import type { AgentLaunchRequest, DeferredLaunchFailure } from "./agent-dispatch
 import type { Database } from "../db/index.js";
 import { resolveEffectivePrompt } from "./agent-provider/context-files-prompt.js";
 import { buildRemoteLaunchSpec } from "./remote-launch-spec.js";
-import { announceRemoteBridgeInBrief, buildRemoteContextFiles } from "./remote-context-files.js";
+import { announceRemoteBridgeInBrief, buildRemoteContextFiles, withTicketContextFile } from "./remote-context-files.js";
 import {
   REMOTE_BOARD_TOOLS,
   buildRemoteMcpConfigFile,
@@ -23,6 +23,7 @@ import { resolveLaunchPorts, buildAgentSpawnEnv, resolveAgentHangTimeoutMs } fro
 import { buildRemoteSpecEnv } from "../lib/remote-spec-env.js";
 import { resolveWorktreeDevPorts } from "./worktree-ports.js";
 import { listAgentSkills } from "../repositories/agent-skill.repository.js";
+import { getSessionLiveness } from "../repositories/worker.repository.js";
 import { ensureGitHttpServer } from "./git-http.service.js";
 import { incomingRefFor } from "./worker-remote-sync.service.js";
 import { resolveProjectCommitterIdentity } from "./project-committer-identity.js";
@@ -42,8 +43,10 @@ export function buildRemoteAssignSpec(
     worktreePath, sessionId, prompt, agentArgs,
     providerSessionId, agentCommand, keepAlive, permissionPromptTool,
     planMode, provider, profile, extraEnv, skipPermissions,
-    model, contextFiles, systemInstructions, builderContext,
+    model, systemInstructions, builderContext,
   } = request;
+  // #1407: the ticket brief ships whatever the launch prompt was (see withTicketContextFile).
+  const contextFiles = placement.repo ? withTicketContextFile(request.contextFiles, worktreePath) : request.contextFiles;
   // #524: codex has no channel for contextFiles other than the prompt, and this path
   // used to send the raw one — so a codex builder on a fleet worker ran with NO ticket
   // context. Same helper the host uses, so the two cannot diverge again.
@@ -130,20 +133,45 @@ export interface GitTransportAssignmentDeps {
   noteAssigned: (sessionId: string, workerId: string, detail: Record<string, unknown>) => void;
   finishSession: (sessionId: string, session: RemoteSession, stderr: string, exitCode: number | null) => void;
   onDeferredLaunchFailure?: (failure: DeferredLaunchFailure) => void;
+  /** True once the board has killed this session while its assign was still being prepared (#1407). */
+  isCancelled?: () => boolean;
+}
+
+/**
+ * Has the board already ended this session (#1407)? The assign is built asynchronously, so a
+ * session reconciled or stopped in that gap would otherwise still be handed to a worker, which
+ * would run it, hold a slot, and push a stale result. Fails OPEN on an unreadable row: a stray
+ * agent is cheaper than a launch that never happens.
+ */
+async function sessionAlreadyEnded(deps: GitTransportAssignmentDeps): Promise<boolean> {
+  if (deps.isCancelled?.()) return true;
+  try {
+    const live = await getSessionLiveness(deps.request.sessionId, deps.database);
+    return live !== null && live.status !== "running";
+  } catch {
+    return false;
+  }
 }
 
 /** Git transport needs the git-http listener and the skill payload, which are async — assign after they resolve. */
 export async function dispatchGitTransportAssignment(deps: GitTransportAssignmentDeps): Promise<void> {
   const { manager, database, sessions, fleetMcp, request, workerId, repo, spec, noteAssigned, finishSession, onDeferredLaunchFailure } = deps;
-  const { sessionId, provider, contextFiles } = request;
+  const { sessionId, provider } = request;
+  const contextFiles = withTicketContextFile(request.contextFiles, request.worktreePath);
   try {
     const git = await ensureGitHttpServer(database);
     const skillRows = await listAgentSkills(repo.projectId, false, database).catch(() => []);
+    if (await sessionAlreadyEnded(deps)) {
+      console.warn(`[agent-remote] session ${sessionId} ended before its assign was sent; not assigning it to worker ${workerId} (#1407)`);
+      sessions.delete(sessionId);
+      return;
+    }
     const incomingRef = incomingRefFor(repo.branch);
     // #247/#246: the token is scoped to THIS worker, THIS project and THIS
     // incoming ref — not a board-wide credential for every repo — and it is
-    // dropped when the worker is revoked.
-    const gitToken = git.issueToken({ workerId, projectId: repo.projectId, incomingRef });
+    // dropped when the worker is revoked. #1407: and to THIS session, so a session the
+    // board has since superseded cannot push over its successor's result.
+    const gitToken = git.issueToken({ workerId, projectId: repo.projectId, incomingRef, sessionId });
     // #769: board TOOLS for a remote builder — the second half of #749. A per-assignment
     // token on the fleet listener's allowlisted MCP bridge, delivered as a config file in
     // the checkout (never in argv, where a process listing would show it) plus the provider

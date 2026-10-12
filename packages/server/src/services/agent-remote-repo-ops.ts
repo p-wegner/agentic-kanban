@@ -66,7 +66,7 @@ export function createRemoteRepoService(deps: {
     return {
       projectId,
       gitPort: git.port,
-      gitToken: git.issueToken({ workerId: session.workerId, projectId, incomingRef }),
+      gitToken: git.issueToken({ workerId: session.workerId, projectId, incomingRef, sessionId }),
       branch: repo.branch,
       incomingRef,
     };

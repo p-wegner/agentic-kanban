@@ -66,6 +66,7 @@ import type { Database } from "../db/index.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import {
   findCurrentWorkerAssignment,
+  isSessionSupersededOnBranch,
   WORKER_RESULT_LANDABLE_AFTER_END_MS,
 } from "../repositories/worker.repository.js";
 import {
@@ -125,6 +126,13 @@ export interface IssueGitTokenInput {
    * scope in practice: any push is refused because no ref can match.
    */
   incomingRef?: string;
+  /**
+   * The session this token was issued to (#1407). A push under it is refused once a newer
+   * session exists for the same branch, so a superseded session's late result can never
+   * replace its successor's. Held in memory only: a token resurrected from the table after a
+   * board restart carries none and falls back to the assignment check alone.
+   */
+  sessionId?: string;
   ttlMs?: number;
   /** Test seam for expiry. Epoch ms (#614: `nowMs` for arithmetic). */
   nowMs?: number;
@@ -134,6 +142,7 @@ interface GitTokenScope {
   workerId: string;
   projectId: string;
   incomingRef?: string;
+  sessionId?: string;
   /** When this token was minted — the clock the settle window above is measured from. */
   issuedAtMs: number;
 }
@@ -149,6 +158,9 @@ export type AssignmentLookup = (params: {
   branch: string;
   nowMs: number;
 }) => Promise<boolean>;
+
+/** Has a newer session than `sessionId` been dispatched for this branch (#1407)? */
+export type SupersededLookup = (params: { projectId: string; branch: string; sessionId: string }) => Promise<boolean>;
 
 export interface GitHttpHandle {
   port: number;
@@ -204,6 +216,7 @@ function createGitTokenStore(database: Database) {
         workerId: input.workerId,
         projectId: input.projectId,
         incomingRef: input.incomingRef,
+        sessionId: input.sessionId,
         issuedAtMs,
       };
       const token = store.issue(scope, { nowMs: input.nowMs, ttlMs: input.ttlMs });
@@ -211,7 +224,7 @@ function createGitTokenStore(database: Database) {
       track(
         insertGitToken(
           sha256Hex(token),
-          { ...scope, expiresAtMs: issuedAtMs + (input.ttlMs ?? DEFAULT_GIT_TOKEN_TTL_MS) },
+          { workerId: scope.workerId, projectId: scope.projectId, incomingRef: scope.incomingRef, issuedAtMs, expiresAtMs: issuedAtMs + (input.ttlMs ?? DEFAULT_GIT_TOKEN_TTL_MS) },
           database,
         ).catch((err) =>
           console.error(`[git-http] failed to persist token scope for worker ${input.workerId}:`, err),
@@ -305,11 +318,26 @@ export type AuthorizeOutcome =
  * nothing more — which is the correct authority for a token that cannot push anywhere.
  */
 export async function authorizeAssignment(
-  scope: { workerId: string; projectId: string; incomingRef?: string; issuedAtMs: number },
+  scope: { workerId: string; projectId: string; incomingRef?: string; sessionId?: string; issuedAtMs: number },
   lookup: AssignmentLookup,
   nowMs: number = Date.now(),
+  isSuperseded?: SupersededLookup,
 ): Promise<AuthorizeOutcome> {
   const branch = branchFromIncomingRef(scope.incomingRef);
+  // #1407: BEFORE the settle window, which would otherwise wave a stale session's token
+  // through for its first five minutes — exactly the window the incident fell in.
+  if (branch && scope.sessionId && isSuperseded) {
+    let superseded = false;
+    try {
+      superseded = await isSuperseded({ projectId: scope.projectId, branch, sessionId: scope.sessionId });
+    } catch (err) {
+      console.error(`[git-http] supersession lookup failed for session ${scope.sessionId}:`, err);
+      return { ok: false, reason: "supersession lookup failed" };
+    }
+    if (superseded) {
+      return { ok: false, reason: `session ${scope.sessionId} is no longer the current session of ${branch}` };
+    }
+  }
   if (branch) {
     let current = false;
     try {
@@ -338,6 +366,11 @@ export async function authorizeAssignment(
 export function createAssignmentLookup(database: Database): AssignmentLookup {
   return async ({ workerId, projectId, branch, nowMs }) =>
     (await findCurrentWorkerAssignment({ workerId, projectId, branch, nowMs }, database)) !== null;
+}
+
+/** The DB-backed supersession check used in production. */
+export function createSupersededLookup(database: Database): SupersededLookup {
+  return ({ projectId, branch, sessionId }) => isSessionSupersededOnBranch({ projectId, branch, sessionId }, database);
 }
 
 function pktLine(payload: string): string {
@@ -528,6 +561,8 @@ export async function startGitHttpServer(opts?: {
   host?: string;
   /** Injectable for tests; defaults to the DB-backed dispatch check. */
   assignmentLookup?: AssignmentLookup;
+  /** Injectable for tests; defaults to the DB-backed newest-session check (#1407). */
+  supersededLookup?: SupersededLookup;
 }): Promise<GitHttpHandle> {
   const database = opts?.database ?? realDb;
   // #776: checked only when no explicit port was passed — an explicit port is the test /
@@ -543,6 +578,7 @@ export async function startGitHttpServer(opts?: {
     console.error("[git-http] failed to prune expired token scopes:", err),
   );
   const assignmentLookup = opts?.assignmentLookup ?? createAssignmentLookup(database);
+  const supersededLookup = opts?.supersededLookup ?? createSupersededLookup(database);
 
   const http: Server = createServer((req, res) => {
     void (async () => {
@@ -563,7 +599,7 @@ export async function startGitHttpServer(opts?: {
 
         // #753: the token proves WHO, the assignment proves STILL. Checked before the path
         // is even parsed, so no request of any shape outlives its session.
-        const authorized = await authorizeAssignment(scope, assignmentLookup);
+        const authorized = await authorizeAssignment(scope, assignmentLookup, Date.now(), supersededLookup);
         if (!authorized.ok) {
           await tokens.drop(provided);
           console.warn(`[git-http] refused and revoked a token for worker ${scope.workerId}: ${authorized.reason}`);

@@ -371,7 +371,8 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
    * reported as assign_failed (the board classifies it as a launch failure).
    */
   function assignWithRepo(sessionId: string, spec: WorkerLaunchSpec, repo: WorkerRepoTransport): void {
-    seen.noteAssigned(sessionId);
+    // An exit, not assign_failed: the board ended this session and must not re-place it elsewhere (#1407).
+    if (seen.noteAssigned(sessionId)) return emitExit(sessionId, null);
     if (processes.has(sessionId) || provisioning.has(sessionId)) {
       send({ type: "assign_failed", sessionId, error: "session already running on this worker" });
       return;
@@ -422,7 +423,8 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   }
 
   function assign(sessionId: string, specAsSent: WorkerLaunchSpec): void {
-    seen.noteAssigned(sessionId);
+    // An exit, not assign_failed: the board ended this session and must not re-place it elsewhere (#1407).
+    if (seen.noteAssigned(sessionId)) return emitExit(sessionId, null);
     if (processes.has(sessionId)) {
       send({ type: "assign_failed", sessionId, error: "session already running on this worker" });
       return;
@@ -609,7 +611,9 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         emitExit(sessionId, null);
         return true;
       }
-      return false;
+      // Nothing running and nothing provisioning: either a long-gone session or one whose
+      // assign has not arrived yet (#1407). Remember it unless it already exited here.
+      return seen.noteStopped(sessionId);
     }
     workerLog(`[worker] stopping agent: sessionId=${sessionId} pid=${proc.pid}`);
     // #836: through the ONE kill seam (#832/#833) rather than a private
