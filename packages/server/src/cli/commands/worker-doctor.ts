@@ -453,6 +453,7 @@ import { resolveProviderAuthDir } from "./worker-doctor-provider-auth.js";
 import type { WorkerHarness } from "../../worker/worker-harness.js";
 import { bindDefaultAlias } from "../../worker/worker-profile-aliases.js";
 import { checkHarness } from "./worker-doctor-harness.js";
+import { checkUndeliveredResults } from "./worker-doctor-undelivered.js";
 
 /**
  * Check 7 — the provider CLI, installed AND logged in.
@@ -696,6 +697,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   }
   checks.push(checkWorkerCheckoutTrust(opts.workRoot ?? defaultWorkerWorkRoot(opts.stateFile), opts.home ?? homedir(), opts.harness?.dirFor("claude")));
   checks.push(await checkCloneIntegrity(opts.workRoot ?? defaultWorkerWorkRoot(opts.stateFile)));
+  checks.push(checkUndeliveredResults(opts.workRoot ?? defaultWorkerWorkRoot(opts.stateFile)));
   if (opts.harness) checks.push(...checkHarness(opts.harness, opts.providers, undefined, { notes: opts.harnessNotes, legacy: opts.harnessLegacy }));
   for (const provider of opts.providers) {
     checks.push(...(await checkProvider(provider, opts.home, undefined, opts.harness)));

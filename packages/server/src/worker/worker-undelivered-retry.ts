@@ -30,6 +30,7 @@ import {
   loadUndelivered,
   markUndeliveredLost,
   removeUndelivered,
+  undeliveredGiveUpReason,
   upsertUndelivered,
   type LostSessionRecord,
 } from "./worker-undelivered.js";
@@ -107,7 +108,10 @@ const localBranchFor = (sessionId: string) => `kanban/${sessionId}`;
 
 export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
   const { workRoot, safeSend } = deps;
-  const unpushed = new Map<string, { pending: PendingResult; attempts: number; lastError: string }>();
+  const unpushed = new Map<
+    string,
+    { pending: PendingResult; attempts: number; lastError: string; recordedAt: string; onDisk: boolean }
+  >();
 
   // #871: adopt the previous daemon's undelivered results. In-memory entries cannot exist
   // yet (the map was created one line up), so every persisted record is adopted as-is — the
@@ -128,6 +132,8 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
       },
       attempts: record.attempts,
       lastError: record.lastError || "restored after a daemon restart; not yet retried by this process",
+      recordedAt: record.recordedAt || new Date().toISOString(),
+      onDisk: true,
     });
     workerLog(
       `[worker] restored an undelivered result from ${workRoot}: sessionId=${record.sessionId} ` +
@@ -151,7 +157,7 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
   function persist(sessionId: string): void {
     const entry = unpushed.get(sessionId);
     if (!entry) return;
-    upsertUndelivered(workRoot, {
+    entry.onDisk = upsertUndelivered(workRoot, {
       sessionId,
       branch: entry.pending.repo.branch,
       baseBranch: entry.pending.repo.baseBranch,
@@ -162,7 +168,7 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
       gitPort: entry.pending.repo.gitPort,
       attempts: entry.attempts,
       lastError: entry.lastError,
-      recordedAt: new Date().toISOString(),
+      recordedAt: entry.recordedAt,
     });
   }
 
@@ -227,7 +233,13 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
    * bounded by design.
    */
   function retain(sessionId: string, pending: PendingResult, outcome: PushOutcome & { ok: false }): void {
-    unpushed.set(sessionId, { pending, attempts: outcome.attempts, lastError: outcome.lastError });
+    unpushed.set(sessionId, {
+      pending,
+      attempts: outcome.attempts,
+      lastError: outcome.lastError,
+      recordedAt: new Date().toISOString(),
+      onDisk: false,
+    });
     // #871: the FACT (not the token) also goes to disk, so the entry survives the daemon
     // restart the supervisor performs 2 s after a crash.
     persist(sessionId);
@@ -257,7 +269,28 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
    */
   async function retryPending(): Promise<{ pushed: string[]; stillPending: string[] }> {
     const pushed: string[] = [];
+    // #1416: the file is the operator's surface. An entry we persisted that is no longer in it was
+    // deleted on purpose; writing it back from memory is what retried dead results forever.
+    const onFile = new Set(loadUndelivered(workRoot).map((r) => r.sessionId));
     for (const [sessionId, entry] of [...unpushed]) {
+      if (entry.onDisk && !onFile.has(sessionId)) {
+        unpushed.delete(sessionId);
+        workerLog(
+          `[worker] dropping retained result: sessionId=${sessionId} was removed from ` +
+            `${workRoot}/undelivered-results.json by the operator - not retrying or re-writing it`,
+        );
+        continue;
+      }
+      const giveUp = undeliveredGiveUpReason(entry);
+      if (giveUp) {
+        unpushed.delete(sessionId);
+        removeUndelivered(workRoot, sessionId);
+        workerLog(
+          `[worker] giving up on retained result: sessionId=${sessionId}: ${giveUp}; last error: ` +
+            `${entry.lastError}. The checkout is kept at ${entry.pending.checkout.cwd}.`,
+        );
+        continue;
+      }
       try {
         await deps.push(deps.boardUrl, entry.pending.repo, entry.pending.checkout);
       } catch (err) {
