@@ -25,7 +25,7 @@ function git(cwd: string, args: string[]): Promise<string> {
 describe("commitLeftoverChanges atomic-write temp files (#1384)", () => {
   let dir: string;
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), "leftover-tmp-"));
+    dir = await mkdtemp(join(tmpdir(), "ak-leftover-tmp-"));
     await git(dir, ["init", "-q"]);
     await git(dir, ["config", "user.email", "t@t.local"]);
     await git(dir, ["config", "user.name", "t"]);
