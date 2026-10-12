@@ -221,6 +221,41 @@ export async function syncIncomingBranch(
   return { ...inTree, via: "worktree", worktreePath };
 }
 
+export type RefusedPushClass =
+  | { kind: "rewritten-history"; count: number; summary: string }
+  | { kind: "stale-clean"; summary: string }
+  | { kind: "unknown"; summary: string };
+
+/**
+ * #1427 — say WHY a refused worker push is refused. A push that diverged from the board's
+ * branch is either merely stale (a clean rebase onto an older base) or carries rewritten
+ * copies of commits the base already has (the worker rebased onto its own stale local base
+ * ref); landing the latter would duplicate those commits on merge. The base is the project
+ * checkout's current branch, and equivalence is `git cherry` (patch-id), which survives the
+ * hash rewrite. Never throws.
+ */
+export async function classifyRefusedPush(repoPath: string, branch: string): Promise<RefusedPushClass> {
+  const unknown: RefusedPushClass = { kind: "unknown", summary: "push could not be classified" };
+  try {
+    const head = await gitExec(["symbolic-ref", "--short", "HEAD"], { cwd: repoPath });
+    const base = execSucceeded(head) ? head.stdout.trim() : "";
+    if (!base) return unknown;
+    const cherry = await gitExec(["cherry", base, incomingRefFor(branch)], { cwd: repoPath });
+    if (!execSucceeded(cherry)) return unknown;
+    const count = cherry.stdout.split(/\r?\n/).filter((l) => l.startsWith("- ")).length;
+    if (count > 0) {
+      return {
+        kind: "rewritten-history",
+        count,
+        summary: `push carries ${count} commits patch-equivalent to base commits (rewritten history)`,
+      };
+    }
+    return { kind: "stale-clean", summary: "stale but clean rebase" };
+  } catch {
+    return unknown;
+  }
+}
+
 /** Drop the staging ref once its content has landed on the real branch. */
 export async function clearIncomingRef(repoPath: string, branch: string): Promise<void> {
   await gitExec(["update-ref", "-d", incomingRefFor(branch)], { cwd: repoPath });
