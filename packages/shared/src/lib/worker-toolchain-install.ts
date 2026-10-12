@@ -28,6 +28,16 @@ export interface ToolchainInstallStatus {
   reason?: string;
 }
 
+/** The board's record of the latest toolchain install it asked one worker for (#1371). */
+export interface ToolchainInstallRecord {
+  requestId: string;
+  /** Requirements as text (`go>=1.23`). */
+  toolchains: string[];
+  state: ToolchainInstallState;
+  reason?: string;
+  requestedAtMs: number;
+  updatedAtMs: number;
+}
 /** Board -> worker: please install these (subject to your own policy). */
 export interface ToolchainInstallRequestFrame {
   type: "toolchain_install";

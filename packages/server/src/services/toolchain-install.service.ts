@@ -3,7 +3,7 @@
 // The board never forces: the policy matrix is evaluated here to explain and to avoid pointless requests,
 // and again on the worker, which has the last word. Pure over its inputs (registry views + a send function).
 import { randomUUID } from "node:crypto";
-import { decideToolchainInstall } from "@agentic-kanban/shared/lib/worker-toolchain-install";
+import { decideToolchainInstall, type ToolchainInstallRecord } from "@agentic-kanban/shared/lib/worker-toolchain-install";
 import {
   formatToolchainRequirement,
   parseRequiredToolchains,
@@ -11,7 +11,7 @@ import {
   toolchainSatisfies,
   type ToolchainRequirement,
 } from "@agentic-kanban/shared/lib/worker-toolchains";
-import type { ToolchainInstallRecord, WorkerView } from "./worker-registry.service.js";
+import type { WorkerView } from "./worker-registry.service.js";
 
 /** A failed install is not re-requested for the same toolchains until this long has passed. */
 export const TOOLCHAIN_INSTALL_RETRY_MS = 15 * 60_000;

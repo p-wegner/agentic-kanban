@@ -37,21 +37,11 @@ import {
 import { parseWorkerToolchains, type WorkerToolchains } from "@agentic-kanban/shared/lib/worker-toolchains";
 import {
   parseWorkerToolchainInstallInfo,
-  type ToolchainInstallState,
+  type ToolchainInstallRecord,
   type ToolchainInstallStatus,
   type WorkerToolchainInstallInfo,
 } from "@agentic-kanban/shared/lib/worker-toolchain-install";
 
-/** The board's record of the latest toolchain install it asked one worker for (#1371). */
-export interface ToolchainInstallRecord {
-  requestId: string;
-  /** Requirements as text (`go>=1.23`). */
-  toolchains: string[];
-  state: ToolchainInstallState;
-  reason?: string;
-  requestedAtMs: number;
-  updatedAtMs: number;
-}
 import { recordWorkerEvent } from "./worker-events.service.js";
 import type { WorkerUpdateReport } from "../lib/worker-update.js";
 
