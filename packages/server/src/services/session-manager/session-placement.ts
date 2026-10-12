@@ -9,7 +9,7 @@ import type { Database } from "../../db/index.js";
 import type { Placement } from "../agent-dispatch.service.js";
 import type { ProviderName } from "../agent-provider.js";
 import { resolveWorkerPlacement, WorkerDispatchUnavailableError } from "../worker-fleet.service.js";
-import { updateSessionPlacementReason } from "../../repositories/placement-observability.repository.js";
+import { countRunningHostSessions, updateSessionPlacementReason } from "../../repositories/placement-observability.repository.js";
 import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
 import { WorkspaceError } from "../workspace-internals.js";
 
@@ -80,6 +80,8 @@ export async function resolveSessionPlacement(args: {
     // `thrashing: "none"` is honestly "not measured" — the host can only win on free RAM it
     // actually reported, never on a thrashing tiebreak it has not earned.
     hostCapacity: toWorkerCapacitySnapshot(hostTier0),
+    // #1380: the load `host_builder_slots` caps — builders and reviewers alike, this session excluded.
+    hostActiveSessions: await countRunningHostSessions(sessionId, database).catch(() => undefined),
   }).catch((err) => {
     if (err instanceof WorkerDispatchUnavailableError) {
       throw new WorkspaceError(err.message, "CONFLICT", { code: "NO_AVAILABLE_WORKER" });

@@ -127,6 +127,11 @@ export const SETTINGS_REGISTRY = {
   // starting an (N+1)th stack, so an over-subscribed host queues instead of thrashing.
   // In a DinD deployment the KANBAN_STACK_PORT_RANGE size is ALSO a natural cap.
   max_concurrent_stacks: { type: "number", default: "" },
+  // Max concurrent builder/reviewer sessions on the BOARD HOST (#1380). Empty = unlimited
+  // (today's behaviour). `0` = never place on the host while any eligible worker is online;
+  // the host stays the fallback when none is (unless the project is strict). Overridable per
+  // project via `host_builder_slots_<projectId>`.
+  host_builder_slots: { type: "number", default: "" },
   nudge_auto_start: { type: "bool", default: "false" },
   // `nudge_wip_limit` was retired by #1102 — WIP is configured only in a project's Strategy
   // Bullseye. A stored row still feeds `resolveMonitorTunables`' no-Bullseye default path, but

@@ -59,6 +59,8 @@ import {
   compareCandidates,
   hostCandidate,
   describeHeadroom,
+  resolveHostCap,
+  hostBuilderSlotsPrefKey,
   type WorkerCandidate,
 } from "./worker-host-candidate.js";
 export { SHARES_FILESYSTEM_LABEL };
@@ -150,6 +152,7 @@ export function getWorkerFleet(database: Database = realDb): WorkerFleet {
 const workerDispatchPrefDef = projectPref("worker_dispatch");
 const workerLabelsPrefDef = projectPref("worker_labels");
 const workerStrictPrefDef = projectPref("worker_dispatch_strict");
+export { hostBuilderSlotsPrefKey };
 
 export function workerDispatchPrefKey(projectId: string): string {
   return workerDispatchPrefDef.key(projectId);
@@ -471,6 +474,13 @@ export async function resolveWorkerPlacement(params: {
    * eligible, and `hostSaturated` keeps its separate job of labelling the reason.
    */
   hostCapacity?: WorkerCapacityInfo;
+  /**
+   * #1380: builder/reviewer sessions currently running on the board host (the launching
+   * session excluded). With `host_builder_slots` set and this at/over it, the host is held out
+   * of the ranking, so an eligible worker always wins; the host stays the no-worker fallback.
+   * Absent = the cap is not enforced (callers with no session ledger, e.g. dry runs).
+   */
+  hostActiveSessions?: number;
 }): Promise<Placement> {
   // #751: a remote decision claims a capacity slot, and EVERY exit from this
   // function that is not a remote placement has to give it back — including the
@@ -495,8 +505,15 @@ async function resolvePlacementWithReservation(
 ): Promise<Placement> {
   const {
     database, projectId, providerName, branch, baseBranch, resumeProviderSessionId, now, nowMs,
-    hostSaturated, hostCapacity,
+    hostSaturated, hostCapacity, hostActiveSessions,
   } = params;
+  // #1380: `host_builder_slots` (per-project over global). Read up front so the recorded reason
+  // can name the cap whenever it is what kept the work off the host.
+  const { capped: hostCapped, note: capNote, noWorkerNote } = resolveHostCap(
+    await getPreferenceValue(hostBuilderSlotsPrefKey(projectId), database).catch(() => undefined),
+    await getPreferenceValue("host_builder_slots", database).catch(() => undefined),
+    hostActiveSessions,
+  );
   // #908: when the host is saturated, a remote landing is BECAUSE of that — not just
   // because a worker happened to be eligible — so the recorded reason should say so.
   // #910: name the headroom that decided, when the worker reported one — `worker
@@ -504,8 +521,8 @@ async function resolvePlacementWithReservation(
   const remoteReason = (detail: string, capacity?: WorkerCapacityInfo): PlacementReason => {
     const headroom = describeHeadroom(capacity);
     return hostSaturated
-      ? because("machine_saturated", `host is saturated; ${detail}${headroom}`)
-      : because("eligible_worker", `${detail}${headroom}`);
+      ? because("machine_saturated", `host is saturated; ${detail}${headroom}${capNote}`)
+      : because("eligible_worker", `${detail}${headroom}${capNote}`);
   };
   try {
     const pref = await getPreferenceValue(workerDispatchPrefKey(projectId), database);
@@ -597,7 +614,10 @@ async function resolvePlacementWithReservation(
     // keep the work exactly where #908 says it should not go. It remains the LAST-RESORT
     // fallback below when no worker is eligible (that path is unchanged, and still records
     // `machine_saturated`); it just cannot WIN a comparison against a worker that could run.
-    const rankedHostCapacity = strict || hostSaturated ? undefined : hostCapacity;
+    // #1380: a host at its `host_builder_slots` cap is not a candidate either — same reasoning
+    // as saturation, but operator-declared. `0` therefore means an eligible worker ALWAYS wins;
+    // with none, the no-worker fallback below still lands on the host (unless strict).
+    const rankedHostCapacity = strict || hostSaturated || hostCapped ? undefined : hostCapacity;
     // #1027: for a restricted project the candidate set is the ATTESTING workers, and the
     // profile each would run under is decided by the same roster selection a local launch
     // uses. Null for every unrestricted project, which keeps the pre-#1027 candidate set
@@ -622,7 +642,7 @@ async function resolvePlacementWithReservation(
       console.warn(
         `[worker-fleet] project ${projectId} wants worker dispatch but no eligible ${providerName} worker${detail} is available; launching on host`,
       );
-      return hostBecause("eligible_worker", `no eligible ${providerName} worker${detail} is available`);
+      return hostBecause("eligible_worker", `no eligible ${providerName} worker${detail} is available${noWorkerNote}`);
     }
     const { workerId } = placed;
     reservation.id = placed.reservationId;
