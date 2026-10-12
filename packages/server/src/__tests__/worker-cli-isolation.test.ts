@@ -127,7 +127,8 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 61 -> 63 in #1381 for `worker/worker-settings-apply.ts` and shared `lib/worker-settings.ts` (board-pushed settings; node builtins only).
     // Raised 63 -> 64 in #1416 for the undelivered-results give-up/doctor helper module.
     // Raised 64 -> 65 in #1337 for `worker/worker-state.ts` (identity-keyed pairing state, db-free).
-    expect(files.size).toBeLessThan(65);
+    // Raised 65 -> 66 in #1337 for `worker/worker-daemon-helpers.ts` (leaf helpers split out of the daemon).
+    expect(files.size).toBeLessThan(66);
   });
 
   it("never reaches the database or board-service layer", () => {

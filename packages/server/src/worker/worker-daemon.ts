@@ -44,6 +44,7 @@ import {
   parseBoardList,
   saveIdentity,
   urlsOfBoard,
+  type BoardProbe,
   type WorkerIdentity,
 } from "./worker-state.js";
 import { dirname, join } from "node:path";
@@ -66,6 +67,7 @@ import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
 import { packageManagersField, refreshPackageManagers, refreshToolchains, toolchainsField } from "../cli/commands/worker-doctor-git-prereqs.js";
 import { cleanUpBeforeStart } from "./agent-process-tree.js";
 import { attestAndNotice, attestProviders } from "./worker-provider-notice.js";
+import { flushCritical, reattestProviders } from "./worker-daemon-helpers.js";
 export { attestProviders };
 import { defaultWorkerName, sameNamedNotice } from "./worker-name.js";
 import { createDoctorSummaryTracker } from "../cli/commands/worker-doctor-daemon.js";
@@ -426,6 +428,27 @@ function logShutdownReport(
   }
 }
 
+/**
+ * #1337: learn which board each URL is, then resume the pairing held for that board or register on
+ * the first URL that answers. Kept out of `startWorkerDaemon` (nloc ratchet).
+ */
+async function resolvePairing(a: {
+  opts: WorkerDaemonOptions; stateFile: string; boardUrls: string[]; name: string;
+  profiles: WorkerProfileAttestation[]; doctor?: WorkerDoctorSummary; log: (line: string) => void;
+}): Promise<{ identity: WorkerIdentity; urlIndex: number; probes: BoardProbe[] }> {
+  const { probes, firstReachable: urlIndex } = await learnBoards(a.stateFile, a.boardUrls, a.log);
+  const url = a.boardUrls[urlIndex]!;
+  const found = a.boardUrls.map((u) => findIdentity(loadState(a.stateFile), u)).find((i) => i !== undefined);
+  if (found) {
+    a.log(`[worker] resuming pairing with ${url} as '${found.name}' (id=${found.workerId})`);
+    return { identity: found, urlIndex, probes };
+  }
+  const identity = await registerWithBoard(a.opts, url, a.name, a.profiles, a.doctor);
+  saveIdentity(a.stateFile, url, identity, urlsOfBoard(a.boardUrls, probes, identity.boardId));
+  a.log(`[worker] registered with ${url} as '${identity.name}' (id=${identity.workerId}); to use another name, pair again with --name <name>`);
+  return { identity, urlIndex, probes };
+}
+
 export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<WorkerDaemonHandle> {
   const stateFile = opts.stateFile ?? defaultWorkerStateFile();
   // #1381: flags pin their keys; the rest start from what the board last pushed.
@@ -486,19 +509,11 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     runningEntry: opts.selfUpdate?.entry ?? null,
   });
   await doctor.refresh();
-  const { probes, firstReachable } = await learnBoards(stateFile, boardUrls, log);
-  let urlIndex = firstReachable;
+  const paired = await resolvePairing({ opts, stateFile, boardUrls, name, profiles: attestedProfiles(), doctor: doctor.takeCurrent(), log });
+  const { probes } = paired;
+  let urlIndex = paired.urlIndex;
+  let identity = paired.identity;
   const currentUrl = (): string => boardUrls[urlIndex]!;
-  const found = boardUrls.map((u) => findIdentity(loadState(stateFile), u)).find((i) => i !== undefined);
-  let identity = found as WorkerIdentity;
-  if (!found) {
-    identity = await registerWithBoard(opts, currentUrl(), name, attestedProfiles(), doctor.takeCurrent());
-    saveIdentity(stateFile, currentUrl(), identity, urlsOfBoard(boardUrls, probes, identity.boardId));
-    log(`[worker] registered with ${currentUrl()} as '${identity.name}' (id=${identity.workerId}); to use another name, pair again with --name <name>`);
-  } else {
-    log(`[worker] resuming pairing with ${currentUrl()} as '${identity.name}' (id=${identity.workerId})`);
-  }
-
   let ws: WebSocket | null = null;
   let stopped = false;
   let draining = settings.startDrained();
@@ -857,18 +872,11 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     // result; a changed result gets exactly one summary line rather than re-explaining every
     // excluded provider's reason each beat (attestProviders already did that once, at
     // startup, and `worker doctor` gives the detail on demand).
-    if (opts.attestProviders !== false && declaredProviders && declaredProviders.length > 0) {
-      const att = await attestAndNotice(declaredProviders, () => {}, opts.harness);
-      const reattested = att.advertised;
+    const att = await reattestProviders(opts, declaredProviders, advertisedProviders, log);
+    if (att) {
       providerNotice = att.notice;
-      if (reattested.join(",") !== (advertisedProviders ?? []).join(",")) {
-        log(
-          `[worker] provider attestation changed: now advertising [${reattested.join(", ") || "none"}] ` +
-            `(was [${(advertisedProviders ?? []).join(", ") || "none"}])`,
-        );
-        advertisedProviders = reattested;
-        opts.providers = advertisedProviders;
-      }
+      advertisedProviders = att.advertised;
+      opts.providers = advertisedProviders;
     }
     // #1027: ONE quota tick per beat â€” at most one request to the usage endpoint, over the
     // profiles that are due. Never throws: a quota read is diagnostics, and a rate limit
@@ -934,18 +942,6 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   const heartbeatTimer = setInterval(() => { void sendHeartbeat(); }, opts.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS);
   if (heartbeatTimer.unref) heartbeatTimer.unref();
 
-  /** Flush queued exit/assign_failed frames. Returns how many could NOT be delivered. */
-  function flushCritical(): number {
-    while (pendingCritical.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
-      try {
-        ws.send(JSON.stringify(pendingCritical.shift()));
-      } catch {
-        break; // socket died mid-flush; the remainder is counted as lost
-      }
-    }
-    return pendingCritical.length;
-  }
-
   return {
     workerId: identity.workerId,
     connected,
@@ -977,7 +973,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       // The kill above only sends the signal. The result push is kicked off by the
       // agent's `exit` handler, so exiting now is precisely the bug: wait for it.
       const drained = await runner.drainPushes(timeoutMs);
-      const criticalMessagesLost = flushCritical();
+      const criticalMessagesLost = flushCritical(ws, pendingCritical);
       const retained = runner.unpushedResults();
       setWorkerLogSink(null);
       const report: DrainReport = {

@@ -58,6 +58,11 @@ function profileResolveOptions(o: { profileAliases?: ProfileAlias[]; profileHome
   return { ...(o.profileAliases ? { aliases: o.profileAliases } : {}), ...(o.profileHome ? { home: o.profileHome } : {}) };
 }
 
+/** The board URL to compose git-transport URLs from, read at use time (#1337). */
+function boardUrlOf(options: { boardUrl?: string | (() => string) }): string | undefined {
+  return typeof options.boardUrl === "function" ? options.boardUrl() : options.boardUrl;
+}
+
 export interface WorkerAgentRunnerOptions {
   /** #1379: `--profile-alias` entries, so an assign naming an aliased profile resolves to its real dir. */
   profileAliases?: ProfileAlias[];
@@ -217,11 +222,6 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     hangWatchdogs.delete(sessionId);
   }
 
-  /** The board URL to compose git-transport URLs from, read at use time (#1337). */
-  function boardUrlNow(): string | undefined {
-    return typeof options.boardUrl === "function" ? options.boardUrl() : options.boardUrl;
-  }
-
   /** Sleep that never keeps the event loop alive on its own. */
   function wait(ms: number): Promise<void> {
     return new Promise((resolve) => {
@@ -254,7 +254,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
    */
   const undelivered = createUndeliveredStore({
     workRoot,
-    get boardUrl() { return boardUrlNow() ?? ""; },
+    get boardUrl() { return boardUrlOf(options) ?? ""; },
     retryDelaysMs,
     push: repoOps.push,
     cleanup: repoOps.cleanup,
@@ -297,16 +297,15 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       });
       return;
     }
-    const boardUrl = boardUrlNow();
-    if (!boardUrl) {
+    if (!boardUrlOf(options)) {
       answer({ ok: false, status: "error", error: "worker has no board URL for git transport" });
       return;
     }
     void (async () => {
       try {
         const outcome = op === "sync"
-          ? await repoOps.sync(boardUrl, auth, pending.checkout)
-          : await repoOps.pushHead(boardUrl, auth, pending.checkout);
+          ? await repoOps.sync(boardUrlOf(options)!, auth, pending.checkout)
+          : await repoOps.pushHead(boardUrlOf(options)!, auth, pending.checkout);
         answer(outcome);
       } catch (err) {
         answer({ ok: false, status: "error", error: errorMessage(err) });
@@ -409,8 +408,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       refuseAtCapacity(sessionId);
       return;
     }
-    const boardUrl = boardUrlNow();
-    if (!boardUrl) {
+    if (!boardUrlOf(options)) {
       send({ type: "assign_failed", sessionId, error: "worker has no board URL for git transport" });
       return;
     }
@@ -418,7 +416,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     exited.delete(sessionId);
     void (async () => {
       try {
-        const checkout = await repoOps.provision(boardUrl, repo, sessionId, options.workRoot);
+        const checkout = await repoOps.provision(boardUrlOf(options)!, repo, sessionId, options.workRoot);
         if (!provisioning.has(sessionId)) {
           // Stopped while provisioning — do not launch; drop the checkout.
           await repoOps.cleanup(checkout).catch(() => {});
