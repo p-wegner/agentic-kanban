@@ -68,7 +68,16 @@ export interface UndeliveredStoreDeps {
   safeSend: (message: WorkerToBoardMessage) => void;
   /** Sleep that never keeps the event loop alive on its own. */
   wait: (ms: number) => Promise<void>;
+  /**
+   * #1383: ask the board for a fresh git token for this session (null = none came). Called
+   * once per push, right after a 401, so a rejected token is never simply retried.
+   */
+  refreshToken?: (sessionId: string) => Promise<string | null>;
 }
+
+/** A git failure that means the board rejected our credential (or git was refused a prompt). */
+export const isGitAuthFailure = (message: string): boolean =>
+  /(?:^|\D)401(?:\D|$)|Authentication failed|could not read Username|terminal prompts disabled/i.test(message);
 
 const localBranchFor = (sessionId: string) => `kanban/${sessionId}`;
 
@@ -145,6 +154,7 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
   async function pushWithRetry(sessionId: string, pending: PendingResult): Promise<PushOutcome> {
     let attempts = 0;
     let lastError = "";
+    let refreshed = false;
     for (;;) {
       attempts += 1;
       try {
@@ -154,6 +164,16 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
       } catch (err) {
         lastError = errorMessage(err);
         workerLog(`[worker] push failed (attempt ${attempts}): sessionId=${sessionId}: ${lastError}`);
+        if (!refreshed && deps.refreshToken && isGitAuthFailure(lastError)) {
+          refreshed = true;
+          const fresh = await deps.refreshToken(sessionId).catch(() => null);
+          if (fresh) {
+            pending.repo = { ...pending.repo, gitToken: fresh };
+            workerLog(`[worker] got a fresh git token after a 401, retrying now: sessionId=${sessionId}`);
+            continue;
+          }
+          workerLog(`[worker] the board issued no fresh git token: sessionId=${sessionId}`);
+        }
       }
       const delay = deps.retryDelaysMs[attempts - 1];
       if (delay === undefined || retriesSuspended) break;

@@ -291,6 +291,10 @@ export function createRemoteAgentService(
       liveness.handleProbeResult(workerId, message.sessionId, message.probe);
       return;
     }
+    if (message.type === "git_token_request") {
+      void repoOps.handleTokenRequest(workerId, message.sessionId, message.requestId); // #1383
+      return;
+    }
     if (message.type === "repo_op_result") {
       repoOps.handleResult(workerId, message.result);
       return;
@@ -354,9 +358,9 @@ export function createRemoteAgentService(
       // no timeline.
       noteAssigned(sessionId, workerId, { transport: "shared-filesystem" });
     } else {
+      // #1407: isCancelled — the board stopped the session before its assign was sent
       void dispatchGitTransportAssignment({
-        manager, database, sessions, fleetMcp, request, workerId, repo: placement.repo, spec,
-        noteAssigned, finishSession, onDeferredLaunchFailure,
+        manager, database, sessions, fleetMcp, request, workerId, repo: placement.repo, spec, noteAssigned, finishSession, onDeferredLaunchFailure, isCancelled: () => sessions.get(sessionId)?.killed === true,
       });
     }
     console.log(`[agent-remote] assigned session ${sessionId} to worker ${workerId} (command=${config.command})`);
@@ -386,6 +390,8 @@ export function createRemoteAgentService(
   function kill(sessionId: string): boolean {
     const session = sessions.get(sessionId);
     if (!session) return false;
+    // #1407: a git-transport assign still being prepared would otherwise reach the worker after this stop.
+    session.killed = true;
     // The exit event from the worker finalizes the session; if the worker is
     // gone the disconnect grace path does. Either way the mapping stays until
     // an exit arrives so late output is not misrouted.

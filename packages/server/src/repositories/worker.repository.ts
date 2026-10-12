@@ -216,6 +216,28 @@ export async function findCurrentWorkerAssignment(
 }
 
 /**
+ * Has a NEWER fleet dispatch than `sessionId` been started for this branch (#1407)?
+ *
+ * Both sessions of the incident ran on the same worker for the same branch, so neither the
+ * worker nor the branch can tell them apart; only recency can. A relaunch is the workspace's
+ * current session and its predecessor is, from then on, not entitled to write the incoming
+ * ref — whatever its token's age. An unknown session id is NOT superseded: nothing newer is
+ * known, and the assignment check still applies.
+ */
+export async function isSessionSupersededOnBranch(
+  params: { projectId: string; branch: string; sessionId: string },
+  database: Database = db,
+): Promise<boolean> {
+  const assignments = await listWorkerBranchAssignments(params.projectId, database);
+  const forBranch = assignments.filter((a) => a.branch === params.branch);
+  const newest = forBranch[0]; // newest-started first
+  if (!newest) return false;
+  if (newest.sessionId === params.sessionId) return false;
+  // Only a session that really is in the list can be superseded by a different newest one.
+  return forBranch.some((a) => a.sessionId === params.sessionId);
+}
+
+/**
  * The facts the MCP bridge re-derives per request for ONE assignment (#799 gap 3).
  *
  * The git transport already re-derives its dispatch on every request (#753); the MCP path only

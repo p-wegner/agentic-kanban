@@ -66,7 +66,7 @@ export function createRemoteRepoService(deps: {
     return {
       projectId,
       gitPort: git.port,
-      gitToken: git.issueToken({ workerId: session.workerId, projectId, incomingRef }),
+      gitToken: git.issueToken({ workerId: session.workerId, projectId, incomingRef, sessionId }),
       branch: repo.branch,
       incomingRef,
     };
@@ -156,5 +156,27 @@ export function createRemoteRepoService(deps: {
     );
   }
 
-  return { requestRepoOp, handleResult };
+  /**
+   * #1383: a worker whose result push got a 401 asks for a fresh token instead of retrying
+   * the rejected one. Answered only for a session this board tracks AS ON THAT WORKER; the
+   * token is the same scoped `issueToken` capability a repo op gets, for the session's own ref.
+   */
+  async function handleTokenRequest(workerId: string, sessionId: string, requestId: string): Promise<void> {
+    const session = sessions.get(sessionId);
+    let reply: { gitToken?: string; error?: string };
+    if (!session?.repo || session.workerId !== workerId) {
+      reply = { error: `this board does not track session ${sessionId} as a git-transport session on worker ${workerId}` };
+    } else {
+      try {
+        reply = { gitToken: (await resolveOpAuth(sessionId, session, session.repo)).gitToken };
+      } catch (err) {
+        reply = { error: errorMessage(err) };
+      }
+    }
+    if (reply.gitToken) console.log(`[agent-remote] issued a fresh git token after a 401: sessionId=${sessionId} worker=${workerId}`);
+    else console.warn(`[agent-remote] could not issue a fresh git token: sessionId=${sessionId}: ${reply.error}`);
+    manager.send(workerId, { type: "git_token", sessionId, requestId, ...reply });
+  }
+
+  return { requestRepoOp, handleResult, handleTokenRequest };
 }
