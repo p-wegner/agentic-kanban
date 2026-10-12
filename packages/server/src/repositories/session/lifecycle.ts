@@ -1,5 +1,5 @@
 import { sessions, agentSkills, workspaces, issues, projects } from "@agentic-kanban/shared/schema";
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, and, isNull } from "drizzle-orm";
 import { db } from "../../db/index.js";
 import type { Database } from "../../db/index.js";
 import { firstRow } from "../../lib/first-row.js";
@@ -223,4 +223,20 @@ export async function getLatestSessionByWorkspace(
     }
   }
   return result;
+}
+
+/**
+ * Sessions running on the BOARD HOST right now (no worker, status running), excluding the one
+ * being placed — the load `host_builder_slots` caps (#1380). Builders and reviewers are both
+ * sessions, so this counts both.
+ */
+export async function countRunningHostSessions(
+  excludeSessionId?: string,
+  database: Database = db,
+): Promise<number> {
+  const rows = await database
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(and(eq(sessions.status, "running"), isNull(sessions.workerId)));
+  return rows.filter((r) => r.id !== excludeSessionId).length;
 }

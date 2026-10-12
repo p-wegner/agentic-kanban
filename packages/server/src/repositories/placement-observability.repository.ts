@@ -3,13 +3,16 @@
 // The policy — the ordered decision chain and how it is explained — lives in
 // `services/placement-explain.service.ts`. Only the reads live here, so the service
 // stays a policy module and `lint:arch`'s `services-bypass-repositories` rule holds.
-import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { issues, sessions, workers, workspaces } from "@agentic-kanban/shared/schema";
 
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { firstRow } from "../lib/first-row.js";
-import { updateSessionPlacementReason as updateSessionPlacementReasonForSession } from "./session/lifecycle.js";
+import {
+  countRunningHostSessions as countRunningHostSessionsForSessions,
+  updateSessionPlacementReason as updateSessionPlacementReasonForSession,
+} from "./session/lifecycle.js";
 
 export interface SessionPlacementRow {
   sessionId: string;
@@ -87,20 +90,12 @@ export async function listSessionPlacementRows(
   return rows;
 }
 
-/**
- * Sessions running on the BOARD HOST right now (no worker, status running), excluding the one
- * being placed — the load `host_builder_slots` caps (#1380). Builders and reviewers are both
- * sessions, so this counts both.
- */
+/** Host-running session count for the `host_builder_slots` cap (#1380); the read lives in the sessions aggregate. */
 export async function countRunningHostSessions(
   excludeSessionId?: string,
   database: Database = db,
 ): Promise<number> {
-  const rows = await database
-    .select({ id: sessions.id })
-    .from(sessions)
-    .where(and(eq(sessions.status, "running"), isNull(sessions.workerId)));
-  return rows.filter((r) => r.id !== excludeSessionId).length;
+  return countRunningHostSessionsForSessions(excludeSessionId, database);
 }
 
 /**
