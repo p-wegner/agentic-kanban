@@ -16,6 +16,7 @@ import { workerLog } from "./worker-updater.js";
 import { healCorruptCache, isCloneCorruption } from "./worker-repo-heal.js";
 import { loadUndelivered } from "./worker-undelivered.js";
 import { mkdirSync, writeFileSync, existsSync, readdirSync, rmSync, appendFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { TICKET_CONTEXT_FILENAME } from "@agentic-kanban/shared/lib/ticket-context";
 import { homedir } from "node:os";
@@ -520,7 +521,10 @@ export async function pushWorkerHead(
 export async function cleanupWorkerCheckout(checkout: WorkerCheckout): Promise<void> {
   await removeCacheWorktree(checkout.cacheDir, checkout.cwd);
   try {
-    rmSync(checkout.cwd, { recursive: true, force: true });
+    // #1420: async, not rmSync — a whole checkout (node_modules) removed synchronously blocks the
+    // daemon's event loop for tens of seconds, so keepalive pongs go unanswered and the board
+    // closes the socket right after the result push.
+    await rm(checkout.cwd, { recursive: true, force: true });
   } catch (err) {
     workerLog(`[worker] could not remove checkout directory ${checkout.cwd}: ${String(err)}`);
   }
