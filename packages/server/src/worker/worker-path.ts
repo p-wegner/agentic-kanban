@@ -4,7 +4,8 @@
 //    and prepended to this process's PATH, so the daemon finds them whatever the login shell says.
 //  - On WSL the Linux PATH carries the Windows PATH (`/mnt/c/...`). A Windows git/claude/codex found
 //    through interop runs on the Windows side with Windows paths, so those entries are dropped.
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
 
 export function workerPathFileFor(stateFile: string): string {
@@ -74,10 +75,62 @@ export function applyWorkerPath(
   stateFile: string | undefined,
   env: NodeJS.ProcessEnv = process.env,
   wsl: boolean = isWsl(env),
+  home: string = homedir(),
 ): void {
   if (originalPath === undefined) originalPath = env.PATH ?? "";
   if (wsl) env.PATH = stripWindowsMounts(originalPath ?? env.PATH ?? "");
-  if (stateFile) for (const dir of readExtraPathDirs(stateFile).reverse()) prependPath(env, dir);
+  if (!stateFile) return;
+  for (const dir of readExtraPathDirs(stateFile).reverse()) prependPath(env, dir);
+  // #1410: a second pairing (new --state-file) has no saved dirs of its own; look where the first
+  // setup put the CLIs and remember what exists for this worker too.
+  for (const dir of discoverInstallDirs(stateFile, env, home)) {
+    if (wsl && isWindowsMountPath(dir)) continue;
+    prependPath(env, dir);
+    try {
+      saveExtraPathDir(stateFile, dir);
+    } catch {
+      /* read-only state dir: the PATH of this process is still fixed */
+    }
+  }
+}
+
+/** Dirs holding saved worker-path.json files of OTHER state files: siblings of this one and ~/.agentic-kanban. */
+function otherSavedDirs(stateFile: string, home: string): string[] {
+  const roots = new Set([dirname(stateFile), join(home, ".agentic-kanban")]);
+  const found: string[] = [];
+  const own = workerPathFileFor(stateFile);
+  for (const root of roots) {
+    const files = [join(root, "worker-path.json")];
+    try {
+      for (const e of readdirSync(root, { withFileTypes: true })) if (e.isDirectory()) files.push(join(root, e.name, "worker-path.json"));
+    } catch {
+      /* root missing */
+    }
+    for (const f of files) {
+      if (f === own) continue;
+      try {
+        const raw = JSON.parse(readFileSync(f, "utf8")) as { dirs?: unknown };
+        if (Array.isArray(raw.dirs)) for (const d of raw.dirs) if (typeof d === "string" && d) found.push(d);
+      } catch {
+        /* no file / unreadable */
+      }
+    }
+  }
+  return found;
+}
+
+/** Existing standard user install dirs plus install dirs saved by other state files, minus those already saved here. */
+export function discoverInstallDirs(
+  stateFile: string,
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+  exists: (p: string) => boolean = existsSync,
+): string[] {
+  const candidates = [join(home, ".local", "bin"), join(home, ".npm-global", "bin")];
+  if (env.NPM_CONFIG_PREFIX) candidates.push(join(env.NPM_CONFIG_PREFIX, "bin"));
+  candidates.push(...otherSavedDirs(stateFile, home));
+  const saved = new Set(readExtraPathDirs(stateFile));
+  return [...new Set(candidates)].filter((d) => !saved.has(d) && exists(d));
 }
 
 /** A `/mnt/<drive>/...` copy of `program` on the unfiltered PATH, or null. */
