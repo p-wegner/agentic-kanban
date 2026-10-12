@@ -58,3 +58,9 @@ export function registerWorkerToolchain(workerCmd: Command): void {
       console.log(`Approved ${id}. The worker installs it now; watch the worker log or the board's worker list.`);
     });
 }
+
+/** The `status --watch` suffix for a worker's toolchain install state ("" when it has none). */
+export function formatToolchainInstall(t: { state: string; toolchains: string[]; reason?: string } | undefined): string {
+  if (!t) return "";
+  return ` toolchain-install=${t.state}(${t.toolchains.join(",")})${t.reason ? `: ${t.reason}` : ""}`;
+}

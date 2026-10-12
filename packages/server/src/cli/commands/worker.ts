@@ -25,7 +25,7 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { cliPathArg } from "../cli-path.js";
 import { createWorkerHarness, resolveInspectedHarness } from "../../worker/worker-harness.js";
 import { addHarnessOptions, registerWorkerAuth } from "./worker-auth-command.js";
-import { addToolchainOptions, registerWorkerToolchain, toolchainDaemonOptions, type ToolchainStartOptions } from "./worker-toolchain-command.js";
+import { addToolchainOptions, formatToolchainInstall, registerWorkerToolchain, toolchainDaemonOptions, type ToolchainStartOptions } from "./worker-toolchain-command.js";
 // Type-only + a db-free formatter: this module is also the standalone worker
 // binary's entry point, which must never pull in the database graph.
 import { renderPlacementExplanation } from "../../lib/placement-explanation-format.js";
@@ -705,14 +705,11 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       }
       for (const w of body.workers) {
         const labels = w.labels ? ` labels=${w.labels}` : "";
-        // #754: "which build is that machine running" was unanswerable from the board, and
-        // with dev tarballs it is the first question a skew bug raises. `?` means the
-        // worker has not spoken since this board started — not that it is old.
-        // #879: when it HAS spoken, say which way it diverges from the board's own build —
-        // "behind board" vs "ahead of board" stay distinct words (ahead is a normal
-        // dev-machine state, not staleness), and a `?` build gets no verdict at all.
+        // #754: which build the machine runs; `?` = it has not spoken since this board started, not "old".
+        // #879: when it has spoken, say which way it diverges from the board ("behind" vs "ahead" stay
+        // distinct: ahead is a normal dev-machine state), and a `?` build gets no verdict.
         const freshness = formatBuildFreshness(w.buildFreshness, body.fleet?.boardWorkerVersion);
-        const build = ` protocol=${w.protocolVersion ?? "?"} build=${w.workerVersion ?? "?"}${freshness ? ` (${freshness})` : ""}${formatUpdateState(w.update, w.updateRequested)}${w.toolchainInstall ? ` toolchain-install=${w.toolchainInstall.state}(${w.toolchainInstall.toolchains.join(",")})${w.toolchainInstall.reason ? `: ${w.toolchainInstall.reason}` : ""}` : ""}`;
+        const build = ` protocol=${w.protocolVersion ?? "?"} build=${w.workerVersion ?? "?"}${freshness ? ` (${freshness})` : ""}${formatUpdateState(w.update, w.updateRequested)}${formatToolchainInstall(w.toolchainInstall)}`;
         console.log(`  ${w.name} [${w.effectiveStatus}] id=${w.id} os=${w.os ?? "?"} maxConcurrency=${w.maxConcurrency}${labels}${build} lastHeartbeat=${w.lastHeartbeatAt ?? "never"}`);
       }
       console.log("\nRetire a worker with: agentic-kanban worker revoke <workerId|name>");
