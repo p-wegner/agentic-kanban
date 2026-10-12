@@ -459,6 +459,7 @@ function handleServiceRpc(
   service: string,
   repoPath: string,
   allowedRef: string | undefined,
+  onPushed?: () => void,
 ): void {
   const cmd = service.replace(/^git-/, "");
   res.writeHead(200, {
@@ -479,7 +480,13 @@ function handleServiceRpc(
   // is a resource-exhaustion primitive on its own.
   req.on("aborted", () => abortGit("client aborted"));
   res.on("close", () => { if (!res.writableFinished) abortGit("response closed early"); });
-  proc.on("exit", () => { settled = true; });
+  proc.on("exit", (code) => {
+    settled = true;
+    // #1414: a push that landed is the board's cue to look at the workspace again.
+    if (code === 0 && cmd === "receive-pack" && allowedRef && onPushed) {
+      try { onPushed(); } catch (err) { console.warn("[git-http] post-push hook failed:", err); }
+    }
+  });
 
   const maxBody = resolveMaxRpcBodyBytes();
   let body: NodeJS.ReadableStream = req.headers["content-encoding"] === "gzip" ? req.pipe(createGunzip()) : req;
@@ -598,6 +605,8 @@ export async function startGitHttpServer(opts?: {
   assignmentLookup?: AssignmentLookup;
   /** Injectable for tests; defaults to the DB-backed newest-session check (#1407). */
   supersededLookup?: SupersededLookup;
+  /** #1414: called (fire-and-forget) after a worker's push to its incoming ref succeeded. */
+  onIncomingPush?: (push: { projectId: string; repoPath: string; branch: string; workerId: string }) => void;
 }): Promise<GitHttpHandle> {
   const database = opts?.database ?? realDb;
   // #776: checked only when no explicit port was passed — an explicit port is the test /
@@ -689,7 +698,13 @@ export async function startGitHttpServer(opts?: {
           reject(res, 400, "bad request");
           return;
         }
-        handleServiceRpc(req, res, tail!, repoPath, scope.incomingRef);
+        const pushedBranch = branchFromIncomingRef(scope.incomingRef);
+        handleServiceRpc(
+          req, res, tail!, repoPath, scope.incomingRef,
+          pushedBranch && opts?.onIncomingPush
+            ? () => opts.onIncomingPush!({ projectId: projectId!, repoPath, branch: pushedBranch, workerId: scope.workerId })
+            : undefined,
+        );
       } catch (err) {
         console.error("[git-http] request failed:", err);
         try {
@@ -732,9 +747,20 @@ export async function startGitHttpServer(opts?: {
  */
 let activeServer: Promise<GitHttpHandle> | null = null;
 
+export type IncomingPush = { projectId: string; repoPath: string; branch: string; workerId: string };
+
+/**
+ * #1414: the composition root (server-start.ts) assigns the late-result handler here.
+ * git-http must not import it: late-result-delivery -> worker-remote-sync -> git-http is a cycle.
+ */
+export const incomingPushHooks: { onPush: ((push: IncomingPush) => void) | null } = { onPush: null };
+
 export function ensureGitHttpServer(database?: Database): Promise<GitHttpHandle> {
   if (!activeServer) {
-    activeServer = startGitHttpServer({ database }).catch((err) => {
+    activeServer = startGitHttpServer({
+      database,
+      onIncomingPush: (push) => incomingPushHooks.onPush?.(push),
+    }).catch((err) => {
       activeServer = null;
       throw err;
     });

@@ -8,8 +8,9 @@ import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { resolveFleetHost, resolveFleetPort, startFleetListener } from "./services/fleet-listener.service.js";
 import {
-  ensureGitHttpServer, stopGitHttpServer, gitPortStabilityViolation, resolveConfiguredGitHost, resolveConfiguredGitPort,
+  ensureGitHttpServer, incomingPushHooks, stopGitHttpServer, gitPortStabilityViolation, resolveConfiguredGitHost, resolveConfiguredGitPort,
 } from "./services/git-http.service.js";
+import { deliverLateResult } from "./services/late-result-delivery.service.js";
 import { superviseBind } from "./services/listener-bind-supervisor.service.js";
 import { createFleetWorkersRoute } from "./routes/workers.js";
 import { setupApiNotFoundAndSpaFallback, setupRoutes } from "./startup/route-setup.js";
@@ -34,6 +35,11 @@ const serverStartRepoRoot = resolve(fileURLToPath(new URL(".", import.meta.url))
 
 export async function startServer(port?: number, hostname?: string) {
   const cleanupCallbacks: Array<() => void> = [];
+  // #1414: wired here, not imported by git-http (it would close an import cycle).
+  incomingPushHooks.onPush = (push) => {
+    void deliverLateResult(push, db)
+      .catch((err) => console.warn(`[late-result] delivery check for ${push.branch} failed:`, err));
+  };
   replaceStartupTimerCleanup(cleanupCallbacks);
 
   // Start sampling event-loop delay before anything else runs (#347). The board's

@@ -34,6 +34,7 @@ const EMITTER_FILES = [
   // for why they were lifted out of the 1000-line launch service.
   "services/agent-remote-events.ts",
   "services/worker-incoming-refs.service.ts",
+  "services/late-result-delivery.service.ts",
   "services/worker-registry.service.ts",
 ];
 
