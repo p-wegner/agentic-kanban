@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -75,8 +75,24 @@ describe("saved install dirs (#1374)", () => {
     expect(saveExtraPathDir(stateFile, "/h/.local/bin")).toBe(false);
     expect(readExtraPathDirs(stateFile)).toEqual(["/h/.local/bin"]);
     const env: NodeJS.ProcessEnv = { PATH: "/usr/bin" };
-    applyWorkerPath(stateFile, env, false);
+    applyWorkerPath(stateFile, env, false, dir);
     expect(env.PATH?.startsWith("/h/.local/bin")).toBe(true);
+  });
+
+  it("a second state file finds ~/.local/bin and dirs saved by another state file (#1410)", () => {
+    const home = join(dir, "home");
+    const localBin = join(home, ".local", "bin");
+    const otherBin = join(dir, "custom-bin");
+    mkdirSync(localBin, { recursive: true });
+    mkdirSync(otherBin, { recursive: true });
+    const first = join(home, ".agentic-kanban", "first", "worker-state.json");
+    saveExtraPathDir(first, otherBin);
+    const second = join(home, ".agentic-kanban", "second", "worker-state.json");
+    const env: NodeJS.ProcessEnv = { PATH: "/usr/bin" };
+    applyWorkerPath(second, env, false, home);
+    expect(env.PATH).toContain(localBin);
+    expect(env.PATH).toContain(otherBin);
+    expect(readExtraPathDirs(second).sort()).toEqual([localBin, otherBin].sort());
   });
 });
 
