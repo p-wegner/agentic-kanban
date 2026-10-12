@@ -26,7 +26,7 @@ import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { RUN_GATE } from "../services/pre-merge-gate.service.js";
 import { buildReviewExitEvidence, runReviewExitGate } from "./exit/review-exit-gate.js";
-import { markReviewExitGateWithheld } from "./exit/gate-withheld-marker.js";
+import { markReviewExitGateHeld, markReviewExitGateWithheld } from "./exit/gate-withheld-marker.js";
 import { getAutoLandLoopTicket } from "../services/plugin-loop-hooks.service.js";
 import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
 import { issues, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workspaces } from "@agentic-kanban/shared/schema";
@@ -452,6 +452,14 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     // test step runs once, at merge. `strict`/`standard` get the full gate exactly as before.
     const preMergeGate = await runReviewExitGate({ workspace: gateWorkspace, projectId, issueId, prefMap, database: db });
     if (!preMergeGate.passed) {
+      if (preMergeGate.held) {
+        // #1423: nothing ran and nothing failed — queue a retry (the stranded-review reconciler
+        // re-arms once the backoff elapses) instead of recording a red verdict.
+        const retryAt = await markReviewExitGateHeld({ workspaceId, issueId, workingDir: workspace.workingDir, message: preMergeGate.message }, { database: db, gitService });
+        console.log(`[workflow] pre-merge gate HELD for workspace ${workspaceId} — withholding readyForMerge, retry at ${retryAt ?? "next reconciler pass"} (#1423): ${preMergeGate.message}`);
+        boardEvents.broadcast(projectId, "issue_updated");
+        return;
+      }
       console.log(`[workflow] pre-merge gate failed (${preMergeGate.stage}) for workspace ${workspaceId} — withholding readyForMerge: ${preMergeGate.message}`);
       // #1299: remember the red per head so the #932 stranded-review reconciler does not re-arm it.
       await markReviewExitGateWithheld({ workspaceId, issueId, workingDir: workspace.workingDir, message: preMergeGate.message }, { database: db, gitService });
