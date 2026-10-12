@@ -141,6 +141,13 @@ describe("worker setup (#1368)", () => {
     expect(code).toBe(0);
   });
 
+  it("--yes without a terminal on stdin never starts an interactive login (#1408)", async () => {
+    const code = await runWorkerSetup({ ...base(), yes: true }, { ...makeDeps(), interactive: () => false });
+    expect(authCalls).toEqual([]);
+    expect(out.join("\n")).toContain("no terminal on stdin");
+    expect(code).toBe(0);
+  });
+
   it("takes a node-only machine to a paired worker, then re-runs as all ok", async () => {
     const opts = { ...base(), yes: true };
     expect(await runWorkerSetup(opts, makeDeps())).toBe(0);

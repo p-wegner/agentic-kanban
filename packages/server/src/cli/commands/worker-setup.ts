@@ -69,6 +69,8 @@ export interface SetupDeps {
   npmPrefix: () => NpmPrefixInfo | null;
   pair: (opts: WorkerDaemonOptions) => Promise<{ alreadyPaired: boolean; name: string }>;
   auth: (provider: AuthProvider, opts: WorkerAuthOptions) => Promise<number>;
+  /** Is a person at a terminal? An interactive login needs one; unset means yes (#1408). */
+  interactive?: () => boolean;
   doctor: (opts: WorkerDoctorOptions) => Promise<DoctorReport>;
   /** `--start`: keep running as the daemon once paired. */
   start?: () => Promise<void>;
@@ -164,6 +166,7 @@ export function defaultSetupDeps(start?: () => Promise<void>): SetupDeps {
     applyPath: (stateFile) => applyWorkerPath(stateFile),
     pair: pairWorker,
     auth: (provider, opts) => runWorkerAuth(provider, opts),
+    interactive: () => Boolean(process.stdin.isTTY),
     doctor: runWorkerDoctor,
     ...(start ? { start } : {}),
   };
@@ -364,6 +367,11 @@ async function stepAuth(
     }
     if (!(await deps.probe(provider, ["--version"])).found) {
       deps.print(`[auth ${provider}] skipped - the ${provider} CLI is not installed, so it cannot log in`);
+      if (worst !== "FAILED") worst = "skipped";
+      continue;
+    }
+    if (options.yes && deps.interactive && !deps.interactive()) {
+      deps.print(`[auth ${provider}] skipped - no terminal on stdin, so no interactive login was started; run: agentic-kanban-worker auth ${provider}${authFlags(options, provider)}`);
       if (worst !== "FAILED") worst = "skipped";
       continue;
     }

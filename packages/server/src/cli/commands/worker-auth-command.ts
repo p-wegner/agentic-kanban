@@ -4,7 +4,8 @@
  * leaves it - the board stores and relays nothing (decision 012). Db-free (standalone binary).
  */
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { Writable } from "node:stream";
@@ -55,6 +56,27 @@ export function planAuth(
     note: `This claude has no non-interactive login subcommand. claude will start with its config in ${dir}: ` +
       "type /login, finish the login, then /exit.",
   };
+}
+
+/** Files a provider login writes into its config dir; only these are moved over after a SUCCESSFUL login. */
+const LOGIN_FILES: Record<AuthProvider, string[]> = {
+  claude: [".credentials.json", ".claude.json"],
+  codex: ["auth.json"],
+};
+
+/** Is there a usable login in `dir`? An expired claude access token with a refresh token still counts. */
+export function hasLoginInDir(provider: AuthProvider, dir: string, nowMs: number = Date.now()): boolean {
+  if (provider === "codex") return existsSync(join(dir, "auth.json"));
+  const read = readOAuthCredentials(dir, nowMs);
+  if (read.err === undefined) return true;
+  if (read.err !== "expired") return false;
+  try {
+    const parsed = JSON.parse(readFileSync(join(dir, ".credentials.json"), "utf8").replace(/^\uFEFF/, ""));
+    const token = (parsed as { claudeAiOauth?: { refreshToken?: unknown } } | null)?.claudeAiOauth?.refreshToken;
+    return typeof token === "string" && token.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 export interface AuthDeps {
@@ -111,6 +133,8 @@ export interface WorkerAuthOptions {
   deviceAuth?: boolean;
   configDir?: string;
   stateFile?: string;
+  /** Log in even though the folder already holds a usable login. */
+  force?: boolean;
 }
 
 interface LocatedHarness {
@@ -271,8 +295,31 @@ export async function runWorkerAuth(
     hasDisplay: deps.hasDisplay(),
     ...(options.deviceAuth !== undefined ? { deviceAuth: options.deviceAuth } : {}),
   });
+  if (!options.force && hasLoginInDir(provider, dir, nowMs)) {
+    deps.print(`${provider} is already logged in at ${dir}; not starting a login (pass --force to log in again).`);
+    return 0;
+  }
   deps.print(plan.note);
-  return deps.run(plan.command, plan.args, env);
+  // #1408: log into a scratch dir and move the credential files over only on success, so a login that is
+  // killed or fails midway can never leave a stub in place of the working login.
+  const scratch = mkdtempSync(join(tmpdir(), `ak-auth-${provider}-`));
+  try {
+    const status = deps.run(plan.command, plan.args, {
+      ...env,
+      [provider === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME"]: scratch,
+    });
+    if (status !== 0) {
+      deps.print(`${provider} login did not complete (exit ${status}); ${dir} was left untouched.`);
+      return status;
+    }
+    mkdirSync(dir, { recursive: true });
+    for (const file of LOGIN_FILES[provider]) {
+      if (existsSync(join(scratch, file))) copyFileSync(join(scratch, file), join(dir, file));
+    }
+    return 0;
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
 
 /** `--inherit-user-config` / `--config-dir` / `--codex-home`, shared by `worker start` and `worker doctor`. */
@@ -311,6 +358,7 @@ export function registerWorkerAuth(workerCmd: Command): void {
     .option("--config-dir <path>", "Use this existing folder instead of the worker's own harness dir (same as 'start --config-dir' / '--codex-home')", cliPathArg)
     .option("--token", "claude only: run 'claude setup-token' and store the token in the worker's state")
     .option("--device-auth", "codex only: force 'codex login --device-auth' (default when there is no browser/display)")
+    .option("--force", "Log in even if the folder already holds a usable login")
     .option("--status", "Print which mode each provider uses and the token expiry if known")
     .option("--state-file <path>", "Pairing state file; the harness dir lives beside it", cliPathArg)
     .action(async (provider: string | undefined, options: WorkerAuthOptions) => {
