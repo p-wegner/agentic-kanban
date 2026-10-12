@@ -203,6 +203,10 @@ if (!skipBuild) {
   execFileSync("node", [join("scripts", "copy-assets.mjs")], { cwd: root, stdio: "inherit", shell: needsShell });
 }
 
+// #1404: a previous pack killed mid-run leaves its stamp in the tracked file — heal it first.
+// Imported lazily: a bare copy of this script (no sibling modules) must still reach its ACP_CLI hint.
+const { restorePackStamp } = await import("./pack-stamp.mjs");
+if (restorePackStamp(root)) console.log("[pack-worker] restored a leftover version stamp from an interrupted pack");
 const original = readFileSync(pkgJsonPath, "utf8");
 const pkg = JSON.parse(original);
 
