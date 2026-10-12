@@ -238,7 +238,7 @@ export function createSessionLifecycle(
       }
     }
 
-    await awaitStrictLaunchWorker({ database: db, workspaceId, projectId, providerName, explicitPlacement: !!placement }); // #1347: strict hold/refusal BEFORE any session row
+    await awaitStrictLaunchWorker({ database: db, workspaceId, projectId, providerName, explicitPlacement: !!placement, triggerType }); // #1347: strict hold/refusal BEFORE any session row
 
     const sessionId = randomUUID(), now = new Date().toISOString();
     console.log(`[session] starting: workspaceId=${workspaceId} sessionId=${sessionId} workingDir=${effectiveWorkingDir}`);

@@ -69,7 +69,7 @@ export interface MainWorkspaceInfo {
    * draining for an update (`worker_updating`) or reconnecting (`worker_reconnecting`).
    * In-memory on the board; null/absent once the launch proceeds or fails.
    */
-  launchHold?: { reason: "worker_updating" | "worker_reconnecting"; workerId: string; since: string } | null;
+  launchHold?: { reason: "worker_updating" | "worker_reconnecting" | "workers_busy"; workerId: string; since: string } | null;
   /**
    * #944 — set while a merge for this workspace is IN FLIGHT, so the card can show that a
    * 30-45 minute pre-merge gate is running instead of the amber `idle` dot it would otherwise
