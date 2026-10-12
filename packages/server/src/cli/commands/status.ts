@@ -122,7 +122,44 @@ Status indicators:
         }
       };
 
+      let allIssues = Boolean(options.all);
+      const intervalSecOf = () => Math.max(parseInt(options.interval ?? "5", 10), 2);
+
+      // #1421: the operator console reads the board that owns the fleet over HTTP, so remote
+      // workers, trains and host capacity are visible. Falls back to the DB-backed frame only
+      // when no board answers.
+      const renderConsoleScreen = async (): Promise<boolean> => {
+        const { resolveBoardServerPort } = await import("@agentic-kanban/shared/lib/board-server-url");
+        const { plainHttp } = await import("../board-server-writes.js");
+        const { buildConsoleModel, renderConsole, consoleFrame, fetchConsolePayloads } = await import("../status-console.js");
+        const baseUrl = `http://127.0.0.1:${resolveBoardServerPort()}`;
+        const get = async (path: string): Promise<unknown> => {
+          const answer = await plainHttp(`${baseUrl}${path}`, { method: "GET", timeoutMs: 4000 });
+          if (answer.status < 200 || answer.status >= 300) throw new Error(`HTTP ${answer.status} ${path}`);
+          return JSON.parse(answer.text);
+        };
+        let payloads;
+        try {
+          payloads = await fetchConsolePayloads(get, { projectId: options.project, all: allIssues, nowMs: Date.now() });
+        } catch {
+          return false;
+        }
+        const model = buildConsoleModel(payloads);
+        const lines = renderConsole(model, {
+          cols: process.stdout.columns || 120,
+          rows: process.stdout.rows || 40,
+          color: !process.env.NO_COLOR && Boolean(process.stdout.isTTY),
+          ascii: process.env.KANBAN_ASCII === "1",
+          intervalSec: intervalSecOf(),
+          nowMs: Date.now(),
+          allIssues,
+        });
+        process.stdout.write(process.stdout.isTTY ? consoleFrame(lines) : lines.join("\n") + "\n");
+        return true;
+      };
+
       const renderScreen = async () => {
+        if (await renderConsoleScreen()) return;
         const status = await fetchStatus();
         const { renderStatusScreen, frameToScreen } = await import("../status-screen.js");
         let onlineWorkers: number | undefined;
@@ -136,8 +173,8 @@ Status indicators:
           onlineWorkers,
           cols: process.stdout.columns || 120,
           rows: process.stdout.rows || 40,
-          all: options.all,
-          intervalSec: Math.max(parseInt(options.interval ?? "5", 10), 2),
+          all: allIssues,
+          intervalSec: intervalSecOf(),
         });
         // Clear + home, then write the frame in one go (no scrollback growth).
         process.stdout.write(frameToScreen(lines));
@@ -153,6 +190,15 @@ Status indicators:
           const restore = () => process.stdout.write("\x1b[?25h\x1b[?1049l");
           process.on("exit", restore);
           process.on("SIGINT", () => process.exit(0));
+          if (process.stdin.isTTY) {
+            process.stdin.setRawMode(true);
+            process.stdin.resume();
+            process.stdin.on("data", (key: Buffer) => {
+              const k = key.toString();
+              if (k === "q" || k === "\u0003") process.exit(0);
+              if (k === "a") { allIssues = !allIssues; void render(); }
+            });
+          }
         }
         const renderAndClear = async () => {
           if (!screen && !options.json) console.clear();

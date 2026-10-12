@@ -29,6 +29,12 @@ import {
   listWorkerEvents,
   recordWorkerEvent,
 } from "../services/worker-events.service.js";
+import { readTier0Capacity } from "@agentic-kanban/shared/lib/machine-capacity";
+import {
+  resolveVerifyChainSlots,
+  verifyChainSemaphoreActive,
+  verifyChainSemaphoreQueueLength,
+} from "../services/verify-chain-semaphore.js";
 import { getWorkerFleet } from "../services/worker-fleet.service.js";
 import {
   changedSettingKeys, parseWorkerSettings, parseWorkerSettingsReport, type WorkerSettings,
@@ -156,6 +162,21 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
         // `worker list` can say "behind board (board runs X)".
         boardWorkerVersion: fleet.boardWorkerVersion,
       },
+    });
+  });
+
+  // #1421 — what `status --watch` shows as the HOST row: free RAM against the gate floor and
+  // the verify-chain slots. Cheap (one `os.freemem()` read, module-state reads), so a 2-5 s
+  // refresh costs nothing.
+  router.get("/host", (c) => {
+    const cap = readTier0Capacity();
+    const slots = resolveVerifyChainSlots();
+    return c.json({
+      freeGb: cap.freeGb,
+      hold: cap.hold,
+      reason: cap.reason,
+      floorGb: Number(process.env.SMART_HOOKS_MIN_FREE_GB ?? 2) || 2,
+      verify: { active: verifyChainSemaphoreActive(), slots: slots.slots, queued: verifyChainSemaphoreQueueLength() },
     });
   });
 

@@ -44,6 +44,7 @@ import { createWebhookSender } from "../services/outbound-webhook.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 import { queryFlag, queryInt } from "../middleware/query-params.js";
+import { getBoardStatus } from "../services/board-status.js";
 import { requireProject } from "../services/require-project.js";
 function toProjectRepoResponse(row: RepoRow): ProjectRepoResponse {
   return {
@@ -580,6 +581,18 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   router.get("/:id/stats", async (c) => {
     const projectId = c.req.param("id");
     const result = await projectService.getStats(projectId);
+    return c.json(result);
+  });
+
+  // GET /api/projects/:id/status — the `status` CLI's model over HTTP (#1421), so `status --watch`
+  // reads the board that owns the fleet instead of resolving its own database. `active` = the
+  // active project. `?all=true` includes closed issues.
+  router.get("/:id/status", async (c) => {
+    const id = c.req.param("id");
+    const result = await getBoardStatus(
+      { projectId: id === "active" ? undefined : id, includeClosed: c.req.query("all") === "true", tailLines: 1 },
+      database,
+    );
     return c.json(result);
   });
 

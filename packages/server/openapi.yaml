@@ -7127,6 +7127,34 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{id}/status:
+    get:
+      summary: active project. `?all=true` includes closed issues.
+      tags:
+        - projects
+      operationId: get_api_projects_id_status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: all
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/statuses:
     get:
       summary: GET /api/projects/:id/statuses
@@ -9300,6 +9328,18 @@ paths:
               schema: {}
         "422":
           description: Error (thrown UNPROCESSABLE, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+  /api/workers/host:
+    get:
+      summary: refresh costs nothing.
+      tags:
+        - workers
+      operationId: get_api_workers_host
+      responses:
+        "200":
+          description: Success
           content:
             application/json:
               schema: {}
