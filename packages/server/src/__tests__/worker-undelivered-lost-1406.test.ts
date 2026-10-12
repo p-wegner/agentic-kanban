@@ -6,7 +6,7 @@ import { createUndeliveredStore } from "../worker/worker-undelivered-retry.js";
 import { loadUndelivered, upsertUndelivered } from "../worker/worker-undelivered.js";
 
 function setup(isGone: boolean) {
-  const workRoot = mkdtempSync(join(tmpdir(), "undelivered-lost-"));
+  const workRoot = mkdtempSync(join(tmpdir(), "kanban-undelivered-lost-"));
   upsertUndelivered(workRoot, {
     sessionId: "s1", branch: "feature/x", baseBranch: "master", incomingRef: "refs/kanban/incoming/feature/x",
     checkoutPath: join(workRoot, "gone"), cacheDir: join(workRoot, "cache"), projectId: "p", gitPort: 1,
