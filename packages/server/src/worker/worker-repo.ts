@@ -36,6 +36,7 @@ import {
   type WorkerRepoTransport,
   type WorkerCommitterIdentity,
 } from "@agentic-kanban/shared/lib/worker-protocol";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
 export function defaultWorkerWorkRoot(stateFile?: string): string {
@@ -77,10 +78,38 @@ export function gitAuthEnv(repo: WorkerRepoTransport): NodeJS.ProcessEnv {
   const basic = Buffer.from(`x-token:${repo.gitToken}`).toString("base64");
   return {
     ...process.env,
-    GIT_CONFIG_COUNT: "1",
+    // #1383: never wait for a human. An empty credential.helper disables Git Credential
+    // Manager for this command (a 401 otherwise opens a GCM prompt and the push hangs until
+    // the 10-minute timeout); an empty core.askPass disables any askpass program.
+    GIT_TERMINAL_PROMPT: "0",
+    GCM_INTERACTIVE: "never",
+    GIT_ASKPASS: "",
+    SSH_ASKPASS: "",
+    GIT_CONFIG_COUNT: "3",
     GIT_CONFIG_KEY_0: "http.extraHeader",
     GIT_CONFIG_VALUE_0: `Authorization: Basic ${basic}`,
+    GIT_CONFIG_KEY_1: "credential.helper",
+    GIT_CONFIG_VALUE_1: "",
+    GIT_CONFIG_KEY_2: "core.askPass",
+    GIT_CONFIG_VALUE_2: "",
   };
+}
+
+/**
+ * #1383: turn a failed git fetch/push message into one that names the HTTP status when git
+ * reported one (`The requested URL returned error: 401`, `HTTP 403`, ...) and keeps only the
+ * last lines of stderr, so a worker log line says WHY the transport failed.
+ */
+export function describeGitTransportFailure(message: string): string {
+  const tail = message.trim().split(/\r?\n/).slice(-6).join(" | ").slice(-600);
+  const status = /returned error: (\d{3})|HTTP (?:code )?(\d{3})|(40[13]).*(?:unauthorized|forbidden)/i.exec(message);
+  const code = status ? (status[1] ?? status[2] ?? status[3]) : undefined;
+  if (code === "401") return `HTTP 401 (board rejected the git token: unknown, expired or revoked): ${tail}`;
+  if (code === "403") return `HTTP 403 (board refused this assignment/ref): ${tail}`;
+  if (/terminal prompts disabled|could not read Username|Authentication failed/i.test(message)) {
+    return `authentication failed (git was not allowed to prompt): ${tail}`;
+  }
+  return code ? `HTTP ${code}: ${tail}` : tail;
 }
 
 export interface WorkerCheckout {
@@ -335,11 +364,15 @@ export async function pushWorkerResult(
   checkout: WorkerCheckout,
 ): Promise<void> {
   const gitUrl = composeGitUrl(boardUrl, repo);
-  await gitExecOrThrow(["push", "--force", gitUrl, `HEAD:${repo.incomingRef}`], {
-    cwd: checkout.cwd,
-    timeout: 10 * 60 * 1000,
-    env: gitAuthEnv(repo),
-  });
+  try {
+    await gitExecOrThrow(["push", "--force", gitUrl, `HEAD:${repo.incomingRef}`], {
+      cwd: checkout.cwd,
+      timeout: 10 * 60 * 1000,
+      env: gitAuthEnv(repo),
+    });
+  } catch (err) {
+    throw new Error(`result push failed: ${describeGitTransportFailure(errorMessage(err))}`);
+  }
 }
 
 /** Outcome of a mid-session repo operation in a worker checkout (#783, #784). */

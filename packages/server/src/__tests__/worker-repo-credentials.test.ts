@@ -8,7 +8,7 @@
 // config instead.
 
 import { describe, it, expect } from "vitest";
-import { composeGitUrl, gitAuthEnv } from "../worker/worker-repo.js";
+import { composeGitUrl, describeGitTransportFailure, gitAuthEnv } from "../worker/worker-repo.js";
 import type { WorkerRepoTransport } from "@agentic-kanban/shared/lib/worker-protocol";
 
 const repo: WorkerRepoTransport = {
@@ -30,10 +30,26 @@ describe("worker git credentials", () => {
 
   it("carries the token as an Authorization header via git's env config", () => {
     const env = gitAuthEnv(repo);
-    expect(env.GIT_CONFIG_COUNT).toBe("1");
+    expect(env.GIT_CONFIG_COUNT).toBe("3");
     expect(env.GIT_CONFIG_KEY_0).toBe("http.extraHeader");
     const expected = Buffer.from(`x-token:${repo.gitToken}`).toString("base64");
     expect(env.GIT_CONFIG_VALUE_0).toBe(`Authorization: Basic ${expected}`);
+  });
+
+  it("never lets git wait for input: no GCM, no askpass, no terminal prompt (#1383)", () => {
+    const env = gitAuthEnv(repo);
+    expect(env.GIT_TERMINAL_PROMPT).toBe("0");
+    expect(env.GCM_INTERACTIVE).toBe("never");
+    expect(env.GIT_CONFIG_KEY_1).toBe("credential.helper");
+    expect(env.GIT_CONFIG_VALUE_1).toBe("");
+    expect(env.GIT_CONFIG_KEY_2).toBe("core.askPass");
+    expect(env.GIT_CONFIG_VALUE_2).toBe("");
+  });
+
+  it("names the HTTP status of a failed transport (#1383)", () => {
+    expect(describeGitTransportFailure("fatal: unable to access 'x': The requested URL returned error: 401")).toContain("HTTP 401");
+    expect(describeGitTransportFailure("remote: HTTP 403 forbidden")).toContain("HTTP 403");
+    expect(describeGitTransportFailure("fatal: could not read Username for 'http://h': terminal prompts disabled")).toContain("authentication failed");
   });
 
   it("preserves https for an https board", () => {
