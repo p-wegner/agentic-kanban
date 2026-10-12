@@ -142,10 +142,11 @@ const sessionPlacements: Schema = looseObject({ placements: arrayOf(nested(sessi
 const incomingRefActionResult: Schema = looseObject({ ok: trueLiteral });
 
 /** The registry entries, spread into `API_RESPONSE_SCHEMAS` (structurally `ApiResponseRoute`). */
-export const WORKER_RUNNERS_ROUTES: ReadonlyArray<{ method: "GET" | "POST"; template: string; schema: Schema }> = [
+export const WORKER_RUNNERS_ROUTES: ReadonlyArray<{ method: "GET" | "POST" | "PUT"; template: string; schema: Schema }> = [
   { method: "GET", template: "/api/workers/connect-info", schema: workerConnectInfo },
   { method: "GET", template: "/api/workers/explain", schema: workerExplainResponse },
   { method: "GET", template: "/api/workers/placements", schema: sessionPlacements },
+  { method: "PUT", template: "/api/workers/:id/settings", schema: incomingRefActionResult }, // #1381: `{ ok: true, ... }`
   { method: "POST", template: "/api/workers/incoming/land", schema: incomingRefActionResult },
   { method: "POST", template: "/api/workers/incoming/discard", schema: incomingRefActionResult },
 ];

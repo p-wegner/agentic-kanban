@@ -9574,9 +9574,77 @@ paths:
                 workerVersion:
                   type: string
                 update: {}
+                settings: {}
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workers/{id}/settings:
+    get:
+      summary: start flags pin. Audited in the worker's event timeline.
+      tags:
+        - workers
+      operationId: get_api_workers_id_settings
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+    put:
+      summary: PUT /api/workers/{id}/settings
+      tags:
+        - workers
+      operationId: put_api_workers_id_settings
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                settings:
+                  type: object
+                  additionalProperties: true
+              additionalProperties: true
+              x-unknown-keys: stripped
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "422":
+          description: Error (thrown UNPROCESSABLE, status from domainErrorHandler)
           content:
             application/json:
               schema: {}

@@ -30,8 +30,27 @@ import {
   type WorkerUpdater,
 } from "./worker-updater.js";
 import { installShim } from "./worker-shim.js";
+import type { NpmRunner } from "./worker-updater.js";
 import type { UpdateNowResult, WorkerControlStatus } from "./worker-control.js";
-import type { WorkerSelfUpdateOptions } from "./worker-daemon.js";
+
+export interface WorkerSelfUpdateOptions {
+  /** `--auto-update`: act on an advertised build without being asked. */
+  auto: boolean;
+  /**
+   * Hand over to `entry` (the new build's `bin/worker.js`) and end this process. Called with
+   * no sessions running, after the pointer + pending marker are written. Also used to roll
+   * back to the previous entry.
+   */
+  restart: (entry: string) => void | Promise<void>;
+  /** The `bin/worker.js` this process runs from â€” what a rollback returns to. */
+  entry: string;
+  versionsDir?: string;
+  keepVersions?: number;
+  /** How long a freshly-switched build gets to connect before it rolls itself back. */
+  confirmTimeoutMs?: number;
+  npm?: NpmRunner;
+  fetchImpl?: typeof fetch;
+}
 
 export interface DaemonSelfUpdateDeps {
   opts: WorkerSelfUpdateOptions;

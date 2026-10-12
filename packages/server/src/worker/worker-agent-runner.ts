@@ -175,7 +175,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   const stdinOpen = new Map<string, boolean>();
   /** Per-session silence watchdogs; reset on every byte of agent output. */
   const hangWatchdogs = new Map<string, { reset(): void; close(): void }>();
-  const maxConcurrency = options.maxConcurrency && options.maxConcurrency > 0 ? options.maxConcurrency : 1;
+  let maxConcurrency = options.maxConcurrency && options.maxConcurrency > 0 ? options.maxConcurrency : 1;
   const tree = createAgentTreeTracker(workRoot); // #1336
 
   /**
@@ -707,7 +707,8 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   }
 
   return {
-    assign, assignWithRepo, input, closeStdin, stop, stopAll, releaseAgents, runningSessionIds,
+    // #1381: setMaxConcurrency = the board changed this worker's ceiling; running sessions are never stopped by it.
+    setMaxConcurrency: (n: number): void => { if (n > 0) maxConcurrency = n; }, assign, assignWithRepo, input, closeStdin, stop, stopAll, releaseAgents, runningSessionIds,
     drainPushes, pendingPushCount, repoOp, gitToken: gitTokens.answer,
     probeSession: seen.answerProbe, rememberedSessionCount: seen.size,
     retryPendingPushes: undelivered.retryPending,

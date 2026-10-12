@@ -29,6 +29,8 @@
 // This file deliberately does NOT own the decision and never edits it: the seam is
 // observation (a non-reserving selector call plus a released dry run), so the
 // resolver stays the single place a placement is decided.
+import { fleetForProject } from "./worker-project-scope.js";
+import { workerAllowsProject, type WorkerSettings } from "@agentic-kanban/shared/lib/worker-settings";
 import {
   allowedProfilesPrefKey,
   rosterPrefKey,
@@ -233,6 +235,8 @@ function ineligibleReasonFor(
     missingLabels: string[];
     providerName: ProviderName;
     unresponsive: string | null;
+    /** #1381: why the board-side allowed/denied project lists bar the asked-about project. */
+    projectBarred?: string | null;
   },
 ): string | null {
   if (worker.effectiveStatus !== "online") {
@@ -242,6 +246,7 @@ function ineligibleReasonFor(
   // #901 — the failure the two checks above cannot see: both are answered by the daemon's
   // transport layer, which outlives its ability to launch anything.
   if (ctx.unresponsive) return ctx.unresponsive;
+  if (ctx.projectBarred) return ctx.projectBarred;
   if (worker.providers && ctx.providers.length > 0 && !ctx.providers.includes(ctx.providerName)) {
     return `does not advertise provider '${ctx.providerName}' (has [${ctx.providers.join(",")}])`;
   }
@@ -250,12 +255,18 @@ function ineligibleReasonFor(
   return null;
 }
 
+function barredReason(settings: WorkerSettings | undefined, projectId: string): string | null {
+  const verdict = workerAllowsProject(settings, projectId);
+  return verdict.allowed ? null : verdict.reason;
+}
+
 async function describeWorkers(
   fleet: WorkerFleet,
   providerName: ProviderName,
   requiredLabels: string[],
   now?: string,
   database: Database = realDb,
+  projectId?: string,
 ): Promise<WorkerEligibility[]> {
   const workers = await fleet.registry.listWorkersView(now);
   const allAssignedIds = workers.flatMap((w) => fleet.connections.assignedSessionIds(w.id));
@@ -290,6 +301,7 @@ async function describeWorkers(
       missingLabels: requiredLabels.filter((l) => !labels.includes(l)),
       providerName,
       unresponsive: fleet.health.unresponsiveReason(w.id),
+      projectBarred: projectId ? barredReason(w.desiredSettings?.settings, projectId) : null,
     });
     return {
       workerId: w.id,
@@ -332,6 +344,9 @@ async function describeWorkers(
         .map((sid) => assignmentsBySession.get(sid))
         .filter((a): a is WorkerAssignment => a !== undefined),
       freeSlots: Math.max(0, w.maxConcurrency - load),
+      // #1381: what an operator set on the board, which keys the worker's flags pin, and whether it has applied them.
+      ...(w.desiredSettings ? { desiredSettings: w.desiredSettings } : {}),
+      ...(w.settingsReport ? { settingsReport: w.settingsReport } : {}),
       // #910: the headroom placement actually compared, not just its outcome.
       ...(w.capacity ? { capacity: w.capacity } : {}),
       // #1338: self-update state, as the worker last reported it.
@@ -464,9 +479,10 @@ async function buildEvalContext(params: {
   now?: string;
 }): Promise<EvalContext> {
   const { database, projectId, providerName, branch, now } = params;
-  const fleet = getWorkerFleet(database);
+  const fullFleet = getWorkerFleet(database);
+  const fleet = fleetForProject(fullFleet, projectId); // #1381: allowed/denied projects, as the resolver sees them
   const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
-  const workers = await describeWorkers(fleet, providerName, requiredLabels, now);
+  const workers = await describeWorkers(fullFleet, providerName, requiredLabels, now, database, projectId);
   // #1027: the SAME attestation pass the resolver runs, over the same eligible set — an
   // explanation that computed this differently would disagree with the resolver exactly
   // where the answer is least obvious (`agreesWithResolver: false` with no visible cause).

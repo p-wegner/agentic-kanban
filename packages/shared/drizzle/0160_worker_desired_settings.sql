@@ -1,0 +1,1 @@
+ALTER TABLE `workers` ADD `desired_settings` text;

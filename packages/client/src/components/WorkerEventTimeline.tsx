@@ -24,6 +24,7 @@ export type { WorkerEvent };
 const TYPE_COLORS: Record<string, string> = {
   registered: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
   protocol_mismatch: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+  settings_changed: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
   ref_landed: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
   ref_discarded: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
 };

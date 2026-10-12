@@ -68,6 +68,8 @@ export { HOST_CANDIDATE_ID } from "./worker-host-candidate.js";
 // refuses a host fallback, #245) and re-exported here for existing importers.
 export { WorkerDispatchUnavailableError } from "./agent-dispatch.service.js";
 
+import { fleetForProject } from "./worker-project-scope.js";
+
 export interface WorkerFleet {
   registry: WorkerRegistry;
   connections: WorkerConnectionManager;
@@ -510,7 +512,7 @@ async function resolvePlacementWithReservation(
     if (pref !== "true") {
       return hostBecause("dispatch_opt_in", `worker_dispatch is not enabled for project ${projectId}`);
     }
-    const fleet = getWorkerFleet(database);
+    const fleet = fleetForProject(getWorkerFleet(database), projectId);
     // Read strictness ONCE and carry it on the placement (#245): every
     // host-fallback path below — and the dispatch proxy's own catch, which runs
     // long after this function returned — must honour the same answer.
@@ -736,7 +738,7 @@ export async function projectCanDispatch(params: {
     // #1025: a project that expressed its restriction as a ROSTER must not lose the #651
     // protection by migrating onto the newer key.
     const rosterRaw = await getPreferenceValue(rosterPrefKey(projectId), database);
-    const fleetForAttestation = getWorkerFleet(database);
+    const fleetForAttestation = fleetForProject(getWorkerFleet(database), projectId);
     const labelsForAttestation = parseRequiredLabels(
       await getPreferenceValue(workerLabelsPrefKey(projectId), database),
     );
@@ -754,7 +756,7 @@ export async function projectCanDispatch(params: {
       await getPreferenceValue(requiredDataLabelsPrefKey(projectId), database),
     );
     if (dataHandlingBlock.blocked) return { available: false, reason: dataHandlingBlock.reason };
-    const fleet = getWorkerFleet(database);
+    const fleet = fleetForProject(getWorkerFleet(database), projectId);
     const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
     // #748: same refusal the placement makes, one step earlier, so the monitor skips
     // the start with the REAL reason instead of starting and then falling back. Only
@@ -812,7 +814,7 @@ export async function checkStrictLaunchReadiness(params: {
   try {
     if ((await getPreferenceValue(workerDispatchPrefKey(projectId), database)) !== "true") return { kind: "proceed" };
     if ((await getPreferenceValue(workerStrictPrefKey(projectId), database)) !== "true") return { kind: "proceed" };
-    const fleet = getWorkerFleet(database);
+    const fleet = fleetForProject(getWorkerFleet(database), projectId);
     const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
     const views = await fleet.registry.listWorkersView(now);
     const eligible = filterEligibleWorkers(fleet, views, providerName, requiredLabels, nowMs);
@@ -866,7 +868,7 @@ export async function hostOverflowHasFleetCapacity(params: {
   const { database, projectId, providerName, now } = params;
   try {
     if ((await getPreferenceValue(workerDispatchPrefKey(projectId), database)) !== "true") return false;
-    const fleet = getWorkerFleet(database);
+    const fleet = fleetForProject(getWorkerFleet(database), projectId);
     const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
     const capacity = await resolveFleetCapacity(fleet, providerName, requiredLabels, now);
     return capacity.freeSlots > 0;

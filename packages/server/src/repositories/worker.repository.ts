@@ -67,6 +67,16 @@ export async function updateWorkerCapabilities(
   await database.update(workers).set({ ...patch, updatedAt: at }).where(eq(workers.id, id));
 }
 
+/** #1381: store the operator's desired settings (`{rev, settings}` JSON). */
+export async function updateWorkerDesiredSettings(
+  id: string,
+  desiredSettings: string,
+  at: string,
+  database: Database = db,
+): Promise<void> {
+  await database.update(workers).set({ desiredSettings, updatedAt: at }).where(eq(workers.id, id));
+}
+
 export async function deleteWorker(id: string, database: Database = db): Promise<void> {
   await database.delete(workers).where(eq(workers.id, id));
 }

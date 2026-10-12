@@ -5,6 +5,8 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { formatBuildFreshness, type WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
 import { startStaggeredPoll } from "../lib/pollScheduler.js";
 import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
+import { WorkerSettingsPanel } from "./WorkerSettingsPanel.js";
+import type { WorkerSettingsEnvelope, WorkerSettingsReport } from "@agentic-kanban/shared/lib/worker-settings";
 import { WorkerEventTimeline } from "./WorkerEventTimeline.js";
 import { WorkerDispatchPrefs } from "./WorkerDispatchPrefs.js";
 import { WorkerSetupSection } from "./WorkerSetupSection.js";
@@ -41,6 +43,9 @@ interface WorkerRow {
   /** #1370: the worker's own doctor results, and the profiles it attests (names only). */
   doctor?: WorkerDoctorSummary;
   attestedProfiles?: WorkerProfileAttestation[];
+  /** #1381: what the operator set on the board, and the worker's report of pinned keys / applied rev. */
+  desiredSettings?: WorkerSettingsEnvelope;
+  settingsReport?: WorkerSettingsReport;
 }
 
 interface FleetSummary {
@@ -90,6 +95,7 @@ export function RunnersFleetPanel({ projectId }: RunnersFleetPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [settingsId, setSettingsId] = useState<string | null>(null);
 
   const { data: activePreference } = useActiveProjectPreferenceQuery();
   const { data: allProjects } = useProjectsQuery();
@@ -325,6 +331,12 @@ export function RunnersFleetPanel({ projectId }: RunnersFleetPanelProps) {
                   {expanded ? "Hide history" : "History"}
                 </button>
                 <button
+                  onClick={() => setSettingsId(settingsId === worker.id ? null : worker.id)}
+                  className="rounded border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
+                  Settings
+                </button>
+                <button
                   onClick={() => revoke(worker)}
                   disabled={busyId === worker.id}
                   className="rounded border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40"
@@ -334,6 +346,20 @@ export function RunnersFleetPanel({ projectId }: RunnersFleetPanelProps) {
               </div>
             </div>
             <WorkerSetupSection {...worker} />
+            {settingsId === worker.id && (
+              <WorkerSettingsPanel
+                // Re-seed the form when the board's stored revision changes (another tab saved).
+                key={`${worker.id}:${worker.desiredSettings?.rev ?? ""}`}
+                workerId={worker.id}
+                maxConcurrency={worker.maxConcurrency}
+                labels={worker.labels}
+                providers={worker.providers}
+                desiredSettings={worker.desiredSettings}
+                settingsReport={worker.settingsReport}
+                projects={(allProjects ?? []).map((p) => ({ id: p.id, name: p.name }))}
+                onSaved={load}
+              />
+            )}
             {expanded && <WorkerEventTimeline workerId={worker.id} />}
           </div>
         );

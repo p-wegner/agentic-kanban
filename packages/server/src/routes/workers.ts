@@ -1,7 +1,8 @@
 import { ConflictError, UnprocessableError } from "../errors/index.js";
 import type { Context, Hono } from "hono";
 import { createRouter } from "../middleware/create-router.js";
-import { parseOptionalJsonBody } from "../middleware/parse-body.js";
+import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
+import { workerSettingsBody } from "./worker-body-schemas.js";
 import { extractBearer } from "../lib/bearer-token.js";
 import type { Database } from "../db/index.js";
 import {
@@ -29,6 +30,9 @@ import {
   recordWorkerEvent,
 } from "../services/worker-events.service.js";
 import { getWorkerFleet } from "../services/worker-fleet.service.js";
+import {
+  changedSettingKeys, parseWorkerSettings, parseWorkerSettingsReport, type WorkerSettings,
+} from "@agentic-kanban/shared/lib/worker-settings";
 import { classifyWorkerDrop } from "../services/worker-drop-diagnosis.js";
 import { getPreferenceValue } from "../repositories/session-lifecycle.repository.js";
 import { listWorkerBranchAssignments } from "../repositories/worker.repository.js";
@@ -314,6 +318,44 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
     return c.json({ ok: true, workerId, note: "delivered on the worker's next heartbeat (within ~30s)" });
   });
 
+  // #1381: the operator's per-worker settings. PUT REPLACES the whole set (a key left out is
+  // cleared); the worker picks it up on its next heartbeat and reports back which keys its
+  // start flags pin. Audited in the worker's event timeline.
+  router.get("/:id/settings", async (c) => {
+    const workerId = c.req.param("id");
+    const view = (await reg.listWorkersView()).find((w) => w.id === workerId);
+    if (!view) return c.json({ error: "worker not found" }, 404);
+    return c.json({
+      workerId,
+      desired: view.desiredSettings ?? null,
+      pinned: view.settingsReport?.pinned ?? [],
+      appliedRev: view.settingsReport?.appliedRev ?? null,
+    });
+  });
+
+  router.put("/:id/settings", async (c) => {
+    const workerId = c.req.param("id");
+    const raw = (await parseJsonBody(c, workerSettingsBody)).settings ?? {};
+    const settings: WorkerSettings = parseWorkerSettings(raw);
+    if (raw.maxConcurrency !== undefined && settings.maxConcurrency === undefined) {
+      throw new UnprocessableError("maxConcurrency must be an integer between 1 and 64");
+    }
+    const result = await reg.setDesiredSettings(workerId, settings);
+    if (!result) return c.json({ error: "worker not found" }, 404);
+    const changed = changedSettingKeys(result.before, settings);
+    if (changed.length > 0) {
+      void recordWorkerEvent({
+        database,
+        workerId,
+        type: "settings_changed",
+        summary: `settings changed on the board: ${changed.join(", ")}`,
+        payload: { changed, before: result.before, after: settings },
+      });
+    }
+    boardEvents?.broadcastToAllProjects("workers_changed");
+    return c.json({ ok: true, workerId, desired: result.envelope, changed });
+  });
+
   router.delete("/:id", async (c) => {
     const workerId = c.req.param("id");
     const ok = await reg.revokeWorker(workerId);
@@ -469,12 +511,15 @@ function registerWorkerFacingRoutes(
       protocolVersion?: number;
       workerVersion?: string;
       update?: unknown;
+      settings?: unknown;
     }>(c);
     const capabilities = parseWorkerCapabilities(body.capabilities);
     const update = parseWorkerUpdateReport(body.update);
+    const settingsReport = parseWorkerSettingsReport(body.settings);
     const result = await reg.heartbeat(c.req.param("id"), token ?? "", {
       status: body.status,
       ...(update ? { update } : {}),
+      ...(settingsReport ? { settingsReport } : {}),
       ...(capabilities ? { capabilities } : {}),
       // Only forward the key when the worker sent one: `"protocolVersion" in opts` is how
       // the registry distinguishes "declared nothing" (a legacy caller, e.g. the board's
@@ -523,7 +568,7 @@ function registerWorkerFacingRoutes(
     } catch {
       /* fleet unavailable: say nothing rather than provoke a reconnect */
     }
-    return c.json({ ok: true, boardBuildId, updateNow: result.updateNow === true, socket });
+    return c.json({ ok: true, boardBuildId, updateNow: result.updateNow === true, socket, ...(result.config ? { config: result.config } : {}) });
   });
 
   // #1338 (subsumes #1327): the board serves its own worker build to a paired worker. Both
