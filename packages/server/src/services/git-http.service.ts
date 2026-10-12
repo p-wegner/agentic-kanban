@@ -747,16 +747,19 @@ export async function startGitHttpServer(opts?: {
  */
 let activeServer: Promise<GitHttpHandle> | null = null;
 
+export type IncomingPush = { projectId: string; repoPath: string; branch: string; workerId: string };
+
+/**
+ * #1414: the composition root (server-start.ts) assigns the late-result handler here.
+ * git-http must not import it: late-result-delivery -> worker-remote-sync -> git-http is a cycle.
+ */
+export const incomingPushHooks: { onPush: ((push: IncomingPush) => void) | null } = { onPush: null };
+
 export function ensureGitHttpServer(database?: Database): Promise<GitHttpHandle> {
   if (!activeServer) {
     activeServer = startGitHttpServer({
       database,
-      // Dynamic: the delivery service imports the sync service, which imports this module.
-      onIncomingPush: (push) => {
-        void import("./late-result-delivery.service.js")
-          .then((m) => m.deliverLateResult(push, database))
-          .catch((err) => console.warn(`[late-result] delivery check for ${push.branch} failed:`, err));
-      },
+      onIncomingPush: (push) => incomingPushHooks.onPush?.(push),
     }).catch((err) => {
       activeServer = null;
       throw err;
