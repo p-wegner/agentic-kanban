@@ -170,6 +170,15 @@ export function WorkspaceSummarySection(props: {
               worker lost
             </span>
           )}
+          {/* #1392 — a remote session's last worker output, so a working builder reads differently from a stalled one. */}
+          {ws.main.remoteLastOutputAt && !ws.main.detachedWorker && (
+            <span
+              className="order-last inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-medium shrink-0"
+              title={`The fleet worker last sent output at ${new Date(ws.main.remoteLastOutputAt).toLocaleTimeString("en-US")}.`}
+            >
+              output {new Date(ws.main.remoteLastOutputAt).toLocaleTimeString("en-US")}
+            </span>
+          )}
           {boardingPass && (
             <span
               className="order-last inline-flex max-w-full items-center truncate px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 text-[10px] font-medium shrink"

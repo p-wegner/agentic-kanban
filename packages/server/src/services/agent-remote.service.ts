@@ -83,7 +83,7 @@ export const WORKER_ASSIGN_SETTLE_MS = 30 * 1000;
 // placement-explain.types.ts for the precedent).
 import type { RemoteSession, RemoteSessionRepo, RemoteRepoOpOutcome, RemoteAgentService } from "./agent-remote.types.js";
 export type { RemoteSessionRepo, RemoteRepoOpOutcome, RemoteAgentService } from "./agent-remote.types.js";
-import { listDetachedSessions } from "./agent-remote-detached.js";
+import { listDetachedSessions, listRemoteOutputTimes } from "./agent-remote-detached.js";
 
 export { REPO_OP_TIMEOUT_MS };
 export function createRemoteAgentService(
@@ -219,6 +219,7 @@ export function createRemoteAgentService(
       // The worker has spoken about this session, so a later hello that omits it is
       // information rather than a race (see WORKER_ASSIGN_SETTLE_MS).
       liveness.noteObserved(message.event.sessionId);
+      if (message.event.type !== "exit") session.lastOutputAtMs = Date.now();
       if (message.event.type !== "exit") {
         deliverRemoteOutput(session.onOutput, message.event);
         return;
@@ -537,6 +538,6 @@ export function createRemoteAgentService(
   return {
     launch, kill, sendInput, closeStdin, isStdinOpen, getProcess, getPid, isPidAlive,
     adoptSession, trackedSessionIds, remoteSessionInfo, remoteGitTransportSessions, requestRepoOp: repoOps.requestRepoOp,
-    probeStdinIdle, tracksSession: isPidAlive, detachedSessions: () => listDetachedSessions(sessions, graceMs, abandonMs),
+    probeStdinIdle, tracksSession: isPidAlive, detachedSessions: () => listDetachedSessions(sessions, graceMs, abandonMs), remoteOutputTimes: () => listRemoteOutputTimes(sessions),
   };
 }
