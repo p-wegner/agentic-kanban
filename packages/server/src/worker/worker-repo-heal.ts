@@ -8,6 +8,7 @@
 
 import { existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
 import { basename, join } from "node:path";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
@@ -61,4 +62,25 @@ export async function findCorruptClones(workRoot: string): Promise<{ project: st
     if (problem) bad.push({ project, problem });
   }
   return bad;
+}
+
+/**
+ * #1417: the cached clone is corrupt. Move it aside (kept, not deleted: undelivered results
+ * live on its branches) and re-clone ONCE; a second failure means this worker cannot serve
+ * the project, so the error says so rather than leaving the next assignment to fail alike.
+ */
+export async function healCorruptCache(
+  workRoot: string,
+  cacheDir: string,
+  cause: string,
+  reclone: () => Promise<unknown>,
+  log: (line: string) => void,
+): Promise<void> {
+  const aside = quarantineCorruptClone(workRoot, cacheDir);
+  log(`[worker] cached clone ${cacheDir} is corrupt (${cause.trim().slice(-200)}); moved to ${aside}, re-cloning`);
+  try {
+    await reclone();
+  } catch (err) {
+    throw new Error(`${CLONE_UNHEALTHY_PREFIX}: re-clone after corruption failed (${errorMessage(err)}); original: ${cause.trim().slice(-200)}`);
+  }
 }
