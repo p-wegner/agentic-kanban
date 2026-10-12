@@ -42,6 +42,7 @@ import { harnessUpdateNote, persistStartHarness, printLauncherWarning } from "./
 import { probeGlobalVersion } from "./worker-doctor-build-check.js";
 import { compareWithBoardBuild, renderBuildMismatch } from "./worker-board-build.js";
 import { boardOrExit, startBoard } from "./worker-board-default.js";
+import { parseBoardList } from "../../worker/worker-state.js";
 import { resolveOwnPackageVersion } from "../../lib/worker-build.js";
 // The step SHAPE lives in shared/lib (#1089, wire-dto-single-declaration) — a deep `lib/` path,
 // not the `types` barrel, because this file is reached by the `agentic-kanban-worker` binary's
@@ -423,6 +424,7 @@ interface WorkerStartOptions {
 
 async function runWorkerStart(rawOptions: WorkerStartOptions): Promise<void> {
   const options = { ...rawOptions, board: startBoard(rawOptions, rawOptions.stateFile ?? defaultWorkerStateFile()) };
+  const boardList = parseBoardList(options.board); options.board = boardList[0] ?? options.board;
   // #1346: a global install that a self-update has left behind hands over to the current build.
   const delegateTo = resolveDelegation({
     stateFile: options.stateFile ?? defaultWorkerStateFile(),
@@ -476,8 +478,7 @@ async function runWorkerStart(rawOptions: WorkerStartOptions): Promise<void> {
     // Read by `restart` below, which can fire (a rollback) before the await resolves.
     let daemonRef: WorkerDaemonHandle | undefined;
     const daemon = await startWorkerDaemon({
-      boardUrl: options.board,
-      pairingToken: options.token,
+      boardUrl: options.board, boardUrls: boardList, pairingToken: options.token,
       name: options.name,
       labels: labels.length > 0 ? labels : undefined,
       providers: splitList(options.providers),
@@ -597,7 +598,11 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         "hold a WebSocket for assignments, execute agent sessions locally, stream output back. " +
         "Runs until Ctrl+C; running agents are killed on exit unless --leave-agents.",
     )
-    .option("--board <url>", `Board base URL (default: the one board this worker is paired with, else ${DEFAULT_BOARD_URL})`)
+    .option(
+      "--board <url>",
+      `Board base URL (default: the one board this worker is paired with, else ${DEFAULT_BOARD_URL}). Repeatable/comma-separated, preferred first (#1337): failover along the list, one board.`,
+      (value: string, previous?: string) => (previous ? `${previous},${value}` : value),
+    )
     .option("--token <pairingToken>", "Pairing token for first registration (ignored once paired)")
     .option("--name <name>", "Worker display name, fixed at first pairing (default: hostname; <hostname>-wsl-<distro> under WSL)")
     .option("--labels <csv>", "Capability labels, e.g. docker,windows")

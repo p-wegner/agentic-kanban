@@ -30,8 +30,19 @@ import { createWorkerWsRoute } from "./worker-connection.service.js";
 import { getWorkerFleet } from "./worker-fleet.service.js";
 import type { WorkerRegistry } from "./worker-registry.service.js";
 import { resolveConfiguredFleetPort, resolveListenHost } from "../lib/bearer-token.js";
-import { resolveBindHost } from "../lib/tailscale-host.js";
+import { resolveBindHosts, warnOnNonTailnetBinds } from "../lib/listen-hosts.js";
 import { FLEET_MCP_PATH, getFleetMcpBridge } from "./fleet-mcp-bridge.service.js";
+import { getOrCreateServiceStackInstanceId } from "../repositories/workspace-service-state.repository.js";
+import type { Context } from "hono";
+
+/** `{ boardId }` for the health/register answers; empty when the id cannot be read (never fails a probe). */
+export async function boardIdentityField(database: Database): Promise<{ boardId?: string }> {
+  try {
+    return { boardId: await getOrCreateServiceStackInstanceId(database) };
+  } catch {
+    return {};
+  }
+}
 
 /**
  * Factory for the owner+worker-facing `/api/workers` router. Injected by the
@@ -43,7 +54,9 @@ export type CreateWorkersRoute = (database: Database, registry: WorkerRegistry) 
 
 export interface FleetListenerHandle {
   port: number;
+  /** The bound addresses, comma-joined (one entry unless a list was configured, #1337). */
   host: string;
+  hosts: string[];
   close(): Promise<void>;
 }
 
@@ -99,7 +112,8 @@ export async function startFleetListener(opts: {
   const { database, port, createWorkersRoute } = opts;
   // #1325: `KANBAN_FLEET_HOST=tailscale` is resolved HERE, at bind time, and throws when the
   // address is unavailable — the supervisor's retry loop turns that into "not up yet".
-  const host = resolveBindHost(opts.host ?? resolveFleetHost());
+  // #1337: the value may be a comma-separated list; every entry is bound.
+  const hosts = resolveBindHosts(opts.host ?? resolveFleetHost());
   const fleet = getWorkerFleet(database);
   const mcp = getFleetMcpBridge(database);
 
@@ -108,8 +122,11 @@ export async function startFleetListener(opts: {
 
   // Both paths: the main board serves /api/health, so accepting either here
   // means one reachability instruction works against either port.
-  app.get("/health", (c) => c.json({ ok: true }));
-  app.get("/api/health", (c) => c.json({ ok: true }));
+  // #1337: the board's stable identity rides the unauthenticated health answer too, so a worker
+  // holding several URLs can tell they are one board BEFORE it pairs (it is an opaque random id).
+  const health = async (c: Context) => c.json({ ok: true, ...(await boardIdentityField(database)) });
+  app.get("/health", health);
+  app.get("/api/health", health);
   app.route("/api/workers", createWorkersRoute(database, fleet.registry));
   // #769: the authority the worker DIALED, learned from its own request rather than guessed by
   // the board. `Host` on the websocket upgrade is exactly the `--board` host:port the worker was
@@ -126,36 +143,49 @@ export async function startFleetListener(opts: {
   // and the board API port must stay loopback-only and unauthenticated.
   app.route(FLEET_MCP_PATH, mcp.route());
 
-  const listening = await new Promise<{ port: number; server: ReturnType<typeof serve> }>((resolve, reject) => {
-    try {
-      const server = serve({ fetch: app.fetch, port, hostname: host }, (info) => {
-        resolve({ port: info.port, server });
+  // #1337: one server per listed address, all on the same port. All-or-nothing: if any address
+  // fails to bind the ones already open are closed and the error propagates, so the supervisor
+  // retries the whole set (never a half-exposed listener that nothing retries).
+  const servers: ReturnType<typeof serve>[] = [];
+  let boundPort = port;
+  try {
+    for (const hostname of hosts) {
+      const listening = await new Promise<{ port: number; server: ReturnType<typeof serve> }>((resolve, reject) => {
+        try {
+          const server = serve({ fetch: app.fetch, port: boundPort, hostname }, (info) => {
+            resolve({ port: info.port, server });
+          });
+          server.on("error", reject);
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error(String(err)));
+        }
       });
-      server.on("error", reject);
-    } catch (err) {
-      reject(err instanceof Error ? err : new Error(String(err)));
+      servers.push(listening.server);
+      injectWebSocket(listening.server);
+      boundPort = listening.port;
     }
-  });
-  injectWebSocket(listening.server);
+  } catch (err) {
+    await Promise.all(servers.map((s) => new Promise<void>((resolve) => s.close(() => resolve()))));
+    throw err;
+  }
   // The ACTUAL bound port (which differs from `port` when 0 was requested). The dispatch path
   // refuses to offer board tools until this is known, so a board with no fleet listener in this
   // process still ships the honest "no board tools" brief (#769).
-  mcp.setEndpointPort(listening.port);
+  mcp.setEndpointPort(boundPort);
+  warnOnNonTailnetBinds("[fleet-listener]", hosts);
 
   console.log(
-    `[fleet-listener] worker endpoints exposed on ${host}:${listening.port} ` +
+    `[fleet-listener] worker endpoints exposed on ${hosts.map((h) => `${h}:${boundPort}`).join(", ")} ` +
       `(register/heartbeat/ws + allowlisted board MCP at ${FLEET_MCP_PATH} — the board API stays on loopback)`,
   );
 
   return {
-    port: listening.port,
-    host,
-    close: () =>
-      new Promise<void>((resolve) =>
-        listening.server.close(() => {
-          mcp.setEndpointPort(null);
-          resolve();
-        }),
-      ),
+    port: boundPort,
+    host: hosts.join(","),
+    hosts,
+    close: async () => {
+      await Promise.all(servers.map((s) => new Promise<void>((resolve) => s.close(() => resolve()))));
+      mcp.setEndpointPort(null);
+    },
   };
 }

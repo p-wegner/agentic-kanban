@@ -31,8 +31,22 @@
 //  * `hello` and `register` carry a protocol version; an incompatible board
 //    refuses with a sentence instead of failing as a silence.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir, platform, arch } from "node:os";
+import {
+  findIdentity,
+  findPreferredUrl,
+  forgetIdentity,
+  learnBoards,
+  nextUrlIndex,
+  loadState,
+  normalizeBoardUrl,
+  parseBoardList,
+  saveIdentity,
+  urlsOfBoard,
+  type BoardProbe,
+  type WorkerIdentity,
+} from "./worker-state.js";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
@@ -53,6 +67,7 @@ import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
 import { packageManagersField, refreshPackageManagers, refreshToolchains, toolchainsField } from "../cli/commands/worker-doctor-git-prereqs.js";
 import { cleanUpBeforeStart } from "./agent-process-tree.js";
 import { attestAndNotice, attestProviders } from "./worker-provider-notice.js";
+import { flushCritical, reattestProviders } from "./worker-daemon-helpers.js";
 export { attestProviders };
 import { defaultWorkerName, sameNamedNotice } from "./worker-name.js";
 import { createDoctorSummaryTracker } from "../cli/commands/worker-doctor-daemon.js";
@@ -109,6 +124,8 @@ export const MAX_REPAIR_ATTEMPTS = 2;
 
 export interface WorkerDaemonOptions {
   boardUrl: string;
+  /** #1337: ordered URLs of the SAME board, preferred first (`boardUrl` is the first): failover + return, one pairing. */
+  boardUrls?: string[];
   /** Required for first registration against this board; ignored once paired. */
   pairingToken?: string;
   name?: string;
@@ -167,41 +184,12 @@ export interface WorkerDaemonOptions {
 }
 
 export type { WorkerSelfUpdateOptions } from "./worker-daemon-update.js";
-interface WorkerIdentity {
-  workerId: string;
-  workerToken: string;
-  name: string;
-}
-
-interface WorkerStateFile {
-  boards: Record<string, WorkerIdentity>;
-}
-
 export function defaultWorkerStateFile(): string {
   return join(homedir(), ".agentic-kanban", "worker-state.json");
 }
 
-export function normalizeBoardUrl(url: string): string {
-  return url.replace(/\/+$/, "");
-}
-
-export function loadState(stateFile: string): WorkerStateFile {
-  try {
-    if (existsSync(stateFile)) {
-      return JSON.parse(readFileSync(stateFile, "utf8")) as WorkerStateFile;
-    }
-  } catch {
-    /* corrupt state â€” re-register */
-  }
-  return { boards: {} };
-}
-
-export function saveIdentity(stateFile: string, boardUrl: string, identity: WorkerIdentity): void {
-  const state = loadState(stateFile);
-  state.boards[boardUrl] = identity;
-  mkdirSync(dirname(stateFile), { recursive: true });
-  writeFileSync(stateFile, JSON.stringify(state, null, 2));
-}
+// #1337: the pairing state is keyed by board identity (see worker-state.ts); these stay importable from here.
+export { normalizeBoardUrl, loadState, saveIdentity };
 
 /**
  * This machine's live headroom (#910), folded onto every heartbeat. Tier 0 only â€” a
@@ -310,6 +298,7 @@ export async function registerWithBoard(
     workerToken?: string;
     error?: string;
     boardProtocolVersion?: number; sameNamed?: { id: string }[];
+    boardId?: string; // #1337
   };
   if (!res.ok || !body.workerId || !body.workerToken) {
     const detail = body.error ?? "unexpected response";
@@ -325,20 +314,7 @@ export async function registerWithBoard(
     throw new Error(`Registration failed (${res.status}): ${detail}`);
   }
   if (body.sameNamed?.length) (opts.log ?? console.log)(sameNamedNotice(name, body.sameNamed)); // #1390
-  return { workerId: body.workerId, workerToken: body.workerToken, name };
-}
-
-/** Forget this board's pairing so a fresh `--token` can be used (#754). */
-function forgetIdentity(stateFile: string, boardUrl: string): void {
-  try {
-    const state = loadState(stateFile);
-    if (!(boardUrl in state.boards)) return;
-    delete state.boards[boardUrl];
-    mkdirSync(dirname(stateFile), { recursive: true });
-    writeFileSync(stateFile, JSON.stringify(state, null, 2));
-  } catch {
-    /* best-effort: the re-register below is what actually matters */
-  }
+  return { workerId: body.workerId, workerToken: body.workerToken, name, ...(body.boardId ? { boardId: body.boardId } : {}) };
 }
 
 export interface WorkerDaemonHandle {
@@ -452,10 +428,31 @@ function logShutdownReport(
   }
 }
 
+/**
+ * #1337: learn which board each URL is, then resume the pairing held for that board or register on
+ * the first URL that answers. Kept out of `startWorkerDaemon` (nloc ratchet).
+ */
+async function resolvePairing(a: {
+  opts: WorkerDaemonOptions; stateFile: string; boardUrls: string[]; name: string;
+  profiles: WorkerProfileAttestation[]; doctor?: WorkerDoctorSummary; log: (line: string) => void;
+}): Promise<{ identity: WorkerIdentity; urlIndex: number; probes: BoardProbe[] }> {
+  const { probes, firstReachable: urlIndex } = await learnBoards(a.stateFile, a.boardUrls, a.log);
+  const url = a.boardUrls[urlIndex]!;
+  const found = a.boardUrls.map((u) => findIdentity(loadState(a.stateFile), u)).find((i) => i !== undefined);
+  if (found) {
+    a.log(`[worker] resuming pairing with ${url} as '${found.name}' (id=${found.workerId})`);
+    return { identity: found, urlIndex, probes };
+  }
+  const identity = await registerWithBoard(a.opts, url, a.name, a.profiles, a.doctor);
+  saveIdentity(a.stateFile, url, identity, urlsOfBoard(a.boardUrls, probes, identity.boardId));
+  a.log(`[worker] registered with ${url} as '${identity.name}' (id=${identity.workerId}); to use another name, pair again with --name <name>`);
+  return { identity, urlIndex, probes };
+}
+
 export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<WorkerDaemonHandle> {
   const stateFile = opts.stateFile ?? defaultWorkerStateFile();
   // #1381: flags pin their keys; the rest start from what the board last pushed.
-  const settings = createWorkerSettingsApplier({ opts, stateFile, boardUrl: normalizeBoardUrl(opts.boardUrl), log: (line) => log(line) });
+  const settings = createWorkerSettingsApplier({ opts, stateFile, boardUrl: parseBoardList([opts.boardUrl, ...(opts.boardUrls ?? [])])[0]!, log: (line) => log(line) });
   opts = settings.effectiveOptions(opts);
   // #1340: an injected `log` (tests) is left alone; the real daemon also keeps a log file.
   // #1334: an injected `log` (tests) leaves the global console alone.
@@ -467,7 +464,8 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   );
   // #1351: the runner, repo ops and result push log through the same sink as the daemon.
   setWorkerLogSink(log);
-  const boardUrl = normalizeBoardUrl(opts.boardUrl);
+  const boardUrls = parseBoardList([opts.boardUrl, ...(opts.boardUrls ?? [])]);
+  const boardUrl = boardUrls[0]!;
   // #1372: on WSL the hostname is the Windows host's, so the default carries the distro.
   const name = opts.name ?? defaultWorkerName();
 
@@ -511,15 +509,11 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     runningEntry: opts.selfUpdate?.entry ?? null,
   });
   await doctor.refresh();
-  let identity = loadState(stateFile).boards[boardUrl];
-  if (!identity) {
-    identity = await registerWithBoard(opts, boardUrl, name, attestedProfiles(), doctor.takeCurrent());
-    saveIdentity(stateFile, boardUrl, identity);
-    log(`[worker] registered with ${boardUrl} as '${identity.name}' (id=${identity.workerId}); to use another name, pair again with --name <name>`);
-  } else {
-    log(`[worker] resuming pairing with ${boardUrl} as '${identity.name}' (id=${identity.workerId})`);
-  }
-
+  const paired = await resolvePairing({ opts, stateFile, boardUrls, name, profiles: attestedProfiles(), doctor: doctor.takeCurrent(), log });
+  const { probes } = paired;
+  let urlIndex = paired.urlIndex;
+  let identity = paired.identity;
+  const currentUrl = (): string => boardUrls[urlIndex]!;
   let ws: WebSocket | null = null;
   let stopped = false;
   let draining = settings.startDrained();
@@ -527,6 +521,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   /** Re-pairings attempted, and whether one is in flight (#754 â€” see handleUnauthorized). */
   let repairAttempts = 0;
   let repairing = false;
+  let switchTarget: number | null = null; // #1337: a preferred URL answered again; the next reconnect dials it
   let reconnectDelay = RECONNECT_MIN_MS;  /** Last moment a socket to the board was open (#1344); null until the first successful connect. */
   let lastReachableAt: number | null = null;
   /**
@@ -592,11 +587,11 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     repairing = true;
     repairAttempts += 1;
     log(`[worker] board rejected our identity (401 on ${where}); re-pairing with the supplied --token`);
-    forgetIdentity(stateFile, boardUrl);
+    forgetIdentity(stateFile, currentUrl());
     try {
-      identity = await registerWithBoard(opts, boardUrl, name);
-      saveIdentity(stateFile, boardUrl, identity);
-      log(`[worker] re-registered with ${boardUrl} as '${identity.name}' (id=${identity.workerId})`);
+      identity = await registerWithBoard(opts, currentUrl(), name);
+      saveIdentity(stateFile, currentUrl(), identity, urlsOfBoard(boardUrls, probes, identity.boardId));
+      log(`[worker] re-registered with ${currentUrl()} as '${identity.name}' (id=${identity.workerId})`);
       repairing = false;
       if (!stopped && !fatal) connect();
     } catch (err) {
@@ -625,7 +620,8 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // tracking capacity protects a well-behaved board, but the ceiling is this machine
   // owner's, so the worker enforces it locally instead of trusting the assigner.
   const runner = createWorkerAgentRunner(sendToBoard, {
-    boardUrl, workRoot, maxConcurrency: opts.maxConcurrency,
+    boardUrl: currentUrl, // #1337: read at use time, so git follows the connected URL
+    workRoot, maxConcurrency: opts.maxConcurrency,
     onAuthFailure: (profile) => profileAttestor.markAuthExpired(profile),
     ...(opts.harness ? { harness: opts.harness } : {}),
     profileAliases, ...(opts.profileHome ? { profileHome: opts.profileHome } : {}),
@@ -641,7 +637,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     ? createDaemonSelfUpdate({
         opts: opts.selfUpdate,
         stateFile,
-        boardUrl,
+        get boardUrl() { return currentUrl(); },
         workerToken: () => identity.workerToken,
         workerVersion,
         log,
@@ -694,7 +690,8 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       );
       return;
     }
-    const wsUrl = `${boardUrl.replace(/^http/, "ws")}/ws/workers/${identity.workerId}`;
+    const dialedUrl = currentUrl();
+    const wsUrl = `${dialedUrl.replace(/^http/, "ws")}/ws/workers/${identity.workerId}`;
     // #1335: handshakeTimeout fails a dead connect in seconds so backoff, not the OS ETIMEDOUT (~22s), sets the pace.
     const socket = new WebSocket(wsUrl, {
       headers: { authorization: `Bearer ${identity.workerToken}` }, handshakeTimeout: CONNECT_TIMEOUT_MS,
@@ -714,7 +711,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         }
         openedAt = Date.now();
         lastReachableAt = openedAt;
-        log(`[worker] connected to ${boardUrl}`);
+        log(`[worker] connected to ${dialedUrl}`);
         socket.send(JSON.stringify({
           type: "hello",
           workerId: identity.workerId,
@@ -776,6 +773,14 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       // #1354: a 1001 close is the board announcing a restart — expected, so the first retry is
       // the short minimum rather than wherever the error backoff had climbed to.
       if (boardRestarting) reconnectDelay = RECONNECT_MIN_MS;
+      if (boardUrls.length > 1) {
+        urlIndex = nextUrlIndex(urlIndex, boardUrls.length, openedAt !== null, switchTarget);
+        switchTarget = null;
+        if (openedAt === null) {
+          if (urlIndex !== 0) reconnectDelay = RECONNECT_MIN_MS;
+          log(`[worker] ${dialedUrl} did not answer; trying ${currentUrl()} next`);
+        }
+      }
       const { delay, next } = nextReconnectDelay(
         reconnectDelay, lastReachableAt === null ? null : Date.now() - lastReachableAt);
       reconnectDelay = next;
@@ -843,6 +848,17 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   selfUpdate?.begin();
   connect();
 
+  /** #1337: on a fallback URL, once a more preferred one answers (same board) drop the socket so the reconnect dials it. */
+  async function returnToPreferredUrl(): Promise<void> {
+    if (urlIndex === 0 || switchTarget !== null || stopped || fatal || !ws || ws.readyState !== WebSocket.OPEN) return;
+    const socket = ws;
+    const i = await findPreferredUrl(boardUrls, urlIndex, identity.boardId);
+    if (i === null || stopped || fatal || ws !== socket || switchTarget !== null || i >= urlIndex) return;
+    log(`[worker] preferred board URL ${boardUrls[i]} answers again; switching back from ${currentUrl()}`);
+    switchTarget = i;
+    socket.close(1000, "switching to a preferred board url");
+  }
+
   /**
    * One heartbeat. Carries the capabilities and the protocol version every time (#754),
    * and â€” unlike before â€” READS the status, because a 401 here is one of the two ways a
@@ -850,23 +866,17 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
    */
   async function sendHeartbeat(): Promise<void> {
     if (stopped || fatal) return;
+    void returnToPreferredUrl();
     // #895: re-attest on every beat, not just at startup â€” the ticket's own example is a
     // login that lapsed silently on a previously-healthy worker. Silent on an unchanged
     // result; a changed result gets exactly one summary line rather than re-explaining every
     // excluded provider's reason each beat (attestProviders already did that once, at
     // startup, and `worker doctor` gives the detail on demand).
-    if (opts.attestProviders !== false && declaredProviders && declaredProviders.length > 0) {
-      const att = await attestAndNotice(declaredProviders, () => {}, opts.harness);
-      const reattested = att.advertised;
+    const att = await reattestProviders(opts, declaredProviders, advertisedProviders, log);
+    if (att) {
       providerNotice = att.notice;
-      if (reattested.join(",") !== (advertisedProviders ?? []).join(",")) {
-        log(
-          `[worker] provider attestation changed: now advertising [${reattested.join(", ") || "none"}] ` +
-            `(was [${(advertisedProviders ?? []).join(", ") || "none"}])`,
-        );
-        advertisedProviders = reattested;
-        opts.providers = advertisedProviders;
-      }
+      advertisedProviders = att.advertised;
+      opts.providers = advertisedProviders;
     }
     // #1027: ONE quota tick per beat â€” at most one request to the usage endpoint, over the
     // profiles that are due. Never throws: a quota read is diagnostics, and a rate limit
@@ -881,7 +891,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     const doctorToSend = doctor.pending();
     let res: Response;
     try {
-      res = await fetch(`${boardUrl}/api/workers/${identity.workerId}/heartbeat`, {
+      res = await fetch(`${currentUrl()}/api/workers/${identity.workerId}/heartbeat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -932,18 +942,6 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   const heartbeatTimer = setInterval(() => { void sendHeartbeat(); }, opts.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS);
   if (heartbeatTimer.unref) heartbeatTimer.unref();
 
-  /** Flush queued exit/assign_failed frames. Returns how many could NOT be delivered. */
-  function flushCritical(): number {
-    while (pendingCritical.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
-      try {
-        ws.send(JSON.stringify(pendingCritical.shift()));
-      } catch {
-        break; // socket died mid-flush; the remainder is counted as lost
-      }
-    }
-    return pendingCritical.length;
-  }
-
   return {
     workerId: identity.workerId,
     connected,
@@ -975,7 +973,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       // The kill above only sends the signal. The result push is kicked off by the
       // agent's `exit` handler, so exiting now is precisely the bug: wait for it.
       const drained = await runner.drainPushes(timeoutMs);
-      const criticalMessagesLost = flushCritical();
+      const criticalMessagesLost = flushCritical(ws, pendingCritical);
       const retained = runner.unpushedResults();
       setWorkerLogSink(null);
       const report: DrainReport = {

@@ -31,6 +31,7 @@
  * will fix it.
  */
 import { findCorruptClones } from "../../worker/worker-repo-heal.js";
+import { findIdentity } from "../../worker/worker-state.js";
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -181,8 +182,10 @@ export function readSavedIdentity(stateFile: string, boardUrl: string): SavedIde
     if (!existsSync(stateFile)) return null;
     const parsed = JSON.parse(readFileSync(stateFile, "utf8")) as {
       boards?: Record<string, SavedIdentity>;
+      urls?: Record<string, string>;
     };
-    const entry = parsed.boards?.[boardUrl.replace(/\/+$/, "")];
+    // #1337: by board identity when this URL is mapped to one, else the legacy URL key.
+    const entry = findIdentity(parsed, boardUrl);
     return entry?.workerId && entry.workerToken ? entry : null;
   } catch {
     return null;

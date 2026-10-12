@@ -368,6 +368,51 @@ host-side steps recorded in `CONTINUE.md`.
 `worker doctor-board` WARNs (Windows only) when a bound listener's host is a tailnet address and no
 enabled inbound allow rule scoped to `100.64.0.0/10` covers its port.
 
+### Plain LAN with the tailnet as fallback (#1337)
+
+Tailscale already uses the direct LAN path between two machines on one LAN, encrypted — if Tailscale
+runs on both ends you need nothing below. This section is for the case where it does not (it is off on
+one side) and the worker should still reach the board over the plain LAN.
+
+**Board side.** `KANBAN_FLEET_HOST` and `KANBAN_GIT_HTTP_HOST` accept a comma-separated list, and the
+listener binds EVERY entry on the one port:
+
+```
+KANBAN_FLEET_HOST=tailscale,192.168.0.198   KANBAN_GIT_HTTP_HOST=tailscale,192.168.0.198
+```
+
+The default is unchanged — a LAN address is bound only because an operator listed it, and
+`KANBAN_FLEET_INSECURE=1` still means "every interface". Binding is all-or-nothing per listener: if one
+entry cannot bind (adapter down) the others are closed again and the supervisor retries the whole set.
+When any entry is neither loopback nor tailnet the board logs a loud `WARNING` at startup.
+
+**Worker side.** `--board` takes an ordered list (repeat the flag, or comma-separate; preferred first):
+
+```
+agentic-kanban worker start --board http://192.168.0.198:3003,http://100.x.y.z:3003 --token <t>
+```
+
+The worker connects to the first URL that answers, fails over to the next when a connect fails or the
+socket dies (missed pong, ~35 s), and returns to a more preferred URL when it answers again (checked on
+the heartbeat). The git transport URL is built from the URL connected right now. All URLs must be URLs
+of the SAME board: the pairing is keyed by the board's identity (a stable `boardId` the board returns
+on `/register` and on the unauthenticated `/health`), recorded in `worker-state.json` as
+`boards["board:<id>"]` plus a `urls` map, so one pairing covers every URL and failover never registers
+a second worker. An existing URL-keyed state file is migrated the first time the board's id is learned.
+(Settings, doctor and the update control endpoint stay keyed by the FIRST `--board` URL.)
+
+**Required firewall rule — this path is plaintext.** The `assign` frame carries a board-authored
+`setupScript`, so anyone who can read or inject traffic on the LAN segment can run code on a paired
+worker. Before binding a LAN address on a Windows board machine:
+
+1. Put the LAN adapter (incl. the WLAN adapter) on the **Private** network profile — never Public.
+2. Add an inbound allow rule per listener port scoped to that **subnet only** (RemoteAddress e.g.
+   `192.168.0.0/24`) and to the **Private profile only** — not `Any`/`Domain,Public`.
+3. Keep the tailnet rules from `scripts/fleet-firewall.ps1` as they are; do not widen them to cover the LAN.
+
+TLS or a frame MAC on these listeners (so the LAN path stops being a plaintext RCE channel) is out of
+scope here and still open.
+
 ### Threat model: everything here is plaintext
 
 Both listeners are plain HTTP and neither supports TLS today. What that means concretely,

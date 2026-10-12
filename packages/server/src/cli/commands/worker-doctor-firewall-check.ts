@@ -156,7 +156,10 @@ export async function checkTailnetFirewall(
   list: FirewallRuleLister = listFirewallRulesViaPowerShell,
 ): Promise<DoctorCheck[]> {
   if (platform !== "win32") return [];
-  const targets = listeners.filter((l) => l.port && isTailnetAddress(l.host));
+  // #1337: a listener may be bound on a comma-joined list; the tailnet entry is the one needing this rule.
+  const targets = listeners
+    .map((l) => ({ ...l, host: (l.host ?? "").split(",").find((h) => isTailnetAddress(h)) ?? l.host }))
+    .filter((l) => l.port && isTailnetAddress(l.host));
   if (targets.length === 0) return [];
   const listed = await list(targets.map((t) => t.port as number));
   const isPartial = listed !== null && !Array.isArray(listed) && "partial" in listed;

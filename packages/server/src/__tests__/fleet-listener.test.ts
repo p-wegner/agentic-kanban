@@ -75,7 +75,7 @@ describe("fleet listener", () => {
       for (const path of ["/health", "/api/health"]) {
         const res = await fetch(`${base}${path}`);
         expect(res.status, path).toBe(200);
-        expect(await res.json()).toEqual({ ok: true });
+        expect(await res.json()).toMatchObject({ ok: true }); // + the board's id (#1337)
       }
     });
   });

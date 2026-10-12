@@ -3,14 +3,8 @@
  * The same registration `startWorkerDaemon` does on first run; an existing pairing is kept.
  */
 import { defaultWorkerName } from "./worker-name.js";
-import {
-  defaultWorkerStateFile,
-  loadState,
-  normalizeBoardUrl,
-  registerWithBoard,
-  saveIdentity,
-  type WorkerDaemonOptions,
-} from "./worker-daemon.js";
+import { defaultWorkerStateFile, registerWithBoard, type WorkerDaemonOptions } from "./worker-daemon.js";
+import { adoptBoardId, findIdentity, loadState, parseBoardList, probeBoard, saveIdentity } from "./worker-state.js";
 import { attestProviders } from "./worker-provider-notice.js";
 import { readPersistedHarness, writePersistedHarness, type PersistedHarness, type WorkerHarness } from "./worker-harness.js";
 import { join } from "node:path";
@@ -29,9 +23,14 @@ function harnessRecordOf(harness: WorkerHarness | undefined): PersistedHarness {
 
 export async function pairWorker(opts: WorkerDaemonOptions): Promise<{ alreadyPaired: boolean; name: string }> {
   const stateFile = opts.stateFile ?? defaultWorkerStateFile();
-  const boardUrl = normalizeBoardUrl(opts.boardUrl);
-  const existing = loadState(stateFile).boards[boardUrl];
+  // #1337: several URLs of one board share a pairing, keyed by the board's identity.
+  const boardUrls = parseBoardList([opts.boardUrl, ...(opts.boardUrls ?? [])]);
+  const probes = await Promise.all(boardUrls.map((u) => probeBoard(u)));
+  for (const p of probes) if (p.boardId) adoptBoardId(stateFile, p.url, p.boardId);
+  const state = loadState(stateFile);
+  const existing = boardUrls.map((u) => findIdentity(state, u)).find((i) => i !== undefined);
   if (existing) return { alreadyPaired: true, name: existing.name };
+  const boardUrl = boardUrls[Math.max(0, probes.findIndex((p) => p.reachable))]!;
   const declared = opts.providers ?? [];
   const providers = opts.attestProviders === false
     ? declared
@@ -42,6 +41,9 @@ export async function pairWorker(opts: WorkerDaemonOptions): Promise<{ alreadyPa
   // A state file that already has a pairing but no record is a legacy one: it stays inherit.
   const unpaired = Object.keys(loadState(stateFile).boards).length === 0;
   if (unpaired && !readPersistedHarness(stateFile)) writePersistedHarness(stateFile, harnessRecordOf(opts.harness));
-  saveIdentity(stateFile, boardUrl, identity);
+  saveIdentity(stateFile, boardUrl, identity, boardUrls.filter((u) => {
+    const id = probes.find((p) => p.url === u)?.boardId;
+    return !id || !identity.boardId || id === identity.boardId;
+  }));
   return { alreadyPaired: false, name: identity.name };
 }
