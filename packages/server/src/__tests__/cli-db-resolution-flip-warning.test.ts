@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dbResolutionFlipWarning } from "../cli/last-resolved-db.js";
+import { dbResolutionFlipWarning, isTempDbPath } from "../cli/last-resolved-db.js";
 
 /**
  * #165: the CLI must warn loudly when a subcommand resolves to a DIFFERENT
@@ -41,5 +41,15 @@ describe("dbResolutionFlipWarning (#165)", () => {
       "/home/.agentic-kanban/kanban.db",
     );
     expect(msg).toContain("libsql://remote");
+  });
+});
+
+describe("isTempDbPath (#1422)", () => {
+  it("flags the OS temp dir and ak-test-db fixtures", () => {
+    expect(isTempDbPath("C:\\Users\\x\\AppData\\Local\\Temp\\a\\kanban.db", "C:\\Users\\x\\AppData\\Local\\Temp")).toBe(true);
+    expect(isTempDbPath("D:\\tmp\\ak-test-db-abc\\kanban.db", "C:\\other")).toBe(true);
+  });
+  it("does not flag the real home or checkout DB", () => {
+    expect(isTempDbPath("C:/Users/x/.agentic-kanban/kanban.db", "C:/Users/x/AppData/Local/Temp")).toBe(false);
   });
 });

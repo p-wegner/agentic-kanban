@@ -108,9 +108,12 @@ program.hook("preAction", async (_thisCommand, actionCommand) => {
         rejectedLocalCandidates: DB_LOCATION.rejectedLocalCandidates,
       }),
     );
-    if (homeFallback) console.warn(homeFallback);
+    // `status --watch` redraws a full-screen frame; banners printed above it are
+    // wiped on the first refresh and would corrupt the layout, so stay silent there.
+    const quiet = actionCommand.name() === "status" && actionCommand.opts().watch === true;
+    if (homeFallback && !quiet) console.warn(homeFallback);
     const flip = checkAndRecordDbResolution(DB_LOCATION);
-    if (flip) console.warn(flip);
+    if (flip && !quiet) console.warn(flip);
   } catch {
     // Non-fatal: never let the DB-source probe block a command.
   }
