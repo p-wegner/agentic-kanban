@@ -712,6 +712,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     probeSession: seen.answerProbe, rememberedSessionCount: seen.size,
     retryPendingPushes: undelivered.retryPending,
     unpushedResults: undelivered.list,
+    lostResults: undelivered.listLost,
   };
 }
 
