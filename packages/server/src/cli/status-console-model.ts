@@ -1,4 +1,4 @@
-import type { BoardStatusIssue, BoardStatusResponse, MergeTrainRowDto, MergeTrainsResponse } from "@agentic-kanban/shared";
+import { isInFlightStatusName, type BoardStatusIssue, BoardStatusResponse, MergeTrainRowDto, MergeTrainsResponse } from "@agentic-kanban/shared";
 import type { MergeTrainWindowResponse } from "@agentic-kanban/shared";
 
 // `status --watch` as a one-screen operator console (#1421). `buildConsoleModel` turns the
@@ -73,9 +73,8 @@ export interface ConsolePayloads {
 
 function columnOf(issue: BoardStatusIssue): ConsoleColumn {
   if (issue.mergeState?.bucket === "pending_merge") return "Merge";
-  if (issue.statusName === "In Review") return "Review";
-  if (issue.statusName === "In Progress") return "Build";
-  return "Todo";
+  if (issue.workspace?.status === "reviewing") return "Review";
+  return isInFlightStatusName(issue.statusName) ? "Build" : "Todo";
 }
 
 function parseEvidence(row: MergeTrainRowDto): { landed: number; dropped: number; gateRuns: number; members: number; gateFailure: string | null } {

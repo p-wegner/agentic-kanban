@@ -149,7 +149,7 @@ Status indicators:
           cols: process.stdout.columns || 120,
           rows: process.stdout.rows || 40,
           color: !process.env.NO_COLOR && Boolean(process.stdout.isTTY),
-          ascii: process.env.KANBAN_ASCII === "1",
+          ascii: !process.stdout.isTTY,
           intervalSec: intervalSecOf(),
           nowMs: Date.now(),
           allIssues,

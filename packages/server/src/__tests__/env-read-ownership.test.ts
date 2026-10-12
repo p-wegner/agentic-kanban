@@ -140,6 +140,7 @@ const BOARD_PREFIXES = ["KANBAN_", "AGENTIC_KANBAN_"];
  */
 const FOREIGN: Record<string, string> = {
   // OS / shell
+  NO_COLOR: "the no-color.org convention — `status --watch` drops ANSI colour when set",
   PATH: "OS — executable search path, used to resolve an agent CLI",
   PATHEXT: "Windows — the extensions that make a file executable (.EXE/.CMD/.BAT/.PS1)",
   APPDATA: "Windows — roaming app data, where a global npm install puts its bin",
