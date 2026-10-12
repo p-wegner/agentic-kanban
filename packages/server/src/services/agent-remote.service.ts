@@ -132,8 +132,7 @@ export function createRemoteAgentService(
     sessionId: string,
     session: RemoteSession,
     reportedExitCode: number | null, endedBy?: BoardEndedReason,
-    workerPhases?: WorkerPhaseTimings,
-    landedPushMeansSuccess = false,
+    workerPhases?: WorkerPhaseTimings, landedPushMeansSuccess = false,
   ): Promise<void> {
     liveness.cancel(sessionId);
     sessions.delete(sessionId);
