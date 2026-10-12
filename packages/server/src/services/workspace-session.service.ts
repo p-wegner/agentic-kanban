@@ -43,6 +43,7 @@ import {
   type GitService,
 } from "./workspace-internals.js";
 import { stopBisectSession } from "./bisect.service.js";
+import { assertNotInLiveTrain } from "./workspace-train-membership.service.js";
 import { assertProjectNotQuiesced } from "./quiesce.service.js";
 import { findLiveAgentTrees, liveAgentRefusalMessage } from "./workspace-agent-liveness.service.js";
 import * as realGitService from "./git.service.js";
@@ -195,6 +196,7 @@ export function createWorkspaceSessionService(deps: {
     // `relaunch_workspace` MCP tool — none of which consult Start Mode at all (by design:
     // `manual` deliberately still permits explicit relaunch). See quiesce.service.ts.
     await assertProjectNotQuiesced(database, await resolveProjectId(id, database), "relaunch");
+    await assertNotInLiveTrain(database, id, "launch", body.force === true || body.fromTrain === true);
     await assertNoLiveAgentTree(id, body.force === true);
 
     // If workingDir is missing on a non-direct workspace, attempt to rebuild the worktree.
@@ -317,8 +319,10 @@ export function createWorkspaceSessionService(deps: {
     return { sessionId };
   }
 
-  async function sendTurn(id: string, content: string): Promise<TurnResult> {
+  /** `opts.fromTrain`: the train's own siding/red-feedback nudges — the one caller allowed to move a live member (#1418). */
+  async function sendTurn(id: string, content: string, opts: { fromTrain?: boolean } = {}): Promise<TurnResult> {
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
+    await assertNotInLiveTrain(database, id, "send-back", opts.fromTrain === true);
 
     const resumable = await findResumableSession(id, database);
     if (!resumable) {
