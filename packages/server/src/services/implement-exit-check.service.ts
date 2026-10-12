@@ -309,7 +309,7 @@ async function runVerifyLevel(args: VerifyLevelArgs, startedAt: number): Promise
         verifyTimeoutMs,
         projectId,
         workspaceId: workspace.id,
-        summarize: (stdout, stderr) => summarizeVerifyFailure(stdout, stderr, workspace.id),
+        summarize: (stdout, stderr) => summarizeVerifyFailure(stdout, stderr, `${workspace.id}-implement-exit`),
       }),
       `implement-exit ${plan.strategy} check for workspace ${workspace.id}`,
       { priority: "background" },

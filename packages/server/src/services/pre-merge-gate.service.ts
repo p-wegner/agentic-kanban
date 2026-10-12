@@ -199,7 +199,8 @@ export async function runPreMergeGate(
   signal?: AbortSignal,
 ): Promise<PreMergeGateResult> {
   // #1164 (per-workspace) + #1203 (a train's `signal`) — see `combineGateAbortSignals`'s doc comment.
-  const combinedSignal = combineGateAbortSignals(beginMergeGateRun(workspace.id), signal);
+  const ownGateSignal = beginMergeGateRun(workspace.id);
+  const combinedSignal = combineGateAbortSignals(ownGateSignal, signal);
   // ---- #628 deferred dependency installs ---------------------------------------------------
   // With install mode `background` the agent launches before its repos' dependencies exist, so
   // the protection `setupFailedBlocking` (#169) gave by refusing the LAUNCH has to be here
@@ -642,6 +643,7 @@ export async function runPreMergeGate(
             }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
           );
         },
+        signal: combinedSignal,
         looksLikeMissingDeps: looksLikeMissingDepsFailure,
         // Only this repo's `scripts/test-mine.mjs` honours a suite scope; for any other project
         // the env var is inert and the "targeted re-run" would be a second FULL run.
@@ -711,7 +713,7 @@ export async function runPreMergeGate(
     await recordFlakySuitesAsRedDebt({ flakySuites: outcome.flakySuites, projectId, workingDir, database });
     } finally {
       // #1164 — spent either way; drop it so a later cancel can't mistake this for a live gate.
-      endMergeGateRun(workspace.id);
+      endMergeGateRun(workspace.id, ownGateSignal);
       // Best-effort by design (#352's root cause): on Windows the directory cannot be removed
       // while any surviving grandchild of the verify run still holds it as its cwd. Log it so a
       // recurring failure is visible instead of silently accumulating again; never throw, because

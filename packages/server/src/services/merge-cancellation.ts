@@ -20,14 +20,25 @@ const controllers = new Map<string, AbortController>();
  * `runSetupScript` is always this run's own, never a previous run's leftover.
  */
 export function beginMergeGateRun(workspaceId: string): AbortSignal {
-  controllers.get(workspaceId)?.abort();
+  const previous = controllers.get(workspaceId);
+  if (previous) {
+    // #1395: the one interrupt nobody logged — a second gate for the same workspace kills the first.
+    const reason = "superseded by a newer pre-merge gate run for the same workspace";
+    console.warn(`[merge-cancellation] aborting the in-flight gate for workspace ${workspaceId}: ${reason}`);
+    previous.abort(reason);
+  }
   const controller = new AbortController();
   controllers.set(workspaceId, controller);
   return controller.signal;
 }
 
-/** Clear the controller once the gate run has settled, so a later cancel has nothing to hit. */
-export function endMergeGateRun(workspaceId: string): void {
+/**
+ * Clear the controller once the gate run has settled, so a later cancel has nothing to hit. Pass
+ * the run's own signal (#1395): a superseded run settles AFTER its successor registered, and an
+ * unconditional delete dropped the successor's controller, leaving it uncancellable.
+ */
+export function endMergeGateRun(workspaceId: string, signal?: AbortSignal): void {
+  if (signal && controllers.get(workspaceId)?.signal !== signal) return;
   controllers.delete(workspaceId);
 }
 
@@ -40,7 +51,8 @@ export function endMergeGateRun(workspaceId: string): void {
 export function requestMergeGateCancellation(workspaceId: string): boolean {
   const controller = controllers.get(workspaceId);
   if (!controller) return false;
-  controller.abort();
+  console.warn(`[merge-cancellation] aborting the in-flight gate for workspace ${workspaceId}: cancel requested via merge/cancel`);
+  controller.abort("cancelled by an operator request (merge/cancel)");
   return true;
 }
 
