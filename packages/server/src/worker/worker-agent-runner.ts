@@ -13,6 +13,7 @@ import { workerLog } from "./worker-updater.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { resolveAgentHangTimeoutMs, startHangWatchdog } from "../lib/agent-launch-env.js";
+import { createSessionTempDir, type SessionTempDir } from "../lib/session-temp-dir.js";
 import { killProcessTree } from "../services/process-exec.js";
 import type {
   BoardToWorkerMessage,
@@ -168,6 +169,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   const stdinOpen = new Map<string, boolean>();
   /** Per-session silence watchdogs; reset on every byte of agent output. */
   const hangWatchdogs = new Map<string, { reset(): void; close(): void }>();
+  const sessionTemps = new Map<string, SessionTempDir>();
   const maxConcurrency = options.maxConcurrency && options.maxConcurrency > 0 ? options.maxConcurrency : 1;
   const tree = createAgentTreeTracker(workRoot); // #1336
 
@@ -301,6 +303,8 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     stdinOpen.delete(sessionId);
     closeWatchdog(sessionId);
     tree.untrack(sessionId);
+    sessionTemps.get(sessionId)?.dispose();
+    sessionTemps.delete(sessionId);
     const pending = checkouts.get(sessionId);
     if (!pending) {
       // safeSend, not send: this runs synchronously on the child's `exit` event, where a
@@ -473,6 +477,9 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     // so a recorded pgid names the whole tree for the next daemon's startup sweep. On win32
     // the equivalent is the kill-on-close Job Object attached after the spawn below.
     let proc: ChildProcess;
+    // #1391: concurrent sessions on one worker must not share the OS temp dir (a `/tmp/msg.txt`
+    // overwritten by the neighbour put another ticket's message on a commit). Applied LAST.
+    const sessionTemp = createSessionTempDir(sessionId);
     try {
       proc = spawn(launch.command, spec.args, {
         cwd: spec.cwd,
@@ -480,16 +487,18 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         // machine's environment — never replace it. The worker authenticates its
         // agent with its own local login, so HOME/USERPROFILE/PATH and the
         // provider config dir must stay this machine's (decision 012).
-        env: { ...process.env, ...spec.env },
+        env: { ...process.env, ...spec.env, ...sessionTemp?.env },
         shell: launch.useShell,
         detached: process.platform !== "win32",
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
       });
     } catch (err) {
+      sessionTemp?.dispose();
       send({ type: "assign_failed", sessionId, error: errorMessage(err) });
       return;
     }
+    if (sessionTemp) sessionTemps.set(sessionId, sessionTemp);
     processes.set(sessionId, proc);
     agentStartedAtMs.set(sessionId, Date.now());
     workerLog(`[worker] launched agent: sessionId=${sessionId} pid=${proc.pid} command=${launch.command}`);

@@ -711,6 +711,11 @@ export function buildCommitMessageEncodingSection(): string {
     "board's own `ak-<N>` matching in its merge reconcilers.",
     "",
     "If you must use PowerShell, pass `-Encoding utf8NoBOM` explicitly.",
+    "",
+    "**Never write the message file to a shared `/tmp/msg.txt` (#1391).** Other sessions run on the",
+    "same machine and a fixed shared path gets overwritten — a commit then carries ANOTHER ticket's",
+    "message. Write it inside your own worktree (e.g. `.git-commit-msg.txt`, delete it after the",
+    "commit) or under your session-private `$TMPDIR`, and re-check `git log -1` after committing.",
   ].join("\n");
 }
 
