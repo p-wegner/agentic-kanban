@@ -33,3 +33,18 @@ export function createSessionTempDir(sessionId: string): SessionTempDir | null {
     return null;
   }
 }
+
+// Worker-side registry: one live temp dir per session id, released on spawn failure or exit.
+const live = new Map<string, SessionTempDir>();
+
+/** Create and register the session's temp dir; returns its env (empty when it cannot be created). */
+export function startSessionTemp(sessionId: string): Record<string, string> {
+  const dir = createSessionTempDir(sessionId);
+  if (dir) live.set(sessionId, dir);
+  return dir?.env ?? {};
+}
+
+export function releaseSessionTemp(sessionId: string): void {
+  live.get(sessionId)?.dispose();
+  live.delete(sessionId);
+}

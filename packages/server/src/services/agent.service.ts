@@ -566,7 +566,6 @@ export function launch(request: AgentLaunchRequest): ChildProcess {
     env: spawnEnv,
     stdio: stdioConfig,
   });
-  if (sessionTemp) proc.once("exit", () => { sessionTemp.dispose(); });
   // Allow server to exit/restart without waiting for real agents
   if (shouldDetach) proc.unref();
 
@@ -623,6 +622,7 @@ export function launch(request: AgentLaunchRequest): ChildProcess {
 
   setupChildOutput(proc, sessionId, shouldDetach, onOutputWithWatchdog);
   attachProcessHandlers(proc, sessionId, shouldDetach, onOutputWithWatchdog);
+  if (sessionTemp) proc.on("exit", () => { sessionTemp.dispose(); });
 
   return proc;
 }
