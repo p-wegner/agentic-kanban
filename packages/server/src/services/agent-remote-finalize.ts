@@ -4,7 +4,7 @@
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { Database } from "../db/index.js";
 import { getSessionLiveness } from "../repositories/worker.repository.js";
-import { syncIncomingBranch, clearIncomingRef } from "./worker-remote-sync.service.js";
+import { syncIncomingBranch, clearIncomingRef, classifyRefusedPush } from "./worker-remote-sync.service.js";
 import type { WorkerConnectionManager } from "./worker-connection.service.js";
 import type { RemoteSession } from "./agent-remote.types.js";
 
@@ -39,10 +39,20 @@ export async function landSessionBranch(
       // The agent failed before producing anything to push — nothing to sync.
       console.warn(`[agent-remote] no incoming ref for failed session ${sessionId}; nothing to sync`);
     } else {
+      let classification = "";
+      if (result.status === "diverged") {
+        const cls = await classifyRefusedPush(session.repo.repoPath, session.repo.branch);
+        classification = ` [${cls.summary}]`;
+        if (cls.kind === "rewritten-history") {
+          // #1427: unusable - a later sync must not be able to land it (#1414).
+          await clearIncomingRef(session.repo.repoPath, session.repo.branch).catch(() => {});
+          classification += " - incoming ref discarded";
+        }
+      }
       session.onOutput({
         type: "stderr",
         sessionId,
-        data: `Worker result could not be landed on ${session.repo.branch}: ${result.error}`,
+        data: `Worker result could not be landed on ${session.repo.branch}: ${result.error}${classification}`,
       });
       exitCode = exitCode === 0 || exitCode === null ? 1 : exitCode;
     }

@@ -235,6 +235,18 @@ export async function provisionWorkerCheckout(
   // form: check out the start point detached, then move to a session-local
   // branch name that can never collide.
   const localBranch = `kanban/${sessionId}`;
+  // #1427: the cache's local base ref is whatever an earlier session or clone left; a review that
+  // rebases onto it drags rewritten copies of base commits into the push. Pin it to the board's tip
+  // just fetched. update-ref (not `branch -f`) because a fresh clone has it checked out.
+  let baseSha: string | null = null;
+  if (repo.baseBranch) {
+    const baseProbe = await gitExec(["rev-parse", "--verify", `refs/remotes/origin/${repo.baseBranch}^{commit}`], { cwd: cacheDir });
+    if (execSucceeded(baseProbe)) {
+      baseSha = baseProbe.stdout.trim();
+      const reset = await gitExec(["update-ref", `refs/heads/${repo.baseBranch}`, baseSha], { cwd: cacheDir });
+      if (!execSucceeded(reset)) log(`[worker] could not reset local ${repo.baseBranch} to the board's tip (non-fatal)`);
+    }
+  }
   const branchProbe = await gitExec(["rev-parse", "--verify", `refs/remotes/origin/${repo.branch}`], { cwd: cacheDir });
   const startPoint = execSucceeded(branchProbe)
     ? `refs/remotes/origin/${repo.branch}`
@@ -280,6 +292,25 @@ export async function provisionWorkerCheckout(
       continue;
     }
     writeFileSync(join(checkoutDir, file.name), file.content, "utf-8");
+  }
+
+  // #1427: name the exact base to rebase onto, so no session guesses at a local ref.
+  if (baseSha) {
+    const contextFile = join(checkoutDir, TICKET_CONTEXT_FILENAME);
+    if (existsSync(contextFile)) {
+      try {
+        appendFileSync(
+          contextFile,
+          `\n\n## Base for rebasing (#1427)\n\n` +
+            `The board's tip of \`${repo.baseBranch}\` is \`${baseSha}\`. If you rebase, rebase onto exactly ` +
+            `\`${baseSha}\` (or \`origin/${repo.baseBranch}\` after fetching) - never a local \`${repo.baseBranch}\` ` +
+            `you did not just reset. Before pushing, \`git log ${baseSha}..HEAD\` must list only this ticket's own commits.\n`,
+          "utf-8",
+        );
+      } catch (err) {
+        workerLog(`[worker] could not append the base note to ${contextFile}: ${String(err)}`);
+      }
+    }
   }
 
   // #852: an assignment with no setup script used to mean NO install at all Ã¢â‚¬â€ the agent
