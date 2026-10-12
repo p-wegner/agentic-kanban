@@ -178,12 +178,13 @@ describe("worker-fleet placement (phase 1c)", () => {
     const idle = await registerLocalWorker({ name: "idle", maxConcurrency: 1 });
     fleet.connections.handleOpen(busy, fakeWs());
     fleet.connections.handleOpen(idle, fakeWs());
-    // The busy worker announces one running session — at capacity.
-    fleet.connections.handleMessage(busy, JSON.stringify({ type: "hello", workerId: busy, runningSessionIds: ["s1"] }));
+    // The busy worker holds one dispatched session — at capacity. (An assign, not a
+    // `hello`: #1415 orphan-stops hello-reported sessions with no session row.)
+    fleet.connections.send(busy, { type: "assign", sessionId: "s1" } as never);
 
     expect(await selectWorkerForLaunch(fleet, "claude")).toBe(idle);
 
-    fleet.connections.handleMessage(idle, JSON.stringify({ type: "hello", workerId: idle, runningSessionIds: ["s2"] }));
+    fleet.connections.send(idle, { type: "assign", sessionId: "s2" } as never);
     expect(await selectWorkerForLaunch(fleet, "claude")).toBeNull();
   });
 
