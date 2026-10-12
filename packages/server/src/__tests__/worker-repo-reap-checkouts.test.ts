@@ -9,6 +9,7 @@ import { rmOrReportHolder } from "./helpers/rm-or-report-holder.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
+import { upsertUndelivered } from "../worker/worker-undelivered.js";
 import { reapOrphanedCheckouts, cleanupWorkerCheckout } from "../worker/worker-repo.js";
 
 describe("reapOrphanedCheckouts", () => {
@@ -52,6 +53,36 @@ describe("reapOrphanedCheckouts", () => {
     expect(report.errored).toEqual([]);
     expect(existsSync(orphanCheckout)).toBe(false);
     expect(existsSync(liveCheckout)).toBe(true);
+  });
+
+  it("#1385: keeps a registered checkout and its kanban/<sid> branch while an undelivered result names it; reaps it without the entry", async () => {
+    const cacheDir = join(workRoot, "repos", "proj-1");
+    mkdirSync(cacheDir, { recursive: true });
+    await gitExecOrThrow(["init", "-b", "master", cacheDir], {});
+    writeFileSync(join(cacheDir, "README.md"), "hello\n");
+    await gitExecOrThrow(["add", "."], { cwd: cacheDir });
+    await gitExecOrThrow(["-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-m", "init"], { cwd: cacheDir });
+    const held = join(workRoot, "checkouts", "sess-held");
+    await gitExecOrThrow(["worktree", "add", "-b", "kanban/sess-held", held, "master"], { cwd: cacheDir });
+    const orphan = join(workRoot, "checkouts", "sess-held-orphan");
+    mkdirSync(orphan, { recursive: true });
+    upsertUndelivered(workRoot, {
+      sessionId: "sess-held", branch: "feature/x", baseBranch: "master", incomingRef: "refs/kanban/incoming/feature/x",
+      checkoutPath: held, cacheDir, projectId: "p", gitPort: 1, attempts: 6, lastError: "boom", recordedAt: new Date().toISOString(),
+    });
+
+    const lines: string[] = [];
+    const report = await reapOrphanedCheckouts(workRoot, (l) => lines.push(l));
+    expect(report.heldForDelivery).toEqual([held]);
+    expect(report.reaped).toEqual([orphan]);
+    expect(existsSync(held)).toBe(true);
+    expect(String(await gitExecOrThrow(["branch", "--list", "kanban/sess-held"], { cwd: cacheDir })).trim()).not.toBe("");
+    expect(lines.join("\n")).toContain("held for delivery");
+
+    // Branch sweep too: drop the worktree registration, branch must still survive.
+    await gitExecOrThrow(["worktree", "remove", "--force", held], { cwd: cacheDir });
+    await reapOrphanedCheckouts(workRoot);
+    expect(String(await gitExecOrThrow(["branch", "--list", "kanban/sess-held"], { cwd: cacheDir })).trim()).not.toBe("");
   });
 
   it("#1321: reaps a registered-but-ownerless checkout and its kanban/<sessionId> branch", async () => {
@@ -131,6 +162,6 @@ describe("reapOrphanedCheckouts", () => {
 
   it("is a no-op when there is no checkouts directory yet", async () => {
     const report = await reapOrphanedCheckouts(workRoot);
-    expect(report).toEqual({ scanned: 0, reaped: [], errored: [], stranded: [], branchesDeleted: [] });
+    expect(report).toEqual({ scanned: 0, reaped: [], errored: [], stranded: [], branchesDeleted: [], heldForDelivery: [] });
   });
 });

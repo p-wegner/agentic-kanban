@@ -49,6 +49,9 @@ export async function cleanUpBeforeStart(workRoot: string, log: (line: string) =
   }
   try {
     const reaped = await reapOrphanedCheckouts(workRoot, log);
+    if (reaped.heldForDelivery.length > 0) {
+      log(`[worker] startup cleanup: kept ${reaped.heldForDelivery.length} checkout(s) held for delivery of an undelivered result`);
+    }
     if (reaped.reaped.length > 0) {
       log(`[worker] startup cleanup: reaped ${reaped.reaped.length} orphaned checkout(s) of ${reaped.scanned} scanned`);
     }
