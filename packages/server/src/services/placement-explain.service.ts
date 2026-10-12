@@ -29,6 +29,7 @@
 // This file deliberately does NOT own the decision and never edits it: the seam is
 // observation (a non-reserving selector call plus a released dry run), so the
 // resolver stays the single place a placement is decided.
+import { authExpiredProfileNames, describeAuthExpired } from "../lib/worker-profile-attestation.js";
 import { fleetForProject } from "./worker-project-scope.js";
 import { workerAllowsProject, type WorkerSettings } from "@agentic-kanban/shared/lib/worker-settings";
 import {
@@ -241,6 +242,8 @@ function ineligibleReasonFor(
     unresponsive: string | null;
     /** #1381: why the board-side allowed/denied project lists bar the asked-about project. */
     projectBarred?: string | null;
+    /** #1426: this worker's login for the provider is dead (see `describeAuthExpired`). */
+    authExpired?: string | null;
   },
 ): string | null {
   if (worker.effectiveStatus !== "online") {
@@ -251,6 +254,7 @@ function ineligibleReasonFor(
   // transport layer, which outlives its ability to launch anything.
   if (ctx.unresponsive) return ctx.unresponsive;
   if (ctx.projectBarred) return ctx.projectBarred;
+  if (ctx.authExpired) return ctx.authExpired;
   if (worker.providers && ctx.providers.length > 0 && !ctx.providers.includes(ctx.providerName)) {
     return `does not advertise provider '${ctx.providerName}' (has [${ctx.providers.join(",")}])`;
   }
@@ -308,6 +312,9 @@ async function describeWorkers(
       missingToolchains: missingToolchains(wanted.toolchains, w.toolchains),
       providerName,
       unresponsive: fleet.health.unresponsiveReason(w.id),
+      authExpired: ((names) => (names.length > 0 ? describeAuthExpired(w.name, providerName, names) : null))(
+        authExpiredProfileNames(w.profiles, providerName),
+      ),
       projectBarred: projectId ? barredReason(w.desiredSettings?.settings, projectId) : null,
     });
     return {

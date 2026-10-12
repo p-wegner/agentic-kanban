@@ -334,6 +334,7 @@
  *
  *   services/agent-remote.service.ts::createRemoteAgentService   292 -> 296  (+4)
  *   routes/workspace-actions.ts::createWorkspaceActionsRoute     388 -> 389  (+1)
+ *   worker/worker-agent-runner.ts::createWorkerAgentRunner       383 -> 390  (+7, #1426: auth-death hook; logic lives in worker-auth-failure.ts)
  *   worker/worker-agent-runner.ts::createWorkerAgentRunner       370 -> 383  (+13)
  *
  * The board answers a worker's `git_token_request` (one dispatch branch; the logic is in
@@ -474,7 +475,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 349 -> 351 (#841): POSIX-only `detached: true` for a shell launch, closing the #836 gap.
   // 351 -> 358 (#1027), disclosed in the ninth movement above.
   // 358 -> 370 (#1328), disclosed in the seventeenth movement above.
-  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 383,
+  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 390,
 };
 
 /**

@@ -45,6 +45,7 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { createWorkerSessionRegistry } from "./worker-session-registry.js";
 import { resolveSpecCommand } from "./worker-command-resolver.js";
 import { applyProfileToSpec } from "./worker-profiles.js";
+import { createAuthFailureTracker } from "./worker-auth-failure.js";
 import type { ProfileAlias } from "../lib/local-profile-discovery.js";
 import { FLEET_MCP_TOKEN_ENV_VAR } from "@agentic-kanban/shared/lib/worker-protocol";
 import { createAgentTreeTracker } from "./agent-process-tree.js";
@@ -65,6 +66,8 @@ export interface WorkerAgentRunnerOptions {
   /** Board base URL — required to compose git-transport URLs for repo assignments. */
   boardUrl?: string;
   workRoot?: string;
+  /** #1426: a session died of an auth failure before any tool call; the profile it ran as (undefined = unpinned). */
+  onAuthFailure?: (profile: string | undefined) => void;
   /**
    * This machine's own concurrency ceiling (#266). The board also tracks capacity
    * (#248), but that only protects against a well-behaved board — the point of a
@@ -149,6 +152,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   const exited = new Set<string>();
   /** Last ~2 KB of each agent's stderr, logged when it dies fast with a non-zero exit (#1383). */
   const stderrTails = new Map<string, string>();
+  const authWatch = createAuthFailureTracker((m) => safeSend(m), options.onAuthFailure); // #1426
   /** Sessions whose work lives in a worker-side checkout that must be pushed back. */
   const checkouts = new Map<string, PendingResult>();
   /**
@@ -313,6 +317,10 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     closeWatchdog(sessionId);
     tree.untrack(sessionId); releaseSessionTemp(sessionId);
     const pending = checkouts.get(sessionId);
+    if (authWatch.exit(sessionId, exitCode, pending && (() => repoOps.cleanup(pending.checkout)))) {
+      checkouts.delete(sessionId); // #1426: a launch failure, not a failed build
+      return;
+    }
     if (!pending) {
       // safeSend, not send: this runs synchronously on the child's `exit` event, where a
       // throw is a process-level uncaught exception (#870).
@@ -444,6 +452,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       return;
     }
     exited.delete(sessionId);
+    authWatch.begin(sessionId, specAsSent.intent?.profile);
 
     // #1027: the board may PIN this launch to a profile NAME (never a credential — the
     // board has none of ours). Resolving the name is this machine's job, and so is
@@ -514,6 +523,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       const data = sanitizeUtf8(chunk.toString());
       if (!data) return;
       if (type === "stderr") stderrTails.set(sessionId, ((stderrTails.get(sessionId) ?? "") + data).slice(-2048));
+      authWatch.noteOutput(sessionId, type, data);
       seen.noteOutput(sessionId);
       hangWatchdogs.get(sessionId)?.reset();
       // safeSend: this runs on the child's stream 'data' events, where a throw out of the

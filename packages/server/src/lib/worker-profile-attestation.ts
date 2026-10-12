@@ -59,6 +59,24 @@ export function isRunnableAttestation(entry: WorkerProfileAttestation): boolean 
   return entry.credentials === undefined;
 }
 
+/**
+ * #1426: the profile names that make this worker unusable for `provider` - non-empty only when it
+ * attests at least one profile for that provider and EVERY one is `auth-expired` (one working
+ * login is enough to run). Empty = no reason to hold the worker back.
+ */
+export function authExpiredProfileNames(
+  profiles: readonly WorkerProfileAttestation[] | null | undefined,
+  provider: string,
+): string[] {
+  const mine = (profiles ?? []).filter((p) => p.provider === provider);
+  return mine.length > 0 && mine.every((p) => p.credentials === "auth-expired") ? mine.map((p) => p.name) : [];
+}
+
+/** `wsl-stable: claude login expired (anth) - re-login or copy credentials` (#1426). */
+export function describeAuthExpired(workerName: string, provider: string, names: readonly string[]): string {
+  return `${workerName}: ${provider} login expired (${names.join(", ")}) - re-login or copy credentials`;
+}
+
 /** `provider:name` for an attestation, in the roster's own spelling. */
 export function attestationRefId(entry: WorkerProfileAttestation): string {
   return profileRefId({ provider: narrowProvider(entry.provider), name: entry.name });
