@@ -553,7 +553,14 @@ export type BoardToWorkerMessage =
    * Correlated by `requestId` like the repo ops, and for the same reason: the board acts
    * on the answer, so a stale reply must not be mistaken for a fresh one.
    */
-  | { type: "probe_session"; sessionId: string; requestId: string };
+  | { type: "probe_session"; sessionId: string; requestId: string }
+  /**
+   * #1383: the board's answer to a `git_token_request` — a FRESH scoped git token for the
+   * session's own incoming ref, or `error` when none could be issued. Correlated by
+   * `requestId`. OPTIONAL on the wire: an older worker never asks, an older board never
+   * answers (the worker's wait times out and it falls back to its normal retry).
+   */
+  | { type: "git_token"; sessionId: string; requestId: string; gitToken?: string; error?: string };
 
 export type WorkerToBoardMessage =
   | {
@@ -593,6 +600,12 @@ export type WorkerToBoardMessage =
    * stale worker in a fleet. So this adds no protocol-version bump.
    */
   | { type: "session_probe_result"; sessionId: string; probe: WorkerSessionProbe }
+  /**
+   * #1383: the worker's result push was rejected (401), so the token it holds is dead.
+   * Asks for a fresh one rather than retrying the rejected credential. Optional on the
+   * wire like `undelivered_result`: an older board drops it and the worker's wait times out.
+   */
+  | { type: "git_token_request"; sessionId: string; requestId: string }
   | {
       type: "undelivered_result";
       sessionId: string;
@@ -616,6 +629,28 @@ function parseJson(raw: unknown): Record<string, unknown> | null {
     }
   }
   return asRecord(raw);
+}
+
+/** Shape-check an `undelivered_result` report (#871). Null = drop it. */
+function parseUndeliveredResult(msg: Record<string, unknown>): WorkerToBoardMessage | null {
+  if (
+    typeof msg.sessionId !== "string" ||
+    typeof msg.branch !== "string" ||
+    typeof msg.incomingRef !== "string" ||
+    typeof msg.checkoutPath !== "string" ||
+    typeof msg.lastError !== "string"
+  ) {
+    return null;
+  }
+  return {
+    type: "undelivered_result",
+    sessionId: msg.sessionId,
+    branch: msg.branch,
+    incomingRef: msg.incomingRef,
+    checkoutPath: msg.checkoutPath,
+    attempts: typeof msg.attempts === "number" && Number.isFinite(msg.attempts) ? msg.attempts : 0,
+    lastError: msg.lastError,
+  };
 }
 
 /** Parse + shape-check a message arriving at the board. Null = drop it. */
@@ -672,26 +707,11 @@ export function parseWorkerToBoardMessage(raw: unknown): WorkerToBoardMessage | 
       if (!probe) return null;
       return { type: "session_probe_result", sessionId: msg.sessionId, probe };
     }
-    case "undelivered_result": {
-      if (
-        typeof msg.sessionId !== "string" ||
-        typeof msg.branch !== "string" ||
-        typeof msg.incomingRef !== "string" ||
-        typeof msg.checkoutPath !== "string" ||
-        typeof msg.lastError !== "string"
-      ) {
-        return null;
-      }
-      return {
-        type: "undelivered_result",
-        sessionId: msg.sessionId,
-        branch: msg.branch,
-        incomingRef: msg.incomingRef,
-        checkoutPath: msg.checkoutPath,
-        attempts: typeof msg.attempts === "number" && Number.isFinite(msg.attempts) ? msg.attempts : 0,
-        lastError: msg.lastError,
-      };
-    }
+    case "git_token_request":
+      if (typeof msg.sessionId !== "string" || typeof msg.requestId !== "string" || !msg.requestId) return null;
+      return { type: "git_token_request", sessionId: msg.sessionId, requestId: msg.requestId };
+    case "undelivered_result":
+      return parseUndeliveredResult(msg);
     default:
       return null;
   }
@@ -894,6 +914,15 @@ export function parseBoardToWorkerMessage(raw: unknown): BoardToWorkerMessage | 
     case "probe_session":
       if (typeof msg.requestId !== "string" || !msg.requestId) return null;
       return { type: "probe_session", sessionId: msg.sessionId, requestId: msg.requestId };
+    case "git_token":
+      if (typeof msg.requestId !== "string" || !msg.requestId) return null;
+      return {
+        type: "git_token",
+        sessionId: msg.sessionId,
+        requestId: msg.requestId,
+        ...(typeof msg.gitToken === "string" && msg.gitToken ? { gitToken: msg.gitToken } : {}),
+        ...(typeof msg.error === "string" ? { error: msg.error } : {}),
+      };
     case "sync_repo":
     case "push_head": {
       if (typeof msg.requestId !== "string" || !msg.requestId) return null;

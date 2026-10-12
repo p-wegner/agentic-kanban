@@ -122,7 +122,8 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 56 -> 57 in #1379 for `worker/worker-profile-aliases.ts` (alias persistence in the state file; node builtins only).
     // Raised 57 -> 58 in #1402 for `worker/worker-repin.ts` (repins an old shim; node builtins + modules already here).
     // Raised 58 -> 59 in #1391 for `lib/session-temp-dir.ts` (per-session TMPDIR; imports shared temp-dir only).
-    expect(files.size).toBeLessThan(59);
+    // Raised 59 -> 60 in #1383 for `worker/worker-git-token.ts` (asks the board for a fresh token after a 401; type-only imports).
+    expect(files.size).toBeLessThan(60);
   });
 
   it("never reaches the database or board-service layer", () => {

@@ -40,6 +40,7 @@ import {
   type UnpushedResult,
   createUndeliveredStore,
 } from "./worker-undelivered-retry.js";
+import { createGitTokenRequester } from "./worker-git-token.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { createWorkerSessionRegistry } from "./worker-session-registry.js";
 import { resolveSpecCommand } from "./worker-command-resolver.js";
@@ -230,6 +231,9 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     }
   }
 
+  /** #1383: a fresh git token after a 401, asked of the board and answered by `git_token`. */
+  const gitTokens = createGitTokenRequester((message) => safeSend(message));
+
   /**
    * Delivering a finished result — retry, retain, persist, re-retry on reconnect — is its own
    * leaf (#899). It holds no runner state: everything it needs is right here in the argument
@@ -243,6 +247,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     cleanup: repoOps.cleanup,
     safeSend,
     wait,
+    refreshToken: gitTokens.request,
   });
 
   /**
@@ -699,7 +704,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
 
   return {
     assign, assignWithRepo, input, closeStdin, stop, stopAll, releaseAgents, runningSessionIds,
-    drainPushes, pendingPushCount, repoOp,
+    drainPushes, pendingPushCount, repoOp, gitToken: gitTokens.answer,
     probeSession: seen.answerProbe, rememberedSessionCount: seen.size,
     retryPendingPushes: undelivered.retryPending,
     unpushedResults: undelivered.list,
@@ -750,6 +755,9 @@ export function dispatchBoardMessage(
       break;
     case "push_head":
       runner.repoOp("push", message.sessionId, message.requestId, message.auth);
+      break;
+    case "git_token":
+      runner.gitToken(message.requestId, message.gitToken ?? null);
       break;
     case "probe_session":
       runner.probeSession(message.sessionId, message.requestId);
