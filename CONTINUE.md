@@ -11,9 +11,20 @@ reviewers run on workers, `worker_dispatch_strict` on; gates still run on the la
 - **Stable:** `stable-20261012-3` = master 2dcf8de74, promoted ~16:50Z (fresh full sweep green,
   smoke passed). desktop-stable re-pinned to it by the desktop agent (build tarball via
   `update-check --apply`); wsl-stable auto-updated. Rollback target `stable-20261012-2`.
-- **Backlog done:** all 31 tickets merged today (#1378 #1380-#1385 #1391 #1392 #1395 #1400
-  #1403-#1423), checked against `git log --merges`. Open: #1337 and #1371 (Peter decides),
-  #1424 (fixes from the first live run of the #1421 watch view; building on desktop-stable).
+- **Backlog empty (checked: `/api/issues` open = none, 21:4xZ).** Merged today: #1378 #1380-#1385
+  #1391 #1392 #1395 #1400 #1403-#1427, plus #1337 and #1371. Merged after stable-20261012-3 and
+  NOT yet promoted (master e4e1c5e22): #1424 watch fixes, #1425 one session per workspace, #1426
+  auth-expired worker not placed, #1337 multi-address bind + worker --board failover, #1427 worker
+  rebases only onto the board-sent base, #1371 toolchain install via mise behind
+  --toolchain-install=never|ask|auto. A promote of rc/20261012-4 was reaped for low memory before
+  tagging; the board stayed on -3.
+- **Decisions (Peter, 2026-10-12):** #1337 option B (LAN + tailnet failover; LAN bind only when an
+  operator lists the address, plaintext, needs a subnet-scoped Private-profile firewall rule; the
+  live fleet is still tailnet-only). #1371 stage 2 built (default policy `never`).
+- **Worker traps seen tonight:** WSL login expired again (copy `.credentials.json` unread, then
+  `MSYS_NO_PATHCONV=1 wsl.exe ... chown/chmod`); creating a workspace auto-launches, so a manual
+  /launch made a second builder (#1425 fixes); a reviewer rebased onto a rewritten local master and
+  pushed duplicated history (#1427 fixes; the incoming ref was deleted by hand).
 - **D: hung three times** (writes+fsync never return, processes unkillable, only a reboot clears
   it; System log `vhdmp` 129 resets). D: is a Dev Drive VHDX (`C:\DevDrive\dev.vhdx`); the WSL
   worker distros lived in `D:\wsl-images` = a VHDX inside the VHDX, and every hang came while a WSL
@@ -35,9 +46,9 @@ reviewers run on workers, `worker_dispatch_strict` on; gates still run on the la
   ~30 min queued; Claude Code reaped background shells at < 2 GB free (the driver script survived,
   only its wrapper died). The scratchpad driver (`drive3.sh`) launches only at >= 4 GB free.
 
-**Next:** land #1424; decide #1337 (LAN vs Tailscale) and #1371 (per-project worker setup);
-consider #1380's follow-up (gates on workers) before the next large drive, since laptop gates and
-memory were today's bottleneck.
+**Next:** promote master (`pnpm promote --dry-run`, then `pnpm promote`, with >= 4 GB free), re-pin
+desktop-stable over ACP, restart the watch pane; then decide whether to list the LAN address for
+the fleet (#1337) and set a worker's --toolchain-install policy (#1371).
 
 ## Archive
 
