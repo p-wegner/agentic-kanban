@@ -15,6 +15,8 @@ import type { WorkerView } from "./worker-registry.service.js";
 
 /** A failed install is not re-requested for the same toolchains until this long has passed. */
 export const TOOLCHAIN_INSTALL_RETRY_MS = 15 * 60_000;
+/** How long a `done` report may lag the worker's refreshed toolchain heartbeat before it is re-requested. */
+export const TOOLCHAIN_DONE_GRACE_MS = 2 * 60_000;
 
 export interface ToolchainInstallOutcome {
   /** A worker that is installing (or waiting on its owner's approval): the launch should wait for it. */
@@ -67,11 +69,13 @@ export function requestToolchainInstalls(
         continue;
       }
       // done but still lacking = the worker's toolchain report has not refreshed yet: it is about to be eligible.
+      // A `done` that stays stale (install since removed, worker restarted) must not hold forever: re-request.
       if (record.state === "done") {
-        outcome.active ??= { workerId: view.id, state: "installing" };
-        continue;
-      }
-      if (nowMs - record.updatedAtMs < TOOLCHAIN_INSTALL_RETRY_MS) {
+        if (nowMs - record.updatedAtMs < TOOLCHAIN_DONE_GRACE_MS) {
+          outcome.active ??= { workerId: view.id, state: "installing" };
+          continue;
+        }
+      } else if (nowMs - record.updatedAtMs < TOOLCHAIN_INSTALL_RETRY_MS) {
         outcome.blocked.push({ workerId: view.id, name: view.name, reason: `toolchain install failed: ${record.reason ?? "unknown reason"}` });
         continue;
       }
