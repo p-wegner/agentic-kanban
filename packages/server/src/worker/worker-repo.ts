@@ -13,6 +13,7 @@
 
 import { describeGitTransportFailure } from "./worker-git-token.js";
 import { workerLog } from "./worker-updater.js";
+import { CLONE_UNHEALTHY_PREFIX, isCloneCorruption, quarantineCorruptClone } from "./worker-repo-heal.js";
 import { loadUndelivered } from "./worker-undelivered.js";
 import { mkdirSync, writeFileSync, existsSync, readdirSync, rmSync, appendFileSync } from "node:fs";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
@@ -161,6 +162,27 @@ export async function applyCommitterIdentity(
 }
 
 /**
+ * #1417: the cached clone is corrupt. Move it aside (kept, not deleted: undelivered results
+ * live on its branches) and re-clone ONCE; a second failure means this worker cannot serve
+ * the project, so the error says so rather than leaving the next assignment to fail alike.
+ */
+async function healCorruptCache(
+  workRoot: string,
+  cacheDir: string,
+  cause: string,
+  reclone: () => Promise<unknown>,
+  log: (line: string) => void,
+): Promise<void> {
+  const aside = quarantineCorruptClone(workRoot, cacheDir);
+  log(`[worker] cached clone ${cacheDir} is corrupt (${cause.trim().slice(-200)}); moved to ${aside}, re-cloning`);
+  try {
+    await reclone();
+  } catch (err) {
+    throw new Error(`${CLONE_UNHEALTHY_PREFIX}: re-clone after corruption failed (${errorMessage(err)}); original: ${cause.trim().slice(-200)}`);
+  }
+}
+
+/**
  * Ensure the cached clone exists and is fresh, then create the per-session
  * worktree with the feature branch checked out. Throws with a descriptive
  * message on any git failure (surfaced to the board as assign_failed).
@@ -194,21 +216,29 @@ export async function provisionWorkerCheckout(
   mkdirSync(join(workRoot, "checkouts"), { recursive: true });
 
   const authEnv = gitAuthEnv(repo);
-  if (!existsSync(join(cacheDir, ".git"))) {
+  const cloneCache = () => {
     phases.fetchKind = "clone";
-    await phase(`clone ${repo.projectId}`, () =>
+    return phase(`clone ${repo.projectId}`, () =>
       gitExecOrThrow(["clone", gitUrl, cacheDir], { timeout: 10 * 60 * 1000, env: authEnv }),
       (ms) => { phases.fetchMs = ms; });
+  };
+  if (!existsSync(join(cacheDir, ".git"))) {
+    await cloneCache();
   } else {
-    // A token is per-assignment Ã¢â‚¬â€ always fetch with the CURRENT credential.
+    // A token is per-assignment - always fetch with the CURRENT credential.
     phases.fetchKind = "fetch";
-    await phase(`fetch ${repo.projectId}`, () =>
-      gitExecOrThrow(["fetch", gitUrl, "+refs/heads/*:refs/remotes/origin/*", "--prune"], {
-        cwd: cacheDir,
-        timeout: 10 * 60 * 1000,
-        env: authEnv,
-      }),
-      (ms) => { phases.fetchMs = ms; });
+    try {
+      await phase(`fetch ${repo.projectId}`, () =>
+        gitExecOrThrow(["fetch", gitUrl, "+refs/heads/*:refs/remotes/origin/*", "--prune"], {
+          cwd: cacheDir,
+          timeout: 10 * 60 * 1000,
+          env: authEnv,
+        }),
+        (ms) => { phases.fetchMs = ms; });
+    } catch (err) {
+      if (!isCloneCorruption(errorMessage(err))) throw err;
+      await healCorruptCache(workRoot, cacheDir, errorMessage(err), cloneCache, log);
+    }
   }
 
   // Stale worktree from a crashed prior session with the same id Ã¢â‚¬â€ remove it.
