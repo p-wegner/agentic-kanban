@@ -11,6 +11,7 @@
 // Every git call goes through the sanctioned @agentic-kanban/shared git-exec
 // adapter (single-spawn architecture gate).
 
+import { describeGitTransportFailure } from "./worker-git-token.js";
 import { workerLog } from "./worker-updater.js";
 import { loadUndelivered } from "./worker-undelivered.js";
 import { mkdirSync, writeFileSync, existsSync, readdirSync, rmSync, appendFileSync } from "node:fs";
@@ -36,6 +37,7 @@ import {
   type WorkerRepoTransport,
   type WorkerCommitterIdentity,
 } from "@agentic-kanban/shared/lib/worker-protocol";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
 export function defaultWorkerWorkRoot(stateFile?: string): string {
@@ -77,9 +79,20 @@ export function gitAuthEnv(repo: WorkerRepoTransport): NodeJS.ProcessEnv {
   const basic = Buffer.from(`x-token:${repo.gitToken}`).toString("base64");
   return {
     ...process.env,
-    GIT_CONFIG_COUNT: "1",
+    // #1383: never wait for a human. An empty credential.helper disables Git Credential
+    // Manager for this command (a 401 otherwise opens a GCM prompt and the push hangs until
+    // the 10-minute timeout); an empty core.askPass disables any askpass program.
+    GIT_TERMINAL_PROMPT: "0",
+    GCM_INTERACTIVE: "never",
+    GIT_ASKPASS: "",
+    SSH_ASKPASS: "",
+    GIT_CONFIG_COUNT: "3",
     GIT_CONFIG_KEY_0: "http.extraHeader",
     GIT_CONFIG_VALUE_0: `Authorization: Basic ${basic}`,
+    GIT_CONFIG_KEY_1: "credential.helper",
+    GIT_CONFIG_VALUE_1: "",
+    GIT_CONFIG_KEY_2: "core.askPass",
+    GIT_CONFIG_VALUE_2: "",
   };
 }
 
@@ -335,11 +348,15 @@ export async function pushWorkerResult(
   checkout: WorkerCheckout,
 ): Promise<void> {
   const gitUrl = composeGitUrl(boardUrl, repo);
-  await gitExecOrThrow(["push", "--force", gitUrl, `HEAD:${repo.incomingRef}`], {
-    cwd: checkout.cwd,
-    timeout: 10 * 60 * 1000,
-    env: gitAuthEnv(repo),
-  });
+  try {
+    await gitExecOrThrow(["push", "--force", gitUrl, `HEAD:${repo.incomingRef}`], {
+      cwd: checkout.cwd,
+      timeout: 10 * 60 * 1000,
+      env: gitAuthEnv(repo),
+    });
+  } catch (err) {
+    throw new Error(`result push failed: ${describeGitTransportFailure(errorMessage(err))}`);
+  }
 }
 
 /** Outcome of a mid-session repo operation in a worker checkout (#783, #784). */
@@ -704,3 +721,6 @@ async function reapCheckoutDirs(
   }
   return report;
 }
+
+// Lives with the other #1383 git-auth helpers; re-exported so existing importers keep their path.
+export { describeGitTransportFailure };

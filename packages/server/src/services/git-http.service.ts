@@ -377,6 +377,41 @@ function pktLine(payload: string): string {
   return (payload.length + 4).toString(16).padStart(4, "0") + payload;
 }
 
+/**
+ * #1383: one line per git-http request, so a worker's silent hang is visible board-side.
+ * Rate-limited per (status, reason): successes are not logged individually (a clone is
+ * hundreds of requests), only 4xx/5xx, at most once per window per key plus a suppressed count.
+ */
+const REQUEST_LOG_WINDOW_MS = 10_000;
+const requestLogState = new Map<string, { at: number; suppressed: number }>();
+
+export function logGitHttpRequest(
+  info: { method: string; service: string; projectId: string; status: number; reason?: string },
+  nowMs: number = Date.now(),
+): boolean {
+  if (info.status < 400) return false;
+  const key = `${info.status}|${info.reason ?? ""}|${info.projectId}`;
+  const prev = requestLogState.get(key);
+  if (prev && nowMs - prev.at < REQUEST_LOG_WINDOW_MS) {
+    prev.suppressed++;
+    return false;
+  }
+  const suppressed = prev?.suppressed ?? 0;
+  requestLogState.set(key, { at: nowMs, suppressed: 0 });
+  if (requestLogState.size > 256) requestLogState.clear();
+  console.warn(
+    `[git-http] ${info.method} ${info.service} project=${info.projectId || "-"} -> ${info.status}` +
+    (info.reason ? ` (${info.reason})` : "") +
+    (suppressed > 0 ? ` [+${suppressed} similar suppressed]` : ""),
+  );
+  return true;
+}
+
+/** Test seam: forget the rate-limit window. */
+export function __resetGitHttpRequestLogForTests(): void {
+  requestLogState.clear();
+}
+
 function reject(res: ServerResponse, status: number, message: string): void {
   res.writeHead(status, { "Content-Type": "text/plain", "WWW-Authenticate": 'Basic realm="agentic-kanban-git"' });
   res.end(message);
@@ -584,6 +619,15 @@ export async function startGitHttpServer(opts?: {
     void (async () => {
       try {
         const url = new URL(req.url ?? "/", "http://localhost");
+        let denial: string | undefined;
+        const logTail = /^\/git\/([^/]+)\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(url.pathname);
+        res.once("finish", () => {
+          if (!logTail) return;
+          const service = logTail[2] === "info/refs"
+            ? `info/refs?service=${url.searchParams.get("service") ?? ""}`
+            : logTail[2]!;
+          logGitHttpRequest({ method: req.method ?? "?", service, projectId: logTail[1]!, status: res.statusCode, reason: denial });
+        });
         if (url.pathname.replace(/\/+$/, "") === "/health") {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: true }));
@@ -593,6 +637,7 @@ export async function startGitHttpServer(opts?: {
         const provided = extractBearer(req.headers.authorization, { allowBasic: true });
         const scope = provided ? await tokens.resolve(provided) : null;
         if (!scope || !provided) {
+          denial = provided ? "token unknown or expired" : "no credentials presented";
           reject(res, 401, "unauthorized");
           return;
         }
@@ -602,6 +647,7 @@ export async function startGitHttpServer(opts?: {
         const authorized = await authorizeAssignment(scope, assignmentLookup, Date.now(), supersededLookup);
         if (!authorized.ok) {
           await tokens.drop(provided);
+          denial = `ref not allowed: ${authorized.reason}`;
           console.warn(`[git-http] refused and revoked a token for worker ${scope.workerId}: ${authorized.reason}`);
           reject(res, 403, "assignment is no longer current");
           return;
@@ -619,6 +665,7 @@ export async function startGitHttpServer(opts?: {
           console.warn(
             `[git-http] refused ${tail} for project ${projectId}: token is scoped to ${scope.projectId} (worker=${scope.workerId})`,
           );
+          denial = "token is scoped to another project";
           reject(res, 403, "token is not scoped to this project");
           return;
         }

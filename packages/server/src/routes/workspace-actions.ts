@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { Context } from "hono";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
@@ -379,6 +380,31 @@ export async function landMidSessionWork(
   }
 }
 
+/**
+ * #1383: the worker no longer holds this session (it exited, or its result push was lost), so
+ * there is no checkout to sync and no live agent to type into. Refusing strands the follow-up;
+ * instead retire the stale record and let `sendTurn` start a fresh session from the branch the
+ * board holds, saying so in the response. Extracted for the `function-nloc-ratchet` (#800) reason.
+ */
+export async function turnOnFreshSession(
+  c: Context,
+  id: string,
+  content: string,
+  workspaceService: Pick<ReturnType<typeof createWorkspaceService>, "stopWorkspace" | "sendTurn">,
+  reason: string,
+): Promise<Response> {
+  console.warn(`[workspace-actions] turn: worker holds no checkout, falling back to a fresh session: workspaceId=${id} (${reason})`);
+  try {
+    await workspaceService.stopWorkspace(id);
+  } catch (err) {
+    console.error(`[workspace-actions] could not retire the stale session before the fallback: workspaceId=${id}`, err);
+  }
+  const result = await workspaceService.sendTurn(id, content);
+  if (result.type === "sent") return c.json({ ok: true });
+  const fallback = `the worker no longer held the previous session (${reason}); started a fresh session from the branch on the board`;
+  return c.json({ sessionId: result.sessionId, resumed: true, fallback }, 201);
+}
+
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
   database: Database,
@@ -506,6 +532,7 @@ export function createWorkspaceActionsRoute(
         ops: fleet.ops,
         probeLiveness: fleet.probeLiveness,
       });
+      if (!gate.ok && gate.status === "no-session") return turnOnFreshSession(c, id, body.content, workspaceService, gate.reason);
       if (!gate.ok) {
         const message =
           `This workspace's agent runs on a fleet worker and its checkout could not be brought up ` +

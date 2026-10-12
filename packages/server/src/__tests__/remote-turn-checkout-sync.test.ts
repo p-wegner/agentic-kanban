@@ -20,6 +20,7 @@
 import { Hono } from "hono";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceActionsRoute } from "../routes/workspace-actions.js";
@@ -212,10 +213,11 @@ describe("POST /api/workspaces/:id/turn — the HTTP refusal (#783 item 2)", () 
   let db: ReturnType<typeof createTestDb>["db"];
   beforeEach(() => { ({ db } = createTestDb()); });
 
-  function mount(ops: RemoteRepoOpPort, probeLiveness: ProbeLiveness, sendTurn = vi.fn(() => ({ ok: true }))) {
+  function mount(ops: RemoteRepoOpPort, probeLiveness: ProbeLiveness, sendTurn = vi.fn(() => ({ ok: true })), onStop: () => Promise<void> = async () => {}) {
+    const startSession = vi.fn(async () => "session-x");
     const sessionManager = {
-      startSession: vi.fn(async () => "session-x"),
-      stopSession: vi.fn(async () => true),
+      startSession,
+      stopSession: vi.fn(async () => { await onStop(); return true; }),
       sendTurn,
       subscribe: vi.fn(),
       unsubscribe: vi.fn(),
@@ -230,7 +232,7 @@ describe("POST /api/workspaces/:id/turn — the HTTP refusal (#783 item 2)", () 
         remoteFleet: { ops, probeLiveness },
       }),
     );
-    return { app, sendTurn };
+    return { app, sendTurn, startSession };
   }
 
   function postTurn(app: Hono, workspaceId: string) {
@@ -289,5 +291,23 @@ describe("POST /api/workspaces/:id/turn — the HTTP refusal (#783 item 2)", () 
     expect(res.status).toBe(200);
     expect(sendTurn).toHaveBeenCalledTimes(1);
     expect(ops.asked).toEqual([]);
+  });
+
+  it("#1383: a worker that holds no checkout (lost result push) gets a FRESH session, not a 422", async () => {
+    const { workspaceId } = await seedWorkspace(db, WORKER_ID);
+    const ops = fakeOps({ answer: { ok: false, status: "no-session", error: "this worker holds no git-transport checkout" } });
+    const { app, sendTurn, startSession } = mount(ops, alive, undefined, async () => {
+      // what the real stopSession does to the row, so sendTurn takes the resume path
+      await db.update(sessions).set({ status: "stopped" }).where(eq(sessions.workspaceId, workspaceId));
+    });
+
+    const res = await postTurn(app, workspaceId);
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { sessionId: string; resumed: boolean; fallback: string };
+    expect(body.sessionId).toBe("session-x");
+    expect(body.fallback).toContain("fresh session");
+    expect(startSession).toHaveBeenCalledTimes(1);
+    expect(sendTurn).not.toHaveBeenCalled();
   });
 });

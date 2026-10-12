@@ -40,6 +40,7 @@ import {
   type UnpushedResult,
   createUndeliveredStore,
 } from "./worker-undelivered-retry.js";
+import { createGitTokenRequester } from "./worker-git-token.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { createWorkerSessionRegistry } from "./worker-session-registry.js";
 import { resolveSpecCommand } from "./worker-command-resolver.js";
@@ -106,6 +107,9 @@ export interface WorkerAgentRunnerOptions {
  * reconnect (with the entry persisted across a daemon restart, #871) instead of by
  * waiting here.
  */
+/** An agent that exits non-zero within this long gets its stderr tail written to the worker log (#1383). */
+const FAST_EXIT_LOG_MS = 60_000;
+
 export const DEFAULT_PUSH_RETRY_DELAYS_MS = [2_000, 10_000, 30_000, 75_000];
 
 /** The worker's git-transport boundary: get a checkout, push it back, tear it down. */
@@ -143,6 +147,8 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   /** Epoch ms each agent was spawned, for the per-phase timings on its exit (#1328). */
   const agentStartedAtMs = new Map<string, number>();
   const exited = new Set<string>();
+  /** Last ~2 KB of each agent's stderr, logged when it dies fast with a non-zero exit (#1383). */
+  const stderrTails = new Map<string, string>();
   /** Sessions whose work lives in a worker-side checkout that must be pushed back. */
   const checkouts = new Map<string, PendingResult>();
   /**
@@ -225,6 +231,9 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     }
   }
 
+  /** #1383: a fresh git token after a 401, asked of the board and answered by `git_token`. */
+  const gitTokens = createGitTokenRequester((message) => safeSend(message));
+
   /**
    * Delivering a finished result — retry, retain, persist, re-retry on reconnect — is its own
    * leaf (#899). It holds no runner state: everything it needs is right here in the argument
@@ -238,6 +247,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     cleanup: repoOps.cleanup,
     safeSend,
     wait,
+    refreshToken: gitTokens.request,
   });
 
   /**
@@ -503,6 +513,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     const emitOutput = (type: "stdout" | "stderr", chunk: Buffer) => {
       const data = sanitizeUtf8(chunk.toString());
       if (!data) return;
+      if (type === "stderr") stderrTails.set(sessionId, ((stderrTails.get(sessionId) ?? "") + data).slice(-2048));
       seen.noteOutput(sessionId);
       hangWatchdogs.get(sessionId)?.reset();
       // safeSend: this runs on the child's stream 'data' events, where a throw out of the
@@ -532,6 +543,16 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     });
     proc.on("exit", (code) => {
       workerLog(`[worker] agent exited: sessionId=${sessionId} code=${code}`);
+      // #1383: a fast non-zero exit used to leave nothing in the worker log to say why.
+      const startedAt = agentStartedAtMs.get(sessionId);
+      if (code !== 0 && startedAt !== undefined && Date.now() - startedAt < FAST_EXIT_LOG_MS) {
+        const tail = (stderrTails.get(sessionId) ?? "").trim().split(/\r?\n/).slice(-8).join(" | ");
+        workerLog(
+          `[worker] agent exited fast: sessionId=${sessionId} code=${code} after ${Date.now() - startedAt}ms; ` +
+          `stderr tail: ${tail || "(none)"}`,
+        );
+      }
+      stderrTails.delete(sessionId);
       emitExit(sessionId, code);
     });
 
@@ -687,7 +708,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
 
   return {
     assign, assignWithRepo, input, closeStdin, stop, stopAll, releaseAgents, runningSessionIds,
-    drainPushes, pendingPushCount, repoOp,
+    drainPushes, pendingPushCount, repoOp, gitToken: gitTokens.answer,
     probeSession: seen.answerProbe, rememberedSessionCount: seen.size,
     retryPendingPushes: undelivered.retryPending,
     unpushedResults: undelivered.list,
@@ -738,6 +759,9 @@ export function dispatchBoardMessage(
       break;
     case "push_head":
       runner.repoOp("push", message.sessionId, message.requestId, message.auth);
+      break;
+    case "git_token":
+      runner.gitToken(message.requestId, message.gitToken ?? null);
       break;
     case "probe_session":
       runner.probeSession(message.sessionId, message.requestId);

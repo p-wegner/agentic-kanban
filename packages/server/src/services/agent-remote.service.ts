@@ -291,6 +291,10 @@ export function createRemoteAgentService(
       liveness.handleProbeResult(workerId, message.sessionId, message.probe);
       return;
     }
+    if (message.type === "git_token_request") {
+      void repoOps.handleTokenRequest(workerId, message.sessionId, message.requestId); // #1383
+      return;
+    }
     if (message.type === "repo_op_result") {
       repoOps.handleResult(workerId, message.result);
       return;

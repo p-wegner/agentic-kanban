@@ -330,6 +330,18 @@
  * header names as architecture rather than tangle — nothing here is extractable without
  * ceremony. Disclosed rather than worked around, per this file's own rule.
  *
+ * -- Disclosed movement (2026-10-12, #1383 worker push 401 / follow-up fallback) ---------
+ *
+ *   services/agent-remote.service.ts::createRemoteAgentService   292 -> 296  (+4)
+ *   routes/workspace-actions.ts::createWorkspaceActionsRoute     388 -> 389  (+1)
+ *   worker/worker-agent-runner.ts::createWorkerAgentRunner       370 -> 383  (+13)
+ *
+ * The board answers a worker's `git_token_request` (one dispatch branch; the logic is in
+ * agent-remote-repo-ops.ts), `/turn` falls back to a fresh session when the worker holds no
+ * checkout (one line; the logic is `turnOnFreshSession`), and the runner wires the fresh-token
+ * requester (worker-git-token.ts) plus the fast-exit stderr tail. Both factories still want
+ * splitting; this is not the ticket that does it.
+ *
  * -- Seventeenth disclosed movement (2026-10-10, #1328 per-phase timings) ----------------
  *
  *   services/agent-remote.service.ts::createRemoteAgentService   289 -> 292  (+3)
@@ -394,7 +406,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "cli/commands/workspace.ts::registerWorkspaceCommand": 616,
   // 637 -> 638 (#1027), disclosed in the ninth movement above.
   // 289 -> 292 (#1328), disclosed in the seventeenth movement above.
-  "services/agent-remote.service.ts::createRemoteAgentService": 292,
+  "services/agent-remote.service.ts::createRemoteAgentService": 296,
   "cli/commands/session.ts::registerSessionCommand": 569,
   // 564 -> 536 (#992): the PATCH field `if` chain became the table in
   // `services/project-update-fields.ts`, which is also what derives the recognized-key set.
@@ -458,11 +470,11 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // `createXRoute` architecture this file's header already names. Landed independently on
   // master while #1164 was in flight; both features are present after the rebase, so the
   // number is re-measured rather than either parent's raw delta.
-  "routes/workspace-actions.ts::createWorkspaceActionsRoute": 388,
+  "routes/workspace-actions.ts::createWorkspaceActionsRoute": 389,
   // 349 -> 351 (#841): POSIX-only `detached: true` for a shell launch, closing the #836 gap.
   // 351 -> 358 (#1027), disclosed in the ninth movement above.
   // 358 -> 370 (#1328), disclosed in the seventeenth movement above.
-  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 370,
+  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 383,
 };
 
 /**
