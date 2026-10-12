@@ -14,6 +14,8 @@ export interface StatusScreenOptions {
   color?: boolean;
   nowMs?: number;
   intervalSec?: number;
+  /** Workers whose registry effectiveStatus is "online" (same as the Runners tab). */
+  onlineWorkers?: number;
 }
 
 /** Truncate to `width` visible characters with an ellipsis; never wraps. */
@@ -40,9 +42,11 @@ function age(iso: string | null | undefined, nowMs: number): string {
   return `${Math.floor(h / 24)}d${h % 24}h`;
 }
 
+/** In Progress / In Review issues are always under ACTIVE, even with an idle or missing workspace. */
 function isActive(issue: BoardStatusIssue): boolean {
   const ws = issue.workspace?.status;
-  return ws === "active" || ws === "fixing" || ws === "reviewing" || issue.session?.status === "running";
+  return ws === "active" || ws === "fixing" || ws === "reviewing" || issue.session?.status === "running"
+    || issue.statusName === "In Progress" || issue.statusName === "In Review";
 }
 
 function isMerging(issue: BoardStatusIssue): boolean {
@@ -66,8 +70,8 @@ function activeRow(issue: BoardStatusIssue, cols: number, nowMs: number): string
     ? `+${issue.diffStats.insertions}/-${issue.diffStats.deletions}`
     : "";
   const where = issue.remoteUnlanded?.workerId ? `@${issue.remoteUnlanded.workerId.slice(0, 8)}` : "local";
-  const session = issue.session ? `${issue.session.status} ${where}` : "-";
-  const right = [diff, session, age(issue.lastActivity ?? issue.session?.startedAt, nowMs)].filter(Boolean).join("  ");
+  const session = issue.session ? `${issue.session.status} ${where}` : issue.workspace ? `ws ${issue.workspace.status}` : "no ws";
+  const right = [diff, session, age(issue.lastActivity ?? issue.session?.endedAt ?? issue.session?.startedAt, nowMs)].filter(Boolean).join("  ");
   const head = `${num(issue).padEnd(5)} ${truncate(issue.statusName, 11).padEnd(11)} ${issue.title}`;
   return fitRow(head, right, cols);
 }
@@ -81,14 +85,20 @@ export function renderStatusScreen(status: BoardStatusResponse, opts: StatusScre
   const active = status.issues.filter((i) => isActive(i) && !isMerging(i));
   const merging = status.issues.filter(isMerging);
   const backlog = status.issues.filter((i) => !isActive(i) && !isMerging(i));
-  const workers = new Set(
+  // Online workers by the registry's effective status (what the Runners tab shows); falls back
+  // to workers holding unlanded work only when the caller could not read the registry.
+  const workers = opts.onlineWorkers ?? new Set(
     status.issues.map((i) => i.remoteUnlanded?.workerId).filter((w): w is string => !!w),
   ).size;
+
+  // ws/running count what ACTIVE lists, so the header can never disagree with the list.
+  const wsCount = [...active, ...merging].filter((i) => i.workspace && i.workspace.status !== "closed").length;
+  const runningCount = [...active, ...merging].filter((i) => i.session?.status === "running").length;
 
   const out: string[] = [];
   const t = status.totals;
   out.push(truncate(
-    `${status.project.name} | ${t.totalIssues} issues, ${t.inProgress} in progress, ${t.activeWorkspaces} ws, ${t.runningSessions} running | workers ${workers} | ${new Date(nowMs).toLocaleTimeString()}`,
+    `${status.project.name} | ${t.totalIssues} issues, ${t.inProgress} in progress, ${wsCount} ws, ${runningCount} running | workers ${workers} | ${new Date(nowMs).toLocaleTimeString()}`,
     cols,
   ));
 

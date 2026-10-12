@@ -50,6 +50,18 @@ describe("renderStatusScreen", () => {
     for (let n = 1; n <= 8; n++) expect(lines.join("\n")).toContain(`#${n} `);
   });
 
+  it("lists an In Progress issue with an idle workspace under ACTIVE and counts it in ws", () => {
+    const idle = issue(7, {
+      workspace: { id: "w", branch: "b", status: "idle", workingDir: null, baseBranch: null, isDirect: false, readyForMerge: false },
+      session: { id: "s", status: "stopped", startedAt: new Date().toISOString(), endedAt: new Date().toISOString() },
+    });
+    const out = renderStatusScreen(status([idle]), { cols: 120, rows: 30, onlineWorkers: 1 }).join("\n");
+    expect(out).toContain("ACTIVE (1)");
+    expect(out).toContain("#7");
+    expect(out).toContain("stopped");
+    expect(out).toContain("1 ws, 0 running | workers 1");
+  });
+
   it("lists backlog lines with --all and shows the merge lane", () => {
     const merging = issue(5, { mergeState: { bucket: "pending_merge", reason: "auto-merge-in-review", label: "auto-merge" } });
     const todo = issue(6, { statusName: "Todo", workspace: null, session: null });
