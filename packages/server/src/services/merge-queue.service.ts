@@ -236,12 +236,12 @@ function wireMergeTrainRunner(
   return createMergeTrainRunner({
     database,
     reconcileAlreadyMerged: (workspaceId) => mergeService.reconcileAlreadyMerged(workspaceId),
-    sendTurn: (workspaceId, content) => sessionService.sendTurn(workspaceId, content),
+    sendTurn: (workspaceId, content) => sessionService.sendTurn(workspaceId, content, { fromTrain: true }),
     // A base-conflict send-back to a workspace whose agent has already exited relaunches its
     // builder (`POST /:id/launch`) with the rebase prompt; the builder's exit then runs review
     // and the review-exit gate, which re-arm readyForMerge for a later train.
     hasLiveSession: async (workspaceId) => Boolean(await findRunningSession(workspaceId, database)),
-    relaunch: (workspaceId, prompt) => sessionService.launchSession(workspaceId, { prompt }),
+    relaunch: (workspaceId, prompt) => sessionService.launchSession(workspaceId, { prompt, fromTrain: true }),
     boardEvents,
   });
 }
