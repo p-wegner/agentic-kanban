@@ -11,7 +11,7 @@ const record = (sessionId: string, over: Record<string, unknown> = {}) => ({
   cacheDir: "/k", projectId: "p", gitPort: 1, attempts: 1, lastError: "x", recordedAt: new Date().toISOString(), ...over,
 });
 const makeStore = (workRoot: string, push = vi.fn().mockRejectedValue(new Error("nope"))) =>
-  ({ push, store: createUndeliveredStore({ workRoot, boardUrl: "u", retryDelaysMs: [], push, cleanup: async () => {}, safeSend: () => {}, wait: async () => {} }) });
+  ({ push, store: createUndeliveredStore({ workRoot, boardUrl: "u", retryDelaysMs: [], push, cleanup: async () => {}, safeSend: () => {}, wait: async () => {}, isGone: async () => false }) });
 
 describe("undelivered results give-up (#1416)", () => {
   it("does not write back an entry the operator deleted", async () => {
