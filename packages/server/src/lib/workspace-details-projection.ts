@@ -38,6 +38,8 @@ export interface WorkspaceDetails {
   lastSessionId: string | null;
   /** Set while the latest session is held because its fleet worker is unreachable (#1317). */
   detachedWorker?: DetachedWorkerInfo | null;
+  /** ISO time the worker last sent output for the latest (remote, running) session (#1392). */
+  remoteLastOutputAt?: string | null;
   lastSessionTriggerType: string | null;
   contextTokens: number | null;
   lastTool: string | null;

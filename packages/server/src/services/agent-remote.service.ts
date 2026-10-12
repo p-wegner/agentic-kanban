@@ -51,7 +51,7 @@ import { createRemoteRepoService, REPO_OP_TIMEOUT_MS } from "./agent-remote-repo
 import { installRemoteSessionHold } from "./agent-remote-hold.js";
 import { landSessionBranch, stopUntrackedSessions } from "./agent-remote-finalize.js";
 import { getFleetMcpBridge } from "./fleet-mcp-bridge.service.js";
-import { deliverRemoteOutput } from "./agent-remote-transcript.js";
+import { deliverRemoteSessionOutput } from "./agent-remote-transcript.js";
 
 /**
  * How long a disconnected worker may be silent before the board REPORTS the gap.
@@ -83,7 +83,7 @@ export const WORKER_ASSIGN_SETTLE_MS = 30 * 1000;
 // placement-explain.types.ts for the precedent).
 import type { RemoteSession, RemoteSessionRepo, RemoteRepoOpOutcome, RemoteAgentService } from "./agent-remote.types.js";
 export type { RemoteSessionRepo, RemoteRepoOpOutcome, RemoteAgentService } from "./agent-remote.types.js";
-import { listDetachedSessions } from "./agent-remote-detached.js";
+import { listDetachedSessions, listRemoteOutputTimes } from "./agent-remote-detached.js";
 
 export { REPO_OP_TIMEOUT_MS };
 export function createRemoteAgentService(
@@ -220,7 +220,7 @@ export function createRemoteAgentService(
       // information rather than a race (see WORKER_ASSIGN_SETTLE_MS).
       liveness.noteObserved(message.event.sessionId);
       if (message.event.type !== "exit") {
-        deliverRemoteOutput(session.onOutput, message.event);
+        deliverRemoteSessionOutput(session, message.event);
         return;
       }
       // Exit: for a git-transport session the worker has already pushed to the
@@ -537,6 +537,6 @@ export function createRemoteAgentService(
   return {
     launch, kill, sendInput, closeStdin, isStdinOpen, getProcess, getPid, isPidAlive,
     adoptSession, trackedSessionIds, remoteSessionInfo, remoteGitTransportSessions, requestRepoOp: repoOps.requestRepoOp,
-    probeStdinIdle, tracksSession: isPidAlive, detachedSessions: () => listDetachedSessions(sessions, graceMs, abandonMs),
+    probeStdinIdle, tracksSession: isPidAlive, detachedSessions: () => listDetachedSessions(sessions, graceMs, abandonMs), remoteOutputTimes: () => listRemoteOutputTimes(sessions),
   };
 }

@@ -28,6 +28,15 @@ export function deliverRemoteOutput(
   }
 }
 
+/** Stamp the session's last worker-output time (#1392 liveness), then deliver the event. */
+export function deliverRemoteSessionOutput(
+  session: { onOutput: AgentOutputCallback; lastOutputAtMs?: number },
+  event: Parameters<AgentOutputCallback>[0],
+): void {
+  session.lastOutputAtMs = Date.now();
+  deliverRemoteOutput(session.onOutput, event);
+}
+
 /**
  * The default sink. `KANBAN_REMOTE_TRANSCRIPT=off` makes it a no-op: the unit-test setup
  * (`test-setup/remote-transcript-neutral.ts`) sets it so tests that drive the remote service

@@ -35,3 +35,14 @@ export async function resolveDetachedWorkers(database: Database): Promise<Map<st
     ]),
   );
 }
+
+/** sessionId -> ISO time of the worker's last output (#1392); empty when no fleet is wired in. */
+export function resolveRemoteLastOutput(database: Database): Map<string, string> {
+  try {
+    const ops = getWorkerFleet(database).remoteAgentService as unknown as { remoteOutputTimes?: () => Map<string, number> };
+    const times = typeof ops.remoteOutputTimes === "function" ? ops.remoteOutputTimes() : new Map<string, number>();
+    return new Map([...times].map(([id, ms]) => [id, new Date(ms).toISOString()]));
+  } catch {
+    return new Map();
+  }
+}

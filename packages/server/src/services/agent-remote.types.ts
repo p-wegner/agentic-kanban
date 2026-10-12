@@ -36,6 +36,8 @@ export interface RemoteSession {
    * finalized. Cleared on reconnect.
    */
   detachedSinceMs?: number;
+  /** Epoch ms of the last non-exit event the worker sent for this session (#1392). */
+  lastOutputAtMs?: number;
 }
 
 /** A session held because its worker is unreachable (#1317). */
@@ -101,6 +103,8 @@ export interface RemoteAgentService extends AgentExecutionService {
   remoteGitTransportSessions(): Array<{ sessionId: string; workerId: string; branch: string; repoPath: string }>;
   /** Sessions currently DETACHED — held because their worker is unreachable (#1317). */
   detachedSessions(): DetachedRemoteSession[];
+  /** sessionId -> epoch ms of the worker's last output, for sessions that have produced any (#1392). */
+  remoteOutputTimes(): Map<string, number>;
   /**
    * Ask the worker to fast-forward its live checkout to the board's branch tip (#783) or
    * to push its current HEAD to the incoming ref (#784), and WAIT for the answer.

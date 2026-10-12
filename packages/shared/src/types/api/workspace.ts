@@ -64,6 +64,8 @@ export interface MainWorkspaceInfo {
   remotePlacement?: { workerId: string } | null;
   /** Set while the latest session is DETACHED — its fleet worker is unreachable (#1317). */
   detachedWorker?: DetachedWorkerInfo | null;
+  /** ISO time a REMOTE running session last produced output on its worker (#1392); absent for host sessions. */
+  remoteLastOutputAt?: string | null;
   /**
    * #1347 — set while this workspace's launch is HELD for a strict-dispatch worker that is
    * draining for an update (`worker_updating`) or reconnecting (`worker_reconnecting`).

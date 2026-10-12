@@ -18,3 +18,10 @@ export function listDetachedSessions(
   }
   return out;
 }
+
+/** Last worker output per live remote session (#1392) — the liveness signal an operator reads on the card. */
+export function listRemoteOutputTimes(sessions: Map<string, RemoteSession>): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [sessionId, s] of sessions) if (s.lastOutputAtMs !== undefined) out.set(sessionId, s.lastOutputAtMs);
+  return out;
+}

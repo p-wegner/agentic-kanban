@@ -31,7 +31,7 @@ import { createWorkspaceSetupRetryService } from "./workspace-setup-retry.servic
 import { releaseWorkspaceResources } from "./workspace-resource-release.js";
 import { resolveProjectDevServerPlan } from "./dev-server.service.js";
 import { isSelfProjectRepo } from "./self-project.js";
-import { resolveDetachedWorkers } from "./remote-detached-port.js";
+import { resolveDetachedWorkers, resolveRemoteLastOutput } from "./remote-detached-port.js";
 import type { WorkspaceDevServerPlanResponse } from "@agentic-kanban/shared";
 import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 
@@ -353,6 +353,7 @@ export function createWorkspaceCrudService(deps: {
     if (details?.lastSessionId && details.sessionStatus === "running") {
       const detached = (await resolveDetachedWorkers(database)).get(details.lastSessionId);
       if (detached) details.detachedWorker = detached;
+      details.remoteLastOutputAt = resolveRemoteLastOutput(database).get(details.lastSessionId) ?? null;
     }
     return details;
   }
