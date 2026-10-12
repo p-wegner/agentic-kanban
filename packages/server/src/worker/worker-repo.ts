@@ -44,10 +44,13 @@ import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 export function defaultWorkerWorkRoot(stateFile?: string): string {
   const shared = join(homedir(), ".agentic-kanban", "worker");
   // #1401: workers paired with their own --state-file but no --work-root must not share one
-  // clone directory; put the root next to the non-default state file, named after it.
+  // clone directory; put the root next to the non-default state file. A state file with the
+  // standard name gets the plain `<dir>/work` layout; any other name gets `<name>-work`, so two
+  // workers sharing a folder stay apart (deterministic, not dependent on what else is in the dir).
   if (!stateFile || resolve(stateFile) === resolve(defaultWorkerStateFilePath())) return shared;
   const base = basename(stateFile).replace(/\.[^.]*$/, "");
-  return join(dirname(resolve(stateFile)), `${base}-work`);
+  const dir = dirname(resolve(stateFile));
+  return join(dir, base === "worker-state" ? "work" : `${base}-work`);
 }
 
 function defaultWorkerStateFilePath(): string {
