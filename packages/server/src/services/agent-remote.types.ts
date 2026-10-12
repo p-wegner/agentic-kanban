@@ -8,6 +8,8 @@ export interface RemoteSession {
   workerId: string;
   onOutput: AgentOutputCallback;
   stdinOpen: boolean;
+  /** The board stopped this session (#1407); a git-transport assign still being prepared is not sent. */
+  killed?: boolean;
   /** Set for git-transport sessions: sync the pushed branch back before exit. */
   repo?: RemoteSessionRepo;
   /**

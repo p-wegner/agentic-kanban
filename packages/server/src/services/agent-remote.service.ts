@@ -93,9 +93,6 @@ export function createRemoteAgentService(
   opts?: { reconnectGraceMs?: number; abandonMs?: number; assignSettleMs?: number; probeAfterMs?: number; probeTimeoutMs?: number },
 ): RemoteAgentService {
   const sessions = new Map<string, RemoteSession>();
-  /** Git-transport assigns still being prepared, and the subset the board killed meanwhile (#1407). */
-  const pendingAssigns = new Set<string>();
-  const cancelledPendingAssigns = new Set<string>();
   const graceMs = opts?.reconnectGraceMs ?? WORKER_RECONNECT_GRACE_MS;
   const abandonMs = Math.max(opts?.abandonMs ?? REMOTE_SESSION_ABANDON_MS, graceMs);
   const assignSettleMs = opts?.assignSettleMs ?? WORKER_ASSIGN_SETTLE_MS;
@@ -357,14 +354,9 @@ export function createRemoteAgentService(
       // no timeline.
       noteAssigned(sessionId, workerId, { transport: "shared-filesystem" });
     } else {
-      pendingAssigns.add(sessionId);
+      // #1407: isCancelled — the board stopped the session before its assign was sent
       void dispatchGitTransportAssignment({
-        manager, database, sessions, fleetMcp, request, workerId, repo: placement.repo, spec,
-        noteAssigned, finishSession, onDeferredLaunchFailure,
-        isCancelled: () => cancelledPendingAssigns.has(sessionId),
-      }).finally(() => {
-        pendingAssigns.delete(sessionId);
-        cancelledPendingAssigns.delete(sessionId);
+        manager, database, sessions, fleetMcp, request, workerId, repo: placement.repo, spec, noteAssigned, finishSession, onDeferredLaunchFailure, isCancelled: () => sessions.get(sessionId)?.killed === true,
       });
     }
     console.log(`[agent-remote] assigned session ${sessionId} to worker ${workerId} (command=${config.command})`);
@@ -394,9 +386,8 @@ export function createRemoteAgentService(
   function kill(sessionId: string): boolean {
     const session = sessions.get(sessionId);
     if (!session) return false;
-    // #1407: a git-transport assign still being prepared has not reached the worker, so the
-    // stop below would arrive first and be dropped. Mark it so the assign is never sent.
-    if (pendingAssigns.has(sessionId)) cancelledPendingAssigns.add(sessionId);
+    // #1407: a git-transport assign still being prepared would otherwise reach the worker after this stop.
+    session.killed = true;
     // The exit event from the worker finalizes the session; if the worker is
     // gone the disconnect grace path does. Either way the mapping stays until
     // an exit arrives so late output is not misrouted.

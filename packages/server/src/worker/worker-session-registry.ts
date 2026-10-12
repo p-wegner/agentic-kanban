@@ -65,15 +65,38 @@ export interface SessionRegistryDeps {
 export function createWorkerSessionRegistry(deps: SessionRegistryDeps) {
   const records = new Map<string, SessionRecord>();
 
-  /** Remember an id the board handed us. Idempotent: a re-assign must not restart the clock. */
-  function noteAssigned(sessionId: string, nowMs: number = Date.now()): void {
-    if (records.has(sessionId)) return;
+  /**
+   * Ids the board stopped BEFORE their assign arrived (#1407). Its `stop` and git-transport
+   * `assign` travel separately, so a session reconciled in between had its stop dropped as
+   * "unknown" and the late assign then ran, holding a slot and pushing a stale result.
+   */
+  const stoppedBeforeAssign = new Set<string>();
+
+  /** The board stopped an id nothing here is running: remember it unless it already exited. Always false (nothing was stopped). */
+  function noteStopped(sessionId: string): false {
+    if (records.get(sessionId)?.exitedAtMs !== undefined) return false;
+    stoppedBeforeAssign.add(sessionId);
+    if (stoppedBeforeAssign.size > MAX_REMEMBERED) stoppedBeforeAssign.delete(stoppedBeforeAssign.values().next().value as string);
+    return false;
+  }
+
+  /**
+   * Remember an id the board handed us. Idempotent: a re-assign must not restart the clock.
+   * Returns true when the board already stopped this id — the caller must refuse the assign.
+   */
+  function noteAssigned(sessionId: string, nowMs: number = Date.now()): boolean {
+    if (stoppedBeforeAssign.delete(sessionId)) {
+      workerLog(`[worker] refusing assign for a session the board already stopped: sessionId=${sessionId}`);
+      return true;
+    }
+    if (records.has(sessionId)) return false;
     records.set(sessionId, { startedAtMs: nowMs });
     while (records.size > MAX_REMEMBERED) {
       const oldest = records.keys().next();
       if (oldest.done) break;
       records.delete(oldest.value);
     }
+    return false;
   }
 
   function noteOutput(sessionId: string, nowMs: number = Date.now()): void {
@@ -136,7 +159,7 @@ export function createWorkerSessionRegistry(deps: SessionRegistryDeps) {
     return records.size;
   }
 
-  return { noteAssigned, noteOutput, noteExit, probe, answerProbe, size };
+  return { noteAssigned, noteStopped, noteOutput, noteExit, probe, answerProbe, size };
 }
 
 export type WorkerSessionRegistry = ReturnType<typeof createWorkerSessionRegistry>;
