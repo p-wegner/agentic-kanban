@@ -51,7 +51,7 @@ import { createRemoteRepoService, REPO_OP_TIMEOUT_MS } from "./agent-remote-repo
 import { installRemoteSessionHold } from "./agent-remote-hold.js";
 import { landSessionBranch, stopUntrackedSessions } from "./agent-remote-finalize.js";
 import { getFleetMcpBridge } from "./fleet-mcp-bridge.service.js";
-import { deliverRemoteOutput } from "./agent-remote-transcript.js";
+import { deliverRemoteSessionOutput } from "./agent-remote-transcript.js";
 
 /**
  * How long a disconnected worker may be silent before the board REPORTS the gap.
@@ -219,9 +219,8 @@ export function createRemoteAgentService(
       // The worker has spoken about this session, so a later hello that omits it is
       // information rather than a race (see WORKER_ASSIGN_SETTLE_MS).
       liveness.noteObserved(message.event.sessionId);
-      if (message.event.type !== "exit") session.lastOutputAtMs = Date.now();
       if (message.event.type !== "exit") {
-        deliverRemoteOutput(session.onOutput, message.event);
+        deliverRemoteSessionOutput(session, message.event);
         return;
       }
       // Exit: for a git-transport session the worker has already pushed to the
