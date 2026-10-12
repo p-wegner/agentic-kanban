@@ -711,7 +711,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     drainPushes, pendingPushCount, repoOp, gitToken: gitTokens.answer,
     probeSession: seen.answerProbe, rememberedSessionCount: seen.size,
     retryPendingPushes: undelivered.retryPending,
-    unpushedResults: undelivered.list,
+    unpushedResults: undelivered.list, lostResults: undelivered.listLost,
   };
 }
 

@@ -23,7 +23,16 @@ import { workerLog } from "./worker-updater.js";
 import type { WorkerRepoTransport, WorkerToBoardMessage } from "@agentic-kanban/shared/lib/worker-protocol";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { WorkerCheckout } from "./worker-repo.js";
-import { loadUndelivered, removeUndelivered, upsertUndelivered } from "./worker-undelivered.js";
+import { existsSync } from "node:fs";
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
+import {
+  loadLost,
+  loadUndelivered,
+  markUndeliveredLost,
+  removeUndelivered,
+  upsertUndelivered,
+  type LostSessionRecord,
+} from "./worker-undelivered.js";
 
 /** A result that finished on this worker and is on its way to the board. */
 export interface PendingResult {
@@ -73,6 +82,21 @@ export interface UndeliveredStoreDeps {
    * once per push, right after a 401, so a rejected token is never simply retried.
    */
   refreshToken?: (sessionId: string) => Promise<string | null>;
+  /**
+   * Is the work unreachable — checkout directory AND local branch both gone (#1406)? Defaults
+   * to a filesystem + `git rev-parse` check.
+   */
+  isGone?: (entry: UnpushedResult) => Promise<boolean>;
+}
+
+/** Default "work is unreachable" probe: no checkout directory and no `kanban/<sid>` branch. */
+async function defaultIsGone(entry: UnpushedResult): Promise<boolean> {
+  if (existsSync(entry.checkoutPath)) return false;
+  if (!existsSync(entry.cacheDir)) return true;
+  const probe = await gitExec(["rev-parse", "--verify", "--quiet", `refs/heads/${entry.localBranch}`], {
+    cwd: entry.cacheDir,
+  });
+  return !!probe.error || probe.stdout.trim() === "";
 }
 
 /** A git failure that means the board rejected our credential (or git was refused a prompt). */
@@ -241,6 +265,7 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
         entry.lastError = errorMessage(err);
         persist(sessionId); // keep the on-disk attempt count/error honest (#871)
         workerLog(`[worker] retained result still cannot be pushed: sessionId=${sessionId}: ${entry.lastError}`);
+        await markLostIfGone(sessionId);
         continue;
       }
       unpushed.delete(sessionId);
@@ -262,6 +287,38 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
       });
     }
     return { pushed, stillPending: [...unpushed.keys()] };
+  }
+
+  /**
+   * #1406: an entry whose checkout and branch are gone can never be pushed, so retrying it on
+   * every restart is noise that hides real failures. Move it to the `lost` list with one loud
+   * line; the board lists it via `listLost`.
+   */
+  async function markLostIfGone(sessionId: string): Promise<void> {
+    const entry = unpushed.get(sessionId);
+    if (!entry) return;
+    const view = list().find((r) => r.sessionId === sessionId)!;
+    let gone = false;
+    try {
+      gone = await (deps.isGone ?? defaultIsGone)(view);
+    } catch {
+      return; // cannot tell - keep retrying rather than drop work
+    }
+    if (!gone) return;
+    const reason =
+      `checkout ${view.checkoutPath} and branch ${view.localBranch} no longer exist; last error: ${entry.lastError}`;
+    if (!markUndeliveredLost(workRoot, sessionId, reason, new Date().toISOString())) return;
+    unpushed.delete(sessionId);
+    workerLog(
+      `[worker] LOST undelivered result, no longer retried: sessionId=${sessionId} branch=${view.branch} - ` +
+        `${reason}. Check whether ${view.branch} is already merged on the board; if not, the commits ` +
+        `are gone from this worker and the work must be redone or restored from a bundle.`,
+    );
+  }
+
+  /** Results moved to the `lost` list (#1406), for the board and for tests. */
+  function listLost(): LostSessionRecord[] {
+    return loadLost(workRoot);
   }
 
   /** Results this worker is still holding, for the daemon's logs and for tests. */
@@ -287,7 +344,7 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
     wakeSuspended();
   }
 
-  return { pushWithRetry, retain, retryPending, list, suspendRetries };
+  return { pushWithRetry, retain, retryPending, list, listLost, suspendRetries };
 }
 
 export type UndeliveredStore = ReturnType<typeof createUndeliveredStore>;

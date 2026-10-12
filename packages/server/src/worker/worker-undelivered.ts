@@ -49,8 +49,15 @@ export function undeliveredStateFile(workRoot: string): string {
   return join(workRoot, "undelivered-results.json");
 }
 
+/** An undelivered result whose checkout and branch are gone: no longer retried (#1406). */
+export interface LostSessionRecord extends UndeliveredSessionRecord {
+  lostAt: string;
+  reason: string;
+}
+
 interface UndeliveredStateFile {
   results: UndeliveredSessionRecord[];
+  lost?: LostSessionRecord[];
 }
 
 function isRecord(value: unknown): value is UndeliveredSessionRecord {
@@ -88,10 +95,52 @@ export function loadUndelivered(workRoot: string): UndeliveredSessionRecord[] {
   }
 }
 
-function save(workRoot: string, results: UndeliveredSessionRecord[]): void {
+/** Load the `lost` list (#1406). A missing or corrupt file is an empty list, never a throw. */
+export function loadLost(workRoot: string): LostSessionRecord[] {
+  try {
+    const file = undeliveredStateFile(workRoot);
+    if (!existsSync(file)) return [];
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as Partial<UndeliveredStateFile>;
+    if (!Array.isArray(parsed.lost)) return [];
+    return parsed.lost.filter(isRecord).map((r) => ({
+      ...r,
+      baseBranch: typeof r.baseBranch === "string" ? r.baseBranch : r.branch,
+      attempts: typeof r.attempts === "number" && Number.isFinite(r.attempts) ? r.attempts : 0,
+      lastError: typeof r.lastError === "string" ? r.lastError : "",
+      recordedAt: typeof r.recordedAt === "string" ? r.recordedAt : "",
+      lostAt: typeof r.lostAt === "string" ? r.lostAt : "",
+      reason: typeof r.reason === "string" ? r.reason : "",
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function save(workRoot: string, results: UndeliveredSessionRecord[], lost: LostSessionRecord[] = loadLost(workRoot)): void {
   const file = undeliveredStateFile(workRoot);
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify({ results } satisfies UndeliveredStateFile, null, 2));
+  writeFileSync(file, JSON.stringify({ results, lost } satisfies UndeliveredStateFile, null, 2));
+}
+
+/**
+ * Move a session from the retry list to the `lost` list (#1406). Never throws. Returns whether
+ * the move was persisted; on failure the entry stays in `results` and is judged again next time.
+ */
+export function markUndeliveredLost(workRoot: string, sessionId: string, reason: string, lostAt: string): boolean {
+  try {
+    const all = loadUndelivered(workRoot);
+    const record = all.find((r) => r.sessionId === sessionId);
+    if (!record) return false;
+    const lost = loadLost(workRoot).filter((r) => r.sessionId !== sessionId);
+    save(
+      workRoot,
+      all.filter((r) => r.sessionId !== sessionId),
+      [...lost, { ...record, lostAt, reason }],
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Add or replace the record for a session. Never throws — persistence is best-effort. */
