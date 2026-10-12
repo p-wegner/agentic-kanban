@@ -20,7 +20,8 @@ vi.mock("../db/index.js", () => ({
 vi.mock("../services/dirty-main-checkout.js", () => ({
   scanDirtyMainCheckouts: vi.fn(async () => []),
 }));
-vi.mock("../services/autodrive-stall-warning.service.js", () => ({
+vi.mock("../services/autodrive-stall-warning.service.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../services/autodrive-stall-warning.service.js")>()),
   scanAutodriveStallWarnings: vi.fn(async () => []),
 }));
 vi.mock("../services/stale-dev-processes.js", () => ({
