@@ -266,6 +266,22 @@ describe("runMergeTrain — environment failures skip bisect (#1154)", () => {
     // No classifier passed → bisects as before, spending more than one gate run.
     expect(result.gateRuns).toBeGreaterThan(1);
   }, 240000);
+
+  it("an INCONCLUSIVE gate (watchdog kill) is never bisected or attributed (#1413)", async () => {
+    const runGate = vi.fn().mockResolvedValue({
+      passed: false,
+      inconclusive: true,
+      message: "verify_script was killed by the no-progress watchdog — inconclusive (not a build/test failure)",
+    });
+    const result = await runMergeTrain({
+      repoPath: repo, baseBranch: "main", members, label: "inc1", runGate, closeMember: vi.fn(),
+    });
+    expect(runGate).toHaveBeenCalledTimes(1);
+    expect(result.inconclusive).toBe(true);
+    expect(result.landed).toEqual([]);
+    expect(result.gateRejected).toEqual([]);
+    expect(result.attempts[0]?.verdict).toBe("env_failure");
+  }, 240000);
 });
 
 /**

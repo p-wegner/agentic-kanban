@@ -292,7 +292,12 @@ async function finishMergeTrain(
   // whose disposition is "the batch failed and this member shares that verdict, unattributed".
   const { gateEvidence, gateRejected } = buildTrainGateEvidence(result, members, review);
   await updateMergeTrainState(trainId, {
-    state: result.landed.length > 0 ? "landed" : "red",
+    // #1413: an inconclusive gate is not a red train — it is closed out `abandoned` (no active
+    // row, so the next window re-forms and re-gates the same members) with the reason on record.
+    state: result.landed.length > 0 ? "landed" : result.inconclusive ? "abandoned" : "red",
+    ...(result.landed.length === 0 && result.inconclusive
+      ? { reconciledReason: `gate inconclusive, will be retried: ${(result.gateFailure ?? "").slice(0, 300)}` }
+      : {}),
     gateEvidence: { ...gateEvidence },
     bisectResult: gateRejected.length > 0 ? { gateRejected } : null,
     finishedAt: new Date().toISOString(),
@@ -316,6 +321,8 @@ interface TrainStagingGateResult {
   guardFailure?: boolean;
   /** #1277 — the fix agent's row (and, when its re-gate was green, the fixed train tip); see `TrainGate`. */
   agentFix?: { attempt: MergeTrainAttemptDto; fixedTrainSha?: string };
+  /** #1413 — the gate was killed/timed out/held rather than judging the tree; see `TrainGate`. */
+  inconclusive?: boolean;
 }
 
 /**
@@ -443,7 +450,10 @@ async function runTrainStagingGate(args: {
     // before anything is bisected. Each re-gate it asks for runs the same gate; `gate` always
     // holds the latest verdict, so a fixed tree flows on to `afterGreen` like any green one.
     let agentFix: TrainStagingGateResult["agentFix"];
-    if (!gate.passed && args.onRed && !signal?.aborted) {
+    // #1413: a watchdog kill / timeout / held run (`timedOut`, `held`) is inconclusive, not red —
+    // there is nothing for a fix agent to fix, so it never gets one.
+    const inconclusive = !gate.passed && (gate.timedOut === true || gate.held === true);
+    if (!gate.passed && !inconclusive && args.onRed && !signal?.aborted) {
       const fix = await args.onRed({
         gateWorktree,
         message: gate.message,
@@ -462,6 +472,7 @@ async function runTrainStagingGate(args: {
         stage: gate.stage,
         ...(gate.failedSuites ? { failedSuites: gate.failedSuites, guardFailure: gate.guardFailure === true } : {}),
         ...(agentFix ? { agentFix } : {}),
+        ...(inconclusive ? { inconclusive: true } : {}),
       };
     }
     const extra = await args.afterGreen?.({ gateWorktree, gateMessage: gate.message });
@@ -708,7 +719,9 @@ async function runDoomedTrainJob(args: {
             return { sided: review.sided };
           },
         });
-        if (!gate.passed) {
+        if (!gate.passed && gate.inconclusive) {
+          console.log(`[merge-train] ${label}: gate INCONCLUSIVE (${attemptLabel}) - not red, no fix agent, no bisect; will re-gate later: ${gate.message.slice(0, 200)}`);
+        } else if (!gate.passed) {
           // Name the red: train, members, stage and suite(s), for the whole train and each half.
           const gatedMembers = included.map((m) => members.find((x) => x.workspaceId === m.workspaceId) ?? { workspaceId: m.workspaceId });
           console.log(`[merge-train] ${describeTrainGateRed({ label, attemptLabel, members: gatedMembers, stage: gate.stage, failedSuites: gate.failedSuites, guardFailure: gate.guardFailure, message: gate.message })}`);
@@ -954,6 +967,15 @@ export function createMergeTrainRunner(deps: {
       if (seenEvent.has(sd.member.workspaceId)) continue;
       seenEvent.add(sd.member.workspaceId);
       yield { type: "skipped", workspaceId: sd.member.workspaceId, issueNumber: sd.member.issueNumber ?? null, issueTitle: "", reason: `sided by the train review: ${sd.reason.slice(0, 300)}` };
+    }
+    if (result.landed.length === 0 && result.inconclusive) {
+      // #1413: nothing was judged — every member is merely withheld pending a retry, not failed.
+      for (const m of members) {
+        if (seenEvent.has(m.workspaceId)) continue;
+        yield { type: "skipped", workspaceId: m.workspaceId, issueNumber: m.issueNumber ?? null, issueTitle: "", reason: `train gate inconclusive - pending a retry: ${(result.gateFailure ?? "").slice(0, 200)}` };
+      }
+      yield { type: "done", merged: [], failed: [], skipped: members.map((m) => m.workspaceId) };
+      return;
     }
     if (result.landed.length === 0) {
       for (const m of members) {
