@@ -493,7 +493,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // filesystem walk) and re-read for quota on every beat; `current()` re-reads the ROLE
   // carriers each time, so a role a human just changed with claude-pick takes effect
   // without restarting the daemon â€” the same freshness rule the board's own roster has.
-  const profileAliases = resolveProfileAliases(stateFile, opts.profileAliases, log);
+  const profileAliases = resolveProfileAliases(stateFile, opts.profileAliases, log, opts.harness?.dirFor("claude"));
   const profileAttestor: WorkerProfileAttestor = createWorkerProfileAttestor({
     aliases: profileAliases, log,
     ...(opts.profiles ? { declared: opts.profiles } : {}), ...(opts.profileHome ? { home: opts.profileHome } : {}),

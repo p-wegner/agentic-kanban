@@ -265,6 +265,11 @@ export interface TrainRunResult {
    */
   cancelled?: true;
   /**
+   * #1413 — the gate was INCONCLUSIVE (watchdog kill / timeout / held), so nothing is red: no
+   * member is attributed, no bisect ran, no fix agent was spawned. The caller re-gates later.
+   */
+  inconclusive?: true;
+  /**
    * #1189 — one node per assemble → gate → land cycle, in the order they finished (a bisect's
    * root first, then its halves depth-first). The tree the panel renders; the sum of the nodes'
    * `gateRuns` is `gateRuns` above.
@@ -323,6 +328,12 @@ export type TrainGate = (ctx: {
    * with this set carries the RE-GATE's message: the failure the fallback should reason about.
    */
   agentFix?: { attempt: MergeTrainAttemptDto; fixedTrainSha?: string };
+  /**
+   * #1413 — the gate did not reach a verdict about the code (no-progress watchdog kill, wall-clock
+   * timeout, cancelled/held run). Never bisected, never fixed, never attributed: the train is
+   * simply retried later.
+   */
+  inconclusive?: boolean;
 }>;
 
 export async function runMergeTrain(args: {
@@ -495,6 +506,9 @@ export async function runMergeTrain(args: {
       // closure over the same signal) is not attribution either — stop here rather than bisect
       // an aborted run's failure onto individual members.
       if (attempt.cancelled) return attempt;
+      // #1413: an inconclusive gate (watchdog kill, timeout, held) says nothing about the code —
+      // halving would only re-gate on the same wedged host and then blame a member for it.
+      if (attempt.inconclusive) return attempt;
       // #1154: an environment failure fails the SAME way for every subset of the same staging
       // worktree — splitting cannot learn anything a second run at the top level didn't already
       // say, and it can only mislabel branches as individually red. Stop here, attribution-free.
@@ -603,6 +617,7 @@ export async function runMergeTrain(args: {
         // the abort and returned a failed gate. Either half reporting cancelled makes the whole
         // split's result cancelled, since the run as a whole was told to stop.
         ...(first.cancelled || second.cancelled ? { cancelled: true as const } : {}),
+        ...(first.landed.length + second.landed.length === 0 && (first.inconclusive || second.inconclusive) ? { inconclusive: true as const } : {}),
       };
     } finally {
       notifyDone?.();
@@ -748,6 +763,11 @@ async function runTrainAttempt(args: {
       // about the code, so it must not be bisected or attributed to any member.
       if (args.signal?.aborted) {
         return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], sided: [], gateRuns: 1, gateFailure: gate.message, cancelled: true }, "red");
+      }
+      // #1413: an inconclusive gate is neither red nor attributable; leaf kind `env_failure`
+      // (the train's own trouble) and the flag tells the driver and the caller not to treat it as red.
+      if (gate.inconclusive) {
+        return await finish({ trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], sided: [], gateRuns: 1, gateFailure: gate.message, inconclusive: true }, "env_failure");
       }
       // #1154/#1189: an environment failure is the train's, not a member's — its own leaf kind.
       const verdict: MergeTrainAttemptVerdict = args.isEnvironmentFailure(gate.message) ? "env_failure" : "red";

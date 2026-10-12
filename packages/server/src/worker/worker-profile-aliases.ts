@@ -27,9 +27,21 @@ export function saveProfileAliases(stateFile: string, aliases: string[]): void {
 }
 
 /** Persist `given` when set, else read the saved list; parse it and log what is in force. */
-export function resolveProfileAliases(stateFile: string, given: string[] | undefined, log: (m: string) => void): ProfileAlias[] {
+export function resolveProfileAliases(
+  stateFile: string,
+  given: string[] | undefined,
+  log: (m: string) => void,
+  /** #1409: the worker's own claude config dir (custom/clean harness); `default` means this, not ~/.claude. */
+  workerClaudeDir?: string,
+): ProfileAlias[] {
   if (given) saveProfileAliases(stateFile, given);
-  const aliases = parseProfileAliases(given ?? loadProfileAliases(stateFile));
+  const aliases = bindDefaultAlias(parseProfileAliases(given ?? loadProfileAliases(stateFile)), workerClaudeDir);
   if (aliases.length > 0) log(`[worker] profile aliases: ${aliases.map((a) => `${a.source}=${a.name}`).join(", ")}`);
   return aliases;
+}
+
+/** #1409: with a relocated claude dir, an alias source `default` is that dir; otherwise unchanged. */
+export function bindDefaultAlias(aliases: ProfileAlias[], workerClaudeDir: string | undefined): ProfileAlias[] {
+  if (!workerClaudeDir) return aliases;
+  return aliases.map((a) => (a.source.toLowerCase() === "default" ? { ...a, source: workerClaudeDir } : a));
 }

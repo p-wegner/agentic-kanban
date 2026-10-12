@@ -87,3 +87,12 @@ describe("profile alias (#1379)", () => {
     expect(aliasHint(["codex:x"])).toBe("");
   });
 });
+
+describe("#1409 default alias binds to the worker's own config dir", () => {
+  it("rewrites `default` to the harness dir and leaves other sources alone", async () => {
+    const { bindDefaultAlias } = await import("../worker/worker-profile-aliases.js");
+    const out = bindDefaultAlias([{ source: "default", name: "anth" }, { source: "x", name: "y" }], "/w/claude");
+    expect(out).toEqual([{ source: "/w/claude", name: "anth" }, { source: "x", name: "y" }]);
+    expect(bindDefaultAlias([{ source: "default", name: "a" }], undefined)[0]!.source).toBe("default");
+  });
+});
