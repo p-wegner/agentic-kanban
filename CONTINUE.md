@@ -45,6 +45,8 @@ Passes older than today have been moved **verbatim, newest first** into
 [`docs/archive/CONTINUE-archive.md`](docs/archive/CONTINUE-archive.md). Nothing is re-verified or
 edited on the way in, so each pass records what that session believed at the time. The archive
 holds:
+- **2026-10-11 (moved 2026-10-12):** harness provisioning rounds 0-6 and D3-D5 (goal reached), the
+  first D: hang, #1367-#1402.
 - **2026-10-10 night (moved 2026-10-12):** tailnet rounds 3-7, newcomer install, #1356-#1366.
 - **2026-10-10 evening, afternoon, later (moved 2026-10-11):** tailnet worker rounds 1-2, self-update
   hardening, the worktree race instrumentation, six local fleet e2e rounds, Tailscale prep (#1315-#1355).
