@@ -1,8 +1,8 @@
 ---
 name: agentic-kanban
 description: Operate the agentic-kanban board — a kanban board where each card is an AI coding session in its own git worktree. Use when asked to work a ticket, drive a project hands-off, review or merge agent work, inspect what agents are doing, or wire the board into another tool. Covers the MCP tools, CLI, board views, statuses, and the review/merge gate.
-commit: 2be110b39
-generated: 2026-10-11
+commit: 8a792052f
+generated: 2026-10-12
 ---
 
 # agentic-kanban
@@ -164,6 +164,7 @@ Top-level: `cleanup`, `create`, `delete-status`, `dev`, `export-backlog`, `impor
 | `tag` | `list`, `create` |
 | `train` | `list`, `show`, `cancel`, `depart` |
 | `worker` | `revoke`, `pair`, `instructions`, `list`, `update`, `explain`, `placements`, `doctor-board`, `update-check`, `cleanup`, `events`, `auth`, `setup` |
+| `worker toolchain` | `list`, `approve` |
 | `workflow` | `list`, `get`, `export`, `create`, `import`, `delete` |
 | `workspace` | `list`, `create`, `launch`, `resume`, `reopen`, `wait`, `review`, `start`, `diff`, `scorecard`, `merge`, `close`, `stop`, `delete`, `relaunch`, `mark-ready`, `propose-transition`, `clarify`, `analyze-touched`, `terminal`, `comment-list`, `comment-add`, `handoff-bundle`, `approve-tool`, `merge-cancel`, `merge-hold`, `merge-hold-release` |
 

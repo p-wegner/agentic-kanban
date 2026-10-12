@@ -49,6 +49,9 @@ interface WorkerRow {
   settingsReport?: WorkerSettingsReport;
   /** #1382: toolchains the worker detected on PATH. Absent = it has not said. */
   toolchains?: Record<string, string>;
+  /** #1371: install policy the worker declared, and the latest toolchain install the board asked of it. */
+  toolchainInstallPolicy?: { policy: string; allow: string[]; mise: boolean };
+  toolchainInstall?: { state: "pending" | "installing" | "failed" | "done"; toolchains: string[]; reason?: string };
 }
 
 interface FleetSummary {
@@ -314,6 +317,22 @@ export function RunnersFleetPanel({ projectId }: RunnersFleetPanelProps) {
                 <div className="mt-2 text-xs text-gray-500 dark:text-gray-400" title="Toolchains detected on this worker's PATH">
                   Toolchains: {worker.toolchains ? formatWorkerToolchains(worker.toolchains) : "not reported"}
                 </div>
+                {worker.toolchainInstallPolicy && (
+                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400" title="Whether the board may ask this worker to install a project's missing toolchains (mise)">
+                    Toolchain install: {worker.toolchainInstallPolicy.policy}
+                    {worker.toolchainInstallPolicy.policy === "auto" && worker.toolchainInstallPolicy.allow.length > 0 ? ` (${worker.toolchainInstallPolicy.allow.join(", ")})` : ""}
+                    {worker.toolchainInstallPolicy.policy !== "never" && !worker.toolchainInstallPolicy.mise ? " — mise not found" : ""}
+                  </div>
+                )}
+                {worker.toolchainInstall && worker.toolchainInstall.state !== "done" && (
+                  <div
+                    className={`mt-1 text-xs ${worker.toolchainInstall.state === "failed" ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`}
+                    data-testid="toolchain-install-state"
+                  >
+                    Install {worker.toolchainInstall.state}: {worker.toolchainInstall.toolchains.join(", ")}
+                    {worker.toolchainInstall.reason ? ` — ${worker.toolchainInstall.reason}` : ""}
+                  </div>
+                )}
                 {(worker.labels.length > 0 || worker.providers.length > 0) && (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {worker.providers.map((p) => (

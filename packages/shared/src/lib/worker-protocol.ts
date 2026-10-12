@@ -13,6 +13,12 @@ export * from "./worker-profile-attestation.js";
 import { parseWorkerProfileAttestations, type WorkerProfileAttestation } from "./worker-profile-attestation.js";
 
 import { parseWorkerToolchains, type WorkerToolchains } from "./worker-toolchains.js"; // #1382
+import {
+  parseToolchainInstallStatus,
+  parseWorkerToolchainInstallInfo,
+  type ToolchainInstallStatus,
+  type WorkerToolchainInstallInfo,
+} from "./worker-toolchain-install.js"; // #1371
 
 /**
  * A worker carrying this label shares the board's filesystem, so its assignments
@@ -420,6 +426,7 @@ export interface WorkerCapabilities {
   profiles?: WorkerProfileAttestation[];
   /** #1369: package managers on this machine's PATH. Absent = unknown (older worker). */
   packageManagers?: WorkerPackageManagers;
+  toolchainInstall?: WorkerToolchainInstallInfo; // #1371: install policy + allowlist + whether mise is present
   toolchains?: WorkerToolchains; // #1382: detected on PATH (`{ java: "21.0.4" }`); absent = unknown
   providerNotice?: string; // #1372: why this worker advertises no usable provider (it gets no work)
   /**
@@ -503,19 +510,21 @@ export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | unde
   const profiles = parseWorkerProfileAttestations(rec.profiles);
   const packageManagers = parseWorkerPackageManagers(rec.packageManagers);
   const toolchains = parseWorkerToolchains(rec.toolchains);
+  const toolchainInstall = parseWorkerToolchainInstallInfo(rec.toolchainInstall);
   const providerNotice = typeof rec.providerNotice === "string" ? rec.providerNotice.trim().slice(0, 400) || undefined : undefined;
   const doctor = parseWorkerDoctorSummary(rec.doctor);
   if (
     labels === undefined &&
     providers === undefined &&
     maxConcurrency === undefined &&
-    capacity === undefined && profiles === undefined && packageManagers === undefined && toolchains === undefined && providerNotice === undefined &&
+    capacity === undefined && profiles === undefined && packageManagers === undefined && toolchains === undefined && toolchainInstall === undefined && providerNotice === undefined &&
     doctor === undefined
   ) {
     return undefined;
   }
   return {
     ...(toolchains ? { toolchains } : {}),
+    ...(toolchainInstall ? { toolchainInstall } : {}),
     ...(labels ? { labels } : {}),
     ...(providers ? { providers } : {}),
     ...(maxConcurrency !== undefined ? { maxConcurrency } : {}),
@@ -562,7 +571,13 @@ export type BoardToWorkerMessage =
    * `requestId`. OPTIONAL on the wire: an older worker never asks, an older board never
    * answers (the worker's wait times out and it falls back to its normal retry).
    */
-  | { type: "git_token"; sessionId: string; requestId: string; gitToken?: string; error?: string };
+  | { type: "git_token"; sessionId: string; requestId: string; gitToken?: string; error?: string }
+  /**
+   * #1371: ask the worker to install missing project toolchains through mise. A REQUEST: the worker's
+   * own `--toolchain-install` policy decides whether anything runs. Optional on the wire — an older
+   * worker drops it, and the board's view of that install simply never leaves `requested`.
+   */
+  | { type: "toolchain_install"; requestId: string; toolchains: string[] };
 
 export type WorkerToBoardMessage =
   | {
@@ -608,6 +623,8 @@ export type WorkerToBoardMessage =
    * wire like `undelivered_result`: an older board drops it and the worker's wait times out.
    */
   | { type: "git_token_request"; sessionId: string; requestId: string }
+  /** #1371: progress of one `toolchain_install` request (pending approval / installing / failed / done). */
+  | { type: "toolchain_install_status"; status: ToolchainInstallStatus }
   | {
       type: "undelivered_result";
       sessionId: string;
@@ -653,6 +670,21 @@ function parseUndeliveredResult(msg: Record<string, unknown>): WorkerToBoardMess
     attempts: typeof msg.attempts === "number" && Number.isFinite(msg.attempts) ? msg.attempts : 0,
     lastError: msg.lastError,
   };
+}
+
+/** Shape-check a `toolchain_install` request (#1371). Null = drop it. */
+function parseToolchainInstallRequest(msg: Record<string, unknown> | null): BoardToWorkerMessage | null {
+  if (!msg || msg.type !== "toolchain_install") return null; // the one board frame about the machine, not a session
+  if (typeof msg.requestId !== "string" || !msg.requestId || !Array.isArray(msg.toolchains)) return null;
+  const toolchains = msg.toolchains.filter((t): t is string => typeof t === "string").slice(0, 20);
+  return toolchains.length > 0 ? { type: "toolchain_install", requestId: msg.requestId, toolchains } : null;
+}
+
+/** Worker frames added after the core set, kept out of the main switch's branch count. Null = drop it. */
+function parseLaterWorkerFrame(msg: Record<string, unknown>): WorkerToBoardMessage | null {
+  if (msg.type !== "toolchain_install_status") return null;
+  const status = parseToolchainInstallStatus(msg.status);
+  return status ? { type: "toolchain_install_status", status } : null;
 }
 
 /** Parse + shape-check a message arriving at the board. Null = drop it. */
@@ -715,7 +747,7 @@ export function parseWorkerToBoardMessage(raw: unknown): WorkerToBoardMessage | 
     case "undelivered_result":
       return parseUndeliveredResult(msg);
     default:
-      return null;
+      return parseLaterWorkerFrame(msg);
   }
 }
 
@@ -875,7 +907,7 @@ function parseRepoTransport(raw: unknown): WorkerRepoTransport | null {
 /** Parse + shape-check a message arriving at a worker. Null = drop it. */
 export function parseBoardToWorkerMessage(raw: unknown): BoardToWorkerMessage | null {
   const msg = parseJson(raw);
-  if (!msg || typeof msg.sessionId !== "string") return null;
+  if (!msg || typeof msg.sessionId !== "string") return parseToolchainInstallRequest(msg); // sessionless frames
   switch (msg.type) {
     case "assign": {
       const spec = asRecord(msg.spec);

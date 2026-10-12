@@ -20,6 +20,8 @@ export interface ConsoleWorker {
   stale?: boolean;
   /** Reports a build sha that differs from the board's own. */
   buildStale?: boolean;
+  /** #1371: the toolchain install the board asked this worker for (pending / installing / failed / done). */
+  toolchainInstall?: { state: string; toolchains: string[]; reason?: string };
 }
 export interface ConsoleHost {
   freeGb: number | null;
@@ -142,6 +144,9 @@ export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
     buildStale: boardCommit != null && workerBuildSha(w.workerVersion) != null
       && !boardCommit.startsWith(workerBuildSha(w.workerVersion)!) && !workerBuildSha(w.workerVersion)!.startsWith(boardCommit),
     heartbeatAt: w.lastHeartbeatAt ?? null,
+    ...(w.toolchainInstall && typeof w.toolchainInstall.state === "string"
+      ? { toolchainInstall: { state: w.toolchainInstall.state, toolchains: w.toolchainInstall.toolchains ?? [], reason: w.toolchainInstall.reason } }
+      : {}),
     tickets: (w.assignments ?? []).map((a: Record<string, any>) => ({
       issueNumber: a.issueNumber ?? null, status: String(a.status ?? ""), startedAt: a.startedAt ?? null,
     })),
@@ -150,6 +155,10 @@ export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
     w.stale = w.status !== "online" && w.heartbeatAt != null && (nowMs - new Date(w.heartbeatAt).getTime() > STALE_WORKER_MS);
     if (w.stale) continue;
     if (w.status !== "online") attention.push({ level: "yellow", text: `${w.name}: ${w.status}` });
+    const ti = w.toolchainInstall;
+    if (ti && (ti.state === "failed" || ti.state === "pending")) {
+      attention.push({ level: "yellow", text: `${w.name}: toolchain install ${ti.state} (${ti.toolchains.join(", ")})${ti.reason ? `: ${ti.reason}` : ""}` });
+    }
   }
 
   // #1426: a worker whose claude login is dead is online and attests profiles, but cannot run anything.

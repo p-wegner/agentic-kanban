@@ -217,6 +217,15 @@ Fleet worker: connect this machine to a board and execute assigned agent session
 | `worker auth [provider]` | Log a provider (claude\|codex) into THIS worker's own config dir with the provider's own login flow |
 | `worker setup` | Set this machine up as a worker, step by step (each step detects what is already there and can be |
 
+## worker toolchain
+
+Toolchain install requests from the board (#1371).
+
+| Command | Does |
+|---|---|
+| `worker toolchain list` | Install requests waiting for your approval |
+| `worker toolchain approve <id>` | Approve a pending install request; the running worker installs it via mise within seconds |
+
 ## workflow
 
 Manage configurable workflow templates (graphs of stages + transitions).

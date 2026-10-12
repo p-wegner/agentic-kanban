@@ -3,7 +3,8 @@
 // remote execution service — so the REST routes, the WS route and the session
 // lifecycle all see the SAME fleet state in one board process.
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
-import { workerMeetsRequirements } from "@agentic-kanban/shared/lib/worker-toolchains";
+import { splitRequirements, workerMeetsRequirements } from "@agentic-kanban/shared/lib/worker-toolchains";
+import { requestToolchainInstalls } from "./toolchain-install.service.js";
 import {
   parseRequiredLabels,
   readPlacementRequirements,
@@ -805,8 +806,19 @@ export async function projectCanDispatch(params: {
   }
 }
 
+/** Does this worker advertise the provider (no list = any)? */
+function providerAdvertised(w: { providers: string | null }, providerName: string): boolean {
+  if (!w.providers) return true;
+  try {
+    const list = JSON.parse(w.providers) as string[];
+    return list.length === 0 || list.includes(providerName);
+  } catch {
+    return true;
+  }
+}
+
 /** Why a strict launch is being HELD rather than failed (#1347). */
-export type StrictHoldReason = "worker_updating" | "worker_reconnecting" | "workers_busy";
+export type StrictHoldReason = "worker_updating" | "worker_reconnecting" | "workers_busy" | "toolchain_installing";
 
 /**
  * The verdict on a STRICT-dispatch launch BEFORE a session row exists (#1347).
@@ -839,6 +851,18 @@ export async function checkStrictLaunchReadiness(params: {
     const views = await fleet.registry.listWorkersView(now);
     const eligible = filterEligibleWorkers(fleet, views, providerName, requiredLabels, nowMs);
     if (eligible.length > 0) return { kind: "proceed" };
+    // #1371: a worker that is out ONLY for missing toolchains is asked to install them (its own policy decides).
+    const install = requestToolchainInstalls(
+      views.filter((w) => providerAdvertised(w, providerName) && workerMeetsRequirements(splitRequirements(requiredLabels).labels, parseLabels(w.labels), undefined)),
+      requiredLabels,
+      {
+        send: (id, frame) => fleet.connections.send(id, frame),
+        record: (id, requestId, toolchains, at) => fleet.registry.noteToolchainInstallRequested(id, requestId, toolchains, at),
+        reachable: (id) => fleet.connections.isConnected(id) && fleet.health.isResponsive(id),
+        ...(nowMs !== undefined ? { nowMs } : {}),
+      },
+    );
+    if (install.active) return { kind: "hold", reason: "toolchain_installing", workerId: install.active.workerId };
     const matching = views.filter((w) => {
       if (w.providers) {
         try {
@@ -862,7 +886,8 @@ export async function checkStrictLaunchReadiness(params: {
     const saturated = matching.find((w) => w.effectiveStatus === "online" && fleet.connections.isConnected(w.id) && fleet.health.isResponsive(w.id) && fleet.connections.assignedSessionIds(w.id, nowMs).length >= w.maxConcurrency);
     if (saturated) return { kind: "hold", reason: "workers_busy", workerId: saturated.id };
     const detail = requiredLabels.length > 0 ? ` with labels [${requiredLabels.join(",")}]` : "";
-    return { kind: "refuse", reason: `no eligible ${providerName} worker${detail} and worker dispatch is strict for project ${projectId}` };
+    const why = install.blocked.length > 0 ? ` (${install.blocked.map((b) => `${b.name}: ${b.reason}`).join("; ")})` : "";
+    return { kind: "refuse", reason: `no eligible ${providerName} worker${detail} and worker dispatch is strict for project ${projectId}${why}` };
   } catch (err) {
     console.error(`[worker-fleet] strict launch readiness check failed; leaving it to placement`, err);
     return { kind: "proceed" };

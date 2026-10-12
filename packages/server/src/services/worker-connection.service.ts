@@ -198,6 +198,7 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
         registry.noteAttestedProfiles(workerId, message.capabilities?.profiles);
         registry.notePackageManagers(workerId, message.capabilities?.packageManagers);
         registry.noteToolchains?.(workerId, message.capabilities?.toolchains);
+        registry.noteToolchainInstallInfo?.(workerId, message.capabilities?.toolchainInstall);
         registry.noteProviderNotice(workerId, message.capabilities?.providerNotice);
         registry.noteDoctor(workerId, message.capabilities?.doctor);
       } else if (message.type === "event") {
@@ -209,6 +210,8 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
           conn.runningSessionIds.add(message.event.sessionId);
           conn.lastEventAt.set(message.event.sessionId, Date.now());
         }
+      } else if (message.type === "toolchain_install_status") {
+        registry.noteToolchainInstallStatus?.(workerId, message.status);
       } else if (message.type === "assign_failed") {
         conn.pendingSessionIds.delete(message.sessionId);
         // Say what KIND of failure this is on the line an operator actually reads
