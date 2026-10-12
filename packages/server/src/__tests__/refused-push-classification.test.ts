@@ -9,7 +9,7 @@ const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8" }).trim();
 
 function repo() {
-  const dir = mkdtempSync(join(tmpdir(), "refused-push-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-refused-push-"));
   git(dir, "init", "-b", "master");
   writeFileSync(join(dir, "a"), "1");
   git(dir, "add", "."); git(dir, "commit", "-m", "root");
