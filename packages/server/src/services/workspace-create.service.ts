@@ -10,6 +10,7 @@
  * passing the same injected deps so gitService stays substitutable in tests.
  */
 
+import { findRunningBuilderSessionIds } from "./workspace-launch-guard.js";
 import { basename } from "node:path";
 import { randomUUID } from "node:crypto";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
@@ -327,7 +328,7 @@ export function createWorkspaceCreateService(deps: {
     /** #1026 — the resolver's own account of why THIS profile, for the session row. */
     profileSelectionReason?: ProfileSelectionReason | null;
   }): Promise<string | undefined> {
-    if (!getSessionManager) return undefined;
+    if (!getSessionManager || (await findRunningBuilderSessionIds(database, params.workspaceId)).length > 0) return undefined; // #1425: a /launch got there first
     const truncatedPrompt = params.agentPrompt.length > 80 ? params.agentPrompt.slice(0, 80) + "..." : params.agentPrompt;
     console.log(`[workspaces] auto-launch: workspaceId=${params.workspaceId} branch=${params.branch} isDirect=${params.isDirect} prompt="${truncatedPrompt}" agentCommand=${params.agentCommand ?? "default"}`);
     const executorProvider = toExecutorProvider(params.resolvedProvider);
@@ -347,7 +348,6 @@ export function createWorkspaceCreateService(deps: {
       profileSelectionReason: params.profileSelectionReason ?? null,
     });
   }
-
   const { rollbackOrphanedWorktree, handleCreateFailure } =
     createWorkspaceCreateFailureHandler({ gitService, database });
 

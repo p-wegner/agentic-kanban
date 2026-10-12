@@ -43,6 +43,7 @@ import {
   type GitService,
 } from "./workspace-internals.js";
 import { stopBisectSession } from "./bisect.service.js";
+import { guardAgainstSecondBuilder } from "./workspace-launch-guard.js";
 import { assertNotInLiveTrain } from "./workspace-train-membership.service.js";
 import { assertProjectNotQuiesced } from "./quiesce.service.js";
 import { findLiveAgentTrees, liveAgentRefusalMessage } from "./workspace-agent-liveness.service.js";
@@ -197,6 +198,7 @@ export function createWorkspaceSessionService(deps: {
     // `manual` deliberately still permits explicit relaunch). See quiesce.service.ts.
     await assertProjectNotQuiesced(database, await resolveProjectId(id, database), "relaunch");
     await assertNotInLiveTrain(database, id, "launch", body.force === true || body.fromTrain === true);
+    await guardAgainstSecondBuilder(database, id, body, (sid) => getSessionManager!().stopSession(sid));
     await assertNoLiveAgentTree(id, body.force === true);
 
     // If workingDir is missing on a non-direct workspace, attempt to rebuild the worktree.
