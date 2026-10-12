@@ -125,7 +125,15 @@ Status indicators:
       const renderScreen = async () => {
         const status = await fetchStatus();
         const { renderStatusScreen, frameToScreen } = await import("../status-screen.js");
+        let onlineWorkers: number | undefined;
+        try {
+          const { getWorkerRegistry } = await import("../../services/worker-registry.service.js");
+          onlineWorkers = (await getWorkerRegistry().listWorkersView()).filter((w) => w.effectiveStatus === "online").length;
+        } catch {
+          // registry unreadable: the renderer falls back to its own estimate
+        }
         const lines = renderStatusScreen(status, {
+          onlineWorkers,
           cols: process.stdout.columns || 120,
           rows: process.stdout.rows || 40,
           all: options.all,

@@ -15,6 +15,11 @@ export function isTerminalStatusName(name: string | null | undefined): boolean {
   return name === "Done" || name === "Cancelled";
 }
 
+/** Whether a status-column name is an in-flight one (In Progress / In Review) — the issues a board screen lists as active. */
+export function isInFlightStatusName(name: string | null | undefined): boolean {
+  return name === "In Progress" || name === "In Review";
+}
+
 export interface StatusViewIssue {
   currentNodeId?: string | null;
   currentNodeType?: string | null;
