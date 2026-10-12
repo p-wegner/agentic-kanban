@@ -444,6 +444,22 @@ async function resolvePairing(a: {
   return { identity, urlIndex, probes };
 }
 
+/** #895: re-attest the declared providers (unless disabled); returns opts advertising only what attested. */
+async function attestDeclaredProviders(opts: WorkerDaemonOptions, log: (line: string) => void): Promise<{ opts: WorkerDaemonOptions; notice?: string }> {
+  const declared = opts.providers;
+  if (opts.attestProviders === false || !declared || declared.length === 0) return { opts };
+  const { advertised, notice } = await attestAndNotice(declared, log, opts.harness);
+  if (notice) log(`[worker] WARNING: ${notice}`);
+  return { opts: { ...opts, providers: advertised }, ...(notice ? { notice } : {}) };
+}
+
+/** #1027: what this machine can authenticate as, built once and re-read per beat. */
+function buildProfileAttestor(opts: WorkerDaemonOptions, aliases: ReturnType<typeof resolveProfileAliases>, log: (line: string) => void): WorkerProfileAttestor {
+  return createWorkerProfileAttestor({
+    aliases, log, ...(opts.profiles ? { declared: opts.profiles } : {}), ...(opts.profileHome ? { home: opts.profileHome } : {}),
+  });
+}
+
 export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<WorkerDaemonHandle> {
   const stateFile = opts.stateFile ?? defaultWorkerStateFile();
   // #1381: flags pin their keys; the rest start from what the board last pushed.
@@ -460,8 +476,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // #1351: the runner, repo ops and result push log through the same sink as the daemon.
   setWorkerLogSink(log);
   const boardUrls = parseBoardList([opts.boardUrl, ...(opts.boardUrls ?? [])]);
-  const boardUrl = boardUrls[0]!;
-  // #1372: on WSL the hostname is the Windows host's, so the default carries the distro.
+  const boardUrl = boardUrls[0]!; // #1372: on WSL the hostname is the Windows host's, so the default carries the distro.
   const name = opts.name ?? defaultWorkerName();
 
   // #895: `providers` as DECLARED (--providers) is kept separate from `providers` as
@@ -473,21 +488,12 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // carriers each time, so a role a human just changed with claude-pick takes effect
   // without restarting the daemon â€” the same freshness rule the board's own roster has.
   const profileAliases = resolveProfileAliases(stateFile, opts.profileAliases, log, opts.harness?.dirFor("claude"));
-  const profileAttestor: WorkerProfileAttestor = createWorkerProfileAttestor({
-    aliases: profileAliases, log,
-    ...(opts.profiles ? { declared: opts.profiles } : {}), ...(opts.profileHome ? { home: opts.profileHome } : {}),
-  });
+  const profileAttestor = buildProfileAttestor(opts, profileAliases, log);
   const attestedProfiles = (): WorkerProfileAttestation[] => profileAttestor.current();
-
   const declaredProviders = opts.providers;
-  let advertisedProviders = declaredProviders;
   let providerNotice: string | undefined;
-  if (opts.attestProviders !== false && declaredProviders && declaredProviders.length > 0) {
-    ({ advertised: advertisedProviders, notice: providerNotice } = await attestAndNotice(declaredProviders, log, opts.harness));
-    opts = { ...opts, providers: advertisedProviders };
-    if (providerNotice) log(`[worker] WARNING: ${providerNotice}`);
-  }
-
+  ({ opts, notice: providerNotice } = await attestDeclaredProviders(opts, log));
+  let advertisedProviders = opts.providers;
   // #850: a checkout whose worktree registration is gone (a prior daemon that stopped,
   // disconnected, or crashed mid-session) is reaped before anything else runs, so a
   // long-lived worker never accumulates whole repo clones from abandoned sessions.
