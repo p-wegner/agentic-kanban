@@ -144,17 +144,45 @@ export function markUndeliveredLost(workRoot: string, sessionId: string, reason:
 }
 
 /** Add or replace the record for a session. Never throws — persistence is best-effort. */
-export function upsertUndelivered(workRoot: string, record: UndeliveredSessionRecord): void {
+export function upsertUndelivered(workRoot: string, record: UndeliveredSessionRecord): boolean {
   try {
     const rest = loadUndelivered(workRoot).filter((r) => r.sessionId !== record.sessionId);
     save(workRoot, [...rest, record]);
+    return true;
   } catch (err) {
     workerLog(
       `[worker] could not persist the undelivered-result record for sessionId=${record.sessionId}: ` +
         `${err instanceof Error ? err.message : String(err)} - the checkout is still kept, but a ` +
         `daemon restart will not know about it`,
     );
+    return false;
   }
+}
+
+/** Give up on an entry after this many failed attempts (#1416). */
+export const UNDELIVERED_MAX_ATTEMPTS = 30;
+/** ...or once it has been held this long. */
+export const UNDELIVERED_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Age of a record in ms, or null when `recordedAt` is missing/unparseable. */
+export function undeliveredAgeMs(recordedAt: string, nowMs: number = Date.now()): number | null {
+  const t = Date.parse(recordedAt);
+  return Number.isFinite(t) ? Math.max(0, nowMs - t) : null;
+}
+
+/** Why an entry should be dropped instead of retried again, or null to keep retrying (#1416). */
+export function undeliveredGiveUpReason(
+  entry: { attempts: number; recordedAt: string },
+  nowMs: number = Date.now(),
+): string | null {
+  if (entry.attempts >= UNDELIVERED_MAX_ATTEMPTS) {
+    return `${entry.attempts} failed attempts (limit ${UNDELIVERED_MAX_ATTEMPTS})`;
+  }
+  const age = undeliveredAgeMs(entry.recordedAt, nowMs);
+  if (age !== null && age >= UNDELIVERED_MAX_AGE_MS) {
+    return `held for ${Math.round(age / 3_600_000)}h (limit ${Math.round(UNDELIVERED_MAX_AGE_MS / 3_600_000)}h)`;
+  }
+  return null;
 }
 
 /** Drop a session's record once its result has been delivered. Never throws. */
