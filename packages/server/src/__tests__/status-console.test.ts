@@ -100,4 +100,35 @@ describe("buildConsoleModel", () => {
     expect(m.runningSessions).toBe(1);
     expect(m.attention.some((a) => a.text.startsWith("b:"))).toBe(true);
   });
+
+  it("hides superseded red trains and month-old workers, shows sha/tag, prefers git's merge count", () => {
+    const day = 86400;
+    const m = buildConsoleModel({
+      nowMs: NOW,
+      status: {
+        project: { id: "p", name: "proj", repoPath: "/x", defaultBranch: "master" },
+        generatedAt: new Date(NOW).toISOString(),
+        totals: { totalIssues: 0, inProgress: 0, activeWorkspaces: 0, runningSessions: 0 },
+        issues: [],
+      },
+      host: { freeGb: 9, floorGb: 2, hold: false, verify: { active: 0, slots: 2, queued: 0 }, boardCommit: "2dcf8de74aaaaaaa", boardTag: "stable-20261012-3", mergedToday: 31 },
+      workers: { workers: [
+        { name: "old", effectiveStatus: "offline", lastHeartbeatAt: ago(48 * day), workerVersion: "0.1.9-dev.1111111" },
+        { name: "cur", effectiveStatus: "online", lastHeartbeatAt: ago(3), workerVersion: "0.1.9-dev.2dcf8de" },
+        { name: "behind", effectiveStatus: "online", lastHeartbeatAt: ago(3), workerVersion: "0.1.9-dev.1234567" },
+      ] },
+      trains: { trains: [
+        { label: "train-09", state: "landed", startedAt: ago(100), finishedAt: ago(50), memberWorkspaceIds: "[]", gateEvidence: null },
+        { label: "train-08", state: "red", startedAt: ago(500), finishedAt: ago(400), memberWorkspaceIds: "[]", gateEvidence: JSON.stringify({ gateFailure: "no members" }) },
+      ] } as any,
+    });
+    expect(m.attention).toEqual([]);
+    expect(m.mergedToday).toBe(31);
+    expect(m.workers.map((w) => [w.build, w.stale, w.buildStale])).toEqual([["1111111", true, true], ["2dcf8de", false, false], ["1234567", false, true]]);
+    const out = renderConsole(m, { ...base, cols: 120, rows: 40, color: false }).join("\n");
+    expect(out).toContain("(stable-20261012-3 2dcf8de)");
+    expect(out).toContain("1 stale worker");
+    expect(out).toContain("1234567!");
+    expect(out).not.toContain("hb 4172553s");
+  });
 });

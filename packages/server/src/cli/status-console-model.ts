@@ -16,6 +16,10 @@ export interface ConsoleWorker {
   build: string | null;
   heartbeatAt: string | null;
   tickets: ConsoleWorkerTicket[];
+  /** Silent for more than a day: history, collapsed into one line and kept out of ATTENTION. */
+  stale?: boolean;
+  /** Reports a build sha that differs from the board's own. */
+  buildStale?: boolean;
 }
 export interface ConsoleHost {
   freeGb: number | null;
@@ -36,6 +40,8 @@ export interface ConsoleTrain {
   dropped: number;
   gateRuns: number;
   gateFailure: string | null;
+  /** Red, but a later train of the same project landed: history, not attention. */
+  superseded?: boolean;
 }
 export interface ConsoleWindow { pending: number[]; firstSeenAt: string; maxWaitMs: number }
 export interface ConsoleAttention { level: "red" | "yellow"; text: string }
@@ -48,6 +54,9 @@ export interface ConsoleModel {
   project: string;
   generatedAt: string;
   boardVersion: string | null;
+  /** The promoted tag (`stable-20261012-3`) and short commit the board runs from. */
+  boardTag?: string | null;
+  boardCommit?: string | null;
   openIssues: number;
   runningSessions: number;
   host: ConsoleHost | null;
@@ -64,12 +73,37 @@ export interface ConsoleModel {
 export interface ConsolePayloads {
   status: BoardStatusResponse;
   workers?: { workers?: Array<Record<string, any>>; fleet?: { boardWorkerVersion?: string | null } } | null;
-  host?: { freeGb: number | null; floorGb: number; hold: boolean; reason?: string; verify: { active: number; slots: number; queued: number } } | null;
+  host?: { freeGb: number | null; floorGb: number; hold: boolean; reason?: string; verify: { active: number; slots: number; queued: number }; boardCommit?: string | null; boardTag?: string | null; mergedToday?: number | null } | null;
   trains?: MergeTrainsResponse | null;
   window?: MergeTrainWindowResponse | null;
   boardVersion?: string | null;
   errors?: string[];
   nowMs: number;
+}
+
+export const STALE_WORKER_MS = 24 * 3600 * 1000;
+
+/** The commit a worker build names: its `-dev.<sha>` stamp, else a bare hex id; null when it names none. */
+export function workerBuildSha(version: unknown): string | null {
+  if (typeof version !== "string") return null;
+  const m = /(?:^|[-.])dev\.([0-9a-f]{7,40})$/i.exec(version.trim()) ?? /^([0-9a-f]{7,40})$/i.exec(version.trim());
+  return m ? m[1]!.toLowerCase() : null;
+}
+
+/** Heartbeat age as a coarse human unit: `45s`, `12m`, `5h`, `48d`. */
+export function formatAge(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
+}
+
+/** ` (stable-20261012-3 2dcf8de)` when the board knows its tag/commit, else the package version. */
+export function buildLabel(model: ConsoleModel): string {
+  const id = [model.boardTag, model.boardCommit].filter(Boolean).join(" ");
+  const label = id || model.boardVersion;
+  return label ? ` (${label})` : "";
 }
 
 function columnOf(issue: BoardStatusIssue): ConsoleColumn {
@@ -97,19 +131,24 @@ export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
   const dayStart = new Date(nowMs); dayStart.setHours(0, 0, 0, 0);
   const attention: ConsoleAttention[] = [];
 
+  const boardCommit = p.host?.boardCommit?.toLowerCase() ?? null;
   const workers: ConsoleWorker[] = (p.workers?.workers ?? []).map((w) => ({
     name: String(w.name ?? w.workerId ?? w.id ?? "?"),
     os: w.os ?? null,
     status: String(w.effectiveStatus ?? w.status ?? "unknown"),
     load: Number(w.load ?? w.assignments?.length ?? 0),
     maxConcurrency: Number(w.maxConcurrency ?? 0),
-    build: typeof w.workerVersion === "string" ? w.workerVersion.slice(0, 7) : null,
+    build: workerBuildSha(w.workerVersion)?.slice(0, 7) ?? (typeof w.workerVersion === "string" ? w.workerVersion : null),
+    buildStale: boardCommit != null && workerBuildSha(w.workerVersion) != null
+      && !boardCommit.startsWith(workerBuildSha(w.workerVersion)!) && !workerBuildSha(w.workerVersion)!.startsWith(boardCommit),
     heartbeatAt: w.lastHeartbeatAt ?? null,
     tickets: (w.assignments ?? []).map((a: Record<string, any>) => ({
       issueNumber: a.issueNumber ?? null, status: String(a.status ?? ""), startedAt: a.startedAt ?? null,
     })),
   }));
   for (const w of workers) {
+    w.stale = w.status !== "online" && w.heartbeatAt != null && (nowMs - new Date(w.heartbeatAt).getTime() > STALE_WORKER_MS);
+    if (w.stale) continue;
     if (w.status !== "online") attention.push({ level: "yellow", text: `${w.name}: ${w.status}` });
   }
 
@@ -124,11 +163,14 @@ export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
   const trains: ConsoleTrain[] = (p.trains?.trains ?? []).slice(0, 6).map((t) => ({
     label: t.label, state: t.state, startedAt: t.startedAt, finishedAt: t.finishedAt, ...parseEvidence(t),
   }));
+  const latestLandedMs = Math.max(0, ...trains.filter((t) => t.state === "landed").map((t) => new Date(t.startedAt).getTime()));
+  for (const t of trains) t.superseded = t.state === "red" && new Date(t.startedAt).getTime() < latestLandedMs;
   for (const t of trains) {
+    if (t.superseded) continue;
     if (t.state === "red") attention.push({ level: "red", text: `${t.label} red${t.gateFailure ? `: ${t.gateFailure}` : ""}` });
     else if (t.dropped > 0 && !t.finishedAt) attention.push({ level: "yellow", text: `${t.label}: ${t.dropped} member(s) dropped/deferred` });
   }
-  const mergedToday = (p.trains?.trains ?? [])
+  const trainMergedToday = (p.trains?.trains ?? [])
     .filter((t) => t.state === "landed" && t.finishedAt && new Date(t.finishedAt).getTime() >= dayStart.getTime())
     .reduce((n, t) => n + parseEvidence(t).landed, 0);
 
@@ -156,6 +198,8 @@ export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
   return {
     project: status.project.name,
     generatedAt: new Date(nowMs).toISOString(),
+    boardTag: p.host?.boardTag ?? null,
+    boardCommit: boardCommit?.slice(0, 7) ?? null,
     boardVersion: p.boardVersion ?? p.workers?.fleet?.boardWorkerVersion ?? null,
     openIssues: status.issues.length,
     runningSessions: Math.max(remoteRunning + localRunning, 0),
@@ -167,7 +211,8 @@ export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
       : null,
     issues,
     attention,
-    mergedToday,
+    // git's own count of merges since local midnight when the board reports it; the train sum undercounts.
+    mergedToday: p.host?.mergedToday ?? trainMergedToday,
     errors: p.errors ?? [],
   };
 }
