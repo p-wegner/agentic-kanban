@@ -161,6 +161,8 @@ const FOREIGN: Record<string, string> = {
   INIT_CWD: "npm/pnpm — the directory the operator actually ran the command in; CLI path arguments resolve against it, since `pnpm cli --` runs with cwd = packages/server (#1038)",
   // Agent CLIs: their config roots. Renaming any of these would break the CLI, not us.
   CLAUDE_CONFIG_DIR: "Claude Code — its config root; the board reads it to find session state",
+  MISE_DATA_DIR: "mise — where it keeps installed tools; the worker points it at its own dir so toolchain installs are never machine-global (#1371)",
+  MISE_CONFIG_DIR: "mise — its global config dir; the worker points it at its own dir (#1371)",
   CODEX_HOME: "Codex CLI — its config/credential root; worker doctor consults it for provider login (#875)",
   CLAUDE_PROJECT_DIR: "Claude Code — the repo root it sets for hook execution; a scaffolded hook self-locates with it",
   PI_CODING_AGENT_DIR: "Pi — its config/credential root",

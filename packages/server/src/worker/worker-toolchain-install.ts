@@ -16,6 +16,7 @@ import {
   type WorkerToolchainInstallInfo,
 } from "@agentic-kanban/shared/lib/worker-toolchain-install";
 import { missingToolchains, type WorkerToolchains } from "@agentic-kanban/shared/lib/worker-toolchains";
+import { refreshToolchains, toolchainsField } from "../cli/commands/worker-doctor-git-prereqs.js";
 import type { WorkerToBoardMessage } from "@agentic-kanban/shared/lib/worker-protocol";
 
 /** Runs one command; resolves the exit code and combined output, never rejects. `code: null` = could not spawn. */
@@ -222,7 +223,11 @@ export interface DaemonToolchainInstall {
   startPolling(): () => void;
 }
 
-export function createDaemonToolchainInstall(opts: ToolchainInstallerOptions): DaemonToolchainInstall {
+export function createDaemonToolchainInstall(given: Omit<ToolchainInstallerOptions, "redetect">): DaemonToolchainInstall {
+  const opts: ToolchainInstallerOptions = {
+    ...given,
+    redetect: async () => { await refreshToolchains(Date.now() + 1); return toolchainsField().toolchains; },
+  };
   const installer = createToolchainInstaller(opts);
   installer.activate(); // shims of an earlier mise install go back on PATH BEFORE the first toolchain probe
   return {

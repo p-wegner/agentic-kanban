@@ -495,10 +495,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // #1336: a previous daemon's leftover agent trees are killed first (agent-process-tree.ts).
   const workRoot = opts.workRoot ?? defaultWorkerWorkRoot(stateFile); // #1401: own root per non-default state file
   await cleanUpBeforeStart(workRoot, log);
-  const toolchains = createDaemonToolchainInstall({ // #1371
-    policy: opts.toolchainInstall ?? "never", allow: opts.toolchainAllow ?? [], stateFile, log, sendToBoard: (m) => sendToBoard(m),
-    redetect: async () => { await refreshToolchains(Date.now() + 1); return toolchainsField().toolchains; }, heartbeat: () => sendHeartbeat(),
-  });
+  const toolchains = createDaemonToolchainInstall({ policy: opts.toolchainInstall ?? "never", allow: opts.toolchainAllow ?? [], stateFile, log, sendToBoard: (m) => sendToBoard(m), heartbeat: () => sendHeartbeat() }); // #1371
   await Promise.all([refreshPackageManagers(), refreshToolchains(), toolchains.installer.refreshMise()]);
 
   // #1370: the worker's own doctor, summarised. hello/register always carry the current summary; a
