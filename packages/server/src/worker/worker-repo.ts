@@ -13,6 +13,7 @@
 
 import { describeGitTransportFailure } from "./worker-git-token.js";
 import { workerLog } from "./worker-updater.js";
+import { healCorruptCache, isCloneCorruption } from "./worker-repo-heal.js";
 import { loadUndelivered } from "./worker-undelivered.js";
 import { mkdirSync, writeFileSync, existsSync, readdirSync, rmSync, appendFileSync } from "node:fs";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
@@ -194,21 +195,29 @@ export async function provisionWorkerCheckout(
   mkdirSync(join(workRoot, "checkouts"), { recursive: true });
 
   const authEnv = gitAuthEnv(repo);
-  if (!existsSync(join(cacheDir, ".git"))) {
+  const cloneCache = () => {
     phases.fetchKind = "clone";
-    await phase(`clone ${repo.projectId}`, () =>
+    return phase(`clone ${repo.projectId}`, () =>
       gitExecOrThrow(["clone", gitUrl, cacheDir], { timeout: 10 * 60 * 1000, env: authEnv }),
       (ms) => { phases.fetchMs = ms; });
+  };
+  if (!existsSync(join(cacheDir, ".git"))) {
+    await cloneCache();
   } else {
-    // A token is per-assignment Ã¢â‚¬â€ always fetch with the CURRENT credential.
+    // A token is per-assignment - always fetch with the CURRENT credential.
     phases.fetchKind = "fetch";
-    await phase(`fetch ${repo.projectId}`, () =>
-      gitExecOrThrow(["fetch", gitUrl, "+refs/heads/*:refs/remotes/origin/*", "--prune"], {
-        cwd: cacheDir,
-        timeout: 10 * 60 * 1000,
-        env: authEnv,
-      }),
-      (ms) => { phases.fetchMs = ms; });
+    try {
+      await phase(`fetch ${repo.projectId}`, () =>
+        gitExecOrThrow(["fetch", gitUrl, "+refs/heads/*:refs/remotes/origin/*", "--prune"], {
+          cwd: cacheDir,
+          timeout: 10 * 60 * 1000,
+          env: authEnv,
+        }),
+        (ms) => { phases.fetchMs = ms; });
+    } catch (err) {
+      if (!isCloneCorruption(errorMessage(err))) throw err;
+      await healCorruptCache(workRoot, cacheDir, errorMessage(err), cloneCache, log);
+    }
   }
 
   // Stale worktree from a crashed prior session with the same id Ã¢â‚¬â€ remove it.
