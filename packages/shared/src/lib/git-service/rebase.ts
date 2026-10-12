@@ -2,6 +2,10 @@ import { execGit } from "./internal.js";
 import { ensureOnBranch } from "./branch-attach.js";
 import { isAncestor } from "./branch.js";
 import { errorMessage } from "../error-message.js";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
+
+const ATOMIC_TMP_RE = /\.tmp\.\d+\.[0-9a-f]+$/i;
 
 /**
  * True when `baseRef` is already reachable from HEAD — i.e. the branch has ALREADY integrated
@@ -37,8 +41,26 @@ export async function baseAlreadyIntegrated(worktreePath: string, baseRef: strin
  */
 export async function commitLeftoverChanges(worktreePath: string): Promise<number> {
   try {
-    const statusOutput = await execGit(["status", "--porcelain"], worktreePath);
-    const changedFiles = statusOutput.trim().split("\n").filter(Boolean);
+    const statusOutput = await execGit(["status", "--porcelain", "-uall"], worktreePath);
+    let changedFiles = statusOutput.split("\n").filter((l) => l.trim().length > 0);
+    // Atomic-write temp files (`<name>.tmp.<pid>.<hex>`) left by a killed session are never work
+    // product (#1384): delete the untracked ones instead of committing them.
+    const strays = changedFiles
+      .filter((l) => l.startsWith("?? "))
+      .map((l) => l.slice(3).replace(/^"|"$/g, ""))
+      .filter((p) => ATOMIC_TMP_RE.test(p));
+    if (strays.length > 0) {
+      for (const p of strays) {
+        try {
+          await rm(join(worktreePath, p), { force: true });
+        } catch (err) {
+          console.log(`[git] could not delete stray temp file ${p}: ${errorMessage(err)}`);
+        }
+      }
+      console.log(`[git] skipped ${strays.length} atomic-write temp file(s) in ${worktreePath}: ${strays.join(", ")}`);
+      const skipped = new Set(strays.map((p) => `?? ${p}`));
+      changedFiles = changedFiles.filter((l) => !skipped.has(l.replace(/^(\?\? )"(.*)"$/, "$1$2")));
+    }
     if (changedFiles.length === 0) return 0;
     await execGit(["add", "-A"], worktreePath);
     await execGit([
