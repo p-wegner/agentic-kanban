@@ -27,7 +27,7 @@ function makeTempDir(prefix: string): string {
   return dir;
 }
 
-async function seedProject(database: TestDb, repoPath = makeTempDir("onboarding-project-")) {
+async function seedProject(database: TestDb, repoPath = makeTempDir("ak-onboarding-project-")) {
   const projectId = randomUUID();
   await database.insert(schema.projects).values({
     id: projectId,
