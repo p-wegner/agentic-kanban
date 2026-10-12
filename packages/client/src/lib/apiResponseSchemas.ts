@@ -829,6 +829,8 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
   { method: "GET", template: "/api/merge-queue/window", schema: mergeTrainWindowResponse },
   // ── #1197: the train-conflicts group scan, called from the Merge Queue panel ──
   { method: "POST", template: "/api/issues/group-scan", schema: groupScanResult },
+  // ── #1382: repo-derived toolchain chips in the worker dispatch prefs ──
+  { method: "GET", template: "/api/workers/toolchain-suggestions", schema: looseObject({ suggestions: arrayOf(str) }) },
 
   ...WORKER_RUNNERS_ROUTES, // #1089 — the Runners view's four tabs
   ...CONTRIBUTION_ROUTES, // #1264 — the Contributions view

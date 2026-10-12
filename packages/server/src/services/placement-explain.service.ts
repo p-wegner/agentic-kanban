@@ -88,12 +88,14 @@ export type {
   WorkerAssignment,
   WorkerEligibility,
 };
+import { missingToolchains, splitRequirements } from "@agentic-kanban/shared/lib/worker-toolchains";
 import { isPlacementReasonId } from "../lib/placement-explain.types.js";
 import { WorkerDispatchUnavailableError } from "./agent-dispatch.service.js";
 import { releaseWorkerSlot } from "./worker-slot-reservation.service.js";
 import {
   getWorkerFleet,
-  parseRequiredLabels,
+  readPlacementRequirements,
+  requiredToolchainsPrefKey,
   resolveFleetCapacity,
   resolveWorkerPlacement,
   workerDispatchPrefKey,
@@ -171,7 +173,7 @@ export const PLACEMENT_CHECK_CHAIN: readonly PlacementCheckSpec[] = [
     title: "An eligible worker has a free slot",
     resolverMarker: "selectAndReserveWorkerForLaunch(",
     docMarker: /No eligible worker/i,
-    prefKeys: (projectId) => [workerLabelsPrefKey(projectId)],
+    prefKeys: (projectId) => [workerLabelsPrefKey(projectId), requiredToolchainsPrefKey(projectId)],
   },
   {
     id: "branch_for_transport",
@@ -233,6 +235,8 @@ function ineligibleReasonFor(
     load: number;
     providers: string[];
     missingLabels: string[];
+    /** #1382: required toolchains the worker REPORTED and does not meet (`java>=21`). */
+    missingToolchains: string[];
     providerName: ProviderName;
     unresponsive: string | null;
     /** #1381: why the board-side allowed/denied project lists bar the asked-about project. */
@@ -251,6 +255,7 @@ function ineligibleReasonFor(
     return `does not advertise provider '${ctx.providerName}' (has [${ctx.providers.join(",")}])`;
   }
   if (ctx.missingLabels.length > 0) return `missing required label(s) [${ctx.missingLabels.join(",")}]`;
+  if (ctx.missingToolchains.length > 0) return `lacks ${ctx.missingToolchains.join(", ")}`;
   if (ctx.load >= worker.maxConcurrency) return `no free slot (${ctx.load}/${worker.maxConcurrency} in use)`;
   return null;
 }
@@ -290,6 +295,7 @@ async function describeWorkers(
       });
     }
   }
+  const wanted = splitRequirements(requiredLabels);
   return workers.map((w) => {
     const labels = parseJsonList(w.labels);
     const connected = fleet.connections.isConnected(w.id);
@@ -298,7 +304,8 @@ async function describeWorkers(
       connected,
       load,
       providers: parseJsonList(w.providers),
-      missingLabels: requiredLabels.filter((l) => !labels.includes(l)),
+      missingLabels: wanted.labels.filter((l) => !labels.includes(l)),
+      missingToolchains: missingToolchains(wanted.toolchains, w.toolchains),
       providerName,
       unresponsive: fleet.health.unresponsiveReason(w.id),
       projectBarred: projectId ? barredReason(w.desiredSettings?.settings, projectId) : null,
@@ -319,6 +326,7 @@ async function describeWorkers(
       ...(w.packageManagers ? { packageManagers: w.packageManagers } : {}),
       // #1370: the worker's own doctor results, so the Runners tab can show a setup checklist.
       ...(w.doctor ? { doctor: w.doctor } : {}),
+      ...(w.toolchains ? { toolchains: w.toolchains } : {}),
       // #774 — the identity half. `GET /api/workers` is served from this shape now, so the
       // route no longer hands out the raw row and the panel no longer computes a second,
       // wrong "capacity" from it.
@@ -392,7 +400,7 @@ export async function describeFleet(params: {
   const singleton = getWorkerFleet(database);
   const fleet: WorkerFleet = params.registry ? { ...singleton, registry: params.registry } : singleton;
   const requiredLabels = params.projectId
-    ? parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(params.projectId), database))
+    ? await readPlacementRequirements(params.projectId, database)
     : [];
   const workers = await describeWorkers(fleet, providerName, requiredLabels, params.now, database);
   const capacity = await resolveFleetCapacity(fleet, providerName, requiredLabels, params.now);
@@ -481,7 +489,7 @@ async function buildEvalContext(params: {
   const { database, projectId, providerName, branch, now } = params;
   const fullFleet = getWorkerFleet(database);
   const fleet = fleetForProject(fullFleet, projectId); // #1381: allowed/denied projects, as the resolver sees them
-  const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
+  const requiredLabels = await readPlacementRequirements(projectId, database);
   const workers = await describeWorkers(fullFleet, providerName, requiredLabels, now, database, projectId);
   // #1027: the SAME attestation pass the resolver runs, over the same eligible set — an
   // explanation that computed this differently would disagree with the resolver exactly

@@ -3,6 +3,13 @@
 // remote execution service — so the REST routes, the WS route and the session
 // lifecycle all see the SAME fleet state in one board process.
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { workerMeetsRequirements } from "@agentic-kanban/shared/lib/worker-toolchains";
+import {
+  parseRequiredLabels,
+  readPlacementRequirements,
+  requiredToolchainsPrefKey,
+  workerLabelsPrefKey,
+} from "./worker-placement-requirements.js";
 
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -150,17 +157,11 @@ export function getWorkerFleet(database: Database = realDb): WorkerFleet {
 
 // #496: built from the registry, so an unregistered prefix is a COMPILE error.
 const workerDispatchPrefDef = projectPref("worker_dispatch");
-const workerLabelsPrefDef = projectPref("worker_labels");
 const workerStrictPrefDef = projectPref("worker_dispatch_strict");
 export { hostBuilderSlotsPrefKey };
 
 export function workerDispatchPrefKey(projectId: string): string {
   return workerDispatchPrefDef.key(projectId);
-}
-
-/** CSV of labels a worker must carry to run this project's work (e.g. "docker,linux"). */
-export function workerLabelsPrefKey(projectId: string): string {
-  return workerLabelsPrefDef.key(projectId);
 }
 
 /**
@@ -172,9 +173,8 @@ export function workerStrictPrefKey(projectId: string): string {
   return workerStrictPrefDef.key(projectId);
 }
 
-export function parseRequiredLabels(pref: string | undefined): string[] {
-  return (pref ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-}
+// #1382: the label + toolchain requirement prefs live in their own module (god-module ceiling).
+export { parseRequiredLabels, readPlacementRequirements, requiredToolchainsPrefKey, workerLabelsPrefKey };
 
 export interface FleetCapacity {
   /** Workers connected, online and matching the filters. */
@@ -267,8 +267,7 @@ function filterEligibleWorkers(
     })
     .filter((w) => {
       if (requiredLabels.length === 0) return true;
-      const labels = parseLabels(w.labels);
-      return requiredLabels.every((required) => labels.includes(required));
+      return workerMeetsRequirements(requiredLabels, parseLabels(w.labels), w.toolchains);
     })
     .filter((w) => allowWorkerIds === undefined || allowWorkerIds.has(w.id))
     // Load counts DISPATCHED work, not just work that has already spoken (#248) —
@@ -537,7 +536,7 @@ async function resolvePlacementWithReservation(
     const refuseHost = (reason: string): never => {
       throw new DispatchUnavailable(`${reason} and worker dispatch is strict for project ${projectId}`);
     };
-    const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
+    const requiredLabels = await readPlacementRequirements(projectId, database);
     // #651 / #1027: a restricted project goes remote ONLY to a worker that attests a
     // profile the roster permits. Still checked before the reserving selection — the
     // question does not depend on which worker has a free SLOT, and answering it early
@@ -759,9 +758,7 @@ export async function projectCanDispatch(params: {
     // protection by migrating onto the newer key.
     const rosterRaw = await getPreferenceValue(rosterPrefKey(projectId), database);
     const fleetForAttestation = fleetForProject(getWorkerFleet(database), projectId);
-    const labelsForAttestation = parseRequiredLabels(
-      await getPreferenceValue(workerLabelsPrefKey(projectId), database),
-    );
+    const labelsForAttestation = await readPlacementRequirements(projectId, database);
     const gate = await resolveAttestationGate({
       database,
       projectId,
@@ -777,7 +774,7 @@ export async function projectCanDispatch(params: {
     );
     if (dataHandlingBlock.blocked) return { available: false, reason: dataHandlingBlock.reason };
     const fleet = fleetForProject(getWorkerFleet(database), projectId);
-    const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
+    const requiredLabels = await readPlacementRequirements(projectId, database);
     // #748: same refusal the placement makes, one step earlier, so the monitor skips
     // the start with the REAL reason instead of starting and then falling back. Only
     // when no eligible worker shares the board's filesystem: such a worker needs no
@@ -835,7 +832,7 @@ export async function checkStrictLaunchReadiness(params: {
     if ((await getPreferenceValue(workerDispatchPrefKey(projectId), database)) !== "true") return { kind: "proceed" };
     if ((await getPreferenceValue(workerStrictPrefKey(projectId), database)) !== "true") return { kind: "proceed" };
     const fleet = fleetForProject(getWorkerFleet(database), projectId);
-    const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
+    const requiredLabels = await readPlacementRequirements(projectId, database);
     const views = await fleet.registry.listWorkersView(now);
     const eligible = filterEligibleWorkers(fleet, views, providerName, requiredLabels, nowMs);
     if (eligible.length > 0) return { kind: "proceed" };
@@ -846,8 +843,7 @@ export async function checkStrictLaunchReadiness(params: {
           if (list.length > 0 && !list.includes(providerName)) return false;
         } catch { /* unparseable = any */ }
       }
-      const labels = parseLabels(w.labels);
-      return requiredLabels.every((required) => labels.includes(required));
+      return workerMeetsRequirements(requiredLabels, parseLabels(w.labels), w.toolchains);
     });
     const wouldBeEligible = matching.filter((w) => fleet.connections.assignedSessionIds(w.id, nowMs).length < w.maxConcurrency);
     // Draining wins over reconnecting: a draining worker's daemon restarts, so the reconnect
@@ -889,7 +885,7 @@ export async function hostOverflowHasFleetCapacity(params: {
   try {
     if ((await getPreferenceValue(workerDispatchPrefKey(projectId), database)) !== "true") return false;
     const fleet = fleetForProject(getWorkerFleet(database), projectId);
-    const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
+    const requiredLabels = await readPlacementRequirements(projectId, database);
     const capacity = await resolveFleetCapacity(fleet, providerName, requiredLabels, now);
     return capacity.freeSlots > 0;
   } catch (err) {

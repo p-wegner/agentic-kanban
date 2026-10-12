@@ -3,6 +3,7 @@ import { apiFetch, apiDelete } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { formatBuildFreshness, type WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
+import { formatWorkerToolchains } from "@agentic-kanban/shared/lib/worker-toolchains";
 import { startStaggeredPoll } from "../lib/pollScheduler.js";
 import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
 import { WorkerSettingsPanel } from "./WorkerSettingsPanel.js";
@@ -46,6 +47,8 @@ interface WorkerRow {
   /** #1381: what the operator set on the board, and the worker's report of pinned keys / applied rev. */
   desiredSettings?: WorkerSettingsEnvelope;
   settingsReport?: WorkerSettingsReport;
+  /** #1382: toolchains the worker detected on PATH. Absent = it has not said. */
+  toolchains?: Record<string, string>;
 }
 
 interface FleetSummary {
@@ -308,6 +311,9 @@ export function RunnersFleetPanel({ projectId }: RunnersFleetPanelProps) {
                     <div className="mt-2 text-xs text-gray-400 dark:text-gray-500">idle</div>
                   )
                 )}
+                <div className="mt-2 text-xs text-gray-500 dark:text-gray-400" title="Toolchains detected on this worker's PATH">
+                  Toolchains: {worker.toolchains ? formatWorkerToolchains(worker.toolchains) : "not reported"}
+                </div>
                 {(worker.labels.length > 0 || worker.providers.length > 0) && (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {worker.providers.map((p) => (

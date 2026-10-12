@@ -196,6 +196,7 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
         // than up to one heartbeat interval later.
         registry.noteAttestedProfiles(workerId, message.capabilities?.profiles);
         registry.notePackageManagers(workerId, message.capabilities?.packageManagers);
+        registry.noteToolchains?.(workerId, message.capabilities?.toolchains);
         registry.noteProviderNotice(workerId, message.capabilities?.providerNotice);
         registry.noteDoctor(workerId, message.capabilities?.doctor);
       } else if (message.type === "event") {

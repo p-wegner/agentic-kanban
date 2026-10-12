@@ -29,6 +29,7 @@ function fakeRegistry(): WorkerRegistry {
     // answer it — the `hello` case below drives the real `handleMessage`.
     noteAttestedProfiles: vi.fn(),
     notePackageManagers: vi.fn(),
+    noteToolchains: vi.fn(),
     noteProviderNotice: vi.fn(),
     noteDoctor: vi.fn(),
     noteCapabilities: vi.fn(async () => {}),

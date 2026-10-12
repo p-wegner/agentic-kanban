@@ -34,6 +34,7 @@ import {
   type WorkerCapacityInfo,
   type WorkerProfileAttestation,
 } from "@agentic-kanban/shared/lib/worker-protocol";
+import { parseWorkerToolchains, type WorkerToolchains } from "@agentic-kanban/shared/lib/worker-toolchains";
 import { recordWorkerEvent } from "./worker-events.service.js";
 import type { WorkerUpdateReport } from "../lib/worker-update.js";
 
@@ -115,6 +116,8 @@ export interface WorkerView extends Omit<WorkerRow, "tokenHash" | "desiredSettin
   profiles?: WorkerProfileAttestation[];
   /** Package managers on this worker's PATH, as of its last hello/heartbeat (#1369). In memory like `capacity`. */
   packageManagers?: WorkerPackageManagers;
+  /** Toolchains (node/java/go/...) on this worker's PATH, as of its last hello/heartbeat (#1382). In memory like `capacity`. */
+  toolchains?: WorkerToolchains;
   /** Why this worker advertises no usable provider, as of its last hello/heartbeat (#1372). In memory like `capacity`. */
   providerNotice?: string;
   /** The worker's latest doctor summary (#1370). In memory like `capacity`; re-sent on hello and on change. */
@@ -178,6 +181,9 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   /** Package managers each worker has on PATH (#1369). See WorkerView for why not a column. */
   const reportedPackageManagers = new Map<string, WorkerPackageManagers>();
+
+  /** Toolchains each worker detected on PATH (#1382). See WorkerView for why not a column. */
+  const reportedToolchains = new Map<string, WorkerToolchains>();
 
   /** Why a worker advertises no usable provider (#1372); absent = nothing to say. */
   const reportedProviderNotices = new Map<string, string>();
@@ -354,6 +360,7 @@ export function createWorkerRegistry(database: Database = realDb) {
       // permission on the board within one heartbeat rather than at the next re-pairing.
       noteAttestedProfiles(workerId, opts.capabilities.profiles);
       notePackageManagers(workerId, opts.capabilities.packageManagers);
+      noteToolchains(workerId, opts.capabilities.toolchains);
       noteProviderNotice(workerId, opts.capabilities.providerNotice);
       noteDoctor(workerId, opts.capabilities.doctor);
     }
@@ -437,6 +444,7 @@ export function createWorkerRegistry(database: Database = realDb) {
       const capacity = reportedCapacity.get(row.id);
       const profiles = reportedProfiles.get(row.id);
       const packageManagers = reportedPackageManagers.get(row.id);
+      const toolchains = reportedToolchains.get(row.id);
       const providerNotice = reportedProviderNotices.get(row.id);
       const doctor = reportedDoctor.get(row.id);
       const update = reportedUpdates.get(row.id);
@@ -454,6 +462,7 @@ export function createWorkerRegistry(database: Database = realDb) {
         ...(capacity ? { capacity } : {}),
         ...(profiles ? { profiles } : {}),
         ...(packageManagers ? { packageManagers } : {}),
+        ...(toolchains ? { toolchains } : {}),
         ...(providerNotice ? { providerNotice } : {}),
         ...(doctor ? { doctor } : {}),
         ...(update ? { update } : {}),
@@ -497,6 +506,13 @@ export function createWorkerRegistry(database: Database = realDb) {
     const parsed = parseWorkerPackageManagers(raw);
     if (parsed) reportedPackageManagers.set(workerId, parsed);
     else reportedPackageManagers.delete(workerId);
+  }
+
+  /** Record (or clear) a worker's detected toolchains (#1382). A REPLACE: absent = unknown. */
+  function noteToolchains(workerId: string, raw: unknown): void {
+    const parsed = parseWorkerToolchains(raw);
+    if (parsed) reportedToolchains.set(workerId, parsed);
+    else reportedToolchains.delete(workerId);
   }
 
   /** Record (or clear) why a worker advertises no usable provider (#1372). A REPLACE: absent = nothing to say. */
@@ -555,6 +571,7 @@ export function createWorkerRegistry(database: Database = realDb) {
     reportedCapacity.delete(workerId);
     reportedProfiles.delete(workerId);
     reportedPackageManagers.delete(workerId);
+    reportedToolchains.delete(workerId);
     reportedProviderNotices.delete(workerId);
     reportedDoctor.delete(workerId);
     reportedUpdates.delete(workerId);
@@ -576,7 +593,7 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   return {
     mintPairingToken, registerWorker, authenticateWorker, heartbeat, touchHeartbeat,
-    listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles, notePackageManagers, noteProviderNotice, noteDoctor, noteCapabilities,
+    listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles, notePackageManagers, noteToolchains, noteProviderNotice, noteDoctor, noteCapabilities,
     requestUpdate, authenticateAnyWorker, isPairingTokenValid, getDesiredSettings, setDesiredSettings,
   };
 }

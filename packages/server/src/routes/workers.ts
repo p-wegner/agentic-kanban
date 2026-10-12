@@ -40,6 +40,9 @@ import {
   changedSettingKeys, parseWorkerSettings, parseWorkerSettingsReport, type WorkerSettings,
 } from "@agentic-kanban/shared/lib/worker-settings";
 import { classifyWorkerDrop } from "../services/worker-drop-diagnosis.js";
+import { getProjectById } from "../repositories/project.repository.js";
+import { suggestToolchainsForRepo } from "../services/toolchain-suggestions.js";
+import { formatToolchainRequirement } from "@agentic-kanban/shared/lib/worker-toolchains";
 import { getPreferenceValue } from "../repositories/session-lifecycle.repository.js";
 import { listWorkerBranchAssignments } from "../repositories/worker.repository.js";
 import type { ProviderName } from "../services/agent-provider.js";
@@ -178,6 +181,18 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
       floorGb: Number(process.env.SMART_HOOKS_MIN_FREE_GB ?? 2) || 2,
       verify: { active: verifyChainSemaphoreActive(), slots: slots.slots, queued: verifyChainSemaphoreQueueLength() },
     });
+  });
+
+  // #1382: what the project's repo files suggest for `required_toolchains` (lockfile, gradlew,
+  // go.mod, pyproject...), for one-click accept in settings. Suggestions only - nothing is saved.
+  router.get("/toolchain-suggestions", async (c) => {
+    const projectId = c.req.query("projectId");
+    if (!projectId) throw new UnprocessableError("projectId is required");
+    const project = await getProjectById(projectId, database);
+    const repoPath = project?.repoPath;
+    if (!repoPath) return c.json({ suggestions: [] });
+    const suggestions = await suggestToolchainsForRepo(repoPath);
+    return c.json({ suggestions: suggestions.map(formatToolchainRequirement) });
   });
 
   // #774 - the per-worker timeline. Before this the board stored nothing about what a worker

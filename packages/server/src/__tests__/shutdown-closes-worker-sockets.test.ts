@@ -23,7 +23,7 @@ vi.mock("../lib/exit-record.js", () => ({ appendExitRecord: () => {}, recordProc
 import { setupProcessHandlers } from "../startup/process-handlers.js";
 
 function fakeRegistry(): WorkerRegistry {
-  return { onRevoke: () => {}, touchHeartbeat: async () => {}, noteAttestedProfiles: () => {}, notePackageManagers: () => {}, noteProviderNotice: () => {}, noteDoctor: () => {}, noteCapabilities: async () => {} } as unknown as WorkerRegistry;
+  return { onRevoke: () => {}, touchHeartbeat: async () => {}, noteAttestedProfiles: () => {}, notePackageManagers: () => {}, noteToolchains: () => {}, noteProviderNotice: () => {}, noteDoctor: () => {}, noteCapabilities: async () => {} } as unknown as WorkerRegistry;
 }
 
 afterEach(() => vi.restoreAllMocks());

@@ -50,7 +50,7 @@ import {
 import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
 import { createWorkerAgentRunner, dispatchBoardMessage, rawDataToBuffer, type UnpushedResult } from "./worker-agent-runner.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
-import { packageManagersField, refreshPackageManagers } from "../cli/commands/worker-doctor-git-prereqs.js";
+import { packageManagersField, refreshPackageManagers, refreshToolchains, toolchainsField } from "../cli/commands/worker-doctor-git-prereqs.js";
 import { cleanUpBeforeStart } from "./agent-process-tree.js";
 import { attestAndNotice, attestProviders } from "./worker-provider-notice.js";
 export { attestProviders };
@@ -233,8 +233,8 @@ function capabilitiesOf(
     ...(opts.maxConcurrency !== undefined ? { maxConcurrency: opts.maxConcurrency } : {}),
     capacity: capacityOf(),
     ...(profiles && profiles.length > 0 ? { profiles } : {}),
-    // #1369: which package managers this machine has, so placement can name the one a lockfile needs.
-    ...packageManagersField(),
+    // #1369/#1382: package managers + toolchains this machine has, so placement can name what a project needs.
+    ...packageManagersField(), ...toolchainsField(),
     ...(doctor ? { doctor } : {}),
   };
 }
@@ -501,7 +501,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // Best-effort â€” a scan failure must never block pairing/connecting.
   // #1336: a previous daemon's leftover agent trees are killed first (agent-process-tree.ts).
   const workRoot = opts.workRoot ?? defaultWorkerWorkRoot(stateFile); // #1401: own root per non-default state file
-  await cleanUpBeforeStart(workRoot, log); await refreshPackageManagers();
+  await cleanUpBeforeStart(workRoot, log); await Promise.all([refreshPackageManagers(), refreshToolchains()]);
 
   // #1370: the worker's own doctor, summarised. hello/register always carry the current summary; a
   // heartbeat carries it only when it differs from what the board last got (`pending`).
