@@ -1,0 +1,75 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderConsole > snapshot at 80 cols, color 1`] = `
+"[33magentic-kanban  stable-20261012-2 (19b2329)  14:19:38  host 7.3G free / floor 2…[0m
+[1mWORKERS ────────────────────────────────────────────────────────────────────────[0m
+[36m desktop-stable  ●●  2/2  win   19b2329 #1414 review 1m12s · #1406 build 4m03s …[0m
+[36m wsl-stable      ●   1/1  wsl   19b2329 #1381 build 2m40s  hb 2s[0m
+[33m host            verify ■■□ 2/3 · 2 queued · held: host saturated: 1.9 GB < 2 GB[0m
+[1mGATES & TESTS ──────────────────────────────────────────────────────────────────[0m
+[36m ▶ train-12     gating     2 members · gate run 1  6m10s[0m
+[33m ⏸ 2 verify chain(s) queued behind 2 running[0m
+[1mMERGE TRAIN ────────────────────────────────────────────────────────────────────[0m
+ train-11 ✔ 2/2 · train-10 ✔ 2/3 (1 dropped) 2 runs · window #1392 1m20s/2m00s
+[1mPIPELINE (7 open) ──────────────────────────────────────────────────────────────[0m
+[2m Todo    #1337[0m
+ Build   #1381 #1416
+ Review  #1414
+ Merge   #1380
+[1mATTENTION ──────────────────────────────────────────────────────────────────────[0m
+[31m ✖ #1416 exit-check red: temp-dir-namespace-guard (feedback 1/2 sent)[0m
+[33m ⚠ host saturated: 1.9 GB < 2 GB[0m
+[32mMERGED TODAY 22[0m
+[2mq quit · a all issues[0m"
+`;
+
+exports[`renderConsole > snapshot at 80 cols, no color 1`] = `
+"agentic-kanban  stable-20261012-2 (19b2329)  14:19:38  host 7.3G free / floor 2…
+WORKERS ────────────────────────────────────────────────────────────────────────
+ desktop-stable  ●●  2/2  win   19b2329 #1414 review 1m12s · #1406 build 4m03s …
+ wsl-stable      ●   1/1  wsl   19b2329 #1381 build 2m40s  hb 2s
+ host            verify ■■□ 2/3 · 2 queued · held: host saturated: 1.9 GB < 2 GB
+GATES & TESTS ──────────────────────────────────────────────────────────────────
+ ▶ train-12     gating     2 members · gate run 1  6m10s
+ ⏸ 2 verify chain(s) queued behind 2 running
+MERGE TRAIN ────────────────────────────────────────────────────────────────────
+ train-11 ✔ 2/2 · train-10 ✔ 2/3 (1 dropped) 2 runs · window #1392 1m20s/2m00s
+PIPELINE (7 open) ──────────────────────────────────────────────────────────────
+ Todo    #1337
+ Build   #1381 #1416
+ Review  #1414
+ Merge   #1380
+ATTENTION ──────────────────────────────────────────────────────────────────────
+ ✖ #1416 exit-check red: temp-dir-namespace-guard (feedback 1/2 sent)
+ ⚠ host saturated: 1.9 GB < 2 GB
+MERGED TODAY 22
+q quit · a all issues"
+`;
+
+exports[`renderConsole > snapshot at 140 cols, color 1`] = `
+"[33magentic-kanban  stable-20261012-2 (19b2329)  14:19:38  host 7.3G free / floor 2G  7 open · 3 running  refresh 5s[0m
+[1mWORKERS ────────────────────────────────────────────────────────────[0m │ [1mPIPELINE (7 open) ──────────────────────────────────────────────────[0m
+[36m desktop-stable  ●●  2/2  win   19b2329 #1414 review 1m12s · #1406 …[0m │ [2m Todo    #1337[0m
+[36m wsl-stable      ●   1/1  wsl   19b2329 #1381 build 2m40s  hb 2s[0m     │  Build   #1381 #1416
+[33m host            verify ■■□ 2/3 · 2 queued · held: host saturated: …[0m │  Review  #1414
+[1mGATES & TESTS ──────────────────────────────────────────────────────[0m │  Merge   #1380
+[36m ▶ train-12     gating     2 members · gate run 1  6m10s[0m             │ [1mATTENTION ──────────────────────────────────────────────────────────[0m
+[33m ⏸ 2 verify chain(s) queued behind 2 running[0m                         │ [31m ✖ #1416 exit-check red: temp-dir-namespace-guard (feedback 1/2 sen…[0m
+[1mMERGE TRAIN ────────────────────────────────────────────────────────[0m │ [33m ⚠ host saturated: 1.9 GB < 2 GB[0m
+ train-11 ✔ 2/2 · train-10 ✔ 2/3 (1 dropped) 2 runs · window #1392 … │ [32mMERGED TODAY 22[0m
+[2mq quit · a all issues[0m"
+`;
+
+exports[`renderConsole > snapshot at 140 cols, no color 1`] = `
+"agentic-kanban  stable-20261012-2 (19b2329)  14:19:38  host 7.3G free / floor 2G  7 open · 3 running  refresh 5s
+WORKERS ──────────────────────────────────────────────────────────── │ PIPELINE (7 open) ──────────────────────────────────────────────────
+ desktop-stable  ●●  2/2  win   19b2329 #1414 review 1m12s · #1406 … │  Todo    #1337
+ wsl-stable      ●   1/1  wsl   19b2329 #1381 build 2m40s  hb 2s     │  Build   #1381 #1416
+ host            verify ■■□ 2/3 · 2 queued · held: host saturated: … │  Review  #1414
+GATES & TESTS ────────────────────────────────────────────────────── │  Merge   #1380
+ ▶ train-12     gating     2 members · gate run 1  6m10s             │ ATTENTION ──────────────────────────────────────────────────────────
+ ⏸ 2 verify chain(s) queued behind 2 running                         │  ✖ #1416 exit-check red: temp-dir-namespace-guard (feedback 1/2 sen…
+MERGE TRAIN ──────────────────────────────────────────────────────── │  ⚠ host saturated: 1.9 GB < 2 GB
+ train-11 ✔ 2/2 · train-10 ✔ 2/3 (1 dropped) 2 runs · window #1392 … │ MERGED TODAY 22
+q quit · a all issues"
+`;
