@@ -40,10 +40,17 @@ export interface VerifyRunResult {
    * as if the run had actually finished and failed.
    */
   noProgress?: boolean;
+  /** Set when the caller's abort signal killed the run (exit 130, #989) — it never finished. */
+  aborted?: boolean;
 }
 
 export interface VerifyFailure {
   timedOut?: boolean;
+  /**
+   * The gate declined to judge (#1395): the run was cancelled or superseded, so it is neither a
+   * red verdict nor a backoff — it rides out as a HELD gate and is re-queued.
+   */
+  held?: true;
   message: string;
 }
 
@@ -116,9 +123,21 @@ export interface ResolveVerifyOutcomeInput {
   /** Shape a failure's output into the operator-facing summary. */
   summarize: (stdout: string, stderr: string) => string;
   log?: (message: string) => void;
+  /** The gate's abort signal; its `reason` says who interrupted an aborted run (#1395). */
+  signal?: AbortSignal;
 }
 
 const combinedOutput = (r: VerifyRunResult) => `${r.stderr || ""}\n${r.stdout || ""}`;
+
+function cancelledFailure(input: { workspaceId: string; signal?: AbortSignal }, log: (m: string) => void): VerifyFailure {
+  const reason = typeof input.signal?.reason === "string" ? input.signal.reason : "an abort signal (no reason given)";
+  log(`verify for workspace ${input.workspaceId} was cancelled, not failed: ${reason}`);
+  return {
+    timedOut: true, // inconclusive: keeps it out of the outcome ledger and the red-failure paths
+    held: true,
+    message: `verify_script was CANCELLED (${reason}) — not a build/test failure; re-queued, no backoff.`,
+  };
+}
 
 function timeoutFailure(input: { verifyTimeoutMs: number; projectId: string; afterInstall: boolean }): VerifyFailure {
   // A wall-clock kill is NOT a build/test failure (#192) — the same commit can be killed now
@@ -180,6 +199,7 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
   const log = input.log ?? ((m: string) => console.warn(`[pre-merge-gate] ${m}`));
   let result = input.result;
   if (result.exitCode === 0) return { failure: null, failedSuites: [] };
+  if (result.aborted) return { failure: cancelledFailure(input, log), failedSuites: [] };
   // A timeout carries no signal about missing dependencies, so it skips both retries. It names no
   // failed suites either: the run was cut off, so anything after the cut is UNJUDGED and reporting
   // whatever happened to have failed before it would be a partial list presented as a whole one.
@@ -206,6 +226,7 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
     }
   }
   if (result.exitCode === 0) return { failure: null, failedSuites: [] };
+  if (result.aborted) return { failure: cancelledFailure(input, log), failedSuites: [] };
   if (result.timedOut) {
     return { failure: timeoutFailure({ ...input, afterInstall: installed }), failedSuites: [] };
   }
@@ -232,6 +253,7 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
     );
     const retryResult = await input.runVerifyWithRetryScope(retryScopeEnvValue(flake.suites));
     const retried = { retriedSuites: flake.suites, retryReason: flake.reason };
+    if (retryResult.aborted) return { failure: cancelledFailure(input, log), failedSuites, ...retried };
     if (retryResult.exitCode === 0 && !retryResult.timedOut && !retryResult.noProgress) {
       return {
         failure: null,

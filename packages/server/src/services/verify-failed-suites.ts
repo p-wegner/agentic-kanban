@@ -166,7 +166,9 @@ export function parseArchOffenders(message: string): string[] {
       continue;
     }
     // The advice lines between a header and its list are unindented; the list is 2-space indented.
-    const offender = inBlock ? /^ {2}(\S+)/.exec(line) : null;
+    // #1395: dependency-cruiser's own `  warn <rule>: …` lines are also 2-space indented and follow
+    // the god-module block; a severity word is never a file, so it neither names one nor extends the list.
+    const offender = inBlock ? /^ {2}(?!(?:warn|error|info|ignore)\b)(\S+)/.exec(line) : null;
     if (offender) {
       found.add(normalize(offender[1]!));
       seenOffender = true;
