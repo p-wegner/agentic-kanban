@@ -120,7 +120,31 @@ describe("F4/F5: start persists mode and dirs; doctor and auth read them", () =>
     pairedState(s, { mode: "custom", claudeConfigDir: x });
     let env: NodeJS.ProcessEnv = {};
     await runWorkerAuth("claude", { stateFile: s }, authDeps([], { run: (_c, _a, e) => ((env = e), 0) }));
-    expect(env.CLAUDE_CONFIG_DIR).toBe(x);
+    // #1408: the login runs in a scratch dir; the credential is moved into the recorded folder on success.
+    const scratch = env.CLAUDE_CONFIG_DIR!;
+    expect(scratch).not.toBe(x);
+    await runWorkerAuth("claude", { stateFile: s }, authDeps([], {
+      run: (_c, _a, e) => (writeFileSync(join(e.CLAUDE_CONFIG_DIR!, ".credentials.json"), "NEW"), 0),
+    }));
+    expect(readFileSync(join(x, ".credentials.json"), "utf8")).toBe("NEW");
+  });
+
+  it("#1408: a failed or killed login leaves the folder untouched; a usable login is never replaced", async () => {
+    const s = join(home, "d2", "state.json");
+    const x = join(home, "claude-keep");
+    pairedState(s, { mode: "custom", claudeConfigDir: x });
+    mkdirSync(x, { recursive: true });
+    const good = JSON.stringify({ claudeAiOauth: { accessToken: "a", refreshToken: "r", expiresAt: Date.now() + 3_600_000 } });
+    writeFileSync(join(x, ".credentials.json"), good);
+    let ran = false;
+    await runWorkerAuth("claude", { stateFile: s }, authDeps([], { run: () => ((ran = true), 0) }));
+    expect(ran).toBe(false);
+    // forced, but the login dies after writing a stub
+    const code = await runWorkerAuth("claude", { stateFile: s, force: true }, authDeps([], {
+      run: (_c, _a, e) => (writeFileSync(join(e.CLAUDE_CONFIG_DIR!, ".credentials.json"), "STUB"), 130),
+    }));
+    expect(code).toBe(130);
+    expect(readFileSync(join(x, ".credentials.json"), "utf8")).toBe(good);
   });
 });
 
