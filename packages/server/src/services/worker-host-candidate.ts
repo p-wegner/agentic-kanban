@@ -12,6 +12,7 @@
 // `worker-fleet.service.ts` rather than inside it because it is its own concept with its
 // own rules (no slot ledger, no socket, no label filter) and because the fleet service is
 // at its cohesion ceiling.
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import type { WorkerCapacityInfo } from "@agentic-kanban/shared/lib/worker-protocol";
 
 /**
@@ -102,6 +103,45 @@ export function hostCandidate(capacity: WorkerCapacityInfo | undefined): WorkerC
   return { id: HOST_CANDIDATE_ID, load: 0, cap: 1, capacity, isHost: true };
 }
 
+/**
+ * The effective `host_builder_slots` (#1380): the per-project value when set, else the global
+ * one, else null = unlimited (today's behaviour). Unparseable/negative values read as unset —
+ * a typo must not silently turn the host off.
+ */
+export function parseHostBuilderSlots(projectRaw: string | undefined, globalRaw: string | undefined): number | null {
+  for (const raw of [projectRaw, globalRaw]) {
+    const trimmed = raw?.trim();
+    if (!trimmed) continue;
+    const n = Number(trimmed);
+    if (Number.isInteger(n) && n >= 0) return n;
+  }
+  return null;
+}
+
+/** True when the host already runs as many builder/reviewer sessions as `host_builder_slots` allows. */
+export function hostAtBuilderCap(slots: number | null, activeHostSessions: number): boolean {
+  return slots !== null && activeHostSessions >= slots;
+}
+
+/** The recorded-reason fragment for a host held out of the ranking by its cap. */
+export function describeHostBuilderCap(slots: number, activeHostSessions: number): string {
+  return `host at its builder cap (${activeHostSessions}/${slots})`;
+}
+
+/** The cap's verdict for one placement, with the reason fragments it contributes (#1380). */
+export function resolveHostCap(
+  projectRaw: string | undefined,
+  globalRaw: string | undefined,
+  activeHostSessions: number | undefined,
+): { capped: boolean; note: string; noWorkerNote: string } {
+  const slots = parseHostBuilderSlots(projectRaw, globalRaw);
+  if (slots === null || activeHostSessions === undefined || !hostAtBuilderCap(slots, activeHostSessions)) {
+    return { capped: false, note: "", noWorkerNote: "" };
+  }
+  const text = describeHostBuilderCap(slots, activeHostSessions);
+  return { capped: true, note: `; ${text}`, noWorkerNote: `; ${text} but no worker to take it` };
+}
+
 /** How a candidate's headroom reads in a recorded reason — the numbers that decided. */
 export function describeHeadroom(capacity: WorkerCapacityInfo | undefined): string {
   if (!capacity) return "";
@@ -109,3 +149,6 @@ export function describeHeadroom(capacity: WorkerCapacityInfo | undefined): stri
     capacity.thrashing !== "none" ? `, thrashing=${capacity.thrashing}` : ""
   })`;
 }
+
+/** #1380: per-project override of the global `host_builder_slots`. */
+export const hostBuilderSlotsPrefKey = (projectId: string): string => projectPref("host_builder_slots").key(projectId);

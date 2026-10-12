@@ -29,6 +29,7 @@ export function dispatchPrefKeys(projectId: string) {
     dispatch: `worker_dispatch_${projectId}`,
     strict: `worker_dispatch_strict_${projectId}`,
     labels: `worker_labels_${projectId}`,
+    hostSlots: `host_builder_slots_${projectId}`,
   };
 }
 
@@ -37,6 +38,9 @@ export function WorkerDispatchPrefs({ projectId, projectName, onSaved }: WorkerD
   const [dispatch, setDispatch] = useState(false);
   const [strict, setStrict] = useState(false);
   const [labels, setLabels] = useState("");
+  // #1380: global `host_builder_slots` and this project's override; "" = unset.
+  const [hostSlotsGlobal, setHostSlotsGlobal] = useState("");
+  const [hostSlotsProject, setHostSlotsProject] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,18 +58,28 @@ export function WorkerDispatchPrefs({ projectId, projectName, onSaved }: WorkerD
         setDispatch(getBool(settings, keys.dispatch));
         setStrict(getBool(settings, keys.strict));
         setLabels(settings[keys.labels] ?? "");
+        setHostSlotsGlobal(settings.host_builder_slots ?? "");
+        setHostSlotsProject(settings[keys.hostSlots] ?? "");
         setLoaded(true);
       })
       .catch((err) => {
         setError(errorMessage(err));
         setLoaded(true);
       });
-  }, [keys.dispatch, keys.strict, keys.labels]);
+  }, [keys.dispatch, keys.strict, keys.labels, keys.hostSlots]);
 
   useEffect(load, [load]);
 
-  const save = async (next: { dispatch?: boolean; strict?: boolean; labels?: string }) => {
+  const save = async (next: {
+    dispatch?: boolean;
+    strict?: boolean;
+    labels?: string;
+    hostSlotsGlobal?: string;
+    hostSlotsProject?: string;
+  }) => {
     const body = {
+      host_builder_slots: next.hostSlotsGlobal ?? hostSlotsGlobal,
+      [keys.hostSlots]: next.hostSlotsProject ?? hostSlotsProject,
       [keys.dispatch]: String(next.dispatch ?? dispatch),
       [keys.strict]: String(next.strict ?? strict),
       [keys.labels]: next.labels ?? labels,
@@ -157,6 +171,38 @@ export function WorkerDispatchPrefs({ projectId, projectName, onSaved }: WorkerD
           onBlur={() => void save({ labels })}
           className="w-full rounded border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1 text-xs text-ink dark:text-stone-100"
         />
+      </div>
+
+      <div className="text-xs text-gray-600 dark:text-gray-300">
+        <div className="font-medium">Builder slots on this machine</div>
+        <div className="text-gray-500 dark:text-gray-400 mb-1">
+          <code>host_builder_slots</code> — max concurrent builder/reviewer sessions on the board
+          host. Empty = unlimited; <code>0</code> = never build here while an eligible worker is
+          online (still the fallback when none is, unless strict). The project field overrides the
+          global one.
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="number"
+            min={0}
+            value={hostSlotsGlobal}
+            disabled={saving}
+            placeholder="global: unlimited"
+            onChange={(e) => setHostSlotsGlobal(e.target.value)}
+            onBlur={() => void save({ hostSlotsGlobal })}
+            className="w-1/2 rounded border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1 text-xs text-ink dark:text-stone-100"
+          />
+          <input
+            type="number"
+            min={0}
+            value={hostSlotsProject}
+            disabled={saving}
+            placeholder="this project: inherit"
+            onChange={(e) => setHostSlotsProject(e.target.value)}
+            onBlur={() => void save({ hostSlotsProject })}
+            className="w-1/2 rounded border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1 text-xs text-ink dark:text-stone-100"
+          />
+        </div>
       </div>
 
       {error && <div className="text-xs text-red-600 dark:text-red-400">{error}</div>}

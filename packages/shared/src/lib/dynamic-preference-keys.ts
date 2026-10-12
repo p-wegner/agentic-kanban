@@ -133,6 +133,10 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "worker_dispatch",
   "worker_labels",
   "worker_dispatch_strict",
+  // #1380: `host_builder_slots_<id>` overrides the global `host_builder_slots` — max concurrent
+  // builder/reviewer sessions on the board host. Empty = inherit; `0` = host builds nothing
+  // while an eligible worker is online.
+  "host_builder_slots",
   // Pre-merge verify-gate timeout override (#192): the runner's wall-clock budget was
   // a hardcoded 5 minutes with no per-project knob, which becomes a hard ceiling as a
   // compiled-stack project's clean build grows past it.

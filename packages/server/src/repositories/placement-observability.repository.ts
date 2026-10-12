@@ -9,7 +9,10 @@ import { issues, sessions, workers, workspaces } from "@agentic-kanban/shared/sc
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { firstRow } from "../lib/first-row.js";
-import { updateSessionPlacementReason as updateSessionPlacementReasonForSession } from "./session/lifecycle.js";
+import {
+  countRunningHostSessions as countRunningHostSessionsForSessions,
+  updateSessionPlacementReason as updateSessionPlacementReasonForSession,
+} from "./session/lifecycle.js";
 
 export interface SessionPlacementRow {
   sessionId: string;
@@ -85,6 +88,14 @@ export async function listSessionPlacementRows(
     .orderBy(desc(sessions.startedAt))
     .limit(query.limit ?? 50);
   return rows;
+}
+
+/** Host-running session count for the `host_builder_slots` cap (#1380); the read lives in the sessions aggregate. */
+export async function countRunningHostSessions(
+  excludeSessionId?: string,
+  database: Database = db,
+): Promise<number> {
+  return countRunningHostSessionsForSessions(excludeSessionId, database);
 }
 
 /**
