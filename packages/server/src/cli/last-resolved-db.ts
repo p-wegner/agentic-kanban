@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 /**
@@ -14,6 +14,15 @@ import { join } from "node:path";
  */
 const MARKER_DIR = join(homedir(), ".agentic-kanban");
 const MARKER_FILE = join(MARKER_DIR, ".last-cli-db-path");
+
+/** True when the DB lives in the OS temp dir or is a vitest `ak-test-db-*` fixture. */
+export function isTempDbPath(dbPath: string, tmp: string = tmpdir()): boolean {
+  const norm = (p: string) => p.replace(/^file:(\/\/)?/, "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  const p = norm(dbPath);
+  if (/\/ak-test-db-[^/]*\//.test(p)) return true;
+  const t = norm(tmp);
+  return t.length > 0 && p.startsWith(`${t}/`);
+}
 
 /** Pure — exposed separately so the warning text is unit-testable without touching disk. */
 export function dbResolutionFlipWarning(
@@ -61,6 +70,9 @@ export function checkAndRecordDbResolution(loc: {
   url: string;
 }): string | null {
   const currentPath = loc.path ?? loc.url;
+  // A fixture/temp DB (test harness DB_URL=file:<tmp>) is neither a baseline worth
+  // recording nor a flip worth warning about — it would poison the operator's marker.
+  if (isTempDbPath(currentPath)) return null;
   let warning: string | null = null;
   try {
     warning = dbResolutionFlipWarning(loc, readLastResolvedPath());
