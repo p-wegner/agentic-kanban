@@ -1,5 +1,5 @@
 // @covers platform.testing.fixtures [regression-guard]
-// @gate:always-run when:packages/server/src/__tests__/** — scans the __tests__ tree for the /repo-lock hang pattern; imports nothing it checks (#538).
+// @gate:always-run when:packages/server/src/__tests__/**,packages/server/** — scans the __tests__ tree for the /repo-lock hang pattern; imports nothing it checks (#538).
 /**
  * No NEW test suite may drive the real merge/repo-lock path against `repoPath: "/repo"` (#273).
  *
@@ -17,7 +17,8 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
 
 const TESTS_DIR = join(import.meta.dirname);
 
@@ -42,5 +43,15 @@ describe("repoPath literal ratchet (#273)", () => {
         `will hang for its full timeout on a machine without a stray C:\\repo\\.git. ` +
         `Use makeTempRepo() from ./helpers/temp-repo.js instead:\n  ${offenders.join("\n  ")}`,
     ).toEqual([]);
+  });
+
+  // #1419: a test seeding a Windows-style "C:/..." path writes into the checkout on Linux (it is
+  // relative there), and Windows cannot check such a path out (core.protectNTFS).
+  it("no tracked or untracked file has a drive-letter path segment (#1419)", () => {
+    const out = gitExecSync(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
+      cwd: resolve(TESTS_DIR, "../../../.."),
+    });
+    const bad = out.split("\0").filter((p) => /(^|\/)[A-Za-z]:(\/|$)/.test(p));
+    expect(bad).toEqual([]);
   });
 });
