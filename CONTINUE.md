@@ -145,3 +145,11 @@ holds:
   26-ticket direct-master batch, #859's root cause, and the UI overflow sweep.
 - **Earlier:** the #680 gate-hermeticity history, the "batch 1 of N" true-state table (#691), the
   2026-08-21/22/23 waves, the adversarial review, and the hook-cost investigations.
+
+## #1378 WSL worker dispatch — state
+Done in repo: `scripts/fleet-firewall.ps1 -Wsl` (WSL vEthernet-scoped rules) + docs/worker-fleet.md.
+Remaining, host-side (cannot be done from a builder checkout): bind listener for WSL; long-lived distro
+(node 22, corepack pnpm, `agentic-kanban-worker setup`, labels `wsl,pnpm`, start at login); project
+dispatch preference (remote preferred, local fallback, check `worker explain`); `pnpm test:mine` on Linux
+and triage of failures; `.wslconfig` (memory > 6GB, move `autoMemoryReclaim` to `[experimental]`);
+PoolMonX `Schc`/`File` before/after measurement (WSL vs Windows builder). No pool delta measured yet.

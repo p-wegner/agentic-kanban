@@ -345,6 +345,16 @@ override with `-FleetPort` / `-GitPort`. The rules are named `agentic-kanban fle
 interface alias when that adapter exists). From a non-elevated shell the script says so and changes
 nothing. Re-run `-Install` after changing a port; it replaces the old rules.
 
+**WSL worker on the same laptop (#1378).** A distro reaches the host over the WSL vEthernet NAT, not
+the tailnet. `scriptsleet-firewall.ps1 -Install -Wsl` (elevated, distro running) adds a second
+pair, `agentic-kanban wsl fleet|git <port>`, scoped to the `vEthernet (WSL*)` subnet and interface
+(override with `-WslSubnet a.b.c.d/n`) — never LAN/WLAN. `-Remove -Wsl` drops only that pair; the
+tailnet pair is untouched by either. `-Status` warns if a wsl rule is not a private subnet. The
+listener must also bind an address the distro can reach (the vEthernet gateway IP, or all
+interfaces with this rule as the guard). Pairing, `.wslconfig` memory (raise from 6GB; `autoMemoryReclaim`
+belongs under `[experimental]`, not `[wsl2]`), the distro toolchain and the pool-leak measurement are
+host-side steps recorded in `CONTINUE.md`.
+
 `worker doctor-board` WARNs (Windows only) when a bound listener's host is a tailnet address and no
 enabled inbound allow rule scoped to `100.64.0.0/10` covers its port.
 
