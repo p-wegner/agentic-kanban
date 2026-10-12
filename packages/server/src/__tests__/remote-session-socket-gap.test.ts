@@ -210,10 +210,10 @@ describe("a remote session survives a socket gap (#746)", () => {
     fm.fireMessage("w1", { type: "hello", runningSessionIds: [] } as never);
     await vi.waitFor(() => expect(events.some((e) => e.type === "exit")).toBe(true));
 
-    // Landed first (the push may well have completed), then failed — the board never
-    // observed the agent's own verdict, so it is never recorded as a clean success.
+    // Landed first. #1420: the push landed, so the session is finalized from it (exit 0, exit
+    // unknown) and the implement-exit check and review still run, rather than a failure.
     expect(syncCalls).toEqual([{ repoPath: "C:/repo", branch: "feature/ak-1-x" }]);
-    expect(events.find((e) => e.type === "exit")?.exitCode).toBe(1);
+    expect(events.find((e) => e.type === "exit")?.exitCode).toBe(0);
     expect(events.some((e) => e.type === "stderr" && String(e.data).includes("reconnected without this session"))).toBe(true);
     expect(service.trackedSessionIds()).not.toContain("s1");
     // #1319: the session_exit row says the BOARD ended it, so `worker placements` can too.
