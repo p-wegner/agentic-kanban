@@ -450,6 +450,7 @@ import { checkTailnetFirewall } from "./worker-doctor-firewall-check.js";
 // #875's env-aware auth-dir resolution lives in its own module for the same reason.
 import { resolveProviderAuthDir } from "./worker-doctor-provider-auth.js";
 import type { WorkerHarness } from "../../worker/worker-harness.js";
+import { bindDefaultAlias } from "../../worker/worker-profile-aliases.js";
 import { checkHarness } from "./worker-doctor-harness.js";
 
 /**
@@ -615,10 +616,12 @@ export function checkProfileCredentials(
   declared: string[] = [],
   platform: NodeJS.Platform = process.platform,
   aliasEntries: string[] = [],
+  /** #1409: the worker's own claude config dir; an alias source `default` means this, not ~/.claude. */
+  workerClaudeDir?: string,
 ): DoctorCheck[] {
   const checks: DoctorCheck[] = [];
   const used = new Set(declared.map((d) => d.trim()).filter(Boolean));
-  const aliases = parseProfileAliases(aliasEntries);
+  const aliases = bindDefaultAlias(parseProfileAliases(aliasEntries), workerClaudeDir);
   for (const a of aliases) used.add(a.name);
   for (const a of aliases) {
     const dir = aliasSourceDir(a.source, home);
@@ -628,7 +631,7 @@ export function checkProfileCredentials(
       status: missing ? "warn" : "pass",
       detail: missing
         ? `${a.source}=${a.name}: ${dir} does not exist, so '${a.name}' is NOT attested`
-        : `attests '${a.name}' for ${a.source} (${dir}); credentials are checked on that dir`,
+        : `attests '${a.name}' for ${a.source} (${dir}); credentials are read from ${dir}`,
       ...(missing ? { remedy: `fix or drop --profile-alias ${a.source}=${a.name}` } : {}),
     });
   }
@@ -695,7 +698,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   for (const provider of opts.providers) {
     checks.push(...(await checkProvider(provider, opts.home, undefined, opts.harness)));
   }
-  checks.push(...checkProfileCredentials(opts.home, undefined, opts.profiles, undefined, opts.profileAliases));
+  checks.push(...checkProfileCredentials(opts.home, undefined, opts.profiles, undefined, opts.profileAliases, opts.harness?.dirFor("claude")));
   // #1372: while the global launcher is stale or absent, remedies name the shim that always runs the current build.
   const launcher = launcherCommand({
     stateFile: opts.stateFile,
