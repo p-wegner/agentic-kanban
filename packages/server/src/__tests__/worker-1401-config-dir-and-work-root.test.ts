@@ -17,6 +17,9 @@ describe("#1401 work root default", () => {
     expect(a).not.toBe(b);
     expect(a).toBe(join(tmpdir(), "d3-state-work"));
   });
+  it("uses <dir>/work for a standard-named state file in another folder", () => {
+    expect(defaultWorkerWorkRoot(join(tmpdir(), "aks-d5", "worker-state.json"))).toBe(join(tmpdir(), "aks-d5", "work"));
+  });
 });
 
 describe("#1401 trust check reads the harness config dir", () => {
