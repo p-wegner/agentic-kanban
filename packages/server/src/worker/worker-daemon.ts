@@ -57,12 +57,13 @@ export { attestProviders };
 import { defaultWorkerName, sameNamedNotice } from "./worker-name.js";
 import { createDoctorSummaryTracker } from "../cli/commands/worker-doctor-daemon.js";
 import { resolveProfileAliases } from "./worker-profile-aliases.js";
+import { createWorkerSettingsApplier } from "./worker-settings-apply.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
 import type { WorkerHarness } from "./worker-harness.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { createDaemonSelfUpdate, type DaemonSelfUpdate } from "./worker-daemon-update.js";
+import { createDaemonSelfUpdate, type DaemonSelfUpdate, type WorkerSelfUpdateOptions } from "./worker-daemon-update.js";
 import { startWorkerControlServer } from "./worker-control.js";
-import { isWorkerLogInherited, setWorkerLogSink, stampConsoleWithTimestamps, teeLogToFile, workerLogFileFor, type NpmRunner } from "./worker-updater.js";
+import { isWorkerLogInherited, setWorkerLogSink, stampConsoleWithTimestamps, teeLogToFile, workerLogFileFor } from "./worker-updater.js";
 
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const RECONNECT_MIN_MS = 1000;
@@ -165,25 +166,7 @@ export interface WorkerDaemonOptions {
   selfUpdate?: WorkerSelfUpdateOptions;
 }
 
-export interface WorkerSelfUpdateOptions {
-  /** `--auto-update`: act on an advertised build without being asked. */
-  auto: boolean;
-  /**
-   * Hand over to `entry` (the new build's `bin/worker.js`) and end this process. Called with
-   * no sessions running, after the pointer + pending marker are written. Also used to roll
-   * back to the previous entry.
-   */
-  restart: (entry: string) => void | Promise<void>;
-  /** The `bin/worker.js` this process runs from â€” what a rollback returns to. */
-  entry: string;
-  versionsDir?: string;
-  keepVersions?: number;
-  /** How long a freshly-switched build gets to connect before it rolls itself back. */
-  confirmTimeoutMs?: number;
-  npm?: NpmRunner;
-  fetchImpl?: typeof fetch;
-}
-
+export type { WorkerSelfUpdateOptions } from "./worker-daemon-update.js";
 interface WorkerIdentity {
   workerId: string;
   workerToken: string;
@@ -471,6 +454,9 @@ function logShutdownReport(
 
 export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<WorkerDaemonHandle> {
   const stateFile = opts.stateFile ?? defaultWorkerStateFile();
+  // #1381: flags pin their keys; the rest start from what the board last pushed.
+  const settings = createWorkerSettingsApplier({ opts, stateFile, boardUrl: normalizeBoardUrl(opts.boardUrl), log: (line) => log(line) });
+  opts = settings.effectiveOptions(opts);
   // #1340: an injected `log` (tests) is left alone; the real daemon also keeps a log file.
   // #1334: an injected `log` (tests) leaves the global console alone.
   if (!opts.log) stampConsoleWithTimestamps();
@@ -536,7 +522,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
 
   let ws: WebSocket | null = null;
   let stopped = false;
-  let draining = false;
+  let draining = settings.startDrained();
   let fatal: string | null = null;
   /** Re-pairings attempted, and whether one is in flight (#754 â€” see handleUnauthorized). */
   let repairAttempts = 0;
@@ -848,6 +834,11 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     });
   }
 
+  const settingsControls = {
+    setMaxConcurrency: (n: number) => { opts.maxConcurrency = n; runner.setMaxConcurrency(n); },
+    setLabels: (labels: string[]) => { opts.labels = labels; },
+    setDrain: (on: boolean) => { if (on === draining) return; draining = on; if (!on) announceOnline = true; void sendHeartbeat(); },
+  };
   selfUpdate?.begin();
   connect();
 
@@ -896,6 +887,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           authorization: `Bearer ${identity.workerToken}`,
         },
         body: JSON.stringify({
+          settings: settings.report(),
           // Not gated on selfUpdate: a daemon restarted after a Ctrl+C drain without --auto-update
           // (every Linux worker until #1374) otherwise stayed `draining` on the board forever.
           ...(draining ? { status: "draining" } : announceOnline ? { status: "online" } : {}),
@@ -916,6 +908,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       try {
         const body = dropSocketIfBoardHasNone(await res.json(), ws, opts.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS, log);
         selfUpdate?.onHeartbeatResponse(body);
+        settings.onHeartbeatResponse(body, settingsControls);
       } catch {
         /* an older board answers {ok:true} only */
       }

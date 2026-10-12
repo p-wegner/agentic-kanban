@@ -1121,6 +1121,13 @@
       "when": 1790100100000,
       "tag": "0159_workspace_train_siding_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 160,
+      "version": "6",
+      "when": 1791795871597,
+      "tag": "0160_worker_desired_settings",
+      "breakpoints": true
     }
   ]
 }

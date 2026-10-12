@@ -20,6 +20,11 @@ export const workers = sqliteTable("workers", {
   /** JSON array of agent providers available on the worker, e.g. ["claude","codex"]. */
   providers: text("providers"),
   maxConcurrency: integer("max_concurrency").notNull().default(1),
+  /**
+   * #1381: the settings an operator set for this worker on the board, as `{rev, settings}` JSON
+   * (see `lib/worker-settings.ts`). NULL = nothing set. The worker's own flags still win per key.
+   */
+  desiredSettings: text("desired_settings"),
   status: text("status").notNull().default("online"),
   tokenHash: text("token_hash").notNull(),
   lastHeartbeatAt: text("last_heartbeat_at"),

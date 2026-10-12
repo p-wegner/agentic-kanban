@@ -75,6 +75,8 @@ export const WORKER_EVENT_TYPES = [
   "ref_held",
   "ref_landed",
   "ref_discarded",
+  // #1381: an operator changed this worker's settings on the board (the audit half of the settings panel).
+  "settings_changed",
 ] as const;
 
 export type WorkerEventType = (typeof WORKER_EVENT_TYPES)[number];
@@ -85,7 +87,7 @@ export type WorkerEventType = (typeof WORKER_EVENT_TYPES)[number];
  * directions, so neither half can drift from the other.
  *
  * Where each one is written (#801):
- *   registered, protocol_mismatch, ref_landed, ref_discarded -> `routes/workers.ts`
+ *   registered, protocol_mismatch, ref_landed, ref_discarded, settings_changed -> `routes/workers.ts`
  *   connected, disconnected                                  -> `services/worker-fleet.service.ts`
  *   assigned, session_exit, undelivered_result               -> `services/agent-remote-events.ts`
  *   ref_held                                                 -> `services/worker-incoming-refs.service.ts`
@@ -103,6 +105,7 @@ export const EMITTED_TYPES: readonly WorkerEventType[] = [
   "ref_held",
   "ref_landed",
   "ref_discarded",
+  "settings_changed",
 ] as const;
 
 /**

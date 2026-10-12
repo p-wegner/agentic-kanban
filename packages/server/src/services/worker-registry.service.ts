@@ -41,6 +41,11 @@ export const PAIRING_TOKEN_TTL_MS = 10 * 60 * 1000;
 /** A worker whose last heartbeat is older than this reads as offline. */
 export const WORKER_HEARTBEAT_STALE_MS = 90 * 1000;
 
+import {
+  parseWorkerSettingsEnvelope,
+  type WorkerSettings, type WorkerSettingsEnvelope, type WorkerSettingsReport,
+} from "@agentic-kanban/shared/lib/worker-settings";
+
 export const WORKER_STATUSES = ["online", "draining", "offline"] as const;
 export type WorkerStatus = (typeof WORKER_STATUSES)[number];
 
@@ -76,7 +81,7 @@ export const PROTOCOL_MISMATCH_PREFIX = "incompatible worker protocol:";
  * credential digest, and shipping it to the UI/CLI would hand every board client
  * material to brute-force a worker token offline. It stays inside this service.
  */
-export interface WorkerView extends Omit<WorkerRow, "tokenHash"> {
+export interface WorkerView extends Omit<WorkerRow, "tokenHash" | "desiredSettings"> {
   /** Stored status downgraded to "offline" when the heartbeat is stale/absent. */
   effectiveStatus: WorkerStatus;
   /**
@@ -122,6 +127,13 @@ export interface WorkerView extends Omit<WorkerRow, "tokenHash"> {
   update?: WorkerUpdateReport;
   /** A board-side `worker update` is waiting for this worker's next heartbeat to pick it up. */
   updateRequested?: boolean;
+  /**
+   * #1381: what an operator set for this worker on the board, and what the worker said about
+   * its side (pinned keys, last applied rev). `labels`/`providers`/`maxConcurrency`/`status`
+   * above already carry the OVERLAID values placement reads.
+   */
+  desiredSettings?: WorkerSettingsEnvelope;
+  settingsReport?: WorkerSettingsReport;
 }
 
 /** Constant-time compare that does not leak length via an early return. */
@@ -175,6 +187,9 @@ export function createWorkerRegistry(database: Database = realDb) {
   /** Self-update state each worker last reported, and the workers asked to update NOW (#1338). */
   const reportedUpdates = new Map<string, WorkerUpdateReport>();
   const updateRequests = new Set<string>();
+
+  /** What each worker said about its side of the settings (#1381): pinned keys + applied rev. */
+  const reportedSettings = new Map<string, WorkerSettingsReport>();
 
   /**
    * Last EFFECTIVE status observed per worker, so `status_change` can be emitted on a
@@ -294,8 +309,10 @@ export function createWorkerRegistry(database: Database = realDb) {
       workerVersion?: string;
       /** #1338: the worker's self-update state. */
       update?: WorkerUpdateReport;
+      /** #1381: pinned keys + last applied settings rev. */
+      settingsReport?: WorkerSettingsReport;
     },
-  ): Promise<{ ok: boolean; error?: string; updateNow?: boolean }> {
+  ): Promise<{ ok: boolean; error?: string; updateNow?: boolean; config?: WorkerSettingsEnvelope }> {
     if (!(await authenticateWorker(workerId, token))) {
       return { ok: false, error: "unauthorized" };
     }
@@ -345,7 +362,37 @@ export function createWorkerRegistry(database: Database = realDb) {
       // The request is delivered once the worker is on it (updating) or has given up (failed).
       if (opts.update.state !== "current") updateRequests.delete(workerId);
     }
-    return { ok: true, updateNow: updateRequests.has(workerId) };
+    if (opts?.settingsReport) reportedSettings.set(workerId, opts.settingsReport);
+    // #1381: the desired settings ride the heartbeat response; the worker applies by `rev`.
+    const config = (await getDesiredSettings(workerId)) ?? undefined;
+    return { ok: true, updateNow: updateRequests.has(workerId), ...(config ? { config } : {}) };
+  }
+
+  async function getDesiredSettings(workerId: string): Promise<WorkerSettingsEnvelope | null> {
+    const row = await workerRepo.getWorkerById(workerId, database);
+    return row ? parseWorkerSettingsEnvelope(row.desiredSettings) : null;
+  }
+
+  /**
+   * #1381: REPLACE this worker's desired settings. Keys a worker has pinned with a flag are
+   * stored anyway (so unpinning later takes effect) but are never applied by it. `drain` also
+   * moves the stored status now, so placement stops/starts without waiting for the next beat.
+   * Null = no such worker.
+   */
+  async function setDesiredSettings(
+    workerId: string, settings: WorkerSettings, now?: string,
+  ): Promise<{ before: WorkerSettings; envelope: WorkerSettingsEnvelope } | null> {
+    const row = await workerRepo.getWorkerById(workerId, database);
+    if (!row) return null;
+    const at = now ?? new Date().toISOString();
+    const before = parseWorkerSettingsEnvelope(row.desiredSettings)?.settings ?? {};
+    const envelope: WorkerSettingsEnvelope = { rev: at, settings };
+    await workerRepo.updateWorkerDesiredSettings(workerId, JSON.stringify(envelope), at, database);
+    if (settings.drain === true && row.status === "online") await workerRepo.updateWorkerStatus(workerId, "draining", at, database);
+    if (settings.drain !== true && before.drain === true && row.status === "draining") {
+      await workerRepo.updateWorkerStatus(workerId, "online", at, database);
+    }
+    return { before, envelope };
   }
 
   /** Ask one worker to update on its next heartbeat (#1338). False = no such worker. */
@@ -383,7 +430,7 @@ export function createWorkerRegistry(database: Database = realDb) {
     const nowMs = now ? new Date(now).getTime() : Date.now();
     const rows = await workerRepo.listWorkers(database);
     return rows.map((row) => {
-      const { tokenHash: _tokenHash, ...safe } = row;
+      const { tokenHash: _tokenHash, desiredSettings: _desiredSettings, ...safe } = row;
       const reported = reportedVersions.get(row.id);
       const current = effectiveStatus(row, nowMs);
       noteEffectiveStatus(row, current);
@@ -393,9 +440,15 @@ export function createWorkerRegistry(database: Database = realDb) {
       const providerNotice = reportedProviderNotices.get(row.id);
       const doctor = reportedDoctor.get(row.id);
       const update = reportedUpdates.get(row.id);
+      const desired = parseWorkerSettingsEnvelope(row.desiredSettings);
+      const settingsReport = reportedSettings.get(row.id);
+      const overlay = desired ? overlaySettings(desired.settings, settingsReport) : {};
       return {
         ...safe,
-        effectiveStatus: current,
+        ...overlay,
+        effectiveStatus: current === "online" && desired?.settings.drain === true ? "draining" : current,
+        ...(desired ? { desiredSettings: desired } : {}),
+        ...(settingsReport ? { settingsReport } : {}),
         ...(reported?.protocolVersion !== undefined ? { protocolVersion: reported.protocolVersion } : {}),
         ...(reported?.workerVersion !== undefined ? { workerVersion: reported.workerVersion } : {}),
         ...(capacity ? { capacity } : {}),
@@ -407,6 +460,22 @@ export function createWorkerRegistry(database: Database = realDb) {
         ...(updateRequests.has(row.id) ? { updateRequested: true } : {}),
       };
     });
+  }
+
+  /**
+   * The board's desired value wins over what the worker last declared, EXCEPT for a key the
+   * worker pinned with a start flag (#1381). Applied at read time because the worker's own
+   * capabilities overwrite the `workers` columns on every beat, until it has applied the push.
+   */
+  function overlaySettings(
+    settings: WorkerSettings, report: WorkerSettingsReport | undefined,
+  ): Partial<Pick<WorkerRow, "labels" | "providers" | "maxConcurrency">> {
+    const pinned = new Set<string>(report?.pinned ?? []);
+    const out: Partial<Pick<WorkerRow, "labels" | "providers" | "maxConcurrency">> = {};
+    if (settings.maxConcurrency !== undefined && !pinned.has("maxConcurrency")) out.maxConcurrency = settings.maxConcurrency;
+    if (settings.labels !== undefined && !pinned.has("labels")) out.labels = JSON.stringify(settings.labels);
+    if (settings.providers !== undefined && !pinned.has("providers")) out.providers = JSON.stringify(settings.providers);
+    return out;
   }
 
   /**
@@ -490,6 +559,7 @@ export function createWorkerRegistry(database: Database = realDb) {
     reportedDoctor.delete(workerId);
     reportedUpdates.delete(workerId);
     updateRequests.delete(workerId);
+    reportedSettings.delete(workerId);
     lastEffectiveStatus.delete(workerId);
     // Deleting the row only stops NEW authentications. A revoked worker also
     // holds a live socket and (for git transport) working git tokens — both must
@@ -507,7 +577,7 @@ export function createWorkerRegistry(database: Database = realDb) {
   return {
     mintPairingToken, registerWorker, authenticateWorker, heartbeat, touchHeartbeat,
     listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles, notePackageManagers, noteProviderNotice, noteDoctor, noteCapabilities,
-    requestUpdate, authenticateAnyWorker, isPairingTokenValid,
+    requestUpdate, authenticateAnyWorker, isPairingTokenValid, getDesiredSettings, setDesiredSettings,
   };
 }
 

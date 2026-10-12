@@ -17,6 +17,7 @@
 // the behaviour and imports its vocabulary from here, and the leaf consumers
 // depend only on this file. Keep this module free of anything that reaches the db.
 import type { ProviderName } from "../services/agent-provider/types.js";
+import type { WorkerSettingsEnvelope, WorkerSettingsReport } from "@agentic-kanban/shared/lib/worker-settings";
 import type { WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
 import type { WorkerCapacityInfo, WorkerDoctorSummary, WorkerPackageManagers, WorkerProfileAttestation } from "@agentic-kanban/shared/lib/worker-protocol";
 import type { WorkerUpdateReport } from "./worker-update.js";
@@ -179,6 +180,12 @@ export interface WorkerEligibility {
    * profile-restricted project reads as #651's refusal, never as "any profile".
    */
   attestedProfiles?: WorkerProfileAttestation[];
+  /**
+   * #1381: the settings an operator set on the board for this worker, and what the worker said
+   * about its side (keys pinned by its start flags, last applied revision).
+   */
+  desiredSettings?: WorkerSettingsEnvelope;
+  settingsReport?: WorkerSettingsReport;
   /** Package managers this worker reported on PATH (#1369). Absent = it has not said. */
   packageManagers?: WorkerPackageManagers;
   /** The worker's latest doctor summary (#1370). Absent = it has not sent one. */

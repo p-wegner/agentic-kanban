@@ -180,6 +180,16 @@ A worker reads `offline` once its heartbeat is older than 90 s
 last reported and its package version. `?` means it has not heartbeated since this board
 process started (the values are held in memory, not in a column), not that it is old.
 
+**Editing a worker from the board (#1381).** Runners tab -> a worker's **Settings**: max
+concurrency, labels, providers, profile alias, allowed/denied projects, drain. The board stores
+them (`workers.desired_settings`, `PUT /api/workers/:id/settings`), returns them as `config` in
+the heartbeat response (<= 30 s), and the worker applies concurrency, labels and drain live and
+keeps them in its state file; providers and profile alias apply on the next restart. A key the
+worker was started with a flag for (`--labels`, `--max-concurrency`, `--providers`,
+`--profile-alias`) is **pinned**: the flag wins, the panel shows it read-only. Allowed/denied
+projects are enforced by the board in placement (`fleetForProject`; `worker explain` names the
+bar). Each change is a `settings_changed` row in the worker's event timeline.
+
 ## 5. Opting a project in, and strict dispatch
 
 > **There is a UI for this now (#774).** Command palette → **Worker Fleet** → *Remote

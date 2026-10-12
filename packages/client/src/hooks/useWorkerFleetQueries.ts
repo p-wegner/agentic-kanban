@@ -1,5 +1,6 @@
 import { useQuery, type QueryClient } from "@tanstack/react-query";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPut } from "../lib/api.js";
+import type { WorkerSettings } from "@agentic-kanban/shared/lib/worker-settings";
 import type { WorkerConnectStep } from "@agentic-kanban/shared/lib/worker-connect-steps";
 import type { BootstrapOs, WorkerBootstrap } from "@agentic-kanban/shared/lib/worker-bootstrap-steps";
 
@@ -86,4 +87,9 @@ export interface ExplainResponse {
  *  button click, not on mount, so there is nothing to keep warm in the cache. */
 export function fetchWorkerExplain(params: URLSearchParams) {
   return apiFetch<ExplainResponse>(`/api/workers/explain?${params}`);
+}
+
+/** #1381: replace one worker's board-side settings. The worker applies them on its next heartbeat. */
+export function saveWorkerSettings(workerId: string, settings: WorkerSettings) {
+  return apiPut<{ ok: boolean; changed: string[] }>(`/api/workers/${workerId}/settings`, { settings });
 }
