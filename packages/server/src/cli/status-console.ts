@@ -1,5 +1,5 @@
 import {
-  CONSOLE_COLUMNS,
+  CONSOLE_COLUMNS, buildLabel, formatAge,
   type ConsoleHost, type ConsoleModel, type ConsoleTrain, type ConsoleWorker,
 } from "./status-console-model.js";
 export * from "./status-console-model.js";
@@ -59,7 +59,7 @@ function headerSection(model: ConsoleModel, opts: ConsoleRenderOptions): Section
     ? `host ${model.host.freeGb != null ? `${model.host.freeGb.toFixed(1)}G` : "?"} free / floor ${model.host.floorGb}G`
     : "host n/a";
   const lines: Line[] = [{
-    text: `agentic-kanban  ${model.project}${model.boardVersion ? ` (${model.boardVersion})` : ""}  ${new Date(opts.nowMs).toLocaleTimeString("en-GB")}  ${hostBit}  ${model.openIssues} open · ${model.runningSessions} running  refresh ${opts.intervalSec ?? 5}s`,
+    text: `agentic-kanban  ${model.project}${buildLabel(model)}  ${new Date(opts.nowMs).toLocaleTimeString("en-GB")}  ${hostBit}  ${model.openIssues} open · ${model.runningSessions} running  refresh ${opts.intervalSec ?? 5}s`,
     tone: model.host?.hold ? "yellow" : "head",
   }];
   for (const e of model.errors) lines.push({ text: `! ${e}`, tone: "red" });
@@ -69,11 +69,11 @@ function headerSection(model: ConsoleModel, opts: ConsoleRenderOptions): Section
 function workerLine(w: ConsoleWorker, g: Glyphs): Line {
   const dots = g.dot.repeat(Math.min(w.load, 6)) || " ";
   const tickets = w.tickets.map((t) => `${issueRef(t.issueNumber)} ${t.status} ${since(t.startedAt, g.nowMs)}`).join(" · ");
-  const hb = w.heartbeatAt ? `hb ${Math.max(0, Math.floor((g.nowMs - new Date(w.heartbeatAt).getTime()) / 1000))}s` : "hb -";
+  const hb = w.heartbeatAt ? `hb ${formatAge(g.nowMs - new Date(w.heartbeatAt).getTime())}` : "hb -";
   const state = w.status === "online" ? "" : ` [${w.status}]`;
   return {
-    text: ` ${w.name.padEnd(15)} ${dots.padEnd(3)} ${w.load}/${w.maxConcurrency}  ${(w.os ?? "").padEnd(5)} ${(w.build ?? "-").padEnd(7)} ${tickets}${state}  ${hb}`,
-    tone: w.status !== "online" ? "yellow" : w.load > 0 ? "cyan" : null,
+    text: ` ${w.name.padEnd(15)} ${dots.padEnd(3)} ${w.load}/${w.maxConcurrency}  ${(w.os ?? "").padEnd(5)} ${`${w.build ?? "-"}${w.buildStale ? "!" : ""}`.padEnd(7)} ${tickets}${state}  ${hb}`,
+    tone: w.status !== "online" || w.buildStale ? "yellow" : w.load > 0 ? "cyan" : null,
   };
 }
 
@@ -85,11 +85,13 @@ function hostLine(h: ConsoleHost, g: Glyphs): Line {
   };
 }
 
-function workersSection(model: ConsoleModel, g: Glyphs): Section | null {
+function workersSection(model: ConsoleModel, g: Glyphs, allIssues: boolean | undefined): Section | null {
   if (model.workers.length === 0 && !model.host) return null;
   const lines: Line[] = [heading("WORKERS")];
   if (model.workers.length === 0) lines.push({ text: " no workers registered", tone: "dim" });
-  for (const w of model.workers) lines.push(workerLine(w, g));
+  const stale = model.workers.filter((w) => w.stale);
+  for (const w of model.workers) if (!w.stale || allIssues) lines.push(workerLine(w, g));
+  if (stale.length > 0 && !allIssues) lines.push({ text: ` ${stale.length} stale worker${stale.length === 1 ? "" : "s"} (silent > 1d; a shows)`, tone: "dim" });
   if (model.host) lines.push(hostLine(model.host, g));
   return { id: "workers", lines, keep: true };
 }
@@ -116,7 +118,7 @@ function trainSection(model: ConsoleModel, g: Glyphs): Section | null {
   });
   const w = model.window;
   if (w) parts.push(`window ${w.pending.map(issueRef).join(" ")} ${since(w.firstSeenAt, g.nowMs)}${w.maxWaitMs ? `/${formatElapsed(w.maxWaitMs)}` : ""}`);
-  const bad = model.trains.some((t) => !isLive(t) && t.state === "red");
+  const bad = model.trains.some((t) => !isLive(t) && t.state === "red" && !t.superseded);
   return { id: "train", lines: [heading("MERGE TRAIN"), { text: ` ${parts.join(" · ")}`, tone: bad ? "red" : null }] };
 }
 
@@ -199,7 +201,7 @@ export function renderConsole(model: ConsoleModel, opts: ConsoleRenderOptions): 
 
   const merged: Section = { id: "merged", lines: [{ text: `MERGED TODAY ${model.mergedToday}`, tone: model.mergedToday > 0 ? "green" : "dim" }] };
   let active = [
-    headerSection(model, opts), workersSection(model, g), gatesSection(model, g), trainSection(model, g),
+    headerSection(model, opts), workersSection(model, g, opts.allIssues), gatesSection(model, g), trainSection(model, g),
     pipelineSection(model, opts.allIssues), attentionSection(model, g), merged,
   ].filter((s): s is Section => s !== null);
 

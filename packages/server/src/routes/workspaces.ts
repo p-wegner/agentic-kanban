@@ -395,7 +395,11 @@ export function createWorkspacesRoute(
     }
 
     const result = await workspaceService.createWorkspace(input);
-    return c.json(result, 201);
+    // #1425: the builder launch is deferred past this response, so its session id is not known yet.
+    // Say that one IS coming (and that /launch would be refused with 409 once it runs) so a caller
+    // does not launch a second builder; the deferred launch itself is a no-op if one already runs.
+    const autoLaunchScheduled = !result.error && result.status !== "blocked";
+    return c.json({ ...result, autoLaunchScheduled }, 201);
   });
 
   // GET /api/workspaces/:id
