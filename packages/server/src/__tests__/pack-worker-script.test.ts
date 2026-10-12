@@ -1,4 +1,4 @@
-// @gate:always-run when:scripts/pack-worker.mjs — spawns `scripts/pack-worker.mjs` and reads its source; nothing here
+// @gate:always-run when:scripts/pack-worker.mjs,scripts/pack-stamp.mjs,scripts/promote.mjs — spawns `scripts/pack-worker.mjs` and reads its source; nothing here
 // is reachable through this package's import graph, so scoped test selection would miss it.
 /**
  * `scripts/pack-worker.mjs` is the fast track for handing a worker tarball to a machine
@@ -20,6 +20,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, readFileSync } fro
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { makeTempRepo } from "./helpers/temp-repo.js";
+// @ts-expect-error plain .mjs script
+import { isPackStampDiff, restorePackStamp } from "../../../../scripts/pack-stamp.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..", "..", "..");
@@ -118,5 +121,33 @@ describe("pack-worker.mjs — the default build skips the React client (#845)", 
 
   it("points a failed client build at the flag that gets you a tarball anyway", () => {
     expect(source).toContain("re-run WITHOUT --with-client");
+  });
+});
+
+const diff = (a: string, b: string) => `--- a/x\n+++ b/x\n@@ -3 +3 @@\n-  "version": "${a}",\n+  "version": "${b}",\n`;
+
+describe("pack stamp recognition (#1404)", () => {
+  it("accepts exactly the -dev.<sha> stamp", () => {
+    expect(isPackStampDiff(diff("0.1.9", "0.1.9-dev.11dc8da40"))).toBe(true);
+  });
+  it("rejects other version edits and extra changes", () => {
+    expect(isPackStampDiff(diff("0.1.9", "0.2.0"))).toBe(false);
+    expect(isPackStampDiff(diff("0.1.9", "0.1.8-dev.abc"))).toBe(false);
+    expect(isPackStampDiff(diff("0.1.9", "0.1.9-dev.abc") + '-  "a": 1\n+  "a": 2\n')).toBe(false);
+  });
+  it("restores a stamped file in a real checkout, leaves others alone", () => {
+    const dir = makeTempRepo("ak-pack-stamp");
+    const g = (...a: string[]) => execFileSync("git", a, { cwd: dir });
+    g("init", "-q");
+    mkdirSync(join(dir, "packages/server"), { recursive: true });
+    const f = join(dir, "packages/server/package.json");
+    const orig = '{\n  "version": "0.1.9"\n}\n';
+    writeFileSync(f, orig);
+    g("add", "."); g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "i");
+    writeFileSync(f, '{\n  "version": "0.1.9-dev.abc123"\n}\n');
+    expect(restorePackStamp(dir)).toBe(true);
+    expect(readFileSync(f, "utf8").replaceAll("\r\n", "\n")).toBe(orig);
+    writeFileSync(f, '{\n  "version": "9.9.9"\n}\n');
+    expect(restorePackStamp(dir)).toBe(false);
   });
 });

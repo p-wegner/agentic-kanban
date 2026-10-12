@@ -39,7 +39,6 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "n
 import { homedir } from "node:os";
 import { resolve, dirname, join, delimiter, extname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { restorePackStamp } from "./pack-stamp.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -205,6 +204,8 @@ if (!skipBuild) {
 }
 
 // #1404: a previous pack killed mid-run leaves its stamp in the tracked file — heal it first.
+// Imported lazily: a bare copy of this script (no sibling modules) must still reach its ACP_CLI hint.
+const { restorePackStamp } = await import("./pack-stamp.mjs");
 if (restorePackStamp(root)) console.log("[pack-worker] restored a leftover version stamp from an interrupted pack");
 const original = readFileSync(pkgJsonPath, "utf8");
 const pkg = JSON.parse(original);

@@ -1,7 +1,7 @@
 // A killed `pack-worker` leaves packages/server/package.json stamped `"version": "x-dev.<sha>"`
 // (#1404). The stamp is recognised EXACTLY: the only changed line is the version, going from a
 // plain version to the same version plus `-dev.<hex>`. Anything else is not ours to touch.
-import { spawnSync } from "node:child_process";
+import { gitExecSyncResult } from "./git-exec.mjs";
 
 export const PACK_STAMP_PATH = "packages/server/package.json";
 
@@ -19,7 +19,7 @@ export function isPackStampDiff(diffText) {
 
 /** Restores a leftover stamp in `cwd`'s checkout. Returns true when it did. */
 export function restorePackStamp(cwd) {
-  const diff = spawnSync("git", ["diff", "-U0", "--", PACK_STAMP_PATH], { cwd, encoding: "utf8" });
-  if (diff.status !== 0 || !diff.stdout || !isPackStampDiff(diff.stdout)) return false;
-  return spawnSync("git", ["checkout", "--", PACK_STAMP_PATH], { cwd }).status === 0;
+  const diff = gitExecSyncResult(["diff", "-U0", "--", PACK_STAMP_PATH], { cwd });
+  if (diff.code !== 0 || !diff.stdout || !isPackStampDiff(diff.stdout)) return false;
+  return gitExecSyncResult(["checkout", "--", PACK_STAMP_PATH], { cwd }).code === 0;
 }
