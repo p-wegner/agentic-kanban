@@ -55,7 +55,8 @@ import { getWorkerBuildService, type WorkerBuildService } from "../services/work
 import type { BoardEventSink } from "../services/board-events.js";
 import { buildWorkerConnectSteps } from "../lib/worker-connect-steps.js";
 import { BOOTSTRAP_TOKEN_PLACEHOLDER, buildWorkerBootstrap } from "@agentic-kanban/shared/lib/worker-bootstrap-steps";
-import { resolveFleetPort, resolveFleetHost } from "../services/fleet-listener.service.js";
+import { parseHostList } from "../lib/listen-hosts.js";
+import { resolveFleetPort, resolveFleetHost, boardIdentityField } from "../services/fleet-listener.service.js";
 import { isTailscaleHost } from "../lib/tailscale-host.js";
 import { resolveConfiguredGitPort, resolveConfiguredGitHost } from "../services/git-http.service.js";
 
@@ -108,7 +109,8 @@ export function describeFleetUrl(env: NodeJS.ProcessEnv = process.env): { fleetU
   if (port === null) {
     return { fleetUrl: null, fleetNote: "fleet listener disabled: set KANBAN_FLEET_PORT" };
   }
-  const host = resolveFleetHost(env);
+  // #1337: with a host LIST the first entry is the preferred URL shown to the operator.
+  const host = parseHostList(resolveFleetHost(env))[0] ?? "127.0.0.1";
   const wildcard = host === "0.0.0.0" || host === "::" || host === "[::]";
   const tailscale = isTailscaleHost(host);
   const shown = wildcard ? "<board-host>" : tailscale ? "<tailscale-ip>" : host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
@@ -519,7 +521,8 @@ function registerWorkerFacingRoutes(
       },
     });
     boardEvents?.broadcastToAllProjects("workers_changed");
-    return c.json(result, 201);
+    // #1337: the board's stable id, so the worker keys its pairing by board, not by the URL it dialed.
+    return c.json({ ...result, ...(await boardIdentityField(database)) }, 201);
   });
 
   // #880 — the READ-ONLY update-check surface: what build is the board itself running?

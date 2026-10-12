@@ -126,7 +126,8 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 60 -> 61 in #1417 for `worker/worker-repo-heal.ts` (corrupt-clone detection; git-exec + node:fs only).
     // Raised 61 -> 63 in #1381 for `worker/worker-settings-apply.ts` and shared `lib/worker-settings.ts` (board-pushed settings; node builtins only).
     // Raised 63 -> 64 in #1416 for the undelivered-results give-up/doctor helper module.
-    expect(files.size).toBeLessThan(64);
+    // Raised 64 -> 65 in #1337 for `worker/worker-state.ts` (identity-keyed pairing state, db-free).
+    expect(files.size).toBeLessThan(65);
   });
 
   it("never reaches the database or board-service layer", () => {

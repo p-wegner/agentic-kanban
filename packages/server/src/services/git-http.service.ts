@@ -595,7 +595,7 @@ export function resolveConfiguredGitHost(env: NodeJS.ProcessEnv = process.env): 
   });
 }
 
-import { resolveBindHost } from "../lib/tailscale-host.js";
+import { resolveBindHosts, warnOnNonTailnetBinds } from "../lib/listen-hosts.js";
 
 export async function startGitHttpServer(opts?: {
   database?: Database;
@@ -624,7 +624,7 @@ export async function startGitHttpServer(opts?: {
   const assignmentLookup = opts?.assignmentLookup ?? createAssignmentLookup(database);
   const supersededLookup = opts?.supersededLookup ?? createSupersededLookup(database);
 
-  const http: Server = createServer((req, res) => {
+  const onRequest = (req: IncomingMessage, res: ServerResponse): void => {
     void (async () => {
       try {
         const url = new URL(req.url ?? "/", "http://localhost");
@@ -712,30 +712,53 @@ export async function startGitHttpServer(opts?: {
         } catch { /* already streaming */ }
       }
     })();
-  });
+  };
+  const http: Server = createServer(onRequest);
   // #753: a slowloris on this listener is a board-wide outage, not a slow clone. Bounded
   // explicitly rather than left to whatever the Node major happens to default to.
   http.headersTimeout = HEADERS_TIMEOUT_MS;
   http.requestTimeout = REQUEST_TIMEOUT_MS;
 
   // #1325: `KANBAN_GIT_HTTP_HOST=tailscale` resolves at bind time like the fleet host.
-  const host = resolveBindHost(opts?.host ?? resolveConfiguredGitHost());
-  const port = await new Promise<number>((resolve, rejectListen) => {
-    http.once("error", rejectListen);
-    http.listen(opts?.port ?? resolveConfiguredGitPort(), host, () => {
-      const address = http.address();
-      resolve(typeof address === "object" && address ? address.port : 0);
+  // #1337: a comma-separated list binds every entry (one server per address, same port); any
+  // failure closes the ones already open and throws, so the supervisor retries the whole set.
+  const hosts = resolveBindHosts(opts?.host ?? resolveConfiguredGitHost());
+  const servers: Server[] = [http];
+  let port = opts?.port ?? resolveConfiguredGitPort();
+  const listenOn = (server: Server, host: string, wantPort: number): Promise<number> =>
+    new Promise<number>((resolve, rejectListen) => {
+      server.once("error", rejectListen);
+      server.listen(wantPort, host, () => {
+        server.off("error", rejectListen);
+        const address = server.address();
+        resolve(typeof address === "object" && address ? address.port : 0);
+      });
     });
-  });
+  try {
+    port = await listenOn(http, hosts[0]!, port);
+    for (const host of hosts.slice(1)) {
+      const extra = createServer(onRequest);
+      extra.headersTimeout = HEADERS_TIMEOUT_MS;
+      extra.requestTimeout = REQUEST_TIMEOUT_MS;
+      servers.push(extra);
+      await listenOn(extra, host, port);
+    }
+  } catch (err) {
+    await Promise.all(servers.map((s) => new Promise<void>((resolve) => s.listening ? s.close(() => resolve()) : resolve())));
+    throw err;
+  }
+  warnOnNonTailnetBinds("[git-http]", hosts);
   // The interface is part of the exposure, so log it: "port 3002" alone does not tell an
   // operator whether the transport is on the tailnet only or on every interface.
-  console.log(`[git-http] serving project repos on ${host}:${port} (per-assignment scoped tokens)`);
+  console.log(`[git-http] serving project repos on ${hosts.map((h) => `${h}:${port}`).join(", ")} (per-assignment scoped tokens)`);
 
   return {
     port,
     issueToken: (input) => tokens.issue(input),
     revokeWorkerTokens: (workerId) => tokens.revokeWorker(workerId),
-    close: () => new Promise<void>((resolve) => http.close(() => resolve())),
+    close: async () => {
+      await Promise.all(servers.map((s) => new Promise<void>((resolve) => s.close(() => resolve()))));
+    },
   };
 }
 

@@ -9,10 +9,19 @@ export const DEFAULT_WORKER_BOARD_URL = "http://127.0.0.1:3001";
 export function savedBoardUrls(stateFile: string): string[] {
   try {
     if (!existsSync(stateFile)) return [];
-    const parsed = JSON.parse(readFileSync(stateFile, "utf8")) as { boards?: Record<string, { workerId?: string; workerToken?: string }> };
-    return Object.entries(parsed.boards ?? {})
-      .filter(([, v]) => v?.workerId && v.workerToken)
-      .map(([url]) => url.replace(/\/+$/, ""));
+    const parsed = JSON.parse(readFileSync(stateFile, "utf8")) as {
+      boards?: Record<string, { workerId?: string; workerToken?: string }>;
+      urls?: Record<string, string>;
+    };
+    // #1337: a board is listed ONCE, by its first-recorded URL, however many URLs map to its identity.
+    const out: string[] = [];
+    for (const [key, v] of Object.entries(parsed.boards ?? {})) {
+      if (!v?.workerId || !v.workerToken) continue;
+      if (!key.startsWith("board:")) { out.push(key.replace(/\/+$/, "")); continue; }
+      const firstUrl = Object.entries(parsed.urls ?? {}).find(([, id]) => `board:${id}` === key)?.[0];
+      if (firstUrl) out.push(firstUrl.replace(/\/+$/, ""));
+    }
+    return out;
   } catch {
     return [];
   }
@@ -27,7 +36,8 @@ export type BoardChoice =
  * none, the local default; with several, an error that lists them and asks for `--board`.
  */
 export function resolveWorkerBoard(stateFile: string, explicit?: string): BoardChoice {
-  if (explicit) return { ok: true, board: explicit.replace(/\/+$/, ""), source: "flag" };
+  // #1337: `--board a,b` is an ordered list for `worker start`; every other verb talks to the first.
+  if (explicit) return { ok: true, board: explicit.split(",")[0]!.trim().replace(/\/+$/, ""), source: "flag" };
   const saved = [...new Set(savedBoardUrls(stateFile))];
   if (saved.length === 0) return { ok: true, board: DEFAULT_WORKER_BOARD_URL, source: "default" };
   if (saved.length === 1) {
