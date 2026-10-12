@@ -155,6 +155,7 @@ const FOREIGN: Record<string, string> = {
   UV_THREADPOOL_SIZE: "libuv — the board raises it when unset; documented under Runtime tuning",
   NODE_ENV: "Node convention — production/development mode; the doc page lists it as a runner convention",
   VITEST: "vitest — set inside a vitest worker; the doc page lists it as a runner convention",
+  NPM_CONFIG_PREFIX: "npm — the global install prefix; setup/doctor probe its bin for agent CLIs a first pairing installed (#1410)",
   npm_execpath: "npm/pnpm — the package manager that invoked us, so a re-invocation uses the same one",
   INIT_CWD: "npm/pnpm — the directory the operator actually ran the command in; CLI path arguments resolve against it, since `pnpm cli --` runs with cwd = packages/server (#1038)",
   // Agent CLIs: their config roots. Renaming any of these would break the CLI, not us.
