@@ -141,13 +141,34 @@ export interface CliResult {
  */
 export const CLI_TEST_ENV = { KANBAN_CLI_WRITE_TRANSPORT: "direct" } as const;
 
+/**
+ * Upper bound for one bundled-CLI child. Well under the gate's no-progress watchdog: a CLI
+ * hung on a stalled disk then fails the ONE test that ran it (by name) instead of freezing
+ * the vitest worker inside spawnSync until the whole gate is killed anonymously, and the
+ * SIGKILL stops the child outliving the gate as an orphan.
+ */
+export const CLI_CHILD_TIMEOUT_MS = 90_000;
+/** The tsx-based `pnpm cli` wrapper is slower to start, so it gets a longer (still bounded) budget. */
+export const PNPM_CLI_CHILD_TIMEOUT_MS = 180_000;
+
+function describeTimeout(timeoutMs: number, args: string[]): string {
+  return `CLI did not exit within ${Math.round(timeoutMs / 1000)}s: ${args.join(" ")}`;
+}
+
+function isTimeout(error: Error | undefined): boolean {
+  return (error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT";
+}
+
 export function runCli(args: string[], dbPath: string): CliResult {
   const result = spawnSync(process.execPath, [builtCliPath(), ...args], {
     env: { ...process.env, ...CLI_TEST_ENV, DB_URL: `file:${dbPath}` },
     cwd: PKG_DIR,
     encoding: "utf-8",
     windowsHide: true,
+    timeout: CLI_CHILD_TIMEOUT_MS,
+    killSignal: "SIGKILL",
   });
+  if (isTimeout(result.error)) throw new Error(describeTimeout(CLI_CHILD_TIMEOUT_MS, args));
   return {
     stdout: (result.stdout || "").trim(),
     stderr: (result.stderr || "").trim(),
@@ -166,7 +187,12 @@ export function runPnpmCli(args: string[], dbPath: string): CliResult & { error?
     const build = spawnSync(pnpm, ["--filter", "shared", "build"], {
       cwd: REPO_ROOT,
       encoding: "utf-8",
+      timeout: PNPM_CLI_CHILD_TIMEOUT_MS,
+      killSignal: "SIGKILL",
     });
+    if (isTimeout(build.error)) {
+      throw new Error(describeTimeout(PNPM_CLI_CHILD_TIMEOUT_MS, ["pnpm", "--filter", "shared", "build"]));
+    }
     if (build.status !== 0) {
       return {
         stdout: build.stdout || "",
@@ -179,7 +205,10 @@ export function runPnpmCli(args: string[], dbPath: string): CliResult & { error?
     env: { ...process.env, ...CLI_TEST_ENV, DB_URL: `file:${dbPath}` },
     cwd: REPO_ROOT,
     encoding: "utf-8",
+    timeout: PNPM_CLI_CHILD_TIMEOUT_MS,
+    killSignal: "SIGKILL",
   });
+  if (isTimeout(result.error)) throw new Error(describeTimeout(PNPM_CLI_CHILD_TIMEOUT_MS, ["pnpm", "cli", "--", ...args]));
   return {
     stdout: (result.stdout || "").trim(),
     stderr: (result.stderr || "").trim(),
