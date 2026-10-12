@@ -1,4 +1,4 @@
-import type { BoardStatusIssue, BoardStatusResponse } from "@agentic-kanban/shared";
+import { isInFlightStatusName, type BoardStatusIssue, type BoardStatusResponse } from "@agentic-kanban/shared";
 
 // Pure renderer for the compact `status --watch` screen. Returns exactly the lines to draw
 // (never wider than `cols`, never more than `rows`) so the caller can repaint in place.
@@ -46,7 +46,7 @@ function age(iso: string | null | undefined, nowMs: number): string {
 function isActive(issue: BoardStatusIssue): boolean {
   const ws = issue.workspace?.status;
   return ws === "active" || ws === "fixing" || ws === "reviewing" || issue.session?.status === "running"
-    || issue.statusName === "In Progress" || issue.statusName === "In Review";
+    || isInFlightStatusName(issue.statusName);
 }
 
 function isMerging(issue: BoardStatusIssue): boolean {
