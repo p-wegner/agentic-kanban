@@ -203,7 +203,9 @@ export interface DeferredLaunchFailure {
      * the link, the board simply placed on a fact that has since changed, and re-placing
      * (or falling back to the host, which CAN enforce the roster) is the right response.
      */
-    | "profile-unknown";
+    | "profile-unknown"
+    /** #1426: the worker's claude login is dead (OAuth refresh failed); the session never got going. */
+    | "auth-expired";
   reason: string;
 }
 

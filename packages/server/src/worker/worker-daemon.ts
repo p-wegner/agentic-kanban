@@ -626,6 +626,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // owner's, so the worker enforces it locally instead of trusting the assigner.
   const runner = createWorkerAgentRunner(sendToBoard, {
     boardUrl, workRoot, maxConcurrency: opts.maxConcurrency,
+    onAuthFailure: (profile) => profileAttestor.markAuthExpired(profile),
     ...(opts.harness ? { harness: opts.harness } : {}),
     profileAliases, ...(opts.profileHome ? { profileHome: opts.profileHome } : {}),
   });

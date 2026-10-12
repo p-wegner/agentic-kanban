@@ -1,4 +1,5 @@
 import { isInFlightStatusName, type BoardStatusIssue, BoardStatusResponse, MergeTrainRowDto, MergeTrainsResponse } from "@agentic-kanban/shared";
+import { authExpiredProfileNames, describeAuthExpired } from "../lib/worker-profile-attestation.js";
 import type { MergeTrainWindowResponse } from "@agentic-kanban/shared";
 
 // `status --watch` as a one-screen operator console (#1421). `buildConsoleModel` turns the
@@ -110,6 +111,14 @@ export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
   }));
   for (const w of workers) {
     if (w.status !== "online") attention.push({ level: "yellow", text: `${w.name}: ${w.status}` });
+  }
+
+  // #1426: a worker whose claude login is dead is online and attests profiles, but cannot run anything.
+  for (const w of p.workers?.workers ?? []) {
+    const expired = authExpiredProfileNames(w.attestedProfiles, "claude");
+    if (expired.length > 0) {
+      attention.push({ level: "red", text: describeAuthExpired(String(w.name ?? w.id ?? "?"), "claude", expired) });
+    }
   }
 
   const trains: ConsoleTrain[] = (p.trains?.trains ?? []).slice(0, 6).map((t) => ({

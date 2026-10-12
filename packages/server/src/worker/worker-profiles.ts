@@ -32,7 +32,7 @@
  * and restricted projects do not reach it).
  */
 import { workerLog } from "./worker-updater.js";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   discoverLocalProfiles,
@@ -59,6 +59,9 @@ export const PROFILES_OPT_OUT = "none";
 
 /** Prefix on the `assign_failed` a rejected profile produces. Board-side classifier pins it. */
 export const PROFILE_UNKNOWN_PREFIX = "unknown agent profile";
+
+/** Prefix (lower-case, matched case-insensitively) on the `assign_failed` an auth-dead session produces (#1426). */
+export const AUTH_EXPIRED_PREFIX = "claude login expired";
 
 export interface WorkerProfileAttestorOptions {
   /**
@@ -88,7 +91,15 @@ export interface WorkerProfileAttestor {
    * logins would otherwise burst five times a minute against a shared rate budget.
    */
   refreshQuota(nowMs?: number): Promise<void>;
+  /**
+   * #1426: a session on this machine died with `Failed to authenticate`. Flag the named profile
+   * (every OAuth profile when none is named) `auth-expired` until its credentials file changes.
+   */
+  markAuthExpired(profile?: string): void;
 }
+
+/** Output of a claude session whose login is dead (the result line, or the raw CLI error). */
+export const AUTH_FAILURE_PATTERN = /Failed to authenticate|OAuth session expired|could not be refreshed/i;
 
 /**
  * Which of this machine's profiles even HAS an OAuth token to measure.
@@ -173,6 +184,19 @@ export function createWorkerProfileAttestor(
     log: (line) => log(`[worker][quota] ${line}`),
   });
   const configDirOf = new Map(pollable.map((p) => [p.profile, p.configDir]));
+  /** #1426: profile -> credentials-file mtime when it was flagged; a changed mtime (re-login) clears it. */
+  const authExpired = new Map<string, number>();
+  const credMtime = (dir: string): number => {
+    try { return statSync(join(dir, ".credentials.json")).mtimeMs; } catch { return 0; }
+  };
+  const runtimeCredentialState = (name: string, dir: string): WorkerProfileCredentialState | undefined => {
+    const flaggedAt = authExpired.get(name);
+    if (flaggedAt !== undefined) {
+      if (credMtime(dir) === flaggedAt) return "auth-expired";
+      authExpired.delete(name);
+    }
+    return poller.record(dir)?.err === "http-401" ? "auth-expired" : undefined;
+  };
 
   return {
     current(nowMs: number = Date.now()): WorkerProfileAttestation[] {
@@ -185,7 +209,7 @@ export function createWorkerProfileAttestor(
         });
         const dir = configDirOf.get(profile.name);
         const reading = dir ? quotaReadingOf(poller.record(dir), nowMs) : undefined;
-        const credentials = dir ? credentialStateOf(dir, nowMs) : undefined;
+        const credentials = dir ? (credentialStateOf(dir, nowMs) ?? runtimeCredentialState(profile.name, dir)) : undefined;
         return {
           provider: profile.provider,
           name: profile.name,
@@ -205,6 +229,11 @@ export function createWorkerProfileAttestor(
             : {}),
         };
       });
+    },
+    markAuthExpired(profile?: string): void {
+      for (const [name, dir] of configDirOf) {
+        if (profile === undefined || name === profile) authExpired.set(name, credMtime(dir));
+      }
     },
     async refreshQuota(nowMs: number = Date.now()): Promise<void> {
       if (pollable.length === 0) return;

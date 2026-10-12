@@ -63,7 +63,8 @@ export interface WorkerProfileAttestation {
   credentials?: WorkerProfileCredentialState;
 }
 
-export type WorkerProfileCredentialState = "expired" | "missing";
+/** #1426: `auth-expired` = the file looked fine but a session / quota probe was refused (OAuth refresh failed, 401). */
+export type WorkerProfileCredentialState = "expired" | "missing" | "auth-expired";
 
 /**
  * Shape-check the attested profile list off the wire (#1027).
@@ -106,7 +107,7 @@ export function parseWorkerProfileAttestations(raw: unknown): WorkerProfileAttes
         ? { dedicatedProject: rec.dedicatedProject.trim() }
         : {}),
       ...(quota ? { quota } : {}),
-      ...(rec.credentials === "expired" || rec.credentials === "missing"
+      ...(rec.credentials === "expired" || rec.credentials === "missing" || rec.credentials === "auth-expired"
         ? { credentials: rec.credentials }
         : {}),
     });

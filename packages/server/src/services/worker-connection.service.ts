@@ -20,7 +20,7 @@ import type { WorkerRegistry } from "./worker-registry.service.js";
 import type { DeferredLaunchFailure } from "./agent-dispatch.service.js";
 // The worker builds this refusal from the same constant, so the classifier cannot drift
 // from the message it classifies (#1027).
-import { PROFILE_UNKNOWN_PREFIX } from "../worker/worker-profiles.js";
+import { AUTH_EXPIRED_PREFIX, PROFILE_UNKNOWN_PREFIX } from "../worker/worker-profiles.js";
 
 /**
  * What KIND of launch failure a worker's `assign_failed` reports (#751).
@@ -42,6 +42,7 @@ export function classifyAssignFailure(error: string): DeferredLaunchFailure["kin
   // actually exact about — and it must not be swallowed by the provisioning pattern below,
   // which the word "profile" would otherwise never reach but a future rewording might.
   if (text.includes(PROFILE_UNKNOWN_PREFIX)) return "profile-unknown";
+  if (text.includes(AUTH_EXPIRED_PREFIX)) return "auth-expired";
   if (/\bcapacity\b|max ?concurrency|too many|at capacity/.test(text)) return "capacity";
   if (/clone|checkout|worktree|provision|setup|lock ref|fetch|lfs|submodule/.test(text)) return "provisioning";
   return "dispatch";

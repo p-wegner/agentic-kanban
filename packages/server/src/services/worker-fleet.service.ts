@@ -77,6 +77,7 @@ export { HOST_CANDIDATE_ID } from "./worker-host-candidate.js";
 // refuses a host fallback, #245) and re-exported here for existing importers.
 export { WorkerDispatchUnavailableError } from "./agent-dispatch.service.js";
 
+import { authExpiredProfileNames } from "../lib/worker-profile-attestation.js";
 import { fleetForProject } from "./worker-project-scope.js";
 
 export interface WorkerFleet {
@@ -270,6 +271,8 @@ function filterEligibleWorkers(
       return workerMeetsRequirements(requiredLabels, parseLabels(w.labels), w.toolchains);
     })
     .filter((w) => allowWorkerIds === undefined || allowWorkerIds.has(w.id))
+    // #1426: a worker whose only login for this provider is dead would burn the session in ~1 s.
+    .filter((w) => authExpiredProfileNames(w.profiles, providerName).length === 0)
     // Load counts DISPATCHED work, not just work that has already spoken (#248) —
     // and, since #751, work that has been PLACED but not yet dispatched. For a
     // true-remote placement the `assign` is sent from an async continuation, so
