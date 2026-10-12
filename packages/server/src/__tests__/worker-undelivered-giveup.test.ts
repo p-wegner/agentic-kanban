@@ -15,7 +15,7 @@ const makeStore = (workRoot: string, push = vi.fn().mockRejectedValue(new Error(
 
 describe("undelivered results give-up (#1416)", () => {
   it("does not write back an entry the operator deleted", async () => {
-    const root = mkdtempSync(join(tmpdir(), "undel-"));
+    const root = mkdtempSync(join(tmpdir(), "ak-undel-"));
     upsertUndelivered(root, record("s1"));
     const { store, push } = makeStore(root);
     writeFileSync(undeliveredStateFile(root), JSON.stringify({ results: [] }));
@@ -26,7 +26,7 @@ describe("undelivered results give-up (#1416)", () => {
   });
 
   it("drops an entry past the attempt limit and logs it off the file", async () => {
-    const root = mkdtempSync(join(tmpdir(), "undel-"));
+    const root = mkdtempSync(join(tmpdir(), "ak-undel-"));
     upsertUndelivered(root, record("s2", { attempts: 99 }));
     const { store, push } = makeStore(root);
     await store.retryPending();
@@ -36,7 +36,7 @@ describe("undelivered results give-up (#1416)", () => {
   });
 
   it("drops an entry past the age limit", async () => {
-    const root = mkdtempSync(join(tmpdir(), "undel-"));
+    const root = mkdtempSync(join(tmpdir(), "ak-undel-"));
     upsertUndelivered(root, record("s3", { recordedAt: new Date(Date.now() - 8 * 86_400_000).toISOString() }));
     const { store } = makeStore(root);
     await store.retryPending();
@@ -44,7 +44,7 @@ describe("undelivered results give-up (#1416)", () => {
   });
 
   it("keeps and retries a fresh entry, and doctor lists it", async () => {
-    const root = mkdtempSync(join(tmpdir(), "undel-"));
+    const root = mkdtempSync(join(tmpdir(), "ak-undel-"));
     upsertUndelivered(root, record("s4"));
     const { store, push } = makeStore(root);
     await store.retryPending();
