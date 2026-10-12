@@ -47,6 +47,7 @@ import { getPreferenceValue } from "../repositories/session-lifecycle.repository
 import { listWorkerBranchAssignments } from "../repositories/worker.repository.js";
 import type { ProviderName } from "../services/agent-provider.js";
 import { resolveBoardCommit, resolveOwnPackageVersion } from "../lib/worker-build.js";
+import { resolveBoardGitFacts } from "../lib/board-git-facts.js";
 import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
 import { parseWorkerUpdateReport } from "../lib/worker-update.js";
@@ -174,7 +175,11 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
   router.get("/host", (c) => {
     const cap = readTier0Capacity();
     const slots = resolveVerifyChainSlots();
+    const facts = resolveBoardGitFacts();
     return c.json({
+      boardCommit: resolveBoardCommit(),
+      boardTag: facts.tag,
+      mergedToday: facts.mergedToday,
       freeGb: cap.freeGb,
       hold: cap.hold,
       reason: cap.reason,
