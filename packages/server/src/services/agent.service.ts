@@ -20,6 +20,7 @@ import {
   startHangWatchdog as startSharedHangWatchdog,
   DEFAULT_AGENT_HANG_TIMEOUT_MS as SHARED_DEFAULT_HANG_TIMEOUT_MS,
 } from "../lib/agent-launch-env.js";
+import { createSessionTempDir } from "../lib/session-temp-dir.js";
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { wrapLaunchConfigForContainer } from "./agent-provider/container-wrap.js";
 import { dockerExec } from "@agentic-kanban/shared/lib/docker-exec";
@@ -472,6 +473,10 @@ export function launch(request: AgentLaunchRequest): ChildProcess {
   for (const [key, value] of Object.entries(fullEnvWithUndefined)) {
     if (value !== undefined) fullEnv[key] = value;
   }
+  // #1391: a private temp dir per host session (not inside a container: a host path is
+  // meaningless there). Removed when the process exits; a crash is left to the stale sweep.
+  const sessionTemp = containerProvision || hostLaunchConfig.isMockAgent ? null : createSessionTempDir(sessionId);
+  if (sessionTemp) Object.assign(fullEnv, sessionTemp.env);
   const hostLaunchConfigWithFullEnv = { ...hostLaunchConfig, env: fullEnv };
   // Containerization is a transformation of the finished launch config, so every
   // provider is containerizable without knowing it exists. Mock agents run
@@ -617,6 +622,7 @@ export function launch(request: AgentLaunchRequest): ChildProcess {
 
   setupChildOutput(proc, sessionId, shouldDetach, onOutputWithWatchdog);
   attachProcessHandlers(proc, sessionId, shouldDetach, onOutputWithWatchdog);
+  if (sessionTemp) proc.on("exit", () => { sessionTemp.dispose(); });
 
   return proc;
 }

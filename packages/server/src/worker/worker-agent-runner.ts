@@ -13,6 +13,7 @@ import { workerLog } from "./worker-updater.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { resolveAgentHangTimeoutMs, startHangWatchdog } from "../lib/agent-launch-env.js";
+import { startSessionTemp, releaseSessionTemp } from "../lib/session-temp-dir.js";
 import { killProcessTree } from "../services/process-exec.js";
 import type {
   BoardToWorkerMessage,
@@ -300,7 +301,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     provisioning.delete(sessionId);
     stdinOpen.delete(sessionId);
     closeWatchdog(sessionId);
-    tree.untrack(sessionId);
+    tree.untrack(sessionId); releaseSessionTemp(sessionId);
     const pending = checkouts.get(sessionId);
     if (!pending) {
       // safeSend, not send: this runs synchronously on the child's `exit` event, where a
@@ -480,14 +481,14 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         // machine's environment — never replace it. The worker authenticates its
         // agent with its own local login, so HOME/USERPROFILE/PATH and the
         // provider config dir must stay this machine's (decision 012).
-        env: { ...process.env, ...spec.env },
+        env: { ...process.env, ...spec.env, ...startSessionTemp(sessionId) }, // #1391 per-session TMPDIR, applied LAST
         shell: launch.useShell,
         detached: process.platform !== "win32",
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
       });
     } catch (err) {
-      send({ type: "assign_failed", sessionId, error: errorMessage(err) });
+      releaseSessionTemp(sessionId); send({ type: "assign_failed", sessionId, error: errorMessage(err) });
       return;
     }
     processes.set(sessionId, proc);
