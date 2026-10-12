@@ -692,7 +692,7 @@ async function runDoomedTrainJob(args: {
           },
         });
         if (!gate.passed && gate.inconclusive) {
-          console.log(describeInconclusiveGate(label, attemptLabel, gate.message));
+          console.log(`[merge-train] ${describeInconclusiveGate(label, attemptLabel, gate.message)}`);
         } else if (!gate.passed) {
           // Name the red: train, members, stage and suite(s), for the whole train and each half.
           const gatedMembers = included.map((m) => members.find((x) => x.workspaceId === m.workspaceId) ?? { workspaceId: m.workspaceId });

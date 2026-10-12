@@ -11,7 +11,7 @@ export function isInconclusiveGate(gate: { passed: boolean; timedOut?: boolean; 
 }
 
 export function describeInconclusiveGate(label: string, attemptLabel: string, message: string): string {
-  return `[merge-train] ${label}: gate INCONCLUSIVE (${attemptLabel}) - not red, no fix agent, no bisect; will re-gate later: ${message.slice(0, 200)}`;
+  return `${label}: gate INCONCLUSIVE (${attemptLabel}) - not red, no fix agent, no bisect; will re-gate later: ${message.slice(0, 200)}`;
 }
 
 /**
