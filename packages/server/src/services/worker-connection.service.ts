@@ -261,6 +261,13 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
       // agent's first output (#248).
       if (message.type === "assign") {
         conn.pendingSessionIds.set(message.sessionId, now + PENDING_ASSIGN_TTL_MS);
+      } else if (message.type === "stop") {
+        // The board ended this session (#1415): release its slot now rather than waiting
+        // for an exit frame a stopped/killed worker may never send. A reconnect's `hello`
+        // still replaces the whole set with what the worker truly holds.
+        conn.pendingSessionIds.delete(message.sessionId);
+        conn.runningSessionIds.delete(message.sessionId);
+        conn.lastEventAt.delete(message.sessionId);
       }
       return true;
     } catch (err) {
