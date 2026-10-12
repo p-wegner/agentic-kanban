@@ -12,6 +12,7 @@
 // adapter (single-spawn architecture gate).
 
 import { workerLog } from "./worker-updater.js";
+import { loadUndelivered } from "./worker-undelivered.js";
 import { mkdirSync, writeFileSync, existsSync, readdirSync, rmSync, appendFileSync } from "node:fs";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { TICKET_CONTEXT_FILENAME } from "@agentic-kanban/shared/lib/ticket-context";
@@ -509,6 +510,7 @@ async function sweepUnheldSessionBranches(
   cacheDir: string,
   log: (line: string) => void,
   report: ReapCheckoutsReport,
+  heldForDelivery: ReadonlySet<string> = new Set(),
 ): Promise<void> {
   const listed = await gitExec(["for-each-ref", "--format=%(refname:short)", "refs/heads/kanban/"], { cwd: cacheDir });
   if (!execSucceeded(listed)) return;
@@ -522,11 +524,22 @@ async function sweepUnheldSessionBranches(
   );
   for (const branch of branches) {
     if (held.has(branch)) continue;
+    // #1385: the commits of an undelivered result live only on this branch.
+    if (heldForDelivery.has(branch.replace(/^kanban\//, ""))) continue;
     const del = await gitExec(["branch", "-D", branch], { cwd: cacheDir });
     if (execSucceeded(del)) {
       report.branchesDeleted.push(branch);
       log(`[worker] deleted unheld session branch ${branch} in ${cacheDir}`);
     }
+  }
+}
+
+/** #1385: session ids whose result is retained in the undelivered-results store. Never throws. */
+function heldUndeliveredSessions(workRoot: string): Set<string> {
+  try {
+    return new Set(loadUndelivered(workRoot).map((r) => r.sessionId));
+  } catch {
+    return new Set();
   }
 }
 
@@ -542,6 +555,8 @@ export interface ReapCheckoutsReport {
   stranded: string[];
   /** #1322: `kanban/*` branches deleted because no worktree held them. */
   branchesDeleted: string[];
+  /** #1385: checkouts spared because an undelivered result (unpushed commits) still needs them. */
+  heldForDelivery: string[];
 }
 
 export interface ReapCheckoutsOptions {
@@ -600,13 +615,14 @@ export async function reapOrphanedCheckouts(
   log: (line: string) => void = () => {},
   opts: ReapCheckoutsOptions = {},
 ): Promise<ReapCheckoutsReport> {
-  const report: ReapCheckoutsReport = { scanned: 0, reaped: [], errored: [], stranded: [], branchesDeleted: [] };
-  await reapCheckoutDirs(workRoot, log, opts, report);
+  const report: ReapCheckoutsReport = { scanned: 0, reaped: [], errored: [], stranded: [], branchesDeleted: [], heldForDelivery: [] };
+  const undelivered = heldUndeliveredSessions(workRoot);
+  await reapCheckoutDirs(workRoot, log, opts, report, undelivered);
   // #1322: after the checkouts are gone, `kanban/*` branches no worktree holds are leftovers.
   try {
     const reposDir = join(workRoot, "repos");
     for (const e of readdirSync(reposDir, { withFileTypes: true })) {
-      if (e.isDirectory()) await sweepUnheldSessionBranches(join(reposDir, e.name), log, report);
+      if (e.isDirectory()) await sweepUnheldSessionBranches(join(reposDir, e.name), log, report, undelivered);
     }
   } catch {
     // no repos directory Ã¢â‚¬â€ nothing to sweep
@@ -619,6 +635,7 @@ async function reapCheckoutDirs(
   log: (line: string) => void,
   opts: ReapCheckoutsOptions,
   report: ReapCheckoutsReport,
+  undelivered: ReadonlySet<string> = new Set(),
 ): Promise<ReapCheckoutsReport> {
   const checkoutsDir = join(workRoot, "checkouts");
   const reposDir = join(workRoot, "repos");
@@ -654,6 +671,15 @@ async function reapCheckoutDirs(
 
   for (const name of checkoutNames) {
     const dir = join(checkoutsDir, name);
+    // #1385: an entry in the undelivered-results store means the commits exist only here.
+    if (undelivered.has(name)) {
+      report.heldForDelivery.push(dir);
+      log(
+        `[worker] checkout ${dir} held for delivery: its result is still undelivered ` +
+          `(recover manually with: git -C <cache-clone> bundle create ${name}.bundle kanban/${name})`,
+      );
+      continue;
+    }
     if (known.has(resolve(dir))) {
       // #1321: still registered, but no agent of THIS daemon owns it (a daemon owns its
       // checkouts only after it provisions them, and this runs before any provisioning),
