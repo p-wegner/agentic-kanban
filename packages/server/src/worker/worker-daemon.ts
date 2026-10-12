@@ -233,10 +233,9 @@ function capabilitiesOf(
     ...(opts.maxConcurrency !== undefined ? { maxConcurrency: opts.maxConcurrency } : {}),
     capacity: capacityOf(),
     ...(profiles && profiles.length > 0 ? { profiles } : {}),
-    // #1369: which package managers this machine has, so placement can name the one a lockfile needs.
-    ...packageManagersField(),
+    // #1369/#1382: package managers + toolchains this machine has, so placement can name what a project needs.
+    ...packageManagersField(), ...toolchainsField(),
     ...(doctor ? { doctor } : {}),
-    ...toolchainsField(), // #1382
   };
 }
 
