@@ -1,7 +1,7 @@
 // Phase 3 scheduling (#189): label matching, capacity aggregation, strict-mode
 // refusal, and the startup incoming-ref recovery sweep.
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -93,8 +93,11 @@ describe("worker fleet scheduling (phase 3)", () => {
       expect(await resolveFleetCapacity(fleet, "claude")).toEqual({ eligibleWorkers: 2, freeSlots: 5 });
 
       fleet.connections.handleMessage(a, JSON.stringify({ type: "hello", workerId: a, runningSessionIds: ["s1", "s2"] }));
-      // `a` is now at capacity and drops out entirely.
-      expect(await resolveFleetCapacity(fleet, "claude")).toEqual({ eligibleWorkers: 1, freeSlots: 3 });
+      // #1415: s1/s2 have no session row, so the board orphan-stops them and the stop
+      // releases their slots at once — `a` is free again instead of staying at capacity.
+      await vi.waitFor(async () => {
+        expect(await resolveFleetCapacity(fleet, "claude")).toEqual({ eligibleWorkers: 2, freeSlots: 5 });
+      });
     });
 
     it("counts a dispatched-but-silent assignment against capacity (#248)", async () => {
