@@ -160,6 +160,15 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   /** Sessions provisioning a checkout — running for bookkeeping before a pid exists. */
   const provisioning = new Set<string>();
   /**
+   * Sessions the board told us to stop BEFORE their assign arrived (#1407). The board's
+   * `stop` and its git-transport `assign` travel separately (the assign waits on async
+   * prerequisites), so a session reconciled in between had its stop dropped as "unknown" and
+   * its assign then ran to completion, holding a slot and pushing a stale result. Remembered
+   * so the late assign is refused instead of started. Bounded: oldest entries fall off.
+   */
+  const cancelledBeforeAssign = new Set<string>();
+  const MAX_CANCELLED_BEFORE_ASSIGN = 256;
+  /**
    * Can this session's stdin still receive input (#900)? Set from the spec at launch
    * (`keepStdinOpen && !suppressStdinPrompt`, the same rule `agent-remote.service.ts` uses
    * board-side), cleared on `closeStdin` and on exit. This is what makes a `probe_session`
@@ -372,6 +381,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
    */
   function assignWithRepo(sessionId: string, spec: WorkerLaunchSpec, repo: WorkerRepoTransport): void {
     seen.noteAssigned(sessionId);
+    if (refuseIfCancelled(sessionId)) return;
     if (processes.has(sessionId) || provisioning.has(sessionId)) {
       send({ type: "assign_failed", sessionId, error: "session already running on this worker" });
       return;
@@ -421,8 +431,19 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     })();
   }
 
+  /** True (and the exit reported) when the board already stopped this session before its assign. */
+  function refuseIfCancelled(sessionId: string): boolean {
+    if (!cancelledBeforeAssign.delete(sessionId)) return false;
+    workerLog(`[worker] refusing assign for a session the board already stopped: sessionId=${sessionId}`);
+    // An exit, not assign_failed: the board has ended this session and must not read the
+    // refusal as a launch failure to re-place on another machine.
+    emitExit(sessionId, null);
+    return true;
+  }
+
   function assign(sessionId: string, specAsSent: WorkerLaunchSpec): void {
     seen.noteAssigned(sessionId);
+    if (refuseIfCancelled(sessionId)) return;
     if (processes.has(sessionId)) {
       send({ type: "assign_failed", sessionId, error: "session already running on this worker" });
       return;
@@ -608,6 +629,15 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         workerLog(`[worker] cancelled provisioning session: sessionId=${sessionId}`);
         emitExit(sessionId, null);
         return true;
+      }
+      // Nothing running and nothing provisioning: either a long-gone session or one whose
+      // assign has not arrived yet (#1407). Remember it unless it already exited here.
+      if (!exited.has(sessionId)) {
+        cancelledBeforeAssign.add(sessionId);
+        if (cancelledBeforeAssign.size > MAX_CANCELLED_BEFORE_ASSIGN) {
+          const oldest = cancelledBeforeAssign.values().next().value;
+          if (oldest !== undefined) cancelledBeforeAssign.delete(oldest);
+        }
       }
       return false;
     }
