@@ -838,7 +838,7 @@ export async function checkStrictLaunchReadiness(params: {
     );
     if (reconnecting) return { kind: "hold", reason: "worker_reconnecting", workerId: reconnecting.id };
     // #1411: every matching worker is healthy but FULL. A free slot is coming, so queue the launch.
-    const saturated = matching.find((w) => w.effectiveStatus === "online" && fleet.connections.isConnected(w.id));
+    const saturated = matching.find((w) => w.effectiveStatus === "online" && fleet.connections.isConnected(w.id) && fleet.health.isResponsive(w.id) && fleet.connections.assignedSessionIds(w.id, nowMs).length >= w.maxConcurrency);
     if (saturated) return { kind: "hold", reason: "workers_busy", workerId: saturated.id };
     const detail = requiredLabels.length > 0 ? ` with labels [${requiredLabels.join(",")}]` : "";
     return { kind: "refuse", reason: `no eligible ${providerName} worker${detail} and worker dispatch is strict for project ${projectId}` };
