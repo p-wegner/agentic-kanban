@@ -17,6 +17,12 @@ export async function landSessionBranch(
   sessionId: string,
   session: RemoteSession,
   reportedExitCode: number | null,
+  /**
+   * #1420: the worker is gone and its exit report with it, but a result WAS pushed (the worker
+   * only pushes after the agent exited). Landing it is then the best evidence of a finished run,
+   * so record exit 0 rather than the placeholder 1 — the implement-exit check and review run.
+   */
+  landedPushMeansSuccess = false,
 ): Promise<number | null> {
   let exitCode = reportedExitCode;
   if (!session.repo) return exitCode;
@@ -24,6 +30,10 @@ export async function landSessionBranch(
     const result = await syncIncomingBranch(session.repo.repoPath, session.repo.branch);
     if (result.ok) {
       console.log(`[agent-remote] synced ${session.repo.branch} (${result.status}) for session ${sessionId}`);
+      if (landedPushMeansSuccess) {
+        exitCode = 0;
+        console.warn(`[agent-remote] session ${sessionId}: pushed result landed after the worker lost its exit; completed, exit unknown (recorded 0)`);
+      }
       await clearIncomingRef(session.repo.repoPath, session.repo.branch).catch(() => {});
     } else if (result.status === "missing" && exitCode !== 0) {
       // The agent failed before producing anything to push — nothing to sync.

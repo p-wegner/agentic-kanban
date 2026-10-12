@@ -133,12 +133,13 @@ export function createRemoteAgentService(
     session: RemoteSession,
     reportedExitCode: number | null, endedBy?: BoardEndedReason,
     workerPhases?: WorkerPhaseTimings,
+    landedPushMeansSuccess = false,
   ): Promise<void> {
     liveness.cancel(sessionId);
     sessions.delete(sessionId);
     fleetMcp.revokeSessionTokens(sessionId);
     const landStart = Date.now();
-    const exitCode = await landSessionBranch(sessionId, session, reportedExitCode);
+    const exitCode = await landSessionBranch(sessionId, session, reportedExitCode, landedPushMeansSuccess);
     // #1328: the board's own half of the timeline — the incoming-ref fast-forward — beside what the worker sent.
     const phases = session.repo ? { ...workerPhases, landMs: Date.now() - landStart } : undefined;
     noteSessionExit(sessionId, session, exitCode, "landed and finalized", endedBy, phases);
@@ -180,7 +181,8 @@ export function createRemoteAgentService(
         `arrive (the worker's pending-result queue does not survive a daemon restart). Any result it ` +
         `pushed is being landed on the branch before this session is closed.`,
     );
-    void landAndFinish(sessionId, session, 1, "worker-lost");
+    // #1420: a pushed result that lands is finalized from the push (exit 0), not as a failure.
+    void landAndFinish(sessionId, session, 1, "worker-lost", undefined, true);
   }
 
   /**
