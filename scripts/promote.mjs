@@ -90,6 +90,7 @@ import { appendFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFil
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitExecSyncResult } from "./git-exec.mjs";
+import { PACK_STAMP_PATH, restorePackStamp } from "./pack-stamp.mjs";
 import { spawnSyncPnpm } from "./pnpm-exec.mjs";
 import { parseNetstatListeners, planPortOwnerKill } from "./dev-port-guard.mjs";
 import {
@@ -1310,6 +1311,8 @@ async function main() {
   if (!existsSync(stableCheckout)) {
     fail(`stable checkout ${stableCheckout} does not exist. Create it per docs/two-boards.md §7, or set KANBAN_STABLE_CHECKOUT.`);
   }
+  // #1404: a killed worker pack leaves exactly this stamp behind; restore it, refuse anything else.
+  if (restorePackStamp(stableCheckout)) log(`[promote] restored a leftover pack-worker version stamp in ${PACK_STAMP_PATH}`);
   const dirty = git(["status", "--porcelain"], stableCheckout);
   if (dirty.code !== 0) fail(`${stableCheckout} is not a git checkout (${dirty.stderr})`);
   if (dirty.stdout) fail(`stable checkout ${stableCheckout} is DIRTY:\n${dirty.stdout}`);
