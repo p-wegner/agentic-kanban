@@ -784,7 +784,7 @@ export async function projectCanDispatch(params: {
 }
 
 /** Why a strict launch is being HELD rather than failed (#1347). */
-export type StrictHoldReason = "worker_updating" | "worker_reconnecting";
+export type StrictHoldReason = "worker_updating" | "worker_reconnecting" | "workers_busy";
 
 /**
  * The verdict on a STRICT-dispatch launch BEFORE a session row exists (#1347).
@@ -800,6 +800,21 @@ export type StrictLaunchReadiness =
   | { kind: "proceed" }
   | { kind: "hold"; reason: StrictHoldReason; workerId: string }
   | { kind: "refuse"; reason: string };
+
+function matchesProviderAndLabels(
+  w: { providers?: string | null; labels?: string | null },
+  providerName: ProviderName,
+  requiredLabels: string[],
+): boolean {
+  if (w.providers) {
+    try {
+      const list = JSON.parse(w.providers) as string[];
+      if (list.length > 0 && !list.includes(providerName)) return false;
+    } catch { /* unparseable = any */ }
+  }
+  const labels = parseLabels(w.labels ?? null);
+  return requiredLabels.every((required) => labels.includes(required));
+}
 
 export async function checkStrictLaunchReadiness(params: {
   database: Database;
@@ -817,17 +832,8 @@ export async function checkStrictLaunchReadiness(params: {
     const views = await fleet.registry.listWorkersView(now);
     const eligible = filterEligibleWorkers(fleet, views, providerName, requiredLabels, nowMs);
     if (eligible.length > 0) return { kind: "proceed" };
-    const wouldBeEligible = views.filter((w) => {
-      if (w.providers) {
-        try {
-          const list = JSON.parse(w.providers) as string[];
-          if (list.length > 0 && !list.includes(providerName)) return false;
-        } catch { /* unparseable = any */ }
-      }
-      const labels = parseLabels(w.labels);
-      if (!requiredLabels.every((required) => labels.includes(required))) return false;
-      return fleet.connections.assignedSessionIds(w.id, nowMs).length < w.maxConcurrency;
-    });
+    const wouldBeEligible = views.filter((w) => matchesProviderAndLabels(w, providerName, requiredLabels)
+      && fleet.connections.assignedSessionIds(w.id, nowMs).length < w.maxConcurrency);
     // Draining wins over reconnecting: a draining worker's daemon restarts, so the reconnect
     // that follows is part of the same update and the better thing to tell the operator.
     const updating = wouldBeEligible.find((w) => w.effectiveStatus === "draining");
@@ -837,6 +843,10 @@ export async function checkStrictLaunchReadiness(params: {
       (w) => w.effectiveStatus === "online" && !fleet.connections.isConnected(w.id),
     );
     if (reconnecting) return { kind: "hold", reason: "worker_reconnecting", workerId: reconnecting.id };
+    // #1411: every matching worker is healthy but FULL. A free slot is coming, so queue the launch.
+    const saturated = views.find((w) => matchesProviderAndLabels(w, providerName, requiredLabels)
+      && w.effectiveStatus === "online" && fleet.connections.isConnected(w.id));
+    if (saturated) return { kind: "hold", reason: "workers_busy", workerId: saturated.id };
     const detail = requiredLabels.length > 0 ? ` with labels [${requiredLabels.join(",")}]` : "";
     return { kind: "refuse", reason: `no eligible ${providerName} worker${detail} and worker dispatch is strict for project ${projectId}` };
   } catch (err) {
