@@ -27,6 +27,8 @@ import {
 import { runMergeTrain, formatTrainLabel, trainDateStamp, trainRefName, type OnTrainDropped } from "./merge-train.service.js";
 import { isMergeTrainLabelLive, registerLiveMergeTrain, unregisterLiveMergeTrain } from "./merge-train-live-registry.js";
 import { cleanupTrainWorktreesForLabel } from "./merge-train-worktrees.js";
+import { describeInconclusiveGate, describeTrainGateRed, finalTrainStateFields, inconclusiveSkipEvents, isInconclusiveGate } from "./merge-queue-train-inconclusive.js";
+export { describeTrainGateRed } from "./merge-queue-train-inconclusive.js";
 import { provisionTrainGateSelector } from "./merge-train-gate-selector.js";
 import { runPreMergeGate, looksLikeMissingDepsFailure } from "./pre-merge-gate.service.js";
 import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
@@ -44,7 +46,6 @@ import { formatIneligibleNote, trainMemberIneligibility } from "./merge-release-
 import { resolveTrainReviewDecision, runTrainReview, type TrainReviewMember } from "./merge-train-review.service.js";
 import { baseConflictProbe, clearTrainSiding, createTrainDropSendBack, partitionSidedMembers } from "./merge-train-siding.service.js";
 import { BRANCH_ALONE_FAILURE_PREFIX } from "./auto-merge-breaker.js";
-import { describeFailedSuites } from "./verify-failed-suites.js";
 import { logTrainConflictClusters, sendTrainRedFeedback } from "./merge-train-red-feedback.js";
 import {
   buildTrainGateEvidence,
@@ -292,12 +293,7 @@ async function finishMergeTrain(
   // whose disposition is "the batch failed and this member shares that verdict, unattributed".
   const { gateEvidence, gateRejected } = buildTrainGateEvidence(result, members, review);
   await updateMergeTrainState(trainId, {
-    // #1413: an inconclusive gate is not a red train — it is closed out `abandoned` (no active
-    // row, so the next window re-forms and re-gates the same members) with the reason on record.
-    state: result.landed.length > 0 ? "landed" : result.inconclusive ? "abandoned" : "red",
-    ...(result.landed.length === 0 && result.inconclusive
-      ? { reconciledReason: `gate inconclusive, will be retried: ${(result.gateFailure ?? "").slice(0, 300)}` }
-      : {}),
+    ...finalTrainStateFields(result),
     gateEvidence: { ...gateEvidence },
     bisectResult: gateRejected.length > 0 ? { gateRejected } : null,
     finishedAt: new Date().toISOString(),
@@ -323,30 +319,6 @@ interface TrainStagingGateResult {
   agentFix?: { attempt: MergeTrainAttemptDto; fixedTrainSha?: string };
   /** #1413 — the gate was killed/timed out/held rather than judging the tree; see `TrainGate`. */
   inconclusive?: boolean;
-}
-
-/**
- * The ONE line the board log gets when a train's gate goes red (pure). MEASURED motivation:
- * `train/2026-09-26-01` went red and bisected with no line naming the failing suites — the only
- * trace was the control arm's `gated the bare base … - green` later. The per-branch path already
- * names suites (`describeVerifyFailedSkip`); this is the train's equivalent, in the same
- * `failing suite(s): …` vocabulary, for the whole train and for each bisect half.
- */
-export function describeTrainGateRed(args: {
-  label: string;
-  attemptLabel: string;
-  members: ReadonlyArray<{ workspaceId: string; issueNumber?: number | null }>;
-  stage?: string;
-  failedSuites?: readonly string[];
-  guardFailure?: boolean;
-  message: string;
-}): string {
-  const scope = args.attemptLabel === args.label ? "whole train" : `bisect attempt ${args.attemptLabel}`;
-  const who = args.members.map((m) => (m.issueNumber != null ? `#${m.issueNumber}` : m.workspaceId.slice(0, 8))).join(", ") || "no members";
-  const named = describeFailedSuites({ files: args.failedSuites ?? [], guardFailure: args.guardFailure === true });
-  const firstLine = args.message.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? "no gate output";
-  const what = named || `no failing suite could be named; ${firstLine.slice(0, 200)}`;
-  return `${args.label}: train gate RED (${scope}, ${args.members.length} member(s): ${who}) - stage ${args.stage ?? "unknown"} - ${what}`;
 }
 
 /**
@@ -452,7 +424,7 @@ async function runTrainStagingGate(args: {
     let agentFix: TrainStagingGateResult["agentFix"];
     // #1413: a watchdog kill / timeout / held run (`timedOut`, `held`) is inconclusive, not red —
     // there is nothing for a fix agent to fix, so it never gets one.
-    const inconclusive = !gate.passed && (gate.timedOut === true || gate.held === true);
+    const inconclusive = isInconclusiveGate(gate);
     if (!gate.passed && !inconclusive && args.onRed && !signal?.aborted) {
       const fix = await args.onRed({
         gateWorktree,
@@ -720,7 +692,7 @@ async function runDoomedTrainJob(args: {
           },
         });
         if (!gate.passed && gate.inconclusive) {
-          console.log(`[merge-train] ${label}: gate INCONCLUSIVE (${attemptLabel}) - not red, no fix agent, no bisect; will re-gate later: ${gate.message.slice(0, 200)}`);
+          console.log(describeInconclusiveGate(label, attemptLabel, gate.message));
         } else if (!gate.passed) {
           // Name the red: train, members, stage and suite(s), for the whole train and each half.
           const gatedMembers = included.map((m) => members.find((x) => x.workspaceId === m.workspaceId) ?? { workspaceId: m.workspaceId });
@@ -969,11 +941,7 @@ export function createMergeTrainRunner(deps: {
       yield { type: "skipped", workspaceId: sd.member.workspaceId, issueNumber: sd.member.issueNumber ?? null, issueTitle: "", reason: `sided by the train review: ${sd.reason.slice(0, 300)}` };
     }
     if (result.landed.length === 0 && result.inconclusive) {
-      // #1413: nothing was judged — every member is merely withheld pending a retry, not failed.
-      for (const m of members) {
-        if (seenEvent.has(m.workspaceId)) continue;
-        yield { type: "skipped", workspaceId: m.workspaceId, issueNumber: m.issueNumber ?? null, issueTitle: "", reason: `train gate inconclusive - pending a retry: ${(result.gateFailure ?? "").slice(0, 200)}` };
-      }
+      yield* inconclusiveSkipEvents(members, seenEvent, result.gateFailure);
       yield { type: "done", merged: [], failed: [], skipped: members.map((m) => m.workspaceId) };
       return;
     }
