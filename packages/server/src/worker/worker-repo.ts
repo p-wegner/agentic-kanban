@@ -252,6 +252,12 @@ export async function provisionWorkerCheckout(
   const startPoint = execSucceeded(branchProbe)
     ? `refs/remotes/origin/${repo.branch}`
     : `refs/remotes/origin/${repo.baseBranch}`;
+  // #1455: the board re-places a refused launch under the SAME sessionId, so `kanban/<sessionId>`
+  // may be left over from the first attempt (checkout gone, branch kept). The name is derived from
+  // the session id, so it is ours: drop it so `worktree add -b` cannot collide. `-D` refuses a
+  // branch a live worktree holds, which is correct - that one is not a leftover.
+  await pruneCacheWorktrees(cacheDir);
+  await gitExec(["branch", "-D", localBranch], { cwd: cacheDir });
   await phase("worktree add", () =>
     withWorktreeAdminLock(cacheDir, () =>
       gitExecOrThrow(["worktree", "add", "-b", localBranch, checkoutDir, startPoint], { cwd: cacheDir })),
