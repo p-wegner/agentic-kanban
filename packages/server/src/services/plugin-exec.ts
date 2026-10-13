@@ -64,6 +64,8 @@ export function runPluginCommand(command: string, options: PluginCommandOptions)
     const child = spawnShellCommand(command, {
       cwd: options.cwd,
       stdio: ["ignore", "pipe", "pipe"],
+      // POSIX: own process group, so the timeout can signal the shell AND whatever it forked.
+      detached: process.platform !== "win32",
       mergeEnv: options.env,
     });
     const stdoutCap = options.maxStdoutChars ?? OUTPUT_TAIL_CAP;
@@ -96,7 +98,11 @@ export function runPluginCommand(command: string, options: PluginCommandOptions)
       // pid, so killing cmd.exe first orphaned its grandchild forever (one `hang.mjs` per run
       // of plugin-exec-progress.test.ts, found alive hours later).
       if (process.platform === "win32" && child.pid) void taskkillTree(child.pid).catch(() => {}).finally(killShell);
-      else killShell();
+      else {
+        // sh stays a real parent for anything but a single simple command; kill the whole group.
+        if (child.pid) { try { process.kill(-child.pid, "SIGKILL"); } catch { /* no group */ } }
+        killShell();
+      }
       resolveRun({ code: null, stdout, stderr, timedOut: true, stdoutTruncated });
     }, timeoutMs);
     timer.unref();

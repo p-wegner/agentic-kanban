@@ -123,7 +123,8 @@ describe("data-dir db-location resolution precedence", () => {
     // The discriminating outcome: it resolved to the in-checkout db, NOT the
     // home-dir fallback. (A worktree WITH a checked-out db runs against itself.)
     expect(url).not.toBe(homeUrl);
-    expect(url).not.toContain(".agentic-kanban");
+    // Not the ".agentic-kanban" substring: a worker checkout may itself live under one.
+    expect(url).not.toContain(HOME.replace(/\\/g, "/"));
     expect(url.toLowerCase()).toContain("server");
   });
 

@@ -89,7 +89,9 @@ export function markAgentsLeftOnPurpose(workRoot: string, sessionIds: string[]):
 }
 
 function normalizePath(p: string): string {
-  return resolve(p).replace(/\\/g, "/").toLowerCase();
+  // A Windows drive path recorded by a Windows daemon must not be rebased onto a POSIX cwd.
+  const abs = /^[a-zA-Z]:[\\/]/.test(p) ? p : resolve(p);
+  return abs.replace(/\\/g, "/").toLowerCase();
 }
 
 /**
