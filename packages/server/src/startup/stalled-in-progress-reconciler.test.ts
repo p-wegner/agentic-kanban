@@ -4,6 +4,7 @@ import {
   REDRIVE_COOLDOWN_MS,
   resetStalledInProgressStateForTests,
   STALLED_GRACE_MS,
+  STALLED_MAX_AGE_MS,
 } from "./stalled-in-progress-reconciler.js";
 import { isHangWatchdogKill } from "./session-exit-classification.js";
 import type { StalledInProgressCandidate } from "../repositories/stalled-in-progress.repository.js";
@@ -49,6 +50,11 @@ describe("decideStalledInProgress (#1439)", () => {
     expect(isHangWatchdogKill("Agent hang watchdog: no output for 900s - process killed on worker.")).toBe(true);
     expect(isHangWatchdogKill("boom")).toBe(false);
     expect(decideStalledInProgress(base({ lastSessionTriggerType: null }), nowMs).redrive).toBe(true);
+  });
+
+  it("leaves an abandoned workspace alone: its last session ended over a day ago", () => {
+    const old = base({ lastSessionEndedAt: new Date(nowMs - STALLED_MAX_AGE_MS - 1000).toISOString() });
+    expect(decideStalledInProgress(old, nowMs)).toEqual({ redrive: false, reason: "abandoned (session ended over a day ago)" });
   });
 
   it("exposes a cooldown so a no-op re-drive is not repeated every pass", () => {

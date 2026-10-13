@@ -33,6 +33,12 @@ import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sw
 export const STALLED_GRACE_MS = 3 * 60_000;
 /** The same workspace is re-driven at most once per window, whatever the re-drive achieved. */
 export const REDRIVE_COOLDOWN_MS = 10 * 60_000;
+/**
+ * A session that ended longer ago than this is abandoned, not stalled: re-driving it replays its
+ * stored outcome NOW (2026-10-13: months-old rate-limited sessions re-armed a fresh 5 h profile
+ * cooldown on every pass and blocked all dispatch).
+ */
+export const STALLED_MAX_AGE_MS = 24 * 60 * 60_000;
 
 const NON_BUILDER_TRIGGERS = new Set(["review", "fix-and-merge", "fix-conflicts", "learning", "verify", "bisect"]);
 
@@ -52,6 +58,7 @@ export function decideStalledInProgress(c: StalledInProgressCandidate, nowMs: nu
   if (!c.workingDir || !c.baseBranch) return { redrive: false, reason: "no worktree/base to diff" };
   const endedMs = Date.parse(c.lastSessionEndedAt);
   if (Number.isFinite(endedMs) && nowMs - endedMs < STALLED_GRACE_MS) return { redrive: false, reason: "session ended moments ago" };
+  if (Number.isFinite(endedMs) && nowMs - endedMs > STALLED_MAX_AGE_MS) return { redrive: false, reason: "abandoned (session ended over a day ago)" };
   const last = lastRedriveMs.get(c.workspaceId);
   if (last !== undefined && nowMs - last < REDRIVE_COOLDOWN_MS) return { redrive: false, reason: "re-driven recently" };
   return { redrive: true };
