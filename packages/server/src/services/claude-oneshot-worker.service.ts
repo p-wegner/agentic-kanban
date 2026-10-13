@@ -30,6 +30,7 @@ import { resolveProjectCommitterIdentity } from "./project-committer-identity.js
 import { buildRemoteLaunchSpec } from "./remote-launch-spec.js";
 import { buildRemoteSpecEnv } from "../lib/remote-spec-env.js";
 import type { WorkerConnectionManager } from "./worker-connection.service.js";
+import { registerOneShotDispatch } from "./oneshot-dispatch-registry.js";
 
 /** How long a worker has to acknowledge the frame before it is treated as one that never will. */
 export const ONESHOT_ACCEPT_TIMEOUT_MS = 20_000;
@@ -200,6 +201,7 @@ export async function dispatchOneShotToWorker(args: OneShotDispatchArgs): Promis
   const pinned = wantsRepo && branch && repoPath && args.cwd ? await pinWorkingTree(args.cwd, repoPath, branch) : false;
   if (wantsRepo && !pinned) return { handled: false, reason: "the working tree is not a commit in the project repo" };
   let placement: Placement | undefined;
+  let endDispatch: (() => void) | undefined;
   try {
     placement = await (args.place ?? resolveWorkerPlacement)({
       database,
@@ -212,6 +214,8 @@ export async function dispatchOneShotToWorker(args: OneShotDispatchArgs): Promis
     const requestId = randomUUID();
     const manager = args.manager ?? getWorkerFleet(database).connections;
     const request = await buildRequest(args, placement, requestId, pinned ? branch : undefined);
+    // #1468: the worker pushes the fix to this branch; git-http accepts it only while registered.
+    endDispatch = pinned && branch ? registerOneShotDispatch(placement.workerId, projectId, branch) : undefined;
     const result = await awaitResult({
       manager,
       workerId: placement.workerId,
@@ -222,6 +226,7 @@ export async function dispatchOneShotToWorker(args: OneShotDispatchArgs): Promis
     });
     return await settle(args, placement, result, request);
   } finally {
+    endDispatch?.();
     if (placement?.kind === "remote") releaseWorkerSlot(placement.reservationId);
     if (pinned && branch && repoPath) await unpin(repoPath, branch);
   }

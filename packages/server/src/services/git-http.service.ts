@@ -50,6 +50,7 @@
 // board-side sync step fast-forwards the real branch from the incoming ref
 // (worker-remote-sync service).
 
+import { isOneShotDispatchLive } from "./oneshot-dispatch-registry.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
   createExpiringDigestStore,
@@ -365,6 +366,7 @@ export async function authorizeAssignment(
 /** The DB-backed lookup used in production. */
 export function createAssignmentLookup(database: Database): AssignmentLookup {
   return async ({ workerId, projectId, branch, nowMs }) =>
+    isOneShotDispatchLive(workerId, projectId, branch) ||
     (await findCurrentWorkerAssignment({ workerId, projectId, branch, nowMs }, database)) !== null;
 }
 
