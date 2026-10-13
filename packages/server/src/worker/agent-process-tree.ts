@@ -7,6 +7,8 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { forgetAgent, markAgentsLeftOnPurpose, recordAgent, sweepLeftoverAgents } from "./worker-agent-registry.js";
 import { attachAgentJob, type AgentJob } from "./worker-job-holder.js";
 import { reapOrphanedCheckouts } from "./worker-repo.js";
+import { createPendingDeleteSweeper, sweepPendingDeletes } from "./worker-pending-delete.js";
+export { createPendingDeleteSweeper }; // #1445: the daemon's idle retry of locked-file deletions
 
 export interface AgentTreeTracker {
   /** Record a freshly spawned agent and (win32) put it in a kill-on-close job. */
@@ -46,6 +48,13 @@ export async function cleanUpBeforeStart(workRoot: string, log: (line: string) =
     await sweepLeftoverAgents(workRoot, log);
   } catch (err) {
     log(`[worker] leftover-agent sweep failed (continuing): ${errorMessage(err)}`);
+  }
+  try {
+    // #1445: first retry what a previous daemon could not delete (locks are gone with its agents).
+    const pending = await sweepPendingDeletes(workRoot, log);
+    if (pending.deleted.length > 0) log(`[worker] startup cleanup: finished ${pending.deleted.length} pending checkout deletion(s)`);
+  } catch (err) {
+    log(`[worker] pending-delete sweep failed (continuing): ${errorMessage(err)}`);
   }
   try {
     const reaped = await reapOrphanedCheckouts(workRoot, log);

@@ -15,8 +15,8 @@ import { describeGitTransportFailure } from "./worker-git-token.js";
 import { workerLog } from "./worker-updater.js";
 import { healCorruptCache, isCloneCorruption } from "./worker-repo-heal.js";
 import { loadUndelivered } from "./worker-undelivered.js";
-import { mkdirSync, writeFileSync, existsSync, readdirSync, rmSync, appendFileSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { ensureLongPaths, removeCheckoutDir } from "./worker-pending-delete.js";
+import { mkdirSync, writeFileSync, existsSync, readdirSync, appendFileSync } from "node:fs";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { TICKET_CONTEXT_FILENAME } from "@agentic-kanban/shared/lib/ticket-context";
 import { homedir } from "node:os";
@@ -225,6 +225,7 @@ export async function provisionWorkerCheckout(
   }
 
   // Stale worktree from a crashed prior session with the same id Ã¢â‚¬â€ remove it.
+  await ensureLongPaths(cacheDir, log);
   if (existsSync(checkoutDir)) {
     await removeCacheWorktree(cacheDir, checkoutDir);
   }
@@ -550,15 +551,13 @@ export async function pushWorkerHead(
  * removed afterwards Ã¢â‚¬â€ one leaked shell per session otherwise, reaped only at next boot.
  */
 export async function cleanupWorkerCheckout(checkout: WorkerCheckout): Promise<void> {
+  await ensureLongPaths(checkout.cacheDir);
   await removeCacheWorktree(checkout.cacheDir, checkout.cwd);
-  try {
-    // #1420: async, not rmSync — a whole checkout (node_modules) removed synchronously blocks the
-    // daemon's event loop for tens of seconds, so keepalive pongs go unanswered and the board
-    // closes the socket right after the result push.
-    await rm(checkout.cwd, { recursive: true, force: true });
-  } catch (err) {
-    workerLog(`[worker] could not remove checkout directory ${checkout.cwd}: ${String(err)}`);
-  }
+  // #1420: async, not rmSync — a whole checkout (node_modules) removed synchronously blocks the
+  // daemon's event loop for tens of seconds, so keepalive pongs go unanswered and the board
+  // closes the socket right after the result push.
+  // #1445: a locked file defeats the retries -> the dir is queued for the next sweep.
+  await removeCheckoutDir(dirname(dirname(checkout.cacheDir)), checkout.cwd, workerLog);
   // #1322: the checkout dir is named for the session id; drop its `kanban/<sessionId>` branch
   // (git refuses while the worktree is registered, hence after the remove + prune).
   await pruneCacheWorktrees(checkout.cacheDir);
@@ -649,7 +648,10 @@ async function reapRegisteredCheckout(
       await gitExec(["branch", "-D", `kanban/${sessionId}`], { cwd: cacheDir });
       await pruneCacheWorktrees(cacheDir);
     }
-    rmSync(dir, { recursive: true, force: true });
+    if (!(await removeCheckoutDir(dirname(dirname(dir)), dir, log))) {
+      report.errored.push(dir);
+      return;
+    }
     report.reaped.push(dir);
     log(`[worker] reaped dead session checkout (worktree still registered): ${dir}`);
   } catch (err) {
@@ -757,13 +759,11 @@ async function reapCheckoutDirs(
       await reapRegisteredCheckout(dir, name, projectDirs, log, report);
       continue;
     }
-    try {
-      rmSync(dir, { recursive: true, force: true });
+    if (await removeCheckoutDir(workRoot, dir, log)) {
       report.reaped.push(dir);
       log(`[worker] reaped orphaned checkout (no worktree registration): ${dir}`);
-    } catch (err) {
+    } else {
       report.errored.push(dir);
-      log(`[worker] could not reap orphaned checkout ${dir}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   return report;
