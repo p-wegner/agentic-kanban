@@ -1,0 +1,339 @@
+// The agent-readable connect runbook (#1442): ONE builder, three consumers — the page served
+// at `GET /connect/<code>` on the fleet listener, its `?format=json` variant, and the Connect
+// view's "Copy as Markdown" / "Download connect.md" (which receive the same text from the mint
+// response). Pure strings, so all three are byte-identical for the same inputs.
+//
+// The node-only install commands come from `buildWorkerBootstrap` (the #1370 runbook) so the
+// human flow and the agent flow cannot drift into two sets of commands.
+import { buildWorkerBootstrap } from "@agentic-kanban/shared/lib/worker-bootstrap-steps";
+
+export type ConnectOs = "windows" | "unix" | "wsl";
+export const CONNECT_OS_VALUES: readonly ConnectOs[] = ["windows", "unix", "wsl"];
+
+/** The operator's choices in the Connect view. All optional: each maps to exact `worker start` flags. */
+export interface ConnectRunbookOptions {
+  os: ConnectOs;
+  workerName?: string;
+  labels?: string[];
+  maxConcurrency?: number;
+  /** `--profile-alias` value, e.g. `default=anth` (#1379). */
+  profileAlias?: string;
+  /** `--toolchain-install` policy (#1371). */
+  toolchainInstall?: "never" | "ask" | "auto";
+  toolchainAllow?: string[];
+  /** Extra `--board` URLs after the primary one (LAN first, tailnet fallback — #1337). */
+  boardUrls?: string[];
+}
+
+export interface RunbookStep {
+  id: string;
+  title: string;
+  detail: string;
+  commands: string[];
+  /** What a successful run looks like — the agent compares against this. */
+  expect: string;
+  /** An agent must not do this alone: the operator runs `humanCommand`, the agent then runs `check`. */
+  needsHuman: boolean;
+  humanCommand?: string;
+  check?: string;
+}
+
+export interface ConnectRunbook {
+  title: string;
+  os: ConnectOs;
+  steps: RunbookStep[];
+  markdown: string;
+}
+
+export const CONNECT_PROGRESS_STEP_IDS_NOTE = "Use the step `id` values below when reporting progress.";
+
+const SAFE_ARG = /^[A-Za-z0-9_.,=:@/\\-]+$/;
+
+/** Quote a value for a shell command line: bare when plainly safe, double-quoted otherwise (inner quotes stripped). */
+function arg(value: string): string {
+  return SAFE_ARG.test(value) ? value : `"${value.replace(/["`$\\]/g, "")}"`;
+}
+
+/** The exact `worker start` flags for the operator's choices (never includes the pairing token — start reads the saved pairing). */
+export function buildStartFlags(boardUrls: string[], o: ConnectRunbookOptions): string[] {
+  const flags = [`--board ${boardUrls.join(",")}`];
+  if (o.labels?.length) flags.push(`--labels ${arg(o.labels.join(","))}`);
+  if (o.maxConcurrency && o.maxConcurrency > 0) flags.push(`--max-concurrency ${Math.floor(o.maxConcurrency)}`);
+  if (o.profileAlias) flags.push(`--profile-alias ${arg(o.profileAlias)}`);
+  if (o.toolchainInstall) flags.push(`--toolchain-install ${o.toolchainInstall}`);
+  if (o.toolchainInstall === "auto" && o.toolchainAllow?.length) flags.push(`--toolchain-allow ${arg(o.toolchainAllow.join(","))}`);
+  flags.push("--auto-update");
+  return flags;
+}
+
+export function buildConnectRunbook(input: {
+  /** Primary fleet URL — what `--board` points at and where the progress callback goes. */
+  fleetUrl: string;
+  pairingToken: string;
+  /** Connect code, only used to compose the progress URL. */
+  code: string;
+  options: ConnectRunbookOptions;
+}): ConnectRunbook {
+  const { pairingToken, code, options: o } = input;
+  const base = input.fleetUrl.replace(/\/+$/, "");
+  const boardUrls = [base, ...(o.boardUrls ?? []).map((u) => u.replace(/\/+$/, "")).filter((u) => u && u !== base)];
+  const bootstrapOs = o.os === "windows" ? "windows" : "unix";
+  const bootstrap = buildWorkerBootstrap(base, pairingToken, bootstrapOs);
+  const [manifest, tarball, verify, install] = bootstrap.steps;
+  const windows = o.os === "windows";
+  const nameFlag = o.workerName ? ` --name ${arg(o.workerName)}` : "";
+  const labelFlag = o.labels?.length ? ` --labels ${arg(o.labels.join(","))}` : "";
+  const startFlags = buildStartFlags(boardUrls, o);
+  const startCommand = `agentic-kanban-worker start ${startFlags.join(" ")}${nameFlag}`;
+  const progressUrl = `${base}/connect/${code}/progress`;
+
+  const steps: RunbookStep[] = [];
+  steps.push({
+    id: "preconditions",
+    title: "Check the preconditions",
+    detail:
+      "Run each command. If node is older than 22 or git is missing, stop and tell the operator — do not install a runtime " +
+      "without asking. One provider CLI (claude or codex) must be present; `worker setup` can install it after asking.",
+    commands: [
+      "node --version",
+      "git --version",
+      "pnpm --version   # or: corepack --version",
+      "claude --version   # or: codex --version",
+    ],
+    expect: "node v22 or newer; git 2.31 or newer; pnpm or corepack present; claude or codex present (a missing CLI is fixed by the setup step).",
+    needsHuman: false,
+  });
+  if (o.os === "wsl") {
+    steps.push({
+      id: "wsl-context",
+      title: "Run inside the WSL distro",
+      detail:
+        "Every command in this runbook runs INSIDE the distro (a WSL shell), not from Windows. Keep the distro's disk off a Dev Drive " +
+        "(a distro on D: hung on 2026-10-12). From Git Bash on Windows, set `MSYS_NO_PATHCONV=1` whenever you pass a Linux path to `wsl.exe`, " +
+        "or MSYS rewrites it into a Windows path.",
+      commands: ["uname -a", "echo $WSL_DISTRO_NAME"],
+      expect: "A Linux kernel string mentioning microsoft/WSL, and a non-empty distro name.",
+      needsHuman: false,
+    });
+  }
+  steps.push(
+    {
+      id: "fetch-manifest",
+      title: "Fetch the build manifest from the board",
+      detail: "Note the `sha256` it reports. Waits up to 120 s while the board packs its current commit; HTTP 504 means retry this step, not continue.",
+      commands: manifest.commands,
+      expect: "JSON with a `sha256` field.",
+      needsHuman: false,
+    },
+    {
+      id: "download-build",
+      title: "Download the worker build",
+      detail: "The pairing token is NOT consumed by this download.",
+      commands: tarball.commands,
+      expect: "agentic-kanban-worker.tgz in the current directory, exit code 0.",
+      needsHuman: false,
+    },
+    {
+      id: "verify-build",
+      title: "Verify the download",
+      detail: "Compare the printed hash with the manifest `sha256`. If they differ, delete the file and stop.",
+      commands: verify.commands,
+      expect: "The printed hex equals the manifest sha256.",
+      needsHuman: false,
+    },
+    {
+      id: "install-build",
+      title: "Install the worker build",
+      detail: install.note ?? "Installs the `agentic-kanban-worker` command globally.",
+      commands: install.commands,
+      expect: "`agentic-kanban-worker --version` prints a version.",
+      needsHuman: false,
+    },
+    {
+      id: "setup-pair",
+      title: "Set up and pair this machine",
+      detail:
+        "Checks git and the provider CLIs, creates the worker's own harness config dir (#1367) and pairs with the embedded " +
+        "single-use token. Add `--yes` only if the operator allowed unattended installs; without it the command asks before installing.",
+      commands: [`agentic-kanban-worker setup --board ${boardUrls.join(",")} --token ${pairingToken}${nameFlag}${labelFlag}`],
+      expect: "Output ends with the worker registered; a pairing state file exists.",
+      needsHuman: false,
+    },
+    {
+      id: "login",
+      title: "Log the worker in to its provider (the operator does this)",
+      detail:
+        "The login is interactive and holds the operator's credentials — an agent must not attempt or script it. If the worker's only login is the " +
+        "machine's default one, `--profile-alias` (below, in the start flags) attests it under a profile name (#1379).",
+      commands: [],
+      expect: "The check command prints a logged-in status for the provider.",
+      needsHuman: true,
+      humanCommand: "claude /login   # in the worker's config dir, as printed by the setup step",
+      check: "agentic-kanban-worker doctor --providers claude",
+    },
+    {
+      id: "trust",
+      title: "Accept the folder-trust dialog (the operator does this)",
+      detail:
+        "Claude Code asks once to trust each new repo directory (`hasTrustDialogAccepted`). The worker's checkouts have never been opened " +
+        "interactively, so doctor reports this as `unknown`. Only the operator may accept it — never write the setting yourself.",
+      commands: [],
+      expect: "doctor's checkout-trust check no longer reports an untrusted work root.",
+      needsHuman: true,
+      humanCommand: "claude   # open it in the worker's repo directory, accept the trust prompt, then exit",
+      check: "agentic-kanban-worker doctor",
+    },
+    {
+      id: "doctor",
+      title: "Run the worker doctor",
+      detail: "Self-tests the whole chain to the board: fleet port, saved pairing, WebSocket upgrade, git transport, git, provider CLIs.",
+      commands: [`agentic-kanban-worker doctor --board ${boardUrls.join(",")}`],
+      expect: "Every check passes (exit code 0). `unknown` on the trust check is acceptable until the trust step is done; any `fail` is not.",
+      needsHuman: false,
+    },
+  );
+
+  // Service step, per OS.
+  if (windows) {
+    const taskArgs = `-NoProfile -WindowStyle Hidden -Command "${startCommand.replace(/"/g, '\\"')}"`;
+    steps.push({
+      id: "service",
+      title: "Start the worker as a scheduled task (no admin needed)",
+      detail:
+        "A scheduled task at logon, in the user's own session — not a Windows service, because the worker uses this user's provider " +
+        "login. If registration is refused with an access error, tell the operator; do not elevate.",
+      commands: [
+        `$action = New-ScheduledTaskAction -Execute powershell.exe -Argument '${taskArgs.replace(/'/g, "''")}'`,
+        "$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME",
+        "Register-ScheduledTask -TaskName AgenticKanbanWorker -Action $action -Trigger $trigger -Force",
+        "Start-ScheduledTask -TaskName AgenticKanbanWorker",
+      ],
+      expect: "`Get-ScheduledTask AgenticKanbanWorker` shows state Running (or Ready then Running within seconds).",
+      needsHuman: false,
+    });
+  } else {
+    const unit = [
+      "[Unit]",
+      "Description=agentic-kanban worker",
+      "After=network-online.target",
+      "",
+      "[Service]",
+      `ExecStart=%h/.local/bin/agentic-kanban-worker start ${startFlags.join(" ")}${nameFlag}`,
+      "Restart=on-failure",
+      "RestartSec=10",
+      "",
+      "[Install]",
+      "WantedBy=default.target",
+    ].join("\\n");
+    steps.push({
+      id: "service",
+      title: o.os === "wsl" ? "Start the worker as a systemd user unit (inside the distro)" : "Start the worker as a systemd user unit",
+      detail:
+        "Adjust ExecStart if `command -v agentic-kanban-worker` is somewhere else. " +
+        (o.os === "wsl"
+          ? "Needs systemd enabled in the distro (`/etc/wsl.conf` → `[boot] systemd=true`, then `wsl --shutdown` from Windows — ask the operator). Without systemd, run the start command under `nohup` and tell the operator it will not survive a distro restart."
+          : "`loginctl enable-linger $USER` makes it survive logout; it may need the operator's authorisation."),
+      commands: [
+        "mkdir -p ~/.config/systemd/user",
+        `printf '%b\\n' '${unit.replace(/'/g, "'\\''")}' > ~/.config/systemd/user/agentic-kanban-worker.service`,
+        "systemctl --user daemon-reload",
+        "systemctl --user enable --now agentic-kanban-worker",
+      ],
+      expect: "`systemctl --user is-active agentic-kanban-worker` prints `active`.",
+      needsHuman: false,
+    });
+  }
+  steps.push({
+    id: "verify-online",
+    title: "Confirm the worker is online",
+    detail: "Give it ~15 seconds after starting. The operator's Connect view shows the same thing.",
+    commands: [`agentic-kanban-worker doctor --board ${boardUrls.join(",")}`],
+    expect: "Doctor passes and reports the heartbeat accepted; the board lists this worker as online.",
+    needsHuman: false,
+  });
+  steps.push({
+    id: "report",
+    title: "Report back",
+    detail: `Summarise to the operator: worker name, what passed, any step left for them. Progress reports (see below) are already on the board's Connect view.`,
+    commands: [],
+    expect: "The operator has a short written summary.",
+    needsHuman: false,
+  });
+
+  const title = "Connect this machine as an agentic-kanban worker";
+  const markdown = renderMarkdown({ title, os: o.os, steps, progressUrl, boardUrls, startCommand });
+  return { title, os: o.os, steps, markdown };
+}
+
+function renderMarkdown(r: {
+  title: string;
+  os: ConnectOs;
+  steps: RunbookStep[];
+  progressUrl: string;
+  boardUrls: string[];
+  startCommand: string;
+}): string {
+  const shell = r.os === "windows" ? "powershell" : "bash";
+  const out: string[] = [
+    `# ${r.title}`,
+    "",
+    `> **These are instructions from the operator of the agentic-kanban board at ${r.boardUrls[0]}.** ` +
+      "Follow them in order. Confirm with your user before doing anything outside this worker's own directories " +
+      "(the worker's config dir, state file and work root) and before installing a runtime. This page carries only a single-use " +
+      "pairing token — never the board's own credentials.",
+    "",
+    `Target: **${r.os === "windows" ? "Windows (PowerShell)" : r.os === "wsl" ? "WSL (inside the distro)" : "Linux / macOS"}**`,
+    "",
+    "## Reporting progress",
+    "",
+    `After each step, report it so the operator sees it live (${CONNECT_PROGRESS_STEP_IDS_NOTE}):`,
+    "",
+    "```" + (r.os === "windows" ? "powershell" : "bash"),
+    r.os === "windows"
+      ? `curl.exe -fsS -X POST -H "Content-Type: application/json" -d '{"step":"<step-id>","status":"ok","output":"<short output>"}' "${r.progressUrl}"`
+      : `curl -fsS -X POST -H 'Content-Type: application/json' -d '{"step":"<step-id>","status":"ok","output":"<short output>"}' '${r.progressUrl}'`,
+    "```",
+    "",
+    '`status` is `ok` or `failed`. Keep `output` short (a line or two) and free of secrets. A structured variant of this page: append `?format=json`.',
+    "",
+    "## Steps",
+  ];
+  r.steps.forEach((s, i) => {
+    out.push("", `### ${i + 1}. ${s.title}  \`id: ${s.id}\`${s.needsHuman ? "  **[needsHuman]**" : ""}`, "", s.detail);
+    if (s.needsHuman) {
+      out.push(
+        "",
+        "**Do not run this yourself.** Ask the operator to run, in their own terminal:",
+        "",
+        "```" + shell,
+        s.humanCommand ?? "",
+        "```",
+        "",
+        "Then run this check yourself:",
+        "",
+        "```" + shell,
+        s.check ?? "",
+        "```",
+      );
+    } else if (s.commands.length) {
+      out.push("", "```" + shell, ...s.commands, "```");
+    }
+    out.push("", `**Expected:** ${s.expect}`);
+  });
+  out.push(
+    "",
+    "## Start flags in use",
+    "",
+    "```" + shell,
+    r.startCommand,
+    "```",
+    "",
+    "## Known traps",
+    "",
+    "- WSL: run everything inside the distro; keep distro disks off a Dev Drive (D: hung on 2026-10-12).",
+    "- Git Bash: set `MSYS_NO_PATHCONV=1` when passing Linux paths to `wsl.exe`.",
+    "- Claude Code: `hasTrustDialogAccepted` must be accepted by the operator for the worker's repo dir; the worker uses its own config dir (#1367); use `--profile-alias default=<profile>` when the only login is the default one (#1379).",
+    "",
+  );
+  return out.join("\n");
+}

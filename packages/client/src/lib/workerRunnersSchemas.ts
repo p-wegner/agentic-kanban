@@ -141,9 +141,21 @@ const sessionPlacements: Schema = looseObject({ placements: arrayOf(nested(sessi
  *  it just reloads the list on success — so this asserts only that the request succeeded. */
 const incomingRefActionResult: Schema = looseObject({ ok: trueLiteral });
 
+/** #1442: `POST /api/workers/connect-code` — the minted code plus the runbook text the Connect view copies/downloads. */
+const connectCodeMinted: Schema = looseObject({ code: str, agentUrl: str, agentPrompt: str, markdown: str, pairingToken: str, expiresAt: str });
+/** #1442: `GET /api/workers/connect-code/:code` — status and the agent's live progress reports. */
+const connectCodeView: Schema = looseObject({
+  status: str,
+  expiresAt: str,
+  progress: arrayOf(nested(looseObject({ step: str, status: str, output: str, at: str }))),
+});
+
 /** The registry entries, spread into `API_RESPONSE_SCHEMAS` (structurally `ApiResponseRoute`). */
 export const WORKER_RUNNERS_ROUTES: ReadonlyArray<{ method: "GET" | "POST" | "PUT"; template: string; schema: Schema }> = [
   { method: "GET", template: "/api/workers/connect-info", schema: workerConnectInfo },
+  { method: "POST", template: "/api/workers/connect-code", schema: connectCodeMinted },
+  { method: "GET", template: "/api/workers/connect-code/:code", schema: connectCodeView },
+  { method: "POST", template: "/api/workers/connect-code/:code/revoke", schema: incomingRefActionResult },
   { method: "GET", template: "/api/workers/explain", schema: workerExplainResponse },
   { method: "GET", template: "/api/workers/placements", schema: sessionPlacements },
   { method: "PUT", template: "/api/workers/:id/settings", schema: incomingRefActionResult }, // #1381: `{ ok: true, ... }`

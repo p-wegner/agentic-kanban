@@ -13,6 +13,7 @@ import {
 import { deliverLateResult } from "./services/late-result-delivery.service.js";
 import { superviseBind } from "./services/listener-bind-supervisor.service.js";
 import { createFleetWorkersRoute } from "./routes/workers.js";
+import { createConnectFleetRoute } from "./routes/worker-connect.js";
 import { setupApiNotFoundAndSpaFallback, setupRoutes } from "./startup/route-setup.js";
 import { BACKGROUND_SERVICES } from "./startup/background-services.js";
 import { runGatedDeferredStartupTasks, runStartupAuditTasks } from "./startup/startup-tasks.js";
@@ -195,6 +196,7 @@ export async function startServer(port?: number, hostname?: string) {
         database: db,
         port: fleetPort,
         createWorkersRoute: createFleetWorkersRoute,
+        createConnectRoute: () => createConnectFleetRoute(),
         host: fleetHost,
       }),
       describe: (h) => ({ host: h.host, port: h.port }),

@@ -55,6 +55,8 @@ import { getWorkerBuildService, type WorkerBuildService } from "../services/work
 import type { BoardEventSink } from "../services/board-events.js";
 import { buildWorkerConnectSteps } from "../lib/worker-connect-steps.js";
 import { BOOTSTRAP_TOKEN_PLACEHOLDER, buildWorkerBootstrap } from "@agentic-kanban/shared/lib/worker-bootstrap-steps";
+import { createConnectOwnerRoute } from "./worker-connect.js";
+import { getConnectCodeStore } from "../services/worker-connect-code.service.js";
 import { parseHostList } from "../lib/listen-hosts.js";
 import { resolveFleetPort, resolveFleetHost, boardIdentityField } from "../services/fleet-listener.service.js";
 import { isTailscaleHost } from "../lib/tailscale-host.js";
@@ -131,6 +133,9 @@ export function describeFleetUrl(env: NodeJS.ProcessEnv = process.env): { fleetU
  * "only reachable from this machine" trust, exactly like the rest of /api.
  */
 function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Database, boardEvents?: BoardEventSink): void {
+  // #1442: one-time connect codes for the agent-readable /connect/<code> page (served on the fleet listener).
+  router.route("/connect-code", createConnectOwnerRoute(reg, () => describeFleetUrl()));
+
   router.post("/pairing-token", (c) =>
     // #1318: also names the fleet URL, which is what `worker start --board` needs.
     c.json({ ...reg.mintPairingToken(), ...describeFleetUrl() }, 201));
@@ -520,6 +525,8 @@ function registerWorkerFacingRoutes(
         workerVersion: body.workerVersion ?? null,
       },
     });
+    // #1442: the first successful pairing closes any connect code bound to this token.
+    getConnectCodeStore().markPaired(body.pairingToken ?? "");
     boardEvents?.broadcastToAllProjects("workers_changed");
     // #1337: the board's stable id, so the worker keys its pairing by board, not by the URL it dialed.
     return c.json({ ...result, ...(await boardIdentityField(database)) }, 201);

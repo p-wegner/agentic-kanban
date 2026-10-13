@@ -6,6 +6,7 @@ import { useWorkerConnectInfoQuery } from "../hooks/useWorkerFleetQueries.js";
 import { BOOTSTRAP_OS_LABEL, BOOTSTRAP_TOKEN_PLACEHOLDER, type BootstrapOs } from "@agentic-kanban/shared/lib/worker-bootstrap-steps";
 import { fillBootstrapLine } from "../lib/workerSetup.js";
 import { CopyCommand } from "./CopyCommand.js";
+import { WorkerConnectAgentPanel } from "./WorkerConnectAgentPanel.js";
 
 const PLACEHOLDER_TOKEN = "<pairing-token>";
 
@@ -131,6 +132,8 @@ export function WorkerConnectPanel() {
           </div>
         )}
       </div>
+
+      {info?.fleetConfigured && <WorkerConnectAgentPanel fleetUrl={pairing?.fleetUrl} />}
 
       {info && (
         <div className="rounded border border-gray-200 dark:border-gray-700 p-3 text-xs text-gray-600 dark:text-gray-300">

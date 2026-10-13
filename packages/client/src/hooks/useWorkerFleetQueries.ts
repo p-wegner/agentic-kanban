@@ -27,6 +27,32 @@ export interface ConnectInfo {
   bootstrap?: Record<BootstrapOs, WorkerBootstrap>;
 }
 
+/** #1442: what the Connect view shows of a minted connect code — its state and the agent's live progress reports. */
+export interface ConnectCodeProgress {
+  step: string;
+  status: "ok" | "failed";
+  output: string;
+  at: string;
+}
+export interface ConnectCodeState {
+  codeHint: string;
+  status: "active" | "used" | "revoked" | "expired" | "fetch-limit";
+  expiresAt: string;
+  fetches: number;
+  maxFetches: number;
+  progress: ConnectCodeProgress[];
+}
+
+/** Polls every 3 s while a code is held, so "doctor passed, worker online" appears as the agent reports it. */
+export function useConnectCodeQuery(code: string | null) {
+  return useQuery({
+    queryKey: ["workers", "connect-code", code] as const,
+    queryFn: () => apiFetch<ConnectCodeState>(`/api/workers/connect-code/${encodeURIComponent(code ?? "")}`),
+    enabled: code !== null,
+    refetchInterval: 3000,
+  });
+}
+
 export function useWorkerConnectInfoQuery() {
   return useQuery({
     queryKey: ["workers", "connect-info"] as const,
