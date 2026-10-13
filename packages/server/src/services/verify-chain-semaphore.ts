@@ -126,6 +126,8 @@ interface VerifyChainWaiter {
 
 let active = 0;
 const waiters: VerifyChainWaiter[] = [];
+/** #1449: the chains holding a slot right now, so `status --watch` can name them. */
+const runningChains = new Set<{ label: string; priority: VerifyChainPriority; startedAtMs: number }>();
 const foregroundDemands = new Set<symbol>();
 
 /** A gate waiting for a probe to stop must be visible before it can take a slot. */
@@ -170,18 +172,6 @@ export interface VerifyChainCapacityReading {
   freeGb: number | null;
 }
 
-function readLiveVerifyChainCapacity(): VerifyChainCapacityReading {
-  // Never throws — `readTier0Capacity` fails open with `freeGb: null`, and an unreadable
-  // `os.cpus()` degrades to "one core", i.e. one slot, the pre-#1160 behaviour.
-  let cpuCount = 1;
-  try {
-    cpuCount = os.cpus().length;
-  } catch {
-    cpuCount = 1;
-  }
-  return { cpuCount, freeGb: readTier0Capacity().freeGb };
-}
-
 /**
  * The capacity a test wants the semaphore to believe (#1160). `null` = read the live box.
  *
@@ -201,7 +191,16 @@ export function setVerifyChainCapacityReaderForTests(reader: (() => VerifyChainC
 }
 
 function readVerifyChainCapacity(): VerifyChainCapacityReading {
-  return (capacityReaderForTests ?? readLiveVerifyChainCapacity)();
+  if (capacityReaderForTests) return capacityReaderForTests();
+  // Live read. Never throws — `readTier0Capacity` fails open with `freeGb: null`, and an unreadable
+  // `os.cpus()` degrades to "one core", i.e. one slot, the pre-#1160 behaviour.
+  let cpuCount = 1;
+  try {
+    cpuCount = os.cpus().length;
+  } catch {
+    cpuCount = 1;
+  }
+  return { cpuCount, freeGb: readTier0Capacity().freeGb };
 }
 
 /**
@@ -247,6 +246,33 @@ export function verifyChainSemaphoreActive(): number {
 /** How many verify chains are queued behind the running one(s) (for diagnostics/tests). */
 export function verifyChainSemaphoreQueueLength(): number {
   return waiters.length;
+}
+
+export interface VerifyChainSnapshotEntry {
+  label: string;
+  priority: VerifyChainPriority;
+  state: "running" | "queued";
+  /** Running: ms since it took its slot. Queued: ms since it joined the queue. */
+  ageMs: number;
+  /** Queued only: 1-based arrival-order place in the queue (admission may reorder by priority). */
+  position?: number;
+  /** Queued only: why it is not running (no free slot / held for memory, and when admission next re-checks). */
+  waitReason?: string;
+}
+
+/** #1449: every running and queued chain with its age and wait reason — a plain read of module state. */
+export function listVerifyChains(nowMs: number = Date.now()): VerifyChainSnapshotEntry[] {
+  const out: VerifyChainSnapshotEntry[] = [...runningChains].map((r) => ({
+    label: r.label, priority: r.priority, state: "running" as const, ageMs: Math.max(0, nowMs - r.startedAtMs),
+  }));
+  if (waiters.length === 0) return out;
+  const capacity = resolveVerifyChainSlots();
+  const memoryHeld = /ram|memory|free|GB/i.test(capacity.reason ?? "");
+  const why = memoryHeld ? `held for memory: ${capacity.reason}; re-checked every ${READMIT_INTERVAL_MS / 1000}s` : `no free slot (${active}/${capacity.slots} running)`;
+  waiters.forEach((w, i) => out.push({
+    label: w.label, priority: w.priority, state: "queued", ageMs: Math.max(0, nowMs - w.queuedAtMs), position: i + 1, waitReason: why,
+  }));
+  return out;
 }
 
 /**
@@ -445,9 +471,12 @@ async function runUnderInProcessSemaphore<T>(
       console.log(`[verify-chain] ${label} admitted as chain ${active} of ${capacity.slots} concurrent (${capacity.reason}) (#1160)`);
     }
   }
+  const running = { label, priority, startedAtMs: Date.now() };
+  runningChains.add(running);
   try {
     return await chain();
   } finally {
+    runningChains.delete(running);
     active--;
     admitWaiters();
   }
@@ -491,6 +520,7 @@ export function resetVerifyChainSemaphoreForTests(
 ): void {
   active = 0;
   waiters.length = 0;
+  runningChains.clear();
   foregroundDemands.clear();
   if (readmitTimer) clearInterval(readmitTimer);
   readmitTimer = null;

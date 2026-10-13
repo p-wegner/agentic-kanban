@@ -1,7 +1,11 @@
 import {
-  CONSOLE_COLUMNS, buildLabel, formatAge,
-  type ConsoleHost, type ConsoleModel, type ConsoleTrain, type ConsoleWorker,
+  CONSOLE_COLUMNS, buildLabel, formatAge, formatElapsed,
+  type ConsoleHost, type ConsoleModel, type ConsoleWorker,
 } from "./status-console-model.js";
+import {
+  baseReleaseSection, connectSection, gatesSection, heading, isLive, issueRef, since,
+  type Glyphs, type Line, type Section, type Tone,
+} from "./status-console-sections.js";
 export * from "./status-console-model.js";
 
 // Pure renderer for `status --watch` (#1421): draws a `ConsoleModel`, no clock and no I/O.
@@ -20,10 +24,6 @@ export interface ConsoleRenderOptions {
   allIssues?: boolean;
 }
 
-type Tone = "red" | "yellow" | "green" | "cyan" | "dim" | "head" | null;
-/** `raw` lines are already truncated and painted (a joined two-column row). */
-interface Line { text: string; tone: Tone; raw?: boolean }
-interface Section { id: string; lines: Line[]; keep?: boolean }
 
 const RESET = "\x1b[0m";
 const CODES: Record<Exclude<Tone, null>, string> = {
@@ -37,22 +37,7 @@ function trunc(text: string, width: number, ell: string): string {
   return width === 1 ? ell : flat.slice(0, width - 1) + ell;
 }
 
-export function formatElapsed(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m${String(s % 60).padStart(2, "0")}s`;
-  return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m`;
-}
 
-function since(iso: string | null, nowMs: number): string {
-  return iso ? formatElapsed(nowMs - new Date(iso).getTime()) : "-";
-}
-
-const issueRef = (n: number | null) => (n != null ? `#${n}` : "#?");
-
-interface Glyphs { a: boolean; ell: string; dot: string; sq: [string, string]; rule: string; nowMs: number }
-const heading = (name: string): Line => ({ text: name, tone: "head" });
 
 function headerSection(model: ConsoleModel, opts: ConsoleRenderOptions): Section {
   const hostBit = model.host
@@ -68,15 +53,19 @@ function headerSection(model: ConsoleModel, opts: ConsoleRenderOptions): Section
 
 function workerLine(w: ConsoleWorker, g: Glyphs): Line {
   const dots = g.dot.repeat(Math.min(w.load, 6)) || " ";
-  const tickets = w.tickets.map((t) => `${issueRef(t.issueNumber)} ${t.status} ${since(t.startedAt, g.nowMs)}`).join(" · ");
+  const tickets = w.tickets.map((t) => `${issueRef(t.issueNumber)} ${t.status}${t.phase && t.phase !== t.status ? `/${t.phase}` : ""} ${since(t.startedAt, g.nowMs)}`).join(" · ");
   const verify = (w.verifyJobs ?? []).map((j) => ` · verify ${j}`).join("");
+  const res = w.freeRamGb != null || w.freeDiskGb != null
+    ? ` ram ${w.freeRamGb != null ? `${w.freeRamGb.toFixed(1)}G` : "?"} disk ${w.freeDiskGb != null ? `${Math.round(w.freeDiskGb)}G` : "?"} ·`
+    : "";
   const hb = w.heartbeatAt ? `hb ${formatAge(g.nowMs - new Date(w.heartbeatAt).getTime())}` : "hb -";
   const ti = w.toolchainInstall;
   const install = ti && ti.state !== "done" ? ` · install ${ti.toolchains.join(",")} ${ti.state}${ti.state === "failed" && ti.reason ? ` (${ti.reason})` : ""}` : "";
-  const state = (w.status === "online" ? "" : ` [${w.status}]`) + install;
+  const state = (w.status === "online" ? "" : ` [${w.status}]`) + (w.authExpired ? " [auth-expired]" : "") + install
+    + (w.pinned && w.pinned.length > 0 ? ` · pinned ${w.pinned.join(",")}` : "") + (w.desiredPending ? " · settings pending" : "");
   return {
-    text: ` ${w.name.padEnd(15)} ${dots.padEnd(3)} ${w.load}/${w.maxConcurrency}  ${(w.os ?? "").padEnd(5)} ${`${w.build ?? "-"}${w.buildStale ? "!" : ""}`.padEnd(7)} ${tickets}${verify}${state}  ${hb}`,
-    tone: w.status !== "online" || w.buildStale || ti?.state === "failed" ? "yellow" : w.load > 0 ? "cyan" : null,
+    text: ` ${w.name.padEnd(15)} ${dots.padEnd(3)} ${w.load}/${w.maxConcurrency}  ${(w.os ?? "").padEnd(5)} ${`${w.build ?? "-"}${w.buildStale ? "!" : ""}`.padEnd(7)}${res} ${tickets}${verify}${state}  ${hb}`,
+    tone: w.status !== "online" || w.buildStale || w.authExpired || ti?.state === "failed" ? "yellow" : w.load > 0 ? "cyan" : null,
   };
 }
 
@@ -99,20 +88,6 @@ function workersSection(model: ConsoleModel, g: Glyphs, allIssues: boolean | und
   return { id: "workers", lines, keep: true };
 }
 
-const isLive = (t: ConsoleTrain) => !t.finishedAt && ["assembling", "gating", "landing"].includes(t.state);
-
-function gatesSection(model: ConsoleModel, g: Glyphs): Section | null {
-  const live = model.trains.filter(isLive);
-  const queued = model.host?.verifyQueued ?? 0;
-  if (live.length === 0 && queued === 0) return null;
-  const lines: Line[] = [heading("GATES & TESTS")];
-  for (const t of live) {
-    lines.push({ text: ` ${g.a ? ">" : "▶"} ${t.label.padEnd(12)} ${t.state.padEnd(10)} ${t.members} members · gate run ${t.gateRuns}  ${since(t.startedAt, g.nowMs)}`, tone: "cyan" });
-  }
-  if (queued > 0) lines.push({ text: ` ${g.a ? "|" : "⏸"} ${queued} verify chain(s) queued behind ${model.host?.verifyActive ?? 0} running`, tone: "yellow" });
-  return { id: "gates", lines };
-}
-
 function trainSection(model: ConsoleModel, g: Glyphs): Section | null {
   if (model.trains.length === 0 && !model.window) return null;
   const parts = model.trains.filter((t) => !isLive(t)).slice(0, 3).map((t) => {
@@ -122,7 +97,11 @@ function trainSection(model: ConsoleModel, g: Glyphs): Section | null {
   const w = model.window;
   if (w) parts.push(`window ${w.pending.map(issueRef).join(" ")} ${since(w.firstSeenAt, g.nowMs)}${w.maxWaitMs ? `/${formatElapsed(w.maxWaitMs)}` : ""}`);
   const bad = model.trains.some((t) => !isLive(t) && t.state === "red" && !t.superseded);
-  return { id: "train", lines: [heading("MERGE TRAIN"), { text: ` ${parts.join(" · ")}`, tone: bad ? "red" : null }] };
+  const lines: Line[] = [heading("MERGE TRAIN"), { text: ` ${parts.join(" · ")}`, tone: bad ? "red" : null }];
+  for (const t of model.trains.filter((x) => !isLive(x)).slice(0, 3)) {
+    for (const d of (t.droppedDetail ?? []).slice(0, 3)) lines.push({ text: `   ${g.a ? "-" : "↳"} ${t.label} dropped ${d.ref}${d.deferred ? " (deferred)" : ""}: ${d.reason}`, tone: "dim" });
+  }
+  return { id: "train", lines };
 }
 
 function pipelineSection(model: ConsoleModel, allIssues: boolean | undefined): Section | null {
@@ -170,7 +149,7 @@ function joinColumns(left: Line[], right: Line[], colW: number, g: Glyphs, color
   return out;
 }
 
-const LEFT_COLUMN = new Set(["workers", "gates", "train"]);
+const LEFT_COLUMN = new Set(["workers", "gates", "base", "connect", "train"]);
 
 function layoutSections(list: Section[], cols: number, g: Glyphs, color: boolean | undefined): Line[] {
   const wide = cols >= 140;
@@ -202,14 +181,15 @@ export function renderConsole(model: ConsoleModel, opts: ConsoleRenderOptions): 
   const a = opts.ascii === true;
   const g: Glyphs = { a, ell: a ? "~" : "…", dot: a ? "o" : "●", sq: a ? ["#", "-"] : ["■", "□"], rule: a ? "-" : "─", nowMs: opts.nowMs };
 
-  const merged: Section = { id: "merged", lines: [{ text: `MERGED TODAY ${model.mergedToday}`, tone: model.mergedToday > 0 ? "green" : "dim" }] };
+  const merged: Section = { id: "merged", lines: [{ text: `MERGED TODAY ${model.mergedToday} (since 00:00 local)`, tone: model.mergedToday > 0 ? "green" : "dim" }] };
   let active = [
-    headerSection(model, opts), workersSection(model, g, opts.allIssues), gatesSection(model, g), trainSection(model, g),
+    headerSection(model, opts), workersSection(model, g, opts.allIssues), gatesSection(model, g), baseReleaseSection(model, g),
+    connectSection(model, g), trainSection(model, g),
     pipelineSection(model, opts.allIssues), attentionSection(model, g), merged,
   ].filter((s): s is Section => s !== null);
 
   // Drop history first when the screen is short; WORKERS and ATTENTION are never dropped.
-  for (const id of ["merged", "pipeline", "train", "gates"]) {
+  for (const id of ["merged", "pipeline", "connect", "train", "gates", "base"]) {
     if (layoutSections(active, cols, g, opts.color).length + 1 <= rows) break;
     active = active.filter((s) => s.id !== id);
   }

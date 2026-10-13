@@ -19,7 +19,7 @@ exports[`renderConsole > snapshot at 80 cols, color 1`] = `
 [1mATTENTION ──────────────────────────────────────────────────────────────────────[0m
 [31m ✖ #1416 exit-check red: temp-dir-namespace-guard (feedback 1/2 sent)[0m
 [33m ⚠ host saturated: 1.9 GB < 2 GB[0m
-[32mMERGED TODAY 22[0m
+[32mMERGED TODAY 22 (since 00:00 local)[0m
 [2mq quit · a all issues[0m"
 `;
 
@@ -42,7 +42,7 @@ PIPELINE (7 open) ────────────────────�
 ATTENTION ──────────────────────────────────────────────────────────────────────
  ✖ #1416 exit-check red: temp-dir-namespace-guard (feedback 1/2 sent)
  ⚠ host saturated: 1.9 GB < 2 GB
-MERGED TODAY 22
+MERGED TODAY 22 (since 00:00 local)
 q quit · a all issues"
 `;
 
@@ -56,7 +56,7 @@ exports[`renderConsole > snapshot at 140 cols, color 1`] = `
 [36m ▶ train-12     gating     2 members · gate run 1  6m10s[0m             │ [1mATTENTION ──────────────────────────────────────────────────────────[0m
 [33m ⏸ 2 verify chain(s) queued behind 2 running[0m                         │ [31m ✖ #1416 exit-check red: temp-dir-namespace-guard (feedback 1/2 sen…[0m
 [1mMERGE TRAIN ────────────────────────────────────────────────────────[0m │ [33m ⚠ host saturated: 1.9 GB < 2 GB[0m
- train-11 ✔ 2/2 · train-10 ✔ 2/3 (1 dropped) 2 runs · window #1392 … │ [32mMERGED TODAY 22[0m
+ train-11 ✔ 2/2 · train-10 ✔ 2/3 (1 dropped) 2 runs · window #1392 … │ [32mMERGED TODAY 22 (since 00:00 local)[0m
 [2mq quit · a all issues[0m"
 `;
 
@@ -70,6 +70,6 @@ GATES & TESTS ──────────────────────
  ▶ train-12     gating     2 members · gate run 1  6m10s             │ ATTENTION ──────────────────────────────────────────────────────────
  ⏸ 2 verify chain(s) queued behind 2 running                         │  ✖ #1416 exit-check red: temp-dir-namespace-guard (feedback 1/2 sen…
 MERGE TRAIN ──────────────────────────────────────────────────────── │  ⚠ host saturated: 1.9 GB < 2 GB
- train-11 ✔ 2/2 · train-10 ✔ 2/3 (1 dropped) 2 runs · window #1392 … │ MERGED TODAY 22
+ train-11 ✔ 2/2 · train-10 ✔ 2/3 (1 dropped) 2 runs · window #1392 … │ MERGED TODAY 22 (since 00:00 local)
 q quit · a all issues"
 `;

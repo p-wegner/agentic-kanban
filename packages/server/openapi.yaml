@@ -9288,6 +9288,29 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/workers/console:
+    get:
+      summary: rc state, verify placement, stalled sessions. One cheap read per refresh.
+      tags:
+        - workers
+      operationId: get_api_workers_console
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "422":
+          description: Error (thrown UNPROCESSABLE, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/workers/explain:
     get:
       summary: reports preference values and the whole fleet's shape.
