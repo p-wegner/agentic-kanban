@@ -219,6 +219,15 @@ Fleet worker: connect this machine to a board and execute assigned agent session
 | `worker config <action> [key] [value]` | Edit the worker's persisted start args (#1443) |
 | `worker setup` | Set this machine up as a worker, step by step (each step detects what is already there and can be |
 
+## worker results
+
+Undelivered session results this worker still holds (#1444).
+
+| Command | Does |
+|---|---|
+| `worker results list` | List retained and lost results, with the sha and whether it already landed |
+| `worker results drop <sessionIds...>` | Remove results from the retry list (--lost: also the lost list), under the daemon's file lock |
+
 ## worker toolchain
 
 Toolchain install requests from the board (#1371).
