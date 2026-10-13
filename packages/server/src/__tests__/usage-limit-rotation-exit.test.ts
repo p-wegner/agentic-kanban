@@ -181,6 +181,24 @@ describe("exit-workflow: usage-limit rotation relaunch (handleUsageLimitExit)", 
     expect(await getWorkspaceStatus(db, workspaceId)).toBe("active");
   });
 
+  it("sets no cooldown when a months-old rate-limited session's exit is replayed (#1452)", async () => {
+    const { workspaceId, sessionId } = await seedRateLimitedWorkspace(db, "claude");
+    await db.update(sessions).set({ endedAt: new Date(Date.now() - 60 * 86_400_000).toISOString() }).where(eq(sessions.id, sessionId));
+    const sessionManager = makeSessionManager();
+
+    const { runWorkflowOnExit } = createWorkflowEngine({
+      sessionManager: sessionManager as never,
+      boardEvents: makeBoardEvents() as never,
+      autoMerge: vi.fn(async () => {}),
+      database: db as never,
+    });
+
+    await runWorkflowOnExit(workspaceId, sessionId, 1);
+
+    expect(rotateClaudeSubscription).not.toHaveBeenCalled();
+    expect(sessionManager.startSession).not.toHaveBeenCalled();
+  });
+
   it("leaves the workspace blocked (no relaunch) when the ring cannot rotate", async () => {
     const { workspaceId, sessionId } = await seedRateLimitedWorkspace(db, "codex");
     rotateCodexLicense.mockResolvedValue({ rotated: false, fromProfile: "ki14", reason: "all licenses cooled down" });

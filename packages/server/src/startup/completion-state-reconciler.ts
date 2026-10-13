@@ -15,6 +15,8 @@ import {
 } from "@agentic-kanban/shared/lib/machine-capacity";
 import { resolveGateBusy } from "../services/base-branch-health-reprobe.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { readUsageLimitStats } from "@agentic-kanban/shared/lib/session-stats-blob";
+import { usageLimitHoldsUntil } from "./exit/usage-limit-cooldown.js";
 import { getImplementExitAttention } from "../services/implement-exit-check-state.js";
 
 /** How long a workspace must be in 'active' with a live PID before we reconcile it (hung agent). */
@@ -181,6 +183,8 @@ export async function reconcileCompletionStates(
       sessionWorkerId: sessions.workerId,
       sessionStatus: sessions.status,
       sessionStartedAt: sessions.startedAt,
+      sessionEndedAt: sessions.endedAt,
+      sessionStats: sessions.stats,
       sessionTriggerType: sessions.triggerType,
       issueId: issues.id,
       workspaceId: workspaces.id,
@@ -221,6 +225,15 @@ export async function reconcileCompletionStates(
     if (c.workspaceStatus === "blocked" && getImplementExitAttention(c.workspaceId)) continue;
     if (c.workspaceStatus === "blocked" && (c.sessionStatus === "completed" || c.sessionStatus === "stopped")) {
       if (!c.workingDir || !c.baseBranch) continue;
+      // #1452: a workspace parked by a usage limit waits on that limit's clock. Recovering it to
+      // idle early only has the stalled sweep re-drive it into the same limit (ping-pong), so it
+      // stays blocked until the limit the session itself reported has lapsed.
+      const limit = readUsageLimitStats(c.sessionStats);
+      const holdsUntil = limit ? usageLimitHoldsUntil({ retryAfter: limit.retryAfter, endedAt: c.sessionEndedAt, nowMs }) : null;
+      if (holdsUntil) {
+        console.log(`[reconciler] blocked workspace ${c.workspaceId} stays blocked: its session hit a usage limit that holds until ${holdsUntil} (#1452)`);
+        continue;
+      }
       const hasCommits = await checkCommits(
         { id: c.workspaceId, workingDir: c.workingDir, baseBranch: c.baseBranch, isDirect: c.isDirect, baseCommitSha: c.baseCommitSha },
         database,

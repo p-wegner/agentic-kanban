@@ -30,6 +30,7 @@ import { rotateCodexLicense } from "../../services/codex-license-ring.js";
 import { rotateClaudeSubscription } from "../../services/claude-subscription-ring.js";
 import { emitButlerSystemEvent } from "../../services/butler-event-feed.js";
 import { assertProjectNotQuiesced } from "../../services/quiesce.service.js";
+import { usageLimitHoldsUntil } from "./usage-limit-cooldown.js";
 import { decideRateLimitExit, formatRateLimitBlockedReason } from "../rate-limit-exit-decision.js";
 import type { RateLimitProvider } from "../rate-limit-exit-decision.js";
 import type { SessionRoleFlags } from "../session-exit-classification.js";
@@ -166,6 +167,8 @@ export interface UsageLimitExitInput {
   projectId: string;
   now: string;
   statsJson: string | null | undefined;
+  /** The session's own end time (#1452): the cooldown is anchored here, never on `now`. */
+  endedAt?: string | null;
   roleFlags: SessionRoleFlags;
 }
 
@@ -175,9 +178,16 @@ export interface UsageLimitExitInput {
  * worktree to continue the ticket, otherwise it leaves the workspace blocked with a clear reason.
  */
 export function createUsageLimitExitHandler({ database: db, sessionManager, boardEvents, reconcileForkChildOnExit }: UsageLimitExitDeps) {
-  return async function handleUsageLimitExit(input: UsageLimitExitInput): Promise<void> {
-    const { cfg, workspaceId, sessionId, issueId, projectId, now, statsJson, roleFlags } = input;
-    const resetsAt = parseRateLimitRetryAfter(statsJson);
+  return async function handleUsageLimitExit(input: UsageLimitExitInput): Promise<boolean> {
+    const { cfg, workspaceId, sessionId, issueId, projectId, now, statsJson, roleFlags, endedAt } = input;
+    // #1452: the cooldown comes from the session's OWN limit event. A limit that already lapsed
+    // (a replayed or old session) owes no cooldown and is not a usage-limit exit any more:
+    // report "not handled" so the dispatcher routes it as an ordinary exit.
+    const resetsAt = usageLimitHoldsUntil({ retryAfter: parseRateLimitRetryAfter(statsJson), endedAt, nowMs: new Date(now).getTime() });
+    if (resetsAt === null) {
+      console.log(`[workflow] ${cfg.label}-rate-limited session ${sessionId} hit its limit at ${endedAt ?? "an unknown time"}; the window has lapsed — no cooldown set (workspace ${workspaceId})`);
+      return false;
+    }
     const rotationPrefMap = toPrefMap(await getAllPreferencesCached(db));
     const currentProfile = rotationPrefMap.get(cfg.profilePrefKey) || "default";
     const rotation = await cfg.rotate(db, rotationPrefMap, currentProfile, resetsAt, new Date(now));
@@ -194,7 +204,7 @@ export function createUsageLimitExitHandler({ database: db, sessionManager, boar
     const fresh = await getWorkspaceById(workspaceId, db);
     if (fresh?.status === "closed") {
       console.log(`[workflow] ${cfg.label}-rate-limited session ${sessionId} exited but workspace ${workspaceId} is already closed (forkStatus=${fresh.forkStatus ?? "n/a"}) — skipping blocked/relaunch write`);
-      return;
+      return true;
     }
 
     if (decideRateLimitExit(rotation, builder).action === "relaunch") {
@@ -218,7 +228,7 @@ export function createUsageLimitExitHandler({ database: db, sessionManager, boar
         boardEvents.broadcast(projectId, "issue_updated");
         emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `${cfg.label} usage limit on '${rotation.fromProfile}' — rotated to '${rotation.toProfile}' and relaunched workspace ${workspaceId}.` });
         console.log(`[workflow] ${cfg.label} profile rotated ${rotation.fromProfile} -> ${rotation.toProfile}; relaunched workspace ${workspaceId} session ${relaunchSessionId}`);
-        return;
+        return true;
       } catch (err) {
         console.error(`[workflow] ${cfg.label} profile rotation relaunch failed:`, err);
         // fall through to blocked
@@ -242,5 +252,6 @@ export function createUsageLimitExitHandler({ database: db, sessionManager, boar
         console.warn(`[workflow] fork-child join reconcile failed (non-fatal) for workspace ${workspaceId}:`, err instanceof Error ? err.message : String(err)),
       );
     }
+    return true;
   };
 }
