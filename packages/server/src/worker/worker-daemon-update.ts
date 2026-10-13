@@ -5,6 +5,7 @@
 
 import { rmSync } from "node:fs";
 import { join } from "node:path";
+import { WORKER_PROTOCOL_VERSION } from "@agentic-kanban/shared/lib/worker-protocol";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { parseBuildId, sameBuild, type WorkerBuildManifest, type WorkerUpdateReport } from "../lib/worker-update.js";
 import {
@@ -138,6 +139,7 @@ export function createDaemonSelfUpdate(d: DaemonSelfUpdateDeps): DaemonSelfUpdat
 
   const updater = createWorkerUpdater({
     ownBuildId,
+    ownProtocolVersion: WORKER_PROTOCOL_VERSION,
     auto: opts.auto,
     log: d.log,
     runningCount: d.runningCount,
