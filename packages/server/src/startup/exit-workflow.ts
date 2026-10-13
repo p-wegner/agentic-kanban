@@ -27,6 +27,8 @@ import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/share
 import { RUN_GATE } from "../services/pre-merge-gate.service.js";
 import { buildReviewExitEvidence, runReviewExitGate } from "./exit/review-exit-gate.js";
 import { markReviewExitGateHeld, markReviewExitGateWithheld } from "./exit/gate-withheld-marker.js";
+import { resolveWorkspaceBaseOrNull } from "../services/workspace-base.js";
+import { checkPartialWorkDisclosure } from "../services/partial-work-disclosure.js";
 import { getAutoLandLoopTicket } from "../services/plugin-loop-hooks.service.js";
 import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
 import { issues, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workspaces } from "@agentic-kanban/shared/schema";
@@ -40,7 +42,7 @@ import type { GitService } from "../services/workspace-internals.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { isAutomaticMergeEnabled } from "./merge-strategy.js";
 import type { Database } from "../db/index.js";
-import { classifySessionExit, resolveSessionRoleFlags } from "./session-exit-classification.js";
+import { classifySessionExit, isHangWatchdogKill, resolveSessionRoleFlags } from "./session-exit-classification.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { setMergeGateEvidence } from "../repositories/merge-gate.repository.js";
 import { stampWorkspaceReadyForMergeAt } from "../repositories/workspace-ready-for-merge.repository.js";
@@ -225,13 +227,23 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       // handler. The pure `classifySessionExit` decision core (#855) computes the verdict
       // so the priority between the cases is table-testable; every side effect below stays
       // here, in the same order as the original control flow.
-      const classification = classifySessionExit({
+      let classification = classifySessionExit({
         wasPlanMode: wasPlanMode ?? false,
         isFixAndMerge: roleFlags.isFixAndMerge,
         isLearning: roleFlags.isLearning,
         isReview: roleFlags.isReview,
         exitCode,
       });
+      // #1439: a builder the hang watchdog killed AFTER it committed ended WITH WORK — route it
+      // through the builder exit (implement-exit check, review) instead of leaving it In Progress.
+      if (classification.action === "failed" && !roleFlags.isReview) {
+        const { extractSessionStderr } = await import("../services/failure-pattern.service.js");
+        const killedByWatchdog = isHangWatchdogKill(await extractSessionStderr(sessionId, 50, db).catch(() => ""));
+        if (killedByWatchdog && await hasCommittedChanges(workspace, null, workspaceId, db).catch(() => false)) {
+          console.log(`[workflow] session ${sessionId} was killed by the hang watchdog but workspace ${workspaceId} has committed work — treating the exit as ended with work (#1439)`);
+          classification = { action: "builder" };
+        }
+      }
       // #966: the closed+mergedAt check above ran on a snapshot read ~60 lines earlier —
       // a merge landing in between must NOT be flapped back to idle. setWorkspaceStatus
       // enforces the terminal invariant atomically in its UPDATE's WHERE clause, so a
@@ -442,6 +454,24 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     // still runs FIRST (it must commit its fix onto the branch before the verify build); the #792
     // cold-clone check stays a separate opt-in gate. Any failure WITHHOLDS readyForMerge.
     await applyBuildApprovalRepair(ctx);
+    // #1438: a commit that discloses unfinished work ("remain to be done", "not registered yet")
+    // with no open follow-up ticket withholds readyForMerge BEFORE the expensive gate — the gate
+    // judges the code that exists, never the acceptance that does not.
+    const issueNumberRows = await db.select({ issueNumber: issues.issueNumber }).from(issues).where(eq(issues.id, issueId)).limit(1);
+    const partialWork = await checkPartialWorkDisclosure({
+      workingDir: workspace.workingDir,
+      baseBranch: resolveWorkspaceBaseOrNull(workspace, { defaultBranch }),
+      projectId,
+      issueNumber: issueNumberRows[0]?.issueNumber ?? null,
+      database: db,
+    });
+    if (!partialWork.passed) {
+      console.log(`[workflow] workspace ${workspaceId} — withholding readyForMerge: ${partialWork.message} (#1438)`);
+      await markReviewExitGateWithheld({ workspaceId, issueId, workingDir: workspace.workingDir, message: partialWork.message }, { database: db, gitService });
+      boardEvents.broadcast(projectId, "workflow_error");
+      emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Not approved for merge: ${partialWork.message.slice(0, 300)}` });
+      return;
+    }
     const gateWorkspace = { id: workspaceId, workingDir: workspace.workingDir, baseBranch: workspace.baseBranch || defaultBranch };
     // #540: pin → gate → re-pin → mint, via the ONE owner of the #243 protocol. `ranAt` is
     // stamped at gate END, never from `ctx.now` (captured at the START of runWorkflowOnExit,

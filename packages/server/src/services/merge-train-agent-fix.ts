@@ -39,6 +39,10 @@ export type TrainAgentRunner = (args: {
   prompt: string;
   timeoutMs: number;
   turn: number;
+  /** #1431: with these the turn is placed like a session (a worker edits a checkout of the train tree). */
+  projectId?: string;
+  repoPath?: string;
+  baseBranch?: string;
 }) => Promise<{ sessionId?: string; tokens?: number; costUsd?: number }>;
 
 export interface AgentFixMember {
@@ -126,6 +130,8 @@ export async function runAgentFix(args: {
   runAgent: TrainAgentRunner;
   /** Re-run the gate on the worktree's CURRENT tree. */
   regate: () => Promise<AgentFixGateVerdict>;
+  /** #1431: forwarded to the runner so the turn can run on a fleet worker. */
+  placement?: { projectId: string; repoPath: string };
   writeBrief?: (label: string, brief: string) => Promise<string | undefined>;
 }): Promise<AgentFixOutcome> {
   const { worktree, label, caps } = args;
@@ -156,7 +162,10 @@ export async function runAgentFix(args: {
     });
     briefUrl ??= await (args.writeBrief ?? writeBriefFile)(label, brief).catch(() => undefined);
     try {
-      const run = await args.runAgent({ worktree, prompt: brief, timeoutMs: remaining, turn: turns });
+      const run = await args.runAgent({
+        worktree, prompt: brief, timeoutMs: remaining, turn: turns,
+        ...(args.placement ? { ...args.placement, baseBranch: args.baseBranch } : {}),
+      });
       sessionId = run.sessionId ?? sessionId;
       tokens += run.tokens ?? 0;
       costUsd += run.costUsd ?? 0;
@@ -225,8 +234,12 @@ export function createOneShotAgentRunner(deps: {
   invoke?: (prompt: string, opts: ClaudeCliOptions) => Promise<string>;
 } = {}): TrainAgentRunner {
   const invoke = deps.invoke ?? invokeClaudePrompt;
-  return async ({ worktree, prompt, timeoutMs }) => {
-    await invoke(prompt, { cwd: worktree, timeout: timeoutMs, allowEdits: true, ...(deps.database ? { database: deps.database } : {}) });
+  return async ({ worktree, prompt, timeoutMs, projectId, repoPath, baseBranch }) => {
+    await invoke(prompt, {
+      cwd: worktree, timeout: timeoutMs, allowEdits: true, ...(deps.database ? { database: deps.database } : {}),
+      // #1431: the worker edits a checkout of the train tree and its commits are fast-forwarded into `worktree`.
+      ...(projectId && repoPath ? { projectId, repo: { repoPath, ...(baseBranch ? { baseBranch } : {}) } } : {}),
+    });
     return {};
   };
 }

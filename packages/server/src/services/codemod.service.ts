@@ -191,6 +191,7 @@ export async function generateCodemodScript(
   description: string,
   fileList: string[],
   database: Database,
+  projectId?: string,
 ): Promise<string> {
   const sampleFiles = fileList.slice(0, 10).join("\n");
   const prompt = `You are a TypeScript codemod expert using ts-morph.
@@ -221,7 +222,7 @@ for (const cls of sourceFile.getClasses()) {
   }
 }`;
 
-  const stdout = await invokeClaudePrompt(prompt, { database, timeout: 60000 });
+  const stdout = await invokeClaudePrompt(prompt, { database, timeout: 60000, ...(projectId ? { projectId } : {}) });
   return stdout.trim()
     .replace(/^```(?:typescript|javascript|ts|js)?\s*/i, "")
     .replace(/\s*```$/, "")
@@ -382,7 +383,7 @@ export function createCodemodService(database: Database) {
       const repoPath = await getProjectRepoPath(projectId, database);
       if (!repoPath) throw new ValidationError("Project not found or has no repo path");
       const fileList = await collectTsFiles(repoPath);
-      const script = await generateCodemodScript(description, fileList, database);
+      const script = await generateCodemodScript(description, fileList, database, projectId);
       return { script, repoPath };
     },
 

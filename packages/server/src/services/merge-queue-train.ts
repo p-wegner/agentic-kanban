@@ -542,6 +542,8 @@ function buildTrainOnRed(args: {
   baseBranch: string;
   included: ReadonlyArray<{ workspaceId: string }>;
   members: ReadonlyArray<{ workspaceId: string; branch: string; issueNumber?: number | null }>;
+  /** #1431: where the fix agent's turn may be placed (a worker edits a checkout of the train tree). */
+  placement: { projectId: string; repoPath: string };
 }): Parameters<typeof runTrainStagingGate>[0]["onRed"] {
   const { policy, label, attemptLabel } = args;
   if (!policy.agentFix || attemptLabel !== label) return undefined;
@@ -551,7 +553,7 @@ function buildTrainOnRed(args: {
     console.log(`[merge-train] ${label}: gate RED - spawning the fix agent in ${gateWorktree} (strategy ${policy.strategy}, timeout ${policy.caps.timeoutMs}ms, ${policy.caps.maxTurns} turn(s))`);
     const outcome = await runAgentFix({
       worktree: gateWorktree, label, baseBranch: args.baseBranch, members: aboard,
-      initialFailure: { message, failedSuites }, caps: policy.caps, runAgent: args.agentRunner, regate,
+      initialFailure: { message, failedSuites }, caps: policy.caps, runAgent: args.agentRunner, regate, placement: args.placement,
     });
     console.log(`[merge-train] ${label}: fix agent finished - ${outcome.attempt.verdict}${outcome.attempt.failureHead ? `: ${outcome.attempt.failureHead.slice(0, 160)}` : ""}${policy.bisectAfter && !outcome.fixedTrainSha ? "; falling back to the bisect" : ""}`);
     return outcome;
@@ -666,7 +668,7 @@ async function runDoomedTrainJob(args: {
           includedWorkspaceIds: included.map((m) => m.workspaceId),
           // #1203: same token — a cancel mid-gate kills the running install/verify child process.
           signal: abortController.signal,
-          onRed: buildTrainOnRed({ policy, agentRunner, label, attemptLabel, baseBranch, included, members }),
+          onRed: buildTrainOnRed({ policy, agentRunner, label, attemptLabel, baseBranch, included, members, placement: { projectId, repoPath } }),
           afterGreen: async ({ gateWorktree }) => {
             // #1194: review ONCE, on the tree that just proved green - the assembled diff vs the
             // base, one reviewer, every member's criteria in `{{members}}`. A blocking finding

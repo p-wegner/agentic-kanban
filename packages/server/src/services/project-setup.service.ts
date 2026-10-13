@@ -35,7 +35,7 @@ If no setup is needed, respond with an empty string.
 
 Detected files: ${detected.length > 0 ? detected.join(", ") : "none"}`;
 
-  return (await invokeClaudePrompt(prompt, { timeout: 30000, database })).trim();
+  return (await invokeClaudePrompt(prompt, { timeout: 30000, database, projectId })).trim();
 }
 
 export async function generateTeardownScript(projectId: string, database: Database): Promise<string> {
@@ -78,7 +78,7 @@ If no teardown is needed, respond with an empty string.
 
 ${contextParts.join("\n")}`;
 
-  return (await invokeClaudePrompt(prompt, { timeout: 30000, database })).trim();
+  return (await invokeClaudePrompt(prompt, { timeout: 30000, database, projectId })).trim();
 }
 
 /**
@@ -142,5 +142,5 @@ If no verify command can be determined, respond with an empty string.
 
 Detected files: ${detected.length > 0 ? detected.join(", ") : "none"}`;
 
-  return (await invokeClaudePrompt(prompt, { timeout: 30000, database })).trim();
+  return (await invokeClaudePrompt(prompt, { timeout: 30000, database, projectId })).trim();
 }

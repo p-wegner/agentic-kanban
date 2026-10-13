@@ -3,6 +3,22 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-10-13 — #1431 one-shot agent calls placed on workers
+
+- `invokeClaudePrompt` takes `projectId` (+ `repo` for a prompt that needs files) and routes through
+  `resolveWorkerPlacement({ oneShot: true })` -> `claude-oneshot-worker.service.ts` -> a sessionless
+  `oneshot` / `oneshot_result` frame pair (`shared/lib/worker-oneshot.ts`, worker side
+  `worker/worker-oneshot.ts`). No eligible worker, a worker that never acks, or a launch failure
+  there = host, unless `worker_dispatch_strict` (then NO_AVAILABLE_WORKER). board.log names the
+  worker: `[oneshot] ran on fleet worker <id>`.
+- Wired: enhance, dependencies, touched files, decompose, contract, preflight, group scan, codemod,
+  project setup, stack-profile enrichment, voice capture, train review (read-only checkout), train
+  fix agent (editing checkout; the worker pushes its commit, the board fast-forwards the gate tree).
+  Not wired: `agent-skill` enhance (no project in scope).
+- Open: the fix agent's RE-GATE still runs on the host until #1428 places gates. A read-only repo
+  job still pays the worker's setup/fallback install on checkout. Verified by unit tests only; no
+  live fleet run from this worktree.
+
 ## 2026-10-12 — backlog drive on the two workers; D: hangs traced to WSL disks on the Dev Drive
 
 **Goal (Peter):** get the backlog done using desktop-stable and wsl-stable only (builders and

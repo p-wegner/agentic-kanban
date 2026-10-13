@@ -34,6 +34,7 @@ export const DEFAULT_REVIEW_PROMPT = `You are an AI code reviewer. Review the ch
 {{members}}
 
 Review for: correctness bugs, security vulnerabilities, logic errors, and missing error handling.
+Also check the ticket's Acceptance section against the diff and the commit messages (\`git log {{baseBranch}}..HEAD\`). Unmet acceptance, or a commit that discloses unfinished parts ("remain to be done", "not registered yet", "until <X> lands", "follow-up") without a filed follow-up ticket number, is a CRITICAL finding that names the missing piece.
 Classify each issue as CRITICAL (must fix — bugs, security, data loss), MAJOR (should fix — broken edge cases, poor error handling), or MINOR (nice to have — style, naming).
 
 {{autoFixInstructions}}

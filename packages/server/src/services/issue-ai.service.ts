@@ -42,6 +42,7 @@ export async function enhanceIssue(
   title: string,
   description: string | undefined,
   database: Database,
+  projectId?: string,
 ): Promise<EnhanceIssueResult> {
   const prompt = `You are helping enhance a kanban issue ticket for an AI coding agent.
 Given a title and optional description, return an improved version that is clear, actionable, and well-structured.
@@ -56,7 +57,7 @@ The openQuestions array should contain 1-5 concise questions as plain strings. U
 Current title: ${title}
 Current description: ${description?.trim() || "(none)"}`;
 
-  const stdout = await invokeClaudePrompt(prompt, { database });
+  const stdout = await invokeClaudePrompt(prompt, { database, ...(projectId ? { projectId } : {}) });
   const enhanced = extractModelJson(stdout, { shape: "object" }) as { title?: string; description?: string; openQuestions?: string[] };
 
   let enhancedDescription = enhanced.description?.trim() ?? description ?? "";
@@ -217,7 +218,7 @@ Use "parent_of" when the target is an epic containing another issue.
 Use "child_of" when the target is a subtask of another issue.
 Only include genuinely useful dependencies, not just topical similarity.`;
 
-  const stdout = await invokeClaudePrompt(prompt, { database });
+  const stdout = await invokeClaudePrompt(prompt, { database, projectId });
 
   const parsed = extractModelJson(stdout, { shape: "object" }) as { dependencies?: Array<{ issueId: string; type: string; reason: string }> };
   const deps = parsed.dependencies ?? [];
@@ -380,7 +381,7 @@ ${treeSection}
 Issue title: ${issue.title}
 ${issue.description ? `Description:\n${issue.description}` : ""}`;
 
-  const stdout = await invokeClaudePrompt(prompt, { database, model: "claude-haiku-4-5" });
+  const stdout = await invokeClaudePrompt(prompt, { database, model: "claude-haiku-4-5", projectId: issue.projectId });
   const parsed = extractJsonObject(stdout) as { files?: TouchedFile[] };
   const files: TouchedFile[] = (parsed.files ?? []).slice(0, 12).filter(
     f => f.path && f.reason && ["high", "medium", "low"].includes(f.confidence),
@@ -539,7 +540,7 @@ Respond ONLY with valid JSON, no markdown, no explanation:
   ]
 }`;
 
-  const stdout = await invokeClaudePrompt(prompt, { database });
+  const stdout = await invokeClaudePrompt(prompt, { database, projectId });
   const parsed = extractModelJson(stdout, { shape: "object" }) as {
     children?: Array<{ tempId: string; title: string; description: string; priority: string; targetRepo?: string }>;
     dependencies?: Array<{ fromTempId: string; toTempId: string; type: string }>;
@@ -827,7 +828,7 @@ export async function contractCoupledComponent(
       .sort((a, b) => a.issueNumber - b.issueNumber);
     const survivor = members[0];
 
-    const { mergedTitle, mergedDescription } = await proposeMergedTicket(members, database);
+    const { mergedTitle, mergedDescription } = await proposeMergedTicket(members, database, projectId);
     proposals.push({
       members,
       survivorId: survivor.id,
@@ -853,6 +854,7 @@ function deterministicMerge(members: ContractMember[]): { mergedTitle: string; m
 async function proposeMergedTicket(
   members: ContractMember[],
   database: Database,
+  projectId: string,
 ): Promise<{ mergedTitle: string; mergedDescription: string }> {
   const prompt = `You are merging several COUPLED kanban tickets (they touch the same code and are best done together) into ONE ticket. Produce a single combined title and description that fully covers all of them, with deduplicated, consolidated acceptance criteria.
 
@@ -863,7 +865,7 @@ Respond ONLY with valid JSON, no markdown, no explanation:
 {"title": "concise combined title under 100 chars", "description": "merged description with consolidated acceptance criteria"}`;
 
   try {
-    const stdout = await invokeClaudePrompt(prompt, { database });
+    const stdout = await invokeClaudePrompt(prompt, { database, projectId });
     const parsed = extractJsonObject(stdout) as { title?: string; description?: string };
     const title = parsed.title?.trim();
     const description = parsed.description?.trim();

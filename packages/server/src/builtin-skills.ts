@@ -13,6 +13,8 @@ Before drafting or revising this phase artifact, load the project's constitution
 
 Every generated phase artifact must include a short \`## Constitution Alignment\` section that cites \`CLAUDE.md\` and states how the proposal respects the project's scope discipline and relevant rules. If the requested work conflicts with the constitution, stop and ask a clarifying question instead of designing around it.`;
 
+import { ACCEPTANCE_REVIEW_SECTION } from "./services/review-acceptance-section.js";
+
 export const BUILTIN_SKILLS = [
   ...BUILTIN_INIT_SKILLS,
   {
@@ -67,6 +69,8 @@ Todo → In Progress → In Review → AI Reviewed → Done / Cancelled
 Analyze deeply, report narrowly. Read as much as you need to be sure; write down only what survives the gate below.
 
 Look for: correctness bugs, security vulnerabilities, logic errors, and missing error handling.
+
+${ACCEPTANCE_REVIEW_SECTION}
 
 ## The gate — what earns a finding
 
@@ -254,6 +258,8 @@ Analyze:
 - Missing tests for paths where a regression would be silent
 
 Trace the real call flow end to end before judging a line. A finding you cannot trace to a caller is a guess.
+
+${ACCEPTANCE_REVIEW_SECTION}
 
 ## The gate — what earns a finding
 
