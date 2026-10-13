@@ -8,7 +8,7 @@ import { createAgentDispatch, type AgentExecutionService } from "../agent-dispat
 import { getWorkerFleet, WorkerDispatchUnavailableError } from "../worker-fleet.service.js";
 // #938: placement — where a launch runs and the record of why — lives in its own module.
 // `startSession` keeps the launch; that keeps the decision.
-import { resolveSessionPlacement, awaitStrictLaunchWorker } from "./session-placement.js";
+import { resolveSessionPlacement, awaitStrictLaunchWorker, createReplacePlacement } from "./session-placement.js";
 import { failLaunch, newLaunchTrace, type LaunchTrace } from "./launch-failure.js";
 import type { Placement } from "../agent-dispatch.service.js";
 import { extractPlanFromMessages } from "../plan-mode.service.js";
@@ -673,7 +673,7 @@ export function createSessionLifecycle(
         provider, profile: launchProfile, extraEnv: effectiveExtraEnv, skipPermissions,
         model: effectiveModel, contextFiles,
         systemInstructions: (effectiveSystemInstructions ?? "").trim() || undefined,
-        containerProvision, placement: effectivePlacement, builderContext,
+        containerProvision, placement: effectivePlacement, builderContext, replacePlacement: createReplacePlacement({ database: db, workspaceId, sessionId, projectId, providerName, triggerType, workspace, enabled: !placement && !containerProvision, resumeProviderSessionId: resumedProviderSessionId(resumeWithNewModel, providerSessionId) }),
         onOutput: (event) => {
           if (event.type === "exit") {
             if (state.sessionExitHandled.has(sessionId)) {
