@@ -69,12 +69,13 @@ function headerSection(model: ConsoleModel, opts: ConsoleRenderOptions): Section
 function workerLine(w: ConsoleWorker, g: Glyphs): Line {
   const dots = g.dot.repeat(Math.min(w.load, 6)) || " ";
   const tickets = w.tickets.map((t) => `${issueRef(t.issueNumber)} ${t.status} ${since(t.startedAt, g.nowMs)}`).join(" · ");
+  const verify = (w.verifyJobs ?? []).map((j) => ` · verify ${j}`).join("");
   const hb = w.heartbeatAt ? `hb ${formatAge(g.nowMs - new Date(w.heartbeatAt).getTime())}` : "hb -";
   const ti = w.toolchainInstall;
   const install = ti && ti.state !== "done" ? ` · install ${ti.toolchains.join(",")} ${ti.state}${ti.state === "failed" && ti.reason ? ` (${ti.reason})` : ""}` : "";
   const state = (w.status === "online" ? "" : ` [${w.status}]`) + install;
   return {
-    text: ` ${w.name.padEnd(15)} ${dots.padEnd(3)} ${w.load}/${w.maxConcurrency}  ${(w.os ?? "").padEnd(5)} ${`${w.build ?? "-"}${w.buildStale ? "!" : ""}`.padEnd(7)} ${tickets}${state}  ${hb}`,
+    text: ` ${w.name.padEnd(15)} ${dots.padEnd(3)} ${w.load}/${w.maxConcurrency}  ${(w.os ?? "").padEnd(5)} ${`${w.build ?? "-"}${w.buildStale ? "!" : ""}`.padEnd(7)} ${tickets}${verify}${state}  ${hb}`,
     tone: w.status !== "online" || w.buildStale || ti?.state === "failed" ? "yellow" : w.load > 0 ? "cyan" : null,
   };
 }

@@ -37,6 +37,7 @@ import {
   machineVerifyLockEnabled,
   describeHolder,
 } from "../lib/machine-verify-lock.js";
+import { placementAwareSaturation } from "./base-branch-health-placement.js";
 import {
   readTier0Capacity,
   readCpuBusyPct,
@@ -319,7 +320,8 @@ export async function resolveBaseHealthProbeDue(
   const cpuPct = await (opts.readCpuPct ?? readCpuBusyPct)().catch(() => null);
   const saturation: HeavyProbeSaturation = classifyHeavyProbeSaturation({ freeGb: capacity.freeGb, cpuPct });
   return isBaseHealthProbeDue({
-    hostSaturated: saturation.hold ? saturation.reason : null,
+    // #1437: a saturated host does not defer the probe when an allowlisted worker can take it.
+    hostSaturated: await placementAwareSaturation(saturation.hold ? saturation.reason : null, projectId, database),
     nowMs,
     intervalMs,
     lastResultAt: latest?.createdAt ?? null,

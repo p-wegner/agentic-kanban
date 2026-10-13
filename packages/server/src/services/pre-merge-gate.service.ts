@@ -21,7 +21,8 @@ import { describeFailedSetupRun } from "./pre-merge-gate-setup-failure.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { buildSmokeCheck, getStackProfile, resolveEffectiveVerify } from "./stack-profile.service.js";
 import { resolveProjectDevServerPlan } from "./dev-server.service.js";
-import { describeGateHold, quiesceBuildersEnabled, resolveGateHostAdmission } from "./gate-quiesce.js";
+import { quiesceBuildersEnabled, resolveGateHostAdmission } from "./gate-quiesce.js";
+import { planGateRun, type GateScriptRunner } from "./pre-merge-gate-placement.js";
 import { isSelfProjectRepo } from "./self-project.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
@@ -550,6 +551,10 @@ export async function runPreMergeGate(
     // runs a narrowed subset and its step line would understate what the gate actually cost.
     let lastVerifySteps: VerifyStepTiming[] = [];
     let lastVerifyRunMs: number | undefined;
+    // #1437: set once placement picks a worker; absent = the host's own script run. `??` rather than `if` keeps this function's branch count.
+    let workerRun: GateScriptRunner | undefined;
+    const runVerifyScript = (env: Record<string, string>) =>
+      (workerRun ?? ((e: Record<string, string>) => runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: e, signal: combinedSignal })))(env);
     const runVerify = async () => {
       noteMergeGatePhase(workspace.id, "verify");
       // Started INSIDE the semaphore callback, not before it. `runUnderBuildSemaphore` can hold
@@ -573,7 +578,7 @@ export async function runPreMergeGate(
           chainsInFlight: workers.chainsInFlight,
         });
         startedAt = Date.now();
-        return runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv, signal: combinedSignal })
+        return runVerifyScript(verifyEnv)
           .catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false }));
       });
       lastVerifyRunMs = Date.now() - startedAt;
@@ -608,13 +613,14 @@ export async function runPreMergeGate(
     const admission = await resolveGateHostAdmission({ projectId, database }).catch(
       () => ({ admit: true, reason: "host_has_room" }) as Awaited<ReturnType<typeof resolveGateHostAdmission>>,
     );
-    if (!admission.admit) {
-      // The wording lives in `describeGateHold` (a pure lookup, see its header): picking it with
-      // a `? :` HERE added a 35th branch to this function and turned the master sweep red, which
-      // is what the "no branch here" note above is about.
-      const hold = describeGateHold(admission, projectId);
-      noteMergeGatePhase(workspace.id, "held", hold.phaseNote);
-      return { passed: false, skipped: false, held: true, stage: "verify", message: hold.message };
+    // #1437 — `verify_placement`: a chain the host would hold for memory (or that is pinned to a
+    // worker) runs on an allowlisted worker; with none eligible it holds as before. The decision and
+    // both wordings live in `planGateRun` — this function sits on the branch ceiling.
+    const placed = await planGateRun({ projectId, workspaceId: workspace.id, database, admission, workingDir, verifyScript: verifyScript!, timeoutMs: verifyTimeoutMs, tier: gateStrategy ?? "full" });
+    workerRun = placed.run;
+    if (!placed.proceed) {
+      noteMergeGatePhase(workspace.id, "held", placed.hold.phaseNote);
+      return { passed: false, skipped: false, held: true, stage: "verify", message: placed.hold.message };
     }
     gateTierInfo.baseHealthNote = (await sequenceBaseHealthBeforeVerify({ projectId, database, workspaceId: workspace.id })).note ?? undefined;
     noteMergeGatePhase(workspace.id, "queued", "waiting for the cross-workspace verify chain");
@@ -625,11 +631,8 @@ export async function runPreMergeGate(
         runVerifyWithRetryScope: (retryScope) => {
           noteMergeGatePhase(workspace.id, "flake-retry", "re-running only the failing tests");
           return runUnderBuildSemaphore(() =>
-            runSetupScript(workingDir, verifyScript!, {
-              timeoutMs: verifyTimeoutMs,
-              env: { ...verifyEnv, KANBAN_RETRY_TEST_FILES: retryScope },
-              signal: combinedSignal,
-            }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
+            runVerifyScript({ ...verifyEnv, KANBAN_RETRY_TEST_FILES: retryScope })
+              .catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
           );
         },
         getInstallCommand: () => getProjectSetupScript(projectId, database).catch(() => null),
@@ -703,7 +706,7 @@ export async function runPreMergeGate(
     });
     if (outcome.failure) {
       // #1230 — the failing suites ride on the result and lead its message; total, so no branch here.
-      return withFailedSuites({ passed: false, skipped: false, stage: "verify" as const, ...outcome.failure }, ledger);
+      return placed.holdIfRefused(withFailedSuites({ passed: false, skipped: false, stage: "verify" as const, ...outcome.failure }, ledger));
     }
     // Carried on the tier info so the PASSING message names it (see GateTierInfo).
     if (gateTierInfo && outcome.flakeRetryNote) gateTierInfo.flakeRetryNote = outcome.flakeRetryNote;

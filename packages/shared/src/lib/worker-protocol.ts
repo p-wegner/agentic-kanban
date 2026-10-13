@@ -5,6 +5,7 @@
 // straight into the normal session broadcast/exit machinery.
 
 // #1369: committer identity + package-manager vocabulary lives in its own module.
+import { parseVerifyJobFrame, parseVerifyWorkerFrame, parseWorkerVerifyCapability, type VerifyJobFrame, type VerifyLogChunkFrame, type VerifyProgressFrame, type VerifyResultFrame, type WorkerVerifyCapability } from "./worker-verify-protocol.js";
 import { parseWorkerCommitterIdentity, parseWorkerPackageManagers, type WorkerCommitterIdentity, type WorkerPackageManagers } from "./worker-prerequisites.js";
 export { parseWorkerCommitterIdentity, parseWorkerPackageManagers, type WorkerCommitterIdentity, type WorkerPackageManagers } from "./worker-prerequisites.js";
 export * from "./worker-doctor-summary.js";
@@ -436,6 +437,8 @@ export interface WorkerCapabilities {
    * CHANGES — never every heartbeat — so absent on a beat means "unchanged", not "unknown".
    */
   doctor?: WorkerDoctorSummary;
+  /** #1437: this worker runs verify jobs (gates, train gates, sweeps) for the board; absent = it does not. */
+  verify?: WorkerVerifyCapability;
 }
 
 export type ProtocolCompatibility =
@@ -515,12 +518,13 @@ export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | unde
   const toolchainInstall = parseWorkerToolchainInstallInfo(rec.toolchainInstall);
   const providerNotice = typeof rec.providerNotice === "string" ? rec.providerNotice.trim().slice(0, 400) || undefined : undefined;
   const doctor = parseWorkerDoctorSummary(rec.doctor);
+  const verify = parseWorkerVerifyCapability(rec.verify);
   if (
     labels === undefined &&
     providers === undefined &&
     maxConcurrency === undefined &&
     capacity === undefined && profiles === undefined && packageManagers === undefined && toolchains === undefined && toolchainInstall === undefined && providerNotice === undefined &&
-    doctor === undefined
+    doctor === undefined && verify === undefined
   ) {
     return undefined;
   }
@@ -535,6 +539,7 @@ export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | unde
     ...(packageManagers ? { packageManagers } : {}),
     ...(providerNotice ? { providerNotice } : {}),
     ...(doctor ? { doctor } : {}),
+    ...(verify ? { verify } : {}),
   };
 }
 
@@ -581,7 +586,9 @@ export type BoardToWorkerMessage =
    */
   | { type: "toolchain_install"; requestId: string; toolchains: string[] }
   /** #1431: run ONE prompt and answer with `oneshot_result`. Sessionless; an older worker drops it, so the board waits only for the `accepted` ack. */
-  | WorkerOneShotRequest;
+  | WorkerOneShotRequest
+  /** #1437: run one verify job (a gate, train gate or sweep) on this worker; answered by `verify_progress`/`verify_log_chunk`/`verify_result`. */
+  | VerifyJobFrame;
 
 export type WorkerToBoardMessage =
   | {
@@ -631,6 +638,9 @@ export type WorkerToBoardMessage =
   | { type: "toolchain_install_status"; status: ToolchainInstallStatus }
   /** #1431: the `accepted` ack and the outcome of one `oneshot`. */
   | { type: "oneshot_result"; result: WorkerOneShotResult }
+  | VerifyProgressFrame
+  | VerifyLogChunkFrame
+  | VerifyResultFrame
   | {
       type: "undelivered_result";
       sessionId: string;
@@ -682,6 +692,7 @@ function parseUndeliveredResult(msg: Record<string, unknown>): WorkerToBoardMess
 function parseToolchainInstallRequest(msg: Record<string, unknown> | null): BoardToWorkerMessage | null {
   if (!msg) return null;
   if (msg.type === "oneshot") return parseOneShotRequest(msg, { repo: parseRepoTransport(msg.repo), intent: parseLaunchIntent(asRecord(msg.job)?.intent) }); // #1431
+  if (msg.type === "verify_job") return parseVerifyJobFrame(msg); // #1437: sessionless like this one
   if (msg.type !== "toolchain_install") return null; // the frames about the machine/a job, not a session
   if (typeof msg.requestId !== "string" || !msg.requestId || !Array.isArray(msg.toolchains)) return null;
   const toolchains = msg.toolchains.filter((t): t is string => typeof t === "string").slice(0, 20);
@@ -694,6 +705,7 @@ function parseLaterWorkerFrame(msg: Record<string, unknown>): WorkerToBoardMessa
     const result = parseOneShotResult(msg.result);
     return result ? { type: "oneshot_result", result } : null;
   }
+  if (typeof msg.type === "string" && msg.type.startsWith("verify_")) return parseVerifyWorkerFrame(msg);
   if (msg.type !== "toolchain_install_status") return null;
   const status = parseToolchainInstallStatus(msg.status);
   return status ? { type: "toolchain_install_status", status } : null;
