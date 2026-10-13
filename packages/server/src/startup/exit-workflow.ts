@@ -27,6 +27,7 @@ import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/share
 import { RUN_GATE } from "../services/pre-merge-gate.service.js";
 import { buildReviewExitEvidence, runReviewExitGate } from "./exit/review-exit-gate.js";
 import { markReviewExitGateHeld, markReviewExitGateWithheld } from "./exit/gate-withheld-marker.js";
+import { resolveWorkspaceBaseOrNull } from "../services/workspace-base.js";
 import { checkPartialWorkDisclosure } from "../services/partial-work-disclosure.js";
 import { getAutoLandLoopTicket } from "../services/plugin-loop-hooks.service.js";
 import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
@@ -449,7 +450,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     const issueNumberRows = await db.select({ issueNumber: issues.issueNumber }).from(issues).where(eq(issues.id, issueId)).limit(1);
     const partialWork = await checkPartialWorkDisclosure({
       workingDir: workspace.workingDir,
-      baseBranch: workspace.baseBranch || defaultBranch,
+      baseBranch: resolveWorkspaceBaseOrNull(workspace, { defaultBranch }),
       projectId,
       issueNumber: issueNumberRows[0]?.issueNumber ?? null,
       database: db,

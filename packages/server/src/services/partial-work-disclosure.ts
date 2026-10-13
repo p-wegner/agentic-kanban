@@ -15,6 +15,7 @@
  * failure shape, not a gate that may strand finished work on a harness fault.
  */
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
+import { execErrorMessage, execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 import { isTerminalStatusName } from "@agentic-kanban/shared/lib/status-view";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { Database } from "../db/index.js";
@@ -114,7 +115,7 @@ export interface CheckPartialWorkDeps {
 /** The branch's own commits (`base..HEAD`, no merges) with full bodies. */
 export async function listBranchCommitMessages(workingDir: string, baseBranch: string): Promise<DisclosureCommit[]> {
   const res = await gitExec(["log", "--no-merges", "--format=%H%x1f%s%x1f%b%x1e", `${baseBranch}..HEAD`], { cwd: workingDir });
-  if (res.code !== 0) throw new Error(res.stderr.trim() || "git log failed");
+  if (!execSucceeded(res)) throw new Error(execErrorMessage(res));
   return res.stdout
     .split("\x1e")
     .map((rec) => rec.replace(/^\s+/, ""))
