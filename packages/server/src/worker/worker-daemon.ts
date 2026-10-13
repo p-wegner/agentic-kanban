@@ -66,7 +66,7 @@ import { createWorkerOneShotRunner } from "./worker-oneshot.js"; // #1431
 import { createWorkerAgentRunner, dispatchBoardMessage, rawDataToBuffer, type UnpushedResult } from "./worker-agent-runner.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
 import { packageManagersField, refreshPackageManagers, refreshToolchains, toolchainsField } from "../cli/commands/worker-doctor-git-prereqs.js";
-import { cleanUpBeforeStart } from "./agent-process-tree.js";
+import { cleanUpBeforeStart, createPendingDeleteSweeper } from "./agent-process-tree.js";
 import { attestAndNotice, attestProviders } from "./worker-provider-notice.js";
 import { flushCritical, reattestProviders } from "./worker-daemon-helpers.js";
 export { attestProviders };
@@ -945,7 +945,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     }
   }
 
-  const heartbeatTimer = setInterval(() => { void sendHeartbeat(); }, opts.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS);
+  const sweepPending = createPendingDeleteSweeper(workRoot, log); const heartbeatTimer = setInterval(() => { void sendHeartbeat(); sweepPending(); }, opts.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS);
   if (heartbeatTimer.unref) heartbeatTimer.unref();
   const stopApprovalPolling = toolchains.startPolling(); // `toolchain approve <id>` is a file the CLI writes
 
