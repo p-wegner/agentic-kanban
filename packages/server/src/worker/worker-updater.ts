@@ -379,6 +379,13 @@ export interface WorkerUpdaterDeps {
   /** Opt-in (`--auto-update`): act on an advertised build without being asked. */
   auto: boolean;
   log: (line: string) => void;
+  /**
+   * #1460: the wire protocol this build speaks. When the advertised build speaks the SAME one,
+   * the update is "soft": the worker keeps taking sessions on the old build and only drains once
+   * it reaches zero, so a fleet-wide update never stops the whole fleet from accepting work.
+   * Undefined = always drain first (the pre-#1460 behaviour).
+   */
+  ownProtocolVersion?: number;
   /** Sessions this daemon is still running. */
   runningCount: () => number;
   /** Stop being a placement candidate (and refuse `assign`). */
@@ -440,11 +447,11 @@ export function createWorkerUpdater(deps: WorkerUpdaterDeps): WorkerUpdater {
     deps.onState?.(next);
   };
 
-  async function waitForIdle(target: string): Promise<void> {
+  async function waitForIdle(target: string, why: string): Promise<void> {
     for (;;) {
       const running = deps.runningCount();
       if (running === 0) return;
-      set({ state: "updating", reason: `waiting for ${running} running session(s) to finish`, targetBuild: target });
+      set({ state: "updating", reason: `update pending (${why}): waits for ${running} session(s)`, targetBuild: target });
       await sleep(pollMs);
     }
   }
@@ -501,11 +508,16 @@ export function createWorkerUpdater(deps: WorkerUpdaterDeps): WorkerUpdater {
     try {
       const manifest = await retrying(target, "manifest", () => waitForManifest(target));
       phaseOfFailure = "drain";
+      const soft = deps.ownProtocolVersion !== undefined && manifest.protocolVersion === deps.ownProtocolVersion;
+      if (soft) {
+        deps.log(`[worker] update to build ${target}: worker code changed, protocol unchanged; still taking sessions until none are running`);
+        await waitForIdle(target, "worker code changed");
+      }
       set({ state: "updating", reason: "draining", targetBuild: target });
       deps.log(`[worker] update to build ${target}: board build available; draining (the board stops assigning; running sessions finish first)`);
       await deps.drain();
       drained = true;
-      await waitForIdle(target);
+      await waitForIdle(target, soft ? "worker code changed" : "protocol bump");
       await deps.settle?.();
       deps.log(`[worker] update to build ${target}: drained, no sessions running and result pushes settled`);
       phaseOfFailure = "download";

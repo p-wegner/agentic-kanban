@@ -48,6 +48,7 @@ import { getPreferenceValue } from "../repositories/session-lifecycle.repository
 import { listWorkerBranchAssignments } from "../repositories/worker.repository.js";
 import type { ProviderName } from "../services/agent-provider.js";
 import { resolveBoardCommit, resolveOwnPackageVersion } from "../lib/worker-build.js";
+import { resolveBoardWorkerBuild } from "../lib/worker-bundle.js";
 import { resolveBoardGitFacts } from "../lib/board-git-facts.js";
 import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
@@ -188,6 +189,8 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
     const facts = resolveBoardGitFacts();
     return c.json({
       boardCommit: resolveBoardCommit(),
+      // #1460: what a worker's build is compared against (last commit touching the worker bundle).
+      workerBuild: resolveBoardWorkerBuild(undefined, resolveBoardCommit),
       boardTag: facts.tag,
       mergedToday: facts.mergedToday,
       freeGb: cap.freeGb,
@@ -553,7 +556,7 @@ function registerWorkerFacingRoutes(
     return c.json({
       boardProtocolVersion: reg.boardProtocolVersion(),
       boardWorkerVersion: resolveOwnPackageVersion() ?? null,
-      boardCommit: resolveBoardCommit(),
+      boardCommit: resolveBoardWorkerBuild(undefined, resolveBoardCommit),
     });
   });
 

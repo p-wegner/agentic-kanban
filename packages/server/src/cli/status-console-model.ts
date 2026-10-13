@@ -22,6 +22,8 @@ export interface ConsoleWorker {
   stale?: boolean;
   /** Reports a build sha that differs from the board's own. */
   buildStale?: boolean;
+  /** #1460: the worker's own update report while it is updating, e.g. `update pending (worker code changed): waits for 2 session(s)`. */
+  updatePending?: string;
   /** #1371: the toolchain install the board asked this worker for (pending / installing / failed / done). */
   toolchainInstall?: { state: string; toolchains: string[]; reason?: string };
 }
@@ -77,7 +79,7 @@ export interface ConsoleModel {
 export interface ConsolePayloads {
   status: BoardStatusResponse;
   workers?: { workers?: Array<Record<string, any>>; fleet?: { boardWorkerVersion?: string | null } } | null;
-  host?: { freeGb: number | null; floorGb: number; hold: boolean; reason?: string; verify: { active: number; slots: number; queued: number }; boardCommit?: string | null; boardTag?: string | null; mergedToday?: number | null } | null;
+  host?: { freeGb: number | null; floorGb: number; hold: boolean; reason?: string; verify: { active: number; slots: number; queued: number }; boardCommit?: string | null; workerBuild?: string | null; boardTag?: string | null; mergedToday?: number | null } | null;
   trains?: MergeTrainsResponse | null;
   window?: MergeTrainWindowResponse | null;
   boardVersion?: string | null;
@@ -135,7 +137,8 @@ export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
   const dayStart = new Date(nowMs); dayStart.setHours(0, 0, 0, 0);
   const attention: ConsoleAttention[] = [];
 
-  const boardCommit = p.host?.boardCommit?.toLowerCase() ?? null;
+  // #1460: compare against the worker-bundle build, not the board's HEAD (board-only commits are not stale).
+  const boardCommit = (p.host?.workerBuild ?? p.host?.boardCommit)?.toLowerCase() ?? null;
   const workers: ConsoleWorker[] = (p.workers?.workers ?? []).map((w) => ({
     name: String(w.name ?? w.workerId ?? w.id ?? "?"),
     os: w.os ?? null,
@@ -146,6 +149,7 @@ export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
     buildStale: boardCommit != null && workerBuildSha(w.workerVersion) != null
       && !boardCommit.startsWith(workerBuildSha(w.workerVersion)!) && !workerBuildSha(w.workerVersion)!.startsWith(boardCommit),
     heartbeatAt: w.lastHeartbeatAt ?? null,
+    ...(w.update?.state === "updating" ? { updatePending: String(w.update.reason ?? "updating") } : {}),
     ...(w.toolchainInstall && typeof w.toolchainInstall.state === "string"
       ? { toolchainInstall: { state: w.toolchainInstall.state, toolchains: w.toolchainInstall.toolchains ?? [], reason: w.toolchainInstall.reason } }
       : {}),

@@ -7,7 +7,8 @@
 // failed build is reported (not retried in a tight loop — the next request after the failure
 // window tries again).
 //
-// The build id is the commit sha. A dirty tree is NOT distinguished: uncommitted edits do not
+// The build id is the last commit touching the worker bundle (#1460; HEAD when that cannot be
+// resolved), so board-only commits do not change it. A dirty tree is NOT distinguished: uncommitted edits do not
 // change the id, so the cached tarball reflects the commit — commit before you expect a worker
 // to pick it up. A board without a source checkout (an npm-installed board has no
 // `scripts/pack-worker.mjs`) answers "unavailable" with the reason instead of pretending.
@@ -21,6 +22,7 @@ import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { WORKER_PROTOCOL_VERSION } from "@agentic-kanban/shared/lib/worker-protocol";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { resolveOwnPackageVersion } from "../lib/worker-build.js";
+import { resolveWorkerBundleCommit } from "../lib/worker-bundle.js";
 import { parseBuildId, sameBuild, type WorkerBuildManifest } from "../lib/worker-update.js";
 
 /** How long after a failed build before the next request may try again. */
@@ -79,14 +81,14 @@ function sha256File(file: string): Promise<string> {
   });
 }
 
-function runPackScript(repoRoot: string, outDir: string): Promise<PackResult> {
+function runPackScript(repoRoot: string, outDir: string, buildId: string): Promise<PackResult> {
   const skipBuild = process.env.KANBAN_WORKER_BUILD_SKIP_BUILD === "1";
   const args = [join(repoRoot, "scripts", "pack-worker.mjs"), "--out-dir", outDir, "--json", ...(skipBuild ? ["--skip-build"] : [])];
   return new Promise((resolvePack, reject) => {
     execFile(
       process.execPath,
       args,
-      { cwd: repoRoot, windowsHide: true, timeout: 20 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 },
+      { cwd: repoRoot, env: { ...process.env, KANBAN_PACK_WORKER_STAMP: buildId.slice(0, 7) }, windowsHide: true, timeout: 20 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) {
           reject(new Error(`pack-worker failed: ${(stderr || err.message).toString().trim().split("\n").slice(-4).join(" | ")}`));
@@ -115,6 +117,10 @@ export function createWorkerBuildService(deps: WorkerBuildServiceDeps): WorkerBu
   async function currentBuildId(): Promise<string | null> {
     if (deps.resolveBuildId) return deps.resolveBuildId();
     if (!repoRoot) return null;
+    // #1460: the last commit touching the worker bundle, so a board-only promote does not
+    // change the advertised build. No bundle (unusual tree) falls back to HEAD.
+    const bundle = await resolveWorkerBundleCommit(repoRoot);
+    if (bundle) return bundle;
     const result = await gitExec(["rev-parse", "HEAD"], { cwd: repoRoot });
     const sha = result.stdout.trim();
     return result.error || !/^[0-9a-f]{40}$/i.test(sha) ? null : sha.toLowerCase();
@@ -137,7 +143,7 @@ export function createWorkerBuildService(deps: WorkerBuildServiceDeps): WorkerBu
     const packDir = join(dir, "pack");
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(packDir, { recursive: true });
-    const packed = await (deps.pack ? deps.pack(packDir) : runPackScript(repoRoot!, packDir));
+    const packed = await (deps.pack ? deps.pack(packDir) : runPackScript(repoRoot!, packDir, buildId));
     // The stamped version carries the sha pack-worker saw. If HEAD moved while it built, this
     // tarball is not the commit we are about to advertise — refuse rather than serve a mismatch.
     const stamped = parseBuildId(packed.version);

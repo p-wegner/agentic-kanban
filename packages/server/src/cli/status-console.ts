@@ -73,7 +73,7 @@ function workerLine(w: ConsoleWorker, g: Glyphs): Line {
   const hb = w.heartbeatAt ? `hb ${formatAge(g.nowMs - new Date(w.heartbeatAt).getTime())}` : "hb -";
   const ti = w.toolchainInstall;
   const install = ti && ti.state !== "done" ? ` · install ${ti.toolchains.join(",")} ${ti.state}${ti.state === "failed" && ti.reason ? ` (${ti.reason})` : ""}` : "";
-  const state = (w.status === "online" ? "" : ` [${w.status}]`) + install;
+  const state = (w.status === "online" ? "" : ` [${w.status}]`) + install + (w.updatePending ? ` · ${w.updatePending}` : "");
   return {
     text: ` ${w.name.padEnd(15)} ${dots.padEnd(3)} ${w.load}/${w.maxConcurrency}  ${(w.os ?? "").padEnd(5)} ${`${w.build ?? "-"}${w.buildStale ? "!" : ""}`.padEnd(7)} ${tickets}${verify}${state}  ${hb}`,
     tone: w.status !== "online" || w.buildStale || ti?.state === "failed" ? "yellow" : w.load > 0 ? "cyan" : null,

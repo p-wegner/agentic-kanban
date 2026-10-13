@@ -248,7 +248,43 @@ describe("createWorkerUpdater — drain, wait, verify, switch", () => {
     // nothing was downloaded/installed before the last session ended
     expect(h.calls.indexOf("download")).toBeGreaterThan(h.calls.lastIndexOf("poll"));
     expect(h.calls.slice(-4)).toEqual(["download", "install", "activate", "restart"]);
-    expect(h.states.some((s) => s.includes("waiting for 1 running session"))).toBe(true);
+    expect(h.states.some((s) => s.includes("waits for 1 session"))).toBe(true);
+  });
+
+  it("#1460: a protocol-compatible update keeps taking sessions until idle, THEN drains", async () => {
+    const h = harness();
+    h.setRunning(2);
+    const updater = createWorkerUpdater({
+      ...h.deps,
+      ownProtocolVersion: manifestFor(Buffer.from("tarball")).protocolVersion,
+      sleep: async () => {
+        if (h.calls.filter((c) => c === "poll").length >= 3) h.setRunning(0);
+        h.calls.push("poll");
+        await Promise.resolve();
+      },
+    });
+    updater.onBoardBuild(NEW_BUILD);
+    await updater.idle();
+    expect(h.calls.indexOf("drain")).toBeGreaterThan(h.calls.lastIndexOf("poll"));
+    expect(h.states.some((s) => s.includes("update pending (worker code changed): waits for 2 session"))).toBe(true);
+  });
+
+  it("#1460: a protocol bump still drains first and says so", async () => {
+    const h = harness();
+    h.setRunning(1);
+    const updater = createWorkerUpdater({
+      ...h.deps,
+      ownProtocolVersion: manifestFor(Buffer.from("tarball")).protocolVersion + 1,
+      sleep: async () => {
+        if (h.calls.filter((c) => c === "poll").length >= 2) h.setRunning(0);
+        h.calls.push("poll");
+        await Promise.resolve();
+      },
+    });
+    updater.onBoardBuild(NEW_BUILD);
+    await updater.idle();
+    expect(h.calls.slice(0, 2)).toEqual(["manifest", "drain"]);
+    expect(h.states.some((s) => s.includes("(protocol bump)"))).toBe(true);
   });
 
   it("with auto-update off, an advertised build is ignored; an explicit request still updates", async () => {

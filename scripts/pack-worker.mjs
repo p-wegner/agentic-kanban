@@ -157,6 +157,9 @@ if (printAcp) {
 const acpCli = toBlob ? resolveAcpCli() : null;
 
 function shortSha() {
+  // #1460: the board stamps the build with the last commit touching the worker bundle, not HEAD.
+  const forced = process.env.KANBAN_PACK_WORKER_STAMP;
+  if (forced && /^[0-9a-f]{7,40}$/i.test(forced)) return forced.toLowerCase();
   try {
     return run("git", ["rev-parse", "--short", "HEAD"], root).trim();
   } catch {
