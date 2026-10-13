@@ -13,6 +13,7 @@
 import { findRunningBuilderSessionIds } from "./workspace-launch-guard.js";
 import { basename } from "node:path";
 import { randomUUID } from "node:crypto";
+import { projectDepsLiveOnWorker } from "./worker-deps-placement.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { isTerminalWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import type { ProfileSelectionReason } from "../lib/profile-selection-reason.js";
@@ -130,7 +131,7 @@ export function createWorkspaceCreateService(deps: {
   async function resolveIssueAndProject(issueId: string): Promise<{
     issue: { id?: string; projectId: string; issueNumber: number | null; title: string; description: string | null; priority: string | null; externalKey: string | null };
     project: { repoPath: string; defaultBranch: string | null; defaultSkillId: string | null; servicesConfig: string | null };
-    setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean };
+    setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean; depsOnWorker: boolean };
     symlinkConfig: { enabled: boolean; dirs: string[] };
   }> {
     const issueRows = await crudRepo.getIssueForWorkspaceCreate(issueId, database);
@@ -154,7 +155,7 @@ export function createWorkspaceCreateService(deps: {
       setupConfig: {
         setupScript: projectRow.setupScript ?? null,
         setupBlocking: projectRow.setupBlocking ?? true,
-        setupEnabled: projectRow.setupEnabled ?? true,
+        setupEnabled: projectRow.setupEnabled ?? true, depsOnWorker: await projectDepsLiveOnWorker(issue.projectId, database), // #1429
       },
       symlinkConfig: {
         enabled: projectRow.symlinkEnabled ?? false,
@@ -721,8 +722,6 @@ export function createWorkspaceCreateService(deps: {
         issue,
       ));
       timing("worktree-setup", t);
-      // The branch is only settled here (it can be derived), and the worktree path is what a
-      // reclaim needs — record both before the sibling loop, which is the long part.
       await updateProvisioning(id, { phase: "siblings", branch, worktreePath }, database).catch(() => {});
 
       if (!isDirect && worktreePath) {
@@ -755,7 +754,7 @@ export function createWorkspaceCreateService(deps: {
           gitService, database, projectId: issue.projectId, branch, repoScope,
           // #629: `skipSetup` suppressed only the leading repo's setup script, so on a
           // multi-repo project the installs that dominate provisioning ran anyway.
-          skipSetup: input.skipSetup === true,
+          skipSetup: input.skipSetup === true || setupConfig.depsOnWorker,
           ...installOpts,
         });
         if (siblingWorktrees.length > 0) timing("sibling-worktrees", t);

@@ -1,6 +1,7 @@
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import type { Database } from "../db/index.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
+import { projectDepsLiveOnWorker } from "./worker-deps-placement.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
@@ -39,7 +40,7 @@ export async function refreshWorkspaceBuildArtifacts(args: {
   /** Worktree HEAD after. Equal to `headShaBefore` means nothing changed. */
   headShaAfter: string | null;
   runScript?: typeof runSetupScript;
-}): Promise<"refreshed" | "skipped-unchanged" | "skipped-no-script" | "failed"> {
+}): Promise<"refreshed" | "skipped-unchanged" | "skipped-no-script" | "skipped-on-worker" | "failed"> {
   const { workingDir, projectId, database, headShaBefore, headShaAfter } = args;
   const runScript = args.runScript ?? runSetupScript;
 
@@ -47,6 +48,9 @@ export async function refreshWorkspaceBuildArtifacts(args: {
   // is not proof of that, so it falls through and refreshes — the cheap, safe direction.
   if (headShaBefore && headShaAfter && headShaBefore === headShaAfter) return "skipped-unchanged";
   if (!projectId) return "skipped-no-script";
+
+  // #1429: a strict-dispatch project's builds happen on the worker, so a host rebuild is waste.
+  if (await projectDepsLiveOnWorker(projectId, database)) return "skipped-on-worker";
 
   const setupScript = await getProjectSetupScript(projectId, database).catch(() => null);
   if (!setupScript || !setupScript.trim()) return "skipped-no-script";

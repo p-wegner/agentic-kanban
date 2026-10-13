@@ -11,6 +11,7 @@
  */
 
 import { resolveIssueBaseBranch } from "./workspace-base.js";
+import { depsOnWorkerSetupRun } from "./worker-deps-placement.js";
 import { readFile } from "node:fs/promises";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { resolveWorktreeClaims } from "@agentic-kanban/shared/lib/worktree-claim";
@@ -359,7 +360,7 @@ export function createWorkspaceProvisionService(deps: {
     repoPath: string,
     defaultBranch: string | null,
     input: Pick<CreateWorkspaceInput, "branch" | "baseBranch" | "skipSetup">,
-    setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean },
+    setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean; depsOnWorker?: boolean },
     symlinkConfig: { enabled: boolean; dirs: string[] },
     workspaceId: string,
     // The profile this workspace's agent will actually launch under (#155). Passed
@@ -428,8 +429,9 @@ export function createWorkspaceProvisionService(deps: {
       }
     }
 
-    const { setupScript, setupBlocking, setupEnabled } = setupConfig;
-    let latestSetup = skippedSetupRun(setupScript);
+    // #1429: strict dispatch => the worker installs; keep only the git worktree.
+    const { setupScript, setupBlocking } = setupConfig, depsOnWorker = !isDirect && !!setupScript && !!setupConfig.depsOnWorker, setupEnabled = setupConfig.setupEnabled && !depsOnWorker;
+    let latestSetup = depsOnWorker ? depsOnWorkerSetupRun(setupScript) : skippedSetupRun(setupScript);
     let setupCompletion: Promise<LatestSetupRun> | undefined;
 
     // Provision the devcontainer BEFORE the setup script (#135). A host-run

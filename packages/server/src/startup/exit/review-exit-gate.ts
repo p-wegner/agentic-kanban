@@ -39,6 +39,7 @@ import { runGateWithEvidence, type GateWithEvidence } from "../../services/merge
 import type { MergeGateShas } from "../../services/merge-gate-token.js";
 import type { PreMergeGateWorkspace } from "../../services/pre-merge-gate.types.js";
 import { formatPostureNote, resolveIssueRiskPosture } from "../../services/risk-posture.service.js";
+import { readHeadSha, runPlacedVerifyCommand, VerifyJobHeldError } from "../../services/verify-job-placement.js";
 import { getStackProfile } from "../../services/stack-profile.service.js";
 
 /** The evidence `source` of a full review-exit gate (unchanged since #182). */
@@ -119,8 +120,19 @@ async function readProfileTypecheckCommand(projectId: string, database: Database
   return (await getStackProfile(projectId, database))?.typecheckCommand?.trim() || null;
 }
 
-function runTypecheckCommand(workingDir: string, command: string): Promise<SetupScriptResult> {
-  return runSetupScript(workingDir, command, { timeoutMs: REVIEW_EXIT_TYPECHECK_TIMEOUT_MS });
+/** Placed by verify_placement_<id> (#1430); host unless the project opts in. */
+async function runTypecheckCommand(workingDir: string, command: string, projectId: string, database: Database): Promise<SetupScriptResult> {
+  const { result } = await runPlacedVerifyCommand({
+    kind: "review-exit-typecheck",
+    projectId,
+    database,
+    command,
+    workingDir,
+    sha: await readHeadSha(workingDir),
+    tier: "typecheck",
+    runOnHost: () => runSetupScript(workingDir, command, { timeoutMs: REVIEW_EXIT_TYPECHECK_TIMEOUT_MS }),
+  });
+  return result;
 }
 
 /**
@@ -147,8 +159,13 @@ export async function runReviewExitGate(args: RunReviewExitGateArgs): Promise<Re
   const startedAtMs = Date.now();
   let result: SetupScriptResult;
   try {
-    result = await (args.runTypecheck ?? runTypecheckCommand)(workspace.workingDir, command);
+    result = await (args.runTypecheck ?? ((dir, cmd) => runTypecheckCommand(dir, cmd, projectId, database)))(workspace.workingDir, command);
   } catch (err) {
+    // A held placement is "no worker yet", not a red typecheck: hand over to the full gate,
+    // which owns its own hold handling, instead of bouncing the builder on a false failure.
+    if (err instanceof VerifyJobHeldError) {
+      return { ...(await runFullGate({ workspace, projectId, source: REVIEW_EXIT_GATE_SOURCE, database })), typecheckOnly: false };
+    }
     result = { exitCode: -1, stdout: "", stderr: errorMessage(err) };
   }
   const durationMs = Date.now() - startedAtMs;

@@ -175,7 +175,20 @@ export interface AgentLaunchRequest {
    * or a refusal that names itself as one.
    */
   onDeferredLaunchFailure?: (failure: DeferredLaunchFailure) => void;
+  /**
+   * #1434: supplied by the session lifecycle for a launch that placed itself. When a STRICT
+   * remote launch dies late of a failure another worker could cure (auth-expired, capacity,
+   * profile-unknown, worker-lost, dispatch), the proxy asks for a NEW placement instead of
+   * finalizing the session: the hook queues like #1411 (a held launch waits for a free slot)
+   * and rejects when nothing becomes eligible, which is what finalizes the session as before.
+   */
+  replacePlacement?: (failure: DeferredLaunchFailure) => Promise<Placement>;
 }
+
+/** Late failures a different worker could cure — worth a re-placement under strict dispatch (#1434). */
+const REPLACEABLE_FAILURES: ReadonlySet<DeferredLaunchFailure["kind"]> = new Set([
+  "auth-expired", "capacity", "profile-unknown", "worker-lost", "dispatch",
+]);
 
 /**
  * A launch that failed AFTER `launch` returned — reported through
@@ -305,7 +318,7 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
     return implementations.host;
   };
 
-  return {
+  const proxy: AgentExecutionService = {
     launch(request) {
       const { sessionId, placement, onOutput } = request;
       const impl = resolveImplementation(sessionId, placement);
@@ -336,6 +349,34 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
         releaseWorkerSlot(reservationId);
         const detail = `${failure.kind}: ${failure.reason}`;
         if (placement?.kind === "remote" && placement.strict) {
+          const finalizeStrict = (extra: string): void => {
+            onOutput({
+              type: "stderr",
+              sessionId,
+              data:
+                `${DISPATCH_LAUNCH_FAILURE_PREFIX} NO_AVAILABLE_WORKER — remote launch on worker ` +
+                `${placement.workerId} failed (${detail}) and worker dispatch is strict for this project.${extra}`,
+            });
+            onOutput({ type: "exit", sessionId, exitCode: 1 });
+          };
+          // #1434: another worker could cure this — queue a re-placement (waits for a free
+          // slot like #1411) instead of stranding the session.
+          if (request.replacePlacement && REPLACEABLE_FAILURES.has(failure.kind)) {
+            console.warn(
+              `[agent-dispatch] deferred remote launch failure under STRICT worker dispatch; re-placing: sessionId=${sessionId}: ${detail}`,
+            );
+            request.replacePlacement(failure).then(
+              (next) => {
+                try {
+                  proxy.launch({ ...request, placement: next });
+                } catch (err) {
+                  finalizeStrict(` Re-placement failed: ${errorMessage(err)}`);
+                }
+              },
+              (err) => finalizeStrict(` Re-placement found no worker: ${errorMessage(err)}`),
+            );
+            return;
+          }
           // Nothing to throw to — `launch` returned long ago. The session has to be
           // finalized through its own output channel, and it has to say that this
           // was a DISPATCH failure: an operator reading a bare "exit 1" cannot tell
@@ -343,14 +384,7 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
           console.warn(
             `[agent-dispatch] deferred remote launch failure under STRICT worker dispatch; refusing the host fallback: sessionId=${sessionId}: ${detail}`,
           );
-          onOutput({
-            type: "stderr",
-            sessionId,
-            data:
-              `${DISPATCH_LAUNCH_FAILURE_PREFIX} NO_AVAILABLE_WORKER — remote launch on worker ` +
-              `${placement.workerId} failed (${detail}) and worker dispatch is strict for this project.`,
-          });
-          onOutput({ type: "exit", sessionId, exitCode: 1 });
+          finalizeStrict("");
           return;
         }
         console.warn(
@@ -452,6 +486,7 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
       return bySession.has(sessionId) ? "host" : undefined;
     },
   };
+  return proxy;
 }
 
 function reservationIdOf(placement?: Placement): string | undefined {

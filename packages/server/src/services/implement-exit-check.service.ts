@@ -37,6 +37,7 @@ import type { Database } from "../db/index.js";
 import { getChangedFileNames } from "./git.service.js";
 import { getStackProfile } from "./stack-profile.service.js";
 import { describeGateHold, resolveGateHostAdmission } from "./gate-quiesce.js";
+import { readHeadSha, runPlacedVerifyCommand } from "./verify-job-placement.js";
 import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
 import { runUnderVerifyChainSemaphoreTimed } from "./verify-chain-semaphore.js";
 import {
@@ -155,7 +156,7 @@ export async function runImplementExitCheck(args: RunImplementExitCheckArgs): Pr
   const startedAt = Date.now();
   try {
     return plan.kind === "typecheck"
-      ? await runTypecheckLevel(workspace, plan.command, startedAt)
+      ? await runTypecheckLevel(workspace, plan.command, startedAt, projectId, args.database)
       : await runVerifyLevel({ ...args, workingDir: workspace.workingDir!, plan, verification: verification! }, startedAt);
   } catch (err) {
     // Fail OPEN: the check is an early signal and the merge gate still runs. A broken harness
@@ -171,13 +172,21 @@ async function runTypecheckLevel(
   workspace: ImplementExitCheckWorkspace,
   command: string,
   startedAt: number,
+  projectId: string,
+  database: Database,
 ): Promise<ImplementExitCheckResult> {
+  const workingDir = workspace.workingDir!;
+  const sha = await readHeadSha(workingDir);
+  const runOnHost = () => runUnderBuildSemaphore(() =>
+    runSetupScript(workingDir, command, {
+      timeoutMs: IMPLEMENT_EXIT_TYPECHECK_TIMEOUT_MS,
+      env: buildVerifyResourceEnv(2),
+    }).catch((err): SetupScriptResult => ({ exitCode: -1, stdout: "", stderr: errorMessage(err) })));
   const { result } = await runUnderVerifyChainSemaphoreTimed(
-    () => runUnderBuildSemaphore(() =>
-      runSetupScript(workspace.workingDir!, command, {
-        timeoutMs: IMPLEMENT_EXIT_TYPECHECK_TIMEOUT_MS,
-        env: buildVerifyResourceEnv(2),
-      }).catch((err): SetupScriptResult => ({ exitCode: -1, stdout: "", stderr: errorMessage(err) }))),
+    // #1430: placed by verify_placement_<id>; a worker run skips the host's build semaphore.
+    async () => (await runPlacedVerifyCommand({
+      kind: "implement-exit", projectId, database, command, workingDir, sha, tier: "typecheck", runOnHost,
+    })).result,
     `implement-exit typecheck for workspace ${workspace.id}`,
     { priority: "background" },
   );
