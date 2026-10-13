@@ -6,6 +6,7 @@
  * release train; `createMergeQueueService` calls `createMergeTrainRunner` and dispatches to
  * it when `trainEligible` + the caller/classifier/pref opt in.
  */
+import { trainGateWorkerName } from "./merge-train-placement.js";
 import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "./board-events.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -380,7 +381,9 @@ async function runTrainStagingGate(args: {
     // is reported through the gate result below rather than thrown, since a project with
     // no setup script configured (installMode "symlink", or none at all) must still gate
     // normally.
-    const setupScript = await getProjectSetupScript(projectId, database).catch(() => null);
+    // #1440: on a worker placement the worker installs; the host runs no setup script here.
+    const onWorker = (await trainGateWorkerName(projectId, database, attemptLabel)) !== null;
+    const setupScript = onWorker ? null : await getProjectSetupScript(projectId, database).catch(() => null);
     if (setupScript && setupScript.trim()) {
       noteMergeGatePhase(`train:${attemptLabel}`, "install", setupScript);
       const setup = await runSetupScript(gateWorktree, setupScript, {

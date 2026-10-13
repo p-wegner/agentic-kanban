@@ -108,6 +108,7 @@ import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
 import { acquireQueueRepoLock } from "./merge-queue-repo-lock.js";
+import { runImpactMapBuildOnWorker, type ImpactMapPlacement } from "./test-impact-map/worker-build.js";
 import { runImpactMapBuild, runImpactMapCheck, type ImpactMapRunner } from "./test-impact-map/impact-cli.js";
 
 /** Repo-relative path of the map. Mirrors the skill's default `CFG.inventory`. */
@@ -187,6 +188,7 @@ export type ImpactMapOutcome =
   | "map_tracked"
   | "map_not_ignored"
   | "lock_busy"
+  | "held"
   | "build_failed";
 
 export interface ImpactMapResult {
@@ -247,6 +249,8 @@ export interface ImpactMapPassDeps {
    * still taken and still skipped on contention — so forcing can only ever cost one rebuild.
    */
   forceRebuild?: boolean;
+  /** #1440: when set, the build is placed by `verify_placement_<id>` and runs on a worker unless it says host. */
+  placement?: ImpactMapPlacement;
 }
 
 /**
@@ -328,7 +332,11 @@ export async function runTestImpactMapPass(
     // committed — so the old `detached_head` refusal went with the commit that motivated it.
     const headSha = (await gitExec(["rev-parse", "--short", "HEAD"], { cwd: repoPath })).stdout.trim();
 
-    const build = await runImpactMapBuild(paths.tool, repoPath, paths.durations, runner);
+    const placedBuild = deps.placement
+      ? await runImpactMapBuildOnWorker({ placement: deps.placement, repoPath, tool: paths.tool, durations: paths.durations, mapPath: paths.map })
+      : null;
+    if (placedBuild?.held) return { outcome: "held", detail: placedBuild.detail };
+    const build = placedBuild ?? (await runImpactMapBuild(paths.tool, repoPath, paths.durations, runner));
     if (!build.ok) return { outcome: "build_failed", detail: build.detail };
 
     return { outcome: "rebuilt", headSha, durationsFed: paths.durations !== null };
