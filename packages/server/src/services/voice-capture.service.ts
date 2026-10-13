@@ -212,6 +212,7 @@ async function parseTranscript(
   database: Database,
   speechLanguage?: string | null,
   speechLanguageLabel?: string | null,
+  projectId?: string,
 ): Promise<{ title: string; description: string; priority: string }> {
   const languageContext = formatSpeechLanguageContext(speechLanguage, speechLanguageLabel);
 
@@ -234,7 +235,7 @@ Respond ONLY with valid JSON (no markdown, no explanation):
 
   let stdout: string;
   try {
-    stdout = await invokeClaudePrompt(prompt, { database, model: "claude-haiku-4-5" });
+    stdout = await invokeClaudePrompt(prompt, { database, model: "claude-haiku-4-5", ...(projectId ? { projectId } : {}) });
   } catch (err) {
     console.warn("[voice-capture] AI structuring failed; creating issue from raw transcript:", err);
     return fallbackStructuredTranscript(transcript);
@@ -270,7 +271,7 @@ export async function createVoiceCaptureIssue(
   }
 
   const [structured, statusId, tagId] = await Promise.all([
-    parseTranscript(transcript, database, speechLanguage, speechLanguageLabel),
+    parseTranscript(transcript, database, speechLanguage, speechLanguageLabel, projectId),
     resolveBacklogStatusId(projectId, database),
     ensureVoiceCaptureTagRepo(database),
   ]);

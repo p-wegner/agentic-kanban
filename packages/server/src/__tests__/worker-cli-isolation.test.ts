@@ -130,7 +130,8 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 65 -> 66 in #1337 for `worker/worker-daemon-helpers.ts` (leaf helpers split out of the daemon).
     // Raised 66 -> 69 in #1371 for `worker/worker-toolchain-install.ts`, `cli/commands/worker-toolchain-command.ts`
     // and `cli/commands/worker-doctor-mise.ts` (node builtins + shared deep paths only).
-    expect(files.size).toBeLessThan(69);
+    // Raised 69 -> 70 in #1431 for `worker/worker-oneshot.ts` (one-shot agent jobs; the shared protocol half is pure).
+    expect(files.size).toBeLessThan(70);
   });
 
   it("never reaches the database or board-service layer", () => {

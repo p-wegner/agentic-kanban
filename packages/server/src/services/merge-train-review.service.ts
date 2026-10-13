@@ -256,7 +256,7 @@ export function formatTrainReviewComment(args: {
 export interface TrainReviewDeps {
   database?: Database;
   /** The one-shot agent runner; injected so the review can be tested without a CLI on the path. */
-  invoke?: (prompt: string, opts: { timeout: number; cwd: string; model?: string; database: Database }) => Promise<string>;
+  invoke?: (prompt: string, opts: { timeout: number; cwd: string; model?: string; database: Database; projectId?: string; repo?: { repoPath: string; baseBranch?: string } }) => Promise<string>;
   /** Injected for tests; defaults to the real diff builder against the staging worktree. */
   buildContext?: (args: { workingDir: string; baseRef: string }) => Promise<string | null>;
   /** ISO instant the review's comments are stamped with (the persisted value) — injected for tests. */
@@ -372,7 +372,11 @@ export async function runTrainReview(
       database, projectId: args.projectId, baseBranch: args.baseBranch, trainRef: args.trainRef,
       members: args.members, precomputedContext, thorough: args.thorough,
     });
-    const reply = await invoke(prompt, { timeout: TRAIN_REVIEW_TIMEOUT_MS, cwd: args.gateWorktree, database, ...(model ? { model } : {}) });
+    const reply = await invoke(prompt, {
+      timeout: TRAIN_REVIEW_TIMEOUT_MS, cwd: args.gateWorktree, database, ...(model ? { model } : {}),
+      // #1431: placed like a session; the worker reads the assembled train from a checkout of the gate tree's HEAD.
+      projectId: args.projectId, repo: { repoPath: args.repoPath, baseBranch: args.baseBranch },
+    });
     verdict = parseTrainReviewVerdict(reply, args.members);
   } catch (err) {
     const error = errorMessage(err).slice(0, 500);

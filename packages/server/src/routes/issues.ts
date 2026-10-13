@@ -213,7 +213,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // POST /api/issues/enhance — AI-enhance a ticket title and description
   router.post("/enhance", async (c) => {
     const body = await parseJsonBody(c, enhanceIssueBody);
-    return c.json(await wrapAiOperation("enhance", () => enhanceIssue(body.title, body.description, database)));
+    return c.json(await wrapAiOperation("enhance", () => enhanceIssue(body.title, body.description, database, body.projectId)));
   });
 
   // POST /api/issues/analyze-dependencies — AI-analyze dependencies for an issue

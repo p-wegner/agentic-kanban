@@ -12,6 +12,8 @@ import { parseWorkerDoctorSummary, type WorkerDoctorSummary } from "./worker-doc
 export * from "./worker-profile-attestation.js";
 import { parseWorkerProfileAttestations, type WorkerProfileAttestation } from "./worker-profile-attestation.js";
 
+import { parseOneShotRequest, parseOneShotResult, type WorkerOneShotRequest, type WorkerOneShotResult } from "./worker-oneshot.js"; // #1431
+export * from "./worker-oneshot.js";
 import { parseWorkerToolchains, type WorkerToolchains } from "./worker-toolchains.js"; // #1382
 import {
   parseToolchainInstallStatus,
@@ -577,7 +579,9 @@ export type BoardToWorkerMessage =
    * own `--toolchain-install` policy decides whether anything runs. Optional on the wire — an older
    * worker drops it, and the board's view of that install simply never leaves `requested`.
    */
-  | { type: "toolchain_install"; requestId: string; toolchains: string[] };
+  | { type: "toolchain_install"; requestId: string; toolchains: string[] }
+  /** #1431: run ONE prompt and answer with `oneshot_result`. Sessionless; an older worker drops it, so the board waits only for the `accepted` ack. */
+  | WorkerOneShotRequest;
 
 export type WorkerToBoardMessage =
   | {
@@ -625,6 +629,8 @@ export type WorkerToBoardMessage =
   | { type: "git_token_request"; sessionId: string; requestId: string }
   /** #1371: progress of one `toolchain_install` request (pending approval / installing / failed / done). */
   | { type: "toolchain_install_status"; status: ToolchainInstallStatus }
+  /** #1431: the `accepted` ack and the outcome of one `oneshot`. */
+  | { type: "oneshot_result"; result: WorkerOneShotResult }
   | {
       type: "undelivered_result";
       sessionId: string;
@@ -674,7 +680,9 @@ function parseUndeliveredResult(msg: Record<string, unknown>): WorkerToBoardMess
 
 /** Shape-check a `toolchain_install` request (#1371). Null = drop it. */
 function parseToolchainInstallRequest(msg: Record<string, unknown> | null): BoardToWorkerMessage | null {
-  if (!msg || msg.type !== "toolchain_install") return null; // the one board frame about the machine, not a session
+  if (!msg) return null;
+  if (msg.type === "oneshot") return parseOneShotRequest(msg, { repo: parseRepoTransport(msg.repo), intent: parseLaunchIntent(asRecord(msg.job)?.intent) }); // #1431
+  if (msg.type !== "toolchain_install") return null; // the frames about the machine/a job, not a session
   if (typeof msg.requestId !== "string" || !msg.requestId || !Array.isArray(msg.toolchains)) return null;
   const toolchains = msg.toolchains.filter((t): t is string => typeof t === "string").slice(0, 20);
   return toolchains.length > 0 ? { type: "toolchain_install", requestId: msg.requestId, toolchains } : null;
@@ -682,6 +690,10 @@ function parseToolchainInstallRequest(msg: Record<string, unknown> | null): Boar
 
 /** Worker frames added after the core set, kept out of the main switch's branch count. Null = drop it. */
 function parseLaterWorkerFrame(msg: Record<string, unknown>): WorkerToBoardMessage | null {
+  if (msg.type === "oneshot_result") {
+    const result = parseOneShotResult(msg.result);
+    return result ? { type: "oneshot_result", result } : null;
+  }
   if (msg.type !== "toolchain_install_status") return null;
   const status = parseToolchainInstallStatus(msg.status);
   return status ? { type: "toolchain_install_status", status } : null;
@@ -846,7 +858,9 @@ function parseLaunchIntent(raw: unknown): WorkerLaunchIntent | null {
   if (!intent) return null;
   if (typeof intent.provider !== "string" || typeof intent.program !== "string") return null;
   if (!intent.program.trim()) return null;
-  return { provider: intent.provider, program: intent.program };
+  // #1431: the pinned profile NAME must survive the parse, or a profile-restricted project's launch loses its pin.
+  const profile = typeof intent.profile === "string" ? intent.profile.trim() : "";
+  return { provider: intent.provider, program: intent.program, ...(profile ? { profile } : {}) };
 }
 
 function parseRepoTransport(raw: unknown): WorkerRepoTransport | null {

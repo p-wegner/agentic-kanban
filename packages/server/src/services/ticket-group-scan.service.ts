@@ -120,7 +120,7 @@ Respond with JSON only:
   // Nobody watches a spinner for a batch consolidation, so scale the budget with the input
   // rather than making the operator retry into the same wall.
   const timeout = Math.min(GROUP_SCAN_TIMEOUT_CAP_MS, GROUP_SCAN_BASE_TIMEOUT_MS + candidates.length * GROUP_SCAN_MS_PER_TICKET);
-  const stdout = await invokeClaudePrompt(prompt, { database, timeout });
+  const stdout = await invokeClaudePrompt(prompt, { database, timeout, projectId });
   const parsed = extractModelJson(stdout, { shape: "object" }) as {
     groups?: Array<{ issueNumbers?: unknown; rationale?: unknown }>;
   };

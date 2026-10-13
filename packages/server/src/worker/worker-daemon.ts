@@ -63,6 +63,7 @@ import {
 import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
 import { createDaemonToolchainInstall } from "./worker-toolchain-install.js";
 import type { ToolchainInstallPolicy, WorkerToolchainInstallInfo } from "@agentic-kanban/shared/lib/worker-toolchain-install";
+import { createWorkerOneShotRunner } from "./worker-oneshot.js"; // #1431
 import { createWorkerAgentRunner, dispatchBoardMessage, rawDataToBuffer, type UnpushedResult } from "./worker-agent-runner.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
 import { packageManagersField, refreshPackageManagers, refreshToolchains, toolchainsField } from "../cli/commands/worker-doctor-git-prereqs.js";
@@ -629,6 +630,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     ...(opts.harness ? { harness: opts.harness } : {}),
     profileAliases, ...(opts.profileHome ? { profileHome: opts.profileHome } : {}),
   });
+  const oneShots = createWorkerOneShotRunner({ send: (m) => sendToBoard(m), boardUrl: currentUrl, workRoot, ...(opts.harness ? { harness: opts.harness } : {}), profileAliases, ...(opts.profileHome ? { profileHome: opts.profileHome } : {}), isDraining: () => draining }); // #1431
 
   /**
    * #1338: a freshly started daemon says `online` on its FIRST heartbeat. A worker that was
@@ -745,7 +747,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         log(`[worker] dropping malformed board message`);
         return;
       }
-      if (toolchains.handle(message)) return;
+      if (toolchains.handle(message) || oneShots.handle(message)) return; // #1431
       try {
         dispatchBoardMessage(message, runner, sendToBoard, draining);
       } catch (err) {
