@@ -191,25 +191,6 @@ describe("the train departure window holds on a red base (#1204)", () => {
 let repo: string;
 const git = (args: string[]) => gitExecOrThrow(args, { cwd: repo });
 
-beforeEach(async () => {
-  repo = mkdtempSync(join(tmpdir(), "kanban-train-basearm-"));
-  await git(["init", "-q", "-b", "main"]);
-  writeFileSync(join(repo, "base.txt"), "base\n", "utf8");
-  await git(["add", "."]);
-  await git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "chore: base"]);
-  for (const [branch, file] of [["f1", "a.txt"], ["f2", "b.txt"], ["f3", "c.txt"], ["f4", "d.txt"]]) {
-    await git(["checkout", "-q", "-b", branch, "main"]);
-    writeFileSync(join(repo, file), file, "utf8");
-    await git(["add", file]);
-    await git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", `feat: ${file}`]);
-  }
-  await git(["checkout", "-q", "main"]);
-});
-
-afterEach(() => {
-  try { rmSync(repo, { recursive: true, force: true }); } catch { /* best effort */ }
-});
-
 const fourMembers = [
   { workspaceId: "w1", branch: "f1", issueNumber: 1 },
   { workspaceId: "w2", branch: "f2", issueNumber: 2 },
@@ -218,6 +199,27 @@ const fourMembers = [
 ];
 
 describe("runMergeTrain's control arm (#1204)", () => {
+  // #1441: scoped to THIS describe. Hoisted to the file it built a 5-commit git repo (~20 spawns,
+  // 1.5s idle, minutes under a full sweep) before every one of the nine pure/in-memory tests too.
+  beforeEach(async () => {
+    repo = mkdtempSync(join(tmpdir(), "kanban-train-basearm-"));
+    await git(["init", "-q", "-b", "main"]);
+    writeFileSync(join(repo, "base.txt"), "base\n", "utf8");
+    await git(["add", "."]);
+    await git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "chore: base"]);
+    for (const [branch, file] of [["f1", "a.txt"], ["f2", "b.txt"], ["f3", "c.txt"], ["f4", "d.txt"]]) {
+      await git(["checkout", "-q", "-b", branch, "main"]);
+      writeFileSync(join(repo, file), file, "utf8");
+      await git(["add", file]);
+      await git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", `feat: ${file}`]);
+    }
+    await git(["checkout", "-q", "main"]);
+  });
+
+  afterEach(() => {
+    try { rmSync(repo, { recursive: true, force: true }); } catch { /* best effort */ }
+  });
+
   it("a red base stops the bisect dead: ONE extra gate run, zero gateRejected, every member still aboard", async () => {
     const runGate = vi.fn().mockResolvedValue({ passed: false, message: "4 guard suites failed" });
     const closeMember = vi.fn().mockResolvedValue(undefined);

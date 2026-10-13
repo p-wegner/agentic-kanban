@@ -12,6 +12,16 @@ import { listMergeTrainsForProject } from "../repositories/merge-train.repositor
 import { resetLiveMergeTrainRegistryForTests } from "../services/merge-train-live-registry.js";
 import type { TrainAgentRunner } from "../services/merge-train-agent-fix.js";
 
+// #1441: the real staging gate (`runPreMergeGate`) asks the HOST whether it may run at all (#1009
+// Tier-0 free-RAM floor, #1056 %TEMP% probe) before the verify script. On a box under the floor
+// (7.8 GB free after a reboot, mid-sweep) that returns HELD, which is inconclusive and never
+// reaches the fix agent — so "agent called 1 time" read 0. Admission has its own suite
+// (gate-host-admission.test.ts); here it is always granted.
+vi.mock("../services/gate-quiesce.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/gate-quiesce.js")>();
+  return { ...actual, resolveGateHostAdmission: vi.fn(async () => ({ admit: true, reason: "host_has_room" })) };
+});
+
 /**
  * #1277 — a red train, driven through the real runner and the real staging gate: the fix agent is
  * launched against the train's OWN gate worktree (the assembled tree, not a member's branch), its
