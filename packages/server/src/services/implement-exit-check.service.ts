@@ -37,7 +37,7 @@ import type { Database } from "../db/index.js";
 import { getChangedFileNames } from "./git.service.js";
 import { getStackProfile } from "./stack-profile.service.js";
 import { describeGateHold, resolveGateHostAdmission } from "./gate-quiesce.js";
-import { readHeadSha, runPlacedVerifyCommand } from "./verify-job-placement.js";
+import { planVerifyPlacement, readHeadSha, runOnPlannedWorker, runPlacedVerifyCommand } from "./verify-job-placement.js";
 import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
 import { runUnderVerifyChainSemaphoreTimed } from "./verify-chain-semaphore.js";
 import {
@@ -87,6 +87,8 @@ export interface ImplementExitCheckResult {
   durationMs: number;
 }
 
+const HOST_DEPS_MISSING_REASON = "the host worktree has no installed dependencies (the session ran on a worker); the merge gate verifies";
+
 /** What one run will execute — decided before anything is spawned (pure). */
 export type ImplementExitRunPlan =
   | { kind: "skip"; reason: string }
@@ -118,7 +120,7 @@ export function planImplementExitRun(input: {
   if (!script) return { kind: "skip", reason: "the project has no verify_script" };
   // #1458: a worker-built workspace never gets an install on the host; running here would be red
   // in seconds and cost the builder its feedback turns. The merge gate still verifies.
-  if (input.depsMissing) return { kind: "skip", reason: "the host worktree has no installed dependencies (the session ran on a worker); the merge gate verifies" };
+  if (input.depsMissing) return { kind: "skip", reason: HOST_DEPS_MISSING_REASON };
   return { kind: "verify", strategy: input.level, command: script };
 }
 
@@ -153,7 +155,8 @@ export async function runImplementExitCheck(args: RunImplementExitCheckArgs): Pr
     workingDir: workspace.workingDir,
     typecheckCommand: level === "typecheck" ? await readTypecheckCommand(projectId, database) : null,
     verifyScript: verification?.verifyScript ?? null,
-    depsMissing: hostDepsMissing(workspace.workingDir),
+    // #1458: not decided here — a worker has the deps, so only a HOST run without them skips
+    // (see `runVerifyLevel`, which knows where the run is placed).
   });
   if (plan.kind === "skip") return skipped(level, `implement-exit check skipped: ${plan.reason}`);
 
@@ -297,6 +300,16 @@ async function buildImplementExitVerifyEnv(args: VerifyLevelArgs, dataDir: strin
  */
 async function runVerifyLevel(args: VerifyLevelArgs, startedAt: number): Promise<ImplementExitCheckResult> {
   const { workspace, projectId, database, workingDir, plan } = args;
+  // #1458: placed like the typecheck level. A worker holds the session's deps; the host fallback
+  // without deps skips with the reason instead of reporting red.
+  const sha = await readHeadSha(workingDir);
+  const placement = await planVerifyPlacement({ kind: "implement-exit", projectId, database });
+  if (placement.target === "hold" || (placement.target === "worker" && !sha)) {
+    return skipped(plan.strategy, `implement-exit check held: no verify worker is available (${placement.reason})`, true);
+  }
+  if (placement.target === "host" && hostDepsMissing(workingDir)) {
+    return skipped(plan.strategy, `implement-exit check skipped: ${HOST_DEPS_MISSING_REASON}`);
+  }
   const changedFiles = workspace.baseBranch
     ? await getChangedFileNames(workingDir, workspace.baseBranch).catch(() => [] as string[])
     : [];
@@ -304,9 +317,23 @@ async function runVerifyLevel(args: VerifyLevelArgs, startedAt: number): Promise
   try {
     const { env: verifyEnv, tierInfo } = await buildImplementExitVerifyEnv(args, dataDir.path, changedFiles);
     const verifyTimeoutMs = await resolveVerifyTimeoutMs(projectId, database);
+    let refusal = null as string | null;
+    const runOnWorker = async (env: Record<string, string>, maxWorkers: number): Promise<SetupScriptResult> => {
+      if (placement.target !== "worker") throw new Error("not placed on a worker");
+      const out = await runOnPlannedWorker(placement, {
+        kind: "implement-exit", projectId, database, command: plan.command, workingDir, sha, tier: plan.strategy,
+        timeoutMs: verifyTimeoutMs, env, maxWorkers,
+        runOnHost: async () => ({ exitCode: -1, stdout: "", stderr: "ran on host", timedOut: false }),
+      });
+      if (out.refused) refusal = out.refused;
+      return out.result;
+    };
     const run = (extraEnv: Record<string, string> = {}) => runUnderBuildSemaphore(async () => {
       const workers = await resolveVerifyMaxWorkers(projectId, database);
       tierInfo.maxWorkers = workers.workers;
+      if (placement.target === "worker") {
+        return runOnWorker({ ...verifyEnv, ...extraEnv }, workers.workers).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false }));
+      }
       return runSetupScript(workingDir, plan.command, {
         timeoutMs: verifyTimeoutMs,
         env: { ...verifyEnv, ...buildVerifyResourceEnv(workers.workers), ...extraEnv },
@@ -333,6 +360,10 @@ async function runVerifyLevel(args: VerifyLevelArgs, startedAt: number): Promise
       `implement-exit ${plan.strategy} check for workspace ${workspace.id}`,
       { priority: "background" },
     );
+    // A refused worker job verified nothing: held, not red, and not a ledger row.
+    if (refusal !== null) {
+      return skipped(plan.strategy, `implement-exit check held: verify worker refused the job (${refusal}); nothing was verified`, true);
+    }
     const ledger = await recordVerifyGateOutcome({
       workspaceId: workspace.id,
       workingDir,
