@@ -51,10 +51,10 @@ export interface DaemonVerifyRunner {
   capability(): WorkerVerifyCapability;
 }
 
-/** vitest's `✓ path` / `× path` lines and its `Test Files  N passed (M)` summary, for progress. */
+/** vitest pass/fail marker lines and its `Test Files  N passed (M)` summary, for progress. */
 export function parseVerifyProgress(output: string): { filesDone: number; filesTotal?: number } {
   let done = 0;
-  for (const line of output.split(/\r?\n/)) if (/^\s*(?:[✓√×✗✘]|FAIL\b|❯)\s+\S+\.(?:test|spec)\.[cm]?[jt]sx?/.test(line)) done++;
+  for (const line of output.split(/\r?\n/)) if (/^\s*(?:[\u2713\u221a\u00d7\u2717\u2718]|FAIL\b|\u276f)\s+\S+\.(?:test|spec)\.[cm]?[jt]sx?/.test(line)) done++;
   const summary = /Test Files\s+(?:(\d+) failed\s*\|\s*)?(\d+) passed(?:\s*\|[^()]*)?\s*\((\d+)\)/.exec(output);
   return summary ? { filesDone: Number(summary[3]), filesTotal: Number(summary[3]) } : { filesDone: done };
 }
@@ -63,7 +63,7 @@ export function parseVerifyProgress(output: string): { filesDone: number; filesT
 export function parseVerifyFailingSuites(output: string): string[] {
   const found = new Set<string>();
   for (const line of output.split(/\r?\n/)) {
-    const m = /(?:^|\s)(?:FAIL|×|✗|✘)\s+\[?\s*([^\s>\]]+\.(?:test|spec)\.[cm]?[jt]sx?)/.exec(line);
+    const m = /(?:^|\s)(?:FAIL|\u00d7|\u2717|\u2718)\s+\[?\s*([^\s>\]]+\.(?:test|spec)\.[cm]?[jt]sx?)/.exec(line);
     if (m) found.add(m[1].replace(/\\/g, "/").replace(/^\.\//, ""));
   }
   return [...found].sort();
