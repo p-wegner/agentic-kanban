@@ -19,6 +19,8 @@ export interface GateRunPlan {
   workerName?: string;
   /** The held message + phase note, already worded for the reason it is held. */
   hold: { phaseNote: string; message: string };
+  /** Maps a failed gate result to HELD when the worker REFUSED the job (nothing was verified, so it must not read as red). Identity otherwise. */
+  holdIfRefused: <R extends object>(result: R) => R | (R & { held: true; message: string });
 }
 
 /** A worker that REFUSED the job (sha mismatch, no slot, unreachable) verified nothing: not red, not green. */
@@ -50,14 +52,19 @@ export async function planGateRun(args: {
     ? { phaseNote: `waiting for a verify worker — ${plan.reason}`, message: `pre-merge gate HELD — no verify worker is available (${plan.reason}). Nothing was verified and nothing failed; the merge is deferred and will be retried on the next cycle.` }
     : hostHold;
   const proceed = !heldForWorker && (onWorker || admission.admit);
-  if (!onWorker || plan.target !== "worker") return { proceed, hold };
+  const keep = <R extends object>(result: R): R => result;
+  if (!onWorker || plan.target !== "worker") return { proceed, hold, holdIfRefused: keep };
   const placed = plan;
+  let refusal: string | null = null;
   const run: GateScriptRunner = async (env) => {
     const out = await runOnPlannedWorker(placed, {
       kind, projectId, database, command: args.verifyScript, workingDir: args.workingDir, sha, tier: args.tier,
       timeoutMs: args.timeoutMs, env, maxWorkers: args.maxWorkers, runOnHost: async () => refusedAsHeld(placed.workerName, "ran on host"),
     });
+    refusal = out.refused ?? null;
     return out.refused ? refusedAsHeld(placed.workerName, out.refused) : out.result;
   };
-  return { proceed, run, workerName: placed.workerName, hold };
+  const holdIfRefused = <R extends object>(result: R): R | (R & { held: true; message: string }) =>
+    refusal === null ? result : { ...result, held: true, message: `pre-merge gate HELD — verify worker ${placed.workerName} refused the job (${refusal}). Nothing was verified and nothing failed; the merge is deferred and will be retried on the next cycle.` };
+  return { proceed, run, workerName: placed.workerName, hold, holdIfRefused };
 }

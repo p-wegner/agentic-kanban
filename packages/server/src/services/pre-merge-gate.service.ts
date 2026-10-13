@@ -706,7 +706,7 @@ export async function runPreMergeGate(
     });
     if (outcome.failure) {
       // #1230 — the failing suites ride on the result and lead its message; total, so no branch here.
-      return withFailedSuites({ passed: false, skipped: false, stage: "verify" as const, ...outcome.failure }, ledger);
+      return placed.holdIfRefused(withFailedSuites({ passed: false, skipped: false, stage: "verify" as const, ...outcome.failure }, ledger));
     }
     // Carried on the tier info so the PASSING message names it (see GateTierInfo).
     if (gateTierInfo && outcome.flakeRetryNote) gateTierInfo.flakeRetryNote = outcome.flakeRetryNote;
