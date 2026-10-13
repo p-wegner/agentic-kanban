@@ -188,7 +188,7 @@ describe("the drain waits for results that are already finished (#754 items 1+2)
     // The original bug: nothing held a reference to this push, so `stop()` +
     // `process.exit(0)` killed the process mid-push and the board learned about a
     // completed agent as a 60 s-grace failure.
-    expect(await drain).toEqual({ completed: 1, abandoned: 0 });
+    expect(await drain).toMatchObject({ completed: 1, abandoned: 0 });
   }, 40000);
 
   it("gives up on a push that outlives the timeout, and SAYS it abandoned it", async () => {
@@ -203,14 +203,14 @@ describe("the drain waits for results that are already finished (#754 items 1+2)
     await vi.waitFor(() => expect(runner.pendingPushCount()).toBe(1), { timeout: 20000 });
     // `abandoned` is the number that matters: reporting success here would be the original
     // bug wearing a drain's clothes.
-    expect(await runner.drainPushes(150)).toEqual({ completed: 0, abandoned: 1 });
+    expect(await runner.drainPushes(150)).toMatchObject({ completed: 0, abandoned: 1 });
   }, 40000);
 
   it("a session with no repo owes no push, so a drain is instant and empty", async () => {
     const runner = createWorkerAgentRunner(() => {}, { workRoot: freshWorkRoot() });
     runner.assign("s-plain", nodeSpec("process.exit(0)"));
     await vi.waitFor(() => expect(runner.runningSessionIds()).toEqual([]), { timeout: 20000 });
-    expect(await runner.drainPushes(50)).toEqual({ completed: 0, abandoned: 0 });
+    expect(await runner.drainPushes(50)).toMatchObject({ completed: 0, abandoned: 0 });
   }, 40000);
 });
 
@@ -314,7 +314,7 @@ describe("the daemon against a real board socket (#754 items 2,4,5,6)", () => {
 
     const report = await daemon.stop({ killAgents: true, drainTimeoutMs: 200 });
     daemon = undefined;
-    expect(report).toEqual({
+    expect(report).toMatchObject({
       pushesCompleted: 0,
       pushesAbandoned: 0,
       agentsLeftRunning: 0,

@@ -343,6 +343,8 @@ export interface DrainReport {
   pushesCompleted: number;
   /** Sessions still pushing when the drain timed out â€” their work stayed on the worker. */
   pushesAbandoned: number;
+  /** #1461: which sessions/branches those were; each is persisted to the undelivered-results store. */
+  abandonedSessions?: { sessionId: string; branch: string }[];
   /** Agents still running at exit (only possible with killAgents: false). */
   agentsLeftRunning: number;
   /**
@@ -413,11 +415,13 @@ function logShutdownReport(
     );
   }
   if (report.pushesAbandoned > 0 || report.criticalMessagesLost > 0) {
+    const named = (report.abandonedSessions ?? []).map((s) => `${s.sessionId} (branch ${s.branch})`).join(", ");
     log(
-      `[worker] shutdown INCOMPLETE: ${report.pushesAbandoned} result push(es) abandoned after ` +
-        `${Math.round(timeoutMs / 1000)}s and ${report.criticalMessagesLost} undelivered ` +
-        `exit/assign_failed message(s) lost (the queue is in memory only). The board will fall ` +
-        `back to its disconnect grace for those sessions.`,
+      `[worker] shutdown INCOMPLETE: ${report.pushesAbandoned} result push(es) still in flight after ` +
+        `${Math.round(timeoutMs / 1000)}s${named ? `: ${named}` : ""} - saved to undelivered-results.json ` +
+        `with the checkout kept, to be delivered on the next start; ` +
+        `${report.criticalMessagesLost} undelivered exit/assign_failed message(s) lost (the queue is in ` +
+        `memory only). The board will fall back to its disconnect grace for those sessions.`,
     );
   } else {
     log(`[worker] drained cleanly: ${report.pushesCompleted} result push(es) completed`);
@@ -987,6 +991,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       const report: DrainReport = {
         pushesCompleted: drained.completed,
         pushesAbandoned: drained.abandoned,
+        abandonedSessions: drained.abandonedSessions,
         agentsLeftRunning: runner.runningSessionIds().length,
         criticalMessagesLost,
         resultsRetained: retained.length,

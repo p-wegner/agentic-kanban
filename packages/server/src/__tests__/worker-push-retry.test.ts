@@ -196,7 +196,7 @@ describe("#750 — a worker retries a failed result push instead of losing the r
 
     // A 60 s backoff must not turn a bounded drain into a timeout: the current attempt
     // finishes, the remaining retries are dropped, and the result is retained instead.
-    expect(await runner.drainPushes(5000)).toEqual({ completed: 1, abandoned: 0 });
+    expect(await runner.drainPushes(5000)).toMatchObject({ completed: 1, abandoned: 0 });
     expect(state.pushes).toBe(1);
     expect(runner.unpushedResults()).toHaveLength(1);
   }, 40000);

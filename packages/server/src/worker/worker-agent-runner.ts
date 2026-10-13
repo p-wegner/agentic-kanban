@@ -40,6 +40,7 @@ import {
   type UnpushedResult,
   createUndeliveredStore,
 } from "./worker-undelivered-retry.js";
+import { removeUndelivered } from "./worker-undelivered.js";
 import { createGitTokenRequester } from "./worker-git-token.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { createWorkerSessionRegistry } from "./worker-session-registry.js";
@@ -174,6 +175,10 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
    * drain possible at all.
    */
   const inFlightPushes = new Map<string, Promise<void>>();
+  /** #1461: what each in-flight push carries, so a drain that gives up can persist it. */
+  const inFlightPending = new Map<string, PendingResult>();
+  /** #1461: sessions whose push was handed to the durable store by a drain; their checkout must survive. */
+  const abandonedPushes = new Set<string>();
   const workRoot = options.workRoot ?? defaultWorkerWorkRoot();
   const retryDelaysMs = options.pushRetryDelaysMs ?? DEFAULT_PUSH_RETRY_DELAYS_MS;
   /** Sessions provisioning a checkout — running for bookkeeping before a pid exists. */
@@ -341,15 +346,22 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     // arrived yet. Push failure is reported as stderr and downgrades the exit
     // code so the session is never recorded as a clean success.
     checkouts.delete(sessionId);
+    inFlightPending.set(sessionId, pending);
     const push = (async () => {
       let effectiveExit = exitCode;
       const pushStart = Date.now();
       try {
         const outcome = await undelivered.pushWithRetry(sessionId, pending);
-        if (outcome.ok) {
+        if (outcome.ok && abandonedPushes.has(sessionId)) {
+          // #1461: the drain already recorded this as undelivered; it did land after all, so
+          // clear the record. The checkout is left for the next start's reaper (nothing holds it).
+          removeUndelivered(workRoot, sessionId);
+        } else if (outcome.ok) {
           try {
             await repoOps.cleanup(pending.checkout);
           } catch { /* best-effort */ }
+        } else if (abandonedPushes.has(sessionId)) {
+          effectiveExit = exitCode === 0 || exitCode === null ? 1 : exitCode;
         } else {
           // #750/#775 item 2: the checkout is NOT removed. A `git worktree remove --force`
           // here leaves the commits only on the `kanban/<sessionId>` branch of the cache
@@ -384,6 +396,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       safeSend({ type: "event", event: { type: "exit", sessionId, exitCode: effectiveExit, phases } });
     })().finally(() => {
       inFlightPushes.delete(sessionId);
+      inFlightPending.delete(sessionId);
     });
     // Retained (#754) so a shutdown can WAIT for it. Errors are already handled inside,
     // so the stored promise never rejects — but attach a sink anyway: an unhandled
@@ -698,26 +711,53 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
    * A push that starts AFTER the deadline (an agent killed at the very end of the window)
    * is not waited for — bounding the wait is the point, and the ceiling is the operator's.
    */
-  async function drainPushes(timeoutMs: number): Promise<{ completed: number; abandoned: number }> {
+  async function drainPushes(
+    timeoutMs: number,
+    progressEveryMs = 5000,
+  ): Promise<{ completed: number; abandoned: number; abandonedSessions: { sessionId: string; branch: string }[] }> {
     // #750: stop waiting out retry backoffs. The attempt in flight still finishes, and a
     // result that ends up unpushed is retained (with its checkout) rather than deleted.
     undelivered.suspendRetries();
     const started = inFlightPushes.size;
-    if (started === 0) return { completed: 0, abandoned: 0 };
+    if (started === 0) return { completed: 0, abandoned: 0, abandonedSessions: [] };
     let timer: NodeJS.Timeout | undefined;
     const deadline = new Promise<"timeout">((resolve) => {
       timer = setTimeout(() => resolve("timeout"), timeoutMs);
       if (timer.unref) timer.unref();
     });
+    // #1461: progress while waiting, so a stuck drain is visible rather than silent.
+    const progress = setInterval(() => {
+      workerLog(
+        `[worker] draining: waiting for ${inFlightPushes.size} result push(es): ` +
+          `${[...inFlightPushes.keys()].join(", ")}`,
+      );
+    }, progressEveryMs);
+    if (progress.unref) progress.unref();
     // Re-read the map each round: an agent killed by stopAll() reaches its exit handler
     // (and therefore starts its push) only after this function is already waiting.
     while (inFlightPushes.size > 0) {
       const outcome = await Promise.race([Promise.allSettled([...inFlightPushes.values()]), deadline]);
       if (outcome === "timeout") break;
     }
+    clearInterval(progress);
     if (timer) clearTimeout(timer);
-    const abandoned = inFlightPushes.size;
-    return { completed: started - abandoned, abandoned };
+    // #1461: a push still in flight is NOT dropped. Its record goes to the durable
+    // undelivered-results store and its checkout is kept, so the next start delivers it.
+    const abandonedSessions: { sessionId: string; branch: string }[] = [];
+    for (const [sessionId, pending] of [...inFlightPending]) {
+      abandonedPushes.add(sessionId);
+      try {
+        undelivered.retain(sessionId, pending, {
+          ok: false,
+          attempts: 0,
+          lastError: "worker shut down while the result push was still in flight",
+        });
+      } catch (err) {
+        workerLog(`[worker] could not persist the in-flight result: sessionId=${sessionId}: ${errorMessage(err)}`);
+      }
+      abandonedSessions.push({ sessionId, branch: pending.repo.branch });
+    }
+    return { completed: started - abandonedSessions.length, abandoned: abandonedSessions.length, abandonedSessions };
   }
 
   /** How many result pushes are in flight right now. For tests and diagnostics. */

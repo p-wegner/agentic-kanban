@@ -7,6 +7,8 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { spawnSync } from "node:child_process";
+import { loadUndelivered } from "./worker-undelivered.js";
 import type { WorkerSettingKey, WorkerSettings } from "@agentic-kanban/shared/lib/worker-settings";
 import type { WorkerControlHandlers } from "./worker-control.js";
 
@@ -133,7 +135,34 @@ export function buildLifecycleDetails(ctx: LifecycleCtx): Record<string, unknown
     ...(desired?.[key] !== undefined ? { desired: desired[key] } : {}),
     ...(pinned.has(key) ? { pinnedBy: key in cfg.set ? `config set ${key}` : KEY_FLAG[key] } : {}),
   }));
-  return { draining: ctx.draining(), sessionsLeft: ctx.sessionsLeft(), stateFile: ctx.stateFile, workRoot: ctx.workRoot, settings };
+  return {
+    draining: ctx.draining(),
+    sessionsLeft: ctx.sessionsLeft(),
+    stateFile: ctx.stateFile,
+    workRoot: ctx.workRoot,
+    settings,
+    daemonNode: process.version,
+    sessionsNode: probeNodeOnPath(),
+    undelivered: loadUndelivered(ctx.workRoot).map((r) => ({
+      sessionId: r.sessionId,
+      branch: r.branch,
+      checkoutPath: r.checkoutPath,
+      attempts: r.attempts,
+      lastError: r.lastError,
+      recordedAt: r.recordedAt,
+    })),
+  };
+}
+
+/** #1461: the Node a session's PATH resolves (what agents run), or null when there is none. Never throws. */
+export function probeNodeOnPath(env: NodeJS.ProcessEnv = process.env): string | null {
+  try {
+    const r = spawnSync("node", ["--version"], { encoding: "utf8", timeout: 5000, windowsHide: true, env, shell: process.platform === "win32" });
+    const out = String(r.stdout ?? "").trim();
+    return r.status === 0 && out ? out : null;
+  } catch {
+    return null;
+  }
 }
 
 const show = (v: unknown): string => (v === undefined ? "default" : Array.isArray(v) ? v.join(",") || "none" : String(v));
@@ -146,6 +175,18 @@ export function renderStatus(s: Record<string, unknown>): string {
   lines.push(`state:        ${s.draining ? "draining" : "online"}, ${left} session(s) ${s.draining ? "left" : "running"}`);
   const upd = s.update as { state?: string; reason?: string } | undefined;
   if (upd?.state && upd.state !== "current") lines.push(`update:       ${upd.state}${upd.reason ? ` (${upd.reason})` : ""}`);
+  if (s.daemonNode !== undefined || s.sessionsNode !== undefined) {
+    const d = String(s.daemonNode ?? "unknown");
+    const n = s.sessionsNode ? String(s.sessionsNode) : "none on PATH";
+    lines.push(`node:         daemon ${d}, sessions ${n}${s.sessionsNode && s.sessionsNode !== d ? "  (differ - restart the daemon from a shell with the wanted Node first on PATH)" : ""}`);
+  }
+  const held = (s.undelivered as { sessionId: string; branch: string; checkoutPath: string; attempts: number; lastError?: string }[] | undefined) ?? [];
+  if (held.length > 0) {
+    lines.push(`undelivered:  ${held.length} result(s) not yet on the board`);
+    for (const r of held) {
+      lines.push(`  ${r.sessionId} branch ${r.branch} (${r.attempts} attempt(s)) checkout ${r.checkoutPath}${r.lastError ? ` - ${r.lastError}` : ""}`);
+    }
+  }
   lines.push(`state file:   ${String(s.stateFile ?? "?")}`);
   lines.push(`work root:    ${String(s.workRoot ?? "?")}`);
   lines.push("settings:");
