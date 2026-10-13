@@ -14,7 +14,8 @@ import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/sha
 import { WorkspaceError } from "../workspace-internals.js";
 
 // #1347: the strict-dispatch hold runs just before placement; re-exported so the lifecycle imports one module.
-export { awaitStrictLaunchWorker } from "./strict-launch-hold.js";
+import { awaitStrictLaunchWorker } from "./strict-launch-hold.js";
+export { awaitStrictLaunchWorker };
 
 /**
  * #801 — the recording seam for "why did THAT session run on the host".
@@ -90,4 +91,39 @@ export async function resolveSessionPlacement(args: {
   });
   recordPlacementReason(sessionId, placement, database);
   return placement;
+}
+
+/** #1434: how long a re-placement waits for a worker before the session fails, and how often it may re-place. */
+export const REPLACE_QUEUE_TIMEOUT_MS = 30 * 60_000;
+export const REPLACE_MAX_ATTEMPTS = 3;
+
+/**
+ * The `replacePlacement` hook for a self-placed launch: when a strict remote launch dies late
+ * (auth-expired login, full worker), queue like #1411 until a worker is eligible, then place
+ * again. Rejecting (nobody eligible within the bound) lets the proxy finalize the session.
+ */
+export function createReplacePlacement(args: {
+  database: Database;
+  workspaceId: string;
+  sessionId: string;
+  projectId: string;
+  providerName: ProviderName;
+  triggerType?: string | null;
+  workspace: { isDirect?: boolean | null; branch: string; baseBranch?: string | null };
+  /** Only a launch that placed itself is re-placed; an explicit placement or a container is not. */
+  enabled: boolean;
+  resumeProviderSessionId?: string;
+}): (() => Promise<Placement>) | undefined {
+  if (!args.enabled || !args.projectId) return undefined;
+  const { database, workspaceId, sessionId, projectId, providerName, triggerType, workspace, resumeProviderSessionId } = args;
+  let attempts = 0;
+  return async () => {
+    if (++attempts > REPLACE_MAX_ATTEMPTS) throw new Error(`re-placed ${REPLACE_MAX_ATTEMPTS} times already`);
+    await awaitStrictLaunchWorker({ database, workspaceId, projectId, providerName, triggerType }, { queueTimeoutMs: REPLACE_QUEUE_TIMEOUT_MS });
+    return resolveSessionPlacement({
+      database, sessionId, projectId, providerName, resumeProviderSessionId,
+      branch: workspace.isDirect ? undefined : workspace.branch,
+      baseBranch: workspace.baseBranch ?? undefined,
+    });
+  };
 }
