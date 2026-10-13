@@ -105,7 +105,10 @@ function buildMonitor() {
 }
 
 const flush = (ms = 0) => new Promise((r) => setTimeout(r, ms));
-async function waitUntil(pred: () => boolean, timeoutMs = 3000) {
+// The deadline is a hang guard, not a latency assertion: the rc sweep ran this on a host loaded
+// by builders and gates, and a 3s wall-clock bound timed out there (#1433). The test's own
+// timeout (120s) is the real ceiling.
+async function waitUntil(pred: () => boolean, timeoutMs = 30_000) {
   const start = Date.now();
   while (!pred()) {
     if (Date.now() - start > timeoutMs) throw new Error("waitUntil timed out");
