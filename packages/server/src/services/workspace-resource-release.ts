@@ -62,7 +62,8 @@ export async function releaseWorkspaceResources(
   const composeProjectName = parseStoredComposeProjectName(workspace.serviceState);
   // #1447: what runs on a fleet worker (dev server, scripts, a compose stack) stops there, with
   // the workspace. A stack brought down on the worker must not also be torn down against the host.
-  const remote = await step("release-worker-services", () => releaseRemoteWorkspaceServices(id, composeProjectName ?? null))
+  // Not wrapped in `step`: it carries its own request timeouts, and `step` names are the local resources.
+  const remote = await releaseRemoteWorkspaceServices(id, composeProjectName ?? null)
     .catch((err) => {
       console.warn(`[workspaces] ${where}worker-service release failed/timed out for ${id} (best-effort): ${errorMessage(err)}`);
       return { remoteStackReleased: false };

@@ -3,7 +3,7 @@
 // host's worktree for it has no dependencies (#1429). This is the one place that answers "which
 // worker, which session, and is it still connected", plus the URL the card links to.
 import type { Database } from "../db/index.js";
-import { getLatestSessionPlacement } from "../repositories/remote-session.repository.js";
+import { getLatestSessionPlacement } from "../repositories/session.repository.js";
 import { getWorkerServicesClient, type RemoteServiceRecord, type WorkerServicesClient } from "./worker-services-client.js";
 import { WorkspaceError } from "./workspace-internals.js";
 

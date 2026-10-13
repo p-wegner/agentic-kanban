@@ -72,15 +72,6 @@ export function WorkspaceDiagnosticsPanel({ workspace, project }: { workspace: W
   // fabricated for a docker-compose / multi-repo project (ticket #100).
   const [planResp, setPlanResp] = useState<WorkspaceDevServerPlanResponse | null>(null);
   const [planLoaded, setPlanLoaded] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    setPlanLoaded(false);
-    apiFetch<WorkspaceDevServerPlanResponse>(`/api/workspaces/${workspace.id}/dev-server-plan`)
-      .then((r) => { if (!cancelled) { setPlanResp(r); setPlanLoaded(true); } })
-      .catch(() => { if (!cancelled) { setPlanResp(null); setPlanLoaded(true); } });
-    return () => { cancelled = true; };
-  }, [workspace.id]);
-
   // #1447: where the dev server actually runs. A worker-placed workspace runs it ON the worker and
   // links to it through the board's proxy; `unreachable` means that worker's connection dropped.
   const [devStatus, setDevStatus] = useState<WorkspaceDevServerStatusResponse | null>(null);
@@ -88,16 +79,20 @@ export function WorkspaceDiagnosticsPanel({ workspace, project }: { workspace: W
   const [devError, setDevError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
-    apiFetch<WorkspaceDevServerStatusResponse>(`/api/workspaces/${workspace.id}/dev-server`)
-      .then((r) => { if (!cancelled) setDevStatus(r); })
-      .catch(() => { if (!cancelled) setDevStatus(null); });
+    setPlanLoaded(false);
+    apiFetch<WorkspaceDevServerPlanResponse>(`/api/workspaces/${workspace.id}/dev-server-plan`)
+      .then((r) => { if (!cancelled) { setPlanResp(r); setDevStatus(r.devServer ?? null); setPlanLoaded(true); } })
+      .catch(() => { if (!cancelled) { setPlanResp(null); setPlanLoaded(true); } });
     return () => { cancelled = true; };
   }, [workspace.id]);
+
   async function controlDevServer(action: "start" | "stop") {
     setDevBusy(true);
     setDevError(null);
     try {
-      setDevStatus(await apiPost<WorkspaceDevServerStatusResponse>(`/api/workspaces/${workspace.id}/dev-server/${action}`));
+      setDevStatus(action === "start"
+        ? await apiPost<WorkspaceDevServerStatusResponse>(`/api/workspaces/${workspace.id}/dev-server/start`)
+        : await apiPost<WorkspaceDevServerStatusResponse>(`/api/workspaces/${workspace.id}/dev-server/stop`));
     } catch (err) {
       setDevError(errorMessage(err));
     } finally {

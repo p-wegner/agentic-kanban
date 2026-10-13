@@ -4,7 +4,7 @@
 // `startup-bypasses-repositories` rule exists because 30 files in `startup/` reach
 // the DB directly, and a NEW pass should not add the 31st.
 
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { issues, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -46,21 +46,4 @@ export async function listRunningWorkerSessions(
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
     .innerJoin(projects, eq(issues.projectId, projects.id))
     .where(and(eq(sessions.status, "running"), isNotNull(sessions.workerId)));
-}
-
-/**
- * The workspace's MOST RECENT session, with the worker it ran on (null = it ran on the host).
- * Where a workspace's builder is placed decides where its dev server and compose stack run (#1447).
- */
-export async function getLatestSessionPlacement(
-  workspaceId: string,
-  database: Database = db,
-): Promise<{ sessionId: string; workerId: string | null; status: string } | null> {
-  const rows = await database
-    .select({ sessionId: sessions.id, workerId: sessions.workerId, status: sessions.status })
-    .from(sessions)
-    .where(eq(sessions.workspaceId, workspaceId))
-    .orderBy(desc(sessions.startedAt))
-    .limit(1);
-  return rows[0] ?? null;
 }

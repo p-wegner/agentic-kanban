@@ -133,8 +133,10 @@ export function createWorkerServicesRunner(options: WorkerServicesOptions) {
       rmSync(dir, { recursive: true, force: true });
       reply({ type: "service_result", requestId: m.requestId, stdout, stderr, ...r });
     };
-    const base = { cwd, env: { ...process.env, ...m.env }, windowsHide: true };
-    const proc = m.command ? spawn(m.command, { ...base, shell: true }) : spawn(argv[0]!, argv.slice(1), base);
+    const env = { ...process.env, ...m.env };
+    const proc = m.command
+      ? spawn(m.command, { cwd, env, shell: true, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] })
+      : spawn(argv[0]!, argv.slice(1), { cwd, env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     const timer = setTimeout(() => {
       if (proc.pid) void killProcessTree(proc.pid, { timeout: 5000, signal: "SIGTERM" }).catch(() => undefined);
       finish({ ok: false, code: null, error: `timed out after ${m.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS}ms` });

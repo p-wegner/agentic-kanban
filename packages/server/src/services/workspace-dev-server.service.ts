@@ -23,6 +23,14 @@ interface HostRun { pid: number | null; plan: DevServerPlan }
 /** Dev servers the board started on ITS OWN machine, by workspace (the pre-#1447 behaviour). */
 const hostRuns = new Map<string, HostRun>();
 
+/** The workspace's dev server as the board knows it on a worker (in memory, no placement lookup), or null. */
+export function remoteDevServerStatus(workspaceId: string): WorkspaceDevServerStatus | null {
+  const remote = listRemoteServices(workspaceId).find((s) => s.label === DEV_SERVER_LABEL);
+  if (!remote) return null;
+  const port = remote.ports[0] ?? null;
+  return { workspaceId, where: "worker", workerId: remote.workerId, status: remote.status, command: null, port, url: port != null ? workspaceProxyPath(workspaceId, port) : null };
+}
+
 export function createWorkspaceDevServerService(deps: {
   database: Database;
   getPlan: (workspaceId: string) => Promise<WorkspaceDevServerPlanResponse | null>;
@@ -35,11 +43,8 @@ export function createWorkspaceDevServerService(deps: {
   const stopHost = deps.stopHost ?? stopDevServer;
 
   async function status(workspaceId: string): Promise<WorkspaceDevServerStatus> {
-    const remote = listRemoteServices(workspaceId).find((s) => s.label === DEV_SERVER_LABEL);
-    if (remote) {
-      const port = remote.ports[0] ?? null;
-      return { workspaceId, where: "worker", workerId: remote.workerId, status: remote.status, command: null, port, url: port != null ? workspaceProxyPath(workspaceId, port) : null };
-    }
+    const remote = remoteDevServerStatus(workspaceId);
+    if (remote) return remote;
     const host = hostRuns.get(workspaceId);
     if (host) {
       const port = host.plan.port;

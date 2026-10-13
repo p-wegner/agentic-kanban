@@ -75,7 +75,8 @@ afterEach(async () => {
   await runner.stopAll();
   wss.close();
   await new Promise<void>((r) => upstream.close(() => r()));
-  rmSync(checkout, { recursive: true, force: true });
+  // Windows holds a dead service's cwd for a moment after taskkill returns.
+  rmSync(checkout, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
 });
 
 const LONG_RUNNING = `"${process.execPath}" -e "setInterval(() => {}, 1000)"`;

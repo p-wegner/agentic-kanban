@@ -23,6 +23,7 @@ export {
   countRunningHostSessions,
   getSessionWorkspaceId,
   findRunningSession,
+  getLatestSessionPlacement,
   findResumableSession,
   getWorkspaceSessions,
   getWorkspaceSkillName,

@@ -734,7 +734,6 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
   // which the client has been asserting as a full `WorkspaceResponse` for as long as the
   // cast existed. Found while writing this registry — the first thing it caught.
   { method: "PATCH", template: "/api/workspaces/:id", schema: looseObject({ id: str }) },
-  { method: "GET", template: "/api/workspaces/:id/dev-server", schema: devServerStatus },
   { method: "POST", template: "/api/workspaces/:id/dev-server/start", schema: devServerStatus },
   { method: "POST", template: "/api/workspaces/:id/dev-server/stop", schema: devServerStatus },
   { method: "POST", template: "/api/workspaces/:id/launch", schema: sessionHandle },

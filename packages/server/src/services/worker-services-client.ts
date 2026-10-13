@@ -44,8 +44,7 @@ const PROXY_TIMEOUT_MS = 90_000;
 
 type FrameWithoutId<T> = Omit<T, "type" | "requestId" | "proxyId">;
 
-export function createWorkerServicesClient(manager: WorkerConnectionManager, deps: { nowMs?: () => number } = {}) {
-  const nowMs = deps.nowMs ?? Date.now;
+export function createWorkerServicesClient(manager: WorkerConnectionManager) {
   const records = new Map<string, Map<string, RemoteServiceRecord>>();
   const pendingRequests = new Map<string, { workerId: string; resolve: (r: WorkerServiceResult) => void }>();
   const pendingHttp = new Map<string, { workerId: string; resolve: (r: WorkerProxyHttpResult) => void }>();
@@ -124,7 +123,7 @@ export function createWorkerServicesClient(manager: WorkerConnectionManager, dep
     if (result.ok) {
       const byLabel = records.get(args.workspaceId) ?? new Map<string, RemoteServiceRecord>();
       records.set(args.workspaceId, byLabel);
-      byLabel.set(args.label, { workspaceId: args.workspaceId, workerId, sessionId: args.sessionId, label: args.label, ports: args.ports, status: "running", startedAt: new Date(nowMs()).toISOString() });
+      byLabel.set(args.label, { workspaceId: args.workspaceId, workerId, sessionId: args.sessionId, label: args.label, ports: args.ports, status: "running", startedAt: new Date().toISOString() });
     }
     return result;
   }
@@ -206,7 +205,7 @@ export function createWorkerServicesClient(manager: WorkerConnectionManager, dep
     registerPorts: (args: { workerId: string; sessionId: string; workspaceId: string; label: string; ports: number[] }): void => {
       const byLabel = records.get(args.workspaceId) ?? new Map<string, RemoteServiceRecord>();
       records.set(args.workspaceId, byLabel);
-      byLabel.set(args.label, { ...args, status: "running", startedAt: new Date(nowMs()).toISOString() });
+      byLabel.set(args.label, { ...args, status: "running", startedAt: new Date().toISOString() });
     },
   };
 }

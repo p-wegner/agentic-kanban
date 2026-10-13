@@ -224,6 +224,8 @@ export interface WorkspaceDevServerPlanResponse {
   isSelfProject: boolean;
   /** Null when the project has no bootable dev-server command configured/detected. */
   plan: DevServerPlan | null;
+  /** #1447: the dev server this workspace already has running on a fleet worker, if any (with its proxy `url`). */
+  devServer?: WorkspaceDevServerStatusResponse | null;
 }
 
 /**
