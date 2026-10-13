@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { materializeRepoSkills } from "../worker/worker-repo.js";
+import { materializeRepoSkills } from "../worker/worker-repo-skills.js";
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf-8", windowsHide: true });
