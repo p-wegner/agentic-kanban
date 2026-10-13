@@ -69,7 +69,7 @@ export interface PlacedVerifyResult {
 }
 
 export async function runPlacedVerifyCommand(args: PlaceVerifyCommandArgs): Promise<PlacedVerifyResult> {
-  const { kind, projectId, database, log = (l) => console.log(l) } = args;
+  const { kind, projectId, database, log = (l) => console.log(`[verify-placement] ${l}`) } = args;
   const [rawPlacement, rawAllow] = await Promise.all([
     getPreference(verifyPlacementPrefKey(projectId), database).catch(() => null),
     getPreference(verifyWorkersPrefKey(projectId), database).catch(() => null),
@@ -85,11 +85,11 @@ export async function runPlacedVerifyCommand(args: PlaceVerifyCommandArgs): Prom
   if (decision.target === "host" || !active) return { result: await args.runOnHost(), target: "host" };
 
   const request: VerifyRequest = { requestId: randomUUID(), workerId: decision.workerId, sha: args.sha, tier: args.tier };
-  log(`[verify-placement] ${decision.reason} (worker ${decision.workerName})`);
+  log(`${decision.reason} (worker ${decision.workerName})`);
   const report = await active.run({ ...request, kind, command: args.command, workingDir: args.workingDir });
   const verdict = acceptWorkerVerdict(request, report, allowlist, decision.workerName);
   if (!verdict.accepted) {
-    log(`[verify-placement] ${kind} verdict from ${decision.workerName} refused: ${verdict.reason}`);
+    log(`${kind} verdict from ${decision.workerName} refused: ${verdict.reason}`);
     return { result: { exitCode: -1, stdout: "", stderr: `worker verdict refused: ${verdict.reason}` }, target: "worker", workerName: decision.workerName };
   }
   return {
