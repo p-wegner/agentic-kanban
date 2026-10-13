@@ -449,6 +449,19 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     })();
   }
 
+  /**
+   * #1455: an assign refused AFTER its checkout was provisioned (unknown profile, spawn failure)
+   * never starts an agent, so nothing else would remove the worktree or its `kanban/<sessionId>`
+   * branch — and the board re-places the SAME sessionId, whose next `worktree add -b` would then
+   * collide on that branch. Best-effort, after the refusal has been sent.
+   */
+  function dropRefusedCheckout(sessionId: string): void {
+    const pending = checkouts.get(sessionId);
+    if (!pending) return;
+    checkouts.delete(sessionId);
+    void repoOps.cleanup(pending.checkout).catch(() => {});
+  }
+
   function assign(sessionId: string, specAsSent: WorkerLaunchSpec): void {
     // An exit, not assign_failed: the board ended this session and must not re-place it elsewhere (#1407).
     if (seen.noteAssigned(sessionId)) return emitExit(sessionId, null);
@@ -472,6 +485,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     if (!resolvedProfile.ok) {
       workerLog(`[worker] refusing assign: sessionId=${sessionId} ${resolvedProfile.error}`);
       send({ type: "assign_failed", sessionId, error: resolvedProfile.error });
+      dropRefusedCheckout(sessionId);
       return;
     }
     // #1367: unless the worker runs in inherit mode, the session gets the worker's own clean
@@ -519,6 +533,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       });
     } catch (err) {
       releaseSessionTemp(sessionId); send({ type: "assign_failed", sessionId, error: errorMessage(err) });
+      dropRefusedCheckout(sessionId);
       return;
     }
     processes.set(sessionId, proc);
