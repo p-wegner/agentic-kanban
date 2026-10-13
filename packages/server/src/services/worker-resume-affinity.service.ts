@@ -20,6 +20,30 @@ import type { Database } from "../db/index.js";
 import { listWorkerBranchAssignments } from "../repositories/worker.repository.js";
 
 /**
+ * #1459: does a `--resume` placed HERE find its conversation? The holder is the worker that ran
+ * the branch last, or null for the board host (which has no worker assignment). The resume works
+ * only where that conversation lives; anywhere else it exits 1 in seconds with "No conversation
+ * found", so the caller drops `--resume` and starts fresh with a handoff instead.
+ */
+export function resumeConversationReachable(
+  holderWorkerId: string | null,
+  placement: { kind: string; workerId?: string } | undefined,
+): boolean {
+  if (!placement) return true;
+  if (placement.kind === "remote") return holderWorkerId !== null && holderWorkerId === placement.workerId;
+  return holderWorkerId === null;
+}
+
+/** The prompt for a resume that could not follow its conversation: the handoff stands in for it. */
+export function withResumeHandoff(prompt: string, handoff: string | null): string {
+  const note =
+    "[SESSION HANDOFF — the previous conversation for this workspace lives on another machine and " +
+    "could not be resumed here, so this is a FRESH session. Use the context below, the ticket brief " +
+    "and the git history to continue the work.]";
+  return handoff ? `${note}\n\n${handoff}\n---\n\n${prompt}` : `${note}\n\n${prompt}`;
+}
+
+/**
  * The worker that ran this branch most recently, or null when the board has no record of
  * a fleet dispatch for it (a branch that has only ever been built on the host, or a first
  * run).

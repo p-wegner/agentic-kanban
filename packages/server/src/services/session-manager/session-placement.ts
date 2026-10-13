@@ -9,6 +9,7 @@ import type { Database } from "../../db/index.js";
 import type { Placement } from "../agent-dispatch.service.js";
 import type { ProviderName } from "../agent-provider.js";
 import { resolveWorkerPlacement, WorkerDispatchUnavailableError } from "../worker-fleet.service.js";
+import { resolveResumeWorkerAffinity, resumeConversationReachable, withResumeHandoff } from "../worker-resume-affinity.service.js";
 import { countRunningHostSessions, updateSessionPlacementReason } from "../../repositories/placement-observability.repository.js";
 import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
 import { WorkspaceError } from "../workspace-internals.js";
@@ -94,6 +95,51 @@ export async function resolveSessionPlacement(args: {
   });
   recordPlacementReason(sessionId, placement, database);
   return placement;
+}
+
+/**
+ * #1459: can a `--resume` launched on this placement find its conversation? Looks up the worker
+ * that ran the branch last (null = the host, also what an unreadable lookup yields) and compares.
+ */
+export async function resumeReachableFromPlacement(
+  database: Database,
+  projectId: string,
+  workspace: { isDirect?: boolean | null; branch: string },
+  placement: Placement,
+): Promise<boolean> {
+  const holder = workspace.isDirect
+    ? null
+    : await resolveResumeWorkerAffinity({ projectId, branch: workspace.branch }, database);
+  return resumeConversationReachable(holder, placement);
+}
+
+/**
+ * #1459: keep `--resume` only where its conversation lives. Otherwise drop it and return a prompt
+ * carrying HANDOFF.md (builders only, #853) so the fresh session continues the work.
+ */
+export async function resumeOrHandoff(args: {
+  database: Database;
+  projectId: string;
+  workspace: { isDirect?: boolean | null; branch: string };
+  placement: Placement;
+  providerSessionId: string | undefined;
+  prompt: string;
+  /** Set for builder sessions only; where HANDOFF.md is read from. */
+  workingDir: string | undefined;
+  sessionId: string;
+}): Promise<{ providerSessionId: string | undefined; prompt: string }> {
+  const { providerSessionId } = args;
+  if (!providerSessionId || (await resumeReachableFromPlacement(args.database, args.projectId, args.workspace, args.placement))) {
+    return { providerSessionId, prompt: args.prompt };
+  }
+  console.warn(`[session] resume ${providerSessionId} not reachable from placement ${args.placement.kind}; starting fresh with handoff: sessionId=${args.sessionId}`);
+  let handoff: string | null = null;
+  if (args.workingDir) {
+    try {
+      handoff = (await (await import("../handoff.service.js")).readHandoffFile(args.workingDir)) || null;
+    } catch { /* handoff not available — the ticket brief still travels */ }
+  }
+  return { providerSessionId: undefined, prompt: withResumeHandoff(args.prompt, handoff) };
 }
 
 /** #1434: how long a re-placement waits for a worker before the session fails, and how often it may re-place. */
