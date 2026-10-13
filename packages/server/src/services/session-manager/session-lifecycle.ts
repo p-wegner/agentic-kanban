@@ -673,8 +673,7 @@ export function createSessionLifecycle(
         provider, profile: launchProfile, extraEnv: effectiveExtraEnv, skipPermissions,
         model: effectiveModel, contextFiles,
         systemInstructions: (effectiveSystemInstructions ?? "").trim() || undefined,
-        containerProvision, placement: effectivePlacement, builderContext,
-        replacePlacement: createReplacePlacement({ database: db, workspaceId, sessionId, projectId, providerName, triggerType, workspace, enabled: !placement && !containerProvision, resumeProviderSessionId: resumedProviderSessionId(resumeWithNewModel, providerSessionId) }),
+        containerProvision, placement: effectivePlacement, builderContext, replacePlacement: createReplacePlacement({ database: db, workspaceId, sessionId, projectId, providerName, triggerType, workspace, enabled: !placement && !containerProvision, resumeProviderSessionId: resumedProviderSessionId(resumeWithNewModel, providerSessionId) }),
         onOutput: (event) => {
           if (event.type === "exit") {
             if (state.sessionExitHandled.has(sessionId)) {
