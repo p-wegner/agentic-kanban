@@ -215,6 +215,8 @@ Fleet worker: connect this machine to a board and execute assigned agent session
 | `worker cleanup` | Run ON THE WORKER MACHINE: remove checkout directories under <work-root>/checkouts/ whose git |
 | `worker events <workerId>` | The board's recorded timeline for one worker (#774): registration, protocol mismatches and |
 | `worker auth [provider]` | Log a provider (claude\|codex) into THIS worker's own config dir with the provider's own login flow |
+| `worker status` | Run ON THE WORKER MACHINE (#1443): ask the running daemon for its build, drain state, sessions left, |
+| `worker config <action> [key] [value]` | Edit the worker's persisted start args (#1443) |
 | `worker setup` | Set this machine up as a worker, step by step (each step detects what is already there and can be |
 
 ## worker toolchain

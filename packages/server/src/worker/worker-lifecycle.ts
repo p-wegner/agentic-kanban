@@ -1,4 +1,4 @@
-// #1443 — worker lifecycle: persisted start args (`config set|unset`) and the `status` view.
+// #1443 - worker lifecycle: persisted start args (`config set|unset`) and the `status` view.
 //
 // Start flags that PIN a setting (#1381) used to live only in argv, and a self-update restart reuses
 // the old argv, so removing `--max-concurrency 2` took an extra manual restart. The state file now

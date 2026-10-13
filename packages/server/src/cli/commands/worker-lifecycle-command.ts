@@ -1,4 +1,4 @@
-// #1443 — `status`, `stop`, `restart`, `config` for the running worker daemon, plus the daemon-side
+// #1443 - `status`, `stop`, `restart`, `config` for the running worker daemon, plus the daemon-side
 // stop/restart handler `worker start` hands to the control endpoint. Db-free: part of the standalone
 // worker binary (worker-cli-isolation.test.ts).
 
@@ -121,7 +121,7 @@ export function registerWorkerLifecycle(workerCmd: Command): void {
     workerCmd
       .command(verb)
       .description(
-        `Run ON THE WORKER MACHINE (#1443): ${verb} the running daemon (found through the state file) — no manual node-pid kill. ` +
+        `Run ON THE WORKER MACHINE (#1443): ${verb} the running daemon (found through the state file) - no manual node-pid kill. ` +
           `With --drain it first stops taking new sessions and waits for the running ones, then ${verb}s; without it, running agents are killed like Ctrl+C.`,
       )
       .option("--drain", `Let running sessions finish before the ${verb} (returns at once; follow with 'status')`)
@@ -152,7 +152,7 @@ export function registerWorkerLifecycle(workerCmd: Command): void {
     .description(
       "Edit the worker's persisted start args (#1443). `config set <key> <value>` pins a setting, `config unset <key>` " +
         "drops its pin (the board's value applies again), `config show` lists them. Keys: " +
-        `${START_CONFIG_KEYS.join(", ")}. Applied on the next (self-)restart — e.g. 'config unset maxConcurrency' then 'restart --drain'.`,
+        `${START_CONFIG_KEYS.join(", ")}. Applied on the next (self-)restart - e.g. 'config unset maxConcurrency' then 'restart --drain'.`,
     )
     .option(...stateOpt)
     .action((action: string, key: string | undefined, value: string | undefined, options: { stateFile?: string }) => {
