@@ -13,7 +13,7 @@
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { KANBAN_INCOMING_REF_PREFIX } from "./git-http.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
+import { execSucceeded, execFailedToRun } from "@agentic-kanban/shared/lib/exec-result";
 
 export function incomingRefFor(branch: string): string {
   return `${KANBAN_INCOMING_REF_PREFIX}${branch}`;
@@ -301,8 +301,8 @@ export async function adoptCleanRebase(repoPath: string, branch: string): Promis
     if (!/^[0-9a-f]{40,64}$/.test(expectedTree)) return refuse("could not compute the expected tree of base+local");
     const conflicted = new Set<string>();
     if (!execSucceeded(merged)) {
-      // exit 1 = conflicts: line 0 is the tree, then conflicted names up to a blank line.
-      if (merged.code !== 1) return refuse("could not compute the expected tree of base+local");
+      // non-zero with a tree on line 0 = conflicts (a fatal error prints no tree): line 0 is the tree, then conflicted names up to a blank line.
+      if (execFailedToRun(merged)) return refuse("could not compute the expected tree of base+local");
       for (const l of lines.slice(1)) {
         if (!l.trim()) break;
         conflicted.add(l.trim());
