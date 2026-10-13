@@ -70,6 +70,8 @@ export interface WorkerSettingsApplier {
   effectiveOptions<T extends SettingsOptions>(opts: T): T;
   /** The board asked for this worker to be drained and it has not been undrained since. */
   startDrained(): boolean;
+  /** The board's last-pushed settings (#1443: `status` shows them next to what a pin makes effective). */
+  desired(): WorkerSettings | undefined;
   /** What to put on a heartbeat. */
   report(): WorkerSettingsReport;
   /** Apply the `config` of a heartbeat response, if it is new. */
@@ -136,6 +138,7 @@ export function createWorkerSettingsApplier(deps: {
   return {
     effectiveOptions,
     startDrained: () => drainedByBoard,
+    desired: () => persisted?.settings,
     report: () => ({ pinned, ...(appliedRev ? { appliedRev } : {}) }),
     onHeartbeatResponse(body, controls) {
       const envelope = parseWorkerSettingsEnvelope((body as { config?: unknown } | null)?.config);
