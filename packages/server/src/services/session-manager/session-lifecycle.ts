@@ -8,7 +8,7 @@ import { createAgentDispatch, type AgentExecutionService } from "../agent-dispat
 import { getWorkerFleet, WorkerDispatchUnavailableError } from "../worker-fleet.service.js";
 // #938: placement — where a launch runs and the record of why — lives in its own module.
 // `startSession` keeps the launch; that keeps the decision.
-import { resolveSessionPlacement, awaitStrictLaunchWorker, createReplacePlacement } from "./session-placement.js";
+import { resolveSessionPlacement, awaitStrictLaunchWorker, createReplacePlacement, resumeOrHandoff } from "./session-placement.js";
 import { failLaunch, newLaunchTrace, type LaunchTrace } from "./launch-failure.js";
 import type { Placement } from "../agent-dispatch.service.js";
 import { extractPlanFromMessages } from "../plan-mode.service.js";
@@ -645,7 +645,7 @@ export function createSessionLifecycle(
     // Worker-fleet placement (epic #1): an explicit placement wins; otherwise
     // `resolveSessionPlacement` (session-placement.ts) decides and records why.
     // Containerized launches keep the container path untouched.
-    let effectivePlacement = dcWorker;
+    let effectivePlacement = dcWorker, launchProviderSessionId = resumedProviderSessionId(resumeWithNewModel, providerSessionId);
     if (!effectivePlacement && !containerProvision && projectId) {
       effectivePlacement = await resolveSessionPlacement({
         database: db,
@@ -654,11 +654,12 @@ export function createSessionLifecycle(
         providerName,
         branch: workspace.isDirect ? undefined : workspace.branch,
         baseBranch: workspace.baseBranch ?? undefined,
-        // #750: a resume's provider transcript and checkout live on the worker that ran
-        // it, so placement prefers that worker. `resumeWithNewModel` drops --resume, so
-        // there is nothing to be near in that case — same condition as the launch below.
+        // #750: a resume's transcript and checkout live on the worker that ran it, so placement
+        // prefers it. `resumeWithNewModel` drops --resume: nothing to be near in that case.
         resumeProviderSessionId: resumedProviderSessionId(resumeWithNewModel, providerSessionId),
       });
+      // #1459: a resume follows its conversation (session-placement.ts)
+      ({ providerSessionId: launchProviderSessionId, prompt: effectivePrompt } = await resumeOrHandoff({ database: db, projectId, workspace, placement: effectivePlacement, providerSessionId: launchProviderSessionId, prompt: effectivePrompt, workingDir: builderSession ? effectiveWorkingDir : undefined, sessionId }));
     }
 
     try {
@@ -668,7 +669,7 @@ export function createSessionLifecycle(
         prompt: effectivePrompt,
         agentArgs: effectiveAgentArgs,
         // resumeWithNewModel omits --resume so the new profile/provider is used instead.
-        providerSessionId: resumeWithNewModel ? undefined : providerSessionId,
+        providerSessionId: launchProviderSessionId,
         agentCommand, keepAlive: multiTurn, permissionPromptTool, planMode,
         provider, profile: launchProfile, extraEnv: effectiveExtraEnv, skipPermissions,
         model: effectiveModel, contextFiles,
