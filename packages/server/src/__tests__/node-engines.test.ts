@@ -1,12 +1,12 @@
-// @gate:always-run
+// @gate:always-run when:package.json — reads the root package.json engines.node and pins it to BOARD_NODE_ENGINES (#1457).
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { BOARD_NODE_ENGINES, nodeSatisfiesEngines } from "../src/lib/node-engines.js";
+import { BOARD_NODE_ENGINES, nodeSatisfiesEngines } from "../lib/node-engines.js";
 
 describe("node-engines (#1457)", () => {
   it("root package.json engines.node is the one declared range", () => {
-    const pkg = JSON.parse(readFileSync(resolve(__dirname, "../../../package.json"), "utf8"));
+    const pkg = JSON.parse(readFileSync(resolve(__dirname, "../../../../package.json"), "utf8"));
     expect(pkg.engines.node).toBe(BOARD_NODE_ENGINES);
   });
 

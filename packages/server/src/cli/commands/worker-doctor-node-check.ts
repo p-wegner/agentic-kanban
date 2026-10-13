@@ -1,4 +1,4 @@
-import { BOARD_NODE_ENGINES, nodeSatisfiesEngines } from "@agentic-kanban/shared/lib/node-engines";
+import { BOARD_NODE_ENGINES, nodeSatisfiesEngines } from "../../lib/node-engines.js";
 import type { DoctorCheck } from "./worker-doctor.js";
 
 /**
