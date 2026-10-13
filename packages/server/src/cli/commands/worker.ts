@@ -37,6 +37,7 @@ import { renderDoctorReport, runBoardDoctor, runWorkerDoctor } from "./worker-do
 // #1358 — first-install guide + bootstrap commands. Pure strings, db-free.
 import { runWorkerPair } from "./worker-pair-output.js";
 import { registerWorkerSetup } from "./worker-setup.js";
+import { registerWorkerResults } from "./worker-results-command.js";
 // #880 — the read-only update-check. Db-free like the doctor: also part of the
 // standalone worker binary.
 import { renderUpdateCheckReport, runWorkerUpdateCheck } from "./worker-update-check.js";
@@ -655,7 +656,9 @@ export function registerWorkerSubcommands(workerCmd: Command) {
   addToolchainOptions(addHarnessOptions(startCmd)).action(runWorkerStart);
 
   registerWorkerAuth(workerCmd);
-  registerWorkerToolchain(workerCmd); registerWorkerLifecycle(workerCmd);
+  registerWorkerToolchain(workerCmd);
+  registerWorkerLifecycle(workerCmd);
+  registerWorkerResults(workerCmd);
 
   workerCmd
     .command("instructions")

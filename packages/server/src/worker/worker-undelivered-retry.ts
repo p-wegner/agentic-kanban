@@ -32,6 +32,7 @@ import {
   removeUndelivered,
   undeliveredGiveUpReason,
   upsertUndelivered,
+  UNDELIVERED_MAX_AUTH_ATTEMPTS,
   type LostSessionRecord,
 } from "./worker-undelivered.js";
 
@@ -106,11 +107,35 @@ export const isGitAuthFailure = (message: string): boolean =>
 
 const localBranchFor = (sessionId: string) => `kanban/${sessionId}`;
 
+/** HEAD sha of a kept result (#1444): the checkout, else the cache clone's `kanban/<sid>` branch. */
+export async function resolveResultHeadSha(checkoutPath: string, cacheDir: string, sessionId: string): Promise<string | undefined> {
+  const probes: Array<[string, string]> = [
+    [checkoutPath, "HEAD"],
+    [cacheDir, `refs/heads/${localBranchFor(sessionId)}`],
+  ];
+  for (const [cwd, rev] of probes) {
+    if (!existsSync(cwd)) continue;
+    const r = await gitExec(["rev-parse", "--verify", "--quiet", rev], { cwd });
+    const sha = r.error ? "" : r.stdout.trim();
+    if (/^[0-9a-f]{40}$/i.test(sha)) return sha;
+  }
+  return undefined;
+}
+
+/** Why a retained result whose push is being refused on credentials should stop retrying, or null (#1444). */
+export function authFailureGiveUpReason(attempts: number, prevError: string, error: string): string | null {
+  if (attempts < UNDELIVERED_MAX_AUTH_ATTEMPTS || !isGitAuthFailure(error) || !isGitAuthFailure(prevError)) return null;
+  return (
+    `the push is refused on credentials (${attempts} attempts, limit ${UNDELIVERED_MAX_AUTH_ATTEMPTS}) - the board ` +
+    `has most likely revoked this session's git token, so retrying cannot succeed; last error: ${error}`
+  );
+}
+
 export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
   const { workRoot, safeSend } = deps;
   const unpushed = new Map<
     string,
-    { pending: PendingResult; attempts: number; lastError: string; recordedAt: string; onDisk: boolean }
+    { pending: PendingResult; attempts: number; lastError: string; recordedAt: string; onDisk: boolean; headSha?: string }
   >();
 
   // #871: adopt the previous daemon's undelivered results. In-memory entries cannot exist
@@ -134,6 +159,7 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
       lastError: record.lastError || "restored after a daemon restart; not yet retried by this process",
       recordedAt: record.recordedAt || new Date().toISOString(),
       onDisk: true,
+      headSha: record.headSha,
     });
     workerLog(
       `[worker] restored an undelivered result from ${workRoot}: sessionId=${record.sessionId} ` +
@@ -169,7 +195,18 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
       attempts: entry.attempts,
       lastError: entry.lastError,
       recordedAt: entry.recordedAt,
+      headSha: entry.headSha,
     });
+  }
+
+  /** Record the result's HEAD sha once (#1444), then re-persist so the file carries it. */
+  async function captureHeadSha(sessionId: string): Promise<void> {
+    const entry = unpushed.get(sessionId);
+    if (!entry || entry.headSha) return;
+    const sha = await resolveResultHeadSha(entry.pending.checkout.cwd, entry.pending.checkout.cacheDir, sessionId).catch(() => undefined);
+    if (!sha || !unpushed.has(sessionId)) return;
+    entry.headSha = sha;
+    persist(sessionId);
   }
 
   /**
@@ -243,6 +280,7 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
     // #871: the FACT (not the token) also goes to disk, so the entry survives the daemon
     // restart the supervisor performs 2 s after a crash.
     persist(sessionId);
+    void captureHeadSha(sessionId);
     safeSend({
       type: "event",
       event: {
@@ -291,13 +329,19 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
         );
         continue;
       }
+      await captureHeadSha(sessionId); // entries recorded before #1444 have no sha yet
       try {
         await deps.push(deps.boardUrl, entry.pending.repo, entry.pending.checkout);
       } catch (err) {
         entry.attempts += 1;
+        const authGiveUp = authFailureGiveUpReason(entry.attempts, entry.lastError, errorMessage(err));
         entry.lastError = errorMessage(err);
         persist(sessionId); // keep the on-disk attempt count/error honest (#871)
         workerLog(`[worker] retained result still cannot be pushed: sessionId=${sessionId}: ${entry.lastError}`);
+        if (authGiveUp) {
+          markLost(sessionId, authGiveUp);
+          continue;
+        }
         await markLostIfGone(sessionId);
         continue;
       }
@@ -338,14 +382,23 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
       return; // cannot tell - keep retrying rather than drop work
     }
     if (!gone) return;
-    const reason =
-      `checkout ${view.checkoutPath} and branch ${view.localBranch} no longer exist; last error: ${entry.lastError}`;
+    markLost(
+      sessionId,
+      `checkout ${view.checkoutPath} and branch ${view.localBranch} no longer exist; last error: ${entry.lastError}`,
+    );
+  }
+
+  /** Move an entry to the `lost` list and log it with the sha an operator needs (#1444). */
+  function markLost(sessionId: string, reason: string): void {
+    const entry = unpushed.get(sessionId);
+    if (!entry) return;
     if (!markUndeliveredLost(workRoot, sessionId, reason, new Date().toISOString())) return;
     unpushed.delete(sessionId);
     workerLog(
-      `[worker] LOST undelivered result, no longer retried: sessionId=${sessionId} branch=${view.branch} - ` +
-        `${reason}. Check whether ${view.branch} is already merged on the board; if not, the commits ` +
-        `are gone from this worker and the work must be redone or restored from a bundle.`,
+      `[worker] LOST undelivered result, no longer retried: sessionId=${sessionId} branch=${entry.pending.repo.branch} ` +
+        `sha=${entry.headSha ?? "unknown"} - ${reason}. Check whether ${entry.headSha ?? entry.pending.repo.branch} is ` +
+        `already merged on the board ('agentic-kanban-worker results list' marks landed ones); if not, the work ` +
+        `must be redone or restored from the kept checkout/bundle.`,
     );
   }
 

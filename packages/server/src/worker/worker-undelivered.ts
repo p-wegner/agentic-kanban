@@ -21,7 +21,7 @@
 // (`worker-cli-isolation.test.ts` enforces it).
 
 import { workerLog } from "./worker-updater.js";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 /** One completed session this worker still owes the board. No token — see the header. */
@@ -43,6 +43,8 @@ export interface UndeliveredSessionRecord {
   attempts: number;
   lastError: string;
   recordedAt: string;
+  /** HEAD of the result checkout when it was recorded (#1444), so an operator can check it landed. */
+  headSha?: string;
 }
 
 export function undeliveredStateFile(workRoot: string): string {
@@ -87,6 +89,7 @@ export function loadUndelivered(workRoot: string): UndeliveredSessionRecord[] {
       attempts: typeof r.attempts === "number" && Number.isFinite(r.attempts) ? r.attempts : 0,
       lastError: typeof r.lastError === "string" ? r.lastError : "",
       recordedAt: typeof r.recordedAt === "string" ? r.recordedAt : "",
+      headSha: typeof r.headSha === "string" && r.headSha ? r.headSha : undefined,
     }));
   } catch {
     // Corrupt state loses only the POINTER; the checkouts themselves are still on disk
@@ -108,6 +111,7 @@ export function loadLost(workRoot: string): LostSessionRecord[] {
       attempts: typeof r.attempts === "number" && Number.isFinite(r.attempts) ? r.attempts : 0,
       lastError: typeof r.lastError === "string" ? r.lastError : "",
       recordedAt: typeof r.recordedAt === "string" ? r.recordedAt : "",
+      headSha: typeof r.headSha === "string" && r.headSha ? r.headSha : undefined,
       lostAt: typeof r.lostAt === "string" ? r.lostAt : "",
       reason: typeof r.reason === "string" ? r.reason : "",
     }));
@@ -116,10 +120,69 @@ export function loadLost(workRoot: string): LostSessionRecord[] {
   }
 }
 
+/** Atomic replace: a reader (or a crash) never sees a half-written file. */
 function save(workRoot: string, results: UndeliveredSessionRecord[], lost: LostSessionRecord[] = loadLost(workRoot)): void {
   const file = undeliveredStateFile(workRoot);
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify({ results, lost } satisfies UndeliveredStateFile, null, 2));
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify({ results, lost } satisfies UndeliveredStateFile, null, 2));
+  renameSync(tmp, file);
+}
+
+const LOCK_STALE_MS = 30_000;
+const LOCK_WAIT_MS = 10_000;
+
+/**
+ * Run a read-modify-write of the state file under a cross-process lock (#1444). The daemon and the
+ * `results drop` CLI both go through here, so neither rewrites the file from a stale read.
+ */
+export function withUndeliveredLock<T>(workRoot: string, fn: () => T): T {
+  const lock = `${undeliveredStateFile(workRoot)}.lock`;
+  mkdirSync(workRoot, { recursive: true });
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      closeSync(openSync(lock, "wx"));
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) rmSync(lock, { force: true });
+      } catch {
+        // lock vanished between the failed open and the stat - just retry
+      }
+      if (Date.now() > deadline) throw new Error(`could not lock ${undeliveredStateFile(workRoot)} (held by another process)`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    rmSync(lock, { force: true });
+  }
+}
+
+/**
+ * Remove sessions from the retry list (and, with `lost`, the lost list) under the lock (#1444).
+ * Returns the session ids actually removed.
+ */
+export function dropUndelivered(workRoot: string, sessionIds: string[], opts: { lost?: boolean } = {}): string[] {
+  return withUndeliveredLock(workRoot, () => {
+    const want = new Set(sessionIds);
+    const results = loadUndelivered(workRoot);
+    const lost = loadLost(workRoot);
+    const dropped = [
+      ...results.filter((r) => want.has(r.sessionId)),
+      ...(opts.lost ? lost.filter((r) => want.has(r.sessionId)) : []),
+    ].map((r) => r.sessionId);
+    if (dropped.length === 0) return [];
+    save(
+      workRoot,
+      results.filter((r) => !want.has(r.sessionId)),
+      opts.lost ? lost.filter((r) => !want.has(r.sessionId)) : lost,
+    );
+    return [...new Set(dropped)];
+  });
 }
 
 /**
@@ -128,16 +191,18 @@ function save(workRoot: string, results: UndeliveredSessionRecord[], lost: LostS
  */
 export function markUndeliveredLost(workRoot: string, sessionId: string, reason: string, lostAt: string): boolean {
   try {
-    const all = loadUndelivered(workRoot);
-    const record = all.find((r) => r.sessionId === sessionId);
-    if (!record) return false;
-    const lost = loadLost(workRoot).filter((r) => r.sessionId !== sessionId);
-    save(
-      workRoot,
-      all.filter((r) => r.sessionId !== sessionId),
-      [...lost, { ...record, lostAt, reason }],
-    );
-    return true;
+    return withUndeliveredLock(workRoot, () => {
+      const all = loadUndelivered(workRoot);
+      const record = all.find((r) => r.sessionId === sessionId);
+      if (!record) return false;
+      const lost = loadLost(workRoot).filter((r) => r.sessionId !== sessionId);
+      save(
+        workRoot,
+        all.filter((r) => r.sessionId !== sessionId),
+        [...lost, { ...record, lostAt, reason }],
+      );
+      return true;
+    });
   } catch {
     return false;
   }
@@ -146,8 +211,10 @@ export function markUndeliveredLost(workRoot: string, sessionId: string, reason:
 /** Add or replace the record for a session. Never throws — persistence is best-effort. */
 export function upsertUndelivered(workRoot: string, record: UndeliveredSessionRecord): boolean {
   try {
-    const rest = loadUndelivered(workRoot).filter((r) => r.sessionId !== record.sessionId);
-    save(workRoot, [...rest, record]);
+    withUndeliveredLock(workRoot, () => {
+      const rest = loadUndelivered(workRoot).filter((r) => r.sessionId !== record.sessionId);
+      save(workRoot, [...rest, record]);
+    });
     return true;
   } catch (err) {
     workerLog(
@@ -158,6 +225,9 @@ export function upsertUndelivered(workRoot: string, record: UndeliveredSessionRe
     return false;
   }
 }
+
+/** An auth-rejected push (revoked token) is hopeless sooner: lost after this many attempts (#1444). */
+export const UNDELIVERED_MAX_AUTH_ATTEMPTS = 5;
 
 /** Give up on an entry after this many failed attempts (#1416). */
 export const UNDELIVERED_MAX_ATTEMPTS = 30;
@@ -188,10 +258,12 @@ export function undeliveredGiveUpReason(
 /** Drop a session's record once its result has been delivered. Never throws. */
 export function removeUndelivered(workRoot: string, sessionId: string): void {
   try {
-    const all = loadUndelivered(workRoot);
-    const rest = all.filter((r) => r.sessionId !== sessionId);
-    if (rest.length === all.length) return;
-    save(workRoot, rest);
+    withUndeliveredLock(workRoot, () => {
+      const all = loadUndelivered(workRoot);
+      const rest = all.filter((r) => r.sessionId !== sessionId);
+      if (rest.length === all.length) return;
+      save(workRoot, rest);
+    });
   } catch {
     // A stale entry is re-reported on the next reconnect; harmless next to a throw here.
   }
