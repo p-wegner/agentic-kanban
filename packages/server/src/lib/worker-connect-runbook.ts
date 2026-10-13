@@ -227,7 +227,7 @@ export function buildConnectRunbook(input: {
       commands: [],
       expect: "The check command prints a logged-in status for the provider.",
       needsHuman: true,
-      humanCommand: `agentic-kanban-worker auth ${providerList[0] ?? "claude"}   # logs in inside the worker's own config dir`,
+      humanCommand: `agentic-kanban-worker auth ${providerList[0] ?? "claude"}`,
       check: `agentic-kanban-worker doctor --providers ${providerList.join(",")}${profilesFlag}`,
     },
     {
