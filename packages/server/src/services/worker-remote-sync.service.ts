@@ -256,6 +256,86 @@ export async function classifyRefusedPush(repoPath: string, branch: string): Pro
   }
 }
 
+export type AdoptRebaseOutcome =
+  | { adopted: true; old: string; sha: string; count: number; summary: string }
+  | { adopted: false; reason: string };
+
+/**
+ * #1446 — adopt a worker's push that was refused only because it is a clean rebase of the
+ * board's branch onto a newer base (`classifyRefusedPush` = `stale-clean`), by resetting the
+ * workspace branch (and worktree) to it. Refuses, with the reason, unless:
+ *  - the push's merge-base with the base is an ancestor of the base tip;
+ *  - the push's tree equals the tree of base+local (`merge-tree`), or differs only in files
+ *    that conflicted in that merge (a rebase that resolved conflicts with now-base commits);
+ *  - the worktree holding the branch is clean and still at the local tip we verified against.
+ * Never throws.
+ */
+export async function adoptCleanRebase(repoPath: string, branch: string): Promise<AdoptRebaseOutcome> {
+  const refuse = (reason: string): AdoptRebaseOutcome => ({ adopted: false, reason });
+  try {
+    const head = await gitExec(["symbolic-ref", "--short", "HEAD"], { cwd: repoPath });
+    const base = execSucceeded(head) ? head.stdout.trim() : "";
+    if (!base) return refuse("base branch could not be determined");
+    const rev = async (ref: string) => {
+      const r = await gitExec(["rev-parse", "--verify", `${ref}^{commit}`], { cwd: repoPath });
+      return execSucceeded(r) ? r.stdout.trim() : "";
+    };
+    const [baseTip, local, push] = await Promise.all([rev(base), rev(`refs/heads/${branch}`), rev(incomingRefFor(branch))]);
+    if (!baseTip || !local || !push) return refuse("base, local branch or incoming ref is missing");
+
+    const mbResult = await gitExec(["merge-base", baseTip, push], { cwd: repoPath });
+    const mb = execSucceeded(mbResult) ? mbResult.stdout.trim() : "";
+    if (!mb) return refuse("push shares no history with the base");
+    const mbAncestor = await gitExec(["merge-base", "--is-ancestor", mb, baseTip], { cwd: repoPath });
+    if (!execSucceeded(mbAncestor)) return refuse("push's merge-base is not an ancestor of the base tip");
+
+    const countResult = await gitExec(["rev-list", "--count", `${mb}..${push}`], { cwd: repoPath });
+    const count = execSucceeded(countResult) ? Number(countResult.stdout.trim()) : 0;
+    if (!(count > 0)) return refuse("push carries no commits of its own");
+
+    // Expected result of rebasing: base + local. The push must match it, give or take
+    // files that conflicted (their resolution is the worker's).
+    const merged = await gitExec(["merge-tree", "--write-tree", "--name-only", "--no-messages", baseTip, local], { cwd: repoPath });
+    const lines = merged.stdout.split(/\r?\n/);
+    const expectedTree = (lines[0] ?? "").trim();
+    if (!/^[0-9a-f]{40,64}$/.test(expectedTree)) return refuse("could not compute the expected tree of base+local");
+    const conflicted = new Set<string>();
+    if (!execSucceeded(merged)) {
+      // exit 1 = conflicts: line 0 is the tree, then conflicted names up to a blank line.
+      if (merged.code !== 1) return refuse("could not compute the expected tree of base+local");
+      for (const l of lines.slice(1)) {
+        if (!l.trim()) break;
+        conflicted.add(l.trim());
+      }
+    }
+    const diff = await gitExec(["diff", "--name-only", "-z", expectedTree, push], { cwd: repoPath });
+    if (!execSucceeded(diff)) return refuse("could not compare the push against base+local");
+    const differing = diff.stdout.split("\0").filter(Boolean);
+    const unexplained = differing.filter((f) => !conflicted.has(f));
+    if (unexplained.length > 0) {
+      return refuse(`push is not patch-equivalent to the local branch (differs in ${unexplained.slice(0, 5).join(", ")})`);
+    }
+
+    const worktree = await findBranchWorktree(repoPath, branch);
+    if (worktree) {
+      const status = await gitExec(["status", "--porcelain"], { cwd: worktree });
+      if (!execSucceeded(status)) return refuse("worktree status could not be read");
+      if (status.stdout.trim()) return refuse("worktree has uncommitted changes");
+      const wtHead = await gitExec(["rev-parse", "HEAD"], { cwd: worktree });
+      if (!execSucceeded(wtHead) || wtHead.stdout.trim() !== local) return refuse("worktree HEAD moved since the check");
+      const reset = await gitExec(["reset", "--hard", push], { cwd: worktree });
+      if (!execSucceeded(reset)) return refuse(`worktree reset failed: ${reset.stderr.trim()}`);
+    } else {
+      await gitExecOrThrow(["update-ref", `refs/heads/${branch}`, push, local], { cwd: repoPath });
+    }
+    const summary = `adopted clean rebase ${local.slice(0, 8)}..${push.slice(0, 8)} (${count} commits)`;
+    console.log(`[worker-sync] ${branch}: ${summary}`);
+    return { adopted: true, old: local, sha: push, count, summary };
+  } catch (err) {
+    return refuse(errorMessage(err));
+  }
+}
+
 /** Drop the staging ref once its content has landed on the real branch. */
 export async function clearIncomingRef(repoPath: string, branch: string): Promise<void> {
   await gitExec(["update-ref", "-d", incomingRefFor(branch)], { cwd: repoPath });
