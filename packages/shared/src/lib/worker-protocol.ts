@@ -406,6 +406,8 @@ export interface WorkerCapacityInfo {
   totalRamGb?: number;
   /** #1451: free disk (GB) on the worker's work root. Absent = unknown, not zero. */
   freeDiskGb?: number;
+  /** #1456: logical cores. Absent = an older worker. */
+  totalCores?: number;
 }
 
 /**

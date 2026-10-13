@@ -36,12 +36,12 @@ describe("per-worker settings (#1381)", () => {
     dispose();
   });
 
-  async function register(name: string): Promise<{ id: string; token: string }> {
+  async function register(name: string, maxConcurrency: number | null = 1): Promise<{ id: string; token: string }> {
     const { pairingToken } = (await (await fetch(`${base}/api/workers/pairing-token`, { method: "POST" })).json()) as { pairingToken: string };
     const res = await fetch(`${base}/api/workers/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pairingToken, name, labels: ["linux"], providers: ["claude"], maxConcurrency: 1 }),
+      body: JSON.stringify({ pairingToken, name, labels: ["linux"], providers: ["claude"], maxConcurrency: maxConcurrency ?? undefined }),
     });
     const body = (await res.json()) as { workerId: string; workerToken: string };
     return { id: body.workerId, token: body.workerToken };
@@ -154,6 +154,41 @@ describe("per-worker settings (#1381)", () => {
     expect(low.harnessMode).toBe("clean");
     await beat(id, token, cap(12));
     expect((await listed(id)).ineligibleReason ?? "").not.toContain("minFreeRamGb");
+  });
+
+  it("auto concurrency: derives slots from the heartbeat, backs off on thrashing / low RAM, resumes (#1456)", async () => {
+    const { id, token } = await register("auto-sized", null);
+    const cap = (o: Record<string, unknown>) => ({ capabilities: { capacity: { freeRamGb: 20, totalRamGb: 32, totalCores: 16, freeDiskGb: 200, spareCores: 12, thrashing: "none", ...o } } });
+    // registered without a slot flag: the board defaults it to auto
+    await beat(id, token, cap({}));
+    const big = await listed(id);
+    expect(big.concurrency).toMatchObject({ mode: "auto", slots: 4 });
+    expect(big.maxConcurrency).toBe(4);
+    await beat(id, token, cap({ totalRamGb: 8, freeRamGb: 6, totalCores: 4 }));
+    expect((await listed(id)).concurrency).toMatchObject({ mode: "auto", slots: 1 });
+    // thrashing: no new placements, reason shown, then it clears
+    await beat(id, token, cap({ thrashing: "heavy" }));
+    const hot = await listed(id);
+    expect(hot.eligible).toBe(false);
+    expect(hot.ineligibleReason).toContain("auto: 4 of 4 slots");
+    expect(hot.ineligibleReason).toContain("thrashing");
+    await beat(id, token, cap({}));
+    expect((await listed(id)).ineligibleReason ?? "").not.toContain("auto:");
+    // free RAM under the reserve (8 GB of 32)
+    await beat(id, token, cap({ freeRamGb: 5.1 }));
+    expect((await listed(id)).ineligibleReason).toContain("free RAM 5.1 GB under reserve 8.0 GB");
+  });
+
+  it("a board-set fixed value overrides auto, and bounds apply (#1456)", async () => {
+    const { id, token } = await register("auto-bounded", null);
+    const cap = { capabilities: { capacity: { freeRamGb: 30, totalRamGb: 64, totalCores: 32, spareCores: 20, thrashing: "none" } } };
+    await put(id, { maxConcurrency: "auto", maxSlots: 6 });
+    await beat(id, token, cap);
+    expect((await listed(id)).concurrency).toMatchObject({ mode: "auto", slots: 6 });
+    await put(id, { maxConcurrency: 2 });
+    const fixed = await listed(id);
+    expect(fixed.concurrency).toMatchObject({ mode: "fixed", slots: 2 });
+    expect(fixed.maxConcurrency).toBe(2);
   });
 
   it("drain takes the worker out of rotation at once and undrain returns it", async () => {

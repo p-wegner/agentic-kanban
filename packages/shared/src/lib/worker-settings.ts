@@ -16,6 +16,9 @@ export const WORKER_SETTING_KEYS = [
   "deniedProjects",
   "drain",
   "minFreeRamGb",
+  "minSlots",
+  "maxSlots",
+  "sessionRamGb",
 ] as const;
 export type WorkerSettingKey = (typeof WORKER_SETTING_KEYS)[number];
 
@@ -23,10 +26,11 @@ export type WorkerSettingKey = (typeof WORKER_SETTING_KEYS)[number];
 export const WORKER_RESTART_SETTING_KEYS: readonly WorkerSettingKey[] = ["providers", "profileAlias"];
 
 /** Keys enforced by the BOARD, so a worker's flags cannot pin them. */
-export const WORKER_BOARD_ONLY_SETTING_KEYS: readonly WorkerSettingKey[] = ["allowedProjects", "deniedProjects", "minFreeRamGb"];
+export const WORKER_BOARD_ONLY_SETTING_KEYS: readonly WorkerSettingKey[] = ["allowedProjects", "deniedProjects", "minFreeRamGb", "minSlots", "maxSlots", "sessionRamGb"];
 
 export interface WorkerSettings {
-  maxConcurrency?: number;
+  /** A fixed slot count, or `"auto"` (#1456): the board sizes the slots from the worker's hardware. */
+  maxConcurrency?: number | "auto";
   labels?: string[];
   /** Agent providers this worker advertises. Empty = any. */
   providers?: string[];
@@ -39,6 +43,11 @@ export interface WorkerSettings {
   drain?: boolean;
   /** #1451: the board places no new session or verify job here while the worker reports less free RAM (GB). */
   minFreeRamGb?: number;
+  /** #1456: auto mode's bounds (default 1..4). Ignored for a fixed or pinned count. */
+  minSlots?: number;
+  maxSlots?: number;
+  /** #1456: auto mode's per-session RAM budget in GB (default 4; JVM/Gradle need more). */
+  sessionRamGb?: number;
 }
 
 /** What the board stores and sends: the settings plus a revision the worker echoes back. */
@@ -71,7 +80,8 @@ function strings(value: unknown, max = 100): string[] | undefined {
 export function parseWorkerSettings(raw: unknown): WorkerSettings {
   const rec = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
   const out: WorkerSettings = {};
-  if (typeof rec.maxConcurrency === "number" && Number.isInteger(rec.maxConcurrency)
+  if (rec.maxConcurrency === "auto") out.maxConcurrency = "auto";
+  else if (typeof rec.maxConcurrency === "number" && Number.isInteger(rec.maxConcurrency)
     && rec.maxConcurrency >= 1 && rec.maxConcurrency <= 64) {
     out.maxConcurrency = rec.maxConcurrency;
   }
@@ -82,6 +92,13 @@ export function parseWorkerSettings(raw: unknown): WorkerSettings {
   if (typeof rec.drain === "boolean") out.drain = rec.drain;
   if (typeof rec.minFreeRamGb === "number" && Number.isFinite(rec.minFreeRamGb) && rec.minFreeRamGb > 0 && rec.minFreeRamGb <= 1024) {
     out.minFreeRamGb = rec.minFreeRamGb;
+  }
+  for (const key of ["minSlots", "maxSlots"] as const) {
+    const v = rec[key];
+    if (typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 64) out[key] = v;
+  }
+  if (typeof rec.sessionRamGb === "number" && Number.isFinite(rec.sessionRamGb) && rec.sessionRamGb > 0 && rec.sessionRamGb <= 256) {
+    out.sessionRamGb = rec.sessionRamGb;
   }
   return out;
 }

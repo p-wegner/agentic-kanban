@@ -13,32 +13,10 @@ import { getProjectSetupScript } from "../repositories/stack-profile.repository.
 import { ensureGitHttpServer } from "./git-http.service.js";
 import type { VerifyRunRequest, VerifyWorkerRunner } from "./verify-job-placement.js";
 import type { VerifyChainKind, VerifyWorkerCandidate, WorkerVerifyReport } from "./verify-placement.js";
+import { active, listActiveVerifyJobs, type ActiveVerifyJob } from "./verify-active-jobs.js";
 import { getWorkerFleet } from "./worker-fleet.service.js";
 
-/** One verify job as the watch view and /api/workers show it. */
-export interface ActiveVerifyJob {
-  jobId: string;
-  workerId: string;
-  workerName: string;
-  kind: VerifyChainKind;
-  sha: string;
-  tier: string;
-  stage: VerifyStage;
-  filesDone?: number;
-  filesTotal?: number;
-  startedAt: string;
-  /** #1465: the worker's socket dropped; the board is holding the job for the reconnect grace. */
-  disconnectedAt?: string;
-  /** #1465: the worker came back and the board re-attached to this still-placed job. */
-  reattached?: boolean;
-}
-
-const active = new Map<string, ActiveVerifyJob>();
-
-/** Verify jobs in flight on workers right now (#1437). */
-export function listActiveVerifyJobs(): ActiveVerifyJob[] {
-  return [...active.values()];
-}
+export { listActiveVerifyJobs, type ActiveVerifyJob } from "./verify-active-jobs.js";
 
 /** How long past the script's own timeout the board waits for a worker's result before refusing. */
 const RESULT_GRACE_MS = 10 * 60 * 1000;
@@ -61,6 +39,12 @@ export interface VerifyRunnerDeps {
   reconnectGraceMs?: number;
 }
 
+/** #1456: on an auto worker verify jobs share the session budget: sessions + verify jobs <= derived slots. */
+function budgetSlots(w: { maxConcurrency: number; concurrency?: { mode: string } }, sessions: number, inFlight: number): number[] {
+  if (w.concurrency?.mode !== "auto") return [];
+  return [w.maxConcurrency - sessions - inFlight];
+}
+
 export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRunner {
   const fleet = () => deps.fleet ?? getWorkerFleet(deps.database);
 
@@ -71,6 +55,8 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
       .filter((w) => w.effectiveStatus === "online" && connections.isConnected(w.id) && w.verify)
       // #1451: under its own minFreeRamGb floor a worker takes no new verify job
       .filter((w) => !workerBelowRamFloor(w.desiredSettings?.settings, w.capacity?.freeRamGb).below)
+      // #1456: an auto worker in live back-off takes no new verify job either
+      .filter((w) => !w.concurrency?.hold)
       .map((w) => {
         const cap = w.verify as WorkerVerifyCapability;
         const inFlight = listActiveVerifyJobs().filter((j) => j.workerId === w.id).length;
@@ -78,7 +64,7 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
           id: w.id,
           name: w.name,
           // Our own in-flight count wins over a heartbeat that predates the job's first frame.
-          freeSlots: Math.max(0, Math.min(cap.freeSlots, cap.slots - inFlight)),
+          freeSlots: Math.max(0, Math.min(cap.freeSlots, cap.slots - inFlight, ...budgetSlots(w, connections.assignedSessionIds(w.id).length, inFlight))),
           freeRamGb: w.capacity?.freeRamGb ?? cap.ramGb,
           thrashing: w.capacity ? w.capacity.thrashing !== "none" : undefined,
         };

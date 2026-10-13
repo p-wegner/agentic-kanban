@@ -28,6 +28,15 @@ describe("worker settings form (#1381)", () => {
     expect(settingsFromForm({ ...base, profileAlias: "nonsense" })).toHaveProperty("error");
   });
 
+  it('accepts "auto" with optional slot bounds (#1456)', () => {
+    const base = formFromWorker({ maxConcurrency: "auto", maxSlots: 6 }, current);
+    expect(base).toMatchObject({ maxConcurrency: "auto", maxSlots: "6", minSlots: "" });
+    expect(settingsFromForm(base)).toMatchObject({ settings: { maxConcurrency: "auto", maxSlots: 6 } });
+    expect(settingsFromForm({ ...base, minSlots: "7" })).toHaveProperty("error");
+    // bounds are meaningless for a fixed count and are not sent
+    expect(settingsFromForm({ ...base, maxConcurrency: "3" })).toEqual(expect.objectContaining({ settings: expect.not.objectContaining({ maxSlots: 6 }) }));
+  });
+
   it("explains a flag-pinned key and nothing else", () => {
     expect(pinnedNote("labels", ["labels"])).toContain("start flag");
     expect(pinnedNote("maxConcurrency", ["labels"])).toBeNull();

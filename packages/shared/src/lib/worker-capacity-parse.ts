@@ -12,9 +12,11 @@ export function parseWorkerCapacityInfo(raw: unknown): WorkerCapacityInfo | unde
   if (freeRamGb === undefined || spareCores === undefined || thrashing === undefined) return undefined;
   const totalRamGb = gb(rec.totalRamGb);
   const freeDiskGb = gb(rec.freeDiskGb);
+  const totalCores = num(rec.totalCores) !== undefined && (num(rec.totalCores) as number) > 0 ? Math.floor(rec.totalCores as number) : undefined;
   return {
     freeRamGb, spareCores, thrashing,
     ...(totalRamGb !== undefined ? { totalRamGb } : {}),
     ...(freeDiskGb !== undefined ? { freeDiskGb } : {}),
+    ...(totalCores !== undefined ? { totalCores } : {}),
   };
 }

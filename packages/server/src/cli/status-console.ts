@@ -62,11 +62,12 @@ function workerLine(w: ConsoleWorker, g: Glyphs): Line {
   const ti = w.toolchainInstall;
   const install = ti && ti.state !== "done" ? ` · install ${ti.toolchains.join(",")} ${ti.state}${ti.state === "failed" && ti.reason ? ` (${ti.reason})` : ""}` : "";
   const state = (w.status === "online" ? "" : ` [${w.status}]`) + (w.authExpired ? " [auth-expired]" : "") + install
+    + (w.concurrencyMode ? ` · ${w.concurrencyMode}` : "") + (w.concurrencyHold ? ` · HOLD ${w.concurrencyHold}` : "")
     + (w.pinned && w.pinned.length > 0 ? ` · pinned ${w.pinned.join(",")}` : "") + (w.desiredPending ? " · settings pending" : "")
     + (w.updatePending ? ` · ${w.updatePending}` : "");
   return {
     text: ` ${w.name.padEnd(15)} ${dots.padEnd(3)} ${w.load}/${w.maxConcurrency}  ${(w.os ?? "").padEnd(5)} ${`${w.build ?? "-"}${w.buildStale ? "!" : ""}`.padEnd(7)}${res} ${tickets}${verify}${state}  ${hb}`,
-    tone: w.status !== "online" || w.buildStale || w.authExpired || ti?.state === "failed" ? "yellow" : w.load > 0 ? "cyan" : null,
+    tone: w.status !== "online" || w.buildStale || w.concurrencyHold || w.authExpired || ti?.state === "failed" ? "yellow" : w.load > 0 ? "cyan" : null,
   };
 }
 

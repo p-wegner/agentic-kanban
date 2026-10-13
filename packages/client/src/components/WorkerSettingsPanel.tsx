@@ -6,12 +6,15 @@ import {
   type WorkerSettingsEnvelope,
   type WorkerSettingsReport,
 } from "@agentic-kanban/shared/lib/worker-settings";
+import { DEFAULT_MAX_SLOTS, DEFAULT_MIN_SLOTS } from "@agentic-kanban/shared/lib/worker-concurrency";
 import { saveWorkerSettings } from "../hooks/useWorkerFleetQueries.js";
 import { formFromWorker, pinnedNote, settingsFromForm, type WorkerSettingsFormState } from "../lib/workerSettingsForm.js";
 
 export interface WorkerSettingsPanelProps {
   workerId: string;
   maxConcurrency: number;
+  /** #1456: mode, derived slots and why, as the board computed them. */
+  concurrency?: { mode: string; slots: number; reason: string; hold?: string };
   labels: string[];
   providers: string[];
   desiredSettings?: WorkerSettingsEnvelope;
@@ -87,9 +90,20 @@ export function WorkerSettingsPanel(props: WorkerSettingsPanelProps) {
         Settings
         {pending && <span className="rounded bg-blue-100 px-1.5 py-0.5 font-normal text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">waiting for the worker to apply</span>}
       </div>
+      {props.concurrency && (
+        <div className={`mb-2 text-xs ${props.concurrency.hold ? "text-amber-700 dark:text-amber-300" : "text-gray-500"}`} data-testid="worker-concurrency-reason">
+          <span className="font-medium">{props.concurrency.mode}</span> · {props.concurrency.slots} slot(s) · {props.concurrency.reason}
+        </div>
+      )}
       <div className="grid gap-2 sm:grid-cols-2">
         {field("maxConcurrency", "Max concurrency", (d) => (
-          <input type="number" min={1} max={64} disabled={d} className={INPUT} value={form.maxConcurrency} onChange={(e) => set("maxConcurrency", e.target.value)} />
+          <input disabled={d} className={INPUT} placeholder="auto or 1-64" value={form.maxConcurrency} onChange={(e) => set("maxConcurrency", e.target.value)} />
+        ))}
+        {form.maxConcurrency.trim().toLowerCase() === "auto" && field("minSlots", `Auto: min / max slots (default ${DEFAULT_MIN_SLOTS} / ${DEFAULT_MAX_SLOTS})`, (d) => (
+          <span className="flex gap-1">
+            <input type="number" min={1} max={64} disabled={d} className={INPUT} value={form.minSlots} onChange={(e) => set("minSlots", e.target.value)} />
+            <input type="number" min={1} max={64} disabled={d} className={INPUT} value={form.maxSlots} onChange={(e) => set("maxSlots", e.target.value)} />
+          </span>
         ))}
         {field("labels", "Labels (comma separated)", (d) => (
           <input disabled={d} className={INPUT} value={form.labels} onChange={(e) => set("labels", e.target.value)} />

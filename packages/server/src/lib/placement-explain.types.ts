@@ -17,6 +17,7 @@
 // the behaviour and imports its vocabulary from here, and the leaf consumers
 // depend only on this file. Keep this module free of anything that reaches the db.
 import type { ProviderName } from "../services/agent-provider/types.js";
+import type { WorkerConcurrencyVerdict } from "@agentic-kanban/shared/lib/worker-concurrency";
 import type { WorkerSettingsEnvelope, WorkerSettingsReport } from "@agentic-kanban/shared/lib/worker-settings";
 import type { WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
 import type { WorkerToolchains } from "@agentic-kanban/shared/lib/worker-toolchains";
@@ -184,6 +185,8 @@ export interface WorkerEligibility {
   attestedProfiles?: WorkerProfileAttestation[];
   /** #1451: the worker's provider harness mode (clean|custom|inherit); absent = not reported. */
   harnessMode?: string;
+  /** #1456: concurrency mode (auto/fixed/pinned), the slots placement uses, and why. */
+  concurrency?: WorkerConcurrencyVerdict;
   /**
    * #1381: the settings an operator set on the board for this worker, and what the worker said
    * about its side (keys pinned by its start flags, last applied revision).

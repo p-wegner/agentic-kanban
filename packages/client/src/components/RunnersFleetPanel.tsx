@@ -25,6 +25,8 @@ interface WorkerRow {
   labels: string[];
   providers: string[];
   maxConcurrency: number;
+  /** #1456: auto/fixed/pinned, the slots placement uses, and why (incl. a back-off hold). */
+  concurrency?: { mode: string; slots: number; reason: string; hold?: string };
   status: string;
   effectiveStatus: "online" | "draining" | "offline";
   lastHeartbeatAt: string | null;
@@ -250,7 +252,7 @@ export function RunnersFleetPanel({ projectId }: RunnersFleetPanelProps) {
                 <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   {worker.os ?? "unknown OS"}
                   {worker.arch ? ` · ${worker.arch}` : ""} · {worker.load}/{worker.maxConcurrency} in use (
-                  {worker.freeSlots} free) ·{" "}
+                  {worker.freeSlots} free){worker.concurrency ? ` · ${worker.concurrency.reason}` : ""} ·{" "}
                   {worker.lastHeartbeatAt ? `heartbeat ${formatRelativeTime(worker.lastHeartbeatAt)}` : "never seen"}
                 </div>
                 <div className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
@@ -377,6 +379,7 @@ export function RunnersFleetPanel({ projectId }: RunnersFleetPanelProps) {
                 key={`${worker.id}:${worker.desiredSettings?.rev ?? ""}`}
                 workerId={worker.id}
                 maxConcurrency={worker.maxConcurrency}
+                concurrency={worker.concurrency}
                 labels={worker.labels}
                 providers={worker.providers}
                 desiredSettings={worker.desiredSettings}

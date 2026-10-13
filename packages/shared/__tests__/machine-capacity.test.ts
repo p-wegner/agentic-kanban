@@ -92,7 +92,7 @@ describe("resolveSpareCores", () => {
 describe("toWorkerCapacitySnapshot", () => {
   it("folds a Tier 0 snapshot into the heartbeat shape with thrashing 'none'", () => {
     const snapshot = toWorkerCapacitySnapshot({ tier: "0", hold: false, reason: "3.0GB free", freeGb: 3 });
-    expect(snapshot).toEqual({ freeRamGb: 3, spareCores: expect.any(Number), totalRamGb: expect.any(Number), thrashing: "none" });
+    expect(snapshot).toMatchObject({ freeRamGb: 3, spareCores: expect.any(Number), totalRamGb: expect.any(Number), totalCores: expect.any(Number), thrashing: "none" });
   });
 
   it("falls back to 0 free RAM when Tier 0 could not read memory", () => {
