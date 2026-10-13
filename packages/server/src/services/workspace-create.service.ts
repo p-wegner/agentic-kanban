@@ -131,7 +131,7 @@ export function createWorkspaceCreateService(deps: {
   async function resolveIssueAndProject(issueId: string): Promise<{
     issue: { id?: string; projectId: string; issueNumber: number | null; title: string; description: string | null; priority: string | null; externalKey: string | null };
     project: { repoPath: string; defaultBranch: string | null; defaultSkillId: string | null; servicesConfig: string | null };
-    setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean };
+    setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean; depsOnWorker: boolean };
     symlinkConfig: { enabled: boolean; dirs: string[] };
   }> {
     const issueRows = await crudRepo.getIssueForWorkspaceCreate(issueId, database);
@@ -155,7 +155,7 @@ export function createWorkspaceCreateService(deps: {
       setupConfig: {
         setupScript: projectRow.setupScript ?? null,
         setupBlocking: projectRow.setupBlocking ?? true,
-        setupEnabled: projectRow.setupEnabled ?? true,
+        setupEnabled: projectRow.setupEnabled ?? true, depsOnWorker: await projectDepsLiveOnWorker(issue.projectId, database), // #1429
       },
       symlinkConfig: {
         enabled: projectRow.symlinkEnabled ?? false,
@@ -711,9 +711,8 @@ export function createWorkspaceCreateService(deps: {
       provisioningMarked = true;
 
       t = Date.now();
-      const depsOnWorker = !isDirect && await projectDepsLiveOnWorker(issue.projectId, database); // #1429
       ({ branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion, symlinkRun: latestSymlink } = await setupWorktree(
-        isDirect, project.repoPath, project.defaultBranch, input, { ...setupConfig, depsOnWorker }, symlinkConfig, id,
+        isDirect, project.repoPath, project.defaultBranch, input, setupConfig, symlinkConfig, id,
         {
           claudeProfile: agentConfig.claudeProfile,
           settingsProfile: agentConfig.claudeProfile && agentConfig.claudeProfile !== "default"
@@ -755,7 +754,7 @@ export function createWorkspaceCreateService(deps: {
           gitService, database, projectId: issue.projectId, branch, repoScope,
           // #629: `skipSetup` suppressed only the leading repo's setup script, so on a
           // multi-repo project the installs that dominate provisioning ran anyway.
-          skipSetup: input.skipSetup === true || depsOnWorker,
+          skipSetup: input.skipSetup === true || setupConfig.depsOnWorker,
           ...installOpts,
         });
         if (siblingWorktrees.length > 0) timing("sibling-worktrees", t);

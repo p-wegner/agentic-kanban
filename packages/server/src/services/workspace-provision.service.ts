@@ -429,13 +429,9 @@ export function createWorkspaceProvisionService(deps: {
       }
     }
 
-    // #1429: a strict-dispatch project's sessions run on a worker, which installs for itself —
-    // keep the git worktree (rebase/merge metadata) and skip the host install entirely.
-    const depsOnWorker = !isDirect && !!setupConfig.setupScript && setupConfig.depsOnWorker === true;
-    const { setupScript, setupBlocking, setupEnabled } = depsOnWorker
-      ? { ...setupConfig, setupEnabled: false }
-      : setupConfig;
-    let latestSetup = depsOnWorker ? depsOnWorkerSetupRun(setupConfig.setupScript) : skippedSetupRun(setupScript);
+    // #1429: strict dispatch => the worker installs; keep only the git worktree.
+    const { setupScript, setupBlocking } = setupConfig, depsOnWorker = !isDirect && !!setupScript && !!setupConfig.depsOnWorker, setupEnabled = setupConfig.setupEnabled && !depsOnWorker;
+    let latestSetup = depsOnWorker ? depsOnWorkerSetupRun(setupScript) : skippedSetupRun(setupScript);
     let setupCompletion: Promise<LatestSetupRun> | undefined;
 
     // Provision the devcontainer BEFORE the setup script (#135). A host-run
