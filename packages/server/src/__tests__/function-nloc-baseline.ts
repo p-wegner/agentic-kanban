@@ -334,7 +334,7 @@
  *
  *   services/agent-remote.service.ts::createRemoteAgentService   292 -> 296  (+4)
  *   routes/workspace-actions.ts::createWorkspaceActionsRoute     388 -> 389  (+1)
- *   worker/worker-agent-runner.ts::createWorkerAgentRunner       383 -> 383  (+7, #1426: auth-death hook; logic lives in worker-auth-failure.ts)
+ *   worker/worker-agent-runner.ts::createWorkerAgentRunner       383 -> 390  (+7, #1426: auth-death hook; logic lives in worker-auth-failure.ts)
  *   worker/worker-agent-runner.ts::createWorkerAgentRunner       370 -> 383  (+13)
  *
  * The board answers a worker's `git_token_request` (one dispatch branch; the logic is in
