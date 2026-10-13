@@ -10,6 +10,7 @@ import type { Placement } from "../agent-dispatch.service.js";
 import type { ProviderName } from "../agent-provider.js";
 import { resolveWorkerPlacement, WorkerDispatchUnavailableError } from "../worker-fleet.service.js";
 import { resolveResumeWorkerAffinity, resumeConversationReachable, withResumeHandoff } from "../worker-resume-affinity.service.js";
+import { getNewestSessionWorkerForBranch } from "../../repositories/worker.repository.js";
 import { countRunningHostSessions, updateSessionPlacementReason } from "../../repositories/placement-observability.repository.js";
 import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
 import { WorkspaceError } from "../workspace-internals.js";
@@ -107,9 +108,14 @@ export async function resumeReachableFromPlacement(
   workspace: { isDirect?: boolean | null; branch: string },
   placement: Placement,
 ): Promise<boolean> {
-  const holder = workspace.isDirect
-    ? null
-    : await resolveResumeWorkerAffinity({ projectId, branch: workspace.branch }, database);
+  let holder: string | null = null;
+  if (!workspace.isDirect) {
+    try {
+      // Newest session wins, host sessions included: a host fallback after a worker run moved the conversation.
+      const newest = await getNewestSessionWorkerForBranch(projectId, workspace.branch, database);
+      holder = newest ? newest.workerId : await resolveResumeWorkerAffinity({ projectId, branch: workspace.branch }, database);
+    } catch { holder = null; }
+  }
   return resumeConversationReachable(holder, placement);
 }
 

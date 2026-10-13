@@ -311,3 +311,23 @@ export { getSessionLiveness } from "./session/lifecycle.js";
  * module so fleet callers keep importing it from the worker repository.
  */
 export { updateSessionWorkerId } from "./session.repository.js";
+
+/**
+ * #1459: the worker of the NEWEST session on a branch, host sessions included. `null` workerId
+ * means that session ran on the board host; `undefined` means the branch has no session at all.
+ * A host session that followed a worker one holds the conversation a resume names.
+ */
+export async function getNewestSessionWorkerForBranch(
+  projectId: string,
+  branch: string,
+  database: Database = db,
+): Promise<{ workerId: string | null } | undefined> {
+  const rows = await database
+    .select({ workerId: sessions.workerId, startedAt: sessions.startedAt })
+    .from(sessions)
+    .innerJoin(workspaces, eq(workspaces.id, sessions.workspaceId))
+    .innerJoin(issues, eq(issues.id, workspaces.issueId))
+    .where(and(eq(issues.projectId, projectId), eq(workspaces.branch, branch)));
+  rows.sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
+  return rows[0] ? { workerId: rows[0].workerId } : undefined;
+}
