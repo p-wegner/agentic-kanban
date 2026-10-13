@@ -1,4 +1,5 @@
 import type { BoardStatusIssue } from "@agentic-kanban/shared";
+import { isInFlightStatusName } from "@agentic-kanban/shared/lib/status-view";
 import type { ConsoleExtras } from "../services/console-extras.service.js";
 import type { ConsoleModel, ConsolePayloads } from "./status-console-model.js";
 
@@ -62,7 +63,7 @@ export function buildChains(extras: ConsoleExtrasPayload | null | undefined, iss
 export function strandedIssues(issues: BoardStatusIssue[], chains: ConsoleChain[], workerTicketNumbers: Set<number>): number[] {
   const inChain = new Set(chains.map((c) => c.ref));
   return issues
-    .filter((i) => i.issueNumber != null && (i.statusName === "In Progress" || i.statusName === "In Review"))
+    .filter((i) => i.issueNumber != null && isInFlightStatusName(i.statusName))
     .filter((i) => i.session?.status !== "running" && !i.remoteUnlanded && !i.attention && i.mergeState?.bucket !== "pending_merge")
     .filter((i) => !workerTicketNumbers.has(i.issueNumber!) && !inChain.has(`#${i.issueNumber}`))
     .map((i) => i.issueNumber!);

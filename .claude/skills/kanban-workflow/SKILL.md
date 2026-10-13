@@ -1,14 +1,16 @@
 ---
 name: kanban-workflow
-description: Complete guide for using the agentic-kanban board via MCP tools or CLI. Covers status workflow, issue management, workspaces, review, and common patterns.
+description: Guide for using the agentic-kanban MCP tools to reflect implementation progress on the board. Use when starting work on an issue, moving through implementation steps, reviewing completed work, or closing out a task.
+argument-hint: [issue-id or issue-number]
 ---
 
-Keep the kanban board in sync with your work. You have two ways to interact with the board:
+# Kanban Workflow — Reflecting Implementation Steps on the Board
 
-1. **MCP tools** (preferred when available) — prefix `mcp__agentic-kanban__`
-2. **CLI** (fallback, or when no MCP server is running) — `npx agentic-kanban <command>`
+Use the **agentic-kanban MCP** tools (prefix `mcp__agentic-kanban__`) to keep the board in sync with your actual work.
 
-Use whichever is available. The workflow rules and status names are the same either way.
+## Tool selection
+
+Builder sessions should use the harness-native file inspection tools where available: Claude `Read` for file contents and `Grep` for content search; Codex `rg`/shell inspection is acceptable when those tools are not available. Avoid fragile PowerShell text pipelines for review/search work (`git show HEAD:file | Select-String` fails with German-locale quoting errors); prefer searching a real file path with the harness-native search tool.
 
 ## Session constraints
 
@@ -17,178 +19,94 @@ Builder sessions are headless - there is no human at the terminal.
 For task tracking, use `TaskCreate` / `TaskUpdate` instead of plan mode.
 For clarification needs, make a reasonable assumption, document it in the commit message, and proceed.
 
-## Status Names (exact strings)
-Todo → In Progress → In Review → AI Reviewed → Done / Cancelled
-
-## Priority Values
-"low" | "medium" | "high" | "critical"
-
----
-
-## MCP Tools (when available)
+## Available MCP Tools
 
 | Tool | Purpose |
 |------|---------|
-| `get_context` | Active project, issue counts, running workspaces |
-| `get_board_status` | Full dashboard: issues, workspace state, diff stats, session stats |
-| `list_issues` | List issues (filter by status, priority, tag). Descriptions omitted — use `get_issue` for one issue's full text |
-| `get_issue` | Full issue details including workspaces and dependencies |
-| `create_issue` / `update_issue` / `delete_issue` | Issue CRUD |
-| `move_issue` | Move issue to a different status |
-| `list_workspaces` / `start_workspace` / `stop_workspace` | Workspace management |
-| `get_workspace_diff` | View git diff for a workspace |
-| `merge_workspace` / `close_workspace` | Finalize work |
+| `get_context` | Active project, issue counts by status, active workspaces |
+| `get_board_status` | Full dashboard: issues with workspace state, diff/session stats, last output |
+| `list_issues` / `get_issue` | List (filter by status/priority/tag) / full detail (workspaces + dependencies) |
+| `create_issue` / `update_issue` / `delete_issue` / `move_issue` | Create / change status·title·desc·priority / delete / move (shorthand) |
+| `list_workspaces` / `start_workspace` / `stop_workspace` | List (filter by issue) / create worktree workspace / stop a session |
+| `merge_workspace` / `get_workspace_diff` | Merge branch + close / get git diff |
 | `list_tags` / `create_tag` | Tag management |
-| `list_sessions` / `read_terminal` / `get_session_stats` | Session monitoring |
-| `get_diff_comments` / `create_diff_comment` | Code review |
-| `add_dependency` / `remove_dependency` | Issue dependency management |
+| `list_sessions` / `read_terminal` / `get_session_stats` | Session list / last N terminal lines / token·cost·duration |
 
----
+## Workflow
 
-## CLI Commands (when no MCP server)
+### 1. Orient
+`get_context` (active project, open issues, running workspaces) → `list_issues` (filter `statusName="Todo"`) → `get_issue(issueId)` (title, description, status).
 
-Replace `npx agentic-kanban` with `agentic-kanban` if installed globally.
-
-### Board overview
+### 2. Start work — move first, code second
 ```
-npx agentic-kanban status                        # active issues
-npx agentic-kanban status --all                  # include completed
-npx agentic-kanban status --watch                # auto-refresh
+update_issue(issueId, statusName="In Progress")
 ```
+**Hard rule:** never start coding without moving the issue first — it gives the user live board feedback.
 
-### Issues
+### 3. Break down (optional)
+Large issue → `create_issue(title="Step 1: …", priority="medium")` per step; move each to In Progress on start, Done on finish.
+
+### 4. Log progress in the description
+The description is the **only shared state** between you and the user — log blockers, decisions, scope changes:
 ```
-npx agentic-kanban issue create "Title"                        # create (Todo by default)
-npx agentic-kanban issue create "Title" -d "desc" -p high      # with details
-npx agentic-kanban issue list                                   # all issues
-npx agentic-kanban issue list -s Todo                           # filter by status
-npx agentic-kanban issue list -p critical                       # filter by priority
-npx agentic-kanban issue get <number>                           # full details
-npx agentic-kanban issue move <number> "In Progress"            # move by issue number
-npx agentic-kanban issue status <number>                        # workspace + last agent message
-npx agentic-kanban issue summary <number>                       # session summary
+update_issue(issueId, description="## Progress\n- Schema migrated\n- API route WIP\n- UI pending")
 ```
 
-### Workspaces
-```
-npx agentic-kanban workspace create <issue-id>                  # create git worktree
-npx agentic-kanban workspace create <issue-id> --base develop    # from specific branch
-npx agentic-kanban workspace list                                # all workspaces
-npx agentic-kanban workspace resume <issue-number>               # relaunch agent
-npx agentic-kanban workspace review <workspace-id>               # trigger AI review
-```
+**Direct workspaces (`isDirect: true`)** work straight on the default branch (no feature branch to merge). You must still move the issue status when done, and the system does NOT auto-review them — run a self-review subagent before committing (Step 6).
 
-### Dependencies
-```
-npx agentic-kanban issue dependency list <issue-id>
-npx agentic-kanban issue dependency add <issue-id> <target-id> -t depends_on
-# Types: depends_on, blocked_by, related_to, duplicates, parent_of, child_of, coupled_with
-```
+### 5. Test and commit (mandatory before finishing)
+1. **Run tests.** For refactors, run only tests for changed files. vitest v4 moved `--related` to a subcommand — the flag no longer works:
+   ```bash
+   cd packages/server && node node_modules/vitest/vitest.mjs related src/services/foo.service.ts
+   # or derive from git:
+   cd packages/server && node node_modules/vitest/vitest.mjs related $(git diff --name-only HEAD | grep "^packages/server" | sed 's|packages/server/||')
+   pnpm test:mine   # fast iteration, safe subset, no known-flaky
+   ```
+   If `pnpm test:mine` fails with "could not find vitest", check whether `node_modules` is a junction: `(Get-Item node_modules).LinkType`. If it returns `Junction` → do NOT install (deps are shared). If it returns nothing or `Directory` → the worktree predates symlinks; run `pnpm install` once to create local deps.
+   Full suite (`pnpm --filter agentic-kanban test`) only for cross-cutting changes or a final pre-commit check.
+2. Stage and commit all changed files with a message summarizing what + why; reference the issue if appropriate.
 
-### Project management
-```
-npx agentic-kanban register <path>                               # register a git repo
-npx agentic-kanban register .                                    # register cwd
-npx agentic-kanban list                                          # show registered projects
-npx agentic-kanban unregister <name-or-id>                       # remove project
-```
+**Commit the moment the core is green** — the instant `tsc -b --noEmit` passes for the packages you touched AND directly-related tests pass, commit. Continue polish/extra tests in follow-up commits. Don't batch a multi-step diff into one end-of-task commit — an interruption (crash, hot-reload, timeout) loses all of it. Never leave the worktree with uncommitted changes.
 
----
+### 6. Review (every workspace, no exceptions)
 
-## Step-by-Step Workflow
+**Branched workspaces — automatic.** After your session exits, the system launches a review subagent (purple **AI Reviewing** badge) and handles the full review→fix→merge cycle. Do nothing — just commit, run tests, exit normally. **Do NOT call any REST endpoint to trigger it** — there is no `/propose-transition` or `/review-trigger`; the transition fires on session exit.
 
-### 1. Orient yourself
-```
-# MCP:  get_context → list_issues → get_issue(issueId)
-# CLI:  npx agentic-kanban status
-```
+> Visual verification: if the project has `visual_verification_mode = "after_merge"`, you need NOT verify the UI before stopping — the server tags `needs-visual-verification` at merge time on client file changes. If `"before_merge"` (default), the stop hook blocks you until you run `/playwright-cli` and confirm the UI renders.
 
-### 2. Start work — move to In Progress immediately
-```
-# MCP:  update_issue(issueId, statusName="In Progress")
-# CLI:  npx agentic-kanban issue move <N> "In Progress"
-```
-Never start coding without moving the issue first.
+**Direct workspaces — you must trigger it** before marking Done:
+1. `update_issue(issueId, statusName="In Review")`.
+2. Spawn a review subagent (Codex `spawn_agent` / Claude `Agent` tool). Pass the diff context (changed files, commit message, issue description). Respect review settings: `thorough_review` unset/`false` → `code-review` skill (correctness, security, logic); `true` → `code-review-thorough` (broader, includes style/naming/edge cases). The subagent reads the full `git diff HEAD~1` and assesses every changed file.
+3. CRITICAL/MAJOR found → fix, commit, re-review. Only MINOR / none → close.
+4. `update_issue(issueId, statusName="Done")`.
 
-### 3. Update description with progress notes
-Use the description field as a shared progress log — update with blockers, decisions, scope changes.
-```
-# MCP:  update_issue(issueId, description="## Progress\n- Done: X\n- Pending: Y")
-# CLI:  (use MCP or REST API for description updates)
-```
+**Review checklist (what the subagent checks):** correctness/logic bugs; security (injection, XSS); missing error handling; dead code / debug output; broken patterns or regressions; that the commit addresses ALL the ticket's checklist items, not just some.
 
-### 3b. Direct workspaces (isDirect: true)
-No separate branch — changes go directly to the default branch. You must still move issue status. The system does NOT auto-review direct workspaces — run a self-review subagent before marking Done.
+**Complete the full ticket:** if the description lists steps, do ALL of them before review — don't ask permission to skip listed steps. A genuinely-blocked step → note it in the description; never commit partial work and mark Done.
 
-### 4. Run tests and commit your changes
-Mandatory before finishing. While iterating, prefer a fast/filtered command so you don't chase false failures: use the project's flaky-skipping script if it has one (check CLAUDE.md / README / package.json), else run only tests covering your changed files:
-```
-<test command> --related <changed-files>                       # targeted (preferred for refactoring)
-<test command> --related $(git diff --name-only HEAD)          # or derive from git
-```
-Run the full suite once before marking work ready (or when cross-cutting changes may affect unrelated tests), then stage and commit all changed files with a descriptive message.
+### 7. Close
+`update_issue(issueId, statusName="Done")` — only after work is actually complete (tests pass, committed, review passed). Never mark Done with work in progress.
 
-**Commit at the green checkpoint:** the instant `tsc -b --noEmit` passes for the packages you touched AND the directly-related tests pass, **commit immediately**; continue polish/extra tests in follow-up commits. Don't batch a multi-step diff into one end-of-task commit — an interruption (crash, hot-reload, timeout) loses all of it. Meaningful work normally shows two or more commits, not one.
+### 8. Cancel if abandoned
+`update_issue(issueId, statusName="Cancelled")` for superseded/irrelevant issues; add a note in the description explaining why. Cancelled is not failure — use it freely when scope changes.
 
-### 5. Review
-**Branched workspaces:** system auto-launches review after your session exits.
-**Direct workspaces:** you must spawn a review subagent yourself before marking Done.
-```
-# Move to In Review first
-# MCP:  update_issue(issueId, statusName="In Review")
-# CLI:  npx agentic-kanban issue move <N> "In Review"
-```
+## Reference
 
-### 6. Close the issue
-**Branched workspaces:** Done is set automatically by `merge_workspace` — do NOT call `update_issue(statusName="Done")` manually. Doing so before merging strands the branch and causes silent merge loss.
-**Direct workspaces only** (isDirect: true — no separate branch):
-```
-# MCP:  update_issue(issueId, statusName="Done")
-# CLI:  npx agentic-kanban issue move <N> "Done"
-```
-Only after: code committed, tests pass, review passed.
+**Status names** (exact strings for `statusName`): `"Todo"` · `"In Progress"` · `"In Review"` (impl complete, awaiting review) · `"AI Reviewed"` (passed auto-review, ready to merge) · `"Done"` · `"Cancelled"`.
 
-### 7. Cancel if abandoned
-```
-# MCP:  update_issue(issueId, statusName="Cancelled")
-# CLI:  npx agentic-kanban issue move <N> "Cancelled"
-```
+**Priority** (for `priority`): `"low"` | `"medium"` | `"high"` | `"critical"`.
 
----
+## "Review #N" / "Merge #N"
 
-## Common Patterns
+When the user says "review #N", "review #N and merge", or "merge #N", this is **board issue #N, never a GitHub PR** (this project uses manual merge, no PRs). Workflow:
+1. Find the issue by `issueNumber` (`get_board_status` / `list_issues`).
+2. Find its workspace (board data, or `list_workspaces` with the issue ID).
+3. `get_workspace_diff(workspaceId)` → review all changes for correctness, security, broken patterns, missing cleanup.
+4. **Fine** → merge (`POST /api/workspaces/:id/merge` or `merge_workspace`) → `update_issue(issueId, statusName="Done")`.
+5. **Not fine** → report issues to the user, leave the issue in its current status.
 
-### "I'm starting work right now"
-Move to In Progress before any file edits.
+## Rules of thumb
 
-### "I'm blocked — flagging for the user"
-Set priority to high and describe the blocker in the issue description.
-
-### "Check what I've changed so far"
-```
-# MCP:  list_workspaces → get_workspace_diff
-# CLI:  npx agentic-kanban issue status <N>
-```
-
-### "Review #N and merge"
-`#N` always means a kanban board issue, never a GitHub PR.
-```
-# MCP:  get_board_status → get_workspace_diff → merge_workspace
-# CLI:  npx agentic-kanban issue status <N> → (use REST API for merge)
-```
-**Note:** `merge_workspace` merges the branch AND auto-transitions the issue to Done.
-Do NOT call `update_issue(statusName="Done")` separately — it is redundant and will be blocked if the workspace is still open.
-
----
-
-## Rules of Thumb
-
-1. **Move first, code second** — update to In Progress before any file edits.
-2. **Every commit gets reviewed** — no workspace skips review.
-3. **Board reflects reality** — move statuses in real-time, don't batch.
-4. **Complete the full ticket** — if the ticket lists steps, do all of them.
-5. **Commit before review** — never trigger review with uncommitted changes.
-6. **Commit at the green checkpoint** (see Step 4) — never batch a multi-step diff into one end-of-task commit; an interruption loses all of it.
-7. **Description is a shared log** — write progress notes so the user can follow along.
-8. **Done means done** — code committed, tests green, review passed, no loose ends.
-9. **Cancelled is not failure** — use it freely when scope changes.
+- **Board reflects reality** — In Progress before edits; In Review while review runs; Done only after review passes. Never skip In Review for direct workspaces.
+- **One status transition per logical checkpoint** — don't batch-move issues after the fact.
+- **Done means done** — committed, tests green, review passed, no loose ends or open questions.
