@@ -52,6 +52,64 @@ import { FLEET_MCP_TOKEN_ENV_VAR } from "@agentic-kanban/shared/lib/worker-proto
 import { createAgentTreeTracker } from "./agent-process-tree.js";
 import { applyHarnessToSpec, type WorkerHarness } from "./worker-harness.js";
 
+interface DrainState {
+  inFlightPushes: Map<string, Promise<void>>;
+  inFlightPending: Map<string, PendingResult>;
+  abandonedPushes: Set<string>;
+  undelivered: ReturnType<typeof createUndeliveredStore>;
+}
+
+/** Wait for in-flight result pushes (#754); whatever is still pending is persisted, never dropped (#1461). */
+export async function drainInFlightPushes(
+{ inFlightPushes, inFlightPending, abandonedPushes, undelivered }: DrainState,
+timeoutMs: number,
+progressEveryMs: number,
+): Promise<{ completed: number; abandoned: number; abandonedSessions: { sessionId: string; branch: string }[] }> {
+  // #750: stop waiting out retry backoffs. The attempt in flight still finishes, and a
+  // result that ends up unpushed is retained (with its checkout) rather than deleted.
+  undelivered.suspendRetries();
+  const started = inFlightPushes.size;
+  if (started === 0) return { completed: 0, abandoned: 0, abandonedSessions: [] };
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), timeoutMs);
+    if (timer.unref) timer.unref();
+  });
+  // #1461: progress while waiting, so a stuck drain is visible rather than silent.
+  const progress = setInterval(() => {
+    workerLog(
+      `[worker] draining: waiting for ${inFlightPushes.size} result push(es): ` +
+        `${[...inFlightPushes.keys()].join(", ")}`,
+    );
+  }, progressEveryMs);
+  if (progress.unref) progress.unref();
+  // Re-read the map each round: an agent killed by stopAll() reaches its exit handler
+  // (and therefore starts its push) only after this function is already waiting.
+  while (inFlightPushes.size > 0) {
+    const outcome = await Promise.race([Promise.allSettled([...inFlightPushes.values()]), deadline]);
+    if (outcome === "timeout") break;
+  }
+  clearInterval(progress);
+  if (timer) clearTimeout(timer);
+  // #1461: a push still in flight is NOT dropped. Its record goes to the durable
+  // undelivered-results store and its checkout is kept, so the next start delivers it.
+  const abandonedSessions: { sessionId: string; branch: string }[] = [];
+  for (const [sessionId, pending] of [...inFlightPending]) {
+    abandonedPushes.add(sessionId);
+    try {
+      undelivered.retain(sessionId, pending, {
+        ok: false,
+        attempts: 0,
+        lastError: "worker shut down while the result push was still in flight",
+      });
+    } catch (err) {
+      workerLog(`[worker] could not persist the in-flight result: sessionId=${sessionId}: ${errorMessage(err)}`);
+    }
+    abandonedSessions.push({ sessionId, branch: pending.repo.branch });
+  }
+  return { completed: started - abandonedSessions.length, abandoned: abandonedSessions.length, abandonedSessions };
+}
+
 export type SendToBoard = (message: WorkerToBoardMessage) => void;
 
 /** #1379: the alias/home seams `applyProfileToSpec` resolves against. */
@@ -711,54 +769,8 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
    * A push that starts AFTER the deadline (an agent killed at the very end of the window)
    * is not waited for — bounding the wait is the point, and the ceiling is the operator's.
    */
-  async function drainPushes(
-    timeoutMs: number,
-    progressEveryMs = 5000,
-  ): Promise<{ completed: number; abandoned: number; abandonedSessions: { sessionId: string; branch: string }[] }> {
-    // #750: stop waiting out retry backoffs. The attempt in flight still finishes, and a
-    // result that ends up unpushed is retained (with its checkout) rather than deleted.
-    undelivered.suspendRetries();
-    const started = inFlightPushes.size;
-    if (started === 0) return { completed: 0, abandoned: 0, abandonedSessions: [] };
-    let timer: NodeJS.Timeout | undefined;
-    const deadline = new Promise<"timeout">((resolve) => {
-      timer = setTimeout(() => resolve("timeout"), timeoutMs);
-      if (timer.unref) timer.unref();
-    });
-    // #1461: progress while waiting, so a stuck drain is visible rather than silent.
-    const progress = setInterval(() => {
-      workerLog(
-        `[worker] draining: waiting for ${inFlightPushes.size} result push(es): ` +
-          `${[...inFlightPushes.keys()].join(", ")}`,
-      );
-    }, progressEveryMs);
-    if (progress.unref) progress.unref();
-    // Re-read the map each round: an agent killed by stopAll() reaches its exit handler
-    // (and therefore starts its push) only after this function is already waiting.
-    while (inFlightPushes.size > 0) {
-      const outcome = await Promise.race([Promise.allSettled([...inFlightPushes.values()]), deadline]);
-      if (outcome === "timeout") break;
-    }
-    clearInterval(progress);
-    if (timer) clearTimeout(timer);
-    // #1461: a push still in flight is NOT dropped. Its record goes to the durable
-    // undelivered-results store and its checkout is kept, so the next start delivers it.
-    const abandonedSessions: { sessionId: string; branch: string }[] = [];
-    for (const [sessionId, pending] of [...inFlightPending]) {
-      abandonedPushes.add(sessionId);
-      try {
-        undelivered.retain(sessionId, pending, {
-          ok: false,
-          attempts: 0,
-          lastError: "worker shut down while the result push was still in flight",
-        });
-      } catch (err) {
-        workerLog(`[worker] could not persist the in-flight result: sessionId=${sessionId}: ${errorMessage(err)}`);
-      }
-      abandonedSessions.push({ sessionId, branch: pending.repo.branch });
-    }
-    return { completed: started - abandonedSessions.length, abandoned: abandonedSessions.length, abandonedSessions };
-  }
+  const drainPushes = (timeoutMs: number, progressEveryMs = 5000) =>
+    drainInFlightPushes({ inFlightPushes, inFlightPending, abandonedPushes, undelivered }, timeoutMs, progressEveryMs);
 
   /** How many result pushes are in flight right now. For tests and diagnostics. */
   function pendingPushCount(): number {
