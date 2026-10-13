@@ -171,6 +171,7 @@ export interface WorkerDaemonOptions {
   log?: (line: string) => void;
   /** How long `stop()` waits for in-flight result pushes (#754). */
   drainTimeoutMs?: number;
+  lifecycle?: (ctx: import("./worker-lifecycle.js").LifecycleCtx) => import("./worker-lifecycle.js").LifecycleHandlers; // #1443: status details + stop/restart for the control endpoint
   /**
    * Called once when this daemon can never work against this board again â€” a 401 with no
    * pairing token to recover with, or a protocol the board refuses (#754). The daemon has
@@ -671,12 +672,11 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         boardUrl,
         workerVersion,
         log,
-        handlers: { updateNow: () => selfUpdate.updateNow(), status: () => selfUpdate.controlStatus() },
+        handlers: { updateNow: () => selfUpdate.updateNow(), status: () => selfUpdate.controlStatus(), ...opts.lifecycle?.({ stateFile, workRoot, boardUrl, draining: () => draining, sessionsLeft: () => runner.runningSessionIds().length, effective: () => settings.effectiveOptions(opts), pinned: () => settings.report().pinned, desired: () => settings.desired() }) }, // #1443
       })
     : null;
 
-  let resolveConnected!: () => void;
-  const connected = new Promise<void>((resolve) => { resolveConnected = resolve; });
+  let resolveConnected!: () => void; const connected = new Promise<void>((resolve) => { resolveConnected = resolve; });
 
   function connect(): void {
     if (stopped) return;
