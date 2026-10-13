@@ -5515,3 +5515,66 @@ anyway.
 **No new guard test.** A tree-scanning line-based guard would have to register in
 `line-based-guard-ratchet.test.ts`, which #794 just shrank 15 → 8 and which was outside
 this ticket's file scope. The `.codemetricsrc` comment carries the rationale instead.
+
+## 2026-10-13 — #1431 one-shot agent calls placed on workers
+
+- `invokeClaudePrompt` takes `projectId` (+ `repo` for a prompt that needs files) and routes through
+  `resolveWorkerPlacement({ oneShot: true })` -> `claude-oneshot-worker.service.ts` -> a sessionless
+  `oneshot` / `oneshot_result` frame pair (`shared/lib/worker-oneshot.ts`, worker side
+  `worker/worker-oneshot.ts`). No eligible worker, a worker that never acks, or a launch failure
+  there = host, unless `worker_dispatch_strict` (then NO_AVAILABLE_WORKER). board.log names the
+  worker: `[oneshot] ran on fleet worker <id>`.
+- Wired: enhance, dependencies, touched files, decompose, contract, preflight, group scan, codemod,
+  project setup, stack-profile enrichment, voice capture, train review (read-only checkout), train
+  fix agent (editing checkout; the worker pushes its commit, the board fast-forwards the gate tree).
+  Not wired: `agent-skill` enhance (no project in scope).
+- Open: the fix agent's RE-GATE still runs on the host until #1428 places gates. A read-only repo
+  job still pays the worker's setup/fallback install on checkout. Verified by unit tests only; no
+  live fleet run from this worktree.
+
+## 2026-10-12 — backlog drive on the two workers; D: hangs traced to WSL disks on the Dev Drive
+
+**Goal (Peter):** get the backlog done using desktop-stable and wsl-stable only (builders and
+reviewers run on workers, `worker_dispatch_strict` on; gates still run on the laptop).
+
+- **Stable:** `stable-20261012-3` = master 2dcf8de74, promoted ~16:50Z (fresh full sweep green,
+  smoke passed). desktop-stable re-pinned to it by the desktop agent (build tarball via
+  `update-check --apply`); wsl-stable auto-updated. Rollback target `stable-20261012-2`.
+- **Backlog empty (checked: `/api/issues` open = none, 21:4xZ).** Merged today: #1378 #1380-#1385
+  #1391 #1392 #1395 #1400 #1403-#1427, plus #1337 and #1371. Merged after stable-20261012-3 and
+  NOT yet promoted (master e4e1c5e22): #1424 watch fixes, #1425 one session per workspace, #1426
+  auth-expired worker not placed, #1337 multi-address bind + worker --board failover, #1427 worker
+  rebases only onto the board-sent base, #1371 toolchain install via mise behind
+  --toolchain-install=never|ask|auto. A promote of rc/20261012-4 was reaped for low memory before
+  tagging; the board stayed on -3.
+- **Decisions (Peter, 2026-10-12):** #1337 option B (LAN + tailnet failover; LAN bind only when an
+  operator lists the address, plaintext, needs a subnet-scoped Private-profile firewall rule; the
+  live fleet is still tailnet-only). #1371 stage 2 built (default policy `never`).
+- **Worker traps seen tonight:** WSL login expired again (copy `.credentials.json` unread, then
+  `MSYS_NO_PATHCONV=1 wsl.exe ... chown/chmod`); creating a workspace auto-launches, so a manual
+  /launch made a second builder (#1425 fixes); a reviewer rebased onto a rewritten local master and
+  pushed duplicated history (#1427 fixes; the incoming ref was deleted by hand).
+- **D: hung three times** (writes+fsync never return, processes unkillable, only a reboot clears
+  it; System log `vhdmp` 129 resets). D: is a Dev Drive VHDX (`C:\DevDrive\dev.vhdx`); the WSL
+  worker distros lived in `D:\wsl-images` = a VHDX inside the VHDX, and every hang came while a WSL
+  worker was busy. **Moved `akw-r6` to `C:\wsl-images\akw-r6`** (`wsl --manage --move` copied the
+  file, then failed E_ACCESSDENIED on the registry; fixed `BasePath` in HKCU Lxss by hand). Since
+  then: no hang through hours of gates and builds. Keep worker distros OFF D:. IT addendum (exclude
+  the VHDX from MDE) in `Documents\performance\2026-10-11-kernel-pool-leak-for-IT.md`.
+- **Recovery recipes used today:** a result in `refs/kanban/incoming/<branch>` that never reached
+  the workspace branch (#1414) -> `ALLOW_CROSS_WORKTREE_WRITE=1 git -C <wt> reset --hard <incoming>`
+  (clean worktree only), then POST review. A result the board refuses (401 after it ended the
+  session) -> git bundle from the worker over ACP. A commit holding a path with `C:` (#1419) ->
+  rebuild the tree in a temp index (`core.protectNTFS=false`, `update-index --force-remove --stdin`)
+  and `commit-tree`. WSL login expired -> copy the main `.credentials.json` again (not read) into
+  `~/.claude` and the harness dir. Corrupt worker clone -> move `state-work/repos/<project>` aside.
+- **Filed today:** #1411 (strict dispatch drops reviews/send-backs/auto-starts when slots are
+  full), #1412-#1420. #1420 (worker misses pongs after a push -> session finalized exit 1) and
+  #1414 (late results never reach the branch) cost the most operator time.
+- **Laptop limits:** gates run three at a time at ~3 GB each; implement-exit checks took up to
+  ~30 min queued; Claude Code reaped background shells at < 2 GB free (the driver script survived,
+  only its wrapper died). The scratchpad driver (`drive3.sh`) launches only at >= 4 GB free.
+
+**Next:** promote master (`pnpm promote --dry-run`, then `pnpm promote`, with >= 4 GB free), re-pin
+desktop-stable over ACP, restart the watch pane; then decide whether to list the LAN address for
+the fleet (#1337) and set a worker's --toolchain-install policy (#1371).
