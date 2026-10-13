@@ -162,10 +162,10 @@ interface TickOutcome {
  */
 async function excludeBackedOffCandidates(
   database: Database,
-  candidates: { workspaceId: string; projectId: string; workingDir: string | null }[],
+  candidates: { workspaceId: string; projectId: string; workingDir: string | null; offDefaultBase?: boolean }[],
   lastLogged: Map<string, string>,
-): Promise<{ workspaceId: string; projectId: string }[]> {
-  const kept: { workspaceId: string; projectId: string }[] = [];
+): Promise<{ workspaceId: string; projectId: string; offDefaultBase?: boolean }[]> {
+  const kept: { workspaceId: string; projectId: string; offDefaultBase?: boolean }[] = [];
   for (const candidate of candidates) {
     const decision: MergeBackoffSkipDecision = await shouldSkipMergeForBackoff(
       { wsId: candidate.workspaceId, projectId: candidate.projectId, workingDir: candidate.workingDir },
@@ -175,7 +175,7 @@ async function excludeBackedOffCandidates(
       if (lastLogged.delete(candidate.workspaceId) && decision.reason) {
         console.log(`[auto-merge] workspace ${candidate.workspaceId} is back in the merge queue: ${decision.reason}`);
       }
-      kept.push({ workspaceId: candidate.workspaceId, projectId: candidate.projectId });
+      kept.push({ workspaceId: candidate.workspaceId, projectId: candidate.projectId, offDefaultBase: candidate.offDefaultBase });
       continue;
     }
     const reason = decision.reason ?? "merge backoff active";
@@ -347,7 +347,7 @@ export function createAutoMergeOrchestrator(deps: {
   }
 
   /** `{workspaceId, projectId}` for every ready workspace — the batching window partitions by projectId. */
-  async function findCompletedWorkspaceRows(): Promise<{ workspaceId: string; projectId: string }[]> {
+  async function findCompletedWorkspaceRows(): Promise<{ workspaceId: string; projectId: string; offDefaultBase?: boolean }[]> {
     const prefRows = await getAllPreferencesCached(database);
     const prefMap = toPrefMap(prefRows);
     const autoMergeInReview = getBool(prefMap, "auto_merge_in_review");
@@ -399,6 +399,8 @@ export function createAutoMergeOrchestrator(deps: {
         parentWorkspaceId: workspaces.parentWorkspaceId,
         forkStatus: workspaces.forkStatus,
         workingDir: workspaces.workingDir,
+        baseBranch: workspaces.baseBranch,
+        defaultBranch: projects.defaultBranch,
       })
       .from(workspaces)
       .innerJoin(issues, eq(workspaces.issueId, issues.id))
@@ -448,7 +450,14 @@ export function createAutoMergeOrchestrator(deps: {
       // NOT for a gated project, where readyForMerge means "the verify/smoke gate passed". Gated
       // un-ready In-Review work waits for its review's gate instead of being merged unverified (#821).
       .filter((row) => row.readyForMerge || row.issueStatusName === "AI Reviewed" || (autoMergeInReview && !gatedProjectIds.has(row.projectId)))
-      .map((row) => ({ workspaceId: row.workspaceId, projectId: row.projectId, workingDir: row.workingDir }));
+      .map((row) => ({
+        workspaceId: row.workspaceId,
+        projectId: row.projectId,
+        workingDir: row.workingDir,
+        // #1435: a workspace targeting a branch other than the project default (a heal onto an rc)
+        // is not touched by the DEFAULT branch's red base, so the red-base veto must not hold it.
+        offDefaultBase: !!row.baseBranch && !!row.defaultBranch && row.baseBranch !== row.defaultBranch,
+      }));
     // #1230 — the merge backoff (#417/#1219) is consulted HERE, before the train window ever
     // sees the candidate: a `verify_failed` skip used to be re-gated on every 30 s tick.
     return excludeBackedOffCandidates(database, candidates, backoffLogState);
@@ -524,7 +533,7 @@ export function createAutoMergeOrchestrator(deps: {
    * projects and therefore repos — `runOnce` partitions them by (repoPath, baseBranch) before
    * the queue asks `trainEligible` (#1180).
    */
-  async function applyTrainWindow(rows: { workspaceId: string; projectId: string }[], now: string): Promise<string[]> {
+  async function applyTrainWindow(rows: { workspaceId: string; projectId: string; offDefaultBase?: boolean }[], now: string): Promise<string[]> {
     const prefRows = await getAllPreferencesCached(database);
     const prefMap = toPrefMap(prefRows);
     const nowMs = new Date(now).getTime();
@@ -538,6 +547,7 @@ export function createAutoMergeOrchestrator(deps: {
       state.trainWindows.set(projectId, persisted);
     }
 
+    const offDefaultIds = new Set(rows.filter((row) => row.offDefaultBase).map((row) => row.workspaceId));
     const byProject = new Map<string, string[]>();
     for (const row of rows) {
       const list = byProject.get(row.projectId) ?? [];
@@ -636,6 +646,18 @@ export function createAutoMergeOrchestrator(deps: {
       if (baseRed !== null && baseRedLogState.get(projectId) !== baseRedKey) {
         baseRedLogState.set(projectId, baseRedKey!);
         console.log(`[auto-merge] train window held: base_red for project ${projectId} — base is red at ${baseRed.healthSha.slice(0, 8)}, holding ${ids.length} workspace(s) rather than bisecting the base's own failures onto them${baseRed.message ? `: ${baseRed.message.slice(0, 200)}` : ""}`);
+      }
+      if (!hold.release && hold.reason === "base_red") {
+        // #1435: the veto reads the default branch's health; off-default-base members bypass it.
+        const bypass = ids.filter((id) => offDefaultIds.has(id));
+        if (bypass.length > 0) {
+          console.log(`[auto-merge] base_red hold bypassed for ${bypass.length} workspace(s) targeting a non-default base in project ${projectId}`);
+          released.push(...bypass);
+          const rest = ids.filter((id) => !offDefaultIds.has(id));
+          if (rest.length === 0) await dropWindow(projectId, existing);
+          else await persistWindow(projectId, existing, { pendingIds: rest, firstSeenAt, lastVerdict: hold, lastEvaluatedAt: now, ...carry });
+          continue;
+        }
       }
       if (hold.release) {
         console.log(`[auto-merge] train window closed for project ${projectId} (${hold.reason}, size ${config.maxSize}/wait ${config.maxWaitMs}ms): releasing ${ids.length} workspace(s)${config.batchingFromPosture ? formatPostureNote(config.posture) : ""}`);
