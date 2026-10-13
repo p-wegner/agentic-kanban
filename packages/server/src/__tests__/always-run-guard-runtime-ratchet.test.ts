@@ -292,8 +292,14 @@ import {
  * three files it exercises, so an ordinary diff elsewhere does not pay it; this unconditional
  * total is what the repo commits to for a diff that touches one of those three. Should shrink to
  * its real cost (well under the 3,000 ms assumption) at the next `durations.json` capture.
+ *
+ * -- Fifteenth movement, DOWN (2026-10-14, #1466) — 568,000 -> 489,689 ----------------------
+ *
+ * The 31 guards that were counted at the assumed 3,000 ms (flush 2026-10-13-1 added them without a
+ * `durations.json` capture) were measured and recorded; their real cost is a fraction of the
+ * assumption. No cap was raised: the baseline is lowered to the measured floor.
  */
-const BASELINE_TOTAL_MS = 568_000;
+const BASELINE_TOTAL_MS = 489_689;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative

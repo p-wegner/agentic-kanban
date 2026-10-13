@@ -396,7 +396,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // async check plus its comment line landing inside the existing `if` body.
   "services/issue.service.ts::createIssueService": 629,
   // 618 -> 620 (#968), disclosed in the sixth movement above.
-  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 623,
+  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 604,
   "services/workflow-fork.service.ts::createWorkflowForkService": 581,
   // 573 -> 577 (#1047), disclosed in the tenth movement above. 577 -> 578 (#1164), disclosed
   // in the fourteenth movement above. 578 -> 616 (#1206, rebase): a new `workspace reopen
@@ -475,7 +475,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 349 -> 351 (#841): POSIX-only `detached: true` for a shell launch, closing the #836 gap.
   // 351 -> 358 (#1027), disclosed in the ninth movement above.
   // 358 -> 370 (#1328), disclosed in the seventeenth movement above.
-  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 390,
+  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 387,
 };
 
 /**

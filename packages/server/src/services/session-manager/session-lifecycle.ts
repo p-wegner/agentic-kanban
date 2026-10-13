@@ -39,7 +39,8 @@ import {
   staleResumeRecoveryCount,
 } from "./stale-resume-policy.js";
 import { buildIndeterminateExitStats } from "./session-exit-stats.js";
-import { CODEX_SPARK_MODEL, CODEX_SAFE_DEFAULT_MODEL, isBuilderSession, buildStaleResumeHandoffPrompt, instructionFingerprint, mergeExistingSessionStats, lifecycleProviderName, resolveProviderRotation, withBuilderTestWorkerCap, withBuilderTestImpactBudget } from "./session-launch-helpers.js";
+import { guardCodexModel } from "./codex-model-guard.js";
+import { isBuilderSession, buildStaleResumeHandoffPrompt, instructionFingerprint, mergeExistingSessionStats, lifecycleProviderName, resolveProviderRotation, withBuilderTestWorkerCap, withBuilderTestImpactBudget } from "./session-launch-helpers.js";
 import { finalizePlanModeExit } from "./plan-mode-exit.js";
 import { finalizeUsageLimitRoute, finalizeLaunchFailureRoute, finalizeCompletedRoute, type ExitFinalizeContext } from "./exit-finalize.js";
 import { createRemoteTurnRecovery } from "./remote-turn-recovery.js";
@@ -148,27 +149,7 @@ export function createSessionLifecycle(
       : undefined;
     const resolvedModel = model ?? workspaceModelSafe ?? undefined;
     const builderSession = isBuilderSession(triggerType, planMode);
-    let effectiveModel = resolvedModel;
-    if (providerName === "codex") {
-      if ((effectiveModel ?? "").trim() === CODEX_SPARK_MODEL) {
-        const message =
-          `Refusing to launch Codex builder session with hostile model ${CODEX_SPARK_MODEL}; ` +
-          `choose a safe Codex model such as ${CODEX_SAFE_DEFAULT_MODEL}.`;
-        if (builderSession) {
-          throw new WorkspaceError(message, "CONFLICT", {
-            code: "UNSAFE_CODEX_MODEL",
-            model: CODEX_SPARK_MODEL,
-          });
-        }
-        console.warn(`[session] WARNING: ${message}`);
-      } else if (!effectiveModel && builderSession) {
-        effectiveModel = CODEX_SAFE_DEFAULT_MODEL;
-        console.warn(
-          `[session] Codex builder launch has no explicit model; using ${CODEX_SAFE_DEFAULT_MODEL} ` +
-          "instead of relying on CODEX_HOME config.toml.",
-        );
-      }
-    }
+    const effectiveModel = guardCodexModel(providerName, resolvedModel, builderSession);
     const effectiveWorkingDir = workingDirOverride ?? workspace.workingDir;
     if (!effectiveWorkingDir) throw new Error("Workspace has no working directory; run setup first");
 

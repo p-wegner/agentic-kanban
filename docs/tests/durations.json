@@ -1241,6 +1241,11 @@
       "endTime": 1101.208251953125
     },
     {
+      "name": "packages/server/src/__tests__/always-run-guard-runtime-ratchet.test.ts",
+      "startTime": 0,
+      "endTime": 1025.263671875
+    },
+    {
       "name": "packages/server/src/__tests__/always-run-marker-ratchet.test.ts",
       "startTime": 0,
       "endTime": 754.72412109375
@@ -1406,6 +1411,11 @@
       "endTime": 4949.358642578125
     },
     {
+      "name": "packages/server/src/__tests__/base-health-probe-temp-cleanup.test.ts",
+      "startTime": 0,
+      "endTime": 4776.503662109375
+    },
+    {
       "name": "packages/server/src/__tests__/base-health-reprobe-guard.test.ts",
       "startTime": 0,
       "endTime": 7.62939453125
@@ -1414,6 +1424,11 @@
       "name": "packages/server/src/__tests__/base-health-timeout-is-unknown.test.ts",
       "startTime": 0,
       "endTime": 102.537109375
+    },
+    {
+      "name": "packages/server/src/__tests__/base-move-relevance-allowlist-ratchet.test.ts",
+      "startTime": 0,
+      "endTime": 2.291015625
     },
     {
       "name": "packages/server/src/__tests__/bearer-token.test.ts",
@@ -1484,11 +1499,6 @@
       "name": "packages/server/src/__tests__/board-notify-route.test.ts",
       "startTime": 0,
       "endTime": 255.06787109375
-    },
-    {
-      "name": "packages/server/src/__tests__/worker-console-ascii.test.ts",
-      "startTime": 0,
-      "endTime": 600
     },
     {
       "name": "packages/server/src/__tests__/board-port-ladder-single-source.test.ts",
@@ -1671,6 +1681,11 @@
       "endTime": 411.939697265625
     },
     {
+      "name": "packages/server/src/__tests__/check-arch-scoping.test.mjs",
+      "startTime": 0,
+      "endTime": 5.14208984375
+    },
+    {
       "name": "packages/server/src/__tests__/check-branch-tip-is-ancestor.test.ts",
       "startTime": 0,
       "endTime": 928.55224609375
@@ -1679,6 +1694,11 @@
       "name": "packages/server/src/__tests__/check-uncommitted-hook.test.ts",
       "startTime": 0,
       "endTime": 3045.40966796875
+    },
+    {
+      "name": "packages/server/src/__tests__/claude-md-builder-budget.test.ts",
+      "startTime": 0,
+      "endTime": 3.2
     },
     {
       "name": "packages/server/src/__tests__/claude-md-git-invariants.test.ts",
@@ -1739,6 +1759,11 @@
       "name": "packages/server/src/__tests__/cli-issue.test.ts",
       "startTime": 0,
       "endTime": 69832.4
+    },
+    {
+      "name": "packages/server/src/__tests__/cli-path-resolution-guard.test.ts",
+      "startTime": 0,
+      "endTime": 23.576416015625
     },
     {
       "name": "packages/server/src/__tests__/cli-preferences-guard.test.ts",
@@ -1824,6 +1849,11 @@
       "name": "packages/server/src/__tests__/commit-checkpoint.test.ts",
       "startTime": 0,
       "endTime": 1961.7666015625
+    },
+    {
+      "name": "packages/server/src/__tests__/commit-subject-bom-ratchet.test.ts",
+      "startTime": 0,
+      "endTime": 47.693359375
     },
     {
       "name": "packages/server/src/__tests__/completion-state-reconciler.test.ts",
@@ -2069,6 +2099,11 @@
       "name": "packages/server/src/__tests__/dirty-main-checkout.test.ts",
       "startTime": 0,
       "endTime": 2498.9609375
+    },
+    {
+      "name": "packages/server/src/__tests__/disclose-context-hook-command.test.ts",
+      "startTime": 0,
+      "endTime": 268.34375
     },
     {
       "name": "packages/server/src/__tests__/domain-error-vocabulary.test.ts",
@@ -2411,9 +2446,24 @@
       "endTime": 900.27099609375
     },
     {
+      "name": "packages/server/src/__tests__/guard-inventory.test.ts",
+      "startTime": 0,
+      "endTime": 1284.0361328125
+    },
+    {
       "name": "packages/server/src/__tests__/guard-suite-count.test.ts",
       "startTime": 0,
       "endTime": 95.0908203125
+    },
+    {
+      "name": "packages/server/src/__tests__/guards-at-merge-raw-read-ratchet.test.ts",
+      "startTime": 0,
+      "endTime": 232.4755859375
+    },
+    {
+      "name": "packages/server/src/__tests__/guards-at-merge.test.ts",
+      "startTime": 0,
+      "endTime": 29.719970703125
     },
     {
       "name": "packages/server/src/__tests__/hand-merged-branch-reconciler.test.ts",
@@ -2636,6 +2686,11 @@
       "endTime": 7.363037109375
     },
     {
+      "name": "packages/server/src/__tests__/issue-update-unrecognized-keys.test.ts",
+      "startTime": 0,
+      "endTime": 7.25048828125
+    },
+    {
       "name": "packages/server/src/__tests__/issues-batch.test.ts",
       "startTime": 0,
       "endTime": 38779.38818359375
@@ -2709,6 +2764,11 @@
       "name": "packages/server/src/__tests__/loop-unit-reopen-guard.test.ts",
       "startTime": 0,
       "endTime": 27.371826171875
+    },
+    {
+      "name": "packages/server/src/__tests__/machine-verify-lock-mirror.test.ts",
+      "startTime": 0,
+      "endTime": 210.22998046875
     },
     {
       "name": "packages/server/src/__tests__/manual-migrate.test.ts",
@@ -3066,6 +3126,11 @@
       "endTime": 1147.25146484375
     },
     {
+      "name": "packages/server/src/__tests__/node-engines.test.ts",
+      "startTime": 0,
+      "endTime": 4.193359375
+    },
+    {
       "name": "packages/server/src/__tests__/null-workingdir-launch.test.ts",
       "startTime": 0,
       "endTime": 330.3330078125
@@ -3074,6 +3139,11 @@
       "name": "packages/server/src/__tests__/oauth-login-bootstrap.test.ts",
       "startTime": 0,
       "endTime": 18.9453125
+    },
+    {
+      "name": "packages/server/src/__tests__/objective-capacity-hold-ratchet.test.ts",
+      "startTime": 0,
+      "endTime": 2.473876953125
     },
     {
       "name": "packages/server/src/__tests__/onboarding-service.test.ts",
@@ -3336,9 +3406,19 @@
       "endTime": 1766.421875
     },
     {
+      "name": "packages/server/src/__tests__/pnpm-store-health.test.mjs",
+      "startTime": 0,
+      "endTime": 12.05419921875
+    },
+    {
       "name": "packages/server/src/__tests__/port-allocator.test.ts",
       "startTime": 0,
       "endTime": 105.93359375
+    },
+    {
+      "name": "packages/server/src/__tests__/pre-merge-gate-admission-mock-ratchet.test.ts",
+      "startTime": 0,
+      "endTime": 162.73291015625
     },
     {
       "name": "packages/server/src/__tests__/pre-merge-gate-install-block.test.ts",
@@ -3496,6 +3576,21 @@
       "endTime": 326.828125
     },
     {
+      "name": "packages/server/src/__tests__/project-update-unrecognized-keys.test.ts",
+      "startTime": 0,
+      "endTime": 6.950927734375
+    },
+    {
+      "name": "packages/server/src/__tests__/promote-evidence.test.ts",
+      "startTime": 0,
+      "endTime": 17.193603515625
+    },
+    {
+      "name": "packages/server/src/__tests__/promote-plan.test.ts",
+      "startTime": 0,
+      "endTime": 41.41162109375
+    },
+    {
       "name": "packages/server/src/__tests__/promote-repo-to-leading.test.ts",
       "startTime": 0,
       "endTime": 778.867919921875
@@ -3546,6 +3641,11 @@
       "endTime": 713.266357421875
     },
     {
+      "name": "packages/server/src/__tests__/prune-worktree-husks.test.mjs",
+      "startTime": 0,
+      "endTime": 269.202392578125
+    },
+    {
       "name": "packages/server/src/__tests__/quality-metrics-collector-skill.test.ts",
       "startTime": 0,
       "endTime": 5.82568359375
@@ -3566,6 +3666,11 @@
       "endTime": 6.368896484375
     },
     {
+      "name": "packages/server/src/__tests__/quiesce-reconciler-launch-sites.test.ts",
+      "startTime": 0,
+      "endTime": 4.222412109375
+    },
+    {
       "name": "packages/server/src/__tests__/quota-usage-endpoint.test.ts",
       "startTime": 0,
       "endTime": 23.184814453125
@@ -3578,17 +3683,7 @@
     {
       "name": "packages/server/src/__tests__/rc-state.test.ts",
       "startTime": 0,
-      "endTime": 95.0
-    },
-    {
-      "name": "packages/server/src/__tests__/claude-md-builder-budget.test.ts",
-      "startTime": 0,
-      "endTime": 3.2
-    },
-    {
-      "name": "packages/server/src/__tests__/workspace-base-read-ratchet.test.ts",
-      "startTime": 0,
-      "endTime": 700.0
+      "endTime": 95
     },
     {
       "name": "packages/server/src/__tests__/ready-for-merge-zero-commit-guard.test.ts",
@@ -3624,6 +3719,11 @@
       "name": "packages/server/src/__tests__/reconciler.service.test.ts",
       "startTime": 0,
       "endTime": 7.9169921875
+    },
+    {
+      "name": "packages/server/src/__tests__/red-base-policy-raw-read-ratchet.test.ts",
+      "startTime": 0,
+      "endTime": 233.42626953125
     },
     {
       "name": "packages/server/src/__tests__/red-debt-cap.test.ts",
@@ -3876,6 +3976,11 @@
       "endTime": 4.5625
     },
     {
+      "name": "packages/server/src/__tests__/roster-raw-read-ratchet.test.ts",
+      "startTime": 0,
+      "endTime": 290.560791015625
+    },
+    {
       "name": "packages/server/src/__tests__/rotted-suite-scan.test.ts",
       "startTime": 0,
       "endTime": 990.456787109375
@@ -3914,6 +4019,11 @@
       "name": "packages/server/src/__tests__/runtime-state-separation.test.ts",
       "startTime": 0,
       "endTime": 223.80224609375
+    },
+    {
+      "name": "packages/server/src/__tests__/safe-rmdir.test.ts",
+      "startTime": 0,
+      "endTime": 321.36865234375
     },
     {
       "name": "packages/server/src/__tests__/scaffold-commit-covers-hooks.test.ts",
@@ -4386,6 +4496,11 @@
       "endTime": 694
     },
     {
+      "name": "packages/server/src/__tests__/temp-entry-cap-lockstep.test.ts",
+      "startTime": 0,
+      "endTime": 3.628173828125
+    },
+    {
       "name": "packages/server/src/__tests__/terminal-move-guard.test.ts",
       "startTime": 0,
       "endTime": 772.779541015625
@@ -4399,6 +4514,16 @@
       "name": "packages/server/src/__tests__/test-db-template-cache.test.ts",
       "startTime": 0,
       "endTime": 1088.434814453125
+    },
+    {
+      "name": "packages/server/src/__tests__/test-impact-budget-cap-lockstep.test.mjs",
+      "startTime": 0,
+      "endTime": 5.37109375
+    },
+    {
+      "name": "packages/server/src/__tests__/test-impact-budget-setting.test.ts",
+      "startTime": 0,
+      "endTime": 20.2802734375
     },
     {
       "name": "packages/server/src/__tests__/test-impact-map.test.ts",
@@ -4419,6 +4544,11 @@
       "name": "packages/server/src/__tests__/test-mine-exclusions-ratchet.test.ts",
       "startTime": 0,
       "endTime": 142.783203125
+    },
+    {
+      "name": "packages/server/src/__tests__/test-mine-guards-intersecting.test.mjs",
+      "startTime": 0,
+      "endTime": 2524.95361328125
     },
     {
       "name": "packages/server/src/__tests__/test-mine-impact-selector.test.mjs",
@@ -4479,6 +4609,11 @@
       "name": "packages/server/src/__tests__/turn-stale-resume-result-event.test.ts",
       "startTime": 0,
       "endTime": 482.584716796875
+    },
+    {
+      "name": "packages/server/src/__tests__/typecheck-package-coverage.test.ts",
+      "startTime": 0,
+      "endTime": 3.525634765625
     },
     {
       "name": "packages/server/src/__tests__/unique-issue-number-constraint.test.ts",
@@ -4546,6 +4681,11 @@
       "endTime": 410.19580078125
     },
     {
+      "name": "packages/server/src/__tests__/verify-step-timings.test.ts",
+      "startTime": 0,
+      "endTime": 12.186279296875
+    },
+    {
       "name": "packages/server/src/__tests__/visual-verification-relevance.test.ts",
       "startTime": 0,
       "endTime": 4.36474609375
@@ -4604,6 +4744,11 @@
       "name": "packages/server/src/__tests__/worker-connection-reaper.test.ts",
       "startTime": 0,
       "endTime": 10.50439453125
+    },
+    {
+      "name": "packages/server/src/__tests__/worker-console-ascii.test.ts",
+      "startTime": 0,
+      "endTime": 600
     },
     {
       "name": "packages/server/src/__tests__/worker-daemon-close-code.test.ts",
@@ -4859,6 +5004,11 @@
       "name": "packages/server/src/__tests__/workspace-already-merged.test.ts",
       "startTime": 0,
       "endTime": 5181.794921875
+    },
+    {
+      "name": "packages/server/src/__tests__/workspace-base-read-ratchet.test.ts",
+      "startTime": 0,
+      "endTime": 700
     },
     {
       "name": "packages/server/src/__tests__/workspace-branch-already-held.test.ts",
@@ -5529,6 +5679,11 @@
       "name": "packages/shared/__tests__/gate-activity.test.ts",
       "startTime": 0,
       "endTime": 6.15234375
+    },
+    {
+      "name": "packages/shared/__tests__/gate-step-emitters.test.ts",
+      "startTime": 0,
+      "endTime": 4.40283203125
     },
     {
       "name": "packages/shared/__tests__/git-exec-child-vs-queue-time.test.ts",

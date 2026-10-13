@@ -147,14 +147,26 @@ export interface WorkerRepoOps {
  */
 export const ASSIGN_REFUSED_AT_CAPACITY = "worker at capacity";
 
-export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentRunnerOptions = {}) {
-  const repoOps: WorkerRepoOps = {
+function resolveRepoOps(options: WorkerAgentRunnerOptions): WorkerRepoOps {
+  return {
     provision: options.repoOps?.provision ?? provisionWorkerCheckout,
     push: options.repoOps?.push ?? pushWorkerResult,
     cleanup: options.repoOps?.cleanup ?? cleanupWorkerCheckout,
     sync: options.repoOps?.sync ?? syncWorkerCheckout,
     pushHead: options.repoOps?.pushHead ?? pushWorkerHead,
   };
+}
+
+/** Sleep that never keeps the event loop alive on its own. */
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    if (timer.unref) timer.unref();
+  });
+}
+
+export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentRunnerOptions = {}) {
+  const repoOps = resolveRepoOps(options);
   const processes = new Map<string, ChildProcess>();
   /** Epoch ms each agent was spawned, for the per-phase timings on its exit (#1328). */
   const agentStartedAtMs = new Map<string, number>();
@@ -220,14 +232,6 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   function closeWatchdog(sessionId: string): void {
     hangWatchdogs.get(sessionId)?.close();
     hangWatchdogs.delete(sessionId);
-  }
-
-  /** Sleep that never keeps the event loop alive on its own. */
-  function wait(ms: number): Promise<void> {
-    return new Promise((resolve) => {
-      const timer = setTimeout(resolve, ms);
-      if (timer.unref) timer.unref();
-    });
   }
 
   /**
