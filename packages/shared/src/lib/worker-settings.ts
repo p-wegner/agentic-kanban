@@ -15,6 +15,7 @@ export const WORKER_SETTING_KEYS = [
   "allowedProjects",
   "deniedProjects",
   "drain",
+  "minFreeRamGb",
 ] as const;
 export type WorkerSettingKey = (typeof WORKER_SETTING_KEYS)[number];
 
@@ -22,7 +23,7 @@ export type WorkerSettingKey = (typeof WORKER_SETTING_KEYS)[number];
 export const WORKER_RESTART_SETTING_KEYS: readonly WorkerSettingKey[] = ["providers", "profileAlias"];
 
 /** Keys enforced by the BOARD, so a worker's flags cannot pin them. */
-export const WORKER_BOARD_ONLY_SETTING_KEYS: readonly WorkerSettingKey[] = ["allowedProjects", "deniedProjects"];
+export const WORKER_BOARD_ONLY_SETTING_KEYS: readonly WorkerSettingKey[] = ["allowedProjects", "deniedProjects", "minFreeRamGb"];
 
 export interface WorkerSettings {
   maxConcurrency?: number;
@@ -36,6 +37,8 @@ export interface WorkerSettings {
   /** Project ids this worker must never take work for. Wins over `allowedProjects`. */
   deniedProjects?: string[];
   drain?: boolean;
+  /** #1451: the board places no new session or verify job here while the worker reports less free RAM (GB). */
+  minFreeRamGb?: number;
 }
 
 /** What the board stores and sends: the settings plus a revision the worker echoes back. */
@@ -77,6 +80,9 @@ export function parseWorkerSettings(raw: unknown): WorkerSettings {
     if (list) out[key] = list;
   }
   if (typeof rec.drain === "boolean") out.drain = rec.drain;
+  if (typeof rec.minFreeRamGb === "number" && Number.isFinite(rec.minFreeRamGb) && rec.minFreeRamGb > 0 && rec.minFreeRamGb <= 1024) {
+    out.minFreeRamGb = rec.minFreeRamGb;
+  }
   return out;
 }
 
@@ -119,4 +125,17 @@ export function workerAllowsProject(
     return { allowed: false, reason: "project is not on this worker's allowed-projects list" };
   }
   return { allowed: true };
+}
+
+/**
+ * #1451: is the worker under its `minFreeRamGb` floor? A worker that has not reported free RAM is
+ * never held back (unknown is not zero, as for `capacity` everywhere else); no floor = no check.
+ */
+export function workerBelowRamFloor(
+  settings: WorkerSettings | undefined,
+  freeRamGb: number | undefined,
+): { below: false } | { below: true; reason: string } {
+  const floor = settings?.minFreeRamGb;
+  if (floor === undefined || freeRamGb === undefined || freeRamGb >= floor) return { below: false };
+  return { below: true, reason: `free RAM ${freeRamGb.toFixed(1)} GB is under this worker's minFreeRamGb ${floor} GB` };
 }

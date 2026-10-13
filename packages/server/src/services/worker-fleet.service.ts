@@ -2,6 +2,7 @@
 // the registry (auth + rows), the connection manager (live sockets) and the
 // remote execution service — so the REST routes, the WS route and the session
 // lifecycle all see the SAME fleet state in one board process.
+import { workerBelowRamFloor } from "@agentic-kanban/shared/lib/worker-settings";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { splitRequirements, workerMeetsRequirements } from "@agentic-kanban/shared/lib/worker-toolchains";
 import { requestToolchainInstalls } from "./toolchain-install.service.js";
@@ -272,6 +273,8 @@ function filterEligibleWorkers(
       return workerMeetsRequirements(requiredLabels, parseLabels(w.labels), w.toolchains);
     })
     .filter((w) => allowWorkerIds === undefined || allowWorkerIds.has(w.id))
+    // #1451: below its own free-RAM floor a worker takes no new session until the heartbeat shows it recovered.
+    .filter((w) => !workerBelowRamFloor(w.desiredSettings?.settings, w.capacity?.freeRamGb).below)
     // #1426: a worker whose only login for this provider is dead would burn the session in ~1 s.
     .filter((w) => authExpiredProfileNames(w.profiles, providerName).length === 0)
     // Load counts DISPATCHED work, not just work that has already spoken (#248) —

@@ -182,6 +182,8 @@ export interface WorkerEligibility {
    * profile-restricted project reads as #651's refusal, never as "any profile".
    */
   attestedProfiles?: WorkerProfileAttestation[];
+  /** #1451: the worker's provider harness mode (clean|custom|inherit); absent = not reported. */
+  harnessMode?: string;
   /**
    * #1381: the settings an operator set on the board for this worker, and what the worker said
    * about its side (keys pinned by its start flags, last applied revision).

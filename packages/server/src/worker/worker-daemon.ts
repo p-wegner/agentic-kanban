@@ -58,7 +58,7 @@ import {
   type WorkerCapabilities, type WorkerDoctorSummary,
   type WorkerProfileAttestation, type WorkerToBoardMessage,
 } from "@agentic-kanban/shared/lib/worker-protocol";
-import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
+import { readWorkerCapacity } from "./worker-resources.js";
 import { createDaemonToolchainInstall } from "./worker-toolchain-install.js";
 import { createDaemonVerifyRunner } from "./worker-verify-runner.js"; // #1437
 import type { ToolchainInstallPolicy, WorkerToolchainInstallInfo } from "@agentic-kanban/shared/lib/worker-toolchain-install";
@@ -206,7 +206,7 @@ function capabilitiesOf(
   profiles?: WorkerProfileAttestation[],
   providerNotice?: string,
   doctor?: WorkerDoctorSummary,
-  toolchainInstall?: WorkerToolchainInstallInfo, verify?: WorkerCapabilities["verify"],
+  toolchainInstall?: WorkerToolchainInstallInfo, verify?: WorkerCapabilities["verify"], workRoot?: string,
 ): WorkerCapabilities {
   return {
     ...(toolchainInstall ? { toolchainInstall } : {}), ...(verify ? { verify } : {}),
@@ -215,7 +215,7 @@ function capabilitiesOf(
     ...(opts.providers ? { providers: opts.providers } : {}),
     ...(opts.maxConcurrency !== undefined ? { maxConcurrency: opts.maxConcurrency } : {}),
     // #910: this machine's live headroom (Tier 0 only: one sync os.freemem() read, cheap for every beat; never throws)
-    capacity: toWorkerCapacitySnapshot(readTier0Capacity()),
+    capacity: readWorkerCapacity(workRoot), ...(opts.harness ? { harnessMode: opts.harness.mode } : {}), // #1451
     ...(profiles && profiles.length > 0 ? { profiles } : {}),
     // #1369/#1382: package managers + toolchains this machine has, so placement can name what a project needs.
     ...packageManagersField(), ...toolchainsField(),
@@ -672,7 +672,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         boardUrl,
         workerVersion,
         log,
-        handlers: { updateNow: () => selfUpdate.updateNow(), status: () => selfUpdate.controlStatus(), ...opts.lifecycle?.({ stateFile, workRoot, boardUrl, draining: () => draining, sessionsLeft: () => runner.runningSessionIds().length, effective: () => settings.effectiveOptions(opts), pinned: () => settings.report().pinned, desired: () => settings.desired() }) }, // #1443
+        handlers: { updateNow: () => selfUpdate.updateNow(), status: () => selfUpdate.controlStatus(), ...opts.lifecycle?.({ stateFile, workRoot, boardUrl, draining: () => draining, sessionsLeft: () => runner.runningSessionIds().length, effective: () => settings.effectiveOptions(opts), pinned: () => settings.report().pinned, desired: () => settings.desired(), profiles: () => attestedProfiles().map((p) => `${p.provider}:${p.name}`), harnessMode: () => opts.harness?.mode }) }, // #1443/#1451
       })
     : null;
 
@@ -725,7 +725,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           // gained docker (or changed its ceiling) says so without being re-paired.
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
-          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctor.takeCurrent(), toolchains.installer.info(), verifyJobs.capability()),
+          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctor.takeCurrent(), toolchains.installer.info(), verifyJobs.capability(), workRoot),
         } satisfies WorkerToBoardMessage));
         while (pendingCritical.length > 0) {
           socket.send(JSON.stringify(pendingCritical.shift()));
@@ -908,7 +908,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           // Not gated on selfUpdate: a daemon restarted after a Ctrl+C drain without --auto-update
           // (every Linux worker until #1374) otherwise stayed `draining` on the board forever.
           ...(draining ? { status: "draining" } : announceOnline ? { status: "online" } : {}),
-          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctorToSend, toolchains.installer.info(), verifyJobs.capability()),
+          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctorToSend, toolchains.installer.info(), verifyJobs.capability(), workRoot),
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
           ...(selfUpdate ? { update: selfUpdate.state() } : {}),

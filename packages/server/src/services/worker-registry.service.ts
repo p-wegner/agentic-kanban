@@ -134,6 +134,8 @@ export interface WorkerView extends Omit<WorkerRow, "tokenHash" | "desiredSettin
   toolchainInstall?: ToolchainInstallRecord;
   /** Why this worker advertises no usable provider, as of its last hello/heartbeat (#1372). In memory like `capacity`. */
   providerNotice?: string;
+  /** #1451: provider harness mode (clean|custom|inherit) as of the last hello/heartbeat. In memory like `capacity`. */
+  harnessMode?: string;
   /** The worker's latest doctor summary (#1370). In memory like `capacity`; re-sent on hello and on change. */
   doctor?: WorkerDoctorSummary;
   /**
@@ -205,6 +207,7 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   /** Why a worker advertises no usable provider (#1372); absent = nothing to say. */
   const reportedProviderNotices = new Map<string, string>();
+  const reportedHarnessModes = new Map<string, string>(); // #1451
   /** Latest doctor summary each worker sent (#1370). See WorkerView for why not a column. */
   const reportedDoctor = new Map<string, WorkerDoctorSummary>();
 
@@ -382,6 +385,7 @@ export function createWorkerRegistry(database: Database = realDb) {
       noteToolchainInstallInfo(workerId, opts.capabilities.toolchainInstall);
       noteVerify(workerId, opts.capabilities.verify);
       noteProviderNotice(workerId, opts.capabilities.providerNotice);
+      noteHarnessMode(workerId, opts.capabilities.harnessMode);
       noteDoctor(workerId, opts.capabilities.doctor);
     }
     if (opts?.update) {
@@ -469,6 +473,7 @@ export function createWorkerRegistry(database: Database = realDb) {
       const toolchainInstall = toolchainInstalls.get(row.id);
       const verify = reportedVerify.get(row.id);
       const providerNotice = reportedProviderNotices.get(row.id);
+      const harnessMode = reportedHarnessModes.get(row.id);
       const doctor = reportedDoctor.get(row.id);
       const update = reportedUpdates.get(row.id);
       const desired = parseWorkerSettingsEnvelope(row.desiredSettings);
@@ -490,6 +495,7 @@ export function createWorkerRegistry(database: Database = realDb) {
         ...(verify ? { verify } : {}),
         ...(toolchainInstall ? { toolchainInstall } : {}),
         ...(providerNotice ? { providerNotice } : {}),
+        ...(harnessMode ? { harnessMode } : {}),
         ...(doctor ? { doctor } : {}),
         ...(update ? { update } : {}),
         ...(updateRequests.has(row.id) ? { updateRequested: true } : {}),
@@ -572,6 +578,12 @@ export function createWorkerRegistry(database: Database = realDb) {
     });
   }
 
+  /** #1451: the worker's provider harness mode, a REPLACE like the notice below. */
+  function noteHarnessMode(workerId: string, mode: string | undefined): void {
+    if (mode) reportedHarnessModes.set(workerId, mode);
+    else reportedHarnessModes.delete(workerId);
+  }
+
   /** Record (or clear) why a worker advertises no usable provider (#1372). A REPLACE: absent = nothing to say. */
   function noteProviderNotice(workerId: string, notice: string | undefined): void {
     if (notice) reportedProviderNotices.set(workerId, notice);
@@ -597,6 +609,7 @@ export function createWorkerRegistry(database: Database = realDb) {
     await workerRepo.updateWorkerCapabilities(workerId, capabilities, now ?? new Date().toISOString(), database);
     if (capabilities.capacity) reportedCapacity.set(workerId, capabilities.capacity);
     else reportedCapacity.delete(workerId);
+    noteHarnessMode(workerId, capabilities.harnessMode);
   }
 
   /**
@@ -633,6 +646,7 @@ export function createWorkerRegistry(database: Database = realDb) {
     reportedVerify.delete(workerId);
     toolchainInstalls.delete(workerId);
     reportedProviderNotices.delete(workerId);
+    reportedHarnessModes.delete(workerId);
     reportedDoctor.delete(workerId);
     reportedUpdates.delete(workerId);
     updateRequests.delete(workerId);

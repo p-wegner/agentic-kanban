@@ -163,6 +163,8 @@ export interface WorkerCapacitySnapshot {
   freeRamGb: number;
   spareCores: number;
   thrashing: "none" | "light" | "heavy" | string;
+  /** #1451: total RAM in GB. */
+  totalRamGb?: number;
 }
 
 export function resolveSpareCores(opts: { usedCores?: number } = {}): number {
@@ -191,6 +193,7 @@ export function toWorkerCapacitySnapshot(
     freeRamGb,
     spareCores: resolveSpareCores(opts),
     thrashing: snapshot.tier === "1" ? snapshot.thrashing : "none",
+    totalRamGb: os.totalmem() / GB,
   };
 }
 

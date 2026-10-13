@@ -142,6 +142,20 @@ describe("per-worker settings (#1381)", () => {
     expect(forP2).toContain(allowOnly.id);
   });
 
+  it("minFreeRamGb makes the worker ineligible with the reason, and eligible again on recovery (#1451)", async () => {
+    const { id, token } = await register("ram-floor");
+    await put(id, { minFreeRamGb: 8 });
+    const cap = (freeRamGb: number) => ({ capabilities: { capacity: { freeRamGb, totalRamGb: 32, freeDiskGb: 120, spareCores: 4, thrashing: "none" }, harnessMode: "clean" } });
+    await beat(id, token, cap(4));
+    const low = await listed(id);
+    expect(low.eligible).toBe(false);
+    expect(low.ineligibleReason).toContain("minFreeRamGb 8");
+    expect(low.capacity).toMatchObject({ freeRamGb: 4, totalRamGb: 32, freeDiskGb: 120 });
+    expect(low.harnessMode).toBe("clean");
+    await beat(id, token, cap(12));
+    expect((await listed(id)).ineligibleReason ?? "").not.toContain("minFreeRamGb");
+  });
+
   it("drain takes the worker out of rotation at once and undrain returns it", async () => {
     const { id, token } = await register("drainable");
     await beat(id, token, {});

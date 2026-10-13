@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  changedSettingKeys, parseWorkerSettings, parseWorkerSettingsEnvelope, parseWorkerSettingsReport, workerAllowsProject,
+  changedSettingKeys, parseWorkerSettings, parseWorkerSettingsEnvelope, parseWorkerSettingsReport, workerAllowsProject, workerBelowRamFloor,
 } from "../src/lib/worker-settings.js";
 
 describe("worker settings (#1381)", () => {
@@ -30,5 +30,14 @@ describe("worker settings (#1381)", () => {
 
   it("names the keys that changed", () => {
     expect(changedSettingKeys({ labels: ["a"] }, { labels: ["a"], drain: true })).toEqual(["drain"]);
+  });
+
+  it("minFreeRamGb: holds a worker under its floor, never one that has not reported (#1451)", () => {
+    expect(parseWorkerSettings({ minFreeRamGb: 8 }).minFreeRamGb).toBe(8);
+    expect(parseWorkerSettings({ minFreeRamGb: -1 }).minFreeRamGb).toBeUndefined();
+    expect(workerBelowRamFloor({ minFreeRamGb: 8 }, 4)).toMatchObject({ below: true });
+    expect(workerBelowRamFloor({ minFreeRamGb: 8 }, 8).below).toBe(false);
+    expect(workerBelowRamFloor({ minFreeRamGb: 8 }, undefined).below).toBe(false);
+    expect(workerBelowRamFloor({}, 1).below).toBe(false);
   });
 });

@@ -5,6 +5,7 @@
 // straight into the normal session broadcast/exit machinery.
 
 // #1369: committer identity + package-manager vocabulary lives in its own module.
+import { parseWorkerCapacityInfo } from "./worker-capacity-parse.js";
 import { parseVerifyJobFrame, parseVerifyWorkerFrame, parseWorkerVerifyCapability, type VerifyJobFrame, type VerifyLogChunkFrame, type VerifyProgressFrame, type VerifyResultFrame, type WorkerVerifyCapability } from "./worker-verify-protocol.js";
 import { parseWorkerCommitterIdentity, parseWorkerPackageManagers, type WorkerCommitterIdentity, type WorkerPackageManagers } from "./worker-prerequisites.js";
 export { parseWorkerCommitterIdentity, parseWorkerPackageManagers, type WorkerCommitterIdentity, type WorkerPackageManagers } from "./worker-prerequisites.js";
@@ -400,6 +401,10 @@ export interface WorkerCapacityInfo {
   spareCores: number;
   /** Tier 1's own vocabulary; "none" when only Tier 0 (RAM-only) is available. */
   thrashing: "none" | "light" | "heavy" | string;
+  /** #1451: total RAM in GB. Absent = an older worker. */
+  totalRamGb?: number;
+  /** #1451: free disk (GB) on the worker's work root. Absent = unknown, not zero. */
+  freeDiskGb?: number;
 }
 
 /**
@@ -431,6 +436,7 @@ export interface WorkerCapabilities {
   packageManagers?: WorkerPackageManagers;
   toolchainInstall?: WorkerToolchainInstallInfo; // #1371: install policy + allowlist + whether mise is present
   toolchains?: WorkerToolchains; // #1382: detected on PATH (`{ java: "21.0.4" }`); absent = unknown
+  harnessMode?: string; // #1451: provider harness mode (clean | custom | inherit); absent = older worker
   providerNotice?: string; // #1372: why this worker advertises no usable provider (it gets no work)
   /**
    * #1370: the worker's own doctor results, compact. Sent on `hello` and again only when it
@@ -487,18 +493,6 @@ export function checkProtocolCompatibility(
   return { ok: true, version: effective };
 }
 
-/** Shape-check a capacity blob off the wire (#910). Anything malformed reads as absent/unknown. */
-function parseWorkerCapacityInfo(raw: unknown): WorkerCapacityInfo | undefined {
-  const rec = asRecord(raw);
-  if (!rec) return undefined;
-  const freeRamGb = typeof rec.freeRamGb === "number" && Number.isFinite(rec.freeRamGb) ? rec.freeRamGb : undefined;
-  const spareCores =
-    typeof rec.spareCores === "number" && Number.isFinite(rec.spareCores) ? rec.spareCores : undefined;
-  const thrashing = typeof rec.thrashing === "string" ? rec.thrashing : undefined;
-  if (freeRamGb === undefined || spareCores === undefined || thrashing === undefined) return undefined;
-  return { freeRamGb, spareCores, thrashing };
-}
-
 /** Shape-check a capabilities blob off the wire. Unknown/ill-typed fields are dropped. */
 export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | undefined {
   const rec = asRecord(raw);
@@ -518,13 +512,14 @@ export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | unde
   const toolchainInstall = parseWorkerToolchainInstallInfo(rec.toolchainInstall);
   const providerNotice = typeof rec.providerNotice === "string" ? rec.providerNotice.trim().slice(0, 400) || undefined : undefined;
   const doctor = parseWorkerDoctorSummary(rec.doctor);
+  const harnessMode = typeof rec.harnessMode === "string" && rec.harnessMode.trim() ? rec.harnessMode.trim().slice(0, 40) : undefined;
   const verify = parseWorkerVerifyCapability(rec.verify);
   if (
     labels === undefined &&
     providers === undefined &&
     maxConcurrency === undefined &&
     capacity === undefined && profiles === undefined && packageManagers === undefined && toolchains === undefined && toolchainInstall === undefined && providerNotice === undefined &&
-    doctor === undefined && verify === undefined
+    doctor === undefined && verify === undefined && harnessMode === undefined
   ) {
     return undefined;
   }
@@ -540,6 +535,7 @@ export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | unde
     ...(providerNotice ? { providerNotice } : {}),
     ...(doctor ? { doctor } : {}),
     ...(verify ? { verify } : {}),
+    ...(harnessMode ? { harnessMode } : {}),
   };
 }
 
