@@ -55,10 +55,8 @@ import {
   parseBoardToWorkerMessage,
   WORKER_PROTOCOL_VERSION,
   WORKER_UPDATE_REMEDIATION,
-  type WorkerCapabilities,
-  type WorkerDoctorSummary,
-  type WorkerProfileAttestation,
-  type WorkerToBoardMessage,
+  type WorkerCapabilities, type WorkerDoctorSummary,
+  type WorkerProfileAttestation, type WorkerToBoardMessage,
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
 import { createDaemonToolchainInstall } from "./worker-toolchain-install.js";

@@ -47,12 +47,11 @@ export interface VerifyRunnerDeps {
   issueGitAuth?: (input: { workerId: string; projectId: string; jobId: string }) => Promise<{ gitPort: number; gitToken: string }>;
   /** Injected for tests; the project's setup script. */
   readSetupScript?: (projectId: string) => Promise<string | null>;
-  nowMs?: () => number;
+  nowMs?: number;
 }
 
 export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRunner {
   const fleet = () => deps.fleet ?? getWorkerFleet(deps.database);
-  const clock = deps.nowMs ?? Date.now;
 
   async function listWorkers(): Promise<VerifyWorkerCandidate[]> {
     const { registry, connections } = fleet();
@@ -86,7 +85,7 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
     const setupScript = await (deps.readSetupScript ?? ((id: string) => getProjectSetupScript(id, deps.database)))(req.projectId).catch(() => null);
     const timeoutMs = req.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const job: ActiveVerifyJob = {
-      jobId, workerId: req.workerId, workerName, kind: req.kind, sha: req.sha, tier: req.tier, stage: "queued", startedAt: new Date(clock()).toISOString(),
+      jobId, workerId: req.workerId, workerName, kind: req.kind, sha: req.sha, tier: req.tier, stage: "queued", startedAt: new Date(deps.nowMs ?? Date.now()).toISOString(),
     };
     active.set(jobId, job);
     const chunks = new Map<number, string>();

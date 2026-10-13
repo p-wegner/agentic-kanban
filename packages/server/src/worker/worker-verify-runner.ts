@@ -13,6 +13,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { WorkerToBoardMessage } from "@agentic-kanban/shared/lib/worker-protocol";
 import {
@@ -85,12 +86,12 @@ async function defaultPrepareCheckout(deps: VerifyRunnerDeps, job: VerifyJobFram
     return { ok: false, refused: "fetch_failed", reason: errorMessage(err) };
   }
   let have = await gitExec(["cat-file", "-e", `${job.sha}^{commit}`], { cwd: cacheDir });
-  if (have.code !== 0) {
+  if (!execSucceeded(have)) {
     // A staging or detached tip no branch points at: ask for the sha itself.
     await gitExec(["fetch", url, job.sha], { cwd: cacheDir, timeout: 10 * 60 * 1000, env });
     have = await gitExec(["cat-file", "-e", `${job.sha}^{commit}`], { cwd: cacheDir });
   }
-  if (have.code !== 0) return { ok: false, refused: "sha_unavailable", reason: `this worker cannot fetch ${job.sha} from the board` };
+  if (!execSucceeded(have)) return { ok: false, refused: "sha_unavailable", reason: `this worker cannot fetch ${job.sha} from the board` };
   const dir = join(deps.workRoot, "verify", job.jobId);
   mkdirSync(join(deps.workRoot, "verify"), { recursive: true });
   try {
