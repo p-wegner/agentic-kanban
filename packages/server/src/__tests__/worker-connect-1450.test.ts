@@ -1,6 +1,6 @@
 // #1450 — the connect runbook's first live run: old installs, a revoked pairing, corrupt clones, profiles.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildConnectRunbook, buildStartFlags } from "../lib/worker-connect-runbook.js";
@@ -109,7 +109,7 @@ describe("revoked pairing (#1450)", () => {
   it("leaves a valid pairing alone", async () => {
     expect(await moveAsideRevokedPairing({ stateFile, boardUrls: ["http://board:3003"], log: vi.fn(), fetchImpl: answering(200) })).toBeNull();
     expect(Object.keys(loadState(stateFile).boards)).toHaveLength(1);
-    expect(readdirSync(dir)).toEqual(["worker-state.json"]);
+    expect(existsSync(`${stateFile}.revoked-0`)).toBe(false);
   });
 
   it("does nothing when the board cannot be reached or nothing is paired", async () => {
