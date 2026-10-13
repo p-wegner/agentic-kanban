@@ -4,7 +4,7 @@
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { Database } from "../db/index.js";
 import { getSessionLiveness } from "../repositories/worker.repository.js";
-import { syncIncomingBranch, clearIncomingRef, classifyRefusedPush } from "./worker-remote-sync.service.js";
+import { syncIncomingBranch, clearIncomingRef, classifyRefusedPush, adoptCleanRebase } from "./worker-remote-sync.service.js";
 import type { WorkerConnectionManager } from "./worker-connection.service.js";
 import type { RemoteSession } from "./agent-remote.types.js";
 
@@ -40,6 +40,7 @@ export async function landSessionBranch(
       console.warn(`[agent-remote] no incoming ref for failed session ${sessionId}; nothing to sync`);
     } else {
       let classification = "";
+      let adopted = false;
       if (result.status === "diverged") {
         const cls = await classifyRefusedPush(session.repo.repoPath, session.repo.branch);
         classification = ` [${cls.summary}]`;
@@ -47,14 +48,28 @@ export async function landSessionBranch(
           // #1427: unusable - a later sync must not be able to land it (#1414).
           await clearIncomingRef(session.repo.repoPath, session.repo.branch).catch(() => {});
           classification += " - incoming ref discarded";
+        } else if (cls.kind === "stale-clean") {
+          // #1446: a clean rebase onto a newer base is the worker doing what it was told.
+          const adoption = await adoptCleanRebase(session.repo.repoPath, session.repo.branch);
+          if (adoption.adopted) {
+            adopted = true;
+            console.log(`[agent-remote] session ${sessionId}: ${adoption.summary}`);
+            session.onOutput({ type: "stdout", sessionId, data: adoption.summary });
+            await clearIncomingRef(session.repo.repoPath, session.repo.branch).catch(() => {});
+            if (landedPushMeansSuccess) exitCode = 0;
+          } else {
+            classification += ` - not adopted: ${adoption.reason}`;
+          }
         }
       }
-      session.onOutput({
-        type: "stderr",
-        sessionId,
-        data: `Worker result could not be landed on ${session.repo.branch}: ${result.error}${classification}`,
-      });
-      exitCode = exitCode === 0 || exitCode === null ? 1 : exitCode;
+      if (!adopted) {
+        session.onOutput({
+          type: "stderr",
+          sessionId,
+          data: `Worker result could not be landed on ${session.repo.branch}: ${result.error}${classification}`,
+        });
+        exitCode = exitCode === 0 || exitCode === null ? 1 : exitCode;
+      }
     }
   } catch (err) {
     session.onOutput({ type: "stderr", sessionId, data: `Branch sync failed: ${errorMessage(err)}` });
