@@ -46,6 +46,8 @@ import { startStaleTempSweeper, stopStaleTempSweeper } from "./stale-temp-sweep.
 import { startNonBlockingSetupRetryReconciler, stopNonBlockingSetupRetryReconciler } from "./non-blocking-setup-retry-reconciler.js";
 import { startCommitMsgHookBackfill, stopCommitMsgHookBackfill } from "./commit-msg-hook-backfill.js";
 import { startFlushActivityLogReconciler, stopFlushActivityLogReconciler } from "./flush-activity-log-reconciler.js";
+import { startQueueFlushSweep, stopQueueFlushSweep } from "./queue-flush-sweep.js";
+import { createQueueFlushService } from "../services/queue-flush.service.js";
 import { getWorkerBuildService, startWorkerBuildPrewarm } from "../services/worker-build.service.js";
 
 /**
@@ -441,6 +443,17 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start({ db }) {
       startFlushActivityLogReconciler({ database: db });
       return stopFlushActivityLogReconciler;
+    },
+  },
+  {
+    // #1463 (decision 020) — the flush tick: evaluates `queue_flush_<id>=auto` and advances every
+    // open flush record through its heal states. The manual door is `POST /queue/flush`.
+    name: "queue-flush-sweep",
+    start({ db, boardEvents, getSessionManager }) {
+      const queueService = createMergeQueueService({ database: db, boardEvents, getSessionManager });
+      const service = createQueueFlushService({ database: db, executeQueue: (ids, opts) => queueService.executeQueue(ids, opts) });
+      startQueueFlushSweep({ database: db, service });
+      return stopQueueFlushSweep;
     },
   },
   {

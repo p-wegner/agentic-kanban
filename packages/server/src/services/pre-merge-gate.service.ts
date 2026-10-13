@@ -31,6 +31,7 @@ import { runE2ESmokeGateStage } from "./e2e-smoke-lane.js";
 import { noteMergeGatePhase } from "./merge-job.service.js";
 import {
   resolveGateVerification,
+  flushLedgerSource,
   resolveVerifyGateStrategy,
   guardFloorFor,
   buildGateTierMessage,
@@ -198,6 +199,8 @@ export async function runPreMergeGate(
   database: Database,
   /** #1203 — a train's own abort token; optional, combined below with #1164's per-workspace one. */
   signal?: AbortSignal,
+  /** #1463 — a queue flush's gate script (check:arch + typecheck), run in place of the project's verify command. */
+  verifyScriptOverride?: string,
 ): Promise<PreMergeGateResult> {
   // #1164 (per-workspace) + #1203 (a train's `signal`) — see `combineGateAbortSignals`'s doc comment.
   const ownGateSignal = beginMergeGateRun(workspace.id);
@@ -230,7 +233,7 @@ export async function runPreMergeGate(
   // that changes what this gate runs while tier, verify command and merged tree stay identical,
   // because the skill is materialized into the worktree untracked. #966 folds the budget in there.
   const { strategy: gateStrategy, posture: gatePosture, effectiveVerify, verifyScript, verificationKey, budget: gateBudget, guardsAtMerge } =
-    await resolveGateVerification(projectId, database, { workingDir: workspace.workingDir });
+    await resolveGateVerification(projectId, database, { workingDir: workspace.workingDir, verifyScriptOverride });
 
   // ---- #492 tree-hash memo -----------------------------------------------------------------
   // A queue of ready branches re-ran the same suite against the same code: five branches, five
@@ -703,6 +706,8 @@ export async function runPreMergeGate(
       baseBranch: workspace.baseBranch,
       outcome,
       tierInfo: gateTierInfo,
+      // #1463 — a flush's arch+typecheck run is no selection: counted apart from impact misses (`FLUSH_LEDGER_SOURCE`).
+      source: flushLedgerSource(verifyScriptOverride),
     });
     if (outcome.failure) {
       // #1230 — the failing suites ride on the result and lead its message; total, so no branch here.

@@ -88,6 +88,8 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "queue_flush_thresholds",
   "queue_flush_daily_cap",
   "queue_flush_history",
+  // `queue_flush_gate_<id>` (#1463): the flush's gate script. Unset = `pnpm check:arch && pnpm typecheck`.
+  "queue_flush_gate",
   "verify_script",
   // Builder context policy (#1302): `builder_context_<id>` is `isolated` (default) | `inherit`.
   // Isolated Claude builders launch with `--setting-sources project,local`, so the operator's

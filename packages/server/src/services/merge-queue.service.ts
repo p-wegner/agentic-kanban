@@ -17,6 +17,8 @@ import { lockContentionSkipEvent, preMergeGateSkipEvent } from "./merge-lock-con
 import type { BoardEventSink } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 import { createMergeTrainRunner, pickQueueStrategy } from "./merge-queue-train.js";
+import { trainMemberIneligibility } from "./merge-release-partition.js";
+import type { FlushRunSpec } from "./merge-train-flush-run.js";
 import { findRunningSession } from "../repositories/session.repository.js";
 
 export interface WorkspaceConflictPreview {
@@ -502,10 +504,23 @@ export function createMergeQueueService(deps: {
 
   async function* executeQueue(
     workspaceIds: string[],
-    opts: { skipOnConflict?: boolean; strategy?: "sequential" | "train" } = {},
+    opts: { skipOnConflict?: boolean; strategy?: "sequential" | "train"; flush?: FlushRunSpec } = {},
   ): AsyncGenerator<MergeQueueEvent> {
     const plan = await computePlan(workspaceIds);
     yield { type: "planned", plan };
+
+    // Queue flush (#1463, decision 020): the whole ready set as ONE train in flush mode. No
+    // `trainEligible` size floor (a one-branch flush is still a flush) but the repo/base must be one.
+    if (opts.flush) {
+      const first = plan.order[0];
+      if (!first || !plan.order.every((ws) => ws.repoPath === first.repoPath && ws.baseBranch === first.baseBranch && trainMemberIneligibility(ws) === null)) {
+        yield { type: "error", workspaceId: first?.id ?? "", issueNumber: first?.issueNumber ?? null, issueTitle: first?.issueTitle ?? "", error: "flush refused: members are not provably one repo and one base branch" };
+        yield { type: "done", merged: [], failed: [], skipped: workspaceIds };
+        return;
+      }
+      yield* trainRunner.runTrainStrategy(plan, opts.flush);
+      return;
+    }
 
     // Release train (#904): gate the assembled batch ONCE instead of once per member. The
     // dispatch decision (shape eligibility, caller/classifier/opt-in, and #1180's "why not"

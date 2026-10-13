@@ -2,6 +2,7 @@ import { createProjectsRoute } from "./projects.js";
 import { createProjectAnalyticsRoute } from "./project-analytics.js";
 import { createProjectHealthRoute } from "./project-health.js";
 import { createProjectRcRoute } from "./project-rc.js";
+import { createProjectQueueFlushRoute } from "./project-queue-flush.js";
 import { createTrackerSnapshotRoute } from "./tracker-snapshot.js";
 import { createProjectStackProfileRoute } from "./project-stack-profile.js";
 import { createProjectScriptsRoute } from "./project-scripts.js";
@@ -86,6 +87,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/projects", createProjectAnalyticsRoute(database, { ...options, getSessionManager }));
   routes.route("/projects", createProjectHealthRoute(database));
   routes.route("/projects", createProjectRcRoute(database, getSessionManager, options));
+  routes.route("/projects", createProjectQueueFlushRoute(database, getSessionManager, options));
   routes.route("/projects", createTrackerSnapshotRoute(database));
   routes.route("/projects", createProjectStackProfileRoute(database));
   routes.route("/projects", createProjectScriptsRoute(database));

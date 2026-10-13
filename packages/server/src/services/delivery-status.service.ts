@@ -16,6 +16,7 @@ import { rcHealSummary } from "./rc-heal-ticket.service.js";
 import { getQueuePressure, readQueuePressureMembers } from "./queue-pressure.service.js";
 import { getMergeActivity } from "./merge-activity.service.js";
 import { latestFlush, readFlushState } from "./flush-state.js";
+import { parseQueueFlushMode, queueFlushPrefKey } from "./queue-flush-trigger.service.js";
 
 const trainMaxSizePref = projectPref("train_max_size");
 const promoteCadencePref = projectPref("promote_cadence");
@@ -66,6 +67,7 @@ export async function getDeliveryStatus(projectId: string, database: Database = 
     // checkout's `.kanban/` directory the rc summary above already reads.
     queuePressure: await getQueuePressure(projectId, project.repoPath, database, Date.now(), queueMembers),
     flush: latestFlush(readFlushState(resolveStableCheckoutFor(project.repoPath))),
+    flushMode: parseQueueFlushMode(prefMap.get(queueFlushPrefKey(projectId))),
     // The live merge state the chip leads with: the running train, the last finished one, the waiting branches.
     mergeActivity: await getMergeActivity(projectId, queueMembers, database),
   };
