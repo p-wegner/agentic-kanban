@@ -191,7 +191,7 @@ export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
     ...(w.toolchainInstall && typeof w.toolchainInstall.state === "string"
       ? { toolchainInstall: { state: w.toolchainInstall.state, toolchains: w.toolchainInstall.toolchains ?? [], reason: w.toolchainInstall.reason } }
       : {}),
-    ...(Array.isArray(w.verifyJobs) && w.verifyJobs.length > 0 ? { verifyJobs: w.verifyJobs.map((j: Record<string, any>) => `${j.kind} ${String(j.sha).slice(0, 9)} (${j.tier}) ${j.stage}${j.filesTotal ? ` ${j.filesDone ?? 0}/${j.filesTotal}` : ""}`) } : {}),
+    ...(Array.isArray(w.verifyJobs) && w.verifyJobs.length > 0 ? { verifyJobs: w.verifyJobs.map((j: Record<string, any>) => `${j.kind} ${String(j.sha).slice(0, 9)} (${j.tier}) ${j.stage}${j.filesTotal ? ` ${j.filesDone ?? 0}/${j.filesTotal}` : ""}${j.disconnectedAt ? " [worker disconnected, holding]" : j.reattached ? " [re-attached]" : ""}`) } : {}),
     tickets: (w.assignments ?? []).map((a: Record<string, any>) => ({
       issueNumber: a.issueNumber ?? null, status: String(a.status ?? ""), startedAt: a.startedAt ?? null, phase: a.phase ?? a.kind ?? null,
     })),

@@ -10,7 +10,7 @@
 //      with `refused` set, so the board treats it as "not verified", not as red or green.
 //   3. BOUNDED. `slots` caps concurrent jobs; the verify child gets `KANBAN_TEST_MAX_WORKERS`.
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
@@ -43,6 +43,43 @@ export interface VerifyRunnerDeps {
   runScript?: (dir: string, script: string, opts: { timeoutMs: number; env: Record<string, string>; onOutput: (chunk: string) => void }) => Promise<ScriptOutcome>;
   /** Remove the throwaway checkout. Injectable for tests. */
   cleanup?: (job: VerifyJobFrame, dir: string) => Promise<void>;
+  /** #1465: true while the board socket is open. Absent = always connected (frames are never held back). */
+  isConnected?: () => boolean;
+  /** #1465: where a finished job's frames wait for delivery. Absent = in memory only. Injectable for tests. */
+  store?: VerifyResultStore;
+  /** Injectable clock for the retention sweep. */
+  nowMs?: () => number;
+}
+
+/** #1465: durable store for the frames of a job that finished (like #1444's undelivered session results). */
+export interface VerifyResultStore {
+  save(jobId: string, entry: StoredVerifyResult): void;
+  remove(jobId: string): void;
+  loadAll(): Array<{ jobId: string; entry: StoredVerifyResult }>;
+}
+export interface StoredVerifyResult { finishedAt: number; frames: WorkerToBoardMessage[] }
+
+/** A buffered verdict older than this is useless: the board gave the job up after its reconnect grace. */
+export const VERIFY_RESULT_RETENTION_MS = 30 * 60 * 1000;
+
+/** One JSON file per job under `<workRoot>/verify-undelivered/`; every failure is swallowed (best effort). */
+export function createFileVerifyResultStore(workRoot: string): VerifyResultStore {
+  const dir = join(workRoot, "verify-undelivered");
+  const file = (jobId: string): string => join(dir, `${jobId.replace(/[^A-Za-z0-9_.-]/g, "_")}.json`);
+  return {
+    save(jobId, entry) { try { mkdirSync(dir, { recursive: true }); writeFileSync(file(jobId), JSON.stringify({ jobId, ...entry })); } catch { /* memory copy still delivers */ } },
+    remove(jobId) { try { rmSync(file(jobId), { force: true }); } catch { /* gone */ } },
+    loadAll() {
+      try {
+        return readdirSync(dir).filter((f) => f.endsWith(".json")).flatMap((f) => {
+          try {
+            const raw = JSON.parse(readFileSync(join(dir, f), "utf8")) as { jobId?: string } & Partial<StoredVerifyResult>;
+            return typeof raw.jobId === "string" && Array.isArray(raw.frames) && typeof raw.finishedAt === "number" ? [{ jobId: raw.jobId, entry: { finishedAt: raw.finishedAt, frames: raw.frames } }] : [];
+          } catch { return []; }
+        });
+      } catch { return []; }
+    },
+  };
 }
 
 export interface DaemonVerifyRunner {
@@ -50,6 +87,8 @@ export interface DaemonVerifyRunner {
   handle(message: { type: string }): boolean;
   /** What this worker declares in its heartbeat. */
   capability(): WorkerVerifyCapability;
+  /** #1465: call right after `hello` on every (re)connect: re-announces running jobs and delivers buffered verdicts. */
+  onConnected(): void;
 }
 
 /** vitest pass/fail marker lines and its `Test Files  N passed (M)` summary, for progress. */
@@ -129,15 +168,29 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
   const run = deps.runScript ?? defaultRunScript;
   const cleanup = deps.cleanup ?? ((job: VerifyJobFrame, dir: string) => defaultCleanup(deps, job, dir));
   const running = new Set<string>();
+  const now = deps.nowMs ?? Date.now;
+  const connected = (): boolean => deps.isConnected?.() ?? true;
+  /** Latest progress per running job, replayed on reconnect so the board knows the job is alive. */
+  const lastProgress = new Map<string, WorkerToBoardMessage>();
+  /** Finished jobs whose frames may not have reached the board; replayed on every reconnect until retention. */
+  const finished = new Map<string, StoredVerifyResult>();
+  for (const { jobId, entry } of deps.store?.loadAll() ?? []) finished.set(jobId, entry);
 
-  const progress = (jobId: string, stage: VerifyStage, extra: { filesDone?: number; filesTotal?: number } = {}): void =>
-    deps.sendToBoard({ type: "verify_progress", jobId, stage, ...extra });
+  const progress = (jobId: string, stage: VerifyStage, extra: { filesDone?: number; filesTotal?: number } = {}): void => {
+    const frame: WorkerToBoardMessage = { type: "verify_progress", jobId, stage, ...extra };
+    if (stage === "done") lastProgress.delete(jobId); else lastProgress.set(jobId, frame);
+    // While the socket is down the frame is dropped (the replay on reconnect carries the latest one).
+    if (connected()) deps.sendToBoard(frame);
+  };
+
+  function pruneFinished(): void {
+    for (const [jobId, entry] of finished) if (now() - entry.finishedAt > VERIFY_RESULT_RETENTION_MS) { finished.delete(jobId); deps.store?.remove(jobId); }
+  }
 
   function finish(job: VerifyJobFrame, started: number, r: Partial<VerifyResultFrame> & { sha: string }, log: string): void {
     const chunks = chunkVerifyLog(log);
-    progress(job.jobId, "uploading");
-    chunks.forEach((data, seq) => deps.sendToBoard({ type: "verify_log_chunk", jobId: job.jobId, seq, data }));
-    deps.sendToBoard({
+    const frames: WorkerToBoardMessage[] = chunks.map((data, seq) => ({ type: "verify_log_chunk", jobId: job.jobId, seq, data }));
+    frames.push({
       type: "verify_result",
       jobId: job.jobId,
       tier: job.tier,
@@ -150,6 +203,13 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
       logChunks: chunks.length,
       ...r,
     });
+    // #1465: keep the verdict and log until the board has had a chance to take them, whatever the socket does.
+    const entry: StoredVerifyResult = { finishedAt: now(), frames };
+    finished.set(job.jobId, entry);
+    deps.store?.save(job.jobId, entry);
+    pruneFinished();
+    progress(job.jobId, "uploading");
+    if (connected()) for (const f of frames) deps.sendToBoard(f);
   }
 
   async function execute(job: VerifyJobFrame): Promise<void> {
@@ -212,5 +272,10 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
       return true;
     },
     capability: () => ({ slots: deps.slots, freeSlots: Math.max(0, deps.slots - running.size), ramGb: deps.ramGb }),
+    onConnected() {
+      pruneFinished();
+      for (const jobId of running) { const f = lastProgress.get(jobId); if (f) deps.sendToBoard(f); }
+      for (const entry of finished.values()) for (const f of entry.frames) deps.sendToBoard(f);
+    },
   };
 }
