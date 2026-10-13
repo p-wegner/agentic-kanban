@@ -177,7 +177,19 @@ export function createConnectCodeStore(defaults: { ttlMs?: number; maxFetches?: 
     };
   }
 
-  return { mint, consumeFetch, peek, markPaired, revoke, recordProgress, view, maxFetches };
+  /** #1449: every code still worth showing — live, or paired within the progress grace. */
+  function listLive(nowMs: number = Date.now()): ConnectCodeView[] {
+    const out: ConnectCodeView[] = [];
+    for (const code of records.keys()) {
+      const v = view(code, nowMs);
+      if (!v) continue;
+      const r = records.get(code)!;
+      if (v.status === "active" || (v.status === "used" && nowMs - r.createdAtMs < CONNECT_PROGRESS_GRACE_MS)) out.push(v);
+    }
+    return out;
+  }
+
+  return { mint, consumeFetch, peek, markPaired, revoke, recordProgress, view, listLive, maxFetches };
 }
 
 export type ConnectCodeStore = ReturnType<typeof createConnectCodeStore>;

@@ -17,6 +17,7 @@ import {
   landIncomingRef,
   discardIncomingRef,
 } from "../services/worker-incoming-refs.service.js";
+import { buildConsoleExtras } from "../services/console-extras.service.js";
 import { listActiveVerifyJobs } from "../services/verify-worker-runner.service.js";
 import {
   describeFleet,
@@ -193,12 +194,21 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
       workerBuild: resolveBoardWorkerBuild(undefined, resolveBoardCommit),
       boardTag: facts.tag,
       mergedToday: facts.mergedToday,
+      unpromotedMerges: facts.unpromotedMerges,
       freeGb: cap.freeGb,
       hold: cap.hold,
       reason: cap.reason,
       floorGb: Number(process.env.SMART_HOOKS_MIN_FREE_GB ?? 2) || 2,
       verify: { active: verifyChainSemaphoreActive(), slots: slots.slots, queued: verifyChainSemaphoreQueueLength(), placed: listActiveVerifyJobs() },
     });
+  });
+
+  // #1449 — the rest of what `status --watch` shows: running/queued verify chains, base verdict,
+  // rc state, verify placement, stalled sessions. One cheap read per refresh.
+  router.get("/console", async (c) => {
+    const projectId = c.req.query("projectId");
+    if (!projectId) throw new UnprocessableError("projectId is required");
+    return c.json(await buildConsoleExtras(projectId, database));
   });
 
   // #1382: what the project's repo files suggest for `required_toolchains` (lockfile, gradlew,

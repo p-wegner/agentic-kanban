@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import * as os from "node:os";
+import * as fs from "node:fs";
 
 /**
  * Host-capacity signal for the server's placement decisions (#908).
@@ -163,6 +164,18 @@ export interface WorkerCapacitySnapshot {
   freeRamGb: number;
   spareCores: number;
   thrashing: "none" | "light" | "heavy" | string;
+  /** #1449: free GB on the volume holding the home directory; absent when unreadable. */
+  freeDiskGb?: number;
+}
+
+/** Free GB where agent checkouts land (the home volume). Never throws; null when unreadable. */
+export function readFreeDiskGb(dir: string = os.homedir()): number | null {
+  try {
+    const st = fs.statfsSync(dir);
+    return Math.round((Number(st.bavail) * Number(st.bsize) / GB) * 10) / 10;
+  } catch {
+    return null;
+  }
 }
 
 export function resolveSpareCores(opts: { usedCores?: number } = {}): number {
@@ -187,10 +200,12 @@ export function toWorkerCapacitySnapshot(
   opts: { usedCores?: number } = {},
 ): WorkerCapacitySnapshot {
   const freeRamGb = snapshot.tier === "1" ? Math.max(0, os.freemem() / GB) : (snapshot.freeGb ?? 0);
+  const freeDiskGb = readFreeDiskGb();
   return {
     freeRamGb,
     spareCores: resolveSpareCores(opts),
     thrashing: snapshot.tier === "1" ? snapshot.thrashing : "none",
+    ...(freeDiskGb != null ? { freeDiskGb } : {}),
   };
 }
 

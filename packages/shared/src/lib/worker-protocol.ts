@@ -400,6 +400,8 @@ export interface WorkerCapacityInfo {
   spareCores: number;
   /** Tier 1's own vocabulary; "none" when only Tier 0 (RAM-only) is available. */
   thrashing: "none" | "light" | "heavy" | string;
+  /** #1449: free GB on the volume checkouts land on. Optional: older workers omit it. */
+  freeDiskGb?: number;
 }
 
 /**
@@ -496,7 +498,8 @@ function parseWorkerCapacityInfo(raw: unknown): WorkerCapacityInfo | undefined {
     typeof rec.spareCores === "number" && Number.isFinite(rec.spareCores) ? rec.spareCores : undefined;
   const thrashing = typeof rec.thrashing === "string" ? rec.thrashing : undefined;
   if (freeRamGb === undefined || spareCores === undefined || thrashing === undefined) return undefined;
-  return { freeRamGb, spareCores, thrashing };
+  const freeDiskGb = typeof rec.freeDiskGb === "number" && Number.isFinite(rec.freeDiskGb) ? rec.freeDiskGb : undefined;
+  return { freeRamGb, spareCores, thrashing, ...(freeDiskGb !== undefined ? { freeDiskGb } : {}) };
 }
 
 /** Shape-check a capabilities blob off the wire. Unknown/ill-typed fields are dropped. */
