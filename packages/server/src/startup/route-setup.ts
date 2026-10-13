@@ -9,6 +9,8 @@ import { createBoardWsRoute } from "../routes/board-ws.js";
 import { createRoutes } from "../routes/index.js";
 import { createSessionsRoute } from "../routes/sessions.js";
 import { createWorkspaceReviewRoute } from "../routes/workspace-review.js";
+import { createWorkspaceDevServerRoute } from "../routes/workspace-dev-server.js";
+import { createWorkspaceProxyRoute } from "../routes/workspace-proxy.js";
 import type { createBoardEvents } from "../services/board-events.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { createWorkerWsRoute } from "../services/worker-connection.service.js";
@@ -34,6 +36,10 @@ export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSess
   // composition root's job. Registered ahead of `app.route("/api", createRoutes(...))`, as
   // the inline handler was, so Hono's resolution order is unchanged.
   app.route("/api/workspaces", createWorkspaceReviewRoute(db, () => sessionManager, { boardEvents, reviewSessionIds }));
+
+  // #1447 — a worker-placed workspace's dev server, and the board's door to its ports.
+  app.route("/api/workspaces", createWorkspaceDevServerRoute(db));
+  app.route("/api/workspaces", createWorkspaceProxyRoute(upgradeWebSocket));
 
   app.get("/ws/sessions/:sessionId", sessionManager.wsRoute());
   app.get("/ws/board/:projectId", createBoardWsRoute(upgradeWebSocket, boardEvents));

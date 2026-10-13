@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
-import { getWorkspaceDevPorts, describeDevServerPlan } from "../lib/workspace-preview.js";
-import { apiFetch } from "../lib/api.js";
-import type { WorkspaceResponse, WorkspaceDevServerPlanResponse } from "@agentic-kanban/shared";
+import { getWorkspaceDevPorts, describeDevServerPlan, workspaceProxyBase } from "../lib/workspace-preview.js";
+import { apiFetch, apiPost } from "../lib/api.js";
+import type { WorkspaceResponse, WorkspaceDevServerPlanResponse, WorkspaceDevServerStatusResponse } from "@agentic-kanban/shared";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { SetupStatusPanel } from "./SetupStatusPanel.js";
 import { ServiceStackStatusPanel } from "./ServiceStackStatusPanel.js";
 
@@ -80,6 +81,31 @@ export function WorkspaceDiagnosticsPanel({ workspace, project }: { workspace: W
     return () => { cancelled = true; };
   }, [workspace.id]);
 
+  // #1447: where the dev server actually runs. A worker-placed workspace runs it ON the worker and
+  // links to it through the board's proxy; `unreachable` means that worker's connection dropped.
+  const [devStatus, setDevStatus] = useState<WorkspaceDevServerStatusResponse | null>(null);
+  const [devBusy, setDevBusy] = useState(false);
+  const [devError, setDevError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<WorkspaceDevServerStatusResponse>(`/api/workspaces/${workspace.id}/dev-server`)
+      .then((r) => { if (!cancelled) setDevStatus(r); })
+      .catch(() => { if (!cancelled) setDevStatus(null); });
+    return () => { cancelled = true; };
+  }, [workspace.id]);
+  async function controlDevServer(action: "start" | "stop") {
+    setDevBusy(true);
+    setDevError(null);
+    try {
+      setDevStatus(await apiPost<WorkspaceDevServerStatusResponse>(`/api/workspaces/${workspace.id}/dev-server/${action}`));
+    } catch (err) {
+      setDevError(errorMessage(err));
+    } finally {
+      setDevBusy(false);
+    }
+  }
+  const onWorker = devStatus?.where === "worker";
+
   // The app's own worktree ports (3001+N/5173+N) are correct ONLY for agentic-kanban itself.
   const isSelfProject = planResp?.isSelfProject ?? false;
   const planDisplay = describeDevServerPlan(planResp);
@@ -125,6 +151,13 @@ export function WorkspaceDiagnosticsPanel({ workspace, project }: { workspace: W
           value={planLoaded ? (planResp?.plan?.port != null ? "ready" : "unknown") : "…"}
           detail={planLoaded ? planDisplay.endpoint : "Resolving dev-server plan…"}
         />
+        {devStatus && devStatus.where !== null && (
+          <DiagnosticsRow
+            label={onWorker ? `Dev server (worker ${devStatus.workerId})` : "Dev server (host)"}
+            value={devStatus.status}
+            detail={devStatus.status === "unreachable" ? "The worker's connection dropped — the process cannot be reached until it reconnects." : (devStatus.url ?? "No port known")}
+          />
+        )}
         {isSelfProject && (
           <DiagnosticsRow
             label="App worktree ports"
@@ -143,9 +176,23 @@ export function WorkspaceDiagnosticsPanel({ workspace, project }: { workspace: W
         />
       </div>
 
+      {planResp?.plan && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <button type="button" disabled={devBusy} onClick={() => void controlDevServer("start")} className="rounded px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/40 dark:text-green-300 disabled:opacity-50">
+            Start dev server{workspace.remotePlacement ? " on worker" : ""}
+          </button>
+          {devStatus?.where && (
+            <button type="button" disabled={devBusy} onClick={() => void controlDevServer("stop")} className="rounded px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/40 dark:text-red-300 disabled:opacity-50">
+              Stop
+            </button>
+          )}
+          {devError && <span className="text-red-700 dark:text-red-300">{devError}</span>}
+        </div>
+      )}
+
       {workspace.latestSetup && <SetupStatusPanel setup={workspace.latestSetup} />}
 
-      {serviceState && <ServiceStackStatusPanel serviceState={serviceState} />}
+      {serviceState && <ServiceStackStatusPanel serviceState={serviceState} proxyBase={workspaceProxyBase(workspace)} />}
 
       {symlink && (
         <div className="rounded border border-gray-200 dark:border-gray-700 p-2 text-xs">
@@ -169,12 +216,15 @@ export function WorkspaceDiagnosticsPanel({ workspace, project }: { workspace: W
       {(() => {
         // Prefer the app's own worktree client URL for the self project (correct there);
         // otherwise the resolved plan's origin, when one is actually known.
-        const previewUrl = isSelfProject && ports.ok ? ports.previewUrl : planDisplay.previewUrl;
+        // A worker-side server is only reachable through the board's proxy, never its own loopback.
+        const previewUrl = onWorker && devStatus?.url ? devStatus.url : isSelfProject && ports.ok ? ports.previewUrl : planDisplay.previewUrl;
         if (!previewUrl) return null;
         return (
           <div className="rounded border border-gray-200 dark:border-gray-700 p-2 text-xs text-gray-600 dark:text-gray-400">
             <div className="font-semibold text-gray-700 dark:text-gray-300">Preview</div>
-            <div className="mt-1 font-mono break-all">{previewUrl}</div>
+            {onWorker
+              ? <a className="mt-1 block font-mono break-all underline" href={previewUrl} target="_blank" rel="noreferrer">{previewUrl}</a>
+              : <div className="mt-1 font-mono break-all">{previewUrl}</div>}
           </div>
         );
       })()}

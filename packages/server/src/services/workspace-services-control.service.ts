@@ -32,6 +32,7 @@ import { parseServicesConfig, provisionServicesForLaunch } from "./workspace-cre
 import type { SiblingWorktree } from "./workspace-repos.service.js";
 import { WorkspaceError } from "./workspace-internals.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { createRemoteStackResolver, type RemoteStack, type RemoteStackResolver } from "./workspace-remote-stack.js";
 
 /** Resolved context for a control op over one workspace's stack. */
 interface ResolvedStackContext {
@@ -51,9 +52,12 @@ export function createWorkspaceServicesControlService(deps: {
   boardEvents?: BoardEventSink;
   /** Injectable for tests; defaults to the process-wide real-docker engine. */
   engine?: WorkspaceServicesEngine;
+  /** #1447: the engine for a workspace placed on a fleet worker (null = host-placed). Injectable for tests. */
+  remoteStack?: RemoteStackResolver;
 }) {
   const { database, boardEvents } = deps;
-  const engine = deps.engine ?? workspaceServicesService;
+  const hostEngine = deps.engine ?? workspaceServicesService;
+  const remoteStack = deps.remoteStack ?? createRemoteStackResolver(database);
 
   async function resolveContext(workspaceId: string): Promise<ResolvedStackContext> {
     const workspace = await getWorkspaceById(workspaceId, database);
@@ -133,7 +137,7 @@ export function createWorkspaceServicesControlService(deps: {
    * stack. Reuses the create flow's `provisionServicesForLaunch` (admission cap +
    * shared-worktree adoption) so retry behaves exactly like a fresh create would.
    */
-  async function provisionAndPersist(ctx: ResolvedStackContext): Promise<ServiceStackState> {
+  async function provisionAndPersist(ctx: ResolvedStackContext, remote: RemoteStack | null): Promise<ServiceStackState> {
     const result = await provisionServicesForLaunch(database, {
       servicesConfigRaw: ctx.servicesConfigRaw,
       workspaceId: ctx.workspace.id,
@@ -141,13 +145,19 @@ export function createWorkspaceServicesControlService(deps: {
       branch: ctx.workspace.branch,
       leadingWorktreePath: ctx.workspace.workingDir as string,
       siblings: ctx.siblings,
-    });
+    }, remote ? { provisionWorkspaceServices: remote.engine.provisionWorkspaceServices } : {});
     if (!result) {
       // parseServicesConfig already succeeded in resolveContext, so a null here would be a
       // genuine surprise — surface it rather than silently no-op.
       throw new WorkspaceError("Service stack could not be provisioned for this workspace", "CONFLICT");
     }
+    remote?.registerPorts(result.state.ports);
     return persist(ctx, result.state);
+  }
+
+  /** Where this workspace's stack runs: the worker holding its session, or (null) the host. */
+  function placeStack(ctx: ResolvedStackContext): Promise<RemoteStack | null> {
+    return remoteStack({ workspaceId: ctx.workspace.id, composeWorktreePath: ctx.composeWorktreePath, composeRepo: ctx.config.composeRepo });
   }
 
   /**
@@ -157,12 +167,14 @@ export function createWorkspaceServicesControlService(deps: {
    */
   async function up(workspaceId: string, opts: { recreate?: boolean } = {}): Promise<ServiceStackState> {
     const ctx = await resolveContext(workspaceId);
+    const remote = await placeStack(ctx);
     if (isProvisioned(ctx.state)) {
-      const state = await engine.startWorkspaceServices(controlCtx(ctx, ctx.state), { forceRecreate: opts.recreate });
+      const state = await (remote?.engine ?? hostEngine).startWorkspaceServices(controlCtx(ctx, ctx.state), { forceRecreate: opts.recreate });
+      remote?.registerPorts(state.ports);
       return persist(ctx, state);
     }
     // Nothing usable to reuse (never provisioned, or a deferred/error state) → re-provision.
-    return provisionAndPersist(ctx);
+    return provisionAndPersist(ctx, remote);
   }
 
   /**
@@ -188,7 +200,7 @@ export function createWorkspaceServicesControlService(deps: {
       throw new WorkspaceError("No running service stack to stop for this workspace", "CONFLICT");
     }
     try {
-      const state = await engine.stopWorkspaceServices(controlCtx(ctx, ctx.state));
+      const state = await ((await placeStack(ctx))?.engine ?? hostEngine).stopWorkspaceServices(controlCtx(ctx, ctx.state));
       return await persist(ctx, state);
     } catch (err) {
       throw asWorkspaceError(err);
@@ -201,7 +213,7 @@ export function createWorkspaceServicesControlService(deps: {
       throw new WorkspaceError("No service stack to restart for this workspace", "CONFLICT");
     }
     try {
-      const state = await engine.restartWorkspaceServices(controlCtx(ctx, ctx.state));
+      const state = await ((await placeStack(ctx))?.engine ?? hostEngine).restartWorkspaceServices(controlCtx(ctx, ctx.state));
       return await persist(ctx, state);
     } catch (err) {
       throw asWorkspaceError(err);
@@ -213,7 +225,7 @@ export function createWorkspaceServicesControlService(deps: {
     if (!ctx.state || ctx.state.composeProjectName.length === 0) {
       throw new WorkspaceError("No service stack has been provisioned for this workspace yet", "CONFLICT");
     }
-    return engine.getWorkspaceServiceLogs(
+    return ((await placeStack(ctx))?.engine ?? hostEngine).getWorkspaceServiceLogs(
       controlCtx(ctx, ctx.state),
       Number.isFinite(tail) && tail > 0 ? Math.floor(tail) : 200,
     );

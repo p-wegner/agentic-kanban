@@ -16,6 +16,8 @@ import {
   deleteProjectScriptShortcut,
 } from "../repositories/project-scripts.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { resolveProjectId } from "../repositories/workspace.repository.js";
+import { resolveRemotePlacement } from "./workspace-remote-placement.js";
 
 export class ProjectScriptsError extends Error {
   constructor(
@@ -25,6 +27,9 @@ export class ProjectScriptsError extends Error {
     super(message);
   }
 }
+
+/** A shortcut that has not finished in this long on a worker is abandoned (the board is not streaming it). */
+const SCRIPT_TIMEOUT_MS = 30 * 60_000;
 
 type LastRunStatus = "running" | "success" | "failed" | "error";
 type CwdMode = "project" | "custom";
@@ -182,15 +187,37 @@ export function createProjectScriptsService(deps: { database: Database }) {
     lastRuns.delete(shortcutId);
   }
 
-  async function run(projectId: string, shortcutId: string, onEvent: (event: ScriptRunEvent) => void) {
+  /**
+   * Run a shortcut. With `workspaceId` whose builder is placed on a fleet worker (#1447), it runs
+   * THERE, in the worker's checkout of the workspace branch — the host worktree has no installed
+   * dependencies. Output arrives when the run ends rather than streaming. Host-placed: as always.
+   */
+  async function run(projectId: string, shortcutId: string, onEvent: (event: ScriptRunEvent) => void, opts: { workspaceId?: string } = {}) {
     const project = await getProject(projectId, database);
     if (!project) throw new ProjectScriptsError("Project not found", "NOT_FOUND");
     const rows = await getProjectScriptShortcutForProject(shortcutId, projectId, database);
     const shortcut = rows[0];
     if (!shortcut) throw new ProjectScriptsError("Script shortcut not found", "NOT_FOUND");
     const cwd = resolveWorkingDir(project.repoPath, shortcut.workingDir);
+    const placement = await placeOnWorker(projectId, opts.workspaceId);
     const startedAt = new Date().toISOString();
     lastRuns.set(shortcutId, { status: "running", startedAt, endedAt: null, exitCode: null });
+    if (placement) {
+      onEvent({ type: "start", startedAt, cwd: `worker ${placement.workerId}:${shortcut.workingDir ?? "."}` });
+      const res = await placement.client.exec({
+        workerId: placement.workerId, sessionId: placement.sessionId, workspaceId: opts.workspaceId!, label: `script:${shortcutId}`,
+        command: shortcut.command, cwdRel: shortcut.workingDir ?? "", timeoutMs: SCRIPT_TIMEOUT_MS,
+      });
+      if (res.stdout) onEvent({ type: "stdout", data: res.stdout });
+      if (res.stderr) onEvent({ type: "stderr", data: res.stderr });
+      if (!res.ok && res.error) onEvent({ type: "stderr", data: `${res.error}
+` });
+      const endedAt = new Date().toISOString();
+      const status: LastRunStatus = res.ok ? "success" : res.code == null ? "error" : "failed";
+      lastRuns.set(shortcutId, { status, startedAt, endedAt, exitCode: res.code ?? null });
+      onEvent({ type: "exit", exitCode: res.code ?? null, status, endedAt });
+      return;
+    }
     onEvent({ type: "start", startedAt, cwd });
 
     const child: ChildProcess = spawnShellCommand(shortcut.command, { cwd, stdio: ["ignore", "pipe", "pipe"] });
@@ -218,6 +245,15 @@ export function createProjectScriptsService(deps: { database: Database }) {
         finish(status, code);
       });
     });
+  }
+
+  /** The worker holding `workspaceId`'s session, when the workspace belongs to this project and is worker-placed. */
+  async function placeOnWorker(projectId: string, workspaceId: string | undefined) {
+    if (!workspaceId) return null;
+    if ((await resolveProjectId(workspaceId, database)) !== projectId) {
+      throw new ProjectScriptsError("Workspace does not belong to this project", "BAD_REQUEST");
+    }
+    return resolveRemotePlacement(workspaceId, database);
   }
 
   return { list, create, update, remove, run };

@@ -1,7 +1,7 @@
 import React from "react";
 import ReactMarkdown from "react-markdown";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
-import { getWorkspacePreviewUrl } from "../lib/workspace-preview.js";
+import { getWorkspacePreviewUrl, workspaceProxyBase } from "../lib/workspace-preview.js";
 import { getOutputFormatForAgent, getOutputFormatForProvider } from "../lib/agent-output-parser.js";
 import { TerminalView } from "./TerminalView.js";
 import { WorkspacePreviewPanel } from "./WorkspacePreviewPanel.js";
@@ -589,7 +589,7 @@ export function WorkspaceCard({
 
       <SetupStatusPanel setup={ws.latestSetup ?? null} />
 
-      <ServiceStackStatusPanel serviceState={ws.serviceState ?? null} workspaceId={ws.id} />
+      <ServiceStackStatusPanel serviceState={ws.serviceState ?? null} workspaceId={ws.id} proxyBase={workspaceProxyBase(ws)} />
 
       {!ws.isDirect && (
         <RepoMergeStatusStrip workspaceId={ws.id} refreshKey={ws.mergedAt ?? ws.status} />

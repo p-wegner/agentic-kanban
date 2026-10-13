@@ -15,6 +15,7 @@ import { parseWorkerProfileAttestations, type WorkerProfileAttestation } from ".
 
 import { parseOneShotRequest, parseOneShotResult, type WorkerOneShotRequest, type WorkerOneShotResult } from "./worker-oneshot.js"; // #1431
 export * from "./worker-oneshot.js";
+import { isServiceFrameType, parseServiceBoardFrame, parseServiceWorkerFrame, type WorkerServiceBoardFrame, type WorkerServiceWorkerFrame } from "./worker-services.js"; export * from "./worker-services.js"; // #1447
 import { parseWorkerToolchains, type WorkerToolchains } from "./worker-toolchains.js"; // #1382
 import {
   parseToolchainInstallStatus,
@@ -586,7 +587,7 @@ export type BoardToWorkerMessage =
    */
   | { type: "toolchain_install"; requestId: string; toolchains: string[] }
   /** #1431: run ONE prompt and answer with `oneshot_result`. Sessionless; an older worker drops it, so the board waits only for the `accepted` ack. */
-  | WorkerOneShotRequest
+  | WorkerOneShotRequest | WorkerServiceBoardFrame // #1447: workspace services + the board's port proxy
   /** #1437: run one verify job (a gate, train gate or sweep) on this worker; answered by `verify_progress`/`verify_log_chunk`/`verify_result`. */
   | VerifyJobFrame;
 
@@ -637,7 +638,7 @@ export type WorkerToBoardMessage =
   /** #1371: progress of one `toolchain_install` request (pending approval / installing / failed / done). */
   | { type: "toolchain_install_status"; status: ToolchainInstallStatus }
   /** #1431: the `accepted` ack and the outcome of one `oneshot`. */
-  | { type: "oneshot_result"; result: WorkerOneShotResult }
+  | { type: "oneshot_result"; result: WorkerOneShotResult } | WorkerServiceWorkerFrame // #1447
   | VerifyProgressFrame
   | VerifyLogChunkFrame
   | VerifyResultFrame
@@ -691,6 +692,7 @@ function parseUndeliveredResult(msg: Record<string, unknown>): WorkerToBoardMess
 /** Shape-check a `toolchain_install` request (#1371). Null = drop it. */
 function parseToolchainInstallRequest(msg: Record<string, unknown> | null): BoardToWorkerMessage | null {
   if (!msg) return null;
+  if (isServiceFrameType(msg.type)) return parseServiceBoardFrame(msg); // #1447
   if (msg.type === "oneshot") return parseOneShotRequest(msg, { repo: parseRepoTransport(msg.repo), intent: parseLaunchIntent(asRecord(msg.job)?.intent) }); // #1431
   if (msg.type === "verify_job") return parseVerifyJobFrame(msg); // #1437: sessionless like this one
   if (msg.type !== "toolchain_install") return null; // the frames about the machine/a job, not a session
@@ -701,6 +703,7 @@ function parseToolchainInstallRequest(msg: Record<string, unknown> | null): Boar
 
 /** Worker frames added after the core set, kept out of the main switch's branch count. Null = drop it. */
 function parseLaterWorkerFrame(msg: Record<string, unknown>): WorkerToBoardMessage | null {
+  if (isServiceFrameType(msg.type)) return parseServiceWorkerFrame(msg); // #1447
   if (msg.type === "oneshot_result") {
     const result = parseOneShotResult(msg.result);
     return result ? { type: "oneshot_result", result } : null;
@@ -933,7 +936,7 @@ function parseRepoTransport(raw: unknown): WorkerRepoTransport | null {
 /** Parse + shape-check a message arriving at a worker. Null = drop it. */
 export function parseBoardToWorkerMessage(raw: unknown): BoardToWorkerMessage | null {
   const msg = parseJson(raw);
-  if (!msg || typeof msg.sessionId !== "string") return parseToolchainInstallRequest(msg); // sessionless frames
+  if (!msg || isServiceFrameType(msg.type) || typeof msg.sessionId !== "string") return parseToolchainInstallRequest(msg); // sessionless frames (#1447: the services frames carry a sessionId but are not a session's)
   switch (msg.type) {
     case "assign": {
       const spec = asRecord(msg.spec);

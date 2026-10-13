@@ -8715,6 +8715,11 @@ paths:
           required: true
           schema:
             type: string
+        - name: workspaceId
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: Success
@@ -10851,6 +10856,24 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/workspaces/{id}/dev-server:
+    get:
+      summary: GET /api/workspaces/:id/dev-server — where it runs, whether it is reachable, and the link to open.
+      tags:
+        - workspace-dev-server
+      operationId: get_api_workspaces_id_dev-server
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
   /api/workspaces/{id}/dev-server-plan:
     get:
       summary: "ports, which are wrong for any other project (docker-compose / multi-repo, #100)."
@@ -10871,6 +10894,57 @@ paths:
               schema: {}
         "404":
           description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/dev-server/start:
+    post:
+      summary: POST /api/workspaces/:id/dev-server/start — start it on the worker holding the session (or the host).
+      tags:
+        - workspace-dev-server
+      operationId: post_api_workspaces_id_dev-server_start
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/dev-server/stop:
+    post:
+      summary: POST /api/workspaces/:id/dev-server/stop
+      tags:
+        - workspace-dev-server
+      operationId: post_api_workspaces_id_dev-server_stop
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
           content:
             application/json:
               schema: {}
