@@ -137,6 +137,11 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // builder/reviewer sessions on the board host. Empty = inherit; `0` = host builds nothing
   // while an eligible worker is online.
   "host_builder_slots",
+  // #1428: `verify_placement_<id>` = host | worker | prefer-worker (default host) — where a verify chain
+  // (gate, implement-exit check, train gate, rc sweep) runs; `verify_workers_<id>` is the CSV allowlist
+  // of worker names/ids whose verdict may authorize a merge or promotion. See verify-placement.ts.
+  "verify_placement",
+  "verify_workers",
   // Required toolchains (#1382): `required_toolchains_<id>` is a CSV like `pnpm, java>=21`. A worker
   // that REPORTED its toolchains and misses one is not a candidate; one that reported nothing is unknown.
   "required_toolchains",
