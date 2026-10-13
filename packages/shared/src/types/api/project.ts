@@ -224,6 +224,23 @@ export interface WorkspaceDevServerPlanResponse {
   isSelfProject: boolean;
   /** Null when the project has no bootable dev-server command configured/detected. */
   plan: DevServerPlan | null;
+  /** #1447: the dev server this workspace already has running on a fleet worker, if any (with its proxy `url`). */
+  devServer?: WorkspaceDevServerStatusResponse | null;
+}
+
+/**
+ * Where a workspace's dev server runs and how to reach it (#1447). A worker-placed workspace runs it
+ * ON the worker and `url` is the board's proxy path; a host-placed one is the plain loopback URL.
+ */
+export interface WorkspaceDevServerStatusResponse {
+  workspaceId: string;
+  where: "host" | "worker" | null;
+  workerId: string | null;
+  /** `unreachable`: the worker's connection dropped, so the board cannot vouch for the process. */
+  status: "running" | "stopped" | "exited" | "unreachable";
+  command: string | null;
+  port: number | null;
+  url: string | null;
 }
 
 export type ProjectScriptLastRunStatus = "running" | "success" | "failed" | "error";

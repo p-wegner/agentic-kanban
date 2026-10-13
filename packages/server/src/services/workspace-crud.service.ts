@@ -30,6 +30,7 @@ import { createWorkspaceCreateService } from "./workspace-create.service.js";
 import { createWorkspaceSetupRetryService } from "./workspace-setup-retry.service.js";
 import { releaseWorkspaceResources } from "./workspace-resource-release.js";
 import { resolveProjectDevServerPlan } from "./dev-server.service.js";
+import { remoteDevServerStatus } from "./workspace-dev-server.service.js";
 import { isSelfProjectRepo } from "./self-project.js";
 import { resolveDetachedWorkers, resolveRemoteLastOutput } from "./remote-detached-port.js";
 import type { WorkspaceDevServerPlanResponse } from "@agentic-kanban/shared";
@@ -381,7 +382,7 @@ export function createWorkspaceCrudService(deps: {
       workingDir: workspace.workingDir,
       isSelfProject,
     });
-    return { workspaceId: id, isSelfProject, plan };
+    return { workspaceId: id, isSelfProject, plan, devServer: remoteDevServerStatus(id) };
   }
 
   return {

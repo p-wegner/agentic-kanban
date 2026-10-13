@@ -62,7 +62,7 @@ import { readWorkerCapacity } from "./worker-resources.js";
 import { createDaemonToolchainInstall } from "./worker-toolchain-install.js";
 import { createDaemonVerifyRunner } from "./worker-verify-runner.js"; // #1437
 import type { ToolchainInstallPolicy, WorkerToolchainInstallInfo } from "@agentic-kanban/shared/lib/worker-toolchain-install";
-import { createWorkerOneShotRunner } from "./worker-oneshot.js"; // #1431
+import { createWorkerOneShotRunner } from "./worker-oneshot.js"; import { createWorkerServicesRunner } from "./worker-services.js"; // #1431, #1447
 import { createWorkerAgentRunner, dispatchBoardMessage, rawDataToBuffer, type UnpushedResult } from "./worker-agent-runner.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
 import { packageManagersField, refreshPackageManagers, refreshToolchains, toolchainsField } from "../cli/commands/worker-doctor-git-prereqs.js";
@@ -631,7 +631,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     ...(opts.harness ? { harness: opts.harness } : {}),
     profileAliases, ...(opts.profileHome ? { profileHome: opts.profileHome } : {}),
   });
-  const oneShots = createWorkerOneShotRunner({ send: (m) => sendToBoard(m), boardUrl: currentUrl, workRoot, ...(opts.harness ? { harness: opts.harness } : {}), profileAliases, ...(opts.profileHome ? { profileHome: opts.profileHome } : {}), isDraining: () => draining }); // #1431
+  const oneShots = createWorkerOneShotRunner({ send: (m) => sendToBoard(m), boardUrl: currentUrl, workRoot, ...(opts.harness ? { harness: opts.harness } : {}), profileAliases, ...(opts.profileHome ? { profileHome: opts.profileHome } : {}), isDraining: () => draining }); const services = createWorkerServicesRunner({ send: (m) => sendToBoard(m), cwdForSession: (id) => runner.checkoutCwd(id), isDraining: () => draining }); // #1431, #1447
 
   /**
    * #1338: a freshly started daemon says `online` on its FIRST heartbeat. A worker that was
@@ -747,7 +747,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         log(`[worker] dropping malformed board message`);
         return;
       }
-      if (toolchains.handle(message) || oneShots.handle(message) || verifyJobs.handle(message)) return; // #1431, #1437
+      if (toolchains.handle(message) || oneShots.handle(message) || verifyJobs.handle(message) || services.handle(message)) return; // #1431, #1437, #1447
       try {
         dispatchBoardMessage(message, runner, sendToBoard, draining);
       } catch (err) {
@@ -976,7 +976,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       clearInterval(heartbeatTimer);
       stopApprovalPolling();
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-      if (stopOpts?.killAgents) runner.stopAll();
+      if (stopOpts?.killAgents) { runner.stopAll(); void services.stopAll(); }
       else runner.releaseAgents(); // #1336: --leave-agents â€” the trees survive on purpose
       // The kill above only sends the signal. The result push is kicked off by the
       // agent's `exit` handler, so exiting now is precisely the bug: wait for it.

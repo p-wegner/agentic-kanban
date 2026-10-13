@@ -743,7 +743,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   return {
     // #1381: setMaxConcurrency = the board changed this worker's ceiling; running sessions are never stopped by it.
     setMaxConcurrency: (n: number): void => { if (n > 0) maxConcurrency = n; }, assign, assignWithRepo, input, closeStdin, stop, stopAll, releaseAgents, runningSessionIds,
-    drainPushes, pendingPushCount, repoOp, gitToken: gitTokens.answer,
+    drainPushes, pendingPushCount, repoOp, gitToken: gitTokens.answer, checkoutCwd: (sid: string): string | undefined => checkouts.get(sid)?.checkout.cwd, // #1447
     probeSession: seen.answerProbe, rememberedSessionCount: seen.size,
     retryPendingPushes: undelivered.retryPending,
     unpushedResults: undelivered.list, lostResults: undelivered.listLost,

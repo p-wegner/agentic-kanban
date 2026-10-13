@@ -71,6 +71,24 @@ export async function findRunningSession(
   return rows.find(s => s.status === "running") ?? null;
 }
 
+/**
+ * The workspace's MOST RECENT session and the worker it ran on (null = the host). Where a
+ * workspace's builder is placed decides where its dev server and compose stack run (#1447).
+ */
+export async function getLatestSessionPlacement(
+  workspaceId: string,
+  database: Database = db,
+): Promise<{ sessionId: string; workerId: string | null; status: string } | null> {
+  return firstRow(
+    database
+      .select({ sessionId: sessions.id, workerId: sessions.workerId, status: sessions.status })
+      .from(sessions)
+      .where(eq(sessions.workspaceId, workspaceId))
+      .orderBy(desc(sessions.startedAt))
+      .limit(1),
+  );
+}
+
 export async function findResumableSession(
   workspaceId: string,
   database: Database = db,

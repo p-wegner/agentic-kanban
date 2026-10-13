@@ -37,7 +37,7 @@ export function createProjectScriptsRoute(database: Database) {
         const encoder = new TextEncoder();
         service.run(c.req.param("projectId"), c.req.param("scriptId"), (event) => {
           controller.enqueue(encoder.encode(encodeEvent(event)));
-        }).then(() => controller.close()).catch((err) => {
+        }, { workspaceId: c.req.query("workspaceId") || undefined }).then(() => controller.close()).catch((err) => {
           controller.enqueue(encoder.encode(encodeEvent({
             type: "exit",
             status: "error",

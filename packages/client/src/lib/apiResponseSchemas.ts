@@ -62,7 +62,7 @@
  *    /api/workspaces` guarantees a handle, `GET /api/workspaces/:id` guarantees the shape
  *    the panels render.
  */
-import type { ProjectResponse } from "@agentic-kanban/shared/types";
+import type { ProjectResponse, WorkspaceDevServerStatusResponse } from "@agentic-kanban/shared/types";
 import type { WorkspaceResponse } from "@agentic-kanban/shared/types";
 import type { IssueComment } from "@agentic-kanban/shared/types";
 import type { ProjectRepoResponse } from "@agentic-kanban/shared/types";
@@ -284,6 +284,9 @@ const workspace = dtoObject<WorkspaceResponse>({
  * (`routes/workspaces.ts`). Stating that as a union is exactly what a compile-time-only
  * contract could never do.
  */
+/** #1447: where a workspace's dev server runs, whether it is reachable, and the link to open. */
+const devServerStatus = dtoObject<WorkspaceDevServerStatusResponse>({ workspaceId: str, port: nullable(num), url: nullable(str) });
+
 const workspaceOrCreateJob = union(
   // The CREATE response's client-facing contract is "a workspace handle": every caller
   // reads `id` (and optionally `sessionId`). The full-shape check belongs on the READ,
@@ -731,6 +734,8 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
   // which the client has been asserting as a full `WorkspaceResponse` for as long as the
   // cast existed. Found while writing this registry — the first thing it caught.
   { method: "PATCH", template: "/api/workspaces/:id", schema: looseObject({ id: str }) },
+  { method: "POST", template: "/api/workspaces/:id/dev-server/start", schema: devServerStatus },
+  { method: "POST", template: "/api/workspaces/:id/dev-server/stop", schema: devServerStatus },
   { method: "POST", template: "/api/workspaces/:id/launch", schema: sessionHandle },
   // Registered in `startup/route-setup.ts`, not `src/routes/` — which is why the OpenAPI
   // generator cannot see it at all. Noted as a follow-up on #780.

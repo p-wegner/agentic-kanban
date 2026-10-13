@@ -101,6 +101,14 @@ export interface DevServerPlanDisplay {
 }
 
 /**
+ * Base path of the board's proxy for a workspace whose builder runs on a fleet worker (#1447):
+ * its dev server and compose ports are only reachable through it. Undefined for a host workspace.
+ */
+export function workspaceProxyBase(workspace: { id: string; remotePlacement?: { workerId: string } | null }): string | undefined {
+  return workspace.remotePlacement ? `/api/workspaces/${workspace.id}/proxy` : undefined;
+}
+
+/**
  * Turn a resolved dev-server plan response into honest display strings for the
  * diagnostics tab. Never fabricates a port: when the plan can't know one, it says so.
  */

@@ -48,9 +48,15 @@ function ControlButton({
 export function ServiceStackStatusPanel({
   serviceState,
   workspaceId,
+  proxyBase,
 }: {
   serviceState: WorkspaceResponse["serviceState"];
   workspaceId?: string;
+  /**
+   * Set for a workspace whose stack runs on a fleet worker (#1447): its ports are only reachable
+   * through the board's proxy, so each port links to `${proxyBase}/<port>/` instead of being plain text.
+   */
+  proxyBase?: string;
 }) {
   // Local override so a control's result is reflected immediately (the board WS
   // refresh also re-flows the prop shortly after). Re-synced when the prop changes.
@@ -126,7 +132,16 @@ export function ServiceStackStatusPanel({
         <span className="font-semibold">{labels[state.status] ?? state.status}</span>
         {state.deferred && <span className="italic opacity-80">(deferred — capacity)</span>}
         {portEntries.length > 0 && (
-          <span>{portEntries.map(([name, port]) => `${name}:${port}`).join(", ")}</span>
+          <span>
+            {portEntries.map(([name, port], i) => (
+              <span key={name}>
+                {i > 0 && ", "}
+                {proxyBase && state.status === "up"
+                  ? <a className="underline" href={`${proxyBase}/${port}/`} target="_blank" rel="noreferrer" title="Open through the board's proxy">{`${name}:${port}`}</a>
+                  : `${name}:${port}`}
+              </span>
+            ))}
+          </span>
         )}
         {state.updatedAt && (
           <span title={state.updatedAt}>{formatRelativeTime(state.updatedAt)}</span>
