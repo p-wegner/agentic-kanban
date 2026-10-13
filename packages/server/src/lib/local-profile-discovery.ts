@@ -189,7 +189,10 @@ export function findLocalProfile(
 ): LocalProfile | null {
   const wanted = name.trim();
   if (!wanted) return null;
-  const wantedProvider = provider.trim().toLowerCase();
+  // The launch intent carries the executor id ("claude-code"); local profiles are keyed by
+  // the provider ("claude"). Without this a pinned profile never matched on a worker.
+  const rawProvider = provider.trim().toLowerCase();
+  const wantedProvider = rawProvider === "claude-code" ? "claude" : rawProvider;
   return (
     discoverLocalProfiles(home, aliases).find(
       (p) => p.name === wanted && (wantedProvider === "" || p.provider === wantedProvider),

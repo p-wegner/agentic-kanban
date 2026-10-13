@@ -216,6 +216,14 @@ describe("the worker's own half: resolve the pinned profile, or refuse (#1027)",
     expect(apikey.spec.env.CLAUDE_CONFIG_DIR).toBeUndefined();
   });
 
+  it("matches a pin sent with the executor id claude-code against a claude profile", () => {
+    // The board's launch intent names the executor ("claude-code"); after #1431 kept the pin
+    // through the parse, every pinned worker launch was refused as profile-unknown.
+    const pinned = spec("oauth");
+    const result = applyProfileToSpec({ ...pinned, intent: { ...pinned.intent!, provider: "claude-code" } }, { home: fakeHome() });
+    expect(result.ok).toBe(true);
+  });
+
   it("REFUSES a profile this machine does not hold, naming it", () => {
     // The attestation the board placed on has gone stale. Running under another local login
     // would be the silent fallback #651 refused remote dispatch to prevent.
