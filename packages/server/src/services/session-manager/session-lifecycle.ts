@@ -626,7 +626,7 @@ export function createSessionLifecycle(
     // devcontainer-launch.ts for the best-effort/strict-mode contract.
     const { containerProvision, isolationDowngradeReason, workerPlacement: dcWorker } = await resolveContainerOrWorker({
       db, state, sessionId, workspaceId, projectId, effectiveWorkingDir, profile, launchProfile, effectiveExtraEnv,
-      placement, providerName, branch: workspace.isDirect ? undefined : workspace.branch, baseBranch: workspace.baseBranch ?? undefined, resumeProviderSessionId: resumedProviderSessionId(resumeWithNewModel, providerSessionId), // #1432
+      placement, providerName, workspace, resumeProviderSessionId: resumedProviderSessionId(resumeWithNewModel, providerSessionId), // #1432
     });
 
     // Persist the container id (#154) so stop/hang-kill/killAll — and a post-restart
@@ -646,7 +646,7 @@ export function createSessionLifecycle(
     // Worker-fleet placement (epic #1): an explicit placement wins; otherwise
     // `resolveSessionPlacement` (session-placement.ts) decides and records why.
     // Containerized launches keep the container path untouched.
-    let effectivePlacement = placement ?? dcWorker;
+    let effectivePlacement = dcWorker;
     if (!effectivePlacement && !containerProvision && projectId) {
       effectivePlacement = await resolveSessionPlacement({
         database: db,

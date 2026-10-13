@@ -178,15 +178,16 @@ export async function resolveContainerOrWorker(
   params: ResolveContainerProvisionParams & {
     placement?: Placement;
     providerName: ProviderName;
-    branch?: string;
-    baseBranch?: string;
+    workspace: { isDirect?: boolean | null; branch: string; baseBranch?: string | null };
     resumeProviderSessionId?: string;
   },
-): Promise<ResolveContainerProvisionResult & { workerPlacement?: Placement }> {
-  const { placement, providerName, branch, baseBranch, resumeProviderSessionId, ...provisionParams } = params;
+): Promise<ResolveContainerProvisionResult &  { workerPlacement?: Placement }> {
+  const { placement, providerName, workspace, resumeProviderSessionId, ...provisionParams } = params;
   const workerPlacement = placement ? undefined : await resolveDevcontainerWorkerPlacement({
-    db: params.db, sessionId: params.sessionId, projectId: params.projectId, providerName, branch, baseBranch, resumeProviderSessionId,
+    db: params.db, sessionId: params.sessionId, projectId: params.projectId, providerName, resumeProviderSessionId,
+    branch: workspace.isDirect ? undefined : workspace.branch, baseBranch: workspace.baseBranch ?? undefined,
   });
   if (workerPlacement) return { devcontainerEnabled: true, workerPlacement };
-  return resolveContainerProvision(provisionParams);
+  // `workerPlacement` carries the caller's explicit placement through unchanged.
+  return { ...(await resolveContainerProvision(provisionParams)), workerPlacement: placement };
 }
