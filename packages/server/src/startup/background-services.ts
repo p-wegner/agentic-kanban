@@ -18,6 +18,7 @@ import { startStrandedReviewReconciler, stopStrandedReviewReconciler } from "./s
 import { startStrandedPlanReconciler, stopStrandedPlanReconciler } from "./plan-mode-reconciler.js";
 import { startZombieFixSessionReconciler, stopZombieFixSessionReconciler } from "./zombie-fix-session-reconciler.js";
 import { startAncestorBranchReconciler, stopAncestorBranchReconciler } from "./ancestor-branch-reconciler.js";
+import { startStalledInProgressReconciler, stopStalledInProgressReconciler } from "./stalled-in-progress-reconciler.js";
 import { startBornBlockedReconciler, stopBornBlockedReconciler } from "./born-blocked-reconciler.js";
 import { startWorkflowNodeDivergenceReconciler, stopWorkflowNodeDivergenceReconciler } from "./workflow-node-divergence-reconciler.js";
 import { startDoneUnmergedSweep, stopDoneUnmergedSweep } from "./done-unmerged-invariant-sweep.js";
@@ -72,6 +73,8 @@ export interface BackgroundServiceContext {
   serverPort: number;
   /** In-memory set of review session ids, owned by the workflow engine. */
   reviewSessionIds: Set<string>;
+  /** The workflow engine's session-exit entry point, for sweeps that replay a lost exit (#1439). */
+  runWorkflowOnExit: (workspaceId: string, sessionId: string, exitCode: number | null, wasPlanMode?: boolean) => Promise<unknown>;
   /** Absolute path to the board's own repo root (Conductor supervisor). */
   boardRepoRoot: string;
 }
@@ -169,6 +172,15 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start() {
       startBornBlockedReconciler();
       return stopBornBlockedReconciler;
+    },
+  },
+  {
+    // Committed work stalled In Progress after a watchdog kill or a restart that lost the queued
+    // implement-exit check (#1439): replays the builder exit so the check/review runs.
+    name: "stalled-in-progress-reconciler",
+    start({ db, runWorkflowOnExit }) {
+      startStalledInProgressReconciler({ database: db, runWorkflowOnExit });
+      return stopStalledInProgressReconciler;
     },
   },
   {

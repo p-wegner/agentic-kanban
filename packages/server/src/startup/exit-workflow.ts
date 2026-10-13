@@ -40,7 +40,7 @@ import type { GitService } from "../services/workspace-internals.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { isAutomaticMergeEnabled } from "./merge-strategy.js";
 import type { Database } from "../db/index.js";
-import { classifySessionExit, resolveSessionRoleFlags } from "./session-exit-classification.js";
+import { classifySessionExit, isHangWatchdogKill, resolveSessionRoleFlags } from "./session-exit-classification.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { setMergeGateEvidence } from "../repositories/merge-gate.repository.js";
 import { stampWorkspaceReadyForMergeAt } from "../repositories/workspace-ready-for-merge.repository.js";
@@ -225,13 +225,23 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       // handler. The pure `classifySessionExit` decision core (#855) computes the verdict
       // so the priority between the cases is table-testable; every side effect below stays
       // here, in the same order as the original control flow.
-      const classification = classifySessionExit({
+      let classification = classifySessionExit({
         wasPlanMode: wasPlanMode ?? false,
         isFixAndMerge: roleFlags.isFixAndMerge,
         isLearning: roleFlags.isLearning,
         isReview: roleFlags.isReview,
         exitCode,
       });
+      // #1439: a builder the hang watchdog killed AFTER it committed ended WITH WORK — route it
+      // through the builder exit (implement-exit check, review) instead of leaving it In Progress.
+      if (classification.action === "failed" && !roleFlags.isReview) {
+        const { extractSessionStderr } = await import("../services/failure-pattern.service.js");
+        const killedByWatchdog = isHangWatchdogKill(await extractSessionStderr(sessionId, 50, db).catch(() => ""));
+        if (killedByWatchdog && await hasCommittedChanges(workspace, null, workspaceId, db).catch(() => false)) {
+          console.log(`[workflow] session ${sessionId} was killed by the hang watchdog but workspace ${workspaceId} has committed work — treating the exit as ended with work (#1439)`);
+          classification = { action: "builder" };
+        }
+      }
       // #966: the closed+mergedAt check above ran on a snapshot read ~60 lines earlier —
       // a merge landing in between must NOT be flapped back to idle. setWorkspaceStatus
       // enforces the terminal invariant atomically in its UPDATE's WHERE clause, so a
