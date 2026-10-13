@@ -2,6 +2,7 @@
 // Drops go through the same file lock the daemon writes under, so nobody hand-edits the JSON while
 // the daemon may rewrite it. Db-free: this module ships in the standalone worker binary.
 import type { Command } from "commander";
+import { execFailedToRun, execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { defaultWorkerStateFile } from "../../worker/worker-daemon.js";
 import { defaultWorkerWorkRoot } from "../../worker/worker-repo.js";
@@ -21,9 +22,9 @@ export async function isResultLanded(record: UndeliveredSessionRecord): Promise<
     const exists = await gitExec(["rev-parse", "--verify", "--quiet", target], { cwd: record.cacheDir });
     if (exists.error || !exists.stdout.trim()) continue;
     const r = await gitExec(["merge-base", "--is-ancestor", record.headSha, target], { cwd: record.cacheDir });
-    if (!r.error) return true;
-    // exit 1 = not an ancestor; anything else (unknown object, bad cwd) = cannot tell
-    return r.code === 1 ? false : null;
+    if (execSucceeded(r)) return true;
+    // a clean exit-1 with no stderr = not an ancestor; anything else (unknown object, bad cwd) = cannot tell
+    return execFailedToRun(r) || r.stderr.trim() ? null : false;
   }
   return null;
 }
