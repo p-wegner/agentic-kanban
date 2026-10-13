@@ -484,6 +484,12 @@ export async function resolveWorkerPlacement(params: {
    * Absent = the cap is not enforced (callers with no session ledger, e.g. dry runs).
    */
   hostActiveSessions?: number;
+  /**
+   * #1431: a one-shot agent call (`invokeClaudePrompt`), not a session. With no `branch` it needs
+   * no repo context, so a worker with no shared filesystem is placed with no git transport
+   * instead of falling back to the host for want of a branch.
+   */
+  oneShot?: boolean;
 }): Promise<Placement> {
   // #751: a remote decision claims a capacity slot, and EVERY exit from this
   // function that is not a remote placement has to give it back — including the
@@ -500,6 +506,14 @@ export async function resolveWorkerPlacement(params: {
     releaseWorkerSlot(reservation.id);
     throw err;
   }
+}
+
+/** A remote worker was chosen but there is no branch to push back: host, or a refusal for a strict project. */
+function branchlessHost(workerId: string, projectId: string, strict: boolean): Placement {
+  const why = `remote worker ${workerId} needs a branch for git transport`;
+  if (strict) throw new DispatchUnavailable(`${why} and worker dispatch is strict for project ${projectId}`);
+  console.warn(`[worker-fleet] ${why}; launching on host`);
+  return hostBecause("branch_for_transport", why);
 }
 
 async function resolvePlacementWithReservation(
@@ -682,9 +696,9 @@ async function resolvePlacementWithReservation(
     // there is nothing safe to dispatch remotely — stay on the host, unless the
     // project forbids that.
     if (!branch) {
-      if (strict) refuseHost(`remote worker ${workerId} needs a branch for git transport`);
-      console.warn(`[worker-fleet] remote worker ${workerId} needs a branch for git transport; launching on host`);
-      return hostBecause("branch_for_transport", `remote worker ${workerId} needs a branch for git transport`);
+      // #1431: a one-shot with no repo context needs no transport; anything else needs a branch to push back.
+      if (params.oneShot) return { kind: "remote", workerId, strict, sharesFilesystem: false, reservationId: reservation.id, ...profileOnPlacement, reason: remoteReason(`worker ${workerId} took a one-shot that needs no repo`, placed.capacity) };
+      return branchlessHost(workerId, projectId, strict);
     }
     const project = await getProjectById(projectId, database);
     if (!project?.repoPath) {

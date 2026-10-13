@@ -165,6 +165,27 @@ describe("worker-fleet placement (phase 1c)", () => {
     expect(placement).toEqual({ kind: "host", reason: { id: "branch_for_transport", detail: expect.any(String) } });
   });
 
+  // #1431: a one-shot agent call has no branch to push back, so for a true remote worker it is
+  // placed with no git transport instead of falling back to the host.
+  it("places a branchless one-shot on a true remote worker with no repo", async () => {
+    await optIn();
+    await seedProject();
+    const workerId = await registerWorker({ providers: ["claude"] });
+    fleet.connections.handleOpen(workerId, fakeWs());
+    const placement = await resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude", oneShot: true });
+    expect(placement).toEqual({
+      kind: "remote", workerId, strict: false, sharesFilesystem: false, reservationId: expect.any(String),
+      reason: { id: "eligible_worker", detail: expect.stringContaining("one-shot") },
+    });
+  });
+
+  it("still refuses the host for a strict project when no worker is eligible for a one-shot", async () => {
+    await optIn();
+    await db.insert(preferences).values({ key: workerStrictPrefKey(PROJECT_ID), value: "true" });
+    await expect(resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude", oneShot: true }))
+      .rejects.toMatchObject({ code: "NO_AVAILABLE_WORKER" });
+  });
+
   it("filters by provider", async () => {
     await optIn();
     const codexOnly = await registerLocalWorker({ providers: ["codex"] });

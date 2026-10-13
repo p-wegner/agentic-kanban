@@ -5,6 +5,7 @@ import { buildAgentLaunchConfig, narrowProviderName, getProfilePrefKey } from ".
 import type { Database } from "../db/index.js";
 import { getClaudeCliPreferences } from "../repositories/claude-cli.repository.js";
 import { toExecutorProvider } from "./agent-settings.service.js";
+import { dispatchOneShotToWorker, type OneShotRepoContext } from "./claude-oneshot-worker.service.js";
 
 export interface ClaudeCliOptions {
   timeout?: number;
@@ -23,6 +24,19 @@ export interface ClaudeCliOptions {
    * run to that tree.
    */
   allowEdits?: boolean;
+  /**
+   * The project this call works for (#1431). With it the call is PLACED like a session: a
+   * project opted into worker dispatch runs it on a fleet worker (the host only coordinates), and
+   * falls back to the host unless `worker_dispatch_strict` forbids that. Without it the call runs
+   * on the host as before.
+   */
+  projectId?: string;
+  /**
+   * Repo context for a worker run (#1431): `cwd` is a working tree of this project, which the
+   * worker checks out at its HEAD over git transport. An `allowEdits` call returns its commits by
+   * fast-forwarding `cwd`. Omit for a prompt that needs no files.
+   */
+  repo?: OneShotRepoContext;
 }
 
 /**
@@ -56,7 +70,7 @@ export async function invokeClaudePrompt(
   const providerName = narrowProviderName(providerPref);
   const profileName = profileByKey.get(getProfilePrefKey(providerName));
 
-  const { command, args, env, useShell } = buildAgentLaunchConfig({
+  const launch = buildAgentLaunchConfig({
     provider: toExecutorProvider(providerName),
     oneShotText: true,
     ...(allowEdits ? { oneShotAllowEdits: true } : {}),
@@ -64,6 +78,15 @@ export async function invokeClaudePrompt(
     model,
     ...(profileName ? { profile: { provider: providerName, name: profileName } } : {}),
   });
+  const { command, args, env, useShell } = launch;
+
+  if (opts.projectId) {
+    const placed = await dispatchOneShotToWorker({
+      database, projectId: opts.projectId, providerName, config: launch, prompt, timeoutMs: timeout, cwd, allowEdits,
+      ...(opts.repo ? { repo: opts.repo } : {}), explicitCommand: Boolean(agentCommand) || Boolean(launch.isMockAgent),
+    });
+    if (placed.handled) return placed.text;
+  }
 
   return new Promise<string>((resolve, reject) => {
     const child = execFile(command, args, {

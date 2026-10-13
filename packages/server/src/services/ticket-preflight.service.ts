@@ -93,7 +93,7 @@ ${answeredClarifications.length > 0 ? `\nThe user has already answered these cla
 Other open issues on the board:
 ${issuesSummary}`;
 
-  const stdout = await invokeClaudePrompt(prompt, { database, model: "claude-haiku-4-5" });
+  const stdout = await invokeClaudePrompt(prompt, { database, model: "claude-haiku-4-5", projectId });
   const parsed = extractModelJson(stdout, { shape: "object" }) as {
     verdict?: string;
     questions?: unknown[];

@@ -71,6 +71,12 @@ export type Placement =
        */
       strict?: boolean;
       /**
+       * #1431: `false` only on a one-shot placement that chose a worker with NO shared filesystem and
+       * needs no repo (so there is no `repo` to say so). Absent everywhere else, where `repo` present
+       * means a transport worker and neither means a filesystem-sharing one.
+       */
+      sharesFilesystem?: boolean;
+      /**
        * The profile the worker must run this session under (#1027).
        *
        * A NAME, never a credential — the board holds none the worker could use, and that

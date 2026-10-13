@@ -83,7 +83,7 @@ export async function populateStackProfile(
 
   if (!options?.skipLlm && isProfileSparse(profile)) {
     try {
-      const enriched = await enrichWithLlm(profile, repoPath, database);
+      const enriched = await enrichWithLlm(profile, repoPath, database, projectId);
       if (enriched) {
         await saveStackProfile(projectId, enriched, database, repoPath, scaffoldOptions);
         return enriched;
@@ -101,6 +101,7 @@ async function enrichWithLlm(
   profile: StackProfile,
   repoPath: string,
   database: Database,
+  projectId?: string,
 ): Promise<StackProfile | null> {
   let rootListing: string[] = [];
   try {
@@ -123,7 +124,7 @@ Detected marker files: ${profile.detectedMarkers.length ? profile.detectedMarker
 Repo root entries: ${rootListing.length ? rootListing.join(", ") : "unavailable"}
 Rule-based guesses so far: ${JSON.stringify({ stack: profile.stack, testCommand: profile.testCommand, buildCommand: profile.buildCommand })}`;
 
-  const raw = (await invokeClaudePrompt(prompt, { timeout: 30000, database })).trim();
+  const raw = (await invokeClaudePrompt(prompt, { timeout: 30000, database, ...(projectId ? { projectId } : {}) })).trim();
   const parsed = parseLlmJson(raw);
   if (!parsed) return null;
 
