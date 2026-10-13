@@ -66,6 +66,12 @@ export const SETTINGS_REGISTRY = {
    */
   devcontainer_builders: { type: "bool", default: "false" },
   /**
+   * #1432: with `devcontainer_builders` on, try a worker labelled `docker` first and
+   * run the devcontainer there; with none eligible the launch stays on the host
+   * (container on the board host) unless `worker_dispatch_strict`. Off by default.
+   */
+  devcontainer_on_workers: { type: "bool", default: "false" },
+  /**
    * When `devcontainer_builders` is on, refuse to launch instead of silently
    * falling back to host execution on a containerization prerequisite failure.
    * Off by default (best-effort fallback is the default contract, #160).

@@ -18,6 +18,9 @@ import {
 import { WorkspaceError } from "../workspace-internals.js";
 import type { ProviderName } from "../agent-provider.js";
 import type { SessionState } from "./types.js";
+import type { Placement } from "../agent-dispatch.service.js";
+import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
+import { resolveSessionPlacement } from "./session-placement.js";
 
 export interface ResolveContainerProvisionParams {
   db: Database;
@@ -141,4 +144,49 @@ export function surfaceIsolationDowngrade(params: {
     updateWorkspaceIsolationDowngrade(workspaceId, false, null, db)
       .catch((err) => console.error(`[devcontainer] failed to clear isolation downgrade: workspaceId=${workspaceId}`, err));
   }
+}
+
+/** The worker label a devcontainer builder needs (#1432): the worker runs docker for the stack. */
+export const DEVCONTAINER_WORKER_LABEL = "docker";
+
+/**
+ * #1432: placement for a devcontainer launch. With `devcontainer_builders` AND
+ * `devcontainer_on_workers` on, ask the fleet for a worker labelled `docker` BEFORE the board
+ * host provisions a container. Returns the remote placement when one is chosen (the caller then
+ * skips host provisioning); `undefined` means "stay on the host path". A strict-dispatch refusal
+ * propagates as the usual NO_AVAILABLE_WORKER conflict.
+ */
+export async function resolveDevcontainerWorkerPlacement(params: {
+  db: Database;
+  sessionId: string;
+  projectId: string | undefined;
+  providerName: ProviderName;
+  branch?: string;
+  baseBranch?: string;
+  resumeProviderSessionId?: string;
+}): Promise<Placement | undefined> {
+  const { db, projectId } = params;
+  if (!projectId) return undefined;
+  const on = async (key: string) => parseBoolSetting(key, (await lifecycleRepo.getPreferenceValue(key, db)) ?? null);
+  if (!(await on("devcontainer_builders")) || !(await on("devcontainer_on_workers"))) return undefined;
+  const placement = await resolveSessionPlacement({ ...params, database: db, projectId, extraRequiredLabels: [DEVCONTAINER_WORKER_LABEL] });
+  return placement.kind === "remote" ? placement : undefined;
+}
+
+/** #1432: worker placement for a devcontainer launch, else host provisioning (one call for the lifecycle). */
+export async function resolveContainerOrWorker(
+  params: ResolveContainerProvisionParams & {
+    placement?: Placement;
+    providerName: ProviderName;
+    branch?: string;
+    baseBranch?: string;
+    resumeProviderSessionId?: string;
+  },
+): Promise<ResolveContainerProvisionResult & { workerPlacement?: Placement }> {
+  const { placement, providerName, branch, baseBranch, resumeProviderSessionId, ...provisionParams } = params;
+  const workerPlacement = placement ? undefined : await resolveDevcontainerWorkerPlacement({
+    db: params.db, sessionId: params.sessionId, projectId: params.projectId, providerName, branch, baseBranch, resumeProviderSessionId,
+  });
+  if (workerPlacement) return { devcontainerEnabled: true, workerPlacement };
+  return resolveContainerProvision(provisionParams);
 }

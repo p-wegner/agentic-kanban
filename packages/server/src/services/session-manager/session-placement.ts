@@ -59,8 +59,10 @@ export async function resolveSessionPlacement(args: {
   baseBranch?: string;
   /** #750: set only when this launch actually resumes a provider session. */
   resumeProviderSessionId?: string;
+  /** #1432: extra worker labels this launch needs (a devcontainer builder needs `docker`). */
+  extraRequiredLabels?: string[];
 }): Promise<Placement> {
-  const { database, sessionId, projectId, providerName, branch, baseBranch, resumeProviderSessionId } = args;
+  const { database, sessionId, projectId, providerName, branch, baseBranch, resumeProviderSessionId, extraRequiredLabels } = args;
   // #908/#938: ONE Tier-0 read feeding BOTH placement inputs — reading it twice would let
   // them disagree about the same instant. Tier 0 is one in-process `os.freemem()` call,
   // cheap enough per launch (Tier 1 spawns a process and is the monitor's per-cycle read).
@@ -72,6 +74,7 @@ export async function resolveSessionPlacement(args: {
     branch,
     baseBranch,
     resumeProviderSessionId,
+    extraRequiredLabels,
     // #908: a saturated host does NOT block this launch — that would turn a placement input
     // into a gate. It only changes which reason lands on the session record when the chain
     // picks a worker anyway (`machine_saturated` rather than `eligible_worker`).
