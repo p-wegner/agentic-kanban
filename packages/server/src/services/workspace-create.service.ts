@@ -13,6 +13,7 @@
 import { findRunningBuilderSessionIds } from "./workspace-launch-guard.js";
 import { basename } from "node:path";
 import { randomUUID } from "node:crypto";
+import { projectDepsLiveOnWorker } from "./worker-deps-placement.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { isTerminalWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import type { ProfileSelectionReason } from "../lib/profile-selection-reason.js";
@@ -710,8 +711,9 @@ export function createWorkspaceCreateService(deps: {
       provisioningMarked = true;
 
       t = Date.now();
+      const depsOnWorker = !isDirect && await projectDepsLiveOnWorker(issue.projectId, database); // #1429
       ({ branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion, symlinkRun: latestSymlink } = await setupWorktree(
-        isDirect, project.repoPath, project.defaultBranch, input, setupConfig, symlinkConfig, id,
+        isDirect, project.repoPath, project.defaultBranch, input, { ...setupConfig, depsOnWorker }, symlinkConfig, id,
         {
           claudeProfile: agentConfig.claudeProfile,
           settingsProfile: agentConfig.claudeProfile && agentConfig.claudeProfile !== "default"
@@ -721,8 +723,6 @@ export function createWorkspaceCreateService(deps: {
         issue,
       ));
       timing("worktree-setup", t);
-      // The branch is only settled here (it can be derived), and the worktree path is what a
-      // reclaim needs — record both before the sibling loop, which is the long part.
       await updateProvisioning(id, { phase: "siblings", branch, worktreePath }, database).catch(() => {});
 
       if (!isDirect && worktreePath) {
@@ -755,7 +755,7 @@ export function createWorkspaceCreateService(deps: {
           gitService, database, projectId: issue.projectId, branch, repoScope,
           // #629: `skipSetup` suppressed only the leading repo's setup script, so on a
           // multi-repo project the installs that dominate provisioning ran anyway.
-          skipSetup: input.skipSetup === true,
+          skipSetup: input.skipSetup === true || depsOnWorker,
           ...installOpts,
         });
         if (siblingWorktrees.length > 0) timing("sibling-worktrees", t);
