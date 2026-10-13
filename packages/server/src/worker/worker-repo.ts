@@ -170,6 +170,38 @@ export async function applyCommitterIdentity(
  * worktree with the feature branch checked out. Throws with a descriptive
  * message on any git failure (surfaced to the board as assign_failed).
  */
+/**
+ * #1467: write the board's skills into a fresh checkout WITHOUT overwriting a skill the repo
+ * itself tracks. The board's built-in text of `code-review` etc. differs from the project's own
+ * tracked copy, and a builder's `git add .claude/skills` committed the overwrite (8f9831bea).
+ * A name whose directory holds tracked files is skipped - the project copy wins.
+ */
+export async function materializeRepoSkills(
+  checkoutDir: string,
+  skills: ReadonlyArray<{ name: string; description?: string; content: string }>,
+  log: (line: string) => void = workerLog,
+): Promise<{ written: string[]; skippedTracked: string[] }> {
+  const written: string[] = [];
+  const skippedTracked: string[] = [];
+  for (const skill of skills) {
+    const tracked = await gitExec(["ls-files", "--", `.claude/skills/${skill.name}`], { cwd: checkoutDir });
+    if (execSucceeded(tracked) && tracked.stdout.trim().length > 0) {
+      skippedTracked.push(skill.name);
+      continue;
+    }
+    await writeAgentSkillFile(checkoutDir, {
+      name: skill.name,
+      description: skill.description ?? "",
+      prompt: skill.content,
+    });
+    written.push(skill.name);
+  }
+  if (skippedTracked.length > 0) {
+    log(`[worker] kept the repo's tracked copy of ${skippedTracked.length} skill(s) instead of the board's text: ${skippedTracked.join(", ")}`);
+  }
+  return { written, skippedTracked };
+}
+
 export async function provisionWorkerCheckout(
   boardUrl: string,
   repo: WorkerRepoTransport,
@@ -278,13 +310,7 @@ export async function provisionWorkerCheckout(
   // #553: through the shared writer, not a raw writeFileSync. The hand-rolled version
   // had no `isSafeSkillName` guard and emitted no frontmatter, so a remote worker's
   // skills were not discoverable as slash-commands the way every local one is.
-  for (const skill of repo.skills ?? []) {
-    await writeAgentSkillFile(checkoutDir, {
-      name: skill.name,
-      description: skill.description ?? "",
-      prompt: skill.content,
-    });
-  }
+  await materializeRepoSkills(checkoutDir, repo.skills ?? [], log);
 
   // #749: the ticket-context file(s) the board wrote into ITS worktree. They arrive as
   // name + content because a board path names nothing here, and they must land BEFORE the
