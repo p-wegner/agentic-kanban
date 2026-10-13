@@ -56,7 +56,7 @@ describe("host-only verify work on workers (#1440)", () => {
 
   it("impact map is built on the worker and the artifact stored by the board", async () => {
     place();
-    const repo = mkdtempSync(join(tmpdir(), "impact-"));
+    const repo = mkdtempSync(join(tmpdir(), "ak-impact-"));
     const w = worker(`noise\n${IMPACT_MAP_BEGIN}\n{"v":1}\n${IMPACT_MAP_END}\n`);
     const mapPath = join(repo, "docs", "tests", "impact-map.json");
     const out = await runImpactMapBuildOnWorker({ placement: { projectId: "p1", database: db, workerRunner: w }, repoPath: repo, tool: join(repo, ".claude/skills/test-impact/tools/impact.mjs"), durations: null, mapPath });
