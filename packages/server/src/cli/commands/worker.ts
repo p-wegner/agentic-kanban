@@ -45,6 +45,7 @@ import { probeGlobalVersion } from "./worker-doctor-build-check.js";
 import { compareWithBoardBuild, renderBuildMismatch } from "./worker-board-build.js";
 import { boardOrExit, startBoard } from "./worker-board-default.js";
 import { parseBoardList } from "../../worker/worker-state.js";
+import { moveAsideRevokedPairing } from "../../worker/worker-revoked-pairing.js";
 import { resolveOwnPackageVersion } from "../../lib/worker-build.js";
 // The step SHAPE lives in shared/lib (#1089, wire-dto-single-declaration) — a deep `lib/` path,
 // not the `types` barrel, because this file is reached by the `agentic-kanban-worker` binary's
@@ -453,10 +454,8 @@ async function runWorkerStart(rawOptions: WorkerStartOptions & ToolchainStartOpt
     if (!entry && options.autoUpdate) {
       console.warn("[worker] --auto-update ignored: cannot locate this install's bin/worker.js");
     }
-    // #1350: a fixed-path launcher that always resolves current.json, so a manual restart never
-    // depends on the global install (which self-update never refreshes).
-    // #1352: the lines below print before the daemon's timestamped logger exists; on a relaunch
-    // stdout IS worker.log, so they used to land there with no timestamp. (Idempotent.)
+    // #1350: a fixed-path launcher that always resolves current.json (a manual restart never needs the global install).
+    // #1352: these lines print before the daemon's logger exists; on a relaunch stdout IS worker.log. (Idempotent.)
     stampConsoleWithTimestamps();
     applyWorkerPath(options.stateFile ?? defaultWorkerStateFile()); // #1374: saved CLI dirs first, WSL /mnt entries off
     // #1402: an old-style shim (pre-#1400) is repinned to a private copy of this build before it is rewritten.
@@ -476,6 +475,7 @@ async function runWorkerStart(rawOptions: WorkerStartOptions & ToolchainStartOpt
       if (cmp.state === "differs") console.warn(`[worker] WARNING: ${renderBuildMismatch(cmp.own, cmp.board)}`);
     }
     // #1373: the harness mode and dirs live in the state file, so doctor/auth read what the daemon uses.
+    if (options.token) await moveAsideRevokedPairing({ stateFile: options.stateFile ?? defaultWorkerStateFile(), boardUrls: boardList, log: console.log }); // #1450
     const harnessCfg = persistStartHarness(options.stateFile ?? defaultWorkerStateFile(), options);
     // Read by `restart` below, which can fire (a rollback) before the await resolves.
     let daemonRef: WorkerDaemonHandle | undefined;

@@ -56,6 +56,8 @@ export function WorkerConnectAgentPanel({ fleetUrl }: { fleetUrl?: string | null
   const [labels, setLabels] = useState("");
   const [maxConcurrency, setMaxConcurrency] = useState("");
   const [profileAlias, setProfileAlias] = useState("");
+  const [providers, setProviders] = useState("");
+  const [profiles, setProfiles] = useState("");
   const [toolchainInstall, setToolchainInstall] = useState("");
   const [boardUrls, setBoardUrls] = useState("");
   const [minted, setMinted] = useState<MintedConnectCode | null>(null);
@@ -74,6 +76,8 @@ export function WorkerConnectAgentPanel({ fleetUrl }: { fleetUrl?: string | null
           labels,
           maxConcurrency,
           profileAlias,
+          providers,
+          profiles,
           toolchainInstall,
           boardUrls,
           ...(fleetUrl ? { fleetUrl } : {}),
@@ -130,6 +134,17 @@ export function WorkerConnectAgentPanel({ fleetUrl }: { fleetUrl?: string | null
           Profile alias
           <input className={inputClass} value={profileAlias} onChange={(e) => setProfileAlias(e.target.value)} placeholder="default=anth" />
         </label>
+        <label>
+          Providers to offer (csv)
+          <input className={inputClass} value={providers} onChange={(e) => setProviders(e.target.value)} placeholder="claude" />
+        </label>
+        <label>
+          Profiles to offer (csv)
+          <input className={inputClass} value={profiles} onChange={(e) => setProfiles(e.target.value)} placeholder="anth" />
+        </label>
+        <div className="col-span-2 text-gray-500 dark:text-gray-400">
+          Leave both empty and the worker offers EVERY login on that machine, so placement can run sessions on any profile a project roster lists.
+        </div>
         <label>
           Toolchain install
           <select className={inputClass} value={toolchainInstall} onChange={(e) => setToolchainInstall(e.target.value)}>

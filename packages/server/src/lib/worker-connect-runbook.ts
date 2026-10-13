@@ -15,6 +15,10 @@ export interface ConnectRunbookOptions {
   os: ConnectOs;
   workerName?: string;
   labels?: string[];
+  /** `--providers`: which agent providers this machine offers (#1450). */
+  providers?: string[];
+  /** `--profiles`: which of the machine's logins it attests; absent = every one it finds (#1450). */
+  profiles?: string[];
   maxConcurrency?: number;
   /** `--profile-alias` value, e.g. `default=anth` (#1379). */
   profileAlias?: string;
@@ -58,6 +62,8 @@ function arg(value: string): string {
 export function buildStartFlags(boardUrls: string[], o: ConnectRunbookOptions): string[] {
   const flags = [`--board ${boardUrls.join(",")}`];
   if (o.labels?.length) flags.push(`--labels ${arg(o.labels.join(","))}`);
+  if (o.providers?.length) flags.push(`--providers ${arg(o.providers.join(","))}`);
+  if (o.profiles?.length) flags.push(`--profiles ${arg(o.profiles.join(","))}`);
   if (o.maxConcurrency && o.maxConcurrency > 0) flags.push(`--max-concurrency ${Math.floor(o.maxConcurrency)}`);
   if (o.profileAlias) flags.push(`--profile-alias ${arg(o.profileAlias)}`);
   if (o.toolchainInstall) flags.push(`--toolchain-install ${o.toolchainInstall}`);
@@ -84,6 +90,8 @@ export function buildConnectRunbook(input: {
   const nameFlag = o.workerName ? ` --name ${arg(o.workerName)}` : "";
   const labelFlag = o.labels?.length ? ` --labels ${arg(o.labels.join(","))}` : "";
   const startFlags = buildStartFlags(boardUrls, o);
+  const providerList = o.providers?.length ? o.providers : ["claude"];
+  const profilesFlag = o.profiles?.length ? ` --profiles ${arg(o.profiles.join(","))}` : "";
   const startCommand = `agentic-kanban-worker start ${startFlags.join(" ")}${nameFlag}`;
   const progressUrl = `${base}/connect/${code}/progress`;
 
@@ -103,6 +111,7 @@ export function buildConnectRunbook(input: {
     expect: "node v22 or newer; git 2.31 or newer; pnpm or corepack present; claude or codex present (a missing CLI is fixed by the setup step).",
     needsHuman: false,
   });
+  steps.push(existingInstallStep(o.os, boardUrls[0]!));
   if (o.os === "wsl") {
     steps.push({
       id: "wsl-context",
@@ -154,22 +163,34 @@ export function buildConnectRunbook(input: {
       title: "Set up and pair this machine",
       detail:
         "Checks git and the provider CLIs, creates the worker's own harness config dir (#1367) and pairs with the embedded " +
-        "single-use token. Add `--yes` only if the operator allowed unattended installs; without it the command asks before installing.",
+        "single-use token. Add `--yes` only if the operator allowed unattended installs; without it the command asks before installing. " +
+        "A pairing state the board rejects as revoked (401) is copied to `<state>.revoked-<ms>`, dropped, and paired again with this token — the output says so (#1450).",
       commands: [`agentic-kanban-worker setup --board ${boardUrls.join(",")} --token ${pairingToken}${nameFlag}${labelFlag}`],
-      expect: "Output ends with the worker registered; a pairing state file exists.",
+      expect: "Output ends with the worker registered; a pairing state file exists. If it printed `moved it aside`, a stale revoked pairing was replaced.",
+      needsHuman: false,
+    },
+    {
+      id: "repo-check",
+      title: "Check the cached clones and quarantine corrupt ones",
+      detail:
+        "`git fsck`s every cached clone under the worker's work root (#1417). A corrupt one is moved to `<work-root>/quarantine` (kept, not deleted) " +
+        "so the next assignment re-clones it. Run this while no worker daemon is running — the existing-install step stopped any old one.",
+      commands: ["agentic-kanban-worker repo-check --quarantine"],
+      expect: "Exit code 0: either `every cached clone ... is intact` or one `QUARANTINED <project> -> <path>` line per corrupt clone.",
       needsHuman: false,
     },
     {
       id: "login",
       title: "Log the worker in to its provider (the operator does this)",
       detail:
-        "The login is interactive and holds the operator's credentials — an agent must not attempt or script it. If the worker's only login is the " +
+        "Check the login BEFORE the service starts, so the daemon never comes up unable to run a session. The login is interactive and holds the " +
+        "operator's credentials — an agent must not attempt or script it. If the worker's only login is the " +
         "machine's default one, `--profile-alias` (below, in the start flags) attests it under a profile name (#1379).",
       commands: [],
       expect: "The check command prints a logged-in status for the provider.",
       needsHuman: true,
-      humanCommand: "claude /login   # in the worker's config dir, as printed by the setup step",
-      check: "agentic-kanban-worker doctor --providers claude",
+      humanCommand: `agentic-kanban-worker auth ${providerList[0] ?? "claude"}   # logs in inside the worker's own config dir`,
+      check: `agentic-kanban-worker doctor --providers ${providerList.join(",")}${profilesFlag}`,
     },
     {
       id: "trust",
@@ -187,8 +208,12 @@ export function buildConnectRunbook(input: {
       id: "doctor",
       title: "Run the worker doctor",
       detail: "Self-tests the whole chain to the board: fleet port, saved pairing, WebSocket upgrade, git transport, git, provider CLIs.",
-      commands: [`agentic-kanban-worker doctor --board ${boardUrls.join(",")}`],
-      expect: "Every check passes (exit code 0). `unknown` on the trust check is acceptable until the trust step is done; any `fail` is not.",
+      commands: [`agentic-kanban-worker doctor --board ${boardUrls.join(",")}${profilesFlag}`],
+      expect:
+        "Every check passes (exit code 0). `unknown` on the trust check is acceptable until the trust step is done; any `fail` is not. " +
+        "The `attested profiles` line must list only the profiles the operator chose" +
+        (o.profiles?.length ? ` (${o.profiles.join(", ")})` : " — without a `--profiles` choice it WARNs that every local login is attested; ask the operator which to offer") +
+        ".",
       needsHuman: false,
     },
   );
@@ -243,6 +268,7 @@ export function buildConnectRunbook(input: {
       needsHuman: false,
     });
   }
+  steps.push(verifyDaemonStep(o.os, boardUrls[0]!, startFlags));
   steps.push({
     id: "verify-online",
     title: "Confirm the worker is online",
@@ -265,6 +291,62 @@ export function buildConnectRunbook(input: {
   return { title, os: o.os, steps, markdown };
 }
 
+/** #1450: find and stop an older worker install BEFORE installing — a live old scheduled task/service/daemon otherwise outlives `Register-ScheduledTask -Force`. */
+function existingInstallStep(os: ConnectOs, board: string): RunbookStep {
+  const commands =
+    os === "windows"
+      ? [
+          "Get-ScheduledTask | Where-Object { $_.TaskName -match 'AgenticKanbanWorker|agentic-kanban-worker|ak-worker' -or (($_.Actions | ForEach-Object { \"$($_.Execute) $($_.Arguments)\" }) -join ' ') -match 'agentic-kanban-worker|ak-worker-service' } | Select-Object TaskName, State",
+          "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'agentic-kanban-worker|ak-worker-service' -and $_.ProcessId -ne $PID } | Select-Object ProcessId, Name, CommandLine",
+          "Test-Path \"$HOME\\.agentic-kanban\\worker\"   # the state dir an earlier install used",
+          "agentic-kanban-worker status   # only if an old command exists: shows the running daemon's board, flags and state file",
+        ]
+      : [
+          "systemctl --user list-units --all 'agentic-kanban-worker*' 'ak-worker*' --no-pager",
+          "pgrep -af 'agentic-kanban-worker|ak-worker-service'",
+          "crontab -l 2>/dev/null | grep -i 'agentic-kanban-worker\\|ak-worker'",
+          "ls -d ~/.agentic-kanban/worker 2>/dev/null   # the state dir an earlier install used",
+          "agentic-kanban-worker status   # only if an old command exists",
+        ];
+  const stop =
+    os === "windows"
+      ? "`Stop-ScheduledTask -TaskName <name>` then `Unregister-ScheduledTask -TaskName <name> -Confirm:$false` for each task found, then `Stop-Process -Id <pid>` for each leftover worker process (by PID only, never by image name)"
+      : "`systemctl --user disable --now <unit>` for each unit found, remove a matching crontab line, then `kill <pid>` for each leftover worker process (by PID only, never by image name)";
+  return {
+    id: "existing-install",
+    title: "Find and stop any older worker install",
+    detail:
+      "A worker installed earlier (same task name `AgenticKanbanWorker`, a wrapper such as `ak-worker-service.ps1`, or any process with " +
+      "`agentic-kanban-worker` in its command line) keeps running when this runbook re-registers the task, and its wrapper restarts its daemon " +
+      "with the OLD flags — the board then shows a heartbeat but no socket and no profiles. Run the commands. If anything matches, tell the operator " +
+      `what you found (name, state, command line) and ask before stopping it (unless they already told you to replace it); then stop it: ${stop}. ` +
+      `Re-run the commands until nothing matches. Leave the state dir in place — the pairing step handles a stale pairing. Board: ${board}.`,
+    commands,
+    expect: "Nothing matches, or every match was stopped with the operator's agreement. Report what was stopped in this step's progress output.",
+    needsHuman: false,
+  };
+}
+
+/** #1450: after the service starts, prove the RUNNING daemon carries this runbook's flags, not an old wrapper's. */
+function verifyDaemonStep(os: ConnectOs, board: string, startFlags: string[]): RunbookStep {
+  const commands =
+    os === "windows"
+      ? ["Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'agentic-kanban-worker|worker\\.js' -and $_.CommandLine -match '\\bstart\\b' } | Select-Object ProcessId, CommandLine"]
+      : ["pgrep -af 'agentic-kanban-worker|worker\\.js' | grep ' start'"];
+  return {
+    id: "verify-daemon",
+    title: "Verify exactly one daemon runs with the new flags",
+    detail:
+      `List the running worker daemons. Exactly ONE must appear and its command line must contain these flags: ${startFlags.join(" ")}. ` +
+      "A second process, or one with other flags (e.g. no `--profile-alias`, other labels), is an old install the earlier step missed: stop it " +
+      "(by PID, after asking) and start the service again. `agentic-kanban-worker status` shows the daemon's effective settings. " +
+      `Board: ${board}.`,
+    commands: [...commands, "agentic-kanban-worker status"],
+    expect: "One daemon process; its flags match the list above; `status` shows the expected board.",
+    needsHuman: false,
+  };
+}
+
 function renderMarkdown(r: {
   title: string;
   os: ConnectOs;
@@ -284,6 +366,7 @@ function renderMarkdown(r: {
     "",
     `Target: **${r.os === "windows" ? "Windows (PowerShell)" : r.os === "wsl" ? "WSL (inside the distro)" : "Linux / macOS"}**`,
     "",
+    ...humanStepsSection(r.steps),
     "## Reporting progress",
     "",
     `After each step, report it so the operator sees it live (${CONNECT_PROGRESS_STEP_IDS_NOTE}):`,
@@ -336,4 +419,21 @@ function renderMarkdown(r: {
     "",
   );
   return out.join("\n");
+}
+
+/** #1450: say up front which steps need the operator, so the agent asks once rather than discovering them one by one. */
+function humanStepsSection(steps: RunbookStep[]): string[] {
+  const human = steps.filter((s) => s.needsHuman);
+  if (!human.length) return [];
+  return [
+    "## What you will need from the operator",
+    "",
+    "Tell the operator now, so they are at the machine:",
+    "",
+    ...human.map((s) => `- **${s.title}** (\`id: ${s.id}\`)`),
+    "- Approval before stopping an older worker install, if the `existing-install` step finds one.",
+    "",
+    "Finish every step that does not need them first; list in your final report which of these you asked for.",
+    "",
+  ];
 }

@@ -456,7 +456,7 @@ import { checkTailnetFirewall } from "./worker-doctor-firewall-check.js";
 import { resolveProviderAuthDir } from "./worker-doctor-provider-auth.js";
 import type { WorkerHarness } from "../../worker/worker-harness.js";
 import { bindDefaultAlias } from "../../worker/worker-profile-aliases.js";
-import { checkHarness } from "./worker-doctor-harness.js";
+import { checkAttestedProfiles, checkHarness } from "./worker-doctor-harness.js";
 import { checkPendingDeletes, checkUndeliveredResults } from "./worker-doctor-undelivered.js";
 
 /**
@@ -709,6 +709,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
     checks.push(...(await checkProvider(provider, opts.home, undefined, opts.harness)));
   }
   checks.push(...checkProfileCredentials(opts.home, undefined, opts.profiles, undefined, opts.profileAliases, opts.harness?.dirFor("claude")));
+  checks.push(checkAttestedProfiles(discoverLocalProfiles(opts.home, bindDefaultAlias(parseProfileAliases(opts.profileAliases), opts.harness?.dirFor("claude"))), opts.profiles));
   // #1372: while the global launcher is stale or absent, remedies name the shim that always runs the current build.
   const launcher = launcherCommand({
     stateFile: opts.stateFile,

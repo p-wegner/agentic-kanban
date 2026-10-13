@@ -135,7 +135,8 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 71 -> 73 in #1443 for `worker/worker-lifecycle.ts` and `cli/commands/worker-lifecycle-command.ts` (status/stop/restart/config; node builtins + sibling worker modules).
     // Raised 73 -> 74 in #1445 for `worker/worker-pending-delete.ts` (node builtins only).
     // Raised 74 -> 75 in #1444 for `cli/commands/worker-results-command.ts` (`results list|drop`; node builtins + git-exec only).
-    expect(files.size).toBeLessThan(75);
+    // Raised 75 -> 76 in #1450 for `worker/worker-revoked-pairing.ts` (revoked-pairing probe; node builtins + worker-state only).
+    expect(files.size).toBeLessThan(76);
   });
 
   it("never reaches the database or board-service layer", () => {
