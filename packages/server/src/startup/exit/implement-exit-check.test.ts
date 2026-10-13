@@ -53,6 +53,13 @@ describe("planImplementExitRun — what one check executes", () => {
     expect(planImplementExitRun({ ...base, level: "full" })).toEqual({ kind: "verify", strategy: "full", command: "pnpm verify" });
     expect(planImplementExitRun({ ...base, level: "full", verifyScript: null }).kind).toBe("skip");
   });
+
+  it("skips impact and full when the host worktree has no deps (a worker built it), not typecheck", () => {
+    const plan = planImplementExitRun({ ...base, level: "impact", depsMissing: true });
+    expect(plan.kind).toBe("skip");
+    expect(plan.kind === "skip" && plan.reason).toContain("ran on a worker");
+    expect(planImplementExitRun({ ...base, level: "typecheck", depsMissing: true }).kind).toBe("typecheck");
+  });
 });
 
 describe("buildImplementExitFeedbackPrompt", () => {

@@ -103,6 +103,8 @@ export function planImplementExitRun(input: {
   workingDir: string | null;
   typecheckCommand: string | null;
   verifyScript: string | null;
+  /** A Node worktree without node_modules: a worker built it, so the host has no deps to run tests with. */
+  depsMissing?: boolean;
 }): ImplementExitRunPlan {
   if (input.level === "none") return { kind: "skip", reason: "the posture asks for no implement-exit check" };
   if (!input.workingDir) return { kind: "skip", reason: "the workspace has no worktree" };
@@ -114,6 +116,9 @@ export function planImplementExitRun(input: {
   }
   const script = input.verifyScript?.trim();
   if (!script) return { kind: "skip", reason: "the project has no verify_script" };
+  // #1458: a worker-built workspace never gets an install on the host; running here would be red
+  // in seconds and cost the builder its feedback turns. The merge gate still verifies.
+  if (input.depsMissing) return { kind: "skip", reason: "the host worktree has no installed dependencies (the session ran on a worker); the merge gate verifies" };
   return { kind: "verify", strategy: input.level, command: script };
 }
 
@@ -122,6 +127,10 @@ export interface RunImplementExitCheckArgs {
   projectId: string;
   level: ImplementExitCheckLevel;
   database: Database;
+}
+
+function hostDepsMissing(workingDir: string | null): boolean {
+  return Boolean(workingDir) && existsSync(join(workingDir!, "package.json")) && !existsSync(join(workingDir!, "node_modules"));
 }
 
 function skipped(level: ImplementExitCheckLevel, message: string, held = false): ImplementExitCheckResult {
@@ -144,6 +153,7 @@ export async function runImplementExitCheck(args: RunImplementExitCheckArgs): Pr
     workingDir: workspace.workingDir,
     typecheckCommand: level === "typecheck" ? await readTypecheckCommand(projectId, database) : null,
     verifyScript: verification?.verifyScript ?? null,
+    depsMissing: hostDepsMissing(workspace.workingDir),
   });
   if (plan.kind === "skip") return skipped(level, `implement-exit check skipped: ${plan.reason}`);
 
