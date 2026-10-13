@@ -6,9 +6,11 @@
 // `worker start` on every (self-)restart. Db-free: ships in the standalone worker binary.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { freemem, totalmem } from "node:os";
 import { dirname } from "node:path";
 import type { WorkerSettingKey, WorkerSettings } from "@agentic-kanban/shared/lib/worker-settings";
 import type { WorkerControlHandlers } from "./worker-control.js";
+import { freeDiskGb } from "./worker-resources.js";
 
 export const START_CONFIG_KEYS = ["maxConcurrency", "labels", "providers", "profileAlias"] as const;
 export type StartConfigKey = (typeof START_CONFIG_KEYS)[number];
@@ -106,6 +108,9 @@ export interface LifecycleCtx {
   effective(): { maxConcurrency?: number; labels?: string[]; providers?: string[]; profileAliases?: string[] };
   pinned(): WorkerSettingKey[];
   desired(): WorkerSettings | undefined;
+  /** #1451: attested provider:profile pairs and the harness mode (absent on older callers). */
+  profiles?(): string[];
+  harnessMode?(): string | undefined;
 }
 
 export interface StatusSetting {
@@ -133,7 +138,12 @@ export function buildLifecycleDetails(ctx: LifecycleCtx): Record<string, unknown
     ...(desired?.[key] !== undefined ? { desired: desired[key] } : {}),
     ...(pinned.has(key) ? { pinnedBy: key in cfg.set ? `config set ${key}` : KEY_FLAG[key] } : {}),
   }));
-  return { draining: ctx.draining(), sessionsLeft: ctx.sessionsLeft(), stateFile: ctx.stateFile, workRoot: ctx.workRoot, settings };
+  const GB = 1024 ** 3;
+  const resources = { freeRamGb: freemem() / GB, totalRamGb: totalmem() / GB, freeDiskGb: freeDiskGb(ctx.workRoot) };
+  return {
+    draining: ctx.draining(), sessionsLeft: ctx.sessionsLeft(), stateFile: ctx.stateFile, workRoot: ctx.workRoot, settings,
+    profiles: ctx.profiles?.() ?? [], harnessMode: ctx.harnessMode?.(), resources, // #1451
+  };
 }
 
 const show = (v: unknown): string => (v === undefined ? "default" : Array.isArray(v) ? v.join(",") || "none" : String(v));
@@ -148,6 +158,15 @@ export function renderStatus(s: Record<string, unknown>): string {
   if (upd?.state && upd.state !== "current") lines.push(`update:       ${upd.state}${upd.reason ? ` (${upd.reason})` : ""}`);
   lines.push(`state file:   ${String(s.stateFile ?? "?")}`);
   lines.push(`work root:    ${String(s.workRoot ?? "?")}`);
+  const profiles = s.profiles as string[] | undefined;
+  if (profiles) lines.push(`profiles:     ${profiles.length > 0 ? profiles.join(", ") : "none attested"}`);
+  if (s.harnessMode) lines.push(`harness:      ${String(s.harnessMode)}`);
+  const res = s.resources as { freeRamGb?: number; totalRamGb?: number; freeDiskGb?: number } | undefined;
+  if (res) {
+    const gb = (v?: number): string => (v === undefined ? "?" : `${v.toFixed(1)} GB`);
+    lines.push(`ram:          ${gb(res.freeRamGb)} free of ${gb(res.totalRamGb)}`);
+    lines.push(`disk:         ${gb(res.freeDiskGb)} free (work root)`);
+  }
   lines.push("settings:");
   for (const st of (s.settings as StatusSetting[] | undefined) ?? []) {
     let text: string;

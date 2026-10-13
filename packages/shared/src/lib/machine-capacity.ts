@@ -166,6 +166,8 @@ export interface WorkerCapacitySnapshot {
   thrashing: "none" | "light" | "heavy" | string;
   /** #1449: free GB on the volume holding the home directory; absent when unreadable. */
   freeDiskGb?: number;
+  /** #1451: total RAM in GB. */
+  totalRamGb?: number;
 }
 
 /** Free GB where agent checkouts land (the home volume). Never throws; null when unreadable. */
@@ -206,6 +208,7 @@ export function toWorkerCapacitySnapshot(
     spareCores: resolveSpareCores(opts),
     thrashing: snapshot.tier === "1" ? snapshot.thrashing : "none",
     ...(freeDiskGb != null ? { freeDiskGb } : {}),
+    totalRamGb: os.totalmem() / GB,
   };
 }
 

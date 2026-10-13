@@ -31,7 +31,7 @@
 // resolver stays the single place a placement is decided.
 import { authExpiredProfileNames, describeAuthExpired } from "../lib/worker-profile-attestation.js";
 import { fleetForProject } from "./worker-project-scope.js";
-import { workerAllowsProject, type WorkerSettings } from "@agentic-kanban/shared/lib/worker-settings";
+import { workerAllowsProject, workerBelowRamFloor, type WorkerSettings } from "@agentic-kanban/shared/lib/worker-settings";
 import {
   allowedProfilesPrefKey,
   rosterPrefKey,
@@ -248,11 +248,14 @@ function ineligibleReasonFor(
     projectBarred?: string | null;
     /** #1426: this worker's login for the provider is dead (see `describeAuthExpired`). */
     authExpired?: string | null;
+    /** #1451: free RAM is under the worker's `minFreeRamGb` floor. */
+    lowRam?: string | null;
   },
 ): string | null {
   if (worker.effectiveStatus !== "online") {
     return `status is ${worker.effectiveStatus} (heartbeat too old, or draining)`;
   }
+  if (ctx.lowRam) return ctx.lowRam; // #1451: named before the socket check, which a recovering worker may also fail
   if (!ctx.connected) return "heartbeat is fresh but the board holds no WebSocket for it";
   // #901 — the failure the two checks above cannot see: both are answered by the daemon's
   // transport layer, which outlives its ability to launch anything.
@@ -321,6 +324,7 @@ async function describeWorkers(
         authExpiredProfileNames(w.profiles, providerName),
       ),
       projectBarred: projectId ? barredReason(w.desiredSettings?.settings, projectId) : null,
+      lowRam: ((v) => (v.below ? v.reason : null))(workerBelowRamFloor(w.desiredSettings?.settings, w.capacity?.freeRamGb)),
     });
     return {
       workerId: w.id,
@@ -371,6 +375,7 @@ async function describeWorkers(
       ...(w.settingsReport ? { settingsReport: w.settingsReport } : {}),
       // #910: the headroom placement actually compared, not just its outcome.
       ...(w.capacity ? { capacity: w.capacity } : {}),
+      ...(w.harnessMode ? { harnessMode: w.harnessMode } : {}), // #1451
       // #1338: self-update state, as the worker last reported it.
       ...(w.update ? { update: w.update } : {}),
       ...(w.updateRequested ? { updateRequested: true } : {}),

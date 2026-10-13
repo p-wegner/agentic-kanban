@@ -102,6 +102,9 @@ export function WorkerSettingsPanel(props: WorkerSettingsPanelProps) {
         ))}
         {field("allowedProjects", "Allowed projects (none selected = all)", multi("allowedProjects"))}
         {field("deniedProjects", "Denied projects", multi("deniedProjects"))}
+        {field("minFreeRamGb", "Min free RAM, GB (empty = no floor)", (d) => (
+          <input type="number" min={0} step="0.5" disabled={d} className={INPUT} value={form.minFreeRamGb} onChange={(e) => set("minFreeRamGb", e.target.value)} />
+        ))}
       </div>
       <label className="mt-2 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
         <input type="checkbox" checked={form.drain} onChange={(e) => set("drain", e.target.checked)} />

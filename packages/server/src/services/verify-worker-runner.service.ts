@@ -6,6 +6,7 @@
 // It never decides trust: the caller feeds the report through `acceptWorkerVerdict`, which judges it
 // against the request the BOARD built (sha, tier, worker), not against anything in the frame. This
 // service also never invents a verdict: a worker that vanishes or goes silent yields a refusal.
+import { workerBelowRamFloor } from "@agentic-kanban/shared/lib/worker-settings";
 import type { VerifyJobFrame, VerifyStage, WorkerVerifyCapability } from "@agentic-kanban/shared/lib/worker-verify-protocol";
 import type { Database } from "../db/index.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
@@ -58,6 +59,8 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
     const views = await registry.listWorkersView();
     return views
       .filter((w) => w.effectiveStatus === "online" && connections.isConnected(w.id) && w.verify)
+      // #1451: under its own minFreeRamGb floor a worker takes no new verify job
+      .filter((w) => !workerBelowRamFloor(w.desiredSettings?.settings, w.capacity?.freeRamGb).below)
       .map((w) => {
         const cap = w.verify as WorkerVerifyCapability;
         const inFlight = listActiveVerifyJobs().filter((j) => j.workerId === w.id).length;

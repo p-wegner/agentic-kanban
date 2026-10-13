@@ -9,6 +9,8 @@ export interface WorkerSettingsFormState {
   allowedProjects: string[];
   deniedProjects: string[];
   drain: boolean;
+  /** #1451: free-RAM floor in GB; empty = no floor. */
+  minFreeRamGb: string;
 }
 
 export const splitCsv = (text: string): string[] => [...new Set(text.split(",").map((t) => t.trim()).filter(Boolean))];
@@ -26,6 +28,7 @@ export function formFromWorker(
     allowedProjects: desired?.allowedProjects ?? [],
     deniedProjects: desired?.deniedProjects ?? [],
     drain: desired?.drain === true,
+    minFreeRamGb: desired?.minFreeRamGb === undefined ? "" : String(desired.minFreeRamGb),
   };
 }
 
@@ -35,8 +38,12 @@ export function settingsFromForm(form: WorkerSettingsFormState): { settings: Wor
   if (!Number.isInteger(max) || max < 1 || max > 64) return { error: "Max concurrency must be a whole number from 1 to 64." };
   const aliases = splitCsv(form.profileAlias);
   if (aliases.some((a) => !/^[^=\s]+=[^=\s]+$/.test(a))) return { error: "Profile aliases look like default=anth." };
+  const floorText = form.minFreeRamGb.trim();
+  const floor = floorText === "" ? undefined : Number(floorText);
+  if (floor !== undefined && !(Number.isFinite(floor) && floor > 0 && floor <= 1024)) return { error: "Minimum free RAM is a number of GB above 0 (or empty for no floor)." };
   return {
     settings: {
+      ...(floor !== undefined ? { minFreeRamGb: floor } : {}),
       maxConcurrency: max,
       labels: splitCsv(form.labels),
       providers: splitCsv(form.providers),

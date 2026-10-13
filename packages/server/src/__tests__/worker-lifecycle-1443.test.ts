@@ -78,6 +78,14 @@ describe("worker lifecycle (#1443)", () => {
       expect(text).toContain("work root:");
     });
 
+    it("lists attested profiles, harness mode, RAM and disk (#1451)", () => {
+      const text = renderStatus({ pid: 1, ...buildLifecycleDetails(ctx({ profiles: () => ["claude:anth", "codex:main"], harnessMode: () => "inherit" })) });
+      expect(text).toContain("profiles:     claude:anth, codex:main");
+      expect(text).toContain("harness:      inherit");
+      expect(text).toMatch(/ram:\s+[\d.]+ GB free of [\d.]+ GB/);
+      expect(text).toMatch(/disk:\s+[\d.]+ GB free/);
+    });
+
     it("shows it unpinned once the pin is gone", () => {
       const text = renderStatus({ pid: 1, ...buildLifecycleDetails(ctx({ pinned: () => [], effective: () => ({ maxConcurrency: 4 }) })) });
       expect(text).toMatch(/maxConcurrency\s+4 \(from the board\)/);
