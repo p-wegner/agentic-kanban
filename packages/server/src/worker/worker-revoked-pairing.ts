@@ -61,7 +61,7 @@ export async function moveAsideRevokedPairing(opts: {
     opts.log(`[worker] the board rejected the saved pairing (worker ${probe.workerId}) but a copy could not be kept (${errorMessage(err)}); leaving it in place`);
     return null;
   }
-  for (const url of opts.boardUrls) forgetIdentity(opts.stateFile, url);
+  forgetIdentity(opts.stateFile, probe.url!);
   opts.log(`[worker] the board rejected the saved pairing (worker ${probe.workerId} was revoked); moved it aside to ${aside} and pairing again with the new token`);
   return aside;
 }
