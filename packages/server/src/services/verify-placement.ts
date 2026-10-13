@@ -19,7 +19,16 @@ export const VERIFY_PLACEMENTS = ["host", "worker", "prefer-worker"] as const;
 export type VerifyPlacement = (typeof VERIFY_PLACEMENTS)[number];
 
 /** The four kinds of verify chain that can be placed. */
-export type VerifyChainKind = "workspace-gate" | "implement-exit" | "train-gate" | "rc-sweep";
+export type VerifyChainKind =
+  | "workspace-gate"
+  | "implement-exit"
+  | "train-gate"
+  | "rc-sweep"
+  // #1430: the remaining verify-type jobs, placed by the same policy and allowlist.
+  | "review-exit-typecheck"
+  | "cold-clone-build"
+  | "bisect"
+  | "impact-map";
 
 export const verifyPlacementPrefKey = (projectId: string): string => projectPref("verify_placement").key(projectId);
 export const verifyWorkersPrefKey = (projectId: string): string => projectPref("verify_workers").key(projectId);
