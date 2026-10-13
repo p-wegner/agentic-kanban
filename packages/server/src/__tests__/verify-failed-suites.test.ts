@@ -99,7 +99,7 @@ describe("isGuardSuite / classifyFailedSuites (#1230)", () => {
     const wt = makeWorktree();
     try {
       const guardOnly = classifyFailedSuites(wt.root, [{ file: GUARD, packageLabel: null }]);
-      expect(guardOnly).toEqual({ files: [`packages/client/${GUARD}`], guardSuites: [`packages/client/${GUARD}`], guardFailure: true });
+      expect(guardOnly).toEqual({ files: [`packages/client/${GUARD}`], guardSuites: [`packages/client/${GUARD}`], guardFailure: true, unattributed: [] });
       const mixed = classifyFailedSuites(wt.root, [{ file: GUARD, packageLabel: null }, { file: PLAIN, packageLabel: "client" }]);
       expect(mixed.guardFailure).toBe(false);
       expect(mixed.guardSuites).toEqual([`packages/client/${GUARD}`]);

@@ -35,6 +35,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { hasAlwaysRunMarker } from "./always-run-guard-floor.js";
+import { stripCheckoutPrefix } from "./failed-suite-parse.js";
 import { withMergeFixHint, type MergeFixHint } from "./merge-failure-fix-hint.js";
 
 /** The un-prefixed failing-suite shape the ledger and this module both read. */
@@ -49,7 +50,7 @@ export interface FailedSuiteRef {
 export const GUARD_SUITE_NAME_RE = /(?:^|\/)[^/]*(?:ratchet|guard|invariant|parity)[^/]*\.(?:test|spec)\.[cm]?[jt]sx?$/i;
 
 function normalize(file: string): string {
-  return file.replace(/\\/g, "/").replace(/^\.\//, "");
+  return stripCheckoutPrefix(file);
 }
 
 /** The package directories a worktree actually has — the candidate set for attribution. */
@@ -128,13 +129,23 @@ export interface FailedSuiteClassification {
    * the verdict.
    */
   guardFailure: boolean;
+  /**
+   * Names that could NOT be placed, kept as the runner printed them (#1470). Never fed to the
+   * ledger (a guessed name there is a phantom miss) — only shown, so a red names its suites.
+   */
+  unattributed?: string[];
 }
 
 /** {@link attributeFailedSuites} + {@link isGuardSuite}, as one verdict. */
 export function classifyFailedSuites(workingDir: string | null, suites: readonly FailedSuiteRef[]): FailedSuiteClassification {
   const files = attributeFailedSuites(workingDir, suites);
   const guardSuites = files.filter((file) => isGuardSuite(workingDir, file));
-  return { files, guardSuites, guardFailure: files.length > 0 && guardSuites.length === files.length };
+  const unattributed = [...new Set(
+    suites
+      .map((s) => normalize(s.file))
+      .filter((raw) => !files.some((f) => f === raw || f.endsWith(`/${raw}`))),
+  )];
+  return { files, guardSuites, guardFailure: files.length > 0 && guardSuites.length === files.length, unattributed };
 }
 
 /**

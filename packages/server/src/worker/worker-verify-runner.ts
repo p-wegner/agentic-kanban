@@ -25,6 +25,7 @@ import {
   type VerifyStage,
   type WorkerVerifyCapability,
 } from "@agentic-kanban/shared/lib/worker-verify-protocol";
+import { stripCheckoutPrefix } from "../services/failed-suite-parse.js";
 import { composeGitUrl, deriveFallbackSetupCommand, gitAuthEnv } from "./worker-repo.js";
 
 export type CheckoutOutcome = { ok: true; dir: string; sha: string } | { ok: false; refused: VerifyRefusal; reason: string; sha?: string };
@@ -65,7 +66,7 @@ export function parseVerifyFailingSuites(output: string): string[] {
   const found = new Set<string>();
   for (const line of output.split(/\r?\n/)) {
     const m = /(?:^|\s)(?:FAIL|\u00d7|\u2717|\u2718)\s+\[?\s*([^\s>\]]+\.(?:test|spec)\.[cm]?[jt]sx?)/.exec(line);
-    if (m) found.add(m[1].replace(/\\/g, "/").replace(/^\.\//, ""));
+    if (m) found.add(stripCheckoutPrefix(m[1]));
   }
   return [...found].sort();
 }

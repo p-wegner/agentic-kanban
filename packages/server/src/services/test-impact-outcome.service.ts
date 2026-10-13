@@ -801,7 +801,9 @@ export async function recordVerifyGateOutcome(args: {
   // stdout, so no `FAIL` line ever follows its `[test:mine] <pkg>:` header (31 rows of `failed: []`
   // on #1228). `classifyFailedSuites` places an unlabelled suite by disk instead — see its header.
   const classified = classifyFailedSuites(args.workingDir, outcome.failedSuites);
-  const named = { failedSuites: classified.files, guardFailure: classified.guardFailure, guardSuites: classified.guardSuites };
+  // #1470: names that could not be placed stay visible (raw) in what the gate reports; the ledger
+  // below still receives only the placed ones.
+  const named = { failedSuites: [...classified.files, ...(classified.unattributed ?? [])], guardFailure: classified.guardFailure, guardSuites: classified.guardSuites };
   if (outcome.failure?.timedOut) {
     return { recorded: false, reason: "the run timed out or was killed — inconclusive, so it is not an observation", ...named };
   }
