@@ -1,7 +1,8 @@
-import { and, desc, eq } from "drizzle-orm";
-import { issues, projectStatuses, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { and, eq } from "drizzle-orm";
+import { issues, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
+import { getRecentSessionBriefs } from "./session.repository.js";
 
 export interface StalledInProgressCandidate {
   workspaceId: string;
@@ -44,12 +45,7 @@ export async function listIdleInProgressWorkspaces(database: Database = db): Pro
 
   const out: StalledInProgressCandidate[] = [];
   for (const r of rows) {
-    const recent = await database
-      .select({ id: sessions.id, status: sessions.status, triggerType: sessions.triggerType, endedAt: sessions.endedAt })
-      .from(sessions)
-      .where(eq(sessions.workspaceId, r.workspaceId))
-      .orderBy(desc(sessions.startedAt))
-      .limit(5);
+    const recent = await getRecentSessionBriefs(r.workspaceId, 5, database);
     out.push({
       ...r,
       hasRunningSession: recent.some((s) => s.status === "running"),
