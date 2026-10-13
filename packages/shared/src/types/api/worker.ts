@@ -65,3 +65,11 @@ export interface WorkerDropDiagnosis {
   reconnectsSinceLastDrop: number;
   msSinceLastDrop: number | null;
 }
+
+/** One step report an agent posts to `POST /connect/<code>/progress`, shown live in the Connect view (#1442). */
+export interface ConnectProgressEntry {
+  step: string;
+  status: "ok" | "failed";
+  output: string;
+  at: string;
+}

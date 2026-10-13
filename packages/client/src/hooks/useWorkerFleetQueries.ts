@@ -1,5 +1,6 @@
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { apiFetch, apiPut } from "../lib/api.js";
+import type { ConnectProgressEntry } from "@agentic-kanban/shared/types";
 import type { WorkerSettings } from "@agentic-kanban/shared/lib/worker-settings";
 import type { WorkerConnectStep } from "@agentic-kanban/shared/lib/worker-connect-steps";
 import type { BootstrapOs, WorkerBootstrap } from "@agentic-kanban/shared/lib/worker-bootstrap-steps";
@@ -28,12 +29,7 @@ export interface ConnectInfo {
 }
 
 /** #1442: what the Connect view shows of a minted connect code — its state and the agent's live progress reports. */
-export interface ConnectCodeProgress {
-  step: string;
-  status: "ok" | "failed";
-  output: string;
-  at: string;
-}
+export type ConnectCodeProgress = ConnectProgressEntry;
 export interface ConnectCodeState {
   codeHint: string;
   status: "active" | "used" | "revoked" | "expired" | "fetch-limit";

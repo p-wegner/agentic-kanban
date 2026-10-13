@@ -6,6 +6,7 @@
 // restart should invalidate every outstanding code, exactly as it already does for pairing tokens
 // (`createExpiringDigestStore`). The code itself is never logged — only `redactConnectCode`.
 import { randomBytes } from "node:crypto";
+import type { ConnectProgressEntry } from "@agentic-kanban/shared/types";
 import type { ConnectRunbookOptions } from "../lib/worker-connect-runbook.js";
 
 export const CONNECT_CODE_TTL_MS = 15 * 60 * 1000;
@@ -17,12 +18,7 @@ const MAX_OUTPUT_CHARS = 400;
 
 export type ConnectCodeStatus = "active" | "used" | "revoked" | "expired" | "fetch-limit";
 
-export interface ConnectProgressEntry {
-  step: string;
-  status: "ok" | "failed";
-  output: string;
-  at: string;
-}
+export type { ConnectProgressEntry };
 
 interface ConnectCodeRecord {
   code: string;
