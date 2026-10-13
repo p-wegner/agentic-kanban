@@ -148,6 +148,7 @@ export async function runWorkspacePostMergeCleanup(
   await refreshImpactMapAfterMerge({
     repoPath: args.repoPath,
     projectId: args.projectId,
+    database: deps.database,
     prefMap: args.prefMap,
   });
   await maybeAutoStartFollowups(args, deps);

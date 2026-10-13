@@ -43,6 +43,7 @@ import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
+import type { Database } from "../../db/index.js";
 import {
   resolveTestImpactMapGate,
   runTestImpactMapPass,
@@ -101,6 +102,8 @@ export interface PostMergeImpactMapInput {
   /** The project's MAIN CHECKOUT. A worktree path here would break single-writer. */
   repoPath: string | null | undefined;
   projectId: string | null | undefined;
+  /** #1440: lets the rebuild be placed on a verify worker; absent = host as before. */
+  database?: Database;
   /** The pref map the merge chain already loaded — no second read, no second generation. */
   prefMap: Map<string, string>;
   /** The bound to apply; defaults to {@link IMPACT_MAP_MAX_COMMITS_BEHIND}. */
@@ -133,7 +136,7 @@ export async function refreshImpactMapAfterMerge(
   try {
     const commitsBehind = await countImpactMapCommitsBehind(repoPath);
     const forced = commitsBehind !== null && commitsBehind > bound;
-    const pass = await runTestImpactMapPass(repoPath, { ...input.passDeps, forceRebuild: forced });
+    const pass = await runTestImpactMapPass(repoPath, { ...input.passDeps, forceRebuild: forced, ...(input.database ? { placement: { projectId, database: input.database } } : {}) });
 
     if (pass.outcome === "rebuilt") {
       log(

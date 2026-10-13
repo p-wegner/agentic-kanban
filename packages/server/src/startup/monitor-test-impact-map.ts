@@ -70,7 +70,7 @@ export async function runTestImpactMapRefresh(
       const project = await getProjectById(projectId, database);
       if (!project?.repoPath || !existsSync(project.repoPath)) continue;
 
-      const result = await runTestImpactMapPass(project.repoPath);
+      const result = await runTestImpactMapPass(project.repoPath, database ? { placement: { projectId, database } } : {});
       switch (result.outcome) {
         case "rebuilt":
           rebuilt++;
