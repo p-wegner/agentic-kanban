@@ -124,8 +124,20 @@ describe("worker doctor — node runtime version (#860)", () => {
   it("fails a Node version below the floor, with a remedy", () => {
     const check = checkNodeVersion(`v${MIN_SUPPORTED_NODE_MAJOR - 1}.9.0`);
     expect(check.status).toBe("fail");
-    expect(check.detail).toContain("older than the board's declared floor");
+    expect(check.detail).toContain("outside the board's supported range");
     expect(check.remedy).toContain(`Node ${MIN_SUPPORTED_NODE_MAJOR}`);
+  });
+
+  it("fails Node 23.7 (dependency-cruiser cannot run check:arch), naming the range and the fix (#1457)", () => {
+    const check = checkNodeVersion("v23.7.0");
+    expect(check.status).toBe("fail");
+    expect(check.detail).toContain("^22.0.0 || >=24.0.0");
+    expect(check.detail).toContain("check:arch");
+    expect(check.remedy).toContain("toolchain-install");
+  });
+
+  it("passes Node 24", () => {
+    expect(checkNodeVersion("v24.1.0").status).toBe("pass");
   });
 
   it("reports unknown, not a failure, for an unparseable version string", () => {
