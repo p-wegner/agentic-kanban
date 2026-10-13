@@ -8,7 +8,8 @@
 //    possession of the one-time code; it carries only the pairing token, never board credentials.
 import { Hono } from "hono";
 import { createRouter } from "../middleware/create-router.js";
-import { parseOptionalJsonBody } from "../middleware/parse-body.js";
+import { parseJsonBody } from "../middleware/parse-body.js";
+import { connectCodeMintBody, connectProgressBody } from "./worker-connect-body-schemas.js";
 import { UnprocessableError } from "../errors/index.js";
 import type { WorkerRegistry } from "../services/worker-registry.service.js";
 import { PAIRING_TOKEN_TTL_MS } from "../services/worker-registry.service.js";
@@ -84,7 +85,7 @@ export function createConnectOwnerRoute(
   const router = createRouter();
 
   router.post("/", async (c) => {
-    const body = await parseOptionalJsonBody<Record<string, unknown>>(c);
+    const body = await parseJsonBody(c, connectCodeMintBody);
     const options = parseConnectOptions(body);
     const described = describeFleet();
     const fleetUrl = typeof body.fleetUrl === "string" && URL_RE.test(body.fleetUrl.replace(/\/+$/, "")) ? body.fleetUrl.replace(/\/+$/, "") : described.fleetUrl;
@@ -171,7 +172,7 @@ export function createConnectFleetRoute(store: ConnectCodeStore = getConnectCode
   });
 
   router.post("/:code/progress", async (c) => {
-    const body = await parseOptionalJsonBody<{ step?: unknown; status?: unknown; output?: unknown }>(c);
+    const body = await parseJsonBody(c, connectProgressBody);
     if (typeof body.step !== "string" || !body.step.trim() || (body.status !== "ok" && body.status !== "failed")) {
       return c.json({ error: 'body must be {"step": "<step id>", "status": "ok"|"failed", "output": "<short text>"}' }, 422);
     }
