@@ -1,3 +1,4 @@
+import { BOARD_NODE_ENGINES, nodeSatisfiesEngines } from "@agentic-kanban/shared/lib/node-engines";
 import type { DoctorCheck } from "./worker-doctor.js";
 
 /**
@@ -31,17 +32,17 @@ export function checkNodeVersion(nodeVersion: string = process.version): DoctorC
       detail: `could not parse a major version out of "${nodeVersion}"`,
     };
   }
-  if (major < MIN_SUPPORTED_NODE_MAJOR) {
+  if (major < MIN_SUPPORTED_NODE_MAJOR || nodeSatisfiesEngines(nodeVersion) === false) {
     return {
       name: "node runtime version",
       status: "fail",
-      detail: `this machine runs Node ${nodeVersion}, older than the board's declared floor (>=${MIN_SUPPORTED_NODE_MAJOR})`,
-      remedy: `Install Node ${MIN_SUPPORTED_NODE_MAJOR} LTS or newer, then reinstall the worker package under it.`,
+      detail: `this machine runs Node ${nodeVersion}, outside the board's supported range (${BOARD_NODE_ENGINES}); \`pnpm check:arch\` (dependency-cruiser) cannot run on it, so builders would skip the architecture gate`,
+      remedy: `Install Node 22 LTS or >=24 (e.g. \`mise use -g node@22\`), then reinstall the worker package under it. Or start the worker with --toolchain-install=ask|auto (and --toolchain-allow node) so a project requiring \`toolchain:node>=24\` gets a mise-installed Node per session.`,
     };
   }
   return {
     name: "node runtime version",
     status: "pass",
-    detail: `Node ${nodeVersion} (floor is >=${MIN_SUPPORTED_NODE_MAJOR})`,
+    detail: `Node ${nodeVersion} (supported range is ${BOARD_NODE_ENGINES})`,
   };
 }
