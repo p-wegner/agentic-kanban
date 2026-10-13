@@ -37,6 +37,9 @@ export interface WorkerControlStatus {
   boardUrl: string;
   workerVersion?: string;
   update: WorkerUpdateReport;
+  /** #1443: lifecycle view, merged in by the daemon (see worker-lifecycle.ts). */
+  draining?: boolean;
+  sessionsLeft?: number;
   /** Phase of the last recorded update failure (`manifest`, `download`, `install`, …). */
   failurePhase?: string;
 }
@@ -44,7 +47,15 @@ export interface WorkerControlStatus {
 export interface WorkerControlHandlers {
   updateNow(): Promise<UpdateNowResult>;
   status(): WorkerControlStatus;
+  /** #1443: extra fields for `status` (effective settings, state file, work root, ...). */
+  details?(): Record<string, unknown>;
+  /** #1443: stop or restart the daemon, optionally after draining. Answers at once; the work runs on. */
+  shutdown?(req: { restart: boolean; drain: boolean }): ShutdownAck;
 }
+
+export type ShutdownAck =
+  | { ok: true; sessionsLeft: number; drain: boolean; restart: boolean }
+  | { ok: false; reason: string };
 
 export function controlFileFor(stateFile: string): string {
   return join(dirname(stateFile), "worker-control.json");
@@ -81,7 +92,12 @@ export async function startWorkerControlServer(opts: {
     void (async () => {
       if (req.headers["x-worker-control-token"] !== token) return send(res, 401, { error: "bad control token" });
       try {
-        if (req.method === "GET" && req.url === "/status") return send(res, 200, opts.handlers.status());
+        if (req.method === "GET" && req.url === "/status") return send(res, 200, { ...opts.handlers.status(), ...(opts.handlers.details?.() ?? {}) });
+        if (req.method === "POST" && req.url?.startsWith("/shutdown")) {
+          if (!opts.handlers.shutdown) return send(res, 501, { error: "this daemon cannot stop or restart itself" });
+          const q = new URL(req.url, "http://127.0.0.1").searchParams;
+          return send(res, 200, opts.handlers.shutdown({ restart: q.get("restart") === "1", drain: q.get("drain") === "1" }));
+        }
         if (req.method === "POST" && req.url === "/update") return send(res, 200, await opts.handlers.updateNow());
         send(res, 404, { error: "not found" });
       } catch (err) {
@@ -136,7 +152,7 @@ async function call<T>(ctl: WorkerControlFile, method: "GET" | "POST", path: str
 export interface ApplyUpdateOptions {
   stateFile: string;
   print: (line: string) => void;
-  /** Give up waiting for the restart after this long (drain waits for running sessions). */
+  /** Give up waiting for the restart after this long (drain waits for running sessions). 0 = look once (--no-wait, #1443). */
   timeoutMs?: number;
   pollMs?: number;
   fetchImpl?: typeof fetch;
@@ -147,6 +163,11 @@ export interface ApplyUpdateOptions {
 function shortBuild(id: string | undefined): string {
   if (!id) return "?";
   return /^[0-9a-f]{7,40}$/i.test(id) ? id.slice(0, 7) : id;
+}
+
+/** #1443: what `update-check --apply` prints when the wait ends mid-drain: progress, not a failure. */
+export function drainInProgressMessage(sessionsLeft: number | undefined): string {
+  return `drain in progress, ${sessionsLeft ?? "?"} session(s) left; check with: agentic-kanban-worker status`;
 }
 
 /** Exit-code-shaped outcome of `update-check --apply`. */
@@ -196,7 +217,10 @@ export async function applyWorkerUpdate(o: ApplyUpdateOptions): Promise<ApplyUpd
   const deadline = Date.now() + timeoutMs;
   let lastReason = "";
   let current = ctl;
-  while (Date.now() < deadline) {
+  let lastStatus: WorkerControlStatus | undefined;
+  let polled = false;
+  while (!polled || Date.now() < deadline) {
+    polled = true; // a no-wait run still looks once
     await sleep(pollMs);
     const latest = readControlFile(o.stateFile) ?? current;
     let status: WorkerControlStatus;
@@ -208,6 +232,7 @@ export async function applyWorkerUpdate(o: ApplyUpdateOptions): Promise<ApplyUpd
       continue;
     }
     current = latest;
+    lastStatus = status;
     if (latest.token !== ctl.token) {
       // A new daemon start answers (its token is fresh per start): the restart happened.
       const now = status.workerVersion;
@@ -230,5 +255,40 @@ export async function applyWorkerUpdate(o: ApplyUpdateOptions): Promise<ApplyUpd
       return { ok: true, summary: `already current (build ${status.workerVersion ?? "?"})` };
     }
   }
+  // #1443: a drain still waiting on sessions is progress, not a failure.
+  if (lastStatus?.update.state === "updating") return { ok: true, summary: drainInProgressMessage(lastStatus.sessionsLeft) };
   return fail(`timed out after ${Math.round(timeoutMs / 1000)}s waiting for the daemon to finish updating; it may still be draining (check worker.log)`);
+}
+
+/** #1443: `stop` / `restart` — ask the running daemon to shut down (optionally after draining). */
+export async function requestWorkerShutdown(o: {
+  stateFile: string;
+  restart: boolean;
+  drain: boolean;
+  fetchImpl?: typeof fetch;
+}): Promise<{ ok: true; pid: number; ack: Extract<ShutdownAck, { ok: true }> } | { ok: false; reason: string }> {
+  const ctl = readControlFile(o.stateFile);
+  if (!ctl) return { ok: false, reason: `no running worker daemon found (no ${controlFileFor(o.stateFile)})` };
+  try {
+    const res = await (o.fetchImpl ?? fetch)(`http://127.0.0.1:${ctl.port}/shutdown?restart=${o.restart ? 1 : 0}&drain=${o.drain ? 1 : 0}`, {
+      method: "POST",
+      headers: { "x-worker-control-token": ctl.token },
+    });
+    if (!res.ok) return { ok: false, reason: `control endpoint answered HTTP ${res.status}` };
+    const ack = (await res.json()) as ShutdownAck;
+    return ack.ok ? { ok: true, pid: ctl.pid, ack } : { ok: false, reason: ack.reason };
+  } catch (err) {
+    return { ok: false, reason: `the daemon (pid ${ctl.pid}) did not answer on 127.0.0.1:${ctl.port} (${errorMessage(err)})` };
+  }
+}
+
+/** #1443: the daemon's `/status` including the lifecycle details; null when no daemon answers. */
+export async function fetchWorkerStatus(stateFile: string, fetchImpl: typeof fetch = fetch): Promise<(WorkerControlStatus & Record<string, unknown>) | null> {
+  const ctl = readControlFile(stateFile);
+  if (!ctl) return null;
+  try {
+    return await call<WorkerControlStatus & Record<string, unknown>>(ctl, "GET", "/status", fetchImpl);
+  } catch {
+    return null;
+  }
 }

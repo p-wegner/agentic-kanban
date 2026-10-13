@@ -25,6 +25,7 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { cliPathArg } from "../cli-path.js";
 import { createWorkerHarness, resolveInspectedHarness } from "../../worker/worker-harness.js";
 import { addHarnessOptions, registerWorkerAuth } from "./worker-auth-command.js";
+import { createLifecycle, registerWorkerLifecycle, waitOption } from "./worker-lifecycle-command.js"; import { applyStartConfig } from "../../worker/worker-lifecycle.js"; // #1443
 import { addToolchainOptions, formatToolchainInstall, registerWorkerToolchain, toolchainDaemonOptions, type ToolchainStartOptions } from "./worker-toolchain-command.js";
 // Type-only + a db-free formatter: this module is also the standalone worker
 // binary's entry point, which must never pull in the database graph.
@@ -424,7 +425,7 @@ interface WorkerStartOptions {
 }
 
 async function runWorkerStart(rawOptions: WorkerStartOptions & ToolchainStartOptions): Promise<void> {
-  const options = { ...rawOptions, board: startBoard(rawOptions, rawOptions.stateFile ?? defaultWorkerStateFile()) };
+  const options = applyStartConfig({ ...rawOptions, board: startBoard(rawOptions, rawOptions.stateFile ?? defaultWorkerStateFile()) }, rawOptions.stateFile ?? defaultWorkerStateFile()); // #1443: persisted `config set|unset` beats argv
   const boardList = parseBoardList(options.board); options.board = boardList[0] ?? options.board;
   // #1346: a global install that a self-update has left behind hands over to the current build.
   const delegateTo = resolveDelegation({
@@ -494,6 +495,7 @@ async function runWorkerStart(rawOptions: WorkerStartOptions & ToolchainStartOpt
       stateFile: options.stateFile,
       workRoot: options.workRoot,
       drainTimeoutMs,
+      lifecycle: createLifecycle({ getDaemon: () => daemonRef, entry, argv: relaunchArgvOf(process.argv.slice(2)), logFile, leaveAgents: options.leaveAgents, isSupervised: isSupervised(), onStopped: () => clearInterval(keepAlive) }),
       ...(entry
         ? {
             selfUpdate: {
@@ -653,7 +655,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
   addToolchainOptions(addHarnessOptions(startCmd)).action(runWorkerStart);
 
   registerWorkerAuth(workerCmd);
-  registerWorkerToolchain(workerCmd);
+  registerWorkerToolchain(workerCmd); registerWorkerLifecycle(workerCmd);
 
   workerCmd
     .command("instructions")
@@ -911,15 +913,15 @@ export function registerWorkerSubcommands(workerCmd: Command) {
     )
     .option("--board <url>", "Board base URL — the FLEET port on a cross-machine setup (default: the one board this worker is paired with; ignored with --apply: the daemon's own board is used)")
     .option("--state-file <path>", `Pairing state file, relative to the directory you run the command in (default: ${defaultWorkerStateFile()})`, cliPathArg)
-    .option("--apply", "Worker machine: update the running daemon to the board's build now (needs a daemon started with self-update, i.e. 'worker start')")
+    .option("--apply", "Worker machine: update the running daemon to the board's build now (needs a daemon started with self-update, i.e. 'worker start')").option("--wait <dur>", "With --apply: how long to follow the update (e.g. 90s, 10m; default 10m). A drain still waiting on sessions then exits 0 with its progress").option("--no-wait", "With --apply: do not wait; report drain progress and exit 0")
     .option("--json", "Output the report as JSON")
-    .action(async (options: { board?: string; stateFile?: string; json?: boolean; apply?: boolean }) => {
+    .action(async (options: { board?: string; stateFile?: string; json?: boolean; apply?: boolean; wait?: string | false }) => {
       if (options.apply) {
         const applyStateFile = options.stateFile ?? defaultWorkerStateFile();
         const log = (line: string) => console.log(line);
         const before = harnessUpdateNote(applyStateFile);
         if (before) log(before);
-        const outcome = await applyWorkerUpdate({ stateFile: applyStateFile, print: log });
+        const outcome = await applyWorkerUpdate({ stateFile: applyStateFile, print: log, ...waitOption(options.wait) });
         console.log(options.json ? JSON.stringify(outcome) : outcome.summary);
         if (!options.json) printLauncherWarning(applyStateFile, probeGlobalVersion(), log);
         if (!outcome.ok) process.exit(1);
