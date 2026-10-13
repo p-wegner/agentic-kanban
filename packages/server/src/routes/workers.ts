@@ -17,6 +17,7 @@ import {
   landIncomingRef,
   discardIncomingRef,
 } from "../services/worker-incoming-refs.service.js";
+import { listActiveVerifyJobs } from "../services/verify-worker-runner.service.js";
 import {
   describeFleet,
   explainIssuePlacement,
@@ -160,6 +161,8 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
         // consumer has read `id` since epic #1. Renaming it would have been a silent break.
         id: w.workerId,
         ...w,
+        // #1437: which verify jobs (gate / train gate / rc sweep / ...) the board has placed on this worker right now.
+        verifyJobs: listActiveVerifyJobs().filter((j) => j.workerId === w.workerId),
       })),
       fleet: {
         registered: fleet.registered,
@@ -191,7 +194,7 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
       hold: cap.hold,
       reason: cap.reason,
       floorGb: Number(process.env.SMART_HOOKS_MIN_FREE_GB ?? 2) || 2,
-      verify: { active: verifyChainSemaphoreActive(), slots: slots.slots, queued: verifyChainSemaphoreQueueLength() },
+      verify: { active: verifyChainSemaphoreActive(), slots: slots.slots, queued: verifyChainSemaphoreQueueLength(), placed: listActiveVerifyJobs() },
     });
   });
 

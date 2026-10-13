@@ -16,6 +16,7 @@
 // scoped git tokens (#247) — otherwise a revoked machine keeps streaming into
 // in-flight sessions and keeps cloning/pushing until the board restarts.
 
+import { parseWorkerVerifyCapability, type WorkerVerifyCapability } from "@agentic-kanban/shared/lib/worker-verify-protocol";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createExpiringDigestStore, mintToken, sha256Hex } from "../lib/bearer-token.js";
 import { db as realDb } from "../db/index.js";
@@ -127,6 +128,8 @@ export interface WorkerView extends Omit<WorkerRow, "tokenHash" | "desiredSettin
   toolchains?: WorkerToolchains;
   /** The worker's own install policy for project toolchains (#1371): never|ask|auto, its allowlist, whether mise is present. */
   toolchainInstallPolicy?: WorkerToolchainInstallInfo;
+  /** Verify-job capability + free slots as of the last heartbeat (#1437). In memory like `capacity`. */
+  verify?: WorkerVerifyCapability;
   /** The latest install the board asked this worker for and how it is going (#1371): pending/installing/failed/done. */
   toolchainInstall?: ToolchainInstallRecord;
   /** Why this worker advertises no usable provider, as of its last hello/heartbeat (#1372). In memory like `capacity`. */
@@ -197,6 +200,7 @@ export function createWorkerRegistry(database: Database = realDb) {
   const reportedToolchains = new Map<string, WorkerToolchains>();
   /** Install policy each worker declared, and the latest install request per worker (#1371). In memory like toolchains. */
   const reportedInstallInfo = new Map<string, WorkerToolchainInstallInfo>();
+  const reportedVerify = new Map<string, WorkerVerifyCapability>(); // #1437
   const toolchainInstalls = new Map<string, ToolchainInstallRecord>();
 
   /** Why a worker advertises no usable provider (#1372); absent = nothing to say. */
@@ -376,6 +380,7 @@ export function createWorkerRegistry(database: Database = realDb) {
       notePackageManagers(workerId, opts.capabilities.packageManagers);
       noteToolchains(workerId, opts.capabilities.toolchains);
       noteToolchainInstallInfo(workerId, opts.capabilities.toolchainInstall);
+      noteVerify(workerId, opts.capabilities.verify);
       noteProviderNotice(workerId, opts.capabilities.providerNotice);
       noteDoctor(workerId, opts.capabilities.doctor);
     }
@@ -462,6 +467,7 @@ export function createWorkerRegistry(database: Database = realDb) {
       const toolchains = reportedToolchains.get(row.id);
       const toolchainInstallPolicy = reportedInstallInfo.get(row.id);
       const toolchainInstall = toolchainInstalls.get(row.id);
+      const verify = reportedVerify.get(row.id);
       const providerNotice = reportedProviderNotices.get(row.id);
       const doctor = reportedDoctor.get(row.id);
       const update = reportedUpdates.get(row.id);
@@ -481,6 +487,7 @@ export function createWorkerRegistry(database: Database = realDb) {
         ...(packageManagers ? { packageManagers } : {}),
         ...(toolchains ? { toolchains } : {}),
         ...(toolchainInstallPolicy ? { toolchainInstallPolicy } : {}),
+        ...(verify ? { verify } : {}),
         ...(toolchainInstall ? { toolchainInstall } : {}),
         ...(providerNotice ? { providerNotice } : {}),
         ...(doctor ? { doctor } : {}),
@@ -525,6 +532,13 @@ export function createWorkerRegistry(database: Database = realDb) {
     const parsed = parseWorkerPackageManagers(raw);
     if (parsed) reportedPackageManagers.set(workerId, parsed);
     else reportedPackageManagers.delete(workerId);
+  }
+
+  /** Record (or clear) a worker's verify capability (#1437). A REPLACE: absent = it runs no verify jobs. */
+  function noteVerify(workerId: string, raw: unknown): void {
+    const parsed = parseWorkerVerifyCapability(raw);
+    if (parsed) reportedVerify.set(workerId, parsed);
+    else reportedVerify.delete(workerId);
   }
 
   /** Record (or clear) a worker's detected toolchains (#1382). A REPLACE: absent = unknown. */
@@ -616,6 +630,7 @@ export function createWorkerRegistry(database: Database = realDb) {
     reportedPackageManagers.delete(workerId);
     reportedToolchains.delete(workerId);
     reportedInstallInfo.delete(workerId);
+    reportedVerify.delete(workerId);
     toolchainInstalls.delete(workerId);
     reportedProviderNotices.delete(workerId);
     reportedDoctor.delete(workerId);
@@ -638,7 +653,7 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   return {
     mintPairingToken, registerWorker, authenticateWorker, heartbeat, touchHeartbeat,
-    listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles, notePackageManagers, noteToolchains, noteToolchainInstallInfo, noteToolchainInstallRequested, noteToolchainInstallStatus, noteProviderNotice, noteDoctor, noteCapabilities,
+    listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles, notePackageManagers, noteToolchains, noteToolchainInstallInfo, noteVerify, noteToolchainInstallRequested, noteToolchainInstallStatus, noteProviderNotice, noteDoctor, noteCapabilities,
     requestUpdate, authenticateAnyWorker, isPairingTokenValid, getDesiredSettings, setDesiredSettings,
   };
 }

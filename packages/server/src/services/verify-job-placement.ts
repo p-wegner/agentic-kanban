@@ -25,9 +25,22 @@ import {
   type WorkerVerifyReport,
 } from "./verify-placement.js";
 
+/** What the board tells a worker beyond the sha: the project (to fetch + read scripts), the timeout and env (#1437). */
+export interface VerifyRunRequest extends VerifyRequest {
+  kind: VerifyChainKind;
+  command: string;
+  workingDir: string;
+  projectId?: string;
+  branch?: string;
+  timeoutMs?: number;
+  /** Env the host run would carry that the worker should reproduce (e.g. `KANBAN_RETRY_TEST_FILES`). */
+  env?: Record<string, string>;
+  maxWorkers?: number;
+}
+
 export interface VerifyWorkerRunner {
   listWorkers(): VerifyWorkerCandidate[] | Promise<VerifyWorkerCandidate[]>;
-  run(request: VerifyRequest & { kind: VerifyChainKind; command: string; workingDir: string }): Promise<WorkerVerifyReport>;
+  run(request: VerifyRunRequest): Promise<WorkerVerifyReport>;
 }
 
 let runner: VerifyWorkerRunner | null = null;
@@ -60,43 +73,71 @@ export interface PlaceVerifyCommandArgs {
   /** Injectable for tests; defaults to the registered runner. */
   workerRunner?: VerifyWorkerRunner | null;
   log?: (line: string) => void;
+  /** What a worker run needs beyond the command (#1437); ignored on the host. */
+  branch?: string;
+  timeoutMs?: number;
+  env?: Record<string, string>;
+  maxWorkers?: number;
 }
 
 export interface PlacedVerifyResult {
   result: SetupScriptResult;
   target: "host" | "worker";
   workerName?: string;
+  /** The worker REFUSED (sha mismatch, no slot, ...): nothing was verified, so callers hold/retry rather than record red. */
+  refused?: string;
+  /** What the worker reported (#1437), so a caller can store the verdict like a host run's. */
+  report?: WorkerVerifyReport;
 }
 
-export async function runPlacedVerifyCommand(args: PlaceVerifyCommandArgs): Promise<PlacedVerifyResult> {
-  const { kind, projectId, database, log = (l) => console.log(`[verify-placement] ${l}`) } = args;
+export type VerifyPlan =
+  | { target: "host"; reason: string }
+  | { target: "hold"; reason: string }
+  | { target: "worker"; reason: string; workerId: string; workerName: string; active: VerifyWorkerRunner; allowlist: Set<string> };
+
+/** Decide host / worker / hold for one chain WITHOUT running it (#1437): callers that must act on a hold (the gate, the sweep) use this. */
+export async function planVerifyPlacement(args: Pick<PlaceVerifyCommandArgs, "kind" | "projectId" | "database" | "hostHeld" | "workerRunner">): Promise<VerifyPlan> {
   const [rawPlacement, rawAllow] = await Promise.all([
-    getPreference(verifyPlacementPrefKey(projectId), database).catch(() => null),
-    getPreference(verifyWorkersPrefKey(projectId), database).catch(() => null),
+    getPreference(verifyPlacementPrefKey(args.projectId), args.database).catch(() => null),
+    getPreference(verifyWorkersPrefKey(args.projectId), args.database).catch(() => null),
   ]);
   const placement = parseVerifyPlacement(rawPlacement);
-  if (placement === "host") return { result: await args.runOnHost(), target: "host" };
-
+  if (placement === "host") return { target: "host", reason: "verify_placement=host" };
   const active = args.workerRunner === undefined ? runner : args.workerRunner;
   const allowlist = parseVerifyWorkerAllowlist(rawAllow);
   const workers = active ? await Promise.resolve(active.listWorkers()).catch(() => []) : [];
-  const decision = decideVerifyPlacement({ placement, kind, hostHeld: args.hostHeld ?? false, allowlist, workers });
-  if (decision.target === "hold") throw new VerifyJobHeldError(decision.reason);
-  if (decision.target === "host" || !active) return { result: await args.runOnHost(), target: "host" };
+  const decision = decideVerifyPlacement({ placement, kind: args.kind, hostHeld: args.hostHeld ?? false, allowlist, workers });
+  if (decision.target === "hold") return { target: "hold", reason: decision.reason };
+  if (decision.target === "host" || !active) return { target: "host", reason: decision.reason };
+  return { target: "worker", reason: decision.reason, workerId: decision.workerId, workerName: decision.workerName, active, allowlist };
+}
 
-  const request: VerifyRequest = { requestId: randomUUID(), workerId: decision.workerId, sha: args.sha, tier: args.tier };
-  log(`${decision.reason} (worker ${decision.workerName})`);
-  const report = await active.run({ ...request, kind, command: args.command, workingDir: args.workingDir });
-  const verdict = acceptWorkerVerdict(request, report, allowlist, decision.workerName);
+/** Run on the worker a plan chose and judge its report through `acceptWorkerVerdict`. */
+export async function runOnPlannedWorker(plan: Extract<VerifyPlan, { target: "worker" }>, args: PlaceVerifyCommandArgs): Promise<PlacedVerifyResult> {
+  const log = args.log ?? ((l: string) => console.log(`[verify-placement] ${l}`));
+  const request: VerifyRequest = { requestId: randomUUID(), workerId: plan.workerId, sha: args.sha, tier: args.tier };
+  log(`${plan.reason} (worker ${plan.workerName})`);
+  const report = await plan.active
+    .run({ ...request, kind: args.kind, command: args.command, workingDir: args.workingDir, projectId: args.projectId, branch: args.branch, timeoutMs: args.timeoutMs, env: args.env, maxWorkers: args.maxWorkers })
+    .catch((e: unknown): WorkerVerifyReport => ({ ...request, passed: false, refused: "worker_unreachable", reason: e instanceof Error ? e.message : String(e) }));
+  const verdict = acceptWorkerVerdict(request, report, plan.allowlist, plan.workerName);
   if (!verdict.accepted) {
-    log(`${kind} verdict from ${decision.workerName} refused: ${verdict.reason}`);
-    return { result: { exitCode: -1, stdout: "", stderr: `worker verdict refused: ${verdict.reason}` }, target: "worker", workerName: decision.workerName };
+    log(`${args.kind} verdict from ${plan.workerName} refused: ${verdict.reason}`);
+    return { result: { exitCode: -1, stdout: "", stderr: `worker verdict refused: ${verdict.reason}` }, target: "worker", workerName: plan.workerName, refused: verdict.reason, report };
   }
   return {
-    result: { exitCode: verdict.verdict === "green" ? 0 : 1, stdout: report.log ?? "", stderr: "" },
+    result: { exitCode: verdict.verdict === "green" ? 0 : report.exitCode || 1, stdout: report.log ?? "", stderr: "", timedOut: report.timedOut === true },
     target: "worker",
-    workerName: decision.workerName,
+    workerName: plan.workerName,
+    report,
   };
+}
+
+export async function runPlacedVerifyCommand(args: PlaceVerifyCommandArgs): Promise<PlacedVerifyResult> {
+  const plan = await planVerifyPlacement(args);
+  if (plan.target === "hold") throw new VerifyJobHeldError(plan.reason);
+  if (plan.target === "host") return { result: await args.runOnHost(), target: "host" };
+  return runOnPlannedWorker(plan, args);
 }
 
 /** The tree a worker verdict is pinned to; empty when unreadable (a worker verdict is then refused). */
