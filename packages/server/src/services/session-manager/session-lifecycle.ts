@@ -625,8 +625,7 @@ export function createSessionLifecycle(
     // any isolation downgrade instead of leaving it in a console.warn only (#160) — see
     // devcontainer-launch.ts for the best-effort/strict-mode contract.
     const { containerProvision, isolationDowngradeReason, workerPlacement: dcWorker } = await resolveContainerOrWorker({
-      db, state, sessionId, workspaceId, projectId, effectiveWorkingDir, profile, launchProfile, effectiveExtraEnv,
-      placement, providerName, workspace, resumeProviderSessionId: resumedProviderSessionId(resumeWithNewModel, providerSessionId), // #1432
+      db, state, sessionId, workspaceId, projectId, effectiveWorkingDir, profile, launchProfile, effectiveExtraEnv, placement, providerName, workspace, resumeProviderSessionId: resumedProviderSessionId(resumeWithNewModel, providerSessionId), // #1432
     });
 
     // Persist the container id (#154) so stop/hang-kill/killAll — and a post-restart
