@@ -13,6 +13,7 @@
 //   GET  /api/workers/:id/update-check   (per-worker bearer token — the board's build, #880)
 //   GET  /ws/workers/:id                 (per-worker bearer token, checked pre-upgrade)
 //   ALL  /mcp                         (per-ASSIGNMENT token, allowlisted board tools — #769)
+//   GET  /connect/:code, POST /connect/:code/progress  (one-time connect code, #1442)
 //   GET  /health, /api/health         (unauthenticated liveness, like the others)
 // Every one of them authenticates for itself, so this surface is safe to expose
 // while the main app stays on loopback permanently. The owner-only endpoints
@@ -108,6 +109,8 @@ export async function startFleetListener(opts: {
   createWorkersRoute: CreateWorkersRoute;
   /** Defaults to `resolveFleetHost()` — loopback unless an interface is named (#753). */
   host?: string;
+  /** The agent-readable `/connect/<code>` surface (#1442). Injected like `createWorkersRoute` (services must not import routes/). */
+  createConnectRoute?: () => Hono;
 }): Promise<FleetListenerHandle> {
   const { database, port, createWorkersRoute } = opts;
   // #1325: `KANBAN_FLEET_HOST=tailscale` is resolved HERE, at bind time, and throws when the
@@ -128,6 +131,8 @@ export async function startFleetListener(opts: {
   app.get("/health", health);
   app.get("/api/health", health);
   app.route("/api/workers", createWorkersRoute(database, fleet.registry));
+  // #1442: one-time, code-authenticated runbook for an agent on a new worker machine.
+  if (opts.createConnectRoute) app.route("/connect", opts.createConnectRoute());
   // #769: the authority the worker DIALED, learned from its own request rather than guessed by
   // the board. `Host` on the websocket upgrade is exactly the `--board` host:port the worker was
   // started with, which is what makes the MCP bridge URL composable without the board ever

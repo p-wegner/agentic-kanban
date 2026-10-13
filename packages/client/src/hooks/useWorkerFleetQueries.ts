@@ -1,5 +1,6 @@
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { apiFetch, apiPut } from "../lib/api.js";
+import type { ConnectProgressEntry } from "@agentic-kanban/shared/types";
 import type { WorkerSettings } from "@agentic-kanban/shared/lib/worker-settings";
 import type { WorkerConnectStep } from "@agentic-kanban/shared/lib/worker-connect-steps";
 import type { BootstrapOs, WorkerBootstrap } from "@agentic-kanban/shared/lib/worker-bootstrap-steps";
@@ -25,6 +26,27 @@ export interface ConnectInfo {
   steps: WorkerConnectStep[];
   /** #1370: the node-only bootstrap per worker OS, built by the same function `worker pair` prints. */
   bootstrap?: Record<BootstrapOs, WorkerBootstrap>;
+}
+
+/** #1442: what the Connect view shows of a minted connect code — its state and the agent's live progress reports. */
+export type ConnectCodeProgress = ConnectProgressEntry;
+export interface ConnectCodeState {
+  codeHint: string;
+  status: "active" | "used" | "revoked" | "expired" | "fetch-limit";
+  expiresAt: string;
+  fetches: number;
+  maxFetches: number;
+  progress: ConnectCodeProgress[];
+}
+
+/** Polls every 3 s while a code is held, so "doctor passed, worker online" appears as the agent reports it. */
+export function useConnectCodeQuery(code: string | null) {
+  return useQuery({
+    queryKey: ["workers", "connect-code", code] as const,
+    queryFn: () => apiFetch<ConnectCodeState>(`/api/workers/connect-code/${encodeURIComponent(code ?? "")}`),
+    enabled: code !== null,
+    refetchInterval: 3000,
+  });
 }
 
 export function useWorkerConnectInfoQuery() {
