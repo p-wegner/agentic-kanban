@@ -90,6 +90,7 @@ import { appendFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFil
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitExecSyncResult } from "./git-exec.mjs";
+import { mergeBackRc } from "./promote-merge-back.mjs";
 import { PACK_STAMP_PATH, restorePackStamp } from "./pack-stamp.mjs";
 import { spawnSyncPnpm } from "./pnpm-exec.mjs";
 import { parseNetstatListeners, planPortOwnerKill } from "./dev-port-guard.mjs";
@@ -1373,23 +1374,35 @@ async function main() {
       }
       log(`[promote] === ${tag} is live on ${boardUrl} ===`);
       if (rc) {
-        // #1238 item 3 — terminal. #1239: the merge-back into master is a board workspace (branch =
-        // the rc, base = master, the normal gate); the freshly restarted stable board is asked for
-        // it, and the hand command is printed only when it did not answer.
+        // #1238 item 3 — terminal.
         recordRc(rc.branch, { state: "promoted", tag, sha });
-        // Nothing was healed on the rc when its tip is already in master: a merge-back would be a
-        // zero-commit workspace, and the board launched a builder into it with nothing to do
-        // (#1263, 2026-09-27: plan mode produced no plan, marked blocked, relaunched).
-        if (git(["merge-base", "--is-ancestor", rc.branch, baseBranch], MAIN_CHECKOUT).code === 0) {
-          log(`[promote] rc: ${rc.branch} is promoted as ${tag}. Its tip is already in ${baseBranch} (nothing was healed on it) — no merge-back needed.`);
-          return;
+        // #1436: the merge-back is performed here (direct no-ff merge, a board workspace only when
+        // that conflicts), reported, and followed by a master re-probe; a failure is loud.
+        const projectId = sweep?.projectId ?? null;
+        let mergeBack;
+        try {
+        mergeBack = await mergeBackRc({
+          rcBranch: rc.branch,
+          baseBranch,
+          tag,
+          git: (a) => git(a, MAIN_CHECKOUT),
+          requestWorkspace: () => requestMergeBack(projectId, rc.branch, tag),
+          reprobe: async () => {
+            if (!projectId) return false;
+            const res = await fetch(`${boardUrl}/api/projects/${projectId}/base-branch-health/reprobe`, { method: "POST", signal: AbortSignal.timeout(30_000) });
+            return res.ok;
+          },
+          markAttention: async (reason) => {
+            writeFileSync(join(stableCheckout, ".kanban", "merge-back-attention.json"), JSON.stringify({ rc: rc.branch, tag, reason, at: new Date().toISOString() }, null, 2));
+          },
+          log,
+        });
+        } catch (e) {
+          // A merge-back error must never fall into the rollback below: the promotion itself succeeded.
+          log(`[promote] !!! MERGE-BACK ERRORED: ${e instanceof Error ? e.message : String(e)}`);
+          mergeBack = { outcome: "failed" };
         }
-        const mergeBack = await requestMergeBack(sweep?.projectId ?? null, rc.branch, tag);
-        if (mergeBack) {
-          log(`[promote] rc: ${rc.branch} is promoted as ${tag}. Merge-back #${mergeBack.issueNumber ?? "?"} on workspace ${mergeBack.workspaceId}${mergeBack.created ? "" : " (already open)"} — the board lands it into ${baseBranch} and closes the heal tickets.`);
-        } else {
-          log(`[promote] rc: ${rc.branch} is promoted as ${tag}. No board answered for the merge-back; by hand: ${mergeBackInstruction(rc.branch)}`);
-        }
+        if (mergeBack.outcome === "failed") process.exitCode = 1;
       }
       return;
     }
