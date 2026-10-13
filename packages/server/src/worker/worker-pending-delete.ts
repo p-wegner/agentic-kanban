@@ -190,7 +190,13 @@ export async function sweepPendingDeletes(
     }
   }
   if (report.checked > 0) {
-    try { savePending(workRoot, keep); } catch { /* retried next sweep */ }
+    try {
+      // Re-read: a checkout cleanup may have queued a directory while this (slow) sweep ran.
+      const swept = new Set(all.map((r) => resolve(r.dir)));
+      const kept = new Map(keep.map((r) => [resolve(r.dir), r]));
+      const fresh = loadPendingDeletes(workRoot).filter((r) => !swept.has(resolve(r.dir)));
+      savePending(workRoot, [...kept.values(), ...fresh]);
+    } catch { /* retried next sweep */ }
   }
   return report;
 }
