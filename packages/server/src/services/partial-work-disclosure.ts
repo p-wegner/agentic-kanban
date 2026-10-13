@@ -139,7 +139,12 @@ export async function checkPartialWorkDisclosure(deps: CheckPartialWorkDeps): Pr
   const database = deps.database ?? db;
   try {
     const commits = await (deps.listCommits ?? listBranchCommitMessages)(deps.workingDir, deps.baseBranch);
-    const disclosures = scanCommitsForDisclosure(commits, deps.issueNumber);
+    // A follow-up ticket referenced by ANY commit on the branch answers every disclosure: a
+    // builder cannot rewrite the disclosing commit, only add a later one that names the ticket.
+    const branchRefs = commits.flatMap((c) => referencedTicketNumbers(`${c.subject}
+${c.body}`.replace(/^co-authored-by:.*$/gim, ""), deps.issueNumber));
+    const disclosures = scanCommitsForDisclosure(commits, deps.issueNumber)
+      .map((d) => ({ ...d, referencedTickets: [...new Set([...d.referencedTickets, ...branchRefs])] }));
     if (disclosures.length === 0) return ok("no commit discloses unfinished work");
     const open = new Set<number>();
     const isOpen = deps.isOpenTicket ?? lookupOpenTicket;
