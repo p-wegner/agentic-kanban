@@ -156,6 +156,7 @@ export async function startServer(port?: number, hostname?: string) {
     getSessionManager: () => sessionManager,
     serverPort,
     reviewSessionIds: workflow.reviewSessionIds,
+    runWorkflowOnExit: workflow.runWorkflowOnExit,
     boardRepoRoot: serverStartRepoRoot,
   };
   // #1095: a throwaway boot for the pre-merge gate's smoke check has nothing to reconcile —

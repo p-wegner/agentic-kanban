@@ -240,3 +240,17 @@ export async function countRunningHostSessions(
     .where(and(eq(sessions.status, "running"), isNull(sessions.workerId)));
   return rows.filter((r) => r.id !== excludeSessionId).length;
 }
+
+/** Newest `limit` sessions of a workspace (newest first), narrow columns — stalled-in-progress sweep (#1439). */
+export async function getRecentSessionBriefs(
+  workspaceId: string,
+  limit = 5,
+  database: Database = db,
+) {
+  return database
+    .select({ id: sessions.id, status: sessions.status, triggerType: sessions.triggerType, endedAt: sessions.endedAt })
+    .from(sessions)
+    .where(eq(sessions.workspaceId, workspaceId))
+    .orderBy(desc(sessions.startedAt))
+    .limit(limit);
+}

@@ -133,3 +133,12 @@ export function resolveSessionRoleFlags(
     isLearning: sets.learningSessionIds.has(sessionId) || dbRole === "learning",
   };
 }
+
+/**
+ * #1439 — was this exit the spawn-layer hang watchdog killing the session (`agent.service.ts`,
+ * `worker-agent-runner.ts`)? A kill AFTER the builder committed is a session that ended with work,
+ * not a failed one: the commits are on the branch and the implement-exit check still has to run.
+ */
+export function isHangWatchdogKill(stderrText: string | null | undefined): boolean {
+  return !!stderrText && /Agent hang watchdog: no output for \d+s/.test(stderrText);
+}
