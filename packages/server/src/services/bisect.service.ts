@@ -17,6 +17,7 @@ import {
   setSessionTerminal,
 } from "../repositories/bisect.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { readHeadSha, tryRunOnWorker, type VerifyWorkerRunner } from "./verify-job-placement.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export type BisectScope = "related" | "full";
@@ -200,6 +201,8 @@ export function createBisectService(deps: {
   database: Database;
   getSessionManager?: () => SessionManager;
   boardEvents?: BoardEventSink;
+  /** #1440 test seam: the verify worker bisect steps are placed on; defaults to the registered runner. */
+  workerRunner?: VerifyWorkerRunner | null;
 }) {
   const { database, getSessionManager, boardEvents } = deps;
 
@@ -221,9 +224,24 @@ export function createBisectService(deps: {
     await emit(sessionId, { type: "stdout", sessionId, data: `${line}\n` });
   }
 
-  async function runTests(sessionId: string, cwd: string, scope: BisectScope, changedFiles: string[], active: ActiveBisect) {
+  async function runTests(sessionId: string, cwd: string, scope: BisectScope, changedFiles: string[], active: ActiveBisect, projectId: string | null) {
     const testCommand = buildBisectTestCommand(cwd, scope, changedFiles);
     await emitLine(sessionId, `$ ${testCommand.display}`);
+
+    // #1440: each step is one worker job on the commit `git bisect` just checked out (the checkout
+    // itself is git plumbing and stays here). A hold/refusal throws and fails the bisect with its reason.
+    const placed = projectId
+      ? await tryRunOnWorker({
+          kind: "bisect", projectId, database, workerRunner: deps.workerRunner, command: testCommand.display, workingDir: cwd,
+          sha: await readHeadSha(cwd), tier: "bisect-step", runOnHost: async () => ({ exitCode: -1, stdout: "", stderr: "ran on host" }),
+        })
+      : null;
+    if (placed) {
+      await emitLine(sessionId, `[bisect] step ran on worker ${placed.workerName}`);
+      const output = trimOutput(placed.result.stdout || placed.result.stderr);
+      void emit(sessionId, { type: "stdout", sessionId, data: output });
+      return { exitCode: placed.result.exitCode as number | null, output };
+    }
 
     return new Promise<{ exitCode: number | null; output: string }>((resolve) => {
       const command = process.platform === "win32" ? "cmd.exe" : testCommand.command;
@@ -338,7 +356,7 @@ export function createBisectService(deps: {
         seen.add(current);
         await emitLine(sessionId, `\n[${step}] Testing ${current}`);
 
-        const test = await runTests(sessionId, row.workingDir, scope, changedFiles, active);
+        const test = await runTests(sessionId, row.workingDir, scope, changedFiles, active, projectId);
         throwIfCancelled(active);
         const output = trimOutput(test.output);
         if (test.exitCode === 0) {

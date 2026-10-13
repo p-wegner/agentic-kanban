@@ -144,3 +144,18 @@ export async function runPlacedVerifyCommand(args: PlaceVerifyCommandArgs): Prom
 export async function readHeadSha(workingDir: string): Promise<string> {
   return (await gitExecOrThrow(["rev-parse", "HEAD"], { cwd: workingDir }).catch(() => "")).trim();
 }
+
+/**
+ * The seam for jobs whose host path is NOT a plain command (clone + install + build, a bisect
+ * step, an impact-map build) (#1440): `null` means "placement says host, run your own way";
+ * a worker run returns its judged result; a hold, or a worker that REFUSED (nothing verified),
+ * throws `VerifyJobHeldError` so the caller holds with a reason instead of recording red/green.
+ */
+export async function tryRunOnWorker(args: PlaceVerifyCommandArgs): Promise<PlacedVerifyResult | null> {
+  const plan = await planVerifyPlacement(args);
+  if (plan.target === "hold") throw new VerifyJobHeldError(plan.reason);
+  if (plan.target === "host") return null;
+  const out = await runOnPlannedWorker(plan, args);
+  if (out.refused) throw new VerifyJobHeldError(`worker ${plan.workerName} refused the ${args.kind} job (${out.refused}); nothing was verified`);
+  return out;
+}

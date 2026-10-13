@@ -26,6 +26,7 @@ import {
   getStackProfile,
 } from "./stack-profile.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { tryRunOnWorker, VerifyJobHeldError, type VerifyWorkerRunner } from "./verify-job-placement.js";
 
 /** Preference key gating the cold-clone build check for a project. */
 // #496: built from the registry, so an unregistered prefix is a COMPILE error.
@@ -45,7 +46,7 @@ export interface ColdCloneCheckResult {
   /** Whether the cold clone built cleanly. A skipped/no-op check is `ok: true`. */
   ok: boolean;
   /** Resolved reason — useful for logging and board surfacing. */
-  reason: "passed" | "build-failed" | "clone-failed" | "no-build-command" | "skipped";
+  reason: "passed" | "held" | "build-failed" | "clone-failed" | "no-build-command" | "skipped";
   /** The exit code of the failing step (install or build), when applicable. */
   exitCode?: number;
   /** Captured stdout/stderr tail from the failing step, for the board comment. */
@@ -83,6 +84,8 @@ export async function runColdCloneBuildCheck(
     cleanup?: (dest: string) => Promise<void>;
     /** Override the temp clone dir (deterministic for tests). */
     tmpDir?: string;
+    /** #1440: where the clone + install + build runs; the host path below is used when placement says host. */
+    placement?: { projectId: string; database: Database; workerRunner?: VerifyWorkerRunner | null };
   } = {},
 ): Promise<ColdCloneCheckResult> {
   const run = deps.runner ?? runSetupScript;
@@ -95,6 +98,29 @@ export async function runColdCloneBuildCheck(
   if (!buildCommand) return { ok: true, reason: "no-build-command" };
 
   const installCommand = deriveSetupScriptFromProfile(profile, input.repoPath).trim();
+
+  // #1440: with a worker placement the worker clones the branch from the board's git transport and
+  // installs + builds there; nothing below (clone, install, build) runs on the host.
+  if (deps.placement) {
+    try {
+      const sha = (await gitService.revParse(input.repoPath, input.branch)) ?? "";
+      const placed = await tryRunOnWorker({
+        kind: "cold-clone-build", projectId: deps.placement.projectId, database: deps.placement.database, workerRunner: deps.placement.workerRunner,
+        command: installCommand ? `${installCommand} && ${buildCommand}` : buildCommand,
+        workingDir: input.repoPath, sha: sha.trim(), tier: "cold-clone", branch: input.branch, timeoutMs: CLONE_TIMEOUT_MS * 6,
+        runOnHost: async () => ({ exitCode: -1, stdout: "", stderr: "ran on host" }),
+      });
+      if (placed) {
+        console.log(`[cold-clone] ${input.branch} built on worker ${placed.workerName}`);
+        return placed.result.exitCode === 0
+          ? { ok: true, reason: "passed" }
+          : { ok: false, reason: "build-failed", exitCode: placed.result.exitCode, failedCommand: buildCommand, output: tail(placed.result.stdout || placed.result.stderr) };
+      }
+    } catch (e) {
+      if (e instanceof VerifyJobHeldError) return { ok: false, reason: "held", output: e.message };
+      return { ok: false, reason: "clone-failed", output: errorMessage(e) };
+    }
+  }
 
   // A unique temp dir keyed by branch so parallel reviews don't collide. The branch
   // name is sanitized to a filesystem-safe slug (it can contain `/`).
@@ -148,7 +174,7 @@ export async function runColdCloneBuildCheckForProject(
   deps?: Parameters<typeof runColdCloneBuildCheck>[2],
 ): Promise<ColdCloneCheckResult> {
   const profile = await getStackProfile(projectId, database);
-  return runColdCloneBuildCheck(input, profile, deps);
+  return runColdCloneBuildCheck(input, profile, { ...deps, placement: deps?.placement ?? { projectId, database } });
 }
 
 /** Default cloner: a shallow single-branch clone into a fresh dir (no worktree, no warm deps). */
