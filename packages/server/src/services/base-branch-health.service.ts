@@ -42,6 +42,7 @@ import { getProjectById } from "../repositories/project.repository.js";
 import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
 import { buildVerifyResourceEnv } from "./verify-resource-env.js";
 import { resolveVerifyMaxWorkers, resolveVerifyTimeoutMs } from "./verify-tunables.js";
+import { planProbePlacement, runProbeOnWorker } from "./base-branch-health-placement.js";
 import { failedSuitesForOutcome } from "./failed-suite-parse.js";
 import { resolveRedProbeOutcome, tail } from "./base-branch-red-outcome.js";
 import { resolveEffectiveVerify, deriveSetupScriptFromProfile, getStackProfile } from "./stack-profile.service.js";
@@ -350,6 +351,23 @@ async function runBaseBranchProbe(
   const sha = await revParse(project.repoPath, branch).catch(() => null);
   if (!sha) return null;
 
+  // #1437 — `verify_placement`: the sweep may run on an allowlisted fleet worker instead of cloning
+  // and verifying here. `hold` (placement=worker, nobody eligible) answers nothing rather than
+  // running on the host; the verdict a worker returns is stored by the SAME tail a host run uses.
+  const placement = await planProbePlacement({ projectId, database, isBaseLane });
+  if (placement.target === "hold") return null;
+  if (placement.target === "worker") {
+    return runProbeOnWorker({
+      plan: placement, kind: isBaseLane ? "base-probe" : "rc-sweep", projectId, database, repoPath: project.repoPath, branch, sha, verifyScript,
+      timeoutMs: await resolveVerifyTimeoutMs(projectId, database), stampKey: baseHealthProbeStartPrefKey(projectId), startedAtIso: now,
+      finish: (result, combined) => {
+        result.scope = probeScopeFromOutput(combined);
+        const idle = { freeGb: null, cpuPct: null };
+        return finishBaseProbe({ result, project, branch, isBaseLane, sha, verifyScript, projectId, database, capacityStart: idle, queueWaitMs: 0, chainActiveAtStart: 0, chainQueuedAtStart: 0 });
+      },
+    });
+  }
+
   const slug = branch.replace(/[^a-zA-Z0-9._-]/g, "_");
   // #712 — a UNIQUE directory per probe. This used to be
   // `join(tmpdir(), \`kanban-base-health-${projectId}-${slug}\`)`: the same path every call,
@@ -634,6 +652,28 @@ ${tail(combined)}`,
     await setPreference(baseHealthProbeStartPrefKey(projectId), "", database).catch(() => {});
   }
 
+  return finishBaseProbe({ result, project, branch, isBaseLane, sha, verifyScript, projectId, database, capacityStart, queueWaitMs, chainActiveAtStart, chainQueuedAtStart });
+}
+
+/** What the probe measured about the box around its run (#1110); the worker path (#1437) has no host queue, so it passes zeros. */
+interface FinishBaseProbeInput {
+  result: BaseBranchVerifyResult;
+  project: NonNullable<Awaited<ReturnType<typeof getProjectById>>> & { repoPath: string };
+  branch: string;
+  isBaseLane: boolean;
+  sha: string;
+  verifyScript: string;
+  projectId: string;
+  database: Database;
+  capacityStart: { freeGb: number | null; cpuPct: number | null };
+  queueWaitMs: number;
+  chainActiveAtStart: number;
+  chainQueuedAtStart: number;
+}
+
+/** Everything after a probe has a verdict: contention snapshot, the row, heal tickets, the outcome ledger. Shared by the host run and a worker run (#1437) so both store the same shape. */
+export async function finishBaseProbe(input: FinishBaseProbeInput): Promise<BaseBranchVerifyResult> {
+  const { result, project, branch, isBaseLane, sha, verifyScript, projectId, database, capacityStart, queueWaitMs, chainActiveAtStart, chainQueuedAtStart } = input;
   // #1110 — the box's state at the END too, so a reader can see whether load changed over the
   // run (a probe that STARTED idle and ENDED starved is a different story than one starved
   // throughout). Best-effort: an unreadable capacity read must never affect the verdict.

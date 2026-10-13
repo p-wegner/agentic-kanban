@@ -1,3 +1,5 @@
+import { setVerifyWorkerRunner } from "./services/verify-job-placement.js";
+import { createVerifyWorkerRunner } from "./services/verify-worker-runner.service.js";
 import { readFileSync } from "node:fs";
 import { createSecureServer } from "node:http2";
 import { serve } from "@hono/node-server";
@@ -237,6 +239,10 @@ export async function startServer(port?: number, hostname?: string) {
   // cleanup via replaceStartupTimerCleanup, and the signal handlers run it too. Registered
   // unconditionally — stopGitHttpServer is an idempotent no-op when nothing ever bound.
   cleanupCallbacks.push(() => { void stopGitHttpServer(); });
+
+  // #1437 — the transport behind `verify_placement`: until a project opts in (and allowlists a worker) nothing is ever placed, so this is inert.
+  setVerifyWorkerRunner(createVerifyWorkerRunner({ database: db }));
+  cleanupCallbacks.push(() => setVerifyWorkerRunner(null));
 
   setupProcessHandlers(server, agentService, { cleanupStartupTimers });
 

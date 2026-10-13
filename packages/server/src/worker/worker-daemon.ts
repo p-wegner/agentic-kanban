@@ -32,7 +32,7 @@
 //    refuses with a sentence instead of failing as a silence.
 
 import { readFileSync } from "node:fs";
-import { homedir, platform, arch } from "node:os";
+import { homedir, platform, arch, totalmem } from "node:os";
 import {
   findIdentity,
   findPreferredUrl,
@@ -62,6 +62,7 @@ import {
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
 import { createDaemonToolchainInstall } from "./worker-toolchain-install.js";
+import { createDaemonVerifyRunner } from "./worker-verify-runner.js"; // #1437
 import type { ToolchainInstallPolicy, WorkerToolchainInstallInfo } from "@agentic-kanban/shared/lib/worker-toolchain-install";
 import { createWorkerOneShotRunner } from "./worker-oneshot.js"; // #1431
 import { createWorkerAgentRunner, dispatchBoardMessage, rawDataToBuffer, type UnpushedResult } from "./worker-agent-runner.js";
@@ -206,10 +207,10 @@ function capabilitiesOf(
   profiles?: WorkerProfileAttestation[],
   providerNotice?: string,
   doctor?: WorkerDoctorSummary,
-  toolchainInstall?: WorkerToolchainInstallInfo,
+  toolchainInstall?: WorkerToolchainInstallInfo, verify?: WorkerCapabilities["verify"],
 ): WorkerCapabilities {
   return {
-    ...(toolchainInstall ? { toolchainInstall } : {}),
+    ...(toolchainInstall ? { toolchainInstall } : {}), ...(verify ? { verify } : {}),
     ...(providerNotice ? { providerNotice } : {}),
     ...(opts.labels ? { labels: opts.labels } : {}),
     ...(opts.providers ? { providers: opts.providers } : {}),
@@ -503,6 +504,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   const workRoot = opts.workRoot ?? defaultWorkerWorkRoot(stateFile); // #1401: own root per non-default state file
   await cleanUpBeforeStart(workRoot, log);
   const toolchains = createDaemonToolchainInstall({ policy: opts.toolchainInstall ?? "never", allow: opts.toolchainAllow ?? [], stateFile, log, sendToBoard: (m) => sendToBoard(m), heartbeat: () => sendHeartbeat() }); // #1371
+  const verifyJobs = createDaemonVerifyRunner({ workRoot, boardUrl: () => boardUrl, sendToBoard: (m) => sendToBoard(m), log, slots: 1, ramGb: Math.round(totalmem() / 2 ** 30) }); // #1437: gates/sweeps the board places on this worker
   await Promise.all([refreshPackageManagers(), refreshToolchains(), toolchains.installer.refreshMise()]);
 
   // #1370: the worker's own doctor, summarised. hello/register always carry the current summary; a
@@ -725,7 +727,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           // gained docker (or changed its ceiling) says so without being re-paired.
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
-          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctor.takeCurrent(), toolchains.installer.info()),
+          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctor.takeCurrent(), toolchains.installer.info(), verifyJobs.capability()),
         } satisfies WorkerToBoardMessage));
         while (pendingCritical.length > 0) {
           socket.send(JSON.stringify(pendingCritical.shift()));
@@ -747,7 +749,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         log(`[worker] dropping malformed board message`);
         return;
       }
-      if (toolchains.handle(message) || oneShots.handle(message)) return; // #1431
+      if (toolchains.handle(message) || oneShots.handle(message) || verifyJobs.handle(message)) return; // #1431, #1437
       try {
         dispatchBoardMessage(message, runner, sendToBoard, draining);
       } catch (err) {
@@ -908,7 +910,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           // Not gated on selfUpdate: a daemon restarted after a Ctrl+C drain without --auto-update
           // (every Linux worker until #1374) otherwise stayed `draining` on the board forever.
           ...(draining ? { status: "draining" } : announceOnline ? { status: "online" } : {}),
-          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctorToSend, toolchains.installer.info()),
+          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctorToSend, toolchains.installer.info(), verifyJobs.capability()),
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
           ...(selfUpdate ? { update: selfUpdate.state() } : {}),

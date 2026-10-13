@@ -199,6 +199,7 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
         registry.notePackageManagers(workerId, message.capabilities?.packageManagers);
         registry.noteToolchains?.(workerId, message.capabilities?.toolchains);
         registry.noteToolchainInstallInfo?.(workerId, message.capabilities?.toolchainInstall);
+        registry.noteVerify?.(workerId, message.capabilities?.verify);
         registry.noteProviderNotice(workerId, message.capabilities?.providerNotice);
         registry.noteDoctor(workerId, message.capabilities?.doctor);
       } else if (message.type === "event") {

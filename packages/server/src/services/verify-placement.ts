@@ -24,6 +24,7 @@ export type VerifyChainKind =
   | "implement-exit"
   | "train-gate"
   | "rc-sweep"
+  | "base-probe" // #1437: the base-branch health probe on the default branch
   // #1430: the remaining verify-type jobs, placed by the same policy and allowlist.
   | "review-exit-typecheck"
   | "cold-clone-build"
@@ -129,6 +130,14 @@ export type WorkerVerifyReport = {
   tier: string;
   passed: boolean;
   log?: string;
+  /** The remaining fields are the worker's own account of the run (#1437); the board stores them like a host run's. */
+  exitCode?: number;
+  timedOut?: boolean;
+  failingSuites?: string[];
+  durationMs?: number;
+  /** Set when the worker REFUSED to run (sha mismatch, no slot, ...): nothing was verified, so it is neither green nor red. */
+  refused?: string;
+  reason?: string;
 };
 
 /** What the board sent. The report is judged against THIS, never against itself. */
@@ -151,6 +160,7 @@ export function acceptWorkerVerdict(request: VerifyRequest, report: WorkerVerify
   if (!isWorkerTrusted(allowlist, { id: request.workerId, name: workerName })) {
     return { accepted: false, reason: `worker ${workerName} is not on the verify_workers allowlist` };
   }
+  if (report.refused) return { accepted: false, reason: `worker refused the job (${report.refused}): ${report.reason ?? "no reason given"}` };
   if (report.requestId !== request.requestId) return { accepted: false, reason: "verdict answers a different request" };
   if (report.workerId !== request.workerId) return { accepted: false, reason: "verdict came from a worker the request was not sent to" };
   if (!report.sha || report.sha.toLowerCase() !== request.sha.toLowerCase()) {
