@@ -105,6 +105,26 @@ describe("the train departure window holds on a red base (#1204)", () => {
     expect(window?.pendingIds).toHaveLength(4);
   });
 
+  it("a red default base does not hold a workspace targeting another base (rc heal, #1435)", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusId } = await seedProject(db, "/tmp/repo");
+    for (let i = 0; i < 3; i++) await seedReady(db, projectId, statusId);
+    const healId = await seedReady(db, projectId, statusId);
+    await db.update(workspaces).set({ baseBranch: "rc/20261013" }).where(eq(workspaces.id, healId));
+
+    const orchestrator = createAutoMergeOrchestrator({
+      database: db,
+      checkBaseRedVeto: async () => ({ healthSha: "deadbeefcafe", message: "red" }),
+    });
+    const rows = await orchestrator.findCompletedWorkspaceRows();
+    const released = await orchestrator.applyTrainWindow(rows, new Date().toISOString());
+
+    expect(released).toEqual([healId]);
+    const window = orchestrator.state.trainWindows.get(projectId);
+    expect(window?.lastVerdict).toEqual({ release: false, reason: "base_red" });
+    expect(window?.pendingIds).toHaveLength(3);
+  });
+
   it("releases normally when the base is not red", async () => {
     const { db } = createTestDb();
     const { projectId, statusId } = await seedProject(db, "/tmp/repo");

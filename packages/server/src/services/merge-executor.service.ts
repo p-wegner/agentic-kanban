@@ -90,7 +90,9 @@ export async function runMergeCore(args: RunMergeCoreArgs): Promise<MergeCoreRes
     console.warn("[backup] pre-merge backup failed (non-fatal):", errorMessage(err));
   }
 
-  const preMergeHead = await revParseSafe(repoPath, "HEAD", gitService);
+  // #1435: report the TARGET branch's shas. A heal workspace targets an rc branch that is not
+  // checked out in the main checkout, so HEAD there is master's tip, not the base that moved.
+  const preMergeHead = (await revParseSafe(repoPath, targetBranch, gitService)) || (await revParseSafe(repoPath, "HEAD", gitService));
   // Capture the feature branch tip BEFORE the merge — post-merge cleanup deletes
   // the branch ref, but this commit stays reachable from the default branch, so
   // the merged-commits panel can resolve baseCommitSha..mergedHeadSha afterwards.
@@ -114,7 +116,8 @@ export async function runMergeCore(args: RunMergeCoreArgs): Promise<MergeCoreRes
   // mergeBranch with deferWorkingTreeSync skips git reset --hard during the request.
   // Extract the pending SHA so post-merge cleanup can apply it after the response is sent.
   const pendingWorkingTreeSyncSha = extractPendingWorkingTreeSync(mergeOutput);
-  const mergeCommitSha = await revParseSafe(repoPath, "HEAD", gitService);
+  const checkoutHeadSha = await revParseSafe(repoPath, "HEAD", gitService);
+  const mergeCommitSha = (await revParseSafe(repoPath, targetBranch, gitService)) || checkoutHeadSha;
 
   // Post-merge invariant: verify the branch tip is now reachable from target.
   // If not, the git merge did not actually land the work (e.g. plumbing anomaly
@@ -127,7 +130,7 @@ export async function runMergeCore(args: RunMergeCoreArgs): Promise<MergeCoreRes
   await assertMainCheckoutReflectsMerge({
     repoPath,
     branch,
-    mergeCommitSha,
+    mergeCommitSha: checkoutHeadSha,
     // Nothing to assert while a sync is still owed: the caller explicitly took ownership
     // of the window. Only a caller that syncs inline can be held to a clean checkout.
     skip: pendingWorkingTreeSyncSha !== null,
