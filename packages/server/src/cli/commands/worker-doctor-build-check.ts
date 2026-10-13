@@ -10,6 +10,7 @@ import { hasLegacyShim } from "../../worker/worker-repin.js";
 import { readPointer, versionsDirFor } from "../../worker/worker-versions.js";
 import type { DoctorCheck } from "./worker-doctor.js";
 import { globalLauncherFix } from "./worker-update-notes.js";
+import { shellLine } from "./worker-doctor-git-prereqs.js";
 import { resolveOwnPackageVersion } from "../../lib/worker-build.js";
 
 /** `version` of the package a `bin/worker.js` entry belongs to; null when unreadable. */
@@ -26,11 +27,12 @@ export function readEntryVersion(entry: string | null): string | null {
 /** Version of the globally installed `agentic-kanban` package (the `npm i -g` launcher); null if none. */
 export function probeGlobalVersion(): string | null {
   try {
-    const root = execFileSync("npm", ["root", "-g"], {
+    const win = process.platform === "win32";
+    const root = execFileSync(win ? shellLine("npm", ["root", "-g"]) : "npm", win ? [] : ["root", "-g"], {
       encoding: "utf8",
       timeout: 8000,
       windowsHide: true,
-      shell: process.platform === "win32",
+      shell: win,
     }).trim();
     const pkg = JSON.parse(readFileSync(join(root, "agentic-kanban", "package.json"), "utf8")) as { version?: string };
     return pkg.version ?? null;

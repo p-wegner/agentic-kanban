@@ -115,17 +115,25 @@ export async function checkPackageManager(
 
 
 
+/**
+ * `command args` as ONE string for a `shell: true` spawn on Windows (`.cmd` shims). Passing an args array together with
+ * `shell: true` is Node's DEP0190 (args are concatenated unescaped); a single, quoted line is the documented pattern (#1453).
+ */
+export function shellLine(command: string, args: readonly string[]): string {
+  return [command, ...args.map((a) => (/[\s"&|<>^]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a))].join(" ");
+}
+
 /** Does `command --version` run? Never throws; ENOENT (or any spawn failure) is "absent". */
 export function commandExists(command: string, timeoutMs = 10_000): Promise<boolean> {
   return new Promise((resolve) => {
     // `shell: true` on Windows: pnpm/yarn/corepack are `.cmd` shims there, which execFile
     // cannot spawn directly. The command name is a fixed literal, never operator input.
-    execFile(
-      command,
-      ["--version"],
-      { timeout: timeoutMs, windowsHide: true, shell: process.platform === "win32" },
-      (err) => resolve(!err),
-    );
+    const onDone = (err: unknown) => resolve(!err);
+    if (process.platform === "win32") {
+      execFile(shellLine(command, ["--version"]), { timeout: timeoutMs, windowsHide: true, shell: true }, onDone);
+    } else {
+      execFile(command, ["--version"], { timeout: timeoutMs, windowsHide: true }, onDone);
+    }
   });
 }
 
@@ -200,13 +208,13 @@ export function packageManagersField(): { packageManagers?: WorkerPackageManager
 /** Run `command args`, resolving the combined output, or null when it cannot be spawned / exits non-zero. */
 export function runForOutput(command: string, args: string[], timeoutMs = 10_000): Promise<string | null> {
   return new Promise((resolve) => {
-    execFile(
-      command,
-      args,
-      { timeout: timeoutMs, windowsHide: true, shell: process.platform === "win32" },
-      (err, stdout, stderr) => resolve(err ? null : `${stdout}
-${stderr}`), // java prints its version on stderr
-    );
+    const onDone = (err: unknown, stdout: string, stderr: string) => resolve(err ? null : `${stdout}
+${stderr}`); // java prints its version on stderr
+    if (process.platform === "win32") {
+      execFile(shellLine(command, args), { timeout: timeoutMs, windowsHide: true, shell: true }, onDone);
+    } else {
+      execFile(command, args, { timeout: timeoutMs, windowsHide: true }, onDone);
+    }
   });
 }
 

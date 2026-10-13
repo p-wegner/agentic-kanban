@@ -246,6 +246,14 @@ switch ($PSCmdlet.ParameterSetName) {
     if ($cmd) { $workerCmd = $cmd.Source }
     if (-not $workerCmd) { throw "agentic-kanban-worker is not on PATH - install it first (see ak-worker.ps1)" }
 
+    # #1453: a path with its backslashes eaten by an outer shell (C:Userspwegner.claude) used to be
+    # stored as-is and the worker ran agents with a nonexistent CLAUDE_CONFIG_DIR. Refuse it here.
+    if ($ClaudeConfigDir -and -not (Test-Path -LiteralPath $ClaudeConfigDir)) {
+      throw "-ClaudeConfigDir '$ClaudeConfigDir' does not exist. If you called this through bash or cmd, the backslashes were probably stripped: pass the path with forward slashes or from a PowerShell prompt."
+    }
+    # #1453: the runbook install (agentic-kanban-worker start under a task of the same name) is the supported path.
+    Write-Warning "This supervisor-wrapper install is the legacy Windows path. The supported one is the Connect view runbook (scheduled task AgenticKanbanWorker running 'agentic-kanban-worker start'). Installing both gives two workers on one state file."
+
     if (-not $ClaudeConfigDir) {
       Write-Warning "CLAUDE_CONFIG_DIR is not set and none was passed. The worker will run agents under the DEFAULT profile (~/.claude), which may be a different account than you expect. Pass -ClaudeConfigDir to pin it."
     }

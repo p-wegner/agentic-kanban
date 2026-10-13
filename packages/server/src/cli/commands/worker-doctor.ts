@@ -450,6 +450,7 @@ import { checkGlobalLauncher, checkWorkerBuild, probeGlobalVersion, readEntryVer
 import { installedBuildOf, launcherCommand, useLauncherInRemedies } from "./worker-update-notes.js";
 import { parseBuildId } from "../../lib/worker-update.js";
 import { checkBoardBuild } from "./worker-board-build.js";
+import { checkRunningDaemon } from "./worker-doctor-running-daemon.js";
 import { resolveOwnPackageVersion } from "../../lib/worker-build.js";
 import { checkTailnetFirewall } from "./worker-doctor-firewall-check.js";
 // #875's env-aware auth-dir resolution lives in its own module for the same reason.
@@ -682,6 +683,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
     checks.push(await checkWebSocket(boardUrl, identity, opts.timeoutMs));
     checks.push(await checkGitTransport(boardUrl, opts.gitPort));
   }
+  if (!opts.local) checks.push(await checkRunningDaemon(opts.stateFile, readControlFile(opts.stateFile) !== null));
   checks.push(await checkGitInstalled(probeCommand));
   checks.push(await checkGitIdentity(probeCommand));
   const safeDirectory = await checkGitSafeDirectory(probeCommand);
