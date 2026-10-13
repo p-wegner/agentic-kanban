@@ -103,22 +103,23 @@ async function commitFile(branch: string, file: string, content: string, from = 
   await git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", `feat: ${file}`]);
 }
 
-beforeEach(async () => {
-  repo = mkdtempSync(join(tmpdir(), "kanban-flush-train-"));
-  await git(["init", "-q", "-b", "main"]);
-  writeFileSync(join(repo, "base.txt"), "base\n", "utf8");
-  writeFileSync(join(repo, "shared.txt"), "shared\n", "utf8");
-  await git(["add", "."]);
-  await git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "chore: base"]);
-});
-
-afterEach(() => {
-  try { rmSync(repo, { recursive: true, force: true }); } catch { /* best effort */ }
-});
-
 const memberList = (ids: string[]) => ids.map((id, i) => ({ workspaceId: `w${i + 1}`, branch: id, issueNumber: i + 1 }));
 
 describe("runFlushTrain (#1247)", () => {
+  // #1441: scoped to THIS describe — hoisted to the file it built a git repo before every pure test too.
+  beforeEach(async () => {
+    repo = mkdtempSync(join(tmpdir(), "kanban-flush-train-"));
+    await git(["init", "-q", "-b", "main"]);
+    writeFileSync(join(repo, "base.txt"), "base\n", "utf8");
+    writeFileSync(join(repo, "shared.txt"), "shared\n", "utf8");
+    await git(["add", "."]);
+    await git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "chore: base"]);
+  });
+
+  afterEach(() => {
+    try { rmSync(repo, { recursive: true, force: true }); } catch { /* best effort */ }
+  });
+
   it("lands a train of 6 with one conflicting member sided, runs the gate ONCE, no bisect, tags the landing", async () => {
     const branches = ["f1", "f2", "f3", "f4", "f5", "f6"];
     for (const b of branches) await commitFile(b, `${b}.txt`, b);

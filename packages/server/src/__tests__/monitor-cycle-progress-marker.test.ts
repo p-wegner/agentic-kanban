@@ -105,15 +105,13 @@ function buildMonitor() {
 }
 
 const flush = (ms = 0) => new Promise((r) => setTimeout(r, ms));
-// The deadline is a hang guard, not a latency assertion: the rc sweep ran this on a host loaded
-// by builders and gates, and a 3s wall-clock bound timed out there (#1433). The test's own
-// timeout (120s) is the real ceiling.
-async function waitUntil(pred: () => boolean, timeoutMs = 30_000) {
-  const start = Date.now();
-  while (!pred()) {
-    if (Date.now() - start > timeoutMs) throw new Error("waitUntil timed out");
-    await flush(5);
-  }
+// #1441: no wall-clock deadline of our own. #1433 stretched this bound from 3s to 30s and the
+// 12:55Z sweep still blew it: the cycle runs real git/process work before it reaches auto-start,
+// and how long that takes is the host's business, not an assertion. The signals below are awaited
+// as events (the fetch mock resolves a promise; completion is observed on the state itself), and
+// the test's own timeout is the single hang guard.
+async function waitForState(pred: () => boolean) {
+  while (!pred()) await flush(10);
 }
 
 let activeSetup: { stop: () => void } | null = null;
@@ -137,7 +135,10 @@ describe("monitor cycle progress marker (#208)", () => {
     // Gate the auto-start POST so the cycle stays "in flight" long enough to observe status.
     let releaseFetch!: () => void;
     const gate = new Promise<void>((r) => { releaseFetch = r; });
+    let signalFetched!: () => void;
+    const fetched = new Promise<void>((r) => { signalFetched = r; });
     const fetchMock = vi.fn(async () => {
+      signalFetched();
       await gate;
       return { ok: true, json: async () => ({ id: "ws-x" }) } as unknown as Response;
     });
@@ -153,7 +154,7 @@ describe("monitor cycle progress marker (#208)", () => {
     expect(beforeStatus.lastRun).toBeNull();
 
     triggerCycle();
-    await waitUntil(() => fetchMock.mock.calls.length >= 1);
+    await fetched;
 
     const midStatus = await status();
     expect(midStatus.currentCycle).not.toBeNull();
@@ -162,15 +163,15 @@ describe("monitor cycle progress marker (#208)", () => {
     expect(midStatus.lastRun).toBeNull();
 
     releaseFetch();
-    // Poll rather than wait a fixed 150ms: the cycle's teardown now takes a closing environmental
-    // CONTROL spawn (#368) — a real `git --version`, MEASURED between 68ms and 10203ms on this
-    // machine — and a fixed budget here would be the same load-sensitive assertion #368 is about.
+    // Observe the state rather than wait a fixed budget: the cycle's teardown takes a closing
+    // environmental CONTROL spawn (#368) — a real `git --version`, MEASURED between 68ms and
+    // 10203ms on this machine — and any bound here would be the load-sensitive assertion #368 is about.
     let afterStatus = await status();
-    for (let i = 0; i < 2000 && afterStatus.currentCycle !== null; i++) {
+    while (afterStatus.currentCycle !== null) {
       await flush(10);
       afterStatus = await status();
     }
     expect(afterStatus.currentCycle).toBeNull();
     expect(afterStatus.lastRun).not.toBeNull();
-  });
+  }, 180_000);
 });
