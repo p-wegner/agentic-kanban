@@ -108,7 +108,7 @@ function runAgentProcess(spec: WorkerLaunchSpec, request: WorkerOneShotRequest, 
       if (timedOut) return done({ ok: false, error: `timed out after ${job.timeoutMs}ms (killed with SIGTERM)` });
       if (code === 0) return done({ ok: true, text: stdout });
       const tail = stderr.trim().split(/\r?\n/).filter(Boolean).slice(-5).join("\n");
-      done({ ok: false, error: `exited ${code}${tail ? ` — stderr:\n${tail}` : ""}` });
+      done({ ok: false, error: `exited ${code}${tail ? ` - stderr:\n${tail}` : ""}` });
     });
     try {
       proc.stdin?.end(job.prompt);
