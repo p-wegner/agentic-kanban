@@ -3,6 +3,8 @@ import { join } from "node:path";
 import type { DoctorCheck } from "./worker-doctor.js";
 import { readOAuthCredentials } from "../../lib/oauth-quota-core.js";
 import { settingsHaveHooks, type WorkerHarness } from "../../worker/worker-harness.js";
+import type { LocalProfile } from "../../lib/local-profile-discovery.js";
+import { narrowDeclaredProfiles } from "../../worker/worker-profiles.js";
 
 /**
  * The worker's own provider config (#1367), as the doctor sees it: which mode is active, and
@@ -117,4 +119,30 @@ export function checkHarness(
     }
   }
   return checks;
+}
+
+/**
+ * #1450: which local profiles this worker advertises. Without `--profiles` that is EVERY login on the
+ * machine (14 of them on the first live connect), so placement can run sessions on any a roster names.
+ * WARN then, listing them; with a restriction, PASS naming exactly the attested set.
+ */
+export function checkAttestedProfiles(discovered: readonly LocalProfile[], declared: string[] | undefined): DoctorCheck {
+  const name = "attested profiles";
+  const attested = narrowDeclaredProfiles(discovered, declared, () => {});
+  const list = attested.map((p) => `${p.provider}:${p.name}`).join(", ") || "none";
+  if (declared === undefined) {
+    return {
+      name,
+      status: attested.length > 1 ? "warn" : "pass",
+      detail: `no --profiles: all ${attested.length} local profile(s) are attested - ${list}`,
+      ...(attested.length > 1 ? { remedy: "Restrict what this machine offers: start with --providers <csv> --profiles <names> (the Connect view renders both)." } : {}),
+    };
+  }
+  const missing = declared.map((d) => d.trim()).filter((d) => d && d.toLowerCase() !== "none" && !discovered.some((p) => p.name === d));
+  return {
+    name,
+    status: missing.length > 0 ? "warn" : "pass",
+    detail: `--profiles restricts this worker to ${attested.length} profile(s): ${list}` + (missing.length > 0 ? `; no local login named ${missing.join(", ")}` : ""),
+    ...(missing.length > 0 ? { remedy: `Log in to ${missing.join(", ")} or drop it from --profiles.` } : {}),
+  };
 }

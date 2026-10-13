@@ -27,6 +27,8 @@ import {
 
 const NAME_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 const LABEL_RE = /^[A-Za-z0-9_.:-]{1,48}$/;
+const PROVIDER_RE = /^[a-z][a-z0-9_-]{0,31}$/;
+const PROFILE_RE = /^[A-Za-z0-9_.:@-]{1,64}$/;
 const ALIAS_RE = /^[A-Za-z0-9_.,=:/\\ -]{1,200}$/;
 const URL_RE = /^https?:\/\/[A-Za-z0-9_.:[\]-]+$/;
 
@@ -49,6 +51,8 @@ export function parseConnectOptions(body: Record<string, unknown>): ConnectRunbo
     options.workerName = body.workerName.trim();
   }
   options.labels = stringList(body.labels, LABEL_RE, "label");
+  options.providers = stringList(body.providers, PROVIDER_RE, "provider");
+  options.profiles = stringList(body.profiles, PROFILE_RE, "profile");
   if (body.maxConcurrency !== undefined && body.maxConcurrency !== null && body.maxConcurrency !== "") {
     const n = Number(body.maxConcurrency);
     if (!Number.isInteger(n) || n < 1 || n > 64) throw new UnprocessableError("maxConcurrency must be an integer 1-64");

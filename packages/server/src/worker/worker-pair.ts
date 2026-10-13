@@ -7,6 +7,7 @@ import { defaultWorkerStateFile, registerWithBoard, type WorkerDaemonOptions } f
 import { adoptBoardId, findIdentity, loadState, parseBoardList, probeBoard, saveIdentity } from "./worker-state.js";
 import { attestProviders } from "./worker-provider-notice.js";
 import { readPersistedHarness, writePersistedHarness, type PersistedHarness, type WorkerHarness } from "./worker-harness.js";
+import { moveAsideRevokedPairing } from "./worker-revoked-pairing.js";
 import { join } from "node:path";
 
 /** The state-file record for the harness a pairing used; no harness = the default, clean. */
@@ -27,6 +28,8 @@ export async function pairWorker(opts: WorkerDaemonOptions): Promise<{ alreadyPa
   const boardUrls = parseBoardList([opts.boardUrl, ...(opts.boardUrls ?? [])]);
   const probes = await Promise.all(boardUrls.map((u) => probeBoard(u)));
   for (const p of probes) if (p.boardId) adoptBoardId(stateFile, p.url, p.boardId);
+  // #1450: a fresh token plus a saved pairing the board rejects as revoked = pair again, not "already paired".
+  if (opts.pairingToken) await moveAsideRevokedPairing({ stateFile, boardUrls, log: opts.log ?? console.log });
   const state = loadState(stateFile);
   const existing = boardUrls.map((u) => findIdentity(state, u)).find((i) => i !== undefined);
   if (existing) return { alreadyPaired: true, name: existing.name };

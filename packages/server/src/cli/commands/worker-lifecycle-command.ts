@@ -17,6 +17,9 @@ import {
   type LifecycleHandlers,
 } from "../../worker/worker-lifecycle.js";
 import { relaunchWorker } from "../../worker/worker-updater.js";
+import { findCorruptClones, quarantineCorruptClone } from "../../worker/worker-repo-heal.js";
+import { defaultWorkerWorkRoot } from "../../worker/worker-repo.js";
+import { join } from "node:path";
 import { cliPathArg } from "../cli-path.js";
 
 /** `90`, `90s`, `10m`, `2h` -> milliseconds; null when it is none of those. */
@@ -146,6 +149,36 @@ export function registerWorkerLifecycle(workerCmd: Command): void {
         console.log(result);
       });
   }
+
+  workerCmd
+    .command("repo-check")
+    .description(
+      "Run ON THE WORKER MACHINE (#1450): `git fsck` every cached clone under the work root (#1417). With --quarantine a corrupt " +
+        "one is moved to <work-root>/quarantine (kept, never deleted) so the next assignment re-clones. Exit 1 only when a clone " +
+        "is corrupt and was left in place. Run it while the daemon is stopped.",
+    )
+    .option("--quarantine", "Move each corrupt clone aside instead of only reporting it")
+    .option("--work-root <path>", "Worker work root (default: next to the state file)", cliPathArg)
+    .option(...stateOpt)
+    .action(async (options: { quarantine?: boolean; workRoot?: string; stateFile?: string }) => {
+      const stateFile = options.stateFile ?? defaultWorkerStateFile();
+      const workRoot = options.workRoot ?? defaultWorkerWorkRoot(stateFile);
+      const corrupt = await findCorruptClones(workRoot);
+      if (corrupt.length === 0) {
+        console.log(`every cached clone under ${join(workRoot, "repos")} is intact`);
+        return;
+      }
+      for (const c of corrupt) {
+        if (!options.quarantine) {
+          console.log(`CORRUPT ${c.project}: ${c.problem}`);
+          continue;
+        }
+        const aside = quarantineCorruptClone(workRoot, join(workRoot, "repos", c.project));
+        const firstLine = c.problem.split(/\r?\n/)[0];
+        console.log(`QUARANTINED ${c.project} -> ${aside} (${firstLine}); the next assignment re-clones`);
+      }
+      if (!options.quarantine) process.exit(1);
+    });
 
   workerCmd
     .command("config <action> [key] [value]")
