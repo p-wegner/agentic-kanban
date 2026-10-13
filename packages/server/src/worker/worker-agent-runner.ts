@@ -106,7 +106,12 @@ export interface WorkerAgentRunnerOptions {
    * machine's own `~/.claude` and env exactly as before.
    */
   harness?: WorkerHarness;
+  /** #1464: how long after a `result` event with no further output the worker ends the process. 0 disables. */
+  idleAfterResultGraceMs?: number;
 }
+
+/** #1464: a finished agent that lingers (observed: 15 min) is ended this long after its result event. */
+export const DEFAULT_IDLE_AFTER_RESULT_GRACE_MS = 30_000;
 
 /**
  * How long the worker waits before each retry of a failed result push (#750, #870).
@@ -188,7 +193,14 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   const stdinOpen = new Map<string, boolean>();
   /** Per-session silence watchdogs; reset on every byte of agent output. */
   const hangWatchdogs = new Map<string, { reset(): void; close(): void }>();
-  let maxConcurrency = options.maxConcurrency && options.maxConcurrency > 0 ? options.maxConcurrency : 1;
+  /** #1464: sessions whose last stdout event was a `result` (final turn over) — idle there means DONE. */
+  const resultSeen = new Set<string>();
+  const resultTimers = new Map<string, NodeJS.Timeout>();
+  const stdoutPartials = new Map<string, string>();
+  /** Sessions the worker itself ended (grace or hang watchdog) after a result event. */
+  const killedAfterResult = new Set<string>();
+  const resultGraceMs = options.idleAfterResultGraceMs ?? DEFAULT_IDLE_AFTER_RESULT_GRACE_MS;
+  let maxConcurrency = options.maxConcurrency &&options.maxConcurrency > 0 ? options.maxConcurrency : 1;
   const tree = createAgentTreeTracker(workRoot); // #1336
 
   /**
@@ -220,6 +232,65 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   function closeWatchdog(sessionId: string): void {
     hangWatchdogs.get(sessionId)?.close();
     hangWatchdogs.delete(sessionId);
+    clearResultState(sessionId);
+  }
+
+  /** #1464: forget everything the idle-after-result logic knows about a session. */
+  function clearResultState(sessionId: string): void {
+    const timer = resultTimers.get(sessionId);
+    if (timer) clearTimeout(timer);
+    resultTimers.delete(sessionId);
+    resultSeen.delete(sessionId);
+    stdoutPartials.delete(sessionId);
+    killedAfterResult.delete(sessionId);
+  }
+
+  /**
+   * #1464: scan a stdout chunk for stream-json events. A `result` event means the agent's final
+   * turn is over; any other event after it means the agent is still working (a new turn).
+   * Returns nothing — it only maintains `resultSeen`.
+   */
+  function noteStdoutEvents(sessionId: string, data: string): void {
+    const buffered = (stdoutPartials.get(sessionId) ?? "") + data;
+    const lines = buffered.split("\n");
+    stdoutPartials.set(sessionId, (lines.pop() ?? "").slice(-65536));
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line.startsWith("{")) continue;
+      if (/"type"\s*:\s*"result"/.test(line.slice(0, 4096)) || /"type"\s*:\s*"result"/.test(line.slice(-512))) {
+        try {
+          if ((JSON.parse(line) as { type?: unknown }).type === "result") {
+            resultSeen.add(sessionId);
+            continue;
+          }
+        } catch { /* not a complete event; treat as other output */ }
+      }
+      resultSeen.delete(sessionId);
+    }
+  }
+
+  /** (Re)arm the grace timer after a result event; any later output re-arms it from scratch. */
+  function armResultGrace(sessionId: string): void {
+    const old = resultTimers.get(sessionId);
+    if (old) clearTimeout(old);
+    resultTimers.delete(sessionId);
+    if (!resultSeen.has(sessionId) || resultGraceMs <= 0) return;
+    const timer = setTimeout(() => {
+      resultTimers.delete(sessionId);
+      const proc = processes.get(sessionId);
+      if (!proc || !resultSeen.has(sessionId)) return;
+      workerLog(`[worker] session ${sessionId} idle ${resultGraceMs}ms after its result event; ending it (completed)`);
+      killedAfterResult.add(sessionId);
+      try { proc.stdin?.end(); } catch { /* already closed */ }
+      stdinOpen.set(sessionId, false);
+      // stdin EOF is the polite ask; a process that ignores it gets SIGTERM shortly after.
+      const killTimer = setTimeout(() => {
+        if (processes.get(sessionId) === proc) stop(sessionId);
+      }, Math.min(5_000, resultGraceMs));
+      if (killTimer.unref) killTimer.unref();
+    }, resultGraceMs);
+    if (timer.unref) timer.unref();
+    resultTimers.set(sessionId, timer);
   }
 
   /** Sleep that never keeps the event loop alive on its own. */
@@ -550,6 +621,9 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       authWatch.noteOutput(sessionId, type, data);
       seen.noteOutput(sessionId);
       hangWatchdogs.get(sessionId)?.reset();
+      // #1464: track the final `result` event; interactive (keepStdinOpen) sessions wait for input, so they are exempt.
+      if (type === "stdout") noteStdoutEvents(sessionId, data);
+      if (!spec.keepStdinOpen) armResultGrace(sessionId);
       // safeSend: this runs on the child's stream 'data' events, where a throw out of the
       // send seam is a process-level uncaught exception (#870).
       safeSend({ type: "event", event: { type, sessionId, data } });
@@ -587,6 +661,13 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         );
       }
       stderrTails.delete(sessionId);
+      // #1464: a process the worker ended because it sat idle after its result event FINISHED —
+      // the signal/taskkill exit code is ours, not the agent's verdict.
+      if (killedAfterResult.has(sessionId) && resultSeen.has(sessionId) && code !== 0) {
+        workerLog(`[worker] session ${sessionId} completed (killed idle after result); recording exit 0 instead of ${code}`);
+        emitExit(sessionId, 0);
+        return;
+      }
       emitExit(sessionId, code);
     });
 
@@ -601,6 +682,17 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     if (hangTimeoutMs > 0) {
       hangWatchdogs.set(sessionId, startHangWatchdog(`sessionId=${sessionId}`, hangTimeoutMs, () => {
         const seconds = Math.round(hangTimeoutMs / 1000);
+        if (resultSeen.has(sessionId)) {
+          // #1464: idle after its final result is DONE, not hung — say so and record exit 0.
+          killedAfterResult.add(sessionId);
+          workerLog(`[worker] session ${sessionId} completed (killed idle after result) after ${seconds}s of silence`);
+          safeSend({
+            type: "event",
+            event: { type: "stderr", sessionId, data: `Session completed (killed idle after result): no output for ${seconds}s after the final result event.` },
+          });
+          stop(sessionId);
+          return;
+        }
         workerLog(`[worker] hang watchdog fired: sessionId=${sessionId} pid=${proc.pid} - no output for ${seconds}s; killing`);
         safeSend({
           type: "event",

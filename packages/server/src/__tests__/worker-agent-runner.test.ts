@@ -20,7 +20,7 @@ function nodeSpec(script: string, overrides?: Partial<WorkerLaunchSpec>): Worker
   };
 }
 
-function collector(options?: { maxConcurrency?: number }) {
+function collector(options?: { maxConcurrency?: number; idleAfterResultGraceMs?: number }) {
   const messages: WorkerToBoardMessage[] = [];
   // A temp work root per runner: since #871 the runner reads/writes the undelivered-results
   // file under its work root, and a test must never touch the machine's real one.
@@ -113,6 +113,44 @@ describe("worker-agent-runner (worker fleet phase 1b)", () => {
       expect(stderr).toContain("Process error");
     }
   });
+});
+
+describe("idle after the final result event (#1464)", () => {
+  // A finished claude: prints its result event, then never exits (ignores stdin EOF too).
+  const lingerAfterResult =
+    "console.log(JSON.stringify({type:'assistant',message:{}}));" +
+    "console.log(JSON.stringify({type:'result',subtype:'success',is_error:false}));" +
+    "process.stdin.resume();setInterval(()=>{},1000);";
+
+  it("ends the process a short grace after the result event and records exit 0", async () => {
+    const { runner, exitOf } = collector({ idleAfterResultGraceMs: 500 });
+    runner.assign("s1", nodeSpec(lingerAfterResult, { hangTimeoutMs: 0 }));
+
+    await vi.waitFor(() => expect(exitOf("s1")).toBeTruthy(), { timeout: 20000 });
+    expect(exitOf("s1")!.exitCode).toBe(0);
+    expect(runner.runningSessionIds()).toEqual([]);
+  }, 30000);
+
+  it("records a hang-watchdog kill after a result event as completed (exit 0), not a hang", async () => {
+    // Grace disabled so only the watchdog can end it.
+    const { runner, eventsOf, exitOf } = collector({ idleAfterResultGraceMs: 0 });
+    runner.assign("s1", nodeSpec(lingerAfterResult, { hangTimeoutMs: 1500 }));
+
+    await vi.waitFor(() => expect(exitOf("s1")).toBeTruthy(), { timeout: 20000 });
+    const stderr = eventsOf("s1").filter((e) => e.type === "stderr").map((e) => e.data).join("");
+    expect(stderr).toContain("killed idle after result");
+    expect(stderr).not.toContain("Agent hang watchdog");
+    expect(exitOf("s1")!.exitCode).toBe(0);
+  }, 30000);
+
+  it("does not end a silent agent that never produced a result event", async () => {
+    const { runner, exitOf } = collector({ idleAfterResultGraceMs: 300 });
+    runner.assign("s1", nodeSpec("console.log('working');setInterval(()=>{},1000)", { hangTimeoutMs: 0 }));
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(exitOf("s1")).toBeUndefined();
+    runner.stop("s1");
+    await vi.waitFor(() => expect(exitOf("s1")).toBeTruthy(), { timeout: 15000 });
+  }, 30000);
 });
 
 describe("worker hang watchdog (parity with the host spawn site)", () => {
