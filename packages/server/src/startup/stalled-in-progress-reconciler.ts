@@ -43,6 +43,13 @@ export const STALLED_MAX_AGE_MS = 24 * 60 * 60_000;
 const NON_BUILDER_TRIGGERS = new Set(["review", "fix-and-merge", "fix-conflicts", "learning", "verify", "bisect"]);
 
 const lastRedriveMs = new Map<string, number>();
+/** Workspaces already reported as abandoned, so each surfaces once rather than every pass (#1452). */
+const abandonedReported = new Set<string>();
+
+/** Workspaces the sweep has reported as abandoned In Progress since boot: a cleanup list. */
+export function listAbandonedInProgress(): string[] {
+  return [...abandonedReported];
+}
 
 export type StalledDecision = { redrive: true } | { redrive: false; reason: string };
 
@@ -81,7 +88,16 @@ export async function reconcileStalledInProgress(deps: StalledInProgressDeps): P
   let redriven = 0;
   for (const c of await listIdleInProgressWorkspaces(database)) {
     const decision = decideStalledInProgress(c, nowMs);
-    if (!decision.redrive) continue;
+    if (!decision.redrive) {
+      if (decision.reason.startsWith("abandoned") && !abandonedReported.has(c.workspaceId)) {
+        abandonedReported.add(c.workspaceId);
+        console.warn(
+          `[stalled-in-progress] ATTENTION: #${c.issueNumber ?? "?"} workspace ${c.workspaceId} (project ${c.projectId}) is abandoned In Progress ` +
+            `— last session ended ${c.lastSessionEndedAt}. Not acting on it; close or relaunch it (reported once).`,
+        );
+      }
+      continue;
+    }
     // The check is running (or queued for the verify slot) in THIS process, or the board marked it.
     if (implementExitHoldReason(c.workspaceId)) continue;
     if (getMergeJob(c.workspaceId)?.state === "running" || isReviewLaunchPending(c.workspaceId)) continue;
@@ -127,4 +143,5 @@ export function startStalledInProgressReconciler(deps: StalledInProgressDeps, in
 /** Test seam. */
 export function resetStalledInProgressStateForTests(): void {
   lastRedriveMs.clear();
+  abandonedReported.clear();
 }

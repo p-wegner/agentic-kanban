@@ -210,7 +210,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       // relaunch a builder on the fresh account (review/fix sessions inherit the switched
       // pref and rely on their own reconciler). Both providers share one implementation,
       // parameterized by the provider table in ./exit/usage-limit-exit.ts.
-      const sessionRows = await db.select({ stats: sessions.stats, triggerType: sessions.triggerType }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+      const sessionRows = await db.select({ stats: sessions.stats, triggerType: sessions.triggerType, endedAt: sessions.endedAt }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
       // #950: resolve the session's role from the in-memory sets (fast path) AND the
       // persisted sessions.triggerType (source of truth that survives restarts). A
       // reattached review/fix-and-merge/learning session exits into EMPTY sets — the
@@ -220,8 +220,8 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       // asking each provider's predicate whether the blob is its own.
       const usageLimitCfg = findUsageLimitProvider(sessionRows[0]?.stats);
       if (usageLimitCfg) {
-        await handleUsageLimitExit({ cfg: usageLimitCfg, workspaceId, sessionId, issueId, projectId, now, statsJson: sessionRows[0]?.stats, roleFlags });
-        return;
+        const handled = await handleUsageLimitExit({ cfg: usageLimitCfg, workspaceId, sessionId, issueId, projectId, now, statsJson: sessionRows[0]?.stats, endedAt: sessionRows[0]?.endedAt, roleFlags });
+        if (handled) return;
       }
       // Route the (non-already-merged, non-usage-limited) exit to exactly one terminal
       // handler. The pure `classifySessionExit` decision core (#855) computes the verdict

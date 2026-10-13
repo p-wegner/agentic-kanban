@@ -191,8 +191,14 @@ function describeEntry(
 ): string {
   const id = profileRefId(entry);
   const until = input.prefMap.get(profileCooldownKey(entry.provider, entry.name));
-  if (until && isProfileCooling(entry, input.prefMap, input.nowMs)) return `${id} until ${until}`;
   const used = headroomOf(entry, input.headroom);
+  if (until && isProfileCooling(entry, input.prefMap, input.nowMs)) {
+    // #1452: a cooldown against FRESH telemetry that says the window is mostly free is flagged,
+    // not trusted silently — it is the signature of a stale/replayed rate-limit stamp.
+    return used !== null && used < exhaustedPct
+      ? `${id} until ${until} — CONTRADICTS fresh quota (${used}% of the 5-hour window used), suspect a stale cooldown`
+      : `${id} until ${until}`;
+  }
   if (used !== null && used >= exhaustedPct) return `${id} at ${used}% of the 5-hour window`;
   return id;
 }
