@@ -23,7 +23,7 @@ import { type AgentOutputMessage, modelBelongsToProvider } from "@agentic-kanban
 import { teardownSessionState } from "./types.js";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
 import { workspaceLaunchPreflight } from "../preflight-check.js";
-import { resolveContainerProvision, surfaceIsolationDowngrade } from "./devcontainer-launch.js";
+import { resolveContainerOrWorker, surfaceIsolationDowngrade } from "./devcontainer-launch.js";
 import { WorkspaceError } from "../workspace-internals.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../constants/preference-keys.js";
 import { parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
@@ -624,8 +624,8 @@ export function createSessionLifecycle(
     // Provision the builder's devcontainer BEFORE the (synchronous) spawn, and surface
     // any isolation downgrade instead of leaving it in a console.warn only (#160) — see
     // devcontainer-launch.ts for the best-effort/strict-mode contract.
-    const { containerProvision, isolationDowngradeReason } = await resolveContainerProvision({
-      db, state, sessionId, workspaceId, projectId, effectiveWorkingDir, profile, launchProfile, effectiveExtraEnv,
+    const { containerProvision, isolationDowngradeReason, workerPlacement: dcWorker } = await resolveContainerOrWorker({
+      db, state, sessionId, workspaceId, projectId, effectiveWorkingDir, profile, launchProfile, effectiveExtraEnv, placement, providerName, workspace, resumeProviderSessionId: resumedProviderSessionId(resumeWithNewModel, providerSessionId), // #1432
     });
 
     // Persist the container id (#154) so stop/hang-kill/killAll — and a post-restart
@@ -645,7 +645,7 @@ export function createSessionLifecycle(
     // Worker-fleet placement (epic #1): an explicit placement wins; otherwise
     // `resolveSessionPlacement` (session-placement.ts) decides and records why.
     // Containerized launches keep the container path untouched.
-    let effectivePlacement = placement;
+    let effectivePlacement = dcWorker;
     if (!effectivePlacement && !containerProvision && projectId) {
       effectivePlacement = await resolveSessionPlacement({
         database: db,

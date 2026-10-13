@@ -490,6 +490,8 @@ export async function resolveWorkerPlacement(params: {
    * instead of falling back to the host for want of a branch.
    */
   oneShot?: boolean;
+  /** #1432: labels required on top of the project's own (a devcontainer launch needs `docker`). */
+  extraRequiredLabels?: string[];
 }): Promise<Placement> {
   // #751: a remote decision claims a capacity slot, and EVERY exit from this
   // function that is not a remote placement has to give it back — including the
@@ -522,7 +524,7 @@ async function resolvePlacementWithReservation(
 ): Promise<Placement> {
   const {
     database, projectId, providerName, branch, baseBranch, resumeProviderSessionId, now, nowMs,
-    hostSaturated, hostCapacity, hostActiveSessions,
+    hostSaturated, hostCapacity, hostActiveSessions, extraRequiredLabels,
   } = params;
   // #1380: `host_builder_slots` (per-project over global). Read up front so the recorded reason
   // can name the cap whenever it is what kept the work off the host.
@@ -554,7 +556,7 @@ async function resolvePlacementWithReservation(
     const refuseHost = (reason: string): never => {
       throw new DispatchUnavailable(`${reason} and worker dispatch is strict for project ${projectId}`);
     };
-    const requiredLabels = await readPlacementRequirements(projectId, database);
+    const requiredLabels = [...await readPlacementRequirements(projectId, database), ...(extraRequiredLabels ?? [])];
     // #651 / #1027: a restricted project goes remote ONLY to a worker that attests a
     // profile the roster permits. Still checked before the reserving selection — the
     // question does not depend on which worker has a free SLOT, and answering it early
