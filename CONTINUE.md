@@ -16,7 +16,7 @@ coordinates. Also: get the backlog done on desktop-stable and wsl-stable.
   staging, rc sweeps and base-health probes go to desktop-stable once it runs -3 (re-pin requested
   over ACP); otherwise they fall back to the host. Check: board.log names the worker on the next
   gate. Not yet verified live.
-- **Merged today (24):** #1428 #1429 #1430 #1431 #1432(a) #1433 #1434 #1435 #1436 #1437 #1438
+- **Merged today (18):** #1428 #1429 #1430 #1431 #1432(a) #1433 #1434 #1435 #1436 #1437 #1438
   #1439 #1440 #1441 #1442 #1443 #1445 #1446 plus the rc heal. Open: #1444 (rebase conflict with
   #1443/#1445 in worker.ts, back with a builder), #1447 (dev servers on workers via a board proxy,
   part b of #1432, building).
