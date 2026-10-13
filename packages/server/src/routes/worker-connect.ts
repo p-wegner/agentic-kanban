@@ -49,6 +49,7 @@ export function parseConnectOptions(body: Record<string, unknown>): ConnectRunbo
     options.workerName = body.workerName.trim();
   }
   options.labels = stringList(body.labels, LABEL_RE, "label");
+  options.providers = stringList(body.providers, LABEL_RE, "provider");
   if (body.maxConcurrency !== undefined && body.maxConcurrency !== null && body.maxConcurrency !== "") {
     const n = Number(body.maxConcurrency);
     if (!Number.isInteger(n) || n < 1 || n > 64) throw new UnprocessableError("maxConcurrency must be an integer 1-64");

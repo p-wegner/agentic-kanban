@@ -15,6 +15,8 @@ export interface ConnectRunbookOptions {
   os: ConnectOs;
   workerName?: string;
   labels?: string[];
+  /** `--providers` for `worker setup` (claude-only boxes must not be checked for codex, #1453). */
+  providers?: string[];
   maxConcurrency?: number;
   /** `--profile-alias` value, e.g. `default=anth` (#1379). */
   profileAlias?: string;
@@ -54,14 +56,23 @@ function arg(value: string): string {
   return SAFE_ARG.test(value) ? value : `"${value.replace(/["`$\\]/g, "")}"`;
 }
 
+/**
+ * A comma list as ONE argument. PowerShell parses a bare `a,b` as an array and the worker receives "a b"
+ * (#1453), so the Windows rendering single-quotes every list; POSIX shells keep the plain form.
+ */
+export function listArg(values: string[], quoteLists: boolean): string {
+  const joined = values.join(",");
+  return quoteLists && values.length > 1 ? `'${joined.replace(/'/g, "''")}'` : arg(joined);
+}
+
 /** The exact `worker start` flags for the operator's choices (never includes the pairing token — start reads the saved pairing). */
-export function buildStartFlags(boardUrls: string[], o: ConnectRunbookOptions): string[] {
-  const flags = [`--board ${boardUrls.join(",")}`];
-  if (o.labels?.length) flags.push(`--labels ${arg(o.labels.join(","))}`);
+export function buildStartFlags(boardUrls: string[], o: ConnectRunbookOptions, quoteLists = false): string[] {
+  const flags = [`--board ${listArg(boardUrls, quoteLists)}`];
+  if (o.labels?.length) flags.push(`--labels ${listArg(o.labels, quoteLists)}`);
   if (o.maxConcurrency && o.maxConcurrency > 0) flags.push(`--max-concurrency ${Math.floor(o.maxConcurrency)}`);
   if (o.profileAlias) flags.push(`--profile-alias ${arg(o.profileAlias)}`);
   if (o.toolchainInstall) flags.push(`--toolchain-install ${o.toolchainInstall}`);
-  if (o.toolchainInstall === "auto" && o.toolchainAllow?.length) flags.push(`--toolchain-allow ${arg(o.toolchainAllow.join(","))}`);
+  if (o.toolchainInstall === "auto" && o.toolchainAllow?.length) flags.push(`--toolchain-allow ${listArg(o.toolchainAllow, quoteLists)}`);
   flags.push("--auto-update");
   return flags;
 }
@@ -82,8 +93,10 @@ export function buildConnectRunbook(input: {
   const [manifest, tarball, verify, install] = bootstrap.steps;
   const windows = o.os === "windows";
   const nameFlag = o.workerName ? ` --name ${arg(o.workerName)}` : "";
-  const labelFlag = o.labels?.length ? ` --labels ${arg(o.labels.join(","))}` : "";
-  const startFlags = buildStartFlags(boardUrls, o);
+  const labelFlag = o.labels?.length ? ` --labels ${listArg(o.labels, windows)}` : "";
+  const providerFlag = o.providers?.length ? ` --providers ${listArg(o.providers, windows)}` : "";
+  const boardArg = listArg(boardUrls, windows);
+  const startFlags = buildStartFlags(boardUrls, o, windows);
   const startCommand = `agentic-kanban-worker start ${startFlags.join(" ")}${nameFlag}`;
   const progressUrl = `${base}/connect/${code}/progress`;
 
@@ -113,6 +126,29 @@ export function buildConnectRunbook(input: {
         "or MSYS rewrites it into a Windows path.",
       commands: ["uname -a", "echo $WSL_DISTRO_NAME"],
       expect: "A Linux kernel string mentioning microsoft/WSL, and a non-empty distro name.",
+      needsHuman: false,
+    });
+  }
+  if (windows) {
+    steps.push({
+      id: "retire-old-install",
+      title: "Retire an older Windows worker install (tray / supervisor wrapper)",
+      detail:
+        "The older `tools/worker-windows` install (ak-worker-service.ps1 / ak-worker-run.ps1 / the tray) registered the SAME scheduled task " +
+        "name `AgenticKanbanWorker` and a `AgenticKanbanWorkerTray` Startup shortcut, and its supervisor restarts a killed worker after up to 300 s — " +
+        "so a second worker silently comes back minutes after this pairing and fights over the state file. List what exists first and tell the " +
+        "operator what you found. If anything is there, stop and remove it (the runbook's own task below replaces it); if nothing is, move on. " +
+        "Never delete the worker state file or the operator's claude config.",
+      commands: [
+        "Get-ScheduledTask -TaskName AgenticKanbanWorker -ErrorAction SilentlyContinue | Format-List TaskName, State",
+        "Get-ChildItem \"$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\" -Filter 'AgenticKanbanWorkerTray*'",
+        "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'ak-worker(-run|-service|-tray)?\.ps1' } | Format-List ProcessId, CommandLine",
+        "# only if something was listed and the operator agreed:",
+        "Stop-ScheduledTask -TaskName AgenticKanbanWorker -ErrorAction SilentlyContinue",
+        "Remove-Item \"$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\AgenticKanbanWorkerTray*\" -ErrorAction SilentlyContinue",
+        "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'ak-worker(-run|-service|-tray)?\.ps1' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }",
+      ],
+      expect: "No `ak-worker*.ps1` process, no AgenticKanbanWorkerTray shortcut; any old AgenticKanbanWorker task is stopped (the service step re-registers it).",
       needsHuman: false,
     });
   }
@@ -154,8 +190,10 @@ export function buildConnectRunbook(input: {
       title: "Set up and pair this machine",
       detail:
         "Checks git and the provider CLIs, creates the worker's own harness config dir (#1367) and pairs with the embedded " +
-        "single-use token. Add `--yes` only if the operator allowed unattended installs; without it the command asks before installing.",
-      commands: [`agentic-kanban-worker setup --board ${boardUrls.join(",")} --token ${pairingToken}${nameFlag}${labelFlag}`],
+        "single-use token. Add `--yes` only if the operator allowed unattended installs; without it the command asks before installing " +
+        "(with no terminal on stdin it asks nothing and skips). Setup checks `claude,codex` unless `--providers` says otherwise: on a " +
+        "claude-only machine pass `--providers claude`, or doctor fails on the missing codex CLI.",
+      commands: [`agentic-kanban-worker setup --board ${boardArg} --token ${pairingToken}${nameFlag}${labelFlag}${providerFlag}`],
       expect: "Output ends with the worker registered; a pairing state file exists.",
       needsHuman: false,
     },
@@ -163,12 +201,14 @@ export function buildConnectRunbook(input: {
       id: "login",
       title: "Log the worker in to its provider (the operator does this)",
       detail:
-        "The login is interactive and holds the operator's credentials — an agent must not attempt or script it. If the worker's only login is the " +
-        "machine's default one, `--profile-alias` (below, in the start flags) attests it under a profile name (#1379).",
+        "The login is interactive and holds the operator's credentials — an agent must not attempt or script it. This step is ALWAYS needed: " +
+        "the worker's harness config dir is empty after setup. `--profile-alias default=<profile>` (in the start flags) only names that " +
+        "harness dir under a profile name (#1379); it does NOT reuse the machine's default Claude login. Copying the default login in is " +
+        "not offered: a copied OAuth session dies as soon as the source refreshes its token (seen with WSL).",
       commands: [],
       expect: "The check command prints a logged-in status for the provider.",
       needsHuman: true,
-      humanCommand: "claude /login   # in the worker's config dir, as printed by the setup step",
+      humanCommand: "agentic-kanban-worker auth claude",
       check: "agentic-kanban-worker doctor --providers claude",
     },
     {
@@ -187,7 +227,7 @@ export function buildConnectRunbook(input: {
       id: "doctor",
       title: "Run the worker doctor",
       detail: "Self-tests the whole chain to the board: fleet port, saved pairing, WebSocket upgrade, git transport, git, provider CLIs.",
-      commands: [`agentic-kanban-worker doctor --board ${boardUrls.join(",")}`],
+      commands: [`agentic-kanban-worker doctor --board ${boardArg}`],
       expect: "Every check passes (exit code 0). `unknown` on the trust check is acceptable until the trust step is done; any `fail` is not.",
       needsHuman: false,
     },
@@ -247,7 +287,7 @@ export function buildConnectRunbook(input: {
     id: "verify-online",
     title: "Confirm the worker is online",
     detail: "Give it ~15 seconds after starting. The operator's Connect view shows the same thing.",
-    commands: [`agentic-kanban-worker doctor --board ${boardUrls.join(",")}`],
+    commands: [`agentic-kanban-worker doctor --board ${boardArg}`],
     expect: "Doctor passes and reports the heartbeat accepted; the board lists this worker as online.",
     needsHuman: false,
   });
@@ -332,7 +372,7 @@ function renderMarkdown(r: {
     "",
     "- WSL: run everything inside the distro; keep distro disks off a Dev Drive (D: hung on 2026-10-12).",
     "- Git Bash: set `MSYS_NO_PATHCONV=1` when passing Linux paths to `wsl.exe`.",
-    "- Claude Code: `hasTrustDialogAccepted` must be accepted by the operator for the worker's repo dir; the worker uses its own config dir (#1367); use `--profile-alias default=<profile>` when the only login is the default one (#1379).",
+    "- Claude Code: `hasTrustDialogAccepted` must be accepted by the operator for the worker's repo dir; the worker uses its own config dir (#1367); `--profile-alias default=<profile>` names the worker's own (initially empty) harness dir and does not reuse the default login: run `agentic-kanban-worker auth claude` (#1379, #1453).",
     "",
   );
   return out.join("\n");

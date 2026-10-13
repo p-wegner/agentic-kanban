@@ -134,7 +134,8 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 70 -> 71 in #1437 for `worker/worker-verify-runner.ts` and shared `lib/worker-verify-protocol.ts` (verify jobs on a worker; git-exec + node builtins only).
     // Raised 71 -> 73 in #1443 for `worker/worker-lifecycle.ts` and `cli/commands/worker-lifecycle-command.ts` (status/stop/restart/config; node builtins + sibling worker modules).
     // Raised 73 -> 74 in #1445 for `worker/worker-pending-delete.ts` (node builtins only).
-    expect(files.size).toBeLessThan(74);
+    // Raised 74 -> 75 in #1453 for `cli/commands/worker-doctor-running-daemon.ts` (the doctor's running-daemon check).
+    expect(files.size).toBeLessThan(75);
   });
 
   it("never reaches the database or board-service layer", () => {

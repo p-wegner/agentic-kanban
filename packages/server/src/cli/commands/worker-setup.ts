@@ -19,6 +19,7 @@ import { pairWorker } from "../../worker/worker-pair.js";
 import { createWorkerHarness, type WorkerHarness } from "../../worker/worker-harness.js";
 import { applyWorkerPath, prependPath, saveExtraPathDir } from "../../worker/worker-path.js";
 import { cliPathArg } from "../cli-path.js";
+import { shellLine } from "./worker-doctor-git-prereqs.js";
 import { AUTH_PROVIDERS, runWorkerAuth, type AuthProvider, type WorkerAuthOptions } from "./worker-auth-command.js";
 import {
   probeCommand,
@@ -89,7 +90,7 @@ const DEFAULT_BOARD_URL = "http://127.0.0.1:3001";
 
 function askYesNo(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) {
-    console.log(`${question} (no terminal to ask on - re-run with --yes to accept)`);
+    console.log(`${question} (no terminal on stdin, not asking - skipped; re-run with --yes to accept)`);
     return Promise.resolve(false);
   }
   return new Promise((resolve) => {
@@ -102,9 +103,10 @@ function askYesNo(question: string): Promise<boolean> {
 }
 
 function readNpmPrefix(): NpmPrefixInfo | null {
-  const res = spawnSync("npm", ["prefix", "-g"], {
+  const win = process.platform === "win32";
+  const res = spawnSync(win ? shellLine("npm", ["prefix", "-g"]) : "npm", win ? [] : ["prefix", "-g"], {
     encoding: "utf8",
-    shell: process.platform === "win32",
+    shell: win,
     windowsHide: true,
   });
   const prefix = res.status === 0 ? String(res.stdout ?? "").trim() : "";
@@ -153,7 +155,10 @@ export function defaultSetupDeps(start?: () => Promise<void>): SetupDeps {
     home: homedir(),
     probe: probeCommand,
     run: (plan) =>
-      spawnSync(plan.command, plan.args, { stdio: "inherit", shell: plan.shell, windowsHide: true }).status ?? 1,
+      (plan.shell
+        ? spawnSync(shellLine(plan.command, plan.args), { stdio: "inherit", shell: true, windowsHide: true })
+        : spawnSync(plan.command, plan.args, { stdio: "inherit", windowsHide: true })
+      ).status ?? 1,
     confirm: askYesNo,
     print: (line) => console.log(line),
     npmPrefix: readNpmPrefix,
@@ -542,6 +547,12 @@ export function registerWorkerSetup(
     .action(async (options: SetupOptions) => {
       const code = await runWorkerSetup(options, defaultSetupDeps(() => ctx.start(options)));
       // --start leaves the daemon's own timers holding the process open; do not exit under it.
-      if (!(code === 0 && options.start)) process.exit(code);
+      if (!(code === 0 && options.start)) {
+        // process.exit() straight after the doctor's sockets/children began closing trips libuv's
+        // `!(handle->flags & UV_HANDLE_CLOSING)` assertion on Windows (#1453): let the loop drain, and only
+        // force the exit (on an unref'd timer) if something keeps it alive.
+        process.exitCode = code;
+        setTimeout(() => process.exit(code), 1000).unref();
+      }
     });
 }
