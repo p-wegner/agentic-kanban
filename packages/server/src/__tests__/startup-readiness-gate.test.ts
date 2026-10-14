@@ -30,6 +30,7 @@ function appWithGate(gate = createStartupReadinessGate()) {
   app.use("/api/*", gate);
   app.get("/api/board", (c) => c.json({ ok: true }));
   app.post("/api/workspaces", (c) => c.json({ created: true }, 201));
+  app.put("/api/preferences/settings", (c) => c.json({ ok: true }));
   return app;
 }
 
@@ -65,6 +66,18 @@ describe("startup readiness gate (#282)", () => {
     const res = await pending;
 
     expect(res.status).toBe(201);
+  });
+
+  it("does NOT hold a preference write while startup is still running (#1473)", async () => {
+    const waitFor = vi.fn(() => new Promise<void>(() => {}));
+    const app = appWithGate(createStartupReadinessGate({ waitFor, isComplete: () => false }));
+
+    const started = Date.now();
+    const res = await app.request("/api/preferences/settings", { method: "PUT" });
+
+    expect(res.status).toBe(200);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(waitFor).not.toHaveBeenCalled();
   });
 
   it("stops gating once startup is complete — no per-request wait afterwards", async () => {
