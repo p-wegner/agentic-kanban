@@ -10,7 +10,8 @@
 //      with `refused` set, so the board treats it as "not verified", not as red or green.
 //   3. BOUNDED. `slots` caps concurrent jobs; the verify child gets `KANBAN_TEST_MAX_WORKERS`.
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
@@ -217,7 +218,16 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
     if (running.size >= deps.slots) return refuse("no_free_slot", `this worker runs ${deps.slots} verify job(s) at a time`);
     running.add(job.jobId);
     let dir: string | null = null;
+    let dataDir: string | null = null;
     try {
+      // The board's gate sets AGENTIC_KANBAN_DIR to a temp dir on ITS disk (#231 isolation); on
+      // this machine that path does not exist and every DB-backed suite died with ENOENT mkdir
+      // (trains 2026-10-14-40/41: 219 suites). Keep the isolation, but on a dir of our own.
+      const jobEnv = { ...(job.env ?? {}) };
+      if (jobEnv.AGENTIC_KANBAN_DIR) {
+        dataDir = mkdtempSync(join(tmpdir(), "kanban-verify-gate-"));
+        jobEnv.AGENTIC_KANBAN_DIR = dataDir;
+      }
       progress(job.jobId, "fetch");
       const co = await prepare(job);
       if (!co.ok) return refuse(co.refused, co.reason, co.sha);
@@ -226,14 +236,14 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
       const install = (job.setupScript ?? deriveFallbackSetupCommand(co.dir) ?? "").trim();
       let log = "";
       if (install) {
-        const inst = await run(co.dir, install, { timeoutMs: Math.min(job.timeoutMs, 30 * 60 * 1000), env: job.env ?? {}, onOutput: () => undefined });
+        const inst = await run(co.dir, install, { timeoutMs: Math.min(job.timeoutMs, 30 * 60 * 1000), env: jobEnv, onOutput: () => undefined });
         log += `$ ${install}\n${inst.output}\n`;
         if (inst.exitCode !== 0 || inst.timedOut) return refuse("setup_failed", `\`${install}\` ${inst.timedOut ? "timed out" : `exited ${inst.exitCode}`}`, co.sha);
       }
       progress(job.jobId, "verify");
       let lastReport = 0;
       let seen = "";
-      const env = { ...(job.env ?? {}), ...(job.maxWorkers ? { KANBAN_TEST_MAX_WORKERS: String(job.maxWorkers) } : {}), ...(job.scope ? { KANBAN_RETRY_TEST_FILES: job.scope } : {}) };
+      const env = { ...jobEnv, ...(job.maxWorkers ? { KANBAN_TEST_MAX_WORKERS: String(job.maxWorkers) } : {}), ...(job.scope ? { KANBAN_RETRY_TEST_FILES: job.scope } : {}) };
       const out = await run(co.dir, job.script, {
         timeoutMs: job.timeoutMs,
         env,
@@ -258,6 +268,7 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
     } finally {
       running.delete(job.jobId);
       if (dir) await cleanup(job, dir).catch(() => undefined);
+      if (dataDir) try { rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* temp dir, reaped later */ }
       progress(job.jobId, "done");
     }
   }
