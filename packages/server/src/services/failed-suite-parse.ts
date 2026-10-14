@@ -32,7 +32,7 @@
  * file`) plus the bracketed collect-error form, without a regex per shape. WHERE it may appear
  * is constrained separately, by the marker-anchored patterns below.
  */
-const TEST_PATH = String.raw`[\w./\\@-]*[\w@-][/\\][\w./\\@-]*\.(?:test|spec)\.[cm]?[jt]sx?`;
+const TEST_PATH = String.raw`[\w./\\@:-]*[\w@-][/\\][\w./\\@-]*\.(?:test|spec)\.[cm]?[jt]sx?`;
 
 /**
  * Lines that name a test file WITHOUT claiming it failed. `✓`/`↓` are vitest's pass/skip
@@ -99,9 +99,23 @@ function lineAttributesFailure(line: string): boolean {
   return FAILURE_ATTRIBUTING_LINE.test(line);
 }
 
+/**
+ * Forward-slash form, with an ABSOLUTE checkout prefix stripped (#1470). A verify run on a fleet
+ * worker lives at `/home/worker/.agentic-kanban/stable/state-work/verify/<job>/…` (or a Windows
+ * `C:\…\verify\<job>\…`), and a runner that prints the full path would otherwise yield names no
+ * ledger or `select` vocabulary can match. Anything up to the first `packages/` or `.claude/`
+ * segment is the checkout root; a path with neither is returned as printed (never guessed).
+ */
+export function stripCheckoutPrefix(path: string): string {
+  const slashed = path.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (!/^(?:\/|[A-Za-z]:\/)/.test(slashed)) return slashed;
+  const m = /\/((?:packages|\.claude)\/.+)$/.exec(slashed);
+  return m ? m[1]! : slashed;
+}
+
 /** Normalise to repo-relative-looking forward-slash form so the same suite compares equal across probes. */
 function normalize(path: string): string {
-  return path.replace(/\\/g, "/").replace(/^\.\//, "");
+  return stripCheckoutPrefix(path);
 }
 
 /**
