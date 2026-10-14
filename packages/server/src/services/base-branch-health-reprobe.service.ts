@@ -37,7 +37,8 @@ import {
   machineVerifyLockEnabled,
   describeHolder,
 } from "../lib/machine-verify-lock.js";
-import { placementAwareSaturation } from "./base-branch-health-placement.js";
+import { placementAwareSaturation, planProbePlacement } from "./base-branch-health-placement.js";
+import { holdReprobe, clearHeldReprobe } from "./base-branch-reprobe-hold.js";
 import {
   readTier0Capacity,
   readCpuBusyPct,
@@ -181,7 +182,11 @@ export interface BaseHealthDueVerdict {
     | "recent_result"
     | "gate_running"
     | "sha_unchanged"
-    | "host_saturated";
+    | "host_saturated"
+    | "placement_held";
+  /** Only with `placement_held` (#1471): why the probe could not be placed, and when it is retried. */
+  held?: string;
+  retryAt?: string;
   /**
    * Present only when `reason === "probe_in_flight"` (#1223). An operator (or `promote.mjs`)
    * cannot tell a live probe from a corpse whose owning process was killed mid-run — both read
@@ -338,6 +343,22 @@ export async function resolveBaseHealthProbeDue(
 }
 
 /**
+ * Would placement HOLD this probe right now (#1471)? Returns the hold reason, or null when it can
+ * run (on the host or on a worker). Fail-open: anything unreadable means "not held", which keeps
+ * the pre-#1471 behaviour of attempting the probe.
+ */
+async function reprobePlacementHold(projectId: string, database: Database, branch: string | null): Promise<string | null> {
+  try {
+    const project = await getProjectById(projectId, database);
+    if (!project?.defaultBranch) return null;
+    const plan = await planProbePlacement({ projectId, database, isBaseLane: !branch || branch === project.defaultBranch });
+    return plan.target === "hold" ? plan.reason : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Ask for a fresh probe on demand, but only if one is actually DUE (#935).
  *
  * The gate and the reprobe route both want "the base's cached verdict is a non-answer, measure
@@ -410,6 +431,13 @@ export async function requestBaseBranchReprobe(
       && (verdict.reason === "recent_result" || verdict.reason === "sha_unchanged" || verdict.reason === "gate_running")) {
       verdict = { due: true, reason: "interval_elapsed" };
     }
+    // #1471 — `host_saturated` is also how a placement HOLD reaches this check
+    // (`placementAwareSaturation`). For an explicit request that is not a refusal but a hold: route it
+    // to the visible held-and-retried path below rather than dropping the request.
+    if (opts.ignoreRecency && !verdict.due && verdict.reason === "host_saturated"
+      && await reprobePlacementHold(projectId, database, opts.branch ?? null) !== null) {
+      verdict = { due: true, reason: "interval_elapsed" };
+    }
     if (!verdict.due) {
       console.log(
         `[base-branch-health] on-demand re-probe for project ${projectId} skipped (${verdict.reason})`,
@@ -423,15 +451,34 @@ export async function requestBaseBranchReprobe(
     // reach a slot it then hands back (see `BaseBranchProbeOptions`).
     // #1238 — a named branch is a candidate sweep: `explicit` by construction (someone is blocked
     // on it), and the branch rides on the options so the row is stamped with what was measured.
-    void verifyBaseBranchHealth(projectId, database, undefined, {
-      explicit: opts.ignoreRecency === true || Boolean(opts.branch),
-      ...(opts.branch ? { branch: opts.branch } : {}),
-    }).catch((err) => {
-      console.warn(
-        `[base-branch-health] on-demand re-probe failed for project ${projectId} (non-fatal):`,
-        err instanceof Error ? err.message : String(err),
-      );
-    });
+    // #1471 — placement is decided HERE, before reporting anything: a probe that placement would
+    // hold (worker placement, nobody with a free verify slot) never runs, so claiming it started
+    // was a lie. Held visibly and retried instead.
+    const startProbe = () => {
+      void verifyBaseBranchHealth(projectId, database, undefined, {
+        explicit: opts.ignoreRecency === true || Boolean(opts.branch),
+        ...(opts.branch ? { branch: opts.branch } : {}),
+      }).catch((err) => {
+        console.warn(
+          `[base-branch-health] on-demand re-probe failed for project ${projectId} (non-fatal):`,
+          err instanceof Error ? err.message : String(err),
+        );
+      });
+    };
+    const heldReason = await reprobePlacementHold(projectId, database, opts.branch ?? null);
+    if (heldReason !== null) {
+      const held = holdReprobe({
+        projectId, branch: opts.branch ?? null, reason: heldReason, nowMs,
+        retry: async () => {
+          const still = await reprobePlacementHold(projectId, database, opts.branch ?? null);
+          if (still === null) startProbe();
+          return still;
+        },
+      });
+      return { due: false, reason: "placement_held", held: held.reason, retryAt: held.retryAt };
+    }
+    clearHeldReprobe(projectId, opts.branch ?? null);
+    startProbe();
   } catch (err) {
     console.warn(
       `[base-branch-health] on-demand re-probe could not be decided for project ${projectId} (non-fatal):`,
