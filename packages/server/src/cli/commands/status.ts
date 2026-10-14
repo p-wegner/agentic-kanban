@@ -2,6 +2,11 @@ import type { Command } from "commander";
 import { timeSince, cliAction } from "../shared.js";
 import { formatDurationStr } from "@agentic-kanban/shared";
 
+// #1492: a held pre-merge gate reads "gate held: <reason>, retry at <time>", not "auto-merge pending".
+function pendingMergeLabel(mergeState: { reason?: string; label: string }): string {
+  return mergeState.reason === "gate-held" ? mergeState.label : "auto-merge pending";
+}
+
 export function registerStatusCommand(program: Command) {
   program
     .command("status")
@@ -95,7 +100,7 @@ Status indicators:
               wsInfo.push(`+${issue.diffStats.insertions}/-${issue.diffStats.deletions}`);
             }
             if (issue.mergeState?.bucket === "pending_merge") {
-              wsInfo.push(issue.mergeState.reason === "gate-held" ? issue.mergeState.label : "auto-merge pending");
+              wsInfo.push(pendingMergeLabel(issue.mergeState));
             }
             console.log(`         ${wsInfo.join(" · ")}`);
           }
