@@ -1,6 +1,6 @@
 // Type declarations for the remote agent service (#871 ceiling split) — see
 // agent-remote.service.ts, which re-exports the public ones. Types only, no runtime code.
-import type { WorkerRepoOpKind, WorkerRepoOpResult } from "@agentic-kanban/shared/lib/worker-protocol";
+import type { BoardToWorkerMessage, WorkerRepoOpKind, WorkerRepoOpResult } from "@agentic-kanban/shared/lib/worker-protocol";
 import type { AgentExecutionService, DeferredLaunchFailure } from "./agent-dispatch.service.js";
 import type { AgentOutputCallback } from "./agent.service.js";
 
@@ -21,6 +21,10 @@ export interface RemoteSession {
   onDeferredLaunchFailure?: (failure: DeferredLaunchFailure) => void;
   /** Has this worker ever spoken about this session? Positive proof it took the assign. */
   observed?: boolean;
+  /** The assign frame as sent (#1490), kept so a worker that never started it can be sent it once more. */
+  assignMessage?: BoardToWorkerMessage;
+  /** How many times the assign was re-sent after the worker never started it (#1490). */
+  assignResends?: number;
   /** A deferred "is this really lost?" re-check, armed by a hello inside the settle window. */
   lostCheckTimer?: ReturnType<typeof setTimeout>;
   /**

@@ -43,7 +43,7 @@ import { incomingRefFor } from "./worker-remote-sync.service.js";
 import { REMOTE_SESSION_ABANDON_MS } from "./remote-session-liveness.js";
 import { WORKER_HEARTBEAT_STALE_MS } from "./worker-registry.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import type { WorkerPhaseTimings } from "@agentic-kanban/shared/lib/worker-protocol";
+import type { BoardToWorkerMessage, WorkerPhaseTimings } from "@agentic-kanban/shared/lib/worker-protocol";
 import { createRemoteSessionEventRecorder, type BoardEndedReason } from "./agent-remote-events.js";
 import { createRemoteLiveness } from "./agent-remote-liveness.js";
 import { buildRemoteAssignSpec, dispatchGitTransportAssignment } from "./agent-remote-launch.js";
@@ -349,8 +349,10 @@ export function createRemoteAgentService(
 
     // Same-machine dispatch (no repo in the placement): the worker shares this
     // filesystem, so assign directly; git transport assigns after its async prerequisites.
+    let sharedAssign: BoardToWorkerMessage | undefined;
     if (!placement.repo) {
-      if (!manager.send(workerId, { type: "assign", sessionId, spec })) {
+      sharedAssign = { type: "assign", sessionId, spec };
+      if (!manager.send(workerId, sharedAssign)) {
         throw new Error(`fleet worker ${workerId} is not connected`);
       }
       // #801 — recorded only once the assign is actually ON THE WIRE. An event written
@@ -381,6 +383,7 @@ export function createRemoteAgentService(
           }
         : undefined,
       onDeferredLaunchFailure,
+      assignMessage: sharedAssign,
     });
     liveness.armAssignProbe(sessionId); // #887 — ask, rather than wait out a silence TTL
     updateSessionWorkerId(sessionId, workerId, database)
