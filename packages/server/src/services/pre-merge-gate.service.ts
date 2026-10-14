@@ -63,6 +63,7 @@ import { buildVerifyResourceEnv } from "./verify-resource-env.js";
 import { sequenceBaseHealthBeforeVerify } from "./gate-base-health-sequencing.js";
 import { openRedDebtEntry } from "../repositories/red-debt.repository.js";
 import { buildStaleVerdictReason } from "./merge-gate-verdict-reason.js";
+import { looksLikeMissingDepsFailure, missingDepsEvidence } from "./missing-deps-signature.js";
 
 // The verify TUNABLES (timeout / worker cap / file-scope prefs, and #909's capacity
 // derivation) live in `verify-tunables.ts` — same reason as the two extractions above this
@@ -104,16 +105,7 @@ export {
  */
 export { summarizeVerifyFailure };
 
-// cmd.exe's "command not found" is LOCALIZED (#1092). A German box prints
-// `Der Befehl "depcruise" ist entweder falsch geschrieben oder\nkonnte nicht gefunden werden.` —
-// split across two lines — and matching only the English wording meant #169's install retry
-// never fired there: the gate went straight to `verify_infra_missing` and a 2h backoff.
-const MISSING_DEPS_SIGNATURE =
-  /cannot find module|could not resolve|err_module_not_found|module_not_found|unresolved_import|enoent.*node_modules|command not found|is not recognized as an internal or external command|ist entweder falsch geschrieben oder\s+konnte nicht gefunden werden/i;
-
-export function looksLikeMissingDepsFailure(output: string): boolean {
-  return MISSING_DEPS_SIGNATURE.test(output);
-}
+export { looksLikeMissingDepsFailure, missingDepsEvidence } from "./missing-deps-signature.js";
 
 /**
  * Open a `flaky`-tagged red-debt ledger entry for every suite #894's targeted re-run just
@@ -646,6 +638,7 @@ export async function runPreMergeGate(
         },
         getInstallCommand: () => getProjectSetupScript(projectId, database).catch(() => null),
         runInstall: async (command) => {
+          if (workerRun) return; // #1493: a worker run installs in its own checkout each job; a host install changes nothing it reads
           noteMergeGatePhase(workspace.id, "install", command);
           await runUnderBuildSemaphore(() =>
             runSetupScript(workingDir, command, {
@@ -657,6 +650,7 @@ export async function runPreMergeGate(
         },
         signal: combinedSignal,
         looksLikeMissingDeps: looksLikeMissingDepsFailure,
+        missingDepsEvidence,
         // Only this repo's `scripts/test-mine.mjs` honours a suite scope; for any other project
         // the env var is inert and the "targeted re-run" would be a second FULL run.
         scoped: isSelfRepo,

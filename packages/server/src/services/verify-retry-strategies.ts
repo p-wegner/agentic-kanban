@@ -106,6 +106,8 @@ export interface ResolveVerifyOutcomeInput {
   runInstall: (command: string) => Promise<void>;
   /** Does the failure text look like missing dependencies rather than a regression? */
   looksLikeMissingDeps: (output: string) => boolean;
+  /** The output line that tripped `looksLikeMissingDeps` (#1493), so the retry names what was missing. */
+  missingDepsEvidence?: (output: string) => string | null;
   /** Whether this project's verify_script honours a suite scope at all. */
   scoped: boolean;
   /**
@@ -213,11 +215,15 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
 
   // ---- #169 missing-deps install retry ----------------------------------------------------
   let installed = false;
+  let missingEvidence: string | null = null;
   if (input.looksLikeMissingDeps(combinedOutput(result))) {
+    missingEvidence = input.missingDepsEvidence?.(combinedOutput(result)) ?? null;
     const installCommand = await input.getInstallCommand();
     if (installCommand && installCommand.trim()) {
       log(
-        `verify_script failed with a missing-deps signature for workspace ${input.workspaceId} — ` +
+        `verify_script failed with a missing-deps signature for workspace ${input.workspaceId}` +
+          (missingEvidence ? ` (matched: ${missingEvidence})` : "") +
+          " — " +
           "retrying once after running the project's install command",
       );
       await input.runInstall(installCommand);
@@ -291,7 +297,9 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
   // (#1242's finding: it had silently declined every time). Only when something was named —
   // a compile or install failure carries nothing to explain.
   const declined = failedSuites.length > 0 ? ` [no flake retry: ${flake.reason}]` : "";
-  const suffix = installed ? " (retried once after an auto-install; still failing)" : "";
+  const suffix = installed
+    ? ` (retried once after an auto-install; still failing${missingEvidence ? `; first run missing: ${missingEvidence}` : ""})`
+    : "";
   return {
     failure: {
       message:
