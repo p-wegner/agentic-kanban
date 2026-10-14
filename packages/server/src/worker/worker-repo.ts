@@ -13,11 +13,11 @@
 
 import { describeGitTransportFailure } from "./worker-git-token.js";
 import { workerLog } from "./worker-updater.js";
+import { materializeRepoSkills } from "./worker-repo-skills.js";
 import { healCorruptCache, isCloneCorruption } from "./worker-repo-heal.js";
 import { loadUndelivered } from "./worker-undelivered.js";
 import { ensureLongPaths, removeCheckoutDir } from "./worker-pending-delete.js";
 import { mkdirSync, writeFileSync, existsSync, readdirSync, appendFileSync } from "node:fs";
-import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { TICKET_CONTEXT_FILENAME } from "@agentic-kanban/shared/lib/ticket-context";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -278,13 +278,7 @@ export async function provisionWorkerCheckout(
   // #553: through the shared writer, not a raw writeFileSync. The hand-rolled version
   // had no `isSafeSkillName` guard and emitted no frontmatter, so a remote worker's
   // skills were not discoverable as slash-commands the way every local one is.
-  for (const skill of repo.skills ?? []) {
-    await writeAgentSkillFile(checkoutDir, {
-      name: skill.name,
-      description: skill.description ?? "",
-      prompt: skill.content,
-    });
-  }
+  await materializeRepoSkills(checkoutDir, repo.skills ?? [], log);
 
   // #749: the ticket-context file(s) the board wrote into ITS worktree. They arrive as
   // name + content because a board path names nothing here, and they must land BEFORE the
