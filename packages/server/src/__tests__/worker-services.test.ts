@@ -75,8 +75,12 @@ afterEach(async () => {
   await runner.stopAll();
   wss.close();
   await new Promise<void>((r) => upstream.close(() => r()));
-  // Windows holds a dead service's cwd for a moment after taskkill returns.
-  rmSync(checkout, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  // Windows holds a dead service's cwd for a moment after taskkill returns, and under a loaded
+  // full sweep even 5 s of retries ran out (EPERM, 2026-10-14). Best-effort: the `ak-` temp dir
+  // is reaped later, and a leftover dir must not turn a passing test red.
+  try {
+    rmSync(checkout, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  } catch { /* reaped with the other stale ak- temp dirs */ }
 });
 
 const LONG_RUNNING = `"${process.execPath}" -e "setInterval(() => {}, 1000)"`;
