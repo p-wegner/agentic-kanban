@@ -6,6 +6,7 @@ import WebSocket from "ws";
 const PING_INTERVAL_MS = 15 * 1000;
 const PONG_TIMEOUT_MS = 20 * 1000;
 /** A `socket:false` heartbeat answer is ignored this long after connect: the board may not have processed `hello` yet. */
+const BOARD_PING_GAP_WARN_MS = 20 * 1000;
 const SOCKET_FALSE_GRACE_MS = 10 * 1000;
 
 const startedAt = new WeakMap<WebSocket, number>();
@@ -36,6 +37,15 @@ export function startSocketKeepalive(
   }, intervalMs);
   pingTimer.unref?.();
   socket.on("pong", clearPong);
+  // #1480: which side stops answering? Log a gap between board pings far above its cadence — it means
+  // THIS worker's event loop (or the link) held them back, and says so in the worker's own log.
+  let lastBoardPingAt = Date.now();
+  socket.on("ping", () => {
+    const now = Date.now();
+    const gap = now - lastBoardPingAt;
+    lastBoardPingAt = now;
+    if (gap > BOARD_PING_GAP_WARN_MS) log(`[worker] board ping arrived ${Math.round(gap / 1000)}s after the previous one (expected ~10s) - link or worker event loop stalled`);
+  });
   socket.on("close", () => { clearInterval(pingTimer); clearPong(); });
 }
 
