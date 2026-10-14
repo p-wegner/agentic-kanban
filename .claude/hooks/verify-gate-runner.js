@@ -209,14 +209,25 @@ function listListeningPids() {
       }
       return pids;
     }
-    const out = execFileSync("lsof", ["-iTCP", "-sTCP:LISTEN", "-P", "-n"], {
-      encoding: "utf8",
-      timeout: 10000,
-    });
     const pids = new Set();
-    for (const line of out.split("\n").slice(1)) {
-      const parts = line.trim().split(/\s+/);
-      const pid = Number(parts[1]);
+    try {
+      const out = execFileSync("lsof", ["-iTCP", "-sTCP:LISTEN", "-P", "-n"], {
+        encoding: "utf8",
+        timeout: 10000,
+      });
+      for (const line of out.split("\n").slice(1)) {
+        const parts = line.trim().split(/\s+/);
+        const pid = Number(parts[1]);
+        if (Number.isInteger(pid) && pid > 0) pids.add(pid);
+      }
+      return pids;
+    } catch {
+      // lsof is not installed on minimal Linux hosts (fleet workers); an EMPTY listener set
+      // would make the sweep kill a deliberately detached dev server, so fall back to ss.
+    }
+    const out = execFileSync("ss", ["-H", "-tlnp"], { encoding: "utf8", timeout: 10000 });
+    for (const m of out.matchAll(/pid=(\d+)/g)) {
+      const pid = Number(m[1]);
       if (Number.isInteger(pid) && pid > 0) pids.add(pid);
     }
     return pids;
