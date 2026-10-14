@@ -4,6 +4,16 @@
 Sentinel line are #1253, still in the merge queue). Builds on 017 (risk posture)
 and 019 (release-candidate promotion).
 
+**Wired 2026-10-13 (#1463).** #1246–#1249 shipped the decision layer only; the route, CLI, train
+integration and tick were a follow-up nobody had filed (the operator could not run a flush with 13
+reviewed branches waiting). `services/queue-flush.service.ts` is that wiring: `POST
+/api/projects/:id/queue/flush`, `pnpm cli -- queue flush [--dry-run]`, a Flush action in the
+delivery chip, the train in flush mode (`merge-train-flush-run.ts`; gate script overridable per
+project with `queue_flush_gate_<id>`), and `startup/queue-flush-sweep.ts` (auto trigger + heal-state
+advance). `standard`/`strict` still refuse: lower the rung for the flush, raise it afterwards. For a
+`rc` heal target the rc is cut by `pnpm promote`; the record waits in `flushed` until a candidate
+containing the landing exists.
+
 ## The problem this answers
 
 The merge queue exists to prove each change before it lands. When builders produce branches faster

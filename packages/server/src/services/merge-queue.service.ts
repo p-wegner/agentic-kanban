@@ -17,6 +17,8 @@ import { lockContentionSkipEvent, preMergeGateSkipEvent } from "./merge-lock-con
 import type { BoardEventSink } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 import { createMergeTrainRunner, pickQueueStrategy } from "./merge-queue-train.js";
+import { trainMemberIneligibility } from "./merge-release-partition.js";
+import type { FlushRunSpec } from "./merge-train-flush-run.js";
 import { findRunningSession } from "../repositories/session.repository.js";
 
 export interface WorkspaceConflictPreview {
@@ -244,6 +246,20 @@ function wireMergeTrainRunner(
     relaunch: (workspaceId, prompt) => sessionService.launchSession(workspaceId, { prompt, fromTrain: true }),
     boardEvents,
   });
+}
+
+/** A flush needs no size floor, but its members must provably share one repo and base branch. */
+async function* executeFlushQueue(
+  plan: MergeQueuePlan, workspaceIds: string[], flush: FlushRunSpec,
+  runTrainStrategy: (plan: MergeQueuePlan, flush: FlushRunSpec) => AsyncGenerator<MergeQueueEvent>,
+): AsyncGenerator<MergeQueueEvent> {
+  const first = plan.order[0];
+  if (first && plan.order.every((ws) => ws.repoPath === first.repoPath && ws.baseBranch === first.baseBranch && trainMemberIneligibility(ws) === null)) {
+    yield* runTrainStrategy(plan, flush);
+    return;
+  }
+  yield { type: "error", workspaceId: first?.id ?? "", issueNumber: first?.issueNumber ?? null, issueTitle: first?.issueTitle ?? "", error: "flush refused: members are not provably one repo and one base branch" };
+  yield { type: "done", merged: [], failed: [], skipped: workspaceIds };
 }
 
 export function createMergeQueueService(deps: {
@@ -502,7 +518,7 @@ export function createMergeQueueService(deps: {
 
   async function* executeQueue(
     workspaceIds: string[],
-    opts: { skipOnConflict?: boolean; strategy?: "sequential" | "train" } = {},
+    opts: { skipOnConflict?: boolean; strategy?: "sequential" | "train"; flush?: FlushRunSpec } = {},
   ): AsyncGenerator<MergeQueueEvent> {
     const plan = await computePlan(workspaceIds);
     yield { type: "planned", plan };
@@ -510,8 +526,9 @@ export function createMergeQueueService(deps: {
     // Release train (#904): gate the assembled batch ONCE instead of once per member. The
     // dispatch decision (shape eligibility, caller/classifier/opt-in, and #1180's "why not"
     // log line) lives in `pickQueueStrategy` beside the train runner it routes into.
-    if ((await pickQueueStrategy(plan, opts, database)) === "train") {
-      yield* trainRunner.runTrainStrategy(plan);
+    // Queue flush (#1463, decision 020): the whole ready set as ONE train in flush mode, never size-gated.
+    if (opts.flush || (await pickQueueStrategy(plan, opts, database)) === "train") {
+      yield* (opts.flush ? executeFlushQueue(plan, workspaceIds, opts.flush, trainRunner.runTrainStrategy) : trainRunner.runTrainStrategy(plan));
       return;
     }
 

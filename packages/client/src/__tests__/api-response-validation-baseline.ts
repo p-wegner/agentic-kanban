@@ -187,6 +187,8 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "POST /api/projects/:param/issues/import/preview",
   "POST /api/projects/:param/onboarding/:param",
   "POST /api/projects/:param/onboarding/dismiss",
+  // #1463: the response body is never read (the action only surfaces a toast or the 409 reason).
+  "POST /api/projects/:param/queue/flush",
   "POST /api/projects/:param/repos",
   "POST /api/projects/:param/repos/:param/promote",
   "POST /api/projects/:param/scripts",

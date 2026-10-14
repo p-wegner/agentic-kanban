@@ -6640,6 +6640,57 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{id}/queue/flush:
+    post:
+      summary: POST /api/projects/{id}/queue/flush
+      tags:
+        - project-queue-flush
+      operationId: post_api_projects_id_queue_flush
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dryRun:
+                  type: boolean
+                wait:
+                  type: boolean
+                triggeredBy:
+                  type: string
+                  enum:
+                    - manual
+                    - cli
+              additionalProperties: true
+              x-unknown-keys: passthrough
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "202":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/rc:
     get:
       summary: GET /api/projects/:id/rc

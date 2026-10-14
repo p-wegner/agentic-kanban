@@ -298,8 +298,15 @@ import {
  * The 31 guards that were counted at the assumed 3,000 ms (flush 2026-10-13-1 added them without a
  * `durations.json` capture) were measured and recorded; their real cost is a fraction of the
  * assumption. No cap was raised: the baseline is lowered to the measured floor.
+ *
+ * -- Sixteenth movement, UP (2026-10-14, #1485) — 489,689 -> 492,689 ----------------------
+ *
+ * One guard, `test-mine-crash-ledger.test.ts`, at the ASSUMED 3,000 ms. It imports
+ * `scripts/vitest-crash-ledger.mjs`, which test-mine.mjs loads as a vitest reporter by path, so
+ * dependency selection cannot see the runner needs it. It carries a `when:` territory of those
+ * two scripts, so an ordinary diff does not pay it; the next capture should give the 3 s back.
  */
-const BASELINE_TOTAL_MS = 489_689;
+const BASELINE_TOTAL_MS = 492_689;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative

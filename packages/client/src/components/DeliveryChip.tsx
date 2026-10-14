@@ -23,6 +23,7 @@ import {
 import { setProjectPref } from "../lib/settingsStore.js";
 import { DeliveryMergeActivityBody } from "./DeliveryMergeActivity.js";
 import { showToast } from "../lib/toast.js";
+import { apiPost } from "../lib/api.js";
 
 const trainMaxSizePref = projectPref("train_max_size");
 const trainMaxWaitMsPref = projectPref("train_max_wait_ms");
@@ -154,6 +155,16 @@ function DeliveryPanelBody({
 
   const setRedBasePolicy = (v: RedBasePolicy) =>
     save(() => setProjectPref(projectId, redBasePolicyPref.prefix, v), "Failed to change red-base policy");
+
+  // #1463: the Flush action (decision 020). The server owns every rail and answers 409 with the
+  // reason; a started flush runs detached and shows up in the line below once it lands.
+  const flushWithConfirm = () => {
+    if (!window.confirm("Flush the queue? Every ready branch lands as ONE train with only check:arch + typecheck as its gate; the full suite runs afterwards and a red becomes a heal ticket.")) return;
+    void save(async () => {
+      await apiPost(`/api/projects/${projectId}/queue/flush`, { triggeredBy: "manual" });
+      showToast("Flush started — follow it in the delivery chip", "success");
+    }, "Flush refused");
+  };
 
   const [cadenceDraft, setCadenceDraft] = useState<string | null>(null);
   const cadenceValue = cadenceDraft ?? (status.promoteCadence?.trim() || "off");
@@ -310,6 +321,17 @@ function DeliveryPanelBody({
       >
         {describeFlush(status.flush)}
       </div>
+      {status.flushMode && status.flushMode !== "off" && (
+        <button
+          type="button"
+          data-testid="delivery-flush-action"
+          disabled={saving}
+          onClick={flushWithConfirm}
+          className="self-start rounded border border-red-300 px-2 py-0.5 text-[11px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/30"
+        >
+          Flush queue
+        </button>
+      )}
     </>
   );
 }

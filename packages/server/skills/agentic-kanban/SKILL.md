@@ -1,7 +1,7 @@
 ---
 name: agentic-kanban
 description: Operate the agentic-kanban board — a kanban board where each card is an AI coding session in its own git worktree. Use when asked to work a ticket, drive a project hands-off, review or merge agent work, inspect what agents are doing, or wire the board into another tool. Covers the MCP tools, CLI, board views, statuses, and the review/merge gate.
-commit: a5ab40c43
+commit: 1d5e2fa6c
 generated: 2026-10-14
 ---
 
@@ -158,6 +158,7 @@ Top-level: `cleanup`, `create`, `delete-status`, `dev`, `export-backlog`, `impor
 | `openspec` | `list`, `show`, `validate` |
 | `plugin-sync` | `config-get`, `config-set`, `validate`, `trigger`, `status` |
 | `preferences` | `set`, `get` |
+| `queue` | `flush` |
 | `services` | `reap` |
 | `session` | `analyze`, `recent`, `backfill-friction`, `review-effectiveness`, `reviewer-fixes`, `transcript`, `search`, `stats`, `friction`, `find-similar` |
 | `skill` | `list`, `get`, `create`, `export`, `verify` |

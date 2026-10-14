@@ -903,6 +903,11 @@ export async function resolveGateVerification(
     workingDir?: string | null;
     /** Injected for tests — see `resolveSelectorId`. */
     resolveSelectorIdFn?: typeof resolveSelectorId;
+    /**
+     * A queue flush's gate (#1463): run THIS script instead of the project's verify command. The key
+     * is folded with `|flush` so a pass banked under it is never replayed as a full-suite pass.
+     */
+    verifyScriptOverride?: string;
   },
 ): Promise<{
   strategy: VerifyGateStrategy;
@@ -919,8 +924,11 @@ export async function resolveGateVerification(
   verificationKey: string;
 }> {
   const { strategy, posture, fromPosture, budget, guardsAtMerge } = await resolveGateTierFor(projectId, database);
-  const effectiveVerify = await resolveEffectiveVerify(projectId, database, { persistDerived: true }).catch(() => null);
-  const verifyScript = effectiveVerify?.command ?? null;
+  const verifyScriptOverride = options?.verifyScriptOverride;
+  const effectiveVerify = verifyScriptOverride
+    ? null
+    : await resolveEffectiveVerify(projectId, database, { persistDerived: true }).catch(() => null);
+  const verifyScript = verifyScriptOverride ?? effectiveVerify?.command ?? null;
   // Never throws and never blocks: an unresolvable selector yields `""`, which reproduces the
   // pre-#958 key exactly. The only cost of losing it is an extra gate run.
   //
@@ -953,7 +961,12 @@ export async function resolveGateVerification(
     verificationKey: gateVerificationKey(
       strategy,
       verifyScript,
-      guardsAtMerge === "intersecting" ? `${selectorId}|guards=intersecting` : selectorId,
+      `${guardsAtMerge === "intersecting" ? `${selectorId}|guards=intersecting` : selectorId}${verifyScriptOverride ? "|flush" : ""}`,
     ),
   };
+}
+
+/** #1463 — the outcome-ledger `source` of a gate that ran a flush script; `undefined` keeps the default `ci`. */
+export function flushLedgerSource(verifyScriptOverride: string | undefined): string | undefined {
+  return verifyScriptOverride ? "flush" : undefined;
 }
