@@ -11,6 +11,35 @@ First archive pass: 2026-08-27, cutting at the 2026-08-24 boundary (`CONTINUE.md
 
 ---
 
+## 2026-10-14 (night, moved 2026-10-14 morning) — two queue flushes; paused for a reboot
+
+**Goal (Peter):** get the board backlog done using the workers.
+
+- **Stable:** `stable-20261014` = master 7c038f185 via `promote --recover` (flush 1 + heal #1466 +
+  #1468). A full sweep is OWED. Master is now e09a4504f (flush 2, heal #1472, #1477), not promoted.
+  Its full sweep was running on desktop-stable at the reboot; re-request it after the reboot.
+- **Flushes done by hand** (the built-in flush mode is not wired, #1463 is building it): merge the
+  reviewed branches into a worktree OUTSIDE `.worktrees`, resolve, `skill:generate`, typecheck +
+  check:arch + the guard ratchets (nloc, worker-cli-isolation, always-run, status-read,
+  shared-lib-single-consumer, codex parity), ff master, tag `flush/<date>-N`, then sweep and heal.
+  Flush 1 (13 tickets) needed heal #1466 + two direct fixes; flush 2 (6 tickets) needed #1472.
+- **Done since yesterday:** #1444 #1447 #1449-#1455 #1457-#1461 #1464-#1470 #1472 (+ #1468 direct).
+  In review: #1456 #1462 #1463 #1471 #1473. Building: #1474 #1475 #1476. To do: #1477.
+- **Verify placement:** `verify_placement=worker`, `verify_workers=desktop-stable` only.
+  wsl-stable is Linux and four suites fail there (#1469, fix merged in flush 2); ao-pf38 loses
+  gates on socket drops (#1465, merged in flush 2). Widen the allowlist after promoting.
+- **Worker slots:** desktop-stable 1 (Peter's own RAM use), ao-pf38 4, wsl-stable 1.
+- **Board is slow:** writes take 120-210 s, reads are fast (#1473); scratchpad `launch.sh` and
+  `drive3.sh` use 240 s timeouts. `status --watch` fell back to the old list because console GETs
+  timed out (#1477, timeout raised on master).
+- **Known flake:** worker-agent-runner "hang-watchdog kill after a result event" under load (#1476).
+
+**Next:** after the reboot, request the master sweep (desktop-stable), promote if green (only the
+#1476 flake is acceptable), restart the watch pane, then widen verify_workers and let the review
+queue merge.
+
+---
+
 ## 2026-10-13 — compute moved to workers; stable-20261013-3 live
 
 **Goal (Peter):** every compute-heavy job of ticket work runs on fleet workers; the laptop only
