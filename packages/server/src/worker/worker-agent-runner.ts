@@ -40,7 +40,8 @@ import {
   type UnpushedResult,
   createUndeliveredStore,
 } from "./worker-undelivered-retry.js";
-import { removeUndelivered } from "./worker-undelivered.js";
+import { createResultIdleTracker } from "./worker-result-idle.js";
+import { settleResultPush } from "./worker-result-push.js";
 import { createGitTokenRequester } from "./worker-git-token.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { createWorkerSessionRegistry } from "./worker-session-registry.js";
@@ -268,13 +269,6 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   const stdinOpen = new Map<string, boolean>();
   /** Per-session silence watchdogs; reset on every byte of agent output. */
   const hangWatchdogs = new Map<string, { reset(): void; close(): void }>();
-  /** #1464: sessions whose last stdout event was a `result` (final turn over) — idle there means DONE. */
-  const resultSeen = new Set<string>();
-  const resultTimers = new Map<string, NodeJS.Timeout>();
-  const stdoutPartials = new Map<string, string>();
-  /** Sessions the worker itself ended (grace or hang watchdog) after a result event. */
-  const killedAfterResult = new Set<string>();
-  const resultGraceMs = options.idleAfterResultGraceMs ?? DEFAULT_IDLE_AFTER_RESULT_GRACE_MS;
   let maxConcurrency = options.maxConcurrency &&options.maxConcurrency > 0 ? options.maxConcurrency : 1;
   const tree = createAgentTreeTracker(workRoot); // #1336
 
@@ -304,68 +298,17 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     send({ type: "assign_failed", sessionId, error: ASSIGN_REFUSED_AT_CAPACITY });
   }
 
+  const resultIdle = createResultIdleTracker({
+    graceMs: options.idleAfterResultGraceMs ?? DEFAULT_IDLE_AFTER_RESULT_GRACE_MS,
+    getProcess: (sid) => processes.get(sid),
+    onStdinClosed: (sid) => stdinOpen.set(sid, false),
+    stop: (sid) => stop(sid),
+  });
+
   function closeWatchdog(sessionId: string): void {
     hangWatchdogs.get(sessionId)?.close();
     hangWatchdogs.delete(sessionId);
-    clearResultState(sessionId);
-  }
-
-  /** #1464: forget everything the idle-after-result logic knows about a session. */
-  function clearResultState(sessionId: string): void {
-    const timer = resultTimers.get(sessionId);
-    if (timer) clearTimeout(timer);
-    resultTimers.delete(sessionId);
-    resultSeen.delete(sessionId);
-    stdoutPartials.delete(sessionId);
-    killedAfterResult.delete(sessionId);
-  }
-
-  /**
-   * #1464: scan a stdout chunk for stream-json events. A `result` event means the agent's final
-   * turn is over; any other event after it means the agent is still working (a new turn).
-   * Returns nothing — it only maintains `resultSeen`.
-   */
-  function noteStdoutEvents(sessionId: string, data: string): void {
-    const buffered = (stdoutPartials.get(sessionId) ?? "") + data;
-    const lines = buffered.split("\n");
-    stdoutPartials.set(sessionId, (lines.pop() ?? "").slice(-65536));
-    for (const raw of lines) {
-      const line = raw.trim();
-      if (!line.startsWith("{")) continue;
-      if (/"type"\s*:\s*"result"/.test(line.slice(0, 4096)) || /"type"\s*:\s*"result"/.test(line.slice(-512))) {
-        try {
-          if ((JSON.parse(line) as { type?: unknown }).type === "result") {
-            resultSeen.add(sessionId);
-            continue;
-          }
-        } catch { /* not a complete event; treat as other output */ }
-      }
-      resultSeen.delete(sessionId);
-    }
-  }
-
-  /** (Re)arm the grace timer after a result event; any later output re-arms it from scratch. */
-  function armResultGrace(sessionId: string): void {
-    const old = resultTimers.get(sessionId);
-    if (old) clearTimeout(old);
-    resultTimers.delete(sessionId);
-    if (!resultSeen.has(sessionId) || resultGraceMs <= 0) return;
-    const timer = setTimeout(() => {
-      resultTimers.delete(sessionId);
-      const proc = processes.get(sessionId);
-      if (!proc || !resultSeen.has(sessionId)) return;
-      workerLog(`[worker] session ${sessionId} idle ${resultGraceMs}ms after its result event; ending it (completed)`);
-      killedAfterResult.add(sessionId);
-      try { proc.stdin?.end(); } catch { /* already closed */ }
-      stdinOpen.set(sessionId, false);
-      // stdin EOF is the polite ask; a process that ignores it gets SIGTERM shortly after.
-      const killTimer = setTimeout(() => {
-        if (processes.get(sessionId) === proc) stop(sessionId);
-      }, Math.min(5_000, resultGraceMs));
-      if (killTimer.unref) killTimer.unref();
-    }, resultGraceMs);
-    if (timer.unref) timer.unref();
-    resultTimers.set(sessionId, timer);
+    resultIdle.clear(sessionId);
   }
 
   /**
@@ -481,45 +424,10 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     checkouts.delete(sessionId);
     inFlightPending.set(sessionId, pending);
     const push = (async () => {
-      let effectiveExit = exitCode;
       const pushStart = Date.now();
-      try {
-        const outcome = await undelivered.pushWithRetry(sessionId, pending);
-        if (outcome.ok && abandonedPushes.has(sessionId)) {
-          // #1461: the drain already recorded this as undelivered; it did land after all, so
-          // clear the record. The checkout is left for the next start's reaper (nothing holds it).
-          removeUndelivered(workRoot, sessionId);
-        } else if (outcome.ok) {
-          try {
-            await repoOps.cleanup(pending.checkout);
-          } catch { /* best-effort */ }
-        } else if (abandonedPushes.has(sessionId)) {
-          effectiveExit = exitCode === 0 || exitCode === null ? 1 : exitCode;
-        } else {
-          // #750/#775 item 2: the checkout is NOT removed. A `git worktree remove --force`
-          // here leaves the commits only on the `kanban/<sessionId>` branch of the cache
-          // clone, which nothing on either machine enumerates — so a failed push used to
-          // cost the whole run in every practical sense.
-          undelivered.retain(sessionId, pending, outcome);
-          effectiveExit = exitCode === 0 || exitCode === null ? 1 : exitCode;
-        }
-      } catch (err) {
-        // #870: NOTHING on this path may escape. This IIFE runs detached off the child's
-        // exit event, so an exception here was an unhandled rejection — and observed live,
-        // one failed push took the whole daemon (and every other agent on the machine)
-        // down with "[run] daemon threw". Retain the result like any exhausted retry and
-        // hand it to the #871 undelivered tracking; the daemon stays up.
-        const message = errorMessage(err);
-        workerLog(
-          `[worker] result push path failed unexpectedly (daemon staying up): sessionId=${sessionId}: ${message}`,
-        );
-        try {
-          undelivered.retain(sessionId, pending, { ok: false, attempts: 0, lastError: message });
-        } catch (retainErr) {
-          workerLog(`[worker] could not retain the unpushed result: sessionId=${sessionId}`, retainErr);
-        }
-        effectiveExit = exitCode === 0 || exitCode === null ? 1 : exitCode;
-      }
+      const effectiveExit = await settleResultPush(
+        { undelivered, abandonedPushes, workRoot, cleanup: repoOps.cleanup }, sessionId, pending, exitCode,
+      );
       const phases: WorkerPhaseTimings = {
         ...pending.checkout.phases,
         ...(agentMs !== undefined ? { agentMs } : {}),
@@ -697,8 +605,8 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       seen.noteOutput(sessionId);
       hangWatchdogs.get(sessionId)?.reset();
       // #1464: track the final `result` event; interactive (keepStdinOpen) sessions wait for input, so they are exempt.
-      if (type === "stdout") noteStdoutEvents(sessionId, data);
-      if (!spec.keepStdinOpen) armResultGrace(sessionId);
+      if (type === "stdout") resultIdle.noteStdout(sessionId, data);
+      if (!spec.keepStdinOpen) resultIdle.arm(sessionId);
       // safeSend: this runs on the child's stream 'data' events, where a throw out of the
       // send seam is a process-level uncaught exception (#870).
       safeSend({ type: "event", event: { type, sessionId, data } });
@@ -736,10 +644,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         );
       }
       stderrTails.delete(sessionId);
-      // #1464: a process the worker ended because it sat idle after its result event FINISHED —
-      // the signal/taskkill exit code is ours, not the agent's verdict.
-      if (killedAfterResult.has(sessionId) && resultSeen.has(sessionId) && code !== 0) {
-        workerLog(`[worker] session ${sessionId} completed (killed idle after result); recording exit 0 instead of ${code}`);
+      if (resultIdle.shouldRecordCompleted(sessionId, code)) {
         emitExit(sessionId, 0);
         return;
       }
@@ -757,14 +662,9 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     if (hangTimeoutMs > 0) {
       hangWatchdogs.set(sessionId, startHangWatchdog(`sessionId=${sessionId}`, hangTimeoutMs, () => {
         const seconds = Math.round(hangTimeoutMs / 1000);
-        if (resultSeen.has(sessionId)) {
-          // #1464: idle after its final result is DONE, not hung — say so and record exit 0.
-          killedAfterResult.add(sessionId);
-          workerLog(`[worker] session ${sessionId} completed (killed idle after result) after ${seconds}s of silence`);
-          safeSend({
-            type: "event",
-            event: { type: "stderr", sessionId, data: `Session completed (killed idle after result): no output for ${seconds}s after the final result event.` },
-          });
+        const completedNote = resultIdle.hangCompletion(sessionId, seconds);
+        if (completedNote) {
+          safeSend({ type: "event", event: { type: "stderr", sessionId, data: completedNote } });
           stop(sessionId);
           return;
         }
