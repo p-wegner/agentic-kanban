@@ -238,6 +238,8 @@ export interface RunSetupScriptOptions {
    * first so there is exactly one teardown path rather than two.
    */
   signal?: AbortSignal;
+  /** Sees every stdout/stderr chunk as it arrives (#1462: live gate progress). A throw is swallowed. */
+  onOutput?: (chunk: string) => void;
 }
 
 /**
@@ -314,8 +316,9 @@ export function runSetupScript(
     let stderr = "";
     let lastOutputAt = Date.now();
 
-    proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); lastOutputAt = Date.now(); });
-    proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); lastOutputAt = Date.now(); });
+    const tap = (text: string): void => { try { options.onOutput?.(text); } catch { /* a progress sink never fails the run */ } };
+    proc.stdout.on("data", (chunk: Buffer) => { const text = chunk.toString(); stdout += text; lastOutputAt = Date.now(); tap(text); });
+    proc.stderr.on("data", (chunk: Buffer) => { const text = chunk.toString(); stderr += text; lastOutputAt = Date.now(); tap(text); });
 
     const timeoutMs = options.timeoutMs ?? DEFAULT_SETUP_SCRIPT_TIMEOUT_MS;
     const noProgressTimeoutMs = options.noProgressTimeoutMs ?? DEFAULT_NO_PROGRESS_TIMEOUT_MS;

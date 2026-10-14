@@ -27,6 +27,8 @@ import { isSelfProjectRepo } from "./self-project.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
 import { runUnderVerifyChainSemaphore, runUnderVerifyChainSemaphoreTimed } from "./verify-chain-semaphore.js";
+import { workspaceVerifyChainLabel } from "./verify-chain-registry.js";
+import { createWorkspaceVerifySink } from "./verify-chain-progress.js";
 import { runE2ESmokeGateStage } from "./e2e-smoke-lane.js";
 import { noteMergeGatePhase } from "./merge-job.service.js";
 import {
@@ -554,7 +556,7 @@ export async function runPreMergeGate(
     // #1437: set once placement picks a worker; absent = the host's own script run. `??` rather than `if` keeps this function's branch count.
     let workerRun: GateScriptRunner | undefined;
     const runVerifyScript = (env: Record<string, string>) =>
-      (workerRun ?? ((e: Record<string, string>) => runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: e, signal: combinedSignal })))(env);
+      (workerRun ?? ((e: Record<string, string>) => runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: e, signal: combinedSignal, onOutput: createWorkspaceVerifySink(workspace.id) })))(env); // #1462: live stage + vitest files for status --watch
     const runVerify = async () => {
       noteMergeGatePhase(workspace.id, "verify");
       // Started INSIDE the semaphore callback, not before it. `runUnderBuildSemaphore` can hold
@@ -659,7 +661,7 @@ export async function runPreMergeGate(
         workspaceId: workspace.id,
         summarize: (stdout, stderr) => summarizeVerifyFailure(stdout, stderr, workspace.id),
       }),
-      `verify chain for workspace ${workspace.id}`,
+      workspaceVerifyChainLabel(workspace.id),
     );
     // #949: how long this gate spent QUEUED behind another heavyweight verification. Carried
     // onto the tier info so a PASSING gate can say so — the same "the conditions a verdict was

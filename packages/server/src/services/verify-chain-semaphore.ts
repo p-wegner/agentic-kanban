@@ -80,6 +80,7 @@ import {
   readTier0Capacity,
   type VerifyChainSlots,
 } from "@agentic-kanban/shared/lib/machine-capacity";
+import { clearRunningVerifyChainsForTests, listRunningVerifyChains, registerRunningVerifyChain } from "./verify-chain-registry.js";
 import {
   MACHINE_VERIFY_ROLES,
   machineVerifyLockEnabled,
@@ -254,6 +255,10 @@ export interface VerifyChainSnapshotEntry {
   state: "running" | "queued";
   /** Running: ms since it took its slot. Queued: ms since it joined the queue. */
   ageMs: number;
+  /** Running only (#1462): the stage and vitest progress the runner reported, when it did. */
+  stage?: string;
+  filesDone?: number;
+  filesTotal?: number;
   /** Queued only: 1-based arrival-order place in the queue (admission may reorder by priority). */
   position?: number;
   /** Queued only: why it is not running (no free slot / held for memory, and when admission next re-checks). */
@@ -262,9 +267,14 @@ export interface VerifyChainSnapshotEntry {
 
 /** #1449: every running and queued chain with its age and wait reason — a plain read of module state. */
 export function listVerifyChains(nowMs: number = Date.now()): VerifyChainSnapshotEntry[] {
-  const out: VerifyChainSnapshotEntry[] = [...runningChains].map((r) => ({
-    label: r.label, priority: r.priority, state: "running" as const, ageMs: Math.max(0, nowMs - r.startedAtMs),
-  }));
+  const progress = listRunningVerifyChains();
+  const out: VerifyChainSnapshotEntry[] = [...runningChains].map((r) => {
+    const p = progress.find((c) => c.label === r.label && c.startedAtMs >= r.startedAtMs);
+    return {
+      label: r.label, priority: r.priority, state: "running" as const, ageMs: Math.max(0, nowMs - r.startedAtMs),
+      ...(p?.stage ? { stage: p.stage } : {}), ...(p?.filesDone != null ? { filesDone: p.filesDone } : {}), ...(p?.filesTotal != null ? { filesTotal: p.filesTotal } : {}),
+    };
+  });
   if (waiters.length === 0) return out;
   const capacity = resolveVerifyChainSlots();
   const memoryHeld = /ram|memory|free|GB/i.test(capacity.reason ?? "");
@@ -473,10 +483,12 @@ async function runUnderInProcessSemaphore<T>(
   }
   const running = { label, priority, startedAtMs: Date.now() };
   runningChains.add(running);
+  const unregister = registerRunningVerifyChain(label); // #1462: progress (stage, vitest files) the gate reports
   try {
     return await chain();
   } finally {
     runningChains.delete(running);
+    unregister();
     active--;
     admitWaiters();
   }
@@ -521,6 +533,7 @@ export function resetVerifyChainSemaphoreForTests(
   active = 0;
   waiters.length = 0;
   runningChains.clear();
+  clearRunningVerifyChainsForTests();
   foregroundDemands.clear();
   if (readmitTimer) clearInterval(readmitTimer);
   readmitTimer = null;

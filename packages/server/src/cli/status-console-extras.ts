@@ -13,8 +13,11 @@ export interface ConsoleChain {
   where: string;
   state: "running" | "queued";
   ageMs: number;
-  /** Worker-placed chains: `typecheck 12/340`. Host chains do not report a stage. */
+  /** Worker-placed: `(full) typecheck 12/340`; host: setup/arch/typecheck/tests once the gate reports it. */
   stage?: string;
+  /** #1462: vitest files finished / expected, when the runner knows. */
+  filesDone?: number;
+  filesTotal?: number;
   position?: number;
   waitReason?: string;
 }
@@ -47,14 +50,15 @@ export function chainRefOf(label: string, issues: BoardStatusIssue[]): string {
   return train ? `train ${train[1]}` : label.replace(/^.*\bfor\s+/i, "").slice(0, 28);
 }
 
-export function buildChains(extras: ConsoleExtrasPayload | null | undefined, issues: BoardStatusIssue[], workerJobs: Array<{ worker: string; job: string }>): ConsoleChain[] {
+export function buildChains(extras: ConsoleExtrasPayload | null | undefined, issues: BoardStatusIssue[], workerJobs: Array<{ worker: string; job: string; ageMs?: number }>): ConsoleChain[] {
   const out: ConsoleChain[] = (extras?.chains ?? []).map((c) => ({
     kind: chainKindOf(c.label), ref: chainRefOf(c.label, issues), where: "host", state: c.state, ageMs: c.ageMs,
+    ...(c.stage ? { stage: c.stage } : {}), ...(c.filesDone != null ? { filesDone: c.filesDone } : {}), ...(c.filesTotal != null ? { filesTotal: c.filesTotal } : {}),
     ...(c.position != null ? { position: c.position } : {}), ...(c.waitReason ? { waitReason: c.waitReason } : {}),
   }));
   for (const j of workerJobs) {
     const [kind = "verify", sha = "", ...rest] = j.job.split(" ");
-    out.push({ kind: kind.replace(/-/g, " "), ref: sha, where: j.worker, state: "running", ageMs: 0, stage: rest.join(" ") });
+    out.push({ kind: kind.replace(/-/g, " "), ref: sha, where: j.worker, state: "running", ageMs: j.ageMs ?? 0, stage: rest.join(" ") });
   }
   return out;
 }
@@ -73,7 +77,10 @@ export function strandedIssues(issues: BoardStatusIssue[], chains: ConsoleChain[
 export function applyConsoleExtras(model: ConsoleModel, p: ConsolePayloads): void {
   const extras = p.extras ?? null;
   const issues = p.status.issues;
-  const workerJobs = model.workers.flatMap((w) => (w.verifyJobs ?? []).map((job) => ({ worker: w.name, job })));
+  const workerJobs = model.workers.flatMap((w) => (w.verifyJobs ?? []).map((job, i) => {
+    const at = w.verifyJobStartedAt?.[i];
+    return { worker: w.name, job, ageMs: at ? Math.max(0, p.nowMs - new Date(at).getTime()) : 0 };
+  }));
   model.chains = buildChains(extras, issues, workerJobs);
   model.placement = extras?.placement ?? null;
   model.rc = extras?.rc ? { branch: extras.rc.branch, sha: extras.rc.sha, state: extras.rc.state, updatedAt: extras.rc.updatedAt } : null;

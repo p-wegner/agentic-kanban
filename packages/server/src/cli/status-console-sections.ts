@@ -20,7 +20,10 @@ export const isLive = (t: ConsoleTrain) => !t.finishedAt && ["assembling", "gati
 function chainLine(c: ConsoleChain, g: Glyphs): Line {
   const what = `${c.kind} ${c.ref}`.trim();
   if (c.state === "running") {
-    return { text: ` ${g.a ? ">" : "▶"} ${what.padEnd(28)} ${c.where.padEnd(10)}${c.stage ? ` ${c.stage}` : ""}${c.ageMs > 0 ? `  ${formatElapsed(c.ageMs)}` : ""}`, tone: "cyan" };
+    // Elapsed leads the progress so a narrow column truncates the stage text, never the clock (#1462).
+    const files = c.filesTotal ? ` ${c.filesDone ?? 0}/${c.filesTotal}` : c.filesDone ? ` ${c.filesDone}` : "";
+    const elapsed = c.ageMs > 0 ? formatElapsed(c.ageMs).padStart(6) : "";
+    return { text: ` ${g.a ? ">" : "▶"} ${what.padEnd(22)} ${c.where.padEnd(8)}${elapsed}${c.stage ? `  ${c.stage}` : ""}${files}`, tone: "cyan" };
   }
   return { text: ` ${g.a ? "|" : "⏸"} #${c.position ?? "?"} ${what.padEnd(25)} ${c.where.padEnd(10)} waiting ${formatElapsed(c.ageMs)}${c.waitReason ? `: ${c.waitReason}` : ""}`, tone: "yellow" };
 }
