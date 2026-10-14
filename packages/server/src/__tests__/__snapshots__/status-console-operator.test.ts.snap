@@ -7,9 +7,9 @@ exports[`operator console frame (#1449) > snapshot at 80 cols, color 1`] = `
 [33m wsl-stable          0/2  wsl   2dcf8de  [auth-expired]  hb 2s[0m
  host            verify ■ 1/1 · 2 queued
 [1mGATES & TESTS ──────────────────────────────────────────────────────────────────[0m
-[36m ▶ workspace gate #1435         host        12m05s[0m
+[36m ▶ workspace gate #1435   host    12m05s  tests 120/340[0m
 [33m ⏸ #1 base-health probe master  host       waiting 4m00s: held for memory: 1.9 …[0m
-[36m ▶ rc sweep 1a2b3c4d5           ao-pf38    (full) tests 12/340[0m
+[36m ▶ rc sweep 1a2b3c4d5     ao-pf38  1m35s  (full) tests 12/340[0m
 [1mBASE & RELEASE ─────────────────────────────────────────────────────────────────[0m
 [31m master red 1a2b3c4d 2h ago: status-console, worker-cli-isolation +1[0m
 [31m merges held: base_red · holding #1429 #1430[0m
@@ -39,9 +39,9 @@ WORKERS ────────────────────────
  wsl-stable          0/2  wsl   2dcf8de  [auth-expired]  hb 2s
  host            verify ■ 1/1 · 2 queued
 GATES & TESTS ──────────────────────────────────────────────────────────────────
- ▶ workspace gate #1435         host        12m05s
+ ▶ workspace gate #1435   host    12m05s  tests 120/340
  ⏸ #1 base-health probe master  host       waiting 4m00s: held for memory: 1.9 …
- ▶ rc sweep 1a2b3c4d5           ao-pf38    (full) tests 12/340
+ ▶ rc sweep 1a2b3c4d5     ao-pf38  1m35s  (full) tests 12/340
 BASE & RELEASE ─────────────────────────────────────────────────────────────────
  master red 1a2b3c4d 2h ago: status-console, worker-cli-isolation +1
  merges held: base_red · holding #1429 #1430
@@ -71,9 +71,9 @@ exports[`operator console frame (#1449) > snapshot at 140 cols, color 1`] = `
 [33m wsl-stable          0/2  wsl   2dcf8de  [auth-expired]  hb 2s[0m       │ [1mATTENTION ──────────────────────────────────────────────────────────[0m
  host            verify ■ 1/1 · 2 queued                             │ [31m ✖ merges held: base_red (master 1a2b3c4d), holding #1429 #1430[0m
 [1mGATES & TESTS ──────────────────────────────────────────────────────[0m │ [33m ⚠ #1437 In Progress: no running session or queued chain[0m
-[36m ▶ workspace gate #1435         host        12m05s[0m                   │ [31m ✖ #1441 Agent hang watchdog: no output for 900s[0m
+[36m ▶ workspace gate #1435   host    12m05s  tests 120/340[0m              │ [31m ✖ #1441 Agent hang watchdog: no output for 900s[0m
 [33m ⏸ #1 base-health probe master  host       waiting 4m00s: held for …[0m │ [32mMERGED TODAY 18 (since 00:00 local)[0m
-[36m ▶ rc sweep 1a2b3c4d5           ao-pf38    (full) tests 12/340[0m       │ 
+[36m ▶ rc sweep 1a2b3c4d5     ao-pf38  1m35s  (full) tests 12/340[0m        │ 
 [1mBASE & RELEASE ─────────────────────────────────────────────────────[0m │ 
 [31m master red 1a2b3c4d 2h ago: status-console, worker-cli-isolation +1[0m │ 
 [31m merges held: base_red · holding #1429 #1430[0m                         │ 
@@ -96,9 +96,9 @@ WORKERS ────────────────────────
  wsl-stable          0/2  wsl   2dcf8de  [auth-expired]  hb 2s       │ ATTENTION ──────────────────────────────────────────────────────────
  host            verify ■ 1/1 · 2 queued                             │  ✖ merges held: base_red (master 1a2b3c4d), holding #1429 #1430
 GATES & TESTS ────────────────────────────────────────────────────── │  ⚠ #1437 In Progress: no running session or queued chain
- ▶ workspace gate #1435         host        12m05s                   │  ✖ #1441 Agent hang watchdog: no output for 900s
+ ▶ workspace gate #1435   host    12m05s  tests 120/340              │  ✖ #1441 Agent hang watchdog: no output for 900s
  ⏸ #1 base-health probe master  host       waiting 4m00s: held for … │ MERGED TODAY 18 (since 00:00 local)
- ▶ rc sweep 1a2b3c4d5           ao-pf38    (full) tests 12/340       │ 
+ ▶ rc sweep 1a2b3c4d5     ao-pf38  1m35s  (full) tests 12/340        │ 
 BASE & RELEASE ───────────────────────────────────────────────────── │ 
  master red 1a2b3c4d 2h ago: status-console, worker-cli-isolation +1 │ 
  merges held: base_red · holding #1429 #1430                         │ 
