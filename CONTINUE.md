@@ -3,39 +3,32 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
-## 2026-10-13 — compute moved to workers; stable-20261013-3 live
+## 2026-10-14 (night) — two queue flushes; paused for a reboot
 
-**Goal (Peter):** every compute-heavy job of ticket work runs on fleet workers; the laptop only
-coordinates. Also: get the backlog done on desktop-stable and wsl-stable.
+**Goal (Peter):** get the board backlog done using the workers.
 
-- **Stable:** `stable-20261013-3` = master a2fd52f31, promoted ~17:10Z (rc/20261013-2 swept green
-  on the re-run; the first sweep was red only on a vitest worker fork exiting, all tests passed,
-  and master at the same sha swept green twice). Rollback target `stable-20261013-2`.
-- **Verify placement ON (17:15Z):** `verify_placement_<agentic-kanban>=prefer-worker`,
-  `verify_workers_<agentic-kanban>=desktop-stable`. Gates, implement-exit/review-exit checks, train
-  staging, rc sweeps and base-health probes go to desktop-stable once it runs -3 (re-pin requested
-  over ACP); otherwise they fall back to the host. Check: board.log names the worker on the next
-  gate. Not yet verified live.
-- **Merged today (18):** #1428 #1429 #1430 #1431 #1432(a) #1433 #1434 #1435 #1436 #1437 #1438
-  #1439 #1440 #1441 #1442 #1443 #1445 #1446 plus the rc heal. Open: #1444 (rebase conflict with
-  #1443/#1445 in worker.ts, back with a builder), #1447 (dev servers on workers via a board proxy,
-  part b of #1432, building).
-- **desktop-stable:** maxConcurrency is board-controlled now (start flag removed; desired 3 while
-  Peter's own work leaves ~4 GB free on that box, 4 when it has room). Stale workers
-  AO-PF38Z8R8 and monitor-local unregistered.
-- **WSL login keeps expiring (4x):** a copied laptop `.credentials.json` dies at its access-token
-  expiry after the laptop rotates the refresh token (proven by timestamps 13:56/14:00). Durable
-  fix pending Peter: `claude setup-token` or a WSL `/login`. Until then re-copy (unread).
-- **Recovery recipe used 5x today, now automated by #1446 (live from -3):** a worker push refused
-  as `[stale but clean rebase]` -> verify incoming = base + own `(#N)` commits -> reset the worktree
-  to `refs/kanban/incoming/...` -> POST /merge (scratchpad `adopt.cjs`). Reviewers rebasing a
-  stale branch caused it every time.
-- **acp:** backlog pass by an agent in herdr pane w1:p5Q, 7 commits pushed. `acp show/history`
-  need an elevated hub restart (`service.ps1 -Restart`), pending Peter. Its open questions are in
-  acp's BACKLOG.md.
+- **Stable:** `stable-20261014` = master 7c038f185 via `promote --recover` (flush 1 + heal #1466 +
+  #1468). A full sweep is OWED. Master is now e09a4504f (flush 2, heal #1472, #1477), not promoted.
+  Its full sweep was running on desktop-stable at the reboot; re-request it after the reboot.
+- **Flushes done by hand** (the built-in flush mode is not wired, #1463 is building it): merge the
+  reviewed branches into a worktree OUTSIDE `.worktrees`, resolve, `skill:generate`, typecheck +
+  check:arch + the guard ratchets (nloc, worker-cli-isolation, always-run, status-read,
+  shared-lib-single-consumer, codex parity), ff master, tag `flush/<date>-N`, then sweep and heal.
+  Flush 1 (13 tickets) needed heal #1466 + two direct fixes; flush 2 (6 tickets) needed #1472.
+- **Done since yesterday:** #1444 #1447 #1449-#1455 #1457-#1461 #1464-#1470 #1472 (+ #1468 direct).
+  In review: #1456 #1462 #1463 #1471 #1473. Building: #1474 #1475 #1476. To do: #1477.
+- **Verify placement:** `verify_placement=worker`, `verify_workers=desktop-stable` only.
+  wsl-stable is Linux and four suites fail there (#1469, fix merged in flush 2); ao-pf38 loses
+  gates on socket drops (#1465, merged in flush 2). Widen the allowlist after promoting.
+- **Worker slots:** desktop-stable 1 (Peter's own RAM use), ao-pf38 4, wsl-stable 1.
+- **Board is slow:** writes take 120-210 s, reads are fast (#1473); scratchpad `launch.sh` and
+  `drive3.sh` use 240 s timeouts. `status --watch` fell back to the old list because console GETs
+  timed out (#1477, timeout raised on master).
+- **Known flake:** worker-agent-runner "hang-watchdog kill after a result event" under load (#1476).
 
-**Next:** confirm the first gate runs on desktop-stable after its re-pin (board.log names the
-worker); land #1444 and #1447; give the WSL worker its own login; restart the ACP hub.
+**Next:** after the reboot, request the master sweep (desktop-stable), promote if green (only the
+#1476 flake is acceptable), restart the watch pane, then widen verify_workers and let the review
+queue merge.
 
 ## Archive
 
@@ -43,6 +36,8 @@ Passes older than today have been moved **verbatim, newest first** into
 [`docs/archive/CONTINUE-archive.md`](docs/archive/CONTINUE-archive.md). Nothing is re-verified or
 edited on the way in, so each pass records what that session believed at the time. The archive
 holds:
+- **2026-10-13 (moved 2026-10-14):** compute moved to workers, `stable-20261013-3`, verify
+  placement on, the WSL credential expiry, #1428-#1446.
 - **2026-10-11 (moved 2026-10-12):** harness provisioning rounds 0-6 and D3-D5 (goal reached), the
   first D: hang, #1367-#1402.
 - **2026-10-10 night (moved 2026-10-12):** tailnet rounds 3-7, newcomer install, #1356-#1366.
