@@ -269,6 +269,8 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   const stdinOpen = new Map<string, boolean>();
   /** Per-session silence watchdogs; reset on every byte of agent output. */
   const hangWatchdogs = new Map<string, { reset(): void; close(): void }>();
+  /** #1475: sessions the BOARD told us to stop (superseded/revoked) — their exit is not a failure. */
+  const stoppedByBoard = new Set<string>();
   let maxConcurrency = options.maxConcurrency &&options.maxConcurrency > 0 ? options.maxConcurrency : 1;
   const tree = createAgentTreeTracker(workRoot); // #1336
 
@@ -648,6 +650,12 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         emitExit(sessionId, 0);
         return;
       }
+      if (stoppedByBoard.delete(sessionId) && code !== 0) {
+        workerLog(`[worker] session ${sessionId} superseded (stopped by the board); recording exit 0 instead of ${code}`);
+        safeSend({ type: "event", event: { type: "stderr", sessionId, data: "Session superseded: the board stopped this agent on the worker." } });
+        emitExit(sessionId, 0);
+        return;
+      }
       emitExit(sessionId, code);
     });
 
@@ -759,6 +767,12 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     return true;
   }
 
+  /** #1475: a `stop` frame from the board — the agent ends and the exit is reported as superseded, not failed. */
+  function stopByBoard(sessionId: string): boolean {
+    if (processes.get(sessionId)?.pid) stoppedByBoard.add(sessionId);
+    return stop(sessionId);
+  }
+
   function stopAll(): void {
     for (const sessionId of [...processes.keys(), ...provisioning]) stop(sessionId);
   }
@@ -790,7 +804,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
 
   return {
     // #1381: setMaxConcurrency = the board changed this worker's ceiling; running sessions are never stopped by it.
-    setMaxConcurrency: (n: number): void => { if (n > 0) maxConcurrency = n; }, assign, assignWithRepo, input, closeStdin, stop, stopAll, releaseAgents, runningSessionIds,
+    setMaxConcurrency: (n: number): void => { if (n > 0) maxConcurrency = n; }, assign, assignWithRepo, input, closeStdin, stop, stopByBoard, stopAll, releaseAgents, runningSessionIds,
     drainPushes, pendingPushCount, repoOp, gitToken: gitTokens.answer, checkoutCwd: (sid: string): string | undefined => checkouts.get(sid)?.checkout.cwd, // #1447
     probeSession: seen.answerProbe, rememberedSessionCount: seen.size,
     retryPendingPushes: undelivered.retryPending,
@@ -835,7 +849,7 @@ export function dispatchBoardMessage(
       runner.closeStdin(message.sessionId);
       break;
     case "stop":
-      runner.stop(message.sessionId);
+      runner.stopByBoard(message.sessionId);
       break;
     case "sync_repo":
       runner.repoOp("sync", message.sessionId, message.requestId, message.auth);
