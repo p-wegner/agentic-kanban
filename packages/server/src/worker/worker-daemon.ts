@@ -343,6 +343,8 @@ export interface DrainReport {
   pushesCompleted: number;
   /** Sessions still pushing when the drain timed out â€” their work stayed on the worker. */
   pushesAbandoned: number;
+  /** #1461: which sessions/branches those were; each is persisted to the undelivered-results store. */
+  abandonedSessions?: { sessionId: string; branch: string }[];
   /** Agents still running at exit (only possible with killAgents: false). */
   agentsLeftRunning: number;
   /**
@@ -404,8 +406,7 @@ function logShutdownReport(
   log: (line: string) => void,
 ): void {
   for (const result of retained) {
-    // #750/#775: the checkout was NOT removed, so this is recoverable by hand â€” but
-    // only if the operator is told where it is before the process goes away.
+    // #750/#775: the checkout was NOT removed; tell the operator where it is before the process goes away.
     log(
       `[worker] KEPT an unpushed result: sessionId=${result.sessionId} is in ` +
         `${result.checkoutPath} on branch ${result.localBranch} (target ${result.incomingRef}); ` +
@@ -413,11 +414,11 @@ function logShutdownReport(
     );
   }
   if (report.pushesAbandoned > 0 || report.criticalMessagesLost > 0) {
+    const named = (report.abandonedSessions ?? []).map((s) => `${s.sessionId} (branch ${s.branch})`).join(", ");
     log(
-      `[worker] shutdown INCOMPLETE: ${report.pushesAbandoned} result push(es) abandoned after ` +
-        `${Math.round(timeoutMs / 1000)}s and ${report.criticalMessagesLost} undelivered ` +
-        `exit/assign_failed message(s) lost (the queue is in memory only). The board will fall ` +
-        `back to its disconnect grace for those sessions.`,
+      `[worker] shutdown INCOMPLETE: ${report.pushesAbandoned} push(es) still in flight after ${Math.round(timeoutMs / 1000)}s` +
+        `${named ? `: ${named}` : ""} - saved to undelivered-results.json, checkout kept, delivered on next start; ` +
+        `${report.criticalMessagesLost} exit/assign_failed message(s) lost (in-memory queue).`,
     );
   } else {
     log(`[worker] drained cleanly: ${report.pushesCompleted} result push(es) completed`);
@@ -964,8 +965,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
 
     async stop(stopOpts): Promise<DrainReport> {
       const timeoutMs = stopOpts?.drainTimeoutMs ?? opts.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
-      // Announce BEFORE killing anything: a board that keeps assigning into a dying
-      // daemon produces exactly the launch failures this shutdown is trying to avoid.
+      // Announce BEFORE killing anything: a board assigning into a dying daemon causes launch failures.
       if (!draining && !fatal) {
         draining = true;
         await sendHeartbeat().catch(() => {});
@@ -978,8 +978,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (stopOpts?.killAgents) { runner.stopAll(); void services.stopAll(); }
       else runner.releaseAgents(); // #1336: --leave-agents â€” the trees survive on purpose
-      // The kill above only sends the signal. The result push is kicked off by the
-      // agent's `exit` handler, so exiting now is precisely the bug: wait for it.
+      // The kill only signals; the push starts in the agent's `exit` handler, so wait for it.
       const drained = await runner.drainPushes(timeoutMs);
       const criticalMessagesLost = flushCritical(ws, pendingCritical);
       const retained = runner.unpushedResults();
@@ -987,6 +986,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       const report: DrainReport = {
         pushesCompleted: drained.completed,
         pushesAbandoned: drained.abandoned,
+        abandonedSessions: drained.abandonedSessions,
         agentsLeftRunning: runner.runningSessionIds().length,
         criticalMessagesLost,
         resultsRetained: retained.length,

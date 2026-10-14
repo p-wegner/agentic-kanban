@@ -99,13 +99,25 @@ export function installShim(opts: {
   try {
     mkdirSync(dir, { recursive: true });
     writeIfChanged(join(dir, RESOLVER), resolverSource(opts.fallbackEntry, opts.fallbackVersion ?? null));
-    writeIfChanged(join(dir, `${SHIM_NAME}.cmd`), `@echo off\r\n"${node}" "%~dp0${RESOLVER}" %*\r\nexit /b %ERRORLEVEL%\r\n`);
+    // #1461: the Node on PATH wins, so an operator who puts another Node first gets the daemon on
+    // it too; the Node recorded by `setup`/start is the fallback when the shell's PATH has none.
+    writeIfChanged(
+      join(dir, `${SHIM_NAME}.cmd`),
+      `@echo off\r\nwhere node >nul 2>nul\r\nif errorlevel 1 goto baked\r\nnode "%~dp0${RESOLVER}" %*\r\nexit /b %ERRORLEVEL%\r\n` +
+        `:baked\r\n"${node}" "%~dp0${RESOLVER}" %*\r\nexit /b %ERRORLEVEL%\r\n`,
+    );
     writeIfChanged(
       join(dir, `${SHIM_NAME}.ps1`),
-      `& '${node.replace(/'/g, "''")}' (Join-Path $PSScriptRoot '${RESOLVER}') @args\r\nexit $LASTEXITCODE\r\n`,
+      `$n = Get-Command node -ErrorAction SilentlyContinue\r\n` +
+        `if ($n) { & $n.Source (Join-Path $PSScriptRoot '${RESOLVER}') @args } ` +
+        `else { & '${node.replace(/'/g, "''")}' (Join-Path $PSScriptRoot '${RESOLVER}') @args }\r\nexit $LASTEXITCODE\r\n`,
     );
     const sh = join(dir, SHIM_NAME);
-    writeIfChanged(sh, `#!/bin/sh\nexec "${node}" "$(dirname "$0")/${RESOLVER}" "$@"\n`);
+    writeIfChanged(
+      sh,
+      `#!/bin/sh\nif command -v node >/dev/null 2>&1; then exec node "$(dirname "$0")/${RESOLVER}" "$@"; fi\n` +
+        `exec "${node}" "$(dirname "$0")/${RESOLVER}" "$@"\n`,
+    );
     try {
       chmodSync(sh, 0o755);
     } catch {

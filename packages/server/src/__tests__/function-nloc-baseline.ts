@@ -475,7 +475,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 349 -> 351 (#841): POSIX-only `detached: true` for a shell launch, closing the #836 gap.
   // 351 -> 358 (#1027), disclosed in the ninth movement above.
   // 358 -> 370 (#1328), disclosed in the seventeenth movement above.
-  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 387,
+  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 383,
 };
 
 /**
