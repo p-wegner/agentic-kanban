@@ -293,6 +293,9 @@ const DYNAMIC_ENV_READS: Record<string, string> = {
     "asserts the two are equal.",
   "scripts/machine-verify-lock.mjs::MACHINE_LOCK_DIR_ENV":
     "the mirror half of the directory override, held to the shared value by the same suite.",
+  "scripts/vitest-crash-ledger.mjs::LEDGER_ENV":
+    "resolves only to the exported constant KANBAN_TEST_CRASH_LEDGER — the ledger path test-mine.mjs " +
+    "hands the reporter. Read through the constant so the runner and the reporter share one name.",
 };
 
 interface Read {
