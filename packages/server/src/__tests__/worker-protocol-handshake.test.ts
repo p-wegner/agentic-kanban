@@ -284,6 +284,7 @@ describe("the board's side of the handshake (#754)", () => {
       pairingToken: await pairingToken(),
       name: "quiet",
       labels: ["gpu"],
+      maxConcurrency: 1, // a declared count: with none the board sizes the worker itself (#1456)
       protocolVersion: WORKER_PROTOCOL_VERSION,
     });
     const { workerId, workerToken } = await res.json() as { workerId: string; workerToken: string };

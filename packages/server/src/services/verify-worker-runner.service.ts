@@ -40,9 +40,9 @@ export interface VerifyRunnerDeps {
 }
 
 /** #1456: on an auto worker verify jobs share the session budget: sessions + verify jobs <= derived slots. */
-function budgetSlots(w: { maxConcurrency: number; concurrency?: { mode: string } }, sessions: number, inFlight: number): number[] {
+function budgetSlots(w: { maxConcurrency: number; concurrency?: { mode: string } }, sessions: () => number, inFlight: number): number[] {
   if (w.concurrency?.mode !== "auto") return [];
-  return [w.maxConcurrency - sessions - inFlight];
+  return [w.maxConcurrency - sessions() - inFlight];
 }
 
 export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRunner {
@@ -64,7 +64,7 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
           id: w.id,
           name: w.name,
           // Our own in-flight count wins over a heartbeat that predates the job's first frame.
-          freeSlots: Math.max(0, Math.min(cap.freeSlots, cap.slots - inFlight, ...budgetSlots(w, connections.assignedSessionIds(w.id).length, inFlight))),
+          freeSlots: Math.max(0, Math.min(cap.freeSlots, cap.slots - inFlight, ...budgetSlots(w, () => connections.assignedSessionIds(w.id).length, inFlight))),
           freeRamGb: w.capacity?.freeRamGb ?? cap.ramGb,
           thrashing: w.capacity ? w.capacity.thrashing !== "none" : undefined,
         };
