@@ -138,7 +138,8 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 75 -> 76 in #1450 for `worker/worker-revoked-pairing.ts` (revoked-pairing probe; node builtins + worker-state only).
     // Raised 76 -> 77 in #1453 for `cli/commands/worker-doctor-running-daemon.ts` (the doctor's running-daemon check).
     // Raised 77 -> 78 in #1451 for `worker/worker-resources.ts` (free RAM/disk reading; node builtins + shared machine-capacity).
-    expect(files.size).toBeLessThan(78);
+    // Raised 78 -> 79 in #1467 for `worker/worker-repo-skills.ts` (which skill names the repo tracks; git-exec only).
+    expect(files.size).toBeLessThan(79);
   });
 
   it("never reaches the database or board-service layer", () => {
