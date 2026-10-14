@@ -114,6 +114,23 @@ describe("worker one-shot with a checkout", () => {
     expect(ops.cleanup).toHaveBeenCalled();
   });
 
+  it("leaves a lockfile the agent did not author out of the commit (#1483)", async () => {
+    const ops = repoOps();
+    const script = agentScript(`const fs = require("fs"); fs.writeFileSync("a.txt", "two\\n"); fs.writeFileSync("pnpm-lock.yaml", "drift\\n"); process.stdout.write("fixed");`);
+    const frames = await run(request(script, { allowEdits: true }, transport), { repoOps: ops, boardUrl: "http://board:1" });
+    expect(frames[1]).toMatchObject({ ok: true });
+    const files = (await gitExecOrThrow(["show", "--name-only", "--format=", "HEAD"], { cwd: checkoutDir })).trim().split(/\r?\n/);
+    expect(files).toEqual(["a.txt"]);
+  });
+
+  it("pushes nothing when the only leftover is a lockfile (#1483)", async () => {
+    const ops = repoOps();
+    const script = agentScript(`require("fs").writeFileSync("pnpm-lock.yaml", "drift\\n"); process.stdout.write("x");`);
+    const frames = await run(request(script, { allowEdits: true }, transport), { repoOps: ops, boardUrl: "http://board:1" });
+    expect(frames[1]!.pushedSha).toBeUndefined();
+    expect(ops.push).not.toHaveBeenCalled();
+  });
+
   it("pushes nothing when the editing agent changed nothing", async () => {
     const ops = repoOps();
     const frames = await run(request(agentScript(`process.stdout.write("no change");`), { allowEdits: true }, transport), { repoOps: ops, boardUrl: "http://board:1" });

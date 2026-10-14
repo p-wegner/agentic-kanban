@@ -58,11 +58,20 @@ export interface WorkerOneShotOptions {
 
 type Outcome = Pick<WorkerOneShotResult, "ok" | "text" | "error" | "launchFailed" | "pushedSha">;
 
-/** Commit what the agent left uncommitted, then say which commit HEAD is if it moved past `startSha`. */
+/**
+ * Lockfiles are install artifacts, never an agent's edit (#1483): a worker whose pnpm differs from the
+ * repo's pin rewrites pnpm-lock.yaml on install, and the sweep-everything auto-commit landed that in a train.
+ */
+const LOCKFILE_PATHSPECS = [
+  ":(exclude,glob)**/pnpm-lock.yaml", ":(exclude,glob)**/package-lock.json",
+  ":(exclude,glob)**/yarn.lock", ":(exclude,glob)**/bun.lockb", ":(exclude,glob)**/bun.lock",
+];
+
+/** Commit what the agent left uncommitted (minus lockfiles), then say which commit HEAD is if it moved past `startSha`. */
 async function commitAndReadHead(cwd: string, startSha: string): Promise<string | null> {
-  const status = await gitExec(["status", "--porcelain"], { cwd });
+  const status = await gitExec(["status", "--porcelain", "--", ".", ...LOCKFILE_PATHSPECS], { cwd });
   if (execSucceeded(status) && status.stdout.trim()) {
-    await gitExecOrThrow(["add", "-A"], { cwd });
+    await gitExecOrThrow(["add", "-A", "--", ".", ...LOCKFILE_PATHSPECS], { cwd });
     await gitExecOrThrow(["commit", "-m", "chore: one-shot agent changes"], { cwd });
   }
   const head = (await gitExecOrThrow(["rev-parse", "HEAD"], { cwd })).trim();
