@@ -78,6 +78,8 @@ interface WorkerConnection {
   pendingSessionIds: Map<string, number>;
   /** Keepalive pings sent since the last pong/message (#1335). */
   missedPings: number;
+  /** Last pong or frame from the worker (epoch ms) — the real silence, independent of how many ticks fired. */
+  lastHeardAt: number;
 }
 
 /** Minimal view of the underlying `ws` socket (`WSContext.raw`) the keepalive needs. */
@@ -93,7 +95,14 @@ function rawSocket(ws: WSContext): RawPingSocket | undefined {
 /** Board→worker WebSocket ping cadence (#1335). */
 export const WS_KEEPALIVE_INTERVAL_MS = 10_000;
 /** Pings left unanswered before the socket is declared dead: dropped within ~interval × (this + 1). */
-export const WS_KEEPALIVE_MAX_MISSED = 2;
+export const WS_KEEPALIVE_MAX_MISSED = 3;
+/**
+ * #1480: a socket is only dropped after this much REAL silence as well. Ticks are timer-driven, so a
+ * board event-loop stall runs two ticks back to back BEFORE the poll phase reads the queued pong —
+ * counting ticks alone declared a healthy link dead. Sized above the worst measured stall (7.4 s)
+ * plus a loaded Windows worker's slow pong.
+ */
+export const WS_KEEPALIVE_MIN_SILENCE_MS = 30_000;
 
 /**
  * How long an assigned-but-silent session counts against a worker's capacity.
@@ -161,10 +170,11 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
       lastEventAt: new Map(),
       pendingSessionIds: new Map(),
       missedPings: 0,
+      lastHeardAt: Date.now(),
     };
     connections.set(workerId, conn);
     const raw = rawSocket(ws);
-    raw?.on?.("pong", () => { conn.missedPings = 0; });
+    raw?.on?.("pong", () => { conn.missedPings = 0; conn.lastHeardAt = Date.now(); });
     if (raw?.ping) ensureKeepaliveTimer();
     console.log(`[worker-connection] worker connected: id=${workerId}`);
     for (const listener of connectListeners) {
@@ -181,6 +191,7 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     const conn = connections.get(workerId);
     if (conn) {
       conn.missedPings = 0; // any traffic proves the link is alive
+      conn.lastHeardAt = Date.now();
       if (message.type === "hello") {
         // The worker just declared what it actually holds — that supersedes every
         // board-side guess, so the pending set is reconciled away entirely.
@@ -287,11 +298,16 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
    * pings unanswered, ping the rest. Without it a half-open socket (network loss, no close
    * frame) read `connected` until the worker reconnected, and an `assign` went into the void.
    */
-  function keepaliveTick(): string[] {
+  function keepaliveTick(nowMs = Date.now()): string[] {
     const dropped: string[] = [];
     for (const [workerId, conn] of [...connections]) {
-      if (conn.missedPings >= WS_KEEPALIVE_MAX_MISSED) {
-        closeConnection(workerId, `keepalive: no pong after ${conn.missedPings} pings`);
+      const silentMs = nowMs - conn.lastHeardAt;
+      if (conn.missedPings >= WS_KEEPALIVE_MAX_MISSED && silentMs >= WS_KEEPALIVE_MIN_SILENCE_MS) {
+        closeConnection(
+          workerId,
+          `keepalive: no pong after ${conn.missedPings} pings (last pong/frame ${Math.round(silentMs / 1000)}s ago, ` +
+            `ping interval ${WS_KEEPALIVE_INTERVAL_MS / 1000}s)`,
+        );
         dropped.push(workerId);
         continue;
       }

@@ -142,7 +142,9 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 79 -> 80 in #1461: `worker/worker-lifecycle.ts` now reaches `worker/worker-undelivered.ts` (undelivered results in `status`).
     // Raised 80 -> 82 in #1472: `worker-result-idle.ts` and `worker-result-push.ts` were extracted from `createWorkerAgentRunner` (nloc ratchet).
     // Raised 82 -> 83 in #1474 for `worker/worker-repo-lock.ts` (per-repo clone/fetch serialization; node builtins only).
-    expect(files.size).toBeLessThan(83);
+    // Raised 83 -> 84 in train 2026-10-14-49: #1483 added `cli/commands/worker-doctor-pnpm-version.ts` and #1488 added
+    // shared `lib/git-spawn-governor.ts` (reached via git-exec); each fit alone, together they need one more slot.
+    expect(files.size).toBeLessThan(84);
   });
 
   it("never reaches the database or board-service layer", () => {

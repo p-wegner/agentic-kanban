@@ -90,6 +90,7 @@ guarded by `board-client-port-ladder-single-source.test.ts`.
 | `KANBAN_WORKER_SUPERVISED` | Worker side (#1338). Set to `1` by `ak-worker-run.ps1`: a supervisor will relaunch the daemon, so after installing an update it exits with code 75 instead of spawning the new build itself. Never set by hand. |
 | `KANBAN_FLEET_INSECURE` | Set to exactly `1` to let both fleet listeners bind every interface with no interface named. Both are plaintext HTTP carrying a bearer credential, so this is the explicit "yes, on every network this machine is on" switch. Anything other than `1` (including `true`) keeps them on loopback. |
 | `KANBAN_GIT_MAX_BODY_BYTES` | Cap on ONE git smart-HTTP request body, counted after gzip decompression (default 1 GiB). Raise it only for a repo whose real pushes exceed it. |
+| `KANBAN_GIT_BG_SPAWNS_PER_SEC` | Budget for BACKGROUND git spawns (hook backfill, sweeps) per second, so startup maintenance cannot saturate the event loop (#1488). Default 3; `0` disables the budget. |
 | `VITE_HOST` | Interface the Vite dev client binds (default `::`, every interface). **Set to `127.0.0.1` whenever a fleet listener is configured** — the dev client proxies `/api` to the unauthenticated board API, so a default bind publishes it on every interface. Read in `packages/client/vite.config.ts`; see [worker-fleet.md](worker-fleet.md). |
 | `KANBAN_SERVICE_HOST` | Host that project service stacks bind. |
 | `KANBAN_STACK_PORT_RANGE` | Port range allocated to project service stacks. |

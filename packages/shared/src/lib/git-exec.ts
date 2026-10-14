@@ -3,6 +3,13 @@ import { execFile, execFileSync, spawn, type ChildProcess, type ExecFileExceptio
 import { existsSync } from "node:fs";
 import { execFailedToRun, type ExecResult } from "./exec-result.js";
 import { recordOperation } from "./operation-metrics.js";
+import {
+  backgroundSpawnAllowed,
+  msUntilBackgroundSpawnAllowed,
+  noteGitSpawnCaller,
+  recordBackgroundSpawnStart,
+  __resetGitSpawnGovernorForTests,
+} from "./git-spawn-governor.js";
 
 /**
  * The single sanctioned adapter for spawning the `git` CLI.
@@ -192,26 +199,60 @@ export const GIT_SPAWN_SLOTS = 8;
 let activeSpawns = 0;
 const interactiveQueue: Array<() => void> = [];
 const normalQueue: Array<() => void> = [];
+let budgetTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** Release one slot: hand it to the next queued spawn (interactive lane first), FIFO within each lane. */
+/**
+ * Release one slot: hand it to the next queued spawn (interactive lane first), FIFO within each
+ * lane. A normal-lane spawn is handed the slot only if the #1488 background budget admits it;
+ * otherwise the slot is freed and the budget timer starts the queue when the window allows.
+ */
 function releaseSlot(): void {
-  const next = interactiveQueue.shift() ?? normalQueue.shift();
-  if (next) {
-    next(); // slot transfers directly; activeSpawns unchanged
-  } else {
-    activeSpawns--;
+  const interactive = interactiveQueue.shift();
+  if (interactive) {
+    interactive(); // slot transfers directly; activeSpawns unchanged
+    return;
   }
+  if (normalQueue.length > 0 && backgroundSpawnAllowed()) {
+    recordBackgroundSpawnStart();
+    normalQueue.shift()!();
+    return;
+  }
+  activeSpawns--;
+  armBudgetTimer();
+}
+
+/** Start queued normal-lane spawns as the budget window and free slots allow; re-arm if work remains. */
+function drainNormalQueue(): void {
+  budgetTimer = null;
+  while (normalQueue.length > 0 && activeSpawns < GIT_SPAWN_SLOTS && backgroundSpawnAllowed()) {
+    activeSpawns++;
+    recordBackgroundSpawnStart();
+    normalQueue.shift()!();
+  }
+  armBudgetTimer();
+}
+
+function armBudgetTimer(): void {
+  if (budgetTimer !== null || normalQueue.length === 0 || activeSpawns >= GIT_SPAWN_SLOTS) return;
+  const wait = msUntilBackgroundSpawnAllowed();
+  if (wait <= 0) return; // a slot release will pick it up
+  budgetTimer = setTimeout(drainNormalQueue, wait);
+  budgetTimer.unref?.();
 }
 
 /**
- * Run `spawnBuffered` under the process-wide semaphore. When a slot is free the spawn
- * happens synchronously in this tick (so tests and callers observing the spawn right
- * after the call still work); otherwise the spawn is queued FIFO in its priority lane.
+ * Run `spawnBuffered` under the process-wide semaphore. When a slot is free (and, for the normal
+ * lane, the #1488 background budget admits it) the spawn happens synchronously in this tick (so
+ * tests and callers observing the spawn right after the call still work); otherwise the spawn is
+ * queued FIFO in its priority lane.
  */
 function scheduleSpawn(args: string[], opts: GitExecOptions): Promise<GitExecResult> {
   const startedMs = Date.now();
-  if (activeSpawns < GIT_SPAWN_SLOTS) {
+  noteGitSpawnCaller(effectiveSubcommand(args));
+  const interactive = opts.priority === "interactive";
+  if (activeSpawns < GIT_SPAWN_SLOTS && (interactive || (normalQueue.length === 0 && backgroundSpawnAllowed(startedMs)))) {
     activeSpawns++;
+    if (!interactive) recordBackgroundSpawnStart(startedMs);
     return spawnBuffered(args, opts, startedMs).finally(releaseSlot);
   }
   return new Promise<GitExecResult>((resolve) => {
@@ -221,7 +262,8 @@ function scheduleSpawn(args: string[], opts: GitExecOptions): Promise<GitExecRes
       // is no rejection to lose (no-floating-promises).
       void spawnBuffered(args, opts, startedMs).finally(releaseSlot).then(resolve);
     };
-    (opts.priority === "interactive" ? interactiveQueue : normalQueue).push(run);
+    (interactive ? interactiveQueue : normalQueue).push(run);
+    if (!interactive) armBudgetTimer();
   });
 }
 
@@ -330,10 +372,13 @@ function sweepResultMemo(now: number): void {
  */
 export function __resetGitExecSchedulerForTests(): void {
   activeSpawns = 0;
+  if (budgetTimer !== null) clearTimeout(budgetTimer);
+  budgetTimer = null;
   interactiveQueue.length = 0;
   normalQueue.length = 0;
   inFlightByKey.clear();
   resultMemo.clear();
+  __resetGitSpawnGovernorForTests();
 }
 
 function exitCodeOf(err: ExecFileException | null, hadError: boolean): number | null {

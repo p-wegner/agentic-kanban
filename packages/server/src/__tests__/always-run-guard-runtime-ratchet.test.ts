@@ -305,8 +305,15 @@ import {
  * `scripts/vitest-crash-ledger.mjs`, which test-mine.mjs loads as a vitest reporter by path, so
  * dependency selection cannot see the runner needs it. It carries a `when:` territory of those
  * two scripts, so an ordinary diff does not pay it; the next capture should give the 3 s back.
+ *
+ * -- Seventeenth movement, UP (2026-10-14, #1483) — 492,689 -> 495,689 ---------------------
+ *
+ * One guard, `lockfile-drift.test.ts`, at the ASSUMED 3,000 ms. It reads the root package.json's
+ * `packageManager` pin to keep the worker doctor's expected pnpm version in lockstep with it, a
+ * file outside its import graph. It carries a `when:package.json` territory, so an ordinary diff
+ * does not pay it; the next capture should give the 3 s back.
  */
-const BASELINE_TOTAL_MS = 492_689;
+const BASELINE_TOTAL_MS = 495_689;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative

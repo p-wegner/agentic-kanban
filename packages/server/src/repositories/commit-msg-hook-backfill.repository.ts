@@ -1,4 +1,5 @@
-import { and, eq, isNotNull, ne } from "drizzle-orm";
+import { and, eq, isNotNull, notInArray } from "drizzle-orm";
+import { TERMINAL_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-liveness";
 import { workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -9,7 +10,7 @@ export interface HookBackfillCandidate {
 }
 
 /**
- * The persistence half of the #1214 commit-msg hook backfill: every open, non-direct workspace
+ * The persistence half of the #1214 commit-msg hook backfill: every non-terminal (not closed/merged, #1488), non-direct workspace
  * that has a worktree on record. DIRECT workspaces are excluded here rather than in the sweep,
  * because their "worktree" is the project's main checkout, which the sweep must never install
  * into (`startup/commit-msg-hook-backfill.ts` says why).
@@ -20,5 +21,5 @@ export async function listHookBackfillCandidates(
   return database
     .select({ workingDir: workspaces.workingDir, tddMode: workspaces.tddMode })
     .from(workspaces)
-    .where(and(ne(workspaces.status, "closed"), eq(workspaces.isDirect, false), isNotNull(workspaces.workingDir)));
+    .where(and(notInArray(workspaces.status, [...TERMINAL_WORKSPACE_STATUSES]), eq(workspaces.isDirect, false), isNotNull(workspaces.workingDir)));
 }

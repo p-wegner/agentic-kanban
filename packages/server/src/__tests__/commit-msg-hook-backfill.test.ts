@@ -7,7 +7,8 @@
  * one pre-merge-gate failure at a time. So the pass is asserted against real worktrees: one
  * missing the hook, one already carrying it, and one whose row is a direct workspace.
  */
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
+import * as gitExecModule from "@agentic-kanban/shared/lib/git-exec";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,7 +16,7 @@ import { join, resolve } from "node:path";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
-import { reconcileCommitMsgHooks } from "../startup/commit-msg-hook-backfill.js";
+import { reconcileCommitMsgHooks, parseHooksPath } from "../startup/commit-msg-hook-backfill.js";
 import { installCommitMsgHook } from "../services/commit-msg-hook.js";
 
 const tempDirs: string[] = [];
@@ -80,7 +81,31 @@ async function configuredHooksPath(worktree: string): Promise<string> {
   return res.stdout.trim();
 }
 
+describe("parseHooksPath (#1488)", () => {
+  it("reads core.hooksPath, ignoring other sections, last assignment wins", () => {
+    expect(parseHooksPath("[core]\n\thooksPath = C:/a/hooks\n")).toBe("C:/a/hooks");
+    expect(parseHooksPath("[other]\n\thooksPath = x\n[core]\n\tbare = false\n")).toBeNull();
+    expect(parseHooksPath("[core]\n\thooksPath = a\n\thooksPath = b\n")).toBe("b");
+  });
+});
+
 describe("reconcileCommitMsgHooks (#1214)", () => {
+  it("answers 'already present' without spawning git (#1488)", async () => {
+    const { db } = createTestDb();
+    const repo = await makeRepo();
+    const worktree = await addWorktree(repo, "wt-nospawn");
+    await installCommitMsgHook(worktree, { tddMode: false });
+    await seedWorkspace(db, worktree);
+    const spy = vi.spyOn(gitExecModule, "gitExec");
+    try {
+      const result = await reconcileCommitMsgHooks({ database: db });
+      expect(result.alreadyPresent).toBe(1);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("installs the hook into a live worktree that has none", async () => {
     const { db } = createTestDb();
     const repo = await makeRepo();
@@ -139,6 +164,7 @@ describe("reconcileCommitMsgHooks (#1214)", () => {
     const repo = await makeRepo();
     const closed = await addWorktree(repo, "wt-closed");
     await seedWorkspace(db, closed, { status: "closed" });
+    await seedWorkspace(db, await addWorktree(repo, "wt-merged"), { status: "merged" });
     await seedWorkspace(db, join(repo, "..", "vanished-worktree"));
 
     const result = await reconcileCommitMsgHooks({ database: db });
