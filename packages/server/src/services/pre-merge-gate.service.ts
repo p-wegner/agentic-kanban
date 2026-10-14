@@ -13,6 +13,7 @@ import { isDocsOnlyDiff, isGuardsOnlyDiff } from "@agentic-kanban/shared";
 import { testPackagesEnvValue } from "@agentic-kanban/shared/lib/changed-packages";
 import { revParse } from "@agentic-kanban/shared/lib/git-service";
 import { getChangedFileNames } from "./git.service.js";
+import { describeLockfileOnlyDrift } from "./lockfile-drift.js";
 import type { Database } from "../db/index.js";
 import type { PreMergeGateResult, PreMergeGateWorkspace } from "./pre-merge-gate.types.js";
 import { getPreference } from "../repositories/preferences.repository.js";
@@ -191,7 +192,10 @@ async function describeBlockingPreflightForGate(
     const setupFailure = await describeFailedSetupRun(checkId, database);
     if (setupFailure) return setupFailure;
   }
-  return null;
+  // #1483: lockfile-only drift of the leading diff (a train gates the merged tree in `workingDir`).
+  if (!workspace.workingDir || !workspace.baseBranch) return null;
+  const changed = await getChangedFileNames(workspace.workingDir, workspace.baseBranch).catch(() => [] as string[]);
+  return describeLockfileOnlyDrift(changed);
 }
 
 export async function runPreMergeGate(
