@@ -1,6 +1,6 @@
 ﻿import { describe, it, expect, vi, afterEach } from "vitest";
 import type { WSContext } from "hono/ws";
-import { createWorkerConnectionManager, WS_KEEPALIVE_MAX_MISSED } from "../services/worker-connection.service.js";
+import { createWorkerConnectionManager, WS_KEEPALIVE_MAX_MISSED, WS_KEEPALIVE_MIN_SILENCE_MS } from "../services/worker-connection.service.js";
 import type { WorkerRegistry } from "../services/worker-registry.service.js";
 
 function fakeRegistry(): WorkerRegistry {
@@ -24,15 +24,26 @@ describe("worker connection keepalive (#1335)", () => {
     mgr.onDisconnect((id) => gone.push(id));
     const { ws, raw } = deadSocket();
     mgr.handleOpen("w1", ws);
+    const t0 = Date.now();
     for (let i = 0; i < WS_KEEPALIVE_MAX_MISSED; i++) {
-      expect(mgr.keepaliveTick()).toEqual([]);
+      expect(mgr.keepaliveTick(t0 + i * 10_000)).toEqual([]);
       expect(mgr.isConnected("w1")).toBe(true);
     }
-    expect(mgr.keepaliveTick()).toEqual(["w1"]);
+    expect(mgr.keepaliveTick(t0 + WS_KEEPALIVE_MIN_SILENCE_MS)).toEqual(["w1"]);
     expect(raw.ping).toHaveBeenCalledTimes(WS_KEEPALIVE_MAX_MISSED);
     expect(mgr.isConnected("w1")).toBe(false);
     expect(mgr.send("w1", { type: "ping" } as never)).toBe(false);
     expect(gone).toEqual(["w1"]);
+  });
+
+  it("keeps a socket whose missed ticks bunched up in a stall (#1480)", () => {
+    const mgr = createWorkerConnectionManager(fakeRegistry());
+    const { ws } = deadSocket();
+    mgr.handleOpen("w1", ws);
+    const t0 = Date.now();
+    for (let i = 0; i <= WS_KEEPALIVE_MAX_MISSED + 2; i++) mgr.keepaliveTick(t0 + i);
+    expect(mgr.isConnected("w1")).toBe(true);
+    mgr.closeConnection("w1");
   });
 
   it("keeps a socket that answers with pongs", () => {
