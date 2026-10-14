@@ -83,11 +83,14 @@ export function startLoopLagMonitor(options?: {
   now?: () => Date;
   /** Injected source of git-spawn attribution (defaults to the adapter's own counters). */
   drainSpawnCallers?: () => GitSpawnCallerCount[];
+  /** p50 lag at or above which callers are logged (defaults to LOOP_LAG_ATTRIBUTION_P50_MS). */
+  attributionP50Ms?: number;
 }): LoopLagMonitor {
   const warnThresholdMs = options?.warnThresholdMs ?? LOOP_LAG_WARN_MS;
   const warnIntervalMs = options?.warnIntervalMs ?? LOOP_LAG_WARN_INTERVAL_MS;
   const onWarn = options?.onWarn ?? ((message) => { console.warn(message); });
   const now = options?.now ?? (() => new Date());
+  const attributionP50Ms = options?.attributionP50Ms ?? LOOP_LAG_ATTRIBUTION_P50_MS;
   const drainSpawnCallers = options?.drainSpawnCallers ?? (() => drainGitSpawnCallers());
 
   const histogram: IntervalHistogram = monitorEventLoopDelay({ resolution: LOOP_LAG_RESOLUTION_MS });
@@ -136,7 +139,7 @@ export function startLoopLagMonitor(options?: {
     const snapshot = statsAndReset();
     // Drain every window so the counts always describe THIS window, not everything since boot.
     const callers = drainSpawnCallers();
-    if (snapshot.p50 >= LOOP_LAG_ATTRIBUTION_P50_MS && callers.length > 0) {
+    if (snapshot.p50 >= attributionP50Ms && callers.length > 0) {
       onWarn(
         `[loop-lag] ${snapshot.windowStartedAt} sustained lag p50=${snapshot.p50}ms; git spawns queued by: `
         + callers.map((c) => `${c.caller}×${c.count}`).join(", "),

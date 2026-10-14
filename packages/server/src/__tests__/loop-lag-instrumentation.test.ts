@@ -246,12 +246,9 @@ describe("spawn attribution on sustained lag (#1488)", () => {
     const onWarn = vi.fn();
     const drain = vi.fn(() => [{ caller: "startup/x.ts:1 git:rev-parse", count: 9 }]);
     const monitor = startLoopLagMonitor({
-      warnThresholdMs: 100_000, warnIntervalMs: 40, onWarn, drainSpawnCallers: drain,
+      warnThresholdMs: 100_000, warnIntervalMs: 40, onWarn, drainSpawnCallers: drain, attributionP50Ms: 0,
     });
     try {
-      // Keep the loop busy so the p50 of the window crosses the attribution threshold.
-      const until = Date.now() + 700;
-      while (Date.now() < until) { /* block */ }
       await new Promise((r) => setTimeout(r, 150));
       expect(drain).toHaveBeenCalled();
       const messages = onWarn.mock.calls.map((c) => c[0] as string);
