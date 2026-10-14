@@ -63,5 +63,8 @@ describe("get_workspace_diff tool", () => {
     } finally {
       await rm(repoPath, { recursive: true, force: true });
     }
-  }, 30000);
+    // #1481: ~1.6 s alone, but seven git spawns plus a DB seed ran past 30 s when three full
+    // verify chains shared the box (2026-10-14, a sweep and a pre-merge gate). A real hang
+    // still fails here; a loaded box no longer reds an unrelated gate.
+  }, 90_000);
 });
