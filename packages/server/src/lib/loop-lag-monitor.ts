@@ -16,11 +16,14 @@
 // delays the probe itself.
 
 import { monitorEventLoopDelay, type IntervalHistogram } from "node:perf_hooks";
+import { drainGitSpawnCallers, type GitSpawnCallerCount } from "@agentic-kanban/shared/lib/git-spawn-governor";
 
 /** Resolution of the underlying libuv timer. Lag below this is not observable. */
 export const LOOP_LAG_RESOLUTION_MS = 10;
 /** A window whose max lag exceeds this logs a `[loop-lag]` warning. */
 export const LOOP_LAG_WARN_MS = 500;
+/** A window whose MEDIAN lag exceeds this also logs which call sites queued the git spawns (#1488). */
+export const LOOP_LAG_ATTRIBUTION_P50_MS = 500;
 /** How often the window is evaluated for the warning. */
 export const LOOP_LAG_WARN_INTERVAL_MS = 10_000;
 
@@ -78,11 +81,17 @@ export function startLoopLagMonitor(options?: {
   warnIntervalMs?: number;
   onWarn?: (message: string, stats: LoopLagStats) => void;
   now?: () => Date;
+  /** Injected source of git-spawn attribution (defaults to the adapter's own counters). */
+  drainSpawnCallers?: () => GitSpawnCallerCount[];
+  /** p50 lag at or above which callers are logged (defaults to LOOP_LAG_ATTRIBUTION_P50_MS). */
+  attributionP50Ms?: number;
 }): LoopLagMonitor {
   const warnThresholdMs = options?.warnThresholdMs ?? LOOP_LAG_WARN_MS;
   const warnIntervalMs = options?.warnIntervalMs ?? LOOP_LAG_WARN_INTERVAL_MS;
   const onWarn = options?.onWarn ?? ((message) => { console.warn(message); });
   const now = options?.now ?? (() => new Date());
+  const attributionP50Ms = options?.attributionP50Ms ?? LOOP_LAG_ATTRIBUTION_P50_MS;
+  const drainSpawnCallers = options?.drainSpawnCallers ?? (() => drainGitSpawnCallers());
 
   const histogram: IntervalHistogram = monitorEventLoopDelay({ resolution: LOOP_LAG_RESOLUTION_MS });
   histogram.enable();
@@ -128,6 +137,15 @@ export function startLoopLagMonitor(options?: {
   // and the monitor's phase log.
   const warnTimer = setInterval(() => {
     const snapshot = statsAndReset();
+    // Drain every window so the counts always describe THIS window, not everything since boot.
+    const callers = drainSpawnCallers();
+    if (snapshot.p50 >= attributionP50Ms && callers.length > 0) {
+      onWarn(
+        `[loop-lag] ${snapshot.windowStartedAt} sustained lag p50=${snapshot.p50}ms; git spawns queued by: `
+        + callers.map((c) => `${c.caller}×${c.count}`).join(", "),
+        snapshot,
+      );
+    }
     if (snapshot.max >= warnThresholdMs) {
       onWarn(
         `[loop-lag] ${snapshot.windowStartedAt} window max=${snapshot.max}ms `

@@ -22,6 +22,7 @@ import { runGatedDeferredStartupTasks, runStartupAuditTasks } from "./startup/st
 import { markStartupComplete } from "./startup/readiness.js";
 import { cleanupExpiredRuntimeState } from "./repositories/runtime-state.repository.js";
 import { ensureLoopLagMonitor, stopLoopLagMonitor } from "./lib/loop-lag-registry.js";
+import { configureGitBackgroundSpawnBudget } from "@agentic-kanban/shared/lib/git-spawn-governor";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -31,6 +32,9 @@ import { createBootstrappedApp } from "./startup/app-bootstrap.js";
 import { wireCoreServices } from "./startup/core-services-wiring.js";
 import { runBootSequence } from "./startup/boot-sequence.js";
 import { maybeStartIpv6CompanionListener } from "./startup/ipv6-companion-listener.js";
+
+/** 3 spawns/s costs ~25-55% of one loop at the measured 80-180 ms per CreateProcess; sweeps get that, requests the rest. */
+const DEFAULT_GIT_BG_SPAWNS_PER_SEC = 3;
 
 export { cleanupStartupTimers, replaceStartupTimerCleanup };
 
@@ -54,6 +58,9 @@ export async function startServer(port?: number, hostname?: string) {
   // against the slow-request ring buffer and the monitor's per-phase timings.
   // Idempotent, so a tsx hot-reload does not stack histograms or timers.
   ensureLoopLagMonitor();
+  // #1488: background git sweeps are rate-limited (request-path git is exempt) so process creation
+  // cannot saturate the loop. Override with KANBAN_GIT_BG_SPAWNS_PER_SEC; 0 disables the budget.
+  configureGitBackgroundSpawnBudget(Number(process.env.KANBAN_GIT_BG_SPAWNS_PER_SEC ?? DEFAULT_GIT_BG_SPAWNS_PER_SEC));
   cleanupCallbacks.push(() => { stopLoopLagMonitor(); });
 
   const app = createBootstrappedApp(serverStartRepoRoot);

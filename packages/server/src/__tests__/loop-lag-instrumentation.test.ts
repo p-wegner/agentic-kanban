@@ -240,3 +240,21 @@ describe("monitor phase timings (#347)", () => {
     expect(timings.totalMs).toBeGreaterThanOrEqual(0);
   });
 });
+
+describe("spawn attribution on sustained lag (#1488)", () => {
+  it("logs the busiest git-spawn callers when p50 lag is high, and drains every window", async () => {
+    const onWarn = vi.fn();
+    const drain = vi.fn(() => [{ caller: "startup/x.ts:1 git:rev-parse", count: 9 }]);
+    const monitor = startLoopLagMonitor({
+      warnThresholdMs: 100_000, warnIntervalMs: 40, onWarn, drainSpawnCallers: drain, attributionP50Ms: 0,
+    });
+    try {
+      await new Promise((r) => setTimeout(r, 150));
+      expect(drain).toHaveBeenCalled();
+      const messages = onWarn.mock.calls.map((c) => c[0] as string);
+      expect(messages.some((m) => m.includes("startup/x.ts:1 git:rev-parse\u00d79"))).toBe(true);
+    } finally {
+      monitor.stop();
+    }
+  });
+});
