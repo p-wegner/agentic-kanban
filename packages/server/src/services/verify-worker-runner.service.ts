@@ -27,6 +27,10 @@ export interface ActiveVerifyJob {
   filesDone?: number;
   filesTotal?: number;
   startedAt: string;
+  /** #1465: the worker's socket dropped; the board is holding the job for the reconnect grace. */
+  disconnectedAt?: string;
+  /** #1465: the worker came back and the board re-attached to this still-placed job. */
+  reattached?: boolean;
 }
 
 const active = new Map<string, ActiveVerifyJob>();
@@ -39,16 +43,22 @@ export function listActiveVerifyJobs(): ActiveVerifyJob[] {
 /** How long past the script's own timeout the board waits for a worker's result before refusing. */
 const RESULT_GRACE_MS = 10 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 45 * 60 * 1000;
+/** #1465: how long a placed job survives its worker's socket being down (a 1 s blip must not cost a 65 min sweep). */
+export const VERIFY_RECONNECT_GRACE_MS = 2 * 60 * 1000;
 
 export interface VerifyRunnerDeps {
   database: Database;
   /** Injected for tests; defaults to the board's fleet singleton. */
-  fleet?: Pick<ReturnType<typeof getWorkerFleet>, "connections" | "registry">;
+  fleet?: Pick<ReturnType<typeof getWorkerFleet>, "registry"> & {
+    connections: Omit<ReturnType<typeof getWorkerFleet>["connections"], "onConnect"> & { onConnect?: ReturnType<typeof getWorkerFleet>["connections"]["onConnect"] };
+  };
   /** Injected for tests; defaults to a read-only token on the board's git transport. */
   issueGitAuth?: (input: { workerId: string; projectId: string; jobId: string }) => Promise<{ gitPort: number; gitToken: string }>;
   /** Injected for tests; the project's setup script. */
   readSetupScript?: (projectId: string) => Promise<string | null>;
   nowMs?: number;
+  /** #1465: injected for tests; defaults to VERIFY_RECONNECT_GRACE_MS. */
+  reconnectGraceMs?: number;
 }
 
 export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRunner {
@@ -96,10 +106,16 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
       return await new Promise<WorkerVerifyReport>((resolve) => {
         let off: (() => void) | undefined;
         let offDisconnect: (() => void) | undefined;
+        let offConnect: (() => void) | undefined;
         let timer: NodeJS.Timeout | undefined;
-        const end = (report: WorkerVerifyReport): void => { off?.(); offDisconnect?.(); if (timer) clearTimeout(timer); resolve(report); };
+        let graceTimer: NodeJS.Timeout | undefined;
+        const graceMs = deps.reconnectGraceMs ?? VERIFY_RECONNECT_GRACE_MS;
+        const clearGrace = (): void => { if (graceTimer) clearTimeout(graceTimer); graceTimer = undefined; };
+        const end = (report: WorkerVerifyReport): void => { off?.(); offDisconnect?.(); offConnect?.(); clearGrace(); if (timer) clearTimeout(timer); resolve(report); };
         off = connections.onMessage((workerId, message) => {
           if (workerId !== req.workerId || !("jobId" in message) || message.jobId !== jobId) return;
+          // #1465: after a reconnect, any frame for this job proves the worker still knows it.
+          if (job.reattached) clearGrace();
           if (message.type === "verify_progress") {
             Object.assign(job, { stage: message.stage, filesDone: message.filesDone ?? job.filesDone, filesTotal: message.filesTotal ?? job.filesTotal });
           } else if (message.type === "verify_log_chunk") {
@@ -123,7 +139,26 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
         });
         timer = setTimeout(() => end(refuse(`no verify_result from ${workerName} within ${Math.round((timeoutMs + RESULT_GRACE_MS) / 60000)} min`)), timeoutMs + RESULT_GRACE_MS);
         timer.unref?.();
-        offDisconnect = connections.onDisconnect((id) => { if (id === req.workerId) end(refuse(`${workerName} disconnected mid-run`)); });
+        // #1465: a dropped socket only starts a grace period. The worker's process keeps running and it
+        // re-announces its jobs (and delivers buffered results) on reconnect; only a worker that does not
+        // come back, or comes back without the job, is unreachable.
+        offDisconnect = connections.onDisconnect((id) => {
+          if (id !== req.workerId) return;
+          if (!connections.onConnect || graceMs <= 0) return end(refuse(`${workerName} disconnected mid-run`));
+          job.disconnectedAt = new Date(deps.nowMs ?? Date.now()).toISOString();
+          clearGrace();
+          graceTimer = setTimeout(() => end(refuse(`${workerName} disconnected mid-run and did not reconnect within ${Math.round(graceMs / 1000)} s`)), graceMs);
+          graceTimer.unref?.();
+        });
+        offConnect = connections.onConnect?.((id) => {
+          if (id !== req.workerId || !job.disconnectedAt) return;
+          delete job.disconnectedAt;
+          job.reattached = true;
+          clearGrace();
+          // The worker must announce the job (progress or result) within the grace; a restarted worker lost it.
+          graceTimer = setTimeout(() => end(refuse(`${workerName} reconnected but no longer knows this verify job (lost with the worker process)`)), graceMs);
+          graceTimer.unref?.();
+        });
         const frame: VerifyJobFrame = {
           type: "verify_job",
           jobId,

@@ -60,7 +60,7 @@ import {
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { readWorkerCapacity } from "./worker-resources.js";
 import { createDaemonToolchainInstall } from "./worker-toolchain-install.js";
-import { createDaemonVerifyRunner } from "./worker-verify-runner.js"; // #1437
+import { createDaemonVerifyRunner, createFileVerifyResultStore } from "./worker-verify-runner.js"; // #1437, #1465
 import type { ToolchainInstallPolicy, WorkerToolchainInstallInfo } from "@agentic-kanban/shared/lib/worker-toolchain-install";
 import { createWorkerOneShotRunner } from "./worker-oneshot.js"; import { createWorkerServicesRunner } from "./worker-services.js"; // #1431, #1447
 import { createWorkerAgentRunner, dispatchBoardMessage, rawDataToBuffer, type UnpushedResult } from "./worker-agent-runner.js";
@@ -503,7 +503,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   const workRoot = opts.workRoot ?? defaultWorkerWorkRoot(stateFile); // #1401: own root per non-default state file
   await cleanUpBeforeStart(workRoot, log);
   const toolchains = createDaemonToolchainInstall({ policy: opts.toolchainInstall ?? "never", allow: opts.toolchainAllow ?? [], stateFile, log, sendToBoard: (m) => sendToBoard(m), heartbeat: () => sendHeartbeat() }); // #1371
-  const verifyJobs = createDaemonVerifyRunner({ workRoot, boardUrl: () => boardUrl, sendToBoard: (m) => sendToBoard(m), log, slots: 1, ramGb: Math.round(totalmem() / 2 ** 30) }); // #1437: gates/sweeps the board places on this worker
+  const verifyJobs = createDaemonVerifyRunner({ workRoot, boardUrl: () => boardUrl, sendToBoard: (m) => sendToBoard(m), log, slots: 1, ramGb: Math.round(totalmem() / 2 ** 30), isConnected: () => ws?.readyState === WebSocket.OPEN, store: createFileVerifyResultStore(workRoot) }); // #1437: gates/sweeps the board places on this worker
   await Promise.all([refreshPackageManagers(), refreshToolchains(), toolchains.installer.refreshMise()]);
 
   // #1370: the worker's own doctor, summarised. hello/register always carry the current summary; a
@@ -730,7 +730,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         while (pendingCritical.length > 0) {
           socket.send(JSON.stringify(pendingCritical.shift()));
         }
-        retryRetainedResults(runner, sendToBoard, log);
+        retryRetainedResults(runner, sendToBoard, log); verifyJobs.onConnected(); // #1465: re-announce running verify jobs, deliver verdicts buffered while disconnected
         selfUpdate?.onConnected();
         resolveConnected();
       } catch (err) {
