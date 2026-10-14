@@ -93,11 +93,13 @@
 // where they are exempt from the score floor but still counted against the budget.
 
 import { spawn, spawnSync, execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, writeSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { format } from "node:util";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
+import { LEDGER_ENV, WORKER_CRASH_PATTERN, decideCrashRetry, describeCrash } from "./vitest-crash-ledger.mjs";
 import {
   acquireForBuilderTest,
   MACHINE_LOCK_HEARTBEAT_INTERVAL_MS,
@@ -1443,7 +1445,48 @@ function topUpSuites(pkg) {
   );
 }
 
-function runPackage({ dir, label, exclude }, mode = null) {
+/**
+ * #1485 — a vitest fork that dies mid-file (`Worker exited unexpectedly`) leaves every reported
+ * test green, one file unreported and the run red. `runPackageOnce` carries a ledger reporter that
+ * names the file; this wrapper retries ONLY that case, ONCE, over the unreported files. A real
+ * failure, a non-crash unhandled error, or a retry that fails again stays red.
+ */
+const CRASH_LEDGER_REPORTER = resolve(__dirname, "vitest-crash-ledger.mjs");
+const CRASH_RETRY_MAX_FILES = 25;
+async function runPackage(pkg, mode = null) {
+  const ledgerPath = join(tmpdir(), `kanban-crash-ledger-${process.pid}-${Date.now()}-${pkg.label}.json`);
+  const first = await runPackageOnce(pkg, mode, ledgerPath);
+  if (first.code === 0) return first;
+  let ledger = null;
+  try {
+    ledger = JSON.parse(readFileSync(ledgerPath, "utf8"));
+  } catch {}
+  try {
+    rmSync(ledgerPath, { force: true });
+  } catch {}
+  const pkgDir = slash(resolve(ROOT, pkg.dir));
+  const rel = (abs) => (slash(abs).startsWith(`${pkgDir}/`) ? slash(abs).slice(pkgDir.length + 1) : null);
+  if (ledger?.errors.some((e) => WORKER_CRASH_PATTERN.test(e.message))) {
+    console.error(`\n[test:mine] ${pkg.label}: vitest worker fork crash${first.signal ? ` (vitest itself exited by signal ${first.signal})` : ""}:`);
+    for (const line of describeCrash(ledger, (f) => rel(f) ?? f)) console.error(`[test:mine]   ${line}`);
+  }
+  const decision = decideCrashRetry(ledger, rel);
+  if (!decision.retry) return first;
+  if (decision.files.length > CRASH_RETRY_MAX_FILES) {
+    console.error(`[test:mine] ${pkg.label}: ${decision.files.length} unreported files exceeds the retry cap (${CRASH_RETRY_MAX_FILES}) — staying red.`);
+    return first;
+  }
+  console.error(`[test:mine] ${pkg.label}: no test failed — retrying the ${decision.files.length} unreported file(s) ONCE: ${decision.files.join(", ")}`);
+  const second = await runPackageOnce(pkg, { kind: "flake-retry", files: decision.files }, null);
+  if (second.code === 0) {
+    console.error(`[test:mine] ${pkg.label}: the retried file(s) passed — the fork crash is recorded above but does not red the run.`);
+    return { ...second, code: 0 };
+  }
+  console.error(`[test:mine] ${pkg.label}: the retried file(s) failed again — this is not a one-off fork crash.`);
+  return first;
+}
+
+function runPackageOnce({ dir, label, exclude }, mode = null, ledgerPath = null) {
   return new Promise((resolvePromise) => {
     const pkgDir = resolve(ROOT, dir);
     const vitestEntry = resolveVitestEntry(pkgDir);
@@ -1477,7 +1520,11 @@ function runPackage({ dir, label, exclude }, mode = null) {
           : mode?.kind === "impact"
             ? ["run", ...mode.files]
             : ["run"];
-    const args = [vitestEntry, ...modeArgs, ...excludeArgs, ...workerCapArgs, ...passthrough];
+    // #1485 — the ledger reporter rides along unless the caller already chose reporters.
+    const ledgerArgs = ledgerPath && !passthrough.some((a) => a.startsWith("--reporter"))
+      ? ["--reporter=default", `--reporter=${CRASH_LEDGER_REPORTER}`]
+      : [];
+    const args = [vitestEntry, ...modeArgs, ...excludeArgs, ...workerCapArgs, ...ledgerArgs, ...passthrough];
     console.log(
       `\n[test:mine] ${label}: node vitest ${[...modeArgs, ...excludeArgs, ...workerCapArgs, ...passthrough].join(" ")}`
     );
@@ -1496,6 +1543,7 @@ function runPackage({ dir, label, exclude }, mode = null) {
       cwd: pkgDir,
       stdio: tee ? ["inherit", "pipe", "pipe"] : "inherit",
       windowsHide: true,
+      env: ledgerPath ? { ...process.env, [LEDGER_ENV]: ledgerPath } : process.env,
     });
     let sawNoTestFiles = false;
     if (tee) {
@@ -1513,7 +1561,7 @@ function runPackage({ dir, label, exclude }, mode = null) {
       watch(child.stdout, 1);
       watch(child.stderr, 2);
     }
-    child.on("exit", (code) => resolvePromise({ code: code ?? 1, selectedNothing: sawNoTestFiles }));
+    child.on("exit", (code, signal) => resolvePromise({ code: code ?? 1, signal, selectedNothing: sawNoTestFiles }));
     child.on("error", (err) => {
       console.error(`[test:mine] ${label} failed to start:`, err);
       resolvePromise({ code: 1, selectedNothing: false });
