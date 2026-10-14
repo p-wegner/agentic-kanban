@@ -958,8 +958,8 @@ export function matchesPathGlob(glob, relPath) {
  *     allowed to run anyway.
  * Neither is a signal about the change, so the exclusion is applied HERE, loudly.
  */
-export function partitionExcluded({ dir, exclude }, files) {
-  const lifted = new Set(liftedExclusions({ exclude }).map((e) => e.glob));
+export function partitionExcluded({ dir, exclude }, files, changedFiles = scopedFiles) {
+  const lifted = new Set(liftedExclusions({ exclude }, changedFiles).map((e) => e.glob));
   exclude = exclude.filter((e) => !lifted.has(e.glob));
   const kept = [];
   const excluded = [];

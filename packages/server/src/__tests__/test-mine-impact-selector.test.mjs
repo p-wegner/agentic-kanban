@@ -185,6 +185,9 @@ describe("exclusion of selected suites this runner never runs", () => {
   // silently skipped the excluded one — a green for a suite that never ran; alone, vitest
   // resolves nothing and exits 1 with a bare `No test files found`.
   const server = PACKAGES.find((p) => p.label === "server");
+  // Pin the change set: by default the exclusions are lifted from THIS checkout's diff, so a
+  // branch touching packages/server/src/cli/** would lift cli-issue and fail these cases.
+  const NO_CHANGES = [];
 
   it("matches the `**/name.test.ts` shape the exclude globs actually use", () => {
     expect(matchesExcludeGlob("**/cli-issue.test.ts", "src/__tests__/cli-issue.test.ts")).toBe(true);
@@ -199,7 +202,7 @@ describe("exclusion of selected suites this runner never runs", () => {
     const { kept, excluded } = partitionExcluded(server, [
       "src/__tests__/cli-issue.test.ts",
       "src/__tests__/gate-builder-quiesce.test.ts",
-    ]);
+    ], NO_CHANGES);
     expect(kept).toEqual(["src/__tests__/gate-builder-quiesce.test.ts"]);
     expect(excluded).toEqual([
       { file: "packages/server/src/__tests__/cli-issue.test.ts", reason: "spawns the CLI binary as a child process" },
@@ -211,7 +214,7 @@ describe("exclusion of selected suites this runner never runs", () => {
       "src/__tests__/cli-issue.test.ts",
       "src/__tests__/git.service.test.ts",
       "src/__tests__/compose-lifecycle-real-docker.test.ts",
-    ]);
+    ], NO_CHANGES);
     // All three are environmentally excluded — nothing left to run, which the caller turns
     // into a fall-back rather than a green from guards alone.
     expect(kept).toEqual([]);
