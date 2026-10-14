@@ -335,7 +335,7 @@
  *   services/agent-remote.service.ts::createRemoteAgentService   292 -> 296  (+4)
  *   routes/workspace-actions.ts::createWorkspaceActionsRoute     388 -> 389  (+1)
  *   worker/worker-agent-runner.ts::createWorkerAgentRunner       383 -> 375  (#1472: idle-after-result -> worker-result-idle.ts, push settling -> worker-result-push.ts)
- *   worker/worker-agent-runner.ts::createWorkerAgentRunner       375 -> 370  (#1475: fast-exit log + superseded-exit settling extracted to module helpers)
+ *   worker/worker-agent-runner.ts::createWorkerAgentRunner       375 -> 371  (#1475: fast-exit log + superseded-exit settling extracted to module helpers)
  *   worker/worker-agent-runner.ts::createWorkerAgentRunner       383 -> 390  (+7, #1426: auth-death hook; logic lives in worker-auth-failure.ts)
  *   worker/worker-agent-runner.ts::createWorkerAgentRunner       370 -> 383  (+13)
  *
@@ -477,7 +477,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 349 -> 351 (#841): POSIX-only `detached: true` for a shell launch, closing the #836 gap.
   // 351 -> 358 (#1027), disclosed in the ninth movement above.
   // 358 -> 370 (#1328), disclosed in the seventeenth movement above.
-  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 370,
+  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 371,
 };
 
 /**
