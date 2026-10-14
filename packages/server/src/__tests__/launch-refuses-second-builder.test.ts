@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import * as schema from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { guardAgainstSecondBuilder } from "../services/workspace-launch-guard.js";
@@ -67,6 +68,21 @@ describe("guardAgainstSecondBuilder (#1425)", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     await guardAgainstSecondBuilder(db, ws, { replace: true }, stop);
     expect(stop).toHaveBeenCalledWith(running);
+  });
+
+  it("409s over a running review session too, and force stops it (#1475)", async () => {
+    const { db } = createTestDb();
+    const ws = await seedWorkspace(db);
+    const review = await seedSession(db, ws, "running");
+    await db.update(schema.sessions).set({ triggerType: "review" }).where(eq(schema.sessions.id, review));
+    const stop = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const err = await guardAgainstSecondBuilder(db, ws, {}, stop).catch((e) => e);
+    expect(err).toBeInstanceOf(WorkspaceError);
+    expect(err.code).toBe("CONFLICT");
+    expect(stop).not.toHaveBeenCalled();
+    await guardAgainstSecondBuilder(db, ws, { force: true }, stop);
+    expect(stop).toHaveBeenCalledWith(review);
   });
 
   it("ignores a running bisect session", async () => {

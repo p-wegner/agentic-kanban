@@ -230,6 +230,25 @@ function wait(ms: number): Promise<void> {
   });
 }
 
+/** #1383: a fast non-zero exit used to leave nothing in the worker log to say why. */
+function logFastExit(sessionId: string, code: number | null, startedAt: number | undefined, stderrTail = ""): void {
+  if (code === 0 || startedAt === undefined || Date.now() - startedAt >= FAST_EXIT_LOG_MS) return;
+  const tail = stderrTail.trim().split(/[\r\n]+/).slice(-8).join(" | ");
+  workerLog(`[worker] agent exited fast: sessionId=${sessionId} code=${code} after ${Date.now() - startedAt}ms; stderr tail: ${tail || "(none)"}`);
+}
+
+/** #1475: a session the board stopped ends as superseded (exit 0 + note), not as a failure. */
+function settleSupersededExit(
+  boardStops: Set<string>, sessionId: string, code: number | null,
+  safeSend: (m: WorkerToBoardMessage) => void, emitExit: (sid: string, code: number | null) => void,
+): boolean {
+  if (!boardStops.delete(sessionId) || code === 0) return false;
+  workerLog(`[worker] session ${sessionId} superseded (stopped by the board); recording exit 0 instead of ${code}`);
+  safeSend({ type: "event", event: { type: "stderr", sessionId, data: "Session superseded: the board stopped this agent on the worker." } });
+  emitExit(sessionId, 0);
+  return true;
+}
+
 export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentRunnerOptions = {}) {
   const repoOps = resolveRepoOps(options);
   const processes = new Map<string, ChildProcess>();
@@ -269,6 +288,8 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   const stdinOpen = new Map<string, boolean>();
   /** Per-session silence watchdogs; reset on every byte of agent output. */
   const hangWatchdogs = new Map<string, { reset(): void; close(): void }>();
+  /** #1475: sessions the BOARD told us to stop (superseded/revoked) — their exit is not a failure. */
+  const boardStops = new Set<string>();
   let maxConcurrency = options.maxConcurrency &&options.maxConcurrency > 0 ? options.maxConcurrency : 1;
   const tree = createAgentTreeTracker(workRoot); // #1336
 
@@ -634,20 +655,13 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     });
     proc.on("exit", (code) => {
       workerLog(`[worker] agent exited: sessionId=${sessionId} code=${code}`);
-      // #1383: a fast non-zero exit used to leave nothing in the worker log to say why.
-      const startedAt = agentStartedAtMs.get(sessionId);
-      if (code !== 0 && startedAt !== undefined && Date.now() - startedAt < FAST_EXIT_LOG_MS) {
-        const tail = (stderrTails.get(sessionId) ?? "").trim().split(/\r?\n/).slice(-8).join(" | ");
-        workerLog(
-          `[worker] agent exited fast: sessionId=${sessionId} code=${code} after ${Date.now() - startedAt}ms; ` +
-          `stderr tail: ${tail || "(none)"}`,
-        );
-      }
+      logFastExit(sessionId, code, agentStartedAtMs.get(sessionId), stderrTails.get(sessionId));
       stderrTails.delete(sessionId);
       if (resultIdle.shouldRecordCompleted(sessionId, code)) {
         emitExit(sessionId, 0);
         return;
       }
+      if (settleSupersededExit(boardStops, sessionId, code, safeSend, emitExit)) return;
       emitExit(sessionId, code);
     });
 
@@ -792,6 +806,8 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     // #1381: setMaxConcurrency = the board changed this worker's ceiling; running sessions are never stopped by it.
     setMaxConcurrency: (n: number): void => { if (n > 0) maxConcurrency = n; }, assign, assignWithRepo, input, closeStdin, stop, stopAll, releaseAgents, runningSessionIds,
     drainPushes, pendingPushCount, repoOp, gitToken: gitTokens.answer, checkoutCwd: (sid: string): string | undefined => checkouts.get(sid)?.checkout.cwd, // #1447
+    // #1475: a `stop` frame from the board — the agent ends and the exit is reported as superseded, not failed.
+    stopByBoard: (sid: string): boolean => { if (processes.get(sid)?.pid) boardStops.add(sid); return stop(sid); },
     probeSession: seen.answerProbe, rememberedSessionCount: seen.size,
     retryPendingPushes: undelivered.retryPending,
     unpushedResults: undelivered.list, lostResults: undelivered.listLost,
@@ -835,7 +851,7 @@ export function dispatchBoardMessage(
       runner.closeStdin(message.sessionId);
       break;
     case "stop":
-      runner.stop(message.sessionId);
+      runner.stopByBoard(message.sessionId);
       break;
     case "sync_repo":
       runner.repoOp("sync", message.sessionId, message.requestId, message.auth);

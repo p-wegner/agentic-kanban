@@ -15,8 +15,8 @@ export async function findRunningBuilderSessionIds(database: Database, workspace
 
 /**
  * Refuse a launch while a builder session is live, unless the caller passed `replace: true`
- * (then the old sessions are stopped first). `force`/`fromTrain` callers keep their old,
- * unguarded behavior.
+ * (then the old sessions are stopped first). `force` also stops them (#1475); `fromTrain`
+ * callers keep their old, unguarded behavior.
  */
 export async function guardAgainstSecondBuilder(
   database: Database,
@@ -24,10 +24,12 @@ export async function guardAgainstSecondBuilder(
   body: Record<string, unknown>,
   stopSession: (sessionId: string) => Promise<unknown>,
 ): Promise<void> {
-  if (body.force === true || body.fromTrain === true) return;
+  if (body.fromTrain === true) return;
   const running = await findRunningBuilderSessionIds(database, workspaceId);
   if (running.length === 0) return;
-  if (body.replace !== true) {
+  // #1475: a forced launch still supersedes the running session — it is stopped, so a remote
+  // one gets a `stop` frame on its worker instead of working on for a result that is refused.
+  if (body.replace !== true && body.force !== true) {
     throw new WorkspaceError(
       `Workspace already has a running session (${running.join(", ")}). ` +
         `Pass replace: true to stop it and launch a new one, or stop the workspace first.`,
@@ -35,6 +37,6 @@ export async function guardAgainstSecondBuilder(
       { reason: "SESSION_ALREADY_RUNNING", sessionIds: running, sessionId: running[0] },
     );
   }
-  console.warn(`[workspace-session] launch replace=true: stopping ${running.join(", ")} for workspaceId=${workspaceId}`);
+  console.warn(`[workspace-session] launch replace/force: stopping ${running.join(", ")} for workspaceId=${workspaceId}`);
   for (const sid of running) await stopSession(sid);
 }
