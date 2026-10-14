@@ -17,7 +17,7 @@
  *  - Budgeted per pass, so a board with a large backlog of old worktrees spreads the git spawns
  *    over several passes instead of one burst.
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -47,12 +47,55 @@ export interface CommitMsgHookBackfillDeps {
   maxPerPass?: number;
 }
 
+/** `core.hooksPath` from a git config file's text, or null. Last assignment wins, as in git. */
+export function parseHooksPath(configText: string): string | null {
+  let inCore = false;
+  let value: string | null = null;
+  for (const raw of configText.split(/\r?\n/)) {
+    const line = raw.trim();
+    const section = /^\[\s*([^\s\]"]+)/.exec(line);
+    if (section) {
+      inCore = section[1].toLowerCase() === "core";
+      continue;
+    }
+    if (!inCore) continue;
+    const m = /^hookspath\s*=\s*(.*)$/i.exec(line);
+    if (m) value = m[1].trim().replace(/^"(.*)"$/, "$1").replace(/\\\\/g, "\\") || null;
+  }
+  return value;
+}
+
+/**
+ * True only when the worktree's own `config.worktree` (linked worktree) points `core.hooksPath`
+ * at a dir that holds `commit-msg`. No git spawn; false means "ask git", not "missing".
+ */
+function hookPresentOnDisk(worktreePath: string): boolean {
+  try {
+    const dotGit = join(worktreePath, ".git");
+    const stat = statSync(dotGit);
+    const gitDir = stat.isFile()
+      ? resolvePath(worktreePath, /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf-8"))?.[1].trim() ?? "")
+      : dotGit;
+    const configPath = join(gitDir, stat.isFile() ? "config.worktree" : "config");
+    if (!existsSync(configPath)) return false;
+    const hooksPath = parseHooksPath(readFileSync(configPath, "utf-8"));
+    if (!hooksPath) return false;
+    return existsSync(join(resolvePath(worktreePath, hooksPath), "commit-msg"));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Does this worktree lack a hook git would actually run? `core.hooksPath` unset means git
  * resolves hooks from the COMMON dir, which a linked worktree does not own — so an unset value
  * is exactly the pre-#1214 state, whatever files happen to sit in the worktree.
  */
 async function needsCommitMsgHook(worktreePath: string): Promise<boolean | null> {
+  // #1488: answer "already done" from the filesystem — one git spawn per old worktree per pass
+  // saturated the board's event loop on Windows. Only a POSITIVE answer short-circuits; anything
+  // else falls through to git, which stays the authority for the unset/unreadable cases.
+  if (hookPresentOnDisk(worktreePath)) return false;
   const configured = await gitExec(["config", "--get", "core.hooksPath"], { cwd: worktreePath });
   // `--get` exits 1 for an unset key, which is a legitimate answer, not a failure. A worktree
   // git cannot read at all answers null so the caller can count it as skipped rather than fixed.
