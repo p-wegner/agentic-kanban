@@ -134,7 +134,9 @@ Status indicators:
         const { buildConsoleModel, renderConsole, consoleFrame, fetchConsolePayloads } = await import("../status-console.js");
         const baseUrl = `http://127.0.0.1:${resolveBoardServerPort()}`;
         const get = async (path: string): Promise<unknown> => {
-          const answer = await plainHttp(`${baseUrl}${path}`, { method: "GET", timeoutMs: 4000 });
+          // 15 s: /status takes several seconds on a busy board, and a timeout here silently drops the
+          // whole console back to the DB-backed list (#1477).
+          const answer = await plainHttp(`${baseUrl}${path}`, { method: "GET", timeoutMs: 15_000 });
           if (answer.status < 200 || answer.status >= 300) throw new Error(`HTTP ${answer.status} ${path}`);
           return JSON.parse(answer.text);
         };
