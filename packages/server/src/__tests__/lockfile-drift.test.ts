@@ -1,4 +1,4 @@
-// @gate:always-run
+// @gate:always-run when:package.json — reads the root package.json's packageManager pin, outside its import graph.
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
