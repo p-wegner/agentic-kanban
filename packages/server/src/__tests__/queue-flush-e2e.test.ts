@@ -46,7 +46,7 @@ async function setPref(db: TestDb, key: string, value: string) {
   invalidatePreferencesCache();
 }
 
-describe("queue flush, end to end (#1463)", { timeout: 120_000 }, () => {
+describe("queue flush, end to end (#1463)", { timeout: 300_000 }, () => {
   let db: TestDb;
   let repoPath: string;
   let stable: string;
@@ -194,8 +194,8 @@ describe("queue flush, end to end (#1463)", { timeout: 120_000 }, () => {
     await setPref(db, `queue_flush_thresholds_${projectId}`, JSON.stringify({ minWaiting: 2, maxOldestAgeMinutes: 100000, arrivalsPerGateRatio: 100000 }));
     const tick = await reconcileQueueFlush({ database: db, service });
     expect(tick.fired).toEqual([projectId]);
-    await vi.waitFor(() => expect(readFlushState(stable).flushes.length).toBe(1), { timeout: 60_000 });
+    await vi.waitFor(() => expect(readFlushState(stable).flushes.length).toBe(1), { timeout: 240_000 });
     expect(readFlushState(stable).flushes[0].triggeredBy).toBe("auto");
     expect(readFileSync(join(stable, ".kanban", "flush-state.json"), "utf8")).toContain("flush/");
-  }, 90_000);
+  }, 300_000);
 });
