@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { buildConsoleModel, renderConsole, type ConsoleModel, type ConsolePayloads } from "../cli/status-console.js";
 import { chainKindOf, chainRefOf } from "../cli/status-console-extras.js";
 import { classifyStall } from "../services/console-extras.service.js";
+import { reportVerifyChainProgress } from "../services/verify-chain-registry.js";
 import { listVerifyChains, resetVerifyChainSemaphoreForTests, runUnderVerifyChainSemaphore } from "../services/verify-chain-semaphore.js";
 
 // #1449: everything the operator had to look up during the 2026-10-12/13 drives is in the frame.
@@ -28,9 +29,9 @@ const model: ConsoleModel = {
   ],
   mergedToday: 18,
   chains: [
-    { kind: "workspace gate", ref: "#1435", where: "host", state: "running", ageMs: 725000 },
+    { kind: "workspace gate", ref: "#1435", where: "host", state: "running", ageMs: 725000, stage: "tests", filesDone: 120, filesTotal: 340 },
     { kind: "base-health probe", ref: "master", where: "host", state: "queued", ageMs: 240000, position: 1, waitReason: "held for memory: 1.9 GB free; re-checked every 30s" },
-    { kind: "rc sweep", ref: "1a2b3c4d5", where: "ao-pf38", state: "running", ageMs: 0, stage: "(full) tests 12/340" },
+    { kind: "rc sweep", ref: "1a2b3c4d5", where: "ao-pf38", state: "running", ageMs: 95000, stage: "(full) tests 12/340" },
   ],
   baseHealth: { outcome: "red", sha: "1a2b3c4d5e6f", createdAt: ago(7200), failedSuites: ["status-console", "worker-cli-isolation", "x"] },
   mergeHold: { reason: "base_red", held: [1429, 1430] },
@@ -60,6 +61,35 @@ describe("operator console frame (#1449)", () => {
       "verify placement prefer-worker", "ram 11.2G disk 84G", "[auth-expired]", "running/fix", "dropped #1429: conflicts with #1430", "NEW WORKER CONNECTIONS", "since 00:00 local"]) {
       expect(out).toContain(s);
     }
+  });
+});
+
+describe("chain progress and elapsed (#1462)", () => {
+  it("shows stage, files done/total and elapsed on every running chain line", () => {
+    for (const cols of [80, 140]) {
+      const out = renderConsole(model, { ...base, cols, rows: 60, color: false }).join("\n");
+      expect(out).toMatch(/workspace gate #1435\s+host\s+12m05s\s+tests 120\/340/);
+      expect(out).toMatch(/rc sweep 1a2b3c4d5\s+ao-pf38\s+1m35s\s+\(full\) tests 12\/340/);
+    }
+  });
+
+  it("derives a worker chain's age from the job start time in the heartbeat", () => {
+    const m = buildConsoleModel({
+      nowMs: NOW,
+      status: { project: { id: "p", name: "proj", repoPath: "/x", defaultBranch: "master" }, generatedAt: new Date(NOW).toISOString(), totals: { totalIssues: 0, inProgress: 0, activeWorkspaces: 0, runningSessions: 0 }, issues: [] },
+      workers: { workers: [{ name: "wsl", effectiveStatus: "online", verifyJobs: [{ kind: "rc-sweep", sha: "1a2b3c4d5e6f", tier: "full", stage: "verify", filesDone: 3, filesTotal: 9, startedAt: ago(30) }] }] },
+    });
+    expect(m.chains?.[0]).toMatchObject({ where: "wsl", ageMs: 30000 });
+  });
+
+  it("carries a host chain's reported stage and files into the snapshot", async () => {
+    resetVerifyChainSemaphoreForTests();
+    let seen: ReturnType<typeof listVerifyChains> = [];
+    await runUnderVerifyChainSemaphore(async () => {
+      reportVerifyChainProgress("gate #7", { stage: "tests", filesDone: 4, filesTotal: 10 });
+      seen = listVerifyChains();
+    }, "gate #7");
+    expect(seen[0]).toMatchObject({ stage: "tests", filesDone: 4, filesTotal: 10 });
   });
 });
 

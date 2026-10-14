@@ -37,6 +37,8 @@
 
 import type { MergeGatePhase } from "@agentic-kanban/shared/lib/gate-activity";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { stageOfGatePhase } from "./verify-chain-progress.js";
+import { reportVerifyChainProgress, workspaceVerifyChainLabel } from "./verify-chain-registry.js";
 import { clearMergeRunMarker, resetMergeRunMarkerPort, writeMergeRunMarker } from "./merge-run-marker-port.js";
 import { notifySummaryWriteThrough } from "./summary-write-through-notifier.js";
 
@@ -279,6 +281,8 @@ export function noteMergeGatePhase(
   detail?: string,
   nowIso = new Date().toISOString(),
 ): void {
+  const chainStage = stageOfGatePhase(phase);
+  if (chainStage) reportVerifyChainProgress(workspaceVerifyChainLabel(workspaceId), { stage: chainStage }); // #1462
   const job = jobsByWorkspace.get(workspaceId);
   if (!job || job.state !== "running") return;
   // Last, not first: retries push a new attempt and the newest unfinished one is the live gate.

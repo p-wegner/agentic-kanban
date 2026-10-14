@@ -59,6 +59,19 @@ const READ_ONLY_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
  */
 export const READINESS_GATE_TIMEOUT_MS = 120_000;
 
+/**
+ * Mutating routes that never race the deferred startup reconcilers (#1473). Preference
+ * writes touch only the `preferences` table (+ objective.md); the reconcilers repair
+ * git/workspace/service-stack state. Holding them cost every `PUT /api/preferences/settings`
+ * the full 120 s timeout after a restart while the sweeps ran (reads answered at once), and a
+ * client with a 60 s timeout wrongly concluded the setting had not changed.
+ */
+const UNGATED_WRITE_PREFIXES = ["/api/preferences/"];
+
+function isUngatedWrite(path: string): boolean {
+  return UNGATED_WRITE_PREFIXES.some((p) => path.startsWith(p));
+}
+
 export function createStartupReadinessGate(
   opts: { timeoutMs?: number; waitFor?: () => Promise<void>; isComplete?: () => boolean } = {},
 ): MiddlewareHandler {
@@ -67,7 +80,7 @@ export function createStartupReadinessGate(
   const isComplete = opts.isComplete ?? isStartupComplete;
 
   return async (c, next) => {
-    if (isComplete() || READ_ONLY_METHODS.has(c.req.method)) return next();
+    if (isComplete() || READ_ONLY_METHODS.has(c.req.method) || isUngatedWrite(c.req.path)) return next();
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timedOut = await Promise.race([

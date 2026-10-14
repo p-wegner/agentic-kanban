@@ -19,6 +19,8 @@ export interface ConsoleWorker {
   tickets: ConsoleWorkerTicket[];
   /** #1437: verify jobs the board placed on this worker, e.g. `rc-sweep 1a2b3c4d5 (full) verify 12/340`. */
   verifyJobs?: string[];
+  /** #1462: when each of `verifyJobs` started (same order), so the chain line can show elapsed. */
+  verifyJobStartedAt?: Array<string | null>;
   /** Silent for more than a day: history, collapsed into one line and kept out of ATTENTION. */
   stale?: boolean;
   /** Reports a build sha that differs from the board's own. */
@@ -191,6 +193,7 @@ export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
     ...(w.toolchainInstall && typeof w.toolchainInstall.state === "string"
       ? { toolchainInstall: { state: w.toolchainInstall.state, toolchains: w.toolchainInstall.toolchains ?? [], reason: w.toolchainInstall.reason } }
       : {}),
+    ...(Array.isArray(w.verifyJobs) && w.verifyJobs.length > 0 ? { verifyJobStartedAt: w.verifyJobs.map((j: Record<string, any>) => (typeof j.startedAt === "string" ? j.startedAt : null)) } : {}),
     ...(Array.isArray(w.verifyJobs) && w.verifyJobs.length > 0 ? { verifyJobs: w.verifyJobs.map((j: Record<string, any>) => `${j.kind} ${String(j.sha).slice(0, 9)} (${j.tier}) ${j.stage}${j.filesTotal ? ` ${j.filesDone ?? 0}/${j.filesTotal}` : ""}${j.disconnectedAt ? " [worker disconnected, holding]" : j.reattached ? " [re-attached]" : ""}`) } : {}),
     tickets: (w.assignments ?? []).map((a: Record<string, any>) => ({
       issueNumber: a.issueNumber ?? null, status: String(a.status ?? ""), startedAt: a.startedAt ?? null, phase: a.phase ?? a.kind ?? null,
