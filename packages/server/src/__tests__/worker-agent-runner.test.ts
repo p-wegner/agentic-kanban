@@ -133,15 +133,46 @@ describe("idle after the final result event (#1464)", () => {
 
   it("records a hang-watchdog kill after a result event as completed (exit 0), not a hang", async () => {
     // Grace disabled so only the watchdog can end it.
-    const { runner, eventsOf, exitOf } = collector({ idleAfterResultGraceMs: 0 });
-    runner.assign("s1", nodeSpec(lingerAfterResult, { hangTimeoutMs: 1500 }));
+    //
+    // Deterministic (#1476): the watchdog's timers are FAKED, so a slow child start under load
+    // can't let 1.5s of real silence elapse before the result event is even printed (which made
+    // the kill a genuine "hang"). We wait in real time for the result event, then advance the
+    // fake clock past the watchdog ourselves. Only setTimeout/clearTimeout are faked; the child
+    // process and its streams stay real.
+    const realSetTimeout = globalThis.setTimeout;
+    const realSleep = (ms: number) => new Promise<void>((r) => realSetTimeout(r, ms));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { runner, eventsOf, exitOf } = collector({ idleAfterResultGraceMs: 0 });
+      runner.assign("s1", nodeSpec(lingerAfterResult, { hangTimeoutMs: 1500 }));
 
-    await vi.waitFor(() => expect(exitOf("s1")).toBeTruthy(), { timeout: 20000 });
+      const deadline = Date.now() + 25000;
+      const resultSeen = () =>
+        eventsOf("s1").some((e) => e.type === "stdout" && /"type":"result"/.test(String(e.data)));
+      while (!resultSeen() && Date.now() < deadline) await realSleep(25);
+      expect(resultSeen()).toBe(true);
+
+      // Silence now begins; push the fake clock past the watchdog (and any kill escalation).
+      while (!exitOf("s1") && Date.now() < deadline) {
+        await vi.advanceTimersByTimeAsync(5000);
+        await realSleep(25);
+      }
+      expect(exitOf("s1")).toBeTruthy();
+      assertCompleted(eventsOf, exitOf);
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 30000);
+
+  function assertCompleted(
+    eventsOf: (id: string) => Array<{ type: string; data?: unknown }>,
+    exitOf: (id: string) => { exitCode?: number | null } | undefined,
+  ): void {
     const stderr = eventsOf("s1").filter((e) => e.type === "stderr").map((e) => e.data).join("");
     expect(stderr).toContain("killed idle after result");
     expect(stderr).not.toContain("Agent hang watchdog");
     expect(exitOf("s1")!.exitCode).toBe(0);
-  }, 30000);
+  }
 
   it("does not end a silent agent that never produced a result event", async () => {
     const { runner, exitOf } = collector({ idleAfterResultGraceMs: 300 });

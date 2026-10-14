@@ -15,6 +15,7 @@ import { describeGitTransportFailure } from "./worker-git-token.js";
 import { workerLog } from "./worker-updater.js";
 import { materializeRepoSkills } from "./worker-repo-skills.js";
 import { healCorruptCache, isCloneCorruption } from "./worker-repo-heal.js";
+import { withCacheLock, retryOnRefLockRace } from "./worker-repo-lock.js";
 import { loadUndelivered } from "./worker-undelivered.js";
 import { ensureLongPaths, removeCheckoutDir } from "./worker-pending-delete.js";
 import { mkdirSync, writeFileSync, existsSync, readdirSync, appendFileSync } from "node:fs";
@@ -205,24 +206,29 @@ export async function provisionWorkerCheckout(
       gitExecOrThrow(["clone", gitUrl, cacheDir], { timeout: 10 * 60 * 1000, env: authEnv }),
       (ms) => { phases.fetchMs = ms; });
   };
-  if (!existsSync(join(cacheDir, ".git"))) {
-    await cloneCache();
-  } else {
-    // A token is per-assignment - always fetch with the CURRENT credential.
-    phases.fetchKind = "fetch";
-    try {
-      await phase(`fetch ${repo.projectId}`, () =>
-        gitExecOrThrow(["fetch", gitUrl, "+refs/heads/*:refs/remotes/origin/*", "--prune"], {
-          cwd: cacheDir,
-          timeout: 10 * 60 * 1000,
-          env: authEnv,
-        }),
-        (ms) => { phases.fetchMs = ms; });
-    } catch (err) {
-      if (!isCloneCorruption(errorMessage(err))) throw err;
-      await healCorruptCache(workRoot, cacheDir, errorMessage(err), cloneCache, log);
+  // #1474: the exists-check, clone/fetch and heal run under the per-clone lock, so a second
+  // assignment waits and then simply fetches into the clone the first one created.
+  await withCacheLock(cacheDir, async () => {
+    if (!existsSync(join(cacheDir, ".git"))) {
+      await cloneCache();
+    } else {
+      // A token is per-assignment - always fetch with the CURRENT credential.
+      phases.fetchKind = "fetch";
+      try {
+        await phase(`fetch ${repo.projectId}`, () =>
+          retryOnRefLockRace(() =>
+            gitExecOrThrow(["fetch", gitUrl, "+refs/heads/*:refs/remotes/origin/*", "--prune"], {
+              cwd: cacheDir,
+              timeout: 10 * 60 * 1000,
+              env: authEnv,
+            }), log),
+          (ms) => { phases.fetchMs = ms; });
+      } catch (err) {
+        if (!isCloneCorruption(errorMessage(err))) throw err;
+        await healCorruptCache(workRoot, cacheDir, errorMessage(err), cloneCache, log);
+      }
     }
-  }
+  });
 
   // Stale worktree from a crashed prior session with the same id Ã¢â‚¬â€ remove it.
   await ensureLongPaths(cacheDir, log);
@@ -259,8 +265,8 @@ export async function provisionWorkerCheckout(
   await pruneCacheWorktrees(cacheDir);
   await gitExec(["branch", "-D", localBranch], { cwd: cacheDir });
   await phase("worktree add", () =>
-    withWorktreeAdminLock(cacheDir, () =>
-      gitExecOrThrow(["worktree", "add", "-b", localBranch, checkoutDir, startPoint], { cwd: cacheDir })),
+    retryOnRefLockRace(() => withWorktreeAdminLock(cacheDir, () =>
+      gitExecOrThrow(["worktree", "add", "-b", localBranch, checkoutDir, startPoint], { cwd: cacheDir })), log),
     (ms) => { phases.worktreeMs = ms; });
 
   // #1397: the ticket brief and review prompt name the board's branch (`repo.branch`), but this

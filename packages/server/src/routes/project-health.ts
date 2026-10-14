@@ -12,6 +12,7 @@ import { getProjectHealth } from "../services/project-health.service.js";
 import { listBaseBranchHealth, getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 import { inFlightBaseBranchProbeCount } from "../services/base-branch-health.service.js";
 import { requestBaseBranchReprobe, describeGateBusy } from "../services/base-branch-health-reprobe.service.js";
+import { listHeldReprobes } from "../services/base-branch-reprobe-hold.js";
 import { probeYieldHistory } from "../services/base-health-probe-preemption.js";
 import { readTier0Capacity, readCpuBusyPct } from "@agentic-kanban/shared/lib/machine-capacity";
 import { describeBaseSweep, resolveRiskPosture } from "../services/risk-posture.service.js";
@@ -77,7 +78,7 @@ export function createProjectHealthRoute(database: Database) {
     // a scheduled full-suite sweep and how often — the posture decides, the opt-in rule
     // (`resolveBaseSweepIntervalMs`) may say "never".
     const sweep = describeBaseSweep(resolveRiskPosture(toPrefMap(prefRows), projectId), latest?.createdAt);
-    return c.json({ latest, history, sweep, branch });
+    return c.json({ latest, history, sweep, branch, heldReprobes: listHeldReprobes(projectId) });
   });
 
   // POST /api/projects/:id/base-branch-health/reprobe — invalidate the cached verdict and
@@ -115,6 +116,10 @@ export function createProjectHealthRoute(database: Database) {
     return c.json({
       started: verdict.due,
       skippedReason: verdict.due ? null : verdict.reason,
+      // #1471 — a probe placement could not place now (no allowlisted worker with a free verify
+      // slot) is HELD and retried, never reported as started.
+      held: verdict.held ?? null,
+      retryAt: verdict.retryAt ?? null,
       joinedRunningProbe: alreadyRunning,
       // What the caller is replacing, so the response is self-explanatory in a log.
       previousOutcome: previous?.outcome ?? null,
