@@ -32,7 +32,7 @@
 //    refuses with a sentence instead of failing as a silence.
 
 import { readFileSync } from "node:fs";
-import { homedir, platform, arch, totalmem } from "node:os";
+import { homedir, platform, arch, totalmem, cpus } from "node:os";
 import {
   findIdentity,
   findPreferredUrl,
@@ -60,7 +60,7 @@ import {
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { readWorkerCapacity } from "./worker-resources.js";
 import { createDaemonToolchainInstall } from "./worker-toolchain-install.js";
-import { createDaemonVerifyRunner, createFileVerifyResultStore } from "./worker-verify-runner.js"; // #1437, #1465
+import { createDaemonVerifyRunner, createFileVerifyResultStore, deriveVerifySlots } from "./worker-verify-runner.js"; // #1437, #1465
 import type { ToolchainInstallPolicy, WorkerToolchainInstallInfo } from "@agentic-kanban/shared/lib/worker-toolchain-install";
 import { createWorkerOneShotRunner } from "./worker-oneshot.js"; import { createWorkerServicesRunner } from "./worker-services.js"; // #1431, #1447
 import { createWorkerAgentRunner, dispatchBoardMessage, rawDataToBuffer, type UnpushedResult } from "./worker-agent-runner.js";
@@ -161,6 +161,8 @@ export interface WorkerDaemonOptions {
   /** #1370: run the local doctor and send the board a compact summary (on hello, then on change). Opt-in. */
   doctorSummary?: boolean;
   maxConcurrency?: number;
+  /** #1496: concurrent gates/sweeps this worker runs; default derived from RAM/cores. */
+  verifySlots?: number;
   /** #1371 `--toolchain-install` (default never) and `--toolchain-allow`: may the board have this worker install toolchains via mise? */
   toolchainInstall?: ToolchainInstallPolicy; toolchainAllow?: string[];
   /** Defaults to ~/.agentic-kanban/worker-state.json. */
@@ -504,7 +506,8 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   const workRoot = opts.workRoot ?? defaultWorkerWorkRoot(stateFile); // #1401: own root per non-default state file
   await cleanUpBeforeStart(workRoot, log);
   const toolchains = createDaemonToolchainInstall({ policy: opts.toolchainInstall ?? "never", allow: opts.toolchainAllow ?? [], stateFile, log, sendToBoard: (m) => sendToBoard(m), heartbeat: () => sendHeartbeat() }); // #1371
-  const verifyJobs = createDaemonVerifyRunner({ workRoot, boardUrl: () => boardUrl, sendToBoard: (m) => sendToBoard(m), log, slots: 1, ramGb: Math.round(totalmem() / 2 ** 30), isConnected: () => ws?.readyState === WebSocket.OPEN, store: createFileVerifyResultStore(workRoot) }); // #1437: gates/sweeps the board places on this worker
+  const verifySlots = opts.verifySlots && opts.verifySlots > 0 ? opts.verifySlots : deriveVerifySlots(totalmem() / 2 ** 30, cpus().length); // #1496
+  const verifyJobs = createDaemonVerifyRunner({ workRoot, boardUrl: () => boardUrl, sendToBoard: (m) => sendToBoard(m), log, slots: verifySlots, ramGb: Math.round(totalmem() / 2 ** 30), isConnected: () => ws?.readyState === WebSocket.OPEN, store: createFileVerifyResultStore(workRoot) }); // #1437: gates/sweeps the board places on this worker
   await Promise.all([refreshPackageManagers(), refreshToolchains(), toolchains.installer.refreshMise()]);
 
   // #1370: the worker's own doctor, summarised. hello/register always carry the current summary; a
@@ -673,7 +676,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         boardUrl,
         workerVersion,
         log,
-        handlers: { updateNow: () => selfUpdate.updateNow(), status: () => selfUpdate.controlStatus(), ...opts.lifecycle?.({ stateFile, workRoot, boardUrl, draining: () => draining, sessionsLeft: () => runner.runningSessionIds().length, effective: () => settings.effectiveOptions(opts), pinned: () => settings.report().pinned, desired: () => settings.desired(), profiles: () => attestedProfiles().map((p) => `${p.provider}:${p.name}`), harnessMode: () => opts.harness?.mode }) }, // #1443/#1451
+        handlers: { updateNow: () => selfUpdate.updateNow(), status: () => selfUpdate.controlStatus(), ...opts.lifecycle?.({ stateFile, workRoot, boardUrl, draining: () => draining, sessionsLeft: () => runner.runningSessionIds().length, effective: () => ({ ...settings.effectiveOptions(opts), verifySlots }), pinned: () => settings.report().pinned, desired: () => settings.desired(), profiles: () => attestedProfiles().map((p) => `${p.provider}:${p.name}`), harnessMode: () => opts.harness?.mode }) }, // #1443/#1451
       })
     : null;
 

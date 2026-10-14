@@ -410,6 +410,7 @@ interface WorkerStartOptions {
   profiles?: string;
   profileAlias?: string;
   maxConcurrency?: number;
+  verifySlots?: number;
   stateFile?: string;
   workRoot?: string;
   sharesFilesystem?: boolean;
@@ -491,6 +492,7 @@ async function runWorkerStart(rawOptions: WorkerStartOptions & ToolchainStartOpt
       harness: createWorkerHarness(harnessCfg.options),
       doctorSummary: true, // #1370: the board shows this worker's setup checklist
       maxConcurrency: options.maxConcurrency,
+      verifySlots: options.verifySlots,
       ...toolchainDaemonOptions(options),
       stateFile: options.stateFile,
       workRoot: options.workRoot,
@@ -629,6 +631,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
     )
     .option("--profile-alias <csv>", "Attest a nameless login under a profile name (#1379), e.g. default=anth (source: 'default', a profile name or a config dir). Persisted; '' clears")
     .option("--max-concurrency <n>", "Max parallel agent sessions (pins the count; omit it and the board sizes the worker from its RAM and cores, #1456)", (v) => parseInt(v, 10))
+    .option("--verify-slots <n>", "Concurrent pre-merge gates/sweeps this worker runs (#1496; default derived from RAM and cores, 1-3)", (v) => parseInt(v, 10))
     .option("--state-file <path>", `Pairing state file, relative to the directory you run the command in (default: ${defaultWorkerStateFile()})`, cliPathArg)
     .option("--work-root <path>", "Root for git-transport clones/checkouts, relative to the directory you run the command in (default: ~/.agentic-kanban/worker, or <dir>/work next to a non-default worker-state.json, <state-file name>-work for other names)", cliPathArg)
     .option("--leave-agents", "On Ctrl+C, leave running agent processes alive instead of killing them")

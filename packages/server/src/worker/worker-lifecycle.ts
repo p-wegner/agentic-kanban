@@ -15,12 +15,13 @@ import type { WorkerControlHandlers } from "./worker-control.js";
 import { freeDiskGb, readWorkerCapacity } from "./worker-resources.js";
 import { evaluateWorkerConcurrency } from "@agentic-kanban/shared/lib/worker-concurrency";
 
-export const START_CONFIG_KEYS = ["maxConcurrency", "labels", "providers", "profileAlias"] as const;
+export const START_CONFIG_KEYS = ["maxConcurrency", "verifySlots", "labels", "providers", "profileAlias"] as const;
 export type StartConfigKey = (typeof START_CONFIG_KEYS)[number];
 
 /** The `start` flag behind each key; the key is also the `worker start` option property it fills. */
 const KEY_FLAG: Record<StartConfigKey, string> = {
   maxConcurrency: "--max-concurrency",
+  verifySlots: "--verify-slots",
   labels: "--labels",
   providers: "--providers",
   profileAlias: "--profile-alias",
@@ -64,6 +65,9 @@ export function setStartConfig(stateFile: string, key: string, value: string | u
   if (key === "maxConcurrency" && (!/^\d+$/.test(value.trim()) || Number(value) < 1 || Number(value) > 64)) {
     return "maxConcurrency must be a whole number between 1 and 64";
   }
+  if (key === "verifySlots" && (!/^\d+$/.test(value.trim()) || Number(value) < 1 || Number(value) > 16)) {
+    return "verifySlots must be a whole number between 1 and 16";
+  }
   const cfg = loadStartConfig(stateFile);
   cfg.set[key] = value.trim();
   cfg.unset = cfg.unset.filter((k) => k !== key);
@@ -83,6 +87,7 @@ export function unsetStartConfig(stateFile: string, key: string): string | null 
 
 interface StartConfigurable {
   maxConcurrency?: number;
+  verifySlots?: number;
   labels?: string;
   providers?: string;
   profileAlias?: string;
@@ -95,6 +100,7 @@ export function applyStartConfig<T extends StartConfigurable>(options: T, stateF
   for (const key of cfg.unset) out[key] = undefined;
   for (const [key, value] of Object.entries(cfg.set) as [StartConfigKey, string][]) {
     if (key === "maxConcurrency") out.maxConcurrency = Number(value);
+    else if (key === "verifySlots") out.verifySlots = Number(value);
     else out[key] = value;
   }
   return out as T;
@@ -108,7 +114,7 @@ export interface LifecycleCtx {
   boardUrl: string;
   draining(): boolean;
   sessionsLeft(): number;
-  effective(): { maxConcurrency?: number; labels?: string[]; providers?: string[]; profileAliases?: string[] };
+  effective(): { maxConcurrency?: number; verifySlots?: number; labels?: string[]; providers?: string[]; profileAliases?: string[] };
   pinned(): WorkerSettingKey[];
   desired(): WorkerSettings | undefined;
   /** #1451: attested provider:profile pairs and the harness mode (absent on older callers). */
@@ -131,6 +137,7 @@ export function buildLifecycleDetails(ctx: LifecycleCtx): Record<string, unknown
   const pinned = new Set<string>(ctx.pinned());
   const value: Record<StartConfigKey, unknown> = {
     maxConcurrency: desired?.maxConcurrency === "auto" && !pinned.has("maxConcurrency") ? "auto" : eff.maxConcurrency,
+    verifySlots: eff.verifySlots,
     labels: eff.labels,
     providers: eff.providers,
     profileAlias: eff.profileAliases,
@@ -138,7 +145,7 @@ export function buildLifecycleDetails(ctx: LifecycleCtx): Record<string, unknown
   const settings: StatusSetting[] = START_CONFIG_KEYS.map((key) => ({
     key,
     effective: value[key],
-    ...(desired?.[key] !== undefined ? { desired: desired[key] } : {}),
+    ...(key !== "verifySlots" && desired?.[key] !== undefined ? { desired: desired[key] } : {}),
     ...(pinned.has(key) ? { pinnedBy: key in cfg.set ? `config set ${key}` : KEY_FLAG[key] } : {}),
   }));
   const GB = 1024 ** 3;
@@ -216,6 +223,8 @@ export function renderStatus(s: Record<string, unknown>): string {
     lines.push(`disk:         ${gb(res.freeDiskGb)} free (work root)`);
   }
   const conc = s.concurrency as { mode?: string; slots?: number; reason?: string } | undefined;
+  const vs = (s.settings as StatusSetting[] | undefined)?.find((x) => x.key === "verifySlots");
+  if (vs?.effective !== undefined) lines.push(`verify slots: ${String(vs.effective)}`);
   if (conc?.mode) lines.push(`concurrency:  ${conc.mode}, ${conc.slots ?? "?"} slot(s) - ${conc.reason ?? ""}`);
   lines.push("settings:");
   for (const st of (s.settings as StatusSetting[] | undefined) ?? []) {
