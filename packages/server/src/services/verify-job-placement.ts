@@ -36,6 +36,8 @@ export interface VerifyRunRequest extends VerifyRequest {
   /** Env the host run would carry that the worker should reproduce (e.g. `KANBAN_RETRY_TEST_FILES`). */
   env?: Record<string, string>;
   maxWorkers?: number;
+  /** #1489: aborting it (a train/gate cancel) tells the worker to kill the job's process tree and remove its checkout. */
+  signal?: AbortSignal;
 }
 
 export interface VerifyWorkerRunner {
@@ -78,6 +80,8 @@ export interface PlaceVerifyCommandArgs {
   timeoutMs?: number;
   env?: Record<string, string>;
   maxWorkers?: number;
+  /** #1489: the cancel signal of the owner (a train's abort, the gate's own); forwarded to the worker run. */
+  signal?: AbortSignal;
 }
 
 export interface PlacedVerifyResult {
@@ -118,7 +122,7 @@ export async function runOnPlannedWorker(plan: Extract<VerifyPlan, { target: "wo
   const request: VerifyRequest = { requestId: randomUUID(), workerId: plan.workerId, sha: args.sha, tier: args.tier };
   log(`${plan.reason} (worker ${plan.workerName})`);
   const report = await plan.active
-    .run({ ...request, kind: args.kind, command: args.command, workingDir: args.workingDir, projectId: args.projectId, branch: args.branch, timeoutMs: args.timeoutMs, env: args.env, maxWorkers: args.maxWorkers })
+    .run({ ...request, kind: args.kind, command: args.command, workingDir: args.workingDir, projectId: args.projectId, branch: args.branch, timeoutMs: args.timeoutMs, env: args.env, maxWorkers: args.maxWorkers, signal: args.signal })
     .catch((e: unknown): WorkerVerifyReport => ({ ...request, passed: false, refused: "worker_unreachable", reason: e instanceof Error ? e.message : String(e) }));
   const verdict = acceptWorkerVerdict(request, report, plan.allowlist, plan.workerName);
   if (!verdict.accepted) {

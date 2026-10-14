@@ -20,12 +20,15 @@ import type { WorkerToBoardMessage } from "@agentic-kanban/shared/lib/worker-pro
 import {
   VERIFY_LOG_TAIL_BYTES,
   chunkVerifyLog,
+  type VerifyCancelFrame,
   type VerifyJobFrame,
+  type VerifyLiveJobsFrame,
   type VerifyRefusal,
   type VerifyResultFrame,
   type VerifyStage,
   type WorkerVerifyCapability,
 } from "@agentic-kanban/shared/lib/worker-verify-protocol";
+import { killProcessTree } from "../services/process-exec.js";
 import { stripCheckoutPrefix } from "../services/failed-suite-parse.js";
 import { composeGitUrl, deriveFallbackSetupCommand, gitAuthEnv } from "./worker-repo.js";
 
@@ -42,7 +45,7 @@ export interface VerifyRunnerDeps {
   /** Fetch + check out `job.sha` detached in a throwaway dir. Injectable for tests. */
   prepareCheckout?: (job: VerifyJobFrame) => Promise<CheckoutOutcome>;
   /** Run a shell script in `dir`, streaming output through `onOutput`. Injectable for tests. */
-  runScript?: (dir: string, script: string, opts: { timeoutMs: number; env: Record<string, string>; onOutput: (chunk: string) => void }) => Promise<ScriptOutcome>;
+  runScript?: (dir: string, script: string, opts: { timeoutMs: number; env: Record<string, string>; onOutput: (chunk: string) => void; signal?: AbortSignal }) => Promise<ScriptOutcome>;
   /** Remove the throwaway checkout. Injectable for tests. */
   cleanup?: (job: VerifyJobFrame, dir: string) => Promise<void>;
   /** #1465: true while the board socket is open. Absent = always connected (frames are never held back). */
@@ -89,6 +92,10 @@ export interface DaemonVerifyRunner {
   capability(): WorkerVerifyCapability;
   /** #1465: call right after `hello` on every (re)connect: re-announces running jobs and delivers buffered verdicts. */
   onConnected(): void;
+  /** #1489: kill the job's process tree and remove its checkout; true when the job was running or buffered. */
+  cancel(jobId: string): boolean;
+  /** #1489: the board's set of wanted job ids; every running job (and buffered verdict) outside it is reaped. */
+  reapExcept(liveJobIds: readonly string[]): string[];
 }
 
 /** vitest pass/fail marker lines and its `Test Files  N passed (M)` summary, for progress. */
@@ -143,15 +150,22 @@ async function defaultPrepareCheckout(deps: VerifyRunnerDeps, job: VerifyJobFram
   return { ok: true, dir, sha: head };
 }
 
-function defaultRunScript(dir: string, script: string, opts: { timeoutMs: number; env: Record<string, string>; onOutput: (chunk: string) => void }): Promise<ScriptOutcome> {
+function defaultRunScript(dir: string, script: string, opts: { timeoutMs: number; env: Record<string, string>; onOutput: (chunk: string) => void; signal?: AbortSignal }): Promise<ScriptOutcome> {
   return new Promise((resolve) => {
-    const child = spawn(script, { cwd: dir, shell: true, windowsHide: true, env: { ...process.env, ...opts.env } });
+    // #1489: detached on POSIX so the whole tree is one process group a cancel can kill (taskkill /T on Windows).
+    const child = spawn(script, { cwd: dir, shell: true, windowsHide: true, detached: process.platform !== "win32", env: { ...process.env, ...opts.env } });
+    const killTree = (): void => {
+      if (child.pid) void killProcessTree(child.pid, { timeout: 10_000, group: true }).catch(() => { try { child.kill(); } catch { /* gone */ } });
+      else child.kill();
+    };
+    if (opts.signal?.aborted) killTree();
+    else opts.signal?.addEventListener("abort", killTree, { once: true });
     let output = "";
     let timedOut = false;
     const feed = (d: Buffer): void => { const s = d.toString("utf8"); output += s; opts.onOutput(s); };
     child.stdout?.on("data", feed);
     child.stderr?.on("data", feed);
-    const timer = setTimeout(() => { timedOut = true; child.kill(); }, opts.timeoutMs);
+    const timer = setTimeout(() => { timedOut = true; killTree(); }, opts.timeoutMs);
     timer.unref?.();
     child.on("error", (err) => { clearTimeout(timer); resolve({ exitCode: 1, timedOut, output: `${output}\n${String(err)}` }); });
     child.on("close", (code) => { clearTimeout(timer); resolve({ exitCode: code ?? 1, timedOut, output }); });
@@ -168,6 +182,8 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
   const run = deps.runScript ?? defaultRunScript;
   const cleanup = deps.cleanup ?? ((job: VerifyJobFrame, dir: string) => defaultCleanup(deps, job, dir));
   const running = new Set<string>();
+  /** #1489: one controller per running job; aborting it kills the job's process tree. */
+  const controllers = new Map<string, AbortController>();
   const connected = (): boolean => deps.isConnected?.() ?? true;
   /** Latest progress per running job, replayed on reconnect so the board knows the job is alive. */
   const lastProgress = new Map<string, WorkerToBoardMessage>();
@@ -187,6 +203,8 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
   }
 
   function finish(job: VerifyJobFrame, started: number, r: Partial<VerifyResultFrame> & { sha: string }, log: string): void {
+    // #1489: nobody waits for a cancelled job's verdict; buffering it would replay it on every reconnect.
+    if (controllers.get(job.jobId)?.signal.aborted) return;
     const chunks = chunkVerifyLog(log);
     const frames: WorkerToBoardMessage[] = chunks.map((data, seq) => ({ type: "verify_log_chunk", jobId: job.jobId, seq, data }));
     frames.push({
@@ -217,6 +235,8 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
       finish(job, started, { sha, refused, reason }, `verify refused (${refused}): ${reason}`);
     if (running.size >= deps.slots) return refuse("no_free_slot", `this worker runs ${deps.slots} verify job(s) at a time`);
     running.add(job.jobId);
+    const ctl = new AbortController();
+    controllers.set(job.jobId, ctl);
     let dir: string | null = null;
     let dataDir: string | null = null;
     try {
@@ -232,12 +252,14 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
       const co = await prepare(job);
       if (!co.ok) return refuse(co.refused, co.reason, co.sha);
       dir = co.dir;
+      if (ctl.signal.aborted) return;
       progress(job.jobId, "install");
       const install = (job.setupScript ?? deriveFallbackSetupCommand(co.dir) ?? "").trim();
       let log = "";
       if (install) {
-        const inst = await run(co.dir, install, { timeoutMs: Math.min(job.timeoutMs, 30 * 60 * 1000), env: jobEnv, onOutput: () => undefined });
+        const inst = await run(co.dir, install, { timeoutMs: Math.min(job.timeoutMs, 30 * 60 * 1000), env: jobEnv, onOutput: () => undefined, signal: ctl.signal });
         log += `$ ${install}\n${inst.output}\n`;
+        if (ctl.signal.aborted) return;
         if (inst.exitCode !== 0 || inst.timedOut) return refuse("setup_failed", `\`${install}\` ${inst.timedOut ? "timed out" : `exited ${inst.exitCode}`}`, co.sha);
       }
       progress(job.jobId, "verify");
@@ -247,6 +269,7 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
       const out = await run(co.dir, job.script, {
         timeoutMs: job.timeoutMs,
         env,
+        signal: ctl.signal,
         onOutput: (chunk) => {
           seen = (seen + chunk).slice(-64 * 1024);
           if (Date.now() - lastReport < 2000) return;
@@ -267,6 +290,7 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
       refuse("fetch_failed", errorMessage(err));
     } finally {
       running.delete(job.jobId);
+      controllers.delete(job.jobId);
       if (dir) await cleanup(job, dir).catch(() => undefined);
       if (dataDir) try { rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* temp dir, reaped later */ }
       progress(job.jobId, "done");
@@ -275,10 +299,29 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
 
   return {
     handle(message) {
+      if (message.type === "verify_cancel") { this.cancel((message as VerifyCancelFrame).jobId); return true; }
+      if (message.type === "verify_live_jobs") { this.reapExcept((message as VerifyLiveJobsFrame).jobIds); return true; }
       if (message.type !== "verify_job") return false;
       const job = message as VerifyJobFrame;
       void execute(job).catch((err) => deps.log(`[worker] verify job ${job.jobId} crashed: ${errorMessage(err)}`));
       return true;
+    },
+    cancel(jobId) {
+      const ctl = controllers.get(jobId);
+      const buffered = finished.delete(jobId);
+      if (buffered) deps.store?.remove(jobId);
+      lastProgress.delete(jobId);
+      if (!ctl) return buffered;
+      deps.log(`[worker] verify job ${jobId} cancelled by the board: killing its process tree and removing its checkout`);
+      ctl.abort();
+      return true;
+    },
+    reapExcept(liveJobIds) {
+      const live = new Set(liveJobIds);
+      const gone = [...new Set([...controllers.keys(), ...finished.keys()])].filter((id) => !live.has(id));
+      for (const id of gone) this.cancel(id);
+      if (gone.length > 0) deps.log(`[worker] board no longer wants ${gone.length} verify job(s) (${gone.join(", ")}): reaped`);
+      return gone;
     },
     capability: () => ({ slots: deps.slots, freeSlots: Math.max(0, deps.slots - running.size), ramGb: deps.ramGb }),
     onConnected() {

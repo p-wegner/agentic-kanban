@@ -50,6 +50,25 @@ export interface VerifyJobFrame {
   auth: VerifyJobAuth;
 }
 
+/**
+ * #1489: the board no longer wants this job (its train was cancelled/abandoned, or the gate was
+ * aborted): the worker kills the job's process tree and removes its checkout. Idempotent; an unknown
+ * jobId is a no-op. An older worker drops it as an unknown frame (the job then runs to its own timeout).
+ */
+export interface VerifyCancelFrame {
+  type: "verify_cancel";
+  jobId: string;
+}
+
+/**
+ * #1489: sent on every (re)connect: the verify job ids the board still has an owner waiting for on
+ * this worker. The worker reaps every running job NOT in the set (the board restarted and lost them).
+ */
+export interface VerifyLiveJobsFrame {
+  type: "verify_live_jobs";
+  jobIds: string[];
+}
+
 export interface VerifyProgressFrame {
   type: "verify_progress";
   jobId: string;
@@ -124,6 +143,13 @@ export function parseVerifyJobFrame(msg: Record<string, unknown>): VerifyJobFram
     ...(env ? { env: Object.fromEntries(Object.entries(env).filter(([, v]) => typeof v === "string")) as Record<string, string> } : {}),
     auth,
   };
+}
+
+/** Board→worker `verify_cancel` / `verify_live_jobs` (#1489). Null = not one of them, or malformed: drop it. */
+export function parseVerifyControlFrame(msg: Record<string, unknown>): VerifyCancelFrame | VerifyLiveJobsFrame | null {
+  if (msg.type === "verify_cancel") return str(msg.jobId) ? { type: "verify_cancel", jobId: msg.jobId } : null;
+  if (msg.type === "verify_live_jobs") return Array.isArray(msg.jobIds) ? { type: "verify_live_jobs", jobIds: msg.jobIds.filter(str) } : null;
+  return null;
 }
 
 /** Worker→board verify frames. Null = not one of them (or malformed: drop it). */
