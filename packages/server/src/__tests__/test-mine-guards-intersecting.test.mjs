@@ -156,6 +156,7 @@ function recordedRunner({ changedFiles, guards, guardsOnly = false }) {
   try {
     mkdirSync(resolve(root, "scripts"));
     copyFileSync(resolve(import.meta.dirname, "../../../../scripts/test-mine.mjs"), resolve(root, "scripts/test-mine.mjs"));
+    copyFileSync(resolve(import.meta.dirname, "../../../../scripts/vitest-crash-ledger.mjs"), resolve(root, "scripts/vitest-crash-ledger.mjs"));
     writeFileSync(resolve(root, "scripts/machine-verify-lock.mjs"),
       "export const MACHINE_LOCK_HEARTBEAT_INTERVAL_MS=1000; export async function acquireForBuilderTest(){return {handle:null};}\n");
     const log = resolve(root, "argv.jsonl");

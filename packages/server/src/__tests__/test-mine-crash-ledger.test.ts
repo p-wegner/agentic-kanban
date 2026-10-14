@@ -14,7 +14,7 @@ const mod = (id: string, state = "passed") => ({ moduleId: id, state: () => stat
 
 describe("crash ledger reporter", () => {
   it("names the in-flight and unreported files and the raw error", () => {
-    const dir = mkdtempSync(join(tmpdir(), "ledger-test-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-ledger-test-"));
     const file = join(dir, "ledger.json");
     process.env[LEDGER_ENV] = file;
     try {
