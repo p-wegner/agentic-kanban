@@ -519,6 +519,12 @@ export function buildRemoteWorkerSection(opts: RemoteWorkerSectionOptions = {}):
     "- **Your work travels as commits.** Commit everything you want kept; the worker pushes your",
     "  branch back to the board when the session ends, and anything uncommitted is discarded",
     "  with this checkout.",
+    // #1464: `propose_transition` is not on the bridge, and an instruction to call it made sessions
+    // stall. The board advances the card itself when the session exits 0.
+    "- **Do NOT try to move your card.** `propose_transition` is not available on this machine; ignore",
+    "  any workflow instruction to call it. When your work is committed, give your final summary and",
+    "  stop — the worker ends the process shortly after your last turn, and a clean exit moves the",
+    "  card to the next stage (Review) on the board.",
   ].join("\n");
 }
 
