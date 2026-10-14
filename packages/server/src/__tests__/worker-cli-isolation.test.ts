@@ -140,7 +140,8 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 77 -> 78 in #1451 for `worker/worker-resources.ts` (free RAM/disk reading; node builtins + shared machine-capacity).
     // Raised 78 -> 79 in #1467 for `worker/worker-repo-skills.ts` (which skill names the repo tracks; git-exec only).
     // Raised 79 -> 80 in #1461: `worker/worker-lifecycle.ts` now reaches `worker/worker-undelivered.ts` (undelivered results in `status`).
-    expect(files.size).toBeLessThan(80);
+    // Raised 80 -> 82 in #1472: `worker-result-idle.ts` and `worker-result-push.ts` were extracted from `createWorkerAgentRunner` (nloc ratchet).
+    expect(files.size).toBeLessThan(82);
   });
 
   it("never reaches the database or board-service layer", () => {
