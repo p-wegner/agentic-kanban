@@ -28,7 +28,24 @@ import {
   type BoardStatusWorkspaceRow,
 } from "../repositories/board-status.repository.js";
 
+import { listWorkspaceCommentPayloadsByKind } from "../repositories/issue-comments.repository.js";
+
 export { classifyBoardStatusIssueAttention, classifyBoardStatusIssueMergeState } from "./board-status-classifiers.js";
+
+/** `mergeReason` of the review-exit gate's HELD decision — mirrors `startup/exit/gate-withheld-marker.ts` (services may not import startup/). */
+const GATE_HELD_MERGE_REASON = "review_exit_gate_held";
+
+/** The workspace's newest gate decision, when it is a hold (#1492). Persisted as a comment, so it outlives a restart. */
+async function readHeldGate(workspaceId: string, database: typeof db): Promise<{ reason: string; retryAt: string | null } | null> {
+  try {
+    const [raw] = await listWorkspaceCommentPayloadsByKind(workspaceId, "gate-decision", database);
+    const payload = raw ? (JSON.parse(raw) as { mergeReason?: string; retryAt?: string; holdReason?: string }) : null;
+    if (payload?.mergeReason !== GATE_HELD_MERGE_REASON) return null;
+    return { reason: payload.holdReason ?? "waiting for capacity", retryAt: payload.retryAt ?? null };
+  } catch {
+    return null;
+  }
+}
 
 // In-memory conflict cache: workspaceId → { result, timestamp }
 const conflictCache = new Map<string, ConflictCacheEntry>();
@@ -201,6 +218,18 @@ export async function getBoardStatus(
 
   for (const issue of result) {
     issue.mergeState = classifyBoardStatusIssueMergeState(issue, classificationOptions);
+    // #1492: an idle un-armed workspace whose pre-merge gate was HELD is not "auto-merge pending" —
+    // say why and when the stranded-review sweep retries.
+    if (issue.mergeState && issue.workspace) {
+      const held = await readHeldGate(issue.workspace.id, database);
+      if (held) {
+        issue.mergeState = {
+          bucket: "pending_merge",
+          reason: "gate-held",
+          label: `gate held: ${held.reason}, retry at ${held.retryAt ?? "next sweep"}`,
+        };
+      }
+    }
     issue.attention = classifyBoardStatusIssueAttention(issue);
   }
 

@@ -95,7 +95,7 @@ Status indicators:
               wsInfo.push(`+${issue.diffStats.insertions}/-${issue.diffStats.deletions}`);
             }
             if (issue.mergeState?.bucket === "pending_merge") {
-              wsInfo.push("auto-merge pending");
+              wsInfo.push(issue.mergeState.reason === "gate-held" ? issue.mergeState.label : "auto-merge pending");
             }
             console.log(`         ${wsInfo.join(" · ")}`);
           }

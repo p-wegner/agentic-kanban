@@ -51,7 +51,7 @@ export interface BoardStatusIssue {
   } | null;
   mergeState?: {
     bucket: "pending_merge";
-    reason: "auto-merge-in-review";
+    reason: "auto-merge-in-review" | "gate-held";
     label: string;
   } | null;
 }

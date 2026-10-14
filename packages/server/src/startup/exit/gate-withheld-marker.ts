@@ -23,7 +23,7 @@ export function gateHeldRetryDelayMs(priorHolds: number): number {
   return GATE_HELD_RETRY_DELAYS_MS[Math.min(priorHolds, GATE_HELD_RETRY_DELAYS_MS.length - 1)];
 }
 
-interface GateDecisionPayload { mergeReason?: string; headSha?: string; retryAt?: string }
+interface GateDecisionPayload { mergeReason?: string; headSha?: string; retryAt?: string; holdReason?: string }
 
 interface RevParser {
   revParse(workingDir: string, ref: string): Promise<string>;
@@ -78,7 +78,7 @@ export async function markReviewExitGateHeld(
       kind: "gate-decision",
       author: "system",
       body: `Gate held: waiting for capacity (retry at ${hhmm}Z). ${input.message.slice(0, 400)}`,
-      payload: { mergeReason: REVIEW_EXIT_GATE_HELD_REASON, headSha, retryAt },
+      payload: { mergeReason: REVIEW_EXIT_GATE_HELD_REASON, headSha, retryAt, holdReason: input.message.slice(0, 400) },
       createdAt: new Date(nowMs).toISOString(),
     }, deps.database);
     return retryAt;
