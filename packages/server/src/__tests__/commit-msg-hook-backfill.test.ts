@@ -164,6 +164,7 @@ describe("reconcileCommitMsgHooks (#1214)", () => {
     const repo = await makeRepo();
     const closed = await addWorktree(repo, "wt-closed");
     await seedWorkspace(db, closed, { status: "closed" });
+    await seedWorkspace(db, await addWorktree(repo, "wt-merged"), { status: "merged" });
     await seedWorkspace(db, join(repo, "..", "vanished-worktree"));
 
     const result = await reconcileCommitMsgHooks({ database: db });
