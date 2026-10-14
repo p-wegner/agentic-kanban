@@ -30,6 +30,7 @@ import { isMergeTrainLabelLive, registerLiveMergeTrain, unregisterLiveMergeTrain
 import { cleanupTrainWorktreesForLabel } from "./merge-train-worktrees.js";
 import { describeInconclusiveGate, describeTrainGateRed, finalTrainStateFields, inconclusiveSkipEvents, isInconclusiveGate } from "./merge-queue-train-inconclusive.js";
 export { describeTrainGateRed } from "./merge-queue-train-inconclusive.js";
+import { finishFlushRun, type FlushRunSpec } from "./merge-train-flush-run.js";
 import { provisionTrainGateSelector } from "./merge-train-gate-selector.js";
 import { runPreMergeGate, looksLikeMissingDepsFailure } from "./pre-merge-gate.service.js";
 import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
@@ -360,6 +361,8 @@ async function runTrainStagingGate(args: {
    * nothing to cancel).
    */
   signal?: AbortSignal;
+  /** #1463 — a queue flush's gate script, run instead of the project's verify command. */
+  verifyScriptOverride?: string;
 }): Promise<TrainStagingGateResult> {
   const { database, repoPath, baseBranch, projectId, ref, attemptLabel, signal } = args;
   let gateWorktree: string | null = null;
@@ -419,6 +422,7 @@ async function runTrainStagingGate(args: {
       // #1203: same token — a cancel mid-verify kills the running gate process instead of
       // letting it run to completion before the row's `abandoned` state is noticed.
       signal,
+      args.verifyScriptOverride,
     );
     let gate = await gateOnce();
     // #1277: a red tree gets one directed fix agent, in THIS worktree (deps already installed),
@@ -598,8 +602,10 @@ async function runDoomedTrainJob(args: {
   onDropped: OnTrainDropped;
   /** #1277 — runs the in-train fix agent's turns. */
   agentRunner: TrainAgentRunner;
+  /** #1463 — flush mode: arch+typecheck gate, no bisect, no fix agent, no train review, tag after landing. */
+  flush?: FlushRunSpec;
 }): Promise<{ ok: true; result: Awaited<ReturnType<typeof runMergeTrain>> } | { ok: false; reason: string }> {
-  const { database, boardEvents, reconcileAlreadyMerged, sendTurn, reviewTrain, repoPath, baseBranch, members, label, trainId, projectId, reviewEvidenceRef, abortController, onDropped, agentRunner } = args;
+  const { database, boardEvents, reconcileAlreadyMerged, sendTurn, reviewTrain, repoPath, baseBranch, members, label, trainId, projectId, reviewEvidenceRef, abortController, onDropped, agentRunner, flush } = args;
 
   let repoLock: Awaited<ReturnType<typeof acquireQueueRepoLock>>;
   try {
@@ -632,7 +638,8 @@ async function runDoomedTrainJob(args: {
       members,
       label,
       trainId,
-      redStrategy: policy.strategy,
+      redStrategy: flush ? undefined : policy.strategy,
+      ...(flush ? { bisectOnFailure: false } : {}),
       // #1181: an operator cancel or a reconciler verdict can mark this row `abandoned` while
       // the job is still gating (there is no cancellation token into `runMergeTrain`). The
       // gate work is sunk cost either way, but a train whose row says abandoned must not
@@ -671,8 +678,10 @@ async function runDoomedTrainJob(args: {
           includedWorkspaceIds: included.map((m) => m.workspaceId),
           // #1203: same token — a cancel mid-gate kills the running install/verify child process.
           signal: abortController.signal,
-          onRed: buildTrainOnRed({ policy, agentRunner, label, attemptLabel, baseBranch, included, members, placement: { projectId, repoPath } }),
+          verifyScriptOverride: flush?.gateScript,
+          onRed: flush ? undefined : buildTrainOnRed({ policy, agentRunner, label, attemptLabel, baseBranch, included, members, placement: { projectId, repoPath } }),
           afterGreen: async ({ gateWorktree }) => {
+            if (flush) return {};
             // #1194: review ONCE, on the tree that just proved green - the assembled diff vs the
             // base, one reviewer, every member's criteria in `{{members}}`. A blocking finding
             // names its member in `sided`; `runMergeTrain` re-lands the rest without it.
@@ -730,6 +739,7 @@ async function runDoomedTrainJob(args: {
         boardEvents?.broadcast(projectId, "merge_train_changed");
       },
     });
+    if (flush) await finishFlushRun(flush, repoPath, label, result).catch((e) => console.warn(`[merge-train] ${label}: flush finish failed: ${errorMessage(e)}`));
     return { ok: true, result };
   } catch (err) {
     const reason = errorMessage(err);
@@ -799,7 +809,7 @@ export function createMergeTrainRunner(deps: {
    * The whole run holds the repo lock: the train's value depends on its base not moving
    * between assembly and landing, and `landMergeTrain` refuses (correctly) if it does.
    */
-  async function* runTrainStrategy(plan: MergeQueuePlan): AsyncGenerator<MergeQueueEvent> {
+  async function* runTrainStrategy(plan: MergeQueuePlan, flush?: FlushRunSpec): AsyncGenerator<MergeQueueEvent> {
     const repoPath = plan.order[0].repoPath;
     const baseBranch = plan.order[0].baseBranch as string;
     // #1190: the label is minted by `beginMergeTrain` (`train/<today>-<NN>`), not here.
@@ -888,6 +898,7 @@ export function createMergeTrainRunner(deps: {
       abortController,
       onDropped: sendBack.onDropped,
       agentRunner,
+      flush,
     });
     reviewEvidence = reviewEvidenceRef.current;
     if (!outcome.ok) {

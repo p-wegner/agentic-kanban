@@ -359,6 +359,11 @@ export interface DeliveryStatusResponse {
    */
   flush?: FlushRecord | null;
   /**
+   * `queue_flush_<id>` (#1463): `off` hides the Flush action, `manual`/`auto` show it. Optional on
+   * the wire for an older server.
+   */
+  flushMode?: "off" | "manual" | "auto";
+  /**
    * What is merging now: the live train, the last one finished within a few hours, and the
    * ready branches waiting. Optional on the wire for an older server.
    */

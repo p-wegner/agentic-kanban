@@ -13,12 +13,10 @@
  * rather than falling back to some default that could open the valve on a value the operator
  * never actually set.
  *
- * Wiring NOT done here (the manual action button, the CLI subcommand's process/exit code, the
- * `POST /api/projects/:id/queue/flush` route, the monitor/train tick's auto-evaluation call
- * site, and the flush-history/member-comment side effects) is left for a follow-up: the pure
- * decision layer is what every one of those needs and is what the ticket's own test list names
- * (pref parsing incl. fail-closed; threshold evaluation table; daily cap; supersede path; CLI
- * dry-run output snapshot; route) as the part to prove.
+ * Wiring (#1463, the follow-up this header used to name as undone): `queue-flush.service.ts` is the
+ * orchestrator that calls these resolvers — `POST /api/projects/:id/queue/flush`, `pnpm cli --
+ * queue flush [--dry-run]`, the delivery view's Flush action, and the `startup/queue-flush-sweep.ts`
+ * tick that evaluates `auto`. This module stays the pure decision layer they all share.
  */
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import type { QueuePressureSummary } from "@agentic-kanban/shared/types";

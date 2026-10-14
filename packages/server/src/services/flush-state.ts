@@ -15,8 +15,8 @@
  * (#1247/#1248) mirrors it in a `scripts/*.mjs` the same way `pnpm promote` mirrors rc-state,
  * since a published `packages/server` cannot import a repo-root script.
  */
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { FlushRecord, FlushState } from "@agentic-kanban/shared/types";
 
 export type { FlushRecord, FlushState };
@@ -154,4 +154,46 @@ export function applyFlushTransition(
     next = { ...next, state: "merged-back", updatedAt: now };
   }
   return { record: next, result: { ok: true } };
+}
+
+/**
+ * The write half (#1463): the flush service is the one writer. Whole-file, atomic (temp + rename)
+ * so a reader (`GET /flushes`, the activity-log sweep) never sees a torn file. Creates `.kanban/`
+ * when the stable checkout exists but has never held a flush.
+ */
+export function writeFlushState(stableCheckout: string, file: FlushStateFile): void {
+  const path = join(stableCheckout, FLUSH_STATE_RELPATH);
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(file, null, 2)}
+`, "utf8");
+  renameSync(tmp, path);
+}
+
+/** Append one record (a new flush) to the file. */
+export function appendFlushRecord(stableCheckout: string, record: FlushRecord): FlushStateFile {
+  const file = readFlushState(stableCheckout);
+  const next: FlushStateFile = { ...file, flushes: [...file.flushes, record] };
+  writeFlushState(stableCheckout, next);
+  return next;
+}
+
+/**
+ * Replace one record by id with `update(record)`; unknown id is a no-op. State moves go through
+ * `applyFlushTransition` in the callback, never by assigning `state` directly.
+ */
+export function updateFlushRecord(
+  stableCheckout: string,
+  id: string,
+  update: (record: FlushRecord) => FlushRecord,
+): FlushRecord | null {
+  const file = readFlushState(stableCheckout);
+  let updated: FlushRecord | null = null;
+  const flushes = file.flushes.map((r) => {
+    if (r.id !== id) return r;
+    updated = update(r);
+    return updated;
+  });
+  if (updated) writeFlushState(stableCheckout, { ...file, flushes });
+  return updated;
 }

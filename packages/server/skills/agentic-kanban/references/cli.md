@@ -140,6 +140,14 @@ Manage CLI preferences.
 | `preferences set <key> <value>` | Set a preference value |
 | `preferences get <key>` | Get a preference value |
 
+## queue
+
+The merge queue's pressure valve.
+
+| Command | Does |
+|---|---|
+| `queue flush` | Flush the queue: land every ready branch as one train with a reduced gate, then heal afterwards |
+
 ## services
 
 Per-workspace Docker service-stack maintenance.
