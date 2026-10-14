@@ -628,7 +628,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         "(#651). Omit to attest what discovery finds; 'none' attests nothing. Unknown names are dropped.",
     )
     .option("--profile-alias <csv>", "Attest a nameless login under a profile name (#1379), e.g. default=anth (source: 'default', a profile name or a config dir). Persisted; '' clears")
-    .option("--max-concurrency <n>", "Max parallel agent sessions", (v) => parseInt(v, 10))
+    .option("--max-concurrency <n>", "Max parallel agent sessions (pins the count; omit it and the board sizes the worker from its RAM and cores, #1456)", (v) => parseInt(v, 10))
     .option("--state-file <path>", `Pairing state file, relative to the directory you run the command in (default: ${defaultWorkerStateFile()})`, cliPathArg)
     .option("--work-root <path>", "Root for git-transport clones/checkouts, relative to the directory you run the command in (default: ~/.agentic-kanban/worker, or <dir>/work next to a non-default worker-state.json, <state-file name>-work for other names)", cliPathArg)
     .option("--leave-agents", "On Ctrl+C, leave running agent processes alive instead of killing them")
@@ -694,7 +694,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         process.exit(1);
       }
       const body = await res.json() as {
-        workers: Array<{ id: string; name: string; effectiveStatus: string; status: string; os: string | null; labels: string | null; maxConcurrency: number; lastHeartbeatAt: string | null; protocolVersion?: number; workerVersion?: string; buildFreshness?: WorkerBuildFreshness; update?: WorkerUpdateReport; updateRequested?: boolean; toolchainInstall?: { state: string; toolchains: string[]; reason?: string } }>;
+        workers: Array<{ id: string; name: string; effectiveStatus: string; status: string; os: string | null; labels: string | null; maxConcurrency: number; concurrency?: { mode: string; reason: string }; lastHeartbeatAt: string | null; protocolVersion?: number; workerVersion?: string; buildFreshness?: WorkerBuildFreshness; update?: WorkerUpdateReport; updateRequested?: boolean; toolchainInstall?: { state: string; toolchains: string[]; reason?: string } }>;
         fleet?: { boardWorkerVersion?: string | null };
       };
       if (options.json) {
@@ -712,7 +712,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         // distinct: ahead is a normal dev-machine state), and a `?` build gets no verdict.
         const freshness = formatBuildFreshness(w.buildFreshness, body.fleet?.boardWorkerVersion);
         const build = ` protocol=${w.protocolVersion ?? "?"} build=${w.workerVersion ?? "?"}${freshness ? ` (${freshness})` : ""}${formatUpdateState(w.update, w.updateRequested)}${formatToolchainInstall(w.toolchainInstall)}`;
-        console.log(`  ${w.name} [${w.effectiveStatus}] id=${w.id} os=${w.os ?? "?"} maxConcurrency=${w.maxConcurrency}${labels}${build} lastHeartbeat=${w.lastHeartbeatAt ?? "never"}`);
+        console.log(`  ${w.name} [${w.effectiveStatus}] id=${w.id} os=${w.os ?? "?"} maxConcurrency=${w.maxConcurrency}${w.concurrency ? ` (${w.concurrency.reason})` : ""}${labels}${build} lastHeartbeat=${w.lastHeartbeatAt ?? "never"}`);
       }
       console.log("\nRetire a worker with: agentic-kanban worker revoke <workerId|name>");
     });

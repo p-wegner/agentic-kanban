@@ -37,6 +37,9 @@ export interface ConsoleWorker {
   /** #1443: settings keys the worker's start flags pin; `desiredPending` while the board's desired set is not yet applied. */
   pinned?: string[];
   desiredPending?: boolean;
+  /** #1456: concurrency mode (auto/fixed/pinned) and, while auto back-off holds placement, why. */
+  concurrencyMode?: string;
+  concurrencyHold?: string;
 }
 export interface ConsoleHost {
   freeGb: number | null;
@@ -189,6 +192,8 @@ export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
     freeRamGb: w.capacity?.freeRamGb ?? null,
     freeDiskGb: w.capacity?.freeDiskGb ?? null,
     pinned: w.settingsReport?.pinned ?? [],
+    ...(typeof w.concurrency?.mode === "string" ? { concurrencyMode: w.concurrency.mode } : {}),
+    ...(typeof w.concurrency?.hold === "string" ? { concurrencyHold: w.concurrency.hold } : {}),
     desiredPending: w.desiredSettings != null && w.settingsReport?.appliedRev !== w.desiredSettings?.rev,
     ...(w.toolchainInstall && typeof w.toolchainInstall.state === "string"
       ? { toolchainInstall: { state: w.toolchainInstall.state, toolchains: w.toolchainInstall.toolchains ?? [], reason: w.toolchainInstall.reason } }

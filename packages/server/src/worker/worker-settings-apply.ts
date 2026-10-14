@@ -28,6 +28,15 @@ interface SettingsOptions {
 }
 
 /** The start flags that fix a key. A flag given explicitly always beats the board. */
+/**
+ * The runner's own ceiling for a board-set `maxConcurrency`. In `"auto"` (#1456) the BOARD is the
+ * gate (it derives the slots from heartbeats), so the worker keeps a generous local backstop.
+ */
+const AUTO_LOCAL_CEILING = 16;
+function localCeiling(v: number | "auto" | undefined): number | undefined {
+  return v === "auto" ? AUTO_LOCAL_CEILING : v;
+}
+
 export function pinnedSettingKeys(opts: SettingsOptions): WorkerSettingKey[] {
   const pinned: WorkerSettingKey[] = [];
   if (opts.maxConcurrency !== undefined) pinned.push("maxConcurrency");
@@ -98,7 +107,7 @@ export function createWorkerSettingsApplier(deps: {
     if (!s) return opts;
     return {
       ...opts,
-      ...(!isPinned("maxConcurrency") && s.maxConcurrency !== undefined ? { maxConcurrency: s.maxConcurrency } : {}),
+      ...(!isPinned("maxConcurrency") && s.maxConcurrency !== undefined ? { maxConcurrency: localCeiling(s.maxConcurrency) } : {}),
       ...(!isPinned("labels") && s.labels !== undefined ? { labels: s.labels } : {}),
       ...(!isPinned("providers") && s.providers !== undefined && s.providers.length > 0 ? { providers: s.providers } : {}),
     };
@@ -115,7 +124,7 @@ export function createWorkerSettingsApplier(deps: {
       }
       switch (key) {
         case "maxConcurrency":
-          controls.setMaxConcurrency(next.maxConcurrency ?? 1);
+          controls.setMaxConcurrency(localCeiling(next.maxConcurrency) ?? 1);
           break;
         case "labels":
           controls.setLabels(next.labels ?? []);

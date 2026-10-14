@@ -12,7 +12,8 @@ import { spawnSync } from "node:child_process";
 import { loadUndelivered } from "./worker-undelivered.js";
 import type { WorkerSettingKey, WorkerSettings } from "@agentic-kanban/shared/lib/worker-settings";
 import type { WorkerControlHandlers } from "./worker-control.js";
-import { freeDiskGb } from "./worker-resources.js";
+import { freeDiskGb, readWorkerCapacity } from "./worker-resources.js";
+import { evaluateWorkerConcurrency } from "@agentic-kanban/shared/lib/worker-concurrency";
 
 export const START_CONFIG_KEYS = ["maxConcurrency", "labels", "providers", "profileAlias"] as const;
 export type StartConfigKey = (typeof START_CONFIG_KEYS)[number];
@@ -129,7 +130,7 @@ export function buildLifecycleDetails(ctx: LifecycleCtx): Record<string, unknown
   const cfg = loadStartConfig(ctx.stateFile);
   const pinned = new Set<string>(ctx.pinned());
   const value: Record<StartConfigKey, unknown> = {
-    maxConcurrency: eff.maxConcurrency,
+    maxConcurrency: desired?.maxConcurrency === "auto" && !pinned.has("maxConcurrency") ? "auto" : eff.maxConcurrency,
     labels: eff.labels,
     providers: eff.providers,
     profileAlias: eff.profileAliases,
@@ -141,7 +142,14 @@ export function buildLifecycleDetails(ctx: LifecycleCtx): Record<string, unknown
     ...(pinned.has(key) ? { pinnedBy: key in cfg.set ? `config set ${key}` : KEY_FLAG[key] } : {}),
   }));
   const GB = 1024 ** 3;
+  const resources = { freeRamGb: freemem() / GB, totalRamGb: totalmem() / GB, freeDiskGb: freeDiskGb(ctx.workRoot) };
+  // #1456: mode, derived slots and why, from THIS machine's own numbers (the board derives from the same heartbeat).
+  const concurrency = evaluateWorkerConcurrency({
+    declaredSlots: eff.maxConcurrency ?? 1, pinned: pinned.has("maxConcurrency"),
+    capacity: readWorkerCapacity(ctx.workRoot), settings: desired,
+  });
   return {
+    concurrency,
     draining: ctx.draining(),
     sessionsLeft: ctx.sessionsLeft(),
     stateFile: ctx.stateFile,
@@ -149,7 +157,7 @@ export function buildLifecycleDetails(ctx: LifecycleCtx): Record<string, unknown
     settings,
     profiles: ctx.profiles?.() ?? [],
     harnessMode: ctx.harnessMode?.(),
-    resources: { freeRamGb: freemem() / GB, totalRamGb: totalmem() / GB, freeDiskGb: freeDiskGb(ctx.workRoot) }, // #1451
+    resources, // #1451
     daemonNode: process.version,
     sessionsNode: probeNodeOnPath(),
     undelivered: loadUndelivered(ctx.workRoot).map((r) => ({
@@ -207,6 +215,8 @@ export function renderStatus(s: Record<string, unknown>): string {
     lines.push(`ram:          ${gb(res.freeRamGb)} free of ${gb(res.totalRamGb)}`);
     lines.push(`disk:         ${gb(res.freeDiskGb)} free (work root)`);
   }
+  const conc = s.concurrency as { mode?: string; slots?: number; reason?: string } | undefined;
+  if (conc?.mode) lines.push(`concurrency:  ${conc.mode}, ${conc.slots ?? "?"} slot(s) - ${conc.reason ?? ""}`);
   lines.push("settings:");
   for (const st of (s.settings as StatusSetting[] | undefined) ?? []) {
     let text: string;

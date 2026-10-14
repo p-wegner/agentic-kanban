@@ -167,6 +167,8 @@ export interface WorkerCapacitySnapshot {
   freeDiskGb?: number;
   /** #1451: total RAM in GB. */
   totalRamGb?: number;
+  /** #1456: logical cores. */
+  totalCores?: number;
 }
 
 export function resolveSpareCores(opts: { usedCores?: number } = {}): number {
@@ -196,6 +198,7 @@ export function toWorkerCapacitySnapshot(
     spareCores: resolveSpareCores(opts),
     thrashing: snapshot.tier === "1" ? snapshot.thrashing : "none",
     totalRamGb: os.totalmem() / GB,
+    totalCores: os.cpus().length,
   };
 }
 

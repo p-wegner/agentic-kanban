@@ -17,6 +17,7 @@
 // in-flight sessions and keeps cloning/pushing until the board restarts.
 
 import { parseWorkerVerifyCapability, type WorkerVerifyCapability } from "@agentic-kanban/shared/lib/worker-verify-protocol";
+import { evaluateWorkerConcurrency, type WorkerConcurrencyVerdict } from "@agentic-kanban/shared/lib/worker-concurrency";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createExpiringDigestStore, mintToken, sha256Hex } from "../lib/bearer-token.js";
 import { db as realDb } from "../db/index.js";
@@ -134,6 +135,8 @@ export interface WorkerView extends Omit<WorkerRow, "tokenHash" | "desiredSettin
   toolchainInstall?: ToolchainInstallRecord;
   /** Why this worker advertises no usable provider, as of its last hello/heartbeat (#1372). In memory like `capacity`. */
   providerNotice?: string;
+  /** #1456: concurrency mode (auto/fixed/pinned), the slots placement uses, why, and any live back-off hold. */
+  concurrency?: WorkerConcurrencyVerdict;
   /** #1451: provider harness mode (clean|custom|inherit) as of the last hello/heartbeat. In memory like `capacity`. */
   harnessMode?: string;
   /** The worker's latest doctor summary (#1370). In memory like `capacity`; re-sent on hello and on change. */
@@ -295,6 +298,8 @@ export function createWorkerRegistry(database: Database = realDb) {
       labels: input.labels ? JSON.stringify(input.labels) : null,
       providers: input.providers ? JSON.stringify(input.providers) : null,
       maxConcurrency: input.maxConcurrency && input.maxConcurrency > 0 ? input.maxConcurrency : 1,
+      // #1456: a worker started without a slot flag is sized by the board from its hardware.
+      ...(input.maxConcurrency ? {} : { desiredSettings: JSON.stringify({ rev: now, settings: { maxConcurrency: "auto" } } satisfies WorkerSettingsEnvelope) }),
       status: "online",
       tokenHash: sha256Hex(workerToken),
       lastHeartbeatAt: now,
@@ -479,9 +484,18 @@ export function createWorkerRegistry(database: Database = realDb) {
       const desired = parseWorkerSettingsEnvelope(row.desiredSettings);
       const settingsReport = reportedSettings.get(row.id);
       const overlay = desired ? overlaySettings(desired.settings, settingsReport) : {};
+      const concurrency = evaluateWorkerConcurrency({
+        declaredSlots: (overlay.maxConcurrency ?? row.maxConcurrency) as number,
+        pinned: settingsReport?.pinned.includes("maxConcurrency") === true,
+        capacity,
+        settings: desired?.settings,
+      });
       return {
         ...safe,
         ...overlay,
+        // #1456: auto mode derives the slot count every consumer reads as `maxConcurrency`.
+        ...(concurrency.mode === "auto" ? { maxConcurrency: concurrency.slots } : {}),
+        concurrency,
         effectiveStatus: current === "online" && desired?.settings.drain === true ? "draining" : current,
         ...(desired ? { desiredSettings: desired } : {}),
         ...(settingsReport ? { settingsReport } : {}),
@@ -513,7 +527,7 @@ export function createWorkerRegistry(database: Database = realDb) {
   ): Partial<Pick<WorkerRow, "labels" | "providers" | "maxConcurrency">> {
     const pinned = new Set<string>(report?.pinned ?? []);
     const out: Partial<Pick<WorkerRow, "labels" | "providers" | "maxConcurrency">> = {};
-    if (settings.maxConcurrency !== undefined && !pinned.has("maxConcurrency")) out.maxConcurrency = settings.maxConcurrency;
+    if (typeof settings.maxConcurrency === "number" && !pinned.has("maxConcurrency")) out.maxConcurrency = settings.maxConcurrency;
     if (settings.labels !== undefined && !pinned.has("labels")) out.labels = JSON.stringify(settings.labels);
     if (settings.providers !== undefined && !pinned.has("providers")) out.providers = JSON.stringify(settings.providers);
     return out;

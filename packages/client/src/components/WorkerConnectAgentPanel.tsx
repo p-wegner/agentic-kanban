@@ -127,8 +127,8 @@ export function WorkerConnectAgentPanel({ fleetUrl }: { fleetUrl?: string | null
           <input className={inputClass} value={labels} onChange={(e) => setLabels(e.target.value)} placeholder="docker,windows" />
         </label>
         <label>
-          Max concurrency
-          <input className={inputClass} value={maxConcurrency} onChange={(e) => setMaxConcurrency(e.target.value)} placeholder="2" />
+          Max concurrency (empty = auto: sized from the machine's RAM and cores)
+          <input className={inputClass} value={maxConcurrency} onChange={(e) => setMaxConcurrency(e.target.value)} placeholder="auto" />
         </label>
         <label>
           Profile alias

@@ -11,6 +11,9 @@ export interface WorkerSettingsFormState {
   drain: boolean;
   /** #1451: free-RAM floor in GB; empty = no floor. */
   minFreeRamGb: string;
+  /** #1456: auto mode's bounds; empty = the default (1..4). Only sent while max concurrency is "auto". */
+  minSlots: string;
+  maxSlots: string;
 }
 
 export const splitCsv = (text: string): string[] => [...new Set(text.split(",").map((t) => t.trim()).filter(Boolean))];
@@ -29,13 +32,25 @@ export function formFromWorker(
     deniedProjects: desired?.deniedProjects ?? [],
     drain: desired?.drain === true,
     minFreeRamGb: desired?.minFreeRamGb === undefined ? "" : String(desired.minFreeRamGb),
+    minSlots: desired?.minSlots === undefined ? "" : String(desired.minSlots),
+    maxSlots: desired?.maxSlots === undefined ? "" : String(desired.maxSlots),
   };
 }
 
 /** Form -> the PUT body. Returns an error string instead of settings when the input is invalid. */
 export function settingsFromForm(form: WorkerSettingsFormState): { settings: WorkerSettings } | { error: string } {
-  const max = Number(form.maxConcurrency);
-  if (!Number.isInteger(max) || max < 1 || max > 64) return { error: "Max concurrency must be a whole number from 1 to 64." };
+  const auto = form.maxConcurrency.trim().toLowerCase() === "auto";
+  const max = auto ? "auto" as const : Number(form.maxConcurrency);
+  if (max !== "auto" && (!Number.isInteger(max) || max < 1 || max > 64)) return { error: 'Max concurrency must be "auto" or a whole number from 1 to 64.' };
+  const bounds: { minSlots?: number; maxSlots?: number } = {};
+  for (const key of ["minSlots", "maxSlots"] as const) {
+    const text = form[key].trim();
+    if (text === "" || !auto) continue;
+    const n = Number(text);
+    if (!Number.isInteger(n) || n < 1 || n > 64) return { error: "Slot bounds are whole numbers from 1 to 64." };
+    bounds[key] = n;
+  }
+  if (bounds.minSlots !== undefined && bounds.maxSlots !== undefined && bounds.minSlots > bounds.maxSlots) return { error: "Min slots cannot exceed max slots." };
   const aliases = splitCsv(form.profileAlias);
   if (aliases.some((a) => !/^[^=\s]+=[^=\s]+$/.test(a))) return { error: "Profile aliases look like default=anth." };
   const floorText = form.minFreeRamGb.trim();
@@ -45,6 +60,7 @@ export function settingsFromForm(form: WorkerSettingsFormState): { settings: Wor
     settings: {
       ...(floor !== undefined ? { minFreeRamGb: floor } : {}),
       maxConcurrency: max,
+      ...bounds,
       labels: splitCsv(form.labels),
       providers: splitCsv(form.providers),
       profileAlias: aliases,

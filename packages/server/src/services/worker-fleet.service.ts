@@ -2,6 +2,7 @@
 // the registry (auth + rows), the connection manager (live sockets) and the
 // remote execution service — so the REST routes, the WS route and the session
 // lifecycle all see the SAME fleet state in one board process.
+import { verifyJobCountOnWorker } from "./verify-active-jobs.js";
 import { workerBelowRamFloor } from "@agentic-kanban/shared/lib/worker-settings";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { splitRequirements, workerMeetsRequirements } from "@agentic-kanban/shared/lib/worker-toolchains";
@@ -275,6 +276,8 @@ function filterEligibleWorkers(
     .filter((w) => allowWorkerIds === undefined || allowWorkerIds.has(w.id))
     // #1451: below its own free-RAM floor a worker takes no new session until the heartbeat shows it recovered.
     .filter((w) => !workerBelowRamFloor(w.desiredSettings?.settings, w.capacity?.freeRamGb).below)
+    // #1456: an auto worker in live back-off (thrashing, free RAM under the reserve) takes no new session.
+    .filter((w) => !w.concurrency?.hold)
     // #1426: a worker whose only login for this provider is dead would burn the session in ~1 s.
     .filter((w) => authExpiredProfileNames(w.profiles, providerName).length === 0)
     // Load counts DISPATCHED work, not just work that has already spoken (#248) —
@@ -286,7 +289,8 @@ function filterEligibleWorkers(
       const assigned = fleet.connections.assignedSessionIds(w.id, nowMs);
       return {
         id: w.id,
-        load: assigned.length + reservedSlotCount(w.id, assigned, nowMs),
+        // #1456: verify jobs placed on an auto worker draw on the same slot budget as sessions.
+        load: assigned.length + reservedSlotCount(w.id, assigned, nowMs) + (w.concurrency?.mode === "auto" ? verifyJobCountOnWorker(w.id) : 0),
         cap: w.maxConcurrency,
         capacity: w.capacity,
       };

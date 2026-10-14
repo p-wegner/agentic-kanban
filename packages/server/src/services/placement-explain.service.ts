@@ -324,7 +324,7 @@ async function describeWorkers(
         authExpiredProfileNames(w.profiles, providerName),
       ),
       projectBarred: projectId ? barredReason(w.desiredSettings?.settings, projectId) : null,
-      lowRam: ((v) => (v.below ? v.reason : null))(workerBelowRamFloor(w.desiredSettings?.settings, w.capacity?.freeRamGb)),
+      lowRam: ((v) => (v.below ? v.reason : null))(workerBelowRamFloor(w.desiredSettings?.settings, w.capacity?.freeRamGb)) ?? w.concurrency?.hold ?? null, // #1456: auto back-off
     });
     return {
       workerId: w.id,
@@ -376,6 +376,7 @@ async function describeWorkers(
       // #910: the headroom placement actually compared, not just its outcome.
       ...(w.capacity ? { capacity: w.capacity } : {}),
       ...(w.harnessMode ? { harnessMode: w.harnessMode } : {}), // #1451
+      ...(w.concurrency ? { concurrency: w.concurrency } : {}), // #1456
       // #1338: self-update state, as the worker last reported it.
       ...(w.update ? { update: w.update } : {}),
       ...(w.updateRequested ? { updateRequested: true } : {}),
