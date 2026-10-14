@@ -48,8 +48,6 @@ export interface VerifyRunnerDeps {
   isConnected?: () => boolean;
   /** #1465: where a finished job's frames wait for delivery. Absent = in memory only. Injectable for tests. */
   store?: VerifyResultStore;
-  /** Injectable clock for the retention sweep. */
-  nowMs?: () => number;
 }
 
 /** #1465: durable store for the frames of a job that finished (like #1444's undelivered session results). */
@@ -169,7 +167,6 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
   const run = deps.runScript ?? defaultRunScript;
   const cleanup = deps.cleanup ?? ((job: VerifyJobFrame, dir: string) => defaultCleanup(deps, job, dir));
   const running = new Set<string>();
-  const now = deps.nowMs ?? Date.now;
   const connected = (): boolean => deps.isConnected?.() ?? true;
   /** Latest progress per running job, replayed on reconnect so the board knows the job is alive. */
   const lastProgress = new Map<string, WorkerToBoardMessage>();
@@ -185,7 +182,7 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
   };
 
   function pruneFinished(): void {
-    for (const [jobId, entry] of finished) if (now() - entry.finishedAt > VERIFY_RESULT_RETENTION_MS) { finished.delete(jobId); deps.store?.remove(jobId); }
+    for (const [jobId, entry] of finished) if (Date.now() - entry.finishedAt > VERIFY_RESULT_RETENTION_MS) { finished.delete(jobId); deps.store?.remove(jobId); }
   }
 
   function finish(job: VerifyJobFrame, started: number, r: Partial<VerifyResultFrame> & { sha: string }, log: string): void {
@@ -205,7 +202,7 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
       ...r,
     });
     // #1465: keep the verdict and log until the board has had a chance to take them, whatever the socket does.
-    const entry: StoredVerifyResult = { finishedAt: now(), frames };
+    const entry: StoredVerifyResult = { finishedAt: Date.now(), frames };
     finished.set(job.jobId, entry);
     deps.store?.save(job.jobId, entry);
     pruneFinished();
