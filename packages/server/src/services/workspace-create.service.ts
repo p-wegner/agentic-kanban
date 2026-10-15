@@ -721,8 +721,7 @@ export function createWorkspaceCreateService(deps: {
         },
         issue,
       ));
-      timing("worktree-setup", t);
-      touchBranchCreateClaim(createClaim, "siblings");
+      timing("worktree-setup", t); touchBranchCreateClaim(createClaim, "siblings");
       await updateProvisioning(id, { phase: "siblings", branch, worktreePath }, database).catch(() => {});
 
       if (!isDirect && worktreePath) {
@@ -826,8 +825,7 @@ export function createWorkspaceCreateService(deps: {
       // and why the row looked like it had coexisted with a `Backlog` issue for 84 seconds. It never
       // did — the row and the issue transition land in ONE transaction, right here. The backdating
       // was the whole illusion, and it silently corrupted every latency number taken from it.
-      const committedAt = new Date().toISOString();
-      touchBranchCreateClaim(createClaim, "committing"); // #1487: short stall budget, frees the claim for a retry
+      const committedAt = (touchBranchCreateClaim(createClaim, "committing"), new Date().toISOString()); // #1487: short stall budget
       await withTransaction(database, async (tx) => {
         // #630: the marker dies with the same commit that makes the workspace real, so
         // there is no window in which both — or neither — exist.
