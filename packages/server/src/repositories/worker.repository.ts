@@ -240,11 +240,13 @@ export async function isSessionSupersededOnBranch(
 ): Promise<boolean> {
   const assignments = await listWorkerBranchAssignments(params.projectId, database);
   const forBranch = assignments.filter((a) => a.branch === params.branch);
-  const newest = forBranch[0]; // newest-started first
-  if (!newest) return false;
-  if (newest.sessionId === params.sessionId) return false;
-  // Only a session that really is in the list can be superseded by a different newest one.
-  return forBranch.some((a) => a.sessionId === params.sessionId);
+  // newest-started first: everything before our own row started later than we did.
+  const own = forBranch.findIndex((a) => a.sessionId === params.sessionId);
+  if (own <= 0) return false; // unknown, or already the newest
+  // #1500: only a newer session that is STILL RUNNING supersedes. A newer duplicate the
+  // operator killed (or that already ended) is not the workspace's live session, and letting
+  // it retire the real one left the genuine result refused with 403 forever.
+  return forBranch.slice(0, own).some((a) => a.status === "running");
 }
 
 /**
