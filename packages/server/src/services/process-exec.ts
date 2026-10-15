@@ -130,8 +130,34 @@ export function spawnShellCommand(command: string, options: SpawnShellCommandOpt
   } satisfies SpawnOptions);
 }
 
-export async function taskkillTree(pid: number, options: { timeout?: number } = {}): Promise<void> {
-  await execCommand("taskkill", ["/pid", String(pid), "/T", "/F"], { timeout: options.timeout ?? 5000 });
+function pidIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code === "EPERM"; // exists, just not ours to signal
+  }
+}
+
+/**
+ * `taskkill /T /F` exits non-zero when a descendant had already exited ("process not found",
+ * localized — German "keine Instanz"), though nothing is left to kill (#1491). Rather than
+ * parse that text, check the outcome: every pid the output names, and the root, must be gone.
+ * A pid that survives keeps the original error.
+ */
+export async function taskkillTree(
+  pid: number,
+  options: { timeout?: number; isAlive?: (pid: number) => boolean; exec?: typeof execCommand } = {},
+): Promise<void> {
+  try {
+    await (options.exec ?? execCommand)("taskkill", ["/pid", String(pid), "/T", "/F"], { timeout: options.timeout ?? 5000 });
+  } catch (err) {
+    const isAlive = options.isAlive ?? pidIsAlive;
+    const e = err as { stdout?: unknown; stderr?: unknown; message?: unknown };
+    const text = [e.stdout, e.stderr, e.message].filter((s): s is string => typeof s === "string").join("\n");
+    const named = new Set([pid, ...(text.match(/\b\d{2,}\b/g) ?? []).map(Number)]);
+    if ([...named].some((p) => isAlive(p))) throw err;
+  }
 }
 
 /**
