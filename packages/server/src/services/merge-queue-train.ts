@@ -562,7 +562,7 @@ function buildTrainOnRed(args: {
       worktree: gateWorktree, label, baseBranch: args.baseBranch, members: aboard,
       initialFailure: { message, failedSuites }, caps: policy.caps, runAgent: args.agentRunner, regate, placement: args.placement,
     });
-    console.log(describeAgentFixFinished(label, outcome, policy.bisectAfter));
+    console.log(`[merge-train] ${describeAgentFixFinished(label, outcome, policy.bisectAfter)}`);
     return outcome;
   };
 }

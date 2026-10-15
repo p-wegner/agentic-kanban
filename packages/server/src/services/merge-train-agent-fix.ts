@@ -229,7 +229,7 @@ export function describeAgentFixFinished(label: string, outcome: AgentFixOutcome
     : bisectAfter ? "; falling back to the bisect"
     : "; no fix turns left - the train ends red, members get the failure as feedback, nothing is bisected";
   const head = outcome.attempt.failureHead ? `: ${outcome.attempt.failureHead}` : "";
-  return `[merge-train] ${label}: fix agent finished - ${outcome.attempt.verdict}${head}${named}${next}`;
+  return `${label}: fix agent finished - ${outcome.attempt.verdict}${head}${named}${next}`;
 }
 
 async function writeBriefFile(label: string, brief: string): Promise<string> {
