@@ -100,6 +100,16 @@ import { worktreeDirLeafForBranch } from "@agentic-kanban/shared/lib/git-service
  */
 export const CLAIM_TTL_MS = 30 * 60 * 1000;
 
+/**
+ * #1487 — a claim whose create has not ADVANCED its phase for this long is abandoned too, even
+ * inside the TTL. The incident: two creates hung 35+ minutes in the final db transaction and
+ * their claims blocked every retry ("a workspace creation is already in flight"). The phase
+ * budget is per phase because legitimate work differs: provisioning/installs run minutes to
+ * tens of minutes, the final commit is milliseconds.
+ */
+export const CLAIM_STALL_MS: Record<string, number> = { claimed: Infinity, committing: 2 * 60 * 1000 };
+export const CLAIM_DEFAULT_STALL_MS = 25 * 60 * 1000;
+
 /** The (repo, branch) a create is about to provision a worktree for. */
 export interface BranchCreateTarget {
   /** The LEADING repo's path — the `<parent>/.worktrees/<repoDirName>` the leaf sits under. */
@@ -126,6 +136,9 @@ interface BranchCreateClaim {
   branch: string;
   claimedAtMs: number;
   holderId: string;
+  /** #1487: the create's current phase and when it last changed. */
+  phase: string;
+  phaseAtMs: number;
 }
 
 const claims = new Map<string, BranchCreateClaim>();
@@ -158,8 +171,16 @@ export function claimBranchForCreate(
   const held = claims.get(key);
   if (held) {
     const ageMs = nowMs - held.claimedAtMs;
-    if (ageMs < ttlMs) return null;
-    console.warn(
+    const stallMs = nowMs - held.phaseAtMs;
+    const stalled = stallMs >= (CLAIM_STALL_MS[held.phase] ?? CLAIM_DEFAULT_STALL_MS);
+    if (ageMs < ttlMs && !stalled) return null;
+    if (ageMs < ttlMs) {
+      console.warn(
+        `[workspaces] taking over a STALLED worktree-create claim on "${key}" — phase "${held.phase}" `
+          + `has not advanced for ${Math.round(stallMs / 1000)}s (issue ${held.issueId}, branch "${held.branch}"). `
+          + `The create is assumed hung; its eventual release is a no-op.`,
+      );
+    } else console.warn(
       `[workspaces] taking over an abandoned worktree-create claim on "${key}" — held for `
         + `${Math.round(ageMs / 1000)}s (issue ${held.issueId}, branch "${held.branch}", `
         + `TTL ${Math.round(ttlMs / 1000)}s). The create that took it never reached its `
@@ -167,7 +188,7 @@ export function claimBranchForCreate(
     );
   }
   const holderId = `${++holderCounter}`;
-  claims.set(key, { issueId: target.issueId, branch: target.branch, claimedAtMs: nowMs, holderId });
+  claims.set(key, { issueId: target.issueId, branch: target.branch, claimedAtMs: nowMs, holderId, phase: "claimed", phaseAtMs: nowMs });
   return { worktreePath: key, holderId };
 }
 
@@ -183,6 +204,19 @@ export function releaseBranchForCreate(token: BranchCreateClaimToken | null | un
   claims.delete(token.worktreePath);
 }
 
+/** #1487: record that the holder advanced to `phase`, resetting its stall clock. No-op for a stale token. */
+export function touchBranchCreateClaim(
+  token: BranchCreateClaimToken | null | undefined,
+  phase: string,
+  opts: { nowMs?: number } = {},
+): void {
+  if (!token) return;
+  const held = claims.get(token.worktreePath);
+  if (!held || held.holderId !== token.holderId) return;
+  held.phase = phase;
+  held.phaseAtMs = opts.nowMs ?? Date.now();
+}
+
 /** Is a create currently provisioning the worktree this (repo, branch) resolves to? */
 export function isBranchCreateClaimed(
   target: Pick<BranchCreateTarget, "repoPath" | "branch">,
@@ -190,7 +224,9 @@ export function isBranchCreateClaimed(
 ): boolean {
   const held = claims.get(worktreeClaimPath(target.repoPath, target.branch));
   if (!held) return false;
-  return (opts.nowMs ?? Date.now()) - held.claimedAtMs < (opts.ttlMs ?? CLAIM_TTL_MS);
+  const nowMs = opts.nowMs ?? Date.now();
+  if (nowMs - held.phaseAtMs >= (CLAIM_STALL_MS[held.phase] ?? CLAIM_DEFAULT_STALL_MS)) return false;
+  return nowMs - held.claimedAtMs < (opts.ttlMs ?? CLAIM_TTL_MS);
 }
 
 /** Test seam: drop all tracked claims. */

@@ -34,7 +34,7 @@ import {
 import { warnIfBranchHeldByLiveWorkspace } from "./workspace-branch-holders.js";
 import { warnIfWorktreePathNotRegistered } from "./workspace-worktree-reconcile.js";
 import {
-  claimBranchForCreate, releaseBranchForCreate, worktreeClaimPath, type BranchCreateClaimToken,
+  claimBranchForCreate, releaseBranchForCreate, touchBranchCreateClaim, worktreeClaimPath, type BranchCreateClaimToken,
 } from "./workspace-branch-create-claim.js";
 import type { ProviderName } from "./agent-provider.js";
 import {
@@ -721,7 +721,7 @@ export function createWorkspaceCreateService(deps: {
         },
         issue,
       ));
-      timing("worktree-setup", t);
+      timing("worktree-setup", t); touchBranchCreateClaim(createClaim, "siblings");
       await updateProvisioning(id, { phase: "siblings", branch, worktreePath }, database).catch(() => {});
 
       if (!isDirect && worktreePath) {
@@ -825,7 +825,7 @@ export function createWorkspaceCreateService(deps: {
       // and why the row looked like it had coexisted with a `Backlog` issue for 84 seconds. It never
       // did — the row and the issue transition land in ONE transaction, right here. The backdating
       // was the whole illusion, and it silently corrupted every latency number taken from it.
-      const committedAt = new Date().toISOString();
+      const committedAt = (touchBranchCreateClaim(createClaim, "committing"), new Date().toISOString()); // #1487: short stall budget
       await withTransaction(database, async (tx) => {
         // #630: the marker dies with the same commit that makes the workspace real, so
         // there is no window in which both — or neither — exist.
