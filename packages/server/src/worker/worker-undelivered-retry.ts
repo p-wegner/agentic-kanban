@@ -105,7 +105,11 @@ async function defaultIsGone(entry: UnpushedResult): Promise<boolean> {
 export const isGitAuthFailure = (message: string): boolean =>
   /(?:^|\D)401(?:\D|$)|Authentication failed|could not read Username|terminal prompts disabled/i.test(message);
 
-const localBranchFor = (sessionId: string) => `kanban/${sessionId}`;
+/** The board refused the push because the assignment is over (403, #753/#1407) - retrying cannot succeed (#1500). */
+export const isAssignmentRefusal = (message: string): boolean =>
+  /no longer current|(?:^|\D)403(?:\D|$)/i.test(message);
+
+const localBranchFor =(sessionId: string) => `kanban/${sessionId}`;
 
 /** HEAD sha of a kept result (#1444): the checkout, else the cache clone's `kanban/<sid>` branch. */
 export async function resolveResultHeadSha(checkoutPath: string, cacheDir: string, sessionId: string): Promise<string | undefined> {
@@ -242,6 +246,7 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
           workerLog(`[worker] the board issued no fresh git token: sessionId=${sessionId}`);
         }
       }
+      if (isAssignmentRefusal(lastError)) break; // #1500: the board will refuse every retry too
       const delay = deps.retryDelaysMs[attempts - 1];
       if (delay === undefined || retriesSuspended) break;
       safeSend({
@@ -340,6 +345,21 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
         workerLog(`[worker] retained result still cannot be pushed: sessionId=${sessionId}: ${entry.lastError}`);
         if (authGiveUp) {
           markLost(sessionId, authGiveUp);
+          continue;
+        }
+        if (isAssignmentRefusal(entry.lastError)) {
+          // #1500: report it to the board (card-visible) BEFORE it leaves the retained list, then stop
+          // retrying - a lost result with commits is a data-loss risk, not something to loop on.
+          safeSend({
+            type: "undelivered_result",
+            sessionId,
+            branch: entry.pending.repo.branch,
+            incomingRef: entry.pending.repo.incomingRef,
+            checkoutPath: entry.pending.checkout.cwd,
+            attempts: entry.attempts,
+            lastError: `${entry.lastError} [board refused: assignment no longer current - NOT retried; sha=${entry.headSha ?? "unknown"}]`,
+          });
+          markLost(sessionId, `the board refuses the push (assignment no longer current), retrying cannot succeed; last error: ${entry.lastError}`);
           continue;
         }
         await markLostIfGone(sessionId);

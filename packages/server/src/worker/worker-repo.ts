@@ -398,6 +398,19 @@ export async function pushWorkerResult(
   repo: WorkerRepoTransport,
   checkout: WorkerCheckout,
 ): Promise<void> {
+  // #1500: a session that never committed (HEAD == its base) has no result. Force-pushing it would
+  // overwrite the incoming ref a sibling session of the same branch delivered real work to.
+  if (repo.baseBranch) {
+    const [head, base] = await Promise.all([
+      gitExec(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], { cwd: checkout.cwd }),
+      gitExec(["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${repo.baseBranch}^{commit}`], { cwd: checkout.cwd }),
+    ]);
+    const headSha = head.error ? "" : head.stdout.trim();
+    if (headSha && headSha === (base.error ? "" : base.stdout.trim())) {
+      workerLog(`[worker] session made no commits (HEAD == origin/${repo.baseBranch}); not pushing to ${repo.incomingRef}`);
+      return;
+    }
+  }
   const gitUrl = composeGitUrl(boardUrl, repo);
   try {
     await gitExecOrThrow(["push", "--force", gitUrl, `HEAD:${repo.incomingRef}`], {
