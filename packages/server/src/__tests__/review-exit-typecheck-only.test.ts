@@ -112,7 +112,7 @@ describe("runReviewExitGate (#1260)", () => {
 
   function run(level: RiskPostureLevel, overrides: Partial<Parameters<typeof runReviewExitGate>[0]> = {}) {
     return runReviewExitGate({
-      workspace, projectId: PID, issueId: "issue-1", prefMap: new Map(), database: {} as Database,
+      workspace, projectId: PID, issueId: "issue-1", prefMap: new Map([["merge_strategy", "monitor"]]), database: {} as Database,
       resolvePosture: async () => postureFor(level),
       readTypecheckCommand: async () => "pnpm typecheck",
       runTypecheck: typecheck,
@@ -124,6 +124,17 @@ describe("runReviewExitGate (#1260)", () => {
   beforeEach(() => {
     fullGate.mockClear();
     typecheck.mockClear();
+  });
+
+  it("merge_queue (#1502): every posture arms with nothing run, no slot taken, evidence claims no pass", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    for (const level of ["standard", "strict", "flow"] as const) {
+      const gate = await run(level, { prefMap: new Map([["merge_strategy", "merge_queue"]]) });
+      expect(gate).toMatchObject({ passed: true, ran: false, typecheckOnly: true, deferredToTrain: true, token: null });
+      expect(buildReviewExitEvidence(gate as never, {})).toMatchObject({ ranAt: null, stage: null, branchSha: null });
+    }
+    expect(fullGate).not.toHaveBeenCalled();
+    expect(typecheck).not.toHaveBeenCalled();
   });
 
   it("flow: runs the typecheck only, no test gate, and mints NO token", async () => {
@@ -241,6 +252,7 @@ describe("exit-workflow: review-exit gate by posture (#1260)", () => {
     });
     await db.insert(preferences).values([
       { key: riskPosturePrefKey(projectId), value: level, updatedAt: now },
+      { key: "merge_strategy", value: "monitor", updatedAt: now },
       { key: stackProfilePrefKey(projectId), value: JSON.stringify({ stack: "node", typecheckCommand: "pnpm typecheck" }), updatedAt: now },
     ]);
     invalidatePreferencesCache();
