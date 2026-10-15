@@ -31,6 +31,7 @@ const pruneCacheWorktrees = (cacheDir: string) =>
 /** `git worktree remove --force` of one checkout, under the worktree admin lock (#1353). */
 const removeCacheWorktree = (cacheDir: string, dir: string) =>
   withWorktreeAdminLock(cacheDir, () => gitExec(["worktree", "remove", "--force", dir], { cwd: cacheDir }));
+import { setupSlots } from "./worker-setup-slots.js";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import {
   isBareFileName,
@@ -333,7 +334,18 @@ export async function provisionWorkerCheckout(
       : "fallback install (assignment carried no setup script)";
     log(`[worker] setup start (${source}) for session ${sessionId}: ${setupCommand}`);
     const setupStart = Date.now();
-    const result = await runSetupScript(checkoutDir, setupCommand);
+    const result = await setupSlots.run(async (waitedMs) => {
+      if (waitedMs > 1000) log(`[worker] setup for session ${sessionId} waited ${waitedMs}ms for a setup slot`);
+      let attempt = await runSetupScript(checkoutDir, setupCommand);
+      if (attempt.timedOut) {
+        // #1499: a timeout on a saturated disk is usually transient - retry once, naming why.
+        log(`[worker] setup timed out for session ${sessionId} after ${Date.now() - setupStart}ms - retrying once`);
+        attempt = await runSetupScript(checkoutDir, setupCommand);
+        if (attempt.timedOut) attempt = { ...attempt, stderr: `${attempt.stderr}
+(retried once after a first timeout)` };
+      }
+      return attempt;
+    });
     phases.setupMs = Date.now() - setupStart;
     log(
       `[worker] setup end for session ${sessionId}: exit ${result.exitCode}` +
@@ -343,7 +355,7 @@ export async function provisionWorkerCheckout(
       const detail = (result.stderr || result.stdout).slice(-400);
       throw new Error(
         result.timedOut
-          ? `setup (${setupCommand}) timed out - dependencies are incomplete, the agent could not verify its work`
+          ? `setup (${setupCommand}) timed out twice (first attempt retried) - dependencies are incomplete, the agent could not verify its work`
           : `setup script failed (exit ${result.exitCode}): ${detail}`,
       );
     }
