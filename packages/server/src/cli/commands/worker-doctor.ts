@@ -447,7 +447,7 @@ export { checkGitInstalled, checkGitIdentity, checkGitSafeDirectory, checkPackag
 // god-module gate's 20-declaration ceiling (#889), and the check pushed it to 21.
 import { checkNodeVersion } from "./worker-doctor-node-check.js";
 export { MIN_SUPPORTED_NODE_MAJOR, checkNodeVersion } from "./worker-doctor-node-check.js";
-import { checkGlobalLauncher, checkWorkerBuild, probeGlobalVersion, readEntryVersion } from "./worker-doctor-build-check.js";
+import { checkGlobalLauncher, checkLogonTaskLauncher, checkWorkerBuild, probeGlobalVersion, readEntryVersion } from "./worker-doctor-build-check.js";
 import { installedBuildOf, launcherCommand, useLauncherInRemedies } from "./worker-update-notes.js";
 import { parseBuildId } from "../../lib/worker-update.js";
 import { checkBoardBuild } from "./worker-board-build.js";
@@ -697,6 +697,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   checks.push(checkWorkerBuild(opts.stateFile, opts.runningEntry ?? null));
   const globalVersion = opts.globalVersion === undefined ? probeGlobalVersion() : opts.globalVersion;
   checks.push(checkGlobalLauncher({ stateFile: opts.stateFile, runningEntry: opts.runningEntry ?? null, globalVersion }));
+  checks.push(checkLogonTaskLauncher({ globalVersion })); // #1482
   if (!opts.local) {
     checks.push(await checkBoardBuild({
       daemonRunning: readControlFile(opts.stateFile) !== null,
