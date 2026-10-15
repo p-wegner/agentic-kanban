@@ -335,6 +335,27 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
         continue;
       }
       await captureHeadSha(sessionId); // entries recorded before #1444 have no sha yet
+      const reportRefusal = (): void => {
+        // #1500: report it to the board (card-visible) BEFORE it leaves the retained list, then stop
+        // retrying - a lost result with commits is a data-loss risk, not something to loop on.
+        safeSend({
+          type: "undelivered_result",
+          sessionId,
+          branch: entry.pending.repo.branch,
+          incomingRef: entry.pending.repo.incomingRef,
+          checkoutPath: entry.pending.checkout.cwd,
+          attempts: entry.attempts,
+          lastError: `${entry.lastError} [board refused: assignment no longer current - NOT retried; sha=${entry.headSha ?? "unknown"}]`,
+        });
+        markLost(sessionId, `the board refuses the push (assignment no longer current), retrying cannot succeed; last error: ${entry.lastError}`);
+      };
+      // #1510: a 403 at the original push is sticky. The retired assignment's token is gone, so a
+      // retry would only answer 401 ("could not read Username"), which does not look like a refusal
+      // and was retried forever. The first refusal is the verdict: report once, never push again.
+      if (isAssignmentRefusal(entry.lastError)) {
+        reportRefusal();
+        continue;
+      }
       try {
         await deps.push(deps.boardUrl, entry.pending.repo, entry.pending.checkout);
       } catch (err) {
@@ -348,18 +369,7 @@ export function createUndeliveredStore(deps: UndeliveredStoreDeps) {
           continue;
         }
         if (isAssignmentRefusal(entry.lastError)) {
-          // #1500: report it to the board (card-visible) BEFORE it leaves the retained list, then stop
-          // retrying - a lost result with commits is a data-loss risk, not something to loop on.
-          safeSend({
-            type: "undelivered_result",
-            sessionId,
-            branch: entry.pending.repo.branch,
-            incomingRef: entry.pending.repo.incomingRef,
-            checkoutPath: entry.pending.checkout.cwd,
-            attempts: entry.attempts,
-            lastError: `${entry.lastError} [board refused: assignment no longer current - NOT retried; sha=${entry.headSha ?? "unknown"}]`,
-          });
-          markLost(sessionId, `the board refuses the push (assignment no longer current), retrying cannot succeed; last error: ${entry.lastError}`);
+          reportRefusal();
           continue;
         }
         await markLostIfGone(sessionId);
