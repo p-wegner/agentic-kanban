@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveVerifySlots } from "../worker/worker-verify-runner.js";
+import { deriveVerifySlots } from "../worker/worker-verify-slots.js";
 
 describe("deriveVerifySlots (#1496)", () => {
   it("scales with RAM and cores, between 1 and 3", () => {

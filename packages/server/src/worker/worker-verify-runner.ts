@@ -288,8 +288,3 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
     },
   };
 }
-
-/** #1496: default verify slots from this machine - one per ~16 GB total RAM and ~4 cores (a full test:mine uses ~4 workers), 1..3. */
-export function deriveVerifySlots(totalRamGb: number, cores: number): number {
-  return Math.max(1, Math.min(3, Math.floor(totalRamGb / 16), Math.floor(cores / 4)));
-}

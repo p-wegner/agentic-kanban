@@ -26,7 +26,7 @@ import { cliPathArg } from "../cli-path.js";
 import { createWorkerHarness, resolveInspectedHarness } from "../../worker/worker-harness.js";
 import { addHarnessOptions, registerWorkerAuth } from "./worker-auth-command.js";
 import { createLifecycle, registerWorkerLifecycle, waitOption } from "./worker-lifecycle-command.js"; import { applyStartConfig } from "../../worker/worker-lifecycle.js"; // #1443
-import { addToolchainOptions, formatToolchainInstall, registerWorkerToolchain, toolchainDaemonOptions, type ToolchainStartOptions } from "./worker-toolchain-command.js";
+import { addVerifySlotsOption, type VerifySlotsStartOption } from "../../worker/worker-verify-slots.js"; import { addToolchainOptions, formatToolchainInstall, registerWorkerToolchain, toolchainDaemonOptions, type ToolchainStartOptions } from "./worker-toolchain-command.js";
 // Type-only + a db-free formatter: this module is also the standalone worker
 // binary's entry point, which must never pull in the database graph.
 import { renderPlacementExplanation } from "../../lib/placement-explanation-format.js";
@@ -410,7 +410,6 @@ interface WorkerStartOptions {
   profiles?: string;
   profileAlias?: string;
   maxConcurrency?: number;
-  verifySlots?: number;
   stateFile?: string;
   workRoot?: string;
   sharesFilesystem?: boolean;
@@ -426,7 +425,7 @@ interface WorkerStartOptions {
   drainTimeout?: number;
 }
 
-async function runWorkerStart(rawOptions: WorkerStartOptions & ToolchainStartOptions): Promise<void> {
+async function runWorkerStart(rawOptions: WorkerStartOptions & ToolchainStartOptions & VerifySlotsStartOption): Promise<void> {
   const options = applyStartConfig({ ...rawOptions, board: startBoard(rawOptions, rawOptions.stateFile ?? defaultWorkerStateFile()) }, rawOptions.stateFile ?? defaultWorkerStateFile()); // #1443: persisted `config set|unset` beats argv
   const boardList = parseBoardList(options.board); options.board = boardList[0] ?? options.board;
   // #1346: a global install that a self-update has left behind hands over to the current build.
@@ -492,8 +491,7 @@ async function runWorkerStart(rawOptions: WorkerStartOptions & ToolchainStartOpt
       harness: createWorkerHarness(harnessCfg.options),
       doctorSummary: true, // #1370: the board shows this worker's setup checklist
       maxConcurrency: options.maxConcurrency,
-      verifySlots: options.verifySlots,
-      ...toolchainDaemonOptions(options),
+      ...toolchainDaemonOptions(options), verifySlots: options.verifySlots,
       stateFile: options.stateFile,
       workRoot: options.workRoot,
       drainTimeoutMs,
@@ -631,7 +629,6 @@ export function registerWorkerSubcommands(workerCmd: Command) {
     )
     .option("--profile-alias <csv>", "Attest a nameless login under a profile name (#1379), e.g. default=anth (source: 'default', a profile name or a config dir). Persisted; '' clears")
     .option("--max-concurrency <n>", "Max parallel agent sessions (pins the count; omit it and the board sizes the worker from its RAM and cores, #1456)", (v) => parseInt(v, 10))
-    .option("--verify-slots <n>", "Concurrent pre-merge gates/sweeps this worker runs (#1496; default derived from RAM and cores, 1-3)", (v) => parseInt(v, 10))
     .option("--state-file <path>", `Pairing state file, relative to the directory you run the command in (default: ${defaultWorkerStateFile()})`, cliPathArg)
     .option("--work-root <path>", "Root for git-transport clones/checkouts, relative to the directory you run the command in (default: ~/.agentic-kanban/worker, or <dir>/work next to a non-default worker-state.json, <state-file name>-work for other names)", cliPathArg)
     .option("--leave-agents", "On Ctrl+C, leave running agent processes alive instead of killing them")
@@ -655,7 +652,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       (v) => parseInt(v, 10),
     )
     ;
-  addToolchainOptions(addHarnessOptions(startCmd)).action(runWorkerStart);
+  addVerifySlotsOption(addToolchainOptions(addHarnessOptions(startCmd))).action(runWorkerStart);
 
   registerWorkerAuth(workerCmd);
   registerWorkerToolchain(workerCmd); registerWorkerLifecycle(workerCmd); registerWorkerResults(workerCmd);
