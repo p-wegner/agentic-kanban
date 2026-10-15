@@ -83,6 +83,47 @@ export function checkGlobalLauncher(opts: {
   return { name, status: "pass", detail: `global launcher ${global ?? "not detected"}; stable shim at ${shim}` };
 }
 
+/** Action text (`Execute Arguments`) of the AgenticKanbanWorker logon task; null when absent or not Windows. */
+export function probeLogonTaskAction(): string | null {
+  if (process.platform !== "win32") return null;
+  try {
+    const out = execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-Command",
+        "$t = Get-ScheduledTask -TaskName AgenticKanbanWorker -ErrorAction Stop; ($t.Actions | ForEach-Object { \"$($_.Execute) $($_.Arguments)\" }) -join ' '",
+      ],
+      { encoding: "utf8", timeout: 8000, windowsHide: true },
+    ).trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * #1482: a logon task that calls the global `agentic-kanban-worker` runs the setup-time build after a reboot, so a flag
+ * added since then fails before self-update can run. WARN unless the task goes through the stable shim.
+ */
+export function checkLogonTaskLauncher(opts: { taskAction?: string | null; globalVersion?: string | null; runningVersion?: string | null }): DoctorCheck {
+  const name = "logon task launcher";
+  const action = opts.taskAction === undefined ? probeLogonTaskAction() : opts.taskAction;
+  if (!action) return { name, status: "pass", detail: "no AgenticKanbanWorker logon task registered" };
+  if (/\.agentic-kanban[\\/]bin[\\/]agentic-kanban-worker(\.cmd|\.ps1)?/i.test(action)) {
+    return { name, status: "pass", detail: "the logon task runs the stable shim (always the current build)" };
+  }
+  const globalBuild = parseBuildId(opts.globalVersion === undefined ? probeGlobalVersion() : opts.globalVersion);
+  const runningBuild = parseBuildId(opts.runningVersion ?? resolveOwnPackageVersion() ?? null);
+  const older = globalBuild && runningBuild && !sameBuild(globalBuild, runningBuild) ? ` (global build ${globalBuild} is older than the running build ${runningBuild})` : "";
+  return {
+    name,
+    status: "warn",
+    detail: `the AgenticKanbanWorker logon task calls the global agentic-kanban-worker, not the stable shim${older}: after a reboot a flag added since setup fails on the old binary before it can self-update`,
+    remedy: "Re-register the task with the Connect runbook's service step, or point its action at %USERPROFILE%\\.agentic-kanban\\bin\\agentic-kanban-worker.cmd.",
+  };
+}
+
 /**
  * Global vs current build. WARN (never fail) when `current.json` names a different installed
  * build: `worker start` delegates to it by default, so the machine is healthy — the operator

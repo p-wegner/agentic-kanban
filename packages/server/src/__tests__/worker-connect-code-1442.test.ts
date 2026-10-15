@@ -113,6 +113,7 @@ describe("connect code (#1442)", () => {
     const base = { fleetUrl: "http://h:3003", pairingToken: "t", code: "c" };
     const win = buildConnectRunbook({ ...base, options: { os: "windows" } }).markdown;
     expect(win).toContain("Register-ScheduledTask");
+    expect(win).toContain(".agentic-kanban\\bin\\agentic-kanban-worker.cmd"); // #1482: the task runs the stable shim
     const wsl = buildConnectRunbook({ ...base, options: { os: "wsl" } }).markdown;
     expect(wsl).toContain("systemctl --user enable --now");
     expect(wsl).toContain("Dev Drive");

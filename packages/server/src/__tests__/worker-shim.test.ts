@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { checkGlobalLauncher } from "../cli/commands/worker-doctor-build-check.js";
+import { checkGlobalLauncher, checkLogonTaskLauncher } from "../cli/commands/worker-doctor-build-check.js";
 import { installShim, shimCommandFor, shimDirFor } from "../worker/worker-shim.js";
 import { repinLegacyShim } from "../worker/worker-repin.js";
 import { entryForBuild, versionsDirFor, writePointer } from "../worker/worker-versions.js";
@@ -137,5 +137,31 @@ describe("checkGlobalLauncher", () => {
       runningVersion: "0.1.9-dev.abcdef123",
     });
     expect(check.status).toBe("pass");
+  });
+});
+
+describe("checkLogonTaskLauncher (#1482)", () => {
+  const versions = { globalVersion: "0.1.9-dev.6f2bd2826", runningVersion: "0.1.9-dev.abcdef123" };
+
+  it("WARNs when the logon task calls the global binary", () => {
+    const check = checkLogonTaskLauncher({
+      taskAction: 'powershell.exe -NoProfile -Command "agentic-kanban-worker start --board http://x"',
+      ...versions,
+    });
+    expect(check.status).toBe("warn");
+    expect(check.detail).toContain("older than the running build");
+    expect(check.remedy).toContain("agentic-kanban-worker.cmd");
+  });
+
+  it("passes when the task goes through the stable shim", () => {
+    const check = checkLogonTaskLauncher({
+      taskAction: "powershell.exe -Command \"$w = Join-Path $env:USERPROFILE '.agentic-kanban\\bin\\agentic-kanban-worker.cmd'; & $w start\"",
+      ...versions,
+    });
+    expect(check.status).toBe("pass");
+  });
+
+  it("passes when no task is registered", () => {
+    expect(checkLogonTaskLauncher({ taskAction: null, ...versions }).status).toBe("pass");
   });
 });

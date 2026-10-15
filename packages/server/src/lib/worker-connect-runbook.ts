@@ -258,13 +258,21 @@ export function buildConnectRunbook(input: {
 
   // Service step, per OS.
   if (windows) {
-    const taskArgs = `-NoProfile -WindowStyle Hidden -Command "${startCommand.replace(/"/g, '\\"')}"`;
+    // #1482: the logon task must run the stable shim (always the current build), not the setup-time binary on PATH:
+    // a flag added since setup fails on the old binary before its self-update can run. The shim is written by
+    // `worker start`/self-update, so fall back to PATH only while it does not exist yet.
+    const shimStartCommand = startCommand.replace(/^agentic-kanban-worker /, "& $w ");
+    const taskScript =
+      `$w = Join-Path $env:USERPROFILE '.agentic-kanban\\bin\\agentic-kanban-worker.cmd'; ` +
+      `if (-not (Test-Path $w)) { $w = 'agentic-kanban-worker' }; ${shimStartCommand}`;
+    const taskArgs = `-NoProfile -WindowStyle Hidden -Command "${taskScript.replace(/"/g, '\\"')}"`;
     steps.push({
       id: "service",
       title: "Start the worker as a scheduled task (no admin needed)",
       detail:
         "A scheduled task at logon, in the user's own session — not a Windows service, because the worker uses this user's provider " +
-        "login. If registration is refused with an access error, tell the operator; do not elevate.",
+        "login. If registration is refused with an access error, tell the operator; do not elevate. The task runs the stable shim " +
+        "`%USERPROFILE%\\.agentic-kanban\\bin\\agentic-kanban-worker.cmd` (always the current build), not the global binary a reboot would find stale (#1482).",
       commands: [
         `$action = New-ScheduledTaskAction -Execute powershell.exe -Argument '${taskArgs.replace(/'/g, "''")}'`,
         "$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME",
