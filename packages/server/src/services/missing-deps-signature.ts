@@ -3,11 +3,11 @@
 // `Der Befehl "depcruise" ist entweder falsch geschrieben oder\nkonnte nicht gefunden werden.` —
 // split across two lines — and matching only the English wording meant #169's install retry
 // never fired there: the gate went straight to `verify_infra_missing` and a 2h backoff.
-// Anchor to real module-resolution errors, never free-text "could not resolve" (#1512): a test
+// Anchor to real module-resolution errors (esbuild-style `Could not resolve "pkg"` with a quoted specifier is fine), never free-text "could not resolve" (#1512): a test
 // printing `[services] reaper skipped — could not resolve this instance's id: db unavailable`
 // triggered an install plus a full re-run of the train gate.
 const MISSING_DEPS_SIGNATURE =
-  /cannot find module|cannot find package|failed to resolve import|err_module_not_found|module_not_found|unresolved_import|enoent.*node_modules|command not found|is not recognized as an internal or external command|ist entweder falsch geschrieben oder\s+konnte nicht gefunden werden/i;
+  /cannot find module|cannot find package|failed to resolve import|could not resolve ["'`][^"'`\s]+["'`]|err_module_not_found|module_not_found|unresolved_import|enoent.*node_modules|command not found|is not recognized as an internal or external command|ist entweder falsch geschrieben oder\s+konnte nicht gefunden werden/i;
 
 export function looksLikeMissingDepsFailure(output: string): boolean {
   return MISSING_DEPS_SIGNATURE.test(output);

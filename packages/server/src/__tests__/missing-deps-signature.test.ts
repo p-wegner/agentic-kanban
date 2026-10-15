@@ -18,6 +18,7 @@ describe("missingDepsEvidence (#1493)", () => {
     "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'zod' imported from x.js",
     "Error: Cannot find module 'foo'",
     "Failed to resolve import \"bar\" from \"src/a.ts\"",
+    "Error: Could not resolve 'vitest/config'",
   ])("still matches real resolution errors: %s", (line) => {
     expect(looksLikeMissingDepsFailure(line)).toBe(true);
   });
