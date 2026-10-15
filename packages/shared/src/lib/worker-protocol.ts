@@ -6,7 +6,7 @@
 
 // #1369: committer identity + package-manager vocabulary lives in its own module.
 import { parseWorkerCapacityInfo } from "./worker-capacity-parse.js";
-import { parseVerifyJobFrame, parseVerifyWorkerFrame, parseWorkerVerifyCapability, type VerifyJobFrame, type VerifyLogChunkFrame, type VerifyProgressFrame, type VerifyResultFrame, type WorkerVerifyCapability } from "./worker-verify-protocol.js";
+import { parseVerifyControlFrame, parseVerifyJobFrame, parseVerifyWorkerFrame, parseWorkerVerifyCapability, type VerifyCancelFrame, type VerifyJobFrame, type VerifyLiveJobsFrame, type VerifyLogChunkFrame, type VerifyProgressFrame, type VerifyResultFrame, type WorkerVerifyCapability } from "./worker-verify-protocol.js";
 import { parseWorkerCommitterIdentity, parseWorkerPackageManagers, type WorkerCommitterIdentity, type WorkerPackageManagers } from "./worker-prerequisites.js";
 export { parseWorkerCommitterIdentity, parseWorkerPackageManagers, type WorkerCommitterIdentity, type WorkerPackageManagers } from "./worker-prerequisites.js";
 export * from "./worker-doctor-summary.js";
@@ -587,7 +587,9 @@ export type BoardToWorkerMessage =
   /** #1431: run ONE prompt and answer with `oneshot_result`. Sessionless; an older worker drops it, so the board waits only for the `accepted` ack. */
   | WorkerOneShotRequest | WorkerServiceBoardFrame // #1447: workspace services + the board's port proxy
   /** #1437: run one verify job (a gate, train gate or sweep) on this worker; answered by `verify_progress`/`verify_log_chunk`/`verify_result`. */
-  | VerifyJobFrame;
+  | VerifyJobFrame
+  /** #1489: drop a verify job the board no longer wants / reap every verify job not in the live set. */
+  | VerifyCancelFrame | VerifyLiveJobsFrame;
 
 export type WorkerToBoardMessage =
   | {
@@ -693,6 +695,7 @@ function parseToolchainInstallRequest(msg: Record<string, unknown> | null): Boar
   if (isServiceFrameType(msg.type)) return parseServiceBoardFrame(msg); // #1447
   if (msg.type === "oneshot") return parseOneShotRequest(msg, { repo: parseRepoTransport(msg.repo), intent: parseLaunchIntent(asRecord(msg.job)?.intent) }); // #1431
   if (msg.type === "verify_job") return parseVerifyJobFrame(msg); // #1437: sessionless like this one
+  if (msg.type === "verify_cancel" || msg.type === "verify_live_jobs") return parseVerifyControlFrame(msg); // #1489
   if (msg.type !== "toolchain_install") return null; // the frames about the machine/a job, not a session
   if (typeof msg.requestId !== "string" || !msg.requestId || !Array.isArray(msg.toolchains)) return null;
   const toolchains = msg.toolchains.filter((t): t is string => typeof t === "string").slice(0, 20);

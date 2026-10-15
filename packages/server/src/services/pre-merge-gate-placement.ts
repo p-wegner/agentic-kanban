@@ -57,6 +57,8 @@ export async function planGateRun(args: {
   timeoutMs: number;
   tier: string;
   maxWorkers?: number;
+  /** #1489: the gate's cancel signal; a worker run is cancelled on the worker when it fires. */
+  signal?: AbortSignal;
 }): Promise<GateRunPlan> {
   const { admission, projectId, database } = args;
   const kind = args.workspaceId.startsWith("train:") ? "train-gate" : "workspace-gate";
@@ -77,7 +79,7 @@ export async function planGateRun(args: {
   const run: GateScriptRunner = async (env) => {
     const out = await runOnPlannedWorker(placed, {
       kind, projectId, database, command: args.verifyScript, workingDir: args.workingDir, sha, tier: args.tier,
-      timeoutMs: args.timeoutMs, env, maxWorkers: args.maxWorkers, runOnHost: async () => refusedAsHeld(placed.workerName, "ran on host"),
+      timeoutMs: args.timeoutMs, env, maxWorkers: args.maxWorkers, signal: args.signal, runOnHost: async () => refusedAsHeld(placed.workerName, "ran on host"),
     });
     refusal = out.refused ?? null;
     return out.refused ? refusedAsHeld(placed.workerName, out.refused) : out.result;

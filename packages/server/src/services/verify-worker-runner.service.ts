@@ -97,7 +97,12 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
         let graceTimer: NodeJS.Timeout | undefined;
         const graceMs = deps.reconnectGraceMs ?? VERIFY_RECONNECT_GRACE_MS;
         const clearGrace = (): void => { if (graceTimer) clearTimeout(graceTimer); graceTimer = undefined; };
-        const end = (report: WorkerVerifyReport): void => { off?.(); offDisconnect?.(); offConnect?.(); clearGrace(); if (timer) clearTimeout(timer); resolve(report); };
+        const end = (report: WorkerVerifyReport): void => { req.signal?.removeEventListener("abort", onAbort); off?.(); offDisconnect?.(); offConnect?.(); clearGrace(); if (timer) clearTimeout(timer); resolve(report); };
+        // #1489: the owner no longer wants the job (train cancelled/abandoned): tell the worker to kill its tree and drop the checkout.
+        const onAbort = (): void => {
+          connections.send(req.workerId, { type: "verify_cancel", jobId });
+          end(refuse("cancelled: the owner of this verify job stopped waiting", "cancelled"));
+        };
         off = connections.onMessage((workerId, message) => {
           if (workerId !== req.workerId || !("jobId" in message) || message.jobId !== jobId) return;
           // #1465: after a reconnect, any frame for this job proves the worker still knows it.
@@ -159,7 +164,8 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
           ...(req.env ? { env: req.env } : {}),
           auth: { projectId: req.projectId!, gitPort: auth.gitPort, gitToken: auth.gitToken, branch: req.branch || "verify", incomingRef: `refs/verify/${jobId}` },
         };
-        if (!connections.send(req.workerId, frame)) end(refuse(`${workerName} is not connected`));
+        if (!connections.send(req.workerId, frame)) return end(refuse(`${workerName} is not connected`));
+        if (req.signal?.aborted) onAbort(); else req.signal?.addEventListener("abort", onAbort, { once: true });
       });
     } finally {
       active.delete(jobId);

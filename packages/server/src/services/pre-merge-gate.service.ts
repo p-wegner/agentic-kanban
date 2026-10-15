@@ -617,7 +617,7 @@ export async function runPreMergeGate(
     // #1437 — `verify_placement`: a chain the host would hold for memory (or that is pinned to a
     // worker) runs on an allowlisted worker; with none eligible it holds as before. The decision and
     // both wordings live in `planGateRun` — this function sits on the branch ceiling.
-    const placed = await planGateRun({ projectId, workspaceId: workspace.id, database, admission, workingDir, verifyScript: verifyScript!, timeoutMs: verifyTimeoutMs, tier: gateStrategy ?? "full" });
+    const placed = await planGateRun({ projectId, workspaceId: workspace.id, database, admission, workingDir, verifyScript: verifyScript!, timeoutMs: verifyTimeoutMs, tier: gateStrategy ?? "full", signal: combinedSignal });
     workerRun = placed.run;
     if (!placed.proceed) {
       noteMergeGatePhase(workspace.id, "held", placed.hold.phaseNote);

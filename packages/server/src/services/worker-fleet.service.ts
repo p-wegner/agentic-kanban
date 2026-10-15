@@ -2,7 +2,7 @@
 // the registry (auth + rows), the connection manager (live sockets) and the
 // remote execution service — so the REST routes, the WS route and the session
 // lifecycle all see the SAME fleet state in one board process.
-import { verifyJobCountOnWorker } from "./verify-active-jobs.js";
+import { listActiveVerifyJobs, verifyJobCountOnWorker } from "./verify-active-jobs.js";
 import { workerBelowRamFloor } from "@agentic-kanban/shared/lib/worker-settings";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { splitRequirements, workerMeetsRequirements } from "@agentic-kanban/shared/lib/worker-toolchains";
@@ -132,6 +132,11 @@ export function getWorkerFleet(database: Database = realDb): WorkerFleet {
     // question, and a connect/disconnect pair is the spine of the answer. Fire-and-forget
     // by contract (`recordWorkerEvent` never throws), so a diagnostic can never break a
     // socket callback.
+    // #1489: tell a (re)connecting worker which verify jobs the board still has an owner for; it reaps the rest
+    // (a board restart loses every owner while the worker keeps the whole vitest tree running).
+    connections.onConnect((workerId) => {
+      connections.send(workerId, { type: "verify_live_jobs", jobIds: listActiveVerifyJobs().filter((j) => j.workerId === workerId).map((j) => j.jobId) });
+    });
     connections.onConnect((workerId) => {
       void recordWorkerEvent({
         database,
