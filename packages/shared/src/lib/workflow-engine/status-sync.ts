@@ -1,4 +1,4 @@
-import { and, eq, asc, sql } from "drizzle-orm";
+import { and, eq, asc, sql, inArray } from "drizzle-orm";
 import * as schema from "../../schema/index.js";
 import type { WorkflowDb } from "./types.js";
 
@@ -70,6 +70,31 @@ async function findNearestMatchingNode(
 }
 
 /**
+ * The issue's node already maps to the new status, so the sync above has nothing to move on the
+ * ISSUE — but a non-closed workspace can still be parked on the start node (the builder's stage),
+ * which makes a clean review exit read as "the In-Review transition was missed" (#1498, #960).
+ * Re-point only workspaces sitting on a `start` node; a workspace elsewhere in the graph (fork
+ * child, mid-flow stage) is deliberately left alone (#999).
+ */
+async function alignStrandedStartWorkspaces(
+  db: WorkflowDb,
+  issueId: string,
+  targetNodeId: string,
+  nodes: { id: string; nodeType: string }[],
+): Promise<void> {
+  const startIds = nodes.filter((n) => n.nodeType === "start" && n.id !== targetNodeId).map((n) => n.id);
+  if (startIds.length === 0) return;
+  await db
+    .update(schema.workspaces)
+    .set({ currentNodeId: targetNodeId })
+    .where(and(
+      eq(schema.workspaces.issueId, issueId),
+      sql`${schema.workspaces.status} != 'closed'`,
+      inArray(schema.workspaces.currentNodeId, startIds),
+    ));
+}
+
+/**
  * Keep currentNodeId consistent when an issue's status is changed manually
  * (drag-drop, move_issue, CLI). If the issue runs a workflow, point currentNodeId
  * at a node in its template whose statusName matches the issue's (new) status.
@@ -133,7 +158,10 @@ export async function syncCurrentNodeToStatus(db: WorkflowDb, issueId: string): 
     .orderBy(asc(schema.workflowNodes.sortOrder));
   // If the current node already maps to this status, leave it.
   const current = nodes.find((n) => n.id === issue.currentNodeId);
-  if (current && current.statusName === statusName) return;
+  if (current && current.statusName === statusName) {
+    await alignStrandedStartWorkspaces(db, issueId, current.id, nodes);
+    return;
+  }
 
   // #999: pick the NEAREST matching node rather than an arbitrary one.
   let match: (typeof nodes)[number] | undefined;
@@ -148,7 +176,10 @@ export async function syncCurrentNodeToStatus(db: WorkflowDb, issueId: string): 
   // #381: no node matches at all -> clear on a backwards move, leave on a forward one.
   const nextNodeId = match ? match.id : clearedNodeIdForUnmappedStatus(current, newStatus, projectStatuses);
   if (nextNodeId === undefined) return;
-  if (nextNodeId === (issue.currentNodeId ?? null)) return;
+  if (nextNodeId === (issue.currentNodeId ?? null)) {
+    if (nextNodeId) await alignStrandedStartWorkspaces(db, issueId, nextNodeId, nodes);
+    return;
+  }
   await db.update(schema.issues).set({ currentNodeId: nextNodeId }).where(eq(schema.issues.id, issueId));
   // Also sync non-closed workspaces so the board's workflow-status override
   // reflects the new node immediately (workspaces.currentNodeId drives the
