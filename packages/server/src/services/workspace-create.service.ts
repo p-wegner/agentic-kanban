@@ -709,7 +709,6 @@ export function createWorkspaceCreateService(deps: {
         worktreePath: null,
       }, database);
       provisioningMarked = true;
-      touchBranchCreateClaim(createClaim, "worktree");
 
       t = Date.now();
       ({ branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion, symlinkRun: latestSymlink } = await setupWorktree(
@@ -828,9 +827,7 @@ export function createWorkspaceCreateService(deps: {
       // did — the row and the issue transition land in ONE transaction, right here. The backdating
       // was the whole illusion, and it silently corrupted every latency number taken from it.
       const committedAt = new Date().toISOString();
-      // #1487: the commit is milliseconds of work — a short stall budget, so a create hung here
-      // frees its claim for a retry instead of holding it for the 30-minute TTL.
-      touchBranchCreateClaim(createClaim, "committing");
+      touchBranchCreateClaim(createClaim, "committing"); // #1487: short stall budget, frees the claim for a retry
       await withTransaction(database, async (tx) => {
         // #630: the marker dies with the same commit that makes the workspace real, so
         // there is no window in which both — or neither — exist.
