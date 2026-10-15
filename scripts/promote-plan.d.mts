@@ -61,6 +61,13 @@ export declare function buildStableSpawnEnv(opts: {
 }): Record<string, string | undefined>;
 export declare function resolveTailscaleIp4(exec?: () => string): string;
 export declare function planFleetSmokeTargets(spawnEnv: Record<string, string | undefined>, opts?: { resolveTailscale?: () => string }): { label: string; url: string }[];
+export declare const FLEET_SMOKE_TRIES: number;
+export declare const FLEET_SMOKE_INTERVAL_MS: number;
+export declare function describeProbeFailure(err: unknown): string;
+export declare function probeWithRetries(
+  probe: () => Promise<{ status?: number } | null | undefined>,
+  opts?: { tries?: number; intervalMs?: number; sleep?: (ms: number) => Promise<void> },
+): Promise<{ ok: boolean; tries: number; outcomes: string[] }>;
 export declare function resolveMaxSweepAgeMs(env?: Record<string, string | undefined>): number;
 export declare function resolveProjectName(env?: Record<string, string | undefined>): string;
 export declare function resolveSweepWaitMs(env?: Record<string, string | undefined>): number;

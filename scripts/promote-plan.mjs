@@ -277,6 +277,38 @@ export function planFleetSmokeTargets(spawnEnv, { resolveTailscale = resolveTail
   }
   return targets;
 }
+export const FLEET_SMOKE_TRIES = 5;
+export const FLEET_SMOKE_INTERVAL_MS = 6000;
+
+/** One word for how a probe failed: `status 503`, `refused`, `timeout`, or the error's own name. */
+export function describeProbeFailure(err) {
+  const code = err?.cause?.code ?? err?.code;
+  if (code === "ECONNREFUSED") return "refused";
+  if (err?.name === "TimeoutError" || err?.name === "AbortError" || code === "ETIMEDOUT" || code === "UND_ERR_CONNECT_TIMEOUT") return "timeout";
+  return code ? String(code) : (err?.name ?? "error");
+}
+
+/**
+ * #1486 — a freshly started board can miss ONE probe while its startup reconcilers run. Probe a
+ * target up to `tries` times, `intervalMs` apart; pass on the first 200. `probe` resolves to
+ * `{ status }` or rejects (timeout/refused). Returns every try's outcome so a failure can list them.
+ */
+export async function probeWithRetries(probe, { tries = FLEET_SMOKE_TRIES, intervalMs = FLEET_SMOKE_INTERVAL_MS, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  const outcomes = [];
+  for (let i = 1; i <= tries; i++) {
+    let outcome;
+    try {
+      const res = await probe();
+      outcome = res?.status === 200 ? "ok" : `status ${res?.status ?? "none"}`;
+    } catch (err) {
+      outcome = describeProbeFailure(err);
+    }
+    outcomes.push(outcome);
+    if (outcome === "ok") return { ok: true, tries: i, outcomes };
+    if (i < tries) await sleep(intervalMs);
+  }
+  return { ok: false, tries, outcomes };
+}
 export function resolveMaxSweepAgeMs(env = process.env) {
   const raw = Number(env.KANBAN_PROMOTE_MAX_SWEEP_AGE_H);
   const hours = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_MAX_SWEEP_AGE_HOURS;

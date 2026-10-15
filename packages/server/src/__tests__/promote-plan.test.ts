@@ -1041,3 +1041,22 @@ describe("mergeBackRc", () => {
     expect(deps.markAttention).toHaveBeenCalledOnce();
   });
 });
+
+describe("probeWithRetries (#1486)", () => {
+  const noSleep = async () => {};
+  it("passes when the transport answers within the window", async () => {
+    const { probeWithRetries } = await import("../../../../scripts/promote-plan.mjs");
+    let n = 0;
+    const r = await probeWithRetries(async () => (++n < 3 ? Promise.reject(Object.assign(new Error("x"), { name: "TimeoutError" })) : { status: 200 }), { sleep: noSleep });
+    expect(r).toEqual({ ok: true, tries: 3, outcomes: ["timeout", "timeout", "ok"] });
+  });
+  it("fails after all tries, listing each outcome", async () => {
+    const { probeWithRetries } = await import("../../../../scripts/promote-plan.mjs");
+    let n = 0;
+    const r = await probeWithRetries(
+      async () => (++n === 1 ? Promise.reject(Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } })) : { status: 503 }),
+      { tries: 3, sleep: noSleep },
+    );
+    expect(r).toEqual({ ok: false, tries: 3, outcomes: ["refused", "status 503", "status 503"] });
+  });
+});
