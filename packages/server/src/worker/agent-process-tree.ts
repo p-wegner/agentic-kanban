@@ -28,6 +28,7 @@ export function createAgentTreeTracker(workRoot: string): AgentTreeTracker {
       if (job) jobs.set(sessionId, job);
     },
     untrack(sessionId) {
+      jobs.get(sessionId)?.dispose();
       jobs.delete(sessionId);
       forgetAgent(workRoot, sessionId);
     },

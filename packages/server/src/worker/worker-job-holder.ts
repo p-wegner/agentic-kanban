@@ -54,6 +54,8 @@ const ENCODED_HELPER = Buffer.from(HELPER_SCRIPT, "utf16le").toString("base64");
 export interface AgentJob {
   /** Clear kill-on-close so the agent tree outlives the daemon (`--leave-agents`). */
   release(): void;
+  /** The agent exited: close the helper's stdin (EOF) and force-kill it shortly after (#1501). */
+  dispose(): void;
   /** Resolves with the helper's first status line (`job-ready` or an error tag); mainly for tests. */
   ready: Promise<string>;
 }
@@ -63,6 +65,13 @@ export interface AgentJob {
  * Best-effort: the agent is already running, so a failure here is logged by the caller via
  * `ready` and degrades to the startup sweep rather than blocking the launch.
  */
+const liveHolders = new Set<ChildProcess>();
+
+/** Helpers spawned by this daemon that have not exited yet (#1501); compare with live sessions. */
+export function liveJobHolderCount(): number {
+  return liveHolders.size;
+}
+
 export function attachAgentJob(agentPid: number, log: (line: string) => void): AgentJob | null {
   if (process.platform !== "win32") return null;
   let helper: ChildProcess;
@@ -76,6 +85,8 @@ export function attachAgentJob(agentPid: number, log: (line: string) => void): A
     log(`[worker] could not start the job-object helper for pid=${agentPid}: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
+  liveHolders.add(helper);
+  helper.on("exit", () => liveHolders.delete(helper));
   helper.stdin?.on("error", () => { /* helper already gone */ });
   helper.on("error", () => { /* surfaced through `ready` */ });
   const ready = new Promise<string>((resolve) => {
@@ -95,6 +106,13 @@ export function attachAgentJob(agentPid: number, log: (line: string) => void): A
   });
   return {
     ready,
+    dispose() {
+      try { helper.stdin?.end(); } catch { /* helper already gone */ }
+      if (helper.exitCode !== null || helper.killed) return;
+      const timer = setTimeout(() => { try { helper.kill(); } catch { /* already gone */ } }, 2000);
+      timer.unref();
+      helper.once("exit", () => clearTimeout(timer));
+    },
     release() {
       try {
         helper.stdin?.write("release\n");
