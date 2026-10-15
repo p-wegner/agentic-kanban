@@ -21,6 +21,8 @@ export interface BoardStatusIssue {
     status: string;
     startedAt: string;
     endedAt: string | null;
+    /** Fleet worker that ran this session (#1477); absent when it ran on the board's own host. */
+    workerId?: string;
   } | null;
   sessionStats: {
     durationMs: number;

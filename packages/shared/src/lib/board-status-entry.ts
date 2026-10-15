@@ -36,6 +36,8 @@ export interface BoardStatusEntrySession {
   startedAt: string;
   endedAt: string | null;
   stats: string | null;
+  /** The fleet worker that ran the session (#1477); null/absent for the board's own host. */
+  workerId?: string | null;
 }
 
 /**
@@ -102,6 +104,7 @@ export function buildBoardStatusEntry(
     session: latestSession ? {
       id: latestSession.id, status: latestSession.status,
       startedAt: latestSession.startedAt, endedAt: latestSession.endedAt,
+      ...(latestSession.workerId ? { workerId: latestSession.workerId } : {}),
     } : null,
     sessionStats: latestSession?.stats ? parseSessionStats(latestSession.stats) : null,
     diffStats: null,

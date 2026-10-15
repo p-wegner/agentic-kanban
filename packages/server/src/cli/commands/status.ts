@@ -133,7 +133,8 @@ Status indicators:
       // #1421: the operator console reads the board that owns the fleet over HTTP, so remote
       // workers, trains and host capacity are visible. Falls back to the DB-backed frame only
       // when no board answers.
-      const renderConsoleScreen = async (): Promise<boolean> => {
+      // Resolves to null when the console was drawn, else the reason it could not be (#1477).
+      const renderConsoleScreen = async (): Promise<{ failure: unknown } | null> => {
         const { resolveBoardServerPort } = await import("@agentic-kanban/shared/lib/board-server-url");
         const { plainHttp } = await import("../board-server-writes.js");
         const { buildConsoleModel, renderConsole, consoleFrame, fetchConsolePayloads } = await import("../status-console.js");
@@ -141,15 +142,20 @@ Status indicators:
         const get = async (path: string): Promise<unknown> => {
           // 15 s: /status takes several seconds on a busy board, and a timeout here silently drops the
           // whole console back to the DB-backed list (#1477).
-          const answer = await plainHttp(`${baseUrl}${path}`, { method: "GET", timeoutMs: 15_000 });
+          let answer;
+          try {
+            answer = await plainHttp(`${baseUrl}${path}`, { method: "GET", timeoutMs: 15_000 });
+          } catch (e) {
+            throw new Error(`GET ${path} ${e instanceof Error ? e.message : String(e)}`);
+          }
           if (answer.status < 200 || answer.status >= 300) throw new Error(`HTTP ${answer.status} ${path}`);
           return JSON.parse(answer.text);
         };
         let payloads;
         try {
           payloads = await fetchConsolePayloads(get, { projectId: options.project, all: allIssues, nowMs: Date.now() });
-        } catch {
-          return false;
+        } catch (failure) {
+          return { failure };
         }
         const model = buildConsoleModel(payloads);
         const lines = renderConsole(model, {
@@ -162,13 +168,14 @@ Status indicators:
           allIssues,
         });
         process.stdout.write(process.stdout.isTTY ? consoleFrame(lines) : lines.join("\n") + "\n");
-        return true;
+        return null;
       };
 
       const renderScreen = async () => {
-        if (await renderConsoleScreen()) return;
+        const consoleFailure = await renderConsoleScreen();
+        if (!consoleFailure) return;
         const status = await fetchStatus();
-        const { renderStatusScreen, frameToScreen } = await import("../status-screen.js");
+        const { renderStatusScreen, frameToScreen, consoleUnavailableNotice } = await import("../status-screen.js");
         let onlineWorkers: number | undefined;
         try {
           const { getWorkerRegistry } = await import("../../services/worker-registry.service.js");
@@ -178,6 +185,7 @@ Status indicators:
         }
         const lines = renderStatusScreen(status, {
           onlineWorkers,
+          notice: consoleUnavailableNotice(consoleFailure.failure),
           cols: process.stdout.columns || 120,
           rows: process.stdout.rows || 40,
           all: allIssues,

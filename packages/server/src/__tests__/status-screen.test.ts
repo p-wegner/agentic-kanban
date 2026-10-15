@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { BoardStatusIssue, BoardStatusResponse } from "@agentic-kanban/shared";
-import { renderStatusScreen, truncate, visibleLength } from "../cli/status-screen.js";
+import { renderStatusScreen, consoleUnavailableNotice, truncate, visibleLength } from "../cli/status-screen.js";
 
 function issue(n: number, over: Partial<BoardStatusIssue> = {}): BoardStatusIssue {
   return {
@@ -30,6 +30,27 @@ function status(issues: BoardStatusIssue[]): BoardStatusResponse {
     issues,
   };
 }
+
+describe("console fallback (#1477)", () => {
+  it("names why the console could not be built, in the frame", () => {
+    const notice = consoleUnavailableNotice(new Error("GET /api/projects/active/status timed out after 15000 ms"));
+    const out = renderStatusScreen(status([issue(1)]), { cols: 160, rows: 30, notice }).join("\n");
+    expect(out).toContain("console unavailable: GET /api/projects/active/status timed out after 15000 ms; showing the local DB view");
+  });
+
+  it("never calls a worker's session local", () => {
+    const base = new Date().toISOString();
+    const onWorker = issue(2, { session: { id: "s", status: "running", startedAt: base, endedAt: null, workerId: "worker-abcdef123" } });
+    const unlandedOnly = issue(3, { remoteUnlanded: { workerId: "", sessionId: "s", label: "x" } });
+    const mine = issue(4);
+    const lines = renderStatusScreen(status([onWorker, unlandedOnly, mine]), { cols: 160, rows: 30 });
+    const row = (n: number) => lines.find((l) => l.startsWith(`#${n} `)) ?? "";
+    expect(row(2)).toContain("running @worker-a");
+    expect(row(2)).not.toContain("local");
+    expect(row(3)).toContain("running remote");
+    expect(row(4)).toContain("running local");
+  });
+});
 
 describe("renderStatusScreen", () => {
   it("truncates with an ellipsis", () => {
