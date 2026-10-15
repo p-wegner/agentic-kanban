@@ -72,6 +72,68 @@ export async function withTransaction<T>(
   database: Database,
   fn: (tx: TransactionClient) => Promise<T>,
   context = "transaction",
+  opts: { timeoutMs?: number } = {},
 ): Promise<T> {
-  return withDbRetry(() => database.transaction(fn), context);
+  return withDbRetry(() => runWatchedTransaction(database, fn, context, opts.timeoutMs ?? TX_WATCHDOG_MS), context);
+}
+
+/**
+ * #1487 — a transaction open longer than this is reported and failed. Healthy transactions here
+ * are a handful of statements (milliseconds); the incident was one that sat for 35+ minutes with
+ * no SQLITE_BUSY, no retry line and no timeout, wedging the create and its provisioning claim.
+ */
+export const TX_WATCHDOG_MS = 60_000;
+
+/** Thrown to the caller of a transaction that exceeded its watchdog. Not retried by withDbRetry. */
+export class TransactionTimeoutError extends Error {
+  readonly code = "TX_TIMEOUT";
+  constructor(readonly context: string, readonly timeoutMs: number) {
+    super(`[db-tx-watchdog] transaction "${context}" was open longer than ${Math.round(timeoutMs / 1000)}s and was failed`);
+    this.name = "TransactionTimeoutError";
+  }
+}
+
+const openTransactions = new Map<number, { context: string; startedAtMs: number }>();
+let transactionSeq = 0;
+
+/** Diagnostics: the transactions currently open, oldest first, with their context labels. */
+export function listOpenTransactions(nowMs: number = Date.now()): Array<{ context: string; ageMs: number }> {
+  return [...openTransactions.values()]
+    .map((t) => ({ context: t.context, ageMs: nowMs - t.startedAtMs }))
+    .sort((a, b) => b.ageMs - a.ageMs);
+}
+
+async function runWatchedTransaction<T>(
+  database: Database,
+  fn: (tx: TransactionClient) => Promise<T>,
+  context: string,
+  timeoutMs: number,
+): Promise<T> {
+  const seq = ++transactionSeq;
+  openTransactions.set(seq, { context, startedAtMs: Date.now() });
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const work = database.transaction(async (tx) => {
+    const result = await fn(tx);
+    // A transaction that unblocks AFTER its caller was told it failed must not commit: throwing
+    // here rolls it back, so a "failed" create never leaves a workspace row behind.
+    if (timedOut) throw new TransactionTimeoutError(context, timeoutMs);
+    return result;
+  });
+  // The race loser's rejection must not surface as an unhandled rejection.
+  work.catch(() => {});
+  const watchdog = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      const open = listOpenTransactions().map((t) => `${t.context}(${Math.round(t.ageMs / 1000)}s)`).join(", ");
+      console.error(`[db-tx-watchdog] transaction "${context}" open > ${Math.round(timeoutMs / 1000)}s — failing it. Open transactions: ${open}`);
+      reject(new TransactionTimeoutError(context, timeoutMs));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([work, watchdog]);
+  } finally {
+    clearTimeout(timer);
+    openTransactions.delete(seq);
+  }
 }
