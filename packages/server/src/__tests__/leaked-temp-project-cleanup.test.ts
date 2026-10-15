@@ -10,16 +10,16 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { createClient, type Client } from "@libsql/client";
+import type { Client } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import { eq } from "drizzle-orm";
 import * as schema from "@agentic-kanban/shared/schema";
-import { applyMigrationsToClient } from "./helpers/test-db.js";
+import { createTestDb } from "./helpers/test-db.js";
 
 type TestDb = ReturnType<typeof drizzle<typeof schema>>;
 
 const h = vi.hoisted(() => {
-  return { file: undefined as string | undefined, client: undefined as Client | undefined, db: undefined as TestDb | undefined };
+  return { dispose: undefined as (() => void) | undefined, client: undefined as Client | undefined, db: undefined as TestDb | undefined };
 });
 
 function liveProxy<T extends object>(getCurrent: () => T): T {
@@ -47,35 +47,19 @@ vi.mock("../db/index.js", () => {
 });
 
 /**
- * One directory per process, in the reaper's `ak-` namespace, holding this suite's throwaway
- * `.db` files (#1056). This used to build the path from `process.env.TEMP` and drop the file
- * LOOSE in `%TEMP%` — and a loose file is in no swept namespace whatever it is called, since
- * the fixture reaper is gated on `statSync(...).isDirectory()`. Measured at #1056: entries of
- * this suite's own prefix still being minted daily while `temp-dir-namespace-guard` was green,
- * because that guard keys off `tmpdir()` and `process.env.TEMP` is an unscanned synonym for it.
+ * The DB is minted by `createTestDb()` (#1511): a COPY of a migrated template, inside the
+ * helper's swept `ak-` directory (#1056). The per-test `applyMigrationsToClient` replay this
+ * used to do was the 120 s `beforeEach` timeout seen on a loaded box.
  */
-let scratchDbDir: string | null = null;
-function dbScratchDir(): string {
-  if (scratchDbDir) return scratchDbDir;
-  scratchDbDir = mkdtempSync(join(tmpdir(), "ak-leaked-temp-cleanup-"));
-  return scratchDbDir;
-}
-
 function openTestDb(): void {
-  const file = join(dbScratchDir(), `leaked-temp-cleanup-${randomUUID()}.db`);
-  const c = createClient({ url: `file:${file}` });
-  applyMigrationsToClient(c);
-  c.execute("PRAGMA foreign_keys=ON");
-  h.file = file;
-  h.client = c;
-  h.db = drizzle(c, { schema });
+  const t = createTestDb();
+  h.client = t.client;
+  h.db = t.db;
+  h.dispose = t.dispose;
 }
 
 function closeTestDb(): void {
-  try { h.client?.close(); } catch { /* ignore */ }
-  for (const suffix of ["", "-wal", "-shm"]) {
-    try { rmSync(`${h.file}${suffix}`, { force: true }); } catch { /* best-effort */ }
-  }
+  h.dispose?.();
 }
 
 const db = (): TestDb => h.db!;

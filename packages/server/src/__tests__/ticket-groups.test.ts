@@ -10,24 +10,20 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { createClient } from "@libsql/client";
+import type { Client } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import { eq } from "drizzle-orm";
 import * as schema from "@agentic-kanban/shared/schema";
 import { issues, projectStatuses, projects, workspaces, workspaceIssueMembers } from "@agentic-kanban/shared/schema";
 import { buildTicketContextMarkdown } from "@agentic-kanban/shared/lib/ticket-context";
-import { MIGRATION_FILES, MIGRATIONS_DIR } from "./helpers/migrations.js";
-import type { TestDb } from "./helpers/test-db.js";
+import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { finalizeMergeCleanup } from "../services/merge-cleanup.service.js";
 import {
   filterIssuesWithLiveGroupWorkspace,
   listMemberIssueIds,
 } from "../repositories/workspace-issue-members.repository.js";
 
-const tempClients: ReturnType<typeof createClient>[] = [];
+const tempClients: Client[] = [];
 
 afterEach(async () => {
   for (const client of tempClients.splice(0)) {
@@ -35,21 +31,11 @@ afterEach(async () => {
   }
 });
 
+// A copy of the migrated template (#1511): replaying every migration statement per test was the
+// 120 s `createGroupTestDb()` timeout under load.
 async function createGroupTestDb() {
-  const dir = mkdtempSync(join(tmpdir(), "ak-ticket-groups-"));
-  const client = createClient({ url: `file:${join(dir, "test.db")}` });
+  const { client, db } = createTestDb();
   tempClients.push(client);
-  for (const file of MIGRATION_FILES) {
-    const sql = readFileSync(resolve(MIGRATIONS_DIR, file), "utf-8");
-    const statements = sql
-      .split("--> statement-breakpoint")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    for (const stmt of statements) {
-      await client.execute(stmt);
-    }
-  }
-  const db = drizzle(client, { schema });
   return { client, db };
 }
 
