@@ -23,7 +23,18 @@ export interface ImpactMapPlacement {
   database: Database;
   /** Injected for tests; defaults to the registered verify runner. */
   workerRunner?: VerifyWorkerRunner | null;
+  nowMs?: number;
 }
+
+/**
+ * Projects whose worker said it has no impact tool (#1506), keyed by project id -> when. The tool
+ * is a gitignored host-only symlink, so no placement of this job can succeed until the worker
+ * build ships it. Within the TTL the board builds on the host WITHOUT asking a worker, so the
+ * 15-minute reconciler neither re-places the same refused job every cycle nor leaves the map stale.
+ */
+const TOOL_MISSING_TTL_MS = 6 * 60 * 60 * 1000;
+const toolMissingSince = new Map<string, number>();
+export const resetImpactToolMissing = (): void => toolMissingSince.clear();
 
 export interface PlacedImpactBuild {
   ok: boolean;
@@ -75,6 +86,9 @@ export async function runImpactMapBuildOnWorker(args: {
   mapPath: string;
 }): Promise<PlacedImpactBuild | null> {
   const { placement, repoPath, mapPath } = args;
+  const nowMs = placement.nowMs ?? Date.now();
+  const since = toolMissingSince.get(placement.projectId);
+  if (since !== undefined && nowMs - since < TOOL_MISSING_TTL_MS) return null;
   try {
     const placed = await tryRunOnWorker({
       kind: "impact-map", projectId: placement.projectId, database: placement.database, workerRunner: placement.workerRunner,
@@ -85,7 +99,10 @@ export async function runImpactMapBuildOnWorker(args: {
     if (!placed) return null;
     const log = placed.result.stdout;
     if (log.includes(IMPACT_TOOL_MISSING)) {
-      return { ok: false, held: true, workerName: placed.workerName, detail: `worker ${placed.workerName} has no impact tool checked out (.claude/skills is gitignored); map not refreshed` };
+      // Infra refusal, not a red verdict: remember it and let the caller build on the host.
+      toolMissingSince.set(placement.projectId, nowMs);
+      console.warn(`[test-impact-map] worker ${placed.workerName} has no impact tool (.claude/skills is gitignored); building on the host`);
+      return null;
     }
     if (placed.result.exitCode !== 0) return { ok: false, workerName: placed.workerName, detail: `worker ${placed.workerName}: impact build failed: ${log.slice(-400)}` };
     const artifact = extractImpactMapArtifact(log);

@@ -21,7 +21,7 @@ vi.mock("@agentic-kanban/shared/lib/git-exec", () => ({
 
 import { runColdCloneBuildCheck } from "../services/cold-clone-build-check.service.js";
 import { trainGateWorkerName } from "../services/merge-train-placement.js";
-import { IMPACT_MAP_BEGIN, IMPACT_MAP_END, runImpactMapBuildOnWorker } from "../services/test-impact-map/worker-build.js";
+import { IMPACT_MAP_BEGIN, IMPACT_MAP_END, IMPACT_TOOL_MISSING, resetImpactToolMissing, runImpactMapBuildOnWorker } from "../services/test-impact-map/worker-build.js";
 import type { VerifyWorkerRunner } from "../services/verify-job-placement.js";
 
 const db = {} as Database;
@@ -63,6 +63,24 @@ describe("host-only verify work on workers (#1440)", () => {
     expect(out).toMatchObject({ ok: true, workerName: "desktop-stable" });
     expect(readFileSync(mapPath, "utf8")).toBe('{"v":1}');
     expect(w.jobs[0]).toContain("impact.mjs");
+  });
+
+  it("a worker without the impact tool falls back to the host and is not asked again within the TTL (#1506)", async () => {
+    place();
+    resetImpactToolMissing();
+    const w = worker(`${IMPACT_TOOL_MISSING}
+`);
+    const args = { repoPath: tmpdir(), tool: "t", durations: null, mapPath: join(tmpdir(), "m.json") };
+    const t0 = Date.now();
+    expect(await runImpactMapBuildOnWorker({ ...args, placement: { projectId: "p1", database: db, workerRunner: w, nowMs: t0 } })).toBeNull();
+    expect(w.jobs).toHaveLength(1);
+    // the next 15-minute sweep builds on the host without re-placing the job
+    expect(await runImpactMapBuildOnWorker({ ...args, placement: { projectId: "p1", database: db, workerRunner: w, nowMs: t0 + 15 * 60_000 } })).toBeNull();
+    expect(w.jobs).toHaveLength(1);
+    // after the TTL a worker that has gained the tool gets another chance
+    await runImpactMapBuildOnWorker({ ...args, placement: { projectId: "p1", database: db, workerRunner: w, nowMs: t0 + 7 * 3600_000 } });
+    expect(w.jobs).toHaveLength(2);
+    resetImpactToolMissing();
   });
 
   it("impact map build holds when no worker is eligible", async () => {
