@@ -24,6 +24,8 @@ export interface WorkerVerifyCapability {
   freeSlots: number;
   /** The worker's RAM in GB (total), so placement can prefer the roomier machine. */
   ramGb: number;
+  /** #1479: ids of the jobs holding a slot right now, so either side can see why a worker is not eligible. */
+  jobIds?: string[];
 }
 
 export type VerifyStage = "queued" | "fetch" | "checkout" | "install" | "verify" | "uploading" | "done";
@@ -197,7 +199,8 @@ export function parseVerifyWorkerFrame(msg: Record<string, unknown>): VerifyProg
 export function parseWorkerVerifyCapability(raw: unknown): WorkerVerifyCapability | undefined {
   const r = rec(raw);
   if (!r || !num(r.slots) || r.slots < 1 || !num(r.freeSlots) || !num(r.ramGb)) return undefined;
-  return { slots: Math.floor(r.slots), freeSlots: Math.max(0, Math.floor(r.freeSlots)), ramGb: r.ramGb };
+  const jobIds = Array.isArray(r.jobIds) ? r.jobIds.filter((id): id is string => typeof id === "string").slice(0, 64) : undefined;
+  return { slots: Math.floor(r.slots), freeSlots: Math.max(0, Math.floor(r.freeSlots)), ramGb: r.ramGb, ...(jobIds ? { jobIds } : {}) };
 }
 
 /** Cut a full log into chunk payloads, keeping HEAD+TAIL when it exceeds the cap. */

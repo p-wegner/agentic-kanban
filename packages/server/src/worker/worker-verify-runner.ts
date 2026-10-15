@@ -172,9 +172,40 @@ function defaultRunScript(dir: string, script: string, opts: { timeoutMs: number
   });
 }
 
+function removeDir(dir: string): void {
+  try { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* locked; the startup sweep retries */ }
+}
+
 async function defaultCleanup(deps: VerifyRunnerDeps, job: VerifyJobFrame, dir: string): Promise<void> {
   const cacheDir = join(deps.workRoot, "repos", job.auth.projectId);
   await gitExec(["worktree", "remove", "--force", dir], { cwd: cacheDir }).catch(() => undefined);
+  // #1479: `worktree remove` fails on a half-made or locked checkout and the dir then lived forever.
+  if (existsSync(dir)) {
+    removeDir(dir);
+    await gitExec(["worktree", "prune"], { cwd: cacheDir }).catch(() => undefined);
+  }
+}
+
+/**
+ * #1479: remove every `<workRoot>/verify/<jobId>` that is not in `keep` (call at daemon start, when nothing runs),
+ * then prune the clones' dangling worktree records. Returns the job ids reaped.
+ */
+export function sweepOrphanVerifyCheckouts(workRoot: string, keep: ReadonlySet<string> = new Set()): string[] {
+  const root = join(workRoot, "verify");
+  let names: string[];
+  try { names = readdirSync(root); } catch { return []; }
+  const reaped: string[] = [];
+  for (const name of names) {
+    if (keep.has(name)) continue;
+    removeDir(join(root, name));
+    reaped.push(name);
+  }
+  if (reaped.length > 0) {
+    try {
+      for (const repo of readdirSync(join(workRoot, "repos"))) void gitExec(["worktree", "prune"], { cwd: join(workRoot, "repos", repo) }).catch(() => undefined);
+    } catch { /* no clones yet */ }
+  }
+  return reaped;
 }
 
 export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRunner {
@@ -190,10 +221,14 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
   /** Finished jobs whose frames may not have reached the board; replayed on every reconnect until retention. */
   const finished = new Map<string, StoredVerifyResult>();
   for (const { jobId, entry } of deps.store?.loadAll() ?? []) finished.set(jobId, entry);
+  // #1479: nothing runs yet, so every `verify/<jobId>` on disk is an orphan of a previous daemon.
+  const orphans = sweepOrphanVerifyCheckouts(deps.workRoot);
+  if (orphans.length > 0) deps.log(`[worker] startup sweep removed ${orphans.length} orphaned verify checkout(s): ${orphans.join(", ")}`);
 
   const progress = (jobId: string, stage: VerifyStage, extra: { filesDone?: number; filesTotal?: number } = {}): void => {
     const frame: WorkerToBoardMessage = { type: "verify_progress", jobId, stage, ...extra };
     if (stage === "done") lastProgress.delete(jobId); else lastProgress.set(jobId, frame);
+    if (stage !== "verify" || extra.filesDone === undefined) deps.log(`[worker] verify job ${jobId} stage ${stage}`); // #1479 (verify ticks are too chatty)
     // While the socket is down the frame is dropped (the replay on reconnect carries the latest one).
     if (connected()) deps.sendToBoard(frame);
   };
@@ -205,6 +240,9 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
   function finish(job: VerifyJobFrame, started: number, r: Partial<VerifyResultFrame> & { sha: string }, log: string): void {
     // #1489: nobody waits for a cancelled job's verdict; buffering it would replay it on every reconnect.
     if (controllers.get(job.jobId)?.signal.aborted) return;
+    deps.log(r.refused
+      ? `[worker] verify job ${job.jobId} refused (${r.refused}): ${r.reason ?? ""}`
+      : `[worker] verify job ${job.jobId} finished: ${r.passed ? "passed" : "failed"} (exit ${r.exitCode ?? 1}${r.timedOut ? ", timed out" : ""}) in ${Math.round((Date.now() - started) / 1000)}s, sha ${r.sha.slice(0, 9)}, ${connected() ? "sending" : "board socket down, buffered for reconnect"}`);
     const chunks = chunkVerifyLog(log);
     const frames: WorkerToBoardMessage[] = chunks.map((data, seq) => ({ type: "verify_log_chunk", jobId: job.jobId, seq, data }));
     frames.push({
@@ -235,6 +273,7 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
       finish(job, started, { sha, refused, reason }, `verify refused (${refused}): ${reason}`);
     if (running.size >= deps.slots) return refuse("no_free_slot", `this worker runs ${deps.slots} verify job(s) at a time`);
     running.add(job.jobId);
+    deps.log(`[worker] verify job ${job.jobId} started: ${job.tier} @ ${job.sha.slice(0, 9)} (${running.size}/${deps.slots} slots busy)`);
     const ctl = new AbortController();
     controllers.set(job.jobId, ctl);
     let dir: string | null = null;
@@ -291,7 +330,9 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
     } finally {
       running.delete(job.jobId);
       controllers.delete(job.jobId);
-      if (dir) await cleanup(job, dir).catch(() => undefined);
+      // #1479: a refused/half-made checkout never set `dir`, but the default path may exist on disk.
+      const stray = dir ?? (existsSync(join(deps.workRoot, "verify", job.jobId)) ? join(deps.workRoot, "verify", job.jobId) : null);
+      if (stray) await cleanup(job, stray).catch(() => undefined);
       if (dataDir) try { rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* temp dir, reaped later */ }
       progress(job.jobId, "done");
     }
@@ -323,9 +364,10 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
       if (gone.length > 0) deps.log(`[worker] board no longer wants ${gone.length} verify job(s) (${gone.join(", ")}): reaped`);
       return gone;
     },
-    capability: () => ({ slots: deps.slots, freeSlots: Math.max(0, deps.slots - running.size), ramGb: deps.ramGb }),
+    capability: () => ({ slots: deps.slots, freeSlots: Math.max(0, deps.slots - running.size), ramGb: deps.ramGb, jobIds: [...running] }),
     onConnected() {
       pruneFinished();
+      deps.log(`[worker] verify re-sync on connect: running [${[...running].join(", ")}], buffered verdicts [${[...finished.keys()].join(", ")}], ${Math.max(0, deps.slots - running.size)}/${deps.slots} slots free`);
       for (const jobId of running) { const f = lastProgress.get(jobId); if (f) deps.sendToBoard(f); }
       for (const entry of finished.values()) for (const f of entry.frames) deps.sendToBoard(f);
     },

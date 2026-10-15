@@ -91,7 +91,7 @@ describe("verify job frames: board ↔ worker round trip (#1437)", () => {
   });
 
   it("advertises capability: slots, free slots and RAM", () => {
-    expect(wire({ slots: 2 }).worker.capability()).toEqual({ slots: 2, freeSlots: 2, ramGb: 32 });
+    expect(wire({ slots: 2 }).worker.capability()).toEqual({ slots: 2, freeSlots: 2, ramGb: 32, jobIds: [] });
   });
 
   it("lists the worker as a candidate with its free slots", async () => {

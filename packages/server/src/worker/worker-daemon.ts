@@ -673,7 +673,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         boardUrl,
         workerVersion,
         log,
-        handlers: { updateNow: () => selfUpdate.updateNow(), status: () => selfUpdate.controlStatus(), ...opts.lifecycle?.({ stateFile, workRoot, boardUrl, draining: () => draining, sessionsLeft: () => runner.runningSessionIds().length, effective: () => ({ ...settings.effectiveOptions(opts), verifySlots }), pinned: () => settings.report().pinned, desired: () => settings.desired(), profiles: () => attestedProfiles().map((p) => `${p.provider}:${p.name}`), harnessMode: () => opts.harness?.mode }) }, // #1443/#1451
+        handlers: { updateNow: () => selfUpdate.updateNow(), status: () => selfUpdate.controlStatus(), ...opts.lifecycle?.({ stateFile, workRoot, boardUrl, draining: () => draining, sessionsLeft: () => runner.runningSessionIds().length, effective: () => ({ ...settings.effectiveOptions(opts), verifySlots }), pinned: () => settings.report().pinned, desired: () => settings.desired(), profiles: () => attestedProfiles().map((p) => `${p.provider}:${p.name}`), harnessMode: () => opts.harness?.mode, verify: () => verifyJobs.capability() }) }, // #1443/#1451/#1479
       })
     : null;
 
