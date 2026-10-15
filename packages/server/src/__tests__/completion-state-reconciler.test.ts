@@ -122,6 +122,7 @@ describe("reconcileCompletionStates", () => {
       issueStatusName: "In Review",
       workspaceStatus: "active",
       sessionPid: null,
+      sessionStartedAt: makeNow(-10 * 60_000), // past the #1509 launch grace
     });
 
     const count = await reconcileCompletionStates(db, {

@@ -20,6 +20,13 @@ import { usageLimitHoldsUntil } from "./exit/usage-limit-cooldown.js";
 import { getImplementExitAttention } from "../services/implement-exit-check-state.js";
 
 /** How long a workspace must be in 'active' with a live PID before we reconcile it (hung agent). */
+/**
+ * #1509: a session younger than this with no pid and no worker stamp is still LAUNCHING, not dead.
+ * A remote-dispatched session gets both only at the END of the launch (the worker stamp after the
+ * assign is built), and the agent-launch phase measured 15.9 s; a host session's pid lands after spawn.
+ */
+export const SESSION_LAUNCH_GRACE_MS = 3 * 60 * 1000;
+
 const HUNG_AGENT_THRESHOLD_MS = 30 * 60 * 1000;
 
 /**
@@ -264,6 +271,17 @@ export async function reconcileCompletionStates(
     // now decided in ONE place that knows the difference between "no process" and
     // "no information" (services/remote-session-liveness.ts), and an `unknown`
     // verdict HOLDS: the board reports what it cannot see and changes nothing.
+    if (pid == null && !c.sessionWorkerId) {
+      const startedMs = c.sessionStartedAt ? Date.parse(c.sessionStartedAt) : NaN;
+      if (Number.isFinite(startedMs) && nowMs - startedMs < SESSION_LAUNCH_GRACE_MS) {
+        console.warn(
+          `[reconciler] holding session ${c.sessionId} (workspace ${c.workspaceId}): no pid or worker stamp yet but it started ` +
+            `${Math.round((nowMs - startedMs) / 1000)}s ago, inside the ${SESSION_LAUNCH_GRACE_MS / 1000}s launch grace (#1509)`,
+        );
+        continue;
+      }
+    }
+
     const verdict: LivenessVerdict = c.sessionWorkerId
       ? await probeRemote(
           { workerId: c.sessionWorkerId, startedAt: c.sessionStartedAt },

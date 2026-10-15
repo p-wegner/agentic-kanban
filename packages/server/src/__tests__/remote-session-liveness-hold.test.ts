@@ -135,6 +135,20 @@ describe("remote session liveness is three-valued (#744)", () => {
     expect(session.status).toBe("stopped");
   });
 
+  it("#1509: a pid-less, worker-less session still inside its launch grace is held, not reaped", async () => {
+    const { sessionId, workspaceId } = await seed(db, { workerId: null, pid: null });
+    const count = await reconcileCompletionStates(db, {
+      now: new Date(Date.parse(NOW) - 10 * 60_000 + 15_000).toISOString(),
+      checkPid: () => false,
+      checkCommits: async () => true,
+    });
+    expect(count).toBe(0);
+    const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+    expect(session.status).toBe("running");
+    const [ws] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+    expect(ws.status).toBe("active");
+  });
+
   it("the zombie-fix reconciler holds a pid-less remote review session instead of reaping it", async () => {
     const { sessionId, workspaceId } = await seed(db, {
       workerId: "worker-1", pid: null, triggerType: "review", workspaceStatus: "reviewing",
