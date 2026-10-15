@@ -1,3 +1,4 @@
+// @gate:always-run when:scripts/promote-boot-diagnostics.mjs,scripts/promote.mjs
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
