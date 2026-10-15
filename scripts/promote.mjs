@@ -86,7 +86,8 @@
  * KANBAN_PROMOTE_SWEEP_WAIT_MIN — all documented in `docs/env-vars.md`.
  */
 import { spawn, spawnSync, execSync, execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { BASE_BOOT_TIMEOUT_MS, chooseBootTimeoutMs, formatBootDiagnostics, hostMemory, isPidAlive, readLogTail } from "./promote-boot-diagnostics.mjs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitExecSyncResult } from "./git-exec.mjs";
@@ -682,12 +683,46 @@ function startStableBoard() {
     stdio: ["ignore", out, out],
   });
   child.unref();
+  // #1504 — remember the child so a failed smoke can say what became of it.
+  let logOffset = 0;
+  try {
+    logOffset = fstatSync(out).size;
+  } catch {
+    /* tail from the start instead */
+  }
+  lastBoot = { pid: child.pid, startedAt: Date.now(), logOffset, exit: null };
+  const record = lastBoot;
+  child.on("exit", (code, signal) => {
+    record.exit = { code, signal };
+  });
   log(`[promote] started stable board pid ${child.pid} on ${stablePort} (cwd ${stableCheckout}, output -> ${boardLogPath})`);
   return child.pid;
 }
 
-async function waitForHealth(timeoutMs = 180_000) {
-  const deadline = Date.now() + timeoutMs;
+/** #1504 — the most recent stable-board spawn; null until startStableBoard() has run. */
+let lastBoot = null;
+
+/** One-line process snapshot for an alive-but-silent child (Windows tasklist; best effort). */
+function describeAliveProcess(pid) {
+  if (process.platform !== "win32") return "";
+  try {
+    const r = spawnSync("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "LIST"], { encoding: "utf8", windowsHide: true, timeout: 10_000 });
+    const mem = /Mem Usage:\s*(.+)/i.exec(r.stdout ?? "")?.[1]?.trim();
+    return mem ? `child working set: ${mem}` : "";
+  } catch {
+    return "";
+  }
+}
+
+async function waitForHealth(timeoutMs) {
+  const memory = hostMemory();
+  // #1504 — a host short on free RAM pages during boot; give it the longer budget rather than fail.
+  const budgetMs = timeoutMs ?? chooseBootTimeoutMs(memory.freeBytes);
+  if (budgetMs > BASE_BOOT_TIMEOUT_MS) {
+    log(`[promote] host free RAM ${(memory.freeBytes / 1024 ** 3).toFixed(2)} GiB is below the floor — boot budget extended to ${budgetMs / 1000}s`);
+  }
+  const startedAt = Date.now();
+  const deadline = startedAt + budgetMs;
   while (Date.now() < deadline) {
     try {
       const res = await fetch(`${boardUrl}/health`, { signal: AbortSignal.timeout(4000) });
@@ -697,6 +732,23 @@ async function waitForHealth(timeoutMs = 180_000) {
       /* not up yet */
     }
     await new Promise((r) => setTimeout(r, 1000));
+  }
+  // #1504 — record the child's state BEFORE the caller rolls back and kills it.
+  if (lastBoot) {
+    const alive = isPidAlive(lastBoot.pid);
+    log(
+      "[promote] boot diagnostics:\n" +
+        formatBootDiagnostics({
+          pid: lastBoot.pid,
+          alive,
+          exit: lastBoot.exit,
+          elapsedMs: Date.now() - lastBoot.startedAt,
+          memory: hostMemory(),
+          timeoutMs: budgetMs,
+          logTail: readLogTail(boardLogPath, lastBoot.logOffset),
+          extra: alive ? describeAliveProcess(lastBoot.pid) : "",
+        }),
+    );
   }
   return { ok: false, body: null };
 }
