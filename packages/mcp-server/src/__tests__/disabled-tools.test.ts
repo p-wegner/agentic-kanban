@@ -11,7 +11,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { type ChildProcess } from "node:child_process";
 import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -32,8 +32,15 @@ const SPAWN_HOOK_TIMEOUT_MS = 120_000;
 const DISABLED = ["delete_issue", "delete_workspace"] as const;
 const CONTROL = "get_context";
 
-function createTestDb(dbPath: string): void {
-  const db = new DatabaseSync(dbPath);
+// The migrated schema is built ONCE per file and copied per describe (#1511): replaying every
+// migration statement for each describe was the 120 s beforeAll timeout under load.
+let templateDir: string | null = null;
+let templatePath: string | null = null;
+function migratedTemplate(): string {
+  if (templatePath) return templatePath;
+  templateDir = mkdtempSync(join(tmpdir(), "ak-mcp-test-disabled-tpl-"));
+  const built = join(templateDir, "template.db");
+  const db = new DatabaseSync(built);
   for (const file of migrationFilesInOrder()) {
     const sql = readFileSync(join(SHARED_DRIZZLE, file), "utf-8");
     const statements = sql
@@ -45,6 +52,15 @@ function createTestDb(dbPath: string): void {
     }
   }
   db.close();
+  templatePath = built;
+  process.on("exit", () => {
+    try { rmSync(templateDir!, { recursive: true, force: true }); } catch { /* the ak- reaper is the backstop */ }
+  });
+  return built;
+}
+
+function createTestDb(dbPath: string): void {
+  copyFileSync(migratedTemplate(), dbPath);
 }
 
 function seedProject(db: InstanceType<typeof DatabaseSync>, opts: { id: string; name: string; active?: boolean }): void {
