@@ -7,7 +7,25 @@
 import type { SetupScriptResult } from "@agentic-kanban/shared/lib/setup-script";
 import type { Database } from "../db/index.js";
 import { describeGateHold, type GateHostAdmission } from "./gate-quiesce.js";
+import { runOffHostVerifyChainTimed } from "./verify-chain-off-host.js";
+import { runUnderVerifyChainSemaphoreTimed, type VerifyChainPriority } from "./verify-chain-semaphore.js";
 import { planVerifyPlacement, readHeadSha, runOnPlannedWorker } from "./verify-job-placement.js";
+
+/**
+ * #1497: the chain slot a verify chain waits for follows WHERE its script runs. A host run takes
+ * the host's RAM-sized verify-chain slot; a worker run (`workerName` set) does not — it is bounded
+ * by the worker's own verify slots (#1496) and shows in the chain list as "on <worker>".
+ */
+export function runVerifyChainForPlacement<T>(
+  workerName: string | undefined,
+  chain: () => Promise<T>,
+  label: string,
+  opts?: { priority?: VerifyChainPriority },
+): Promise<{ result: T; queueWaitMs: number; lockNote: string | null }> {
+  return workerName
+    ? runOffHostVerifyChainTimed(chain, label, workerName, opts)
+    : runUnderVerifyChainSemaphoreTimed(chain, label, opts);
+}
 
 export type GateScriptRunner = (env: Record<string, string>) => Promise<SetupScriptResult>;
 

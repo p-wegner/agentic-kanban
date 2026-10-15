@@ -80,6 +80,7 @@ import {
   readTier0Capacity,
   type VerifyChainSlots,
 } from "@agentic-kanban/shared/lib/machine-capacity";
+import { clearOffHostChainsForTests, listOffHostChains } from "./verify-chain-off-host.js";
 import { clearRunningVerifyChainsForTests, listRunningVerifyChains, registerRunningVerifyChain } from "./verify-chain-registry.js";
 import {
   MACHINE_VERIFY_ROLES,
@@ -128,7 +129,7 @@ interface VerifyChainWaiter {
 let active = 0;
 const waiters: VerifyChainWaiter[] = [];
 /** #1449: the chains holding a slot right now, so `status --watch` can name them. */
-const runningChains = new Set<{ label: string; priority: VerifyChainPriority; startedAtMs: number }>();
+const runningChains = new Set<{ label: string; priority: VerifyChainPriority; startedAtMs: number; worker?: string }>();
 const foregroundDemands = new Set<symbol>();
 
 /** A gate waiting for a probe to stop must be visible before it can take a slot. */
@@ -253,6 +254,8 @@ export interface VerifyChainSnapshotEntry {
   label: string;
   priority: VerifyChainPriority;
   state: "running" | "queued";
+  /** #1497: set when the chain's script runs on this fleet worker (it holds no host slot). */
+  worker?: string;
   /** Running: ms since it took its slot. Queued: ms since it joined the queue. */
   ageMs: number;
   /** Running only (#1462): the stage and vitest progress the runner reported, when it did. */
@@ -268,10 +271,11 @@ export interface VerifyChainSnapshotEntry {
 /** #1449: every running and queued chain with its age and wait reason — a plain read of module state. */
 export function listVerifyChains(nowMs: number = Date.now()): VerifyChainSnapshotEntry[] {
   const progress = listRunningVerifyChains();
-  const out: VerifyChainSnapshotEntry[] = [...runningChains].map((r) => {
+  const out: VerifyChainSnapshotEntry[] = [...runningChains, ...listOffHostChains()].map((r) => {
     const p = progress.find((c) => c.label === r.label && c.startedAtMs >= r.startedAtMs);
     return {
       label: r.label, priority: r.priority, state: "running" as const, ageMs: Math.max(0, nowMs - r.startedAtMs),
+      ...(r.worker ? { worker: r.worker } : {}),
       ...(p?.stage ? { stage: p.stage } : {}), ...(p?.filesDone != null ? { filesDone: p.filesDone } : {}), ...(p?.filesTotal != null ? { filesTotal: p.filesTotal } : {}),
     };
   });
@@ -533,6 +537,7 @@ export function resetVerifyChainSemaphoreForTests(
   active = 0;
   waiters.length = 0;
   runningChains.clear();
+  clearOffHostChainsForTests();
   clearRunningVerifyChainsForTests();
   foregroundDemands.clear();
   if (readmitTimer) clearInterval(readmitTimer);
