@@ -14,6 +14,8 @@ import { readHeadSha, tryRunOnWorker, VerifyJobHeldError, type VerifyWorkerRunne
 
 export const IMPACT_MAP_BEGIN = "<<<IMPACT_MAP_BEGIN>>>";
 export const IMPACT_MAP_END = "<<<IMPACT_MAP_END>>>";
+/** Printed (exit 0) when the worker checkout has no impact tool: an infra refusal, not a red build (#1506). */
+export const IMPACT_TOOL_MISSING = "<<<IMPACT_TOOL_MISSING>>>";
 const BUILD_TIMEOUT_MS = 10 * 60 * 1000;
 
 export interface ImpactMapPlacement {
@@ -21,7 +23,18 @@ export interface ImpactMapPlacement {
   database: Database;
   /** Injected for tests; defaults to the registered verify runner. */
   workerRunner?: VerifyWorkerRunner | null;
+  nowMs?: number;
 }
+
+/**
+ * Projects whose worker said it has no impact tool (#1506), keyed by project id -> when. The tool
+ * is a gitignored host-only symlink, so no placement of this job can succeed until the worker
+ * build ships it. Within the TTL the board builds on the host WITHOUT asking a worker, so the
+ * 15-minute reconciler neither re-places the same refused job every cycle nor leaves the map stale.
+ */
+const TOOL_MISSING_TTL_MS = 6 * 60 * 60 * 1000;
+const toolMissingSince = new Map<string, number>();
+export const resetImpactToolMissing = (): void => toolMissingSince.clear();
 
 export interface PlacedImpactBuild {
   ok: boolean;
@@ -42,7 +55,13 @@ export function impactMapWorkerCommand(repoPath: string, tool: string, durations
   if (durations) build.push("--durations", JSON.stringify(toRepoRelative(repoPath, durations)));
   const mapRel = toRepoRelative(repoPath, mapPath);
   const emit = `process.stdout.write('\\n${IMPACT_MAP_BEGIN}\\n'+require('fs').readFileSync('${mapRel}','utf8')+'\\n${IMPACT_MAP_END}\\n')`;
-  return `${build.join(" ")} && node -e "${emit}"`;
+  // The tool lives in the gitignored `.claude/skills/` (a host-only symlink), so a worker clone may
+  // not have it. Exit 0 with a marker rather than letting node die with MODULE_NOT_FOUND (exit 1),
+  // which the board reads as a red verdict and re-places every cycle.
+  const toolRel = toRepoRelative(repoPath, tool);
+  const guard = `if(require('fs').existsSync('${toolRel}'))process.exit(1);console.log('${IMPACT_TOOL_MISSING}')`;
+  const guardCmd = `node -e "${guard}"`;
+  return `${guardCmd} || (${build.join(" ")} && node -e "${emit}")`;
 }
 
 export function extractImpactMapArtifact(log: string): string | null {
@@ -67,6 +86,9 @@ export async function runImpactMapBuildOnWorker(args: {
   mapPath: string;
 }): Promise<PlacedImpactBuild | null> {
   const { placement, repoPath, mapPath } = args;
+  const nowMs = placement.nowMs ?? Date.now();
+  const since = toolMissingSince.get(placement.projectId);
+  if (since !== undefined && nowMs - since < TOOL_MISSING_TTL_MS) return null;
   try {
     const placed = await tryRunOnWorker({
       kind: "impact-map", projectId: placement.projectId, database: placement.database, workerRunner: placement.workerRunner,
@@ -76,6 +98,12 @@ export async function runImpactMapBuildOnWorker(args: {
     });
     if (!placed) return null;
     const log = placed.result.stdout;
+    if (log.includes(IMPACT_TOOL_MISSING)) {
+      // Infra refusal, not a red verdict: remember it and let the caller build on the host.
+      toolMissingSince.set(placement.projectId, nowMs);
+      console.warn(`[test-impact-map] worker ${placed.workerName} has no impact tool (.claude/skills is gitignored); building on the host`);
+      return null;
+    }
     if (placed.result.exitCode !== 0) return { ok: false, workerName: placed.workerName, detail: `worker ${placed.workerName}: impact build failed: ${log.slice(-400)}` };
     const artifact = extractImpactMapArtifact(log);
     if (!artifact) return { ok: false, workerName: placed.workerName, detail: `worker ${placed.workerName} built but returned no readable map artifact` };
