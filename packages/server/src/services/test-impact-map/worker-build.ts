@@ -14,6 +14,8 @@ import { readHeadSha, tryRunOnWorker, VerifyJobHeldError, type VerifyWorkerRunne
 
 export const IMPACT_MAP_BEGIN = "<<<IMPACT_MAP_BEGIN>>>";
 export const IMPACT_MAP_END = "<<<IMPACT_MAP_END>>>";
+/** Printed (exit 0) when the worker checkout has no impact tool: an infra refusal, not a red build (#1506). */
+export const IMPACT_TOOL_MISSING = "<<<IMPACT_TOOL_MISSING>>>";
 const BUILD_TIMEOUT_MS = 10 * 60 * 1000;
 
 export interface ImpactMapPlacement {
@@ -42,7 +44,13 @@ export function impactMapWorkerCommand(repoPath: string, tool: string, durations
   if (durations) build.push("--durations", JSON.stringify(toRepoRelative(repoPath, durations)));
   const mapRel = toRepoRelative(repoPath, mapPath);
   const emit = `process.stdout.write('\\n${IMPACT_MAP_BEGIN}\\n'+require('fs').readFileSync('${mapRel}','utf8')+'\\n${IMPACT_MAP_END}\\n')`;
-  return `${build.join(" ")} && node -e "${emit}"`;
+  // The tool lives in the gitignored `.claude/skills/` (a host-only symlink), so a worker clone may
+  // not have it. Exit 0 with a marker rather than letting node die with MODULE_NOT_FOUND (exit 1),
+  // which the board reads as a red verdict and re-places every cycle.
+  const toolRel = toRepoRelative(repoPath, tool);
+  const guard = `if(require('fs').existsSync('${toolRel}'))process.exit(1);console.log('${IMPACT_TOOL_MISSING}')`;
+  const guardCmd = `node -e "${guard}"`;
+  return `${guardCmd} || (${build.join(" ")} && node -e "${emit}")`;
 }
 
 export function extractImpactMapArtifact(log: string): string | null {
@@ -76,6 +84,9 @@ export async function runImpactMapBuildOnWorker(args: {
     });
     if (!placed) return null;
     const log = placed.result.stdout;
+    if (log.includes(IMPACT_TOOL_MISSING)) {
+      return { ok: false, held: true, workerName: placed.workerName, detail: `worker ${placed.workerName} has no impact tool checked out (.claude/skills is gitignored); map not refreshed` };
+    }
     if (placed.result.exitCode !== 0) return { ok: false, workerName: placed.workerName, detail: `worker ${placed.workerName}: impact build failed: ${log.slice(-400)}` };
     const artifact = extractImpactMapArtifact(log);
     if (!artifact) return { ok: false, workerName: placed.workerName, detail: `worker ${placed.workerName} built but returned no readable map artifact` };
