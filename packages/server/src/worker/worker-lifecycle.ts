@@ -120,6 +120,8 @@ export interface LifecycleCtx {
   /** #1451: attested provider:profile pairs and the harness mode (absent on older callers). */
   profiles?(): string[];
   harnessMode?(): string | undefined;
+  /** #1479: verify slots and in-flight job ids. */
+  verify?(): { slots: number; freeSlots: number; ramGb: number; jobIds?: string[] };
 }
 
 export interface StatusSetting {
@@ -165,6 +167,7 @@ export function buildLifecycleDetails(ctx: LifecycleCtx): Record<string, unknown
     profiles: ctx.profiles?.() ?? [],
     harnessMode: ctx.harnessMode?.(),
     resources, // #1451
+    ...(ctx.verify ? { verify: ctx.verify() } : {}), // #1479
     daemonNode: process.version,
     sessionsNode: probeNodeOnPath(),
     undelivered: loadUndelivered(ctx.workRoot).map((r) => ({
