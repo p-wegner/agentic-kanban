@@ -506,6 +506,7 @@ describe("board-status slim projections (#418)", () => {
       "stats",
       "status",
       "triggerType",
+      "workerId",
       "workspaceId",
     ]);
   });
