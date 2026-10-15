@@ -11,6 +11,38 @@ First archive pass: 2026-08-27, cutting at the 2026-08-24 boundary (`CONTINUE.md
 
 ---
 
+## 2026-10-14 (evening): old worktrees gone, board fast again, four trains landed
+
+**Goal (Peter):** get the board backlog done using the workers.
+
+- **Board speed (#1488):** the board's event loop sat ~94% in `child_process.spawn` (git spawns
+  for ~360 old lab-project worktrees in background sweeps). Peter OK'd closing them: 320 old
+  workspaces closed after a WIP commit on each branch, 295 worktrees removed (2 kept: their WIP
+  commit failed). After a board restart, loop-lag p50 fell from ~1.1 s to ~16 ms (board.log
+  `[loop-lag]`); 1-2 s spikes remain. #1488 (hook backfill skips, git spawn budget, lag
+  attribution) landed in train 49.
+- **Landed:** train 48 (#1463 #1485), train 49 (#1480 #1483 #1488), #1456 alone (gate on
+  ao-pf38). Master 83332fea4, pushed to origin. Direct fix: #1494 (4dcb68246), the
+  impact-selector exclusion tests read the real diff and failed on any branch touching
+  `packages/server/src/cli/**`.
+- **Stable is still `stable-20261014-5`** (cca416c4c); the full sweep is owed and nothing since
+  has been promoted.
+- **Workers:** only ao-pf38 is on `verify_workers` now. desktop-stable was taken off at its
+  agent's request (RAM swings to ~1 GB with Peter's GPU jobs); re-add when the queue backs up.
+  A worker runs ONE verify at a time (`slots: 1`, `worker-daemon.ts:507`), whatever its
+  maxConcurrency, and `/api/workers` does not show it (#1492, #1479).
+- **Every worker-gated verify runs twice** (#1493): the first run fails on a missing-deps
+  signature after ~50 min; 18 of 20 verify checkouts on ao-pf38 lack
+  `@anthropic-ai/claude-agent-sdk` (exported trees; the 2 git checkouts have it). Builder running.
+- **Filed today (evening):** #1489 orphaned worker verify after cancel/restart, #1490 builder
+  assignment never reached the worker, #1491 taskkill noise, #1492 held-gate retry never fires +
+  verify slots, #1493 missing SDK, #1494 (Done).
+- **In flight:** builders #1493 and #1492 on ao-pf38. Todo: #1477-#1479, #1482, #1484, #1486,
+  #1487, #1489-#1491. The commit identity on ao-pf38 is the work address; Peter accepted it in
+  public commits (push as is).
+
+**Next:** land #1493 (halves every worker gate), then #1492; sweep master and promote stable.
+
 ## 2026-10-14 (morning): workers gate and land trains; stable-20261014-5
 
 **Goal (Peter):** get the board backlog done using the workers.

@@ -3,37 +3,44 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
-## 2026-10-14 (evening): old worktrees gone, board fast again, four trains landed
+## 2026-10-15: stable 95ddbc975 live, eight tickets ready, host reboot pending
 
 **Goal (Peter):** get the board backlog done using the workers.
 
-- **Board speed (#1488):** the board's event loop sat ~94% in `child_process.spawn` (git spawns
-  for ~360 old lab-project worktrees in background sweeps). Peter OK'd closing them: 320 old
-  workspaces closed after a WIP commit on each branch, 295 worktrees removed (2 kept: their WIP
-  commit failed). After a board restart, loop-lag p50 fell from ~1.1 s to ~16 ms (board.log
-  `[loop-lag]`); 1-2 s spikes remain. #1488 (hook backfill skips, git spawn budget, lag
-  attribution) landed in train 49.
-- **Landed:** train 48 (#1463 #1485), train 49 (#1480 #1483 #1488), #1456 alone (gate on
-  ao-pf38). Master 83332fea4, pushed to origin. Direct fix: #1494 (4dcb68246), the
-  impact-selector exclusion tests read the real diff and failed on any branch touching
-  `packages/server/src/cli/**`.
-- **Stable is still `stable-20261014-5`** (cca416c4c); the full sweep is owed and nothing since
-  has been promoted.
-- **Workers:** only ao-pf38 is on `verify_workers` now. desktop-stable was taken off at its
-  agent's request (RAM swings to ~1 GB with Peter's GPU jobs); re-add when the queue backs up.
-  A worker runs ONE verify at a time (`slots: 1`, `worker-daemon.ts:507`), whatever its
-  maxConcurrency, and `/api/workers` does not show it (#1492, #1479).
-- **Every worker-gated verify runs twice** (#1493): the first run fails on a missing-deps
-  signature after ~50 min; 18 of 20 verify checkouts on ao-pf38 lack
-  `@anthropic-ai/claude-agent-sdk` (exported trees; the 2 git checkouts have it). Builder running.
-- **Filed today (evening):** #1489 orphaned worker verify after cancel/restart, #1490 builder
-  assignment never reached the worker, #1491 taskkill noise, #1492 held-gate retry never fires +
-  verify slots, #1493 missing SDK, #1494 (Done).
-- **In flight:** builders #1493 and #1492 on ao-pf38. Todo: #1477-#1479, #1482, #1484, #1486,
-  #1487, #1489-#1491. The commit identity on ao-pf38 is the work address; Peter accepted it in
-  public commits (push as is).
+- **Stable is `stable-20261015-3` = 95ddbc975** (recovery lane, smoke passed; a full sweep is
+  OWED, `promote-recovery.json`). Two earlier promotions of 9044be7ab rolled back: the board exited
+  0 mid-boot with no log line. Cause: #1488's git budget timer was unref'd, so with ~30 projects
+  queued in `deduplicateProjects` the event loop drained before the server listened. Fixed in
+  #1507 (95ddbc975, regression test bites when the unref is restored; reproduced and verified by
+  booting the bundle against a DB copy).
+- **Base health:** green at 95ddbc975 (desktop-stable probe, 16:58Z). Two earlier probes were red
+  from timeouts only (ao-pf38: 3 DB-setup hooks at 120 s; desktop: merge-train.test.ts, 113 s
+  alone). #1511 builder is on the slow suites.
+- **Ready to merge (8):** #1498 #1499 #1502 #1504 #1505 #1506 #1508 #1509. #1479 is at its
+  pre-merge gate. Building: #1477 #1478 #1510 #1511. Todo: #1491 #1495 #1501 (after #1499)
+  #1503 (after #1502).
+- **No train has formed since 04:06Z.** The window released 7 workspaces at ~17:07Z and nothing
+  ran; a hand `POST /api/merge-queue` (SSE, aborts on client disconnect) produced no event in
+  10 min. The board's loop lag was p50 ~2 s with the git spawn queue full of `diff`/`ls-files`.
+  Host: ~11 GB kernel pool, free RAM down to 0.4-3 GB. **Peter is rebooting the host.**
+- **Settings changed today (revert when noted):** `test_impact_map_refresh=false` until #1506
+  lands (impact-map jobs failed on workers every 15 min and held the host repo lock);
+  wsl-stable `drain=true` (on-host worker, host RAM); `verify_workers=ao-pf38,desktop-stable`
+  (desktop agent OK'd at 11.7 GB free and will say if it drops under 4 GB).
+- **Filed today:** #1507 (Done), #1508 dedup data-loss path, #1509 reconciler reaps a launching
+  remote session (also hits reviews), #1510 worker reconnect after a stall (sessions finalized as
+  crashed, assignments re-sent and retired, progress reset, empty failingSuites, no results-drop
+  command), #1511 slow suites.
+- **ao-pf38 %TEMP%** holds ~197k dirs, mostly non-kanban tools; its agent asks Peter before
+  touching those.
 
-**Next:** land #1493 (halves every worker gate), then #1492; sweep master and promote stable.
+**After the reboot:**
+1. `cd agentic-kanban-stable && pnpm stable:start` (or `pnpm promote --restart-stable`); check
+   `/health` and that the 3 workers reconnect (`/api/workers`).
+2. Check `[loop-lag]` in `.kanban/board.log` is back to ~16 ms, then let auto-merge form a train
+   or `POST /api/merge-queue {workspaceIds}` with the client kept open. First train: #1502 #1506
+   #1508 #1509 #1504; then #1498 #1499 #1505 #1479.
+3. Re-enable `test_impact_map_refresh` once #1506 is merged; then promote with a full sweep.
 
 ## Archive
 
@@ -41,6 +48,8 @@ Passes older than today have been moved **verbatim, newest first** into
 [`docs/archive/CONTINUE-archive.md`](docs/archive/CONTINUE-archive.md). Nothing is re-verified or
 edited on the way in, so each pass records what that session believed at the time. The archive
 holds:
+- **2026-10-14 evening (moved 2026-10-15):** old worktrees closed, board fast again, trains
+  48-49, #1489-#1494.
 - **2026-10-14 morning (moved 2026-10-14 evening):** worker trains land, the lockfile
   incident, stable-20261014-5, #1478-#1486.
 - **2026-10-14 night (moved 2026-10-14 morning):** two hand flushes, the reboot, #1444-#1477.
