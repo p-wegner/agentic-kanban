@@ -33,6 +33,10 @@ export interface LiveMergeTrain {
    * `abandoned` while the job keeps running to completion (the #1153 gap).
    */
   abortController: AbortController;
+  /** #1513 — staging gates (whole-train, bisect halves, control arm) running for this job right now. */
+  activeGates?: number;
+  /** #1513 — epoch ms of the job's last gate start/end; what "idle with no job" is measured from. */
+  lastActivityMs?: number;
 }
 
 /** Read-only view of the registry a sweep decides against. */
@@ -53,8 +57,38 @@ export function registerLiveMergeTrain(entry: { trainId: string; label: string; 
     projectId: entry.projectId,
     registeredAtMs: entry.nowMs ?? Date.now(),
     abortController,
+    activeGates: 0,
+    lastActivityMs: entry.nowMs ?? Date.now(),
   });
   return abortController;
+}
+
+/** #1513 — a staging gate for this job started (true) or finished (false). No-op for an unregistered job. */
+export function noteMergeTrainGateActivity(trainId: string, started: boolean, nowMs: number = Date.now()): void {
+  const entry = live.get(trainId);
+  if (!entry) return;
+  entry.activeGates = Math.max(0, (entry.activeGates ?? 0) + (started ? 1 : -1));
+  entry.lastActivityMs = nowMs;
+}
+
+/** #1513: bracket one staging gate, so a job with NO gate running can be told from one mid-verify. */
+export async function withMergeTrainGateActivity<T>(trainId: string, run: () => Promise<T>): Promise<T> {
+  noteMergeTrainGateActivity(trainId, true);
+  try {
+    return await run();
+  } finally {
+    noteMergeTrainGateActivity(trainId, false);
+  }
+}
+
+/**
+ * #1513 — a live job that has run NO gate for `stallMs`: it is registered (so the sweep skips it
+ * as "live in this process") but nothing is verifying, bisecting or fixing, so nothing will ever
+ * move it. Pure over the entry.
+ */
+export function isMergeTrainStalled(entry: Pick<LiveMergeTrain, "activeGates" | "lastActivityMs">, nowMs: number, stallMs: number): boolean {
+  // An entry that never reported activity (a hand-built snapshot) is never judged stalled.
+  return entry.activeGates === 0 && entry.lastActivityMs !== undefined && nowMs - entry.lastActivityMs >= stallMs;
 }
 
 /** Clear a train job. Idempotent — safe from a `finally` that may run after an explicit clear. */

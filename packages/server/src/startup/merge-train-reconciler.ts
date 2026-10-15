@@ -57,7 +57,10 @@ import {
   trainAttemptLabelFromBranch,
 } from "../services/merge-train-worktrees.js";
 import {
+  abortLiveMergeTrain,
   findLiveMergeTrainForProject,
+  isMergeTrainStalled,
+  unregisterLiveMergeTrain,
   snapshotLiveMergeTrains,
   type LiveMergeTrainSnapshot,
 } from "../services/merge-train-live-registry.js";
@@ -65,6 +68,9 @@ import { getHeldWorkspaceIdsAmong } from "../repositories/merge-hold.repository.
 
 /** How often the reconciler sweeps for stranded trains (defence in depth beyond the boot pass). */
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
+
+/** #1513: a live train with no gate running for this long has no job behind it, whatever the registry says. */
+export const STALLED_LIVE_TRAIN_MS = 20 * 60 * 1000;
 
 export type MergeTrainReconcileAction = "resume" | "abandon";
 
@@ -187,6 +193,37 @@ function skipIfLive(
 }
 
 /**
+ * #1513 — a row whose job is registered in this process but has run NO gate for
+ * {@link STALLED_LIVE_TRAIN_MS} (e.g. the fix agent ended red and nothing followed) is terminal,
+ * not live: signal the job, clear its registry entry and mark the row `abandoned` with the reason,
+ * so the members are re-assembled by the next window instead of sitting behind a train with no
+ * job. A hung job that wakes later finds the row abandoned and leaves it (`finishMergeTrain`).
+ */
+async function abandonIfStalled(
+  row: MergeTrainRow,
+  live: LiveMergeTrainSnapshot,
+  nowMs: number,
+  now: string,
+  result: MergeTrainSweepResult,
+  log: (message: string) => void,
+  database: Database | undefined,
+  boardEvents: BoardEventSink | undefined,
+): Promise<boolean> {
+  const entry = live.get(row.id);
+  if (!entry || !isMergeTrainStalled(entry, nowMs, STALLED_LIVE_TRAIN_MS)) return false;
+  const idleMinutes = Math.round((nowMs - (entry.lastActivityMs ?? nowMs)) / 60_000);
+  const reason = `stalled: registered live in this process but no gate, bisect or fix agent ran for ${idleMinutes}m - abandoned so its members can be re-assembled`;
+  abortLiveMergeTrain(row.id);
+  unregisterLiveMergeTrain(row.id);
+  await updateMergeTrainState(row.id, { state: "abandoned", reconciledReason: reason, finishedAt: now, guardStates: ["assembling", "gating"] }, database).catch(() => undefined);
+  boardEvents?.broadcast(row.projectId, "merge_train_changed");
+  result.abandoned.push(row.id);
+  recordActed(result, row.id, "abandoned-stalled");
+  log(`abandoned train ${row.id} (${row.label}, project ${row.projectId}) - ${reason}`);
+  return true;
+}
+
+/**
  * Sweep every `assembling`/`gating` row and resolve it — resume by re-invoking the caller's
  * train runner, or mark `abandoned` with a reason.
  *
@@ -231,6 +268,7 @@ export async function reconcileStrandedMergeTrains(
   // resume — and only the rows that individually decided "resume" are coalesced.
   const byProject = new Map<string, MergeTrainRow[]>();
   for (const row of rows) {
+    if (await abandonIfStalled(row, live, nowMs, now, result, log, database, opts.boardEvents)) continue;
     if (skipIfLive(row, live, nowMs, result, log)) continue;
     const ref = `train ${row.id} (${row.label}, project ${row.projectId})`;
 

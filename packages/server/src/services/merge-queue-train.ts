@@ -26,7 +26,7 @@ import {
   updateMergeTrainState,
 } from "../repositories/merge-train.repository.js";
 import { runMergeTrain, formatTrainLabel, trainDateStamp, trainRefName, type OnTrainDropped } from "./merge-train.service.js";
-import { isMergeTrainLabelLive, registerLiveMergeTrain, unregisterLiveMergeTrain } from "./merge-train-live-registry.js";
+import { isMergeTrainLabelLive, noteMergeTrainGateActivity, withMergeTrainGateActivity, registerLiveMergeTrain, unregisterLiveMergeTrain } from "./merge-train-live-registry.js";
 import { cleanupTrainWorktreesForLabel } from "./merge-train-worktrees.js";
 import { describeInconclusiveGate, describeTrainGateRed, finalTrainStateFields, inconclusiveSkipEvents, isInconclusiveGate } from "./merge-queue-train-inconclusive.js";
 export { describeTrainGateRed } from "./merge-queue-train-inconclusive.js";
@@ -39,7 +39,7 @@ import { acquireQueueRepoLock, keepRepoLockAliveUntilCancel, MERGE_TRAIN_REPO_LO
 import type { MergeQueueEvent, MergeQueuePlan } from "./merge-queue.service.js";
 import type { MergeTrainAttemptDto, MergeTrainBaseVerdict, MergeTrainGateEvidenceDto } from "@agentic-kanban/shared/types";
 import { resolveMergeTrainRedPolicy, type MergeTrainRedPolicy } from "@agentic-kanban/shared/lib/merge-train-red-strategy";
-import { createOneShotAgentRunner, runAgentFix, type AgentFixGateVerdict, type AgentFixOutcome, type TrainAgentRunner } from "./merge-train-agent-fix.js";
+import { createOneShotAgentRunner, describeAgentFixFinished, runAgentFix, type AgentFixGateVerdict, type AgentFixOutcome, type TrainAgentRunner } from "./merge-train-agent-fix.js";
 import { getBaseBranchHealthForSha, isBaseHealthAnswer } from "../repositories/base-branch-health.repository.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
@@ -562,7 +562,7 @@ function buildTrainOnRed(args: {
       worktree: gateWorktree, label, baseBranch: args.baseBranch, members: aboard,
       initialFailure: { message, failedSuites }, caps: policy.caps, runAgent: args.agentRunner, regate, placement: args.placement,
     });
-    console.log(`[merge-train] ${label}: fix agent finished - ${outcome.attempt.verdict}${outcome.attempt.failureHead ? `: ${outcome.attempt.failureHead.slice(0, 160)}` : ""}${policy.bisectAfter && !outcome.fixedTrainSha ? "; falling back to the bisect" : ""}`);
+    console.log(describeAgentFixFinished(label, outcome, policy.bisectAfter));
     return outcome;
   };
 }
@@ -629,6 +629,8 @@ async function runDoomedTrainJob(args: {
   }
   // #1503: heartbeat the lock, and free it the moment an operator cancels (see the helper).
   const stopLockKeepalive = keepRepoLockAliveUntilCancel(repoLock, abortController.signal);
+  noteMergeTrainGateActivity(trainId, false); // #1513: restart the idle clock now the repo lock is held
+
   try {
     // #1277: the project's red-handling policy, read once per train through the preference layer.
     const policy = resolveMergeTrainRedPolicy(toPrefMap(await getAllPreferencesCached(database).catch(() => [])), projectId);
@@ -651,7 +653,7 @@ async function runDoomedTrainJob(args: {
       // latest, rather than continuing through the rest of a bisect tree.
       signal: abortController.signal,
       onDropped,
-      runGate: async ({ trainRef, included, label: attemptLabel }) => {
+      runGate: ({ trainRef, included, label: attemptLabel }) => withMergeTrainGateActivity(trainId, async () => {
         // Gate the TREE THAT LANDS. A per-member gate never tests the merge commit, which is
         // how two individually-green branches can produce a red base with no conflict.
         //
@@ -713,10 +715,10 @@ async function runDoomedTrainJob(args: {
           console.log(`[merge-train] ${describeTrainGateRed({ label, attemptLabel, members: gatedMembers, stage: gate.stage, failedSuites: gate.failedSuites, guardFailure: gate.guardFailure, message: gate.message })}`);
         }
         return gate;
-      },
+      }),
       // #1204 — the CONTROL ARM, asked once before a red full train is halved: is the BARE
       // BASE red? If it is, the failure belongs to master and no member may be blamed for it.
-      gateBaseAlone: () => gateBaseAloneOnce({ database, repoPath, baseBranch, projectId, trainLabel: label }),
+      gateBaseAlone: () => withMergeTrainGateActivity(trainId, () => gateBaseAloneOnce({ database, repoPath, baseBranch, projectId, trainLabel: label })),
       closeMember: async (workspaceId) => {
         // Reuse the sanctioned already-merged path rather than reimplementing the
         // mergedAt/status/comment bookkeeping the reconcilers depend on.
