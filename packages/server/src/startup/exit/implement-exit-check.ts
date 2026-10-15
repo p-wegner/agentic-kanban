@@ -10,7 +10,7 @@
  *  2. resolves the level from the ticket's risk posture (`RiskPosture.implementExitCheck`);
  *  3. runs the check through `runImplementExitCheck` (admitted verify chain, ledgered);
  *  4. acts on the verdict (`decideImplementExitAction`):
- *     - green, skipped or held: proceed to review exactly as before;
+ *     - green, skipped or held: proceed (a held check is first re-run at backoff intervals, #1515) to review exactly as before;
  *     - red, under the cap: send the builder ONE follow-up turn naming the failures, and stop.
  *       That turn's session exits through this same path, so the check re-runs then;
  *     - red at the cap (or the turn could not be delivered): mark the workspace for attention —
@@ -111,7 +111,13 @@ export interface ImplementExitGateDeps {
   readWorkflowNode?: (workspaceId: string, database: Database) => Promise<WorkflowOwnershipNode | null | undefined>;
   listGroupMembers?: (workspaceId: string, database: Database) => Promise<string[]>;
   cap?: number;
+  /** Waits between re-runs of a held check (#1515); empty disables the retry. */
+  heldRetryDelaysMs?: number[];
+  sleep?: (ms: number) => Promise<void>;
 }
+
+/** A held check is retried at these intervals before review proceeds unverified. */
+export const IMPLEMENT_EXIT_HELD_RETRY_DELAYS_MS = [15_000, 45_000, 120_000];
 
 /** "proceed" = go on to In Review / review as before; "stop" = the board took the exit over. */
 export type ImplementExitGateOutcome = "proceed" | "stop";
@@ -122,6 +128,8 @@ export function createImplementExitGate(deps: ImplementExitGateDeps) {
   const readNode = deps.readWorkflowNode ?? getWorkspaceCurrentWorkflowNode;
   const listMembers = deps.listGroupMembers ?? listMemberIssueIds;
   const cap = deps.cap ?? IMPLEMENT_EXIT_MAX_FEEDBACK_TURNS;
+  const heldRetryDelaysMs = deps.heldRetryDelaysMs ?? IMPLEMENT_EXIT_HELD_RETRY_DELAYS_MS;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
   async function resolveLevel(ctx: ExitContext): Promise<{ posture: RiskPosture; level: ImplementExitCheckLevel }> {
     const posture = await (deps.resolvePosture ?? resolveIssueRiskPosture)(ctx.issueId, ctx.projectId, ctx.prefMap, database)
@@ -156,12 +164,22 @@ export function createImplementExitGate(deps: ImplementExitGateDeps) {
     let result: ImplementExitCheckResult;
     markImplementExitCheckInFlight(workspace.id);
     try {
-      result = await runCheck({
+      const checkArgs = {
         workspace: { id: workspace.id, workingDir: workspace.workingDir, baseBranch: workspace.baseBranch },
         projectId,
         level,
         database,
-      });
+      };
+      result = await runCheck(checkArgs);
+      // #1515: a held check verified nothing. Re-queue it (like a held merge gate) before review
+      // starts; the in-flight marker keeps the monitor off while we wait.
+      for (let i = 0; result.held && i < heldRetryDelaysMs.length; i++) {
+        console.log(
+          `[implement-exit] workspace ${workspace.id}: check held (${result.message}); retry ${i + 1}/${heldRetryDelaysMs.length} in ${Math.round(heldRetryDelaysMs[i]! / 1000)}s`,
+        );
+        await sleep(heldRetryDelaysMs[i]!);
+        result = await runCheck(checkArgs);
+      }
     } finally {
       clearImplementExitCheckInFlight(workspace.id);
     }
