@@ -123,6 +123,7 @@ import {
   parseFleetConfig,
   buildStableSpawnEnv,
   planFleetSmokeTargets,
+  probeWithRetries,
   resolveProjectName,
   resolveStableCheckout,
   resolveSweepWaitMs,
@@ -742,10 +743,13 @@ async function smoke() {
     return { ok: false, failed: "fleet host (tailscale)", detail: err instanceof Error ? err.message : String(err) };
   }
   for (const target of fleetTargets) {
-    const res = await fetch(target.url, { signal: AbortSignal.timeout(5000) }).catch(() => null);
-    if (!res || res.status !== 200) {
-      return { ok: false, failed: `${target.label} ${target.url}`, detail: `status ${res?.status ?? "none"} — the fleet is configured but not answering` };
+    const probed = await probeWithRetries(() => fetch(target.url, { signal: AbortSignal.timeout(5000) }));
+    const tryList = probed.outcomes.map((o, i) => `${i + 1}:${o}`).join(", ");
+    if (!probed.ok) {
+      log(`[promote] smoke: ${target.label} ${target.url} never answered — tries: ${tryList}`);
+      return { ok: false, failed: `${target.label} ${target.url}`, detail: `${probed.tries} tries (${tryList}) — the fleet is configured but not answering` };
     }
+    if (probed.tries > 1) log(`[promote] smoke: ${target.label} answered on try ${probed.tries} (tries: ${tryList})`);
     fleetNotes.push(target.label);
   }
   const fleetDetail = fleetNotes.length ? `; ${fleetNotes.join(" + ")} answered` : "";
