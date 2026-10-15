@@ -628,6 +628,17 @@ async function runDoomedTrainJob(args: {
     return { ok: false, reason: `train abandoned: ${reason}` };
   }
   const heartbeat = setInterval(() => repoLock.heartbeat(), 15_000);
+  // #1503: an operator cancel must free the repo lock NOW, not when the in-flight gate returns
+  // (a worker gate can run ~20 min, and the heartbeat kept refreshing for a train whose row
+  // already says abandoned, refusing every merge in the project). Nothing lands after a cancel
+  // (`vetoLandingIfAbandoned`), so the lock guards nothing; `release` is idempotent and only
+  // removes a lockfile that still belongs to this handle, so the `finally` below stays safe.
+  const releaseOnCancel = () => {
+    clearInterval(heartbeat);
+    repoLock.release();
+  };
+  if (abortController.signal.aborted) releaseOnCancel();
+  else abortController.signal.addEventListener("abort", releaseOnCancel, { once: true });
 
   try {
     // #1277: the project's red-handling policy, read once per train through the preference layer.
@@ -749,6 +760,7 @@ async function runDoomedTrainJob(args: {
     return { ok: false, reason: `train orchestrator threw: ${reason}` };
   } finally {
     clearInterval(heartbeat);
+    abortController.signal.removeEventListener("abort", releaseOnCancel);
     // #1235: the train's own teardown, under the lock it still holds. Every attempt's worktree
     // and `kanban/train/<label>*` branch goes here on BOTH exits — the gate's per-attempt
     // `finally` already removed the directory on a normal run, but the branch delete in
