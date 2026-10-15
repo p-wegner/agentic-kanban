@@ -268,7 +268,10 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
       // #1299: the review-exit gate just withheld THIS head. A clean review exit is not a green
       // gate, and arming here sent auto-merge to re-gate the same red commit.
       const head = await Promise.resolve().then(() => gitService.revParse(c.workingDir!, "HEAD")).then((s) => s.trim()).catch(() => null);
-      if (head && await isGateWithheldForHead(database, c.wsId, head)) continue;
+      if (head && await isGateWithheldForHead(database, c.wsId, head)) {
+        console.log(`[reconcile] workspace ${c.wsId} (#${c.issueNumber ?? "?"}) gate still withheld/held for ${head.slice(0, 8)} — not arming yet (#1492)`);
+        continue;
+      }
       armAfterCleanReview = true;
     }
 
