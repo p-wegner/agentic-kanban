@@ -16,6 +16,8 @@ export interface StatusScreenOptions {
   intervalSec?: number;
   /** Workers whose registry effectiveStatus is "online" (same as the Runners tab). */
   onlineWorkers?: number;
+  /** Why the operator console could not be built; shown in the frame instead of switching layouts silently (#1477). */
+  notice?: string;
 }
 
 /** Truncate to `width` visible characters with an ellipsis; never wraps. */
@@ -65,11 +67,24 @@ function fitRow(left: string, right: string, cols: number): string {
   return truncate(l + " ".repeat(pad) + right, cols);
 }
 
+/** Where a session runs: the worker on its row, "remote" when only the unlanded flag says so, else "local" (#1477). */
+export function sessionWhere(issue: BoardStatusIssue): string {
+  const workerId = issue.session?.workerId ?? issue.remoteUnlanded?.workerId;
+  if (workerId) return `@${workerId.slice(0, 8)}`;
+  return issue.remoteUnlanded ? "remote" : "local";
+}
+
+/** The in-frame sentence for a console that could not be built (#1477). */
+export function consoleUnavailableNotice(error: unknown): string {
+  const msg = (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").trim();
+  return `console unavailable: ${msg || "unknown error"}; showing the local DB view`;
+}
+
 function activeRow(issue: BoardStatusIssue, cols: number, nowMs: number): string {
   const diff = issue.diffStats && (issue.diffStats.insertions || issue.diffStats.deletions)
     ? `+${issue.diffStats.insertions}/-${issue.diffStats.deletions}`
     : "";
-  const where = issue.remoteUnlanded?.workerId ? `@${issue.remoteUnlanded.workerId.slice(0, 8)}` : "local";
+  const where = sessionWhere(issue);
   const session = issue.session ? `${issue.session.status} ${where}` : issue.workspace ? `ws ${issue.workspace.status}` : "no ws";
   const right = [diff, session, age(issue.lastActivity ?? issue.session?.endedAt ?? issue.session?.startedAt, nowMs)].filter(Boolean).join("  ");
   const head = `${num(issue).padEnd(5)} ${truncate(issue.statusName, 11).padEnd(11)} ${issue.title}`;
@@ -103,6 +118,7 @@ export function renderStatusScreen(status: BoardStatusResponse, opts: StatusScre
   ));
 
   const body: string[] = [];
+  if (opts.notice) body.push(truncate(`! ${opts.notice}`, cols));
   body.push(`ACTIVE (${active.length})`);
   for (const issue of active) {
     body.push(activeRow(issue, cols, nowMs));

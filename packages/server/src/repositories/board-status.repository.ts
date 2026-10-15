@@ -137,6 +137,7 @@ export async function getSessionsForWorkspaces(
       ...sessionLifecycleColumns,
       stats: sessions.stats,
       triggerType: sessions.triggerType,
+      workerId: sessions.workerId,
     })
     .from(sessions)
     .where(inArray(sessions.workspaceId, wsIds));
