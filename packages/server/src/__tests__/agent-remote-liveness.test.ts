@@ -215,11 +215,23 @@ describe("requestProbe — an on-demand ask for a turn about to be delivered (#9
 });
 
 describe("the hello reverse-reconcile (#746, moved here in #887)", () => {
-  it("loses a session the worker has spoken about and no longer lists", () => {
+  it("loses a session the worker has spoken about and no longer lists, after a grace window", () => {
     const h = harness();
     h.track("s1").observed = true;
     h.liveness.reconcileHello("w1", []);
+    expect(h.calls.lost).toEqual([]);
+    vi.advanceTimersByTime(SETTLE);
     expect(h.calls.lost).toEqual(["s1"]);
+  });
+
+  it("does not finalize an observed session whose exit arrives inside the grace window (#1510)", () => {
+    const h = harness();
+    h.track("s1").observed = true;
+    h.liveness.reconcileHello("w1", []);
+    h.liveness.noteObserved("s1"); // the stalled worker's late event/exit lands
+    h.sessions.delete("s1");
+    vi.advanceTimersByTime(SETTLE * 2);
+    expect(h.calls.lost).toEqual([]);
   });
 
   it("leaves a session the hello DOES list alone", () => {

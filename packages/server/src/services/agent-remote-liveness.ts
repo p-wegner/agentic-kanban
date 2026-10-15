@@ -244,7 +244,16 @@ export function createRemoteLiveness(deps: RemoteLivenessDeps) {
     for (const [sessionId, session] of sessions) {
       if (session.workerId !== workerId || listed.has(sessionId)) continue;
       if (session.observed) {
-        deps.loseSession(sessionId, workerId);
+        // #1510: after a worker event-loop stall the hello can omit a session that already exited,
+        // its exit (and pushed result) arriving seconds later. Give that exit a settle window to
+        // land before finalizing as crashed; any event for the session cancels this check.
+        if (session.lostCheckTimer) continue;
+        session.lostCheckTimer = unrefed(setTimeout(() => {
+          const current = sessions.get(sessionId);
+          if (!current || current.workerId !== workerId) return;
+          current.lostCheckTimer = undefined;
+          deps.loseSession(sessionId, workerId);
+        }, assignSettleMs));
         continue;
       }
       // Never observed: this hello may simply have crossed a fresh assign. Re-check once the
@@ -302,7 +311,19 @@ export function createRemoteLiveness(deps: RemoteLivenessDeps) {
     }, assignSettleMs));
   }
 
-  return { armAssignProbe, noteObserved, handleProbeResult, reconcileHello, cancel, requestProbe };
+  /**
+   * #1510: an `assign_failed` saying the session is "already running on this worker" is the worker
+   * confirming it is LIVE, not a launch failure. Returns true when it was that, so the caller keeps
+   * the assignment instead of re-placing (and retiring) a session that is mid-run.
+   */
+  function ignoreDuplicateAssign(workerId: string, sessionId: string, error: string): boolean {
+    if (!/already running on this worker/i.test(error)) return false;
+    log(`worker ${workerId} reports session ${sessionId} already running; keeping the assignment (duplicate assign ignored)`);
+    noteObserved(sessionId);
+    return true;
+  }
+
+  return { armAssignProbe, noteObserved, handleProbeResult, reconcileHello, cancel, requestProbe, ignoreDuplicateAssign };
 }
 
 export type RemoteLiveness = ReturnType<typeof createRemoteLiveness>;

@@ -198,7 +198,9 @@ describe("a remote session survives a socket gap (#746)", () => {
     // The recorded `session_exit` row is FK'd to a real worker.
     await db.insert(workers).values({ id: "w1", name: "w1", tokenHash: "x" } as typeof workers.$inferInsert);
     const fm = fakeManager(["w1"]);
-    const service = createRemoteAgentService(fm.manager, db, { reconnectGraceMs: 1000, abandonMs: 10_000 });
+    // #1510: a short settle window, because an observed-but-unlisted session now waits it out before
+    // being finalized (the stalled worker's exit may still be on its way).
+    const service = createRemoteAgentService(fm.manager, db, { reconnectGraceMs: 1000, abandonMs: 10_000, assignSettleMs: 50 });
     const events: AgentOutputEvent[] = [];
     launch(service, "s1", (e) => events.push(e), {
       projectId: "p1", repoPath: "C:/repo", branch: "feature/ak-1-x", baseBranch: "main",

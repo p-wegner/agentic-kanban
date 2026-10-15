@@ -318,7 +318,9 @@ export function createRemoteAgentService(
     }
     if (message.type === "assign_failed") {
       const session = sessions.get(message.sessionId);
-      if (!session || session.workerId !== workerId) return;
+      if (!session || session.workerId !== workerId || liveness.ignoreDuplicateAssign(workerId, message.sessionId, message.error)) return;
+      // #1510: "already running" is the worker confirming the session is LIVE, not a launch failure.
+      // Treating it as one re-placed (and retired) the assignment of a session that was mid-run.
       // A worker's refusal is a LAUNCH failure, not a run that exited 1 — and the kind
       // matters: a capacity refusal means another worker would have taken it, a
       // provisioning failure means THIS worker's checkout is broken. Report it to the
