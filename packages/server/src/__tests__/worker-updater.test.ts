@@ -350,6 +350,16 @@ describe("createWorkerUpdater — drain, wait, verify, switch", () => {
     }
   });
 
+  it("clears a failed update once the board advertises the worker's own build again (rollback, #1505)", async () => {
+    const h = harness({ install: async () => { throw new Error("EBUSY"); } });
+    const updater = createWorkerUpdater(h.deps);
+    updater.onBoardBuild(NEW_BUILD);
+    await updater.idle();
+    expect(updater.state()).toMatchObject({ state: "failed", targetBuild: NEW_BUILD });
+    updater.onBoardBuild(OWN); // board rolled back: in sync with our own build
+    expect(updater.state()).toEqual({ state: "current" });
+  });
+
   it("does not retry a build that failed on every heartbeat, but an explicit request does", async () => {
     const h = harness({ install: async () => { h.calls.push("install"); throw new Error("EBUSY"); } });
     const updater = createWorkerUpdater(h.deps);

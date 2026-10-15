@@ -558,7 +558,9 @@ export function createWorkerUpdater(deps: WorkerUpdaterDeps): WorkerUpdater {
     onBoardBuild(buildId, force = false) {
       if (inFlight) return;
       if (!buildId || sameBuild(buildId, deps.ownBuildId)) {
-        if (report.state === "failed" && report.targetBuild && sameBuild(report.targetBuild, deps.ownBuildId)) {
+        // In sync with what the board advertises: any earlier failure is superseded, including
+        // one aimed at a build the board has since rolled back (#1505).
+        if (report.state === "failed" && buildId) {
           set({ state: "current" });
         }
         return;
