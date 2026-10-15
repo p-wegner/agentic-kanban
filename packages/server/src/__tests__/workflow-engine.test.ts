@@ -548,6 +548,28 @@ describe("workflow-engine", () => {
     expect(wsNode.statusName).toBe("Done");
   });
 
+  it("syncCurrentNodeToStatus re-points a workspace stranded on the start node when the issue node already matches (#1498)", async () => {
+    const { syncCurrentNodeToStatus } = await import("@agentic-kanban/shared/lib/workflow-engine");
+    const { projectId, statusIds } = await seedProject(db);
+    const issueId = await seedIssue(db, projectId, statusIds["Todo"], "bug");
+    const wsId = await seedWorkspace(db, issueId);
+    await initWorkspaceWorkflow(db as any, { workspaceId: wsId, issueId });
+    const startNodeId = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, wsId)))[0].currentNodeId!;
+
+    // Move to In Review: sync points BOTH at the In Review node.
+    await db.update(schema.issues).set({ statusId: statusIds["In Review"] }).where(eq(schema.issues.id, issueId));
+    await syncCurrentNodeToStatus(db as any, issueId);
+    const reviewNodeId = (await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)))[0].currentNodeId!;
+    expect(reviewNodeId).not.toBe(startNodeId);
+
+    // Diverge: the workspace is back on the start node while the issue node already matches.
+    await db.update(schema.workspaces).set({ currentNodeId: startNodeId }).where(eq(schema.workspaces.id, wsId));
+    await syncCurrentNodeToStatus(db as any, issueId);
+
+    const wsAfter = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, wsId)))[0];
+    expect(wsAfter.currentNodeId).toBe(reviewNodeId);
+  });
+
   it("syncCurrentNodeToStatus clears the node on a BACKWARDS move to a status with no node (#381)", async () => {
     // #381: the workflow template has no node for "Todo", so moving an issue back
     // there used to leave issues/workspaces.currentNodeId pointing at the "Review"
