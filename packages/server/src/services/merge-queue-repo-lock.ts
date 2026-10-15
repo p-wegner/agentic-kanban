@@ -95,3 +95,28 @@ export async function acquireQueueRepoLock(
     throw err;
   }
 }
+
+/**
+ * #1503: heartbeat a train's repo lock every 15 s, and on an operator cancel free it NOW rather
+ * than when the in-flight gate returns (a worker gate can run ~20 min, and the heartbeat kept
+ * refreshing for a train whose row already says abandoned, refusing every merge in the project).
+ * Nothing lands after a cancel (`vetoLandingIfAbandoned`), so the lock guards nothing; `release`
+ * is idempotent and only removes a lockfile that still belongs to this handle, so the caller's
+ * own `finally` release stays safe. Returns the stop function for that `finally`.
+ */
+export function keepRepoLockAliveUntilCancel(
+  repoLock: Awaited<ReturnType<typeof acquireQueueRepoLock>>,
+  signal: AbortSignal,
+): () => void {
+  const heartbeat = setInterval(() => repoLock.heartbeat(), 15_000);
+  const releaseOnCancel = () => {
+    clearInterval(heartbeat);
+    repoLock.release();
+  };
+  if (signal.aborted) releaseOnCancel();
+  else signal.addEventListener("abort", releaseOnCancel, { once: true });
+  return () => {
+    clearInterval(heartbeat);
+    signal.removeEventListener("abort", releaseOnCancel);
+  };
+}

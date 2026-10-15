@@ -35,7 +35,7 @@ import { provisionTrainGateSelector } from "./merge-train-gate-selector.js";
 import { runPreMergeGate, looksLikeMissingDepsFailure } from "./pre-merge-gate.service.js";
 import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { randomUUID } from "node:crypto";
-import { acquireQueueRepoLock, MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS } from "./merge-queue-repo-lock.js";
+import { acquireQueueRepoLock, keepRepoLockAliveUntilCancel, MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS } from "./merge-queue-repo-lock.js";
 import type { MergeQueueEvent, MergeQueuePlan } from "./merge-queue.service.js";
 import type { MergeTrainAttemptDto, MergeTrainBaseVerdict, MergeTrainGateEvidenceDto } from "@agentic-kanban/shared/types";
 import { resolveMergeTrainRedPolicy, type MergeTrainRedPolicy } from "@agentic-kanban/shared/lib/merge-train-red-strategy";
@@ -627,19 +627,8 @@ async function runDoomedTrainJob(args: {
     await cleanupTrainWorktreesForLabel({ database, repoPath, label });
     return { ok: false, reason: `train abandoned: ${reason}` };
   }
-  const heartbeat = setInterval(() => repoLock.heartbeat(), 15_000);
-  // #1503: an operator cancel must free the repo lock NOW, not when the in-flight gate returns
-  // (a worker gate can run ~20 min, and the heartbeat kept refreshing for a train whose row
-  // already says abandoned, refusing every merge in the project). Nothing lands after a cancel
-  // (`vetoLandingIfAbandoned`), so the lock guards nothing; `release` is idempotent and only
-  // removes a lockfile that still belongs to this handle, so the `finally` below stays safe.
-  const releaseOnCancel = () => {
-    clearInterval(heartbeat);
-    repoLock.release();
-  };
-  if (abortController.signal.aborted) releaseOnCancel();
-  else abortController.signal.addEventListener("abort", releaseOnCancel, { once: true });
-
+  // #1503: heartbeat the lock, and free it the moment an operator cancels (see the helper).
+  const stopLockKeepalive = keepRepoLockAliveUntilCancel(repoLock, abortController.signal);
   try {
     // #1277: the project's red-handling policy, read once per train through the preference layer.
     const policy = resolveMergeTrainRedPolicy(toPrefMap(await getAllPreferencesCached(database).catch(() => [])), projectId);
@@ -759,8 +748,7 @@ async function runDoomedTrainJob(args: {
     boardEvents?.broadcast(projectId, "merge_train_changed");
     return { ok: false, reason: `train orchestrator threw: ${reason}` };
   } finally {
-    clearInterval(heartbeat);
-    abortController.signal.removeEventListener("abort", releaseOnCancel);
+    stopLockKeepalive();
     // #1235: the train's own teardown, under the lock it still holds. Every attempt's worktree
     // and `kanban/train/<label>*` branch goes here on BOTH exits — the gate's per-attempt
     // `finally` already removed the directory on a normal run, but the branch delete in
