@@ -155,7 +155,7 @@ describe("checkLogonTaskLauncher (#1482)", () => {
 
   it("passes when the task goes through the stable shim", () => {
     const check = checkLogonTaskLauncher({
-      taskAction: "powershell.exe -Command \"$w = Join-Path $env:USERPROFILE '.agentic-kanban\bin\agentic-kanban-worker.cmd'; & $w start\"",
+      taskAction: "powershell.exe -Command \"$w = Join-Path $env:USERPROFILE '.agentic-kanban\\bin\\agentic-kanban-worker.cmd'; & $w start\"",
       ...versions,
     });
     expect(check.status).toBe("pass");
