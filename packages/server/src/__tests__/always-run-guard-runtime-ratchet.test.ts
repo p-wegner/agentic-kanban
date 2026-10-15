@@ -312,8 +312,16 @@ import {
  * `packageManager` pin to keep the worker doctor's expected pnpm version in lockstep with it, a
  * file outside its import graph. It carries a `when:package.json` territory, so an ordinary diff
  * does not pay it; the next capture should give the 3 s back.
+ *
+ * -- Eighteenth movement, UP (2026-10-15, #1504) — 495,689 -> 498,689 ----------------------
+ *
+ * One guard, `promote-boot-diagnostics.test.ts`, at the ASSUMED 3,000 ms. It imports
+ * `scripts/promote-boot-diagnostics.mjs`, a repo script outside every package's import graph, so
+ * dependency selection cannot see it. It carries a `when:` territory of that script and
+ * `scripts/promote.mjs`, so an ordinary diff does not pay it; it ran in ~2 s alone, and the next
+ * capture should give the 3 s back.
  */
-const BASELINE_TOTAL_MS = 495_689;
+const BASELINE_TOTAL_MS = 498_689;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative

@@ -144,7 +144,9 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 82 -> 83 in #1474 for `worker/worker-repo-lock.ts` (per-repo clone/fetch serialization; node builtins only).
     // Raised 83 -> 84 in train 2026-10-14-49: #1483 added `cli/commands/worker-doctor-pnpm-version.ts` and #1488 added
     // shared `lib/git-spawn-governor.ts` (reached via git-exec); each fit alone, together they need one more slot.
-    expect(files.size).toBeLessThan(84);
+    // Raised 84 -> 86 in train 2026-10-15-19: #1499 added `worker/worker-setup-slots.ts` (setup-concurrency
+    // slots; node builtins only) and the train fix split process-exec's output parsers into a sibling module.
+    expect(files.size).toBeLessThan(86);
   });
 
   it("never reaches the database or board-service layer", () => {

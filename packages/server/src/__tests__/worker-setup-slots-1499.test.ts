@@ -32,9 +32,9 @@ describe("worker setup slots (#1499)", () => {
     await expect(slots.run(async () => "ok")).resolves.toBe("ok");
   });
 
-  it("reads WORKER_SETUP_CONCURRENCY, falling back to 1", () => {
-    expect(resolveSetupSlots({ WORKER_SETUP_CONCURRENCY: "3" })).toBe(3);
-    expect(resolveSetupSlots({ WORKER_SETUP_CONCURRENCY: "0" })).toBe(1);
+  it("reads KANBAN_WORKER_SETUP_CONCURRENCY, falling back to 1", () => {
+    expect(resolveSetupSlots({ KANBAN_WORKER_SETUP_CONCURRENCY: "3" })).toBe(3);
+    expect(resolveSetupSlots({ KANBAN_WORKER_SETUP_CONCURRENCY: "0" })).toBe(1);
     expect(resolveSetupSlots({})).toBe(1);
   });
 });

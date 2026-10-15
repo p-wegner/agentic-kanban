@@ -5,7 +5,7 @@
 const DEFAULT_SETUP_SLOTS = 1;
 
 export function resolveSetupSlots(env: NodeJS.ProcessEnv = process.env): number {
-  const n = Number(env.WORKER_SETUP_CONCURRENCY);
+  const n = Number(env.KANBAN_WORKER_SETUP_CONCURRENCY);
   return Number.isInteger(n) && n >= 1 ? n : DEFAULT_SETUP_SLOTS;
 }
 

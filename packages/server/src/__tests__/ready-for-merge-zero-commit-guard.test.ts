@@ -52,10 +52,28 @@ vi.mock("node:child_process", async (importOriginal) => {
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkflowEngine } from "../startup/exit-workflow.js";
+
+/** A git repo on branch feature/ak-629-test at exactly master's tip: 0 commits ahead. */
+function makeZeroCommitBranchRepo(): string {
+  const dir = mkdtempSync(join(tmpdir(), "ak-test-629-"));
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe", windowsHide: true });
+  git("init", "-q", "-b", "master");
+  git("config", "user.email", "test@example.invalid");
+  git("config", "user.name", "test");
+  writeFileSync(join(dir, "README.md"), "base\n");
+  git("add", "README.md");
+  git("commit", "-q", "-m", "base");
+  git("checkout", "-q", "-b", "feature/ak-629-test");
+  return dir;
+}
 
 function makeBoardEvents() {
   return { broadcast: vi.fn(), broadcastActivity: vi.fn() };
@@ -94,7 +112,10 @@ async function seedReviewExitScenario(db: ReturnType<typeof createTestDb>["db"])
   await db.insert(workspaces).values({
     id: workspaceId, issueId,
     branch: "feature/ak-629-test",
-    workingDir: "/repo/.worktrees/ak-629-test",
+    // A REAL repo whose branch is 0 commits ahead of master. The node:child_process mock above
+    // does not reach the shared gitExec (it loads from node_modules), so a fake path made the
+    // commits probe answer "unknown" -> "has commits", and the #629 guard was never exercised.
+    workingDir: makeZeroCommitBranchRepo(),
     baseBranch: "master",
     isDirect: false,
     status: "idle",
