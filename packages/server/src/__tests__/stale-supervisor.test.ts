@@ -11,7 +11,7 @@ import { planStaleSupervisorReap, reapStaleSupervisors } from "../../../../scrip
 let auditDir: string;
 let prevAuditLog: string | undefined;
 beforeAll(() => {
-  auditDir = mkdtempSync(join(tmpdir(), "stale-supervisor-audit-"));
+  auditDir = mkdtempSync(join(tmpdir(), "ak-stale-supervisor-audit-"));
   prevAuditLog = process.env.AGENTIC_KANBAN_PROCESS_AUDIT_LOG;
   process.env.AGENTIC_KANBAN_PROCESS_AUDIT_LOG = join(auditDir, "process-audit.log");
 });
