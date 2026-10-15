@@ -249,7 +249,17 @@ function settleSupersededExit(
   return true;
 }
 
-export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentRunnerOptions = {}) {
+/** #1490: every rejected assignment is logged with its reason, whichever path rejects it. */
+function withRejectionLog(sendToBoard: SendToBoard): SendToBoard {
+  return (message) => {
+    if (message.type === "assign_failed") {
+      workerLog(`[worker] assignment rejected: sessionId=${message.sessionId} reason=${message.error}`);
+    }
+    sendToBoard(message);
+  };
+}
+
+export function createWorkerAgentRunner(sendToBoard: SendToBoard, options: WorkerAgentRunnerOptions = {}, send = withRejectionLog(sendToBoard)) {
   const repoOps = resolveRepoOps(options);
   const processes = new Map<string, ChildProcess>();
   /** Epoch ms each agent was spawned, for the per-phase timings on its exit (#1328). */
@@ -834,16 +844,20 @@ export function dispatchBoardMessage(
   draining: boolean,
 ): void {
   switch (message.type) {
-    case "assign":
+    case "assign": {
+      // #1490: every assignment received, and every one rejected with its reason, is in the worker log.
+      workerLog(`[worker] assignment received: sessionId=${message.sessionId} transport=${message.repo ? "git" : "shared-filesystem"}`);
       // #1338: a draining daemon (an update waiting for its last session) takes no new
       // work — the board stops assigning on its next heartbeat, this covers the race.
       if (draining) {
+        workerLog(`[worker] assignment rejected: sessionId=${message.sessionId} reason=worker is draining`);
         sendToBoard({ type: "assign_failed", sessionId: message.sessionId, error: "worker is draining (self-update or shutdown in progress)" });
         break;
       }
       if (message.repo) runner.assignWithRepo(message.sessionId, message.spec, message.repo);
       else runner.assign(message.sessionId, message.spec);
       break;
+    }
     case "input":
       runner.input(message.sessionId, message.data);
       break;

@@ -30,6 +30,7 @@ import { resolveProjectCommitterIdentity } from "./project-committer-identity.js
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { WorkerConnectionManager } from "./worker-connection.service.js";
 import type { RemoteSession } from "./agent-remote.types.js";
+import type { BoardToWorkerMessage } from "@agentic-kanban/shared/lib/worker-protocol";
 
 type Placement = Extract<NonNullable<AgentLaunchRequest["placement"]>, { kind: "remote" }>;
 type BuiltConfig = ReturnType<typeof buildAgentLaunchConfig>;
@@ -203,7 +204,7 @@ export async function dispatchGitTransportAssignment(deps: GitTransportAssignmen
     }
     // #1369: the board checkout's identity, so a worker with no global one can still commit.
     const committer = await resolveProjectCommitterIdentity(repo.repoPath);
-    const delivered = manager.send(workerId, {
+    const assignMessage: BoardToWorkerMessage = {
       type: "assign",
       sessionId,
       spec: mcpArgs.length > 0 ? { ...spec, args: [...spec.args, ...mcpArgs] } : spec,
@@ -225,7 +226,10 @@ export async function dispatchGitTransportAssignment(deps: GitTransportAssignmen
           .filter((s) => typeof s.prompt === "string" && s.prompt.trim().length > 0)
           .map((s) => ({ name: s.name, description: s.description ?? "", content: s.prompt })),
       },
-    });
+    };
+    const delivered = manager.send(workerId, assignMessage);
+    const tracked = sessions.get(sessionId);
+    if (tracked) tracked.assignMessage = assignMessage; // #1490: kept for a one-time re-send
     if (!delivered) throw new Error(`fleet worker ${workerId} is not connected`);
     noteAssigned(sessionId, workerId, {
       transport: "git",

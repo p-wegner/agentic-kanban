@@ -199,7 +199,7 @@ export function createRemoteLiveness(deps: RemoteLivenessDeps) {
     cancel(sessionId);
     if (probe.state === "unknown") {
       const reason =
-        `worker ${workerId} has no record of session ${sessionId}: the assignment never arrived ` +
+        `assignment never started on ${workerId}: it has no record of session ${sessionId}, so the assignment never arrived ` +
         "(the worker remembers every session id it was handed, so this is a fact rather than a timeout)";
       log(`ASSIGNMENT LOST — ${reason}`);
       deps.report(sessionId, session, `Fleet dispatch failed: ${reason}. Re-placing this launch.`);
@@ -261,9 +261,45 @@ export function createRemoteLiveness(deps: RemoteLivenessDeps) {
         if (!current || current.workerId !== workerId) return;
         current.lostCheckTimer = undefined;
         if (current.observed) return;
-        deps.loseSession(sessionId, workerId);
+        redispatchOrGiveUp(sessionId, current, workerId);
       }, assignSettleMs));
     }
+  }
+
+  /**
+   * #1490: the worker is up, has had a full settle window, and never spoke about a session the
+   * board assigned it — the assign was dropped, not run-and-lost. Send the SAME assign once more
+   * and verify with a probe; a second miss is a named launch failure, never a silent exit 1.
+   * A session with no recorded assign (adopted after a board restart) keeps the old rule.
+   */
+  function redispatchOrGiveUp(sessionId: string, session: RemoteSession, workerId: string): void {
+    if (!session.assignMessage) {
+      deps.loseSession(sessionId, workerId);
+      return;
+    }
+    const never = `assignment never started on ${workerId}`;
+    const giveUp = () => {
+      const reason = `${never}: the worker listed no such session after the assign was sent and re-sent`;
+      log(`ASSIGNMENT LOST — ${reason}`);
+      deps.report(sessionId, session, `Fleet dispatch failed: ${reason}.`);
+      deps.assignmentLost(sessionId, session, reason);
+    };
+    if ((session.assignResends ?? 0) >= 1 || !deps.send(workerId, session.assignMessage)) {
+      giveUp();
+      return;
+    }
+    session.assignResends = 1;
+    log(`${never} (session ${sessionId}, not listed in its hello) — re-sent the assignment once; verifying in ${Math.round(assignSettleMs / 1000)}s`);
+    deps.report(sessionId, session, `Fleet worker ${workerId} never started this session; re-sending the assignment once.`);
+    session.lostCheckTimer = unrefed(setTimeout(() => {
+      const current = sessions.get(sessionId);
+      if (!current || current.workerId !== workerId) return;
+      current.lostCheckTimer = undefined;
+      if (current.observed) return;
+      // Still silent after the one re-send: the attempt is exhausted, so the session ends
+      // (exit 1, #746) with the named reason rather than waiting on a probe that may never answer.
+      giveUp();
+    }, assignSettleMs));
   }
 
   return { armAssignProbe, noteObserved, handleProbeResult, reconcileHello, cancel, requestProbe };

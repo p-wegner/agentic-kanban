@@ -248,6 +248,56 @@ describe("the hello reverse-reconcile (#746, moved here in #887)", () => {
     expect(h.calls.lost).toEqual([]);
   });
 
+  describe("a dropped assignment (#1490)", () => {
+    const assign = { type: "assign", sessionId: "s1" } as unknown as BoardToWorkerMessage;
+    const tracked = (h: ReturnType<typeof harness>) => {
+      const session = h.track("s1");
+      session.assignMessage = assign;
+      return session;
+    };
+
+    it("re-sends the same assign once instead of finalizing, and the session then runs", () => {
+      const h = harness();
+      tracked(h);
+      h.liveness.reconcileHello("w1", []);
+      vi.advanceTimersByTime(SETTLE);
+      expect(h.calls.lost).toEqual([]);
+      expect(h.calls.assignmentLost).toEqual([]);
+      expect(h.sent.map((s) => s.message)).toEqual([assign]);
+      h.liveness.noteObserved("s1"); // the re-sent assign was taken
+      vi.advanceTimersByTime(SETTLE * 3);
+      expect(h.calls.assignmentLost).toEqual([]);
+      expect(h.sent).toHaveLength(1);
+    });
+
+    it("names the reason when the worker still has no record after the re-send", () => {
+      const h = harness();
+      const reasons: string[] = [];
+      tracked(h);
+      h.liveness.reconcileHello("w1", []);
+      vi.advanceTimersByTime(SETTLE); // re-sent
+      vi.advanceTimersByTime(SETTLE); // verification probe goes out
+      h.liveness.handleProbeResult("w1", "s1", { requestId: h.requestIdFor("s1"), state: "unknown" });
+      expect(h.calls.assignmentLost).toEqual(["s1"]);
+      expect(h.calls.lost).toEqual([]);
+      reasons.push(h.reports.join(" "));
+      expect(reasons[0]).toMatch(/assignment never started on w1/);
+    });
+
+    it("gives up with the named reason when a second hello still omits the session", () => {
+      const h = harness();
+      tracked(h);
+      h.liveness.reconcileHello("w1", []);
+      vi.advanceTimersByTime(SETTLE); // re-sent once
+      h.liveness.cancel("s1");
+      h.liveness.reconcileHello("w1", []);
+      vi.advanceTimersByTime(SETTLE);
+      expect(h.sent).toHaveLength(1);
+      expect(h.calls.assignmentLost).toEqual(["s1"]);
+      expect(h.reports.join(" ")).toMatch(/assignment never started on w1/);
+    });
+  });
+
   it("ignores sessions belonging to another worker", () => {
     const h = harness();
     h.track("s1", "w2").observed = true;
