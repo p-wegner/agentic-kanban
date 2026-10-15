@@ -59,6 +59,23 @@ describe("background spawn budget", () => {
     await Promise.all(calls);
   });
 
+  it("keeps the process alive while spawns wait on the budget (#1507: an unref'd timer let the board exit mid-boot)", async () => {
+    configureGitBackgroundSpawnBudget(1);
+    const handles: Array<{ hasRef?: () => boolean }> = [];
+    const realSetTimeout = globalThis.setTimeout;
+    const spy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: () => void, ms?: number) => {
+      const h = realSetTimeout(fn, ms) as unknown as { hasRef?: () => boolean };
+      handles.push(h);
+      return h;
+    }) as never);
+    const calls = [gitExec(["log", "-1"], { cwd: "/r" }), gitExec(["log", "-2"], { cwd: "/r" })];
+    expect(handles.length).toBeGreaterThan(0);
+    for (const h of handles) expect(h.hasRef?.() ?? true).toBe(true);
+    spy.mockRestore();
+    await vi.advanceTimersByTimeAsync(1000);
+    await Promise.all(calls);
+  });
+
   it("never throttles interactive spawns, even with the background budget exhausted", async () => {
     configureGitBackgroundSpawnBudget(1);
     void gitExec(["log", "-1"], { cwd: "/r" });

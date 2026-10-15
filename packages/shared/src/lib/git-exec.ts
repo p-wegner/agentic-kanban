@@ -236,8 +236,10 @@ function armBudgetTimer(): void {
   if (budgetTimer !== null || normalQueue.length === 0 || activeSpawns >= GIT_SPAWN_SLOTS) return;
   const wait = msUntilBackgroundSpawnAllowed();
   if (wait <= 0) return; // a slot release will pick it up
+  // Deliberately NOT unref'd (#1507): queued spawns are promises someone awaits. At boot, before
+  // the server listens, this timer can be the only thing keeping the loop alive — unref'd, the
+  // board exited 0 mid-startup with no log line, and two promotions failed their smoke on it.
   budgetTimer = setTimeout(drainNormalQueue, wait);
-  budgetTimer.unref?.();
 }
 
 /**
