@@ -34,6 +34,7 @@
 import type { RiskPosture, RiskPostureLevel } from "@agentic-kanban/shared/types";
 import { runSetupScript, type SetupScriptResult } from "@agentic-kanban/shared/lib/setup-script";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { resolveMergePolicy } from "@agentic-kanban/shared/lib/merge-policy";
 import type { Database } from "../../db/index.js";
 import { runGateWithEvidence, type GateWithEvidence } from "../../services/merge-gate-evidence.js";
 import type { MergeGateShas } from "../../services/merge-gate-token.js";
@@ -47,6 +48,9 @@ export const REVIEW_EXIT_GATE_SOURCE = "review-exit gate";
 
 /** The evidence `source` of a typecheck-only review-exit run (#1260). */
 export const REVIEW_EXIT_TYPECHECK_ONLY_SOURCE = "review-exit gate (typecheck-only; tests deferred to the merge gate)";
+
+/** The evidence `source` when the merge queue owns verify and nothing ran at review-exit (#1502). */
+export const REVIEW_EXIT_DEFERRED_TO_TRAIN_SOURCE = "review-exit (verify deferred to the merge train)";
 
 /** Wall-clock ceiling for the typecheck. `pnpm typecheck` here is ~10-60 s; this is a hang guard. */
 const REVIEW_EXIT_TYPECHECK_TIMEOUT_MS = 20 * 60 * 1000;
@@ -72,6 +76,8 @@ export function reviewExitDefersTestsToMerge(posture: Pick<RiskPosture, "level">
 export interface ReviewExitGate extends GateWithEvidence {
   /** True when only the typecheck ran; the evidence built from it claims no test pass. */
   typecheckOnly: boolean;
+  /** True when nothing ran: the merge queue owns verify (#1502). Implies `typecheckOnly`. */
+  deferredToTrain?: boolean;
 }
 
 /** What `armReadyForMerge` persists for a review-exit pass. */
@@ -91,7 +97,8 @@ export interface ReviewExitEvidence {
  */
 export function buildReviewExitEvidence(gate: ReviewExitGate, gateShas: MergeGateShas): ReviewExitEvidence {
   if (gate.typecheckOnly) {
-    return { ranAt: null, stage: null, source: REVIEW_EXIT_TYPECHECK_ONLY_SOURCE, branchSha: null, baseSha: null, message: gate.message };
+    const source = gate.deferredToTrain ? REVIEW_EXIT_DEFERRED_TO_TRAIN_SOURCE : REVIEW_EXIT_TYPECHECK_ONLY_SOURCE;
+    return { ranAt: null, stage: null, source, branchSha: null, baseSha: null, message: gate.message };
   }
   return {
     ranAt: gate.ranAt,
@@ -146,6 +153,29 @@ export async function runReviewExitGate(args: RunReviewExitGateArgs): Promise<Re
   // An unreadable posture fails CLOSED to the full gate: running more than asked is safe.
   const posture = await (args.resolvePosture ?? resolveIssueRiskPosture)(issueId, projectId, prefMap, database)
     .catch(() => null);
+  // #1502: the merge queue owns landing and gates the assembled train tree. A per-ticket verify
+  // here is a duplicate that also takes the worker's verify slot a train is waiting for, so ALL
+  // posture levels (standard/strict included) arm after the cheap checks and leave verify to the train.
+  if (resolveMergePolicy(prefMap).owner === "merge_queue") {
+    const message = `review-exit verify deferred to the merge train (merge_strategy=merge_queue): no typecheck or test step ran here${formatPostureNote(posture)}`;
+    console.log(`[workflow] workspace ${workspace.id}: ${message.split("\n")[0]} (#1502)`);
+    return {
+      passed: true,
+      ran: false,
+      stage: "verify",
+      message,
+      shasBefore: {},
+      evidenceShas: {},
+      baseMoveKept: null,
+      moved: null,
+      movedDetail: null,
+      ranAt: new Date().toISOString(),
+      token: null,
+      durationMs: 0,
+      typecheckOnly: true,
+      deferredToTrain: true,
+    };
+  }
   const defers = posture !== null && reviewExitDefersTestsToMerge(posture);
   const command = defers && workspace.workingDir
     ? await (args.readTypecheckCommand ?? readProfileTypecheckCommand)(projectId, database).catch(() => null)
