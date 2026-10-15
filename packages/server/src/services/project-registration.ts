@@ -1,8 +1,8 @@
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { randomUUID } from "node:crypto";
-import { resolve, basename, normalize, sep } from "node:path";
-import { existsSync } from "node:fs";
+import { resolve, basename, normalize, sep, relative, isAbsolute } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { StackProfile } from "@agentic-kanban/shared";
 import { deleteProjectCascade } from "../repositories/project.repository.js";
@@ -72,6 +72,21 @@ async function tryGetGitRoot(repoPath: string): Promise<string | null> {
   }
 }
 
+function realOrResolved(p: string): string {
+  try {
+    return realpathSync.native(p);
+  } catch {
+    return resolve(p);
+  }
+}
+
+/** True when `child` equals or lies under `root`, comparing real paths (junctions, case on win32). */
+export function isPathInside(child: string, root: string): boolean {
+  const norm = (p: string) => (process.platform === "win32" ? p.toLowerCase() : p);
+  const rel = relative(norm(realOrResolved(root)), norm(realOrResolved(child)));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
 /**
  * Detects and removes duplicate project registrations caused by registering a subdirectory
  * of a git repo before git-root resolution was added to detectRepoInfo.
@@ -99,7 +114,19 @@ export async function deduplicateProjects(): Promise<void> {
     byGitRoot.set(gitRoot, group);
   });
 
-  for (const [gitRoot, group] of byGitRoot) {
+  for (const [gitRoot, rawGroup] of byGitRoot) {
+    // A destructive, irreversible merge must not hinge on one `rev-parse` answer (#1508).
+    // Only projects whose own (real) path lies inside the reported root may be merged; a
+    // project that is a git root of its own elsewhere (e.g. shelfwise vs agentic-kanban)
+    // is logged and left alone.
+    const group = rawGroup.filter((p) => {
+      if (isPathInside(p.repoPath, gitRoot)) return true;
+      console.warn(
+        `[startup] project deduplication skipped "${p.name}" (${p.repoPath}) — git reported root ` +
+        `${gitRoot} but the project path is not inside it`,
+      );
+      return false;
+    });
     if (group.length <= 1) continue;
 
     // Prefer the project whose repoPath already equals the git root;
