@@ -262,9 +262,14 @@ describe("a remote session survives a socket gap (#746)", () => {
       launch(service, "s1", (e) => events.push(e));
 
       fm.fireMessage("w1", { type: "hello", runningSessionIds: [] } as never);
+      // #1490: the first settle window re-sends the assign once (no exit yet); the second ends it.
+      vi.advanceTimersByTime(6000);
+      expect(events.some((e) => e.type === "exit")).toBe(false);
+      expect(fm.sent.filter((m) => m.message.type === "assign")).toHaveLength(2);
       vi.advanceTimersByTime(6000);
       await vi.waitFor(() => expect(events.some((e) => e.type === "exit")).toBe(true));
       expect(events.find((e) => e.type === "exit")?.exitCode).toBe(1);
+      expect(events.some((e) => String(e.data ?? "").includes("assignment never started on w1"))).toBe(true);
     } finally {
       vi.useRealTimers();
     }

@@ -278,11 +278,14 @@ export function createRemoteLiveness(deps: RemoteLivenessDeps) {
       return;
     }
     const never = `assignment never started on ${workerId}`;
-    if ((session.assignResends ?? 0) >= 1 || !deps.send(workerId, session.assignMessage)) {
+    const giveUp = () => {
       const reason = `${never}: the worker listed no such session after the assign was sent and re-sent`;
       log(`ASSIGNMENT LOST — ${reason}`);
       deps.report(sessionId, session, `Fleet dispatch failed: ${reason}.`);
       deps.assignmentLost(sessionId, session, reason);
+    };
+    if ((session.assignResends ?? 0) >= 1 || !deps.send(workerId, session.assignMessage)) {
+      giveUp();
       return;
     }
     session.assignResends = 1;
@@ -293,9 +296,9 @@ export function createRemoteLiveness(deps: RemoteLivenessDeps) {
       if (!current || current.workerId !== workerId) return;
       current.lostCheckTimer = undefined;
       if (current.observed) return;
-      // The worker's answer settles it: `running`/`exited` are handled by handleProbeResult,
-      // `unknown` there names the same reason. No answer = an older worker; hold as before.
-      void requestProbe(sessionId);
+      // Still silent after the one re-send: the attempt is exhausted, so the session ends
+      // (exit 1, #746) with the named reason rather than waiting on a probe that may never answer.
+      giveUp();
     }, assignSettleMs));
   }
 

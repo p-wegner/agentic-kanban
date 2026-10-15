@@ -249,14 +249,17 @@ function settleSupersededExit(
   return true;
 }
 
-export function createWorkerAgentRunner(sendToBoard: SendToBoard, options: WorkerAgentRunnerOptions = {}) {
-  // #1490: every rejected assignment is logged with its reason, whichever path rejects it.
-  const send: SendToBoard = (message) => {
+/** #1490: every rejected assignment is logged with its reason, whichever path rejects it. */
+function withRejectionLog(sendToBoard: SendToBoard): SendToBoard {
+  return (message) => {
     if (message.type === "assign_failed") {
       workerLog(`[worker] assignment rejected: sessionId=${message.sessionId} reason=${message.error}`);
     }
     sendToBoard(message);
   };
+}
+
+export function createWorkerAgentRunner(sendToBoard: SendToBoard, options: WorkerAgentRunnerOptions = {}, send = withRejectionLog(sendToBoard)) {
   const repoOps = resolveRepoOps(options);
   const processes = new Map<string, ChildProcess>();
   /** Epoch ms each agent was spawned, for the per-phase timings on its exit (#1328). */

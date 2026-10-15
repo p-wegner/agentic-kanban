@@ -349,10 +349,9 @@ export function createRemoteAgentService(
 
     // Same-machine dispatch (no repo in the placement): the worker shares this
     // filesystem, so assign directly; git transport assigns after its async prerequisites.
-    let sharedAssign: BoardToWorkerMessage | undefined;
+    const sharedAssign: BoardToWorkerMessage | undefined = placement.repo ? undefined : { type: "assign", sessionId, spec };
     if (!placement.repo) {
-      sharedAssign = { type: "assign", sessionId, spec };
-      if (!manager.send(workerId, sharedAssign)) {
+      if (!manager.send(workerId, sharedAssign as BoardToWorkerMessage)) {
         throw new Error(`fleet worker ${workerId} is not connected`);
       }
       // #801 — recorded only once the assign is actually ON THE WIRE. An event written
@@ -368,8 +367,7 @@ export function createRemoteAgentService(
     }
     console.log(`[agent-remote] assigned session ${sessionId} to worker ${workerId} (command=${config.command})`);
     sessions.set(sessionId, {
-      workerId,
-      onOutput,
+      workerId, onOutput,
       stdinOpen: Boolean(config.keepStdinOpen && !config.suppressStdinPrompt),
       repo: placement.repo
         ? {
@@ -382,8 +380,7 @@ export function createRemoteAgentService(
             incomingRef: incomingRefFor(placement.repo.branch),
           }
         : undefined,
-      onDeferredLaunchFailure,
-      assignMessage: sharedAssign,
+      onDeferredLaunchFailure, assignMessage: sharedAssign,
     });
     liveness.armAssignProbe(sessionId); // #887 — ask, rather than wait out a silence TTL
     updateSessionWorkerId(sessionId, workerId, database)
