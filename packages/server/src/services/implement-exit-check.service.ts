@@ -37,9 +37,9 @@ import type { Database } from "../db/index.js";
 import { getChangedFileNames } from "./git.service.js";
 import { getStackProfile } from "./stack-profile.service.js";
 import { describeGateHold, resolveGateHostAdmission } from "./gate-quiesce.js";
-import { planVerifyPlacement, readHeadSha, runOnPlannedWorker, runPlacedVerifyCommand } from "./verify-job-placement.js";
+import { planVerifyPlacement, readHeadSha, runOnPlannedWorker, VerifyJobHeldError } from "./verify-job-placement.js";
 import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
-import { runUnderVerifyChainSemaphoreTimed } from "./verify-chain-semaphore.js";
+import { runVerifyChainForPlacement } from "./pre-merge-gate-placement.js";
 import {
   buildVerifyEnv,
   resolveGateFileScopeEmission,
@@ -195,11 +195,14 @@ async function runTypecheckLevel(
       timeoutMs: IMPLEMENT_EXIT_TYPECHECK_TIMEOUT_MS,
       env: buildVerifyResourceEnv(2),
     }).catch((err): SetupScriptResult => ({ exitCode: -1, stdout: "", stderr: errorMessage(err) })));
-  const { result } = await runUnderVerifyChainSemaphoreTimed(
-    // #1430: placed by verify_placement_<id>; a worker run skips the host's build semaphore.
-    async () => (await runPlacedVerifyCommand({
-      kind: "implement-exit", projectId, database, command, workingDir, sha, tier: "typecheck", runOnHost,
-    })).result,
+  // #1430: placed by verify_placement_<id>; a worker run skips the host's build semaphore.
+  // #1497: and the host's verify-chain slot — planned here so the slot follows the placement.
+  const plan = await planVerifyPlacement({ kind: "implement-exit", projectId, database });
+  if (plan.target === "hold") throw new VerifyJobHeldError(plan.reason);
+  const placeArgs = { kind: "implement-exit" as const, projectId, database, command, workingDir, sha, tier: "typecheck", runOnHost };
+  const { result } = await runVerifyChainForPlacement(
+    plan.target === "worker" ? plan.workerName : undefined,
+    async () => (plan.target === "worker" ? await runOnPlannedWorker(plan, placeArgs) : { result: await runOnHost() }).result,
     `implement-exit typecheck for workspace ${workspace.id}`,
     { priority: "background" },
   );
@@ -340,7 +343,8 @@ async function runVerifyLevel(args: VerifyLevelArgs, startedAt: number): Promise
       }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false }));
     });
     const projectRepoPath = await getProjectRepoPath(projectId, database).catch(() => null);
-    const { result: outcome } = await runUnderVerifyChainSemaphoreTimed(
+    const { result: outcome } = await runVerifyChainForPlacement(
+      placement.target === "worker" ? placement.workerName : undefined,
       async (): Promise<VerifyOutcome> => resolveVerifyOutcome({
         result: await run(),
         runVerify: () => run(),

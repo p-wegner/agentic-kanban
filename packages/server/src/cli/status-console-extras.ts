@@ -20,6 +20,8 @@ export interface ConsoleChain {
   filesTotal?: number;
   position?: number;
   waitReason?: string;
+  /** #1497: the fleet worker the chain's script runs on (it holds no host slot). */
+  worker?: string;
 }
 export interface ConsoleBaseHealth { outcome: string; sha: string; createdAt: string; failedSuites: string[] }
 export interface ConsoleMergeHold { reason: string; held: number[] }
@@ -52,7 +54,7 @@ export function chainRefOf(label: string, issues: BoardStatusIssue[]): string {
 
 export function buildChains(extras: ConsoleExtrasPayload | null | undefined, issues: BoardStatusIssue[], workerJobs: Array<{ worker: string; job: string; ageMs?: number }>): ConsoleChain[] {
   const out: ConsoleChain[] = (extras?.chains ?? []).map((c) => ({
-    kind: chainKindOf(c.label), ref: chainRefOf(c.label, issues), where: "host", state: c.state, ageMs: c.ageMs,
+    kind: chainKindOf(c.label), ref: chainRefOf(c.label, issues), where: c.worker ?? "host", state: c.state, ageMs: c.ageMs,
     ...(c.stage ? { stage: c.stage } : {}), ...(c.filesDone != null ? { filesDone: c.filesDone } : {}), ...(c.filesTotal != null ? { filesTotal: c.filesTotal } : {}),
     ...(c.position != null ? { position: c.position } : {}), ...(c.waitReason ? { waitReason: c.waitReason } : {}),
   }));

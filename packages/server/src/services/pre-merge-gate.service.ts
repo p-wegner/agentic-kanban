@@ -23,11 +23,11 @@ import { getProjectSetupScript } from "../repositories/stack-profile.repository.
 import { buildSmokeCheck, getStackProfile, resolveEffectiveVerify } from "./stack-profile.service.js";
 import { resolveProjectDevServerPlan } from "./dev-server.service.js";
 import { quiesceBuildersEnabled, resolveGateHostAdmission } from "./gate-quiesce.js";
-import { planGateRun, type GateScriptRunner } from "./pre-merge-gate-placement.js";
+import { planGateRun, runVerifyChainForPlacement, type GateScriptRunner } from "./pre-merge-gate-placement.js";
 import { isSelfProjectRepo } from "./self-project.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
-import { runUnderVerifyChainSemaphore, runUnderVerifyChainSemaphoreTimed } from "./verify-chain-semaphore.js";
+import { runUnderVerifyChainSemaphore } from "./verify-chain-semaphore.js";
 import { workspaceVerifyChainLabel } from "./verify-chain-registry.js";
 import { createWorkspaceVerifySink } from "./verify-chain-progress.js";
 import { runE2ESmokeGateStage } from "./e2e-smoke-lane.js";
@@ -625,7 +625,7 @@ export async function runPreMergeGate(
     }
     gateTierInfo.baseHealthNote = (await sequenceBaseHealthBeforeVerify({ projectId, database, workspaceId: workspace.id })).note ?? undefined;
     noteMergeGatePhase(workspace.id, "queued", "waiting for the cross-workspace verify chain");
-    const { result: outcome, queueWaitMs, lockNote } = await runUnderVerifyChainSemaphoreTimed(async () =>
+    const { result: outcome, queueWaitMs, lockNote } = await runVerifyChainForPlacement(placed.workerName, async () =>
       resolveVerifyOutcome({
         result: await runVerify(),
         runVerify,
