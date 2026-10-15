@@ -1,7 +1,25 @@
 // @gate:always-run when:scripts/stale-supervisor.mjs — imports scripts/stale-supervisor.mjs, which no package-local diff links to (#687).
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 // @ts-ignore - scripts/ is .mjs, not in tsconfig
 import { planStaleSupervisorReap, reapStaleSupervisors } from "../../../../scripts/stale-supervisor.mjs";
+
+// The fake reaps below must never land in the real ~/.agentic-kanban/process-audit.log (#1484):
+// operators read that log first when a gate red smells like a process kill.
+let auditDir: string;
+let prevAuditLog: string | undefined;
+beforeAll(() => {
+  auditDir = mkdtempSync(join(tmpdir(), "stale-supervisor-audit-"));
+  prevAuditLog = process.env.AGENTIC_KANBAN_PROCESS_AUDIT_LOG;
+  process.env.AGENTIC_KANBAN_PROCESS_AUDIT_LOG = join(auditDir, "process-audit.log");
+});
+afterAll(() => {
+  if (prevAuditLog === undefined) delete process.env.AGENTIC_KANBAN_PROCESS_AUDIT_LOG;
+  else process.env.AGENTIC_KANBAN_PROCESS_AUDIT_LOG = prevAuditLog;
+  if (existsSync(auditDir)) rmSync(auditDir, { recursive: true, force: true });
+});
 
 const CHECKOUT = "C:/the-organisation/agentic-kanban";
 const SERVER_PORT = 3001;
