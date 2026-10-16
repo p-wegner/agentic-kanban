@@ -8,7 +8,7 @@ vi.mock("./git.service.js", () => ({ getChangedFileNames: vi.fn(async () => ["pa
 
 const dirs: string[] = [];
 function tree(opts: { script?: boolean; deps?: boolean } = { script: true, deps: true }): string {
-  const dir = mkdtempSync(join(tmpdir(), "static-tier-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-static-tier-"));
   dirs.push(dir);
   if (opts.script) {
     mkdirSync(join(dir, "scripts"));

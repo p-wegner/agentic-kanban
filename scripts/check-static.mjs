@@ -18,31 +18,21 @@
  * other script has run.
  */
 import { spawn } from "node:child_process";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnPnpm } from "./pnpm-exec.mjs";
+import { listRepoSubdirs, walkRepoTree } from "./lib/repo-tree.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 export const STATIC_MARKER = "@gate:static";
 
 const TEST_FILE = /\.test\.(ts|tsx|mts)$/;
-const SKIP_DIRS = new Set(["node_modules", "dist", ".git", "drizzle", "coverage"]);
+const SKIP_DIRS = ["drizzle", "coverage"];
 
-function* walkTests(dir) {
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    if (SKIP_DIRS.has(entry.name)) continue;
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) yield* walkTests(full);
-    else if (TEST_FILE.test(entry.name)) yield full;
-  }
+function walkTests(dir) {
+  return walkRepoTree(dir, { skipDirs: SKIP_DIRS, filter: (full) => TEST_FILE.test(full) });
 }
 
 /** Does a test file's header (first 8 lines) carry the static marker as a `//` comment? */
@@ -56,14 +46,9 @@ export function declaresStatic(source) {
 export function discoverStaticSuites(root = REPO_ROOT) {
   const found = [];
   const packagesDir = join(root, "packages");
-  let packages = [];
-  try {
-    packages = readdirSync(packagesDir).filter((n) => statSync(join(packagesDir, n)).isDirectory());
-  } catch {
-    return found;
-  }
+  const packages = listRepoSubdirs(packagesDir);
   for (const pkg of packages) {
-    for (const file of walkTests(join(packagesDir, pkg))) {
+    for (const file of walkTests(pkg)) {
       let head;
       try {
         head = readFileSync(file, "utf8");
