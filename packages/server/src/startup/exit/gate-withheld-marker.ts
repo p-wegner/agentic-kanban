@@ -89,6 +89,27 @@ export async function markReviewExitGateHeld(
 }
 
 /**
+ * Is the newest recorded gate decision a HELD marker for exactly `headSha` whose `retryAt` has
+ * passed (#1524)? Then the un-armed flag is the hold's doing, not a conflict an earlier
+ * `merge-attempt` cleared, and the reconciler must re-arm despite that older merge-attempt row.
+ */
+export async function isGateHeldRetryDue(database: Database, workspaceId: string, headSha: string, nowMs: number = Date.now()): Promise<boolean> {
+  try {
+    for (const raw of await listWorkspaceCommentPayloadsByKind(workspaceId, "gate-decision", database)) {
+      const payload = raw ? (JSON.parse(raw) as GateDecisionPayload) : null;
+      if (payload?.mergeReason === REVIEW_EXIT_GATE_HELD_REASON) {
+        const retryMs = Date.parse(payload.retryAt ?? "");
+        return payload.headSha === headSha && Number.isFinite(retryMs) && nowMs >= retryMs;
+      }
+      if (payload?.mergeReason === REVIEW_EXIT_GATE_RED_REASON) return false;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Is the newest recorded gate decision for this workspace one that must stop the reconciler arming
  * exactly `headSha`? A red verdict does until the head changes; a HELD gate only until its
  * `retryAt` (#1423). Fail-open on a read error (false): the merge still gates.
