@@ -24,8 +24,20 @@ describe("scanCommitsForDisclosure (#1438)", () => {
     "The worker transport (setVerifyWorkerRunner) is not registered yet, so behaviour is unchanged until #1428's runner lands.",
     "Wiring is a follow-up.",
     "The route is not wired up.",
+    "Left for a follow-up.",
+    "Tracked as a follow-up ticket.",
+    "Will do this in a follow-up.",
+    "The rest is follow-up work.",
   ])("flags %s", (body) => {
     expect(scanCommitsForDisclosure([{ sha: "abc12345", subject: "feat(#1430): x", body }], 1430)).toHaveLength(1);
+  });
+
+  it.each([
+    "feat(#1545): a delivered follow-up turn clears readyForMerge",
+    "fix(#1): queue the follow-up message after the session ends",
+    "fix(#1): resume the follow-up session",
+  ])("does not flag follow-up as a noun phrase: %s", (subject) => {
+    expect(scanCommitsForDisclosure([{ sha: "abc12345", subject, body: "" }], 1545)).toEqual([]);
   });
 
   it("ignores a clean commit and the Co-Authored-By trailer", () => {

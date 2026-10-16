@@ -36,7 +36,10 @@ export const DISCLOSURE_PATTERNS: readonly RegExp[] = [
   /\b(?:registered|wired(?:\s+up)?|implemented|hooked\s+up|connected|landed|built)\s+yet\b/i,
   /\buntil\b[^.\n]{0,100}\b(?:lands?|merges?|is\s+(?:merged|implemented|done|ready|wired))\b/i,
   /\bstill\s+(?:to\s+do|to\s+be\s+done|missing|todo)\b/i,
-  /\bfollow-?\s?ups?\b/i,
+  // Only follow-up phrasings that DEFER work; noun uses ("follow-up turn/message/session") are the
+  // subject of a finished change, not a disclosure (#1547).
+  /\b(?:as|in|for|into|is|be|to)\s+(?:a\s+|an\s+|the\s+)?(?:separate\s+|later\s+|future\s+)?follow-?\s?ups?\b(?!\s+(?:turns?|messages?|sessions?|prompts?|runs?|chats?)\b)/i,
+  /\bfollow-?\s?ups?\s+(?:ticket|pr|issue|work|task|commit|change)s?\b/i,
 ];
 
 export interface PartialWorkDisclosure {
