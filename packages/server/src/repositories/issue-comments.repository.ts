@@ -139,6 +139,17 @@ export async function listWorkspaceCommentPayloadsByKind(
   return rows.map((r) => r.payload);
 }
 
+/** Payload + createdAt of a workspace's comments of one kind, newest first. */
+export async function listWorkspaceCommentsWithTimeByKind(
+  workspaceId: string,
+  kind: IssueCommentKind,
+  database: Database = db,
+): Promise<{ payload: string | null; createdAt: string }[]> {
+  return database.select({ payload: issueComments.payload, createdAt: issueComments.createdAt }).from(issueComments)
+    .where(and(eq(issueComments.workspaceId, workspaceId), eq(issueComments.kind, kind)))
+    .orderBy(desc(issueComments.createdAt));
+}
+
 /** Most recent comment of a given kind for an issue, or null. Used to dedup repeated system notes. */
 export async function getLatestIssueCommentByKind(
   issueId: string,

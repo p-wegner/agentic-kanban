@@ -9,7 +9,7 @@
  * the builder's fix is eligible again with nothing to clear.
  */
 import type { Database } from "../../db/index.js";
-import { insertIssueComment, listWorkspaceCommentPayloadsByKind } from "../../repositories/issue-comments.repository.js";
+import { insertIssueComment, listWorkspaceCommentPayloadsByKind, listWorkspaceCommentsWithTimeByKind } from "../../repositories/issue-comments.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export const REVIEW_EXIT_GATE_RED_REASON = "review_exit_gate_red";
@@ -95,11 +95,15 @@ export async function markReviewExitGateHeld(
  */
 export async function isGateHeldRetryDue(database: Database, workspaceId: string, headSha: string, nowMs: number = Date.now()): Promise<boolean> {
   try {
-    for (const raw of await listWorkspaceCommentPayloadsByKind(workspaceId, "gate-decision", database)) {
-      const payload = raw ? (JSON.parse(raw) as GateDecisionPayload) : null;
+    for (const row of await listWorkspaceCommentsWithTimeByKind(workspaceId, "gate-decision", database)) {
+      const payload = row.payload ? (JSON.parse(row.payload) as GateDecisionPayload) : null;
       if (payload?.mergeReason === REVIEW_EXIT_GATE_HELD_REASON) {
         const retryMs = Date.parse(payload.retryAt ?? "");
-        return payload.headSha === headSha && Number.isFinite(retryMs) && nowMs >= retryMs;
+        if (payload.headSha !== headSha || !Number.isFinite(retryMs) || nowMs < retryMs) return false;
+        // A merge attempt AFTER the hold is a real conflict/un-arm, not the hold's doing: re-arming
+        // would loop arm -> merge -> conflict -> clear every tick.
+        const attempts = await listWorkspaceCommentsWithTimeByKind(workspaceId, "merge-attempt", database);
+        return !attempts.some((a) => Date.parse(a.createdAt) > Date.parse(row.createdAt));
       }
       if (payload?.mergeReason === REVIEW_EXIT_GATE_RED_REASON) return false;
     }
