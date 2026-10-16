@@ -3,17 +3,16 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
-## 2026-10-16: backlog empty, stable-20261016 live
+## 2026-10-16: backlog empty, stable-20261016-2 live
 
 **Goal (Peter):** get the board backlog done using the workers. **Done:** 0 open tickets at 15:12Z.
 
 - **Master = origin = 7654e6f23.** Landed 2026-10-15 evening to 2026-10-16: #1478 #1495 #1501 #1503
   #1510-#1530 (trains 22, 10-16-01..08, direct merges). Every push scanned CLEAN (only `From:`
   identity lines hit, accepted).
-- **Stable = `stable-20261016` = 68a10afd6** (promoted 13:28Z after a green rc sweep on
-  desktop-stable; smoke passed). No `missing-deps signature` retry in board.log since (#1512 live).
-  A second promote of 7654e6f23 (rc/20261016-2, adds #1528-#1530) started 15:12Z in herdr pane
-  w1:p5V; check `.kanban/promote.log` for its outcome.
+- **Stable = `stable-20261016-2` = 7654e6f23** (promoted ~15:35Z after a green rc sweep on
+  desktop-stable; smoke passed). It carries every ticket above. The earlier `stable-20261016`
+  (68a10afd6, 13:28Z) ended the `missing-deps signature` double runs (#1512).
 - **Verifiers:** `verify_workers = desktop-stable` only.
   - desktop-stable: rebooted 08:53Z; C: 119 GB free after the pagefile shrank (65 GB, was 106).
     Defender real-time scanning dominates its test I/O (103 MB/30 s) and is the likely cause of
@@ -29,8 +28,7 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
   stable-20261016. Send-back (rebase) sessions do not run it yet (comment on #1514).
 
 **Next:**
-1. Confirm the 15:12Z promote of 7654e6f23 went live (or read why it refused).
-2. When ao-pf38 is fixed, add it back to `verify_workers_<projectId>`.
+1. When ao-pf38 is fixed, add it back to `verify_workers_<projectId>`.
 
 ## Archive
 
