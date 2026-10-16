@@ -62,6 +62,17 @@ export function CompletedGrid({
 
   const doneStatusId = columns.find((c) => c.name === "Done")?.id ?? columns[0]?.id;
 
+  // #1531: the phone bottom sheet is a modal overlay, so Escape closes it like every other one.
+  const sheetOpen = isNarrow && !collapsed && columns.length > 0 && totalIssues > 0;
+  useEffect(() => {
+    if (!sheetOpen) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onToggle();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [sheetOpen, onToggle]);
+
   if (columns.length === 0 || totalIssues === 0) return null;
 
   const collapsedBar = (
@@ -140,6 +151,9 @@ export function CompletedGrid({
         {collapsedBar}
         <div className="fixed inset-0 z-40 bg-black/40" onClick={onToggle}>
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Completed issues"
             className="absolute inset-x-0 bottom-0 flex max-h-[85vh] flex-col rounded-t-2xl border-t border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900"
             onClick={(e) => e.stopPropagation()}
           >
