@@ -3,32 +3,42 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
-## 2026-10-16: backlog empty, stable-20261016-2 live
+## 2026-10-17: UX probe landed, stable-20261017 live
 
-**Goal (Peter):** get the board backlog done using the workers. **Done:** 0 open tickets at 15:12Z.
+**Goal (Peter):** a subagent explores the UI and fixes UX flaws; the board implements the rest.
+**Done:** 0 open tickets except #1548 (filed 23:15Z, builder running).
 
-- **Master = origin = 7654e6f23.** Landed 2026-10-15 evening to 2026-10-16: #1478 #1495 #1501 #1503
-  #1510-#1530 (trains 22, 10-16-01..08, direct merges). Every push scanned CLEAN (only `From:`
-  identity lines hit, accepted).
-- **Stable = `stable-20261016-2` = 7654e6f23** (promoted ~15:35Z after a green rc sweep on
-  desktop-stable; smoke passed). It carries every ticket above. The earlier `stable-20261016`
-  (68a10afd6, 13:28Z) ended the `missing-deps signature` double runs (#1512).
-- **Verifiers:** `verify_workers = desktop-stable` only.
-  - desktop-stable: rebooted 08:53Z; C: 119 GB free after the pagefile shrank (65 GB, was 106).
-    Defender real-time scanning dominates its test I/O (103 MB/30 s) and is the likely cause of
-    `.git/config: Permission denied` flakes; exclusions for `aks\work`, the pnpm store and kanban
-    fixture temp dirs are for Peter to decide.
-  - ao-pf38: off verify. Kernel paged pool ~26 GB in tag **FMfn** (FltMgr file-name leak,
-    ~315-400 MB/h, even idle; suspect `wtd` / Enhanced Phishing Protection). Reboot or disable is
-    for Peter to decide; then add it back. Builders still run there.
+- **Master = origin = 71522ef9c. Stable = `stable-20261017` = 71522ef9c** (promoted ~23:13Z
+  after a green full rc sweep on ao-pf38; smoke passed; rollback target `stable-20261016-2`).
+- **UX probe** (subagent, playwright on the stable board): 8 client fixes committed direct
+  (#1531-#1538: dark-mode text and Cancel button, phone toolbar row, Completed grid clipping,
+  search chip "N matches", shortcut "/" separator, Escape on Merge Queue panel and phone
+  Completed sheet). Screenshots in the session scratchpad `ux/`. **Not browser-verified:**
+  Escape on both panels and the "/" separator (host RAM too tight for the dev board).
+- **Board-built follow-ups:** #1539 (diff of a merged workspace with a deleted branch: 404, not
+  500), #1540+#1541 (Completed grid pages Done/Cancelled server-side, Load more, server search),
+  #1542 (every incoming-ref landing path adopts a clean rebase), #1543 (missing-deps retry ignores
+  captured test output), #1544 (verify_result names failing suites), #1545 (a follow-up turn
+  clears readyForMerge), #1546 (static tier now covers nloc, openapi drift, client fetch and
+  validation ratchets; logs its verdict), #1547 (partial-work detector no longer trips on the
+  noun "follow-up"). All landed through trains 10-16-09, -11, -12 plus one direct merge.
+- **Lesson:** launching a review by hand right after a builder exits cancels its implement-exit
+  check; #1541's ratchet breaks then cost a 39-min red train (train 10, cancelled). Let
+  implement-exit start the review. A builder that ran on the HOST (not a worker) got no
+  implement-exit at all with `auto_monitor` off; that one needed a manual review.
+- **Verifiers:** `verify_workers = desktop-stable,ao-pf38`.
+  - ao-pf38: Peter rebooted it 23:21 local; FMfn leak reset to 71 MB but grows ~430 MB/h under
+    verify load. It needs a reboot every day or two until the leaking minifilter is found
+    (`fltmc instances` as admin, Peter's step).
+  - desktop-stable: Defender exclusions for `akswork`, the pnpm store and kanban fixture temp
+    dirs still Peter's call.
   - wsl-stable: never for verify (shares host RAM).
-- **Host memory** stays tight (3-6 GB free); Claude Code reaps background shells under pressure.
-  Long operations (promote, held SSE clients) belong in a herdr pane, not a background shell.
-- **Lint-like guards:** #1514 (`check:static` at implement-exit, never held) is live from
-  stable-20261016. Send-back (rebase) sessions do not run it yet (comment on #1514).
+- **Host memory** 3-4 GB free; background shells get reaped. Promotes run in herdr pane w1:p5W.
 
 **Next:**
-1. When ao-pf38 is fixed, add it back to `verify_workers_<projectId>`.
+1. Land #1548 (promote accepts a green full sweep of the rc sha recorded on master).
+2. On the live board: press Escape on the Merge Queue panel and the phone Completed sheet;
+   check the shortcut help separator.
 
 ## Archive
 

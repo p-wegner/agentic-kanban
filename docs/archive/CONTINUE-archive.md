@@ -11,6 +11,33 @@ First archive pass: 2026-08-27, cutting at the 2026-08-24 boundary (`CONTINUE.md
 
 ---
 
+## 2026-10-16 (moved 2026-10-17): backlog empty, stable-20261016-2 live
+
+**Goal (Peter):** get the board backlog done using the workers. **Done:** 0 open tickets at 15:12Z.
+
+- **Master = origin = 7654e6f23.** Landed 2026-10-15 evening to 2026-10-16: #1478 #1495 #1501 #1503
+  #1510-#1530 (trains 22, 10-16-01..08, direct merges). Every push scanned CLEAN (only `From:`
+  identity lines hit, accepted).
+- **Stable = `stable-20261016-2` = 7654e6f23** (promoted ~15:35Z after a green rc sweep on
+  desktop-stable; smoke passed). It carries every ticket above. The earlier `stable-20261016`
+  (68a10afd6, 13:28Z) ended the `missing-deps signature` double runs (#1512).
+- **Verifiers:** `verify_workers = desktop-stable` only.
+  - desktop-stable: rebooted 08:53Z; C: 119 GB free after the pagefile shrank (65 GB, was 106).
+    Defender real-time scanning dominates its test I/O (103 MB/30 s) and is the likely cause of
+    `.git/config: Permission denied` flakes; exclusions for `aks\work`, the pnpm store and kanban
+    fixture temp dirs are for Peter to decide.
+  - ao-pf38: off verify. Kernel paged pool ~26 GB in tag **FMfn** (FltMgr file-name leak,
+    ~315-400 MB/h, even idle; suspect `wtd` / Enhanced Phishing Protection). Reboot or disable is
+    for Peter to decide; then add it back. Builders still run there.
+  - wsl-stable: never for verify (shares host RAM).
+- **Host memory** stays tight (3-6 GB free); Claude Code reaps background shells under pressure.
+  Long operations (promote, held SSE clients) belong in a herdr pane, not a background shell.
+- **Lint-like guards:** #1514 (`check:static` at implement-exit, never held) is live from
+  stable-20261016. Send-back (rebase) sessions do not run it yet (comment on #1514).
+
+**Next:**
+1. When ao-pf38 is fixed, add it back to `verify_workers_<projectId>`.
+
 ## 2026-10-15 (moved 2026-10-16): stable 95ddbc975 live, eight tickets ready, host reboot pending
 
 **Goal (Peter):** get the board backlog done using the workers.
