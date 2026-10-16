@@ -36,6 +36,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { shouldWarnGateStale } from "./test-impact-map/staleness-status.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { GateImpactSelection, GateTierInfo } from "./pre-merge-gate-tier.js";
 // Imported from the leaf module, not from `pre-merge-gate-tier.js` (which re-exports it) — that
@@ -493,7 +494,8 @@ export async function resolveGateImpactSelection(input: {
   // The message carries the remedy (`IMPACT_MAP_STALE_REMEDY`); this puts the same fact in the
   // server log at the moment it happens, which is where an operator wondering why the gate got
   // slow actually looks.
-  if (selection.stale) {
+  // #1519 — one line per interval, not one per gate; the monitor owns the per-project status line.
+  if (selection.stale && (input.log || shouldWarnGateStale())) {
     (input.log ?? ((message: string) => console.warn(`[test-impact] ${message}`)))(
       `impact map is STALE in ${input.workingDir} — the selection widened to tier "${selection.tier}", so this gate `
         + `ran broader and slower than its tier name claims. Rebuild it on the project's MAIN CHECKOUT `
