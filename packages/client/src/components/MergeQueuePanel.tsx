@@ -701,6 +701,17 @@ export function MergeQueuePanel({ columns, projectId, onClose, onIssueClick, onM
   // #1187 — both the departure-board history tiles and the merge-train summary's "Last gate"
   // figure open the train detail drawer (#1189), keyed by train id.
   const [openTrainId, setOpenTrainId] = useState<string | null>(null);
+  // #1538: the panel registry leaves mergeQueue out of the shared Escape order because this
+  // component owns its dismissal — so it must actually handle Escape: the train drawer first.
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (openTrainId) setOpenTrainId(null);
+      else onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [openTrainId, onClose]);
 
   async function handleMerge(workspaceId: string) {
     const confirmed = window.confirm("Trigger merge for this workspace?");
