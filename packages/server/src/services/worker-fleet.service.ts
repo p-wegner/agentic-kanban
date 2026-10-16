@@ -846,7 +846,12 @@ function providerAdvertised(w: { providers: string | null }, providerName: strin
 }
 
 /** Why a strict launch is being HELD rather than failed (#1347). */
-export type StrictHoldReason = "worker_updating" | "worker_reconnecting" | "workers_busy" | "toolchain_installing";
+export type StrictHoldReason =
+  | "worker_updating"
+  | "worker_reconnecting"
+  | "workers_busy"
+  | "toolchain_installing"
+  | "profiles_unavailable";
 
 /**
  * The verdict on a STRICT-dispatch launch BEFORE a session row exists (#1347).
@@ -860,7 +865,7 @@ export type StrictHoldReason = "worker_updating" | "worker_reconnecting" | "work
  */
 export type StrictLaunchReadiness =
   | { kind: "proceed" }
-  | { kind: "hold"; reason: StrictHoldReason; workerId: string }
+  | { kind: "hold"; reason: StrictHoldReason; workerId: string; detail?: string }
   | { kind: "refuse"; reason: string };
 
 export async function checkStrictLaunchReadiness(params: {
@@ -878,7 +883,22 @@ export async function checkStrictLaunchReadiness(params: {
     const requiredLabels = await readPlacementRequirements(projectId, database);
     const views = await fleet.registry.listWorkersView(now);
     const eligible = filterEligibleWorkers(fleet, views, providerName, requiredLabels, nowMs);
-    if (eligible.length > 0) return { kind: "proceed" };
+    if (eligible.length > 0) {
+      // #1522: workers exist, but none attests a permitted, non-cooling profile. That clears
+      // when a cooldown ends or a worker attests one, so wait instead of failing the launch.
+      const gate = await resolveAttestationGate({
+        database,
+        projectId,
+        allowlistRaw: await getPreferenceValue(allowedProfilesPrefKey(projectId), database),
+        rosterRaw: await getPreferenceValue(rosterPrefKey(projectId), database),
+        listEligibleWorkers: () => listAttestingWorkers(fleet, providerName, requiredLabels, now, nowMs),
+        nowMs,
+      });
+      if (gate.block.blocked) {
+        return { kind: "hold", reason: "profiles_unavailable", workerId: "", detail: gate.block.reason };
+      }
+      return { kind: "proceed" };
+    }
     // #1371: a worker that is out ONLY for missing toolchains is asked to install them (its own policy decides).
     const install = requestToolchainInstalls(
       views.filter((w) => providerAdvertised(w, providerName) && workerMeetsRequirements(splitRequirements(requiredLabels).labels, parseLabels(w.labels), undefined)),

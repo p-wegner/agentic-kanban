@@ -21,6 +21,8 @@ export interface LaunchHold {
   workerId: string;
   /** ISO time the hold began. */
   since: string;
+  /** What the hold is waiting on, when the reason alone is not enough (#1522: the cooling profiles). */
+  detail?: string;
 }
 
 const holds = new Map<string, LaunchHold>();
@@ -92,15 +94,18 @@ export async function awaitStrictLaunchWorker(
       if (verdict.kind === "refuse") {
         throw new WorkspaceError(verdict.reason, "CONFLICT", { code: "NO_AVAILABLE_WORKER" });
       }
-      const limitMs = verdict.reason === "workers_busy" ? queueTimeoutMs : timeoutMs;
+      const queued = verdict.reason === "workers_busy" || verdict.reason === "profiles_unavailable";
+      const limitMs = queued ? queueTimeoutMs : timeoutMs;
       if (waitedMs >= limitMs) {
         throw new WorkspaceError(
-          `${verdict.reason} for ${Math.round(limitMs / 1000)}s (worker ${verdict.workerId} did not return) and worker dispatch is strict`,
+          verdict.detail
+            ? `${verdict.reason} for ${Math.round(limitMs / 1000)}s: ${verdict.detail}`
+            : `${verdict.reason} for ${Math.round(limitMs / 1000)}s (worker ${verdict.workerId} did not return) and worker dispatch is strict`,
           "CONFLICT",
           { code: "NO_AVAILABLE_WORKER", heldFor: verdict.reason },
         );
       }
-      if (isReview && verdict.reason === "workers_busy") {
+      if (isReview && queued) {
         const set = queuedReviews.get(projectId) ?? new Set<string>();
         set.add(workspaceId);
         queuedReviews.set(projectId, set);
@@ -108,7 +113,12 @@ export async function awaitStrictLaunchWorker(
       if (!holds.has(workspaceId)) {
         console.log(`[session] holding strict launch for workspace ${workspaceId}: ${verdict.reason} (worker ${verdict.workerId})`);
       }
-      holds.set(workspaceId, { reason: verdict.reason, workerId: verdict.workerId, since });
+      holds.set(workspaceId, {
+        reason: verdict.reason,
+        workerId: verdict.workerId,
+        since,
+        ...(verdict.detail ? { detail: verdict.detail } : {}),
+      });
       await sleep(pollMs);
       waitedMs += pollMs;
     }
