@@ -34,6 +34,8 @@ import type { Database } from "../db/index.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { listBoardProjectIds } from "../repositories/project-status.repository.js";
 import { resolveTestImpactMapGate, runTestImpactMapPass } from "../services/test-impact-map.service.js";
+import { countImpactMapCommitsBehind, IMPACT_MAP_MAX_COMMITS_BEHIND } from "../services/test-impact-map/post-merge.js";
+import { recordImpactMapStatus } from "../services/test-impact-map/staleness-status.js";
 
 export interface TestImpactMapStepDeps {
   /** Which projects this cycle may act on (same predicate the rest of the cycle uses). */
@@ -70,7 +72,26 @@ export async function runTestImpactMapRefresh(
       const project = await getProjectById(projectId, database);
       if (!project?.repoPath || !existsSync(project.repoPath)) continue;
 
-      const result = await runTestImpactMapPass(project.repoPath, database ? { placement: { projectId, database } } : {});
+      // #1519: the tool's own threshold (30) is the point where the gate WIDENS; apply the tighter
+      // post-merge bound here too, so a map left behind by hand flushes (no board merge, so no
+      // post-merge hook) is rebuilt by the monitor instead of waiting for the next board merge.
+      const commitsBehind = await countImpactMapCommitsBehind(project.repoPath).catch(() => null);
+      const forceRebuild = commitsBehind !== null && commitsBehind > IMPACT_MAP_MAX_COMMITS_BEHIND;
+      const result = await runTestImpactMapPass(project.repoPath, {
+        ...(forceRebuild ? { forceRebuild } : {}),
+        ...(database ? { placement: { projectId, database } } : {}),
+      });
+      // One status line per project, logged on change only — not one per gate or per cycle.
+      const behindText = commitsBehind === null ? "" : `${commitsBehind} commits behind, `;
+      const status = result.outcome === "rebuilt" || result.outcome === "fresh" ? "fresh"
+        : forceRebuild || result.outcome === "lock_busy" || result.outcome === "held"
+          ? `impact map ${behindText}not rebuilding because ${result.outcome}${result.detail ? ` (${result.detail})` : ""}`
+          : null;
+      if (status && status !== "fresh" && recordImpactMapStatus(projectId, status)) {
+        console.warn(`[monitor] ${status} (project ${projectId})`);
+      } else if (status === "fresh") {
+        recordImpactMapStatus(projectId, status);
+      }
       switch (result.outcome) {
         case "rebuilt":
           rebuilt++;
