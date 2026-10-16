@@ -1,4 +1,5 @@
 // @gate:always-run when:packages/server/src/**,packages/server/scripts/**,packages/server/openapi.yaml,packages/server/package.json,packages/shared/src/**
+// @gate:static — source-scanning ratchet: runs in the static tier (`pnpm check:static`, #1514/#1546), never held.
 //
 // Territory (#1041): everything the generator READS plus the artifact it is compared against —
 // the generator itself, the shared sources the operations are derived from, and the WHOLE of

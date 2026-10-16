@@ -6,25 +6,36 @@ import { ColumnMinimap } from "./ColumnMinimap.js";
 import { useIsNarrow } from "../hooks/useMediaQuery.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import { useBoardBulkSelectionStore } from "../stores/boardBulkSelectionStore.js";
+import { useCompletedPagingStore } from "../stores/completedPagingStore.js";
 import { Icon } from "./Icon.js";
 
 const MINIMAP_THRESHOLD = 20;
 
-// #1540: the board payload caps Done/Cancelled at the newest N, so the header total can exceed
-// what is listed (and what search can match). Say so and point at List view for the rest.
-export function CompletedTruncationNotice({ shown, total, searching }: { shown: number; total: number; searching: boolean }) {
-  if (shown >= total) return null;
-  return (
-    <p data-testid="completed-truncation-notice" className="text-xs text-gray-400 dark:text-gray-500 mb-2 shrink-0">
-      Showing newest {shown} of {total}
-      {searching ? " — search only covers these." : "."} Use List view to find older issues.
-    </p>
-  );
-}
-
 const CARD_MIN_WIDTH = 220;
 const CARD_GAP = 8;
 const ESTIMATED_ROW_HEIGHT = 90;
+
+/** #1541: the paging control — the board payload caps Done/Cancelled, older tickets load here. */
+function LoadMoreFooter({ shown, total }: { shown: number; total: number }) {
+  const hasMore = useCompletedPagingStore((s) => s.hasMore);
+  const loading = useCompletedPagingStore((s) => s.loading);
+  const loadMore = useCompletedPagingStore((s) => s.loadMore);
+  if (!hasMore) return null;
+  return (
+    <div className="flex items-center justify-center gap-2 py-2 shrink-0">
+      <span className="text-xs text-gray-400 dark:text-gray-500">{shown} of {total} loaded</span>
+      <button
+        type="button"
+        data-testid="completed-load-more"
+        onClick={loadMore}
+        disabled={loading}
+        className="rounded-md border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+      >
+        {loading ? "Loading…" : "Load more"}
+      </button>
+    </div>
+  );
+}
 
 interface CompletedGridProps {
   columns: StatusWithIssues[];
@@ -186,8 +197,8 @@ export function CompletedGrid({
               </button>
             </div>
             <div className="overflow-y-auto p-3">
-              <CompletedTruncationNotice shown={allIssues.length} total={totalIssues} searching={searchQuery.trim() !== ""} />
               {cardsGrid}
+              <LoadMoreFooter shown={allIssues.length} total={totalIssues} />
             </div>
           </div>
         </div>
@@ -296,7 +307,6 @@ function VirtualizedCompletedGrid({
         <span className="font-medium">Completed</span>
         <span className="text-xs text-gray-400 dark:text-gray-500">{totalIssues}</span>
       </button>
-      <CompletedTruncationNotice shown={allIssues.length} total={totalIssues} searching={!!searchQuery?.trim()} />
 
       <div className="flex flex-1 min-h-0">
         <div
@@ -361,6 +371,7 @@ function VirtualizedCompletedGrid({
           />
         )}
       </div>
+      <LoadMoreFooter shown={allIssues.length} total={totalIssues} />
     </div>
   );
 }

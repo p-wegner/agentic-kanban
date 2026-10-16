@@ -252,3 +252,62 @@ export async function getBoardSummaryRows(
     .groupBy(projectStatuses.id, projectStatuses.name, projectStatuses.sortOrder)
     .orderBy(projectStatuses.sortOrder);
 }
+
+/** Escape LIKE metacharacters so a query containing `%` or `_` matches itself. */
+function escapeLikeText(text: string): string {
+  return text.replace(/[\%_]/g, (ch) => `\\${ch}`);
+}
+
+/**
+ * #1541: one page of a project's terminal (Done/Cancelled) issues, newest status change first,
+ * optionally narrowed to a title/description/`#number` match. Same projection as `getBoardIssues`
+ * so the page can go through the board's own column builder. `total` is the match count before
+ * paging, so the client can tell whether more remain.
+ */
+export async function getCompletedIssuesPage(
+  projectId: string,
+  statusIds: string[],
+  opts: { offset: number; limit: number; query?: string },
+  database: Database = db,
+) {
+  if (statusIds.length === 0) return { rows: [], total: 0 };
+  const trimmed = (opts.query ?? "").trim().toLowerCase();
+  const filters = [eq(issues.projectId, projectId), inArray(issues.statusId, statusIds)];
+  if (trimmed) {
+    const pattern = `%${escapeLikeText(trimmed.replace(/^#/, ""))}%`;
+    const textMatch = sql`(LOWER(${issues.title}) LIKE ${pattern} ESCAPE '\\' OR LOWER(COALESCE(${issues.description}, '')) LIKE ${pattern} ESCAPE '\\' OR CAST(${issues.issueNumber} AS TEXT) LIKE ${pattern} ESCAPE '\\')`;
+    filters.push(textMatch);
+  }
+  const where = and(...filters);
+  const [{ total }] = await database
+    .select({ total: sql<number>`count(*)` })
+    .from(issues)
+    .where(where);
+  const rows = await database
+    .select({
+      ...issueTriageColumns,
+      issueType: issues.issueType,
+      sortOrder: issues.sortOrder,
+      statusId: issues.statusId,
+      projectId: issues.projectId,
+      createdAt: issues.createdAt,
+      updatedAt: issues.updatedAt,
+      statusChangedAt: issues.statusChangedAt,
+      statusName: projectStatuses.name,
+      skipAutoReview: issues.skipAutoReview,
+      externalKey: issues.externalKey,
+      externalUrl: issues.externalUrl,
+      checklistJson: issues.checklistJson,
+      pinned: issues.pinned,
+      milestoneId: issues.milestoneId,
+      lastAutoStartSkipReason: issues.lastAutoStartSkipReason,
+      lastAutoStartSkipAt: issues.lastAutoStartSkipAt,
+    })
+    .from(issues)
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .where(where)
+    .orderBy(sql`COALESCE(${issues.statusChangedAt}, ${issues.updatedAt}) DESC`, issues.id)
+    .limit(opts.limit)
+    .offset(opts.offset);
+  return { rows, total: Number(total) };
+}

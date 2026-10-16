@@ -644,6 +644,17 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     return c.json(result);
   });
 
+  // GET /api/projects/:id/board/completed?offset=&limit=&q= (#1541) — a page of Done/Cancelled
+  // issues, newest first, optionally matching q (title/description/#number). The board payload caps
+  // each terminal column; this is how the Completed grid reaches the rest.
+  router.get("/:id/board/completed", async (c) => {
+    const projectId = c.req.param("id");
+    const offset = queryInt(c, "offset", { def: 0, min: 0, max: 1_000_000 });
+    const limit = queryInt(c, "limit", { def: 50, min: 1, max: 50 });
+    const result = await projectService.getCompletedPage(projectId, { offset, limit, query: c.req.query("q") ?? "" });
+    return c.json(result);
+  });
+
   // GET /api/projects/:id/board
   router.get("/:id/board", async (c) => {
     const projectId = c.req.param("id");

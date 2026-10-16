@@ -5390,6 +5390,29 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{id}/board/completed:
+    get:
+      summary: each terminal column; this is how the Completed grid reaches the rest.
+      tags:
+        - projects
+      operationId: get_api_projects_id_board_completed
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/board/summary:
     get:
       summary: GET /api/projects/:id/board/summary — column counts only, no issue bodies

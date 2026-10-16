@@ -29,6 +29,7 @@ import {
   getWorkspaceSessions,
   getWorkspaceSkillName,
 } from "../repositories/session.repository.js";
+import { clearWorkspaceReadyForMerge } from "../repositories/workspace-merge-prevalidation.repository.js";
 import { getPreference, getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { buildImplementPrompt, buildRejectPrompt, writePlanFile, PLAN_FILE } from "./plan-mode.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
@@ -321,6 +322,16 @@ export function createWorkspaceSessionService(deps: {
     return { sessionId };
   }
 
+  /**
+   * #1545: a delivered follow-up turn means the work is no longer the reviewed state, so the
+   * ready flag must not keep advertising the old commit to auto-merge. The implement-exit
+   * check and review set it again. The train's own nudges are exempt (#1418).
+   */
+  async function dropReadyForMergeForTurn(id: string, opts: { fromTrain?: boolean }): Promise<void> {
+    if (opts.fromTrain === true) return;
+    await clearWorkspaceReadyForMerge(id, new Date().toISOString(), database);
+  }
+
   /** `opts.fromTrain`: the train's own siding/red-feedback nudges — the one caller allowed to move a live member (#1418). */
   async function sendTurn(id: string, content: string, opts: { fromTrain?: boolean } = {}): Promise<TurnResult> {
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
@@ -340,6 +351,7 @@ export function createWorkspaceSessionService(deps: {
       if (!result.ok) {
         throw new WorkspaceError(result.error || "Agent is busy", "CONFLICT");
       }
+      await dropReadyForMergeForTurn(id, opts);
       return { type: "sent" };
     }
 
@@ -422,6 +434,8 @@ export function createWorkspaceSessionService(deps: {
       agentCommand: agentCommand ?? null,
       provider,
     }, database);
+
+    await dropReadyForMergeForTurn(id, opts);
 
     const projectId = await resolveProjectId(id, database);
     if (projectId) boardEvents?.broadcast(projectId, "session_launched");

@@ -13,6 +13,7 @@ import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { showToast } from "../lib/toast.js";
 import { fetchProjectRepos } from "../lib/projectReposQuery.js";
+import { useCompletedColumns } from "../hooks/useCompletedColumns.js";
 import { matchesBoardFilters } from "../lib/boardFiltering.js";
 import { reconcileSelectedIssue } from "../lib/selectedIssueSync.js";
 import { createQuickUpdateHandlers } from "../lib/issueQuickUpdates.js";
@@ -514,13 +515,13 @@ export function BoardPage() {
     searchQuery,
   }), [focusMode, statusFilterId, activeTagIds, milestoneFilterId, driveFilterId, issueTypeFilter, priorityFilter, showBlocked, showStaleOnly, searchQuery]);
 
+  const completedColumns = useCompletedColumns(activeProjectId, searchQuery, columns); // #1541
   const filteredColumns = useMemo(
     () =>
-      columns.map((col) => ({
-        ...col,
-        issues: col.issues.filter((issue) => matchesBoardFilters(issue, filterOptions)),
+      completedColumns.map((col) => ({
+        ...col, issues: col.issues.filter((issue) => matchesBoardFilters(issue, filterOptions)),
       })),
-    [columns, filterOptions],
+    [completedColumns, filterOptions],
   );
 
   const showAiReviewedColumn = useMemo(
