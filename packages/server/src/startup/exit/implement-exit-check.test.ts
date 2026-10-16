@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildImplementExitFeedbackPrompt,
+  createImplementExitGate,
   decideImplementExitAction,
   IMPLEMENT_EXIT_MAX_FEEDBACK_TURNS,
   isImplementPhaseExit,
@@ -59,6 +60,42 @@ describe("planImplementExitRun — what one check executes", () => {
     expect(plan.kind).toBe("skip");
     expect(plan.kind === "skip" && plan.reason).toContain("ran on a worker");
     expect(planImplementExitRun({ ...base, level: "typecheck", depsMissing: true }).kind).toBe("typecheck");
+  });
+});
+
+describe("gateImplementExit — #1516 cancels a check the workspace has moved past", () => {
+  const ctx = {
+    workspace: { id: "ws-1", workingDir: "/wt", baseBranch: "master", parentWorkspaceId: null, forkStatus: null, isDirect: false },
+    issueId: "i-1", projectId: "p-1", prefMap: new Map<string, string>(), now: new Date().toISOString(),
+  } as unknown as Parameters<ReturnType<typeof createImplementExitGate>>[0];
+  const make = (status: string, runCheck: NonNullable<Parameters<typeof createImplementExitGate>[0]["runCheck"]>) => createImplementExitGate({
+    database: {} as never,
+    boardEvents: { broadcast: () => undefined },
+    runCheck,
+    resolvePosture: async () => ({ level: "flow", implementExitCheck: "impact" }) as never,
+    readWorkflowNode: async () => null,
+    listGroupMembers: async () => [],
+    readStatus: async () => status,
+    watchIntervalMs: 5,
+  });
+
+  it("aborts the in-flight check's signal and stops when the workspace is ready_for_merge", async () => {
+    let seen: AbortSignal | undefined;
+    const gate = make("ready_for_merge", (args) => new Promise((resolve) => {
+      seen = args.signal;
+      args.signal?.addEventListener("abort", () => resolve({ level: "impact", ran: false, passed: true, held: true, message: "cancelled", failureDetail: null, selectionSize: null, durationMs: 0 }));
+    }));
+    expect(await gate(ctx)).toBe("stop");
+    expect(seen?.aborted).toBe(true);
+  });
+
+  it("leaves the check alone while the workspace is still being worked on", async () => {
+    const gate = make("idle", async (args) => {
+      await new Promise((r) => setTimeout(r, 30));
+      expect(args.signal?.aborted).toBe(false);
+      return { level: "impact", ran: true, passed: true, held: false, message: "ok", failureDetail: null, selectionSize: 1, durationMs: 1 };
+    });
+    expect(await gate(ctx)).toBe("proceed");
   });
 });
 

@@ -3,6 +3,7 @@
 // report; imports nothing it checks (#1042). Territory (#1041): a marker can only be added in a
 // package's `__tests__` tree, the scan rule lives in `scripts/test-mine.mjs`, and the numbers come
 // from `docs/tests/durations.json`.
+// @gate:static — source-scanning ratchet: runs in the static tier (`pnpm check:static`, #1514), never held.
 import { describe, expect, it } from "vitest";
 import path from "node:path";
 

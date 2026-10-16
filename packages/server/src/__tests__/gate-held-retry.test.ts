@@ -5,6 +5,7 @@ import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/s
 import { createTestDb } from "./helpers/test-db.js";
 import {
   gateHeldRetryDelayMs,
+  isGateHeldRetryDue,
   isGateWithheldForHead,
   markReviewExitGateHeld,
   markReviewExitGateWithheld,
@@ -39,6 +40,16 @@ describe("held gate retry (#1423)", () => {
     await markReviewExitGateHeld({ workspaceId, issueId, workingDir: "/r/w", message: "m", nowMs: t0 }, { database: db, gitService: git });
     const second = await markReviewExitGateHeld({ workspaceId, issueId, workingDir: "/r/w", message: "m", nowMs: t0 + 1000 }, { database: db, gitService: git });
     expect(Date.parse(second!)).toBe(t0 + 1000 + gateHeldRetryDelayMs(1));
+  });
+
+  it("a held retry is due only for the held head once retryAt has passed (#1524)", async () => {
+    const { db, issueId, workspaceId } = await seed();
+    const t0 = Date.now();
+    await markReviewExitGateHeld({ workspaceId, issueId, workingDir: "/r/w", message: "m", nowMs: t0 }, { database: db, gitService: git });
+    const due = t0 + gateHeldRetryDelayMs(0) + 1;
+    expect(await isGateHeldRetryDue(db, workspaceId, "abc12345", t0 + 60_000)).toBe(false);
+    expect(await isGateHeldRetryDue(db, workspaceId, "abc12345", due)).toBe(true);
+    expect(await isGateHeldRetryDue(db, workspaceId, "other", due)).toBe(false);
   });
 
   it("a red verdict still withholds indefinitely", async () => {

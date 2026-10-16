@@ -45,6 +45,7 @@ import {
 import { getWorkspaceCurrentWorkflowNode } from "../../repositories/workflow.repository.js";
 import { listMemberIssueIds } from "../../repositories/workspace-issue-members.repository.js";
 import { insertIssueComment } from "../../repositories/issue-comments.repository.js";
+import { getWorkspaceStatus } from "../../repositories/merge-queue.repository.js";
 import { setWorkspaceStatus } from "../../repositories/workspace-status.repository.js";
 import type { ExitContext } from "./exit-context.js";
 import { REVIEW_STAGE_STATUS_NAME, type WorkflowOwnershipNode } from "./workflow-ownership.js";
@@ -114,7 +115,14 @@ export interface ImplementExitGateDeps {
   /** Waits between re-runs of a held check (#1515); empty disables the retry. */
   heldRetryDelaysMs?: number[];
   sleep?: (ms: number) => Promise<void>;
+  /** #1516: reads the workspace's current status while its check runs (default: the repository). */
+  readStatus?: (workspaceId: string, database: Database) => Promise<string | undefined>;
+  /** #1516: how often the in-flight check looks at the workspace's status. */
+  watchIntervalMs?: number;
 }
+
+/** #1516: statuses past the point an implement-exit check serves — its verdict can no longer change anything. */
+export const IMPLEMENT_EXIT_PAST_STATUSES: ReadonlySet<string> = new Set(["ready_for_merge", "reviewing", "closed", "merged"]);
 
 /** A held check is retried at these intervals before review proceeds unverified. */
 export const IMPLEMENT_EXIT_HELD_RETRY_DELAYS_MS = [15_000, 45_000, 120_000];
@@ -130,6 +138,8 @@ export function createImplementExitGate(deps: ImplementExitGateDeps) {
   const cap = deps.cap ?? IMPLEMENT_EXIT_MAX_FEEDBACK_TURNS;
   const heldRetryDelaysMs = deps.heldRetryDelaysMs ?? IMPLEMENT_EXIT_HELD_RETRY_DELAYS_MS;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const readStatus = deps.readStatus ?? getWorkspaceStatus;
+  const watchMs = deps.watchIntervalMs ?? 30_000;
 
   async function resolveLevel(ctx: ExitContext): Promise<{ posture: RiskPosture; level: ImplementExitCheckLevel }> {
     const posture = await (deps.resolvePosture ?? resolveIssueRiskPosture)(ctx.issueId, ctx.projectId, ctx.prefMap, database)
@@ -163,17 +173,29 @@ export function createImplementExitGate(deps: ImplementExitGateDeps) {
     const groupNote = members.length > 0 ? `, ticket group of ${members.length + 1}` : "";
     let result: ImplementExitCheckResult;
     markImplementExitCheckInFlight(workspace.id);
+    // #1516: a check the workspace has moved past keeps a worker slot for nothing; watch for that.
+    const ctl = new AbortController();
+    const watcher = setInterval(() => {
+      void readStatus(workspace.id, database).then((status) => {
+        if (status && IMPLEMENT_EXIT_PAST_STATUSES.has(status) && !ctl.signal.aborted) {
+          console.log(`[implement-exit] workspace ${workspace.id} is now ${status}: cancelling its in-flight check`);
+          ctl.abort();
+        }
+      }).catch(() => undefined);
+    }, watchMs);
+    watcher.unref?.();
     try {
       const checkArgs = {
         workspace: { id: workspace.id, workingDir: workspace.workingDir, baseBranch: workspace.baseBranch },
         projectId,
         level,
         database,
+        signal: ctl.signal,
       };
       result = await runCheck(checkArgs);
       // #1515: a held check verified nothing. Re-queue it (like a held merge gate) before review
       // starts; the in-flight marker keeps the monitor off while we wait.
-      for (let i = 0; result.held && i < heldRetryDelaysMs.length; i++) {
+      for (let i = 0; result.held && !ctl.signal.aborted && i < heldRetryDelaysMs.length; i++) {
         console.log(
           `[implement-exit] workspace ${workspace.id}: check held (${result.message}); retry ${i + 1}/${heldRetryDelaysMs.length} in ${Math.round(heldRetryDelaysMs[i]! / 1000)}s`,
         );
@@ -181,8 +203,11 @@ export function createImplementExitGate(deps: ImplementExitGateDeps) {
         result = await runCheck(checkArgs);
       }
     } finally {
+      clearInterval(watcher);
       clearImplementExitCheckInFlight(workspace.id);
     }
+    // The workspace advanced on its own: the verdict can change nothing, and "proceed" would relaunch review.
+    if (ctl.signal.aborted) return "stop";
     const verdict = !result.ran ? (result.held ? "held" : "skipped") : result.passed ? "green" : "red";
     const selection = result.selectionSize === null ? "n/a" : String(result.selectionSize);
     console.log(

@@ -1,5 +1,6 @@
 // @gate:always-run always — walks every package's src tree plus `scripts/` and reads `docs/env-vars.md`;
 // it imports none of the files it judges.
+// @gate:static — source-scanning ratchet: runs in the static tier (`pnpm check:static`, #1514), never held.
 /**
  * Every `process.env` read has a known OWNER (#707).
  *

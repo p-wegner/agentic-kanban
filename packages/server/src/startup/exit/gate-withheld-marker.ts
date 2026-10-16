@@ -9,7 +9,7 @@
  * the builder's fix is eligible again with nothing to clear.
  */
 import type { Database } from "../../db/index.js";
-import { insertIssueComment, listWorkspaceCommentPayloadsByKind } from "../../repositories/issue-comments.repository.js";
+import { insertIssueComment, listWorkspaceCommentPayloadsByKind, listWorkspaceCommentsWithTimeByKind } from "../../repositories/issue-comments.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export const REVIEW_EXIT_GATE_RED_REASON = "review_exit_gate_red";
@@ -85,6 +85,31 @@ export async function markReviewExitGateHeld(
   } catch (err) {
     console.warn(`[workflow] could not record the held gate for workspace ${input.workspaceId}: ${errorMessage(err)}`);
     return null;
+  }
+}
+
+/**
+ * Is the newest recorded gate decision a HELD marker for exactly `headSha` whose `retryAt` has
+ * passed (#1524)? Then the un-armed flag is the hold's doing, not a conflict an earlier
+ * `merge-attempt` cleared, and the reconciler must re-arm despite that older merge-attempt row.
+ */
+export async function isGateHeldRetryDue(database: Database, workspaceId: string, headSha: string, nowMs: number = Date.now()): Promise<boolean> {
+  try {
+    for (const row of await listWorkspaceCommentsWithTimeByKind(workspaceId, "gate-decision", database)) {
+      const payload = row.payload ? (JSON.parse(row.payload) as GateDecisionPayload) : null;
+      if (payload?.mergeReason === REVIEW_EXIT_GATE_HELD_REASON) {
+        const retryMs = Date.parse(payload.retryAt ?? "");
+        if (payload.headSha !== headSha || !Number.isFinite(retryMs) || nowMs < retryMs) return false;
+        // A merge attempt AFTER the hold is a real conflict/un-arm, not the hold's doing: re-arming
+        // would loop arm -> merge -> conflict -> clear every tick.
+        const attempts = await listWorkspaceCommentsWithTimeByKind(workspaceId, "merge-attempt", database);
+        return !attempts.some((a) => Date.parse(a.createdAt) > Date.parse(row.createdAt));
+      }
+      if (payload?.mergeReason === REVIEW_EXIT_GATE_RED_REASON) return false;
+    }
+    return false;
+  } catch {
+    return false;
   }
 }
 

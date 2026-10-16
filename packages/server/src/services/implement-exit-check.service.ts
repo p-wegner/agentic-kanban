@@ -57,6 +57,7 @@ import { recordVerifyGateOutcome, resolveGateImpactTierFields } from "./test-imp
 import { VERIFY_NEUTRALIZED_DB_LOCATION_ENV, VERIFY_NEUTRALIZED_LISTENER_ENV } from "../lib/verify-env.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { isSelfProjectRepo } from "./self-project.js";
+import { runStaticTier } from "./static-tier.service.js";
 
 /** The outcome-ledger `source` of an implement-exit run (a merge gate row is `ci`). */
 export const IMPLEMENT_EXIT_LEDGER_SOURCE = "implement-exit";
@@ -129,6 +130,8 @@ export interface RunImplementExitCheckArgs {
   projectId: string;
   level: ImplementExitCheckLevel;
   database: Database;
+  /** #1516: aborted when the workspace moved past the check; a worker-placed job is cancelled and its slot freed. */
+  signal?: AbortSignal;
 }
 
 function hostDepsMissing(workingDir: string | null): boolean {
@@ -143,10 +146,32 @@ async function readTypecheckCommand(projectId: string, database: Database): Prom
   return (await getStackProfile(projectId, database).catch(() => null))?.typecheckCommand?.trim() || null;
 }
 
+/** A red static-tier result for the builder's feedback turn, or null (green, or nothing ran). */
+async function runStaticTierAtExit(workspace: ImplementExitCheckWorkspace, level: ImplementExitCheckLevel): Promise<ImplementExitCheckResult | null> {
+  if (!workspace.workingDir) return null;
+  const startedAt = Date.now();
+  const verdict = await runStaticTier({ workingDir: workspace.workingDir, baseBranch: workspace.baseBranch });
+  if (verdict.passed) return null;
+  return {
+    level,
+    ran: true,
+    passed: false,
+    held: false,
+    message: `implement-exit ${verdict.message}`,
+    failureDetail: verdict.detail,
+    selectionSize: null,
+    durationMs: Date.now() - startedAt,
+  };
+}
+
 /** Run the implement-exit check for one workspace. Total: never throws. */
 export async function runImplementExitCheck(args: RunImplementExitCheckArgs): Promise<ImplementExitCheckResult> {
   const { workspace, projectId, level, database } = args;
   if (level === "none") return skipped(level, "implement-exit check: none (posture)");
+  // #1514: the static tier runs first and OUTSIDE verify placement, so a red reaches the builder
+  // even when the test part below is `held` (a held check counts as passed).
+  const staticRed = await runStaticTierAtExit(workspace, level);
+  if (staticRed) return staticRed;
   const verification = level === "typecheck"
     ? null
     : await resolveGateVerification(projectId, database, { workingDir: workspace.workingDir }).catch(() => null);
@@ -169,7 +194,7 @@ export async function runImplementExitCheck(args: RunImplementExitCheckArgs): Pr
   const startedAt = Date.now();
   try {
     return plan.kind === "typecheck"
-      ? await runTypecheckLevel(workspace, plan.command, startedAt, projectId, args.database)
+      ? await runTypecheckLevel(workspace, plan.command, startedAt, projectId, args.database, args.signal)
       : await runVerifyLevel({ ...args, workingDir: workspace.workingDir!, plan, verification: verification! }, startedAt);
   } catch (err) {
     // Fail OPEN: the check is an early signal and the merge gate still runs. A broken harness
@@ -187,6 +212,7 @@ async function runTypecheckLevel(
   startedAt: number,
   projectId: string,
   database: Database,
+  signal?: AbortSignal,
 ): Promise<ImplementExitCheckResult> {
   const workingDir = workspace.workingDir!;
   const sha = await readHeadSha(workingDir);
@@ -199,7 +225,7 @@ async function runTypecheckLevel(
   // #1497: and the host's verify-chain slot — planned here so the slot follows the placement.
   const plan = await planVerifyPlacement({ kind: "implement-exit", projectId, database });
   if (plan.target === "hold") throw new VerifyJobHeldError(plan.reason);
-  const placeArgs = { kind: "implement-exit" as const, projectId, database, command, workingDir, sha, tier: "typecheck", runOnHost };
+  const placeArgs = { kind: "implement-exit" as const, projectId, database, command, workingDir, sha, tier: "typecheck", runOnHost, signal };
   const { result } = await runVerifyChainForPlacement(
     plan.target === "worker" ? plan.workerName : undefined,
     async () => (plan.target === "worker" ? await runOnPlannedWorker(plan, placeArgs) : { result: await runOnHost() }).result,
@@ -325,7 +351,7 @@ async function runVerifyLevel(args: VerifyLevelArgs, startedAt: number): Promise
       if (placement.target !== "worker") throw new Error("not placed on a worker");
       const out = await runOnPlannedWorker(placement, {
         kind: "implement-exit", projectId, database, command: plan.command, workingDir, sha, tier: plan.strategy,
-        timeoutMs: verifyTimeoutMs, env, maxWorkers,
+        timeoutMs: verifyTimeoutMs, env, maxWorkers, signal: args.signal,
         runOnHost: async () => ({ exitCode: -1, stdout: "", stderr: "ran on host", timedOut: false }),
       });
       if (out.refused) refusal = out.refused;

@@ -20,7 +20,7 @@ import { clearReviewPreflightBlockRow, setReviewPreflightBlock } from "../reposi
 import { resolveProjectReviewMode } from "../services/review-mode-pref.js";
 import { formatPostureNote } from "../services/risk-posture.service.js";
 import { stampWorkspaceReadyForMergeAt } from "../repositories/workspace-ready-for-merge.repository.js";
-import { isGateWithheldForHead } from "./exit/gate-withheld-marker.js";
+import { isGateHeldRetryDue, isGateWithheldForHead } from "./exit/gate-withheld-marker.js";
 
 /**
  * How many times the reconciler may attempt a review preflight for the SAME pair of
@@ -264,10 +264,13 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
       // prove was never merge-attempted is left for the human, not auto-approved.
       const mergeAttempt = await database.select({ id: issueComments.id }).from(issueComments)
         .where(and(eq(issueComments.workspaceId, c.wsId), eq(issueComments.kind, "merge-attempt"))).limit(1);
-      if (mergeAttempt.length > 0) continue;
+      const head = await Promise.resolve().then(() => gitService.revParse(c.workingDir!, "HEAD")).then((s) => s.trim()).catch(() => null);
+      // #1524: a HELD gate whose retry time has passed overrides an OLDER merge-attempt (e.g. a train
+      // drop the send-back already resolved) — otherwise the scheduled retry never fires.
+      const heldRetryDue = !!head && await isGateHeldRetryDue(database, c.wsId, head);
+      if (mergeAttempt.length > 0 && !heldRetryDue) continue;
       // #1299: the review-exit gate just withheld THIS head. A clean review exit is not a green
       // gate, and arming here sent auto-merge to re-gate the same red commit.
-      const head = await Promise.resolve().then(() => gitService.revParse(c.workingDir!, "HEAD")).then((s) => s.trim()).catch(() => null);
       if (head && await isGateWithheldForHead(database, c.wsId, head)) {
         console.log(`[reconcile] workspace ${c.wsId} (#${c.issueNumber ?? "?"}) gate still withheld/held for ${head.slice(0, 8)} — not arming yet (#1492)`);
         continue;

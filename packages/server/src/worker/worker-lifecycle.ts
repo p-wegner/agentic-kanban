@@ -195,6 +195,12 @@ export function probeNodeOnPath(env: NodeJS.ProcessEnv = process.env): string | 
 
 const show = (v: unknown): string => (v === undefined ? "default" : Array.isArray(v) ? v.join(",") || "none" : String(v));
 
+/** One `verify job:` line of `worker status` (kept out of renderStatus for its branch budget, #726). */
+function renderVerifyJobLine(j: VerifyJobStatus): string {
+  const files = j.filesTotal ? ` ${j.filesDone ?? 0}/${j.filesTotal} files` : j.filesDone ? ` ${j.filesDone} files` : "";
+  return `verify job:   ${j.jobId.slice(0, 8)} ${j.tier} @ ${String(j.sha).slice(0, 9)} ${j.stage}${files} (since ${j.startedAt})${j.dir ? ` dir ${j.dir}` : ""}${j.pid ? ` pid ${j.pid}` : ""}`;
+}
+
 export function renderStatus(s: Record<string, unknown>): string {
   const lines: string[] = [];
   lines.push(`build:        ${(s.workerVersion as string | undefined) ?? "unknown"}`);
@@ -229,10 +235,7 @@ export function renderStatus(s: Record<string, unknown>): string {
   const conc = s.concurrency as { mode?: string; slots?: number; reason?: string } | undefined;
   const vs = (s.settings as StatusSetting[] | undefined)?.find((x) => x.key === "verifySlots");
   const vjobs = (s.verify as { jobs?: VerifyJobStatus[] } | undefined)?.jobs ?? [];
-  for (const j of vjobs) {
-    const files = j.filesTotal ? ` ${j.filesDone ?? 0}/${j.filesTotal} files` : j.filesDone ? ` ${j.filesDone} files` : "";
-    lines.push(`verify job:   ${j.jobId.slice(0, 8)} ${j.tier} @ ${String(j.sha).slice(0, 9)} ${j.stage}${files} (since ${j.startedAt})`);
-  }
+  for (const j of vjobs) lines.push(renderVerifyJobLine(j));
   if (vs?.effective !== undefined) lines.push(`verify slots: ${String(vs.effective)}`);
   if (conc?.mode) lines.push(`concurrency:  ${conc.mode}, ${conc.slots ?? "?"} slot(s) - ${conc.reason ?? ""}`);
   lines.push("settings:");

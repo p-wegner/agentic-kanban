@@ -4,6 +4,7 @@
 // services. That promise is an import-graph property, and import graphs rot
 // silently: one convenient `import { thing } from "../services/â€¦"` re-couples
 // everything and nothing visibly breaks. So walk the graph and assert it.
+// @gate:static — source-scanning ratchet: runs in the static tier (`pnpm check:static`, #1514), never held.
 
 import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
@@ -146,7 +147,9 @@ describe("agentic-kanban-worker binary isolation", () => {
     // shared `lib/git-spawn-governor.ts` (reached via git-exec); each fit alone, together they need one more slot.
     // Raised 84 -> 86 in train 2026-10-15-19: #1499 added `worker/worker-setup-slots.ts` (setup-concurrency
     // slots; node builtins only) and the train fix split process-exec's output parsers into a sibling module.
-    expect(files.size).toBeLessThan(86);
+    // Raised 86 -> 87 in the 2026-10-16 hand flush for #1520's `worker/worker-content-index.ts` (marks the
+    // worker data dirs not-content-indexed; node builtins + child_process only).
+    expect(files.size).toBeLessThan(87);
   });
 
   it("never reaches the database or board-service layer", () => {
