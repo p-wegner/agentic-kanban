@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const syncIncomingBranch = vi.fn();
 vi.mock("../services/worker-remote-sync.service.js", () => ({
-  syncIncomingBranch: (...a: unknown[]) => syncIncomingBranch(...a),
+  landWithRebaseAdoption: async (...a: unknown[]) => ({ outcome: await syncIncomingBranch(...a) }),
   clearIncomingRef: vi.fn(async () => {}),
 }));
 

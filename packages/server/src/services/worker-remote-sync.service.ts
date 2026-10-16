@@ -336,6 +336,44 @@ export async function adoptCleanRebase(repoPath: string, branch: string): Promis
   }
 }
 
+export type LandWithAdoptionOutcome = {
+  outcome: SyncOutcome;
+  /** Set when a diverged push was adopted as a clean rebase (#1521). */
+  adoption?: Extract<AdoptRebaseOutcome, { adopted: true }>;
+  /** Why a diverged push was refused, for the caller's message. */
+  classification?: string;
+  /** True when the push was classified as rewritten history and is unusable. */
+  discardable?: boolean;
+};
+
+/**
+ * #1521 — the ONE landing rule for a worker push: fast-forward when possible, otherwise adopt
+ * it when it is a clean rebase of the branch onto the current base (`stale-clean` +
+ * `adoptCleanRebase`). Shared by the session-exit path and the operator's incoming/land route
+ * so they can never disagree about the same push. Does not clear the incoming ref.
+ */
+export async function landWithRebaseAdoption(
+  repoPath: string,
+  branch: string,
+  opts?: { worktreePath?: string },
+): Promise<LandWithAdoptionOutcome> {
+  const outcome = await syncIncomingBranch(repoPath, branch, opts);
+  if (outcome.ok || outcome.status !== "diverged") return { outcome };
+  const cls = await classifyRefusedPush(repoPath, branch);
+  let classification = ` [${cls.summary}]`;
+  if (cls.kind === "rewritten-history") {
+    return { outcome, classification, discardable: true };
+  }
+  if (cls.kind === "stale-clean") {
+    const adoption = await adoptCleanRebase(repoPath, branch);
+    if (adoption.adopted) {
+      return { outcome: { ok: true, status: "updated", sha: adoption.sha, via: "ref" }, adoption };
+    }
+    classification += ` - not adopted: ${adoption.reason}`;
+  }
+  return { outcome, classification };
+}
+
 /** Drop the staging ref once its content has landed on the real branch. */
 export async function clearIncomingRef(repoPath: string, branch: string): Promise<void> {
   await gitExec(["update-ref", "-d", incomingRefFor(branch)], { cwd: repoPath });
