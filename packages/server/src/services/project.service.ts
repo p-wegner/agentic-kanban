@@ -22,13 +22,14 @@ import { listBranches } from "./git.service.js";
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "./board-aggregation.service.js";
 import { buildDriveMap } from "./drive-membership.service.js";
 import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, setProjectArchived, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
-import { getProjectsBasePath, updateProjectFields, clearActiveProjectPreference, getProjectStatusIdsAndNames, getBoardIssueRows, getProjectStatusesOrdered, getBoardIssues, getCompletedIssuesPage, getGraphIssues, getCrossProjectIssues, getActiveWorkspaceCounts, getBoardSummaryRows } from "../repositories/project-service.repository.js";
+import { getProjectsBasePath, updateProjectFields, clearActiveProjectPreference, getProjectStatusIdsAndNames, getBoardIssueRows, getProjectStatusesOrdered, getBoardIssues, getGraphIssues, getCrossProjectIssues, getActiveWorkspaceCounts, getBoardSummaryRows } from "../repositories/project-service.repository.js";
 import { deriveSetupScriptFromProfile, deriveVerifyScriptFromProfile, getStackProfile } from "./stack-profile.service.js";
 import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI, generateVerifyScript as generateVerifyScriptAI } from "./project-setup.service.js";
 import { cloneRepo } from "./repo-clone.service.js";
 import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
 import type { WorkspaceSummary } from "./workspace-summary.service.js";
 import { buildBoardColumns } from "../lib/board-view.js";
+import { getCompletedPage as getCompletedPageImpl } from "./project-completed.service.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
 
 import { ProjectError } from "./project-error.js";
@@ -679,46 +680,6 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     });
   }
 
-  /**
-   * #1541: a page of Done/Cancelled issues (newest first) for the Completed grid's "load more" and
-   * for board search beyond the capped first page. Each row is enriched exactly like a board card.
-   */
-  async function getCompletedPage(
-    projectId: string,
-    opts: { offset: number; limit: number; query?: string },
-  ) {
-    const project = await getProjectById(projectId, database);
-    if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
-    const statuses = await getProjectStatusesOrdered(projectId, database);
-    const terminal = statuses.filter((s) => ARCHIVE_STATUS_NAMES.has(s.name.toLowerCase()));
-    const { rows, total } = await getCompletedIssuesPage(projectId, terminal.map((s) => s.id), opts, database);
-    const issueIds = rows.map((i) => i.id);
-    const archivedIssueIds = new Set(issueIds);
-    const [workspaceSummaryMap, blockedMap, issueTagMap, driveMap] = await Promise.all([
-      resolveSummaryMap(projectId, issueIds, project.defaultBranch, archivedIssueIds),
-      buildBlockedMap(issueIds, database),
-      buildTagMap(issueIds, database),
-      buildDriveMap(projectId, database),
-    ]);
-    const columns = buildBoardColumns({
-      statuses,
-      visibleStatuses: terminal,
-      projectIssues: rows,
-      workspaceSummaryMap,
-      blockedMap,
-      issueTagMap,
-      driveMap,
-      now: Date.now(),
-      staleDays: 0,
-      inProgressStaleDays: 0,
-    });
-    const order = new Map(issueIds.map((id, i) => [id, i] as const));
-    const page = columns
-      .flatMap((c) => c.issues)
-      .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-    return { issues: page, total, offset: opts.offset };
-  }
-
   async function getGraph(projectId: string) {
     const project = await getProjectById(projectId, database);
     if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
@@ -941,8 +902,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     removeWorktreeById,
     getStats,
     getBoard,
-    getCompletedPage,
-    scheduleBoardWarmup,
+    scheduleBoardWarmup, getCompletedPage: (projectId: string, opts: { offset: number; limit: number; query?: string }) => getCompletedPageImpl({ database, resolveSummaryMap }, projectId, opts),
     getBoardSummary,
     getGraph,
     getCrossProjectWorkspaces,

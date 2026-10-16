@@ -407,6 +407,9 @@ const boardColumn = dtoObject<StatusWithIssues>({
   issues: arrayOf(nested<IssueWithStatus>(boardIssue)),
 });
 
+/** `GET /api/projects/:id/board/completed` (#1541) → one page of Done/Cancelled board cards. */
+const completedPage = looseObject({ issues: arrayOf(nested<IssueWithStatus>(boardIssue)), total: num, offset: num });
+
 /**
  * `GET /api/projects/:id/statuses` → the `project_statuses` rows (`getProjectStatuses`, a
  * bare `select()`), so the four NOT NULL columns the workflow builder and the
@@ -806,6 +809,7 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
 
   // ── the deep reads (#806 batch 2) ──
   { method: "GET", template: "/api/projects/:id/board", schema: arrayRoot(boardColumn) },
+  { method: "GET", template: "/api/projects/:id/board/completed", schema: completedPage },
   { method: "GET", template: "/api/projects/:id/statuses", schema: arrayRoot(projectStatus) },
   { method: "GET", template: "/api/projects/:id/repos", schema: arrayRoot(projectRepo) },
   { method: "GET", template: "/api/projects/:id/board-monitor/next", schema: nextStartCandidates },
