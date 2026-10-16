@@ -9,15 +9,40 @@
 const MISSING_DEPS_SIGNATURE =
   /cannot find module|cannot find package|failed to resolve import|could not resolve ["'`][^"'`\s]+["'`]|err_module_not_found|module_not_found|unresolved_import|enoent.*node_modules|command not found|is not recognized as an internal or external command|ist entweder falsch geschrieben oder\s+konnte nicht gefunden werden/i;
 
+/**
+ * Drop text a TEST printed (#1543): vitest echoes captured console output as `stdout | <file> > <test>` /
+ * `stderr | …` blocks (ending at the next blank line), and a board log line (`[pre-merge-gate] …`) is
+ * our own logging, which may quote an earlier match. A test that mocks `Error: Could not resolve
+ * 'vitest/config'` is not a run whose tooling failed to resolve.
+ */
+function stripTestLogOutput(output: string): string {
+  const kept: string[] = [];
+  let inCapturedBlock = false;
+  for (const line of output.split("\n")) {
+    if (/^\s*(stdout|stderr) \| /.test(line)) {
+      inCapturedBlock = true;
+      continue;
+    }
+    if (inCapturedBlock) {
+      if (line.trim() === "") inCapturedBlock = false;
+      continue;
+    }
+    if (/^\s*\[[a-z][\w-]*\]\s/i.test(line)) continue;
+    kept.push(line);
+  }
+  return kept.join("\n");
+}
+
 export function looksLikeMissingDepsFailure(output: string): boolean {
-  return MISSING_DEPS_SIGNATURE.test(output);
+  return MISSING_DEPS_SIGNATURE.test(stripTestLogOutput(output));
 }
 
 /**
  * The line of `output` that tripped the signature (#1493), trimmed and capped, so the gate log and
  * failure evidence NAME the module/command the run could not find. Null when nothing matches.
  */
-export function missingDepsEvidence(output: string): string | null {
+export function missingDepsEvidence(raw: string): string | null {
+  const output = stripTestLogOutput(raw);
   const m = MISSING_DEPS_SIGNATURE.exec(output);
   if (!m) return null;
   const start = output.lastIndexOf("\n", m.index) + 1;
