@@ -3,39 +3,34 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
-## 2026-10-16: backlog landed except #1528, promote blocked on a fit verifier
+## 2026-10-16: backlog empty, stable-20261016 live
 
-**Goal (Peter):** get the board backlog done using the workers.
+**Goal (Peter):** get the board backlog done using the workers. **Done:** 0 open tickets at 15:12Z.
 
-- **Master = origin = 82250988e.** Landed 2026-10-15 evening to 2026-10-16 (trains 22, 10-16-01..08,
-  two direct merges): #1478 #1495 #1501 #1503 #1510-#1527. Each push scanned CLEAN (only `From:`
+- **Master = origin = 7654e6f23.** Landed 2026-10-15 evening to 2026-10-16: #1478 #1495 #1501 #1503
+  #1510-#1530 (trains 22, 10-16-01..08, direct merges). Every push scanned CLEAN (only `From:`
   identity lines hit, accepted).
-- **Stable still runs 95ddbc975**, so the live board lacks #1512's missing-deps fix: every red gate
-  is re-run once after a reinstall (doubles a 30-50 min run), triggered by the log line
-  `[services] reaper skipped — ... db unavailable`. Promote needs a green base sweep.
-- **Base sweep:** red at 4c689511e (ao-pf38) ONLY on two mcp-server `beforeAll` timeouts (120 s):
-  `disabled-tools.test.ts`, `tools/get-context-boundary.test.ts`; both pass in 8 s on the host. Cause:
-  they spawn `node --import tsx` on the MCP server source. **#1528** (builder running) fixes that;
-  then re-sweep and `pnpm promote` (dry-run first). Alternative waiting on Peter: `--recover` with
-  the sweep owed.
-- **Verifiers (verify_workers = ao-pf38 only):**
-  - ao-pf38: kernel paged pool ~26 GB, tag **FMfn** (FltMgr file-name info leak, ~315-400 MB/h, even
-    idle). Suspect `wtd` (Enhanced Phishing Protection). Reboot or disable is Peter's call; until then
-    it is slow (mcp-server 25 min vs 105 s). Indexing turned off on its worker dirs (#1520 automates).
-  - desktop-stable: **drained** and off verify. C: swings 0.7-6 GB with a 106 GB system-managed
-    pagefile; hiberfil 25.6 GB. Peter's options: `powercfg /h off`, fixed pagefile, or pagefile on
-    another drive. Then `drain=false` and add it back to verify.
-  - wsl-stable: never for verify (shares host RAM; a sweep there dropped the host to 3.4 GB).
-- **Host memory** is tight (3-6 GB free): Claude Code reaps background shells under pressure, which
-  killed a full `test:mine` and two SSE `merge-queue` clients. Prefer auto-merge over held SSE calls.
-- **Auto-merge is ON** again (was paused for the hand-queued trains).
-- **Lint-like guards** (size ceiling, ratchets) reached builders only at the train; #1514 (landed)
-  adds `check:static` at implement-exit, never held. Follow-up worth watching: send-back (rebase)
-  sessions should run it too (comment on #1514).
+- **Stable = `stable-20261016` = 68a10afd6** (promoted 13:28Z after a green rc sweep on
+  desktop-stable; smoke passed). No `missing-deps signature` retry in board.log since (#1512 live).
+  A second promote of 7654e6f23 (rc/20261016-2, adds #1528-#1530) started 15:12Z in herdr pane
+  w1:p5V; check `.kanban/promote.log` for its outcome.
+- **Verifiers:** `verify_workers = desktop-stable` only.
+  - desktop-stable: rebooted 08:53Z; C: 119 GB free after the pagefile shrank (65 GB, was 106).
+    Defender real-time scanning dominates its test I/O (103 MB/30 s) and is the likely cause of
+    `.git/config: Permission denied` flakes; exclusions for `aks\work`, the pnpm store and kanban
+    fixture temp dirs are for Peter to decide.
+  - ao-pf38: off verify. Kernel paged pool ~26 GB in tag **FMfn** (FltMgr file-name leak,
+    ~315-400 MB/h, even idle; suspect `wtd` / Enhanced Phishing Protection). Reboot or disable is
+    for Peter to decide; then add it back. Builders still run there.
+  - wsl-stable: never for verify (shares host RAM).
+- **Host memory** stays tight (3-6 GB free); Claude Code reaps background shells under pressure.
+  Long operations (promote, held SSE clients) belong in a herdr pane, not a background shell.
+- **Lint-like guards:** #1514 (`check:static` at implement-exit, never held) is live from
+  stable-20261016. Send-back (rebase) sessions do not run it yet (comment on #1514).
 
 **Next:**
-1. Land #1528, re-sweep, promote; then re-add verifiers once Peter fixes ao-pf38 / desktop C:.
-2. After the promote, confirm the missing-deps double runs stop (grep `missing-deps signature`).
+1. Confirm the 15:12Z promote of 7654e6f23 went live (or read why it refused).
+2. When ao-pf38 is fixed, add it back to `verify_workers_<projectId>`.
 
 ## Archive
 
