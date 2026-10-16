@@ -630,7 +630,6 @@ async function runDoomedTrainJob(args: {
   // #1503: heartbeat the lock, and free it the moment an operator cancels (see the helper).
   const stopLockKeepalive = keepRepoLockAliveUntilCancel(repoLock, abortController.signal);
   noteMergeTrainGateActivity(trainId, false); // #1513: restart the idle clock now the repo lock is held
-
   try {
     // #1277: the project's red-handling policy, read once per train through the preference layer.
     const policy = resolveMergeTrainRedPolicy(toPrefMap(await getAllPreferencesCached(database).catch(() => [])), projectId);
