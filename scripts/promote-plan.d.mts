@@ -117,6 +117,12 @@ export declare function parseSweepVerdict(
 
 export declare function isFreshSweepRow(row: SweepRow | null | undefined, previous: SweepRow | null | undefined): boolean;
 
+/** #1548 — adopt a green full sweep of the rc's exact sha recorded under another branch name. */
+export declare function adoptSameShaSweep(
+  other: SweepRow | null | undefined,
+  opts?: { tipSha?: string | null; previous?: SweepRow | null; nowMs?: number; maxAgeMs?: number },
+): { ok: true; verdict: SweepVerdict; row: SweepRow; detail: string } | { ok: false; reason: string };
+
 /** The `POST …/base-branch-health/reprobe` response, as `routes/project-health.ts` builds it. */
 export interface ReprobeAnswer {
   started?: boolean;

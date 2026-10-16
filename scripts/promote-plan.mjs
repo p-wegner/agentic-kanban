@@ -458,6 +458,31 @@ export function isFreshSweepRow(row, previous) {
 }
 
 /**
+ * #1548 — may a sweep recorded under ANOTHER branch name satisfy the rc gate?
+ *
+ * The commit is what a sweep tests, not the branch label: a full green sweep of master at the
+ * exact sha the rc was cut at is the same evidence as an rc-labelled one. So an `other` row is
+ * adopted when its sha equals the rc tip, it is a distinct observation from the pre-request row
+ * (`isFreshSweepRow`), and it parses as a green verdict under its OWN branch name. `scope` must be
+ * exactly `full` — the null-scope leniency for pre-#1231 rows does not extend to a cross-branch
+ * adoption. Returns `{ ok: true, verdict, row, detail }` or `{ ok: false, reason }`.
+ */
+export function adoptSameShaSweep(other, { tipSha, previous = null, nowMs = Date.now(), maxAgeMs } = {}) {
+  if (!other) return { ok: false, reason: "no-row" };
+  if (!tipSha || other.sha !== tipSha) return { ok: false, reason: "sha-differs" };
+  if (!isFreshSweepRow(other, previous)) return { ok: false, reason: "not-fresh" };
+  if (other.scope !== "full") return { ok: false, reason: "scope-not-full" };
+  const verdict = parseSweepVerdict(other, { branch: other.branch ?? "master", nowMs, ...(maxAgeMs === undefined ? {} : { maxAgeMs }) });
+  if (!verdict.ok) return { ok: false, reason: verdict.reason };
+  return {
+    ok: true,
+    verdict,
+    row: other,
+    detail: `accepted the green full sweep recorded under '${other.branch ?? "<none>"}' at ${verdict.at}: its sha ${other.sha} equals the rc tip (the commit is what was tested) and it differs from the pre-request row`,
+  };
+}
+
+/**
  * Does the reprobe response say a probe is running FOR THIS PROJECT?
  *
  * Only two fields say that: `started` (this request launched one) and
