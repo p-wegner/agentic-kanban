@@ -311,7 +311,10 @@ function VirtualizedCompletedGrid({
                       right: 0,
                       transform: `translateY(${virtualRow.start}px)`,
                       display: "grid",
-                      gridTemplateColumns: `repeat(${columnsPerRow}, 1fr)`,
+                      // #1535: minmax(0, 1fr), not 1fr — a bare 1fr track has an auto minimum and
+                      // grew to each card's min-content (the mono branch name), pushing the
+                      // right-most columns out of the container.
+                      gridTemplateColumns: `repeat(${columnsPerRow}, minmax(0, 1fr))`,
                       gap: `${CARD_GAP}px`,
                       paddingBottom: `${CARD_GAP}px`,
                     }}
