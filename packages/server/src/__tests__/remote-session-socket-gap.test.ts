@@ -40,9 +40,9 @@ vi.mock("../services/worker-events.service.js", () => ({
 
 vi.mock("../services/worker-remote-sync.service.js", () => ({
   incomingRefFor: (branch: string) => `refs/kanban/incoming/${branch}`,
-  syncIncomingBranch: async (repoPath: string, branch: string) => {
+  landWithRebaseAdoption: async (repoPath: string, branch: string) => {
     syncCalls.push({ repoPath, branch });
-    return syncResult;
+    return { outcome: syncResult };
   },
   clearIncomingRef: async () => {},
 }));
