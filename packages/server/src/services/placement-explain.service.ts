@@ -271,6 +271,26 @@ function ineligibleReasonFor(
   return null;
 }
 
+/** #1529: how long a worker may hold a fresh heartbeat without a socket before it reads offline. */
+export const DISCONNECT_GRACE_MS = 60 * 1000;
+
+/**
+ * Liveness for display: the registry's heartbeat-derived status, forced to `offline` once the
+ * board holds no socket for the worker and its last heartbeat is older than the grace.
+ */
+export function deriveLiveStatus(
+  effective: string,
+  connected: boolean,
+  lastHeartbeatAt: string | null | undefined,
+  now?: string,
+): string {
+  if (effective === "offline") return "offline";
+  if (connected) return effective;
+  const nowMs = now ? new Date(now).getTime() : Date.now();
+  const age = lastHeartbeatAt ? nowMs - new Date(lastHeartbeatAt).getTime() : Infinity;
+  return Number.isFinite(age) && age <= DISCONNECT_GRACE_MS ? effective : "offline";
+}
+
 function barredReason(settings: WorkerSettings | undefined, projectId: string): string | null {
   const verdict = workerAllowsProject(settings, projectId);
   return verdict.allowed ? null : verdict.reason;
@@ -311,6 +331,7 @@ async function describeWorkers(
     const labels = parseJsonList(w.labels);
     const connected = fleet.connections.isConnected(w.id);
     const load = fleet.connections.assignedSessionIds(w.id).length;
+    const liveStatus = deriveLiveStatus(w.effectiveStatus, connected, w.lastHeartbeatAt, now);
     const reason = ineligibleReasonFor(w, {
       connected,
       load,
@@ -352,7 +373,10 @@ async function describeWorkers(
       arch: w.arch,
       labels,
       providers: parseJsonList(w.providers),
-      status: w.status,
+      // #1529: liveness comes from the live connection + heartbeat age, never the stored
+      // `workers.status` (which keeps its last value once the worker is gone).
+      status: liveStatus,
+      ...(liveStatus === "offline" ? { since: w.lastHeartbeatAt ?? null } : {}),
       lastHeartbeatAt: w.lastHeartbeatAt,
       ...(w.protocolVersion === undefined ? {} : { protocolVersion: w.protocolVersion }),
       // #879: freshness rides ONLY on a reported build. A worker that reported nothing
@@ -369,12 +393,13 @@ async function describeWorkers(
         .assignedSessionIds(w.id)
         .map((sid) => assignmentsBySession.get(sid))
         .filter((a): a is WorkerAssignment => a !== undefined),
-      freeSlots: Math.max(0, w.maxConcurrency - load),
+      freeSlots: liveStatus === "offline" ? 0 : Math.max(0, w.maxConcurrency - load),
       // #1381: what an operator set on the board, which keys the worker's flags pin, and whether it has applied them.
       ...(w.desiredSettings ? { desiredSettings: w.desiredSettings } : {}),
       ...(w.settingsReport ? { settingsReport: w.settingsReport } : {}),
       // #910: the headroom placement actually compared, not just its outcome.
-      ...(w.capacity ? { capacity: w.capacity } : {}),
+      // #1529: capacity is as of the last report; say when, so a stale figure reads as stale.
+      ...(w.capacity ? { capacity: { ...w.capacity, reportedAt: w.lastHeartbeatAt ?? null } } : {}),
       ...(w.harnessMode ? { harnessMode: w.harnessMode } : {}), // #1451
       ...(w.concurrency ? { concurrency: w.concurrency } : {}), // #1456
       // #1338: self-update state, as the worker last reported it.
@@ -426,7 +451,7 @@ export async function describeFleet(params: {
   const capacity = await resolveFleetCapacity(fleet, providerName, requiredLabels, params.now);
   return {
     registered: workers.length,
-    online: workers.filter((w) => w.effectiveStatus === "online").length,
+    online: workers.filter((w) => w.status === "online").length,
     connected: workers.filter((w) => w.connected).length,
     eligible: capacity.eligibleWorkers,
     freeSlots: capacity.freeSlots,
