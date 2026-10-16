@@ -7,7 +7,7 @@ import { removeDir, sweepVerifyBackstop, writeVerifyJobFile, VERIFY_JOB_FILE } f
 
 const roots: string[] = [];
 afterEach(() => { for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true }); });
-const makeRoot = (): string => { const r = mkdtempSync(join(tmpdir(), "verify-1526-")); roots.push(r); return r; };
+const makeRoot = (): string => { const r = mkdtempSync(join(tmpdir(), "ak-verify-1526-")); roots.push(r); return r; };
 
 describe("#1526 verify dir cleanup", () => {
   it("removes a dir and reports null", () => {
