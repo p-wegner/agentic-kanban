@@ -13,6 +13,7 @@ interface Shortcut {
   keys: string[];
   description: string;
   sequential?: boolean;
+  alternatives?: boolean;
 }
 
 export function ShortcutHelp({ onClose, currentView, projectId = null }: ShortcutHelpProps) {
@@ -104,7 +105,7 @@ function ShortcutSection({ title, shortcuts }: { title: string; shortcuts: Short
                 </kbd>
                 {i < shortcut.keys.length - 1 && (
                   <span className="text-xs text-gray-400 dark:text-gray-500 mx-0.5">
-                    {shortcut.sequential ? "then" : "+"}
+                    {shortcut.sequential ? "then" : shortcut.alternatives ? "/" : "+"}
                   </span>
                 )}
               </span>

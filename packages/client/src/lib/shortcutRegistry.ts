@@ -18,6 +18,8 @@ export interface ShortcutEntry {
   category: ShortcutCategory;
   /** True when keys must be pressed in sequence rather than simultaneously. */
   sequential?: boolean;
+  /** True when each key does the same thing on its own (#1536) — rendered "/", never "+". */
+  alternatives?: boolean;
 }
 
 export const SHORTCUT_REGISTRY: ShortcutEntry[] = [
@@ -27,8 +29,8 @@ export const SHORTCUT_REGISTRY: ShortcutEntry[] = [
   { keys: ["Escape"], description: "Close panel / clear search / go back", category: "Navigation" },
   { keys: ["?"], description: "Show keyboard shortcuts", category: "Navigation" },
   // Board
-  { keys: ["↑", "↓", "k", "j"], description: "Move selection up / down within column", category: "Board" },
-  { keys: ["←", "→", "h", "l"], description: "Move selection left / right across columns (h/l when card selected)", category: "Board" },
+  { keys: ["↑", "↓", "k", "j"], description: "Move selection up / down within column", category: "Board", alternatives: true },
+  { keys: ["←", "→", "h", "l"], description: "Move selection left / right across columns (h/l when card selected)", category: "Board", alternatives: true },
   { keys: ["Enter"], description: "Open selected card's detail panel", category: "Board" },
   { keys: ["w"], description: "New issue + start workspace", category: "Board" },
   { keys: ["Shift", "V"], description: "Start voice inbox (record idea → Backlog issue)", category: "Board" },
