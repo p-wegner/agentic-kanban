@@ -461,6 +461,11 @@ function renderMarkdown(r: {
     "",
     "- WSL: run everything inside the distro; keep distro disks off a Dev Drive (D: hung on 2026-10-12).",
     "- Git Bash: set `MSYS_NO_PATHCONV=1` when passing Linux paths to `wsl.exe`.",
+    ...(r.os === "windows"
+      ? [
+          "- Windows Search: indexing the worker's checkout/verify/temp dirs dominates disk I/O (verify runs 10x slower, #1520). `worker start` marks `~/.agentic-kanban`, the work root and `%TEMP%` not-content-indexed (`attrib +I`, no admin, reversible); `doctor` warns when one is still indexed. Defender exclusions are NOT set automatically; adding them is the operator's call (admin + security trade-off).",
+        ]
+      : []),
     "- Claude Code: `hasTrustDialogAccepted` must be accepted by the operator for the worker's repo dir; the worker uses its own config dir (#1367); `--profile-alias default=<profile>` names the worker's own (initially empty) harness dir and does not reuse the default login: run `agentic-kanban-worker auth claude` (#1379, #1453).",
     "",
   );
