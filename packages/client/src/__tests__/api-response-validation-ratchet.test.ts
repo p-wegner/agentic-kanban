@@ -1,4 +1,5 @@
 // @gate:always-run when:packages/client/src/** — recursively walks the whole client source tree and parses every file; it
+// @gate:static — source-scanning ratchet: runs in the static tier (`pnpm check:static`, #1514/#1546), never held.
 // imports nothing it measures, so `vitest related` can never select it from a component diff.
 import { describe, expect, it } from "vitest";
 import path from "node:path";

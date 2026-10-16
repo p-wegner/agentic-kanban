@@ -1,4 +1,5 @@
 // @gate:always-run when:packages/client/src/** — walks the client src tree with the TS compiler; imports nothing it measures.
+// @gate:static — source-scanning ratchet: runs in the static tier (`pnpm check:static`, #1514/#1546), never held.
 import { describe, expect, it } from "vitest";
 import path from "node:path";
 import { compareNlocRatchet, measureFunctionNloc } from "../../../shared/__tests__/helpers/function-nloc.js";

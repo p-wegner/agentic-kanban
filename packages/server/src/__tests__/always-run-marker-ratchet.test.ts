@@ -566,7 +566,7 @@ describe("@gate:static marker (#1514)", () => {
   const suites: string[] = discoverStaticSuites(root);
 
   it("tags the source-scanning ratchets the train kept failing on", () => {
-    for (const name of ["console-tag-ratchet", "env-read-ownership", "worker-cli-isolation", "always-run-marker-ratchet", "always-run-guard-runtime-ratchet"]) {
+    for (const name of ["console-tag-ratchet", "env-read-ownership", "worker-cli-isolation", "always-run-marker-ratchet", "always-run-guard-runtime-ratchet", "function-nloc-ratchet", "openapi-drift", "fetch-in-effect-ratchet", "api-response-validation-ratchet"]) {
       expect(suites.some((s) => s.endsWith(`/${name}.test.ts`)), name).toBe(true);
     }
   });
