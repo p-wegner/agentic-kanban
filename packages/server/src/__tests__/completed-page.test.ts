@@ -60,6 +60,14 @@ describe("getCompletedPage (#1541)", () => {
     expect(first.issues.some((i) => i.issueNumber === 999)).toBe(false);
   });
 
+  it("treats % and _ in the query literally", async () => {
+    const svc = createProjectService({ database: db });
+    const r = await svc.getCompletedPage(projectId, { offset: 0, limit: 50, query: "100%_x" });
+    expect(r.total).toBe(0);
+    const wild = await svc.getCompletedPage(projectId, { offset: 0, limit: 50, query: "ticket_1" });
+    expect(wild.total).toBe(0);
+  });
+
   it("finds an old ticket by title and by #number", async () => {
     const svc = createProjectService({ database: db });
     const byTitle = await svc.getCompletedPage(projectId, { offset: 0, limit: 50, query: "NEEDLE" });

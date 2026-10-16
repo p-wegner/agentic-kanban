@@ -255,7 +255,7 @@ export async function getBoardSummaryRows(
 
 /** Escape LIKE metacharacters so a query containing `%` or `_` matches itself. */
 function escapeLikeText(text: string): string {
-  return text.replace(/[\%_]/g, (ch) => `\${ch}`);
+  return text.replace(/[\%_]/g, (ch) => `\\${ch}`);
 }
 
 /**
