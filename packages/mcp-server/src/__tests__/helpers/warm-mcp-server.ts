@@ -13,7 +13,7 @@ import type { ChildProcess } from "node:child_process";
 import { startMcpServer, stopMcpServer } from "./server-process.js";
 
 export default async function warmMcpServer(): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "mcp-warm-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-mcp-warm-"));
   let proc: ChildProcess | undefined;
   try {
     proc = await startMcpServer(join(dir, "warm.db"), { startupTimeoutMs: 600_000 });
