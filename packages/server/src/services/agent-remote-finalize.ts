@@ -53,6 +53,8 @@ export async function landSessionBranch(
         await clearIncomingRef(session.repo.repoPath, session.repo.branch).catch(() => {});
         classification += " - incoming ref discarded";
       }
+      // #1542: a not-landed result must reach board.log, not only the session transcript.
+      console.warn(`[agent-remote] session ${sessionId}: worker result NOT landed on ${session.repo.branch}: ${result.ok ? "" : result.error}${classification}`);
       session.onOutput({
         type: "stderr",
         sessionId,

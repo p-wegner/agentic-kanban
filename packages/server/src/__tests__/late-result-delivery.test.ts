@@ -11,7 +11,7 @@ const { findLive, running, sync, clear, record } = vi.hoisted(() => ({
 vi.mock("../repositories/workspace-reads.repository.js", () => ({ findLiveWorkspacesOnBranch: findLive }));
 vi.mock("../repositories/workspace-lifecycle-reconcile.repository.js", () => ({ getRunningSessionIdsForWorkspace: running }));
 vi.mock("../repositories/worker.repository.js", () => ({ getWorkerById: async () => ({ name: "desktop" }) }));
-vi.mock("../services/worker-remote-sync.service.js", () => ({ syncIncomingBranch: sync, clearIncomingRef: clear }));
+vi.mock("../services/worker-remote-sync.service.js", () => ({ landWithRebaseAdoption: async (...a: unknown[]) => ({ outcome: await sync(...a) }), clearIncomingRef: clear }));
 vi.mock("../services/worker-events.service.js", () => ({ recordWorkerEvent: record }));
 
 import { deliverLateResult } from "../services/late-result-delivery.service.js";
