@@ -4,6 +4,7 @@
 // services. That promise is an import-graph property, and import graphs rot
 // silently: one convenient `import { thing } from "../services/â€¦"` re-couples
 // everything and nothing visibly breaks. So walk the graph and assert it.
+// @gate:static — source-scanning ratchet: runs in the static tier (`pnpm check:static`, #1514), never held.
 
 import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync } from "node:fs";

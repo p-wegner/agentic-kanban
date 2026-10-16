@@ -33,6 +33,7 @@ export { describeTrainGateRed } from "./merge-queue-train-inconclusive.js";
 import { finishFlushRun, type FlushRunSpec } from "./merge-train-flush-run.js";
 import { provisionTrainGateSelector } from "./merge-train-gate-selector.js";
 import { runPreMergeGate, looksLikeMissingDepsFailure } from "./pre-merge-gate.service.js";
+import { runStaticTierGate } from "./static-tier.service.js"; // #1514: check:static before the suites
 import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { randomUUID } from "node:crypto";
 import { acquireQueueRepoLock, keepRepoLockAliveUntilCancel, MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS } from "./merge-queue-repo-lock.js";
@@ -408,7 +409,7 @@ async function runTrainStagingGate(args: {
     }
     // `memberWorkspaceIds`: the synthetic `train:<label>` id matches no `repos` row, so
     // without it the #628 deferred-install check passes vacuously for the whole train.
-    const gateOnce = () => runPreMergeGate(
+    const gateOnce = async () => (await runStaticTierGate(gateWorktree as string, baseBranch, signal, args.verifyScriptOverride)) ?? runPreMergeGate(
       {
         id: `train:${attemptLabel}`,
         workingDir: gateWorktree as string,
@@ -419,8 +420,7 @@ async function runTrainStagingGate(args: {
       },
       projectId,
       database,
-      // #1203: same token — a cancel mid-verify kills the running gate process instead of
-      // letting it run to completion before the row's `abandoned` state is noticed.
+      // #1203: same token — a cancel mid-verify kills the running gate process.
       signal,
       args.verifyScriptOverride,
     );
