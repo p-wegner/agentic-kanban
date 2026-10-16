@@ -210,6 +210,20 @@ describe("clampProfileToAllowlist", () => {
     expect(result.holdReason).toContain(COOLING);
   });
 
+  it("#1522: a closed roster with nothing attested does not claim an empty cooling list", async () => {
+    const { resolveRosterSelection } = await import("../src/lib/profile-roster-selection.js");
+    const result = resolveRosterSelection({
+      roster: { entries: [], closed: true, restricted: true } as never,
+      provider: null,
+      profileName: null,
+      prefMap: prefs({}),
+      nowMs: NOW_MS,
+    });
+    expect(result.selection).toBeNull();
+    expect(result.holdReason).not.toContain("cooling ()");
+    expect(result.holdReason).toContain("no allowed profile");
+  });
+
   it("a single-entry allowlist holds as soon as its one profile cools", () => {
     // This is the client-a case: pinned to one client subscription, so a limit means wait,
     // never "use the other account".

@@ -329,16 +329,19 @@ export function resolveRosterSelection(input: RosterSelectionInput): RosterSelec
   if (!roster.closed) {
     return { ...PASS_THROUGH, poolOrder };
   }
-  const allCooling = roster.entries.every((e) => cooling(e) || e.role === "forbidden");
-  const detail = roster.entries
-    .filter((e) => e.role !== "forbidden")
-    .map((e) => describeEntry(e, input, exhaustedPct))
-    .join(", ");
+  const usable = roster.entries.filter((e) => e.role !== "forbidden");
+  // #1522: an empty candidate set made `every()` vacuously true and printed "cooling ()".
+  // Nothing to cool means the roster (or a worker's attestation) offers no allowed profile.
+  const allCooling = usable.length > 0 && usable.every(cooling);
+  const detail = usable.map((e) => describeEntry(e, input, exhaustedPct)).join(", ");
   return {
     ...PASS_THROUGH,
-    holdReason: allCooling
-      ? `every allowed profile is cooling (${detail})`
-      : `every pool profile is exhausted or cooling (${detail})`,
+    holdReason:
+      usable.length === 0
+        ? "no allowed profile is attested or available (nothing is cooling; the worker attests no profile this project permits)"
+        : allCooling
+          ? `every allowed profile is cooling (${detail})`
+          : `every pool profile is exhausted or cooling (${detail})`,
     note: `${label} exhausted: ${detail}`,
     poolOrder,
   };
