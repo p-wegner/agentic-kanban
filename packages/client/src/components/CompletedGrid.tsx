@@ -10,6 +10,18 @@ import { Icon } from "./Icon.js";
 
 const MINIMAP_THRESHOLD = 20;
 
+// #1540: the board payload caps Done/Cancelled at the newest N, so the header total can exceed
+// what is listed (and what search can match). Say so and point at List view for the rest.
+export function CompletedTruncationNotice({ shown, total, searching }: { shown: number; total: number; searching: boolean }) {
+  if (shown >= total) return null;
+  return (
+    <p data-testid="completed-truncation-notice" className="text-xs text-gray-400 dark:text-gray-500 mb-2 shrink-0">
+      Showing newest {shown} of {total}
+      {searching ? " — search only covers these." : "."} Use List view to find older issues.
+    </p>
+  );
+}
+
 const CARD_MIN_WIDTH = 220;
 const CARD_GAP = 8;
 const ESTIMATED_ROW_HEIGHT = 90;
@@ -173,7 +185,10 @@ export function CompletedGrid({
                 <Icon className="h-5 w-5" d="M6 18L18 6M6 6l12 12" />
               </button>
             </div>
-            <div className="overflow-y-auto p-3">{cardsGrid}</div>
+            <div className="overflow-y-auto p-3">
+              <CompletedTruncationNotice shown={allIssues.length} total={totalIssues} searching={searchQuery.trim() !== ""} />
+              {cardsGrid}
+            </div>
           </div>
         </div>
       </>
@@ -281,6 +296,7 @@ function VirtualizedCompletedGrid({
         <span className="font-medium">Completed</span>
         <span className="text-xs text-gray-400 dark:text-gray-500">{totalIssues}</span>
       </button>
+      <CompletedTruncationNotice shown={allIssues.length} total={totalIssues} searching={!!searchQuery?.trim()} />
 
       <div className="flex flex-1 min-h-0">
         <div

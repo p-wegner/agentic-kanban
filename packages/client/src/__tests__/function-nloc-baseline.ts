@@ -15,7 +15,8 @@
  * `TestImpactBudgetSection` component instead, which is what the ring exists to force.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
-  "components/Layout.tsx::Layout": 691,
+  // 691 -> 694 (#1532): phone header row wraps and the toolbar takes its own row.
+  "components/Layout.tsx::Layout": 694,
   "components/ButlerView.tsx::ButlerView": 693,
   "components/CreateWorkspaceForm.tsx::CreateWorkspaceForm": 694,
   // 625 -> 637 (#1135): boardDriveOptions derivation + driveFilterId wiring for the new

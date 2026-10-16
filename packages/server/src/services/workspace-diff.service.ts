@@ -52,7 +52,18 @@ export function createWorkspaceDiffService(deps: {
       }
       if (!usedWorktree) {
         if (workspace.branch) {
-          diff = await gitService.getDiffFromRepo(repoPath, workspace.branch, baseBranch);
+          try {
+            diff = await gitService.getDiffFromRepo(repoPath, workspace.branch, baseBranch);
+          } catch (err) {
+            // A merged workspace's branch is deleted: answer a clean 404, not a 500.
+            if (/unknown revision|bad revision|ambiguous argument|not a valid object/i.test(errorMessage(err))) {
+              throw new WorkspaceError(
+                `Branch ${workspace.branch} no longer exists (deleted after merge); no diff available`,
+                "NOT_FOUND",
+              );
+            }
+            throw err;
+          }
         } else {
           diff = "";
         }
