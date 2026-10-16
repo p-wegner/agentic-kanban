@@ -242,7 +242,18 @@ export function createRemoteLiveness(deps: RemoteLivenessDeps) {
   function reconcileHello(workerId: string, runningSessionIds: string[]): void {
     const listed = new Set(runningSessionIds);
     for (const [sessionId, session] of sessions) {
-      if (session.workerId !== workerId || listed.has(sessionId)) continue;
+      if (session.workerId !== workerId) continue;
+      if (listed.has(sessionId)) {
+        // #1518: listed (running or still in setup — `pnpm install` can take minutes before the
+        // agent spawns) is positive proof the assignment arrived; a pending never-started check
+        // must not fire and re-place a session the worker holds.
+        if (session.lostCheckTimer) {
+          clearTimeout(session.lostCheckTimer);
+          session.lostCheckTimer = undefined;
+        }
+        session.observed = true;
+        continue;
+      }
       if (session.observed) {
         // #1510: after a worker event-loop stall the hello can omit a session that already exited,
         // its exit (and pushed result) arriving seconds later. Give that exit a settle window to

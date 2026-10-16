@@ -217,6 +217,21 @@ export async function runAgentFix(args: {
   return { attempt, ...(fixedTrainSha ? { fixedTrainSha } : {}), ...(lastGate ? { lastGate } : {}) };
 }
 
+/**
+ * #1513: the one log line when the fix agent is done. Names EVERY failing suite (the old line cut
+ * the reason at 160 chars, so the suite list of train/2026-10-15-19 was lost) and says what
+ * happens next, so a red end is never silent.
+ */
+export function describeAgentFixFinished(label: string, outcome: AgentFixOutcome, bisectAfter: boolean): string {
+  const suites = outcome.lastGate?.failedSuites ?? [];
+  const named = suites.length > 0 ? ` [failing suite(s), all ${suites.length}: ${suites.join(", ")}]` : "";
+  const next = outcome.fixedTrainSha ? ""
+    : bisectAfter ? "; falling back to the bisect"
+    : "; no fix turns left - the train ends red, members get the failure as feedback, nothing is bisected";
+  const head = outcome.attempt.failureHead ? `: ${outcome.attempt.failureHead}` : "";
+  return `${label}: fix agent finished - ${outcome.attempt.verdict}${head}${named}${next}`;
+}
+
 async function writeBriefFile(label: string, brief: string): Promise<string> {
   const path = join(tmpdir(), `kanban-train-fix-${label.replace(/[^A-Za-z0-9._-]/g, "-")}.md`);
   await writeFile(path, brief, "utf8");

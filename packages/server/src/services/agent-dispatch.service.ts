@@ -351,6 +351,12 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
        * failure (#245, #751).
        */
       const handleLateLaunchFailure = (failure: DeferredLaunchFailure): void => {
+        // #1518: "already running on this worker" is the worker ACKing a live session (slow setup),
+        // never a launch failure — re-placing it (even onto the same worker) retires a mid-run agent.
+        if (/already running on this worker/i.test(failure.reason)) {
+          console.warn(`[agent-dispatch] worker reports sessionId=${sessionId} already running; not re-placing: ${failure.reason}`);
+          return;
+        }
         bySession.delete(sessionId);
         releaseWorkerSlot(reservationId);
         const detail = `${failure.kind}: ${failure.reason}`;
