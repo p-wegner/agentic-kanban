@@ -11,6 +11,47 @@ First archive pass: 2026-08-27, cutting at the 2026-08-24 boundary (`CONTINUE.md
 
 ---
 
+## 2026-10-15 (moved 2026-10-16): stable 95ddbc975 live, eight tickets ready, host reboot pending
+
+**Goal (Peter):** get the board backlog done using the workers.
+
+- **Stable is `stable-20261015-3` = 95ddbc975** (recovery lane, smoke passed; a full sweep is
+  OWED, `promote-recovery.json`). Two earlier promotions of 9044be7ab rolled back: the board exited
+  0 mid-boot with no log line. Cause: #1488's git budget timer was unref'd, so with ~30 projects
+  queued in `deduplicateProjects` the event loop drained before the server listened. Fixed in
+  #1507 (95ddbc975, regression test bites when the unref is restored; reproduced and verified by
+  booting the bundle against a DB copy).
+- **Base health:** green at 95ddbc975 (desktop-stable probe, 16:58Z). Two earlier probes were red
+  from timeouts only (ao-pf38: 3 DB-setup hooks at 120 s; desktop: merge-train.test.ts, 113 s
+  alone). #1511 builder is on the slow suites.
+- **Ready to merge (8):** #1498 #1499 #1502 #1504 #1505 #1506 #1508 #1509. #1479 is at its
+  pre-merge gate. Building: #1477 #1478 #1510 #1511. Todo: #1491 #1495 #1501 (after #1499)
+  #1503 (after #1502).
+- **No train has formed since 04:06Z.** The window released 7 workspaces at ~17:07Z and nothing
+  ran; a hand `POST /api/merge-queue` (SSE, aborts on client disconnect) produced no event in
+  10 min. The board's loop lag was p50 ~2 s with the git spawn queue full of `diff`/`ls-files`.
+  Host: ~11 GB kernel pool, free RAM down to 0.4-3 GB. **Peter is rebooting the host.**
+- **Settings changed today (revert when noted):** `test_impact_map_refresh=false` until #1506
+  lands (impact-map jobs failed on workers every 15 min and held the host repo lock);
+  wsl-stable `drain=true` (on-host worker, host RAM); `verify_workers=ao-pf38,desktop-stable`
+  (desktop agent OK'd at 11.7 GB free and will say if it drops under 4 GB).
+- **Filed today:** #1507 (Done), #1508 dedup data-loss path, #1509 reconciler reaps a launching
+  remote session (also hits reviews), #1510 worker reconnect after a stall (sessions finalized as
+  crashed, assignments re-sent and retired, progress reset, empty failingSuites, no results-drop
+  command), #1511 slow suites.
+- **ao-pf38 %TEMP%** holds ~197k dirs, mostly non-kanban tools; its agent asks Peter before
+  touching those.
+
+**After the reboot:**
+1. `cd agentic-kanban-stable && pnpm stable:start` (or `pnpm promote --restart-stable`); check
+   `/health` and that the 3 workers reconnect (`/api/workers`).
+2. Check `[loop-lag]` in `.kanban/board.log` is back to ~16 ms, then let auto-merge form a train
+   or `POST /api/merge-queue {workspaceIds}` with the client kept open. First train: #1502 #1506
+   #1508 #1509 #1504; then #1498 #1499 #1505 #1479.
+3. Re-enable `test_impact_map_refresh` once #1506 is merged; then promote with a full sweep.
+
+---
+
 ## 2026-10-14 (evening): old worktrees gone, board fast again, four trains landed
 
 **Goal (Peter):** get the board backlog done using the workers.
