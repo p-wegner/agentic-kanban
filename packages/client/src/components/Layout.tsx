@@ -300,7 +300,7 @@ export function Layout({
             </button>
           </div>
         )}
-        <div className={`${mobileSearchOpen ? "hidden sm:flex" : "flex"} min-w-0 items-center justify-between gap-2`}>
+        <div className={`${mobileSearchOpen ? "hidden sm:flex" : "flex"} min-w-0 flex-wrap sm:flex-nowrap items-center justify-between gap-x-2 gap-y-1`}>
           <div className={`flex items-center gap-1.5 min-w-0 ${headerExtra ? "shrink" : "flex-1"}`}>
             <h1 className="wordmark hidden sm:block text-base lg:text-lg font-semibold text-ink dark:text-stone-100 shrink-0">
               Agentic Kanban
@@ -363,8 +363,11 @@ export function Layout({
               </button>
             )}
           </div>
+          {/* #1532: on phones the hoisted board toolbar takes its own full-width second row.
+              Squeezed between the project switcher and the search/bell/more cluster it got
+              ~36px, wrapped one control per line and spilled over the search button. */}
           {headerExtra && (
-            <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5 sm:hidden">{headerExtra}</div>
+            <div className="order-last basis-full flex min-w-0 items-center gap-1.5 pb-1 sm:hidden">{headerExtra}</div>
           )}
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             {/* Below sm the field is an ICON until tapped (#435): at w-28 it showed a truncated
