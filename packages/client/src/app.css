@@ -147,7 +147,13 @@ body {
   --scrollbar-thumb: color-mix(in srgb, var(--color-ink-soft) 28%, transparent);
   --scrollbar-thumb-hover: color-mix(in srgb, var(--color-ink-soft) 45%, transparent);
 }
+/* #1533: the root sets the theme's default text colour. Form controls inherit `color`
+   (Tailwind preflight), and in dark mode nothing above them set one, so every input,
+   select and textarea without its own dark:text-* class typed black on the dark header
+   and dialogs. color-scheme makes native select popups and date pickers follow. */
 .dark {
+  color: var(--color-ink-dark);
+  color-scheme: dark;
   --scrollbar-thumb: color-mix(in srgb, var(--color-ink-dark) 22%, transparent);
   --scrollbar-thumb-hover: color-mix(in srgb, var(--color-ink-dark) 38%, transparent);
 }
