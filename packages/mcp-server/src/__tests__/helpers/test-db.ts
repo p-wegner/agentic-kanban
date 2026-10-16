@@ -91,7 +91,7 @@ export function createTestDb(): { client: Client; db: TestDb } {
   registerExitCleanup();
   const file = join(tempDbDir(), `mcp-test-db-${randomUUID()}.db`);
   createdTempDbFiles.push(file);
-  // #1523: migrating is hundreds of statements, each a disk write — 27-75 s per test on a
+  // #1523: migrating is hundreds of statements, each a disk write: 27-75 s per test on a
   // loaded worker. Migrate ONE template per process and copy the file, so the cost is bounded
   // by file count, not test count.
   copyFileSync(migratedTemplateFile(), file);
