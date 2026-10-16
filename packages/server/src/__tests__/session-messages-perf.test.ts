@@ -8,9 +8,14 @@ import { capSessionMessages } from "../services/session-message-pruner.service.j
 /**
  * Benchmark-style tests for session_messages write and read performance at
  * 1000+ message volume. These are correctness + timing guards, not microbenchmarks:
- * they assert that the operations complete within generous but non-trivial bounds
- * and produce correct results regardless of volume.
+ * they assert correct results regardless of volume, and keep wall-clock bounds only
+ * as HANG_GUARD_MS (#1530). This file runs in the shared parallel suite, where host
+ * load can multiply elapsed time several-fold; a tight absolute budget flaked there
+ * (6.35 s vs 5 s). Only load-independent shapes (ratios) are tight.
  */
+
+/** Catches a hang or accidental O(n^2), not a slow machine. */
+const HANG_GUARD_MS = 60_000;
 
 const BATCH_SIZE = 50; // matches DB_FLUSH_BATCH_SIZE in broadcast.ts
 const TOTAL_MESSAGES = 1200;
@@ -56,7 +61,7 @@ async function insertInBatches(
 }
 
 describe("session_messages high-volume write performance", () => {
-  it(`inserts ${TOTAL_MESSAGES} messages in batches of ${BATCH_SIZE} within 5 seconds`, async () => {
+  it(`inserts ${TOTAL_MESSAGES} messages in batches of ${BATCH_SIZE} without hanging`, async () => {
     const { db } = createTestDb();
     const { sessionId } = await seedSession(db as any);
 
@@ -64,7 +69,7 @@ describe("session_messages high-volume write performance", () => {
 
     const rows = await (db as any).select().from(sessionMessages).where(eq(sessionMessages.sessionId, sessionId));
     expect(rows).toHaveLength(TOTAL_MESSAGES);
-    expect(elapsed).toBeLessThan(5000);
+    expect(elapsed).toBeLessThan(HANG_GUARD_MS);
   });
 
   it("batch insert is faster than N individual inserts for the same volume", async () => {
@@ -89,12 +94,12 @@ describe("session_messages high-volume write performance", () => {
 
     // Batch should be meaningfully faster; allow 5× headroom for CI variance
     expect(batchMs).toBeLessThan(individualMs * 5);
-    expect(batchMs).toBeLessThan(2000);
+    expect(batchMs).toBeLessThan(HANG_GUARD_MS);
   });
 });
 
 describe("session_messages high-volume read performance", () => {
-  it(`reads ${TOTAL_MESSAGES} messages via indexed query within 500ms`, async () => {
+  it(`reads ${TOTAL_MESSAGES} messages via indexed query without hanging`, async () => {
     const { db } = createTestDb();
     const { sessionId } = await seedSession(db as any);
 
@@ -109,7 +114,7 @@ describe("session_messages high-volume read performance", () => {
     const elapsed = performance.now() - start;
 
     expect(rows).toHaveLength(TOTAL_MESSAGES);
-    expect(elapsed).toBeLessThan(500);
+    expect(elapsed).toBeLessThan(HANG_GUARD_MS);
   });
 
   it("read time stays stable across multiple 1000-message sessions (no table-scan growth)", async () => {
@@ -135,9 +140,9 @@ describe("session_messages high-volume read performance", () => {
       expect(rows).toHaveLength(1000);
     }
 
-    // Each read should stay under 500ms regardless of other sessions in the table
+    // Wall-clock is only a hang guard here (see HANG_GUARD_MS); correctness is the row count above.
     for (const t of timings) {
-      expect(t).toBeLessThan(500);
+      expect(t).toBeLessThan(HANG_GUARD_MS);
     }
   });
 });
@@ -158,7 +163,7 @@ describe("session_messages cap correctness at high volume", () => {
     expect(remaining).toHaveLength(2000);
   });
 
-  it("cap operation on 2100 messages completes within 2 seconds", async () => {
+  it("cap operation on 2100 messages completes without hanging", async () => {
     const { db } = createTestDb();
     const { sessionId } = await seedSession(db as any);
 
@@ -166,6 +171,6 @@ describe("session_messages cap correctness at high volume", () => {
 
     const start = performance.now();
     await capSessionMessages(db as any);
-    expect(performance.now() - start).toBeLessThan(2000);
+    expect(performance.now() - start).toBeLessThan(HANG_GUARD_MS);
   });
 });
