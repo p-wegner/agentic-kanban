@@ -431,7 +431,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
         <div className="flex items-center justify-between px-5 py-3 border-t border-gray-200">
           <p className="text-xs text-gray-400">Changes apply to new agent sessions only.</p>
           <div className="flex gap-2">
-            <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+            <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md">
               Cancel
             </button>
             <button
