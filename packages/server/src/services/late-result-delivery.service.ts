@@ -18,7 +18,7 @@ import type { Database } from "../db/index.js";
 import { findLiveWorkspacesOnBranch } from "../repositories/workspace-reads.repository.js";
 import { getRunningSessionIdsForWorkspace } from "../repositories/workspace-lifecycle-reconcile.repository.js";
 import { getWorkerById } from "../repositories/worker.repository.js";
-import { syncIncomingBranch, clearIncomingRef } from "./worker-remote-sync.service.js";
+import { landWithRebaseAdoption, clearIncomingRef } from "./worker-remote-sync.service.js";
 import { recordWorkerEvent } from "./worker-events.service.js";
 
 export type LateDeliveryOutcome =
@@ -41,14 +41,18 @@ export async function deliverLateResult(
   // Any live session means the normal exit path will land this push itself.
   for (const ws of candidates) {
     if ((await getRunningSessionIdsForWorkspace(ws.id, database)).length > 0) {
+      console.log(`[late-result] ${branch}: a session is still running; it lands its own result at exit`);
       return { delivered: false, reason: "a session is still running; it lands its own result at exit" };
     }
   }
   const workspace = candidates[0]!;
 
-  const sync = await syncIncomingBranch(repoPath, branch, workspace.workingDir ? { worktreePath: workspace.workingDir } : undefined);
+  // #1542: the same landing rule as the exit path -- a clean rebase is adopted, not held.
+  const landed = await landWithRebaseAdoption(repoPath, branch, workspace.workingDir ? { worktreePath: workspace.workingDir } : undefined);
+  const sync = landed.outcome;
+  if (landed.adoption) console.log(`[late-result] ${branch}: ${landed.adoption.summary}`);
   if (!sync.ok) {
-    const reason = `late result for ${branch} could not be landed (${sync.status}): ${sync.error}`;
+    const reason = `late result for ${branch} could not be landed (${sync.status}): ${sync.error}${landed.classification ?? ""}`;
     console.warn(`[late-result] ${reason}; held in the incoming ref for an operator`);
     void recordWorkerEvent({
       database,
