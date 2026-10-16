@@ -1,7 +1,7 @@
 import { createClient } from "@libsql/client";
 import type { Client } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
-import { mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -91,9 +91,29 @@ export function createTestDb(): { client: Client; db: TestDb } {
   registerExitCleanup();
   const file = join(tempDbDir(), `mcp-test-db-${randomUUID()}.db`);
   createdTempDbFiles.push(file);
+  // #1523: migrating is hundreds of statements, each a disk write — 27-75 s per test on a
+  // loaded worker. Migrate ONE template per process and copy the file, so the cost is bounded
+  // by file count, not test count.
+  copyFileSync(migratedTemplateFile(), file);
   const client = createClient({ url: `file:${file}` });
-  applyMigrationsToClient(client);
   client.execute("PRAGMA foreign_keys=ON");
   const db = drizzle(client, { schema });
   return { client, db };
+}
+
+let templateFile: string | null = null;
+function migratedTemplateFile(): string {
+  if (templateFile) return templateFile;
+  const file = join(tempDbDir(), `template-${randomUUID()}.db`);
+  createdTempDbFiles.push(file);
+  const client = createClient({ url: `file:${file}` });
+  try {
+    applyMigrationsToClient(client);
+    // Fold any WAL back into the main file so a plain file copy is a complete database.
+    client.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+  } finally {
+    client.close();
+  }
+  templateFile = file;
+  return file;
 }
