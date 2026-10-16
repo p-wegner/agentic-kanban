@@ -10,6 +10,7 @@ import { freemem, totalmem } from "node:os";
 import { dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { loadUndelivered } from "./worker-undelivered.js";
+import type { VerifyJobStatus } from "./worker-verify-runner.js";
 import type { WorkerSettingKey, WorkerSettings } from "@agentic-kanban/shared/lib/worker-settings";
 import type { WorkerControlHandlers } from "./worker-control.js";
 import { freeDiskGb, readWorkerCapacity } from "./worker-resources.js";
@@ -121,7 +122,7 @@ export interface LifecycleCtx {
   profiles?(): string[];
   harnessMode?(): string | undefined;
   /** #1479: verify slots and in-flight job ids. */
-  verify?(): { slots: number; freeSlots: number; ramGb: number; jobIds?: string[] };
+  verify?(): { slots: number; freeSlots: number; ramGb: number; jobIds?: string[]; jobs?: VerifyJobStatus[] };
 }
 
 export interface StatusSetting {
@@ -227,6 +228,11 @@ export function renderStatus(s: Record<string, unknown>): string {
   }
   const conc = s.concurrency as { mode?: string; slots?: number; reason?: string } | undefined;
   const vs = (s.settings as StatusSetting[] | undefined)?.find((x) => x.key === "verifySlots");
+  const vjobs = (s.verify as { jobs?: VerifyJobStatus[] } | undefined)?.jobs ?? [];
+  for (const j of vjobs) {
+    const files = j.filesTotal ? ` ${j.filesDone ?? 0}/${j.filesTotal} files` : j.filesDone ? ` ${j.filesDone} files` : "";
+    lines.push(`verify job:   ${j.jobId.slice(0, 8)} ${j.tier} @ ${String(j.sha).slice(0, 9)} ${j.stage}${files} (since ${j.startedAt})`);
+  }
   if (vs?.effective !== undefined) lines.push(`verify slots: ${String(vs.effective)}`);
   if (conc?.mode) lines.push(`concurrency:  ${conc.mode}, ${conc.slots ?? "?"} slot(s) - ${conc.reason ?? ""}`);
   lines.push("settings:");
