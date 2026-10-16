@@ -296,6 +296,17 @@ describe("the hello reverse-reconcile (#746, moved here in #887)", () => {
       expect(reasons[0]).toMatch(/assignment never started on w1/);
     });
 
+    it("a hello that lists the session (still in setup) cancels the pending never-started check (#1518)", () => {
+      const h = harness();
+      tracked(h);
+      h.liveness.reconcileHello("w1", []);
+      vi.advanceTimersByTime(SETTLE); // re-sent once
+      h.liveness.reconcileHello("w1", ["s1"]); // worker is provisioning it
+      vi.advanceTimersByTime(SETTLE * 3);
+      expect(h.calls.assignmentLost).toEqual([]);
+      expect(h.calls.lost).toEqual([]);
+    });
+
     it("gives up with the named reason when a second hello still omits the session", () => {
       const h = harness();
       tracked(h);
