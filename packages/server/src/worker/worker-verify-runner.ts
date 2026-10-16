@@ -94,6 +94,8 @@ export interface DaemonVerifyRunner {
   handle(message: { type: string }): boolean;
   /** What this worker declares in its heartbeat. */
   capability(): WorkerVerifyCapability;
+  /** #1517: stage and file counts of every running job, for `worker status`. */
+  jobs(): VerifyJobStatus[];
   /** #1465: call right after `hello` on every (re)connect: re-announces running jobs and delivers buffered verdicts. */
   onConnected(): void;
   /** #1489: kill the job's process tree and remove its checkout; true when the job was running or buffered. */
@@ -102,13 +104,47 @@ export interface DaemonVerifyRunner {
   reapExcept(liveJobIds: readonly string[]): string[];
 }
 
-/** vitest pass/fail marker lines and its `Test Files  N passed (M)` summary, for progress. */
-export function parseVerifyProgress(output: string): { filesDone: number; filesTotal?: number } {
-  let done = 0;
-  for (const line of output.split(/\r?\n/)) if (/^\s*(?:[\u2713\u221a\u00d7\u2717\u2718]|FAIL\b|\u276f)\s+\S+\.(?:test|spec)\.[cm]?[jt]sx?/.test(line)) done++;
-  const summary = /Test Files\s+(?:(\d+) failed\s*\|\s*)?(\d+) passed(?:\s*\|[^()]*)?\s*\((\d+)\)/.exec(output);
-  return summary ? { filesDone: Number(summary[3]), filesTotal: Number(summary[3]) } : { filesDone: done };
+const ANSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+const FILE_MARKER_RE = /^\s*(?:[\u2713\u221a\u00d7\u2717\u2718]|FAIL\b|\u276f)\s+\S+\.(?:test|spec)\.[cm]?[jt]sx?/;
+const FILES_SUMMARY_RE = /Test Files\s+(?:(\d+) failed\s*\|\s*)?(\d+) passed(?:\s*\|[^()]*)?\s*\((\d+)\)/;
+
+/**
+ * #1517: cumulative vitest file progress over a whole script run. Colour codes are stripped (a worker
+ * with FORCE_COLOR printed `ESC[32m✓` and no marker line ever matched), lines are buffered across
+ * chunks, and counts only grow: a `test:mine` run is several vitest invocations, each ending in its
+ * own `Test Files` summary, so a summary banks its files and the next package counts on top.
+ */
+export function createVerifyProgressTracker(): { push(chunk: string): void; snapshot(): { filesDone: number; filesTotal?: number } } {
+  let pending = "";
+  let banked = 0;
+  let current = 0;
+  let total: number | undefined;
+  const consume = (raw: string): void => {
+    const line = raw.replace(ANSI_RE, "");
+    const summary = FILES_SUMMARY_RE.exec(line);
+    if (summary) { banked += Number(summary[3]); current = 0; total = banked; return; }
+    if (FILE_MARKER_RE.test(line)) current++;
+  };
+  return {
+    push(chunk) {
+      const lines = (pending + chunk).split(/\r?\n/);
+      pending = lines.pop() ?? "";
+      for (const l of lines) consume(l);
+    },
+    snapshot: () => ({ filesDone: banked + current, ...(total !== undefined ? { filesTotal: total } : {}) }),
+  };
 }
+
+/** vitest pass/fail marker lines and its `Test Files  N passed (M)` summary, for progress (one-shot form of the tracker). */
+export function parseVerifyProgress(output: string): { filesDone: number; filesTotal?: number } {
+  const t = createVerifyProgressTracker();
+  t.push(`${output}\n`);
+  const snap = t.snapshot();
+  return snap.filesTotal !== undefined ? { filesDone: snap.filesTotal, filesTotal: snap.filesTotal } : snap;
+}
+
+/** #1517: one running verify job as `worker status` shows it. */
+export interface VerifyJobStatus { jobId: string; tier: string; sha: string; stage: VerifyStage; filesDone?: number; filesTotal?: number; startedAt: string }
 
 /** Test files the output names as failed (`FAIL <path>`), sorted + deduped. */
 export function parseVerifyFailingSuites(output: string): string[] {
@@ -222,6 +258,8 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
   const connected = (): boolean => deps.isConnected?.() ?? true;
   /** Latest progress per running job, replayed on reconnect so the board knows the job is alive. */
   const lastProgress = new Map<string, WorkerToBoardMessage>();
+  /** #1517: the same progress plus job identity, for `worker status` (the board frame carries no tier/sha). */
+  const jobStatus = new Map<string, VerifyJobStatus>();
   /** Finished jobs whose frames may not have reached the board; replayed on every reconnect until retention. */
   const finished = new Map<string, StoredVerifyResult>();
   for (const { jobId, entry } of deps.store?.loadAll() ?? []) finished.set(jobId, entry);
@@ -231,6 +269,8 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
 
   const progress = (jobId: string, stage: VerifyStage, extra: { filesDone?: number; filesTotal?: number } = {}): void => {
     const frame: WorkerToBoardMessage = { type: "verify_progress", jobId, stage, ...extra };
+    const known = jobStatus.get(jobId);
+    if (known) { if (stage === "done") jobStatus.delete(jobId); else Object.assign(known, { stage }, extra); }
     if (stage === "done") lastProgress.delete(jobId); else lastProgress.set(jobId, frame);
     if (stage !== "verify" || extra.filesDone === undefined) deps.log(`[worker] verify job ${jobId} stage ${stage}`); // #1479 (verify ticks are too chatty)
     // While the socket is down the frame is dropped (the replay on reconnect carries the latest one).
@@ -282,6 +322,7 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
       finish(job, started, { sha, refused, reason }, `verify refused (${refused}): ${reason}`);
     if (running.size >= deps.slots) return refuse("no_free_slot", `this worker runs ${deps.slots} verify job(s) at a time`);
     running.add(job.jobId);
+    jobStatus.set(job.jobId, { jobId: job.jobId, tier: job.tier, sha: job.sha, stage: "fetch", startedAt: new Date().toISOString() });
     deps.log(`[worker] verify job ${job.jobId} started: ${job.tier} @ ${job.sha.slice(0, 9)} (${running.size}/${deps.slots} slots busy)`);
     const ctl = new AbortController();
     controllers.set(job.jobId, ctl);
@@ -312,20 +353,21 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
       }
       progress(job.jobId, "verify");
       let lastReport = 0;
-      let seen = "";
+      const tracker = createVerifyProgressTracker();
       const env = { ...jobEnv, ...(job.maxWorkers ? { KANBAN_TEST_MAX_WORKERS: String(job.maxWorkers) } : {}), ...(job.scope ? { KANBAN_RETRY_TEST_FILES: job.scope } : {}) };
       const out = await run(co.dir, job.script, {
         timeoutMs: job.timeoutMs,
         env,
         signal: ctl.signal,
         onOutput: (chunk) => {
-          seen = (seen + chunk).slice(-64 * 1024);
+          tracker.push(chunk);
           if (Date.now() - lastReport < 2000) return;
           lastReport = Date.now();
-          progress(job.jobId, "verify", parseVerifyProgress(seen));
+          progress(job.jobId, "verify", tracker.snapshot());
         },
       });
       log += out.output;
+      progress(job.jobId, "verify", tracker.snapshot()); // the throttle may have swallowed the last ticks
       finish(job, started, {
         sha: co.sha,
         passed: out.exitCode === 0 && !out.timedOut,
@@ -373,6 +415,7 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
       if (gone.length > 0) deps.log(`[worker] board no longer wants ${gone.length} verify job(s) (${gone.join(", ")}): reaped`);
       return gone;
     },
+    jobs: () => [...jobStatus.values()].map((j) => ({ ...j })),
     capability: () => ({ slots: deps.slots, freeSlots: Math.max(0, deps.slots - running.size), ramGb: deps.ramGb, jobIds: [...running] }),
     onConnected() {
       pruneFinished();
