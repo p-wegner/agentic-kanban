@@ -1,4 +1,5 @@
 // @gate:always-run when:packages/client/src/** — scans the client src tree; imports nothing it checks.
+// @gate:static — source-scanning ratchet: runs in the static tier (`pnpm check:static`, #1514/#1546), never held.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

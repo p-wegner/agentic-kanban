@@ -146,32 +146,52 @@ async function readTypecheckCommand(projectId: string, database: Database): Prom
   return (await getStackProfile(projectId, database).catch(() => null))?.typecheckCommand?.trim() || null;
 }
 
-/** A red static-tier result for the builder's feedback turn, or null (green, or nothing ran). */
-async function runStaticTierAtExit(workspace: ImplementExitCheckWorkspace, level: ImplementExitCheckLevel): Promise<ImplementExitCheckResult | null> {
-  if (!workspace.workingDir) return null;
+/** One log-line suffix saying whether the static part ran and passed (#1546). */
+export function staticTierNote(verdict: { ran: boolean; passed: boolean } | null): string {
+  if (!verdict) return "static tier: not run (no worktree)";
+  if (!verdict.ran) return "static tier: skipped";
+  return verdict.passed ? "static tier: passed" : "static tier: FAILED";
+}
+
+/** The static-tier verdict, plus a red result for the builder's feedback turn when it failed. */
+async function runStaticTierAtExit(
+  workspace: ImplementExitCheckWorkspace,
+  level: ImplementExitCheckLevel,
+): Promise<{ note: string; red: ImplementExitCheckResult | null }> {
+  if (!workspace.workingDir) return { note: staticTierNote(null), red: null };
   const startedAt = Date.now();
   const verdict = await runStaticTier({ workingDir: workspace.workingDir, baseBranch: workspace.baseBranch });
-  if (verdict.passed) return null;
+  const note = staticTierNote(verdict);
+  if (verdict.passed) return { note, red: null };
   return {
-    level,
-    ran: true,
-    passed: false,
-    held: false,
-    message: `implement-exit ${verdict.message}`,
-    failureDetail: verdict.detail,
-    selectionSize: null,
-    durationMs: Date.now() - startedAt,
+    note,
+    red: {
+      level,
+      ran: true,
+      passed: false,
+      held: false,
+      message: `implement-exit ${verdict.message}`,
+      failureDetail: verdict.detail,
+      selectionSize: null,
+      durationMs: Date.now() - startedAt,
+    },
   };
 }
 
 /** Run the implement-exit check for one workspace. Total: never throws. */
 export async function runImplementExitCheck(args: RunImplementExitCheckArgs): Promise<ImplementExitCheckResult> {
-  const { workspace, projectId, level, database } = args;
-  if (level === "none") return skipped(level, "implement-exit check: none (posture)");
+  if (args.level === "none") return skipped(args.level, "implement-exit check: none (posture)");
   // #1514: the static tier runs first and OUTSIDE verify placement, so a red reaches the builder
   // even when the test part below is `held` (a held check counts as passed).
-  const staticRed = await runStaticTierAtExit(workspace, level);
-  if (staticRed) return staticRed;
+  const { note, red } = await runStaticTierAtExit(args.workspace, args.level);
+  if (red) return red;
+  // #1546: say whether the static part ran, so a `held` test part does not read as "nothing ran".
+  const result = await runTestPartAtExit(args);
+  return { ...result, message: `${result.message} (${note})` };
+}
+
+async function runTestPartAtExit(args: RunImplementExitCheckArgs): Promise<ImplementExitCheckResult> {
+  const { workspace, projectId, level, database } = args;
   const verification = level === "typecheck"
     ? null
     : await resolveGateVerification(projectId, database, { workingDir: workspace.workingDir }).catch(() => null);
