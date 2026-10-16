@@ -9,6 +9,7 @@
 import { workerBelowRamFloor } from "@agentic-kanban/shared/lib/worker-settings";
 import type { VerifyJobFrame, VerifyStage, WorkerVerifyCapability } from "@agentic-kanban/shared/lib/worker-verify-protocol";
 import type { Database } from "../db/index.js";
+import { listActiveMergeTrainsForProject, recordMergeTrainWorkerVerify } from "../repositories/merge-train.repository.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { ensureGitHttpServer } from "./git-http.service.js";
 import type { VerifyRunRequest, VerifyWorkerRunner } from "./verify-job-placement.js";
@@ -37,6 +38,25 @@ export interface VerifyRunnerDeps {
   nowMs?: number;
   /** #1465: injected for tests; defaults to VERIFY_RECONNECT_GRACE_MS. */
   reconnectGraceMs?: number;
+}
+
+const LOGGED_SUITE_CAP = 10;
+
+/** #1544: ` [a, b, … +N more]` for the verify_result log line; empty when no suite was named. Pure. */
+export function describeFailingSuites(suites: readonly string[] | undefined): string {
+  if (!suites || suites.length === 0) return "";
+  const shown = suites.slice(0, LOGGED_SUITE_CAP).join(", ");
+  return ` [${shown}${suites.length > LOGGED_SUITE_CAP ? `, … +${suites.length - LOGGED_SUITE_CAP} more` : ""}]`;
+}
+
+/** #1544: stamp a red worker verdict on the project's live (gating) train row; never throws. */
+async function persistTrainWorkerVerify(database: Database, projectId: string, entry: Record<string, unknown>): Promise<void> {
+  try {
+    const live = await listActiveMergeTrainsForProject(projectId, ["gating"], database);
+    for (const train of live) await recordMergeTrainWorkerVerify(train.id, entry, database);
+  } catch (err) {
+    console.warn(`[verify-worker] could not persist failing suites on the train row (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /** #1456: on an auto worker verify jobs share the session budget: sessions + verify jobs <= derived slots. */
@@ -114,7 +134,10 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
           } else if (message.type === "verify_result") {
             const log = [...chunks.entries()].sort(([a], [b]) => a - b).map(([, d]) => d).join("") || message.logTail;
             // #1495: the verdict's receipt (placement and refusals were logged, the verdict was not).
-            console.log(`[verify-worker] ${req.kind} verify_result from ${workerName} sha ${message.sha.slice(0, 9)}: ${message.refused ? `refused (${message.refused})` : message.passed ? "passed" : "failed"}, ${message.failingSuites?.length ?? 0} failing suite(s), ${Math.round((message.durationMs ?? 0) / 1000)}s`);
+            console.log(`[verify-worker] ${req.kind} verify_result from ${workerName} sha ${message.sha.slice(0, 9)}: ${message.refused ? `refused (${message.refused})` : message.passed ? "passed" : "failed"}, ${message.failingSuites?.length ?? 0} failing suite(s)${describeFailingSuites(message.failingSuites)}, ${Math.round((message.durationMs ?? 0) / 1000)}s`);
+            if (req.kind === "train-gate" && req.projectId && !message.passed && !message.refused) {
+              void persistTrainWorkerVerify(deps.database, req.projectId, { workerName, sha: message.sha, failingSuites: message.failingSuites ?? [], durationMs: message.durationMs ?? 0, at: new Date(deps.nowMs ?? Date.now()).toISOString() });
+            }
             end({
               requestId: req.requestId,
               workerId: req.workerId,

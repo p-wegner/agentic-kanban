@@ -40,7 +40,7 @@ import {
   listLandableWorkerBranches,
   WORKER_RESULT_LANDABLE_AFTER_END_MS,
 } from "../repositories/worker.repository.js";
-import { syncIncomingBranch, clearIncomingRef } from "../services/worker-remote-sync.service.js";
+import { landWithRebaseAdoption, clearIncomingRef } from "../services/worker-remote-sync.service.js";
 import { reclaimLandedIncomingRefs, INCOMING_REF_STALE_AFTER_MS } from "../services/worker-incoming-refs.service.js";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
@@ -112,7 +112,9 @@ export async function sweepIncomingWorkerRefs(database: Database = realDb): Prom
       // holds the branch (#743). Before it did, this sweep could recover only refs whose
       // workspace had already been torn down — a live workspace holds its branch, which
       // is the normal case, so "restart recovery" recovered almost nothing.
-      const sync = await syncIncomingBranch(project.repoPath, branch);
+      const landed = await landWithRebaseAdoption(project.repoPath, branch); // #1542: adopt a clean rebase too
+      const sync = landed.outcome;
+      if (landed.adoption) console.log(`[worker-sweep] ${branch}: ${landed.adoption.summary}`);
       if (sync.ok) {
         result.landed.push(branch);
         recordActed(result, branch, "landed");
@@ -121,7 +123,7 @@ export async function sweepIncomingWorkerRefs(database: Database = realDb): Prom
       } else {
         result.held.push({ branch, reason: sync.error });
         recordSkipped(result, branch, "sync failed");
-        console.warn(`[worker-sweep] could not land worker push for ${branch}: ${sync.error}`);
+        console.warn(`[worker-sweep] could not land worker push for ${branch}: ${sync.error}${landed.classification ?? ""}`);
       }
     }
   }
