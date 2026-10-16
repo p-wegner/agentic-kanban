@@ -127,6 +127,34 @@ export async function appendMergeTrainAttempt(
     .where(eq(mergeTrains.id, id));
 }
 
+/**
+ * #1544: record a worker's verify verdict on a LIVE train's `gateEvidence.workerVerify` as soon as
+ * it arrives, so the failing suites are visible while the gate retries. Evidence column only (never
+ * the state, #1153); `finishMergeTrain` rewrites the evidence at the end. Missing row = no-op.
+ */
+export async function recordMergeTrainWorkerVerify(
+  id: string,
+  entry: Record<string, unknown>,
+  database: Database = db,
+): Promise<void> {
+  const row = await getMergeTrain(id, database);
+  if (!row) return;
+  let evidence: Record<string, unknown> = {};
+  if (row.gateEvidence) {
+    try {
+      const parsed: unknown = JSON.parse(row.gateEvidence);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) evidence = parsed as Record<string, unknown>;
+    } catch {
+      evidence = {};
+    }
+  }
+  const prior = Array.isArray(evidence.workerVerify) ? (evidence.workerVerify as unknown[]) : [];
+  await database
+    .update(mergeTrains)
+    .set({ gateEvidence: JSON.stringify({ ...evidence, workerVerify: [...prior, entry] }) })
+    .where(eq(mergeTrains.id, id));
+}
+
 /** One train by id, or undefined. */
 export async function getMergeTrain(id: string, database: Database = db): Promise<MergeTrainRow | undefined> {
   const [row] = await database.select().from(mergeTrains).where(eq(mergeTrains.id, id)).limit(1);
