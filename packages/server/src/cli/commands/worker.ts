@@ -18,7 +18,6 @@ import { repinLegacyShim } from "../../worker/worker-repin.js";
 import { applyWorkerUpdate } from "../../worker/worker-control.js";
 import type { WorkerUpdateReport } from "../../lib/worker-update.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "../../worker/worker-repo.js";
-import { markWorkerDirsNotIndexed } from "../../worker/worker-content-index.js";
 import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
 // #879 — pure, so it stays safe for the standalone worker binary (no db graph).
 import { formatBuildFreshness, type WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
@@ -478,7 +477,6 @@ async function runWorkerStart(rawOptions: WorkerStartOptions & ToolchainStartOpt
     // #1373: the harness mode and dirs live in the state file, so doctor/auth read what the daemon uses.
     if (options.token) await moveAsideRevokedPairing({ stateFile: options.stateFile ?? defaultWorkerStateFile(), boardUrls: boardList, log: console.log }); // #1450
     const harnessCfg = persistStartHarness(options.stateFile ?? defaultWorkerStateFile(), options);
-    await markWorkerDirsNotIndexed(options.workRoot ?? defaultWorkerWorkRoot(options.stateFile)); // #1520
     // Read by `restart` below, which can fire (a rollback) before the await resolves.
     let daemonRef: WorkerDaemonHandle | undefined;
     const daemon = await startWorkerDaemon({
