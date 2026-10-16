@@ -32,8 +32,6 @@
 
 | Keys | Does |
 |---|---|
-| `↑/↓/k/j` | Move selection up / down within column |
-| `←/→/h/l` | Move selection left / right across columns (h/l when card selected) |
 | `Enter` | Open selected card's detail panel |
 | `w` | New issue + start workspace |
 | `Shift+V` | Start voice inbox (record idea → Backlog issue) |
