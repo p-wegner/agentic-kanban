@@ -45,6 +45,9 @@ export default defineConfig({
     globals: true,
     // #285 — git committer identity via env, so no fixture pays two `git config` spawns.
     // #1041 gate — see packages/server/vitest.config.ts and test-setup/db-isolation.ts.
+    // #1528 — warm tsx's transpile cache once so spawn-based suites don't each cold-compile
+    // the server inside their beforeAll (>120 s on a loaded worker).
+    globalSetup: [path.resolve(__dirname, "src/__tests__/helpers/warm-mcp-server.ts")],
     setupFiles: [
       path.resolve(__dirname, "../../test-setup/git-identity.ts"),
       path.resolve(__dirname, "../../test-setup/db-isolation.ts"),
