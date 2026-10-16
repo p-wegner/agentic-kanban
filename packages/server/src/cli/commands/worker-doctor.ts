@@ -454,6 +454,7 @@ import { checkBoardBuild } from "./worker-board-build.js";
 import { checkRunningDaemon } from "./worker-doctor-running-daemon.js";
 import { resolveOwnPackageVersion } from "../../lib/worker-build.js";
 import { checkTailnetFirewall } from "./worker-doctor-firewall-check.js";
+import { checkContentIndexing } from "../../worker/worker-content-index.js";
 // #875's env-aware auth-dir resolution lives in its own module for the same reason.
 import { resolveProviderAuthDir } from "./worker-doctor-provider-auth.js";
 import type { WorkerHarness } from "../../worker/worker-harness.js";
@@ -708,6 +709,8 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   }
   checks.push(checkWorkerCheckoutTrust(opts.workRoot ?? defaultWorkerWorkRoot(opts.stateFile), opts.home ?? homedir(), opts.harness?.dirFor("claude")));
   checks.push(await checkCloneIntegrity(opts.workRoot ?? defaultWorkerWorkRoot(opts.stateFile)));
+  const indexing = await checkContentIndexing(opts.workRoot ?? defaultWorkerWorkRoot(opts.stateFile)); // #1520
+  if (indexing) checks.push(indexing);
   checks.push(checkUndeliveredResults(opts.workRoot ?? defaultWorkerWorkRoot(opts.stateFile)));
   checks.push(checkPendingDeletes(opts.workRoot ?? defaultWorkerWorkRoot(opts.stateFile)));
   if (opts.harness) checks.push(...checkHarness(opts.harness, opts.providers, undefined, { notes: opts.harnessNotes, legacy: opts.harnessLegacy }));

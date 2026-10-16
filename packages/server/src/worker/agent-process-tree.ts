@@ -7,6 +7,7 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { forgetAgent, markAgentsLeftOnPurpose, recordAgent, sweepLeftoverAgents } from "./worker-agent-registry.js";
 import { attachAgentJob, type AgentJob } from "./worker-job-holder.js";
 import { reapOrphanedCheckouts } from "./worker-repo.js";
+import { markWorkerDirsNotIndexed } from "./worker-content-index.js";
 import { createPendingDeleteSweeper, sweepPendingDeletes } from "./worker-pending-delete.js";
 export { createPendingDeleteSweeper }; // #1445: the daemon's idle retry of locked-file deletions
 
@@ -45,6 +46,7 @@ export function createAgentTreeTracker(workRoot: string): AgentTreeTracker {
  * reap the orphaned checkouts (#850) so nothing still holds files in them. Never throws.
  */
 export async function cleanUpBeforeStart(workRoot: string, log: (line: string) => void): Promise<void> {
+  await markWorkerDirsNotIndexed(workRoot, log); // #1520: never throws
   try {
     await sweepLeftoverAgents(workRoot, log);
   } catch (err) {
