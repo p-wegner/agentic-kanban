@@ -113,6 +113,8 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
             chunks.set(message.seq, message.data);
           } else if (message.type === "verify_result") {
             const log = [...chunks.entries()].sort(([a], [b]) => a - b).map(([, d]) => d).join("") || message.logTail;
+            // #1495: the verdict's receipt (placement and refusals were logged, the verdict was not).
+            console.log(`[verify-worker] ${req.kind} verify_result from ${workerName} sha ${message.sha.slice(0, 9)}: ${message.refused ? `refused (${message.refused})` : message.passed ? "passed" : "failed"}, ${message.failingSuites?.length ?? 0} failing suite(s), ${Math.round((message.durationMs ?? 0) / 1000)}s`);
             end({
               requestId: req.requestId,
               workerId: req.workerId,
