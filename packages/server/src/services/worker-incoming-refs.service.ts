@@ -32,7 +32,7 @@ import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 import { KANBAN_INCOMING_REF_PREFIX } from "./git-http.service.js";
 import {
   incomingRefFor,
-  syncIncomingBranch,
+  landWithRebaseAdoption,
   clearIncomingRef,
   type SyncOutcome,
 } from "./worker-remote-sync.service.js";
@@ -239,10 +239,12 @@ export async function landIncomingRef(
   if (!assigned.has(branch)) {
     return { ok: false, error: `no worker assignment for ${branch}; refusing to land it (#246)` };
   }
-  const outcome = await syncIncomingBranch(project.repoPath, branch);
+  const landed = await landWithRebaseAdoption(project.repoPath, branch);
+  const outcome = landed.outcome;
   if (!outcome.ok) {
-    console.warn(`[worker-incoming] land ${branch} refused: ${outcome.error}`);
-    return { ok: false, error: outcome.error, outcome };
+    const error = `${outcome.error}${landed.classification ?? ""}`;
+    console.warn(`[worker-incoming] land ${branch} refused: ${error}`);
+    return { ok: false, error, outcome };
   }
   await clearIncomingRef(project.repoPath, branch).catch(() => {});
   console.log(`[worker-incoming] landed ${branch} via ${outcome.via} (${outcome.status}) on operator request`);
