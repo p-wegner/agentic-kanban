@@ -269,8 +269,34 @@ function collectTreePids(rootPid, childrenMap, seen) {
  * listening port, which is what protects a deliberately detached dev server.
  */
 function isOrphanedProcess(proc, byPid) {
-  if (process.platform !== "win32" && proc.ppid <= 1) return true;
+  if (process.platform !== "win32") {
+    if (proc.ppid <= 1) return true;
+    // A Linux worker (WSL, a systemd login session, a container with tini) re-parents an
+    // orphan to a SUBREAPER, not pid 1 — `systemd --user`, `tini`, `dumb-init`, the
+    // `/init` of WSL. That parent is alive, so the plain "parent gone" check called the
+    // leaked worker supervised and left it running (#1478).
+    const parent = byPid.get(proc.ppid);
+    if (parent && isSubreaperCommand(parent.commandLine)) return true;
+  }
   return !byPid.has(proc.ppid);
+}
+
+const SUBREAPER_NAMES = new Set([
+  "init",
+  "systemd",
+  "tini",
+  "dumb-init",
+  "docker-init",
+  "catatonit",
+  "s6-svscan",
+  "containerd-shim",
+  "containerd-shim-runc-v2",
+]);
+
+function isSubreaperCommand(commandLine) {
+  const first = String(commandLine || "").trim().split(/\s+/)[0] || "";
+  const base = first.replace(/^-/, "").split("/").pop();
+  return SUBREAPER_NAMES.has(base);
 }
 
 function killDirDescendants(cwd) {

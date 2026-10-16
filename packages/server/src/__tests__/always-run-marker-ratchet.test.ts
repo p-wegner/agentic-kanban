@@ -263,7 +263,6 @@ const KNOWN_SAFE_UNMARKED = new Set<string>([
   // #661: same shape as merge-cleanup.service.test.ts above — imports the services under
   // test (merge-cleanup + workspace-issue-members repository) directly; MIGRATIONS_DIR
   // only seeds the temp DB.
-  "server/ticket-groups.test.ts",
   // #1250 — both import the pure parser under test (`merge-failure-fix-hint.ts`) and the
   // bank-shrinks service; they match `reaches-tree-via-shared-guard-helper` only because their
   // FIXTURE strings quote the nloc ring's own failure output (`function-nloc-ratchet`,
