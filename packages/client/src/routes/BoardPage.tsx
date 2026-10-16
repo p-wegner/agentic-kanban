@@ -13,6 +13,8 @@ import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { showToast } from "../lib/toast.js";
 import { fetchProjectRepos } from "../lib/projectReposQuery.js";
+import { useCompletedExtras } from "../hooks/useCompletedExtras.js";
+import { useCompletedPagingStore } from "../stores/completedPagingStore.js";
 import { matchesBoardFilters } from "../lib/boardFiltering.js";
 import { reconcileSelectedIssue } from "../lib/selectedIssueSync.js";
 import { createQuickUpdateHandlers } from "../lib/issueQuickUpdates.js";
@@ -514,13 +516,36 @@ export function BoardPage() {
     searchQuery,
   }), [focusMode, statusFilterId, activeTagIds, milestoneFilterId, driveFilterId, issueTypeFilter, priorityFilter, showBlocked, showStaleOnly, searchQuery]);
 
+  // #1541: Done/Cancelled beyond the board payload's cap (paged + server-side search).
+  const boardIssueIds = useMemo(
+    () => new Set(columns.flatMap((col) => col.issues.map((issue) => issue.id))),
+    [columns],
+  );
+  const archiveTotals = useMemo(() => {
+    const archive = columns.filter((col) => ARCHIVE_STATUS_NAMES.has(col.name));
+    return {
+      total: archive.reduce((sum, col) => sum + col.count, 0),
+      loaded: archive.reduce((sum, col) => sum + col.issues.length, 0),
+    };
+  }, [columns]);
+  const completed = useCompletedExtras(activeProjectId, searchQuery, boardIssueIds, archiveTotals.total, archiveTotals.loaded);
+  const setCompletedPaging = useCompletedPagingStore((s) => s.set);
+  useEffect(() => {
+    setCompletedPaging({ hasMore: completed.hasMore, loading: completed.loading, loadMore: completed.loadMore });
+  }, [completed.hasMore, completed.loading, completed.loadMore, setCompletedPaging]);
+
   const filteredColumns = useMemo(
     () =>
-      columns.map((col) => ({
-        ...col,
-        issues: col.issues.filter((issue) => matchesBoardFilters(issue, filterOptions)),
-      })),
-    [columns, filterOptions],
+      columns.map((col) => {
+        const extra = ARCHIVE_STATUS_NAMES.has(col.name)
+          ? completed.extras.filter((issue) => issue.statusId === col.id)
+          : [];
+        return {
+          ...col,
+          issues: [...col.issues, ...extra].filter((issue) => matchesBoardFilters(issue, filterOptions)),
+        };
+      }),
+    [columns, filterOptions, completed.extras],
   );
 
   const showAiReviewedColumn = useMemo(
