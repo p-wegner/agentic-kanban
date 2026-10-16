@@ -89,6 +89,8 @@ async function statusName(db: Db, issueId: string): Promise<string> {
   return status.name;
 }
 
+const HELD: ImplementExitCheckResult = { ...GREEN, ran: false, held: true, message: "implement-exit check held: no_free_slot" };
+
 function engine(db: Db, verdicts: ImplementExitCheckResult[]) {
   const sessionManager = { startSession: vi.fn(async () => randomUUID()) };
   const runCheck = vi.fn(async (_args: RunImplementExitCheckArgs) => verdicts.shift() ?? GREEN);
@@ -99,7 +101,7 @@ function engine(db: Db, verdicts: ImplementExitCheckResult[]) {
     boardEvents: boardEvents as never,
     autoMerge: vi.fn(async () => {}),
     database: db as never,
-    implementExit: { runCheck, sendBuilderTurn },
+    implementExit: { runCheck, sendBuilderTurn, heldRetryDelaysMs: [1, 1], sleep: async () => {} },
   });
   return { runWorkflowOnExit, sessionManager, runCheck, sendBuilderTurn, boardEvents };
 }
@@ -124,6 +126,28 @@ describe("implement-exit check at the builder -> review transition", () => {
     expect(e.sendBuilderTurn).toHaveBeenCalledTimes(1);
     expect(e.sendBuilderTurn.mock.calls[0][0]).toBe(workspaceId);
     expect(e.sendBuilderTurn.mock.calls[0][1]).toContain("packages/server/src/__tests__/broken.test.ts");
+  });
+
+  it("#1515 held then red: the check is retried and its red reaches the builder before review", async () => {
+    const { issueId, workspaceId, sessionId } = await seed(db);
+    const e = engine(db, [HELD, RED]);
+
+    await e.runWorkflowOnExit(workspaceId, sessionId, 0);
+
+    expect(e.runCheck).toHaveBeenCalledTimes(2);
+    expect(e.sessionManager.startSession).not.toHaveBeenCalled();
+    expect(await statusName(db, issueId)).toBe("In Progress");
+    expect(e.sendBuilderTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("#1515 held through every retry: review proceeds after the bounded retries", async () => {
+    const { issueId, workspaceId, sessionId } = await seed(db);
+    const e = engine(db, [HELD, HELD, HELD]);
+
+    await e.runWorkflowOnExit(workspaceId, sessionId, 0);
+
+    expect(e.runCheck).toHaveBeenCalledTimes(3);
+    expect(await statusName(db, issueId)).toBe("In Review");
   });
 
   it("#1293 red on an always-run guard suite reaches the builder before review is spent", async () => {
