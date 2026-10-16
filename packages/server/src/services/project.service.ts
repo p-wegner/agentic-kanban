@@ -29,6 +29,7 @@ import { cloneRepo } from "./repo-clone.service.js";
 import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
 import type { WorkspaceSummary } from "./workspace-summary.service.js";
 import { buildBoardColumns } from "../lib/board-view.js";
+import { getCompletedPage as getCompletedPageImpl } from "./project-completed.service.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
 
 import { ProjectError } from "./project-error.js";
@@ -901,7 +902,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     removeWorktreeById,
     getStats,
     getBoard,
-    scheduleBoardWarmup,
+    scheduleBoardWarmup, getCompletedPage: (projectId: string, opts: { offset: number; limit: number; query?: string }) => getCompletedPageImpl({ database, resolveSummaryMap }, projectId, opts),
     getBoardSummary,
     getGraph,
     getCrossProjectWorkspaces,
