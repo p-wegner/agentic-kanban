@@ -14,7 +14,8 @@ function createTestApp() {
 
 // Helper to create prerequisite data: project -> status -> issue -> workspace -> session
 async function createSessionWithData(database: TestDb) {
-  const now = new Date().toISOString();
+  const baseMs = Date.now();
+  const now = new Date(baseMs).toISOString();
 
   // Project
   const projectId = randomUUID();
@@ -69,7 +70,7 @@ async function createSessionWithData(database: TestDb) {
 
   // Session
   const sessionId = randomUUID();
-  const endedAt = new Date(Date.now() + 345_000).toISOString(); // 5m 45s later
+  const endedAt = new Date(baseMs + 345_000).toISOString(); // 5m 45s later
   await database.insert(schema.sessions).values({
     id: sessionId,
     workspaceId,
