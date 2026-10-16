@@ -48,6 +48,7 @@ import {
 } from "./pre-merge-gate-tier.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
+import { watchGateLiveness } from "./merge-gate-liveness.js";
 import { beginMergeGateRun, combineGateAbortSignals, endMergeGateRun } from "./merge-cancellation.js";
 // #221/#490's failure-message shaping lives in its own module now (this file crossed the
 // 1000-line god-module ceiling). Re-exported below so its importers are unchanged.
@@ -381,6 +382,7 @@ export async function runPreMergeGate(
       gateDir = { path: tmpdir(), dispose: () => true, disposeAsync: async () => true };
     }
     const gateDataDir = gateDir.path;
+    const stopLiveness = watchGateLiveness({ workspaceId: workspace.id, workingDir, database }); // #1525
     try {
     // #278: cap the gate's vitest fan-out. vitest's default `maxWorkers = cpus/2`
     // under `pool: "forks"` is tuned for a machine doing nothing else; a gate shares
@@ -722,6 +724,7 @@ export async function runPreMergeGate(
     } finally {
       // #1164 — spent either way; drop it so a later cancel can't mistake this for a live gate.
       endMergeGateRun(workspace.id, ownGateSignal);
+      stopLiveness();
       // Best-effort by design (#352's root cause): on Windows the directory cannot be removed
       // while any surviving grandchild of the verify run still holds it as its cwd. Log it so a
       // recurring failure is visible instead of silently accumulating again; never throw, because

@@ -207,6 +207,11 @@ export function createImplementExitGate(deps: ImplementExitGateDeps) {
       clearImplementExitCheckInFlight(workspace.id);
     }
     // The workspace advanced on its own: the verdict can change nothing, and "proceed" would relaunch review.
+    // #1525: a check that finished between two watcher ticks must not relaunch review either.
+    if (!ctl.signal.aborted) {
+      const now = await readStatus(workspace.id, database).catch(() => undefined);
+      if (now && IMPLEMENT_EXIT_PAST_STATUSES.has(now)) ctl.abort();
+    }
     if (ctl.signal.aborted) return "stop";
     const verdict = !result.ran ? (result.held ? "held" : "skipped") : result.passed ? "green" : "red";
     const selection = result.selectionSize === null ? "n/a" : String(result.selectionSize);
