@@ -57,6 +57,7 @@ import { recordVerifyGateOutcome, resolveGateImpactTierFields } from "./test-imp
 import { VERIFY_NEUTRALIZED_DB_LOCATION_ENV, VERIFY_NEUTRALIZED_LISTENER_ENV } from "../lib/verify-env.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { isSelfProjectRepo } from "./self-project.js";
+import { runStaticTier } from "./static-tier.service.js";
 
 /** The outcome-ledger `source` of an implement-exit run (a merge gate row is `ci`). */
 export const IMPLEMENT_EXIT_LEDGER_SOURCE = "implement-exit";
@@ -143,10 +144,32 @@ async function readTypecheckCommand(projectId: string, database: Database): Prom
   return (await getStackProfile(projectId, database).catch(() => null))?.typecheckCommand?.trim() || null;
 }
 
+/** A red static-tier result for the builder's feedback turn, or null (green, or nothing ran). */
+async function runStaticTierAtExit(workspace: ImplementExitCheckWorkspace, level: ImplementExitCheckLevel): Promise<ImplementExitCheckResult | null> {
+  if (!workspace.workingDir) return null;
+  const startedAt = Date.now();
+  const verdict = await runStaticTier({ workingDir: workspace.workingDir, baseBranch: workspace.baseBranch });
+  if (verdict.passed) return null;
+  return {
+    level,
+    ran: true,
+    passed: false,
+    held: false,
+    message: `implement-exit ${verdict.message}`,
+    failureDetail: verdict.detail,
+    selectionSize: null,
+    durationMs: Date.now() - startedAt,
+  };
+}
+
 /** Run the implement-exit check for one workspace. Total: never throws. */
 export async function runImplementExitCheck(args: RunImplementExitCheckArgs): Promise<ImplementExitCheckResult> {
   const { workspace, projectId, level, database } = args;
   if (level === "none") return skipped(level, "implement-exit check: none (posture)");
+  // #1514: the static tier runs first and OUTSIDE verify placement, so a red reaches the builder
+  // even when the test part below is `held` (a held check counts as passed).
+  const staticRed = await runStaticTierAtExit(workspace, level);
+  if (staticRed) return staticRed;
   const verification = level === "typecheck"
     ? null
     : await resolveGateVerification(projectId, database, { workingDir: workspace.workingDir }).catch(() => null);

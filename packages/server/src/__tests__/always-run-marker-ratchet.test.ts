@@ -1,4 +1,5 @@
 // @gate:always-run always — meta-ratchet over the always-run classification itself; imports nothing it checks (#538).
+// @gate:static — source-scanning ratchet: runs in the static tier (`pnpm check:static`, #1514), never held.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
@@ -13,6 +14,7 @@ import {
   guardAppliesToChanges,
   alwaysRunWhenGlobIssues,
 } from "../../../../scripts/test-mine.mjs";
+import { discoverStaticSuites } from "../../../../scripts/check-static.mjs";
 
 /**
  * #538 — the always-run guard list was itself hand-maintained, which is the exact failure
@@ -555,5 +557,24 @@ describe("always-run marker ratchet (#538)", () => {
       if (UNSOUND_SIGNATURES.some((sig) => sig.test(source))) stale.push(`${key} (now matches a signature)`);
     }
     expect(stale, `remove these from MARKED_BY_POLICY:\n  ${stale.join("\n  ")}`).toEqual([]);
+  });
+});
+
+// #1514 — the static tier's own contract lives here (an extra always-run suite would cost gate seconds).
+describe("@gate:static marker (#1514)", () => {
+  const root = path.resolve(import.meta.dirname, "..", "..", "..", "..");
+  const suites: string[] = discoverStaticSuites(root);
+
+  it("tags the source-scanning ratchets the train kept failing on", () => {
+    for (const name of ["console-tag-ratchet", "env-read-ownership", "worker-cli-isolation", "always-run-marker-ratchet", "always-run-guard-runtime-ratchet"]) {
+      expect(suites.some((s) => s.endsWith(`/${name}.test.ts`)), name).toBe(true);
+    }
+  });
+
+  it("every static suite is also an always-run suite", () => {
+    for (const s of suites) {
+      const head = fs.readFileSync(path.join(root, s), "utf8").split("\n", 8).join(" ");
+      expect(isAlwaysRunMarked(head), s).toBe(true);
+    }
   });
 });
