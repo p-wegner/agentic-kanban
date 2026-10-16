@@ -64,10 +64,14 @@ export interface StoredVerifyResult { finishedAt: number; frames: WorkerToBoardM
 
 /** A buffered verdict older than this is useless: the board gave the job up after its reconnect grace. */
 export const VERIFY_RESULT_RETENTION_MS = 30 * 60 * 1000;
+export const VERIFY_RESULT_PRUNE_INTERVAL_MS = 5 * 60 * 1000;
 
-/** One JSON file per job under `<workRoot>/verify-undelivered/`; every failure is swallowed (best effort). */
+/**
+ * One JSON file per job under `<workRoot>/verify-results-retained/`; every failure is swallowed (best effort).
+ * #1495: the board does not ack, so the dir holds EVERY recent result, delivered or not (was `verify-undelivered`).
+ */
 export function createFileVerifyResultStore(workRoot: string): VerifyResultStore {
-  const dir = join(workRoot, "verify-undelivered");
+  const dir = join(workRoot, "verify-results-retained");
   const file = (jobId: string): string => join(dir, `${jobId.replace(/[^A-Za-z0-9_.-]/g, "_")}.json`);
   return {
     save(jobId, entry) { try { mkdirSync(dir, { recursive: true }); writeFileSync(file(jobId), JSON.stringify({ jobId, ...entry })); } catch { /* memory copy still delivers */ } },
@@ -236,6 +240,11 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
   function pruneFinished(): void {
     for (const [jobId, entry] of finished) if (Date.now() - entry.finishedAt > VERIFY_RESULT_RETENTION_MS) { finished.delete(jobId); deps.store?.remove(jobId); }
   }
+
+  // #1495: an idle worker never finishes another job, so retention also needs a clock of its own.
+  const pruneTimer = setInterval(pruneFinished, VERIFY_RESULT_PRUNE_INTERVAL_MS);
+  pruneTimer.unref?.();
+  pruneFinished();
 
   function finish(job: VerifyJobFrame, started: number, r: Partial<VerifyResultFrame> & { sha: string }, log: string): void {
     // #1489: nobody waits for a cancelled job's verdict; buffering it would replay it on every reconnect.
