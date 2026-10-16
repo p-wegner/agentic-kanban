@@ -50,6 +50,7 @@ export function BoardStats({
   const {
     allColumns,
     total,
+    shownCount: matchCount,
     doneCount,
     cancelledCount,
     nonCancelledTotal,
@@ -160,9 +161,9 @@ export function BoardStats({
                 key={popKey}
                 className={`inline-flex items-center justify-center min-w-[18px] h-4 px-1 rounded-full text-[10px] font-bold text-white bg-brand-500 ${popKey > 0 ? "count-pop" : ""}`}
               >
-                {total}
+                {matchCount}
               </span>
-              <span className="text-xs font-medium text-gray-600 dark:text-gray-400">filtered</span>
+              <span className="text-xs font-medium text-gray-600 dark:text-gray-400">{matchCount === 1 ? "match" : "matches"}</span>
             </>
           ) : (
             // #1162: the per-column flow, not a bare "N open", which read as one more agent count next

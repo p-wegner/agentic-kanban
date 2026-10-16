@@ -72,6 +72,9 @@ export interface BoardStatsData {
   totalArchive: number;
   /** Grand total issue count. */
   total: number;
+  /** Issues actually present in the columns' `issues` arrays — under a search filter the
+   *  arrays are filtered while `count` stays the server total (#1534). */
+  shownCount: number;
   doneCount: number;
   cancelledCount: number;
   /** Total excluding cancelled — the denominator for completion. */
@@ -178,6 +181,7 @@ export function computeBoardStats(
     totalActive,
     totalArchive,
     total,
+    shownCount: allColumns.reduce((sum, col) => sum + col.issues.length, 0),
     doneCount,
     cancelledCount,
     nonCancelledTotal,

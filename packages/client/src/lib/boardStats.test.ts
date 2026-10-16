@@ -35,6 +35,13 @@ describe("computeBoardStats", () => {
     expect(s.allColumns.map((c) => c.name)).toEqual(["Todo", "In Progress", "Done", "Cancelled"]);
   });
 
+  // #1534: the search chip read "1506 filtered" — it showed the server total, not the matches.
+  it("counts the issues present in the (filtered) arrays separately from the server total", () => {
+    const s = computeBoardStats([col("Todo", 3, [issue()])], [col("Done", 1492, [issue(), issue()])]);
+    expect(s.total).toBe(1495);
+    expect(s.shownCount).toBe(3);
+  });
+
   it("computes completion against the non-cancelled total", () => {
     // 5 done of (11 total - 1 cancelled) = 5/10 = 50%
     const s = computeBoardStats([col("Todo", 5)], [col("Done", 5), col("Cancelled", 1)]);
