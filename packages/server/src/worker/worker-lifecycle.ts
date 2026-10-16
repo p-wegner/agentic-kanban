@@ -231,7 +231,7 @@ export function renderStatus(s: Record<string, unknown>): string {
   const vjobs = (s.verify as { jobs?: VerifyJobStatus[] } | undefined)?.jobs ?? [];
   for (const j of vjobs) {
     const files = j.filesTotal ? ` ${j.filesDone ?? 0}/${j.filesTotal} files` : j.filesDone ? ` ${j.filesDone} files` : "";
-    lines.push(`verify job:   ${j.jobId.slice(0, 8)} ${j.tier} @ ${String(j.sha).slice(0, 9)} ${j.stage}${files} (since ${j.startedAt})`);
+    lines.push(`verify job:   ${j.jobId.slice(0, 8)} ${j.tier} @ ${String(j.sha).slice(0, 9)} ${j.stage}${files} (since ${j.startedAt})${j.dir ? ` dir ${j.dir}` : ""}${j.pid ? ` pid ${j.pid}` : ""}`);
   }
   if (vs?.effective !== undefined) lines.push(`verify slots: ${String(vs.effective)}`);
   if (conc?.mode) lines.push(`concurrency:  ${conc.mode}, ${conc.slots ?? "?"} slot(s) - ${conc.reason ?? ""}`);

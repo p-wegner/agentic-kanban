@@ -10,7 +10,7 @@
 //      with `refused` set, so the board treats it as "not verified", not as red or green.
 //   3. BOUNDED. `slots` caps concurrent jobs; the verify child gets `KANBAN_TEST_MAX_WORKERS`.
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
@@ -45,7 +45,7 @@ export interface VerifyRunnerDeps {
   /** Fetch + check out `job.sha` detached in a throwaway dir. Injectable for tests. */
   prepareCheckout?: (job: VerifyJobFrame) => Promise<CheckoutOutcome>;
   /** Run a shell script in `dir`, streaming output through `onOutput`. Injectable for tests. */
-  runScript?: (dir: string, script: string, opts: { timeoutMs: number; env: Record<string, string>; onOutput: (chunk: string) => void; signal?: AbortSignal }) => Promise<ScriptOutcome>;
+  runScript?: (dir: string, script: string, opts: { timeoutMs: number; env: Record<string, string>; onOutput: (chunk: string) => void; signal?: AbortSignal; onPid?: (pid: number) => void }) => Promise<ScriptOutcome>;
   /** Remove the throwaway checkout. Injectable for tests. */
   cleanup?: (job: VerifyJobFrame, dir: string) => Promise<void>;
   /** #1465: true while the board socket is open. Absent = always connected (frames are never held back). */
@@ -144,7 +144,7 @@ export function parseVerifyProgress(output: string): { filesDone: number; filesT
 }
 
 /** #1517: one running verify job as `worker status` shows it. */
-export interface VerifyJobStatus { jobId: string; tier: string; sha: string; stage: VerifyStage; filesDone?: number; filesTotal?: number; startedAt: string }
+export interface VerifyJobStatus { jobId: string; tier: string; sha: string; stage: VerifyStage; filesDone?: number; filesTotal?: number; startedAt: string; /** #1526 */ dir?: string; pid?: number }
 
 /** Test files the output names as failed (`FAIL <path>`), sorted + deduped. */
 export function parseVerifyFailingSuites(output: string): string[] {
@@ -190,10 +190,11 @@ async function defaultPrepareCheckout(deps: VerifyRunnerDeps, job: VerifyJobFram
   return { ok: true, dir, sha: head };
 }
 
-function defaultRunScript(dir: string, script: string, opts: { timeoutMs: number; env: Record<string, string>; onOutput: (chunk: string) => void; signal?: AbortSignal }): Promise<ScriptOutcome> {
+function defaultRunScript(dir: string, script: string, opts: { timeoutMs: number; env: Record<string, string>; onOutput: (chunk: string) => void; signal?: AbortSignal; onPid?: (pid: number) => void }): Promise<ScriptOutcome> {
   return new Promise((resolve) => {
     // #1489: detached on POSIX so the whole tree is one process group a cancel can kill (taskkill /T on Windows).
     const child = spawn(script, { cwd: dir, shell: true, windowsHide: true, detached: process.platform !== "win32", env: { ...process.env, ...opts.env } });
+    if (child.pid) opts.onPid?.(child.pid);
     const killTree = (): void => {
       if (child.pid) void killProcessTree(child.pid, { timeout: 10_000, group: true }).catch(() => { try { child.kill(); } catch { /* gone */ } });
       else child.kill();
@@ -212,8 +213,48 @@ function defaultRunScript(dir: string, script: string, opts: { timeoutMs: number
   });
 }
 
-function removeDir(dir: string): void {
-  try { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* locked; the startup sweep retries */ }
+/**
+ * #1526: junction-safe removal. `rmSync` lstat()s every entry, so a pnpm link/junction is unlinked and never
+ * followed into the store. Returns the error text when the dir is still there (locked `.node`/`.exe` binary
+ * still mapped by some process), or null when it is gone; the caller logs it and retries later.
+ */
+export function removeDir(dir: string): string | null {
+  try { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch (err) { if (existsSync(dir)) return errorMessage(err); }
+  return existsSync(dir) ? "directory still present after removal" : null;
+}
+
+/** #1526: what a verify dir says about itself, so an operator can match it to the board's job. */
+export interface VerifyJobFile { jobId: string; kind: string; tier: string; sha: string; branch: string; startedAt: string }
+export const VERIFY_JOB_FILE = "job.json";
+
+/** The frame carries the workspace/train as its `branch`; there is no separate id to record. */
+export function writeVerifyJobFile(dir: string, job: VerifyJobFrame, startedAt: string): void {
+  const body: VerifyJobFile = { jobId: job.jobId, kind: job.kind, tier: job.tier, sha: job.sha, branch: job.branch, startedAt };
+  try { writeFileSync(join(dir, VERIFY_JOB_FILE), JSON.stringify(body, null, 2)); } catch { /* a missing label must not fail the job */ }
+}
+
+/** Age/count backstop: verify dirs outside `keep` that are older than `maxAgeMs`, or beyond the newest `maxCount`. */
+export const VERIFY_DIR_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+export const VERIFY_DIR_MAX_COUNT = 20;
+
+export function sweepVerifyBackstop(
+  workRoot: string, keep: ReadonlySet<string>, log: (line: string) => void,
+  opts: { maxAgeMs?: number; maxCount?: number; nowMs?: number } = {},
+): string[] {
+  const root = join(workRoot, "verify");
+  const nowMs = opts.nowMs ?? Date.now();
+  let entries: Array<{ name: string; mtime: number }>;
+  try { entries = readdirSync(root).filter((n) => !keep.has(n)).map((name) => ({ name, mtime: statSync(join(root, name)).mtimeMs })); } catch { return []; }
+  entries.sort((a, b) => b.mtime - a.mtime);
+  const maxAge = opts.maxAgeMs ?? VERIFY_DIR_MAX_AGE_MS;
+  const maxCount = opts.maxCount ?? VERIFY_DIR_MAX_COUNT;
+  const reaped: string[] = [];
+  entries.forEach((e, i) => {
+    if (i < maxCount && nowMs - e.mtime <= maxAge) return;
+    const err = removeDir(join(root, e.name));
+    if (err) log(`[worker] verify dir ${e.name} could not be removed (will retry): ${err}`); else reaped.push(e.name);
+  });
+  return reaped;
 }
 
 async function defaultCleanup(deps: VerifyRunnerDeps, job: VerifyJobFrame, dir: string): Promise<void> {
@@ -230,14 +271,15 @@ async function defaultCleanup(deps: VerifyRunnerDeps, job: VerifyJobFrame, dir: 
  * #1479: remove every `<workRoot>/verify/<jobId>` that is not in `keep` (call at daemon start, when nothing runs),
  * then prune the clones' dangling worktree records. Returns the job ids reaped.
  */
-export function sweepOrphanVerifyCheckouts(workRoot: string, keep: ReadonlySet<string> = new Set()): string[] {
+export function sweepOrphanVerifyCheckouts(workRoot: string, keep: ReadonlySet<string> = new Set(), log?: (line: string) => void): string[] {
   const root = join(workRoot, "verify");
   let names: string[];
   try { names = readdirSync(root); } catch { return []; }
   const reaped: string[] = [];
   for (const name of names) {
     if (keep.has(name)) continue;
-    removeDir(join(root, name));
+    const err = removeDir(join(root, name));
+    if (err) { log?.(`[worker] verify dir ${name} could not be removed (locked, retried later): ${err}`); continue; }
     reaped.push(name);
   }
   if (reaped.length > 0) {
@@ -264,8 +306,18 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
   const finished = new Map<string, StoredVerifyResult>();
   for (const { jobId, entry } of deps.store?.loadAll() ?? []) finished.set(jobId, entry);
   // #1479: nothing runs yet, so every `verify/<jobId>` on disk is an orphan of a previous daemon.
-  const orphans = sweepOrphanVerifyCheckouts(deps.workRoot);
+  const orphans = sweepOrphanVerifyCheckouts(deps.workRoot, new Set(), deps.log);
   if (orphans.length > 0) deps.log(`[worker] startup sweep removed ${orphans.length} orphaned verify checkout(s): ${orphans.join(", ")}`);
+  /** #1526: dirs a finished job could not remove (locked native binary); retried on the prune clock. */
+  const stuck = new Set<string>();
+  function retryStuck(): void {
+    for (const dir of [...stuck]) {
+      if (!existsSync(dir) || removeDir(dir) === null) { stuck.delete(dir); deps.log(`[worker] verify dir ${dir} removed on retry`); }
+    }
+    // Backstop: age/count cap over everything not owned by a running job.
+    const reaped = sweepVerifyBackstop(deps.workRoot, new Set(running), deps.log);
+    if (reaped.length > 0) deps.log(`[worker] verify backstop removed ${reaped.length} old verify dir(s): ${reaped.join(", ")}`);
+  }
 
   const progress = (jobId: string, stage: VerifyStage, extra: { filesDone?: number; filesTotal?: number } = {}): void => {
     const frame: WorkerToBoardMessage = { type: "verify_progress", jobId, stage, ...extra };
@@ -282,7 +334,7 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
   }
 
   // #1495: an idle worker never finishes another job, so retention also needs a clock of its own.
-  const pruneTimer = setInterval(pruneFinished, VERIFY_RESULT_PRUNE_INTERVAL_MS);
+  const pruneTimer = setInterval(() => { pruneFinished(); retryStuck(); }, VERIFY_RESULT_PRUNE_INTERVAL_MS);
   pruneTimer.unref?.();
   pruneFinished();
 
@@ -341,12 +393,16 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
       const co = await prepare(job);
       if (!co.ok) return refuse(co.refused, co.reason, co.sha);
       dir = co.dir;
+      writeVerifyJobFile(co.dir, job, jobStatus.get(job.jobId)?.startedAt ?? new Date(started).toISOString());
+      const status = jobStatus.get(job.jobId);
+      if (status) status.dir = co.dir;
+      const onPid = (pid: number): void => { const s = jobStatus.get(job.jobId); if (s) s.pid = pid; };
       if (ctl.signal.aborted) return;
       progress(job.jobId, "install");
       const install = (job.setupScript ?? deriveFallbackSetupCommand(co.dir) ?? "").trim();
       let log = "";
       if (install) {
-        const inst = await run(co.dir, install, { timeoutMs: Math.min(job.timeoutMs, 30 * 60 * 1000), env: jobEnv, onOutput: () => undefined, signal: ctl.signal });
+        const inst = await run(co.dir, install, { timeoutMs: Math.min(job.timeoutMs, 30 * 60 * 1000), env: jobEnv, onOutput: () => undefined, signal: ctl.signal, onPid });
         log += `$ ${install}\n${inst.output}\n`;
         if (ctl.signal.aborted) return;
         if (inst.exitCode !== 0 || inst.timedOut) return refuse("setup_failed", `\`${install}\` ${inst.timedOut ? "timed out" : `exited ${inst.exitCode}`}`, co.sha);
@@ -359,6 +415,7 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
         timeoutMs: job.timeoutMs,
         env,
         signal: ctl.signal,
+        onPid,
         onOutput: (chunk) => {
           tracker.push(chunk);
           if (Date.now() - lastReport < 2000) return;
@@ -383,7 +440,10 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
       controllers.delete(job.jobId);
       // #1479: a refused/half-made checkout never set `dir`, but the default path may exist on disk.
       const stray = dir ?? (existsSync(join(deps.workRoot, "verify", job.jobId)) ? join(deps.workRoot, "verify", job.jobId) : null);
-      if (stray) await cleanup(job, stray).catch(() => undefined);
+      if (stray) {
+        await cleanup(job, stray).catch(() => undefined);
+        if (existsSync(stray)) { stuck.add(stray); deps.log(`[worker] verify dir ${stray} (job ${job.jobId}) could not be removed; will retry`); }
+      }
       if (dataDir) try { rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* temp dir, reaped later */ }
       progress(job.jobId, "done");
     }
