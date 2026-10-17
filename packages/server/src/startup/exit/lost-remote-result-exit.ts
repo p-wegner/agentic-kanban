@@ -3,9 +3,9 @@
 // nothing to review. Leaving the issue In Progress/In Review points it at a dead workspace that
 // the monitor will never restart; send it back to Todo with a logged reason instead.
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
-import { issues } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { isInFlightStatusName } from "@agentic-kanban/shared/lib/status-view";
 import type { Database } from "../../db/index.js";
+import { getIssueStatusAndProject } from "../../repositories/merge-cleanup.repository.js";
 import { closeWorkspace } from "../../services/workspace-lifecycle-reconcile.service.js";
 
 /** The marker `landSessionBranch` (agent-remote-finalize.ts) writes to the transcript. */
@@ -35,9 +35,8 @@ export async function requeueLostRemoteResult(input: LostRemoteResultInput): Pro
   if (commitsAhead !== null && commitsAhead > 0) return false;
   const todo = statuses.find((s) => s.name === "Todo");
   if (!todo) return false;
-  const rows = await database.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
-  const current = statuses.find((s) => s.id === rows[0]?.statusId)?.name;
-  if (current !== "In Progress" && current !== "In Review") return false;
+  const row = await getIssueStatusAndProject(issueId, database);
+  if (!isInFlightStatusName(statuses.find((s) => s.id === row?.statusId)?.name)) return false;
   console.warn(`[workflow] session ${sessionId}: remote result never landed (no incoming ref) and workspace ${workspaceId} has no commits  returning the issue to Todo so it restarts (#1582)`);
   await closeWorkspace({ database, workspaceId, now, markMerged: false });
   await transitionIssueStatus(database, issueId, todo.id, { now });
