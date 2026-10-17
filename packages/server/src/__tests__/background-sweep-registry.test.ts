@@ -92,6 +92,7 @@ describe("every background sweep is registered (#584)", () => {
       "ancestor-branch-reconciler",
       "born-blocked-reconciler",
       "stalled-in-progress-reconciler",
+      "ready-base-conflict-healer",
       "workflow-node-divergence-reconciler",
       "done-unmerged-scanner",
       "terminal-workspace-reaper",
