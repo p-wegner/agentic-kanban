@@ -541,7 +541,7 @@ async function gateBaseAloneOnce(args: {
  * already a search, and the fix agent is the alternative to starting one. A missing-dependency red
  * is the staging worktree's environment (#1154), which no code edit repairs.
  */
-function buildTrainOnRed(args: {
+export function buildTrainOnRed(args: {
   policy: MergeTrainRedPolicy;
   agentRunner: TrainAgentRunner;
   label: string;
@@ -556,7 +556,8 @@ function buildTrainOnRed(args: {
   if (!policy.agentFix || attemptLabel !== label) return undefined;
   const aboard = args.included.flatMap((m) => args.members.filter((x) => x.workspaceId === m.workspaceId));
   return async ({ gateWorktree, message, failedSuites, regate }) => {
-    if (looksLikeMissingDepsFailure(message)) return null;
+    // #1573: a retry that still names failing suites is a real red, whatever the message says.
+    if (looksLikeMissingDepsFailure(message) && !failedSuites?.length) return null;
     console.log(`[merge-train] ${label}: gate RED - spawning the fix agent in ${gateWorktree} (strategy ${policy.strategy}, timeout ${policy.caps.timeoutMs}ms, ${policy.caps.maxTurns} turn(s))`);
     const outcome = await runAgentFix({
       worktree: gateWorktree, label, baseBranch: args.baseBranch, members: aboard,

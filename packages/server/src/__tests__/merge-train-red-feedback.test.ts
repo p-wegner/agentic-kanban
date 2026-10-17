@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetAllGateRedFeedbackForTests } from "../services/gate-red-feedback.js";
-import { attributeTrainRedToMembers, decideTrainRedFeedbackTargets, sendTrainRedFeedback } from "../services/merge-train-red-feedback.js";
+import { attributeTrainRedToMembers, decideTrainRedFeedbackTargets, sendTrainRedFeedback, splitEnvironmentSuites } from "../services/merge-train-red-feedback.js";
 import type { TrainRunResult } from "../services/merge-train.service.js";
 import type { TrainMember } from "../services/merge-train-assembly.js";
 
@@ -60,5 +60,24 @@ describe("red train builder feedback (#1298)", () => {
     const ms = [member("a", ["p"]), member("b", ["q"])];
     expect(attributeTrainRedToMembers(["z"], ms)).toHaveLength(2);
     expect(attributeTrainRedToMembers(["q"], ms).map((m) => m.workspaceId)).toEqual(["b"]);
+  });
+});
+
+describe("ratchet output names the owner (#1573)", () => {
+  const ratchetOut = "\u001b[31mFAIL\u001b[0m packages/server/src/__tests__/private-tree-walker-ratchet.test.ts\n  offender: packages/server/src/routes/preferences.ts\n";
+
+  it("a ratchet failure naming a member's file attributes to that member only", () => {
+    const a = member("a", ["packages/server/src/routes/preferences.ts"]);
+    const b = member("b", ["other.ts"]);
+    expect(attributeTrainRedToMembers(["packages/server/src/__tests__/private-tree-walker-ratchet.test.ts"], [a, b], ratchetOut).map((m) => m.workspaceId)).toEqual(["a"]);
+  });
+
+  it("environment failures have no owner and are not sent to members", () => {
+    const a = member("a", ["p.ts"]);
+    const out = "FAIL merge-train-orchestration.test.ts\n fatal: .git/config: Permission denied\nFAIL other.test.ts\n assertion failed";
+    expect(splitEnvironmentSuites(["merge-train-orchestration.test.ts", "other.test.ts"], out))
+      .toEqual({ environment: ["merge-train-orchestration.test.ts"], owned: ["other.test.ts"] });
+    const result = base({ redStrategy: "agent-fix", gateFailure: out, failedSuites: ["merge-train-orchestration.test.ts"] });
+    expect(decideTrainRedFeedbackTargets(result, [a])).toEqual([]);
   });
 });
