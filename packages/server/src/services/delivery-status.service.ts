@@ -17,6 +17,7 @@ import { rcHealSummary } from "./rc-heal-ticket.service.js";
 import { getQueuePressure, readQueuePressureMembers } from "./queue-pressure.service.js";
 import { getMergeActivity } from "./merge-activity.service.js";
 import { latestFlush, readFlushState } from "./flush-state.js";
+import { getCiSnapshot } from "./ci-status.service.js";
 import { parseQueueFlushMode, queueFlushPrefKey } from "./queue-flush-trigger.service.js";
 
 const trainMaxSizePref = projectPref("train_max_size");
@@ -72,6 +73,8 @@ export async function getDeliveryStatus(projectId: string, database: Database = 
     flushMode: parseQueueFlushMode(prefMap.get(queueFlushPrefKey(projectId))),
     // The live merge state the chip leads with: the running train, the last finished one, the waiting branches.
     mergeActivity: await getMergeActivity(projectId, queueMembers, database),
+    // #1562 — sustained-red GitHub workflows on the base branch (from the CI watch's last poll).
+    ciRed: (getCiSnapshot(projectId)?.red ?? []).map(({ workflow, since, runUrl, text }) => ({ workflow, since, runUrl, text })),
   };
 }
 

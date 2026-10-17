@@ -379,6 +379,12 @@ export interface DeliveryStatusResponse {
    * ready branches waiting. Optional on the wire for an older server.
    */
   mergeActivity?: MergeActivitySummary;
+  /**
+   * #1562 — GitHub Actions workflows red on the base branch across more than one run, one entry
+   * each (`text` is the ready-made "CI red: arch-gate since 2026-10-04, run <url>" chip line).
+   * Empty/absent when CI is green, not watched, or `gh` is unavailable.
+   */
+  ciRed?: Array<{ workflow: string; since: string | null; runUrl: string; text: string }>;
 }
 
 /** One release candidate's lifecycle state (#1238). Mirrors `scripts/rc-state.mjs`. */

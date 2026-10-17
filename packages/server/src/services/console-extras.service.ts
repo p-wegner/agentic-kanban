@@ -9,6 +9,7 @@ import { getProjectById } from "../repositories/project.repository.js";
 import { listRecentEndedSessions } from "../repositories/console-stalls.repository.js";
 import { currentRcCandidate, readRcState, resolveStableCheckoutFor, toRcCandidateSummary } from "./rc-state.js";
 import { parseVerifyPlacement, parseVerifyWorkerAllowlist, verifyPlacementPrefKey, verifyWorkersPrefKey, type VerifyPlacement } from "./verify-placement.js";
+import { getCiSnapshot } from "./ci-status.service.js";
 import { getConnectCodeStore } from "./worker-connect-code.service.js";
 import { listVerifyChains, type VerifyChainSnapshotEntry } from "./verify-chain-semaphore.js";
 
@@ -23,6 +24,8 @@ export interface ConsoleExtras {
   stalls: ConsoleStall[];
   /** #1442: one-time connect codes still live, with their progress steps. */
   connectCodes: Array<{ codeHint: string; status: string; expiresAt: string; progress: Array<{ step: string; status: string; at: string }> }>;
+  /** #1562: sustained-red GitHub workflows on the base branch ("CI red: arch-gate since …, run <url>"). */
+  ciRed: string[];
 }
 
 const STALL_WINDOW_MS = 6 * 3600 * 1000;
@@ -62,6 +65,7 @@ export async function buildConsoleExtras(projectId: string, database: Database, 
     rc,
     placement: { mode: parseVerifyPlacement(placementRaw), workers: [...parseVerifyWorkerAllowlist(workersRaw)] },
     stalls,
+    ciRed: (getCiSnapshot(projectId)?.red ?? []).map((r) => r.text),
     connectCodes: getConnectCodeStore().listLive(nowMs).map((v) => ({
       codeHint: v.codeHint, status: v.status, expiresAt: v.expiresAt,
       progress: v.progress.map((p) => ({ step: p.step, status: p.status, at: p.at })),

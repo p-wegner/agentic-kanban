@@ -35,6 +35,8 @@ export interface ParsedPromoteArgvOk {
   cadence: boolean;
   /** #1564 — promote despite critical/high production advisories. */
   acceptAdvisories: boolean;
+  /** #1562 — promote although a required GitHub workflow is red on the sha. */
+  ignoreCi: boolean;
   reason: string | null;
 }
 export interface ParsedPromoteArgvUnknown {
