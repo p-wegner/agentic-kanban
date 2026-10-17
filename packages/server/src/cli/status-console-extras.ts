@@ -65,13 +65,42 @@ export function buildChains(extras: ConsoleExtrasPayload | null | undefined, iss
   return out;
 }
 
-/** Issues that sit In Progress/In Review with nothing running, queued or waiting to merge. */
-export function strandedIssues(issues: BoardStatusIssue[], chains: ConsoleChain[], workerTicketNumbers: Set<number>): number[] {
-  const inChain = new Set(chains.map((c) => c.ref));
+const LIVE_TRAIN_STATES = new Set(["assembling", "gating", "landing"]);
+
+/**
+ * #1566: tickets a merge train or its batching window is driving — members of an assembling/gating
+ * train, and ready tickets waiting in the window for it to depart. These have a driver even though
+ * they show no session or chain of their own.
+ */
+export function trainDrivenIssueNumbers(p: Pick<ConsolePayloads, "status" | "trains" | "window">): Set<number> {
+  const out = new Set<number>();
+  const byWorkspace = new Map<string, number>();
+  for (const i of p.status.issues) if (i.workspace?.id && i.issueNumber != null) byWorkspace.set(i.workspace.id, i.issueNumber);
+  for (const t of p.trains?.trains ?? []) {
+    if (!LIVE_TRAIN_STATES.has(t.state)) continue;
+    let ids: unknown[] = [];
+    try { ids = JSON.parse(t.memberWorkspaceIds) as unknown[]; } catch { ids = []; }
+    for (const id of ids) { const n = byWorkspace.get(String(id)); if (n != null) out.add(n); }
+  }
+  for (const m of p.window?.window?.pending ?? []) {
+    const n = m.issueNumber ?? byWorkspace.get(m.workspaceId);
+    if (n != null) out.add(n);
+  }
+  return out;
+}
+
+/** The one "has a driver" predicate: running session, remote work, pending merge, chain, worker, train or window. */
+export function hasDriver(i: BoardStatusIssue, chains: ConsoleChain[], workerTicketNumbers: Set<number>, trainDriven: Set<number>): boolean {
+  if (i.issueNumber == null) return true;
+  if (i.session?.status === "running" || i.remoteUnlanded || i.attention || i.mergeState?.bucket === "pending_merge") return true;
+  return workerTicketNumbers.has(i.issueNumber) || trainDriven.has(i.issueNumber) || chains.some((c) => c.ref === `#${i.issueNumber}`);
+}
+
+/** Issues that sit In Progress/In Review with nothing running, queued, waiting to merge or on a train. */
+export function strandedIssues(issues: BoardStatusIssue[], chains: ConsoleChain[], workerTicketNumbers: Set<number>, trainDriven: Set<number> = new Set()): number[] {
   return issues
     .filter((i) => i.issueNumber != null && isInFlightStatusName(i.statusName))
-    .filter((i) => i.session?.status !== "running" && !i.remoteUnlanded && !i.attention && i.mergeState?.bucket !== "pending_merge")
-    .filter((i) => !workerTicketNumbers.has(i.issueNumber!) && !inChain.has(`#${i.issueNumber}`))
+    .filter((i) => !hasDriver(i, chains, workerTicketNumbers, trainDriven))
     .map((i) => i.issueNumber!);
 }
 
@@ -110,7 +139,7 @@ export function applyConsoleExtras(model: ConsoleModel, p: ConsolePayloads): voi
     model.attention.push({ level: "red", text: `${s.issueNumber != null ? `#${s.issueNumber} ` : ""}${s.text}` });
   }
   const workerNumbers = new Set(model.workers.flatMap((w) => w.tickets.map((t) => t.issueNumber).filter((n): n is number => n != null)));
-  for (const n of strandedIssues(issues, model.chains, workerNumbers)) {
+  for (const n of strandedIssues(issues, model.chains, workerNumbers, trainDrivenIssueNumbers(p))) {
     if (named.has(n)) continue;
     const st = issues.find((i) => i.issueNumber === n)!.statusName;
     model.attention.push({ level: "yellow", text: `#${n} ${st}: no running session or queued chain` });
