@@ -31,6 +31,7 @@
 //  * `hello` and `register` carry a protocol version; an incompatible board
 //    refuses with a sentence instead of failing as a silence.
 
+import { runStartupStep } from "./worker-startup-step.js";
 import { readFileSync } from "node:fs";
 import { homedir, platform, arch, totalmem, cpus } from "node:os";
 import {
@@ -502,10 +503,10 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // Best-effort â€” a scan failure must never block pairing/connecting.
   // #1336: a previous daemon's leftover agent trees are killed first (agent-process-tree.ts).
   const workRoot = opts.workRoot ?? defaultWorkerWorkRoot(stateFile); // #1401: own root per non-default state file
-  await cleanUpBeforeStart(workRoot, log);
+  await runStartupStep("cleaning up after the previous daemon", () => cleanUpBeforeStart(workRoot, log), log); // #1551
   const toolchains = createDaemonToolchainInstall({ policy: opts.toolchainInstall ?? "never", allow: opts.toolchainAllow ?? [], stateFile, log, sendToBoard: (m) => sendToBoard(m), heartbeat: () => sendHeartbeat() }); // #1371
   const verifySlots = resolveVerifySlots(opts.verifySlots, totalmem() / 2 ** 30, cpus().length); /* #1496 */ const verifyJobs = createDaemonVerifyRunner({ workRoot, boardUrl: () => boardUrl, sendToBoard: (m) => sendToBoard(m), log, slots: verifySlots, ramGb: Math.round(totalmem() / 2 ** 30), isConnected: () => ws?.readyState === WebSocket.OPEN, store: createFileVerifyResultStore(workRoot) }); // #1437: gates/sweeps the board places on this worker
-  await Promise.all([refreshPackageManagers(), refreshToolchains(), toolchains.installer.refreshMise()]);
+  await runStartupStep("probing package managers and toolchains", () => Promise.all([refreshPackageManagers(), refreshToolchains(), toolchains.installer.refreshMise()]), log); // #1551
 
   // #1370: the worker's own doctor, summarised. hello/register always carry the current summary; a
   // heartbeat carries it only when it differs from what the board last got (`pending`).
@@ -514,7 +515,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     profiles: opts.profiles, harness: opts.harness, home: opts.profileHome, workRoot,
     runningEntry: opts.selfUpdate?.entry ?? null,
   });
-  await doctor.refresh();
+  await runStartupStep("running the worker doctor", () => doctor.refresh(), log); // #1551
   const paired = await resolvePairing({ opts, stateFile, boardUrls, name, profiles: attestedProfiles(), doctor: doctor.takeCurrent(), log });
   const { probes } = paired;
   let urlIndex = paired.urlIndex;
