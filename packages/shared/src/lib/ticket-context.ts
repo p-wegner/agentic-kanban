@@ -685,6 +685,7 @@ export function buildTicketContextMarkdown(ctx: TicketContext): string {
   // replaces the span from its heading to end-of-string, so anything appended after it is
   // silently destroyed the first time a worker's context is retargeted. #976 appended here
   // and broke that invariant (and its guard) — the ordering is load-bearing, not cosmetic.
+  lines.push(buildOneShotSessionSection(), "");
   lines.push(buildCommitMessageEncodingSection(), "");
   const boardFeedback = buildBoardFeedbackSection(ctx.boardFeedback);
   if (boardFeedback) {
@@ -692,6 +693,21 @@ export function buildTicketContextMarkdown(ctx: TicketContext): string {
     lines.push("");
   }
   return lines.join("\n");
+}
+
+/**
+ * #1557 — the session is one-shot. A builder that ended its turn "waiting for the monitor" lost
+ * its background work with the turn, committed nothing, and stalled the ticket.
+ */
+export function buildOneShotSessionSection(): string {
+  return [
+    "## This session is one-shot (#1557)",
+    "",
+    "When you end your turn the session ends, and background work dies with it. Do NOT background",
+    "long commands or wait on a monitor: run them in the foreground, blocking, and COMMIT before you",
+    "end your turn. A final message that says you are \"waiting for\" background work, with no commit,",
+    "is treated as unfinished work and costs you a follow-up turn.",
+  ].join("\n");
 }
 
 /**

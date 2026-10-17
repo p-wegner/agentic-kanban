@@ -28,6 +28,7 @@ import { RUN_GATE } from "../services/pre-merge-gate.service.js";
 import { buildReviewExitEvidence, runReviewExitGate } from "./exit/review-exit-gate.js";
 import { markReviewExitGateHeld, markReviewExitGateWithheld } from "./exit/gate-withheld-marker.js";
 import { resolveWorkspaceBaseOrNull } from "../services/workspace-base.js";
+import { followUpOnBackgroundWait, resetBackgroundWaitFollowUps } from "./exit/background-wait-exit.js";
 import { checkPartialWorkDisclosure } from "../services/partial-work-disclosure.js";
 import { getAutoLandLoopTicket } from "../services/plugin-loop-hooks.service.js";
 import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
@@ -624,6 +625,12 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
         console.log(`[workflow] non-direct workspace ${workspaceId} closed on agent exit (no committed changes, was In Review, work already landed  mergedAt stamped)  issue moved to Done`);
         return;
       }
+      // #1557: a one-shot builder that ended its turn "waiting" on background work made no commit
+      // and nothing will ever report back; send it a follow-up turn instead of leaving it idle.
+      if (await followUpOnBackgroundWait(implementExit ?? {}, { workspaceId, sessionId })) {
+        boardEvents.broadcast(projectId, "issue_updated");
+        return;
+      }
       // #469 — a dirty worktree with no commits means the work was DONE and never committed,
       // which is otherwise indistinguishable from success here. See uncommitted-work-report.ts.
       const uncommitted = await findUncommittedWork(workspace.workingDir);
@@ -639,6 +646,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     // The implementation phase ends here: the board runs the posture's implement-exit check once,
     // before In Review. Red sends the builder one feedback turn (or marks the workspace for
     // attention at the cap) and stops this exit; see ./exit/implement-exit-check.ts.
+    resetBackgroundWaitFollowUps(workspaceId);
     if (await gateImplementExit(ctx) === "stop") return;
     console.log(`[workflow] agent session ${sessionId} completed with committed changes  moving to In Review`);
     const inReview = findStatus("In Review");
