@@ -160,7 +160,7 @@ async function runStaticTierAtExit(
 ): Promise<{ note: string; red: ImplementExitCheckResult | null }> {
   if (!workspace.workingDir) return { note: staticTierNote(null), red: null };
   const startedAt = Date.now();
-  const verdict = await runStaticTier({ workingDir: workspace.workingDir, baseBranch: workspace.baseBranch });
+  const verdict = await runStaticTier({ workingDir: workspace.workingDir, baseBranch: workspace.baseBranch, memberGuards: true });
   const note = staticTierNote(verdict);
   if (verdict.passed) return { note, red: null };
   return {

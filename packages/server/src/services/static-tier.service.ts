@@ -62,6 +62,8 @@ export async function runStaticTier(args: {
   run?: StaticTierRunner;
   /** The diff, when the caller already has it; read from git otherwise. */
   changedFiles?: string[];
+  /** #1575: also run the `when:`-matched guard suites for the diff (the member's own ratchets). */
+  memberGuards?: boolean;
 }): Promise<StaticTierVerdict> {
   const { workingDir, baseBranch, signal } = args;
   const skip = staticTierSkipReason({
@@ -71,7 +73,10 @@ export async function runStaticTier(args: {
   if (skip) return notRun(`static tier skipped: ${skip}`);
   try {
     const changed = args.changedFiles ?? (baseBranch ? await getChangedFileNames(workingDir, baseBranch).catch(() => [] as string[]) : []);
-    const result = await (args.run ?? runOnHost)(workingDir, { KANBAN_ARCH_CHANGED_FILES: changed.join(",") }, signal);
+    const result = await (args.run ?? runOnHost)(workingDir, {
+      KANBAN_ARCH_CHANGED_FILES: changed.join(","),
+      ...(args.memberGuards ? { KANBAN_STATIC_MEMBER_GUARDS: "1" } : {}),
+    }, signal);
     if (result.timedOut) return notRun("static tier timed out (inconclusive, not red)");
     if (result.exitCode === 0) return { ran: true, passed: true, message: "static tier passed (check:static)", detail: null };
     // exit 3 is check:arch's "could not verify" (no typescript here), a missing runtime — not a finding.

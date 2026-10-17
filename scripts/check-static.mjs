@@ -106,7 +106,35 @@ export async function main() {
       process.exit(1);
     }
   }
+  // 3. #1575: a member's own guards — the `@gate:always-run when:` suites whose territory the diff
+  // intersects, run through test-mine's guards-only mode. Opt-in (the implement-exit check sets it):
+  // the train runs the whole guard floor itself, so it must not pay these twice.
+  const changed = (process.env.KANBAN_ARCH_CHANGED_FILES || "").trim();
+  if (isTruthy(process.env.KANBAN_STATIC_MEMBER_GUARDS) && changed) {
+    const guardCode = await awaitExit(
+      spawn(process.execPath, [join(REPO_ROOT, "scripts", "test-mine.mjs")], {
+        cwd: REPO_ROOT,
+        stdio: "inherit",
+        windowsHide: true,
+        env: { ...process.env, ...memberGuardsEnv(changed) },
+      }),
+      "member guards",
+    );
+    if (guardCode !== 0) {
+      console.error(`[check:static] FAILED in the member's own guard suites (when:-matched against the diff, exit ${guardCode})`);
+      process.exit(1);
+    }
+  }
   console.log(`[check:static] green: check:arch + ${suites.length} static suite(s), ${Math.round((Date.now() - startedAt) / 1000)}s`);
+}
+
+export function isTruthy(value) {
+  return /^(1|true|yes)$/i.test((value || "").trim());
+}
+
+/** The env that makes test-mine run ONLY the guards whose `when:` territory the diff intersects. */
+export function memberGuardsEnv(changedCsv) {
+  return { KANBAN_TEST_GUARDS_ONLY: "1", KANBAN_TEST_GUARDS: "intersecting", KANBAN_TEST_FILES: changedCsv };
 }
 
 if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
