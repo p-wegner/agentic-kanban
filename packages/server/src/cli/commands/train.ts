@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import { cliAction, resolveProjectIdArg } from "../shared.js";
 import { buildApiUrl } from "./workspace-api-url.js";
+import { registerTrainLandLocal } from "./train-land-local.js";
 import type { MergeTrainRowDto } from "@agentic-kanban/shared";
 
 const apiBase = () => buildApiUrl("", "/api");
@@ -31,7 +32,7 @@ function formatTrainLine(t: MergeTrainRowDto): string {
 export function registerTrainCommand(program: Command) {
   const trainCmd = program
     .command("train")
-    .description("Inspect and manage merge trains (batched, gated release trains).\n\nSubcommands: list, show, cancel, depart");
+    .description("Inspect and manage merge trains (batched, gated release trains).\n\nSubcommands: list, show, cancel, depart, land-local");
 
   // ── list ─────────────────────────────────────────────────────────────────
   trainCmd
@@ -173,4 +174,6 @@ Examples:
       }
       process.exit(0);
     }));
+
+  registerTrainLandLocal(trainCmd);
 }
