@@ -10,7 +10,8 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
   Reboot runbook and which view is the full one: `docs/agent-guide/operator-reference.md`
   "After a host reboot".
 - wsl-stable updated to a15f90a via `pnpm cli -- worker update <name>` (board side, no ACP needed).
-- **Hands-off since ~08:50Z:** `start_mode=monitor`, `risk_posture=sprint` on agentic-kanban
+- **Hands-off since ~08:50Z:** `start_mode=monitor`, `risk_posture=sprint` on agentic-kanban;
+  leftover overrides (train size 5, wait 2 min, gate `impact`) cleared 11:2xZ, see #1560
   (was manual/standard; revert both to go back). Recipe: operator-reference "Hands-off".
 - #1551 (worker restart after self-update hangs before connecting) filed from desktop-stable,
   back online on a15f90a after a manual restart (by 09:13Z); the monitor auto-started #1551.

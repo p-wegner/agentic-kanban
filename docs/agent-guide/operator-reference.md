@@ -104,6 +104,13 @@ curl -s http://127.0.0.1:3001/api/projects/$P/delivery    # effective posture, s
   instead of blocking. `flow` still reviews every ticket. Back to the default: `standard`.
 - Read every current value at once: `GET /api/preferences/settings`. A ticket tag
   `risk:<level>` overrides the posture for that one ticket.
+- **Explicit per-field prefs beat the posture, silently.** After changing the posture, clear the
+  leftovers or the new posture only half applies (2026-10-17: `train_max_size`=5,
+  `train_max_wait_ms`=120000 and `verify_gate_strategy`=`impact` kept `sprint` at one merge in
+  2 h). An empty string unsets them:
+  `-d "{\"train_max_size_$P\":\"\",\"train_max_wait_ms_$P\":\"\",\"verify_gate_strategy_$P\":\"\"}"`.
+  Then check `GET /delivery`: `trainSizeFromOverride:false`, `trainWindowFromPosture:true`, and
+  `posture.gateTier` is the one in force.
 
 ## After a host reboot
 Nothing restarts by itself. In order:
