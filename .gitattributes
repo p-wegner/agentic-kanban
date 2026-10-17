@@ -76,3 +76,8 @@ packages/server/openapi.yaml text eol=lf
 
 # Git hooks run under sh; a CRLF shebang breaks them (#1576).
 .githooks/* text eol=lf
+
+# vitest rewrites a .snap file with LF whenever it touches it; a CRLF checkout then shows both
+# files modified after every run, which test:mine reports as a moving tree and which withholds
+# auto-merge in a shared checkout (#814).
+**/__snapshots__/*.snap text eol=lf
