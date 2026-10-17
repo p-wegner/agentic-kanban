@@ -17,6 +17,7 @@ import {
   checkPromoteDirection,
   formatFlowSweepStatement,
   formatPlan,
+  adoptSameShaSweep,
   isFreshSweepRow,
   isProbingThisProject,
   planSweepAcquisition,
@@ -712,6 +713,21 @@ describe("sweep acquisition (#1044)", () => {
     // sqlite spells it snake_case; the two spellings must not read as two different rows
     const snake = { sha: previous.sha, created_at: previous.createdAt };
     expect(isFreshSweepRow(snake, previous)).toBe(false);
+  });
+
+  it("adopts a green full sweep of the rc's sha recorded under master (#1548)", () => {
+    const prev = greenRow({ branch: "rc/20261016-3", sha: "tip", createdAt: new Date(NOW - 3 * HOUR).toISOString(), outcome: "red" });
+    const master = greenRow({ branch: "master", sha: "tip", scope: "full", createdAt: new Date(NOW - 1000).toISOString() });
+    const ok = adoptSameShaSweep(master, { tipSha: "tip", previous: prev, nowMs: NOW });
+    expect(ok.ok).toBe(true);
+    if (ok.ok) expect(ok.detail).toContain("master");
+    // different sha, scoped / null scope, red, or not a new observation: refused
+    expect(adoptSameShaSweep({ ...master, sha: "other" }, { tipSha: "tip", previous: prev, nowMs: NOW }).ok).toBe(false);
+    expect(adoptSameShaSweep({ ...master, scope: "impact" }, { tipSha: "tip", previous: prev, nowMs: NOW }).ok).toBe(false);
+    expect(adoptSameShaSweep({ ...master, scope: null }, { tipSha: "tip", previous: prev, nowMs: NOW }).ok).toBe(false);
+    expect(adoptSameShaSweep({ ...master, outcome: "red" }, { tipSha: "tip", previous: prev, nowMs: NOW }).ok).toBe(false);
+    expect(adoptSameShaSweep(master, { tipSha: "tip", previous: master, nowMs: NOW }).ok).toBe(false);
+    expect(adoptSameShaSweep(null, { tipSha: "tip", nowMs: NOW }).ok).toBe(false);
   });
 
   it("reads 'a probe is running' only from signals about THIS project", () => {

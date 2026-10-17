@@ -104,6 +104,7 @@ import {
   formatPlan,
   formatPromoteUsage,
   formatUnknownFlagRefusal,
+  adoptSameShaSweep,
   isFreshSweepRow,
   isProbingThisProject,
   nextStableTag,
@@ -393,7 +394,7 @@ async function latestSweepRow(projectId, branch) {
  */
 const PROBE_RECHECK_MS = 5 * 60_000;
 
-async function acquireFreshSweep(projectId, previousRow, waitMs, branch) {
+async function acquireFreshSweep(projectId, previousRow, waitMs, branch, sameSha = null) {
   const deadline = Date.now() + waitMs;
   let nextAskAt = 0;
   let lastNote = 0;
@@ -452,6 +453,15 @@ async function acquireFreshSweep(projectId, previousRow, waitMs, branch) {
       if (isFreshSweepRow(row, previousRow)) {
         log(`[promote] fresh sweep landed: ${row.outcome} on ${row.sha} at ${row.createdAt ?? row.created_at}`);
         return { row };
+      }
+      // #1548 — the same commit swept under another branch name (master's own sweep) counts.
+      if (sameSha) {
+        const other = await latestSweepRow(projectId, sameSha.branch);
+        const adopted = adoptSameShaSweep(other, { tipSha: sameSha.tipSha, previous: previousRow, maxAgeMs: sameSha.maxAgeMs });
+        if (adopted.ok) {
+          log(`[promote] ${adopted.detail}`);
+          return { row: adopted.row, adopted: true };
+        }
       }
     } catch (e) {
       log(`[promote] could not re-read the sweep row: ${e instanceof Error ? e.message : String(e)} — retrying`);
@@ -1162,11 +1172,27 @@ async function main() {
       ? { ok: true, reason: opts.recover ? "recovery" : "forced", sha: null, detail: opts.recover ? "--recover: the sweep was not consulted; the build/migrate/restart/smoke pipeline and its rollback are the gate" : "--force-sweep: no sweep verdict was consulted" }
       : sweep.unreadable
         ? { ok: false, reason: "unreadable", sha: null, detail: `the sweep verdict could not be READ at all — ${sweep.source}` }
-        : parseSweepVerdict(sweep.row, { branch: gatedBranch, maxAgeMs: resolveMaxSweepAgeMs(env) });
+        : parseSweepVerdict(sweep.row, { branch: sweep.adopted ? (sweep.row?.branch ?? gatedBranch) : gatedBranch, maxAgeMs: resolveMaxSweepAgeMs(env) });
 
   // The recovery lane reads no verdict, exactly like --force-sweep: there is nothing to acquire.
   let sweep = opts.forceSweep || opts.recover ? null : await readSweepRow(gatedBranch);
   let verdict = verdictFor(sweep);
+
+  // #1548 — an rc verdict that is not green may still be covered by a green full sweep of the SAME
+  // sha recorded under the base branch (the commit is what was tested). Adopt it before asking.
+  if (rc && sweep && !verdict.ok && sweep.projectId && sweep.viaHttp) {
+    try {
+      const other = await latestSweepRow(sweep.projectId, baseBranch);
+      const adopted = adoptSameShaSweep(other, { tipSha: rc.sha, previous: sweep.row, maxAgeMs: resolveMaxSweepAgeMs(env) });
+      if (adopted.ok) {
+        log(`[promote] ${adopted.detail}`);
+        sweep = { ...sweep, row: adopted.row, adopted: true, source: `${sweep.source} (row adopted from '${baseBranch}')` };
+        verdict = verdictFor(sweep);
+      }
+    } catch (e) {
+      log(`[promote] could not read the '${baseBranch}' sweep row for same-sha adoption: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 
   // #1239 item 4 — the abandon above retired a red candidate; its open heal tickets follow the
   // fresh cut. Only through a board that answered (the sqlite fallback has nothing to POST to).
@@ -1198,9 +1224,9 @@ async function main() {
   if (acquisition.request && !opts.dryRun) {
     log(`[promote] sweep acquisition: ${acquisition.detail}`);
     if (rc) recordRc(rc.branch, { state: "sweeping", sha: rc.sha });
-    const acquired = await acquireFreshSweep(sweep.projectId, sweep.row, resolveSweepWaitMs(env), gatedBranch);
+    const acquired = await acquireFreshSweep(sweep.projectId, sweep.row, resolveSweepWaitMs(env), gatedBranch, rc ? { branch: baseBranch, tipSha: rc.sha, maxAgeMs: resolveMaxSweepAgeMs(env) } : null);
     if (acquired.row) {
-      sweep = { ...sweep, row: acquired.row, source: `${sweep.source} (sweep TRIGGERED by this run)` };
+      sweep = { ...sweep, row: acquired.row, adopted: acquired.adopted === true, source: `${sweep.source} (sweep TRIGGERED by this run)` };
       // Re-parsed, not trusted: a sweep this run asked for is judged by exactly the same rules
       // as one that happened on its own clock, so a red or timed-out probe still refuses.
       verdict = verdictFor(sweep);
