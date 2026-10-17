@@ -286,3 +286,24 @@ describe("resolveVerifyOutcome", () => {
     }
   });
 });
+
+describe("resolveVerifyOutcome — environment signatures and scoping (#1579)", () => {
+  const ENV_OUTPUT = `${FLAKY_OUTPUT}\n git rev-parse main failed: unable to access '.git/config': Permission denied\n Test timed out in 120000ms\n`;
+
+  it("turns a failing-then-passing suite green with a flake note that names the environment", async () => {
+    const h = harness({ result: fail(ENV_OUTPUT) });
+    const out = await resolveVerifyOutcome(h.input);
+    expect(out.failure).toBeNull();
+    expect(out.flakySuites).toHaveLength(1);
+    expect(out.flakeRetryNote).toContain("PASSED on a targeted re-run");
+    expect(out.flakeRetryNote).toContain("permission denied on .git/config");
+    expect(out.flakeRetryNote).toContain("test timeout");
+    expect(h.calls.scopedVerify).toBe(1);
+    expect(h.calls.verify).toBe(0);
+  });
+
+  it("names the environment in a declined retry too", async () => {
+    const out = await resolveVerifyOutcome(harness({ result: fail(ENV_OUTPUT), scoped: false }).input);
+    expect(out.failure?.message).toContain("[environment:");
+  });
+});

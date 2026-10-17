@@ -24,7 +24,7 @@ import { buildSmokeCheck, getStackProfile, resolveEffectiveVerify } from "./stac
 import { resolveProjectDevServerPlan } from "./dev-server.service.js";
 import { quiesceBuildersEnabled, resolveGateHostAdmission } from "./gate-quiesce.js";
 import { planGateRun, runInHostBuildSlotUnlessOnWorker, runVerifyChainForPlacement, type GateScriptRunner } from "./pre-merge-gate-placement.js";
-import { isSelfProjectRepo } from "./self-project.js";
+import { isSelfProjectRepo, verifyHonoursSuiteScope } from "./self-project.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
 import { runUnderVerifyChainSemaphore } from "./verify-chain-semaphore.js";
@@ -655,7 +655,7 @@ export async function runPreMergeGate(
         missingDepsEvidence,
         // Only this repo's `scripts/test-mine.mjs` honours a suite scope; for any other project
         // the env var is inert and the "targeted re-run" would be a second FULL run.
-        scoped: isSelfRepo,
+        scoped: verifyHonoursSuiteScope({ repoPath: projectRepoPath, workingDir, verifyScript }), // #1579: ask the runner, not "is this the board's own checkout"
         // #1242 — the retry decision attributes failing suites by DISK (vitest 4 prints FAIL lines
         // on stderr, ahead of every stdout package header), and refuses a deterministic guard.
         workingDir,
