@@ -85,6 +85,9 @@ note: Ubiquitous language merged from the 15 module docs. Terms are defined AS T
 | **Silent merge loss** | Issue marked Done but the branch never landed on the base — the lie the reconcilers hunt. | review-merge |
 | **Stranded review** | An idle, In-Review, not-ready, session-less workspace whose review handshake never fired. | review-merge |
 | **Reconciler** | An interval/startup job that repairs DB status drift from git reality (e.g. done-unmerged scanner). | review-merge, workspaces |
+| **Merge train** | A batch of ready workspaces assembled onto the base in one worktree, gated once and landed in one merge; size and wait come from the risk posture. See `docs/agent-guide/merge-trains.md`. | review-merge |
+| **Train fix agent** | The one-shot agent a red train gets in its worktree before (or instead of) bisect; `merge_train_red_strategy_<id>`. | review-merge |
+| **Train shepherd** | Planned (#1569): one persistent agent session per merge train that resolves member conflicts as members join and fixes red gates, reused for the whole train. Not the **Steward**, which is the Monitor Butler. | review-merge |
 
 ## Butler & UI
 | Term | Meaning | Context |

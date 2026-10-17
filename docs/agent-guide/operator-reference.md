@@ -112,6 +112,29 @@ curl -s http://127.0.0.1:3001/api/projects/$P/delivery    # effective posture, s
   Then check `GET /delivery`: `trainSizeFromOverride:false`, `trainWindowFromPosture:true`, and
   `posture.gateTier` is the one in force.
 
+## Risk postures: what each level sets
+One table instead of reading decision 017 and its five amendments in order. Source of truth:
+`postureForLevel` in `packages/server/src/services/risk-posture.service.ts`; `GET
+/api/projects/<id>/delivery` shows the resolved posture with overrides applied.
+
+| | `strict` | `standard` | `iterate` | `flow` | `fast` | `sprint` |
+|---|---|---|---|---|---|---|
+| Merge gate tier | `full` | `full` | `impact` | `impact`, no guard floor | `scoped` | `scoped-base-watch` (guards only) |
+| Per-ticket review | thorough | standard | standard | standard | none (the train is reviewed) | none |
+| Implement-exit check | full | impact | impact | impact | typecheck | none |
+| Train size / wait | 1 / 0 | 1 / 0 | 1 / 0 | 1 / 0 | 8 / 20 min | 12 / 30 min |
+| Merges / relaunches per cycle | 1 / 1 | 2 / 2 | 2 / 2 | 2 / 2 | 4 / 4 | 8 / 6 |
+| Red base | blocks | blocks | heal ticket | reported only | allowed if known debt | debt ticket |
+| Full-suite base sweep | 12 h | 12 h | 24 h | none (release candidate only) | 6 h | 24 h |
+| File contention | serialize | serialize | serialize | serialize | warn | off |
+| Placement | host-half | host-preferred | host-preferred | host-preferred | remote-preferred | remote-preferred |
+
+Overrides on top of the level: ticket tag `risk:<level>` (that ticket only);
+`red_base_policy_<id>` (softer only, a stricter value is ignored with a warning);
+`train_max_size_<id>`, `train_max_wait_ms_<id>`, `verify_gate_strategy_<id>` (win over the level
+without a warning, #1560). How the posture shapes merge trains, and what happens on red:
+`docs/agent-guide/merge-trains.md`.
+
 ## Spreading work across Claude subscriptions (worker profiles)
 The board picks a profile per remote session only for a project with `allowed_profiles_<id>`
 (agentic-kanban lists `anth`, `andrena_team_5x`, `_2`, `_3`, `_4`): among the allowed profiles the
@@ -147,5 +170,6 @@ Nothing restarts by itself. In order:
 - `docs/prd/`, `docs/state.md` — vision, scope, data model, progress
 - `docs/decisions/` — numbered decision records
 - `docs/integration-risk-ladder.md` — risk ladder, release-candidate model
+- `docs/agent-guide/merge-trains.md` — merge trains: window, assembly, gate, red strategy, the train shepherd (#1569), where to look
 - `docs/two-boards.md` (dev vs stable, promotion), `docs/worker-fleet.md`, `docs/terminal-tracker.md`, `docs/backlog-markdown.md`
 - `packages/server/CLAUDE.md` — server-package detail (incl. Butler ops); `scripts/board-monitor/README.md`
