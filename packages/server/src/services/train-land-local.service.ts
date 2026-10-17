@@ -105,8 +105,8 @@ export function parseFailedSuites(output: string): string[] {
   return [...found];
 }
 
-function windowLabel(nowIso: string): string {
-  return `local-${nowIso.slice(0, 16).replace(/[-:T]/g, "")}`;
+function windowLabel(now: string): string {
+  return `local-${now.slice(0, 16).replace(/[-:T]/g, "")}`;
 }
 
 export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps): Promise<LandLocalOutcome> {

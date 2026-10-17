@@ -204,6 +204,7 @@ Inspect and manage merge trains (batched, gated release trains).
 | `train show <train-id>` | Show a single merge train: state, members, gate evidence, and its bisect-tree attempts |
 | `train cancel <train-id>` | Cancel a merge train (#1153) |
 | `train depart <project>` | Operator 'depart now' (#1186): release a project's merge-train batching window immediately, regardless of size, wait, or a busy gate |
+| `train land-local [train-id]` | Land a train locally from the main checkout (#1586): pause auto-merge + hold the window, assemble in a sibling .worktrees/ checkout, install, run the gate (check:arch, typecheck, test:mine on the train diff), merge with the standard 'Merge train' subject, close the members, clean up |
 
 ## worker
 
