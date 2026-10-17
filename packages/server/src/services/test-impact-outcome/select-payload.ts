@@ -21,6 +21,8 @@ interface SelectPayload {
   dropped?: unknown;
   estMs?: unknown;
   stale?: unknown;
+  staleReason?: unknown;
+  newTests?: unknown;
   signalCounts?: unknown;
 }
 
@@ -59,6 +61,14 @@ export interface ParsedSelection {
    * beside it is what would show the widening.
    */
   stale: boolean;
+  /**
+   * Why the tool called the map stale (#1574): `"map-behind-base"` (a rebuild on main helps) or
+   * `"diff-adds-tests"` (the diff's own new test files — no action needed, not staleness). Absent
+   * from an older tool, which reads as unknown and keeps the "rebuild" wording.
+   */
+  staleReason?: "map-behind-base" | "diff-adds-tests";
+  /** New test files the diff adds, when the tool listed them (#1574). */
+  newTests?: string[];
   /**
    * How many kept entries came from `--union` rather than from the impact ranking (#967) —
    * `signalCounts.external`, the code `impact.mjs` tags every external entry with.
@@ -155,6 +165,12 @@ export function parseSelection(stdout: string, budgetMs?: number | null): Parsed
     budgetDroppedCount,
     ...(estMs !== undefined ? { estMs } : {}),
     stale: payload.stale === true,
+    ...(payload.staleReason === "map-behind-base" || payload.staleReason === "diff-adds-tests"
+      ? { staleReason: payload.staleReason }
+      : {}),
+    ...(Array.isArray(payload.newTests)
+      ? { newTests: payload.newTests.filter((t): t is string => typeof t === "string") }
+      : {}),
     ...(typeof external === "number" && Number.isFinite(external) ? { externalCount: external } : {}),
   };
 }
