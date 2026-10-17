@@ -1,3 +1,5 @@
+import { refreshPackageManagers, refreshToolchains } from "../cli/commands/worker-doctor-git-prereqs.js";
+
 /**
  * #1551: a best-effort step before the first connect (leftover cleanup, toolchain probes, doctor) must
  * not be able to hold the daemon off the board. A restarted daemon once sat 6+ minutes after
@@ -27,4 +29,14 @@ export async function runStartupStep(
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+/** The package-manager/toolchain probes and the doctor refresh, each bounded so none can hold the first connect. */
+export async function refreshPreConnectState(
+  installer: { refreshMise(): Promise<boolean> },
+  doctor: { refresh(): Promise<unknown> },
+  log: (line: string) => void,
+): Promise<void> {
+  await runStartupStep("probing package managers and toolchains", () => Promise.all([refreshPackageManagers(), refreshToolchains(), installer.refreshMise()]), log);
+  await runStartupStep("running the worker doctor", () => doctor.refresh(), log);
 }

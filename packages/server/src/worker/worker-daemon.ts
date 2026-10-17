@@ -31,7 +31,7 @@
 //  * `hello` and `register` carry a protocol version; an incompatible board
 //    refuses with a sentence instead of failing as a silence.
 
-import { runStartupStep } from "./worker-startup-step.js";
+import { runStartupStep, refreshPreConnectState } from "./worker-startup-step.js";
 import { readFileSync } from "node:fs";
 import { homedir, platform, arch, totalmem, cpus } from "node:os";
 import {
@@ -66,7 +66,7 @@ import type { ToolchainInstallPolicy, WorkerToolchainInstallInfo } from "@agenti
 import { createWorkerOneShotRunner } from "./worker-oneshot.js"; import { createWorkerServicesRunner } from "./worker-services.js"; // #1431, #1447
 import { createWorkerAgentRunner, dispatchBoardMessage, rawDataToBuffer, type UnpushedResult } from "./worker-agent-runner.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
-import { packageManagersField, refreshPackageManagers, refreshToolchains, toolchainsField } from "../cli/commands/worker-doctor-git-prereqs.js";
+import { packageManagersField, toolchainsField } from "../cli/commands/worker-doctor-git-prereqs.js";
 import { cleanUpBeforeStart, createPendingDeleteSweeper } from "./agent-process-tree.js";
 import { attestAndNotice, attestProviders } from "./worker-provider-notice.js";
 import { flushCritical, reattestProviders } from "./worker-daemon-helpers.js";
@@ -506,7 +506,6 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   await runStartupStep("cleaning up after the previous daemon", () => cleanUpBeforeStart(workRoot, log), log); // #1551
   const toolchains = createDaemonToolchainInstall({ policy: opts.toolchainInstall ?? "never", allow: opts.toolchainAllow ?? [], stateFile, log, sendToBoard: (m) => sendToBoard(m), heartbeat: () => sendHeartbeat() }); // #1371
   const verifySlots = resolveVerifySlots(opts.verifySlots, totalmem() / 2 ** 30, cpus().length); /* #1496 */ const verifyJobs = createDaemonVerifyRunner({ workRoot, boardUrl: () => boardUrl, sendToBoard: (m) => sendToBoard(m), log, slots: verifySlots, ramGb: Math.round(totalmem() / 2 ** 30), isConnected: () => ws?.readyState === WebSocket.OPEN, store: createFileVerifyResultStore(workRoot) }); // #1437: gates/sweeps the board places on this worker
-  await runStartupStep("probing package managers and toolchains", () => Promise.all([refreshPackageManagers(), refreshToolchains(), toolchains.installer.refreshMise()]), log); // #1551
 
   // #1370: the worker's own doctor, summarised. hello/register always carry the current summary; a
   // heartbeat carries it only when it differs from what the board last got (`pending`).
@@ -515,7 +514,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     profiles: opts.profiles, harness: opts.harness, home: opts.profileHome, workRoot,
     runningEntry: opts.selfUpdate?.entry ?? null,
   });
-  await runStartupStep("running the worker doctor", () => doctor.refresh(), log); // #1551
+  await refreshPreConnectState(toolchains.installer, doctor, log); // #1551: package-manager/toolchain probes + worker doctor, each bounded
   const paired = await resolvePairing({ opts, stateFile, boardUrls, name, profiles: attestedProfiles(), doctor: doctor.takeCurrent(), log });
   const { probes } = paired;
   let urlIndex = paired.urlIndex;
