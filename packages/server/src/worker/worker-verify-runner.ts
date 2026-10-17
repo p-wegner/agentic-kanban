@@ -106,6 +106,8 @@ export interface DaemonVerifyRunner {
 
 const ANSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 const FILE_MARKER_RE = /^\s*(?:[\u2713\u221a\u00d7\u2717\u2718]|FAIL\b|\u276f)\s+\S+\.(?:test|spec)\.[cm]?[jt]sx?/;
+/** The `[test:mine] <pkg>: node vitest <args>` line `scripts/test-mine.mjs` prints before each invocation. */
+const VITEST_COMMAND_RE = /\[test:mine\][^:\n]*:\s*node vitest\s+(.*)$/;
 const FILES_SUMMARY_RE = /Test Files\s+(?:(\d+) failed\s*\|\s*)?(\d+) passed(?:\s*\|[^()]*)?\s*\((\d+)\)/;
 
 /**
@@ -118,11 +120,21 @@ export function createVerifyProgressTracker(): { push(chunk: string): void; snap
   let pending = "";
   let banked = 0;
   let current = 0;
+  // #1568: the denominator belongs to the vitest command RUNNING NOW. It is known only when that
+  // command names its files (`node vitest run a.test.ts ...`) or between invocations, right after a
+  // summary. Carrying the previous package's total into the next one printed `476/152`.
   let total: number | undefined;
   const consume = (raw: string): void => {
     const line = raw.replace(ANSI_RE, "");
     const summary = FILES_SUMMARY_RE.exec(line);
     if (summary) { banked += Number(summary[3]); current = 0; total = banked; return; }
+    const cmd = VITEST_COMMAND_RE.exec(line);
+    if (cmd) {
+      const named = cmd[1].split(/\s+/).filter((t) => t && !t.startsWith("-")).filter((t) => /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(t)).length;
+      current = 0;
+      total = cmd[1].startsWith("run") && named > 0 ? banked + named : undefined;
+      return;
+    }
     if (FILE_MARKER_RE.test(line)) current++;
   };
   return {
