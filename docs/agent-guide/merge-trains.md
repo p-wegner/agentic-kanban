@@ -109,3 +109,13 @@ When #1569 lands, this section is rewritten as shipped behaviour.
 | Why it went red | `gateEvidence.gateFailure` on the train row; the full log `kanban-verify-train-<label>.log` in the board's temp dir (`D:\tmp` here), written when the gate ends. A failed worker run keeps no copy on the worker (#1571) |
 | The story in order | stable board log `D:\projects\andrena\agentic-kanban-stable\.kanban\board.log`, grep `\[merge-train\]`, `\[auto-merge\]`, `\[verify-placement\]`, `\[verify-worker\]`, `\[test-impact\]` |
 | Stop a train | `pnpm cli -- train cancel <id>` (the train becomes `abandoned`; the window re-forms with the members) |
+
+## Ready workspaces that conflict with the base (#1584)
+
+`startup/ready-base-conflict-healer.ts` (a registered background sweep, every 2 min) probes each idle
+ready workspace with the read-only merge-tree check. On a conflict with the base it (1) rebases via the
+board's update-base action, (2) resolves a `CONTINUE.md`-only conflict mechanically keeping both sides
+(`services/base-conflict-keep-both.ts`), else (3) gives the builder ONE fix turn naming the files and
+the base commits that touched them, taking the workspace out of the ready set until its exit re-arms
+it. One turn per branch tip; after two turns the workspace gets a merge hold (needs attention).
+Workspaces with a hold, a running session or merge job, or a live train in their project are skipped.
