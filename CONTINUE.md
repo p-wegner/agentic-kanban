@@ -14,7 +14,7 @@ infra failure (disconnect/launch/zero-token) re-places the turn without consumin
 `STEWARD_MAX_INFRA_RETRIES`, then the attempt is `agent_fix_held` (not red); a red train no
 member owns messages NO builder; `TrainSteward` + `mergeMembersWithSteward`
 (`merge-train-steward.ts`) are the tested session-reuse and conflict-resolution orchestration.
-**Not done (follow-up ticket needed, named here):** (1) incremental assembly (worktree at window
+**Not done (follow-up ticket #1572):** (1) incremental assembly (worktree at window
 open, merge per member) and calling `mergeMembersWithSteward` from `assembleMergeTrain`/
 `merge-train-worktrees.ts` instead of `deferred`; (2) wiring the red gate through one shared
 `TrainSteward.runner` (today `runAgentFix` still gets the raw runner, `resumeSessionId` is passed
