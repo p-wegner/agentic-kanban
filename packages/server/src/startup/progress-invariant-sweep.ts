@@ -13,7 +13,6 @@
  * one more recovery attempt, which the verdict itself keeps idempotent.
  */
 import type { Database } from "../db/index.js";
-import { db } from "../db/index.js";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { revParse } from "@agentic-kanban/shared/lib/git-service";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
@@ -38,6 +37,7 @@ import {
 import { emptyPassReport, formatPassReportBody, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { isInFlightStatusName } from "@agentic-kanban/shared/lib/status-view";
 
 /** What the sweep can DO about a violation. Each member is optional so a missing channel degrades to escalation. */
 export interface ProgressRecoveryPort {
@@ -75,9 +75,8 @@ export const NO_COMMIT_FOLLOWUP_PROMPT =
   "(do not end the turn while it runs), then commit. If you are blocked, say exactly what blocks you.";
 
 function stageOf(name: string): StageName {
-  if (name === "In Progress") return "in_progress";
-  if (name === "In Review") return "in_review";
-  return "other";
+  if (!isInFlightStatusName(name)) return "other";
+  return name.replace(" ", "_").toLowerCase() as StageName;
 }
 
 async function loadDefaultSnapshots(database: Database, nowMs: number): Promise<TicketDriverSnapshot[]> {
@@ -180,7 +179,9 @@ export async function runProgressInvariantPass(
 ): Promise<ProgressInvariantReport> {
   const nowMs = deps.nowMs ?? Date.now();
   const log = deps.log ?? ((m: string) => console.warn(`[progress-invariant] ${m}`));
-  const snapshots = await (deps.loadSnapshots ?? ((n) => loadDefaultSnapshots(deps.database ?? db, n)))(nowMs);
+  const { database, loadSnapshots } = deps;
+  if (!loadSnapshots && !database) throw new Error("progress-invariant: pass a database or loadSnapshots");
+  const snapshots = await (loadSnapshots ?? ((n) => loadDefaultSnapshots(database!, n)))(nowMs);
   const report: ProgressInvariantReport = { ...emptyPassReport(snapshots.length), violations: [], recovered: [], escalated: [] };
 
   for (const s of snapshots) {
