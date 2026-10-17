@@ -28,6 +28,7 @@ import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import type { PostureOverride } from "@agentic-kanban/shared/types";
 import { detectPostureOverrides, formatPostureOverrides } from "../services/posture-overrides.js";
 import { resolveRiskPosture } from "../services/risk-posture.service.js";
+import { riskPosturePref } from "@agentic-kanban/shared/lib/risk-posture";
 export function createPreferencesRoute(database: Database) {
   const router = createRouter();
   const preferenceService = createPreferenceService({ database });
@@ -144,8 +145,8 @@ export function createPreferencesRoute(database: Database) {
     const postureOverrides: Array<{ projectId: string } & PostureOverride> = [];
     const prefMap = toPrefMap(await getAllPreferences(database));
     for (const key of applied) {
-      if (!key.startsWith("risk_posture_")) continue;
-      const projectId = key.slice("risk_posture_".length);
+      const projectId = riskPosturePref.projectIdOf(key);
+      if (!projectId) continue;
       const found = detectPostureOverrides(prefMap, projectId);
       if (found.length === 0) continue;
       console.warn(`[preferences] ${formatPostureOverrides(resolveRiskPosture(prefMap, projectId).level, found)} (project ${projectId}, #1560)`);
