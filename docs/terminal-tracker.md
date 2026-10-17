@@ -1,5 +1,8 @@
 # Terminal tracker (`pnpm cli -- tracker`)
 
+> **Looking for the full view** (workers, host RAM, master/rc/stable, merge trains, pipeline)?
+> That is `pnpm cli -- status --watch` (#1421), not this command.
+
 A dense, fixed-height terminal dashboard for one project — sized for a narrow pane, meant to
 sit alongside builder panes rather than replace the web UI. The snapshot DATA is read the same
 way as `status --watch`: in-process from `getBoardStatus` (no server round-trip), so `--once`

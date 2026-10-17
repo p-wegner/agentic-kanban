@@ -3,6 +3,17 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-10-17 morning: host rebooted 10:01 local, board back
+
+- `pnpm stable:start` brought `stable-20261017-2` back (smoke passed). All three workers online;
+  wsl-stable started by hand in herdr pane w1:p5Y, console (`status --watch`) in w1:p5Z.
+  Reboot runbook and which view is the full one: `docs/agent-guide/operator-reference.md`
+  "After a host reboot".
+- desktop-stable and wsl-stable run worker build 95ddbc9 (console marks it `!`), behind the
+  board's a15f90a.
+- #1550 (tracker header shows no counts with 0 active issues) building on ao-pf38. #1549 cancelled
+  as a duplicate of `status --watch`.
+
 ## 2026-10-17: UX probe landed, stable-20261017-2 live
 
 **Goal (Peter):** a subagent explores the UI and fixes UX flaws; the board implements the rest.

@@ -77,6 +77,23 @@ Skills marked * are user-invoked (`/name`); an agent that needs one reads `.clau
 - **`pnpm dev:devboard`** in THIS main checkout (plain `pnpm dev` here would take the stable board's ports and DB). Plain `pnpm dev` is for worktrees (`feature/<N>-…` = `3001+N`/`5173+N`). Safe headless launch: `dev-server` skill. Clean-clone blockers: `docs/install.md`.
 - **`pnpm promote`** moves master to the stable board on a fresh green sweep — **`--dry-run` first, always**; `--force-sweep` only deliberately. `docs/two-boards.md` §8.
 - `pnpm test:e2e`. `pnpm db:migrate && pnpm db:seed`. `pnpm cli -- register <path>`/`list`/`cleanup`.
+- **Watching the board:** **`pnpm cli -- status --watch`** is the full-screen console (#1421):
+  workers (slots, build, RAM, heartbeat, current job), host RAM, master/rc/stable, verify
+  placement, merge trains, pipeline, attention, merged today; `a` lists every open issue, `q`
+  quits. `pnpm cli -- tracker` is the NARROW one (WIP, in-flight, rc/queue line), not the full
+  view. Run either in a herdr pane, not a background shell.
+
+## After a host reboot
+Nothing restarts by itself. In order:
+1. Stable board: **`pnpm stable:start`** (restart-only, smoke-tests; `docs/two-boards.md` §2).
+2. Workers ao-pf38 and desktop-stable reconnect on their own within a minute; check with
+   `pnpm cli -- worker list`.
+3. WSL worker `wsl-stable` lives in distro **`akw-r6`** under its own state file; start it in a
+   herdr pane:
+   `wsl -d akw-r6 -- bash -lc '~/.agentic-kanban/stable/bin/agentic-kanban-worker start --state-file ~/.agentic-kanban/stable/state.json'`
+   (the distro's default `~/.agentic-kanban/worker-state.json` is an old dev-board pairing,
+   `AO-PF69VL7N-wsl-akw-r6`; do not start that one). It shares host RAM, so it never verifies.
+4. Console: `pnpm cli -- status --watch` in a second pane.
 
 ## Workspace Flow
 `POST /api/workspaces` creates DB record + worktree + launches the agent. Then `/turn` (takes `content` not `message`; 409 if busy), `GET /diff`, `/merge`, `DELETE` (cascades). Loop: register repo → create issue → new workspace → diff → merge.
