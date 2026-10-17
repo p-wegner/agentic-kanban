@@ -112,6 +112,21 @@ curl -s http://127.0.0.1:3001/api/projects/$P/delivery    # effective posture, s
   Then check `GET /delivery`: `trainSizeFromOverride:false`, `trainWindowFromPosture:true`, and
   `posture.gateTier` is the one in force.
 
+## Spreading work across Claude subscriptions (worker profiles)
+The board picks a profile per remote session only for a project with `allowed_profiles_<id>`
+(agentic-kanban lists `anth`, `andrena_team_5x`, `_2`, `_3`, `_4`): among the allowed profiles the
+chosen worker ATTESTS, the lowest `usedPct5h` wins (>= 90% or a credentials problem is skipped).
+A worker discovers every `~/.claude-<name>` dir holding `.credentials.json` at START;
+`--profiles <csv>` filters that list (quote it under PowerShell: `--profiles 'a,b'`), and
+`--profile-alias default=anth` names the plain/harness login. So to add profiles: edit the
+worker's start flags, then restart it while it is IDLE (no session, no verify job; a drain kills
+verify jobs, #1559; `restart` reuses the old argv, so stop + start). Check:
+`GET /api/workers` → `attestedProfiles` with quota. State 2026-10-17: ao-pf38 `anth,
+andrena_team_5x, _2`; desktop-stable `anth, _2, _3, _4` (`andrena_team_5x` there needs a
+re-login); wsl-stable `anth` (credentials copied from the host's `~/.claude`, backups
+`.credentials.json.bak-20261017`). A session under a named profile uses that dir's own Claude
+config (hooks, plugins), not the worker's clean harness.
+
 ## After a host reboot
 Nothing restarts by itself. In order:
 1. Stable board: **`pnpm stable:start`** (restart-only, smoke-tests; `docs/two-boards.md` §2).
