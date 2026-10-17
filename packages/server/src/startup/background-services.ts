@@ -19,6 +19,8 @@ import { startStrandedPlanReconciler, stopStrandedPlanReconciler } from "./plan-
 import { startZombieFixSessionReconciler, stopZombieFixSessionReconciler } from "./zombie-fix-session-reconciler.js";
 import { startAncestorBranchReconciler, stopAncestorBranchReconciler } from "./ancestor-branch-reconciler.js";
 import { startStalledInProgressReconciler, stopStalledInProgressReconciler } from "./stalled-in-progress-reconciler.js";
+import { startReadyBaseConflictHealer, stopReadyBaseConflictHealer } from "./ready-base-conflict-healer.js";
+import { createReadyBaseConflictHealDeps } from "../services/ready-base-conflict-ports.js";
 import { startBornBlockedReconciler, stopBornBlockedReconciler } from "./born-blocked-reconciler.js";
 import { startWorkflowNodeDivergenceReconciler, stopWorkflowNodeDivergenceReconciler } from "./workflow-node-divergence-reconciler.js";
 import { startDoneUnmergedSweep, stopDoneUnmergedSweep } from "./done-unmerged-invariant-sweep.js";
@@ -183,6 +185,15 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start({ db, runWorkflowOnExit }) {
       startStalledInProgressReconciler({ database: db, runWorkflowOnExit });
       return stopStalledInProgressReconciler;
+    },
+  },
+  {
+    // A ready workspace that conflicts with the BASE gets a board rebase, a mechanical CONTINUE.md
+    // resolution, or one builder fix turn - not a standing attention line (#1584).
+    name: "ready-base-conflict-healer",
+    start({ db, boardEvents, getSessionManager }) {
+      startReadyBaseConflictHealer(createReadyBaseConflictHealDeps({ database: db, boardEvents, getSessionManager }));
+      return stopReadyBaseConflictHealer;
     },
   },
   {

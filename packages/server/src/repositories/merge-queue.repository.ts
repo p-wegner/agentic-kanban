@@ -48,6 +48,38 @@ export async function getQueuePressureMemberRows(
   }));
 }
 
+/** A ready-for-merge workspace the base-conflict healer (#1584) may probe: idle, non-direct, with a worktree. */
+export interface ReadyHealCandidateRow {
+  workspaceId: string;
+  issueId: string;
+  issueNumber: number | null;
+  projectId: string;
+  branch: string;
+  workingDir: string;
+}
+
+export async function listReadyHealCandidates(database: Database = db): Promise<ReadyHealCandidateRow[]> {
+  const rows = await database
+    .select({
+      workspaceId: workspaces.id,
+      issueId: issues.id,
+      issueNumber: issues.issueNumber,
+      projectId: issues.projectId,
+      branch: workspaces.branch,
+      workingDir: workspaces.workingDir,
+    })
+    .from(workspaces)
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(and(
+      eq(workspaces.readyForMerge, true),
+      eq(workspaces.status, "idle"),
+      eq(workspaces.isDirect, false),
+    ));
+  return rows.flatMap((r) => (r.branch && r.workingDir
+    ? [{ workspaceId: r.workspaceId, issueId: r.issueId, issueNumber: r.issueNumber ?? null, projectId: r.projectId, branch: r.branch, workingDir: r.workingDir }]
+    : []));
+}
+
 export async function getMergeQueueWorkspaceRows(
   workspaceIds: string[],
   database: Database = db,
