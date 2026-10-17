@@ -362,4 +362,37 @@ describe("auto-merge orchestrator train window persistence (#1186)", () => {
     const t2 = new Date(new Date(t0).getTime() + 6 * 60_000).toISOString();
     expect(await orchestrator.applyTrainWindow(rows, t2)).toEqual([ws]);
   });
+
+  it("a hold cleared while the window has no pending ids stays cleared (#1581)", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusId } = await seedProject(db);
+    invalidatePreferencesCache();
+
+    const t0 = new Date("2026-08-26T12:00:00.000Z").toISOString();
+    await holdTrainWindow(projectId, 180, db, t0);
+    const orchestrator = createAutoMergeOrchestrator({ database: db });
+    // Nothing ready: the orchestrator mirrors the control-only record into memory.
+    const t1 = new Date(new Date(t0).getTime() + 60_000).toISOString();
+    await orchestrator.applyTrainWindow([], t1);
+    expect((await readTrainWindow(projectId, db))?.heldUntil).toBeTruthy();
+
+    // Operator clears: the empty record is deleted outright.
+    expect(await holdTrainWindow(projectId, 0, db, t1)).toBeNull();
+    invalidatePreferencesCache();
+
+    // Still nothing ready: the orchestrator must not write heldUntil back.
+    const t2 = new Date(new Date(t0).getTime() + 120_000).toISOString();
+    await orchestrator.applyTrainWindow([], t2);
+    expect((await readTrainWindow(projectId, db))?.heldUntil).toBeUndefined();
+
+    // A member arrives and the next evaluation is free to release.
+    await db.insert(preferences).values([
+      { key: `train_max_size_${projectId}`, value: "1", updatedAt: new Date().toISOString() },
+    ]);
+    invalidatePreferencesCache();
+    const ws = await seedReadyWorkspace(db, projectId, statusId);
+    const rows = await orchestrator.findCompletedWorkspaceRows();
+    const t3 = new Date(new Date(t0).getTime() + 180_000).toISOString();
+    expect(await orchestrator.applyTrainWindow(rows, t3)).toEqual([ws]);
+  });
 });
