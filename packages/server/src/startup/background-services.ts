@@ -48,6 +48,10 @@ import { startCommitMsgHookBackfill, stopCommitMsgHookBackfill } from "./commit-
 import { startFlushActivityLogReconciler, stopFlushActivityLogReconciler } from "./flush-activity-log-reconciler.js";
 import { startQueueFlushSweep, stopQueueFlushSweep } from "./queue-flush-sweep.js";
 import { createQueueFlushService } from "../services/queue-flush.service.js";
+import { startProgressInvariantSweep, stopProgressInvariantSweep, createProgressRecoveryPort } from "./progress-invariant-sweep.js";
+import { createWorkspaceSessionService } from "../services/workspace-session.service.js";
+import { startManualReview } from "../services/review.service.js";
+import { getRecentSessionBriefs } from "../repositories/session.repository.js";
 import { getWorkerBuildService, startWorkerBuildPrewarm } from "../services/worker-build.service.js";
 
 /**
@@ -454,6 +458,28 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
       const service = createQueueFlushService({ database: db, executeQueue: (ids, opts) => queueService.executeQueue(ids, opts) });
       startQueueFlushSweep({ database: db, service });
       return stopQueueFlushSweep;
+    },
+  },
+  {
+    // #1561 — the progress invariant: every open ticket of a monitor-driven project has a live
+    // driver (session, placed gate job, future retry from the current sha, train, or human hold),
+    // or it is recovered once per hour and then escalated. Replaces one-sweep-per-stall-shape.
+    name: "progress-invariant-sweep",
+    start({ db, boardEvents, getSessionManager, reviewSessionIds, runWorkflowOnExit }) {
+      const sessionService = createWorkspaceSessionService({ database: db, boardEvents, getSessionManager });
+      startProgressInvariantSweep({
+        database: db,
+        recovery: createProgressRecoveryPort({
+          database: db,
+          runWorkflowOnExit,
+          relaunchReview: async (workspaceId) => {
+            await startManualReview(db, getSessionManager, boardEvents, reviewSessionIds, workspaceId, false);
+          },
+          sendBuilderTurn: (workspaceId, content) => sessionService.sendTurn(workspaceId, content),
+          lastSessionId: async (workspaceId) => (await getRecentSessionBriefs(workspaceId, 1, db))[0]?.id ?? null,
+        }),
+      });
+      return stopProgressInvariantSweep;
     },
   },
   {
