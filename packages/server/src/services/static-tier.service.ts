@@ -20,6 +20,7 @@ import { runSetupScript, type SetupScriptResult } from "@agentic-kanban/shared/l
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { getChangedFileNames } from "./git.service.js";
 import type { PreMergeGateResult } from "./pre-merge-gate.types.js";
+import { withFailedSuites } from "./verify-failed-suites.js";
 
 export const STATIC_TIER_COMMAND = "node scripts/check-static.mjs";
 const STATIC_TIER_TIMEOUT_MS = 5 * 60 * 1000;
@@ -96,10 +97,12 @@ export async function runStaticTierGate(
   if (verifyScriptOverride) return null;
   const verdict = await runStaticTier({ workingDir, baseBranch, signal });
   if (verdict.passed) return null;
-  return {
+  // Name the offenders (a red check:arch names files) so the train log names them, the red goes
+  // back to the builder as a deterministic guard failure, and the two never disagree.
+  return withFailedSuites({
     passed: false,
     skipped: false,
-    stage: "verify",
+    stage: "verify" as const,
     message: `${verdict.message} - the suite run was skipped. Fix the static guard first:\n${verdict.detail ?? ""}`,
-  };
+  }, {});
 }

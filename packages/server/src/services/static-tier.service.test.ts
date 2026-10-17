@@ -60,4 +60,19 @@ describe("static tier", () => {
     expect(red).toBeNull();
     expect(await runStaticTierGate(tree(), "master", undefined, "pnpm check:arch && pnpm typecheck")).toBeNull();
   });
+
+  it("a red train pre-step names the offending file as a deterministic guard failure", async () => {
+    const dir = tree();
+    writeFileSync(join(dir, "scripts", "check-static.mjs"), [
+      "console.error('[god-module gate] 1 file over the ceiling');",
+      "console.error('  packages/server/src/worker/worker-daemon.ts 1001/1000');",
+      "process.exit(1);",
+    ].join("\n"));
+    const red = await runStaticTierGate(dir, "master", undefined, undefined);
+    expect(red).toMatchObject({
+      passed: false,
+      failedSuites: ["packages/server/src/worker/worker-daemon.ts"],
+      guardFailure: true,
+    });
+  });
 });
