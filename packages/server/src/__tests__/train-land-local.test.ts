@@ -20,7 +20,7 @@ function makeDeps(over: Partial<LandLocalDeps> = {}) {
     getTrain: async () => ({ id: "t1", projectId: "p1", label: "train/2026-10-17-04", state: "gating", memberWorkspaceIds: ["w1", "w2"] }),
     getTrainProjectId: async () => "p1",
     getWindowMemberIds: async () => ["w1", "w2"],
-    loadMembers: async () => members,
+    loadMembers: async (ids) => members.filter((m) => ids.includes(m.workspaceId)),
     getProject: async () => ({ repoPath: "/r/proj", defaultBranch: "master" }),
     getPref: async (k) => prefs.get(k) ?? null,
     setPref: async (k, v) => void prefs.set(k, v),
@@ -98,6 +98,37 @@ describe("landTrainLocal (#1586)", () => {
     expect(out.status).toBe("landed");
     expect(deps.createTrainRow).toHaveBeenCalled();
     expect(deps.abandonTrain).not.toHaveBeenCalled();
+  });
+
+  it("assembles only members the evidence did not defer, and --only/--skip narrow further (#1590)", async () => {
+    const evidence = { dropped: [{ workspaceId: "w2", reason: "conflicts with #11", deferred: true }], landed: [] };
+    const getTrain = async () => ({ id: "t1", projectId: "p1", label: "train/2026-10-17-08", state: "red", memberWorkspaceIds: ["w1", "w2"], gateEvidence: evidence });
+    const gateSteps = [{ name: "g", command: "true" }];
+    const a = makeDeps({ getTrain });
+    const out = await landTrainLocal({ projectId: "p1", trainId: "t1", skipInstall: true, gateSteps }, a.deps);
+    expect(out).toMatchObject({ status: "landed", closed: [11] });
+    expect(a.deps.closeMember).toHaveBeenCalledTimes(1);
+    expect(a.gitCalls.some((c) => c[0] === "merge" && c.at(-1) === "feature/ak-12-b")).toBe(false);
+
+    const b = makeDeps();
+    expect(await landTrainLocal({ projectId: "p1", trainId: "t1", skipInstall: true, only: [12], gateSteps }, b.deps)).toMatchObject({ status: "landed", closed: [12] });
+    const c = makeDeps();
+    expect(await landTrainLocal({ projectId: "p1", trainId: "t1", skipInstall: true, skip: [12], gateSteps }, c.deps)).toMatchObject({ status: "landed", closed: [11] });
+  });
+
+  it("never closes a member whose branch is not merged into the worktree (#1590)", async () => {
+    const { deps } = makeDeps({
+      git: async (args) => {
+        if (args[0] === "merge-base" && args.includes("feature/ak-12-b")) return { code: 1, stdout: "", stderr: "" };
+        if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") return { code: 0, stdout: "master\n", stderr: "" };
+        if (args[0] === "rev-parse") return { code: 0, stdout: "abcdef1234567890\n", stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+      pathExists: () => true,
+    });
+    const out = await landTrainLocal({ projectId: "p1", trainId: "t1", continueRun: true, gateSteps: [{ name: "g", command: "true" }] }, deps);
+    expect(out).toMatchObject({ status: "landed", closed: [11] });
+    expect(deps.closeMember).toHaveBeenCalledTimes(1);
   });
 
   it("derives a sibling .worktrees path and parses failing suites", () => {
