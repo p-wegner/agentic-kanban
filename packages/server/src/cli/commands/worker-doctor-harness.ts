@@ -121,20 +121,43 @@ export function checkHarness(
   return checks;
 }
 
+/** #1558: where a discovered profile came from, so 14 names from 4 config dirs is explicable. */
+function profileSource(p: LocalProfile): string {
+  if (p.aliasOf) return `alias of ${p.aliasOf}`;
+  switch (p.kind) {
+    case "claude-settings": return `settings file ${p.path}`;
+    case "claude-config-dir": return `config dir ${p.path}`;
+    case "codex-home": return `codex home ${p.path}`;
+    default: return `codex config ${p.path}`;
+  }
+}
+
 /**
  * #1450: which local profiles this worker advertises. Without `--profiles` that is EVERY login on the
  * machine (14 of them on the first live connect), so placement can run sessions on any a roster names.
  * WARN then, listing them; with a restriction, PASS naming exactly the attested set.
  */
-export function checkAttestedProfiles(discovered: readonly LocalProfile[], declared: string[] | undefined): DoctorCheck {
+export function checkAttestedProfiles(
+  discovered: readonly LocalProfile[],
+  declared: string[] | undefined,
+  /** #1558: set when a daemon answered — its flags, not doctor's own argv, decide what is attested. */
+  daemon?: { daemonRunning: boolean; daemonProfiles: string | null },
+): DoctorCheck {
   const name = "attested profiles";
+  if (daemon?.daemonRunning) {
+    return {
+      name,
+      status: "pass",
+      detail: `the running daemon attests ${daemon.daemonProfiles ?? "none reported"} (doctor's own --profiles is not consulted while a daemon runs)`,
+    };
+  }
   const attested = narrowDeclaredProfiles(discovered, declared, () => {});
-  const list = attested.map((p) => `${p.provider}:${p.name}`).join(", ") || "none";
+  const list = attested.map((p) => `${p.provider}:${p.name} (${profileSource(p)})`).join(", ") || "none";
   if (declared === undefined) {
     return {
       name,
       status: attested.length > 1 ? "warn" : "pass",
-      detail: `no --profiles: all ${attested.length} local profile(s) are attested - ${list}`,
+      detail: `no daemon is running; a start with no --profiles would attest all ${attested.length} local profile(s) - ${list}`,
       ...(attested.length > 1 ? { remedy: "Restrict what this machine offers: start with --providers <csv> --profiles <names> (the Connect view renders both)." } : {}),
     };
   }
@@ -142,7 +165,7 @@ export function checkAttestedProfiles(discovered: readonly LocalProfile[], decla
   return {
     name,
     status: missing.length > 0 ? "warn" : "pass",
-    detail: `--profiles restricts this worker to ${attested.length} profile(s): ${list}` + (missing.length > 0 ? `; no local login named ${missing.join(", ")}` : ""),
+    detail: `no daemon is running; a start with these flags would restrict this worker to ${attested.length} profile(s): ${list}` + (missing.length > 0 ? `; no local login named ${missing.join(", ")}` : ""),
     ...(missing.length > 0 ? { remedy: `Log in to ${missing.join(", ")} or drop it from --profiles.` } : {}),
   };
 }
