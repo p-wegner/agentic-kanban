@@ -1,7 +1,7 @@
 import { basename, dirname, join } from "node:path";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { buildMergeTrainCommitMessage } from "./merge-train.service.js";
-import { trainRefName } from "./merge-train-assembly.js";
+import { trainRefName, type TrainMember } from "./merge-train-assembly.js";
 
 /**
  * Operator "land this train locally" (#1586): the manual recipe from the 2026-10-17 train-04
@@ -23,12 +23,8 @@ export const LAND_LOCAL_GATE_STEPS: ReadonlyArray<{ name: string; command: strin
   { name: "test:mine", command: "pnpm test:mine" },
 ];
 
-export interface LandLocalMember {
-  workspaceId: string;
-  issueId: string;
-  issueNumber: number | null;
-  branch: string;
-}
+/** A train member as the local landing needs it: the train's member ref plus its issue. */
+export type LandLocalMember = Pick<TrainMember, "workspaceId" | "branch"> & { issueId: string; issueNumber: number | null };
 
 export interface LandLocalTrainRow {
   id: string;

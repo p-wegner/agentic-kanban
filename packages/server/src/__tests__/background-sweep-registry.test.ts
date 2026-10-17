@@ -103,6 +103,7 @@ describe("every background sweep is registered (#584)", () => {
       "backup-scheduler",
       "session-message-pruner",
       "base-branch-health-reconciler",
+      "ci-status-reconciler",
       "test-impact-map-reconciler",
       "install-staleness-reconciler",
       "merge-train-reconciler",

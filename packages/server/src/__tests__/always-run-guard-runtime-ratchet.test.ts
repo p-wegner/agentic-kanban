@@ -330,8 +330,12 @@ import {
  * #1576: `skills-mirror-hook.test.ts` at the ASSUMED 3,000 ms. It drives a throwaway git repo
  * through `scripts/skills-mirror.mjs` (outside every import graph), with a `when:` territory of
  * `.claude/skills/**`, `.codex/skills/**` and that script, so an ordinary diff does not pay it.
+ *
+ * #1562: `ci-status.test.ts` at the ASSUMED 3,000 ms. It imports `scripts/promote-ci.mjs`, which no
+ * package-local diff links to, with a `when:` territory of the promote CI/plan scripts, so an
+ * ordinary diff does not pay it.
  */
-const BASELINE_TOTAL_MS = 504_689;
+const BASELINE_TOTAL_MS = 507_689;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative

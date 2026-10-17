@@ -5,7 +5,6 @@
  * runs far more often than the verify sweep.
  */
 import { getAllProjects } from "../repositories/project.repository.js";
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
@@ -25,7 +24,7 @@ export function stopCiStatusReconciler(): void {
 }
 
 /** One pass over every watched project. Never throws. */
-export async function runCiStatusCheckOnce(database: Database = db): Promise<void> {
+export async function runCiStatusCheckOnce(database: Database): Promise<void> {
   if (tickInFlight) return;
   tickInFlight = true;
   try {
@@ -42,7 +41,7 @@ export async function runCiStatusCheckOnce(database: Database = db): Promise<voi
   }
 }
 
-export function startCiStatusReconciler(database: Database = db, intervalMs = INTERVAL_MS): void {
+export function startCiStatusReconciler(database: Database, intervalMs = INTERVAL_MS): void {
   stopCiStatusReconciler();
   activeSweep = startPeriodicSweep({
     name: "ci-status",
