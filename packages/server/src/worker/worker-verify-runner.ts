@@ -59,7 +59,12 @@ export interface VerifyResultStore {
   save(jobId: string, entry: StoredVerifyResult): void;
   remove(jobId: string): void;
   loadAll(): Array<{ jobId: string; entry: StoredVerifyResult }>;
+  /** #1571: keep a failed job's output tail as `<jobId>.log` (bounded count/size); outlives the 30 min verdict retention. */
+  saveFailedLog?(jobId: string, tail: string): void;
 }
+/** #1571: how many failed-run logs a worker keeps, and how much of each. */
+export const VERIFY_FAILED_LOG_KEEP = 10;
+export const VERIFY_FAILED_LOG_BYTES = 256 * 1024;
 export interface StoredVerifyResult { finishedAt: number; frames: WorkerToBoardMessage[] }
 
 /** A buffered verdict older than this is useless: the board gave the job up after its reconnect grace. */
@@ -76,6 +81,14 @@ export function createFileVerifyResultStore(workRoot: string): VerifyResultStore
   return {
     save(jobId, entry) { try { mkdirSync(dir, { recursive: true }); writeFileSync(file(jobId), JSON.stringify({ jobId, ...entry })); } catch { /* memory copy still delivers */ } },
     remove(jobId) { try { rmSync(file(jobId), { force: true }); } catch { /* gone */ } },
+    saveFailedLog(jobId, tail) {
+      try {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(file(jobId).replace(/\.json$/, ".log"), tail.slice(-VERIFY_FAILED_LOG_BYTES));
+        const logs = readdirSync(dir).filter((f) => f.endsWith(".log")).map((f) => ({ f, t: statSync(join(dir, f)).mtimeMs })).sort((a, b) => b.t - a.t);
+        for (const old of logs.slice(VERIFY_FAILED_LOG_KEEP)) rmSync(join(dir, old.f), { force: true });
+      } catch { /* best effort */ }
+    },
     loadAll() {
       try {
         return readdirSync(dir).filter((f) => f.endsWith(".json")).flatMap((f) => {
@@ -363,6 +376,7 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
     const entry: StoredVerifyResult = { finishedAt: Date.now(), frames };
     finished.set(job.jobId, entry);
     deps.store?.save(job.jobId, entry);
+    if (!r.refused && r.passed === false) deps.store?.saveFailedLog?.(job.jobId, log.replace(ANSI_RE, ""));
     pruneFinished();
     progress(job.jobId, "uploading");
     if (connected()) for (const f of frames) deps.sendToBoard(f);

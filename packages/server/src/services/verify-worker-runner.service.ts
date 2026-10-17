@@ -8,7 +8,9 @@
 // service also never invents a verdict: a worker that vanishes or goes silent yields a refusal.
 import { workerBelowRamFloor } from "@agentic-kanban/shared/lib/worker-settings";
 import type { VerifyJobFrame, VerifyStage, WorkerVerifyCapability } from "@agentic-kanban/shared/lib/worker-verify-protocol";
+import { writeFileSync } from "node:fs";
 import type { Database } from "../db/index.js";
+import { verifyLogPath } from "./verify-failure-summary.js";
 import { listActiveMergeTrainsForProject, recordMergeTrainWorkerVerify } from "../repositories/merge-train.repository.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { ensureGitHttpServer } from "./git-http.service.js";
@@ -38,6 +40,8 @@ export interface VerifyRunnerDeps {
   nowMs?: number;
   /** #1465: injected for tests; defaults to VERIFY_RECONNECT_GRACE_MS. */
   reconnectGraceMs?: number;
+  /** #1571: injected for tests; where failed-output logs go (defaults to the OS temp dir). */
+  logDir?: string;
 }
 
 const LOGGED_SUITE_CAP = 10;
@@ -47,6 +51,30 @@ export function describeFailingSuites(suites: readonly string[] | undefined): st
   if (!suites || suites.length === 0) return "";
   const shown = suites.slice(0, LOGGED_SUITE_CAP).join(", ");
   return ` [${shown}${suites.length > LOGGED_SUITE_CAP ? `, … +${suites.length - LOGGED_SUITE_CAP} more` : ""}]`;
+}
+
+const FAILED_LOG_TAIL_BYTES = 64 * 1024;
+const EVIDENCE_TAIL_LINES = 40;
+// eslint-disable-next-line no-control-regex -- ESC is the point
+const ANSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+
+/**
+ * #1571: persist a failed worker verdict's output tail (last 64 KB, ANSI stripped) to a PER-ATTEMPT file
+ * (`kanban-verify-worker-<kind>-<jobId>.log`; the job id is unique per attempt, so a retry never overwrites
+ * it). Returns the path plus the last ~40 lines for the evidence row; never throws.
+ */
+export function persistFailedWorkerLog(kind: string, jobId: string, log: string, dir?: string): { logPath: string | null; tailLines: string } {
+  const clean = log.replace(ANSI_RE, "");
+  const tailLines = clean.split(/\r?\n/).filter((l, i, all) => l.trim() || i < all.length - 1).slice(-EVIDENCE_TAIL_LINES).join("\n");
+  let logPath: string | null = null;
+  try {
+    logPath = verifyLogPath(`worker-${kind}-${jobId}`, dir);
+    writeFileSync(logPath, clean.slice(-FAILED_LOG_TAIL_BYTES), "utf8");
+  } catch (err) {
+    logPath = null;
+    console.warn(`[verify-worker] could not write the failed-verify log (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return { logPath, tailLines };
 }
 
 /** #1544: stamp a red worker verdict on the project's live (gating) train row; never throws. */
@@ -135,8 +163,17 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
             const log = [...chunks.entries()].sort(([a], [b]) => a - b).map(([, d]) => d).join("") || message.logTail;
             // #1495: the verdict's receipt (placement and refusals were logged, the verdict was not).
             console.log(`[verify-worker] ${req.kind} verify_result from ${workerName} sha ${message.sha.slice(0, 9)}: ${message.refused ? `refused (${message.refused})` : message.passed ? "passed" : "failed"}, ${message.failingSuites?.length ?? 0} failing suite(s)${describeFailingSuites(message.failingSuites)}, ${Math.round((message.durationMs ?? 0) / 1000)}s`);
-            if (req.kind === "train-gate" && req.projectId && !message.passed && !message.refused) {
-              void persistTrainWorkerVerify(deps.database, req.projectId, { workerName, sha: message.sha, failingSuites: message.failingSuites ?? [], durationMs: message.durationMs ?? 0, at: new Date(deps.nowMs ?? Date.now()).toISOString() });
+            // #1571: the output must hit disk BEFORE any retry decision sees the verdict.
+            const failed = !message.passed && !message.refused;
+            const saved = failed ? persistFailedWorkerLog(req.kind, jobId, log, deps.logDir) : null;
+            if (saved?.logPath) console.log(`[verify-worker] failed output of ${jobId} saved to ${saved.logPath}`);
+            if (req.kind === "train-gate" && req.projectId && failed) {
+              const suites = message.failingSuites ?? [];
+              void persistTrainWorkerVerify(deps.database, req.projectId, {
+                workerName, sha: message.sha, failingSuites: suites, durationMs: message.durationMs ?? 0, at: new Date(deps.nowMs ?? Date.now()).toISOString(),
+                ...(saved?.logPath ? { logPath: saved.logPath } : {}),
+                ...(suites.length === 0 && saved?.tailLines ? { outputTail: saved.tailLines } : {}),
+              });
             }
             end({
               requestId: req.requestId,
