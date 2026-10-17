@@ -22,7 +22,7 @@ export interface ConsoleRenderOptions {
   nowMs: number;
   /** IANA zone for the header clock; omitted = the machine's local zone. Tests pin it (#1553). */
   timeZone?: string;
-  /** `a`— list every open issue instead of the pipeline summary. */
+  /** `a` — list every open issue instead of the pipeline summary. */
   allIssues?: boolean;
 }
 
