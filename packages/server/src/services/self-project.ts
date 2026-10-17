@@ -12,7 +12,7 @@
 // (startup-tasks.ts, data-dir resolution), so we anchor to it here too, injectable
 // for tests.
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathKey } from "@agentic-kanban/shared/lib/path-key";
 
@@ -52,4 +52,45 @@ export function resolveSelfRoot(startDir: string = process.cwd()): string {
 export function isSelfProjectRepo(repoPath: string | null | undefined, selfRoot: string = resolveSelfRoot()): boolean {
   if (!repoPath) return false;
   return normalizeRepoPath(repoPath) === normalizeRepoPath(selfRoot);
+}
+
+/** What `scripts/test-mine.mjs` must contain to count as honouring a suite scope. */
+const RETRY_SCOPE_MARKER = "KANBAN_RETRY_TEST_FILES";
+
+/** A verify_script that runs the repo's own runner (`pnpm test:mine`, `node scripts/test-mine.mjs`). */
+const RUNS_TEST_MINE = /\btest[:-]mine\b/;
+
+/**
+ * Does this project's verify_script honour `KANBAN_RETRY_TEST_FILES`, i.e. may the gate re-run only
+ * the failing suites instead of the whole chain?
+ *
+ * `isSelfProjectRepo` alone answered that for the board's OWN checkout and nothing else. A board
+ * that does not run from the project's checkout (the stable board driving this repo, a worker
+ * run, a merge train) is never "self", so every retry was refused as "does not honour suite
+ * scoping" and two load flakes condemned a whole train (#1579). The runner is what honours the
+ * scope, so ask the runner: the script must invoke `test:mine` AND a checkout it runs in must carry
+ * a `scripts/test-mine.mjs` that reads the variable. Anything else (gradlew, pytest) stays false.
+ */
+export function verifyHonoursSuiteScope(input: {
+  repoPath?: string | null;
+  workingDir?: string | null;
+  verifyScript?: string | null;
+  selfRoot?: string;
+  readRunner?: (dir: string) => string | null;
+}): boolean {
+  if (isSelfProjectRepo(input.repoPath, input.selfRoot)) return true;
+  if (!input.verifyScript || !RUNS_TEST_MINE.test(input.verifyScript)) return false;
+  const readRunner =
+    input.readRunner ??
+    ((dir: string) => {
+      try {
+        return readFileSync(join(dir, "scripts", "test-mine.mjs"), "utf8");
+      } catch {
+        return null;
+      }
+    });
+  return [input.workingDir, input.repoPath].some((dir) => {
+    if (!dir) return false;
+    return readRunner(dir)?.includes(RETRY_SCOPE_MARKER) === true;
+  });
 }

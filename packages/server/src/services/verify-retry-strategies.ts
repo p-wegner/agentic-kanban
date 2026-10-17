@@ -23,7 +23,7 @@
  * Everything the caller needs is injected as a callback, so this module reaches no database,
  * spawns no process of its own, and is exercised without a worktree.
  */
-import { type FailedSuite, decideFlakeRetry, parseFailedSuites, retryScopeEnvValue } from "./verify-flake-retry.js";
+import { type FailedSuite, decideFlakeRetry, environmentNote, parseFailedSuites, retryScopeEnvValue } from "./verify-flake-retry.js";
 import { type FailedSuiteClassification, classifyFailedSuites } from "./verify-failed-suites.js";
 
 export interface VerifyRunResult {
@@ -265,7 +265,7 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
         failure: null,
         flakeRetryNote:
           `— ${flake.suites.length} suite(s) failed under load and PASSED on a targeted re-run: ${names} ` +
-          `[retried because ${flake.reason}]`,
+          `[retried because ${flake.reason}]${environmentNote(combinedOutput(result))}`,
         flakySuites: flake.suites,
         // The gate PASSED, but these suites did fail on the way there. The ledger records the
         // pass (that is the verdict) alongside what failed, so a suite that keeps needing a retry
@@ -284,7 +284,7 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
       failure: {
         message:
           `verify_script failed (exit ${result.exitCode}) and the same ${flake.suites.length} suite(s) failed ` +
-          `again on a targeted re-run (${names}; retried because ${flake.reason}) — this is a real failure, ` +
+          `again on a targeted re-run (${names}; retried because ${flake.reason})${environmentNote(combinedOutput(retryResult))} — this is a real failure, ` +
           `not machine load: ` +
           input.summarize(result.stdout || "", result.stderr || ""),
       },
@@ -296,7 +296,7 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
   // A declined retry says why, so a red gate never reads as "the flake mechanism did not run"
   // (#1242's finding: it had silently declined every time). Only when something was named —
   // a compile or install failure carries nothing to explain.
-  const declined = failedSuites.length > 0 ? ` [no flake retry: ${flake.reason}]` : "";
+  const declined = failedSuites.length > 0 ? ` [no flake retry: ${flake.reason}]${environmentNote(combinedOutput(result))}` : "";
   const suffix = installed
     ? ` (retried once after an auto-install; still failing${missingEvidence ? `; first run missing: ${missingEvidence}` : ""})`
     : "";
