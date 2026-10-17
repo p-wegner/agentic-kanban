@@ -83,6 +83,28 @@ Skills marked * are user-invoked (`/name`); an agent that needs one reads `.clau
   quits. `pnpm cli -- tracker` is the NARROW one (WIP, in-flight, rc/queue line), not the full
   view. Run either in a herdr pane, not a background shell.
 
+## Hands-off: let the board build the backlog by itself
+Two per-project prefs, both written with `PUT /api/preferences/settings` (body is a flat
+`{key: value}` map; an unknown key is a loud 422):
+
+```bash
+P=d1c5d9c1-4897-4e1b-acc3-2aa96de04117   # agentic-kanban
+curl -s -X PUT http://127.0.0.1:3001/api/preferences/settings -H 'Content-Type: application/json' \
+  -d "{\"start_mode_$P\":\"monitor\",\"risk_posture_$P\":\"sprint\"}"
+curl -s http://127.0.0.1:3001/api/projects/$P/delivery    # effective posture, server-resolved
+```
+
+- **`start_mode_<id>`** ∈ `manual | monitor | conductor` (decision 008). `monitor` = the
+  in-process monitor auto-starts unblocked tickets up to the WIP limit. It works per project
+  even though the global `auto_monitor` is reset to `false` on every boot
+  (`startup-tasks.ts`); do not flip `auto_monitor` for this. `manual` is the kill switch.
+- **`risk_posture_<id>`** ∈ `strict | standard | iterate | fast | sprint | flow` (decision 017,
+  `risk-posture.service.ts`). Loosest = **`sprint`**: no per-ticket review, guards-only gate,
+  no implement-exit check, contention off, trains up to 12, a red base files a debt ticket
+  instead of blocking. `flow` still reviews every ticket. Back to the default: `standard`.
+- Read every current value at once: `GET /api/preferences/settings`. A ticket tag
+  `risk:<level>` overrides the posture for that one ticket.
+
 ## After a host reboot
 Nothing restarts by itself. In order:
 1. Stable board: **`pnpm stable:start`** (restart-only, smoke-tests; `docs/two-boards.md` §2).

@@ -11,6 +11,10 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
   "After a host reboot".
 - desktop-stable and wsl-stable run worker build 95ddbc9 (console marks it `!`), behind the
   board's a15f90a.
+- **Hands-off since ~08:50Z:** `start_mode=monitor`, `risk_posture=sprint` on agentic-kanban
+  (was manual/standard; revert both to go back). Recipe: operator-reference "Hands-off".
+- #1551 (worker restart after self-update hangs before connecting) filed from desktop-stable,
+  which is still offline on 95ddbc9 pending the desktop agent's restart.
 - #1550 (tracker header shows no counts with 0 active issues) building on ao-pf38. #1549 cancelled
   as a duplicate of `status --watch`.
 
