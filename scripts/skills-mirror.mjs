@@ -2,10 +2,10 @@
 //   node scripts/skills-mirror.mjs            copy .claude/skills -> .codex/skills (+ delete orphans), stage result
 //   node scripts/skills-mirror.mjs --check    exit 1 if the git INDEX has a .claude/skills change without its mirror
 // .claude/skills is canonical; codex-skills-parity.test.ts is the CI backstop for the same invariant.
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { gitExecSync } from "./git-exec.mjs";
 
 const SRC = ".claude/skills/";
 const DST = ".codex/skills/";
@@ -26,8 +26,8 @@ export function findDrift(claude, codex, readBlob) {
   return drift.sort();
 }
 
-function git(args, cwd, input) {
-  return execFileSync("git", args, { cwd, encoding: "utf8", input, maxBuffer: 1 << 28, windowsHide: true });
+function git(args, cwd) {
+  return gitExecSync(args, { cwd });
 }
 
 function indexBlobs(prefix, cwd) {

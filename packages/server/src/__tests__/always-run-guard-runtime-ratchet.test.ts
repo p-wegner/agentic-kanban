@@ -326,8 +326,12 @@ import {
  * (outside every import graph) to pin the TZ the gate runs vitest under, with a `when:` territory of
  * that script, so an ordinary diff does not pay it; it is two string assertions and runs in well
  * under a second, so the next capture should give the 3 s back.
+ *
+ * #1576: `skills-mirror-hook.test.ts` at the ASSUMED 3,000 ms. It drives a throwaway git repo
+ * through `scripts/skills-mirror.mjs` (outside every import graph), with a `when:` territory of
+ * `.claude/skills/**`, `.codex/skills/**` and that script, so an ordinary diff does not pay it.
  */
-const BASELINE_TOTAL_MS = 501_689;
+const BASELINE_TOTAL_MS = 504_689;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative

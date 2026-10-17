@@ -16,7 +16,7 @@ function put(cwd: string, rel: string, body: string) {
 describe("skills-mirror (#1576)", () => {
   let repo: string;
   beforeEach(() => {
-    repo = mkdtempSync(join(tmpdir(), "skills-mirror-"));
+    repo = mkdtempSync(join(tmpdir(), "ak-skills-mirror-"));
     git(repo, "init", "-q");
     put(repo, ".claude/skills/a/SKILL.md", "one\n");
     put(repo, ".codex/skills/a/SKILL.md", "one\n");

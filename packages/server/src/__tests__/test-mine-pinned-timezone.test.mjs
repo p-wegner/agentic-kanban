@@ -5,9 +5,10 @@
  * Europe/Berlin, so local-time snapshots (#1553) passed here for 13 days and failed only on UTC CI.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { gateTimeZoneEnv } from "../../../../scripts/test-mine.mjs";
+import { walkRepoTree } from "../../../../scripts/lib/repo-tree.mjs";
 
 const ROOT = resolve(import.meta.dirname, "../../../..");
 
@@ -23,28 +24,16 @@ describe("test:mine pins the time zone (#1563)", () => {
   });
 });
 
-function* walk(dir) {
-  for (const name of readdirSync(dir)) {
-    if (name === "node_modules" || name === "dist" || name.startsWith(".")) continue;
-    const p = join(dir, name);
-    if (statSync(p).isDirectory()) yield* walk(p);
-    else if (/\.test\.(ts|tsx|mjs)$/.test(name)) yield p;
-  }
-}
-
 describe("snapshot suites do not render the box's local time (#1563)", () => {
   it("no snapshot test file uses local-time APIs without an explicit timeZone", () => {
     const offenders = [];
-    for (const pkg of readdirSync(join(ROOT, "packages"))) {
-      const dir = join(ROOT, "packages", pkg);
-      if (!statSync(dir).isDirectory()) continue;
-      for (const file of walk(dir)) {
-        const src = readFileSync(file, "utf8");
-        if (!/toMatch(Inline)?Snapshot/.test(src)) continue;
-        if (!/toLocale(Time|Date)?String|\.getHours\(/.test(src)) continue;
-        if (/timeZone/.test(src)) continue;
-        offenders.push(file.slice(ROOT.length + 1));
-      }
+    const files = walkRepoTree(join(ROOT, "packages"), { skipDirs: ["dist"], filter: (f) => /\.test\.(ts|tsx|mjs)$/.test(f) });
+    for (const file of files) {
+      const src = readFileSync(file, "utf8");
+      if (!/toMatch(Inline)?Snapshot/.test(src)) continue;
+      if (!/toLocale(Time|Date)?String|\.getHours\(/.test(src)) continue;
+      if (/timeZone/.test(src)) continue;
+      offenders.push(file.slice(ROOT.length + 1));
     }
     expect(offenders).toEqual([]);
   });
