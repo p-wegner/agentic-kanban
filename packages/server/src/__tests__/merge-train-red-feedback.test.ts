@@ -41,14 +41,13 @@ describe("red train builder feedback (#1298)", () => {
     expect(sendTurn.mock.calls.map((c) => c[0])).toEqual(["a"]);
   });
 
-  it("an agent-fix final-red train with unattributable suites sends every member the full failure", async () => {
+  it("an agent-fix final-red train with unattributable suites messages NO builder (#1569)", async () => {
     const a = member("a", ["p.ts"]);
     const b = member("b", ["q.ts"]);
     const result = base({ redStrategy: "agent-fix", gateFailure: "red", failedSuites: ["elsewhere.test.ts"] });
     const sendTurn = vi.fn().mockResolvedValue(undefined);
     await sendTrainRedFeedback(result, [a, b], { sendTurn, headSha: async () => "s" });
-    expect(sendTurn.mock.calls.map((c) => c[0]).sort()).toEqual(["a", "b"]);
-    expect(sendTurn.mock.calls[0][1]).toContain("elsewhere.test.ts");
+    expect(sendTurn).not.toHaveBeenCalled();
   });
 
   it("a red train outside agent-fix, with no rejection, sends nothing", () => {
@@ -56,9 +55,9 @@ describe("red train builder feedback (#1298)", () => {
     expect(decideTrainRedFeedbackTargets(base({ gateFailure: "red", failedSuites: ["x.test.ts"] }), [a])).toEqual([]);
   });
 
-  it("attribution falls back to all members when none owns a suite", () => {
+  it("attribution names nobody when none owns a suite", () => {
     const ms = [member("a", ["p"]), member("b", ["q"])];
-    expect(attributeTrainRedToMembers(["z"], ms)).toHaveLength(2);
+    expect(attributeTrainRedToMembers(["z"], ms)).toHaveLength(0);
     expect(attributeTrainRedToMembers(["q"], ms).map((m) => m.workspaceId)).toEqual(["b"]);
   });
 });

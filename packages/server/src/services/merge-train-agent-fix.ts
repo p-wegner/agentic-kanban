@@ -24,6 +24,8 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import type { MergeTrainAgentFixDto, MergeTrainAttemptDto } from "@agentic-kanban/shared/types";
 import type { MergeTrainAgentFixCaps } from "@agentic-kanban/shared/lib/merge-train-red-strategy";
+import type { Database } from "../db/index.js";
+import { getLeadIssueForMembersBlock } from "../repositories/workspace-issue-members.repository.js";
 import { invokeClaudePrompt, type ClaudeCliOptions } from "./claude-cli.service.js";
 
 /** What one gate run says, as far as the fix agent cares. */
@@ -39,6 +41,8 @@ export type TrainAgentRunner = (args: {
   prompt: string;
   timeoutMs: number;
   turn: number;
+  /** #1569: the steward's session from an earlier turn: resume it so its context (and cache) is reused. */
+  resumeSessionId?: string;
   /** #1431: with these the turn is placed like a session (a worker edits a checkout of the train tree). */
   projectId?: string;
   repoPath?: string;
@@ -49,6 +53,36 @@ export interface AgentFixMember {
   workspaceId: string;
   issueNumber?: number | null;
   branch: string;
+  /** #1569: the board's own ticket text, so the steward knows what each member is FOR. */
+  title?: string | null;
+  description?: string | null;
+  changedFiles?: readonly string[] | null;
+}
+
+const DESCRIPTION_LIMIT = 800;
+const CHANGED_FILES_LIMIT = 15;
+
+/** #1569: add the board's title and description to members that carry an `issueId`. Never throws. */
+export async function enrichMembersWithTickets<M extends AgentFixMember & { issueId?: string }>(members: readonly M[], database: Database): Promise<M[]> {
+  return Promise.all(members.map(async (m) => {
+    if (!m.issueId) return m;
+    const row = await getLeadIssueForMembersBlock(m.issueId, database).catch(() => undefined);
+    return row ? { ...m, title: row.title, description: row.description } : m;
+  }));
+}
+
+/** Pure: one member as the brief shows it (number, title, branch, trimmed description, changed files). */
+export function describeMemberForBrief(m: AgentFixMember): string {
+  const id = m.issueNumber != null ? `#${m.issueNumber}` : m.workspaceId.slice(0, 8);
+  const lines = [`- ${id}${m.title ? ` ${m.title}` : ""} (${m.branch})`];
+  const desc = (m.description ?? "").trim().replace(/\r?\n/g, "\n    ");
+  if (desc) lines.push(`    ${desc.length > DESCRIPTION_LIMIT ? `${desc.slice(0, DESCRIPTION_LIMIT)}...` : desc}`);
+  const files = m.changedFiles ?? [];
+  if (files.length > 0) {
+    const shown = files.slice(0, CHANGED_FILES_LIMIT).join(", ");
+    lines.push(`    changed files: ${shown}${files.length > CHANGED_FILES_LIMIT ? `, +${files.length - CHANGED_FILES_LIMIT} more` : ""}`);
+  }
+  return lines.join("\n");
 }
 
 /** The brief the agent is given: the failing suites, the output tail, the members, the scope. Pure. */
@@ -60,9 +94,8 @@ export function buildAgentFixBrief(args: {
   failureMessage: string;
   turn: number;
 }): string {
-  const members = args.members
-    .map((m) => `- ${m.issueNumber != null ? `#${m.issueNumber}` : m.workspaceId.slice(0, 8)} (${m.branch})`)
-    .join("\n");
+  // #1569: only the FIRST turn carries the members; the steward session already holds them after that.
+  const members = args.members.map(describeMemberForBrief).join("\n");
   const suites = args.failedSuites && args.failedSuites.length > 0
     ? args.failedSuites.map((s) => `- ${s}`).join("\n")
     : "- (the gate named none; read the output below)";
@@ -74,9 +107,7 @@ export function buildAgentFixBrief(args: {
     "Each member is green on its own branch; the combination is red, so the cause is usually an interaction",
     "between members (a shared ratchet, a widened type, a drifted snapshot, a duplicated declaration).",
     "",
-    "## Members",
-    members,
-    "",
+    ...(args.turn > 1 ? ["## Members", "(unchanged since your first brief)", ""] : ["## Members", members, ""]),
     "## Failing suites",
     suites,
     "",
@@ -92,6 +123,52 @@ export function buildAgentFixBrief(args: {
     "- Run the failing suite(s) to confirm, then COMMIT your change here (a plain commit on the current branch).",
     "- Do not create tickets or comments; just fix and commit.",
   ].join("\n");
+}
+
+/** #1569: how many times an infrastructure failure re-places the steward before the train is held. */
+export const STEWARD_MAX_INFRA_RETRIES = 2;
+
+/**
+ * #1569: a failure of the PLACEMENT, not of the work: the worker went away, the session never
+ * launched, or it ran for ~zero tokens. It says nothing about whether the gate can be fixed, so
+ * it never counts as a turn and never as a red verdict.
+ */
+export function isInfraFailure(reason: string): boolean {
+  return /disconnected|failed to launch|launch failed|could not (be )?(launch|place)|no worker|worker .*(offline|unavailable|lost)|ECONNRESET|ECONNREFUSED|zero tokens/i.test(reason);
+}
+
+type TurnErrorVerdict =
+  | { retry: true }
+  | { retry: false; infra: boolean; outcome: MergeTrainAgentFixDto["outcome"]; capped?: MergeTrainAgentFixDto["capped"]; reason: string };
+
+/** #1569: what one thrown agent turn means. `infraRetries` already counts this failure. */
+function classifyTurnError(reason: string, infraRetries: number): TurnErrorVerdict {
+  if (isInfraFailure(reason)) {
+    if (infraRetries <= STEWARD_MAX_INFRA_RETRIES) return { retry: true };
+    return { retry: false, infra: true, outcome: "held", reason: `steward could not be placed after ${infraRetries} attempts: ${reason}` };
+  }
+  if (/timed out/i.test(reason)) return { retry: false, infra: false, outcome: "capped", capped: "timeout", reason };
+  return { retry: false, infra: false, outcome: "red", reason };
+}
+
+const FIX_VERDICT: Record<MergeTrainAgentFixDto["outcome"], MergeTrainAttemptDto["verdict"]> = {
+  green: "agent_fix_green", capped: "agent_fix_capped", held: "agent_fix_held", red: "agent_fix_red",
+};
+
+/** The persisted `agentFix` facts of one run, plus the attempt verdict they map to. */
+function summarizeFixRun(r: Omit<MergeTrainAgentFixDto, "infraRetries" | "tokens" | "costUsd"> & { infraRetries: number; tokens: number; costUsd: number }) {
+  const agentFix: MergeTrainAgentFixDto = {
+    outcome: r.outcome,
+    ...(r.capped ? { capped: r.capped } : {}),
+    ...(r.sessionId ? { sessionId: r.sessionId } : {}),
+    ...(r.briefUrl ? { briefUrl: r.briefUrl } : {}),
+    durationMs: r.durationMs,
+    turns: r.turns,
+    ...(r.infraRetries > 0 ? { infraRetries: r.infraRetries } : {}),
+    ...(r.tokens > 0 ? { tokens: r.tokens } : {}),
+    ...(r.costUsd > 0 ? { costUsd: r.costUsd } : {}),
+  };
+  return { verdict: FIX_VERDICT[r.outcome], agentFix };
 }
 
 async function headSha(worktree: string): Promise<string> {
@@ -146,6 +223,7 @@ export async function runAgentFix(args: {
   let briefUrl: string | undefined;
   let failure = args.initialFailure;
   let lastGate: AgentFixGateVerdict | undefined;
+  let infraRetries = 0;
   let outcome: MergeTrainAgentFixDto["outcome"] = "red";
   let capped: MergeTrainAgentFixDto["capped"];
   let reason = "";
@@ -164,14 +242,18 @@ export async function runAgentFix(args: {
     try {
       const run = await args.runAgent({
         worktree, prompt: brief, timeoutMs: remaining, turn: turns,
+        ...(sessionId ? { resumeSessionId: sessionId } : {}),
         ...(args.placement ? { ...args.placement, baseBranch: args.baseBranch } : {}),
       });
       sessionId = run.sessionId ?? sessionId;
       tokens += run.tokens ?? 0;
       costUsd += run.costUsd ?? 0;
+      if (run.tokens === 0) throw new Error("steward session used zero tokens");
     } catch (err) {
-      reason = errorMessage(err).slice(0, 300);
-      if (/timed out/i.test(reason)) { outcome = "capped"; capped = "timeout"; } else { outcome = "red"; }
+      const verdict = classifyTurnError(errorMessage(err).slice(0, 300), infraRetries + 1);
+      if (verdict.retry) { infraRetries++; turns--; continue; } // #1569: re-place the steward; consumes no turn.
+      ({ outcome, capped, reason } = verdict);
+      if (verdict.infra) infraRetries++;
       break;
     }
     if (costUsd > caps.costCapUsd) { outcome = "capped"; capped = "cost"; reason = `fix agent cost $${costUsd.toFixed(2)} passed the $${caps.costCapUsd} cap`; break; }
@@ -191,16 +273,7 @@ export async function runAgentFix(args: {
     failure = { message: lastGate.message, failedSuites: lastGate.failedSuites };
   }
 
-  const verdict = outcome === "green" ? "agent_fix_green" : outcome === "capped" ? "agent_fix_capped" : "agent_fix_red";
-  const agentFix: MergeTrainAgentFixDto = {
-    outcome,
-    ...(capped ? { capped } : {}),
-    ...(sessionId ? { sessionId } : {}),
-    ...(briefUrl ? { briefUrl } : {}),
-    durationMs: Date.now() - startedMs,
-    ...(tokens > 0 ? { tokens } : {}),
-    ...(costUsd > 0 ? { costUsd } : {}),
-  };
+  const { verdict, agentFix } = summarizeFixRun({ outcome, capped, sessionId, briefUrl, durationMs: Date.now() - startedMs, turns, infraRetries, tokens, costUsd });
   const attempt: MergeTrainAttemptDto = {
     kind: "agent_fix",
     agentFix,
