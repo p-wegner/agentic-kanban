@@ -125,7 +125,7 @@ export function registerWorkerLifecycle(workerCmd: Command): void {
       .command(verb)
       .description(
         `Run ON THE WORKER MACHINE (#1443): ${verb} the running daemon (found through the state file) - no manual node-pid kill. ` +
-          `With --drain it first stops taking new sessions and waits for the running ones, then ${verb}s; without it, running agents are killed like Ctrl+C.`,
+          `With --drain it first stops taking new sessions and waits for the running ones, then ${verb}s (in-flight verify jobs count as running; a restart re-execs with the ORIGINAL start flags - to change flags, stop --drain and start again); without it, running agents are killed like Ctrl+C.`,
       )
       .option("--drain", `Let running sessions finish before the ${verb} (returns at once; follow with 'status')`)
       .option(...stateOpt)

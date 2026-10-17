@@ -648,7 +648,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         workerToken: () => identity.workerToken,
         workerVersion,
         log,
-        runningCount: () => runner.runningSessionIds().length,
+        runningCount: () => runner.runningSessionIds().length + (verifyJobs.capability().jobIds?.length ?? 0), // #1559
         settle: async () => { await runner.drainPushes(opts.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS); },
         drain: async () => {
           if (draining) return;
@@ -673,7 +673,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         boardUrl,
         workerVersion,
         log,
-        handlers: { updateNow: () => selfUpdate.updateNow(), status: () => selfUpdate.controlStatus(), ...opts.lifecycle?.({ stateFile, workRoot, boardUrl, draining: () => draining, sessionsLeft: () => runner.runningSessionIds().length, effective: () => ({ ...settings.effectiveOptions(opts), verifySlots }), pinned: () => settings.report().pinned, desired: () => settings.desired(), profiles: () => attestedProfiles().map((p) => `${p.provider}:${p.name}`), harnessMode: () => opts.harness?.mode, verify: () => ({ ...verifyJobs.capability(), jobs: verifyJobs.jobs() }) }) }, // #1443/#1451/#1479
+        handlers: { updateNow: () => selfUpdate.updateNow(), status: () => selfUpdate.controlStatus(), ...opts.lifecycle?.({ stateFile, workRoot, boardUrl, draining: () => draining, sessionsLeft: () => runner.runningSessionIds().length + (verifyJobs.capability().jobIds?.length ?? 0), /* #1559: a drain also waits for in-flight verify jobs */ effective: () => ({ ...settings.effectiveOptions(opts), verifySlots }), pinned: () => settings.report().pinned, desired: () => settings.desired(), profiles: () => attestedProfiles().map((p) => `${p.provider}:${p.name}`), harnessMode: () => opts.harness?.mode, verify: () => ({ ...verifyJobs.capability(), jobs: verifyJobs.jobs() }) }) }, // #1443/#1451/#1479
       })
     : null;
 
