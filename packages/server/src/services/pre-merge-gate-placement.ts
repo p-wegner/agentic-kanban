@@ -27,7 +27,22 @@ export function runVerifyChainForPlacement<T>(
     : runUnderVerifyChainSemaphoreTimed(chain, label, opts);
 }
 
-export type GateScriptRunner = (env: Record<string, string>) => Promise<SetupScriptResult>;
+/**
+ * #1555: the host's build semaphore bounds BUILDS ON THIS HOST. A gate placed on a worker must not
+ * queue behind it: #1550's worker-placed gate sat in phase `verify` for 40 min, never reaching
+ * `runOnPlannedWorker` (no `[verify-placement]` line), because the host's build slots were held by
+ * other work. A worker run is bounded by the worker's own verify slots (#1496), so it skips the
+ * host semaphore and starts at once.
+ */
+export function runInHostBuildSlotUnlessOnWorker<T>(
+  workerRun: unknown,
+  task: () => Promise<T>,
+  hostSemaphore: (task: () => Promise<T>) => Promise<T>,
+): Promise<T> {
+  return workerRun ? task() : hostSemaphore(task);
+}
+
+export type GateScriptRunner =(env: Record<string, string>) => Promise<SetupScriptResult>;
 
 export interface GateRunPlan {
   /** False = the gate is HELD (not red): nothing runs, the merge retries next cycle. */
