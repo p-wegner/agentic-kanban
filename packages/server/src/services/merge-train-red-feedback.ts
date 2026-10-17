@@ -22,7 +22,7 @@ function normalizePath(path: string): string {
 
 /**
  * Pure: which members a red train's failing suites implicate. #1569: NO fallback to everyone - a
- * red nobody owns is the steward's/operator's to hold, not 14 builders' to guess at.
+ * red nobody owns is the shepherd's/operator's to hold, not 14 builders' to guess at.
  */
 export function attributeTrainRedToMembers<M extends TrainMember>(failedSuites: readonly string[], members: readonly M[]): M[] {
   const suites = new Set(failedSuites.map(normalizePath).filter(Boolean));

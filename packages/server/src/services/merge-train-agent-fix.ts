@@ -41,7 +41,7 @@ export type TrainAgentRunner = (args: {
   prompt: string;
   timeoutMs: number;
   turn: number;
-  /** #1569: the steward's session from an earlier turn: resume it so its context (and cache) is reused. */
+  /** #1569: the shepherd's session from an earlier turn: resume it so its context (and cache) is reused. */
   resumeSessionId?: string;
   /** #1431: with these the turn is placed like a session (a worker edits a checkout of the train tree). */
   projectId?: string;
@@ -53,7 +53,7 @@ export interface AgentFixMember {
   workspaceId: string;
   issueNumber?: number | null;
   branch: string;
-  /** #1569: the board's own ticket text, so the steward knows what each member is FOR. */
+  /** #1569: the board's own ticket text, so the shepherd knows what each member is FOR. */
   title?: string | null;
   description?: string | null;
   changedFiles?: readonly string[] | null;
@@ -94,7 +94,7 @@ export function buildAgentFixBrief(args: {
   failureMessage: string;
   turn: number;
 }): string {
-  // #1569: only the FIRST turn carries the members; the steward session already holds them after that.
+  // #1569: only the FIRST turn carries the members; the shepherd session already holds them after that.
   const members = args.members.map(describeMemberForBrief).join("\n");
   const suites = args.failedSuites && args.failedSuites.length > 0
     ? args.failedSuites.map((s) => `- ${s}`).join("\n")
@@ -125,8 +125,8 @@ export function buildAgentFixBrief(args: {
   ].join("\n");
 }
 
-/** #1569: how many times an infrastructure failure re-places the steward before the train is held. */
-export const STEWARD_MAX_INFRA_RETRIES = 2;
+/** #1569: how many times an infrastructure failure re-places the shepherd before the train is held. */
+export const SHEPHERD_MAX_INFRA_RETRIES = 2;
 
 /**
  * #1569: a failure of the PLACEMENT, not of the work: the worker went away, the session never
@@ -144,8 +144,8 @@ type TurnErrorVerdict =
 /** #1569: what one thrown agent turn means. `infraRetries` already counts this failure. */
 function classifyTurnError(reason: string, infraRetries: number): TurnErrorVerdict {
   if (isInfraFailure(reason)) {
-    if (infraRetries <= STEWARD_MAX_INFRA_RETRIES) return { retry: true };
-    return { retry: false, infra: true, outcome: "held", reason: `steward could not be placed after ${infraRetries} attempts: ${reason}` };
+    if (infraRetries <= SHEPHERD_MAX_INFRA_RETRIES) return { retry: true };
+    return { retry: false, infra: true, outcome: "held", reason: `shepherd could not be placed after ${infraRetries} attempts: ${reason}` };
   }
   if (/timed out/i.test(reason)) return { retry: false, infra: false, outcome: "capped", capped: "timeout", reason };
   return { retry: false, infra: false, outcome: "red", reason };
@@ -248,12 +248,12 @@ export async function runAgentFix(args: {
       sessionId = run.sessionId ?? sessionId;
       tokens += run.tokens ?? 0;
       costUsd += run.costUsd ?? 0;
-      if (run.tokens === 0) throw new Error("steward session used zero tokens");
+      if (run.tokens === 0) throw new Error("shepherd session used zero tokens");
     } catch (err) {
       const verdict = classifyTurnError(errorMessage(err).slice(0, 300), infraRetries + 1);
-      if (verdict.retry) { infraRetries++; turns--; continue; } // #1569: re-place the steward; consumes no turn.
+      if (verdict.retry) { infraRetries++; turns--; continue; } // #1569: re-place the shepherd; consumes no turn.
       ({ outcome, capped, reason } = verdict);
-      if (verdict.infra) infraRetries++;
+      if (verdict.infra) { infraRetries++; turns--; } // the held outcome used no turn either.
       break;
     }
     if (costUsd > caps.costCapUsd) { outcome = "capped"; capped = "cost"; reason = `fix agent cost $${costUsd.toFixed(2)} passed the $${caps.costCapUsd} cap`; break; }

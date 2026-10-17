@@ -82,6 +82,7 @@ note: Ubiquitous language merged from the 15 module docs. Terms are defined AS T
 | **mergedAt / mergedHeadSha** | Timestamp + tip SHA stamped when the merge lands; survives branch deletion; a crash-recovery anchor. | review-merge, workspaces |
 | **Merge queue** | Ordered batch merge by least file-overlap, skip-on-conflict. | review-merge |
 | **Fix-and-merge** | Relaunch an agent in the worktree to resolve a conflict; workspace status `fixing`. | review-merge |
+| **Train shepherd** | The ONE persistent agent session per merge train that resolves member-vs-member conflicts and fixes a red train gate, reusing the same session (and cache) for every turn. Not the Steward (= Monitor Butler). | review-merge |
 | **Silent merge loss** | Issue marked Done but the branch never landed on the base — the lie the reconcilers hunt. | review-merge |
 | **Stranded review** | An idle, In-Review, not-ready, session-less workspace whose review handshake never fired. | review-merge |
 | **Reconciler** | An interval/startup job that repairs DB status drift from git reality (e.g. done-unmerged scanner). | review-merge, workspaces |

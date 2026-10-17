@@ -7,20 +7,20 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
 promote): read `docs/agent-guide/operator-reference.md` first.** Full console:
 `pnpm cli -- status --watch`. This line is standing; keep it when passes are archived.
 
-## #1569 train steward: PHASE 1 landed, remaining phases open (#691)
+## #1569 train shepherd: PHASE 1 landed, remaining phases open (#691)
 
 Done: brief carries each member's title/description/changed files (later turns omit them);
 infra failure (disconnect/launch/zero-token) re-places the turn without consuming it, bounded by
-`STEWARD_MAX_INFRA_RETRIES`, then the attempt is `agent_fix_held` (not red); a red train no
-member owns messages NO builder; `TrainSteward` + `mergeMembersWithSteward`
-(`merge-train-steward.ts`) are the tested session-reuse and conflict-resolution orchestration.
+`SHEPHERD_MAX_INFRA_RETRIES`, then the attempt is `agent_fix_held` (not red); a red train no
+member owns messages NO builder; `TrainShepherd` + `mergeMembersWithShepherd`
+(`merge-train-shepherd.ts`) are the tested session-reuse and conflict-resolution orchestration.
 **Not done (follow-up ticket #1572):** (1) incremental assembly (worktree at window
-open, merge per member) and calling `mergeMembersWithSteward` from `assembleMergeTrain`/
+open, merge per member) and calling `mergeMembersWithShepherd` from `assembleMergeTrain`/
 `merge-train-worktrees.ts` instead of `deferred`; (2) wiring the red gate through one shared
-`TrainSteward.runner` (today `runAgentFix` still gets the raw runner, `resumeSessionId` is passed
+`TrainShepherd.runner` (today `runAgentFix` still gets the raw runner, `resumeSessionId` is passed
 but the default one-shot runner ignores it); (3) a real placed-session runner reporting usage so
 the cost cap bites; (4) the held outcome in `merge-queue-train.ts` (at the 1000-line ceiling,
-needs an extraction first) plus the one attention line; (5) steward line in `status --watch`.
+needs an extraction first) plus the one attention line; (5) shepherd line in `status --watch`.
 
 ## 2026-10-17 morning: host rebooted 10:01 local, board back
 

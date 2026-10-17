@@ -133,7 +133,7 @@ export type MergeTrainAttemptVerdict =
   // #1277 — a fix-agent attempt: the re-gate on the fixed tree was green / red / never ran
   // (a cap tripped or the agent produced nothing).
   | "agent_fix_green" | "agent_fix_red" | "agent_fix_capped"
-  // #1569 — the steward could not run (worker disconnects/launch failures past the retry bound): inconclusive, not red.
+  // #1569 — the shepherd could not run (worker disconnects/launch failures past the retry bound): inconclusive, not red.
   | "agent_fix_held";
 
 /** #1277 — what a train's red-handling policy was, shown in the train detail. */
@@ -150,7 +150,7 @@ export interface MergeTrainAgentFixDto {
   /** The cap that tripped, when `outcome` is `capped`. */
   capped?: "timeout" | "cost" | "no-change";
   durationMs: number;
-  /** #1569: turns the steward consumed (infrastructure re-placements are not counted). */
+  /** #1569: turns the shepherd consumed (infrastructure re-placements are not counted). */
   turns?: number;
   /** #1569: re-placements after an infrastructure failure; they never consume a turn. */
   infraRetries?: number;
