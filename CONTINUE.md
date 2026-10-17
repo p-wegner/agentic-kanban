@@ -7,6 +7,24 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
 promote): read `docs/agent-guide/operator-reference.md` first.** Full console:
 `pnpm cli -- status --watch`. This line is standing; keep it when passes are archived.
 
+## 2026-10-17 evening: train 04 landed by hand, stable-20261017-3 live
+
+- **Stable = `stable-20261017-3` = 13e32b7d2** (promoted 16:41Z; fresh full rc sweep green, smoke
+  passed; rollback target `stable-20261017-2`). Promote ran in herdr pane w1:p61.
+- **Train 04 was landed by the operator** (13e32b7d2, 14 tickets #1550 #1554 #1556-#1560 #1564-#1566
+  #1568 #1570 #1571 #1573) after trains 01-04 went red on the board for 5 h. Verified in
+  `.worktrees/agentic-kanban/manual-train-04`: check:arch, typecheck, file-scoped tests + all
+  guards. The board closed the members via `hand-merged-branch-reconciler`. Recipe and what goes
+  wrong in board trains: `docs/agent-guide/merge-trains.md`.
+- #1551 landed through the board afterwards (0509b9a26), not in this stable tag.
+- **Why trains failed:** every train ran the full suite (#1574: any new test file counts as a stale
+  impact map), sprint members reach the train without running guard ratchets (#1575), red handling
+  skipped the fix agent / fanned out to every builder (#1573, landed), a false missing-deps retry
+  (#1570, landed), lost failure output (#1571, landed), worker reports 0 failing suites (#1580).
+- **Train shepherd** (#1569 phase 1 landed earlier, #1572 phase 2): one persistent agent per train.
+  Name is "shepherd"; "Steward" is the Monitor Butler.
+- Master is ~18 commits ahead of origin, **not pushed**.
+
 ## 2026-10-17 morning: host rebooted 10:01 local, board back
 
 - `pnpm stable:start` brought `stable-20261017-2` back (smoke passed). All three workers online;
