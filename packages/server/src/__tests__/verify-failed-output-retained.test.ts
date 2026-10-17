@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -42,8 +42,8 @@ describe("worker failed-run log retention (#1571)", () => {
     const root = tmp();
     const store = createFileVerifyResultStore(root);
     for (let i = 0; i < VERIFY_FAILED_LOG_KEEP + 3; i++) store.saveFailedLog!(`job-${i}`, `out ${i}`);
-    const logs = readdirSync(join(root, "verify-results-retained")).filter((f) => f.endsWith(".log"));
-    expect(logs).toHaveLength(VERIFY_FAILED_LOG_KEEP);
+    const written = Array.from({ length: VERIFY_FAILED_LOG_KEEP + 3 }, (_, i) => join(root, "verify-results-retained", `job-${i}.log`));
+    expect(written.filter((f) => existsSync(f))).toHaveLength(VERIFY_FAILED_LOG_KEEP);
   });
 
   it("is not removed with the verdict", () => {
