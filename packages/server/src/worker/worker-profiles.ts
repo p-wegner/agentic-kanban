@@ -52,6 +52,7 @@ import type {
   WorkerLaunchSpec,
   WorkerProfileAttestation,
   WorkerProfileCredentialState,
+  WorkerUnattestedProfile,
 } from "@agentic-kanban/shared/lib/worker-protocol";
 
 /** `--profiles none` — an explicit "attest nothing", distinct from "flag absent". */
@@ -96,6 +97,8 @@ export interface WorkerProfileAttestor {
    * (every OAuth profile when none is named) `auth-expired` until its credentials file changes.
    */
   markAuthExpired(profile?: string): void;
+  /** #1565: discovered profiles this worker does not attest (filtered by `--profiles`) or whose credentials are dead. Names only. */
+  unattested(nowMs?: number): WorkerUnattestedProfile[];
 }
 
 /** Output of a claude session whose login is dead (the result line, or the raw CLI error). */
@@ -177,7 +180,8 @@ export function createWorkerProfileAttestor(
   options: WorkerProfileAttestorOptions = {},
 ): WorkerProfileAttestor {
   const log = options.log ?? ((line: string) => workerLog(line));
-  const attested = narrowDeclaredProfiles(discoverLocalProfiles(options.home, options.aliases), options.declared, log);
+  const discoveredAll = discoverLocalProfiles(options.home, options.aliases);
+  const attested = narrowDeclaredProfiles(discoveredAll, options.declared, log);
   const pollable = quotaPollableProfiles(attested);
   const poller = new OAuthQuotaPoller({
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
@@ -229,6 +233,15 @@ export function createWorkerProfileAttestor(
             : {}),
         };
       });
+    },
+    unattested(nowMs: number = Date.now()): WorkerUnattestedProfile[] {
+      const out: WorkerUnattestedProfile[] = [];
+      for (const p of discoveredAll) {
+        if (attested.some((a) => a.provider === p.provider && a.name === p.name)) continue;
+        const dir = p.kind === "claude-config-dir" ? p.path : undefined;
+        out.push({ provider: p.provider, name: p.name, state: (dir && credentialStateOf(dir, nowMs)) || "filtered" });
+      }
+      return out;
     },
     markAuthExpired(profile?: string): void {
       for (const [name, dir] of configDirOf) {

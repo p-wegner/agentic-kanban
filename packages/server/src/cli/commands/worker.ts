@@ -18,7 +18,7 @@ import { repinLegacyShim } from "../../worker/worker-repin.js";
 import { applyWorkerUpdate } from "../../worker/worker-control.js";
 import type { WorkerUpdateReport } from "../../lib/worker-update.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "../../worker/worker-repo.js";
-import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
+import { SHARES_FILESYSTEM_LABEL, type WorkerProfileAttestation, type WorkerUnattestedProfile } from "@agentic-kanban/shared/lib/worker-protocol"; import { profilesSuffix } from "../../lib/worker-profile-attestation.js";
 // #879 — pure, so it stays safe for the standalone worker binary (no db graph).
 import { formatBuildFreshness, type WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -694,7 +694,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         process.exit(1);
       }
       const body = await res.json() as {
-        workers: Array<{ id: string; name: string; effectiveStatus: string; status: string; os: string | null; labels: string | null; maxConcurrency: number; concurrency?: { mode: string; reason: string }; lastHeartbeatAt: string | null; protocolVersion?: number; workerVersion?: string; buildFreshness?: WorkerBuildFreshness; update?: WorkerUpdateReport; updateRequested?: boolean; toolchainInstall?: { state: string; toolchains: string[]; reason?: string } }>;
+        workers: Array<{ id: string; name: string; effectiveStatus: string; status: string; os: string | null; labels: string | null; maxConcurrency: number; concurrency?: { mode: string; reason: string }; lastHeartbeatAt: string | null; protocolVersion?: number; workerVersion?: string; buildFreshness?: WorkerBuildFreshness; update?: WorkerUpdateReport; updateRequested?: boolean; toolchainInstall?: { state: string; toolchains: string[]; reason?: string }; profiles?: WorkerProfileAttestation[]; unattestedProfiles?: WorkerUnattestedProfile[] }>;
         fleet?: { boardWorkerVersion?: string | null };
       };
       if (options.json) {
@@ -712,7 +712,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         // distinct: ahead is a normal dev-machine state), and a `?` build gets no verdict.
         const freshness = formatBuildFreshness(w.buildFreshness, body.fleet?.boardWorkerVersion);
         const build = ` protocol=${w.protocolVersion ?? "?"} build=${w.workerVersion ?? "?"}${freshness ? ` (${freshness})` : ""}${formatUpdateState(w.update, w.updateRequested)}${formatToolchainInstall(w.toolchainInstall)}`;
-        console.log(`  ${w.name} [${w.effectiveStatus}] id=${w.id} os=${w.os ?? "?"} maxConcurrency=${w.maxConcurrency}${w.concurrency ? ` (${w.concurrency.reason})` : ""}${labels}${build} lastHeartbeat=${w.lastHeartbeatAt ?? "never"}`);
+        console.log(`  ${w.name} [${w.effectiveStatus}] id=${w.id} os=${w.os ?? "?"} maxConcurrency=${w.maxConcurrency}${w.concurrency ? ` (${w.concurrency.reason})` : ""}${labels}${build} lastHeartbeat=${w.lastHeartbeatAt ?? "never"}${profilesSuffix(w.profiles, w.unattestedProfiles)}`);
       }
       console.log("\nRetire a worker with: agentic-kanban worker revoke <workerId|name>");
     });

@@ -238,3 +238,19 @@ export function attestedProfilePlacementFields(
   }
   return { profile: chosen.profile };
 }
+
+/** #1565: the roster entries the project permits (name+provider), [] when it restricts nothing. */
+export async function permittedProfilesOf(projectId: string, database: Database): Promise<Array<{ provider: string; name: string }>> {
+  const prefMap = toPrefMap(await getAllPreferencesCached(database).catch(() => []));
+  const project = await getProjectById(projectId, database).catch(() => null);
+  const roster = resolveProjectRoster({
+    globalRoster: loadObservedGlobalRoster({
+      claudeRingRaw: prefMap.get(PREF_CLAUDE_SUBSCRIPTION_RING),
+      codexRingRaw: prefMap.get(PREF_CODEX_LICENSE_RING),
+    }),
+    rosterRaw: prefMap.get(rosterPrefKey(projectId)),
+    allowlistRaw: prefMap.get(allowedProfilesPrefKey(projectId)),
+    projectSlug: project?.name ?? null,
+  });
+  return roster.restricted ? roster.entries.filter((e) => e.role !== "forbidden").map((e) => ({ provider: e.provider, name: e.name })) : [];
+}

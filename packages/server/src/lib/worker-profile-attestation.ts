@@ -37,7 +37,7 @@
  * PURE and client-safe (no node builtins): the Worker Fleet panel previews the same
  * answer the resolver will make.
  */
-import type { WorkerProfileAttestation } from "@agentic-kanban/shared/lib/worker-protocol";
+import type { WorkerProfileAttestation, WorkerUnattestedProfile } from "@agentic-kanban/shared/lib/worker-protocol";
 import type { ParsedRoster, ProfileRole, RosterEntry } from "@agentic-kanban/shared/lib/profile-roster";
 import {
   DEFAULT_PROFILE_ROLE,
@@ -225,4 +225,53 @@ export function selectAttestedWorkers(
       usedReserve: result.usedReserve,
     };
   });
+}
+
+/** #1565: `ao-pf38 anth ✓ · team5x filtered · team5x_3 expired` - what a worker attests and what it found but does not. */
+export function describeWorkerProfiles(
+  attested: readonly WorkerProfileAttestation[] | null | undefined,
+  unattested: readonly WorkerUnattestedProfile[] | null | undefined,
+): string {
+  return [
+    ...(attested ?? []).map((p) => (p.credentials ? `${p.name} ${p.credentials}` : `${p.name} ✓`)),
+    ...(unattested ?? []).map((p) => `${p.name} ${p.state}`),
+  ].join(" · ");
+}
+
+/**
+ * #1565: a worker whose every attested profile for `provider` has a credentials problem (any state, not only
+ * `auth-expired`) can run nothing for it. Returns `name state` pairs; empty = the worker still has a usable login.
+ */
+export function credentialProblemProfiles(
+  profiles: readonly WorkerProfileAttestation[] | null | undefined,
+  provider: string,
+): string[] {
+  const mine = (profiles ?? []).filter((p) => p.provider === provider);
+  return mine.length > 0 && mine.every((p) => p.credentials !== undefined) ? mine.map((p) => `${p.name} ${p.credentials}`) : [];
+}
+
+/**
+ * #1565: one line per (worker, permitted profile) pair where the project's `allowed_profiles` names a profile the
+ * worker DISCOVERED but does not attest - the worker is online and could widen its set, but nobody has told it to.
+ */
+export function unattestedAllowedProfileLines(
+  workers: ReadonlyArray<{ name: string; profiles?: readonly WorkerProfileAttestation[] | null; unattestedProfiles?: readonly WorkerUnattestedProfile[] | null }>,
+  permitted: ReadonlyArray<{ provider: string; name: string }>,
+): string[] {
+  const out: string[] = [];
+  for (const w of workers) {
+    const missing = (w.unattestedProfiles ?? [])
+      .filter((u) => u.state === "filtered" && permitted.some((p) => p.name === u.name && p.provider === u.provider))
+      .map((u) => u.name);
+    if (missing.length > 0) {
+      out.push(`${w.name}: allowed profile(s) ${missing.join(", ")} found but not attested - widen the worker's attested profiles (Settings > Workers)`);
+    }
+  }
+  return out;
+}
+
+/** #1565: `\n    profiles: anth ✓ · team5x filtered` for `worker list`; empty when the worker reports none. */
+export function profilesSuffix(attested?: WorkerProfileAttestation[], unattested?: WorkerUnattestedProfile[]): string {
+  const text = describeWorkerProfiles(attested, unattested);
+  return text ? `\n    profiles: ${text}` : "";
 }

@@ -6,6 +6,8 @@ export interface WorkerSettingsFormState {
   labels: string;
   providers: string;
   profileAlias: string;
+  /** #1565: attested profiles; empty = every discovered login. */
+  profiles: string;
   allowedProjects: string[];
   deniedProjects: string[];
   drain: boolean;
@@ -28,6 +30,7 @@ export function formFromWorker(
     labels: (desired?.labels ?? current.labels).join(", "),
     providers: (desired?.providers ?? current.providers).join(", "),
     profileAlias: (desired?.profileAlias ?? []).join(", "),
+    profiles: (desired?.profiles ?? []).join(", "),
     allowedProjects: desired?.allowedProjects ?? [],
     deniedProjects: desired?.deniedProjects ?? [],
     drain: desired?.drain === true,
@@ -64,6 +67,7 @@ export function settingsFromForm(form: WorkerSettingsFormState): { settings: Wor
       labels: splitCsv(form.labels),
       providers: splitCsv(form.providers),
       profileAlias: aliases,
+      profiles: splitCsv(form.profiles),
       allowedProjects: form.allowedProjects,
       deniedProjects: form.deniedProjects,
       drain: form.drain,

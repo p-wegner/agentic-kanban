@@ -1,5 +1,5 @@
 import { isInFlightStatusName, type BoardStatusIssue, BoardStatusResponse, MergeTrainRowDto, MergeTrainsResponse } from "@agentic-kanban/shared";
-import { authExpiredProfileNames, describeAuthExpired } from "../lib/worker-profile-attestation.js";
+import { authExpiredProfileNames, credentialProblemProfiles, describeAuthExpired, describeWorkerProfiles } from "../lib/worker-profile-attestation.js";
 import type { MergeTrainWindowResponse } from "@agentic-kanban/shared";
 import { applyConsoleExtras, type ConsoleBaseHealth, type ConsoleChain, type ConsoleConnectCode, type ConsoleExtrasPayload, type ConsoleMergeHold, type ConsoleRc } from "./status-console-extras.js";
 
@@ -34,6 +34,8 @@ export interface ConsoleWorker {
   freeDiskGb?: number | null;
   /** #1426: the claude login is dead — online but cannot run anything. */
   authExpired?: boolean;
+  /** #1565: `anth ✓ · team5x filtered` - attested profiles and the discovered-but-unattested ones. */
+  profiles?: string;
   /** #1443: settings keys the worker's start flags pin; `desiredPending` while the board's desired set is not yet applied. */
   pinned?: string[];
   desiredPending?: boolean;
@@ -171,6 +173,17 @@ function parseEvidence(row: MergeTrainRowDto, refOf: (workspaceId: string) => st
   };
 }
 
+/** #1565: expired/missing credentials (not only a refused session) also leave an online worker with nothing to run. */
+function pushCredentialProblem(w: Record<string, any>, workers: ConsoleWorker[], attention: ConsoleAttention[]): void {
+  if (w.effectiveStatus !== "online") return;
+  const bad = credentialProblemProfiles(w.profiles ?? w.attestedProfiles, "claude");
+  if (bad.length === 0) return;
+  const name = String(w.name ?? w.workerId ?? w.id ?? "?");
+  const row = workers.find((x) => x.name === name);
+  if (row) row.authExpired = true;
+  attention.push({ level: "red", text: `${name}: claude credentials unusable (${bad.join(", ")}) - re-login or copy credentials` });
+}
+
 export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
   const { status, nowMs } = p;
   const dayStart = new Date(nowMs); dayStart.setHours(0, 0, 0, 0);
@@ -194,6 +207,7 @@ export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
     pinned: w.settingsReport?.pinned ?? [],
     ...(typeof w.concurrency?.mode === "string" ? { concurrencyMode: w.concurrency.mode } : {}),
     ...(typeof w.concurrency?.hold === "string" ? { concurrencyHold: w.concurrency.hold } : {}),
+    ...(describeWorkerProfiles(w.profiles ?? w.attestedProfiles, w.unattestedProfiles) ? { profiles: describeWorkerProfiles(w.profiles ?? w.attestedProfiles, w.unattestedProfiles) } : {}),
     desiredPending: w.desiredSettings != null && w.settingsReport?.appliedRev !== w.desiredSettings?.rev,
     ...(w.toolchainInstall && typeof w.toolchainInstall.state === "string"
       ? { toolchainInstall: { state: w.toolchainInstall.state, toolchains: w.toolchainInstall.toolchains ?? [], reason: w.toolchainInstall.reason } }
@@ -216,12 +230,12 @@ export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
 
   // #1426: a worker whose claude login is dead is online and attests profiles, but cannot run anything.
   for (const w of p.workers?.workers ?? []) {
-    const expired = authExpiredProfileNames(w.attestedProfiles, "claude");
+    const expired = authExpiredProfileNames((w.profiles ?? w.attestedProfiles), "claude");
     if (expired.length > 0) {
       const row = workers.find((x) => x.name === String(w.name ?? w.workerId ?? w.id ?? "?"));
       if (row) row.authExpired = true;
       attention.push({ level: "red", text: describeAuthExpired(String(w.name ?? w.id ?? "?"), "claude", expired) });
-    }
+    } else pushCredentialProblem(w, workers, attention);
   }
 
   const refOf = (workspaceId: string): string => {

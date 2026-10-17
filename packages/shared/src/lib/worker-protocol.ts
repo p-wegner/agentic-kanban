@@ -12,8 +12,7 @@ export { parseWorkerCommitterIdentity, parseWorkerPackageManagers, type WorkerCo
 export * from "./worker-doctor-summary.js";
 import { parseWorkerDoctorSummary, type WorkerDoctorSummary } from "./worker-doctor-summary.js";
 export * from "./worker-profile-attestation.js";
-import { parseWorkerProfileAttestations, type WorkerProfileAttestation } from "./worker-profile-attestation.js";
-
+import { parseWorkerProfileAttestations, parseWorkerUnattestedProfiles, type WorkerProfileAttestation, type WorkerUnattestedProfile } from "./worker-profile-attestation.js";
 import { parseOneShotRequest, parseOneShotResult, type WorkerOneShotRequest, type WorkerOneShotResult } from "./worker-oneshot.js"; // #1431
 export * from "./worker-oneshot.js";
 import { isServiceFrameType, parseServiceBoardFrame, parseServiceWorkerFrame, type WorkerServiceBoardFrame, type WorkerServiceWorkerFrame } from "./worker-services.js"; export * from "./worker-services.js"; // #1447
@@ -435,6 +434,7 @@ export interface WorkerCapabilities {
    * it. Absence is never read as "any profile".
    */
   profiles?: WorkerProfileAttestation[];
+  unattestedProfiles?: WorkerUnattestedProfile[]; // #1565: discovered but not attested; display + attention only
   /** #1369: package managers on this machine's PATH. Absent = unknown (older worker). */
   packageManagers?: WorkerPackageManagers;
   toolchainInstall?: WorkerToolchainInstallInfo; // #1371: install policy + allowlist + whether mise is present
@@ -509,7 +509,7 @@ export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | unde
       ? rec.maxConcurrency
       : undefined;
   const capacity = parseWorkerCapacityInfo(rec.capacity);
-  const profiles = parseWorkerProfileAttestations(rec.profiles);
+  const profiles = parseWorkerProfileAttestations(rec.profiles); const unattestedProfiles = parseWorkerUnattestedProfiles(rec.unattestedProfiles);
   const packageManagers = parseWorkerPackageManagers(rec.packageManagers);
   const toolchains = parseWorkerToolchains(rec.toolchains);
   const toolchainInstall = parseWorkerToolchainInstallInfo(rec.toolchainInstall);
@@ -521,7 +521,7 @@ export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | unde
     labels === undefined &&
     providers === undefined &&
     maxConcurrency === undefined &&
-    capacity === undefined && profiles === undefined && packageManagers === undefined && toolchains === undefined && toolchainInstall === undefined && providerNotice === undefined &&
+    capacity === undefined && profiles === undefined && unattestedProfiles === undefined && packageManagers === undefined && toolchains === undefined && toolchainInstall === undefined && providerNotice === undefined &&
     doctor === undefined && verify === undefined && harnessMode === undefined
   ) {
     return undefined;
@@ -533,7 +533,7 @@ export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | unde
     ...(providers ? { providers } : {}),
     ...(maxConcurrency !== undefined ? { maxConcurrency } : {}),
     ...(capacity ? { capacity } : {}),
-    ...(profiles ? { profiles } : {}),
+    ...(profiles ? { profiles } : {}), ...(unattestedProfiles ? { unattestedProfiles } : {}),
     ...(packageManagers ? { packageManagers } : {}),
     ...(providerNotice ? { providerNotice } : {}),
     ...(doctor ? { doctor } : {}),

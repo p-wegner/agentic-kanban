@@ -17,6 +17,8 @@ import {
   landIncomingRef,
   discardIncomingRef,
 } from "../services/worker-incoming-refs.service.js";
+import { permittedProfilesOf } from "../services/worker-profile-placement.service.js";
+import { unattestedAllowedProfileLines } from "../lib/worker-profile-attestation.js";
 import { buildConsoleExtras } from "../services/console-extras.service.js";
 import { listActiveVerifyJobs } from "../services/verify-worker-runner.service.js";
 import {
@@ -208,7 +210,11 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
   router.get("/console", async (c) => {
     const projectId = c.req.query("projectId");
     if (!projectId) throw new UnprocessableError("projectId is required");
-    return c.json(await buildConsoleExtras(projectId, database));
+    // #1565: allowed profiles a worker found but does not attest, as attention lines.
+    const permitted = await permittedProfilesOf(projectId, database).catch(() => []);
+    const views = permitted.length > 0 ? await reg.listWorkersView().catch(() => []) : [];
+    const profileAttention = unattestedAllowedProfileLines(views.filter((w) => w.effectiveStatus === "online").map((w) => ({ name: w.name, profiles: w.profiles, unattestedProfiles: w.unattestedProfiles })), permitted);
+    return c.json({ ...(await buildConsoleExtras(projectId, database)), profileAttention });
   });
 
   // #1382: what the project's repo files suggest for `required_toolchains` (lockfile, gradlew,
