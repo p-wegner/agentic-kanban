@@ -37,6 +37,14 @@ export interface ClaudeCliOptions {
    * fast-forwarding `cwd`. Omit for a prompt that needs no files.
    */
   repo?: OneShotRepoContext;
+  /**
+   * #1572: ask for the provider's JSON result (session id + usage + cost) and resume a prior session.
+   * The returned string is then that JSON; `parseOneShotJsonResult` reads it. Claude only.
+   */
+  json?: boolean;
+  resumeSessionId?: string;
+  /** #1572: told which fleet worker a placed run landed on (not called for a host run). */
+  onPlacement?: (info: { worker: string }) => void;
 }
 
 /**
@@ -74,6 +82,7 @@ export async function invokeClaudePrompt(
     provider: toExecutorProvider(providerName),
     oneShotText: true,
     ...(allowEdits ? { oneShotAllowEdits: true } : {}),
+    ...(opts.json ? { oneShotJson: true, ...(opts.resumeSessionId ? { oneShotResumeId: opts.resumeSessionId } : {}) } : {}),
     agentCommand,
     model,
     ...(profileName ? { profile: { provider: providerName, name: profileName } } : {}),
@@ -85,7 +94,10 @@ export async function invokeClaudePrompt(
       database, projectId: opts.projectId, providerName, config: launch, prompt, timeoutMs: timeout, cwd, allowEdits,
       ...(opts.repo ? { repo: opts.repo } : {}), explicitCommand: Boolean(agentCommand) || Boolean(launch.isMockAgent),
     });
-    if (placed.handled) return placed.text;
+    if (placed.handled) {
+      if (placed.worker) opts.onPlacement?.({ worker: placed.worker });
+      return placed.text;
+    }
   }
 
   return new Promise<string>((resolve, reject) => {

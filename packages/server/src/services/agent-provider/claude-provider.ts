@@ -7,6 +7,12 @@ import { BUILDER_CONTEXT_SETTING_SOURCES } from "./builder-context.js";
 import { leanProfileArgs, leanProfileEnv } from "./builder-lean-profile.js";
 import { getMcpConfigPath, buildSpawnEnv, spliceAgentArgs, nodeFileSystem, profileDefinesCustomEndpoint, resolveMockLaunch, commandCarriesArgs } from "./helpers.js";
 
+/** One-shot output format: plain text, or (#1572) the JSON result with session id and usage, optionally resuming a session. */
+function oneShotFormatArgs(options: { oneShotJson?: boolean; oneShotResumeId?: string }): string[] {
+  if (!options.oneShotJson) return ["--output-format", "text"];
+  return ["--output-format", "json", ...(options.oneShotResumeId ? ["--resume", options.oneShotResumeId] : [])];
+}
+
 export class ClaudeProvider implements AgentProvider {
   readonly name = "claude";
   readonly profilePrefKey = "claude_profile";
@@ -56,7 +62,7 @@ export class ClaudeProvider implements AgentProvider {
     // prompt from stdin and printing the final answer. This is the launch path
     // `invokeClaudePrompt` used to reimplement outside the provider abstraction.
     if (oneShotText && !isMockAgent) {
-      const textArgs: string[] = ["--output-format", "text"];
+      const textArgs: string[] = oneShotFormatArgs(options);
       if (model && !profileDefinesCustomEndpoint(effectiveProfileName, this.fs)) {
         textArgs.push("--model", model);
       }

@@ -422,6 +422,12 @@ export async function runMergeTrain(args: {
    */
   signal?: AbortSignal;
   /**
+   * #1572 — how an attempt assembles its tree. Defaults to the ref-only `assembleMergeTrain`; the
+   * queue passes the shepherd's incremental assembly for the WHOLE train, so a member-vs-member
+   * conflict is resolved by the shepherd instead of deferred. Bisect halves get the default.
+   */
+  assemble?: typeof assembleMergeTrain;
+  /**
    * #1277 — the project's red-handling strategy. The fix agent itself runs inside `runGate` (it
    * needs the gate's installed worktree); this only decides what happens AFTER it: under
    * `agent-fix` a red root attempt is final (no control arm, no bisect), otherwise the search
@@ -692,10 +698,12 @@ async function runTrainAttempt(args: {
   waitForLandTurn?: Promise<void>;
   /** #1203 — see `runMergeTrain`'s doc comment; only read here to classify a killed gate. */
   signal?: AbortSignal;
+  /** #1572 — see `runMergeTrain`'s doc comment. */
+  assemble?: typeof assembleMergeTrain;
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, trainId, runGate, closeMember } = args;
 
-  const asm = await assembleMergeTrain({ repoPath, baseBranch, members, label });
+  const asm = await (args.assemble ?? assembleMergeTrain)({ repoPath, baseBranch, members, label });
   if (asm.dropped.length > 0 && args.onDropped) {
     await args.onDropped(asm.dropped, { trainRef: asm.trainRef, tipSha: asm.baseSha })
       .catch((err) => console.warn(`[merge-train] ${label}: send-back of dropped members failed (non-fatal): ${errorMessage(err).slice(0, 200)}`));

@@ -38,9 +38,12 @@ import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanb
 import { randomUUID } from "node:crypto";
 import { acquireQueueRepoLock, createSuspendableRepoLock, MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS } from "./merge-queue-repo-lock.js";
 import type { MergeQueueEvent, MergeQueuePlan } from "./merge-queue.service.js";
-import type { MergeTrainAttemptDto, MergeTrainBaseVerdict, MergeTrainGateEvidenceDto } from "@agentic-kanban/shared/types";
+import type { MergeTrainAttemptDto, MergeTrainBaseVerdict, MergeTrainGateEvidenceDto, MergeTrainShepherdDto } from "@agentic-kanban/shared/types";
 import { resolveMergeTrainRedPolicy, type MergeTrainRedPolicy } from "@agentic-kanban/shared/lib/merge-train-red-strategy";
-import { createOneShotAgentRunner, describeAgentFixFinished, enrichMembersWithTickets, runAgentFix, type AgentFixGateVerdict, type AgentFixOutcome, type TrainAgentRunner } from "./merge-train-agent-fix.js";
+import { type AgentFixGateVerdict, type AgentFixOutcome, type TrainAgentRunner } from "./merge-train-agent-fix.js";
+import { createPlacedSessionRunner } from "./merge-train-session-runner.js";
+import { buildTrainOnRed, createTrainShepherdKit } from "./merge-train-shepherd-wiring.js";
+import { recordMergeTrainShepherd } from "../repositories/merge-train.repository.js";
 import { getBaseBranchHealthForSha, isBaseHealthAnswer } from "../repositories/base-branch-health.repository.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
@@ -431,7 +434,7 @@ async function runTrainStagingGate(args: {
     let agentFix: TrainStagingGateResult["agentFix"];
     // #1413: a watchdog kill / timeout / held run (`timedOut`, `held`) is inconclusive, not red —
     // there is nothing for a fix agent to fix, so it never gets one.
-    const inconclusive = isInconclusiveGate(gate);
+    let inconclusive = isInconclusiveGate(gate);
     if (!gate.passed && !inconclusive && args.onRed && !signal?.aborted) {
       const fix = await args.onRed({
         gateWorktree,
@@ -443,6 +446,8 @@ async function runTrainStagingGate(args: {
         },
       });
       if (fix) agentFix = { attempt: fix.attempt, ...(fix.fixedTrainSha ? { fixedTrainSha: fix.fixedTrainSha } : {}) };
+      // #1572: a shepherd that could not be placed (infra) says nothing about the code: inconclusive, never red.
+      if (fix?.attempt.verdict === "agent_fix_held") inconclusive = true;
     }
     // #1585: the fix agent's re-gate can be the held/cancelled one — judge the LATEST verdict.
     const finalInconclusive = isInconclusiveGate(gate);
@@ -538,39 +543,6 @@ async function gateBaseAloneOnce(args: {
 }
 
 /**
- * #1277 — the fix-agent hook for ONE attempt's staging gate, or undefined when this attempt gets
- * none. Only the WHOLE train's gate (`attemptLabel === label`) is ever fixed: a bisect half is
- * already a search, and the fix agent is the alternative to starting one. A missing-dependency red
- * is the staging worktree's environment (#1154), which no code edit repairs.
- */
-export function buildTrainOnRed(args: {
-  policy: MergeTrainRedPolicy;
-  agentRunner: TrainAgentRunner;
-  label: string;
-  attemptLabel: string;
-  baseBranch: string;
-  included: ReadonlyArray<{ workspaceId: string }>;
-  members: ReadonlyArray<{ workspaceId: string; branch: string; issueNumber?: number | null; issueId?: string; changedFiles?: readonly string[] }>; database: Database;
-  /** #1431: where the fix agent's turn may be placed (a worker edits a checkout of the train tree). */
-  placement: { projectId: string; repoPath: string };
-}): Parameters<typeof runTrainStagingGate>[0]["onRed"] {
-  const { policy, label, attemptLabel } = args;
-  if (!policy.agentFix || attemptLabel !== label) return undefined;
-  const aboard = args.included.flatMap((m) => args.members.filter((x) => x.workspaceId === m.workspaceId));
-  return async ({ gateWorktree, message, failedSuites, regate }) => {
-    // #1573: a retry that still names failing suites is a real red, whatever the message says.
-    if (looksLikeMissingDepsFailure(message) && !failedSuites?.length) return null;
-    console.log(`[merge-train] ${label}: gate RED - spawning the fix agent in ${gateWorktree} (strategy ${policy.strategy}, timeout ${policy.caps.timeoutMs}ms, ${policy.caps.maxTurns} turn(s))`);
-    const outcome = await runAgentFix({
-      worktree: gateWorktree, label, baseBranch: args.baseBranch, members: await enrichMembersWithTickets(aboard, args.database),
-      initialFailure: { message, failedSuites }, caps: policy.caps, runAgent: args.agentRunner, regate, placement: args.placement,
-    });
-    console.log(`[merge-train] ${describeAgentFixFinished(label, outcome, policy.bisectAfter)}`);
-    return outcome;
-  };
-}
-
-/**
  * Acquire the repo lock and run the gated train, treating a repo-lock timeout and a THROW out
  * of `runMergeTrain` as the same shape of failure: a train job that died before finishing.
  * Both used to be handled differently (see the #1215 call-site comment) — this is the ONE place
@@ -607,7 +579,7 @@ async function runDoomedTrainJob(args: {
   agentRunner: TrainAgentRunner;
   /** #1463 — flush mode: arch+typecheck gate, no bisect, no fix agent, no train review, tag after landing. */
   flush?: FlushRunSpec;
-}): Promise<{ ok: true; result: Awaited<ReturnType<typeof runMergeTrain>> } | { ok: false; reason: string }> {
+}): Promise<{ ok: true; result: Awaited<ReturnType<typeof runMergeTrain>>; shepherd?: MergeTrainShepherdDto } | { ok: false; reason: string }> {
   const { database, boardEvents, reconcileAlreadyMerged, sendTurn, reviewTrain, repoPath, baseBranch, members, label, trainId, projectId, reviewEvidenceRef, abortController, onDropped, agentRunner, flush } = args;
 
   // #1568: held for assembly and landing only — released while a gate runs, like a single
@@ -629,9 +601,12 @@ async function runDoomedTrainJob(args: {
   }
   // #1503: the suspendable lock heartbeats while held and frees itself the moment an operator cancels.
   noteMergeTrainGateActivity(trainId, false); // #1513: restart the idle clock now the repo lock is held
+  let kit: ReturnType<typeof createTrainShepherdKit> | undefined;
   try {
     // #1277: the project's red-handling policy, read once per train through the preference layer.
     const policy = resolveMergeTrainRedPolicy(toPrefMap(await getAllPreferencesCached(database).catch(() => [])), projectId);
+    // #1572: ONE shepherd per train, shared by incremental assembly (conflicts) and the red gate.
+    const shepherdKit = kit = createTrainShepherdKit({ database, agentRunner, policy, trainId, projectId, label, members, boardEvents });
     const result = await runMergeTrain({
       repoPath,
       baseBranch,
@@ -651,6 +626,7 @@ async function runDoomedTrainJob(args: {
       // latest, rather than continuing through the rest of a bisect tree.
       signal: abortController.signal,
       onDropped,
+      ...(flush ? {} : { assemble: shepherdKit.assemble }),
       runGate: ({ trainRef, included, label: attemptLabel }) => withMergeTrainGateActivity(trainId, async () => {
         // Gate the TREE THAT LANDS. A per-member gate never tests the merge commit, which is
         // how two individually-green branches can produce a red base with no conflict.
@@ -680,7 +656,7 @@ async function runDoomedTrainJob(args: {
           // #1203: same token — a cancel mid-gate kills the running install/verify child process.
           signal: abortController.signal,
           verifyScriptOverride: flush?.gateScript,
-          onRed: flush ? undefined : buildTrainOnRed({ database, policy, agentRunner, label, attemptLabel, baseBranch, included, members, placement: { projectId, repoPath } }),
+          onRed: flush ? undefined : buildTrainOnRed({ database, policy, shepherd: shepherdKit.shepherd, label, attemptLabel, baseBranch, included, members, placement: { projectId, repoPath } }),
           afterGreen: async ({ gateWorktree }) => {
             if (flush) return {};
             // #1194: review ONCE, on the tree that just proved green - the assembled diff vs the
@@ -742,7 +718,7 @@ async function runDoomedTrainJob(args: {
       },
     });
     if (flush) await finishFlushRun(flush, repoPath, label, result).catch((e) => console.warn(`[merge-train] ${label}: flush finish failed: ${errorMessage(e)}`));
-    return { ok: true, result };
+    return { ok: true, result, ...(shepherdKit.finalStatus() ? { shepherd: shepherdKit.finalStatus() } : {}) };
   } catch (err) {
     const reason = errorMessage(err);
     await updateMergeTrainState(trainId, { state: "red", reconciledReason: reason, finishedAt: new Date().toISOString() }, database).catch(() => undefined);
@@ -750,6 +726,7 @@ async function runDoomedTrainJob(args: {
     boardEvents?.broadcast(projectId, "merge_train_changed");
     return { ok: false, reason: `train orchestrator threw: ${reason}` };
   } finally {
+    await kit?.flush(); // #1572: no live shepherd write may land after the train's final evidence write
     // #1568: retake the lock for the teardown; a timeout here only skips it (reconcilers are the backstop).
     await trainLock.ensureHeld().catch(() => undefined);
     // #1235: the train's own teardown on BOTH exits — every attempt's worktree and `kanban/train/<label>*`
@@ -796,7 +773,7 @@ export function createMergeTrainRunner(deps: {
 }) {
   const { database, reconcileAlreadyMerged, sendTurn, hasLiveSession, relaunch, boardEvents } = deps;
   const reviewTrain = deps.reviewTrain ?? runTrainReview;
-  const agentRunner = deps.agentFixRunner ?? createOneShotAgentRunner({ database });
+  const agentRunner = deps.agentFixRunner ?? createPlacedSessionRunner({ database });
 
   /**
    * Run the whole batch as one release train: assemble → gate ONCE → land → close each member.
@@ -910,6 +887,8 @@ export function createMergeTrainRunner(deps: {
 
     try {
       await finishMergeTrain(trainId, projectId, label, result, members, database, reviewEvidence, boardEvents);
+      // #1572: finishing rewrote the evidence; put the shepherd's final status (session, turns, conflicts) back.
+      if (outcome.shepherd) await recordMergeTrainShepherd(trainId, { ...outcome.shepherd }, database).catch(() => undefined);
     } finally {
       // #1181: the row's terminal state is persisted (or deliberately left `abandoned`) — only
       // now may a sweep treat it as it finds it. Idempotent with the lock-failure clear above.

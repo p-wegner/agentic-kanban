@@ -7,6 +7,25 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
 promote): read `docs/agent-guide/operator-reference.md` first.** Full console:
 `pnpm cli -- status --watch`. This line is standing; keep it when passes are archived.
 
+## #1569/#1572 train shepherd: phases 1 and 2 landed (#691 residual below)
+
+Done: one `TrainShepherd` per train, shared by incremental assembly and the red gate
+(`merge-train-shepherd-wiring.ts`); `assembleMergeTrainWithShepherd` (`merge-train-incremental-assembly.ts`)
+merges members into a real train worktree and hands a member-vs-member conflict to the shepherd
+instead of deferring it (a conflict with the BASE is still dropped for its author); the red gate
+reuses the same session via `shepherd.runner`; `createPlacedSessionRunner`
+(`merge-train-session-runner.ts`) runs Claude with `--output-format json`, so a turn reports session
+id, tokens and cost and the cost cap bites (conflict turns count toward it); an infra-held shepherd
+makes the gate inconclusive (no builder feedback); a red nobody owns logs one `ATTENTION` line;
+the shepherd line (session, worker, turns, last action) is in `gateEvidence.shepherd`, the train
+drawer and `status --watch`. Verified by `merge-train-shepherd-phase2.test.ts` (real git repo).
+**Not done:** (a) resume works only on the machine holding the session: a placed turn on another
+worker falls back to a fresh session (disclosed in the prompt), so session reuse is host/same-worker;
+(b) non-Claude providers report no usage, so the cost cap stays off for them; (c) the landing-time
+re-assemblies in `merge-train.service.ts` (base moved, sided, rebased) still use ref-only assembly
+and would drop a shepherd-resolved member instead of re-resolving it; (d) the assembly worktree has no
+installed dependencies, so the shepherd resolves conflicts without running suites there.
+
 ## 2026-10-18 night: trains 05, 07, 08 landed by hand, stable-20261018 live
 
 - **Stable = `stable-20261018` = e1a6bbfa9** (promoted 00:08Z; fresh full rc sweep green in 2680 s,

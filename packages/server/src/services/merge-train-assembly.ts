@@ -134,7 +134,7 @@ export function trainDateStamp(now?: string): string {
  * service owns: it is never checked out, never pushed, and carries no work that is not
  * already on a member branch.
  */
-async function resetTrainRef(repoPath: string, trainRef: string, baseBranch: string): Promise<string> {
+export async function resetTrainRef(repoPath: string, trainRef: string, baseBranch: string): Promise<string> {
   const baseSha = await revParse(repoPath, baseBranch);
   // `{ cwd }` — gitExecOrThrow takes an OPTIONS OBJECT. A bare string leaves cwd undefined and
   // the command silently runs in the process cwd, against the wrong repository.

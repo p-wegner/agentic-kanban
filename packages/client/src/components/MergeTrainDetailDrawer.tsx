@@ -43,6 +43,23 @@ function parseRedStrategy(row: MergeTrainRowDto | null): string | null {
   }
 }
 
+/** #1572: the shepherd line (session, worker, turns, last action), from the persisted gate evidence. */
+function parseShepherdLine(row: MergeTrainRowDto | null): string | null {
+  if (!row?.gateEvidence) return null;
+  try {
+    const s = (JSON.parse(row.gateEvidence) as { shepherd?: { sessionId?: string; worker?: string; turns?: number; lastAction?: string } }).shepherd;
+    if (!s || typeof s !== "object") return null;
+    const turns = Number(s.turns ?? 0);
+    return [
+      `${s.sessionId ? `session ${String(s.sessionId).slice(0, 8)}` : "no session yet"}${s.worker ? ` on ${s.worker}` : ""}`,
+      `${turns} turn${turns === 1 ? "" : "s"}`,
+      String(s.lastAction ?? "idle"),
+    ].join(" · ");
+  } catch {
+    return null;
+  }
+}
+
 function verdictLabel(verdict: MergeTrainAttemptVerdict): string {
   switch (verdict) {
     case "agent_fix_green":
@@ -188,6 +205,7 @@ export function MergeTrainDetailDrawer({ projectId, trainId, onClose }: MergeTra
   const stats = computeBisectTreeStats(roots);
   const highlighted = culpritPathLabels(roots);
   const redStrategy = parseRedStrategy(row);
+  const shepherdLine = parseShepherdLine(row);
   const isLive = row ? LIVE_STATES.has(row.state) : false;
 
   return (
@@ -240,6 +258,11 @@ export function MergeTrainDetailDrawer({ projectId, trainId, onClose }: MergeTra
             {redStrategy && (
               <span title="merge_train_red_strategy (Settings → Workflow → Merge train)">
                 Red strategy: <strong className="font-medium text-gray-800 dark:text-gray-100">{redStrategy}</strong>
+              </span>
+            )}
+            {shepherdLine && (
+              <span title="The train shepherd: one agent for member conflicts and the red gate" data-testid="shepherd-line">
+                Shepherd: <strong className="font-medium text-gray-800 dark:text-gray-100">{shepherdLine}</strong>
               </span>
             )}
             {stats.culpritCount > 0 && (

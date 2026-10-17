@@ -155,6 +155,33 @@ export async function recordMergeTrainWorkerVerify(
     .where(eq(mergeTrains.id, id));
 }
 
+/**
+ * #1572: record the train shepherd's status on a LIVE train's `gateEvidence.shepherd` (session id,
+ * worker, turns, last action) so the train row and `status --watch` show it while it works.
+ * Evidence column only, like `recordMergeTrainWorkerVerify`; missing row = no-op.
+ */
+export async function recordMergeTrainShepherd(
+  id: string,
+  shepherd: Record<string, unknown>,
+  database: Database = db,
+): Promise<void> {
+  const row = await getMergeTrain(id, database);
+  if (!row) return;
+  let evidence: Record<string, unknown> = {};
+  if (row.gateEvidence) {
+    try {
+      const parsed: unknown = JSON.parse(row.gateEvidence);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) evidence = parsed as Record<string, unknown>;
+    } catch {
+      evidence = {};
+    }
+  }
+  await database
+    .update(mergeTrains)
+    .set({ gateEvidence: JSON.stringify({ ...evidence, shepherd }) })
+    .where(eq(mergeTrains.id, id));
+}
+
 /** One train by id, or undefined. */
 export async function getMergeTrain(id: string, database: Database = db): Promise<MergeTrainRow | undefined> {
   const [row] = await database.select().from(mergeTrains).where(eq(mergeTrains.id, id)).limit(1);
