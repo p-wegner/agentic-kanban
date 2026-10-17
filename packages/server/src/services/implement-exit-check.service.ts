@@ -180,7 +180,12 @@ async function runStaticTierAtExit(
 
 /** Run the implement-exit check for one workspace. Total: never throws. */
 export async function runImplementExitCheck(args: RunImplementExitCheckArgs): Promise<ImplementExitCheckResult> {
-  if (args.level === "none") return skipped(args.level, "implement-exit check: none (posture)");
+  // The posture asks for no TEST run, but the static tier costs seconds and catches the
+  // deterministic guard reds (god-module ceiling, ratchets) that otherwise stall at the train.
+  if (args.level === "none") {
+    const { note, red } = await runStaticTierAtExit(args.workspace, args.level);
+    return red ?? skipped(args.level, `implement-exit check: none (posture; ${note})`);
+  }
   // #1514: the static tier runs first and OUTSIDE verify placement, so a red reaches the builder
   // even when the test part below is `held` (a held check counts as passed).
   const { note, red } = await runStaticTierAtExit(args.workspace, args.level);

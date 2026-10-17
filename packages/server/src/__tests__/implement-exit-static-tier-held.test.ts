@@ -38,6 +38,20 @@ describe("implement-exit static tier (#1514)", () => {
     expect(planVerifyPlacement).not.toHaveBeenCalled();
   });
 
+  it("level none (sprint) still runs the static tier and returns its red to the builder", async () => {
+    runStaticTier.mockResolvedValue({ ran: true, passed: false, message: "static tier FAILED (check:static, exit 1)", detail: "worker-daemon.ts 1001/1000" });
+    const res = await runImplementExitCheck({ workspace, projectId: "p", level: "none", database: {} as never });
+    expect(res).toMatchObject({ ran: true, passed: false });
+    expect(res.failureDetail).toContain("1001/1000");
+    expect(planVerifyPlacement).not.toHaveBeenCalled();
+  });
+
+  it("level none with a green static tier stays a skip", async () => {
+    runStaticTier.mockResolvedValue({ ran: true, passed: true, message: "ok", detail: null });
+    const res = await runImplementExitCheck({ workspace, projectId: "p", level: "none", database: {} as never });
+    expect(res).toMatchObject({ ran: false, passed: true });
+  });
+
   it("a green static tier leaves the held test part held", async () => {
     runStaticTier.mockResolvedValue({ ran: true, passed: true, message: "ok", detail: null });
     const res = await runImplementExitCheck({ workspace, projectId: "p", level: "impact", database: {} as never });
