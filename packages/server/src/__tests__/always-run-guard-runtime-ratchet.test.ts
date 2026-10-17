@@ -321,8 +321,13 @@ import {
  * dependency selection cannot see it. It carries a `when:` territory of that script and
  * `scripts/promote.mjs`, so an ordinary diff does not pay it; it ran in ~2 s alone, and the next
  * capture should give the 3 s back.
+ *
+ * #1563: `test-mine-pinned-timezone.test.mjs` at the ASSUMED 3,000 ms. It reads `scripts/test-mine.mjs`
+ * (outside every import graph) to pin the TZ the gate runs vitest under, with a `when:` territory of
+ * that script, so an ordinary diff does not pay it; it is two string assertions and runs in well
+ * under a second, so the next capture should give the 3 s back.
  */
-const BASELINE_TOTAL_MS = 498_689;
+const BASELINE_TOTAL_MS = 501_689;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative
