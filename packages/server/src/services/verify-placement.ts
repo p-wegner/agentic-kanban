@@ -58,6 +58,8 @@ export type VerifyWorkerCandidate = {
   freeSlots: number;
   freeRamGb?: number;
   thrashing?: boolean;
+  /** #1578: builder sessions currently assigned to this worker; a busy worker is ranked after an idle one. */
+  builderSessions?: number;
 };
 
 export type VerifyPlacementDecision =
@@ -70,12 +72,13 @@ export function isWorkerTrusted(allowlist: Set<string>, worker: Pick<VerifyWorke
   return allowlist.has(worker.id.toLowerCase()) || allowlist.has(worker.name.toLowerCase());
 }
 
-/** Eligible = allowlisted, has a free slot. Best first: calm, then most free RAM, then name (stable). */
+/** Eligible = allowlisted, has a free slot. Best first: no builder session, calm, then most free RAM, then name (stable). */
 export function rankVerifyWorkers(allowlist: Set<string>, workers: VerifyWorkerCandidate[]): VerifyWorkerCandidate[] {
   return workers
     .filter((w) => w.freeSlots > 0 && isWorkerTrusted(allowlist, w))
     .sort(
       (a, b) =>
+        (a.builderSessions ?? 0) - (b.builderSessions ?? 0) ||
         Number(a.thrashing ?? false) - Number(b.thrashing ?? false) ||
         (b.freeRamGb ?? -1) - (a.freeRamGb ?? -1) ||
         a.name.localeCompare(b.name),

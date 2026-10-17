@@ -115,6 +115,7 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
           freeSlots: Math.max(0, Math.min(cap.freeSlots, cap.slots - inFlight, ...budgetSlots(w, () => connections.assignedSessionIds(w.id).length, inFlight))),
           freeRamGb: w.capacity?.freeRamGb ?? cap.ramGb,
           thrashing: w.capacity ? w.capacity.thrashing !== "none" : undefined,
+          builderSessions: connections.assignedSessionIds?.(w.id).length ?? 0,
         };
       });
   }

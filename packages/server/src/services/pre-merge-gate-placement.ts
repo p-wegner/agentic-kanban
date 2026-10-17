@@ -9,7 +9,8 @@ import type { Database } from "../db/index.js";
 import { describeGateHold, type GateHostAdmission } from "./gate-quiesce.js";
 import { runOffHostVerifyChainTimed } from "./verify-chain-off-host.js";
 import { runUnderVerifyChainSemaphoreTimed, type VerifyChainPriority } from "./verify-chain-semaphore.js";
-import { planVerifyPlacement, readHeadSha, runOnPlannedWorker } from "./verify-job-placement.js";
+import { planVerifyPlacement, readHeadSha, runOnPlannedWorker, type PlacedVerifyResult } from "./verify-job-placement.js";
+import { listShardableSuites, mergeShardReports, pickShardWorkers, shardByDuration } from "./verify-shards.js";
 
 /**
  * #1497: the chain slot a verify chain waits for follows WHERE its script runs. A host run takes
@@ -91,15 +92,35 @@ export async function planGateRun(args: {
   if (!onWorker || plan.target !== "worker") return { proceed, hold, holdIfRefused: keep };
   const placed = plan;
   let refusal: string | null = null;
-  const run: GateScriptRunner = async (env) => {
-    const out = await runOnPlannedWorker(placed, {
+  // #1578: a full-suite TRAIN gate with no suite scope already set shards across every free verify worker.
+  const shardWorkers = kind === "train-gate" && args.tier === "full"
+    ? pickShardWorkers(placed.allowlist, await Promise.resolve(placed.active.listWorkers()).catch(() => []))
+    : [];
+  const suites = shardWorkers.length >= 2 ? listShardableSuites(args.workingDir) : null;
+  const shardPlans = suites ? shardWorkers.map((w) => ({ ...placed, workerId: w.id, workerName: w.name })) : [];
+  const runOne = (p: typeof placed, env: Record<string, string>): Promise<PlacedVerifyResult> =>
+    runOnPlannedWorker(p, {
       kind, projectId, database, command: args.verifyScript, workingDir: args.workingDir, sha, tier: args.tier,
-      timeoutMs: args.timeoutMs, env, maxWorkers: args.maxWorkers, signal: args.signal, runOnHost: async () => refusedAsHeld(placed.workerName, "ran on host"),
+      timeoutMs: args.timeoutMs, env, maxWorkers: args.maxWorkers, signal: args.signal, runOnHost: async () => refusedAsHeld(p.workerName, "ran on host"),
     });
+  const run: GateScriptRunner = async (env) => {
+    if (suites && !env.KANBAN_RETRY_TEST_FILES) {
+      const slices = shardByDuration(suites, shardPlans.length);
+      console.log(`[verify-shards] train gate ${sha.slice(0, 9)} split into ${slices.length} shards: ${shardPlans.map((p, i) => `${p.workerName}=${slices[i]!.length} suites`).join(", ")}`);
+      const outs = await Promise.all(shardPlans.map((p, i) => runOne(p, { ...env, KANBAN_RETRY_TEST_FILES: slices[i]!.map((f) => f.entry).join(",") })));
+      const named = outs.map((o, i) => ({ workerName: shardPlans[i]!.workerName, report: { ...o.report!, ...(o.refused ? { refused: o.refused, passed: false } : {}) } }));
+      const merged = mergeShardReports(named);
+      refusal = merged.refused ?? null;
+      if (refusal) return refusedAsHeld(shardPlans.map((p) => p.workerName).join("+"), refusal);
+      return { exitCode: merged.passed ? 0 : merged.exitCode || 1, stdout: merged.log ?? "", stderr: "", timedOut: merged.timedOut === true };
+    }
+    const out = await runOne(placed, env);
     refusal = out.refused ?? null;
     return out.refused ? refusedAsHeld(placed.workerName, out.refused) : out.result;
   };
   const holdIfRefused = <R extends object>(result: R): R | (R & { held: true; message: string }) =>
     refusal === null ? result : { ...result, held: true, message: `pre-merge gate HELD — verify worker ${placed.workerName} refused the job (${refusal}). Nothing was verified and nothing failed; the merge is deferred and will be retried on the next cycle.` };
-  return { proceed, run, workerName: placed.workerName, hold, holdIfRefused };
+  // The chain line reads "on a+b (2 shards)"; each shard's stage and files done/total show as its own active job.
+  const workerName = shardPlans.length >= 2 ? `${shardPlans.map((p) => p.workerName).join("+")} (${shardPlans.length} shards)` : placed.workerName;
+  return { proceed, run, workerName, hold, holdIfRefused };
 }
