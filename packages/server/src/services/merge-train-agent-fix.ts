@@ -31,6 +31,8 @@ export interface AgentFixGateVerdict {
   passed: boolean;
   message: string;
   failedSuites?: string[];
+  /** #1585: the re-gate was held/cancelled/timed out - nothing was verified and nothing failed. */
+  inconclusive?: boolean;
 }
 
 /** One agent turn. Throws when the agent could not run or timed out; usage is optional. */
@@ -186,6 +188,7 @@ export async function runAgentFix(args: {
     lastGate = await args.regate();
     gateFinishedAt = new Date().toISOString();
     if (lastGate.passed) { outcome = "green"; fixedTrainSha = head; break; }
+    if (lastGate.inconclusive) { outcome = "capped"; capped = "gate-inconclusive"; reason = lastGate.message; break; }
     outcome = "red";
     reason = lastGate.message;
     failure = { message: lastGate.message, failedSuites: lastGate.failedSuites };
