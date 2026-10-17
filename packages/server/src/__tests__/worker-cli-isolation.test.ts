@@ -149,7 +149,8 @@ describe("agentic-kanban-worker binary isolation", () => {
     // slots; node builtins only) and the train fix split process-exec's output parsers into a sibling module.
     // Raised 86 -> 87 in the 2026-10-16 hand flush for #1520's `worker/worker-content-index.ts` (marks the
     // worker data dirs not-content-indexed; node builtins + child_process only).
-    expect(files.size).toBeLessThan(87);
+    // Raised 87 -> 88 for #1551's worker-startup-step.ts (restart-after-update connect step).
+    expect(files.size).toBeLessThan(88);
   });
 
   it("never reaches the database or board-service layer", () => {
