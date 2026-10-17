@@ -25,6 +25,16 @@ describe("#1517 verify progress", () => {
     expect(t.snapshot()).toEqual({ filesDone: 3, filesTotal: 3 });
   });
 
+  it("#1568: the denominator comes from the running command, never the previous package's summary", () => {
+    const t = createVerifyProgressTracker();
+    t.push(" Test Files  152 passed (152)\n");
+    t.push("[test:mine] server: node vitest run --exclude x --maxWorkers=4\n✓ s/a.test.ts\n");
+    expect(t.snapshot()).toEqual({ filesDone: 153 });
+    t.push(" Test Files  1000 passed (1000)\n");
+    t.push("[test:mine] client: node vitest run a.test.ts b.test.ts --passWithNoTests\n✓ a.test.ts\n");
+    expect(t.snapshot()).toEqual({ filesDone: 1153, filesTotal: 1154 });
+  });
+
   it("jobs() exposes stage and file counts of a running job, and renderStatus prints them", async () => {
     const root = mkdtempSync(join(tmpdir(), "ak-verify-1517-")); roots.push(root);
     let release!: () => void;

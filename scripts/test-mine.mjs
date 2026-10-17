@@ -1519,7 +1519,11 @@ function runPackageOnce({ dir, label, exclude }, mode = null, ledgerPath = null)
           // unexpected, and failing is the correct direction for a selector that NARROWS a gate.
           : mode?.kind === "impact"
             ? ["run", ...mode.files]
-            : ["run"];
+            // #1568: a missing mode is the package's FULL suite; any other kind is a bug in the
+            // caller and must not silently widen to it (the impact tier once ran ~1160 files).
+            : mode === null || mode?.kind === "full"
+              ? ["run"]
+              : (() => { throw new Error(`[test:mine] ${label}: unknown run mode "${mode?.kind}"`); })();
     // #1485 — the ledger reporter rides along unless the caller already chose reporters.
     const ledgerArgs = ledgerPath && !passthrough.some((a) => a.startsWith("--reporter"))
       ? ["--reporter=default", `--reporter=${CRASH_LEDGER_REPORTER}`]
@@ -2165,6 +2169,14 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
       impactScope = runImpactSelector({ cli, union });
     }
   }
+  if (impactSelectorRequested && !impactScope) {
+    // #1568 (decision 017's visibility rule): the impact tier did not narrow, so what follows is
+    // the `vitest related` path, which can itself widen to a package's FULL suite. Say so.
+    console.warn(
+      `[test:mine] WIDENED: KANBAN_TEST_SELECTOR=impact was requested but produced no runnable selection — ` +
+        `running the \`vitest related\` path instead; a package may fall back to its FULL suite (each one is named below).`,
+    );
+  }
   /** @type {{ planned: { pkg: any, files: string[] }[], total: number, namedOverall: number, excludedCount: number } | null} */
   let impactPlan = null;
   if (impactScope) {
@@ -2259,6 +2271,9 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   for (const pkg of toRun) {
     const plan = planPackageScope(pkg);
     if (plan.kind === "full") {
+      if (impactSelectorRequested) {
+        console.warn(`[test:mine] WIDENED: ${pkg.label} runs its FULL suite (the change set has unknown paths, a config file, a deleted file, or is empty).`);
+      }
       if ((await runPackage(pkg)).code !== 0) failed = true;
       continue;
     }
