@@ -280,6 +280,20 @@ function applyQueueEvent(
   }
 }
 
+/** A pref that no longer mentions a project means the operator cleared its window record (#1581):
+ *  strip the operator-owned controls from the memory copy so it cannot re-persist them. */
+function dropClearedWindowControls<T extends { heldUntil?: string; releaseRequestedAt?: string }>(
+  memoryWindows: Map<string, T>,
+  fromPrefs: ReadonlyMap<string, unknown>,
+): void {
+  for (const [projectId, memory] of memoryWindows) {
+    if (fromPrefs.has(projectId)) continue;
+    if (memory.heldUntil === undefined && memory.releaseRequestedAt === undefined) continue;
+    const { heldUntil: _held, releaseRequestedAt: _released, ...rest } = memory;
+    memoryWindows.set(projectId, rest as unknown as T);
+  }
+}
+
 export function createAutoMergeOrchestrator(deps: {
   database: Database;
   boardEvents?: BoardEventSink;
@@ -542,8 +556,12 @@ export function createAutoMergeOrchestrator(deps: {
     // just on boot) is what lets the hold/release routes reach the orchestrator: they write the
     // pref, the next tick sees `heldUntil` / `releaseRequestedAt` here. A project the pref does
     // not mention keeps its in-memory entry (a write may have failed), a project the pref does
-    // mention wins over memory.
-    for (const [projectId, persisted] of readTrainWindowsFromPrefMap(prefMap)) {
+    // mention wins over memory. The operator-owned controls (`heldUntil`, `releaseRequestedAt`)
+    // are the exception (#1581): a pref that is gone means the operator cleared the record, so
+    // the memory copy must not re-persist them and shut the window again.
+    const fromPrefs = readTrainWindowsFromPrefMap(prefMap);
+    dropClearedWindowControls(state.trainWindows, fromPrefs);
+    for (const [projectId, persisted] of fromPrefs) {
       state.trainWindows.set(projectId, persisted);
     }
 

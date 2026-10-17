@@ -71,6 +71,9 @@ export function buildDeliveryChipView(status: DeliveryStatusResponse, nowMs: num
     status.baseSweep.reason,
     describeRedBase(status.redBase),
   ];
+  // #1562 — a workflow red on GitHub for more than one run is a warning of its own, whatever the posture.
+  const ciRed = status.ciRed ?? [];
+  for (const red of ciRed) titleLines.push(red.text);
   if (status.queuePressure) titleLines.push(describeQueuePressure(status.queuePressure));
   if (status.flush) titleLines.push(describeFlush(status.flush));
   const overrides = status.postureOverrides ?? [];
@@ -83,18 +86,20 @@ export function buildDeliveryChipView(status: DeliveryStatusResponse, nowMs: num
   }
   titleLines.push("", "Click for the Delivery controls.");
 
+  const ciLabel = ciRed.length > 0 ? ` · CI red: ${ciRed.map((r) => r.workflow).join(", ")}` : "";
+  const ciCompact = ciRed.length > 0 ? " · CI red" : "";
   if (live) {
     return {
-      dotClass: live.warning ? MERGE_WARNING_DOT : RISK_POSTURE_DOT[posture.level],
-      label: `${live.label} · ${RISK_POSTURE_LABELS[posture.level]}${overriddenNote}`,
-      compactLabel: live.compactLabel,
+      dotClass: live.warning || ciRed.length > 0 ? MERGE_WARNING_DOT : RISK_POSTURE_DOT[posture.level],
+      label: `${live.label} · ${RISK_POSTURE_LABELS[posture.level]}${overriddenNote}${ciLabel}`,
+      compactLabel: `${live.compactLabel}${ciCompact}`,
       title: titleLines.join("\n"),
     };
   }
   return {
-    dotClass: RISK_POSTURE_DOT[posture.level],
-    label: `${RISK_POSTURE_LABELS[posture.level]} · ${trainLabel}${overriddenNote}`,
-    compactLabel: `${RISK_POSTURE_LABELS[posture.level]} · ${status.trainWindowMaxSize}`,
+    dotClass: ciRed.length > 0 ? MERGE_WARNING_DOT : RISK_POSTURE_DOT[posture.level],
+    label: `${RISK_POSTURE_LABELS[posture.level]} · ${trainLabel}${overriddenNote}${ciLabel}`,
+    compactLabel: `${RISK_POSTURE_LABELS[posture.level]} · ${status.trainWindowMaxSize}${ciCompact}`,
     title: titleLines.join("\n"),
   };
 }

@@ -454,6 +454,26 @@ export async function resolveGateSelection(input: {
 }
 
 /**
+ * The gate log line for a stale selection (#1574). "The diff adds tests" is not map staleness and
+ * a rebuild cannot help (a member's new test is not on the base yet), so it must not carry the
+ * rebuild remedy; "map behind base" (and an unknown reason from an older tool) does.
+ */
+export function impactStaleLogLine(
+  workingDir: string | null,
+  selection: { tier: string; staleReason?: string; newTests?: readonly string[] },
+): string {
+  if (selection.staleReason === "diff-adds-tests") {
+    const n = selection.newTests?.length;
+    return `the diff in ${workingDir} adds ${n === undefined ? "new" : n} test file(s) the impact map cannot know yet — `
+      + `selection tier "${selection.tier}"; no rebuild needed (the new tests are selected directly).`;
+  }
+  return `impact map is STALE in ${workingDir}${selection.staleReason === "map-behind-base" ? " (map behind base)" : ""} — the selection widened to tier "${selection.tier}", so this gate `
+    + `ran broader and slower than its tier name claims. Rebuild it on the project's MAIN CHECKOUT `
+    + `(\`node .claude/skills/test-impact/tools/impact.mjs build --durations docs/tests/durations.json\`), `
+    + `never from a worktree.`;
+}
+
+/**
  * The `GateImpactSelection` the gate message needs, or null (#956).
  *
  * A thin adapter over `resolveGateSelection` so the CALLER — `runPreMergeGate`, which sits on the
@@ -497,10 +517,7 @@ export async function resolveGateImpactSelection(input: {
   // #1519 — one line per interval, not one per gate; the monitor owns the per-project status line.
   if (selection.stale && (input.log || shouldWarnGateStale())) {
     (input.log ?? ((message: string) => console.warn(`[test-impact] ${message}`)))(
-      `impact map is STALE in ${input.workingDir} — the selection widened to tier "${selection.tier}", so this gate `
-        + `ran broader and slower than its tier name claims. Rebuild it on the project's MAIN CHECKOUT `
-        + `(\`node .claude/skills/test-impact/tools/impact.mjs build --durations docs/tests/durations.json\`), `
-        + `never from a worktree.`,
+      impactStaleLogLine(input.workingDir, selection),
     );
   }
   const budget = input.budget?.trim() || null;

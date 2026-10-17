@@ -101,6 +101,7 @@ export const KNOWN_PROMOTE_FLAGS = Object.freeze([
   "--restart-stable",
   "--cadence",
   "--accept-advisories",
+  "--ignore-ci",
   "--reason",
   "--help",
   "-h",
@@ -150,6 +151,8 @@ export function parsePromoteArgv(argv = []) {
     cadence: argv.includes("--cadence"),
     // #1564 — promote refuses on a critical/high production advisory unless this is passed.
     acceptAdvisories: argv.includes("--accept-advisories"),
+    // #1562 — promote even though a required GitHub workflow is red on the sha.
+    ignoreCi: argv.includes("--ignore-ci"),
     reason,
   };
 }
@@ -194,6 +197,7 @@ export function formatPromoteUsage() {
     "                                             # `pnpm stable:start`.",
     "  node scripts/promote.mjs --cadence        # (set by the board's promote_cadence tick) same run, logged as scheduled",
     "  node scripts/promote.mjs --accept-advisories # promote despite critical/high production advisories (#1564)",
+    "  node scripts/promote.mjs --ignore-ci      # (#1562) promote although a required GitHub workflow is red on the sha",
     "  node scripts/promote.mjs --with-migration # (with --recover) ack that the delta includes a migration",
     '  node scripts/promote.mjs --reason "..."   # (with --recover) why this bypassed the sweep',
     "  node scripts/promote.mjs --help           # this text",

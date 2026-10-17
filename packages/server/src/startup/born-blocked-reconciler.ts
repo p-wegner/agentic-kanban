@@ -60,7 +60,7 @@ import { emptyPassReport, formatPassReportBody, recordActed, recordSkipped, type
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
-import { classifySetupFailure, describeSetupFailure, repairIoFault, type RepairResult } from "../services/setup-io-fault.js";
+import { classifyLockedNativeAddon, classifySetupFailure, describeSetupFailure, repairIoFault, repairLockedNativeAddon, type RepairResult } from "../services/setup-io-fault.js";
 
 /** How long since the last setup attempt before this reconciler will try again. */
 export const SETUP_RETRY_INTERVAL_MS = 30 * 60 * 1000;
@@ -218,6 +218,13 @@ export async function reconcileBornBlockedWorkspaces(
         `${ref}: prior setup failure classified as an I/O fault — `
         + `${repairResult.repaired ? "repaired" : "could NOT repair"} (${repairResult.reason})`,
       );
+    }
+    // #1587: a hard-linked native addon (libsql index.node) mapped by another process blocks the
+    // install's unlink on Windows; rename the package dir aside so the retry can re-import it.
+    const lockedAddon = classifyLockedNativeAddon({ stdout: row.setupStdoutTail, stderr: row.setupStderrTail });
+    if (lockedAddon.kind === "locked-native-addon") {
+      const addonRepair = await repairLockedNativeAddon(lockedAddon);
+      log(`${ref}: prior setup failure was ${lockedAddon.label} — ${addonRepair.reason}`);
     }
     log(`re-running the blocking setup script for ${ref} — ${reason}`);
     let exitCode = 1;

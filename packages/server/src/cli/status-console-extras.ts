@@ -133,6 +133,8 @@ export function applyConsoleExtras(model: ConsoleModel, p: ConsolePayloads): voi
     }
   } else model.mergeHold = null;
 
+  for (const text of extras?.ciRed ?? []) model.attention.push({ level: "red", text });
+
   const named = new Set<number>();
   for (const s of extras?.stalls ?? []) {
     const open = issues.find((i) => i.issueNumber === s.issueNumber);

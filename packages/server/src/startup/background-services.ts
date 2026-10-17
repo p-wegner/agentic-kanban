@@ -19,6 +19,8 @@ import { startStrandedPlanReconciler, stopStrandedPlanReconciler } from "./plan-
 import { startZombieFixSessionReconciler, stopZombieFixSessionReconciler } from "./zombie-fix-session-reconciler.js";
 import { startAncestorBranchReconciler, stopAncestorBranchReconciler } from "./ancestor-branch-reconciler.js";
 import { startStalledInProgressReconciler, stopStalledInProgressReconciler } from "./stalled-in-progress-reconciler.js";
+import { startReadyBaseConflictHealer, stopReadyBaseConflictHealer } from "./ready-base-conflict-healer.js";
+import { createReadyBaseConflictHealDeps } from "../services/ready-base-conflict-ports.js";
 import { startBornBlockedReconciler, stopBornBlockedReconciler } from "./born-blocked-reconciler.js";
 import { startWorkflowNodeDivergenceReconciler, stopWorkflowNodeDivergenceReconciler } from "./workflow-node-divergence-reconciler.js";
 import { startDoneUnmergedSweep, stopDoneUnmergedSweep } from "./done-unmerged-invariant-sweep.js";
@@ -29,6 +31,7 @@ import { startProjectConductorSupervisor } from "../services/project-conductor.s
 import { startBackupScheduler, stopBackupScheduler } from "./backup-scheduler.js";
 import { startSessionMessagePruner, stopSessionMessagePruner } from "../services/session-message-pruner.service.js";
 import { startBaseBranchHealthReconciler, stopBaseBranchHealthReconciler } from "./base-branch-health-reconciler.js";
+import { startCiStatusReconciler, stopCiStatusReconciler } from "./ci-status-reconciler.js";
 import { startWorkerConnectionReaper, stopWorkerConnectionReaper } from "../services/worker-connection-reaper.service.js";
 import { getWorkerFleet } from "../services/worker-fleet.service.js";
 import { startInstallStalenessReconciler, stopInstallStalenessReconciler } from "./install-staleness-reconciler.js";
@@ -190,6 +193,15 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     },
   },
   {
+    // A ready workspace that conflicts with the BASE gets a board rebase, a mechanical CONTINUE.md
+    // resolution, or one builder fix turn - not a standing attention line (#1584).
+    name: "ready-base-conflict-healer",
+    start({ db, boardEvents, getSessionManager }) {
+      startReadyBaseConflictHealer(createReadyBaseConflictHealDeps({ database: db, boardEvents, getSessionManager }));
+      return stopReadyBaseConflictHealer;
+    },
+  },
+  {
     // Resolves an issue whose workflow NODE and STATUS disagree (#395/#397). The `end`-node case
     // is the expensive one: such an issue left the monitor walk entirely, so committed work sat
     // unmerged for ~1000 minutes with auto-merge on and nothing ever looked at it.
@@ -290,6 +302,15 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start({ db }) {
       startBaseBranchHealthReconciler(db);
       return stopBaseBranchHealthReconciler;
+    },
+  },
+  {
+    // #1562: GitHub Actions status of the base branch (read-only `gh run list`); a sustained-red
+    // workflow becomes a console ATTENTION line, a delivery chip and a per-workflow heal ticket.
+    name: "ci-status-reconciler",
+    start({ db }) {
+      startCiStatusReconciler(db);
+      return stopCiStatusReconciler;
     },
   },
   {

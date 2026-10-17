@@ -146,7 +146,7 @@ export interface MergeTrainAgentFixDto {
   /** What ended it: the re-gate verdict, or the cap that tripped. */
   outcome: "green" | "red" | "capped";
   /** The cap that tripped, when `outcome` is `capped`. */
-  capped?: "timeout" | "cost" | "no-change";
+  capped?: "timeout" | "cost" | "no-change" | "gate-inconclusive";
   durationMs: number;
   /** Absent when the provider reports no usage (a one-shot text run). */
   tokens?: number;

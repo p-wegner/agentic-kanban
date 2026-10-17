@@ -70,6 +70,14 @@ describe("buildAgentFixBrief", () => {
 });
 
 describe("runAgentFix", () => {
+  it("#1585: a held/cancelled re-gate is not a red fix - capped, inconclusive, not failed", async () => {
+    const regate = vi.fn(async () => ({ passed: false, inconclusive: true, message: "pre-merge gate HELD - verify worker refused the job (cancelled)" }));
+    const out = await runAgentFix({ worktree: repo, label: "train/x", baseBranch: "main", members, initialFailure: failure, caps, runAgent: writingAgent({ commit: true }), regate });
+    expect(out.attempt.agentFix?.outcome).toBe("capped");
+    expect(out.attempt.verdict).toBe("agent_fix_capped");
+    expect(out.lastGate?.inconclusive).toBe(true);
+  });
+
   it("goes green: the agent's work is committed and the re-gate's tip is returned", async () => {
     const regate = vi.fn().mockResolvedValue({ passed: true, message: "ok" });
     const out = await runAgentFix({ worktree: repo, label: "train/x", baseBranch: "main", members, initialFailure: failure, caps, runAgent: writingAgent(), regate, writeBrief: async () => "file:///brief.md" });

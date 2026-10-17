@@ -21,6 +21,8 @@ import { advanceLoopAfterMergedIssue } from "./plugin-loop-hooks.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { releaseWorkspaceResources } from "./workspace-resource-release.js";
 import { refreshImpactMapAfterMerge } from "./test-impact-map/post-merge.js";
+import { pollProjectCi } from "./ci-status.service.js";
+import { resolveBaseSweepIntervalMs, resolveRiskPosture } from "./risk-posture.service.js";
 
 export type WorkspacePostMergeCleanupArgs = {
   workspaceId: string;
@@ -151,6 +153,11 @@ export async function runWorkspacePostMergeCleanup(
     database: deps.database,
     prefMap: args.prefMap,
   });
+  // #1562 — the base moved: re-read GitHub CI for it (fire-and-forget, never throws; skips when
+  // gh is unavailable). Same opt-in gate as the periodic watch.
+  if (args.projectId && resolveBaseSweepIntervalMs(resolveRiskPosture(args.prefMap, args.projectId)) !== null) {
+    void pollProjectCi(args.projectId, deps.database).catch(() => {});
+  }
   await maybeAutoStartFollowups(args, deps);
   await maybeAutoStartUnblockedDependency(args, deps);
   void mergeResult;
