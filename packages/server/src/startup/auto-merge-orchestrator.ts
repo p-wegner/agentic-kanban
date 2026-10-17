@@ -280,6 +280,20 @@ function applyQueueEvent(
   }
 }
 
+/** A pref that no longer mentions a project means the operator cleared its window record (#1581):
+ *  strip the operator-owned controls from the memory copy so it cannot re-persist them. */
+function dropClearedWindowControls<T extends { heldUntil?: string; releaseRequestedAt?: string }>(
+  memoryWindows: Map<string, T>,
+  fromPrefs: ReadonlyMap<string, unknown>,
+): void {
+  for (const [projectId, memory] of memoryWindows) {
+    if (fromPrefs.has(projectId)) continue;
+    if (memory.heldUntil === undefined && memory.releaseRequestedAt === undefined) continue;
+    const { heldUntil: _held, releaseRequestedAt: _released, ...rest } = memory;
+    memoryWindows.set(projectId, rest as unknown as T);
+  }
+}
+
 export function createAutoMergeOrchestrator(deps: {
   database: Database;
   boardEvents?: BoardEventSink;
@@ -546,12 +560,7 @@ export function createAutoMergeOrchestrator(deps: {
     // are the exception (#1581): a pref that is gone means the operator cleared the record, so
     // the memory copy must not re-persist them and shut the window again.
     const fromPrefs = readTrainWindowsFromPrefMap(prefMap);
-    for (const [projectId, memory] of state.trainWindows) {
-      if (fromPrefs.has(projectId)) continue;
-      if (memory.heldUntil === undefined && memory.releaseRequestedAt === undefined) continue;
-      const { heldUntil: _held, releaseRequestedAt: _released, ...rest } = memory;
-      state.trainWindows.set(projectId, rest);
-    }
+    dropClearedWindowControls(state.trainWindows, fromPrefs);
     for (const [projectId, persisted] of fromPrefs) {
       state.trainWindows.set(projectId, persisted);
     }
