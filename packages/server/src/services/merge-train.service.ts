@@ -18,7 +18,7 @@ import {
   type TrainAssemblyResult,
   type TrainMember,
 } from "./merge-train-assembly.js";
-import { decideSuiteOwnerShortcut, formatSuiteOwnerReason } from "./merge-train-suite-owner.js";
+import { combineHeldBackRegate, decideAttributedOwners, decideSuiteOwnerShortcut, formatSuiteOwnerReason } from "./merge-train-suite-owner.js";
 
 /**
  * Release trains: gate N tickets ONCE instead of N times.
@@ -295,6 +295,8 @@ export interface TrainRunResult {
   failedSuites?: string[];
   /** #1277 — the red-handling strategy the train ran under, for the persisted evidence. */
   redStrategy?: MergeTrainRedStrategy;
+  /** #1577 — owners held back by the single attributed regate; `summary` is the train row's text. */
+  heldBack?: { members: string[]; suites: string[]; summary: string };
 }
 
 /**
@@ -526,7 +528,14 @@ export async function runMergeTrain(args: {
       if (attempt.sided.length > 0) return attempt;
       // #1277: `agent-fix` means the fix agent's red IS the verdict — an operator who picked it
       // wants a hard failure on a second red, not a bisect behind their back.
-      if (args.redStrategy === "agent-fix" && subLabel === label) return attempt;
+      if (args.redStrategy === "agent-fix" && subLabel === label) {
+        // #1577: ATTRIBUTED failures regate ONCE without their owners (label `${label}r` skips the
+        // fix agent) and the rest land; never a bisect, an unattributed red holds as before.
+        const attributed = decideAttributedOwners(attempt.failedSuites, subset.filter((m) => !attempt.dropped.some((d) => d.member.workspaceId === m.workspaceId)));
+        if (!attributed) return attempt;
+        const rest = await runTrainAttempt({ ...args, members: attributed.innocent, label: `${subLabel}r`, isEnvironmentFailure, waitForLandTurn: waitForPredecessor });
+        return combineHeldBackRegate(attempt, rest, attributed);
+      }
       // Suite-owner shortcut (`merge-train-suite-owner.ts`): every failing suite belongs to one
       // included member, so reject it and re-gate the rest once instead of control arm + halving.
       const aboard = subset.filter((m) => !attempt.dropped.some((d) => d.member.workspaceId === m.workspaceId));
