@@ -9,8 +9,7 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
   wsl-stable started by hand in herdr pane w1:p5Y, console (`status --watch`) in w1:p5Z.
   Reboot runbook and which view is the full one: `docs/agent-guide/operator-reference.md`
   "After a host reboot".
-- desktop-stable and wsl-stable run worker build 95ddbc9 (console marks it `!`), behind the
-  board's a15f90a.
+- wsl-stable updated to a15f90a via `pnpm cli -- worker update <name>` (board side, no ACP needed).
 - **Hands-off since ~08:50Z:** `start_mode=monitor`, `risk_posture=sprint` on agentic-kanban
   (was manual/standard; revert both to go back). Recipe: operator-reference "Hands-off".
 - #1551 (worker restart after self-update hangs before connecting) filed from desktop-stable,
