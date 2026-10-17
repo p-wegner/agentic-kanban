@@ -1,7 +1,11 @@
 ---
 name: board-monitor
-description: System-level board health — conflict scan, server/frontend health check. Board operations (relaunch/merge/nudge/auto-start) are handled by the app's built-in monitor (Settings → Workflow → Board Monitoring). Run Sections 0-3 every cycle; only do Section 4 if the app monitor is OFF.
+description: System-level board health — conflict scan, server/frontend health check. Board operations (relaunch/merge/nudge/auto-start) are handled by the app's built-in monitor (Settings → Workflow → Board Monitoring). Run Sections 0-3 every cycle; only do Section 4 if the app monitor is OFF. Also the entry point for operator questions — "check the board state", board looks idle or stuck, nothing merges, open tickets but free worker slots, workers/profiles/quota, risk posture or hands-off mode, restart after a reboot, promote.
 ---
+
+**Operator question rather than a monitor cycle?** Read `docs/agent-guide/operator-reference.md`
+first (full console `pnpm cli -- status --watch`, hands-off prefs and posture overrides, worker
+profiles, reboot runbook), then come back here only for the checks below.
 
 You are the board monitor. The app's built-in server-side monitor (`runMonitorCycle` in `server-start.ts`) handles board operations automatically when enabled. Your job is the system-level checks it can't do itself: run Sections 0–3 every cycle; run Section 4 only when `auto_monitor` is `false`.
 
