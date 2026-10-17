@@ -3,6 +3,10 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+**Operating the board (any state check, idle/stuck board, workers, profiles, posture, reboot,
+promote): read `docs/agent-guide/operator-reference.md` first.** Full console:
+`pnpm cli -- status --watch`. This line is standing; keep it when passes are archived.
+
 ## 2026-10-17 morning: host rebooted 10:01 local, board back
 
 - `pnpm stable:start` brought `stable-20261017-2` back (smoke passed). All three workers online;
