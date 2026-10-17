@@ -149,7 +149,8 @@ export interface VerifyJobStatus { jobId: string; tier: string; sha: string; sta
 /** Test files the output names as failed (`FAIL <path>`), sorted + deduped. */
 export function parseVerifyFailingSuites(output: string): string[] {
   const found = new Set<string>();
-  for (const line of output.split(/\r?\n/)) {
+  for (const raw of output.split(/\r?\n/)) {
+    const line = raw.replace(ANSI_RE, "");
     const m = /(?:^|\s)(?:FAIL|\u00d7|\u2717|\u2718)\s+\[?\s*([^\s>\]]+\.(?:test|spec)\.[cm]?[jt]sx?)/.exec(line);
     if (m) found.add(stripCheckoutPrefix(m[1]));
   }

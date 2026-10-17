@@ -146,6 +146,10 @@ export async function escalateVerifyFailedSkip(
       { sendBuilderTurn: deps.sendBuilderTurn },
     );
     if (feedback.decision === "send" || feedback.decision === "await-builder") {
+      // #1580: a deterministic red on this sha re-fails identically, so the verdict is kept until the
+      // branch gains new work (the branch-moved reset in shouldSkipMergeForBackoff) instead of
+      // letting the backoff window expire and re-gate the same sha for hours.
+      if (guardFailure) await exhaustMergeBackoff(database, skip.workspaceId);
       return { failures, escalated: false, feedbackTurn: feedback.attempt ?? null };
     }
     const capReached = feedback.decision === "cap-reached";
