@@ -57,4 +57,12 @@ describe("implement-exit static tier (#1514)", () => {
     const res = await runImplementExitCheck({ workspace, projectId: "p", level: "impact", database: {} as never });
     expect(res).toMatchObject({ passed: true, held: true });
   });
+
+  it("sprint (level none): the member's own guards run and a ratchet red holds it out with its message (#1575)", async () => {
+    runStaticTier.mockResolvedValue({ ran: true, passed: false, message: "static tier FAILED", detail: "private-tree-walker-ratchet: new readdirSync caller" });
+    const res = await runImplementExitCheck({ workspace, projectId: "p", level: "none", database: {} as never });
+    expect(runStaticTier).toHaveBeenCalledWith(expect.objectContaining({ memberGuards: true }));
+    expect(res).toMatchObject({ ran: true, passed: false });
+    expect(res.failureDetail).toContain("readdirSync");
+  });
 });

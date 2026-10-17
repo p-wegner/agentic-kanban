@@ -38,7 +38,7 @@ const model: ConsoleModel = {
   errors: [],
 };
 
-const base = { nowMs: NOW, intervalSec: 5 };
+const base = { nowMs: NOW, intervalSec: 5, timeZone: "UTC" };
 
 describe("renderConsole", () => {
   for (const cols of [80, 140]) {

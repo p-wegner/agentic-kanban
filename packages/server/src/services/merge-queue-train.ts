@@ -971,7 +971,7 @@ export function createMergeTrainRunner(deps: {
       return;
     }
     console.log(`[merge-train] ${label}: ${result.landed.length}/${members.length} landed in ${result.gateRuns} gate run(s)` +
-      `${result.gateRejected.length > 0 ? `, ${result.gateRejected.length} bisected out` : ""}` +
+      `${result.heldBack ? `, ${result.heldBack.summary}` : result.gateRejected.length > 0 ? `, ${result.gateRejected.length} bisected out` : ""}` +
       `${result.sided.length > 0 ? `, ${result.sided.length} sided by the train review` : ""}`);
     for (const m of result.landed) {
       const closeFailure = result.closeFailures.find((c) => c.member.workspaceId === m.workspaceId);

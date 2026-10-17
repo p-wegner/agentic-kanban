@@ -41,7 +41,7 @@ const model: ConsoleModel = {
   connectCodes: [{ codeHint: "k3f9", status: "active", steps: [{ step: "paired", status: "ok" }, { step: "doctor", status: "failed" }] }],
   errors: [],
 };
-const base = { nowMs: NOW, intervalSec: 5 };
+const base = { nowMs: NOW, intervalSec: 5, timeZone: "UTC" };
 
 describe("operator console frame (#1449)", () => {
   for (const cols of [80, 140]) {
@@ -61,6 +61,39 @@ describe("operator console frame (#1449)", () => {
       "verify placement prefer-worker", "ram 11.2G disk 84G", "[auth-expired]", "running/fix", "dropped #1429: conflicts with #1430", "NEW WORKER CONNECTIONS", "since 00:00 local"]) {
       expect(out).toContain(s);
     }
+  });
+});
+
+describe("short pane with a long attention list (#1567)", () => {
+  const nums = Array.from({ length: 15 }, (_, k) => 1550 + k);
+  const crowded: ConsoleModel = {
+    ...model,
+    openIssues: 16,
+    issues: [
+      ...nums.map((n) => ({ issueNumber: n, title: "t", statusName: "In Review", column: "Review" as const })),
+      { issueNumber: 1565, title: "b", statusName: "Build", column: "Build" as const },
+    ],
+    attention: [
+      ...nums.slice(0, 14).map((n) => ({ level: "yellow" as const, text: `#${n} In Review waiting on train/2026-10-17-01` })),
+      { level: "red" as const, text: "#1565 Agent hang watchdog: no output for 900s" },
+    ],
+  };
+
+  it("keeps header, pipeline summary, train line and a capped attention list at 34 rows", () => {
+    const out = renderConsole(crowded, { ...base, cols: 127, rows: 34, color: false });
+    expect(out.length).toBeLessThanOrEqual(34);
+    expect(out[0]).toContain("agentic-kanban");
+    const text = out.join("\n");
+    expect(text).toContain("In Review 15");
+    expect(text).toContain("MERGE TRAIN");
+    expect(text).toContain("14 In Review waiting on train/2026-10-17-01: #1550 #1551");
+    expect(text.split("\n").filter((l) => /^ [✖⚠]/.test(l)).length).toBeLessThanOrEqual(Math.max(3, Math.floor(34 / 4)));
+  });
+
+  it("caps ungroupable attention with a +N more pointer", () => {
+    const many: ConsoleModel = { ...crowded, attention: Array.from({ length: 20 }, (_, k) => ({ level: "red" as const, text: `reason ${k}` })) };
+    const text = renderConsole(many, { ...base, cols: 127, rows: 34, color: false }).join("\n");
+    expect(text).toContain("+12 more (a: all issues)");
   });
 });
 

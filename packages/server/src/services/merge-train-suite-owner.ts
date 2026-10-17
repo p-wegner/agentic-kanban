@@ -1,4 +1,5 @@
-import type { TrainMember } from "./merge-train-assembly.js";
+import { dedupeConflictClusters, type TrainMember } from "./merge-train-assembly.js";
+import type { TrainRunResult } from "./merge-train.service.js";
 
 /**
  * Suite-owner shortcut for a red train: name the culprit without bisecting when the gate says
@@ -41,7 +42,57 @@ export function decideSuiteOwnerShortcut<M extends TrainMember>(
   return { owner: members[ownerIndex], suites };
 }
 
+/**
+ * #1577 — the members that OWN a red train's failing suites (any number, unlike the single-owner
+ * shortcut), for the one targeted regate without them. Null when the failure is unattributed (no
+ * suite named, or none of them in any member's changed files: environment / semantic break) or
+ * when every member owns one (nothing innocent would be left to land).
+ */
+export function decideAttributedOwners<M extends TrainMember>(
+  failedSuites: readonly string[] | undefined,
+  members: readonly M[],
+): { owners: M[]; innocent: M[]; suites: string[] } | null {
+  const suites = [...new Set((failedSuites ?? []).map(normalizePath).filter(Boolean))];
+  if (suites.length === 0 || members.length < 2) return null;
+  const suiteSet = new Set(suites);
+  const owners = members.filter((m) => (m.changedFiles ?? []).some((f) => suiteSet.has(normalizePath(f))));
+  if (owners.length === 0 || owners.length === members.length) return null;
+  const ownerIds = new Set(owners.map((o) => o.workspaceId));
+  return { owners, innocent: members.filter((m) => !ownerIds.has(m.workspaceId)), suites };
+}
+
+/** "landed N, held back #A #B (owners of <suite>)" — the train row's visible summary (#1577). */
+export function formatHeldBackSummary(landed: number, held: ReadonlyArray<{ issueNumber?: number | null }>, suites: readonly string[]): string {
+  const nums = held.map((h) => (h.issueNumber != null ? `#${h.issueNumber}` : "?")).join(" ");
+  return `landed ${landed}, held back ${nums} (owners of ${suites.join(", ")})`;
+}
+
 /** The `gateRejected` reason for a member the shortcut named. */
 export function formatSuiteOwnerReason(suites: readonly string[], gateFailure: string): string {
   return `failing suite(s) are this branch's own (${suites.join(", ")}); no other train member touched them. ${gateFailure}`;
+}
+
+/** Fold the one regate-without-owners (`rest`) into the red root `attempt` (#1577). */
+export function combineHeldBackRegate(
+  attempt: TrainRunResult,
+  rest: TrainRunResult,
+  attributed: { owners: TrainMember[]; suites: string[] },
+): TrainRunResult {
+  const gateRuns = attempt.gateRuns + rest.gateRuns;
+  const attempts = [...attempt.attempts, ...rest.attempts];
+  if (rest.landed.length === 0) return { ...attempt, gateRuns, attempts };
+  const summary = formatHeldBackSummary(rest.landed.length, attributed.owners, attributed.suites);
+  return {
+    trainRef: attempt.trainRef,
+    landed: rest.landed,
+    dropped: [...attempt.dropped, ...rest.dropped],
+    gateRejected: attributed.owners.map((member) => ({ member, reason: `${summary}; ${attempt.gateFailure ?? ""}`, failedSuites: attributed.suites })),
+    sided: rest.sided,
+    closeFailures: rest.closeFailures,
+    gateRuns,
+    attempts,
+    mergeSha: rest.mergeSha,
+    conflictClusters: dedupeConflictClusters([...(attempt.conflictClusters ?? []), ...(rest.conflictClusters ?? [])]),
+    heldBack: { members: attributed.owners.map((m) => m.workspaceId), suites: attributed.suites, summary },
+  };
 }

@@ -23,7 +23,7 @@ import { getProjectSetupScript } from "../repositories/stack-profile.repository.
 import { buildSmokeCheck, getStackProfile, resolveEffectiveVerify } from "./stack-profile.service.js";
 import { resolveProjectDevServerPlan } from "./dev-server.service.js";
 import { quiesceBuildersEnabled, resolveGateHostAdmission } from "./gate-quiesce.js";
-import { planGateRun, runVerifyChainForPlacement, type GateScriptRunner } from "./pre-merge-gate-placement.js";
+import { planGateRun, runInHostBuildSlotUnlessOnWorker, runVerifyChainForPlacement, type GateScriptRunner } from "./pre-merge-gate-placement.js";
 import { isSelfProjectRepo } from "./self-project.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
@@ -567,7 +567,7 @@ export async function runPreMergeGate(
       // the conflation the clause exists to prevent, and it is already reported separately and
       // honestly as `queued Ns behind another verification` (#949).
       let startedAt = Date.now();
-      const result = await runUnderBuildSemaphore(async () => {
+      const result = await runInHostBuildSlotUnlessOnWorker(workerRun, async () => {
         // Capacity observed before a long queue says nothing about the host at admission.
         const workers = await resolveVerifyMaxWorkers(projectId, database);
         Object.assign(verifyEnv, buildVerifyResourceEnv(workers.workers));
@@ -583,7 +583,7 @@ export async function runPreMergeGate(
         startedAt = Date.now();
         return runVerifyScript(verifyEnv)
           .catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false }));
-      });
+      }, runUnderBuildSemaphore);
       lastVerifyRunMs = Date.now() - startedAt;
       // Total by construction (see `verify-step-timings.ts`): an unparseable or step-less run
       // yields `[]` and the message simply omits the clause. It must never be able to turn a
@@ -633,10 +633,10 @@ export async function runPreMergeGate(
         runVerify,
         runVerifyWithRetryScope: (retryScope) => {
           noteMergeGatePhase(workspace.id, "flake-retry", "re-running only the failing tests");
-          return runUnderBuildSemaphore(() =>
+          return runInHostBuildSlotUnlessOnWorker(workerRun, () =>
             runVerifyScript({ ...verifyEnv, KANBAN_RETRY_TEST_FILES: retryScope })
               .catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
-          );
+          runUnderBuildSemaphore);
         },
         getInstallCommand: () => getProjectSetupScript(projectId, database).catch(() => null),
         runInstall: async (command) => {

@@ -20,6 +20,8 @@ export interface ConsoleRenderOptions {
   ascii?: boolean;
   intervalSec?: number;
   nowMs: number;
+  /** IANA zone for the header clock; omitted = the machine's local zone. Tests pin it (#1553). */
+  timeZone?: string;
   /** `a` — list every open issue instead of the pipeline summary. */
   allIssues?: boolean;
 }
@@ -44,7 +46,7 @@ function headerSection(model: ConsoleModel, opts: ConsoleRenderOptions): Section
     ? `host ${model.host.freeGb != null ? `${model.host.freeGb.toFixed(1)}G` : "?"} free / floor ${model.host.floorGb}G`
     : "host n/a";
   const lines: Line[] = [{
-    text: `agentic-kanban  ${model.project}${buildLabel(model)}  ${new Date(opts.nowMs).toLocaleTimeString("en-GB")}  ${hostBit}  ${model.openIssues} open · ${model.runningSessions} running  refresh ${opts.intervalSec ?? 5}s`,
+    text: `agentic-kanban  ${model.project}${buildLabel(model)}  ${new Date(opts.nowMs).toLocaleTimeString("en-GB", opts.timeZone ? { timeZone: opts.timeZone } : undefined)}  ${hostBit}  ${model.openIssues} open · ${model.runningSessions} running  refresh ${opts.intervalSec ?? 5}s`,
     tone: model.host?.hold ? "yellow" : "head",
   }];
   for (const e of model.errors) lines.push({ text: `! ${e}`, tone: "red" });
@@ -110,6 +112,7 @@ function trainSection(model: ConsoleModel, g: Glyphs): Section | null {
 function pipelineSection(model: ConsoleModel, allIssues: boolean | undefined): Section | null {
   if (model.issues.length === 0) return null;
   const lines: Line[] = [heading(`PIPELINE (${model.openIssues} open)`)];
+  if (!allIssues) lines.push({ text: ` ${stageCounts(model)}`, tone: null });
   if (allIssues) {
     for (const i of model.issues) lines.push({ text: ` ${issueRef(i.issueNumber).padEnd(6)} ${i.statusName.padEnd(12)} ${i.title}`, tone: null });
     return { id: "pipeline", lines };
@@ -123,13 +126,52 @@ function pipelineSection(model: ConsoleModel, allIssues: boolean | undefined): S
   return { id: "pipeline", lines };
 }
 
-function attentionSection(model: ConsoleModel, g: Glyphs): Section | null {
+/** Counts per stage ("In Review 15 · Build 1"): the cheap PIPELINE that survives a short pane. */
+function stageCounts(model: ConsoleModel): string {
+  const parts: string[] = [];
+  for (const c of CONSOLE_COLUMNS) {
+    const counts = new Map<string, number>();
+    for (const i of model.issues) if (i.column === c) counts.set(i.statusName, (counts.get(i.statusName) ?? 0) + 1);
+    for (const [name, n] of counts) parts.push(`${name} ${n}`);
+  }
+  return parts.join(" · ");
+}
+
+function pipelineSummarySection(model: ConsoleModel): Section | null {
+  if (model.issues.length === 0) return null;
+  return { id: "pipeline", lines: [heading(`PIPELINE (${model.openIssues} open)`), { text: ` ${stageCounts(model)}`, tone: null }], keep: true };
+}
+
+/** Lines of the form "#N <reason>" that share level and reason collapse into "K <reason>: #a #b ...". */
+function groupAttention(items: ConsoleModel["attention"]): ConsoleModel["attention"] {
+  const groups = new Map<string, { level: "red" | "yellow"; rest: string; refs: string[] }>();
+  const out: Array<ConsoleModel["attention"][number] | { group: string }> = [];
+  for (const x of items) {
+    const m = /^(#\d+) (.+)$/.exec(x.text);
+    if (!m) { out.push(x); continue; }
+    const key = `${x.level}|${m[2]}`;
+    let grp = groups.get(key);
+    if (!grp) { grp = { level: x.level, rest: m[2]!, refs: [] }; groups.set(key, grp); out.push({ group: key }); }
+    grp.refs.push(m[1]!);
+  }
+  return out.map((o) => {
+    if (!("group" in o)) return o;
+    const grp = groups.get(o.group)!;
+    return grp.refs.length === 1 ? { level: grp.level, text: `${grp.refs[0]} ${grp.rest}` } : { level: grp.level, text: `${grp.refs.length} ${grp.rest}: ${grp.refs.join(" ")}` };
+  });
+}
+
+function attentionSection(model: ConsoleModel, g: Glyphs, rows: number): Section | null {
   if (model.attention.length === 0) return null;
   const lines: Line[] = [heading("ATTENTION")];
-  for (const x of model.attention) {
+  const grouped = groupAttention(model.attention);
+  const ordered = [...grouped.filter((x) => x.level === "red"), ...grouped.filter((x) => x.level !== "red")];
+  const cap = Math.max(3, Math.floor(rows / 4));
+  for (const x of ordered.slice(0, cap)) {
     const mark = x.level === "red" ? (g.a ? "X" : "✖") : (g.a ? "!" : "⚠");
     lines.push({ text: ` ${mark} ${x.text}`, tone: x.level });
   }
+  if (ordered.length > cap) lines.push({ text: `   +${ordered.length - cap} more (a: all issues)`, tone: "dim" });
   return { id: "attention", lines, keep: true };
 }
 
@@ -188,13 +230,17 @@ export function renderConsole(model: ConsoleModel, opts: ConsoleRenderOptions): 
   let active = [
     headerSection(model, opts), workersSection(model, g, opts.allIssues), gatesSection(model, g), baseReleaseSection(model, g),
     connectSection(model, g), trainSection(model, g),
-    pipelineSection(model, opts.allIssues), attentionSection(model, g), merged,
+    pipelineSection(model, opts.allIssues), attentionSection(model, g, rows), merged,
   ].filter((s): s is Section => s !== null);
 
-  // Drop history first when the screen is short; WORKERS and ATTENTION are never dropped.
-  for (const id of ["merged", "pipeline", "connect", "train", "gates", "base"]) {
+  // Drop history first when the screen is short; WORKERS and ATTENTION are never dropped and
+  // PIPELINE shrinks to its one-line stage summary rather than disappearing.
+  for (const id of ["merged", "pipeline", "connect", "gates", "base", "train"]) {
     if (layoutSections(active, cols, g, opts.color).length + 1 <= rows) break;
-    active = active.filter((s) => s.id !== id);
+    if (id === "pipeline") {
+      const summary = pipelineSummarySection(model);
+      active = active.flatMap((s) => (s.id === "pipeline" ? (summary ? [summary] : []) : [s]));
+    } else active = active.filter((s) => s.id !== id);
   }
   const lines = cutToFit(layoutSections(active, cols, g, opts.color), rows, g.ell);
   lines.push({ text: `q quit · a ${opts.allIssues ? "summary" : "all issues"}`, tone: "dim" });

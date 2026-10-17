@@ -483,6 +483,41 @@ describe("runMergeTrain — real cancellation via AbortSignal (#1203)", () => {
     }
   }, 240000);
 
+  it("#1577: agent-fix red with an attributed owner regates ONCE without it and lands the rest", async () => {
+    const owned = [
+      { workspaceId: "w1", branch: "f1", issueNumber: 1, changedFiles: ["a.txt", "packages/x/bad.test.ts"] },
+      { workspaceId: "w2", branch: "f2", issueNumber: 2, changedFiles: ["b.txt"] },
+    ];
+    const runGate = vi.fn()
+      .mockResolvedValueOnce({ passed: false, message: "verify failed", failedSuites: ["packages/x/bad.test.ts"] })
+      .mockResolvedValue({ passed: true, message: "ok" });
+    const closeMember = vi.fn().mockResolvedValue(undefined);
+
+    const result = await runMergeTrain({
+      repoPath: repo, baseBranch: "main", members: owned, label: "ho1", runGate, closeMember, redStrategy: "agent-fix",
+    });
+
+    expect(runGate).toHaveBeenCalledTimes(2);
+    expect(result.landed.map((m) => m.workspaceId)).toEqual(["w2"]);
+    expect(result.gateRejected.map((r) => r.member.workspaceId)).toEqual(["w1"]);
+    expect(result.heldBack?.summary).toBe("landed 1, held back #1 (owners of packages/x/bad.test.ts)");
+    expect(await isAncestor(repo, await revParse(repo, "f1"), "main")).toBe(false);
+  }, 240000);
+
+  it("#1577: an unattributed agent-fix red holds the train as before (no regate)", async () => {
+    const owned = [
+      { workspaceId: "w1", branch: "f1", issueNumber: 1, changedFiles: ["a.txt"] },
+      { workspaceId: "w2", branch: "f2", issueNumber: 2, changedFiles: ["b.txt"] },
+    ];
+    const runGate = vi.fn().mockResolvedValue({ passed: false, message: "verify failed", failedSuites: ["packages/x/other.test.ts"] });
+    const result = await runMergeTrain({
+      repoPath: repo, baseBranch: "main", members: owned, label: "ho2", runGate, closeMember: vi.fn(), redStrategy: "agent-fix",
+    });
+    expect(runGate).toHaveBeenCalledTimes(1);
+    expect(result.landed).toEqual([]);
+    expect(result.heldBack).toBeUndefined();
+  }, 240000);
+
   it("lands normally when the signal never aborts (control)", async () => {
     const controller = new AbortController();
     const runGate = vi.fn().mockResolvedValue({ passed: true, message: "ok" });

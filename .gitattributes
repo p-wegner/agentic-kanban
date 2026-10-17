@@ -73,3 +73,6 @@ packages/server/openapi.yaml text eol=lf
 # and the divergent-merge test that pinned them are all gone together. Do not re-add this line
 # without first re-tracking the map — an attribute for a path git never merges is dead config
 # that a later reader will take as documentation.
+
+# Git hooks run under sh; a CRLF shebang breaks them (#1576).
+.githooks/* text eol=lf
