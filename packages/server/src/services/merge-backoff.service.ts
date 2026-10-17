@@ -213,7 +213,7 @@ export async function defaultBranchHeadSha(workingDir: string): Promise<string |
  * reachable (the branch was rebased, amended or reset) the diff cannot be computed; that
  * IS a real change to the branch, so it counts as substantive rather than as unknown.
  */
-async function defaultHasSubstantiveChangeSince(workingDir: string, sha: string): Promise<boolean | null> {
+export async function defaultHasSubstantiveChangeSince(workingDir: string, sha: string): Promise<boolean | null> {
   const res = await gitExec(["diff", "--quiet", sha, "HEAD"], { cwd: workingDir });
   if (execSucceeded(res)) return false; // identical trees — the tip moved but nothing changed
   if (res.code === 1) return true; // differences present

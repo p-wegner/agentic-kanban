@@ -24,6 +24,7 @@ import { listAutoMergeDisabledProjectIds } from "@agentic-kanban/shared/lib/merg
 import { isSpecPlanningStageName, transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
+import { supersedeStaleMergeBackoff, rearmReadyForMerge } from "./exit/builder-exit-backoff.js";
 import { RUN_GATE } from "../services/pre-merge-gate.service.js";
 import { buildReviewExitEvidence, runReviewExitGate } from "./exit/review-exit-gate.js";
 import { markReviewExitGateHeld, markReviewExitGateWithheld } from "./exit/gate-withheld-marker.js";
@@ -640,6 +641,8 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     // before In Review. Red sends the builder one feedback turn (or marks the workspace for
     // attention at the cap) and stops this exit; see ./exit/implement-exit-check.ts.
     if (await gateImplementExit(ctx) === "stop") return;
+    // #1556: new commits void the backoff recorded against the old tip, even though the workspace is no longer a merge candidate.
+    const backoffSuperseded = await supersedeStaleMergeBackoff({ id: workspaceId, projectId, workingDir: workspace.workingDir }, db);
     console.log(`[workflow] agent session ${sessionId} completed with committed changes  moving to In Review`);
     const inReview = findStatus("In Review");
     if (inReview) {
@@ -707,6 +710,11 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     const reviewDecision = resolveProjectReviewMode(prefMap, projectId);
     if (!reviewDecision.run && !workspace.requiresReview) {
       console.log(`[workflow] skipping per-ticket auto-review for workspace ${workspaceId}${formatPostureNote(reviewDecision.posture)}`);
+      if (backoffSuperseded) {
+        await rearmReadyForMerge(workspaceId, now, db);
+        boardEvents.broadcast(projectId, "workspace_ready_for_merge");
+        console.log(`[workflow] workspace ${workspaceId} re-marked ready after a fix superseded its merge backoff (#1556)`);
+      }
       return;
     }
     const autoReview = !skipAutoReview && (workspace.requiresReview || isAutoReviewEnabled(prefMap.get(AUTO_REVIEW_PREF_KEY)));
