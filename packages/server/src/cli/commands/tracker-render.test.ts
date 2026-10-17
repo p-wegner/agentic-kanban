@@ -253,3 +253,20 @@ describe("ageSince", () => {
     expect(ageSince("not-a-date", NOW_MS)).toBe("-");
   });
 });
+
+describe("renderTrackerFrame — column counts with no active issues (#1550)", () => {
+  it("shows per-status counts from statusCounts when the active issue list is empty", () => {
+    const empty: BoardStatusResponse = {
+      ...snapshot([]),
+      statusCounts: { Backlog: 0, Todo: 0, "In Progress": 0, Done: 1510, Cancelled: 14 },
+    };
+    const header = renderTrackerFrame(empty, { limit: 4 }, { width: 80, nowMs: NOW_MS, connectionStatus: "ws" }).lines[0];
+    expect(header).toBe("pantry | WIP 0/4 | Done:1510 Cancelled:14 | ● live");
+  });
+
+  it("falls back to counting issues when the snapshot has no statusCounts", () => {
+    const header = renderTrackerFrame(FIXTURE, { limit: 4 }, { width: 120, nowMs: NOW_MS }).lines[0];
+    expect(header).toContain("In Progress:2");
+    expect(header).toContain("Todo:1");
+  });
+});

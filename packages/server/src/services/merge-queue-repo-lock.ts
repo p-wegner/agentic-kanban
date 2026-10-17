@@ -97,6 +97,54 @@ export async function acquireQueueRepoLock(
 }
 
 /**
+ * #1568: a repo lock a train holds for ASSEMBLY and LANDING only, never across its gate. A single
+ * workspace gates before taking the lock; a train that held it through an hour-long gate refused
+ * every other merge in the project. `drop` (gate start) is a no-op while a landing is in progress;
+ * `beginLanding` (re)acquires and `endLanding` (attempt finished) releases again. Landings are
+ * serialized by the bisect driver's land turn, so one flag is enough.
+ */
+export function createSuspendableRepoLock(
+  acquire: () => Promise<Awaited<ReturnType<typeof acquireQueueRepoLock>>>,
+  signal: AbortSignal,
+) {
+  let handle: Awaited<ReturnType<typeof acquireQueueRepoLock>> | null = null;
+  let stopKeepalive: () => void = () => undefined;
+  let landing = false;
+  let chain: Promise<unknown> = Promise.resolve();
+  const serial = <T>(fn: () => Promise<T>): Promise<T> => {
+    const result = chain.then(fn);
+    chain = result.catch(() => undefined);
+    return result;
+  };
+  const take = async (): Promise<void> => {
+    if (handle || signal.aborted) return;
+    const fresh = await acquire();
+    handle = fresh;
+    stopKeepalive = keepRepoLockAliveUntilCancel(fresh, signal);
+  };
+  const release = (): void => {
+    if (!handle) return;
+    stopKeepalive();
+    handle.release();
+    handle = null;
+  };
+  return {
+    /** First acquisition; throws on timeout like `acquireQueueRepoLock`. */
+    acquireInitial: () => serial(take),
+    /** Gate start: give the lock back unless a landing holds it. */
+    drop: () => serial(async () => { if (!landing) release(); }),
+    /** Immediately before landing: hold the lock until `endLanding`. */
+    beginLanding: () => serial(async () => { landing = true; await take(); }),
+    /** An attempt finished (landed or not): release again. */
+    endLanding: () => serial(async () => { landing = false; release(); }),
+    /** The train's own teardown, which wants the lock (#1235). Best effort. */
+    ensureHeld: () => serial(take),
+    /** Final release. */
+    close: () => serial(async () => { landing = false; release(); }),
+  };
+}
+
+/**
  * #1503: heartbeat a train's repo lock every 15 s, and on an operator cancel free it NOW rather
  * than when the in-flight gate returns (a worker gate can run ~20 min, and the heartbeat kept
  * refreshing for a train whose row already says abandoned, refusing every merge in the project).

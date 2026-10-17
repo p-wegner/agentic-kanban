@@ -59,7 +59,12 @@ export interface VerifyResultStore {
   save(jobId: string, entry: StoredVerifyResult): void;
   remove(jobId: string): void;
   loadAll(): Array<{ jobId: string; entry: StoredVerifyResult }>;
+  /** #1571: keep a failed job's output tail as `<jobId>.log` (bounded count/size); outlives the 30 min verdict retention. */
+  saveFailedLog?(jobId: string, tail: string): void;
 }
+/** #1571: how many failed-run logs a worker keeps, and how much of each. */
+export const VERIFY_FAILED_LOG_KEEP = 10;
+export const VERIFY_FAILED_LOG_BYTES = 256 * 1024;
 export interface StoredVerifyResult { finishedAt: number; frames: WorkerToBoardMessage[] }
 
 /** A buffered verdict older than this is useless: the board gave the job up after its reconnect grace. */
@@ -76,6 +81,14 @@ export function createFileVerifyResultStore(workRoot: string): VerifyResultStore
   return {
     save(jobId, entry) { try { mkdirSync(dir, { recursive: true }); writeFileSync(file(jobId), JSON.stringify({ jobId, ...entry })); } catch { /* memory copy still delivers */ } },
     remove(jobId) { try { rmSync(file(jobId), { force: true }); } catch { /* gone */ } },
+    saveFailedLog(jobId, tail) {
+      try {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(file(jobId).replace(/\.json$/, ".log"), tail.slice(-VERIFY_FAILED_LOG_BYTES));
+        const logs = readdirSync(dir).filter((f) => f.endsWith(".log")).map((f) => ({ f, t: statSync(join(dir, f)).mtimeMs })).sort((a, b) => b.t - a.t);
+        for (const old of logs.slice(VERIFY_FAILED_LOG_KEEP)) rmSync(join(dir, old.f), { force: true });
+      } catch { /* best effort */ }
+    },
     loadAll() {
       try {
         return readdirSync(dir).filter((f) => f.endsWith(".json")).flatMap((f) => {
@@ -106,6 +119,8 @@ export interface DaemonVerifyRunner {
 
 const ANSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 const FILE_MARKER_RE = /^\s*(?:[\u2713\u221a\u00d7\u2717\u2718]|FAIL\b|\u276f)\s+\S+\.(?:test|spec)\.[cm]?[jt]sx?/;
+/** The `[test:mine] <pkg>: node vitest <args>` line `scripts/test-mine.mjs` prints before each invocation. */
+const VITEST_COMMAND_RE = /\[test:mine\][^:\n]*:\s*node vitest\s+(.*)$/;
 const FILES_SUMMARY_RE = /Test Files\s+(?:(\d+) failed\s*\|\s*)?(\d+) passed(?:\s*\|[^()]*)?\s*\((\d+)\)/;
 
 /**
@@ -118,11 +133,21 @@ export function createVerifyProgressTracker(): { push(chunk: string): void; snap
   let pending = "";
   let banked = 0;
   let current = 0;
+  // #1568: the denominator belongs to the vitest command RUNNING NOW. It is known only when that
+  // command names its files (`node vitest run a.test.ts ...`) or between invocations, right after a
+  // summary. Carrying the previous package's total into the next one printed `476/152`.
   let total: number | undefined;
   const consume = (raw: string): void => {
     const line = raw.replace(ANSI_RE, "");
     const summary = FILES_SUMMARY_RE.exec(line);
     if (summary) { banked += Number(summary[3]); current = 0; total = banked; return; }
+    const cmd = VITEST_COMMAND_RE.exec(line);
+    if (cmd) {
+      const named = cmd[1].split(/\s+/).filter((t) => t && !t.startsWith("-")).filter((t) => /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(t)).length;
+      current = 0;
+      total = cmd[1].startsWith("run") && named > 0 ? banked + named : undefined;
+      return;
+    }
     if (FILE_MARKER_RE.test(line)) current++;
   };
   return {
@@ -363,6 +388,7 @@ export function createDaemonVerifyRunner(deps: VerifyRunnerDeps): DaemonVerifyRu
     const entry: StoredVerifyResult = { finishedAt: Date.now(), frames };
     finished.set(job.jobId, entry);
     deps.store?.save(job.jobId, entry);
+    if (!r.refused && r.passed === false) deps.store?.saveFailedLog?.(job.jobId, log.replace(ANSI_RE, ""));
     pruneFinished();
     progress(job.jobId, "uploading");
     if (connected()) for (const f of frames) deps.sendToBoard(f);

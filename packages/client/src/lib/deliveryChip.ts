@@ -73,19 +73,27 @@ export function buildDeliveryChipView(status: DeliveryStatusResponse, nowMs: num
   ];
   if (status.queuePressure) titleLines.push(describeQueuePressure(status.queuePressure));
   if (status.flush) titleLines.push(describeFlush(status.flush));
+  const overrides = status.postureOverrides ?? [];
+  const overriddenNote = overrides.length > 0 ? ` · overridden: ${overrides.map((o) => `${o.label} ${o.value}`).join(", ")}` : "";
+  if (overrides.length > 0) {
+    titleLines.push(
+      "",
+      `Posture ${RISK_POSTURE_LABELS[posture.level]}, overridden: ${overrides.map((o) => `${o.label} ${o.value} (posture: ${o.postureValue})`).join(", ")}`,
+    );
+  }
   titleLines.push("", "Click for the Delivery controls.");
 
   if (live) {
     return {
       dotClass: live.warning ? MERGE_WARNING_DOT : RISK_POSTURE_DOT[posture.level],
-      label: `${live.label} · ${RISK_POSTURE_LABELS[posture.level]}`,
+      label: `${live.label} · ${RISK_POSTURE_LABELS[posture.level]}${overriddenNote}`,
       compactLabel: live.compactLabel,
       title: titleLines.join("\n"),
     };
   }
   return {
     dotClass: RISK_POSTURE_DOT[posture.level],
-    label: `${RISK_POSTURE_LABELS[posture.level]} · ${trainLabel}`,
+    label: `${RISK_POSTURE_LABELS[posture.level]} · ${trainLabel}${overriddenNote}`,
     compactLabel: `${RISK_POSTURE_LABELS[posture.level]} · ${status.trainWindowMaxSize}`,
     title: titleLines.join("\n"),
   };

@@ -49,6 +49,7 @@ import { resolveEffectiveVerify, deriveSetupScriptFromProfile, getStackProfile }
 import { recordBaseSweepOutcome } from "./test-impact-outcome.service.js";
 import { recordSweepJoin } from "./test-impact-misses.js";
 import { reconcileBaseHealthHealTicket } from "./base-health-heal-ticket.service.js";
+import { reconcileDependencyAdvisoryTickets } from "./dependency-advisory-heal.service.js";
 import { reconcileRcSweepAfterProbe } from "./rc-heal-sweep-hook.js";
 import {
   recordBaseBranchHealth,
@@ -751,6 +752,11 @@ export async function finishBaseProbe(input: FinishBaseProbeInput): Promise<Base
     repoPath: project.repoPath,
     lastGreenSha: lastGreen?.sha ?? null,
   }, database);
+
+  // #1564 — the dependency advisory scan rides the base sweep: a breach files a heal ticket per
+  // advisory, so a new advisory against an unchanged lockfile is caught on the next sweep. A
+  // timeout/unverified sweep still scans (the scan does not depend on the suite verdict).
+  await reconcileDependencyAdvisoryTickets({ projectId, repoPath: project.repoPath }, database);
 
   // #982 — feed the full-suite verdict back into the test-impact outcome ledger, so the fast
   // per-merge tiers have a measured miss rate instead of an assumed one. Deliberately narrow:

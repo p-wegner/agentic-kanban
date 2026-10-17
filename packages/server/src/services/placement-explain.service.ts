@@ -360,6 +360,7 @@ async function describeWorkers(
       // #1027: what this worker says it can authenticate as. In-memory on the registry
       // (a property of the running peer), so absent means "has not said" — never "any".
       ...(w.profiles ? { attestedProfiles: w.profiles } : {}),
+      ...(w.unattestedProfiles ? { unattestedProfiles: w.unattestedProfiles } : {}),
       ...(w.packageManagers ? { packageManagers: w.packageManagers } : {}),
       // #1370: the worker's own doctor results, so the Runners tab can show a setup checklist.
       ...(w.doctor ? { doctor: w.doctor } : {}),

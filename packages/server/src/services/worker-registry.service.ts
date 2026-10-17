@@ -35,6 +35,7 @@ import {
   type WorkerCapabilities,
   type WorkerCapacityInfo,
   type WorkerProfileAttestation,
+  type WorkerUnattestedProfile,
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { parseWorkerToolchains, type WorkerToolchains } from "@agentic-kanban/shared/lib/worker-toolchains";
 import {
@@ -123,6 +124,8 @@ export interface WorkerView extends Omit<WorkerRow, "tokenHash" | "desiredSettin
    * column would be read as a permission.
    */
   profiles?: WorkerProfileAttestation[];
+  /** #1565: discovered-but-unattested profiles (in memory, like `profiles`). */
+  unattestedProfiles?: WorkerUnattestedProfile[];
   /** Package managers on this worker's PATH, as of its last hello/heartbeat (#1369). In memory like `capacity`. */
   packageManagers?: WorkerPackageManagers;
   /** Toolchains (node/java/go/...) on this worker's PATH, as of its last hello/heartbeat (#1382). In memory like `capacity`. */
@@ -197,6 +200,7 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   /** This worker's attested profiles (#1027). See WorkerView for why not a column. */
   const reportedProfiles = new Map<string, WorkerProfileAttestation[]>();
+  const reportedUnattested = new Map<string, WorkerUnattestedProfile[]>(); // #1565
 
   /** Package managers each worker has on PATH (#1369). See WorkerView for why not a column. */
   const reportedPackageManagers = new Map<string, WorkerPackageManagers>();
@@ -385,6 +389,8 @@ export function createWorkerRegistry(database: Database = realDb) {
       // #1027: re-declared every beat, so a login removed on the worker stops being a
       // permission on the board within one heartbeat rather than at the next re-pairing.
       noteAttestedProfiles(workerId, opts.capabilities.profiles);
+      const unattested = opts.capabilities.unattestedProfiles;
+      if (unattested?.length) reportedUnattested.set(workerId, unattested); else reportedUnattested.delete(workerId);
       notePackageManagers(workerId, opts.capabilities.packageManagers);
       noteToolchains(workerId, opts.capabilities.toolchains);
       noteToolchainInstallInfo(workerId, opts.capabilities.toolchainInstall);
@@ -503,6 +509,7 @@ export function createWorkerRegistry(database: Database = realDb) {
         ...(reported?.workerVersion !== undefined ? { workerVersion: reported.workerVersion } : {}),
         ...(capacity ? { capacity } : {}),
         ...(profiles ? { profiles } : {}),
+        ...(reportedUnattested.has(row.id) ? { unattestedProfiles: reportedUnattested.get(row.id) } : {}),
         ...(packageManagers ? { packageManagers } : {}),
         ...(toolchains ? { toolchains } : {}),
         ...(toolchainInstallPolicy ? { toolchainInstallPolicy } : {}),
@@ -654,6 +661,7 @@ export function createWorkerRegistry(database: Database = realDb) {
     reportedVersions.delete(workerId);
     reportedCapacity.delete(workerId);
     reportedProfiles.delete(workerId);
+    reportedUnattested.delete(workerId);
     reportedPackageManagers.delete(workerId);
     reportedToolchains.delete(workerId);
     reportedInstallInfo.delete(workerId);

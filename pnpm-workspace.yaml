@@ -85,6 +85,9 @@ overrides:
   # express@5.2.1 declares `body-parser: "^2.2.1"` (verified in the installed
   # manifest), so 2.3.0 is in range and this merely raises a floor.
   body-parser: "^2.3.0"
+  # GHSA-jqcg-44mw-7w3h (critical, IPv4-mapped IPv6 trust-subnet spoofing), under
+  # @modelcontextprotocol/sdk>express. express@5.2.1 declares ^2.0.7, so 2.0.8 is in range.
+  proxy-addr: "^2.0.8"
 
 # Always fetch the win32-x64 native binaries (rollup/esbuild/swc) in addition to
 # the host platform's, so a lockfile produced on one OS installs cleanly on

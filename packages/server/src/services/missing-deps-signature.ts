@@ -9,6 +9,11 @@
 const MISSING_DEPS_SIGNATURE =
   /cannot find module|cannot find package|failed to resolve import|could not resolve ["'`][^"'`\s]+["'`]|err_module_not_found|module_not_found|unresolved_import|enoent.*node_modules|command not found|is not recognized as an internal or external command|ist entweder falsch geschrieben oder\s+konnte nicht gefunden werden/i;
 
+function stripAnsi(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "");
+}
+
 /**
  * Drop text a TEST printed (#1543): vitest echoes captured console output as `stdout | <file> > <test>` /
  * `stderr | …` blocks (ending at the next blank line), and a board log line (`[pre-merge-gate] …`) is
@@ -18,7 +23,9 @@ const MISSING_DEPS_SIGNATURE =
 function stripTestLogOutput(output: string): string {
   const kept: string[] = [];
   let inCapturedBlock = false;
-  for (const line of output.split("\n")) {
+  // Vitest colours its headers and our log lines with SGR codes (#1570), which hide the line
+  // anchors below — strip them first.
+  for (const line of stripAnsi(output).split("\n")) {
     if (/^\s*(stdout|stderr) \| /.test(line)) {
       inCapturedBlock = true;
       continue;

@@ -109,6 +109,7 @@ import {
   isProbingThisProject,
   nextStableTag,
   parsePromoteArgv,
+  planAdvisoryCheck,
   parseSweepVerdict,
   planSweepAcquisition,
   planRestartOnly,
@@ -184,6 +185,7 @@ const opts = {
   restartStable: parsedArgv.restartStable,
   // #1238: provenance — fired by the board's cadence rather than by a hand. Same run.
   cadence: parsedArgv.cadence,
+  acceptAdvisories: parsedArgv.acceptAdvisories,
   reason: parsedArgv.reason,
 };
 
@@ -1431,6 +1433,17 @@ async function main() {
     log(`[promote] (--force-sweep or --recover redeploy the current sha deliberately, e.g. to rebuild after a dependency change.)`);
     return;
   }
+
+  // #1564 — the dependency advisory scan is a precondition too: GitHub CI sat red for 10 days on a
+  // critical advisory while the board promoted normally. Lockfile-only, seconds.
+  const advisory = planAdvisoryCheck({
+    scan: spawnSync(process.execPath, [join(REPO_ROOT, "scripts", "security-scan.mjs"), "--advisories-only"], {
+      cwd: REPO_ROOT, encoding: "utf8", windowsHide: true, timeout: 120_000,
+    }),
+    accept: opts.acceptAdvisories,
+  });
+  log(`[promote] advisories: ${advisory.detail}`);
+  if (advisory.action === "refuse") fail(`REFUSED — ${advisory.detail}`);
 
   gitOrThrow(["tag", tag, sha]);
   log(`[promote] tagged ${tag} on ${sha}`);

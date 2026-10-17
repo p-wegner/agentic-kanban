@@ -36,7 +36,7 @@ import { runPreMergeGate, looksLikeMissingDepsFailure } from "./pre-merge-gate.s
 import { runStaticTierGate } from "./static-tier.service.js"; // #1514: check:static before the suites
 import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { randomUUID } from "node:crypto";
-import { acquireQueueRepoLock, keepRepoLockAliveUntilCancel, MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS } from "./merge-queue-repo-lock.js";
+import { acquireQueueRepoLock, createSuspendableRepoLock, MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS } from "./merge-queue-repo-lock.js";
 import type { MergeQueueEvent, MergeQueuePlan } from "./merge-queue.service.js";
 import type { MergeTrainAttemptDto, MergeTrainBaseVerdict, MergeTrainGateEvidenceDto } from "@agentic-kanban/shared/types";
 import { resolveMergeTrainRedPolicy, type MergeTrainRedPolicy } from "@agentic-kanban/shared/lib/merge-train-red-strategy";
@@ -541,7 +541,7 @@ async function gateBaseAloneOnce(args: {
  * already a search, and the fix agent is the alternative to starting one. A missing-dependency red
  * is the staging worktree's environment (#1154), which no code edit repairs.
  */
-function buildTrainOnRed(args: {
+export function buildTrainOnRed(args: {
   policy: MergeTrainRedPolicy;
   agentRunner: TrainAgentRunner;
   label: string;
@@ -556,7 +556,8 @@ function buildTrainOnRed(args: {
   if (!policy.agentFix || attemptLabel !== label) return undefined;
   const aboard = args.included.flatMap((m) => args.members.filter((x) => x.workspaceId === m.workspaceId));
   return async ({ gateWorktree, message, failedSuites, regate }) => {
-    if (looksLikeMissingDepsFailure(message)) return null;
+    // #1573: a retry that still names failing suites is a real red, whatever the message says.
+    if (looksLikeMissingDepsFailure(message) && !failedSuites?.length) return null;
     console.log(`[merge-train] ${label}: gate RED - spawning the fix agent in ${gateWorktree} (strategy ${policy.strategy}, timeout ${policy.caps.timeoutMs}ms, ${policy.caps.maxTurns} turn(s))`);
     const outcome = await runAgentFix({
       worktree: gateWorktree, label, baseBranch: args.baseBranch, members: aboard,
@@ -607,18 +608,15 @@ async function runDoomedTrainJob(args: {
 }): Promise<{ ok: true; result: Awaited<ReturnType<typeof runMergeTrain>> } | { ok: false; reason: string }> {
   const { database, boardEvents, reconcileAlreadyMerged, sendTurn, reviewTrain, repoPath, baseBranch, members, label, trainId, projectId, reviewEvidenceRef, abortController, onDropped, agentRunner, flush } = args;
 
-  let repoLock: Awaited<ReturnType<typeof acquireQueueRepoLock>>;
+  // #1568: held for assembly and landing only — released while a gate runs, like a single
+  // workspace's pre-lock gate, so the rest of the queue is not refused for the gate's whole hour.
+  const trainLock = createSuspendableRepoLock(() => acquireQueueRepoLock(repoPath, `merge-train:${label}`, {
+    timeoutMs: MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS,
+    // #1150: a contended wait asks whether the holder is a train job this process still has live.
+    checkHolderLiveness: (holder) => { const m = /^merge-train:(.+)$/.exec(holder); return m ? isMergeTrainLabelLive(m[1]) : undefined; },
+  }), abortController.signal);
   try {
-    repoLock = await acquireQueueRepoLock(repoPath, `merge-train:${label}`, {
-      timeoutMs: MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS,
-      // #1150: let a contended wait say whether the CURRENT holder is a train job this process
-      // itself still has registered as live, rather than only ever repeating a pid that stays
-      // alive for as long as the whole server does.
-      checkHolderLiveness: (holder) => {
-        const match = /^merge-train:(.+)$/.exec(holder);
-        return match ? isMergeTrainLabelLive(match[1]) : undefined;
-      },
-    });
+    await trainLock.acquireInitial();
   } catch (err) {
     const reason = `could not acquire the repo lock within ${Math.round(MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS / 60_000)}m: ${errorMessage(err)}`;
     unregisterLiveMergeTrain(trainId);
@@ -627,8 +625,7 @@ async function runDoomedTrainJob(args: {
     await cleanupTrainWorktreesForLabel({ database, repoPath, label });
     return { ok: false, reason: `train abandoned: ${reason}` };
   }
-  // #1503: heartbeat the lock, and free it the moment an operator cancels (see the helper).
-  const stopLockKeepalive = keepRepoLockAliveUntilCancel(repoLock, abortController.signal);
+  // #1503: the suspendable lock heartbeats while held and frees itself the moment an operator cancels.
   noteMergeTrainGateActivity(trainId, false); // #1513: restart the idle clock now the repo lock is held
   try {
     // #1277: the project's red-handling policy, read once per train through the preference layer.
@@ -641,12 +638,12 @@ async function runDoomedTrainJob(args: {
       trainId,
       redStrategy: flush ? undefined : policy.strategy,
       ...(flush ? { bisectOnFailure: false } : {}),
-      // #1181: an operator cancel or a reconciler verdict can mark this row `abandoned` while
-      // the job is still gating (there is no cancellation token into `runMergeTrain`). The
-      // gate work is sunk cost either way, but a train whose row says abandoned must not
-      // LAND — nobody is going to account for that merge. Checked at the last moment before
-      // `landMergeTrain`, on a fresh read, never on the row captured at start.
-      shouldLand: () => vetoLandingIfAbandoned(trainId, database),
+      // #1181: a cancel or reconciler can mark this row `abandoned` mid-gate; such a train must not
+      // LAND, so a fresh read is checked right before every landing. #1568: the lock is retaken here too.
+      shouldLand: async () => {
+        await trainLock.beginLanding();
+        return vetoLandingIfAbandoned(trainId, database);
+      },
       // #1203: checked by the bisect driver before EVERY attempt (root and every half) — a
       // cancel therefore ends the job after the current gate's child process is killed, at the
       // latest, rather than continuing through the rest of a bisect tree.
@@ -672,6 +669,7 @@ async function runDoomedTrainJob(args: {
         // the attempt races to notice the signal.
         await updateMergeTrainState(trainId, { state: "gating", guardStates: ["assembling", "gating"] }, database).catch(() => undefined);
         boardEvents?.broadcast(projectId, "merge_train_changed");
+        await trainLock.drop(); // #1568: gate pre-lock
         const gate = await runTrainStagingGate({
           database, repoPath, baseBranch, projectId,
           ref: trainRef,
@@ -717,7 +715,7 @@ async function runDoomedTrainJob(args: {
       }),
       // #1204 — the CONTROL ARM, asked once before a red full train is halved: is the BARE
       // BASE red? If it is, the failure belongs to master and no member may be blamed for it.
-      gateBaseAlone: () => withMergeTrainGateActivity(trainId, () => gateBaseAloneOnce({ database, repoPath, baseBranch, projectId, trainLabel: label })),
+      gateBaseAlone: () => withMergeTrainGateActivity(trainId, async () => { await trainLock.drop(); return gateBaseAloneOnce({ database, repoPath, baseBranch, projectId, trainLabel: label }); }),
       closeMember: async (workspaceId) => {
         // Reuse the sanctioned already-merged path rather than reimplementing the
         // mergedAt/status/comment bookkeeping the reconcilers depend on.
@@ -738,6 +736,7 @@ async function runDoomedTrainJob(args: {
       onAttempt: async (attempt) => {
         await appendMergeTrainAttempt(trainId, { ...attempt }, database);
         boardEvents?.broadcast(projectId, "merge_train_changed");
+        await trainLock.endLanding(); // #1568: the attempt is done landing (or never did)
       },
     });
     if (flush) await finishFlushRun(flush, repoPath, label, result).catch((e) => console.warn(`[merge-train] ${label}: flush finish failed: ${errorMessage(e)}`));
@@ -749,14 +748,12 @@ async function runDoomedTrainJob(args: {
     boardEvents?.broadcast(projectId, "merge_train_changed");
     return { ok: false, reason: `train orchestrator threw: ${reason}` };
   } finally {
-    stopLockKeepalive();
-    // #1235: the train's own teardown, under the lock it still holds. Every attempt's worktree
-    // and `kanban/train/<label>*` branch goes here on BOTH exits — the gate's per-attempt
-    // `finally` already removed the directory on a normal run, but the branch delete in
-    // `runMergeTrain`'s own `finally` fails while a leftover worktree still has it checked out,
-    // and a killed gate leaves both. Never throws; the reconcilers are the backstop.
+    // #1568: retake the lock for the teardown; a timeout here only skips it (reconcilers are the backstop).
+    await trainLock.ensureHeld().catch(() => undefined);
+    // #1235: the train's own teardown on BOTH exits — every attempt's worktree and `kanban/train/<label>*`
+    // branch (a leftover worktree blocks the branch delete; a killed gate leaves both). Never throws.
     await cleanupTrainWorktreesForLabel({ database, repoPath, label });
-    repoLock.release();
+    await trainLock.close();
   }
 }
 

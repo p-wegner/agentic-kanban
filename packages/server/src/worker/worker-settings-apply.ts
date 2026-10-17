@@ -24,6 +24,7 @@ interface SettingsOptions {
   labels?: string[];
   providers?: string[];
   profileAliases?: string[];
+  profiles?: string[];
   maxConcurrency?: number;
 }
 
@@ -43,6 +44,7 @@ export function pinnedSettingKeys(opts: SettingsOptions): WorkerSettingKey[] {
   if (opts.labels !== undefined) pinned.push("labels");
   if (opts.providers !== undefined) pinned.push("providers");
   if (opts.profileAliases !== undefined) pinned.push("profileAlias");
+  if (opts.profiles !== undefined) pinned.push("profiles");
   return pinned;
 }
 

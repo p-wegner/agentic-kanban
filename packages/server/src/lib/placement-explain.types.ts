@@ -22,7 +22,7 @@ import type { WorkerSettingsEnvelope, WorkerSettingsReport } from "@agentic-kanb
 import type { WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
 import type { WorkerToolchains } from "@agentic-kanban/shared/lib/worker-toolchains";
 import type { ToolchainInstallRecord, WorkerToolchainInstallInfo } from "@agentic-kanban/shared/lib/worker-toolchain-install";
-import type { WorkerCapacityInfo, WorkerDoctorSummary, WorkerPackageManagers, WorkerProfileAttestation } from "@agentic-kanban/shared/lib/worker-protocol";
+import type { WorkerCapacityInfo, WorkerDoctorSummary, WorkerPackageManagers, WorkerProfileAttestation, WorkerUnattestedProfile } from "@agentic-kanban/shared/lib/worker-protocol";
 import type { WorkerUpdateReport } from "./worker-update.js";
 import type { SessionPhaseTimings } from "@agentic-kanban/shared/lib/worker-protocol";
 
@@ -183,6 +183,8 @@ export interface WorkerEligibility {
    * profile-restricted project reads as #651's refusal, never as "any profile".
    */
   attestedProfiles?: WorkerProfileAttestation[];
+  /** #1565: discovered here but not attested (filtered / credentials problem). */
+  unattestedProfiles?: WorkerUnattestedProfile[];
   /** #1451: the worker's provider harness mode (clean|custom|inherit); absent = not reported. */
   harnessMode?: string;
   /** #1456: concurrency mode (auto/fixed/pinned), the slots placement uses, and why. */

@@ -124,6 +124,11 @@ export async function getBoardStatus(
   //    non-workflow issues are still returned with nodeType = null).
   let projectIssues = await getBoardStatusIssues(projectId, database);
 
+  // #1550 — per-status totals over ALL issues, taken before the active-only filter below.
+  const statusCounts: Record<string, number> = {};
+  for (const s of statuses) statusCounts[s.name] = 0;
+  for (const i of projectIssues) statusCounts[i.statusName] = (statusCounts[i.statusName] ?? 0) + 1;
+
   if (!includeClosed) {
     projectIssues = projectIssues.filter(i => !isTerminalStatusIdView(i, terminalStatusIds));
   }
@@ -134,6 +139,7 @@ export async function getBoardStatus(
       generatedAt: new Date().toISOString(),
       totals: { totalIssues: 0, inProgress: 0, activeWorkspaces: 0, runningSessions: 0 },
       issues: [],
+      statusCounts,
     };
   }
 
@@ -243,5 +249,6 @@ export async function getBoardStatus(
       runningSessions: sessionRows.filter(s => s.status === "running").length,
     },
     issues: result,
+    statusCounts,
   };
 }

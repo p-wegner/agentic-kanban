@@ -33,6 +33,8 @@ export interface ParsedPromoteArgvOk {
   restartStable: boolean;
   /** #1238 — fired by the board's promotion cadence; provenance for the log header only. */
   cadence: boolean;
+  /** #1564 — promote despite critical/high production advisories. */
+  acceptAdvisories: boolean;
   reason: string | null;
 }
 export interface ParsedPromoteArgvUnknown {
@@ -284,3 +286,13 @@ export declare function buildRecoveryRecord(input?: {
 }): RecoveryRecord;
 
 export declare function formatRecoveryLane(lane: RecoveryLane | null, delta?: RecoveryDelta | null): string;
+
+/** #1564 — the advisory-scan precondition's decision. */
+export declare function planAdvisoryCheck(p: {
+  scan: { status: number | null; stdout?: string | null } | null | undefined;
+  accept?: boolean;
+}): {
+  action: "proceed" | "proceed-accepted" | "refuse" | "warn";
+  breaches: Array<{ ghsa: string; severity: string; module: string; vulnerable?: string; patched?: string }>;
+  detail: string;
+};
