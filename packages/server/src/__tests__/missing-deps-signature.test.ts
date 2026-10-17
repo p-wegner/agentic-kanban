@@ -35,6 +35,19 @@ describe("missingDepsEvidence (#1493)", () => {
     expect(missingDepsEvidence(out)).toBeNull();
   });
 
+  it("ignores ANSI-coloured log lines and captured-block headers (#1570)", () => {
+    const logLine =
+      "\x1b[22m\x1b[39m[pre-merge-gate] verify_script failed with a missing-deps signature for workspace a995af4f (matched: Error: Could not resolve 'vitest/config') — retrying once ...";
+    expect(looksLikeMissingDepsFailure(logLine)).toBe(false);
+    expect(missingDepsEvidence(logLine)).toBeNull();
+    const block = "\x1b[90mstderr |\x1b[39m \x1b[2msrc/a.test.ts > t\x1b[22m\nError: Could not resolve 'vitest/config'\n\nok";
+    expect(looksLikeMissingDepsFailure(block)).toBe(false);
+  });
+
+  it("still matches a coloured real error (#1570)", () => {
+    expect(looksLikeMissingDepsFailure("\x1b[31mError: Cannot find module 'foo'\x1b[39m")).toBe(true);
+  });
+
   it("still matches a real error after a captured block ends", () => {
     const out = "stdout | a.test.ts > t\nhello\n\nError: Cannot find module 'foo'";
     expect(looksLikeMissingDepsFailure(out)).toBe(true);
