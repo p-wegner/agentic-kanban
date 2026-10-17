@@ -439,11 +439,13 @@ async function runTrainStagingGate(args: {
         failedSuites: gate.failedSuites,
         regate: async () => {
           gate = await gateOnce();
-          return { passed: gate.passed, message: gate.message, failedSuites: gate.failedSuites };
+          return { passed: gate.passed, message: gate.message, failedSuites: gate.failedSuites, ...(isInconclusiveGate(gate) ? { inconclusive: true } : {}) };
         },
       });
       if (fix) agentFix = { attempt: fix.attempt, ...(fix.fixedTrainSha ? { fixedTrainSha: fix.fixedTrainSha } : {}) };
     }
+    // #1585: the fix agent's re-gate can be the held/cancelled one — judge the LATEST verdict.
+    const finalInconclusive = isInconclusiveGate(gate);
     if (!gate.passed) {
       return {
         passed: false,
@@ -451,7 +453,7 @@ async function runTrainStagingGate(args: {
         stage: gate.stage,
         ...(gate.failedSuites ? { failedSuites: gate.failedSuites, guardFailure: gate.guardFailure === true } : {}),
         ...(agentFix ? { agentFix } : {}),
-        ...(inconclusive ? { inconclusive: true } : {}),
+        ...(inconclusive || finalInconclusive ? { inconclusive: true } : {}),
       };
     }
     const extra = await args.afterGreen?.({ gateWorktree, gateMessage: gate.message });
