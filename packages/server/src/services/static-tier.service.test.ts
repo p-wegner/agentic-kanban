@@ -38,6 +38,17 @@ describe("static tier", () => {
     expect(run.mock.calls[0][1].KANBAN_ARCH_CHANGED_FILES).toBe("packages/server/src/a.ts");
   });
 
+  it("asks for the member's own guards only when told to (#1575), and a red carries the ratchet message", async () => {
+    const run = vi.fn<StaticTierRunner>(async () => result(1, "private-tree-walker-ratchet: new readdirSync caller in src/x.ts"));
+    const plain = await runStaticTier({ workingDir: tree(), baseBranch: "master", run });
+    expect(run.mock.calls[0][1].KANBAN_STATIC_MEMBER_GUARDS).toBeUndefined();
+    expect(plain.passed).toBe(false);
+    const member = await runStaticTier({ workingDir: tree(), baseBranch: "master", run, memberGuards: true });
+    expect(run.mock.calls[1][1].KANBAN_STATIC_MEMBER_GUARDS).toBe("1");
+    expect(member).toMatchObject({ ran: true, passed: false });
+    expect(member.detail).toContain("readdirSync");
+  });
+
   it("is green on exit 0", async () => {
     const verdict = await runStaticTier({ workingDir: tree(), baseBranch: "master", run: async () => result(0) });
     expect(verdict).toMatchObject({ ran: true, passed: true });

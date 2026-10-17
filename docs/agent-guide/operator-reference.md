@@ -100,7 +100,7 @@ curl -s http://127.0.0.1:3001/api/projects/$P/delivery    # effective posture, s
   (`startup-tasks.ts`); do not flip `auto_monitor` for this. `manual` is the kill switch.
 - **`risk_posture_<id>`** ∈ `strict | standard | iterate | fast | sprint | flow` (decision 017,
   `risk-posture.service.ts`). Loosest = **`sprint`**: no per-ticket review, guards-only gate,
-  no implement-exit check, contention off, trains up to 12, a red base files a debt ticket
+  no implement-exit test run (the static tier + the member's own `when:`-matched guard suites still run before review, #1575), contention off, trains up to 12, a red base files a debt ticket
   instead of blocking. `flow` still reviews every ticket. Back to the default: `standard`.
 - Read every current value at once: `GET /api/preferences/settings`. A ticket tag
   `risk:<level>` overrides the posture for that one ticket.
