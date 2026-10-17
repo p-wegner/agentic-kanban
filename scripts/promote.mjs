@@ -134,6 +134,7 @@ import {
   shouldReinstall,
   stableTagDate,
 } from "./promote-plan.mjs";
+import { evaluatePromoteCi, formatCiRefusal, parseRequiredWorkflows, readCiForSha } from "./promote-ci.mjs";
 import { MISSES_RELPATH, OUTCOMES_RELPATH, formatGateEvidence, formatMissRate, parseOutcomeRows, summarizeGateEvidence, summarizeMissRate } from "./promote-evidence.mjs";
 import {
   DEFAULT_RC_CADENCE_MS,
@@ -186,6 +187,8 @@ const opts = {
   // #1238: provenance — fired by the board's cadence rather than by a hand. Same run.
   cadence: parsedArgv.cadence,
   acceptAdvisories: parsedArgv.acceptAdvisories,
+  // #1562: promote although a required GitHub workflow is red on the sha.
+  ignoreCi: parsedArgv.ignoreCi,
   reason: parsedArgv.reason,
 };
 
@@ -345,6 +348,35 @@ async function readPostureLevel(projectId) {
   } catch {
     return null;
   }
+}
+
+// --- GitHub CI on the sha (#1562) -----------------------------------------------------------
+
+/** `ci_required_workflows_<id>` (CSV) from the board's database, read-only; env override wins. [] = every push workflow. */
+async function readCiRequired(projectId) {
+  if (env.KANBAN_PROMOTE_CI_REQUIRED) return parseRequiredWorkflows(env.KANBAN_PROMOTE_CI_REQUIRED);
+  if (!projectId) return [];
+  try {
+    if (!existsSync(dbPath)) return [];
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      const row = db.prepare("select value from preferences where key = ? limit 1").get(`ci_required_workflows_${projectId}`);
+      return parseRequiredWorkflows(typeof row?.value === "string" ? row.value : "");
+    } finally {
+      db.close();
+    }
+  } catch {
+    return [];
+  }
+}
+
+/** The CI state of `sha`: `{ available, verdict?, reason?, line }`. Skips (available:false) when gh cannot answer. */
+async function readCiState(sha, projectId) {
+  const ci = readCiForSha(sha, { cwd: MAIN_CHECKOUT });
+  if (!ci.available) return { available: false, reason: ci.reason, line: `not checked (${ci.reason})` };
+  const verdict = evaluatePromoteCi(ci.runs, await readCiRequired(projectId));
+  return { available: true, verdict, line: verdict.detail };
 }
 
 // --- step 1b: ASK for the sweep this run needs (#1044) --------------------------------------
@@ -1244,6 +1276,10 @@ async function main() {
   const missRate = readMissRateEvidence();
   // #1240 — under `flow` the plan's first line names the rc verdict as the one that counts.
   const postureLevel = await readPostureLevel(sweep?.projectId ?? null);
+  // #1562 — what GitHub Actions says about the sha. A red required workflow refuses (below) unless
+  // --ignore-ci; an unavailable `gh` skips the check and says so.
+  const ciState = await readCiState(sha, sweep?.projectId ?? null);
+  const ciRefusal = ciState.available && !ciState.verdict.ok && !opts.ignoreCi ? formatCiRefusal(ciState.verdict, sha) : null;
 
   // #1054: the recovery lane's whole gate set. `recoveryDelta` is also what makes the delta
   // LEGIBLE — on a single-user board the operator is the review, so printing what would deploy
@@ -1314,6 +1350,7 @@ async function main() {
     const dryDirection = directionFor(sha, stableHead);
     console.log(`  direction        ${dryDirection ? dryDirection.detail : "not checked (no readable stable HEAD)"}`);
     console.log(`  sweep plan       ${acquisition.detail}`);
+    console.log(`  github ci        ${ciState.line}${ciState.available && !ciState.verdict.ok && opts.ignoreCi ? "  (red, but --ignore-ci)" : ""}`);
     // #1045: printed beside the verdict it is weaker than, and labelled as such.
     console.log(`  gate evidence    ${formatGateEvidence(gateEvidence)}`);
     // #1234: the corpus number beside it, under the same label. What the impact tier drops is
@@ -1331,7 +1368,7 @@ async function main() {
     console.log("");
 
     const wouldRefuse =
-      (recoveryLane && !recoveryLane.ok) || (!acquisition.request && (!verdict.ok || (dryDirection && !dryDirection.ok)));
+      (recoveryLane && !recoveryLane.ok) || (!acquisition.request && (!verdict.ok || (dryDirection && !dryDirection.ok))) || ciRefusal !== null;
     console.log(
       acquisition.request
         ? "This run would TRIGGER a sweep first, then run these steps on its verdict (refusing if it is not green):"
@@ -1346,7 +1383,9 @@ async function main() {
           ? recoveryLane.detail
           : !verdict.ok
             ? `${verdict.detail} (reason: ${verdict.reason})`
-            : dryDirection.detail;
+            : dryDirection && !dryDirection.ok
+              ? dryDirection.detail
+              : ciRefusal;
       console.log(`\n[promote] WOULD REFUSE — ${why}`);
       if (!recoveryLane || recoveryLane.ok) {
         console.log(`[promote] ${acquisition.reason === "disabled" ? "drop --no-await-sweep to trigger a sweep instead, or " : ""}--recover is the fast lane (no sweep; pipeline + rollback are the gate); --force-sweep skips every check, loudly.`);
@@ -1389,6 +1428,10 @@ async function main() {
       : `No sweep was requested: ${acquisition.detail}`;
     fail(`${verdict.detail} (reason: ${verdict.reason}). ${tried} Or promote deliberately with --force-sweep.`);
   }
+  // #1562 — GitHub CI: printed always, refusing when a required workflow is red on this sha.
+  log(`[promote] github ci on ${sha}: ${ciState.line}`);
+  if (ciRefusal) fail(ciRefusal);
+  if (ciState.available && !ciState.verdict.ok) log(`[promote] --ignore-ci: promoting despite red CI (${ciState.verdict.detail})`);
   if (rc) recordRc(rc.branch, { state: "green", sha: rc.sha, failedSuites: [] });
 
   // Refuse rather than create or repair the stable checkout: it is an operator artifact

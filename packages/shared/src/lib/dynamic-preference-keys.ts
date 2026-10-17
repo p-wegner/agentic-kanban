@@ -128,6 +128,10 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // off, which is today's behaviour exactly. See shared/lib/test-impact-budget.ts.
   "test_impact_budget",
   "file_contention",
+  // #1562: `ci_required_workflows_<id>` is a CSV of GitHub Actions workflow names the board watches
+  // on the base branch (and `pnpm promote` requires green on the rc sha). Absent/empty = every
+  // workflow that runs on push to the default branch.
+  "ci_required_workflows",
   // Worker fleet (epic #184): `worker_dispatch_<projectId>` opts a project's builder
   // sessions into remote execution on connected fleet workers ("true"/"false");
   // `worker_labels_<id>` is a CSV of labels a worker must carry; `worker_dispatch_

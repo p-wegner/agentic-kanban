@@ -29,6 +29,7 @@ import { startProjectConductorSupervisor } from "../services/project-conductor.s
 import { startBackupScheduler, stopBackupScheduler } from "./backup-scheduler.js";
 import { startSessionMessagePruner, stopSessionMessagePruner } from "../services/session-message-pruner.service.js";
 import { startBaseBranchHealthReconciler, stopBaseBranchHealthReconciler } from "./base-branch-health-reconciler.js";
+import { startCiStatusReconciler, stopCiStatusReconciler } from "./ci-status-reconciler.js";
 import { startWorkerConnectionReaper, stopWorkerConnectionReaper } from "../services/worker-connection-reaper.service.js";
 import { getWorkerFleet } from "../services/worker-fleet.service.js";
 import { startInstallStalenessReconciler, stopInstallStalenessReconciler } from "./install-staleness-reconciler.js";
@@ -286,6 +287,15 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start({ db }) {
       startBaseBranchHealthReconciler(db);
       return stopBaseBranchHealthReconciler;
+    },
+  },
+  {
+    // #1562: GitHub Actions status of the base branch (read-only `gh run list`); a sustained-red
+    // workflow becomes a console ATTENTION line, a delivery chip and a per-workflow heal ticket.
+    name: "ci-status-reconciler",
+    start({ db }) {
+      startCiStatusReconciler(db);
+      return stopCiStatusReconciler;
     },
   },
   {
