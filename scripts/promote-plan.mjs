@@ -100,6 +100,7 @@ export const KNOWN_PROMOTE_FLAGS = Object.freeze([
   "--with-migration",
   "--restart-stable",
   "--cadence",
+  "--accept-advisories",
   "--reason",
   "--help",
   "-h",
@@ -147,8 +148,34 @@ export function parsePromoteArgv(argv = []) {
     // #1238 — fired by the board's promotion cadence rather than by hand. Provenance only: the
     // run is byte-for-byte the same, the log header says who started it.
     cadence: argv.includes("--cadence"),
+    // #1564 — promote refuses on a critical/high production advisory unless this is passed.
+    acceptAdvisories: argv.includes("--accept-advisories"),
     reason,
   };
+}
+
+/**
+ * #1564 — the promote precondition's decision, pure. `scan` is `{ status, stdout }` from
+ * `security-scan.mjs --advisories-only` (exit 0 clean / 1 breach / 2 did not run).
+ * A breach refuses unless accepted; a scan that did not run warns and proceeds (an offline
+ * promote must stay possible) but is never reported as clean.
+ */
+export function planAdvisoryCheck({ scan, accept = false }) {
+  if (scan?.status === 0) return { action: "proceed", breaches: [], detail: "no critical/high advisory in the production graph" };
+  if (scan?.status === 1) {
+    let breaches = [];
+    try {
+      breaches = JSON.parse(scan.stdout ?? "").breaches ?? [];
+    } catch {
+      breaches = [];
+    }
+    const list = breaches.map((b) => `${b.severity} ${b.module} ${b.vulnerable} -> ${b.patched} (${b.ghsa})`);
+    const detail = `${breaches.length} critical/high advisory(ies) in the production graph: ${list.join("; ") || "(unparseable report)"}`;
+    return accept
+      ? { action: "proceed-accepted", breaches, detail: `${detail} — ACCEPTED by --accept-advisories` }
+      : { action: "refuse", breaches, detail: `${detail}. Fix the dependency, or pass --accept-advisories to promote anyway.` };
+  }
+  return { action: "warn", breaches: [], detail: `the advisory scan did not run (exit ${scan?.status ?? "?"}) — advisories are UNKNOWN, not clean` };
 }
 
 /** Rendered once for `--help`/`-h` and for a refusal on an unknown flag. */
@@ -166,6 +193,7 @@ export function formatPromoteUsage() {
     "                                             # No tag, no fast-forward, no build, no sweep. Also",
     "                                             # `pnpm stable:start`.",
     "  node scripts/promote.mjs --cadence        # (set by the board's promote_cadence tick) same run, logged as scheduled",
+    "  node scripts/promote.mjs --accept-advisories # promote despite critical/high production advisories (#1564)",
     "  node scripts/promote.mjs --with-migration # (with --recover) ack that the delta includes a migration",
     '  node scripts/promote.mjs --reason "..."   # (with --recover) why this bypassed the sweep',
     "  node scripts/promote.mjs --help           # this text",
