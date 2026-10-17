@@ -113,6 +113,7 @@ describe("every background sweep is registered (#584)", () => {
       "commit-msg-hook-backfill",
       "flush-activity-log-reconciler",
       "queue-flush-sweep",
+      "progress-invariant-sweep",
       "worker-build-prewarm",
     ]);
   });
