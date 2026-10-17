@@ -61,7 +61,8 @@ function workerLine(w: ConsoleWorker, g: Glyphs): Line {
   const hb = w.heartbeatAt ? `hb ${formatAge(g.nowMs - new Date(w.heartbeatAt).getTime())}` : "hb -";
   const ti = w.toolchainInstall;
   const install = ti && ti.state !== "done" ? ` · install ${ti.toolchains.join(",")} ${ti.state}${ti.state === "failed" && ti.reason ? ` (${ti.reason})` : ""}` : "";
-  const state = (w.status === "online" ? "" : ` [${w.status}]`) + (w.authExpired ? " [auth-expired]" : "") + install
+  const profiles = w.profiles ? ` · ${w.profiles}` : "";
+  const state = (w.status === "online" ? "" : ` [${w.status}]`) + (w.authExpired ? " [auth-expired]" : "") + install + profiles
     + (w.concurrencyMode ? ` · ${w.concurrencyMode}` : "") + (w.concurrencyHold ? ` · HOLD ${w.concurrencyHold}` : "")
     + (w.pinned && w.pinned.length > 0 ? ` · pinned ${w.pinned.join(",")}` : "") + (w.desiredPending ? " · settings pending" : "")
     + (w.updatePending ? ` · ${w.updatePending}` : "");

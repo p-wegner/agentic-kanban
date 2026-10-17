@@ -206,7 +206,7 @@ function capabilitiesOf(
   profiles?: WorkerProfileAttestation[],
   providerNotice?: string,
   doctor?: WorkerDoctorSummary,
-  toolchainInstall?: WorkerToolchainInstallInfo, verify?: WorkerCapabilities["verify"], workRoot?: string,
+  toolchainInstall?: WorkerToolchainInstallInfo, verify?: WorkerCapabilities["verify"], workRoot?: string, unattested?: WorkerCapabilities["unattestedProfiles"],
 ): WorkerCapabilities {
   return {
     ...(toolchainInstall ? { toolchainInstall } : {}), ...(verify ? { verify } : {}),
@@ -216,7 +216,7 @@ function capabilitiesOf(
     ...(opts.maxConcurrency !== undefined ? { maxConcurrency: opts.maxConcurrency } : {}),
     // #910: this machine's live headroom (Tier 0 only: one sync os.freemem() read, cheap for every beat; never throws)
     capacity: readWorkerCapacity(workRoot), ...(opts.harness ? { harnessMode: opts.harness.mode } : {}), // #1451
-    ...(profiles && profiles.length > 0 ? { profiles } : {}),
+    ...(profiles && profiles.length > 0 ? { profiles } : {}), ...(unattested && unattested.length > 0 ? { unattestedProfiles: unattested } : {}),
     // #1369/#1382: package managers + toolchains this machine has, so placement can name what a project needs.
     ...packageManagersField(), ...toolchainsField(),
     ...(doctor ? { doctor } : {}),
@@ -726,7 +726,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           // gained docker (or changed its ceiling) says so without being re-paired.
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
-          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctor.takeCurrent(), toolchains.installer.info(), verifyJobs.capability(), workRoot),
+          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctor.takeCurrent(), toolchains.installer.info(), verifyJobs.capability(), workRoot, profileAttestor.unattested()),
         } satisfies WorkerToBoardMessage));
         while (pendingCritical.length > 0) {
           socket.send(JSON.stringify(pendingCritical.shift()));
@@ -909,7 +909,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           // Not gated on selfUpdate: a daemon restarted after a Ctrl+C drain without --auto-update
           // (every Linux worker until #1374) otherwise stayed `draining` on the board forever.
           ...(draining ? { status: "draining" } : announceOnline ? { status: "online" } : {}),
-          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctorToSend, toolchains.installer.info(), verifyJobs.capability(), workRoot),
+          capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctorToSend, toolchains.installer.info(), verifyJobs.capability(), workRoot, profileAttestor.unattested()),
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
           ...(selfUpdate ? { update: selfUpdate.state() } : {}),

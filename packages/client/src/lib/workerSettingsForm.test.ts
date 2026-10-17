@@ -14,7 +14,7 @@ describe("worker settings form (#1381)", () => {
     const form = { ...formFromWorker(undefined, current), maxConcurrency: "4", labels: "docker, docker , linux", profileAlias: "default=anth" };
     expect(settingsFromForm(form)).toEqual({
       settings: {
-        maxConcurrency: 4, labels: ["docker", "linux"], providers: ["claude"], profileAlias: ["default=anth"],
+        maxConcurrency: 4, labels: ["docker", "linux"], providers: ["claude"], profileAlias: ["default=anth"], profiles: [],
         allowedProjects: [], deniedProjects: [], drain: false,
       },
     });

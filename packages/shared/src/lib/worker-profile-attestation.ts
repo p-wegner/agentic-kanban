@@ -114,3 +114,29 @@ export function parseWorkerProfileAttestations(raw: unknown): WorkerProfileAttes
   }
   return out.length > 0 ? out : undefined;
 }
+
+/**
+ * #1565: a profile this worker DISCOVERED on disk but does not attest - `filtered` out by `--profiles` / the
+ * board's profile setting, or carrying a credentials problem. Names only, display + attention input; it is
+ * never a permission (unlike an attestation), so a half-understood entry is simply dropped.
+ */
+export interface WorkerUnattestedProfile {
+  provider: string;
+  name: string;
+  state: "filtered" | WorkerProfileCredentialState;
+}
+
+export function parseWorkerUnattestedProfiles(raw: unknown): WorkerUnattestedProfile[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: WorkerUnattestedProfile[] = [];
+  for (const item of raw.slice(0, 100)) {
+    const rec = asRecord(item);
+    if (!rec) continue;
+    const provider = typeof rec.provider === "string" ? rec.provider.trim() : "";
+    const name = typeof rec.name === "string" ? rec.name.trim() : "";
+    const state = rec.state;
+    if (!provider || !name || (state !== "filtered" && state !== "expired" && state !== "missing" && state !== "auth-expired")) continue;
+    out.push({ provider, name, state });
+  }
+  return out.length > 0 ? out : undefined;
+}

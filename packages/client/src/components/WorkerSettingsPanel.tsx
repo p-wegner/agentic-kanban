@@ -114,6 +114,9 @@ export function WorkerSettingsPanel(props: WorkerSettingsPanelProps) {
         {field("profileAlias", "Profile alias (default=anth)", (d) => (
           <input disabled={d} className={INPUT} value={form.profileAlias} onChange={(e) => set("profileAlias", e.target.value)} />
         ))}
+        {field("profiles", "Attested profiles (empty = all discovered; applies on restart)", (d) => (
+          <input disabled={d} className={INPUT} value={form.profiles} onChange={(e) => set("profiles", e.target.value)} />
+        ))}
         {field("allowedProjects", "Allowed projects (none selected = all)", multi("allowedProjects"))}
         {field("deniedProjects", "Denied projects", multi("deniedProjects"))}
         {field("minFreeRamGb", "Min free RAM, GB (empty = no floor)", (d) => (

@@ -28,7 +28,7 @@ export interface ConsoleMergeHold { reason: string; held: number[] }
 export interface ConsoleRc { branch: string; sha: string | null; state: string; updatedAt: string | null }
 export interface ConsoleConnectCode { codeHint: string; status: string; steps: Array<{ step: string; status: string }> }
 
-export type ConsoleExtrasPayload = Partial<ConsoleExtras> & { unpromotedMerges?: number | null };
+export type ConsoleExtrasPayload = Partial<ConsoleExtras> & { unpromotedMerges?: number | null; profileAttention?: string[] };
 
 /** What a semaphore label says the chain is — the labels are free text written at each call site. */
 export function chainKindOf(label: string): string {
@@ -91,6 +91,8 @@ export function applyConsoleExtras(model: ConsoleModel, p: ConsolePayloads): voi
     ? { outcome: extras.baseHealth.outcome, sha: extras.baseHealth.sha, createdAt: extras.baseHealth.createdAt, failedSuites: extras.baseHealth.failedSuites }
     : null;
   model.connectCodes = (extras?.connectCodes ?? []).map((c) => ({ codeHint: c.codeHint, status: c.status, steps: c.progress.map((s) => ({ step: s.step, status: s.status })) }));
+
+  for (const text of extras?.profileAttention ?? []) model.attention.push({ level: "yellow", text }); // #1565
 
   const verdict = p.window?.window?.lastVerdict;
   if (verdict && !verdict.release && verdict.reason !== "accumulating") {

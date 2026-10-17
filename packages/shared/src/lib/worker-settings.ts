@@ -12,6 +12,7 @@ export const WORKER_SETTING_KEYS = [
   "labels",
   "providers",
   "profileAlias",
+  "profiles",
   "allowedProjects",
   "deniedProjects",
   "drain",
@@ -23,7 +24,7 @@ export const WORKER_SETTING_KEYS = [
 export type WorkerSettingKey = (typeof WORKER_SETTING_KEYS)[number];
 
 /** Keys the worker can only pick up on its next start (they feed provider/profile attestation). */
-export const WORKER_RESTART_SETTING_KEYS: readonly WorkerSettingKey[] = ["providers", "profileAlias"];
+export const WORKER_RESTART_SETTING_KEYS: readonly WorkerSettingKey[] = ["providers", "profileAlias", "profiles"];
 
 /** Keys enforced by the BOARD, so a worker's flags cannot pin them. */
 export const WORKER_BOARD_ONLY_SETTING_KEYS: readonly WorkerSettingKey[] = ["allowedProjects", "deniedProjects", "minFreeRamGb", "minSlots", "maxSlots", "sessionRamGb"];
@@ -36,6 +37,8 @@ export interface WorkerSettings {
   providers?: string[];
   /** `<source>=<name>` pairs, the shape `--profile-alias` takes. */
   profileAlias?: string[];
+  /** #1565: the profiles this worker ATTESTS (same as `--profiles`). Empty/absent = every discovered login. */
+  profiles?: string[];
   /** Project ids this worker may take work for. Absent/empty = every project. */
   allowedProjects?: string[];
   /** Project ids this worker must never take work for. Wins over `allowedProjects`. */
@@ -85,7 +88,7 @@ export function parseWorkerSettings(raw: unknown): WorkerSettings {
     && rec.maxConcurrency >= 1 && rec.maxConcurrency <= 64) {
     out.maxConcurrency = rec.maxConcurrency;
   }
-  for (const key of ["labels", "providers", "profileAlias", "allowedProjects", "deniedProjects"] as const) {
+  for (const key of ["labels", "providers", "profileAlias", "profiles", "allowedProjects", "deniedProjects"] as const) {
     const list = strings(rec[key]);
     if (list) out[key] = list;
   }
