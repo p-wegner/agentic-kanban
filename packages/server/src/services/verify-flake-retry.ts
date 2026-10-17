@@ -219,3 +219,27 @@ function isGuard(suite: FailedSuite, guardSuites: readonly string[]): boolean {
 export function retryScopeEnvValue(suites: FailedSuite[]): string {
   return suites.map((s) => `${s.packageLabel ?? ""}:${s.file}`).join(",");
 }
+
+/**
+ * Environment signatures (#1579): failure text that names the MACHINE, not the code. They never
+ * decide anything (a retry is earned by the suite count and guard rules above); they only make the
+ * evidence say what a failing suite most likely was, so an operator reading a train's red does not
+ * have to open the log to learn that `Permission denied` on `.git/config` is not a regression.
+ */
+const ENVIRONMENT_SIGNATURES: ReadonlyArray<{ name: string; pattern: RegExp }> = [
+  { name: "permission denied on .git/config", pattern: /unable to access '[^']*\.git[\/]config'[^\n]*Permission denied|Permission denied[^\n]*\.git[\/]config/i },
+  { name: "EBUSY/EPERM on a temp dir", pattern: /\b(?:EBUSY|EPERM)\b[^\n]*(?:temp|tmp|kanban-)/i },
+  { name: "test timeout", pattern: /Test timed out in \d+ms|Hook timed out in \d+ms/i },
+];
+
+/** The names of every environment signature present in `output`, in a stable order. */
+export function environmentSignatures(output: string): string[] {
+  const text = output.replace(ANSI, "");
+  return ENVIRONMENT_SIGNATURES.filter((s) => s.pattern.test(text)).map((s) => s.name);
+}
+
+/** ` [environment: a, b]` or `""` — the suffix the gate appends to a flake note or a red message. */
+export function environmentNote(output: string): string {
+  const names = environmentSignatures(output);
+  return names.length > 0 ? ` [environment: ${names.join(", ")}]` : "";
+}
