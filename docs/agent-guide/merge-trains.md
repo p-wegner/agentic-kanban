@@ -99,6 +99,40 @@ Replaces deferral, bisect and per-member fan-out with **one persistent agent per
 
 When #1569 lands, this section is rewritten as shipped behaviour.
 
+## Landing a train by hand: `train land-local` (#1586)
+
+When the board's train path keeps failing (the 2026-10-17 train 04 took four failed runs and ~15
+manual steps), run from the **main checkout**:
+
+```
+pnpm cli -- train land-local <train-id>      # a train row (cancelled on the board if still live)
+pnpm cli -- train land-local --from-window   # the open window's pending members, no row yet
+pnpm cli -- train land-local <train-id> --continue   # re-run the gate after committing a fix
+```
+
+What it does, in order:
+
+1. **Pauses** `auto_merge_disabled_<project>` and holds the train window for 12 h. Both are
+   **restored in a `finally`** (a pref that was unset is deleted again), also when the gate is red
+   or the run throws. A crash of the process itself skips the restore: reset the pref and
+   `window/hold {minutes: 0}` by hand.
+2. **Worktree** at `<repo parent>/.worktrees/<repo>/land-local/<label>` on branch
+   `kanban/land-local/<label>`: cut from `kanban/train/<label>` when that ref exists, else the base
+   with every member merged `--no-ff`. A member conflict stops the run and leaves the worktree.
+3. **Gate** there: `pnpm install -r` (`--skip-install` to skip), then `check:arch`, `typecheck` and
+   `test:mine` with `KANBAN_TEST_FILES` set to the train diff (guards still run). Progress is
+   printed per step.
+4. **Red** stops with the failing step and suite files and leaves the worktree. Fix, **commit in
+   the worktree**, re-run with `--continue` (it skips assembly and install).
+5. **Green** merges `--no-ff` into the base in the main checkout (must be on the base, clean, and
+   the worktree must contain the current base) with the standard `Merge train <label>: #A #B`
+   subject and `Merge-Train:` trailer, closes each member through `finalizeMergeCleanup` (the same
+   bookkeeping as a board landing, so `hand-merged-branch-reconciler` has nothing to do), marks the
+   train row `landed` with `landedLocally: true`, and removes the worktree and branch.
+
+It does not reinstall in the main checkout: run `pnpm install -r` there if the train changed
+dependencies.
+
 ## Where to look
 
 | Question | Where |
