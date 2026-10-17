@@ -41,7 +41,7 @@ const model: ConsoleModel = {
   connectCodes: [{ codeHint: "k3f9", status: "active", steps: [{ step: "paired", status: "ok" }, { step: "doctor", status: "failed" }] }],
   errors: [],
 };
-const base = { nowMs: NOW, intervalSec: 5 };
+const base = { nowMs: NOW, intervalSec: 5, timeZone: "UTC" };
 
 describe("operator console frame (#1449)", () => {
   for (const cols of [80, 140]) {

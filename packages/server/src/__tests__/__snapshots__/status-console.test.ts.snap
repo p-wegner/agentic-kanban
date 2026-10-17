@@ -1,7 +1,7 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`renderConsole > snapshot at 80 cols, color 1`] = `
-"[33magentic-kanban  stable-20261012-2 (19b2329)  14:19:38  host 7.3G free / floor 2…[0m
+"[33magentic-kanban  stable-20261012-2 (19b2329)  12:19:38  host 7.3G free / floor 2…[0m
 [1mWORKERS ────────────────────────────────────────────────────────────────────────[0m
 [36m desktop-stable  ●●  2/2  win   19b2329 #1414 review 1m12s · #1406 build 4m03s …[0m
 [36m wsl-stable      ●   1/1  wsl   19b2329 #1381 build 2m40s  hb 2s[0m
@@ -24,7 +24,7 @@ exports[`renderConsole > snapshot at 80 cols, color 1`] = `
 `;
 
 exports[`renderConsole > snapshot at 80 cols, no color 1`] = `
-"agentic-kanban  stable-20261012-2 (19b2329)  14:19:38  host 7.3G free / floor 2…
+"agentic-kanban  stable-20261012-2 (19b2329)  12:19:38  host 7.3G free / floor 2…
 WORKERS ────────────────────────────────────────────────────────────────────────
  desktop-stable  ●●  2/2  win   19b2329 #1414 review 1m12s · #1406 build 4m03s …
  wsl-stable      ●   1/1  wsl   19b2329 #1381 build 2m40s  hb 2s
@@ -47,7 +47,7 @@ q quit · a all issues"
 `;
 
 exports[`renderConsole > snapshot at 140 cols, color 1`] = `
-"[33magentic-kanban  stable-20261012-2 (19b2329)  14:19:38  host 7.3G free / floor 2G  7 open · 3 running  refresh 5s[0m
+"[33magentic-kanban  stable-20261012-2 (19b2329)  12:19:38  host 7.3G free / floor 2G  7 open · 3 running  refresh 5s[0m
 [1mWORKERS ────────────────────────────────────────────────────────────[0m │ [1mPIPELINE (7 open) ──────────────────────────────────────────────────[0m
 [36m desktop-stable  ●●  2/2  win   19b2329 #1414 review 1m12s · #1406 …[0m │ [2m Todo    #1337[0m
 [36m wsl-stable      ●   1/1  wsl   19b2329 #1381 build 2m40s  hb 2s[0m     │  Build   #1381 #1416
@@ -61,7 +61,7 @@ exports[`renderConsole > snapshot at 140 cols, color 1`] = `
 `;
 
 exports[`renderConsole > snapshot at 140 cols, no color 1`] = `
-"agentic-kanban  stable-20261012-2 (19b2329)  14:19:38  host 7.3G free / floor 2G  7 open · 3 running  refresh 5s
+"agentic-kanban  stable-20261012-2 (19b2329)  12:19:38  host 7.3G free / floor 2G  7 open · 3 running  refresh 5s
 WORKERS ──────────────────────────────────────────────────────────── │ PIPELINE (7 open) ──────────────────────────────────────────────────
  desktop-stable  ●●  2/2  win   19b2329 #1414 review 1m12s · #1406 … │  Todo    #1337
  wsl-stable      ●   1/1  wsl   19b2329 #1381 build 2m40s  hb 2s     │  Build   #1381 #1416
