@@ -3,13 +3,14 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
-## 2026-10-17: UX probe landed, stable-20261017 live
+## 2026-10-17: UX probe landed, stable-20261017-2 live
 
 **Goal (Peter):** a subagent explores the UI and fixes UX flaws; the board implements the rest.
-**Done:** 0 open tickets except #1548 (filed 23:15Z, builder running).
+**Done:** 0 open tickets (01:16Z).
 
-- **Master = origin = 71522ef9c. Stable = `stable-20261017` = 71522ef9c** (promoted ~23:13Z
-  after a green full rc sweep on ao-pf38; smoke passed; rollback target `stable-20261016-2`).
+- **Master = origin = dea3a44f2. Stable = `stable-20261017-2` = dea3a44f2** (promoted 01:15Z; smoke
+  passed; rollback target `stable-20261017`). It carries #1548: the promote now accepts a green full
+  sweep of the rc sha recorded under master, and did so on its first run (no second sweep).
 - **UX probe** (subagent, playwright on the stable board): 8 client fixes committed direct
   (#1531-#1538: dark-mode text and Cancel button, phone toolbar row, Completed grid clipping,
   search chip "N matches", shortcut "/" separator, Escape on Merge Queue panel and phone
@@ -36,9 +37,12 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
 - **Host memory** 3-4 GB free; background shells get reaped. Promotes run in herdr pane w1:p5W.
 
 **Next:**
-1. Land #1548 (promote accepts a green full sweep of the rc sha recorded on master).
-2. On the live board: press Escape on the Merge Queue panel and the phone Completed sheet;
-   check the shortcut help separator.
+1. Peter: find the leaking minifilter on ao-pf38 (`fltmc instances` as admin); until then reboot it
+   every day or two.
+2. Peter: decide Defender exclusions on desktop-stable.
+
+Verified on the live board 2026-10-17 (playwright, isolated session): Escape closes the Merge
+Queue panel and the phone Completed sheet; shortcut help shows `↑ / ↓ / k / j`.
 
 ## Archive
 
