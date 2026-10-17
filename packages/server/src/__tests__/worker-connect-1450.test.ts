@@ -83,6 +83,19 @@ describe("doctor attested profiles (#1450)", () => {
     expect(ok.detail).not.toContain("zai");
     expect(checkAttestedProfiles(found, ["anth", "ghost"]).status).toBe("warn");
   });
+
+  it("#1558: reports the running daemon's attestation, not doctor's own argv", () => {
+    const c = checkAttestedProfiles(found, undefined, { daemonRunning: true, daemonProfiles: "claude:anth" });
+    expect(c.status).toBe("pass");
+    expect(c.detail).toContain("running daemon attests claude:anth");
+    expect(c.detail).not.toContain("zai");
+  });
+
+  it("#1558: without a daemon says so and names each profile's source", () => {
+    const c = checkAttestedProfiles(found, undefined, { daemonRunning: false, daemonProfiles: null });
+    expect(c.detail).toContain("no daemon is running");
+    expect(c.detail).toContain("config dir /x/zai");
+  });
 });
 
 describe("revoked pairing (#1450)", () => {

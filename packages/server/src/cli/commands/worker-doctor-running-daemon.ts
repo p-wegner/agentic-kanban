@@ -33,6 +33,21 @@ export function describeRunningDaemon(status: (Record<string, unknown> & { pid?:
   return { name: NAME, status: "pass", detail };
 }
 
+/** #1558: the profiles the RUNNING daemon attests (null when it reports none), for the attested-profiles check. */
+export function daemonAttestedProfiles(status: Record<string, unknown> | null): string | null {
+  return status ? (list(status.profiles) ?? list(status.attestedProfiles)) : null;
+}
+
+/** The check plus the raw status, so a caller can reuse what the daemon said without a second request. */
+export async function checkRunningDaemonWithStatus(
+  stateFile: string,
+  controlFileExists: boolean,
+  fetchImpl?: typeof fetch,
+): Promise<{ check: DoctorCheck; status: Record<string, unknown> | null }> {
+  const status = await fetchWorkerStatus(stateFile, fetchImpl);
+  return { check: describeRunningDaemon(status, controlFileExists), status };
+}
+
 export async function checkRunningDaemon(stateFile: string, controlFileExists: boolean, fetchImpl?: typeof fetch): Promise<DoctorCheck> {
-  return describeRunningDaemon(await fetchWorkerStatus(stateFile, fetchImpl), controlFileExists);
+  return (await checkRunningDaemonWithStatus(stateFile, controlFileExists, fetchImpl)).check;
 }

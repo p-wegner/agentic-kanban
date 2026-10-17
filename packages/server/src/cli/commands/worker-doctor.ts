@@ -451,7 +451,7 @@ import { checkGlobalLauncher, checkLogonTaskLauncher, checkWorkerBuild, probeGlo
 import { installedBuildOf, launcherCommand, useLauncherInRemedies } from "./worker-update-notes.js";
 import { parseBuildId } from "../../lib/worker-update.js";
 import { checkBoardBuild } from "./worker-board-build.js";
-import { checkRunningDaemon } from "./worker-doctor-running-daemon.js";
+import { checkRunningDaemonWithStatus, daemonAttestedProfiles } from "./worker-doctor-running-daemon.js";
 import { resolveOwnPackageVersion } from "../../lib/worker-build.js";
 import { checkTailnetFirewall } from "./worker-doctor-firewall-check.js";
 import { checkContentIndexing } from "../../worker/worker-content-index.js";
@@ -685,7 +685,9 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
     checks.push(await checkWebSocket(boardUrl, identity, opts.timeoutMs));
     checks.push(await checkGitTransport(boardUrl, opts.gitPort));
   }
-  if (!opts.local) checks.push(await checkRunningDaemon(opts.stateFile, readControlFile(opts.stateFile) !== null));
+  const running = opts.local ? null : await checkRunningDaemonWithStatus(opts.stateFile, readControlFile(opts.stateFile) !== null);
+  if (running) checks.push(running.check);
+  const daemonStatus = running?.status ?? null;
   checks.push(await checkGitInstalled(probeCommand));
   checks.push(await checkGitIdentity(probeCommand));
   const safeDirectory = await checkGitSafeDirectory(probeCommand);
@@ -718,7 +720,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
     checks.push(...(await checkProvider(provider, opts.home, undefined, opts.harness)));
   }
   checks.push(...checkProfileCredentials(opts.home, undefined, opts.profiles, undefined, opts.profileAliases, opts.harness?.dirFor("claude")));
-  checks.push(checkAttestedProfiles(discoverLocalProfiles(opts.home, bindDefaultAlias(parseProfileAliases(opts.profileAliases), opts.harness?.dirFor("claude"))), opts.profiles));
+  checks.push(checkAttestedProfiles(discoverLocalProfiles(opts.home, bindDefaultAlias(parseProfileAliases(opts.profileAliases), opts.harness?.dirFor("claude"))), opts.profiles, daemonStatus ? { daemonRunning: true, daemonProfiles: daemonAttestedProfiles(daemonStatus) } : undefined));
   // #1372: while the global launcher is stale or absent, remedies name the shim that always runs the current build.
   const launcher = launcherCommand({
     stateFile: opts.stateFile,
