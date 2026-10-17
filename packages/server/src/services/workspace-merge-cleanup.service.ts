@@ -155,7 +155,7 @@ export async function runWorkspacePostMergeCleanup(
   });
   // #1562 — the base moved: re-read GitHub CI for it (fire-and-forget, never throws; skips when
   // gh is unavailable). Same opt-in gate as the periodic watch.
-  if (resolveBaseSweepIntervalMs(resolveRiskPosture(args.prefMap, args.projectId)) !== null) {
+  if (args.projectId && resolveBaseSweepIntervalMs(resolveRiskPosture(args.prefMap, args.projectId)) !== null) {
     void pollProjectCi(args.projectId, deps.database).catch(() => {});
   }
   await maybeAutoStartFollowups(args, deps);
