@@ -124,3 +124,17 @@ describe("describeSetupFailure (#1125)", () => {
     expect(describeSetupFailure({ kind: "unclassified" })).toBe("");
   });
 });
+
+describe("locked native addon (#1587)", () => {
+  const out = "ERR_PNPM_EPERM  EPERM: operation not permitted, unlink 'C:\\\\r\\\\node_modules\\\\.pnpm\\\\x\\\\node_modules\\\\@libsql\\\\win32-x64-msvc\\\\index.node'";
+  it("classifies the EPERM signature and extracts the package dir", async () => {
+    const { classifyLockedNativeAddon } = await import("../services/setup-io-fault.js");
+    const c = classifyLockedNativeAddon({ stderr: out });
+    expect(c.kind).toBe("locked-native-addon");
+  });
+  it("rejects paths outside node_modules or with ..", async () => {
+    const { classifyLockedNativeAddon } = await import("../services/setup-io-fault.js");
+    expect(classifyLockedNativeAddon({ stderr: "ERR_PNPM_EPERM EPERM unlink '/etc/a.node'" }).kind).toBe("unclassified");
+    expect(classifyLockedNativeAddon({ stderr: "ERR_PNPM_EPERM EPERM unlink '/a/node_modules/../../b.node'" }).kind).toBe("unclassified");
+  });
+});

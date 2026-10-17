@@ -1,4 +1,4 @@
-import { unlink } from "node:fs/promises";
+import { rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -126,4 +126,58 @@ export function describeSetupFailure(classification: SetupFailureClassification,
       : repair.reason
     : "not yet repaired";
   return `[io-fault: ${classification.label}; ${repairPart}]`;
+}
+
+/**
+ * Locked native addon (#1587). `pnpm install` hard-links `*.node` from the store; on Windows
+ * a hard link of an image mapped by a running process (board, builder) cannot be unlinked, so
+ * a re-import fails `ERR_PNPM_EPERM ... EPERM: operation not permitted, unlink '<pkg>\\index.node'`.
+ * Renaming the containing package dir aside IS allowed, after which pnpm re-imports it fresh.
+ */
+const LOCKED_ADDON_PATTERN = /\bERR_PNPM_EPERM\b[\s\S]*?\bEPERM\b[^\n]*?\bunlink\s+'([^']+\.node)'/i;
+
+export type LockedAddonClassification =
+  | { kind: "locked-native-addon"; packageDir: string; label: string }
+  | { kind: "unclassified" };
+
+/** Output is untrusted (see safeStorePath): only a `.node` file under a `node_modules` segment, no `..`. */
+export function classifyLockedNativeAddon(output: {
+  stdout?: string | null;
+  stderr?: string | null;
+}): LockedAddonClassification {
+  const combined = [output.stderr, output.stdout].filter((s): s is string => Boolean(s)).join("\n");
+  const match = combined.match(LOCKED_ADDON_PATTERN);
+  if (!match) return { kind: "unclassified" };
+  const normalized = path.normalize(match[1]);
+  const segments = normalized.split(/[\\/]+/);
+  if (segments.includes("..") || !segments.includes("node_modules")) return { kind: "unclassified" };
+  return {
+    kind: "locked-native-addon",
+    packageDir: path.dirname(normalized),
+    label: "native addon locked by a running process (ERR_PNPM_EPERM on a hard-linked .node file)",
+  };
+}
+
+/** Rename the affected package dir aside so the next install can re-import it. */
+export async function repairLockedNativeAddon(
+  classification: LockedAddonClassification,
+  nowMs: number = Date.now(),
+): Promise<RepairResult> {
+  if (classification.kind !== "locked-native-addon") {
+    return { attempted: false, repaired: false, reason: "not classified as a locked native addon" };
+  }
+  const aside = `${classification.packageDir}.locked-${nowMs}`;
+  try {
+    await rename(classification.packageDir, aside);
+    return { attempted: true, repaired: true, reason: `renamed ${classification.packageDir} aside to ${aside}` };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+      return { attempted: true, repaired: true, reason: "package dir was already gone" };
+    }
+    return {
+      attempted: true,
+      repaired: false,
+      reason: `could not rename ${classification.packageDir} aside: ${errorMessage(err)}`,
+    };
+  }
 }
