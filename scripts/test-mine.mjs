@@ -301,6 +301,15 @@ if (maxWorkersRaw && !/^\d+$/.test(maxWorkersRaw)) {
 }
 
 /**
+ * #1563 — vitest runs under a PINNED time zone (UTC, GitHub's runner zone), not the box's. Every
+ * board box is Europe/Berlin, so a snapshot that rendered local time passed here for 13 days and
+ * failed only on CI (#1553). `KANBAN_TEST_TZ` overrides (e.g. to run a sweep under another zone).
+ */
+export function gateTimeZoneEnv(env) {
+  return { TZ: env.KANBAN_TEST_TZ || "UTC" };
+}
+
+/**
  * Resolve vitest's runnable entry for a package. pnpm hoists most deps to the
  * workspace root, but each package may also have a local copy. Prefer the local
  * one, fall back to the root.
@@ -1543,7 +1552,7 @@ function runPackageOnce({ dir, label, exclude }, mode = null, ledgerPath = null)
       cwd: pkgDir,
       stdio: tee ? ["inherit", "pipe", "pipe"] : "inherit",
       windowsHide: true,
-      env: ledgerPath ? { ...process.env, [LEDGER_ENV]: ledgerPath } : process.env,
+      env: { ...process.env, ...gateTimeZoneEnv(process.env), ...(ledgerPath ? { [LEDGER_ENV]: ledgerPath } : {}) },
     });
     let sawNoTestFiles = false;
     if (tee) {
