@@ -612,13 +612,8 @@ async function runDoomedTrainJob(args: {
   // workspace's pre-lock gate, so the rest of the queue is not refused for the gate's whole hour.
   const trainLock = createSuspendableRepoLock(() => acquireQueueRepoLock(repoPath, `merge-train:${label}`, {
     timeoutMs: MERGE_TRAIN_REPO_LOCK_TIMEOUT_MS,
-    // #1150: let a contended wait say whether the CURRENT holder is a train job this process
-    // itself still has registered as live, rather than only ever repeating a pid that stays
-    // alive for as long as the whole server does.
-    checkHolderLiveness: (holder) => {
-      const match = /^merge-train:(.+)$/.exec(holder);
-      return match ? isMergeTrainLabelLive(match[1]) : undefined;
-    },
+    // #1150: a contended wait asks whether the holder is a train job this process still has live.
+    checkHolderLiveness: (holder) => { const m = /^merge-train:(.+)$/.exec(holder); return m ? isMergeTrainLabelLive(m[1]) : undefined; },
   }), abortController.signal);
   try {
     await trainLock.acquireInitial();
@@ -643,12 +638,8 @@ async function runDoomedTrainJob(args: {
       trainId,
       redStrategy: flush ? undefined : policy.strategy,
       ...(flush ? { bisectOnFailure: false } : {}),
-      // #1181: an operator cancel or a reconciler verdict can mark this row `abandoned` while
-      // the job is still gating (there is no cancellation token into `runMergeTrain`). The
-      // gate work is sunk cost either way, but a train whose row says abandoned must not
-      // LAND — nobody is going to account for that merge. Checked at the last moment before
-      // `landMergeTrain`, on a fresh read, never on the row captured at start.
-      // #1568: asked right before every landing, so it is also where the lock is retaken.
+      // #1181: a cancel or reconciler can mark this row `abandoned` mid-gate; such a train must not
+      // LAND, so a fresh read is checked right before every landing. #1568: the lock is retaken here too.
       shouldLand: async () => {
         await trainLock.beginLanding();
         return vetoLandingIfAbandoned(trainId, database);
@@ -759,11 +750,8 @@ async function runDoomedTrainJob(args: {
   } finally {
     // #1568: retake the lock for the teardown; a timeout here only skips it (reconcilers are the backstop).
     await trainLock.ensureHeld().catch(() => undefined);
-    // #1235: the train's own teardown, under the lock it still holds. Every attempt's worktree
-    // and `kanban/train/<label>*` branch goes here on BOTH exits — the gate's per-attempt
-    // `finally` already removed the directory on a normal run, but the branch delete in
-    // `runMergeTrain`'s own `finally` fails while a leftover worktree still has it checked out,
-    // and a killed gate leaves both. Never throws; the reconcilers are the backstop.
+    // #1235: the train's own teardown on BOTH exits — every attempt's worktree and `kanban/train/<label>*`
+    // branch (a leftover worktree blocks the branch delete; a killed gate leaves both). Never throws.
     await cleanupTrainWorktreesForLabel({ database, repoPath, label });
     await trainLock.close();
   }
