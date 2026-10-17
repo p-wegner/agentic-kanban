@@ -112,13 +112,33 @@ describe("buildConsoleModel with extras", () => {
       },
     });
     const text = m.attention.map((a) => a.text).join("\n");
-    expect(text).toContain("#1437 In Progress: no running session or queued chain");
+    expect(text).not.toContain("#1437 In Progress: no running"); // #1566: held in the window, so driven
     expect(text).toContain("#1441 Agent hang watchdog");
     expect(text).not.toContain("#1441 In Review: no running");
     expect(text).not.toContain("#1444");
     expect(text).toContain("merges held: base_red (master deadbeef), holding #1437");
     expect(m.unpromoted).toBe(3);
     expect(m.chains?.[0]).toMatchObject({ kind: "workspace gate", ref: "#1444", where: "host" });
+  });
+});
+
+describe("ATTENTION has-a-driver predicate (#1566)", () => {
+  const mk = (n: number, extra: Record<string, unknown> = {}) => ({ issueNumber: n, issueId: `i${n}`, title: "t", statusName: "In Review", workspace: { id: `ws-${n}`, branch: `b${n}`, status: "reviewing" }, session: { status: "stopped" }, mergeState: null, attention: null, remoteUnlanded: null, ...extra });
+  const status = { project: { id: "p", name: "ak" }, issues: [mk(1), mk(2), mk(3), mk(4), mk(5, { session: { status: "running" }, remoteUnlanded: { workerId: "04544649aaaa", sessionId: "s", label: "remote — committed work not yet landed" } }), mk(6, { remoteUnlanded: { workerId: "04544649aaaa", sessionId: "s", label: "ended" } })] } as unknown as ConsolePayloads["status"];
+  const trains = { ok: true, trains: [
+    { id: "t1", projectId: "p", label: "train/x", memberWorkspaceIds: JSON.stringify(["ws-1", "ws-2"]), state: "gating", gateEvidence: null, bisectResult: null, reconciledReason: null, startedAt: ago(1000), finishedAt: null },
+    { id: "t0", projectId: "p", label: "train/old", memberWorkspaceIds: JSON.stringify(["ws-4"]), state: "landed", gateEvidence: null, bisectResult: null, reconciledReason: null, startedAt: ago(9000), finishedAt: ago(8000) },
+  ] } as unknown as ConsolePayloads["trains"];
+  const window = { ok: true, window: { projectId: "p", pending: [{ workspaceId: "ws-3", issueNumber: 3, issueTitle: null, readySince: null }], firstSeenAt: ago(10), config: { maxSize: 4, maxWaitMs: 1800000, fromPosture: true, postureLevel: "sprint" }, lastVerdict: { release: false, reason: "accumulating" }, lastEvaluatedAt: ago(1) } } as unknown as ConsolePayloads["window"];
+
+  it("treats train members, window waiters and running builders as driven; still flags a driverless ticket", () => {
+    const text = buildConsoleModel({ status, trains, window, nowMs: NOW }).attention.map((a) => a.text).join("\n");
+    expect(text).not.toContain("#1 In Review");
+    expect(text).not.toContain("#2 In Review");
+    expect(text).not.toContain("#3 In Review");
+    expect(text).not.toContain("#5 ");
+    expect(text).toContain("#4 In Review: no running session or queued chain"); // its train already landed
+    expect(text).toContain("#6 unlanded result"); // session ended
   });
 });
 

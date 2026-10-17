@@ -270,7 +270,8 @@ export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
   for (const i of status.issues) {
     const n = i.issueNumber != null ? `#${i.issueNumber}` : "#?";
     if (i.attention) attention.push({ level: "red", text: `${n} ${i.attention.label}` });
-    if (i.remoteUnlanded) attention.push({ level: "yellow", text: `${n} unlanded result on ${i.remoteUnlanded.workerId.slice(0, 8)}: ${i.remoteUnlanded.label}` });
+    // #1566: a mid-session push is expected; unlanded work is attention only once the session has ended.
+    if (i.remoteUnlanded && i.session?.status !== "running") attention.push({ level: "yellow", text: `${n} unlanded result on ${i.remoteUnlanded.workerId.slice(0, 8)}: ${i.remoteUnlanded.label}` });
     if (i.conflicts?.hasConflicts) attention.push({ level: "red", text: `${n} merge conflict: ${i.conflicts.conflictingFiles.slice(0, 2).join(", ")}` });
   }
 
