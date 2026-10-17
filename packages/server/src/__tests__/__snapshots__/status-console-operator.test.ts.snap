@@ -1,7 +1,7 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`operator console frame (#1449) > snapshot at 80 cols, color 1`] = `
-"[1magentic-kanban  agentic-kanban (stable-20261013-3 2dcf8de)  19:19:00  host 3.1G…[0m
+"[1magentic-kanban  agentic-kanban (stable-20261013-3 2dcf8de)  17:19:00  host 3.1G…[0m
 [1mWORKERS ────────────────────────────────────────────────────────────────────────[0m
 [36m ao-pf38         ●   1/3  win   2dcf8de ram 11.2G disk 84G · #1431 running/fix …[0m
 [33m wsl-stable          0/2  wsl   2dcf8de  [auth-expired]  hb 2s[0m
@@ -33,7 +33,7 @@ exports[`operator console frame (#1449) > snapshot at 80 cols, color 1`] = `
 `;
 
 exports[`operator console frame (#1449) > snapshot at 80 cols, no color 1`] = `
-"agentic-kanban  agentic-kanban (stable-20261013-3 2dcf8de)  19:19:00  host 3.1G…
+"agentic-kanban  agentic-kanban (stable-20261013-3 2dcf8de)  17:19:00  host 3.1G…
 WORKERS ────────────────────────────────────────────────────────────────────────
  ao-pf38         ●   1/3  win   2dcf8de ram 11.2G disk 84G · #1431 running/fix …
  wsl-stable          0/2  wsl   2dcf8de  [auth-expired]  hb 2s
@@ -65,7 +65,7 @@ q quit · a all issues"
 `;
 
 exports[`operator console frame (#1449) > snapshot at 140 cols, color 1`] = `
-"[1magentic-kanban  agentic-kanban (stable-20261013-3 2dcf8de)  19:19:00  host 3.1G free / floor 2G  6 open · 2 running  refresh 5s[0m
+"[1magentic-kanban  agentic-kanban (stable-20261013-3 2dcf8de)  17:19:00  host 3.1G free / floor 2G  6 open · 2 running  refresh 5s[0m
 [1mWORKERS ────────────────────────────────────────────────────────────[0m │ [1mPIPELINE (6 open) ──────────────────────────────────────────────────[0m
 [36m ao-pf38         ●   1/3  win   2dcf8de ram 11.2G disk 84G · #1431 …[0m │  Build   #1431
 [33m wsl-stable          0/2  wsl   2dcf8de  [auth-expired]  hb 2s[0m       │ [1mATTENTION ──────────────────────────────────────────────────────────[0m
@@ -90,7 +90,7 @@ exports[`operator console frame (#1449) > snapshot at 140 cols, color 1`] = `
 `;
 
 exports[`operator console frame (#1449) > snapshot at 140 cols, no color 1`] = `
-"agentic-kanban  agentic-kanban (stable-20261013-3 2dcf8de)  19:19:00  host 3.1G free / floor 2G  6 open · 2 running  refresh 5s
+"agentic-kanban  agentic-kanban (stable-20261013-3 2dcf8de)  17:19:00  host 3.1G free / floor 2G  6 open · 2 running  refresh 5s
 WORKERS ──────────────────────────────────────────────────────────── │ PIPELINE (6 open) ──────────────────────────────────────────────────
  ao-pf38         ●   1/3  win   2dcf8de ram 11.2G disk 84G · #1431 … │  Build   #1431
  wsl-stable          0/2  wsl   2dcf8de  [auth-expired]  hb 2s       │ ATTENTION ──────────────────────────────────────────────────────────

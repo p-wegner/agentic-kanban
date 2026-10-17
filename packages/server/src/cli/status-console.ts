@@ -20,6 +20,8 @@ export interface ConsoleRenderOptions {
   ascii?: boolean;
   intervalSec?: number;
   nowMs: number;
+  /** IANA zone for the header clock; omitted = the machine's local zone. Tests pin it (#1553). */
+  timeZone?: string;
   /** `a` — list every open issue instead of the pipeline summary. */
   allIssues?: boolean;
 }
@@ -44,7 +46,7 @@ function headerSection(model: ConsoleModel, opts: ConsoleRenderOptions): Section
     ? `host ${model.host.freeGb != null ? `${model.host.freeGb.toFixed(1)}G` : "?"} free / floor ${model.host.floorGb}G`
     : "host n/a";
   const lines: Line[] = [{
-    text: `agentic-kanban  ${model.project}${buildLabel(model)}  ${new Date(opts.nowMs).toLocaleTimeString("en-GB")}  ${hostBit}  ${model.openIssues} open · ${model.runningSessions} running  refresh ${opts.intervalSec ?? 5}s`,
+    text: `agentic-kanban  ${model.project}${buildLabel(model)}  ${new Date(opts.nowMs).toLocaleTimeString("en-GB", opts.timeZone ? { timeZone: opts.timeZone } : undefined)}  ${hostBit}  ${model.openIssues} open · ${model.runningSessions} running  refresh ${opts.intervalSec ?? 5}s`,
     tone: model.host?.hold ? "yellow" : "head",
   }];
   for (const e of model.errors) lines.push({ text: `! ${e}`, tone: "red" });
