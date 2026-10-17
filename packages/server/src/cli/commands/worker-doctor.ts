@@ -685,12 +685,9 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
     checks.push(await checkWebSocket(boardUrl, identity, opts.timeoutMs));
     checks.push(await checkGitTransport(boardUrl, opts.gitPort));
   }
-  let daemonStatus: Record<string, unknown> | null = null;
-  if (!opts.local) {
-    const running = await checkRunningDaemonWithStatus(opts.stateFile, readControlFile(opts.stateFile) !== null);
-    checks.push(running.check);
-    daemonStatus = running.status;
-  }
+  const running = opts.local ? null : await checkRunningDaemonWithStatus(opts.stateFile, readControlFile(opts.stateFile) !== null);
+  if (running) checks.push(running.check);
+  const daemonStatus = running?.status ?? null;
   checks.push(await checkGitInstalled(probeCommand));
   checks.push(await checkGitIdentity(probeCommand));
   const safeDirectory = await checkGitSafeDirectory(probeCommand);
