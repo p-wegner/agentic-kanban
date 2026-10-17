@@ -56,6 +56,7 @@ import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.servic
 import { isFoundationalBlocker } from "../services/foundational-merge.service.js";
 import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
 import { findUncommittedWork } from "./uncommitted-work-report.js";
+import { requeueLostRemoteResult } from "./exit/lost-remote-result-exit.js";
 import { hasMergeBeforeWorkspace } from "../repositories/issue-reopen.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { createCleanCloneChecks } from "./exit/clean-clone-checks.js";
@@ -328,6 +329,11 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     try {
       const { extractSessionStderr, findSimilarFailures } = await import("../services/failure-pattern.service.js");
       const stderrText = await extractSessionStderr(sessionId);
+      const ahead = workspace.workingDir && workspace.baseBranch ? await commitsAhead(workspace.workingDir, workspace.baseBranch).catch(() => null) : null;
+      if (await requeueLostRemoteResult({ database: db, workspaceId, issueId: ctx.issueId, sessionId, stderr: stderrText, commitsAhead: ahead, statuses: ctx.statuses, now: ctx.now })) {
+        boardEvents.broadcast(ctx.projectId, "issue_updated");
+        return;
+      }
       if (stderrText.trim()) {
         const matches = await findSimilarFailures(stderrText);
         if (matches.length > 0) {
