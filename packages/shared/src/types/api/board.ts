@@ -63,4 +63,10 @@ export interface BoardStatusResponse {
   generatedAt: string;
   totals: { totalIssues: number; inProgress: number; activeWorkspaces: number; runningSessions: number };
   issues: BoardStatusIssue[];
+  /**
+   * Issue count per status name over EVERY issue of the project, closed ones included, in column
+   * order — `issues` is limited to active issues, so counting from it hides Done/Cancelled (#1550).
+   * Optional: older snapshots and fixtures omit it and consumers fall back to counting `issues`.
+   */
+  statusCounts?: Record<string, number>;
 }

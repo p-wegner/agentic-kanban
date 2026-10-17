@@ -112,12 +112,21 @@ function clampWidth(width: number | undefined): number {
   return Math.max(20, Math.floor(width));
 }
 
-function columnCountsLine(issues: readonly BoardStatusIssue[], width: number): string {
+/**
+ * Counts come from the snapshot's all-issue `statusCounts` (#1550): `issues` is active-only, so
+ * counting from it left the header empty on a board with nothing open. Statuses with 0 are dropped
+ * to keep the line short; snapshots without `statusCounts` fall back to counting `issues`.
+ */
+function columnCountsLine(snapshot: BoardStatusResponse, width: number): string {
   const counts = new Map<string, number>();
-  for (const issue of issues) {
-    counts.set(issue.statusName, (counts.get(issue.statusName) ?? 0) + 1);
+  if (snapshot.statusCounts) {
+    for (const [name, count] of Object.entries(snapshot.statusCounts)) counts.set(name, count);
+  } else {
+    for (const issue of snapshot.issues) {
+      counts.set(issue.statusName, (counts.get(issue.statusName) ?? 0) + 1);
+    }
   }
-  const parts = [...counts.entries()].map(([name, count]) => `${name}:${count}`);
+  const parts = [...counts.entries()].filter(([, count]) => count > 0).map(([name, count]) => `${name}:${count}`);
   return truncate(parts.join(" "), width);
 }
 
@@ -143,7 +152,7 @@ export function renderTrackerFrame(
 
   const indicator = options.connectionStatus ? ` | ${CONNECTION_INDICATOR[options.connectionStatus]}` : "";
   const header = truncate(
-    `${snapshot.project.name} | WIP ${snapshot.totals.activeWorkspaces}/${wip.limit} | ${columnCountsLine(snapshot.issues, width)}${indicator}`,
+    `${snapshot.project.name} | WIP ${snapshot.totals.activeWorkspaces}/${wip.limit} | ${columnCountsLine(snapshot, width)}${indicator}`,
     width,
   );
   lines.push(header);
