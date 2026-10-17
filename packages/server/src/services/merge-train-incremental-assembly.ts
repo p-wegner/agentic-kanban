@@ -15,6 +15,7 @@
  * gate opens its own worktree on it exactly as it does after the ref-only assembly.
  */
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
+import { execFailedToRun, execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { MergeTrainAgentFixCaps } from "@agentic-kanban/shared/lib/merge-train-red-strategy";
 import { resolveWorktreeClaims } from "@agentic-kanban/shared/lib/worktree-claim";
@@ -45,7 +46,7 @@ export interface IncrementalAssemblyPorts {
 const MERGE_IDENTITY = ["-c", "user.name=agentic-kanban", "-c", "user.email=kanban@localhost"];
 
 async function hasMergeInProgress(cwd: string): Promise<boolean> {
-  return (await gitExec(["rev-parse", "-q", "--verify", "MERGE_HEAD"], { cwd })).code === 0;
+  return execSucceeded(await gitExec(["rev-parse", "-q", "--verify", "MERGE_HEAD"], { cwd }));
 }
 
 async function unmergedFiles(cwd: string): Promise<string[]> {
@@ -55,7 +56,8 @@ async function unmergedFiles(cwd: string): Promise<string[]> {
 
 /** True when the member collides with the BASE alone (read-only `merge-tree`; exit 1 = conflict). */
 async function conflictsWithBase(repoPath: string, baseSha: string, branch: string): Promise<boolean> {
-  return (await gitExec(["merge-tree", "--write-tree", "--no-messages", baseSha, branch], { cwd: repoPath })).code === 1;
+  const r = await gitExec(["merge-tree", "--write-tree", "--no-messages", baseSha, branch], { cwd: repoPath });
+  return !execSucceeded(r) && !execFailedToRun(r);
 }
 
 /** The git ports `mergeMembersWithShepherd` runs against, over one assembly worktree. */
@@ -71,7 +73,7 @@ export function createWorktreeMergePorts(args: {
   const tryMerge = async (member: ShepherdMember): Promise<MergeAttempt> => {
     headBefore = (await gitExecOrThrow(["rev-parse", "HEAD"], { cwd: worktree })).trim();
     const merged = await gitExec([...MERGE_IDENTITY, "merge", "--no-ff", "-m", `Merge branch '${member.branch}'`, member.branch], { cwd: worktree });
-    if (merged.code === 0) return { ok: true };
+    if (execSucceeded(merged)) return { ok: true };
     const detail = `${merged.stdout}\n${merged.stderr}`.trim();
     const conflicted = (await unmergedFiles(worktree)).length > 0;
     if (conflicted && !(await conflictsWithBase(repoPath, baseSha, member.branch))) {
@@ -87,15 +89,15 @@ export function createWorktreeMergePorts(args: {
     if (await hasMergeInProgress(worktree)) {
       if ((await unmergedFiles(worktree)).length > 0) return false;
       const done = await gitExec([...MERGE_IDENTITY, "commit", "--no-edit"], { cwd: worktree });
-      if (done.code !== 0) return false;
+      if (!execSucceeded(done)) return false;
     }
     const tip = (await gitExec(["rev-parse", member.branch], { cwd: worktree })).stdout.trim();
-    if (!tip || (await gitExec(["merge-base", "--is-ancestor", tip, "HEAD"], { cwd: worktree })).code !== 0) return false;
+    if (!tip || !execSucceeded(await gitExec(["merge-base", "--is-ancestor", tip, "HEAD"], { cwd: worktree }))) return false;
     // No conflict markers in what the merge commit touched.
     const files = (await gitExec(["diff", "--name-only", "HEAD^1", "HEAD"], { cwd: worktree })).stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(0, 200);
     if (files.length === 0) return true;
     const markers = await gitExec(["grep", "-nIE", "^(<{7}|>{7}) ", "HEAD", "--", ...files], { cwd: worktree });
-    return markers.code === 1; // 1 = no match
+    return !execSucceeded(markers) && !execFailedToRun(markers); // ran, found nothing
   };
   const abortMerge = async (): Promise<void> => {
     if (!headBefore) return;

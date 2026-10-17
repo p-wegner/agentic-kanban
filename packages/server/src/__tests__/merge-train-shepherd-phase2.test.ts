@@ -22,7 +22,7 @@ describe("incremental assembly with the shepherd (#1572)", () => {
   let root: string;
   let repo: string;
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), "train-shepherd-"));
+    root = mkdtempSync(join(tmpdir(), "ak-train-shepherd-"));
     repo = join(root, "repo");
     mkdirSync(repo);
     git(repo, "init", "-q", "-b", "main");
@@ -167,7 +167,7 @@ describe("the placed session runner (#1572)", () => {
     expect(shepherd.toDto()).toMatchObject({ worker: "worker-b", turns: 2, costUsd: 6, tokens: 40 });
 
     // $3 of conflict turns already spent leaves < $5 for the fix: a $3 fix turn trips the shared cap
-    const repoDir = mkdtempSync(join(tmpdir(), "train-cap-"));
+    const repoDir = mkdtempSync(join(tmpdir(), "ak-train-cap-"));
     try {
       git(repoDir, "init", "-q");
       git(repoDir, "config", "user.email", "t@t");
