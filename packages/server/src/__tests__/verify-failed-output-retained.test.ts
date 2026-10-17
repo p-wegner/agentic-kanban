@@ -6,7 +6,7 @@ import { persistFailedWorkerLog } from "../services/verify-worker-runner.service
 import { createFileVerifyResultStore, VERIFY_FAILED_LOG_KEEP } from "../worker/worker-verify-runner.js";
 
 const dirs: string[] = [];
-const tmp = (): string => { const d = mkdtempSync(join(tmpdir(), "verify-retained-")); dirs.push(d); return d; };
+const tmp = (): string => { const d = mkdtempSync(join(tmpdir(), "ak-verify-retained-")); dirs.push(d); return d; };
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
 describe("persistFailedWorkerLog (#1571)", () => {
