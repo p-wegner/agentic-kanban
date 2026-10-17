@@ -15,6 +15,8 @@
 // Usage:
 //   pnpm security            human report, exits non-zero on a policy breach
 //   pnpm security -- --json  machine-readable report on stdout
+//   pnpm security -- --advisories-only   prod advisories only, JSON; what the base sweep and
+//                            `pnpm promote` run (#1564). Exit 0 clean / 1 breach / 2 did not run.
 //
 // THE POLICY OF RECORD IS THE `POLICY` OBJECT BELOW — one place, no env-var
 // shadow config, no second copy in the CI workflow. The workflow runs this
@@ -170,7 +172,31 @@ function matchAny(patterns, value) {
   return patterns.some((re) => re.test(value));
 }
 
+/**
+ * Unaccepted gating advisories in the production graph — the part of the policy the board's own
+ * pipeline enforces (#1564: base sweep + `pnpm promote`). Pure, so it is testable without a scan.
+ */
+function gatingBreaches(auditProd) {
+  return advisories(auditProd).filter(
+    (a) => POLICY.failOnSeverities.includes(a.severity) && !(a.ghsa in POLICY.acceptedProdAdvisories),
+  );
+}
+
+/**
+ * `--advisories-only`: ONE `pnpm audit --prod` (seconds, no licence walk, no node_modules needed) for
+ * callers that only ask "is there a breach right now". Always prints JSON. Exit 0 = none, 1 = breach,
+ * 2 = the scan did not run (runPnpmJson), which a caller must not read as clean.
+ */
+function advisoriesOnly() {
+  const breaches = gatingBreaches(runPnpmJson(["audit", "--prod", "--json"])).map(
+    ({ ghsa, severity, module, vulnerable, patched, title, url }) => ({ ghsa, severity, module, vulnerable, patched, title, url }),
+  );
+  process.stdout.write(`${JSON.stringify({ ok: breaches.length === 0, breaches })}\n`);
+  process.exit(breaches.length === 0 ? 0 : 1);
+}
+
 function main() {
+  if (process.argv.includes("--advisories-only")) return advisoriesOnly();
   const jsonOut = process.argv.includes("--json");
 
   const auditAll = runPnpmJson(["audit", "--json"]);
@@ -325,7 +351,7 @@ function main() {
 // would take the whole process down. The guard below keeps `pnpm security`
 // working exactly as before -- it is still the entry point, it just is not the
 // only way in.
-export { POLICY, matchAny };
+export { POLICY, matchAny, gatingBreaches };
 
 const invokedDirectly =
   process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url;

@@ -27,6 +27,7 @@ import {
   formatPromoteUsage,
   formatUnknownFlagRefusal,
   parsePromoteArgv,
+  planAdvisoryCheck,
   KNOWN_PROMOTE_FLAGS,
   planRecoveryLane,
   classifyRecoveryDelta,
@@ -1074,5 +1075,38 @@ describe("probeWithRetries (#1486)", () => {
       { tries: 3, sleep: noSleep },
     );
     expect(r).toEqual({ ok: false, tries: 3, outcomes: ["refused", "status 503", "status 503"] });
+  });
+});
+
+describe("planAdvisoryCheck (#1564)", () => {
+  const breach = { ghsa: "GHSA-x", severity: "critical", module: "proxy-addr", vulnerable: "<2.0.7", patched: ">=2.0.7" };
+  const scan = { status: 1, stdout: JSON.stringify({ ok: false, breaches: [breach] }) };
+
+  it("proceeds on a clean scan", () => {
+    expect(planAdvisoryCheck({ scan: { status: 0, stdout: "{}" } }).action).toBe("proceed");
+  });
+
+  it("refuses on a breach and names package, advisory and fixed version", () => {
+    const r = planAdvisoryCheck({ scan });
+    expect(r.action).toBe("refuse");
+    expect(r.detail).toContain("proxy-addr");
+    expect(r.detail).toContain("GHSA-x");
+    expect(r.detail).toContain(">=2.0.7");
+    expect(r.detail).toContain("--accept-advisories");
+  });
+
+  it("proceeds on a breach only when accepted, keeping the list", () => {
+    const r = planAdvisoryCheck({ scan, accept: true });
+    expect(r.action).toBe("proceed-accepted");
+    expect(r.breaches).toHaveLength(1);
+  });
+
+  it("warns, never reports clean, when the scan did not run", () => {
+    expect(planAdvisoryCheck({ scan: { status: 2, stdout: "" } }).action).toBe("warn");
+  });
+
+  it("parses --accept-advisories as a known flag", () => {
+    const r = parsePromoteArgv(["--accept-advisories"]);
+    expect(r.ok && r.acceptAdvisories).toBe(true);
   });
 });
