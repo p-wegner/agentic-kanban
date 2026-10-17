@@ -8,6 +8,7 @@ import { getLatestBaseBranchHealth } from "../repositories/base-branch-health.re
 import { listOpenHealTickets } from "./base-health-heal-ticket.service.js";
 import { resolveBaseRedVeto } from "./merge-train-base-veto.js";
 import { describeBaseSweep, resolveRiskPosture, type RiskPosture } from "./risk-posture.service.js";
+import { detectPostureOverrides } from "./posture-overrides.js";
 import { requireProject } from "./require-project.js";
 import { resolveTrainWindowConfig } from "./merge-train-window.js";
 import { readImpactMissRate } from "./test-impact-miss-rate.js";
@@ -49,6 +50,7 @@ export async function getDeliveryStatus(projectId: string, database: Database = 
   return {
     projectId,
     posture,
+    postureOverrides: detectPostureOverrides(prefMap, projectId),
     trainSizeFromOverride,
     trainWindowMaxSize: trainWindow.maxSize,
     trainWindowMaxWaitMs: trainWindow.maxWaitMs,

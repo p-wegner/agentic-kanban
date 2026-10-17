@@ -25,6 +25,10 @@ import type { ProviderName } from "../services/agent-provider.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+import type { PostureOverride } from "@agentic-kanban/shared/types";
+import { detectPostureOverrides, formatPostureOverrides } from "../services/posture-overrides.js";
+import { resolveRiskPosture } from "../services/risk-posture.service.js";
+import { riskPosturePref } from "@agentic-kanban/shared/lib/risk-posture";
 export function createPreferencesRoute(database: Database) {
   const router = createRouter();
   const preferenceService = createPreferenceService({ database });
@@ -135,7 +139,20 @@ export function createPreferencesRoute(database: Database) {
         422,
       );
     }
-    return c.json({ ok: true, applied });
+    // #1560: a posture change must not be silently neutralised by leftover per-field prefs.
+    // Report every override that now contradicts the new posture; the caller offers to clear
+    // them (DELETE the listed keys) and the server logs it so the operator log says so too.
+    const postureOverrides: Array<{ projectId: string } & PostureOverride> = [];
+    const prefMap = toPrefMap(await getAllPreferences(database));
+    for (const key of applied) {
+      const projectId = riskPosturePref.projectIdOf(key);
+      if (!projectId) continue;
+      const found = detectPostureOverrides(prefMap, projectId);
+      if (found.length === 0) continue;
+      console.warn(`[preferences] ${formatPostureOverrides(resolveRiskPosture(prefMap, projectId).level, found)} (project ${projectId}, #1560)`);
+      postureOverrides.push(...found.map((o) => ({ projectId, ...o })));
+    }
+    return c.json({ ok: true, applied, ...(postureOverrides.length > 0 ? { postureOverrides } : {}) });
   });
 
   // GET /api/preferences/claude-profiles — list available claude profiles

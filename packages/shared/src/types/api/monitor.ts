@@ -315,9 +315,20 @@ export interface MergeActivitySummary {
   recentWindowMs: number;
 }
 
+/** An explicit per-field pref that contradicts the resolved posture (#1560). */
+export interface PostureOverride {
+  /** The preference key to clear to follow the posture. */
+  key: string;
+  label: string;
+  value: string;
+  postureValue: string;
+}
+
 export interface DeliveryStatusResponse {
   projectId: string;
   posture: RiskPosture;
+  /** Explicit per-field prefs currently contradicting `posture` (#1560); empty when none. */
+  postureOverrides?: PostureOverride[];
   /** Whether the effective train SIZE (the queue's opt-in) came from an explicit
    *  `train_max_size_<projectId>` override rather than the posture. */
   trainSizeFromOverride: boolean;
