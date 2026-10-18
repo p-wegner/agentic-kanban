@@ -131,6 +131,30 @@ describe("landTrainLocal (#1586)", () => {
     expect(deps.closeMember).toHaveBeenCalledTimes(1);
   });
 
+  it("--on-worker places install + the gate on a worker and never runs them on this host (#1612)", async () => {
+    const run = vi.fn(async () => ({ code: 0, tail: "" }));
+    const runOnWorker = vi.fn(async () => ({ status: "ran" as const, workerName: "w-1", passed: true, log: "" }));
+    const { deps } = makeDeps({ run, runOnWorker });
+    const out = await landTrainLocal({ projectId: "p1", trainId: "t1", onWorker: "w-1", gateSteps: [{ name: "g", command: "true" }] }, deps);
+    expect(out.status).toBe("landed");
+    expect(run).not.toHaveBeenCalled();
+    expect(runOnWorker).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "p1", workerName: "w-1", changedFiles: ["a.ts", "b.ts"], steps: [{ name: "install", command: "pnpm install -r" }, { name: "g", command: "true" }],
+    }));
+  });
+
+  it("--on-worker red keeps the worktree and reports the failing step; unavailable is an error, not a pass (#1612)", async () => {
+    const red = makeDeps({ runOnWorker: async () => ({ status: "ran", workerName: "w-1", passed: false, failedStep: "typecheck", log: "FAIL  a/x.test.ts > y" }) });
+    expect(await landTrainLocal({ projectId: "p1", trainId: "t1", onWorker: true }, red.deps))
+      .toMatchObject({ status: "red", step: "typecheck", failedSuites: ["a/x.test.ts"] });
+    expect(red.deps.closeMember).not.toHaveBeenCalled();
+    expect(red.prefs.get("auto_merge_disabled_p1")).toBe("false");
+    const none = makeDeps({ runOnWorker: async () => ({ status: "unavailable", reason: "no allowlisted worker is online" }) });
+    expect(await landTrainLocal({ projectId: "p1", trainId: "t1", onWorker: true }, none.deps))
+      .toMatchObject({ status: "error", message: expect.stringContaining("no allowlisted worker") });
+    expect(none.deps.closeMember).not.toHaveBeenCalled();
+  });
+
   it("derives a sibling .worktrees path and parses failing suites", () => {
     expect(landLocalWorktreePath("/r/proj", "train/2026-10-17-04").replace(/\\/g, "/")).toBe("/r/.worktrees/proj/land-local/2026-10-17-04");
     expect(parseFailedSuites("FAIL  a/b.test.ts > x\n ❯ c/d.test.tsx 3 tests")).toEqual(["a/b.test.ts", "c/d.test.tsx"]);

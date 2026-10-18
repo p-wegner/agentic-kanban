@@ -1,4 +1,5 @@
 import { createProjectsRoute } from "./projects.js";
+import { createProjectLandLocalRoute } from "./project-land-local.js";
 import { createProjectAnalyticsRoute } from "./project-analytics.js";
 import { createProjectHealthRoute } from "./project-health.js";
 import { createProjectRcRoute } from "./project-rc.js";
@@ -86,6 +87,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   // (arch-review §1.5). Mounted at the SAME `/projects` prefix so paths are unchanged.
   routes.route("/projects", createProjectAnalyticsRoute(database, { ...options, getSessionManager }));
   routes.route("/projects", createProjectHealthRoute(database));
+  routes.route("/projects", createProjectLandLocalRoute(database));
   routes.route("/projects", createProjectRcRoute(database, getSessionManager, options));
   routes.route("/projects", createProjectQueueFlushRoute(database, getSessionManager, options));
   routes.route("/projects", createTrackerSnapshotRoute(database));
