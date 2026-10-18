@@ -102,6 +102,7 @@ export const KNOWN_PROMOTE_FLAGS = Object.freeze([
   "--cadence",
   "--accept-advisories",
   "--ignore-ci",
+  "--now",
   "--reason",
   "--help",
   "-h",
@@ -153,8 +154,39 @@ export function parsePromoteArgv(argv = []) {
     acceptAdvisories: argv.includes("--accept-advisories"),
     // #1562 — promote even though a required GitHub workflow is red on the sha.
     ignoreCi: argv.includes("--ignore-ci"),
+    // #1608 — restart without waiting for a gating merge train (loud).
+    now: argv.includes("--now"),
     reason,
   };
+}
+
+/** #1608 — how long promote waits for a gating train before the restart step. */
+export const DEFAULT_TRAIN_WAIT_MS = 30 * 60_000;
+export const TRAIN_POLL_INTERVAL_MS = 15_000;
+
+/** The unfinished states of a merge train (`assembling`/`gating`) — a restart in them loses work. */
+export function gatingTrains(trains) {
+  return (Array.isArray(trains) ? trains : []).filter((t) => t?.state === "assembling" || t?.state === "gating");
+}
+
+export function resolveTrainWaitMs(env = process.env) {
+  const raw = Number(env.KANBAN_PROMOTE_TRAIN_WAIT_MIN);
+  return Number.isFinite(raw) && raw >= 0 && env.KANBAN_PROMOTE_TRAIN_WAIT_MIN !== undefined && env.KANBAN_PROMOTE_TRAIN_WAIT_MIN !== ""
+    ? raw * 60_000
+    : DEFAULT_TRAIN_WAIT_MS;
+}
+
+/**
+ * #1608 — one poll's decision. `proceed` (no gating train), `wait` (one is live, budget left) or
+ * `timeout` (budget spent — the caller REFUSES: restarting mid-train is what lost a shepherd's
+ * work on 2026-10-18, so a wait that ran out never becomes a restart; `--now` is the override).
+ */
+export function planTrainWait({ trains, nowMs, deadlineMs }) {
+  const live = gatingTrains(trains);
+  if (live.length === 0) return { action: "proceed", detail: "no merge train is assembling or gating" };
+  const names = live.map((t) => `${t.label ?? t.id} (${t.state})`).join(", ");
+  if (nowMs >= deadlineMs) return { action: "timeout", detail: `still running: ${names}` };
+  return { action: "wait", detail: names };
 }
 
 /**
@@ -198,6 +230,7 @@ export function formatPromoteUsage() {
     "  node scripts/promote.mjs --cadence        # (set by the board's promote_cadence tick) same run, logged as scheduled",
     "  node scripts/promote.mjs --accept-advisories # promote despite critical/high production advisories (#1564)",
     "  node scripts/promote.mjs --ignore-ci      # (#1562) promote although a required GitHub workflow is red on the sha",
+    "  node scripts/promote.mjs --now            # (#1608) do not wait for a gating merge train before the restart (loud)",
     "  node scripts/promote.mjs --with-migration # (with --recover) ack that the delta includes a migration",
     '  node scripts/promote.mjs --reason "..."   # (with --recover) why this bypassed the sweep',
     "  node scripts/promote.mjs --help           # this text",

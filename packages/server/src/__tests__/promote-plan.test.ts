@@ -27,6 +27,9 @@ import {
   formatPromoteUsage,
   formatUnknownFlagRefusal,
   parsePromoteArgv,
+  planTrainWait,
+  resolveTrainWaitMs,
+  DEFAULT_TRAIN_WAIT_MS,
   planAdvisoryCheck,
   KNOWN_PROMOTE_FLAGS,
   planRecoveryLane,
@@ -1108,5 +1111,36 @@ describe("planAdvisoryCheck (#1564)", () => {
   it("parses --accept-advisories as a known flag", () => {
     const r = parsePromoteArgv(["--accept-advisories"]);
     expect(r.ok && r.acceptAdvisories).toBe(true);
+  });
+});
+
+describe("promote waits for a gating train (#1608)", () => {
+  it("parses --now and lists it in the usage", () => {
+    const r = parsePromoteArgv(["--now"]);
+    expect(r.ok && r.now).toBe(true);
+    expect(formatPromoteUsage()).toContain("--now");
+    const none = parsePromoteArgv([]);
+    expect(none.ok && none.now).toBe(false);
+  });
+
+  it("proceeds when no train is assembling or gating", () => {
+    const trains = [{ id: "a", state: "merged" }, { id: "b", state: "abandoned" }];
+    expect(planTrainWait({ trains, nowMs: 0, deadlineMs: 10 }).action).toBe("proceed");
+    expect(planTrainWait({ trains: [], nowMs: 0, deadlineMs: 10 }).action).toBe("proceed");
+  });
+
+  it("waits on a gating train while budget remains, then times out (never proceeds)", () => {
+    const trains = [{ id: "t", label: "2026-10-18-05", state: "gating" }];
+    const wait = planTrainWait({ trains, nowMs: 5, deadlineMs: 10 });
+    expect(wait.action).toBe("wait");
+    expect(wait.detail).toContain("2026-10-18-05");
+    expect(planTrainWait({ trains, nowMs: 10, deadlineMs: 10 }).action).toBe("timeout");
+  });
+
+  it("treats assembling as live and resolves the wait budget from env", () => {
+    expect(planTrainWait({ trains: [{ id: "x", state: "assembling" }], nowMs: 0, deadlineMs: 1 }).action).toBe("wait");
+    expect(resolveTrainWaitMs({})).toBe(DEFAULT_TRAIN_WAIT_MS);
+    expect(resolveTrainWaitMs({ KANBAN_PROMOTE_TRAIN_WAIT_MIN: "5" })).toBe(5 * 60_000);
+    expect(resolveTrainWaitMs({ KANBAN_PROMOTE_TRAIN_WAIT_MIN: "abc" })).toBe(DEFAULT_TRAIN_WAIT_MS);
   });
 });
