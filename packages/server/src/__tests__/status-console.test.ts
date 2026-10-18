@@ -101,6 +101,23 @@ describe("buildConsoleModel", () => {
     expect(m.attention.some((a) => a.text.startsWith("b:"))).toBe(true);
   });
 
+  it("puts an idle In Review ticket in Review, not Build", () => {
+    const issue = (issueNumber: number, statusName: string, wsStatus: string) => ({
+      issueNumber, issueId: `i${issueNumber}`, title: "t", statusName,
+      workspace: { id: `ws-${issueNumber}`, branch: `b${issueNumber}`, status: wsStatus }, session: { status: "stopped" }, mergeState: null,
+    });
+    const m = buildConsoleModel({
+      nowMs: NOW,
+      status: {
+        project: { id: "p", name: "proj", repoPath: "/x", defaultBranch: "master" },
+        generatedAt: new Date(NOW).toISOString(),
+        totals: { totalIssues: 2, inProgress: 2, activeWorkspaces: 2, runningSessions: 0 },
+        issues: [issue(1572, "In Review", "idle"), issue(1600, "In Progress", "running")],
+      } as any,
+    });
+    expect(m.issues.map((i) => [i.issueNumber, i.column])).toEqual([[1572, "Review"], [1600, "Build"]]);
+  });
+
   it("hides superseded red trains and month-old workers, shows sha/tag, prefers git's merge count", () => {
     const day = 86400;
     const m = buildConsoleModel({

@@ -152,7 +152,9 @@ export function buildLabel(model: ConsoleModel): string {
 
 function columnOf(issue: BoardStatusIssue): ConsoleColumn {
   if (issue.mergeState?.bucket === "pending_merge") return "Merge";
-  if (issue.workspace?.status === "reviewing") return "Review";
+  // An idle "In Review" ticket is built and waiting (under sprint there is no review session at all),
+  // so its status, not only a running review session, puts it in Review.
+  if (issue.workspace?.status === "reviewing" || issue.statusName === "In Review") return "Review";
   return isInFlightStatusName(issue.statusName) ? "Build" : "Todo";
 }
 
