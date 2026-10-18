@@ -122,6 +122,7 @@ Set by the board on an agent subprocess; read by hooks and skills inside a workt
 | `KANBAN_BOARD_SERVER_PID` | PID of the main board server, so cleanup never reaps it. |
 | `KANBAN_PROTECTED_PIDS` | Extra PIDs cleanup must not touch. |
 | `KANBAN_SKIP_ORPHAN_CLEANUP` | Disable the orphan-process sweep. |
+| `KANBAN_SKIP_PRECOMMIT_CHECKS` | Any non-empty value skips the builder pre-commit hook's god-module and static-ratchet checks (`scripts/pre-commit-checks.mjs`, #1604). |
 | `KANBAN_HEARTBEAT_FILE` | Where the board writes its liveness heartbeat. |
 | `KANBAN_EXIT_LOG_FILE` | Where process exits are recorded. |
 | `KANBAN_SPAWN_BASELINE_FILE` | Baseline of pre-existing processes, so cleanup only reaps what the board started. |

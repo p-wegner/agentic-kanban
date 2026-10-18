@@ -165,6 +165,13 @@ const ALLOWLIST = new Map<string, string>([
       "necessity, not by accident.",
   ],
   [
+    join("scripts", "pre-commit-checks.mjs"),
+    "Git pre-commit hook body (#1604) run as bare `node scripts/pre-commit-checks.mjs` from " +
+      "`.githooks/pre-commit`, with no bundler and no tsx — so it cannot import the adapter, which " +
+      "is TypeScript under packages/shared/src, and it must stay sub-second and dependency-free. " +
+      "One read-only `git diff --cached --name-only` to list the staged files; windowsHide.",
+  ],
+  [
     join("scripts", "rework-loop-analysis.mjs"),
     "Standalone measurement script (#804) run as bare `node scripts/rework-loop-analysis.mjs`, " +
       "with no bundler and no tsx — so it cannot import the adapter, which is TypeScript under " +
