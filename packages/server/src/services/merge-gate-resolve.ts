@@ -1,5 +1,5 @@
 // Single owner of the pre-merge gate DECISION, split out of pre-merge-gate.service.ts (#1605); re-exported there.
-import { runPreMergeGate } from "./pre-merge-gate.service.js";
+import type { PreMergeGateResult } from "./pre-merge-gate.types.js";
 import type { Database } from "../db/index.js";
 import type { PreMergeGateWorkspace } from "./pre-merge-gate.types.js";
 import { buildStaleVerdictReason } from "./merge-gate-verdict-reason.js";
@@ -7,7 +7,10 @@ import { evidenceIsValid, resolveMergeGateShas, type MergeGateShas, type MergeGa
 
 
 
+type RunGate = (workspace: PreMergeGateWorkspace, projectId: string, database: Database) => Promise<PreMergeGateResult>;
+
 async function runGateAsResolved(
+  runPreMergeGate: RunGate,
   workspace: PreMergeGateWorkspace,
   projectId: string | null,
   database: Database,
@@ -35,12 +38,12 @@ async function runGateAsResolved(
  * Single OWNER of the pre-merge gate DECISION for every merge trigger path.
  *
  * Resolves the caller's {@link MergeGateToken} into whether the merge may proceed,
- * running the shared {@link runPreMergeGate} only when the token says to (or when an
+ * running the shared `runPreMergeGate` (injected by `pre-merge-gate.service.ts`, which re-exports this as `resolveMergeGate`; injected to avoid an import cycle) only when the token says to (or when an
  * `already-passed` token's evidence is stale/absent — the fail-safe that closes the
  * TOCTOU-by-boolean window). `skip-explicit` and valid `already-passed` tokens return
  * `passed: true` WITHOUT running an (expensive) build/boot again.
  */
-export async function resolveMergeGate(args: {
+export async function resolveMergeGateWith(runPreMergeGate: RunGate, args: {
   token: MergeGateToken;
   workspace: PreMergeGateWorkspace;
   projectId: string | null;
@@ -84,10 +87,10 @@ export async function resolveMergeGate(args: {
         + `${token.evidence.source} (stage ${token.evidence.stage}, ran ${token.evidence.ranAt}) — `
         + `${reason} — so the gate is being re-run in full (#936).`,
     );
-    const result = await runGateAsResolved(workspace, projectId, database);
+    const result = await runGateAsResolved(runPreMergeGate, workspace, projectId, database);
     return { ...result, decision: "run-gate-stale-evidence" };
   }
 
-  const result = await runGateAsResolved(workspace, projectId, database);
+  const result = await runGateAsResolved(runPreMergeGate, workspace, projectId, database);
   return { ...result, decision: "run-gate" };
 }

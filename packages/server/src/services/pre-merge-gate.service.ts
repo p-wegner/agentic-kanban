@@ -23,7 +23,7 @@ import { getProjectSetupScript } from "../repositories/stack-profile.repository.
 import { buildSmokeCheck, getStackProfile, resolveEffectiveVerify } from "./stack-profile.service.js";
 import { runSmokeStage } from "./pre-merge-gate-smoke.js";
 import { recordFlakySuitesAsRedDebt } from "./pre-merge-gate-flaky-debt.js";
-export { resolveMergeGate } from "./merge-gate-resolve.js";
+import { resolveMergeGateWith } from "./merge-gate-resolve.js";
 import { resolveProjectDevServerPlan } from "./dev-server.service.js";
 import { quiesceBuildersEnabled, resolveGateHostAdmission } from "./gate-quiesce.js";
 import { planGateRun, runInHostBuildSlotUnlessOnWorker, runVerifyChainForPlacement, type GateScriptRunner } from "./pre-merge-gate-placement.js";
@@ -95,9 +95,7 @@ export {
   type ResolvedVerifyWorkers,
 };
 
-// `verify_gate_strategy` (the named tier pref), the always-run guard-suite scan, and the
-// pass-message builder live in `pre-merge-gate-tier.ts` (#538) — kept out of this file to stay
-// under the god-module cohesion ceiling (`max-file-size.test.ts` / `check-god-modules.mjs`).
+// `verify_gate_strategy`, the always-run guard scan and the pass-message builder live in `pre-merge-gate-tier.ts` (#538).
 
 /**
  * Failure-message signature of a verify_script that couldn't even resolve its own
@@ -808,3 +806,6 @@ export type { MergeGateEvidence, MergeGateShas, MergeGateToken, ResolvedMergeGat
 // pushed this file past the god-module line ceiling); re-exported so every importer keeps working.
 export { resolveMergeGateConfig } from "./merge-gate-config.js";
 export type { MergeGateConfig } from "./merge-gate-config.js";
+
+/** The #943 merge-gate decision owner (see merge-gate-resolve.ts), bound to this module's `runPreMergeGate`. */
+export const resolveMergeGate = (args: Parameters<typeof resolveMergeGateWith>[1]): ReturnType<typeof resolveMergeGateWith> => resolveMergeGateWith(runPreMergeGate, args);
