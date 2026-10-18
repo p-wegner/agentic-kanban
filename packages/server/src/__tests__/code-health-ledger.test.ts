@@ -60,6 +60,16 @@ describe("code-health ledger and cleanup ticket (#1613)", () => {
     expect(rows[0].description).toContain("f10.ts");
   });
 
+  it("files an ordinary ticket: default placement, no queue jump (operator 2026-10-19)", async () => {
+    await db.insert(issues).values({
+      id: randomUUID(), projectId, statusId: statusIds.Backlog ?? Object.values(statusIds)[0], title: "earlier",
+      issueNumber: 1, sortOrder: -5, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    } as never);
+    await recordCodeHealth({ projectId, breaches: scan(10) }, db);
+    const [ticket] = await cleanupRows();
+    expect(ticket.sortOrder).toBe(0);
+  });
+
   it("keeps firstSeen across scans and drops breaches that were fixed", async () => {
     await recordCodeHealth({ projectId, breaches: scan(3), now: "2026-10-01T00:00:00.000Z" }, db);
     const r = await recordCodeHealth({ projectId, breaches: scan(2), now: "2026-10-05T00:00:00.000Z" }, db);

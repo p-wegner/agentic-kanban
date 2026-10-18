@@ -21,7 +21,7 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getAllPreferences, setPreference } from "../repositories/preferences.repository.js";
 import { updateIssueById } from "../repositories/issue-service.repository.js";
-import { getMinIssueSortOrder, listIssuesByExternalKeyPrefix } from "../repositories/issue/heal-ticket.repository.js";
+import { listIssuesByExternalKeyPrefix } from "../repositories/issue/heal-ticket.repository.js";
 import { createIssueService, type CreateIssueInput, type CreateIssueResult } from "./issue.service.js";
 import { resolveRiskPosture } from "./risk-posture.service.js";
 
@@ -105,14 +105,14 @@ export async function recordCodeHealth(
 
   if (action === "file") {
     const createIssue = input.createIssue ?? createIssueService({ database }).createIssue;
-    const minSort = await getMinIssueSortOrder(input.projectId, database);
+    // An ordinary ticket (operator decision 2026-10-19): default placement, no queue jump, no
+    // special scheduling; the board pulls it in like any other.
     const issue = await createIssue({
       projectId: input.projectId,
       title: cleanupTicketTitle(),
       description: cleanupTicketBody(ledger, posture.level),
       issueType: "task",
       priority: "medium",
-      sortOrder: (minSort ?? 0) - 1,
       externalKey: cleanupTicketExternalKey(input.projectId),
     });
     return { ...base, issueId: issue.id, issueNumber: issue.issueNumber ?? undefined };

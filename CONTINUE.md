@@ -48,7 +48,7 @@ installed dependencies, so the shepherd resolves conflicts without running suite
   replaced by the **code-health posture** (#1613, decision 021): soft caps are recorded, hard caps
   block at pre-commit/implement-exit, a hard-cap breach is fixed to below the SOFT cap, and
   accumulated soft breaches file one cleanup ticket.
-- **Open question for Peter:** should that cleanup ticket start on its own or wait in Backlog?
+- The cleanup ticket is an ordinary ticket (Peter, 2026-10-19): default placement, the board pulls it in like any other.
 - **ao-pf38 still needs its reboot** (shown `draining` in the console).
 
 ## 2026-10-18 night: trains 05, 07, 08 landed by hand, stable-20261018 live

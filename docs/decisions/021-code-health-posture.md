@@ -51,6 +51,8 @@ listed file/function below its soft cap, decomposed behind the existing import p
 - The gate script's default level is the table's `gateDefaultLevel` (`relaxed`); `--level` or
   `KANBAN_CODE_HEALTH_LEVEL` overrides it. At adoption the tree has soft breaches (the first batch is #1605).
 - #1603/#1604 enforce only HARD caps; #1606 shows headroom against the soft cap.
-- Not yet wired: a scheduled caller of the report endpoint, and running the cleanup ticket alone
-  (not in a train) at a quiet moment — the ticket is filed; scheduling it is follow-up work.
+- The cleanup ticket is an ordinary ticket (operator, 2026-10-19): default backlog placement, no
+  queue jump, no separate "run alone at a quiet moment" scheduling; the board pulls it in like any
+  other. This replaces the proposal's run-alone idea.
+- Not yet wired: a scheduled caller of the report endpoint.
 - Numbers are the proposal's; change them in the JSON only, with this record.
