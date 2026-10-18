@@ -287,6 +287,8 @@ describe("merge train assembly", () => {
     await git(["checkout", "-q", "main"]);
 
     let trainRefDuringGate = "";
+    // #1601 re-gates a non-neutral base move (bounded), so the intruder lands on every pass.
+    let intrusions = 0;
     await expect(
       runMergeTrain({
         repoPath: repo,
@@ -297,7 +299,7 @@ describe("merge train assembly", () => {
           trainRefDuringGate = trainRef;
           // Another merge lands on main while the (long) gate runs — landMergeTrain must refuse,
           // and that refusal is a throw, not a returned gateFailure.
-          await commitFile("main", "intruder.txt", "x\n");
+          await commitFile("main", `intruder-${intrusions++}.txt`, "x\n");
           return { passed: true, message: "ok" };
         },
         closeMember: async () => {},
