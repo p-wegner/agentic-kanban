@@ -132,7 +132,9 @@ export type MergeTrainAttemptVerdict =
   | "landed" | "red" | "assembly_empty" | "land_refused" | "env_failure" | "sided"
   // #1277 — a fix-agent attempt: the re-gate on the fixed tree was green / red / never ran
   // (a cap tripped or the agent produced nothing).
-  | "agent_fix_green" | "agent_fix_red" | "agent_fix_capped";
+  | "agent_fix_green" | "agent_fix_red" | "agent_fix_capped"
+  // #1569 — the shepherd could not run (worker disconnects/launch failures past the retry bound): inconclusive, not red.
+  | "agent_fix_held";
 
 /** #1277 — what a train's red-handling policy was, shown in the train detail. */
 export type MergeTrainRedStrategyDto = "agent-fix" | "bisect" | "agent-fix-then-bisect";
@@ -144,10 +146,14 @@ export interface MergeTrainAgentFixDto {
   /** Where to read the brief the agent was given (the failing suites, output tail, members). */
   briefUrl?: string;
   /** What ended it: the re-gate verdict, or the cap that tripped. */
-  outcome: "green" | "red" | "capped";
+  outcome: "green" | "red" | "capped" | "held";
   /** The cap that tripped, when `outcome` is `capped`. */
   capped?: "timeout" | "cost" | "no-change" | "gate-inconclusive";
   durationMs: number;
+  /** #1569: turns the shepherd consumed (infrastructure re-placements are not counted). */
+  turns?: number;
+  /** #1569: re-placements after an infrastructure failure; they never consume a turn. */
+  infraRetries?: number;
   /** Absent when the provider reports no usage (a one-shot text run). */
   tokens?: number;
   costUsd?: number;

@@ -7,7 +7,7 @@
  *  - a member the bisect or the suite-owner shortcut rejected, with the suites that rejected it;
  *  - under `agent-fix`, a whole train that stayed red after the fix agent: the failing suites are
  *    attributed to the members that touched them (the suite-owner idea, but any number of owners),
- *    and when no member did, EVERY member gets the full failure.
+ *    and when no member did, nobody is messaged (#1569: the train is held with one attention line).
  *
  * This never merges and never changes a member's readiness: it only talks to the builder.
  */
@@ -54,16 +54,16 @@ export function splitEnvironmentSuites(failedSuites: readonly string[], output: 
 /**
  * Pure: which members a red train's failing suites implicate. A member owns a suite it changed, or
  * a file the failing output names (#1573: guard ratchets are never in a diff, but say who broke
- * them). Falls back to all of `members`.
+ * them). #1569: NO fallback to everyone - a red nobody owns is the shepherd's/operator's to hold,
+ * not every builder's to guess at.
  */
 export function attributeTrainRedToMembers<M extends TrainMember>(failedSuites: readonly string[], members: readonly M[], output?: string): M[] {
   const suites = new Set(failedSuites.map(normalizePath).filter(Boolean));
   const text = cleanOutput(output);
-  const owners = members.filter((m) => (m.changedFiles ?? []).some((f) => {
+  return members.filter((m) => (m.changedFiles ?? []).some((f) => {
     const file = normalizePath(f);
     return suites.has(file) || (file.length > 0 && text.includes(file));
   }));
-  return owners.length > 0 ? owners : [...members];
 }
 
 export interface TrainRedFeedbackTarget {
