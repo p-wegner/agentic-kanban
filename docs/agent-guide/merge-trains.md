@@ -49,8 +49,22 @@ The **fix agent** is a one-shot session started in the train worktree (it may ru
 worker, #1431). Its brief (`buildAgentFixBrief`, saved as `kanban-train-fix-<label>.md` in the
 temp dir) lists the members as `#N (branch)`, the failing suites and the last 60 lines of gate
 output. It commits onto the train ref, the gate re-runs, and green lands the fixed tree. Caps:
-`merge_train_agent_fix_max_turns` (default 1), `_timeout_ms` (20 min), `_cost_cap_usd` ($2, not
-enforced: the one-shot runner reports no usage).
+`merge_train_agent_fix_max_turns` (default 3 since #1602, was 1), `_timeout_ms` (20 min),
+`_cost_cap_usd` ($2, not enforced: the one-shot runner reports no usage). Every turn resumes the
+same shepherd session, and a re-gate that is red after a fix goes back to it with the new failures.
+
+**Fix precedents (#1602).** The brief tells the shepherd to run `check:arch`, `typecheck`, the failing
+suites and the impact selection before committing, because the gate stops at its first failing stage
+and everything behind it is unseen (train 06: god-module fixed, then two test suites red, cap was 1).
+Known shapes:
+- a new always-run guard with no `when:` territory pushes the runtime ratchet over: raise
+  `BASELINE_TOTAL_MS` in `always-run-guard-runtime-ratchet.test.ts` with a written reason;
+- a test pins behaviour a member changed on purpose (the livelock test vs #1601): update the test to
+  the new behaviour, never revert the member;
+- a member pushed a file over the god-module limits: extract a function behind the existing facade.
+
+**Not yet done (follow-ups):** the gate still stops at its first failing stage, and a board restart
+mid-fix re-runs the batch instead of resuming the shepherd session.
 
 **When the fix agent fails, the members get the failure as feedback** (`merge-train-red-feedback.ts`):
 members whose changed files include a failing suite, or are named in the failing output, get a

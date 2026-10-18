@@ -14,7 +14,7 @@ export type MergeTrainRedStrategy = (typeof MERGE_TRAIN_RED_STRATEGIES)[number];
 
 export const MERGE_TRAIN_RED_STRATEGY_DEFAULT: MergeTrainRedStrategy = "agent-fix-then-bisect";
 
-export const MERGE_TRAIN_AGENT_FIX_DEFAULT_MAX_TURNS = 1;
+export const MERGE_TRAIN_AGENT_FIX_DEFAULT_MAX_TURNS = 3; // #1602: one turn fixed only the first failing stage (check:arch), never the tests behind it.
 export const MERGE_TRAIN_AGENT_FIX_DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 export const MERGE_TRAIN_AGENT_FIX_DEFAULT_COST_CAP_USD = 2;
 
