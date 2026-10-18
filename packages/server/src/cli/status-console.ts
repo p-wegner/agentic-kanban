@@ -24,6 +24,8 @@ export interface ConsoleRenderOptions {
   timeZone?: string;
   /** `a` — list every open issue instead of the pipeline summary. */
   allIssues?: boolean;
+  /** Set when the last poll was slow and `--watch` is waiting longer between polls (#1614). */
+  backoffNote?: string;
 }
 
 
@@ -46,7 +48,7 @@ function headerSection(model: ConsoleModel, opts: ConsoleRenderOptions): Section
     ? `host ${model.host.freeGb != null ? `${model.host.freeGb.toFixed(1)}G` : "?"} free / floor ${model.host.floorGb}G`
     : "host n/a";
   const lines: Line[] = [{
-    text: `agentic-kanban  ${model.project}${buildLabel(model)}  ${new Date(opts.nowMs).toLocaleTimeString("en-GB", opts.timeZone ? { timeZone: opts.timeZone } : undefined)}  ${hostBit}  ${model.openIssues} open · ${model.runningSessions} running  refresh ${opts.intervalSec ?? 5}s`,
+    text: `agentic-kanban  ${model.project}${buildLabel(model)}  ${new Date(opts.nowMs).toLocaleTimeString("en-GB", opts.timeZone ? { timeZone: opts.timeZone } : undefined)}  ${hostBit}  ${model.openIssues} open · ${model.runningSessions} running  refresh ${opts.intervalSec ?? 5}s${opts.backoffNote ? ` (${opts.backoffNote})` : ""}`,
     tone: model.host?.hold ? "yellow" : "head",
   }];
   for (const e of model.errors) lines.push({ text: `! ${e}`, tone: "red" });

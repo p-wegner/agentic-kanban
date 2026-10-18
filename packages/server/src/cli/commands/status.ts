@@ -128,7 +128,12 @@ Status indicators:
       };
 
       let allIssues = Boolean(options.all);
-      const intervalSecOf = () => Math.max(parseInt(options.interval ?? "5", 10), 2);
+      const baseIntervalSec = () => Math.max(parseInt(options.interval ?? "5", 10), 2);
+      // #1614: polls never overlap; a slow answer (> half the interval) doubles the wait to 2x its duration.
+      let lastPollMs = 0;
+      const intervalSecOf = () => Math.max(baseIntervalSec(), Math.ceil((lastPollMs * 2) / 1000));
+      const backoffNoteOf = () =>
+        intervalSecOf() > baseIntervalSec() ? `slow answer ${(lastPollMs / 1000).toFixed(1)}s, backing off` : undefined;
 
       // #1421: the operator console reads the board that owns the fleet over HTTP, so remote
       // workers, trains and host capacity are visible. Falls back to the DB-backed frame only
@@ -152,11 +157,14 @@ Status indicators:
           return JSON.parse(answer.text);
         };
         let payloads;
+        const startedMs = Date.now();
         try {
-          payloads = await fetchConsolePayloads(get, { projectId: options.project, all: allIssues, nowMs: Date.now() });
+          payloads = await fetchConsolePayloads(get, { projectId: options.project, all: allIssues, nowMs: startedMs });
         } catch (failure) {
+          lastPollMs = Date.now() - startedMs;
           return { failure };
         }
+        lastPollMs = Date.now() - startedMs;
         const model = buildConsoleModel(payloads);
         const lines = renderConsole(model, {
           cols: process.stdout.columns || 120,
@@ -166,6 +174,7 @@ Status indicators:
           intervalSec: intervalSecOf(),
           nowMs: Date.now(),
           allIssues,
+          backoffNote: backoffNoteOf(),
         });
         process.stdout.write(process.stdout.isTTY ? consoleFrame(lines) : lines.join("\n") + "\n");
         return null;
@@ -198,7 +207,6 @@ Status indicators:
       const render = options.watch && !options.json ? renderScreen : renderPlain;
 
       if (options.watch) {
-        const intervalSec = Math.max(parseInt(options.interval ?? "5", 10), 2);
         const screen = !options.json && process.stdout.isTTY;
         if (screen) {
           process.stdout.write("\x1b[?1049h\x1b[?25l");
@@ -219,10 +227,15 @@ Status indicators:
           if (!screen && !options.json) console.clear();
           await render();
         };
-        await renderAndClear();
-        setInterval(() => {
-          void renderAndClear();
-        }, intervalSec * 1000);
+        // Sequential loop, not setInterval: the next poll starts only after the previous one ended.
+        for (;;) {
+          try {
+            await renderAndClear();
+          } catch (e) {
+            console.error(e instanceof Error ? e.message : String(e));
+          }
+          await new Promise<void>((resolve) => setTimeout(resolve, intervalSecOf() * 1000));
+        }
       } else {
         await render();
         process.exit(0);
