@@ -1,4 +1,4 @@
 #!/bin/sh
-# Refuse a commit whose staged .claude/skills change lacks its .codex/skills mirror (#1576).
-# Install once per clone: pnpm hooks:install
-exec node "$(git rev-parse --show-toplevel)/scripts/skills-mirror.mjs" --check
+# Pre-commit (#1576 skills mirror, #1604 god-module + static ratchets on staged files; warning only until #1613).
+# Installed per clone/worktree by: pnpm hooks:install
+exec node "$(git rev-parse --show-toplevel)/scripts/pre-commit-checks.mjs"

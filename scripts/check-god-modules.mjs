@@ -35,6 +35,14 @@ function parseRootArg(argv) {
   return resolve(dirname(fileURLToPath(import.meta.url)), "..");
 }
 const REPO_ROOT = parseRootArg(process.argv.slice(2));
+// `--files a,b` (#1604): scan ONLY these repo-relative paths — the pre-commit hook's staged set.
+// Same thresholds and messages as the full scan; paths outside the scanned source set are ignored.
+function parseFilesArg(argv) {
+  const i = argv.indexOf("--files");
+  if (i === -1) return null;
+  return new Set((argv[i + 1] ?? "").split(",").map((f) => f.trim().replace(/\\/g, "/")).filter(Boolean));
+}
+const ONLY_FILES = parseFilesArg(process.argv.slice(2));
 const MAX_LINES = 1000;
 // The cohesion signal counts a module's top-level function-like DECLARATIONS —
 // exported AND internal (arch-review #889). Exports alone undercount: a low-cohesion
@@ -347,7 +355,9 @@ function gatherSourceFiles() {
   return files;
 }
 
-const files = gatherSourceFiles();
+const files = gatherSourceFiles().filter(
+  (f) => !ONLY_FILES || ONLY_FILES.has(relative(REPO_ROOT, f).split(sep).join("/")),
+);
 const lineOffenders = [];
 const cohesionOffenders = [];
 const complexityOffenders = [];

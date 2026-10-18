@@ -37,8 +37,19 @@ export interface ParsedPromoteArgvOk {
   acceptAdvisories: boolean;
   /** #1562 — promote although a required GitHub workflow is red on the sha. */
   ignoreCi: boolean;
+  /** #1608 — do not wait for a gating merge train before the restart. */
+  now: boolean;
   reason: string | null;
 }
+export declare const DEFAULT_TRAIN_WAIT_MS: number;
+export declare const TRAIN_POLL_INTERVAL_MS: number;
+export declare function gatingTrains<T extends { state?: string }>(trains: T[] | null | undefined): T[];
+export declare function resolveTrainWaitMs(env?: Record<string, string | undefined>): number;
+export declare function planTrainWait(input: {
+  trains: Array<{ id?: string; label?: string; state?: string }> | null | undefined;
+  nowMs: number;
+  deadlineMs: number;
+}): { action: "proceed" | "wait" | "timeout"; detail: string };
 export interface ParsedPromoteArgvUnknown {
   ok: false;
   unknown: string[];
