@@ -3,7 +3,7 @@ import type { SessionPlacementRecord } from "../../lib/placement-explain.types.j
 
 /**
  * `worker list` talks to an OWNER route (`GET /api/workers`), mounted only on the board's
- * loopback app — never on the fleet listener a remote worker's `--board` points at (#848).
+ * loopback app - never on the fleet listener a remote worker's `--board` points at (#848).
  * A 404 there is not "board unreachable" (that would be a fetch rejection, never a response
  * at all): it means this URL answered, just not with that route, which is exactly what
  * happens when `--board` was pointed at the fleet port instead of the board's API port.
@@ -14,7 +14,7 @@ export function describeWorkerListFailure(status: number, boardUrl: string): str
   if (status === 404) {
     return (
       `Failed to list workers (404). '${boardUrl}' answered, but 'GET /api/workers' is an owner route ` +
-      "reachable only from the board's own machine (loopback) — never from the fleet port a remote " +
+      "reachable only from the board's own machine (loopback) - never from the fleet port a remote " +
       "worker's --board points at. Run 'worker list' on the board machine instead, against its API " +
       "port (default http://127.0.0.1:3001)."
     );
@@ -26,7 +26,7 @@ export function describeWorkerListFailure(status: number, boardUrl: string): str
  * `[completed]` alone hides a worker-lost run (#1319): the board finalizes it completed / exit 1
  * and an operator reading the list must not mistake it for a success.
  */
-/** `fetch 4.2s · setup 61s · agent 8m12s ...` — recorded phases only, in pipeline order (#1328). */
+/** `fetch 4.2s | setup 61s | agent 8m12s ...` - recorded phases only, in pipeline order (#1328). */
 export function formatPhaseTimings(phases: NonNullable<SessionPlacementRecord["phases"]>): string {
   const fmt = (ms: number): string => (ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`);
   const parts: Array<[string, number | undefined]> = [
@@ -40,7 +40,7 @@ export function formatPhaseTimings(phases: NonNullable<SessionPlacementRecord["p
   return parts
     .filter((p): p is [string, number] => p[1] !== undefined)
     .map(([label, ms]) => `${label} ${fmt(ms)}`)
-    .join(" · ");
+    .join(" | ");
 }
 
 export function formatPlacementState(p: Pick<SessionPlacementRecord, "status" | "exitCode" | "endedBy">): string {

@@ -1,3 +1,4 @@
+// @gate:always-run when:scripts/train-gating-warning.mjs,packages/server/src/__tests__/train-gating-warning.test.ts
 import { describe, it, expect } from "vitest";
 // @ts-expect-error plain .mjs script
 import { formatTrainWarnings } from "../../../../scripts/train-gating-warning.mjs";

@@ -1,8 +1,8 @@
 ---
 name: agentic-kanban
 description: Operate the agentic-kanban board — a kanban board where each card is an AI coding session in its own git worktree. Use when asked to work a ticket, drive a project hands-off, review or merge agent work, inspect what agents are doing, or wire the board into another tool. Covers the MCP tools, CLI, board views, statuses, and the review/merge gate.
-commit: fd9f8c53e
-generated: 2026-10-17
+commit: e7f4e2024
+generated: 2026-10-18
 ---
 
 # agentic-kanban
@@ -163,7 +163,7 @@ Top-level: `cleanup`, `create`, `delete-status`, `dev`, `export-backlog`, `impor
 | `session` | `analyze`, `recent`, `backfill-friction`, `review-effectiveness`, `reviewer-fixes`, `transcript`, `search`, `stats`, `friction`, `find-similar` |
 | `skill` | `list`, `get`, `create`, `export`, `verify` |
 | `tag` | `list`, `create` |
-| `train` | `list`, `show`, `cancel`, `depart`, `land-local` |
+| `train` | `list`, `status`, `show`, `cancel`, `depart`, `land-local` |
 | `worker` | `revoke`, `pair`, `instructions`, `list`, `update`, `explain`, `placements`, `doctor-board`, `update-check`, `cleanup`, `events`, `auth`, `status`, `repo-check`, `config`, `setup` |
 | `worker results` | `list`, `drop` |
 | `worker toolchain` | `list`, `approve` |

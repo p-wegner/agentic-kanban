@@ -53,7 +53,7 @@ export function decideWorkerUpdates(
 }
 
 /** One pass; returns the lines logged. Never throws. */
-export async function runWorkerAutoUpdatePass(database: Database, log: (line: string) => void = (l) => console.log(l)): Promise<AutoUpdateDecision[]> {
+export async function runWorkerAutoUpdatePass(database: Database, log: (line: string) => void = console.log): Promise<AutoUpdateDecision[]> {
   try {
     const { registry } = getWorkerFleet(database);
     const views = (await registry.listWorkersView()) as unknown as AutoUpdateWorkerView[];

@@ -12,9 +12,9 @@ const WINDOWS_TOOLS_SUBDIR = join("tools", "worker-windows");
  * not next to this module.
  *
  * Resolved by walking up from THIS module rather than from `npm prefix -g`,
- * because the same code runs from three different depths — the esbuild bundle at
+ * because the same code runs from three different depths - the esbuild bundle at
  * `dist/worker.js`, the tsc output at `dist/cli/commands/worker.js`, and
- * `src/cli/commands/worker.ts` under tsx in a dev checkout — and because a global
+ * `src/cli/commands/worker.ts` under tsx in a dev checkout - and because a global
  * prefix is exactly the thing that differs per machine (nvm, Scoop, a per-user
  * prefix), so hardcoding one prints a path that does not exist for the reader.
  */
@@ -38,7 +38,7 @@ export function resolveWindowsToolsDir(
  * Windows-only: point the reader at the service/tray scripts that ship IN the
  * package, so an unattended worker is a documented install step rather than
  * scripts someone hand-copies between machines. Kept out of the numbered steps
- * because it is optional and platform-specific — the foreground `start` above is
+ * because it is optional and platform-specific - the foreground `start` above is
  * what proves the pairing works, and this survives the shell closing.
  */
 function renderWindowsServiceSection(): string[] {
@@ -51,8 +51,8 @@ function renderWindowsServiceSection(): string[] {
   lines.push("");
   lines.push(
     "The foreground `start` above dies with its shell. On Windows the package ships scripts that register the " +
-      "worker as the Scheduled Task `AgenticKanbanWorker` — at logon, in YOUR session, so agents keep using this " +
-      "account's provider credentials — under a supervisor that restarts the daemon with backoff, plus a systray " +
+      "worker as the Scheduled Task `AgenticKanbanWorker` - at logon, in YOUR session, so agents keep using this " +
+      "account's provider credentials - under a supervisor that restarts the daemon with backoff, plus a systray " +
       "dot for its real state. They live inside the installed package here:",
   );
   lines.push("");
@@ -74,7 +74,7 @@ function renderWindowsServiceSection(): string[] {
   lines.push("");
   lines.push(
     "Pair once in the foreground first (the step above): the service reuses the saved per-worker token. No admin " +
-      "rights are needed. Set `-ClaudeConfigDir` explicitly — a Scheduled Task inherits nothing, and an unset " +
+      "rights are needed. Set `-ClaudeConfigDir` explicitly - a Scheduled Task inherits nothing, and an unset " +
       "`CLAUDE_CONFIG_DIR` silently runs the agents under the default `~/.claude` account. The supervisor also " +
       "forces `ACP_AUTOCONNECT=0`, without which a headless agent can hang forever with no output. See the " +
       "README in that directory for the rest.",
@@ -93,7 +93,7 @@ export function renderWorkerConnectMarkdown(
   lines.push("");
   lines.push(
     "The board schedules agent sessions onto connected workers. This machine clones the repo from the board over " +
-      "git-over-HTTP, runs the agent in its own checkout, and pushes the result back — the board then lands the " +
+      "git-over-HTTP, runs the agent in its own checkout, and pushes the result back - the board then lands the " +
       "branch and its normal review/merge flow takes over.",
   );
   lines.push("");
@@ -114,7 +114,7 @@ export function renderWorkerConnectMarkdown(
   lines.push("## Board-side networking (cross-machine only)");
   lines.push("");
   lines.push(
-    "A default board is loopback-only and unreachable from other machines. Do NOT open it with KANBAN_HOST — the " +
+    "A default board is loopback-only and unreachable from other machines. Do NOT open it with KANBAN_HOST - the " +
       "board API has no authentication, so binding it to 0.0.0.0 would publish every issue, transcript and merge " +
       "endpoint to the network. Instead open the two purpose-built listeners, each of which authenticates every " +
       "request with a bearer token:",
@@ -130,7 +130,7 @@ export function renderWorkerConnectMarkdown(
   lines.push("");
   lines.push(
     "`KANBAN_FLEET_PORT` serves ONLY worker register/heartbeat/WebSocket; `KANBAN_GIT_HTTP_PORT` serves ONLY the " +
-      "git transport (pin it — otherwise it moves every boot and no firewall rule can match). The board API itself " +
+      "git transport (pin it - otherwise it moves every boot and no firewall rule can match). The board API itself " +
       "stays on 127.0.0.1 and is not reachable from the network at all. Point a remote worker's --board at the " +
       "FLEET port. Still keep the board on a trusted network (LAN/VPN/Tailscale) rather than the open internet.",
   );
@@ -139,13 +139,13 @@ export function renderWorkerConnectMarkdown(
     "`KANBAN_FLEET_HOST` / `KANBAN_GIT_HTTP_HOST` narrow WHICH interface each listener binds (absent = every " +
       "interface, as before). On a VPN this is what makes \"trusted network\" a control rather than a hope: " +
       "with the bind host set to the VPN address, the two ports do not exist on the office LAN, the home LAN or " +
-      "hotel wifi at all, so reaching them requires being on the VPN — the bearer tokens stop being the only " +
+      "hotel wifi at all, so reaching them requires being on the VPN - the bearer tokens stop being the only " +
       "thing between a stranger's packet and the board.",
   );
   lines.push("");
   lines.push(
     "**Do not put a path-based reverse proxy in front of the git transport** (`tailscale serve`, an nginx " +
-      "location prefix). The worker builds its clone URL as `scheme://<board-host>:<git-port>/git/<projectId>` — " +
+      "location prefix). The worker builds its clone URL as `scheme://<board-host>:<git-port>/git/<projectId>` - " +
       "it discards any path prefix and substitutes the port it was told, so behind a serve-style proxy the clone " +
       "hangs with no obvious cause. Use the machine's own name/address (e.g. MagicDNS) with the ports directly. " +
       "Tailscale Funnel must never be used: that is the public internet in front of a board.",
@@ -159,7 +159,7 @@ export function renderWorkerConnectMarkdown(
   );
   lines.push(
     "- **Stopping**: Ctrl+C kills the running agents too; `--leave-agents` leaves them alive. Losing the connection " +
-      "does NOT kill agents — the daemon reconnects with backoff and keeps their exit events queued.",
+      "does NOT kill agents - the daemon reconnects with backoff and keeps their exit events queued.",
   );
   lines.push(
     "- **Revoking**: `agentic-kanban worker list` then the Workers UI panel's Revoke button (or " +

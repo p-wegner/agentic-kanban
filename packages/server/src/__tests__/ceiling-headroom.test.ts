@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 function repoWith(files: Record<string, string>): string {
-  const root = mkdtempSync(join(tmpdir(), "ceiling-headroom-"));
+  const root = mkdtempSync(join(tmpdir(), "ak-ceiling-headroom-"));
   dirs.push(root);
   for (const [rel, content] of Object.entries(files)) {
     mkdirSync(join(root, rel, ".."), { recursive: true });
