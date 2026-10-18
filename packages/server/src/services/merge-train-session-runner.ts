@@ -50,7 +50,7 @@ export function createPlacedSessionRunner(deps: {
   invoke?: (prompt: string, opts: ClaudeCliOptions) => Promise<string>;
 } = {}): TrainAgentRunner {
   const invoke = deps.invoke ?? invokeClaudePrompt;
-  return async ({ worktree, prompt, timeoutMs, resumeSessionId, projectId, repoPath, baseBranch }) => {
+  return async ({ worktree, prompt, timeoutMs, resumeSessionId, projectId, repoPath, baseBranch, label }) => {
     let worker: string | undefined;
     const call = (text: string, resume?: string) => invoke(text, {
       cwd: worktree, timeout: timeoutMs, allowEdits: true, json: true,
@@ -58,7 +58,7 @@ export function createPlacedSessionRunner(deps: {
       ...(deps.database ? { database: deps.database } : {}),
       onPlacement: (info) => { worker = info.worker; },
       // #1431: the worker edits a checkout of the train tree and its commits are fast-forwarded into `worktree`.
-      ...(projectId && repoPath ? { projectId, repo: { repoPath, ...(baseBranch ? { baseBranch } : {}) } } : {}),
+      ...(projectId && repoPath ? { projectId, repo: { repoPath, ...(baseBranch ? { baseBranch } : {}), ...(label ? { keepFixAs: label } : {}) } } : {}),
     });
     let raw: string;
     try {

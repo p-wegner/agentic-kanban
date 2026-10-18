@@ -152,6 +152,32 @@ describe("dispatchOneShotToWorker with repo context", () => {
     expect(execSucceeded(await gitExec(["rev-parse", "--verify", `refs/heads/${frame.repo?.branch}`], { cwd: repo }))).toBe(false);
   });
 
+  it("#1609: keeps a fix it cannot fast-forward on kanban/train-fix/<label> and names it", async () => {
+    await gitExecOrThrow(["checkout", "-q", "-b", "side"], { cwd: repo });
+    writeFileSync(join(repo, "a.txt"), "two\n");
+    await gitExecOrThrow(["commit", "-qam", "fix"], { cwd: repo });
+    const fixSha = (await gitExecOrThrow(["rev-parse", "HEAD"], { cwd: repo })).trim();
+    await gitExecOrThrow(["checkout", "-q", "master"], { cwd: repo });
+    // The train tree moved on (a cancel / reset): the fix is no longer a fast-forward.
+    writeFileSync(join(repo, "b.txt"), "other\n");
+    await gitExecOrThrow(["add", "-A"], { cwd: repo });
+    await gitExecOrThrow(["commit", "-qm", "diverge"], { cwd: repo });
+    const { manager } = fakeManager((req) => [
+      { requestId: req.requestId, phase: "accepted" },
+      { requestId: req.requestId, phase: "done", ok: true, text: "fixed", pushedSha: fixSha },
+    ]);
+    const place = vi.fn(async (p: { branch?: string }) => ({
+      kind: "remote" as const, workerId: "w1", strict: true, sharesFilesystem: false,
+      repo: { projectId: "proj", repoPath: repo, branch: p.branch as string, baseBranch: "master" },
+    }));
+
+    await expect(dispatchOneShotToWorker(base({
+      manager, place: place as unknown as Args["place"], cwd: repo, allowEdits: true,
+      repo: { repoPath: repo, baseBranch: "master", keepFixAs: "2026-10-18-07" },
+    }))).rejects.toThrow(/kept on kanban\/train-fix\/2026-10-18-07/);
+    expect((await gitExecOrThrow(["rev-parse", "refs/heads/kanban/train-fix/2026-10-18-07"], { cwd: repo })).trim()).toBe(fixSha);
+  });
+
   it("stays on the host (and leaves no branch behind) when the placement is the host", async () => {
     const place = vi.fn(async () => ({ kind: "host" as const }));
     const out = await dispatchOneShotToWorker(base({ place: place as unknown as Args["place"], cwd: repo, repo: { repoPath: repo } }));

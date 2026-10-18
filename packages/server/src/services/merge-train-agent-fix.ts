@@ -49,6 +49,8 @@ export type TrainAgentRunner = (args: {
   projectId?: string;
   repoPath?: string;
   baseBranch?: string;
+  /** #1609: the train label; a fix that cannot be applied (train cancelled) is kept on `kanban/train-fix/<label>`. */
+  label?: string;
 }) => Promise<{ sessionId?: string; tokens?: number; costUsd?: number; /** #1572: the fleet worker the turn ran on. */ worker?: string }>;
 
 export interface AgentFixMember {
@@ -251,7 +253,7 @@ export async function runAgentFix(args: {
     briefUrl ??= await (args.writeBrief ?? writeBriefFile)(label, brief).catch(() => undefined);
     try {
       const run = await args.runAgent({
-        worktree, prompt: brief, timeoutMs: remaining, turn: turns,
+        worktree, prompt: brief, timeoutMs: remaining, turn: turns, label,
         ...(sessionId ? { resumeSessionId: sessionId } : {}),
         ...(args.placement ? { ...args.placement, baseBranch: args.baseBranch } : {}),
       });
@@ -333,11 +335,11 @@ export function createOneShotAgentRunner(deps: {
   invoke?: (prompt: string, opts: ClaudeCliOptions) => Promise<string>;
 } = {}): TrainAgentRunner {
   const invoke = deps.invoke ?? invokeClaudePrompt;
-  return async ({ worktree, prompt, timeoutMs, projectId, repoPath, baseBranch }) => {
+  return async ({ worktree, prompt, timeoutMs, projectId, repoPath, baseBranch, label }) => {
     await invoke(prompt, {
       cwd: worktree, timeout: timeoutMs, allowEdits: true, ...(deps.database ? { database: deps.database } : {}),
       // #1431: the worker edits a checkout of the train tree and its commits are fast-forwarded into `worktree`.
-      ...(projectId && repoPath ? { projectId, repo: { repoPath, ...(baseBranch ? { baseBranch } : {}) } } : {}),
+      ...(projectId && repoPath ? { projectId, repo: { repoPath, ...(baseBranch ? { baseBranch } : {}), ...(label ? { keepFixAs: label } : {}) } } : {}),
     });
     return {};
   };
