@@ -228,7 +228,7 @@ export function renderConsole(model: ConsoleModel, opts: ConsoleRenderOptions): 
   const a = opts.ascii === true;
   const g: Glyphs = { a, ell: a ? "~" : "…", dot: a ? "o" : "●", sq: a ? ["#", "-"] : ["■", "□"], rule: a ? "-" : "─", nowMs: opts.nowMs };
 
-  const merged: Section = { id: "merged", lines: [{ text: `MERGED TODAY ${model.mergedToday} (since 00:00 local)`, tone: model.mergedToday > 0 ? "green" : "dim" }] };
+  const merged: Section = { id: "merged", lines: [{ text: `MERGED last 24 h: ${model.mergedToday}`, tone: model.mergedToday > 0 ? "green" : "dim" }] };
   let active = [
     headerSection(model, opts), workersSection(model, g, opts.allIssues), gatesSection(model, g), baseReleaseSection(model, g),
     connectSection(model, g), trainSection(model, g),

@@ -185,7 +185,7 @@ async function applyWorkerFix(cwd: string, sha: string, keep?: { repoPath: strin
     // #1609: a cancelled train removes or moves its tree; the shepherd's commit must outlive that.
     const ref = keep ? await keepTrainFix(keep.repoPath, keep.label, sha) : null;
     const kept = ref ? `; the fix is kept on ${ref} (reuse it with \`train land-local\` or the next train)` : "";
-    throw new Error(`could not apply the worker's fix ${sha.slice(0, 8)} to ${cwd}: ${errorMessage(err).slice(0, 300)}${kept}`);
+    throw new Error(`could not apply the worker's fix ${sha.slice(0, 8)}: ${errorMessage(err).replace(cwd, "<tree>").slice(0, 300)}${kept}`);
   }
 }
 

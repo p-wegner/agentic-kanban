@@ -59,14 +59,14 @@ describe("renderConsole", () => {
     expect(out).toContain("held: host saturated");
     expect(out).toContain("train-12");
     expect(out).toContain("temp-dir-namespace-guard");
-    expect(out).toContain("MERGED TODAY 22");
+    expect(out).toContain("MERGED last 24 h: 22");
   });
 
   it("keeps WORKERS and ATTENTION when the screen is short, dropping history first", () => {
     const out = renderConsole(model, { ...base, cols: 100, rows: 12, color: false }).join("\n");
     expect(out).toContain("WORKERS");
     expect(out).toContain("ATTENTION");
-    expect(out).not.toContain("MERGED TODAY");
+    expect(out).not.toContain("MERGED last 24 h");
   });
 
   it("uses ASCII glyphs and no escape codes when asked", () => {
@@ -143,7 +143,7 @@ describe("buildConsoleModel", () => {
     expect(m.mergedToday).toBe(31);
     expect(m.workers.map((w) => [w.build, w.stale, w.buildStale])).toEqual([["1111111", true, true], ["2dcf8de", false, false], ["1234567", false, true]]);
     const out = renderConsole(m, { ...base, cols: 120, rows: 40, color: false }).join("\n");
-    expect(out).toContain("(stable-20261012-3 2dcf8de)");
+    expect(out).toContain("(stable-20261012-3 worker 2dcf8de)");
     expect(out).toContain("1 stale worker");
     expect(out).toContain("1234567!");
     expect(out).not.toContain("hb 4172553s");

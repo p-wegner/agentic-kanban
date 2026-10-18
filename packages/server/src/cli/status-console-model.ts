@@ -160,7 +160,8 @@ export function formatElapsed(ms: number): string {
 
 /** ` (stable-20261012-3 2dcf8de)` when the board knows its tag/commit, else the package version. */
 export function buildLabel(model: ConsoleModel): string {
-  const id = [model.boardTag, model.boardCommit].filter(Boolean).join(" ");
+  // #1620: the commit is the worker bundle's, not the tag's own, so say so.
+  const id = [model.boardTag, model.boardCommit ? `worker ${model.boardCommit}` : null].filter(Boolean).join(" ");
   const label = id || model.boardVersion;
   return label ? ` (${label})` : "";
 }
@@ -353,7 +354,7 @@ export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
       : null,
     issues,
     attention,
-    // git's own count of merges since local midnight when the board reports it; the train sum undercounts.
+    // git's own count of merges in the last 24 h when the board reports it; the train sum undercounts.
     mergedToday: p.host?.mergedToday ?? trainMergedToday,
     errors: p.errors ?? [],
   };
