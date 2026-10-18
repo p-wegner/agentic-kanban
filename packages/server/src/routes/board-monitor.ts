@@ -23,6 +23,8 @@ import { previewNextStartCandidates } from "../services/start-score-preview.serv
 import { getAutopilotStatus, type AutopilotStatusDeps } from "../services/autopilot-status.service.js";
 import { clearAutoMergeBreaker, readAutoMergeBreaker } from "../services/auto-merge-breaker.js";
 import { clearAutoMergeBranchHoldsForProject } from "../services/auto-merge-branch-hold.js";
+import { z } from "zod";
+import { parseJsonBody } from "../middleware/parse-body.js";
 import { recordCodeHealth } from "../services/code-health.service.js";
 import { getDeliveryStatus } from "../services/delivery-status.service.js";
 import { latestFlush, readFlushState, sortFlushes } from "../services/flush-state.js";
@@ -66,6 +68,17 @@ function memoizeRecent<T>(read: () => Promise<T>, ttlMs: number): () => Promise<
  * `deps.readMachineCapacity` is injectable so a test can hand the route a saturated
  * snapshot without a `fleet` binary or a tight box; production wires the real probe.
  */
+const codeHealthReportBody = z.object({
+  softBreaches: z.array(z.object({
+    file: z.string(),
+    metric: z.enum(["lines", "branches", "declarations"]),
+    value: z.number(),
+    cap: z.number(),
+    detail: z.string().optional(),
+  })),
+  ref: z.string().nullish(),
+});
+
 export function createBoardMonitorRoute(
   database: Database,
   deps: {
@@ -150,12 +163,8 @@ export function createBoardMonitorRoute(
   router.post("/:id/code-health/report", async (c) => {
     const projectId = c.req.param("id");
     await requireProject(projectId, database);
-    const body = await c.req.json().catch(() => ({})) as { softBreaches?: unknown; ref?: unknown };
-    const breaches = Array.isArray(body.softBreaches) ? body.softBreaches : [];
-    const result = await recordCodeHealth(
-      { projectId, breaches, ref: typeof body.ref === "string" ? body.ref : null },
-      database,
-    );
+    const body = await parseJsonBody(c, codeHealthReportBody);
+    const result = await recordCodeHealth({ projectId, breaches: body.softBreaches, ref: body.ref ?? null }, database);
     return c.json({ action: result.action, line: result.line, reason: result.reason, issueNumber: result.issueNumber ?? null });
   });
 
