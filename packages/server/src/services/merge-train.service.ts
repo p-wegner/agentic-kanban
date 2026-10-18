@@ -3,11 +3,7 @@ import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { MergeTrainAttemptDto, MergeTrainAttemptVerdict, MergeTrainBaseVerdict } from "@agentic-kanban/shared/types";
 import type { MergeTrainRedStrategy } from "@agentic-kanban/shared/lib/merge-train-red-strategy";
-import { isGuardsOnlyDiff } from "@agentic-kanban/shared";
-import { assessBaseMove, readBaseMoveFiles } from "./base-move-relevance.js";
-
-/** #1601 — re-gates allowed per attempt when the base moves by gate inputs during the gate. */
-const MAX_BASE_MOVE_REGATES = 2;
+import { deleteTrainRef, landingEvidence, resolveBaseMoveDuringGate } from "./merge-train-base-move.js";
 import { verifyChainSemaphoreActive, verifyChainSemaphoreConcurrency } from "./verify-chain-semaphore.js";
 import {
   assembleMergeTrain, assertTrainPreservesAncestry, dedupeConflictClusters, formatTrainLabel, parentTrainLabel, trainDateStamp, trainRefName,
@@ -850,22 +846,15 @@ async function runTrainAttempt(args: {
       if (!args.waitForLandTurn && !fixLanded && currentBase !== asm.baseSha) {
         // A lone attempt whose base moved during the gate: keep the verdict only when the move
         // was verdict-neutral (base-move-relevance.ts); otherwise `landMergeTrain` refuses.
-        const neutral = await reassembleAfterNeutralBaseMove({ repoPath, baseBranch, asm, currentBase, label });
-        if (neutral) {
-          neutralRef = neutral.asm.trainRef;
-          landAsm = neutral.asm;
-          if (neutral.guardsOnlyNote) landNote = neutral.guardsOnlyNote;
-        } else if ((args.regateDepth ?? 0) < MAX_BASE_MOVE_REGATES) {
-          // #1601: the base moved by something that can change the verdict. Ending the train red
-          // for that wastes a green gate and sends nothing back to anyone — gate again on the new
-          // base instead. Members stay aboard, no feedback; bounded so a hot base cannot loop us.
-          console.log(
-            `[merge-train] ${label}: base '${baseBranch}' moved ${asm.baseSha.slice(0, 8)}..${currentBase.slice(0, 8)} ` +
-              `during the gate and the move is not verdict-neutral; re-gating on the new base (not red)`,
-          );
+        const move = await resolveBaseMoveDuringGate({ repoPath, baseBranch, asm, currentBase, label, regateDepth: args.regateDepth ?? 0 });
+        if (move.kind === "regate") {
+          // #1601: not verdict-neutral; gate again on the new base instead of ending red.
           const again = await runTrainAttempt({ ...args, label: `${label}g`, regateDepth: (args.regateDepth ?? 0) + 1 });
           return { ...again, gateRuns: again.gateRuns + 1 };
         }
+        neutralRef = move.asm?.trainRef ?? null;
+        landAsm = move.asm ?? landAsm;
+        landNote = move.note ?? "";
       }
       if (args.waitForLandTurn && currentBase !== asm.baseSha) {
         landAsm = await assembleMergeTrain({ repoPath, baseBranch, members: asm.included, label });
@@ -898,9 +887,7 @@ async function runTrainAttempt(args: {
         baseSha: landAsm.baseSha,
         included: landAsm.included,
         label,
-        ...(landNote && trainId
-          ? { evidence: { trainId, gateRuns: 1, gateMessage: `${gate.message}; ${landNote}` } }
-          : commitEvidence),
+        ...landingEvidence({ trainId, gateMessage: gate.message, landNote, commitEvidence }),
       });
       // Bookkeeping AFTER the work is safely on the base. A failure here leaves a member merged
       // but not marked — recoverable by the existing done-unmerged/already-merged reconcilers,
@@ -968,55 +955,4 @@ async function runTrainAttempt(args: {
 
 type AssembledTrain = TrainAssemblyResult & { conflictClusters: ConflictCluster[] };
 
-/**
- * The base moved during a lone attempt's gate. When {@link assessBaseMove} judges the move
- * verdict-neutral (e.g. only a Bullseye sync of `scripts/board-monitor/objective.md`), re-assemble
- * the SAME gated members onto the current base without a re-gate and return that assembly to land.
- * Returns null — the caller then lands the original assembly and `landMergeTrain` refuses, exactly
- * as before — on a relevant move, any git failure, or when re-assembly drops a member.
- */
-async function reassembleAfterNeutralBaseMove(args: {
-  repoPath: string;
-  baseBranch: string;
-  asm: AssembledTrain;
-  currentBase: string;
-  label: string;
-}): Promise<{ asm: AssembledTrain; guardsOnlyNote?: string } | null> {
-  const { repoPath, baseBranch, asm, currentBase, label } = args;
-  try {
-    const assessment = await assessBaseMove({ cwd: repoPath, baseBefore: asm.baseSha, baseAfter: currentBase, branchSha: asm.trainSha });
-    // #1601: a base delta of docs/config-only files (`isGuardsOnlyDiff`) cannot change a code
-    // verdict either, whether or not it is on the narrower neutral allowlist. The clean-merge
-    // check below still applies, so a file the train also touches drops out as before.
-    let guardsOnlyNote: string | undefined;
-    if (!assessment.keep) {
-      const moved = assessment.movedPaths ?? (await readBaseMoveFiles(repoPath, asm.baseSha, currentBase));
-      if (!moved || !isGuardsOnlyDiff(moved)) return null;
-      guardsOnlyNote = `base moved ${asm.baseSha.slice(0, 8)}..${currentBase.slice(0, 8)} by guards-only files (${moved.slice(0, 5).join(", ")}); landed without a re-gate`;
-    }
-    const rebased = await assembleMergeTrain({ repoPath, baseBranch, members: asm.included, label: `${label}-rebased` });
-    const clean = rebased.trainSha !== null && rebased.dropped.length === 0 && rebased.included.length === asm.included.length;
-    if (!clean || rebased.baseSha !== currentBase) {
-      await deleteTrainRef(repoPath, rebased.trainRef);
-      return null;
-    }
-    await assertTrainPreservesAncestry(repoPath, rebased.trainRef, rebased.included, baseBranch);
-    console.log(
-      `[merge-train] ${label}: base moved ${asm.baseSha.slice(0, 8)}..${currentBase.slice(0, 8)} during the gate; ` +
-        `landing without a re-gate because ${guardsOnlyNote ?? assessment.reason}`,
-    );
-    return { asm: rebased, ...(guardsOnlyNote ? { guardsOnlyNote } : {}) };
-  } catch (err) {
-    console.warn(`[merge-train] ${label}: base-move assessment failed, refusing as before: ${errorMessage(err).slice(0, 200)}`);
-    return null;
-  }
-}
-
-/** Delete a train ref once its members have been stamped. Best-effort: a leftover ref is harmless. */
-export async function deleteTrainRef(repoPath: string, trainRef: string): Promise<void> {
-  try {
-    await gitExec(["branch", "-D", trainRef], { cwd: repoPath });
-  } catch {
-    // Best-effort.
-  }
-}
+export { deleteTrainRef } from "./merge-train-base-move.js";
