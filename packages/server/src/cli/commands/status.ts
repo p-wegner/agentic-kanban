@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import { timeSince, cliAction } from "../shared.js";
 import { formatDurationStr } from "@agentic-kanban/shared";
+import { plainHttp } from "../../lib/board-server-writes.js";
 
 // #1492: a held pre-merge gate reads "gate held: <reason>, retry at <time>", not "auto-merge pending".
 function pendingMergeLabel(mergeState: { reason?: string; label: string }): string {
@@ -141,7 +142,6 @@ Status indicators:
       // Resolves to null when the console was drawn, else the reason it could not be (#1477).
       const renderConsoleScreen = async (): Promise<{ failure: unknown } | null> => {
         const { resolveBoardServerPort } = await import("@agentic-kanban/shared/lib/board-server-url");
-        const { plainHttp } = await import("../../lib/board-server-writes.js");
         const { buildConsoleModel, renderConsole, consoleFrame, fetchConsolePayloads } = await import("../status-console.js");
         const baseUrl = `http://127.0.0.1:${resolveBoardServerPort()}`;
         const get = async (path: string): Promise<unknown> => {
@@ -229,11 +229,7 @@ Status indicators:
         };
         // Sequential loop, not setInterval: the next poll starts only after the previous one ended.
         for (;;) {
-          try {
-            await renderAndClear();
-          } catch (e) {
-            console.error(e instanceof Error ? e.message : String(e));
-          }
+          await guardedRefresh(renderAndClear, (text) => process.stdout.write(text));
           await new Promise<void>((resolve) => setTimeout(resolve, intervalSecOf() * 1000));
         }
       } else {
@@ -241,4 +237,15 @@ Status indicators:
         process.exit(0);
       }
     }));
+}
+
+/** One failed refresh must never end `--watch`: show the error in the frame; the next tick retries. */
+export async function guardedRefresh(refresh: () => Promise<void>, write: (text: string) => void): Promise<boolean> {
+  try {
+    await refresh();
+    return true;
+  } catch (e) {
+    write(`ATTENTION: refresh failed, retrying next tick: ${e instanceof Error ? e.message : String(e)}\n`);
+    return false;
+  }
 }
