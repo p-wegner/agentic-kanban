@@ -19,7 +19,7 @@ paragraph), `pre-merge-gate.md` (gate tiers), decision 017 (postures), decision 
    **A member that conflicts with an earlier member is deferred to the next train**
    (`[merge-train] deferred <branch> (#N) from train ...: conflicts with ...`). Nothing resolves
    the conflict, so a pair that keeps conflicting can miss train after train (#1562 vs #1560
-   missed two). The train shepherd (below) replaces this.
+   missed two). The train shepherd's phase 2 (#1572, below) replaces this.
 4. **Gate.** One pre-merge gate for the whole tree: install, `check:arch`, typecheck, tests at
    the posture's tier (`verify_gate_strategy`). With `verify_placement=worker` it runs on a verify
    worker (`[verify-placement] train-gate placed on ao-pf38`); the host does no install.
@@ -53,10 +53,11 @@ output. It commits onto the train ref, the gate re-runs, and green lands the fix
 enforced: the one-shot runner reports no usage).
 
 **When the fix agent fails, the members get the failure as feedback** (`merge-train-red-feedback.ts`):
-members whose changed files include a failing suite get a builder turn; if no member owns a
-failing file, **every** member gets one. On 2026-10-17 a worker disconnect killed the fix agent's
-only turn, which counted as red, and all 14 builders were sent back for a one-line god-module
-overflow.
+members whose changed files include a failing suite, or are named in the failing output, get a
+builder turn. Since #1569 a red nobody owns messages nobody (before it, every member got a turn: on
+2026-10-17 a worker disconnect killed the fix agent's only turn and all 14 builders were sent back
+for a one-line god-module overflow). Failures with an environment signature (timeouts, a
+permission-denied `.git/config`) have no owner (#1573).
 
 **Bisect** gates halves of the member set to find the member that breaks it and sends that
 member back. It costs a gate run per split and only attributes, it never fixes. The control arm
@@ -78,26 +79,35 @@ The full per-level table (sweep cadence, merges per cycle, contention, placement
 a warning:** `train_max_size_<id>`, `train_max_wait_ms_<id>`, `verify_gate_strategy_<id>`. Clear
 them after changing the posture (#1560).
 
-## The train shepherd (target design, #1569; not shipped yet)
+## The train shepherd (#1569 phase 1 shipped; #1572 phase 2 pending)
 
-Replaces deferral, bisect and per-member fan-out with **one persistent agent per train**:
+One persistent agent per train, the **train shepherd** (not the Steward, which is the Monitor
+Butler), owns making the train mergeable: member conflicts and a red gate go to the same session,
+so its context already holds the member tickets.
 
-- The train worktree exists from the first member; each member is merged onto it as it joins.
-- The first conflict starts the shepherd (a regular placed session, worker-capable). Every later
-  conflict and every red gate of the same train goes to **the same session** as a follow-up
-  turn, so it already knows the members and its prompt cache stays warm.
-- Its first brief carries each member's title, description, branch and changed files; later
-  turns add only the new member or the new failure.
-- Members are frozen at the sha they joined with; a member that changes leaves and rejoins the
-  next train. `git rerere` replays earlier resolutions when the tree is rebuilt.
-- Each shepherd edit is its own commit naming the tickets it reconciles
-  (`train-shepherd: resolve #A x #B ...`), listed on the train row: nobody reviewed these edits.
-- An infrastructure failure (disconnect, failed launch) re-places the shepherd without using a
-  turn; a shepherd with no progress for N minutes is an attention line and is re-placed (#1561).
-- When it gives up, feedback goes only to members that own the failing files; with no owner the
-  train is held with one attention line.
+**Shipped (#1569, phase 1):**
+- **Brief** (`buildAgentFixBrief`, `merge-train-agent-fix.ts`): the first turn carries, per member,
+  issue number, title, trimmed description, branch and changed files. Later turns add only the new
+  member or the new failure.
+- **Session reuse** (`merge-train-shepherd.ts`): `TrainShepherd` keeps the session id across turns;
+  `mergeMembersWithShepherd` hands each member conflict to it.
+- **An infrastructure failure is not a verdict**: a worker disconnect, failed launch or zero-token
+  session re-places the turn without consuming one, up to `SHEPHERD_MAX_INFRA_RETRIES`; then the
+  attempt is `agent_fix_held` (inconclusive), not red.
+- **Red with no owner**: feedback goes only to members whose changed files are a failing suite or
+  are named in the failing output (`merge-train-red-feedback.ts`); when none is, no builder is
+  messaged. There is no fallback to every member any more.
+- **Caps**: the `merge_train_agent_fix_*` prefs bound the shepherd as a whole.
 
-When #1569 lands, this section is rewritten as shipped behaviour.
+**Pending (#1572, phase 2):** incremental assembly (the worktree exists from the first member, each
+member merged as it joins, conflicts to the shepherd instead of deferral), one shared runner for
+conflicts and red gates, a placed-session runner that reports usage so the cost cap bites, the held
+outcome in `merge-queue-train.ts` with one attention line, and the shepherd line in
+`status --watch`. Until then a conflicting member is still deferred to the next train.
+
+Target rules that stay: members are frozen at the sha they joined with (a changed member leaves and
+rejoins the next train), `git rerere` replays earlier resolutions, and each shepherd edit is its own
+commit naming the tickets it reconciles, listed on the train row, since nobody reviewed it.
 
 ## Landing a train by hand: `train land-local` (#1586)
 
