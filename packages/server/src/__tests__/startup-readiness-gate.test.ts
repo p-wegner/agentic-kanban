@@ -22,6 +22,7 @@ import {
   isStartupComplete,
   markStartupComplete,
   resetStartupReadiness,
+  setStartupPhase,
   whenStartupComplete,
 } from "../startup/readiness.js";
 
@@ -91,20 +92,41 @@ describe("startup readiness gate (#282)", () => {
     expect(waitFor).not.toHaveBeenCalled();
   });
 
-  it("proceeds anyway when the deferred phase hangs, rather than wedging writes forever", async () => {
-    // A git call that never returns (the #254 failure mode) must not make the board
-    // permanently unwritable — proceeding is the pre-#282 behaviour, so it is no worse.
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("refuses a WRITE with 503 + Retry-After naming the phase once the grace elapses (#1611)", async () => {
+    setStartupPhase("abortStaleRebases");
     const app = appWithGate(createStartupReadinessGate({
-      timeoutMs: 10,
+      graceMs: 10,
       waitFor: () => new Promise<void>(() => {}),
       isComplete: () => false,
     }));
 
+    const started = Date.now();
+    const res = await app.request("/api/workspaces", { method: "POST" });
+    const body = await res.json() as { phase: string; error: string };
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBeTruthy();
+    expect(body.phase).toBe("abortStaleRebases");
+    expect(body.error).toContain("abortStaleRebases");
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it("proceeds anyway once the overall bound has passed, rather than wedging writes forever", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let now = 0;
+    const app = appWithGate(createStartupReadinessGate({
+      timeoutMs: 1000,
+      graceMs: 10,
+      clock: () => now,
+      waitFor: () => new Promise<void>(() => {}),
+      isComplete: () => false,
+    }));
+    now = 1500;
+
     const res = await app.request("/api/workspaces", { method: "POST" });
 
     expect(res.status).toBe(201);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("readiness gate timed out"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("readiness gate"));
     warn.mockRestore();
   });
 

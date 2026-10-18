@@ -30,7 +30,7 @@ export type IssueWriteTransport =
   | { mode: "server"; baseUrl: string }
   | { mode: "direct"; reason: string };
 
-export interface HttpAnswer { status: number; text: string }
+export interface HttpAnswer { status: number; text: string; retryAfterSec?: number }
 export type HttpLike = (
   url: string,
   init: { method: string; body?: string; timeoutMs?: number },
@@ -51,7 +51,12 @@ export const plainHttp: HttpLike = (url, init) =>
       let text = "";
       res.setEncoding("utf8");
       res.on("data", (c: string) => { text += c; });
-      res.on("end", () => resolveAnswer({ status: res.statusCode ?? 0, text }));
+      const retryAfter = Number(res.headers["retry-after"]);
+      res.on("end", () => resolveAnswer({
+        status: res.statusCode ?? 0,
+        text,
+        ...(Number.isFinite(retryAfter) && retryAfter > 0 ? { retryAfterSec: retryAfter } : {}),
+      }));
       res.on("error", reject);
     });
     req.on("timeout", () => req.destroy(new Error(`timed out after ${init.timeoutMs} ms`)));
@@ -129,11 +134,22 @@ export function directWriteNotice(reason: string): string {
   return `Note: ${reason}; wrote to the database directly. An open board UI will not show this change until it is reloaded.`;
 }
 
+/** Retries while the board is still starting up (#1611); the server refuses before touching anything. */
+const STARTUP_RETRY_ATTEMPTS = 24;
+const STARTUP_RETRY_DEFAULT_SEC = 5;
+
+export interface BoardServerWriteRetry {
+  sleep?: (ms: number) => Promise<void>;
+  log?: (line: string) => void;
+  attempts?: number;
+}
+
 /**
  * One REST write against the board server. Throws with the server's own `error` text on a
  * non-2xx answer, so a refused write (e.g. the AK-535 terminal-move guard's 409) reads the
- * same as the direct path's message. Never retried and never falls back to the DB: a write
- * that may have landed must not be applied twice.
+ * same as the direct path's message. Never falls back to the DB, and the only retry is the
+ * startup-readiness 503 (`STARTUP_NOT_READY`), which the gate returns BEFORE the handler runs,
+ * so a write that may have landed is never applied twice.
  */
 export async function boardServerWrite<T>(
   transport: { baseUrl: string },
@@ -141,17 +157,28 @@ export async function boardServerWrite<T>(
   path: string,
   body?: unknown,
   http: HttpLike = plainHttp,
+  retry: BoardServerWriteRetry = {},
 ): Promise<T> {
-  let answer: HttpAnswer;
-  try {
-    answer = await http(`${transport.baseUrl}${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body) });
-  } catch (err) {
-    throw new Error(`board server request ${method} ${path} failed: ${errorMessage(err)}`);
-  }
-  const data = parseJson(answer.text);
-  if (answer.status < 200 || answer.status >= 300) {
-    const msg = data && typeof data === "object" && "error" in data ? String((data as { error: unknown }).error) : `HTTP ${answer.status}`;
+  const sleep = retry.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const log = retry.log ?? ((line: string) => console.error(line));
+  const maxAttempts = retry.attempts ?? STARTUP_RETRY_ATTEMPTS;
+  for (let attempt = 1; ; attempt++) {
+    let answer: HttpAnswer;
+    try {
+      answer = await http(`${transport.baseUrl}${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+    } catch (err) {
+      throw new Error(`board server request ${method} ${path} failed: ${errorMessage(err)}`);
+    }
+    const data = parseJson(answer.text);
+    if (answer.status >= 200 && answer.status < 300) return data as T;
+    const obj = data && typeof data === "object" ? (data as { error?: unknown; code?: unknown; phase?: unknown }) : null;
+    if (answer.status === 503 && obj?.code === "STARTUP_NOT_READY" && attempt < maxAttempts) {
+      const waitSec = answer.retryAfterSec ?? STARTUP_RETRY_DEFAULT_SEC;
+      log(`Board is still starting up (phase: ${String(obj.phase ?? "unknown")}); retrying in ${waitSec}s (attempt ${attempt}/${maxAttempts})...`);
+      await sleep(waitSec * 1000);
+      continue;
+    }
+    const msg = obj && "error" in obj ? String(obj.error) : `HTTP ${answer.status}`;
     throw new Error(msg);
   }
-  return data as T;
 }

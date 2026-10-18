@@ -4,7 +4,7 @@
  * DB path with one notice. Every server here is a fake on listen(0); no test touches a real
  * board or a real database.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { resolveIssueWriteTransport, boardServerWrite, directWriteNotice } from "../board-server-writes.js";
@@ -112,5 +112,30 @@ describe("directWriteNotice", () => {
     expect(line).not.toContain("\n");
     expect(line).toContain("no board server answered on 127.0.0.1:3001");
     expect(line).toContain("will not show this change until it is reloaded");
+  });
+});
+
+describe("boardServerWrite startup retry (#1611)", () => {
+  it("retries a STARTUP_NOT_READY 503 with a progress line, then succeeds", async () => {
+    const answers = [
+      { status: 503, text: JSON.stringify({ code: "STARTUP_NOT_READY", phase: "abortStaleRebases", error: "x" }), retryAfterSec: 2 },
+      { status: 200, text: JSON.stringify({ ok: true }) },
+    ];
+    const http = vi.fn(async () => answers.shift()!);
+    const sleep = vi.fn(async () => {});
+    const log = vi.fn();
+
+    const out = await boardServerWrite({ baseUrl: "http://x" }, "POST", "/api/a", {}, http, { sleep, log });
+
+    expect(out).toEqual({ ok: true });
+    expect(http).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(2000);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("abortStaleRebases"));
+  });
+
+  it("does not retry other errors", async () => {
+    const http = vi.fn(async () => ({ status: 503, text: JSON.stringify({ error: "down" }) }));
+    await expect(boardServerWrite({ baseUrl: "http://x" }, "POST", "/api/a", {}, http, { sleep: async () => {}, log: () => {} })).rejects.toThrow("down");
+    expect(http).toHaveBeenCalledTimes(1);
   });
 });
