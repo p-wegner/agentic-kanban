@@ -131,4 +131,23 @@ describe("buildConsoleModel", () => {
     expect(out).toContain("1234567!");
     expect(out).not.toContain("hb 4172553s");
   });
+
+  it("retires a red train's attention line once its members landed, left or moved to a newer train (#1583)", () => {
+    const iss = (n: number, ws: string, ready: boolean) => ({ issueNumber: n, issueId: `i${n}`, title: "t", statusName: "In Review", workspace: { id: ws, readyForMerge: ready }, session: null }) as any;
+    const mk = (issues: any[], trains: any[]) => trainOnly(buildConsoleModel({
+      nowMs: NOW,
+      status: { project: { id: "p", name: "proj", repoPath: "/x", defaultBranch: "master" }, generatedAt: new Date(NOW).toISOString(), totals: { totalIssues: 0, inProgress: 0, activeWorkspaces: 0, runningSessions: 0 }, issues } as any,
+      trains: { trains } as any,
+    }));
+    const trainOnly = <T extends { attention: Array<{ text: string }> }>(m: T): T => ({ ...m, attention: m.attention.filter((a) => a.text.startsWith("train")) });
+    const red = { label: "train-03", state: "red", startedAt: ago(500), finishedAt: ago(400), memberWorkspaceIds: JSON.stringify(["a", "b"]), gateEvidence: JSON.stringify({ gateFailure: "suite x" }) };
+    // still waiting: red
+    expect(mk([iss(1, "a", true), iss(2, "b", true)], [red]).attention.map((a) => a.text)).toEqual(["train-03 red: suite x"]);
+    // all members landed in a later train: no line
+    const later = { label: "train-04", state: "landed", startedAt: ago(100), finishedAt: ago(50), memberWorkspaceIds: JSON.stringify(["a", "b"]), gateEvidence: JSON.stringify({ landed: ["a", "b"] }) };
+    expect(mk([], [later, red]).attention).toEqual([]);
+    // members reworking: says so, yellow
+    const m = mk([iss(1, "a", false), iss(2, "b", false)], [red]);
+    expect(m.attention).toEqual([{ level: "yellow", text: "train-03 red, members reworking: #1 #2" }]);
+  });
 });
