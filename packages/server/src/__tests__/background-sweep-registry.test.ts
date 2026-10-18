@@ -117,6 +117,7 @@ describe("every background sweep is registered (#584)", () => {
       "queue-flush-sweep",
       "progress-invariant-sweep",
       "worker-build-prewarm",
+      "worker-auto-update",
     ]);
   });
 
