@@ -4,7 +4,7 @@ import { revParse } from "@agentic-kanban/shared/lib/git-service";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { MergeTrainAttemptDto, MergeTrainAttemptVerdict } from "@agentic-kanban/shared/types";
-import { assessBaseMove } from "./base-move-relevance.js";
+import { deleteTrainRef, landingEvidence, resolveBaseMoveDuringGate } from "./merge-train-base-move.js";
 import {
   assembleMergeTrain, assertTrainPreservesAncestry, dedupeConflictClusters, formatTrainLabel, parentTrainLabel, trainDateStamp, trainRefName,
   type ConflictCluster, type TrainAssemblyResult, type TrainMember,
@@ -58,6 +58,8 @@ export async function runTrainAttempt(args: {
   /** #1203 — see `runMergeTrain`'s doc comment; only read here to classify a killed gate. */
   signal?: AbortSignal;
   assemble?: typeof assembleMergeTrain; // #1572
+  /** #1601 — how many times this attempt has already re-gated because the base moved under it. */
+  regateDepth?: number;
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, trainId, runGate, closeMember } = args;
 
@@ -208,6 +210,7 @@ export async function runTrainAttempt(args: {
       // unverified. (The sided path below re-assembles onto the current base anyway, so it
       // needs no such recovery.)
       let landAsm = asm;
+      let landNote = "";
       const additionalDropped: TrainRunResult["dropped"] = [];
       const currentBase = await revParse(repoPath, baseBranch);
       // #1277: never for a fixed tree — re-assembling the members would drop the agent's commits
@@ -215,11 +218,15 @@ export async function runTrainAttempt(args: {
       if (!args.waitForLandTurn && !fixLanded && currentBase !== asm.baseSha) {
         // A lone attempt whose base moved during the gate: keep the verdict only when the move
         // was verdict-neutral (base-move-relevance.ts); otherwise `landMergeTrain` refuses.
-        const neutral = await reassembleAfterNeutralBaseMove({ repoPath, baseBranch, asm, currentBase, label });
-        if (neutral) {
-          neutralRef = neutral.trainRef;
-          landAsm = neutral;
+        const move = await resolveBaseMoveDuringGate({ repoPath, baseBranch, asm, currentBase, label, regateDepth: args.regateDepth ?? 0 });
+        if (move.kind === "regate") {
+          // #1601: not verdict-neutral; gate again on the new base instead of ending red.
+          const again = await runTrainAttempt({ ...args, label: `${label}g`, regateDepth: (args.regateDepth ?? 0) + 1 });
+          return { ...again, gateRuns: again.gateRuns + 1 };
         }
+        neutralRef = move.asm?.trainRef ?? null;
+        landAsm = move.asm ?? landAsm;
+        landNote = move.note ?? "";
       }
       if (args.waitForLandTurn && currentBase !== asm.baseSha) {
         landAsm = await assembleMergeTrain({ repoPath, baseBranch, members: asm.included, label });
@@ -252,7 +259,7 @@ export async function runTrainAttempt(args: {
         baseSha: landAsm.baseSha,
         included: landAsm.included,
         label,
-        ...commitEvidence,
+        ...landingEvidence({ trainId, gateMessage: gate.message, landNote, commitEvidence }),
       });
       // Bookkeeping AFTER the work is safely on the base. A failure here leaves a member merged
       // but not marked — recoverable by the existing done-unmerged/already-merged reconcilers,
@@ -320,47 +327,4 @@ export async function runTrainAttempt(args: {
 
 type AssembledTrain = TrainAssemblyResult & { conflictClusters: ConflictCluster[] };
 
-/**
- * The base moved during a lone attempt's gate. When {@link assessBaseMove} judges the move
- * verdict-neutral (e.g. only a Bullseye sync of `scripts/board-monitor/objective.md`), re-assemble
- * the SAME gated members onto the current base without a re-gate and return that assembly to land.
- * Returns null — the caller then lands the original assembly and `landMergeTrain` refuses, exactly
- * as before — on a relevant move, any git failure, or when re-assembly drops a member.
- */
-async function reassembleAfterNeutralBaseMove(args: {
-  repoPath: string;
-  baseBranch: string;
-  asm: AssembledTrain;
-  currentBase: string;
-  label: string;
-}): Promise<AssembledTrain | null> {
-  const { repoPath, baseBranch, asm, currentBase, label } = args;
-  try {
-    const assessment = await assessBaseMove({ cwd: repoPath, baseBefore: asm.baseSha, baseAfter: currentBase, branchSha: asm.trainSha });
-    if (!assessment.keep) return null;
-    const rebased = await assembleMergeTrain({ repoPath, baseBranch, members: asm.included, label: `${label}-rebased` });
-    const clean = rebased.trainSha !== null && rebased.dropped.length === 0 && rebased.included.length === asm.included.length;
-    if (!clean || rebased.baseSha !== currentBase) {
-      await deleteTrainRef(repoPath, rebased.trainRef);
-      return null;
-    }
-    await assertTrainPreservesAncestry(repoPath, rebased.trainRef, rebased.included, baseBranch);
-    console.log(
-      `[merge-train] ${label}: base moved ${asm.baseSha.slice(0, 8)}..${currentBase.slice(0, 8)} during the gate; ` +
-        `landing without a re-gate because ${assessment.reason}`,
-    );
-    return rebased;
-  } catch (err) {
-    console.warn(`[merge-train] ${label}: base-move assessment failed, refusing as before: ${errorMessage(err).slice(0, 200)}`);
-    return null;
-  }
-}
-
-/** Delete a train ref once its members have been stamped. Best-effort: a leftover ref is harmless. */
-export async function deleteTrainRef(repoPath: string, trainRef: string): Promise<void> {
-  try {
-    await gitExec(["branch", "-D", trainRef], { cwd: repoPath });
-  } catch {
-    // Best-effort.
-  }
-}
+export { deleteTrainRef } from "./merge-train-base-move.js";
