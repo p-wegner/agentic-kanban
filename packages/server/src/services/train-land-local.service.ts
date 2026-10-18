@@ -131,6 +131,18 @@ function windowLabel(now: string): string {
   return `local-${now.slice(0, 16).replace(/[-:T]/g, "")}`;
 }
 
+/** `--only` / `--skip`: the operator's explicit member overrides, each skip logged. */
+function filterByIssueFlags(members: LandLocalMember[], input: Pick<LandLocalInput, "only" | "skip">, log: (line: string) => void): LandLocalMember[] {
+  const only = input.only?.length ? new Set(input.only) : null;
+  const skip = new Set(input.skip ?? []);
+  return members.filter((m) => {
+    const n = m.issueNumber ?? -1;
+    const why = only && !only.has(n) ? "not in --only" : skip.has(n) ? "--skip" : null;
+    if (why) log(`skipping #${m.issueNumber ?? "?"}: ${why}`);
+    return why === null;
+  });
+}
+
 export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps): Promise<LandLocalOutcome> {
   const { projectId } = input;
   const project = await deps.getProject(projectId);
@@ -161,17 +173,7 @@ export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps)
   } else {
     return { status: "error", message: "give a train id or --from-window" };
   }
-  let members = await deps.loadMembers(memberIds);
-  if (input.only?.length) {
-    const only = new Set(input.only);
-    for (const m of members) if (!only.has(m.issueNumber ?? -1)) deps.log(`skipping #${m.issueNumber ?? "?"}: not in --only`);
-    members = members.filter((m) => only.has(m.issueNumber ?? -1));
-  }
-  if (input.skip?.length) {
-    const skip = new Set(input.skip);
-    for (const m of members) if (skip.has(m.issueNumber ?? -1)) deps.log(`skipping #${m.issueNumber ?? "?"}: --skip`);
-    members = members.filter((m) => !skip.has(m.issueNumber ?? -1));
-  }
+  const members = filterByIssueFlags(await deps.loadMembers(memberIds), input, deps.log);
   if (members.length === 0) return { status: "error", message: "the train has no loadable members" };
 
   const worktree = landLocalWorktreePath(repo, label);
