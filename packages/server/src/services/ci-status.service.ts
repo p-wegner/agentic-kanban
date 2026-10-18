@@ -25,12 +25,14 @@ import {
   parseGhRunList,
   parseRequiredWorkflows,
   summarizeWorkflows,
+  sustainedRed,
   toCiSnapshot,
   type CiSnapshot,
   type FailedJob,
   type WorkflowCiState,
 } from "../lib/ci-status.js";
 import { ghExec } from "../lib/gh-exec.js";
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
@@ -94,7 +96,8 @@ export async function pollProjectCi(projectId: string, database: Database = db, 
     const required = parseRequiredWorkflows(await getPreference(ciRequiredWorkflowsPrefKey(projectId), database).catch(() => null));
     const states = summarizeWorkflows(runs, required);
     const now = deps.now ?? new Date().toISOString();
-    snapshots.set(projectId, toCiSnapshot(branch, states, now));
+    const ahead = await commitsAheadOfRedRuns(states, branch, project.repoPath);
+    snapshots.set(projectId, toCiSnapshot(branch, states, now, ahead));
     const tickets = await reconcileCiHealTickets({ projectId, branch, states, repoPath: project.repoPath, gh, createIssue: deps.createIssue, now }, database);
     return { status: "polled", states, tickets };
   } catch (err) {
@@ -102,6 +105,31 @@ export async function pollProjectCi(projectId: string, database: Database = db, 
     console.warn(`[ci-status] poll failed for project ${projectId} (non-fatal): ${reason}`);
     return skipped(`poll failed: ${reason}`);
   }
+}
+
+/** Per sustained-red workflow: base-branch commits beyond the red run's head sha (unpushed local work, #1597). Best effort. */
+async function commitsAheadOfRedRuns(states: readonly WorkflowCiState[], branch: string, repoPath: string): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  for (const s of sustainedRed(states)) {
+    const sha = s.latest.headSha;
+    if (!/^[0-9a-f]{7,40}$/i.test(sha)) continue;
+    const res = await gitExec(["rev-list", "--count", `${sha}..${branch}`], { cwd: repoPath }).catch(() => null);
+    const n = res && execSucceeded(res) ? Number.parseInt(res.stdout.trim(), 10) : NaN;
+    if (Number.isFinite(n) && n > 0) out.set(s.workflow, n);
+  }
+  return out;
+}
+
+/** Heal-ticket keys already logged as "same run already healed", so a poll loop logs once. */
+const loggedAlreadyHealed = new Set<string>();
+
+/** True when a CLOSED heal ticket for this key was filed against the same run (id/url) or head sha. */
+function healedBefore(closed: readonly { description: string | null }[], state: WorkflowCiState): boolean {
+  const { url, headSha } = state.latest;
+  return closed.some((r) => {
+    const d = r.description ?? "";
+    return (url !== "" && d.includes(url)) || (headSha !== "" && d.includes(`\`${headSha}\``));
+  });
 }
 
 async function failedJobsOf(state: WorkflowCiState, repoPath: string, gh: GhRunner): Promise<FailedJob[]> {
@@ -125,6 +153,14 @@ export async function reconcileCiHealTickets(
     const key = ciHealExternalKey(projectId, state.workflow);
     const existing = open.find((r) => r.externalKey === key);
     if (state.verdict === "red" && state.sustained) {
+      if (!existing && healedBefore(rows.filter((r) => r.externalKey === key), state)) {
+        const logKey = `${key}@${state.latest.headSha || state.latest.url}`;
+        if (!loggedAlreadyHealed.has(logKey)) {
+          loggedAlreadyHealed.add(logKey);
+          console.log(`[ci-status] project ${projectId}: workflow '${state.workflow}' still red on run ${state.latest.url} (${state.latest.headSha}), but a closed heal ticket already covers that run — not filing again; the fix may be local and unpushed`);
+        }
+        continue;
+      }
       const body = ciHealBody(branch, state, await failedJobsOf(state, input.repoPath, input.gh));
       const title = ciHealTitle(branch, state.workflow);
       console.log(`[ci-status] project ${projectId}: workflow '${state.workflow}' red on '${branch}' since ${state.redSince} — ${existing ? `refreshing heal ticket #${existing.issueNumber}` : "filing heal ticket"}`);

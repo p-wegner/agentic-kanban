@@ -9,6 +9,7 @@
  * `assembleMergeTrain` yet - see CONTINUE.md for the remaining wiring.
  */
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import type { MergeTrainShepherdDto } from "@agentic-kanban/shared/types";
 import type { MergeTrainAgentFixCaps } from "@agentic-kanban/shared/lib/merge-train-red-strategy";
 import { describeMemberForBrief, isInfraFailure, SHEPHERD_MAX_INFRA_RETRIES, type AgentFixMember, type TrainAgentRunner } from "./merge-train-agent-fix.js";
 
@@ -21,6 +22,8 @@ export interface ShepherdStatus {
   turnsUsed: number;
   infraRetries: number;
   lastAction: ShepherdAction;
+  tokens: number;
+  costUsd: number;
 }
 
 /**
@@ -33,9 +36,14 @@ export class TrainShepherd {
   turnsUsed = 0;
   infraRetries = 0;
   lastAction: ShepherdAction = "idle";
+  tokens = 0;
+  costUsd = 0;
+  /** #1572: every conflict handed to the shepherd and what became of it (persisted with the train). */
+  readonly conflicts: NonNullable<MergeTrainShepherdDto["conflicts"]> = [];
   private started = false;
 
-  constructor(private readonly inner: TrainAgentRunner, workerName?: string) {
+  /** `onChange` fires after every turn / action / conflict outcome so the caller can persist a live status. */
+  constructor(private readonly inner: TrainAgentRunner, workerName?: string, private readonly onChange?: (status: MergeTrainShepherdDto) => void) {
     this.worker = workerName;
   }
 
@@ -45,18 +53,46 @@ export class TrainShepherd {
   readonly runner: TrainAgentRunner = async (args) => {
     const run = await this.inner({ ...args, ...(this.sessionId ? { resumeSessionId: this.sessionId } : {}) });
     this.sessionId = run.sessionId ?? this.sessionId;
+    this.worker = run.worker ?? this.worker;
+    this.tokens += run.tokens ?? 0;
+    this.costUsd += run.costUsd ?? 0;
     this.turnsUsed++;
     this.started = true;
+    this.changed();
     return run;
   };
 
-  setAction(action: ShepherdAction): void { this.lastAction = action; }
+  setAction(action: ShepherdAction): void { this.lastAction = action; this.changed(); }
+
+  recordConflict(workspaceId: string, outcome: "resolved" | "deferred", reason?: string): void {
+    this.conflicts.push({ workspaceId, outcome, ...(reason ? { reason: reason.slice(0, 200) } : {}) });
+    this.changed();
+  }
+
+  /** The persisted/wire shape of the shepherd right now. */
+  toDto(): MergeTrainShepherdDto {
+    return {
+      ...(this.sessionId ? { sessionId: this.sessionId } : {}),
+      ...(this.worker ? { worker: this.worker } : {}),
+      turns: this.turnsUsed,
+      ...(this.infraRetries > 0 ? { infraRetries: this.infraRetries } : {}),
+      lastAction: this.lastAction,
+      ...(this.tokens > 0 ? { tokens: this.tokens } : {}),
+      ...(this.costUsd > 0 ? { costUsd: Number(this.costUsd.toFixed(4)) } : {}),
+      ...(this.conflicts.length > 0 ? { conflicts: [...this.conflicts] } : {}),
+    };
+  }
+
+  private changed(): void {
+    try { this.onChange?.(this.toDto()); } catch { /* progress reporting never fails a train */ }
+  }
 
   status(): ShepherdStatus {
     return {
       ...(this.sessionId ? { sessionId: this.sessionId } : {}),
       ...(this.worker ? { worker: this.worker } : {}),
       turnsUsed: this.turnsUsed, infraRetries: this.infraRetries, lastAction: this.lastAction,
+      tokens: this.tokens, costUsd: this.costUsd,
     };
   }
 }
@@ -66,7 +102,10 @@ export interface ShepherdMember extends AgentFixMember {
   conflictsWith?: AgentFixMember;
 }
 
-export type MergeAttempt = { ok: true } | { ok: false; detail: string; conflictsWith?: AgentFixMember };
+export type MergeAttempt =
+  | { ok: true }
+  // `unresolvable`: not the shepherd's to fix (a conflict with the BASE itself, an unknown branch) - dropped, never deferred.
+  | { ok: false; detail: string; conflictsWith?: AgentFixMember; unresolvable?: true };
 
 /** Pure: the brief for ONE conflict turn. The first turn carries the tree context; later turns only the new member. */
 export function buildConflictBrief(args: {
@@ -109,7 +148,7 @@ export function buildConflictBrief(args: {
 export interface ConflictAssemblyResult {
   included: ShepherdMember[];
   /** Left out, with the logged reason; `deferred` members wait for the next train (the fallback only). */
-  dropped: Array<{ member: ShepherdMember; reason: string; deferred: true }>;
+  dropped: Array<{ member: ShepherdMember; reason: string; deferred: boolean }>;
   /** True when infrastructure failures exhausted the retries: the train is inconclusive, not red. */
   held: boolean;
 }
@@ -126,6 +165,8 @@ export async function mergeMembersWithShepherd(args: {
   members: readonly ShepherdMember[];
   shepherd: TrainShepherd;
   caps: MergeTrainAgentFixCaps;
+  /** #1431: where a turn may be placed (a worker edits a checkout of the train tree). */
+  placement?: { projectId: string; repoPath: string };
   /** Attempt `git merge --no-ff` of the member onto the train worktree; leaves the merge IN PROGRESS on conflict. */
   tryMerge: (member: ShepherdMember) => Promise<MergeAttempt>;
   /** Did the shepherd complete the merge (committed, member tip an ancestor, no markers left)? */
@@ -143,6 +184,7 @@ export async function mergeMembersWithShepherd(args: {
 
   const defer = async (member: ShepherdMember, reason: string) => {
     await args.abortMerge().catch(() => undefined);
+    shepherd.recordConflict(member.workspaceId, "deferred", reason);
     dropped.push({ member, reason: `${reason} - deferred to the next train`, deferred: true });
     log(`${args.label}: shepherd fallback - deferring ${member.branch}${member.issueNumber != null ? ` (#${member.issueNumber})` : ""}: ${reason}`);
   };
@@ -150,9 +192,16 @@ export async function mergeMembersWithShepherd(args: {
   for (const member of args.members) {
     const attempt = await args.tryMerge(member).catch((err): MergeAttempt => ({ ok: false, detail: errorMessage(err) }));
     if (attempt.ok) { included.push(member); continue; }
+    if (attempt.unresolvable) {
+      await args.abortMerge().catch(() => undefined);
+      dropped.push({ member, reason: attempt.detail.slice(0, 300), deferred: false });
+      log(`${args.label}: dropping ${member.branch}${member.issueNumber != null ? ` (#${member.issueNumber})` : ""}: ${attempt.detail.slice(0, 120)}`);
+      continue;
+    }
     const m: ShepherdMember = { ...member, ...(attempt.conflictsWith ? { conflictsWith: attempt.conflictsWith } : {}) };
     if (held) { await defer(m, "shepherd unavailable (infrastructure)"); continue; }
     if (shepherd.turnsUsed >= caps.maxTurns) { await defer(m, `shepherd turn cap ${caps.maxTurns} reached`); continue; }
+    if (shepherd.costUsd > caps.costCapUsd) { await defer(m, `shepherd cost $${shepherd.costUsd.toFixed(2)} passed the $${caps.costCapUsd} cap`); continue; }
     const remaining = caps.timeoutMs - (Date.now() - startedMs);
     if (remaining <= 0) { await defer(m, `shepherd timeout ${caps.timeoutMs}ms reached`); continue; }
 
@@ -166,7 +215,7 @@ export async function mergeMembersWithShepherd(args: {
     let lastError = "";
     while (!ran && shepherd.infraRetries <= SHEPHERD_MAX_INFRA_RETRIES) {
       try {
-        await shepherd.runner({ worktree: args.worktree, prompt, timeoutMs: remaining, turn: shepherd.turnsUsed + 1 });
+        await shepherd.runner({ worktree: args.worktree, prompt, timeoutMs: remaining, turn: shepherd.turnsUsed + 1, ...(args.placement ? { ...args.placement, baseBranch: args.baseBranch } : {}) });
         ran = true;
       } catch (err) {
         lastError = errorMessage(err).slice(0, 300);
@@ -180,7 +229,7 @@ export async function mergeMembersWithShepherd(args: {
       else await defer(m, `shepherd failed: ${lastError}`);
       continue;
     }
-    if (await args.isResolved(m).catch(() => false)) included.push(m);
+    if (await args.isResolved(m).catch(() => false)) { included.push(m); shepherd.recordConflict(m.workspaceId, "resolved"); }
     else await defer(m, "shepherd did not resolve the conflict");
   }
   return { included, dropped, held };

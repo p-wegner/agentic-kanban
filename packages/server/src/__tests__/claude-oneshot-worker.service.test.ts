@@ -60,7 +60,7 @@ describe("dispatchOneShotToWorker", () => {
       { requestId: req.requestId, phase: "done", ok: true, text: "enhanced" },
     ]);
     const out = await dispatchOneShotToWorker(base({ manager, place: remote() as unknown as Args["place"] }));
-    expect(out).toEqual({ handled: true, text: "enhanced" });
+    expect(out).toEqual({ handled: true, text: "enhanced", worker: "w1" });
     const frame = sent[0] as OneShotFrame;
     expect(frame.job.prompt).toBe("enhance this");
     expect(frame.job.intent).toMatchObject({ provider: "claude", program: "claude" });
@@ -141,7 +141,7 @@ describe("dispatchOneShotToWorker with repo context", () => {
       manager, place: place as unknown as Args["place"], cwd: repo, allowEdits: true, repo: { repoPath: repo, baseBranch: "master" },
     }));
 
-    expect(out).toEqual({ handled: true, text: "fixed" });
+    expect(out).toEqual({ handled: true, text: "fixed", worker: "w1" });
     const frame = sent[0] as OneShotFrame;
     expect(frame.job.allowEdits).toBe(true);
     expect(frame.repo).toMatchObject({ gitPort: 4321, gitToken: "scoped-token", baseBranch: "master" });
