@@ -7,6 +7,25 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
 promote): read `docs/agent-guide/operator-reference.md` first.** Full console:
 `pnpm cli -- status --watch`. This line is standing; keep it when passes are archived.
 
+## 2026-10-18 night: trains 05, 07, 08 landed by hand, stable-20261018 live
+
+- **Stable = `stable-20261018` = e1a6bbfa9** (promoted 00:08Z; fresh full rc sweep green in 2680 s,
+  smoke passed; rollback target `stable-20261017-3`). Promote ran in herdr pane w1:p61; set
+  `[Console]::OutputEncoding = [Text.Encoding]::UTF8` before piping it to `Out-File`, or the log
+  holds `ÔÇö` for every em dash.
+- **Operator-landed trains** (Peter: "you can fix the train and merge it"), each gated in a sibling
+  worktree with check:arch, typecheck and file-scoped `test:mine` + guards:
+  train 05 (47dd09cca, 10 tickets), train 07 (95bacc62b, 8: #1562 #1574 #1581 #1582 #1584-#1587),
+  train 08 (e1a6bbfa9, #1579 only). Fixes were guard ratchets tripped by single members.
+- **rc heal:** the first two promotes of rc/20261018 were refused (worker lost the job; then a
+  90 s timeout because the rc-sweep and train 08's gate shared ao-pf38, #1589). The rc was
+  fast-forwarded to master and re-swept with the train window held; heal ticket #1588 closed.
+- `train land-local` (#1586) works but assembled a member the board had deferred (#1590, building).
+- `.gitattributes` pins `*.snap` to LF (vitest rewrote both status-console snapshots every run).
+- **Open:** #1569 (shepherd phase 1) conflicts with #1579 and needs a hand resolution in its next
+  train; #1572; #1589; #1590. **ao-pf38 needs a reboot by Sunday midday** (FMfn leak ~8.6 GB).
+- Master is 108 commits ahead of origin, **not pushed**.
+
 ## 2026-10-17 evening: train 04 landed by hand, stable-20261017-3 live
 
 - **Stable = `stable-20261017-3` = 13e32b7d2** (promoted 16:41Z; fresh full rc sweep green, smoke
@@ -40,53 +59,13 @@ promote): read `docs/agent-guide/operator-reference.md` first.** Full console:
 - #1550 (tracker header shows no counts with 0 active issues) building on ao-pf38. #1549 cancelled
   as a duplicate of `status --watch`.
 
-## 2026-10-17: UX probe landed, stable-20261017-2 live
-
-**Goal (Peter):** a subagent explores the UI and fixes UX flaws; the board implements the rest.
-**Done:** 0 open tickets (01:16Z).
-
-- **Master = origin = dea3a44f2. Stable = `stable-20261017-2` = dea3a44f2** (promoted 01:15Z; smoke
-  passed; rollback target `stable-20261017`). It carries #1548: the promote now accepts a green full
-  sweep of the rc sha recorded under master, and did so on its first run (no second sweep).
-- **UX probe** (subagent, playwright on the stable board): 8 client fixes committed direct
-  (#1531-#1538: dark-mode text and Cancel button, phone toolbar row, Completed grid clipping,
-  search chip "N matches", shortcut "/" separator, Escape on Merge Queue panel and phone
-  Completed sheet). Screenshots in the session scratchpad `ux/`. **Not browser-verified:**
-  Escape on both panels and the "/" separator (host RAM too tight for the dev board).
-- **Board-built follow-ups:** #1539 (diff of a merged workspace with a deleted branch: 404, not
-  500), #1540+#1541 (Completed grid pages Done/Cancelled server-side, Load more, server search),
-  #1542 (every incoming-ref landing path adopts a clean rebase), #1543 (missing-deps retry ignores
-  captured test output), #1544 (verify_result names failing suites), #1545 (a follow-up turn
-  clears readyForMerge), #1546 (static tier now covers nloc, openapi drift, client fetch and
-  validation ratchets; logs its verdict), #1547 (partial-work detector no longer trips on the
-  noun "follow-up"). All landed through trains 10-16-09, -11, -12 plus one direct merge.
-- **Lesson:** launching a review by hand right after a builder exits cancels its implement-exit
-  check; #1541's ratchet breaks then cost a 39-min red train (train 10, cancelled). Let
-  implement-exit start the review. A builder that ran on the HOST (not a worker) got no
-  implement-exit at all with `auto_monitor` off; that one needed a manual review.
-- **Verifiers:** `verify_workers = desktop-stable,ao-pf38`.
-  - ao-pf38: Peter rebooted it 23:21 local; FMfn leak reset to 71 MB but grows ~430 MB/h under
-    verify load. It needs a reboot every day or two until the leaking minifilter is found
-    (`fltmc instances` as admin, Peter's step).
-  - desktop-stable: Defender exclusions for `akswork`, the pnpm store and kanban fixture temp
-    dirs still Peter's call.
-  - wsl-stable: never for verify (shares host RAM).
-- **Host memory** 3-4 GB free; background shells get reaped. Promotes run in herdr pane w1:p5W.
-
-**Next:**
-1. Peter: find the leaking minifilter on ao-pf38 (`fltmc instances` as admin); until then reboot it
-   every day or two.
-2. Peter: decide Defender exclusions on desktop-stable.
-
-Verified on the live board 2026-10-17 (playwright, isolated session): Escape closes the Merge
-Queue panel and the phone Completed sheet; shortcut help shows `↑ / ↓ / k / j`.
-
 ## Archive
 
 Passes older than today have been moved **verbatim, newest first** into
 [`docs/archive/CONTINUE-archive.md`](docs/archive/CONTINUE-archive.md). Nothing is re-verified or
 edited on the way in, so each pass records what that session believed at the time. The archive
 holds:
+- **2026-10-17 (moved 2026-10-18):** UX probe, stable-20261017-2, #1531-#1548.
 - **2026-10-15 (moved 2026-10-16):** stable 95ddbc975 (#1507 boot exit), the host reboot, #1507-#1511.
 - **2026-10-14 evening (moved 2026-10-15):** old worktrees closed, board fast again, trains
   48-49, #1489-#1494.
