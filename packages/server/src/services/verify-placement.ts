@@ -14,6 +14,7 @@
 //   3. A VERDICT IS PINNED TO THE SHA THE BOARD SENT. `acceptWorkerVerdict` refuses a green for
 //      any other tree, and refuses a green with no sha at all.
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { RAM_PER_VERIFY_CHAIN_GB, VERIFY_CHAIN_RESERVE_GB } from "@agentic-kanban/shared/lib/machine-capacity";
 
 export const VERIFY_PLACEMENTS = ["host", "worker", "prefer-worker"] as const;
 export type VerifyPlacement = (typeof VERIFY_PLACEMENTS)[number];
@@ -124,6 +125,31 @@ export function decideVerifyPlacement(input: {
     : { target: "host", reason: `verify_placement=prefer-worker but ${why}; host admission applies` };
 }
 
+/**
+ * #1589: the host's chain admission (#1160: RAM_PER_VERIFY_CHAIN_GB over VERIFY_CHAIN_RESERVE_GB), applied to a
+ * worker. An IDLE worker is offered a chain whatever its RAM (its own floor, #1451, still applies); a worker
+ * already running one is offered another only when its reported free RAM fits a further chain over the reserve.
+ * Unknown free RAM on a busy worker admits nothing: a second full suite on an unmeasured box is the incident.
+ */
+export function workerAdmitsAnotherChain(inFlight: number, freeRamGb: number | undefined | null): boolean {
+  if (inFlight <= 0) return true;
+  if (freeRamGb == null) return false;
+  return freeRamGb - VERIFY_CHAIN_RESERVE_GB >= RAM_PER_VERIFY_CHAIN_GB;
+}
+
+/** Was the worker over capacity while a chain ran: another chain beside it, or free RAM under the reserve. */
+export function workerWasAtCapacity(otherChains: number, freeRamGb: number | undefined | null): boolean {
+  return otherChains > 0 || (freeRamGb != null && freeRamGb < VERIFY_CHAIN_RESERVE_GB);
+}
+
+const TIMEOUT_RE = /(?:test|hook)\s+timed out in \d+\s*ms/i;
+const NON_TIMEOUT_FAILURE_RE = /AssertionError|TypeError|ReferenceError|SyntaxError|Cannot find module|error TS\d+|ERR_PNPM/;
+
+/** #1589: a red log whose only failures are vitest timeouts (no assertion, type or import error). */
+export function isTimeoutOnlyFailure(log: string | undefined): boolean {
+  return !!log && TIMEOUT_RE.test(log) && !NON_TIMEOUT_FAILURE_RE.test(log);
+}
+
 /** What a worker reports for one verify run it was sent. */
 export type WorkerVerifyReport = {
   requestId: string;
@@ -138,6 +164,8 @@ export type WorkerVerifyReport = {
   timedOut?: boolean;
   failingSuites?: string[];
   durationMs?: number;
+  /** #1589: red on timeouts only, from a run where the worker was at capacity; the red is load-suspect evidence, not proof. */
+  loadSuspect?: boolean;
   /** Set when the worker REFUSED to run (sha mismatch, no slot, ...): nothing was verified, so it is neither green nor red. */
   refused?: string;
   reason?: string;

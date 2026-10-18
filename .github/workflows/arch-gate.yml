@@ -89,6 +89,11 @@ jobs:
         # `pnpm <pkg> test -- --coverage` does NOT work: pnpm swallows everything after
         # `--`, so the old script ran the plain suite four times and emitted no report at
         # all. `exec vitest run --coverage` is the form that reaches vitest.
+        # #1591: the suite is red on hosted runners (ADR 016: CPU-bound real-child-process
+        # tests, flaky under load), which kept the whole workflow red for 20 runs and hid
+        # real arch-gate breaches. Coverage is informational, so a red suite no longer fails
+        # the workflow; the reader/merge steps below still fail when no report was emitted.
+        continue-on-error: true
         run: pnpm test:coverage
       - name: read the reports (fails if any package emitted none)
         # `if: always()`: #807 found this and the merge step below silently SKIPPED

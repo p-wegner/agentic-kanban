@@ -40,7 +40,7 @@ import { acquireQueueRepoLock, createSuspendableRepoLock, MERGE_TRAIN_REPO_LOCK_
 import type { MergeQueueEvent, MergeQueuePlan } from "./merge-queue.service.js";
 import type { MergeTrainAttemptDto, MergeTrainBaseVerdict, MergeTrainGateEvidenceDto } from "@agentic-kanban/shared/types";
 import { resolveMergeTrainRedPolicy, type MergeTrainRedPolicy } from "@agentic-kanban/shared/lib/merge-train-red-strategy";
-import { createOneShotAgentRunner, describeAgentFixFinished, runAgentFix, type AgentFixGateVerdict, type AgentFixOutcome, type TrainAgentRunner } from "./merge-train-agent-fix.js";
+import { createOneShotAgentRunner, describeAgentFixFinished, enrichMembersWithTickets, runAgentFix, type AgentFixGateVerdict, type AgentFixOutcome, type TrainAgentRunner } from "./merge-train-agent-fix.js";
 import { getBaseBranchHealthForSha, isBaseHealthAnswer } from "../repositories/base-branch-health.repository.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
@@ -550,7 +550,7 @@ export function buildTrainOnRed(args: {
   attemptLabel: string;
   baseBranch: string;
   included: ReadonlyArray<{ workspaceId: string }>;
-  members: ReadonlyArray<{ workspaceId: string; branch: string; issueNumber?: number | null }>;
+  members: ReadonlyArray<{ workspaceId: string; branch: string; issueNumber?: number | null; issueId?: string; changedFiles?: readonly string[] }>; database: Database;
   /** #1431: where the fix agent's turn may be placed (a worker edits a checkout of the train tree). */
   placement: { projectId: string; repoPath: string };
 }): Parameters<typeof runTrainStagingGate>[0]["onRed"] {
@@ -562,7 +562,7 @@ export function buildTrainOnRed(args: {
     if (looksLikeMissingDepsFailure(message) && !failedSuites?.length) return null;
     console.log(`[merge-train] ${label}: gate RED - spawning the fix agent in ${gateWorktree} (strategy ${policy.strategy}, timeout ${policy.caps.timeoutMs}ms, ${policy.caps.maxTurns} turn(s))`);
     const outcome = await runAgentFix({
-      worktree: gateWorktree, label, baseBranch: args.baseBranch, members: aboard,
+      worktree: gateWorktree, label, baseBranch: args.baseBranch, members: await enrichMembersWithTickets(aboard, args.database),
       initialFailure: { message, failedSuites }, caps: policy.caps, runAgent: args.agentRunner, regate, placement: args.placement,
     });
     console.log(`[merge-train] ${describeAgentFixFinished(label, outcome, policy.bisectAfter)}`);
@@ -680,7 +680,7 @@ async function runDoomedTrainJob(args: {
           // #1203: same token — a cancel mid-gate kills the running install/verify child process.
           signal: abortController.signal,
           verifyScriptOverride: flush?.gateScript,
-          onRed: flush ? undefined : buildTrainOnRed({ policy, agentRunner, label, attemptLabel, baseBranch, included, members, placement: { projectId, repoPath } }),
+          onRed: flush ? undefined : buildTrainOnRed({ database, policy, agentRunner, label, attemptLabel, baseBranch, included, members, placement: { projectId, repoPath } }),
           afterGreen: async ({ gateWorktree }) => {
             if (flush) return {};
             // #1194: review ONCE, on the tree that just proved green - the assembled diff vs the

@@ -9,7 +9,7 @@ describe("train onRed after a missing-deps retry (#1573)", () => {
   const onRed = buildTrainOnRed({
     policy: { agentFix: true, strategy: "agent-fix", bisectAfter: false, caps: { timeoutMs: 1, maxTurns: 1 } } as never,
     agentRunner: vi.fn() as never, label: "t", attemptLabel: "t", baseBranch: "master",
-    included: [], members: [], placement: { projectId: "p", repoPath: "/r" },
+    included: [], members: [], database: {} as never, placement: { projectId: "p", repoPath: "/r" },
   })!;
   const message = "Cannot find module 'x' (ERR_MODULE_NOT_FOUND)";
 
