@@ -1,6 +1,6 @@
 // Issue WRITES for the CLI: through the running board server when it serves this CLI's
 // database (so an open board broadcasts and shows the change), else directly into the DB
-// with one stderr notice. Transport choice and its safety rule: `../board-server-writes.ts`.
+// with one stderr notice. Transport choice and its safety rule: `../../lib/board-server-writes.ts`.
 import { isTerminalStatusName } from "@agentic-kanban/shared";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { createIssueWithNextNumber, moveIssueToStatus } from "../../repositories/issue.repository.js";
@@ -8,7 +8,7 @@ import { updateIssueById } from "../../repositories/issue-service.repository.js"
 import { findOpenUnmergedWorkspace } from "../../repositories/workspace.repository.js";
 import { isWorkspaceBranchFullyContained } from "../../services/branch-containment.service.js";
 import { openWorkspaceBlockMessage } from "../../lib/terminal-move-guard.js";
-import { resolveIssueWriteTransport, boardServerWrite, directWriteNotice } from "../board-server-writes.js";
+import { resolveIssueWriteTransport, boardServerWrite, directWriteNotice } from "../../lib/board-server-writes.js";
 
 export interface CliIssueCreateInput {
   projectId: string;

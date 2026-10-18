@@ -8,7 +8,7 @@ import { getPreference, setPreference, deletePreferences } from "../repositories
 import { getProjectById } from "../repositories/project.repository.js";
 import { createMergeTrain, getMergeTrain, getIssueNumbersByWorkspaceIds, updateMergeTrainState } from "../repositories/merge-train.repository.js";
 import { getMergeQueueWorkspaceRows } from "../repositories/merge-queue.repository.js";
-import { resolveIssueWriteTransport, boardServerWrite } from "../cli/board-server-writes.js";
+import { resolveIssueWriteTransport, boardServerWrite } from "../lib/board-server-writes.js";
 import { holdTrainWindow, readTrainWindow } from "./merge-train-window-state.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 import type { LandLocalDeps, LandLocalWorkerGateResult } from "./train-land-local.service.js";

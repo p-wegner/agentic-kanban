@@ -137,7 +137,7 @@ export interface CliResult {
 /** Run the bundled CLI against `dbPath`. */
 /**
  * `KANBAN_CLI_WRITE_TRANSPORT=direct`: issue writes never probe a board server, so a board
- * running on this machine is never contacted by a test (cli/board-server-writes.ts).
+ * running on this machine is never contacted by a test (lib/board-server-writes.ts).
  */
 export const CLI_TEST_ENV = { KANBAN_CLI_WRITE_TRANSPORT: "direct" } as const;
 

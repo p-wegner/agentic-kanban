@@ -20,7 +20,7 @@ import {
 } from "../../repositories/issue-service.repository.js";
 import { validateBatchEdges, formatBatchEdgeResult, type BatchEdgeResult } from "../../lib/dependency-batch.js";
 import { buildApiUrl } from "./workspace-api-url.js";
-import { resolveIssueWriteTransport, boardServerWrite, directWriteNotice } from "../board-server-writes.js";
+import { resolveIssueWriteTransport, boardServerWrite, directWriteNotice } from "../../lib/board-server-writes.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { isDirectionalDependencyType, DIRECTIONAL_DEPENDENCY_TYPES } from "@agentic-kanban/shared/lib/dependency-type-traits";
 
