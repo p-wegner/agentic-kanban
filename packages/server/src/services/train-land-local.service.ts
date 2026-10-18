@@ -42,7 +42,23 @@ export interface LandLocalRunResult {
   tail: string;
 }
 
+/** What `--on-worker` hands the board to place (#1612); mirrors `WorkerGateRequest` minus the project. */
+export interface LandLocalWorkerGateRequest {
+  projectId: string;
+  branch: string;
+  sha: string;
+  steps: Array<{ name: string; command: string }>;
+  changedFiles: string[];
+  workerName?: string;
+}
+
+export type LandLocalWorkerGateResult =
+  | { status: "ran"; workerName: string; passed: boolean; log: string; failedStep?: string; failedSuites?: string[] }
+  | { status: "unavailable"; reason: string };
+
 export interface LandLocalDeps {
+  /** `--on-worker` (#1612): run the gate on a verify worker through the board's placement. */
+  runOnWorker?(request: LandLocalWorkerGateRequest): Promise<LandLocalWorkerGateResult>;
   log(message: string): void;
   getTrain(trainId: string): Promise<LandLocalTrainRow | null>;
   /** `--from-window`: the project's pending train-window members. */
@@ -74,6 +90,8 @@ export interface LandLocalInput {
   /** Re-run the gate in the worktree a previous red run left behind. */
   continueRun?: boolean;
   skipInstall?: boolean;
+  /** #1612: place install + the gate on a verify worker (`true` = any, a string = that worker) instead of this host. */
+  onWorker?: boolean | string;
   /** Operator override (#1590): assemble only these issue numbers. */
   only?: number[];
   /** Operator override (#1590): leave these issue numbers out. */
@@ -204,19 +222,24 @@ export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps)
       if (assembled) return assembled;
     }
 
-    const installOutcome = input.skipInstall || input.continueRun ? null : await step(deps, "install", "pnpm install -r", worktree, {});
-    if (installOutcome && installOutcome.code !== 0) {
-      return { status: "red", step: "install", failedSuites: [], worktree, tail: installOutcome.tail };
-    }
-
-    // 3. Gate, scoped to the train diff.
+    // 3. Gate, scoped to the train diff - on this host, or (#1612) on a verify worker.
     const diff = await deps.git(["diff", "--name-only", `${base}...HEAD`], worktree);
     const changed = diff.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-    for (const gate of input.gateSteps ?? LAND_LOCAL_GATE_STEPS) {
-      const result = await step(deps, gate.name, gate.command, worktree, { KANBAN_TEST_FILES: changed.join(",") });
-      if (result.code !== 0) {
-        deps.log(`gate RED at ${gate.name}; worktree left at ${worktree} - commit a fix there, then re-run with --continue`);
-        return { status: "red", step: gate.name, failedSuites: parseFailedSuites(result.tail), worktree, tail: result.tail };
+    const gateSteps = input.gateSteps ?? LAND_LOCAL_GATE_STEPS;
+    if (input.onWorker) {
+      const red = await gateOnWorker({ deps, input, repo, branch, worktree, changed, gateSteps });
+      if (red) return red;
+    } else {
+      const installOutcome = input.skipInstall || input.continueRun ? null : await step(deps, "install", "pnpm install -r", worktree, {});
+      if (installOutcome && installOutcome.code !== 0) {
+        return { status: "red", step: "install", failedSuites: [], worktree, tail: installOutcome.tail };
+      }
+      for (const gate of gateSteps) {
+        const result = await step(deps, gate.name, gate.command, worktree, { KANBAN_TEST_FILES: changed.join(",") });
+        if (result.code !== 0) {
+          deps.log(`gate RED at ${gate.name}; worktree left at ${worktree} - commit a fix there, then re-run with --continue`);
+          return { status: "red", step: gate.name, failedSuites: parseFailedSuites(result.tail), worktree, tail: result.tail };
+        }
       }
     }
 
@@ -227,6 +250,29 @@ export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps)
   } finally {
     await restore(deps, projectId, autoMergeKey, priorAutoMerge);
   }
+}
+
+/** Null = green on the worker; otherwise the outcome to return. The worker installs (its setup script, plus an explicit install step unless skipped). */
+async function gateOnWorker(a: {
+  deps: LandLocalDeps; input: LandLocalInput; repo: string; branch: string; worktree: string; changed: string[]; gateSteps: ReadonlyArray<{ name: string; command: string }>;
+}): Promise<LandLocalOutcome | null> {
+  const { deps, input, repo, branch, worktree } = a;
+  if (!deps.runOnWorker) return { status: "error", message: "--on-worker is not available in this environment", worktree };
+  const sha = (await deps.git(["rev-parse", branch], repo)).stdout.trim();
+  const steps = [...(input.skipInstall ? [] : [{ name: "install", command: "pnpm install -r" }]), ...a.gateSteps];
+  const workerName = typeof input.onWorker === "string" ? input.onWorker : undefined;
+  deps.log(`gate placed on a verify worker${workerName ? ` (${workerName})` : ""}: ${steps.map((s) => s.name).join(" -> ")} at ${sha.slice(0, 12)}`);
+  const started = Date.now();
+  const result = await deps.runOnWorker({ projectId: input.projectId, branch, sha, steps, changedFiles: a.changed, ...(workerName ? { workerName } : {}) });
+  if (result.status === "unavailable") {
+    return { status: "error", message: `--on-worker: ${result.reason}. Worktree kept; re-run with --continue, or without --on-worker to gate on this host.`, worktree };
+  }
+  deps.log(`worker ${result.workerName} ${result.passed ? "passed" : "FAILED"} the gate in ${Math.round((Date.now() - started) / 1000)}s`);
+  if (result.passed) return null;
+  const failed = result.failedStep ?? "gate";
+  deps.log(`gate RED at ${failed} on ${result.workerName}; worktree left at ${worktree} - commit a fix there, then re-run with --continue`);
+  const tail = result.log.split(/\r?\n/).slice(-80).join("\n");
+  return { status: "red", step: failed, failedSuites: result.failedSuites?.length ? result.failedSuites : parseFailedSuites(result.log), worktree, tail };
 }
 
 async function step(deps: LandLocalDeps, name: string, command: string, cwd: string, env: Record<string, string>) {

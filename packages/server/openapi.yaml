@@ -6363,6 +6363,72 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{id}/land-local/worker-gate:
+    post:
+      summary: POST /api/projects/:id/land-local/worker-gate
+      tags:
+        - project-land-local
+      operationId: post_api_projects_id_land-local_worker-gate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                branch:
+                  type: string
+                  minLength: 1
+                sha:
+                  type: string
+                  minLength: 1
+                steps:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      command:
+                        type: string
+                        minLength: 1
+                    required:
+                      - name
+                      - command
+                    additionalProperties: true
+                    x-unknown-keys: stripped
+                  minItems: 1
+                changedFiles:
+                  type: array
+                  items:
+                    type: string
+                workerName:
+                  type: string
+                  minLength: 1
+              required:
+                - branch
+                - sha
+                - steps
+                - changedFiles
+              additionalProperties: true
+              x-unknown-keys: stripped
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/monitor-cycles:
     get:
       summary: GET /api/projects/:id/monitor-cycles — aggregated cycle summaries
