@@ -125,7 +125,16 @@ export function buildAgentFixBrief(args: {
     "- Make the failing suite(s) pass so this train is green.",
     "- Do NOT revert or undo any member's intent; change the smallest thing that resolves the interaction.",
     "- Work ONLY inside this directory. Do not touch other checkouts or any branch ref.",
-    "- Run the failing suite(s) to confirm, then COMMIT your change here (a plain commit on the current branch).",
+    "- The gate stops at its FIRST failing stage (check:arch, then typecheck, then tests): stages after it did NOT run,",
+    "  so more failures may be hiding behind the one listed. Check your own work before you hand back.",
+    "- BEFORE committing, run in this directory, in order: `pnpm check:arch`, `pnpm typecheck`, each failing suite",
+    "  (`pnpm exec vitest run <file>`), and the impact selection of what you changed",
+    "  (`node .claude/skills/test-impact/tools/impact.mjs select --min-score 1.0 --format vitest`, then run what it prints).",
+    "  Fix every red one, so a single turn clears every stage and not just the first.",
+    "- Known fix precedents (ratchets/tests pinning a member's deliberate change): see `docs/agent-guide/merge-trains.md`",
+    "  \"fix precedents\". A new always-run guard with no `when:` territory raises `BASELINE_TOTAL_MS` with a written reason;",
+    "  a test that pins behaviour a member changed on purpose is updated to the new behaviour.",
+    "- Then COMMIT your change here (a plain commit on the current branch).",
     "- Do not create tickets or comments; just fix and commit.",
   ].join("\n");
 }

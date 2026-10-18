@@ -24,7 +24,7 @@ describe("buildAgentFixBrief (#1569)", () => {
 
   it("trims a long description", () => {
     const brief = buildAgentFixBrief({ label: "t", baseBranch: "main", members: [m(1, { description: "x".repeat(5000) })], failureMessage: "red", turn: 1 });
-    expect(brief.length).toBeLessThan(2500);
+    expect(brief.length).toBeLessThan(3500);
   });
 });
 
