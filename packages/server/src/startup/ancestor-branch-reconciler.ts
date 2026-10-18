@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { and, eq, isNull, ne, notInArray } from "drizzle-orm";
 import { issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
-import { checkBranchTipIsAncestor, countUniqueCommits } from "@agentic-kanban/shared/lib/git-service";
+import { checkBranchTipIsAncestor, countUniqueCommits, getCommitSummariesBetween } from "@agentic-kanban/shared/lib/git-service";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
@@ -40,6 +40,8 @@ export interface AncestorBranchReconcilerDeps {
   checkAncestor?: typeof checkBranchTipIsAncestor;
   /** Injectable for testing. Defaults to the real countUniqueCommits from git-service. */
   countCommits?: typeof countUniqueCommits;
+  /** Injectable for testing. Defaults to the real getCommitSummariesBetween from git-service. */
+  getSummaries?: typeof getCommitSummariesBetween;
   /**
    * On-disk presence probe for a candidate's repo path (#277). Defaults to `existsSync`;
    * suites using synthetic repo paths inject `() => true`.
@@ -108,6 +110,7 @@ export async function reconcileAncestorBranchWorkspaces(
   const database = deps.database ?? db;
   const ancestorCheck = deps.checkAncestor ?? checkBranchTipIsAncestor;
   const commitCounter = deps.countCommits ?? countUniqueCommits;
+  const getSummaries = deps.getSummaries ?? getCommitSummariesBetween;
   const gitSvc = deps.gitService ?? realGitService;
   // Injectable so suites driving fake git over synthetic repo paths keep testing the
   // git-level semantics instead of tripping the missing-repo short-circuit (#277).
@@ -142,6 +145,7 @@ export async function reconcileAncestorBranchWorkspaces(
       wsId: workspaces.id,
       branch: workspaces.branch,
       baseBranch: workspaces.baseBranch,
+      baseCommitSha: workspaces.baseCommitSha,
       workingDir: workspaces.workingDir,
       wsStatus: workspaces.status,
       readyForMerge: workspaces.readyForMerge,
@@ -198,26 +202,45 @@ export async function reconcileAncestorBranchWorkspaces(
 
     if (!result.isAncestor) continue;
 
-    // A 0-commit workspace has no unique commits (branchSha === baseSha for a
-    // fresh branch, or rev-list count==0 when the base advanced past an empty
-    // branch). This is deliberately NOT treated as "already merged" here — a
-    // brand-new, never-touched workspace is indistinguishable from one whose fix
-    // landed elsewhere by SHA alone (#581/#585 incidents: auto-Done'd a workspace
-    // that had simply never started). #1205's fully-contained-branch case (a fix
-    // landed directly on base while the feature branch was never touched again)
-    // is instead handled by the EVIDENCE-gated `reconcileHandMergedBranches`
-    // sweep, which only acts when a base commit explicitly names the issue.
+    // `base..branch` is ALWAYS 0 once the tip is an ancestor of base — it cannot tell a landed
+    // branch from a never-started one (#581/#585: auto-Done'd a workspace that never started).
+    // Two discriminators separate them (#1616):
+    //  1. the branch has commits of its own past the point it was cut (`baseCommitSha..tip` > 0) —
+    //     the same test `resolveMergeState` uses to route a contained branch to `reconcile`;
+    //  2. otherwise, a base commit newer than the tip that names the issue (`#N` / `ak-N`) — a
+    //     hand-landed fix. Matched by issue number only, never by train label: labels are reused
+    //     across hand and board trains.
     let uniqueCommits: number;
     try {
       uniqueCommits = await commitCounter(c.repoPath, result.baseSha, result.branchSha);
     } catch {
       uniqueCommits = 0;
     }
-    if (uniqueCommits === 0) {
+    let ownCommits = 0;
+    if (uniqueCommits === 0 && result.branchSha !== result.baseSha && c.baseCommitSha) {
+      try {
+        ownCommits = await commitCounter(c.repoPath, c.baseCommitSha, result.branchSha);
+      } catch {
+        ownCommits = 0;
+      }
+    }
+    let evidence: { sha: string; message: string } | undefined;
+    if (c.issueNumber != null && result.branchSha !== result.baseSha) {
+      try {
+        const pattern = new RegExp(`(^|[^0-9a-z])(#${c.issueNumber}|ak-${c.issueNumber})(?![0-9])`, "i");
+        evidence = (await getSummaries(c.repoPath, result.branchSha, c.baseBranch)).find((s) => pattern.test(s.message));
+      } catch { /* evidence is best-effort when own commits prove the work */ }
+    }
+    if (uniqueCommits === 0 && ownCommits === 0 && !evidence) {
       console.log(
-        `[ancestor-reconciler] workspace ${c.wsId} (issue #${c.issueNumber ?? "?"}, branch=${c.branch}) — 0 unique commits on branch; skipping`,
+        `[ancestor-reconciler] workspace ${c.wsId} (issue #${c.issueNumber ?? "?"}, branch=${c.branch}) — 0 unique commits on branch and no base commit names the issue; skipping`,
       );
       continue;
+    }
+    if (evidence) {
+      console.log(
+        `[ancestor-reconciler] workspace ${c.wsId} (issue #${c.issueNumber ?? "?"}) — contained in ${c.baseBranch}; evidence: ${evidence.sha} "${evidence.message}"`,
+      );
     }
 
     console.log(
@@ -316,7 +339,7 @@ export async function reconcileAncestorBranchWorkspaces(
           category: "merge",
           issueNumber: c.issueNumber ?? undefined,
           summary: `Ancestor-branch reconciliation: workspace ${c.branch} branch tip was already merged into ${c.baseBranch} but issue was '${c.statusName}'. Closed workspace and moved issue to Done.`,
-          details: { workspaceId: c.wsId, branchSha: result.branchSha, baseSha: result.baseSha, uniqueCommitCount: uniqueCommits, reconciledAt: now },
+          details: { workspaceId: c.wsId, branchSha: result.branchSha, baseSha: result.baseSha, uniqueCommitCount: uniqueCommits, ownCommitCount: ownCommits, evidenceSha: evidence?.sha, evidenceMessage: evidence?.message, reconciledAt: now },
         }, database);
       } catch { /* health event logging is non-fatal */ }
 
