@@ -18,7 +18,7 @@
 // signal now runs beside it: MAX FUNCTION BRANCH COMPLEXITY (see
 // MAX_FUNCTION_BRANCHES below).
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve, relative, sep, dirname } from "node:path";
 import { listRepoSubdirs, walkRepoTree } from "./lib/repo-tree.mjs";
 import { fileURLToPath } from "node:url";
@@ -43,7 +43,26 @@ function parseFilesArg(argv) {
   return new Set((argv[i + 1] ?? "").split(",").map((f) => f.trim().replace(/\\/g, "/")).filter(Boolean));
 }
 const ONLY_FILES = parseFilesArg(process.argv.slice(2));
-const MAX_LINES = 1000;
+
+
+// #1613: soft/hard caps per metric come from ONE table, packages/shared/src/lib/code-health-caps.json
+// (also read by shared/lib/code-health.ts and max-file-size.test.ts). A SOFT breach never fails this
+// script — it is printed, and written to `--report <file>` for the board's code-health ledger. Only a
+// HARD breach exits non-zero. The level is `--level`, else KANBAN_CODE_HEALTH_LEVEL, else the table's
+// `gateDefaultLevel`; the ratchet baselines below raise the hard cap for their grandfathered file.
+const CODE_HEALTH_CAPS = JSON.parse(
+  readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../packages/shared/src/lib/code-health-caps.json"), "utf8"),
+);
+function parseOptionArg(argv, name) {
+  const i = argv.indexOf(name);
+  return i !== -1 && argv[i + 1] ? argv[i + 1] : null;
+}
+const REQUESTED_LEVEL =
+  parseOptionArg(process.argv.slice(2), "--level") ?? process.env.KANBAN_CODE_HEALTH_LEVEL ?? CODE_HEALTH_CAPS.gateDefaultLevel;
+const LEVEL = CODE_HEALTH_CAPS.levels[REQUESTED_LEVEL] ? REQUESTED_LEVEL : CODE_HEALTH_CAPS.gateDefaultLevel;
+const LEVEL_CAPS = CODE_HEALTH_CAPS.levels[LEVEL];
+const REPORT_PATH = parseOptionArg(process.argv.slice(2), "--report");
+const MAX_LINES = LEVEL_CAPS.lines.hard;
 // The cohesion signal counts a module's top-level function-like DECLARATIONS —
 // exported AND internal (arch-review #889). Exports alone undercount: a low-cohesion
 // god-module can hide many independent responsibilities behind a handful of exports
@@ -60,7 +79,7 @@ const MAX_LINES = 1000;
 // invisible below the floor (and could grow unchecked until it crossed 600 already
 // deep in breach). Files that were resident in that blind spot when the floor was
 // removed are grandfathered in COHESION_BASELINE like every other legacy offender.
-const COHESION_MAX_FN_DECLS = 20;
+const COHESION_MAX_FN_DECLS = LEVEL_CAPS.declarations.hard;
 
 // Ratchet baseline (arch-review #889). These large modules already exceeded the
 // internal-declaration threshold when it was introduced. They are grandfathered at
@@ -150,7 +169,7 @@ const COHESION_BASELINE = {
 //   - Complexity weighted by absence of tests: this repo's suites live in
 //     `__tests__/` named by concept, not per source file, so source->test
 //     mapping would be a guess; and the guess is gamed by adding a trivial test.
-const MAX_FUNCTION_BRANCHES = 25;
+const MAX_FUNCTION_BRANCHES = LEVEL_CAPS.branches.hard;
 
 // Ratchet baseline, measured on the tree at #726 (2026-08-22). Shrink-only, exactly
 // like COHESION_BASELINE: the value is the file's WORST function today, growth past
@@ -362,6 +381,7 @@ const lineOffenders = [];
 const cohesionOffenders = [];
 const complexityOffenders = [];
 const complexityStale = [];
+const softBreaches = [];
 let peakComplexity = { branches: 0, rel: "", name: "", line: 0 };
 let overThreshold = 0;
 
@@ -370,6 +390,7 @@ for (const file of files) {
   const text = readFileSync(file, "utf8");
   const lines = lineCount(text);
   if (lines > MAX_LINES) lineOffenders.push(`${rel}  (${lines} lines)`);
+  else if (lines > LEVEL_CAPS.lines.soft) softBreaches.push({ file: rel, metric: "lines", value: lines, cap: LEVEL_CAPS.lines.soft });
   if (ts) {
     const worst = maxFunctionBranches(file, text);
     if (worst.branches > peakComplexity.branches) peakComplexity = { ...worst, rel };
@@ -379,11 +400,17 @@ for (const file of files) {
     if (worst.branches > allowedBranches) {
       const note = baselined ? ` — grandfathered at ${baselined}, GREW past its baseline` : "";
       complexityOffenders.push(`${rel}:${worst.line}  ${worst.name}() has ${worst.branches} branches${note}`);
-    } else if (baselined !== undefined && worst.branches < baselined) {
-      // Reported, never failed: a baseline nobody lowers stops being a ceiling and becomes a
-      // budget the next regression hides inside. Only for files present in THIS scan, so a
-      // `--root` probe tree does not report the whole map as stale.
-      complexityStale.push(`${rel}: now ${worst.branches}, baselined at ${baselined} — lower it`);
+    } else {
+      if (worst.branches > LEVEL_CAPS.branches.soft) {
+        softBreaches.push({ file: rel, metric: "branches", value: worst.branches, cap: LEVEL_CAPS.branches.soft, detail: worst.name });
+      }
+      if (baselined !== undefined && baselined > MAX_FUNCTION_BRANCHES && worst.branches < baselined) {
+        // Reported, never failed: a baseline nobody lowers stops being a ceiling and becomes a
+        // budget the next regression hides inside. Only for files present in THIS scan, so a
+        // `--root` probe tree does not report the whole map as stale. A baseline at or under the
+        // level's hard cap is moot (the hard cap already allows it), so it is not stale-reported.
+        complexityStale.push(`${rel}: now ${worst.branches}, baselined at ${baselined} — lower it`);
+      }
     }
   }
   const fnDecls = countInternalFunctions(file, text);
@@ -393,6 +420,8 @@ for (const file of files) {
       ? ` — grandfathered at ${COHESION_BASELINE[rel]}, GREW past its baseline`
       : "";
     cohesionOffenders.push(`${rel}  (${lines} lines, ${fnDecls} functions/classes${baselineNote})`);
+  } else if (fnDecls > LEVEL_CAPS.declarations.soft) {
+    softBreaches.push({ file: rel, metric: "declarations", value: fnDecls, cap: LEVEL_CAPS.declarations.soft });
   }
 }
 
@@ -462,6 +491,20 @@ if (complexityStale.length > 0) {
       `${complexityStale.length === 1 ? "y is" : "ies are"} stale (the file improved) — lower them, ` +
       `or the slack hides the next regression:\n  ` +
       complexityStale.join("\n  "),
+  );
+}
+
+// #1613: soft breaches never fail the gate. They are shown here and, with `--report <file>`, written
+// as JSON for the board's code-health ledger (server/services/code-health.service.ts).
+if (REPORT_PATH) {
+  writeFileSync(REPORT_PATH, JSON.stringify({ level: LEVEL, softBreaches }, null, 2) + "\n", "utf8");
+}
+{
+  const n = softBreaches.length;
+  const nFiles = new Set(softBreaches.map((b) => b.file)).size;
+  console.log(
+    `code health: ${n} soft breach${n === 1 ? "" : "es"} in ${nFiles} file${nFiles === 1 ? "" : "s"}, ` +
+      `cleanup ticket at ${LEVEL_CAPS.cleanupTrigger.breaches} (${LEVEL})`,
   );
 }
 

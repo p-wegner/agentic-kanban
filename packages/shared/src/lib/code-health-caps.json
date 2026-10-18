@@ -1,0 +1,32 @@
+{
+  "_comment": "Code-health posture caps (#1613, decision 021). The ONE source of truth: read by scripts/check-god-modules.mjs (plain JSON, no TS needed), max-file-size.test.ts and shared/lib/code-health.ts. soft = recorded in the ledger, never blocks; hard = blocks at the builder's pre-commit / implement-exit check and is re-checked by the train. Metrics: lines (per file), branches (worst function per file), declarations (top-level function-like declarations per file).",
+  "gateDefaultLevel": "relaxed",
+  "defaultByRiskPosture": {
+    "strict": "strict",
+    "standard": "balanced",
+    "iterate": "balanced",
+    "fast": "relaxed",
+    "sprint": "relaxed",
+    "flow": "relaxed"
+  },
+  "levels": {
+    "strict": {
+      "lines": { "soft": 800, "hard": 1000 },
+      "branches": { "soft": 20, "hard": 25 },
+      "declarations": { "soft": 15, "hard": 20 },
+      "cleanupTrigger": { "breaches": 1, "days": null }
+    },
+    "balanced": {
+      "lines": { "soft": 1000, "hard": 1300 },
+      "branches": { "soft": 25, "hard": 35 },
+      "declarations": { "soft": 20, "hard": 25 },
+      "cleanupTrigger": { "breaches": 5, "days": 7 }
+    },
+    "relaxed": {
+      "lines": { "soft": 1000, "hard": 1600 },
+      "branches": { "soft": 25, "hard": 45 },
+      "declarations": { "soft": 20, "hard": 30 },
+      "cleanupTrigger": { "breaches": 10, "days": 14 }
+    }
+  }
+}

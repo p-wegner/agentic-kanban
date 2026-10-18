@@ -23,6 +23,7 @@ import { previewNextStartCandidates } from "../services/start-score-preview.serv
 import { getAutopilotStatus, type AutopilotStatusDeps } from "../services/autopilot-status.service.js";
 import { clearAutoMergeBreaker, readAutoMergeBreaker } from "../services/auto-merge-breaker.js";
 import { clearAutoMergeBranchHoldsForProject } from "../services/auto-merge-branch-hold.js";
+import { recordCodeHealth } from "../services/code-health.service.js";
 import { getDeliveryStatus } from "../services/delivery-status.service.js";
 import { latestFlush, readFlushState, sortFlushes } from "../services/flush-state.js";
 import { resolveStableCheckoutFor } from "../services/rc-state.js";
@@ -142,6 +143,20 @@ export function createBoardMonitorRoute(
     const projectId = c.req.param("id");
     const status = await getDeliveryStatus(projectId, database);
     return c.json(status);
+  });
+
+  // #1613: record a scan's SOFT breaches (`check-god-modules.mjs --report`) in the code-health
+  // ledger; the Nth breach files ONE cleanup ticket, later ones append to it. Never blocks.
+  router.post("/:id/code-health/report", async (c) => {
+    const projectId = c.req.param("id");
+    await requireProject(projectId, database);
+    const body = await c.req.json().catch(() => ({})) as { softBreaches?: unknown; ref?: unknown };
+    const breaches = Array.isArray(body.softBreaches) ? body.softBreaches : [];
+    const result = await recordCodeHealth(
+      { projectId, breaches, ref: typeof body.ref === "string" ? body.ref : null },
+      database,
+    );
+    return c.json({ action: result.action, line: result.line, reason: result.reason, issueNumber: result.issueNumber ?? null });
   });
 
   // #1246: latest + history of this project's queue flushes, off the stable checkout's

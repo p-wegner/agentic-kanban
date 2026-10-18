@@ -30,6 +30,7 @@
       "import": "./dist/lib/index.js",
       "default": "./src/lib/index.ts"
     },
+    "./lib/code-health-caps.json": "./src/lib/code-health-caps.json",
     "./lib/*": {
       "development": "./src/lib/*.ts",
       "types": "./dist/lib/*.d.ts",
