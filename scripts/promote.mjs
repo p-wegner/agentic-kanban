@@ -112,6 +112,9 @@ import {
   planAdvisoryCheck,
   parseSweepVerdict,
   planSweepAcquisition,
+  planTrainWait,
+  resolveTrainWaitMs,
+  TRAIN_POLL_INTERVAL_MS,
   planRestartOnly,
   planRecoveryLane,
   classifyRecoveryDelta,
@@ -189,6 +192,8 @@ const opts = {
   acceptAdvisories: parsedArgv.acceptAdvisories,
   // #1562: promote although a required GitHub workflow is red on the sha.
   ignoreCi: parsedArgv.ignoreCi,
+  // #1608: skip the wait for a gating merge train (loudly).
+  now: parsedArgv.now,
   reason: parsedArgv.reason,
 };
 
@@ -514,6 +519,99 @@ async function acquireFreshSweep(projectId, previousRow, waitMs, branch, sameSha
       ? `the board's probe is STILL RUNNING${probeSince} after ${waitedMin} min — it has not recorded a verdict yet; re-run later, it may still land`
       : `no fresh verdict within ${waitedMin} min`,
   };
+}
+
+// --- hold the train window and wait for a gating train (#1608) --------------------------------
+
+/** The project whose train hold this run placed, so it can be cleared once the board is back. */
+let trainHoldProjectId = null;
+
+async function resolveProjectId(knownId) {
+  if (knownId) return knownId;
+  const res = await fetch(`${boardUrl}/api/projects`, { signal: AbortSignal.timeout(5000) });
+  if (!res.ok) throw new Error(`GET /api/projects -> ${res.status}`);
+  const body = await res.json();
+  const projects = Array.isArray(body) ? body : (body?.projects ?? []);
+  const project = projects.find((p) => p?.name === projectName || p?.slug === projectName);
+  if (!project) throw new Error(`no project named '${projectName}' on ${boardUrl}`);
+  return project.id;
+}
+
+async function postTrainHold(projectId, minutes) {
+  const res = await fetch(`${boardUrl}/api/merge-queue/window/hold`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ projectId, minutes }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`POST merge-queue/window/hold -> ${res.status}`);
+}
+
+/** Clear the hold this run placed (best effort: it also expires on its own). */
+async function releaseTrainHold() {
+  if (!trainHoldProjectId) return;
+  const projectId = trainHoldProjectId;
+  trainHoldProjectId = null;
+  try {
+    await postTrainHold(projectId, 0);
+    log("[promote] train window hold released");
+  } catch (e) {
+    log(`[promote] could not clear the train window hold (${e instanceof Error ? e.message : String(e)}) — it expires on its own`);
+  }
+}
+
+/**
+ * Restarting the board while a merge train is assembling/gating makes the reconciler re-run the
+ * batch from scratch and loses the shepherd's work (train 2026-10-18-05). So: hold the window
+ * (no NEW train departs), then wait — bounded — for the live one to finish. Returns when it is
+ * safe to restart; refuses on timeout. `--now` skips all of it, loudly. A board that cannot be
+ * asked has no train to lose, so that proceeds with a warning.
+ */
+async function waitForGatingTrain(knownProjectId) {
+  if (opts.now) {
+    log("[promote] !!! --now: NOT waiting for a gating merge train — a train in flight is re-run from scratch by the restart and its shepherd's work is lost");
+    return;
+  }
+  const waitMs = resolveTrainWaitMs(env);
+  const deadlineMs = Date.now() + waitMs;
+  let projectId;
+  try {
+    projectId = await resolveProjectId(knownProjectId);
+    await postTrainHold(projectId, Math.ceil(waitMs / 60_000) + 30);
+    trainHoldProjectId = projectId;
+    log(`[promote] train window held (no new train departs) while a gating train is waited out — up to ${Math.round(waitMs / 60_000)} min; --now skips this`);
+  } catch (e) {
+    log(`[promote] could not hold the train window / ask the board about trains (${e instanceof Error ? e.message : String(e)}) — proceeding without a train wait`);
+    return;
+  }
+  const startedAt = Date.now();
+  let lastNote = 0;
+  for (;;) {
+    let trains;
+    try {
+      const res = await fetch(`${boardUrl}/api/merge-queue/trains?projectId=${projectId}`, { signal: AbortSignal.timeout(10_000) });
+      if (!res.ok) throw new Error(`GET merge-queue/trains -> ${res.status}`);
+      trains = (await res.json())?.trains ?? [];
+    } catch (e) {
+      log(`[promote] could not read the trains (${e instanceof Error ? e.message : String(e)}) — proceeding without a train wait`);
+      return;
+    }
+    const plan = planTrainWait({ trains, nowMs: Date.now(), deadlineMs });
+    if (plan.action === "proceed") {
+      log(`[promote] ${plan.detail} — safe to restart`);
+      return;
+    }
+    if (plan.action === "timeout") {
+      await releaseTrainHold();
+      fail(`a merge train is still in flight after ${Math.round((Date.now() - startedAt) / 60_000)} min (${plan.detail}). Restarting now would lose its work. Re-run later, or pass --now to restart anyway.`);
+    }
+    const elapsed = Date.now() - startedAt;
+    if (lastNote === 0 || elapsed - lastNote >= 60_000) {
+      lastNote = elapsed || 1;
+      log(`[promote] waiting for a gating train: ${plan.detail} (${Math.round(elapsed / 60_000)} min elapsed of ${Math.round(waitMs / 60_000)})`);
+    }
+    await sleep(TRAIN_POLL_INTERVAL_MS);
+  }
 }
 
 // --- accumulated-gate evidence (#1045) -------------------------------------------------------
@@ -1488,6 +1586,9 @@ async function main() {
   log(`[promote] advisories: ${advisory.detail}`);
   if (advisory.action === "refuse") fail(`REFUSED — ${advisory.detail}`);
 
+  // #1608 — before anything that restarts the board (the tag is the point of no return).
+  await waitForGatingTrain(sweep?.projectId ?? null);
+
   gitOrThrow(["tag", tag, sha]);
   log(`[promote] tagged ${tag} on ${sha}`);
 
@@ -1503,6 +1604,7 @@ async function main() {
     const result = await smoke();
     if (result.ok) {
       log(`[promote] SMOKE PASSED — ${result.detail}`);
+      await releaseTrainHold();
       // Only now: the marker says "this board is live and UNSWEPT", which is only true once it IS
       // live. A recovery that rolled back owes nothing — the previous tag is swept code.
       if (opts.recover) {
@@ -1548,6 +1650,8 @@ async function main() {
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     log(`[promote] !!! PROMOTION FAILED: ${reason}`);
+    // The board is unreachable or on the old tag now; a best-effort clear, else it expires alone.
+    void releaseTrainHold();
     if (!rollbackTag) {
       log("[promote] !!! NO previous stable-* tag — cannot roll back automatically. The stable board may be DOWN or on the failed tag. Fix by hand.");
       process.exitCode = 1;
