@@ -30,6 +30,8 @@ describe("scopedTestPackages", () => {
 
   it("refuses to scope an EMPTY diff — that is ignorance, not a small change", () => {
     expect(scopedTestPackages([])).toBeNull();
+    // ...but a diff that was READ and came back empty (marker commit) scopes to always-run only.
+    expect(scopedTestPackages([], { diffRead: true })).toEqual(["shared", "server"]);
   });
 
   it.each([
