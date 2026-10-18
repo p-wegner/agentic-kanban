@@ -92,7 +92,7 @@ describe("#1328 — per-phase timings on a remote session", () => {
 
   it("formats recorded phases only, in pipeline order", () => {
     expect(formatPhaseTimings({ fetchKind: "clone", fetchMs: 4200, agentMs: 492000, landMs: 180 })).toBe(
-      "clone 4.2s · agent 492.0s · land 180ms",
+      "clone 4.2s | agent 492.0s | land 180ms",
     );
   });
 });

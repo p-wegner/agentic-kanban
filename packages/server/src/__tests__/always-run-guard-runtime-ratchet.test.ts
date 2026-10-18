@@ -337,8 +337,11 @@ import {
  *
  * #1599: `no-machine-local-paths-ratchet.test.ts` at the ASSUMED 3,000 ms. It greps every tracked
  * text file for this machine's paths, and any diff can add one, so it has no `when:` territory.
+ *
+ * #1607: `train-gating-warning.test.ts` at the ASSUMED 3,000 ms, with a `when:` territory of its own
+ * script and test, so an ordinary diff does not pay it.
  */
-const BASELINE_TOTAL_MS = 510_689;
+const BASELINE_TOTAL_MS = 513_689;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative
