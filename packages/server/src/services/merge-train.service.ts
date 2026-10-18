@@ -3,7 +3,11 @@ import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { MergeTrainAttemptDto, MergeTrainAttemptVerdict, MergeTrainBaseVerdict } from "@agentic-kanban/shared/types";
 import type { MergeTrainRedStrategy } from "@agentic-kanban/shared/lib/merge-train-red-strategy";
-import { assessBaseMove } from "./base-move-relevance.js";
+import { isGuardsOnlyDiff } from "@agentic-kanban/shared";
+import { assessBaseMove, readBaseMoveFiles } from "./base-move-relevance.js";
+
+/** #1601 — re-gates allowed per attempt when the base moves by gate inputs during the gate. */
+const MAX_BASE_MOVE_REGATES = 2;
 import { verifyChainSemaphoreActive, verifyChainSemaphoreConcurrency } from "./verify-chain-semaphore.js";
 import {
   assembleMergeTrain, assertTrainPreservesAncestry, dedupeConflictClusters, formatTrainLabel, parentTrainLabel, trainDateStamp, trainRefName,
@@ -686,6 +690,8 @@ async function runTrainAttempt(args: {
   /** #1203 — see `runMergeTrain`'s doc comment; only read here to classify a killed gate. */
   signal?: AbortSignal;
   assemble?: typeof assembleMergeTrain; // #1572
+  /** #1601 — how many times this attempt has already re-gated because the base moved under it. */
+  regateDepth?: number;
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, trainId, runGate, closeMember } = args;
 
@@ -836,6 +842,7 @@ async function runTrainAttempt(args: {
       // unverified. (The sided path below re-assembles onto the current base anyway, so it
       // needs no such recovery.)
       let landAsm = asm;
+      let landNote = "";
       const additionalDropped: TrainRunResult["dropped"] = [];
       const currentBase = await revParse(repoPath, baseBranch);
       // #1277: never for a fixed tree — re-assembling the members would drop the agent's commits
@@ -845,8 +852,19 @@ async function runTrainAttempt(args: {
         // was verdict-neutral (base-move-relevance.ts); otherwise `landMergeTrain` refuses.
         const neutral = await reassembleAfterNeutralBaseMove({ repoPath, baseBranch, asm, currentBase, label });
         if (neutral) {
-          neutralRef = neutral.trainRef;
-          landAsm = neutral;
+          neutralRef = neutral.asm.trainRef;
+          landAsm = neutral.asm;
+          if (neutral.guardsOnlyNote) landNote = neutral.guardsOnlyNote;
+        } else if ((args.regateDepth ?? 0) < MAX_BASE_MOVE_REGATES) {
+          // #1601: the base moved by something that can change the verdict. Ending the train red
+          // for that wastes a green gate and sends nothing back to anyone — gate again on the new
+          // base instead. Members stay aboard, no feedback; bounded so a hot base cannot loop us.
+          console.log(
+            `[merge-train] ${label}: base '${baseBranch}' moved ${asm.baseSha.slice(0, 8)}..${currentBase.slice(0, 8)} ` +
+              `during the gate and the move is not verdict-neutral; re-gating on the new base (not red)`,
+          );
+          const again = await runTrainAttempt({ ...args, label: `${label}g`, regateDepth: (args.regateDepth ?? 0) + 1 });
+          return { ...again, gateRuns: again.gateRuns + 1 };
         }
       }
       if (args.waitForLandTurn && currentBase !== asm.baseSha) {
@@ -880,7 +898,9 @@ async function runTrainAttempt(args: {
         baseSha: landAsm.baseSha,
         included: landAsm.included,
         label,
-        ...commitEvidence,
+        ...(landNote && trainId
+          ? { evidence: { trainId, gateRuns: 1, gateMessage: `${gate.message}; ${landNote}` } }
+          : commitEvidence),
       });
       // Bookkeeping AFTER the work is safely on the base. A failure here leaves a member merged
       // but not marked — recoverable by the existing done-unmerged/already-merged reconcilers,
@@ -961,11 +981,19 @@ async function reassembleAfterNeutralBaseMove(args: {
   asm: AssembledTrain;
   currentBase: string;
   label: string;
-}): Promise<AssembledTrain | null> {
+}): Promise<{ asm: AssembledTrain; guardsOnlyNote?: string } | null> {
   const { repoPath, baseBranch, asm, currentBase, label } = args;
   try {
     const assessment = await assessBaseMove({ cwd: repoPath, baseBefore: asm.baseSha, baseAfter: currentBase, branchSha: asm.trainSha });
-    if (!assessment.keep) return null;
+    // #1601: a base delta of docs/config-only files (`isGuardsOnlyDiff`) cannot change a code
+    // verdict either, whether or not it is on the narrower neutral allowlist. The clean-merge
+    // check below still applies, so a file the train also touches drops out as before.
+    let guardsOnlyNote: string | undefined;
+    if (!assessment.keep) {
+      const moved = assessment.movedPaths ?? (await readBaseMoveFiles(repoPath, asm.baseSha, currentBase));
+      if (!moved || !isGuardsOnlyDiff(moved)) return null;
+      guardsOnlyNote = `base moved ${asm.baseSha.slice(0, 8)}..${currentBase.slice(0, 8)} by guards-only files (${moved.slice(0, 5).join(", ")}); landed without a re-gate`;
+    }
     const rebased = await assembleMergeTrain({ repoPath, baseBranch, members: asm.included, label: `${label}-rebased` });
     const clean = rebased.trainSha !== null && rebased.dropped.length === 0 && rebased.included.length === asm.included.length;
     if (!clean || rebased.baseSha !== currentBase) {
@@ -975,9 +1003,9 @@ async function reassembleAfterNeutralBaseMove(args: {
     await assertTrainPreservesAncestry(repoPath, rebased.trainRef, rebased.included, baseBranch);
     console.log(
       `[merge-train] ${label}: base moved ${asm.baseSha.slice(0, 8)}..${currentBase.slice(0, 8)} during the gate; ` +
-        `landing without a re-gate because ${assessment.reason}`,
+        `landing without a re-gate because ${guardsOnlyNote ?? assessment.reason}`,
     );
-    return rebased;
+    return { asm: rebased, ...(guardsOnlyNote ? { guardsOnlyNote } : {}) };
   } catch (err) {
     console.warn(`[merge-train] ${label}: base-move assessment failed, refusing as before: ${errorMessage(err).slice(0, 200)}`);
     return null;
