@@ -246,7 +246,7 @@ switch ($PSCmdlet.ParameterSetName) {
     if ($cmd) { $workerCmd = $cmd.Source }
     if (-not $workerCmd) { throw "agentic-kanban-worker is not on PATH - install it first (see ak-worker.ps1)" }
 
-    # #1453: a path with its backslashes eaten by an outer shell (C:Userspwegner.claude) used to be
+    # #1453: a path with its backslashes eaten by an outer shell (C:Users<you>.claude) used to be
     # stored as-is and the worker ran agents with a nonexistent CLAUDE_CONFIG_DIR. Refuse it here.
     if ($ClaudeConfigDir -and -not (Test-Path -LiteralPath $ClaudeConfigDir)) {
       throw "-ClaudeConfigDir '$ClaudeConfigDir' does not exist. If you called this through bash or cmd, the backslashes were probably stripped: pass the path with forward slashes or from a PowerShell prompt."

@@ -1166,7 +1166,7 @@ describe("PiProvider", () => {
 
   it("parses session id from the raw Pi JSONL session header sample", () => {
     const evt = provider.parseStreamEvent(
-      `{"type":"session","version":3,"id":"019ec69d-bed7-75ad-9b25-2b19161227d5","timestamp":"2026-06-14T14:51:27.320Z","cwd":"C:\\\\Users\\\\pwegner\\\\AppData\\\\Local\\\\Temp\\\\ak-pi-cli-findings\\\\work"}`
+      `{"type":"session","version":3,"id":"019ec69d-bed7-75ad-9b25-2b19161227d5","timestamp":"2026-06-14T14:51:27.320Z","cwd":"C:\\\\Users\\\\dev\\\\AppData\\\\Local\\\\Temp\\\\ak-pi-cli-findings\\\\work"}`
     );
     expect(evt?.providerSessionId).toBe("019ec69d-bed7-75ad-9b25-2b19161227d5");
   });

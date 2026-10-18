@@ -194,7 +194,7 @@ describe("reconcileBornBlockedWorkspaces (#394)", () => {
       issueStatus: "In Progress",
       // No real file at this path — repair cannot succeed, and must say so rather than
       // silently proceeding as if nothing had gone wrong.
-      setupStdoutTail: "ERR_PNPM_UNKNOWN  UNKNOWN: unknown error, stat 'C:\\Users\\pwegner\\Documents\\secret.txt'",
+      setupStdoutTail: "ERR_PNPM_UNKNOWN  UNKNOWN: unknown error, stat 'C:\\Users\\dev\\Documents\\secret.txt'",
     });
     const result = await reconcileBornBlockedWorkspaces({
       database: db, log: () => {},

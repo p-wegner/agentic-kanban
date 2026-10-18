@@ -47,7 +47,7 @@ describe("dbResolutionFlipWarning (#165)", () => {
 describe("isTempDbPath (#1422)", () => {
   it("flags the OS temp dir and ak-test-db fixtures", () => {
     expect(isTempDbPath("C:\\Users\\x\\AppData\\Local\\Temp\\a\\kanban.db", "C:\\Users\\x\\AppData\\Local\\Temp")).toBe(true);
-    expect(isTempDbPath("D:\\tmp\\ak-test-db-abc\\kanban.db", "C:\\other")).toBe(true);
+    expect(isTempDbPath("E:\\tmp\\ak-test-db-abc\\kanban.db", "C:\\other")).toBe(true);
   });
   it("does not flag the real home or checkout DB", () => {
     expect(isTempDbPath("C:/Users/x/.agentic-kanban/kanban.db", "C:/Users/x/AppData/Local/Temp")).toBe(false);

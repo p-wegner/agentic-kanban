@@ -52,7 +52,7 @@ describe("PiOutputParser", () => {
   it("parses session and assistant text_delta events from Pi JSONL", () => {
     const parser = new PiOutputParser();
     const output = [
-      "{\"type\":\"session\",\"version\":3,\"id\":\"019ec69d-bed7-75ad-9b25-2b19161227d5\",\"timestamp\":\"2026-06-14T14:51:27.320Z\",\"cwd\":\"C:\\\\Users\\\\pwegner\\\\AppData\\\\Local\\\\Temp\\\\ak-pi-cli-findings\\\\work\"}",
+      "{\"type\":\"session\",\"version\":3,\"id\":\"019ec69d-bed7-75ad-9b25-2b19161227d5\",\"timestamp\":\"2026-06-14T14:51:27.320Z\",\"cwd\":\"C:\\\\Users\\\\dev\\\\AppData\\\\Local\\\\Temp\\\\ak-pi-cli-findings\\\\work\"}",
       "{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"contentIndex\":0,\"delta\":\"one-shot-ok\",\"partial\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"one-shot-ok\"}],\"api\":\"ak-faux-api\",\"provider\":\"ak-faux\",\"model\":\"ak-faux-1\",\"usage\":{\"input\":1329,\"output\":3,\"cacheRead\":0,\"cacheWrite\":1329,\"totalTokens\":2661,\"cost\":{\"input\":0,\"output\":0,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0}},\"stopReason\":\"stop\",\"timestamp\":1781448687453}},\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"one-shot-ok\"}],\"api\":\"ak-faux-api\",\"provider\":\"ak-faux\",\"model\":\"ak-faux-1\",\"usage\":{\"input\":1329,\"output\":3,\"cacheRead\":0,\"cacheWrite\":1329,\"totalTokens\":2661,\"cost\":{\"input\":0,\"output\":0,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0}},\"stopReason\":\"stop\",\"timestamp\":1781448687453}}",
       "{\"type\":\"agent_end\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"one-shot schema capture\"}],\"timestamp\":1781448687447},{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"one-shot-ok\"}],\"api\":\"ak-faux-api\",\"provider\":\"ak-faux\",\"model\":\"ak-faux-1\",\"usage\":{\"input\":1329,\"output\":3,\"cacheRead\":0,\"cacheWrite\":1329,\"totalTokens\":2661,\"cost\":{\"input\":0,\"output\":0,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0}},\"stopReason\":\"stop\",\"timestamp\":1781448687453}]}",
     ].join("\n") + "\n";
@@ -62,7 +62,7 @@ describe("PiOutputParser", () => {
         kind: "init",
         model: "pi",
         sessionId: "019ec69d-bed7-75ad-9b25-2b19161227d5",
-        cwd: "C:\\Users\\pwegner\\AppData\\Local\\Temp\\ak-pi-cli-findings\\work",
+        cwd: "C:\\Users\\dev\\AppData\\Local\\Temp\\ak-pi-cli-findings\\work",
         tools: [],
         mcpServers: [],
         permissionMode: "",

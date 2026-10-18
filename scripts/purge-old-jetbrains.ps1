@@ -10,7 +10,7 @@ $delete = @(
 )
 $keepGuard = @('IdeaIC2024.3','IdeaIC2025.1','Rider2024.2',
                'Installations','Toolbox','Toolbox-Dev','Daemon','Shared','dotCover','~')
-$roots = @('C:\Users\pwegner\AppData\Local\JetBrains','C:\Users\pwegner\AppData\Roaming\JetBrains')
+$roots = @('C:\Users\dev\AppData\Local\JetBrains','C:\Users\dev\AppData\Roaming\JetBrains')
 
 $before = (Get-PSDrive C).Free
 $removed = @(); $failed = @()
