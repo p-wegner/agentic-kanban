@@ -35,7 +35,7 @@ pi --no-extensions --extension $scratch\ak-faux-provider.ts --provider ak-faux -
 ```
 
 ```jsonl
-{"type":"session","version":3,"id":"019ec69d-bed7-75ad-9b25-2b19161227d5","timestamp":"2026-06-14T14:51:27.320Z","cwd":"C:\\Users\\pwegner\\AppData\\Local\\Temp\\ak-pi-cli-findings\\work"}
+{"type":"session","version":3,"id":"019ec69d-bed7-75ad-9b25-2b19161227d5","timestamp":"2026-06-14T14:51:27.320Z","cwd":"C:\\Users\\dev\\AppData\\Local\\Temp\\ak-pi-cli-findings\\work"}
 {"type":"agent_start"}
 {"type":"turn_start"}
 {"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"one-shot schema capture"}],"timestamp":1781448687447}}
@@ -58,7 +58,7 @@ pi --no-extensions --extension $scratch\ak-faux-provider.ts --provider ak-faux -
 ```
 
 ```jsonl
-{"type":"session","version":3,"id":"019ec69d-bed7-75ad-9b25-2b19161227d5","timestamp":"2026-06-14T14:51:27.320Z","cwd":"C:\\Users\\pwegner\\AppData\\Local\\Temp\\ak-pi-cli-findings\\work"}
+{"type":"session","version":3,"id":"019ec69d-bed7-75ad-9b25-2b19161227d5","timestamp":"2026-06-14T14:51:27.320Z","cwd":"C:\\Users\\dev\\AppData\\Local\\Temp\\ak-pi-cli-findings\\work"}
 {"type":"agent_start"}
 {"type":"turn_start"}
 {"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"resume schema capture"}],"timestamp":1781448703086}}
@@ -83,7 +83,7 @@ pi --no-extensions --extension $scratch\ak-faux-provider.ts --provider ak-faux -
 The sample includes a provider exhaustion error after the successful tool result because the scratch faux provider was intentionally minimal. The tool event sequence before that error is the part to map.
 
 ```jsonl
-{"type":"session","version":3,"id":"019ec6a1-b911-750c-8f2e-c604c70e1831","timestamp":"2026-06-14T14:55:47.986Z","cwd":"C:\\Users\\pwegner\\AppData\\Local\\Temp\\ak-pi-cli-findings\\work"}
+{"type":"session","version":3,"id":"019ec6a1-b911-750c-8f2e-c604c70e1831","timestamp":"2026-06-14T14:55:47.986Z","cwd":"C:\\Users\\dev\\AppData\\Local\\Temp\\ak-pi-cli-findings\\work"}
 {"type":"agent_start"}
 {"type":"turn_start"}
 {"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"tool-read schema capture"}],"timestamp":1781448948019}}
