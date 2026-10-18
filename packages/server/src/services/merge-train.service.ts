@@ -6,17 +6,8 @@ import type { MergeTrainRedStrategy } from "@agentic-kanban/shared/lib/merge-tra
 import { assessBaseMove } from "./base-move-relevance.js";
 import { verifyChainSemaphoreActive, verifyChainSemaphoreConcurrency } from "./verify-chain-semaphore.js";
 import {
-  assembleMergeTrain,
-  assertTrainPreservesAncestry,
-  dedupeConflictClusters,
-  formatTrainLabel,
-  parentTrainLabel,
-  trainDateStamp,
-  trainRefName,
-  type ConflictCluster,
-  type DroppedTrainMember,
-  type TrainAssemblyResult,
-  type TrainMember,
+  assembleMergeTrain, assertTrainPreservesAncestry, dedupeConflictClusters, formatTrainLabel, parentTrainLabel, trainDateStamp, trainRefName,
+  type ConflictCluster, type DroppedTrainMember, type TrainAssemblyResult, type TrainMember,
 } from "./merge-train-assembly.js";
 import { combineHeldBackRegate, decideAttributedOwners, decideSuiteOwnerShortcut, formatSuiteOwnerReason } from "./merge-train-suite-owner.js";
 
@@ -421,11 +412,7 @@ export async function runMergeTrain(args: {
    * every existing caller (a lone per-workspace gate has nothing to cancel) is unaffected.
    */
   signal?: AbortSignal;
-  /**
-   * #1572 — how an attempt assembles its tree. Defaults to the ref-only `assembleMergeTrain`; the
-   * queue passes the shepherd's incremental assembly for the WHOLE train, so a member-vs-member
-   * conflict is resolved by the shepherd instead of deferred. Bisect halves get the default.
-   */
+  /** #1572 — the shepherd's incremental assembly for the WHOLE train (default: ref-only); bisect halves get the default. */
   assemble?: typeof assembleMergeTrain;
   /**
    * #1277 — the project's red-handling strategy. The fix agent itself runs inside `runGate` (it
@@ -698,8 +685,7 @@ async function runTrainAttempt(args: {
   waitForLandTurn?: Promise<void>;
   /** #1203 — see `runMergeTrain`'s doc comment; only read here to classify a killed gate. */
   signal?: AbortSignal;
-  /** #1572 — see `runMergeTrain`'s doc comment. */
-  assemble?: typeof assembleMergeTrain;
+  assemble?: typeof assembleMergeTrain; // #1572
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, trainId, runGate, closeMember } = args;
 
