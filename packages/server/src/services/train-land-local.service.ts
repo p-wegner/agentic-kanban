@@ -32,6 +32,8 @@ export interface LandLocalTrainRow {
   label: string;
   state: string;
   memberWorkspaceIds: string[];
+  /** Persisted gate evidence (parsed JSON), if any; names the members the board left out of the train (#1590). */
+  gateEvidence?: Record<string, unknown> | null;
 }
 
 export interface LandLocalRunResult {
@@ -72,6 +74,10 @@ export interface LandLocalInput {
   /** Re-run the gate in the worktree a previous red run left behind. */
   continueRun?: boolean;
   skipInstall?: boolean;
+  /** Operator override (#1590): assemble only these issue numbers. */
+  only?: number[];
+  /** Operator override (#1590): leave these issue numbers out. */
+  skip?: number[];
   /** Override the gate step list (tests, or a project with a different gate). */
   gateSteps?: ReadonlyArray<{ name: string; command: string }>;
 }
@@ -101,6 +107,26 @@ export function parseFailedSuites(output: string): string[] {
   return [...found];
 }
 
+/**
+ * Members the board deliberately left out of a train (#1590): `dropped` (including the
+ * member-vs-member `deferred` ones) in the persisted evidence, minus any that also landed.
+ * `memberWorkspaceIds` still lists them, so assembling from it alone would land a ticket the
+ * train never gated.
+ */
+export function excludedFromEvidence(evidence: Record<string, unknown> | null | undefined): Array<{ workspaceId: string; reason: string }> {
+  if (!evidence) return [];
+  const landed = new Set(Array.isArray(evidence.landed) ? (evidence.landed as unknown[]).filter((x): x is string => typeof x === "string") : []);
+  const out = new Map<string, string>();
+  if (Array.isArray(evidence.dropped)) {
+    for (const d of evidence.dropped as Array<{ workspaceId?: unknown; reason?: unknown; deferred?: unknown }>) {
+      if (typeof d?.workspaceId !== "string" || landed.has(d.workspaceId) || out.has(d.workspaceId)) continue;
+      const why = typeof d.reason === "string" ? d.reason : "dropped";
+      out.set(d.workspaceId, d.deferred ? `deferred (member-vs-member conflict): ${why}` : `dropped: ${why}`);
+    }
+  }
+  return [...out].map(([workspaceId, reason]) => ({ workspaceId, reason }));
+}
+
 function windowLabel(now: string): string {
   return `local-${now.slice(0, 16).replace(/[-:T]/g, "")}`;
 }
@@ -121,7 +147,12 @@ export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps)
     if (!train) return { status: "error", message: `train ${input.trainId} not found` };
     if (train.projectId !== projectId) return { status: "error", message: `train ${train.id} belongs to another project` };
     if (train.state === "landed") return { status: "error", message: `train ${train.id} already landed` };
-    memberIds = train.memberWorkspaceIds;
+    const excluded = excludedFromEvidence(train.gateEvidence);
+    const excludedIds = new Set(excluded.map((e) => e.workspaceId));
+    for (const e of excluded) {
+      if (train.memberWorkspaceIds.includes(e.workspaceId)) deps.log(`skipping member ${e.workspaceId}: ${e.reason}`);
+    }
+    memberIds = train.memberWorkspaceIds.filter((id) => !excludedIds.has(id));
     label = train.label;
   } else if (input.fromWindow) {
     memberIds = await deps.getWindowMemberIds(projectId);
@@ -130,7 +161,17 @@ export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps)
   } else {
     return { status: "error", message: "give a train id or --from-window" };
   }
-  const members = await deps.loadMembers(memberIds);
+  let members = await deps.loadMembers(memberIds);
+  if (input.only?.length) {
+    const only = new Set(input.only);
+    for (const m of members) if (!only.has(m.issueNumber ?? -1)) deps.log(`skipping #${m.issueNumber ?? "?"}: not in --only`);
+    members = members.filter((m) => only.has(m.issueNumber ?? -1));
+  }
+  if (input.skip?.length) {
+    const skip = new Set(input.skip);
+    for (const m of members) if (skip.has(m.issueNumber ?? -1)) deps.log(`skipping #${m.issueNumber ?? "?"}: --skip`);
+    members = members.filter((m) => !skip.has(m.issueNumber ?? -1));
+  }
   if (members.length === 0) return { status: "error", message: "the train has no loadable members" };
 
   const worktree = landLocalWorktreePath(repo, label);
@@ -231,7 +272,15 @@ async function land(a: {
   deps: LandLocalDeps; projectId: string; repo: string; base: string; label: string; branch: string;
   worktree: string; members: LandLocalMember[]; train: LandLocalTrainRow | null; changedCount: number;
 }): Promise<LandLocalOutcome> {
-  const { deps, projectId, repo, base, label, branch, worktree, members, train } = a;
+  const { deps, projectId, repo, base, label, branch, worktree, train } = a;
+  // #1590: never close a member whose branch is not in the worktree (e.g. a --continue after the
+  // operator dropped one, or a member the assembly never merged).
+  const members: LandLocalMember[] = [];
+  for (const m of a.members) {
+    if ((await deps.git(["merge-base", "--is-ancestor", m.branch, branch], repo)).code === 0) members.push(m);
+    else deps.log(`member #${m.issueNumber ?? "?"} (${m.branch}) is not merged into ${branch}; it will not be closed`);
+  }
+  if (members.length === 0) return { status: "error", message: `no train member is merged into ${branch}`, worktree };
   const current = (await deps.git(["rev-parse", "--abbrev-ref", "HEAD"], repo)).stdout.trim();
   if (current !== base) return { status: "error", message: `main checkout is on ${current}, not ${base}`, worktree };
   const dirty = (await deps.git(["status", "--porcelain", "--untracked-files=no"], repo)).stdout.trim();

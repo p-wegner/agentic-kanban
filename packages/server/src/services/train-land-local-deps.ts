@@ -39,7 +39,11 @@ export function createLandLocalDeps(database: Database = db): LandLocalDeps {
     async getTrain(trainId) {
       const row = await getMergeTrain(trainId, database);
       if (!row) return null;
-      return { id: row.id, projectId: row.projectId, label: row.label, state: row.state, memberWorkspaceIds: JSON.parse(row.memberWorkspaceIds) as string[] };
+      let gateEvidence: Record<string, unknown> | null = null;
+      try {
+        gateEvidence = row.gateEvidence ? (JSON.parse(row.gateEvidence) as Record<string, unknown>) : null;
+      } catch { /* unreadable evidence: treat as none */ }
+      return { id: row.id, projectId: row.projectId, label: row.label, state: row.state, memberWorkspaceIds: JSON.parse(row.memberWorkspaceIds) as string[], gateEvidence };
     },
     async getWindowMemberIds(projectId) {
       return (await readTrainWindow(projectId, database))?.pendingIds ?? [];
