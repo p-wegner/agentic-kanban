@@ -69,13 +69,33 @@ describe("adoptCleanRebase (#1446)", () => {
   it("refuses a push whose content differs from the local branch", async () => {
     const dir = staleSetup();
     git(dir, "checkout", "worker");
-    writeFileSync(join(dir, "extra"), "x"); git(dir, "add", "."); git(dir, "commit", "-m", "sneaky");
+    writeFileSync(join(dir, "extra"), "x"); git(dir, "add", "."); git(dir, "commit", "--amend", "-m", "sneaky");
     git(dir, "update-ref", incomingRefFor("feat"), git(dir, "rev-parse", "HEAD"));
     git(dir, "checkout", "master");
     const before = git(dir, "rev-parse", "feat");
     const out = await adoptCleanRebase(dir, "feat");
     expect(out.adopted).toBe(false);
     expect(git(dir, "rev-parse", "feat")).toBe(before);
+  });
+
+  it("adopts a conflict-resolving rebase onto the base tip that keeps the ticket subjects (#1594)", async () => {
+    const dir = repo();
+    git(dir, "checkout", "-b", "feat");
+    writeFileSync(join(dir, "f"), "mine"); git(dir, "add", "."); git(dir, "commit", "-m", "one");
+    writeFileSync(join(dir, "g"), "mine"); git(dir, "add", "."); git(dir, "commit", "-m", "two");
+    git(dir, "checkout", "master");
+    writeFileSync(join(dir, "f"), "base"); git(dir, "add", "."); git(dir, "commit", "-m", "base moves");
+    git(dir, "checkout", "-b", "worker", "master");
+    writeFileSync(join(dir, "f"), "resolved"); git(dir, "add", "."); git(dir, "commit", "-m", "one");
+    writeFileSync(join(dir, "g"), "mine"); git(dir, "add", "."); git(dir, "commit", "-m", "two");
+    const push = git(dir, "rev-parse", "HEAD");
+    git(dir, "update-ref", incomingRefFor("feat"), push);
+    git(dir, "checkout", "master");
+    const old = git(dir, "rev-parse", "feat");
+    const out = await adoptCleanRebase(dir, "feat");
+    expect(out.adopted).toBe(true);
+    expect(git(dir, "rev-parse", "feat")).toBe(push);
+    expect(git(dir, "rev-parse", `refs/kanban/backup/feat/${old.slice(0, 12)}`)).toBe(old);
   });
 
   it("refuses when the worktree holding the branch is dirty", async () => {

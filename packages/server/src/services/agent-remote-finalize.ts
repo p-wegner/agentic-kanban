@@ -4,7 +4,7 @@
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { Database } from "../db/index.js";
 import { getSessionLiveness } from "../repositories/worker.repository.js";
-import { landWithRebaseAdoption, clearIncomingRef } from "./worker-remote-sync.service.js";
+import { landWithRebaseAdoption, clearIncomingRef, incomingRefFor } from "./worker-remote-sync.service.js";
 import type { WorkerConnectionManager } from "./worker-connection.service.js";
 import type { RemoteSession } from "./agent-remote.types.js";
 
@@ -52,6 +52,8 @@ export async function landSessionBranch(
         // #1427: unusable - a later sync must not be able to land it (#1414).
         await clearIncomingRef(session.repo.repoPath, session.repo.branch).catch(() => {});
         classification += " - incoming ref discarded";
+      } else {
+        classification += ` - push kept in ${incomingRefFor(session.repo.branch)}`;
       }
       // #1542: a not-landed result must reach board.log, not only the session transcript.
       console.warn(`[agent-remote] session ${sessionId}: worker result NOT landed on ${session.repo.branch}: ${result.ok ? "" : result.error}${classification}`);
