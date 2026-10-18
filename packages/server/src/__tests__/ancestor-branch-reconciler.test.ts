@@ -652,3 +652,60 @@ describe("reconcileAncestorBranchWorkspaces — sibling-aware terminalization (#
     expect(comments.some((c) => /Ancestor-branch reconciliation found the leading branch/.test(c.body))).toBe(true);
   }, GIT_HEAVY_TEST_TIMEOUT_MS);
 });
+
+describe("reconcileAncestorBranchWorkspaces — hand-landed, 0 unique commits (#1616)", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  const issueStatus = async (issueId: string) => {
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    return status.name;
+  };
+
+  it("closes a contained 0-unique branch when a base commit names #N, even though the train label is reused", async () => {
+    const { issueId, workspaceId } = await seedWorkspace(db, { statusName: "In Review" });
+    // Hand-landed commit (names #576) plus the board's later train that REUSED the same label
+    // but names other issues — the match must key on #576, never on the label.
+    const getSummaries = vi.fn(async () => [
+      { sha: "bbb2222", message: "Merge train 2026-10-18-08: #1602 #1603" },
+      { sha: "aaa1111", message: "Merge train 2026-10-18-08 (operator-landed): #575 #576 #577" },
+    ]);
+
+    const count = await reconcileAncestorBranchWorkspaces({
+      pathExists: () => true, database: db, checkAncestor: makeCheckAncestor(true), countCommits: makeCountCommits(0), getSummaries,
+    });
+
+    expect(count).toBe(1);
+    expect(await issueStatus(issueId)).toBe("Done");
+    const [ws] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("closed");
+  });
+
+  it("leaves a contained 0-unique branch alone when only a reused-label commit naming OTHER issues exists", async () => {
+    const { issueId } = await seedWorkspace(db, { statusName: "In Review" });
+    const getSummaries = vi.fn(async () => [{ sha: "bbb2222", message: "Merge train 2026-10-18-08: #1602 #1603 #1608" }]);
+
+    const count = await reconcileAncestorBranchWorkspaces({
+      pathExists: () => true, database: db, checkAncestor: makeCheckAncestor(true), countCommits: makeCountCommits(0), getSummaries,
+    });
+
+    expect(count).toBe(0);
+    expect(await issueStatus(issueId)).toBe("In Review");
+  });
+
+  it("closes a contained branch that has its own commits past the fork point (base..tip is 0 once landed)", async () => {
+    const { issueId, workspaceId } = await seedWorkspace(db, { statusName: "In Review" });
+    await db.update(workspaces).set({ baseCommitSha: "fork-sha" }).where(eq(workspaces.id, workspaceId));
+    const countCommits = vi.fn(async (_repo: string, base: string) => (base === "fork-sha" ? 4 : 0));
+
+    const count = await reconcileAncestorBranchWorkspaces({
+      pathExists: () => true, database: db, checkAncestor: makeCheckAncestor(true), countCommits, getSummaries: vi.fn(async () => []),
+    });
+
+    expect(count).toBe(1);
+    expect(await issueStatus(issueId)).toBe("Done");
+  });
+});
