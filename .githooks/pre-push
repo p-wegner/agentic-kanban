@@ -1,0 +1,4 @@
+#!/bin/sh
+# Warn (never block) when a push from the base branch would move it under a gating train (#1607).
+node "$(git rev-parse --show-toplevel)/scripts/train-gating-warning.mjs" || true
+exit 0
