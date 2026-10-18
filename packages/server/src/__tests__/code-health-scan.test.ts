@@ -8,6 +8,7 @@ import { projects } from "@agentic-kanban/shared/schema";
 import type { SoftBreach } from "../lib/code-health.js";
 import { createTestDb } from "./helpers/test-db.js";
 import { invalidatePreferencesCache } from "../repositories/preferences.repository.js";
+import type { RecordCodeHealthInput } from "../services/code-health.service.js";
 import { CODE_HEALTH_SCAN_DAILY_MS, isScanDue, scanCodeHealthOnce } from "../services/code-health-scan.service.js";
 
 const breach: SoftBreach = { file: "packages/x/src/f.ts", metric: "lines", value: 1100, cap: 1000 };
@@ -16,7 +17,7 @@ describe("code-health report scan (#1619)", () => {
   let db: ReturnType<typeof createTestDb>["db"];
   let projectId: string;
   let tip: string;
-  const record = vi.fn(async (_input: Record<string, unknown>) => ({}) as never);
+  const record = vi.fn(async (_input: RecordCodeHealthInput) => ({}) as never);
   const runScan = vi.fn(async () => [breach]);
   const input = () => ({ projectId, repoPath: "C:/repo", defaultBranch: "master" });
   const deps = () => ({ database: db, resolveTip: async () => ({ tip, head: tip }), runScan, record });
