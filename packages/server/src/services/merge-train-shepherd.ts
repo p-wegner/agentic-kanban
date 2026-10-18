@@ -133,12 +133,10 @@ export async function mergeMembersWithShepherd(args: {
   /** Back out an unresolved merge so the tree is clean for the next member. */
   abortMerge: () => Promise<void>;
   log?: (line: string) => void;
-  nowMs?: () => number;
 }): Promise<ConflictAssemblyResult> {
   const { shepherd, caps } = args;
   const log = args.log ?? ((line: string) => console.warn(`[merge-train] ${line}`));
-  const nowMs = args.nowMs ?? (() => Date.now());
-  const startedMs = nowMs();
+  const startedMs = Date.now();
   const included: ShepherdMember[] = [];
   const dropped: ConflictAssemblyResult["dropped"] = [];
   let held = false;
@@ -155,7 +153,7 @@ export async function mergeMembersWithShepherd(args: {
     const m: ShepherdMember = { ...member, ...(attempt.conflictsWith ? { conflictsWith: attempt.conflictsWith } : {}) };
     if (held) { await defer(m, "shepherd unavailable (infrastructure)"); continue; }
     if (shepherd.turnsUsed >= caps.maxTurns) { await defer(m, `shepherd turn cap ${caps.maxTurns} reached`); continue; }
-    const remaining = caps.timeoutMs - (nowMs() - startedMs);
+    const remaining = caps.timeoutMs - (Date.now() - startedMs);
     if (remaining <= 0) { await defer(m, `shepherd timeout ${caps.timeoutMs}ms reached`); continue; }
 
     const rivalId = m.conflictsWith?.issueNumber != null ? `#${m.conflictsWith.issueNumber}` : m.conflictsWith?.branch ?? "the train";
