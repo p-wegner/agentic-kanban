@@ -135,6 +135,18 @@ Overrides on top of the level: ticket tag `risk:<level>` (that ticket only);
 without a warning, #1560). How the posture shapes merge trains, and what happens on red:
 `docs/agent-guide/merge-trains.md`.
 
+## Code-health posture (#1613, decision 021)
+
+Soft and hard caps per metric (file lines, branches per function, top-level declarations), one table in
+`packages/shared/src/lib/code-health-caps.json`. A **soft** breach never blocks: it lands in the ledger
+(`code_health_ledger_<id>`) and the console (`code health: 7 soft breaches in 4 files, cleanup ticket at 10 (relaxed)`).
+A **hard** breach blocks at the builder's pre-commit / implement-exit check; the train re-checks hard caps only.
+`code_health_posture_<id>` (`strict | balanced | relaxed`) overrides the level derived from the risk posture
+(sprint/fast/flow -> relaxed, standard/iterate -> balanced, strict -> strict). When the trigger fires
+(relaxed: 10 breaches or 14 days) ONE cleanup ticket is filed; further breaches append to it until it starts.
+Inspect: `GET /api/projects/:id/delivery` -> `codeHealth`. Record a scan:
+`node scripts/check-god-modules.mjs --report out.json`, then `POST /api/projects/:id/code-health/report`.
+
 ## Spreading work across Claude subscriptions (worker profiles)
 The board picks a profile per remote session only for a project with `allowed_profiles_<id>`
 (agentic-kanban lists `anth`, `andrena_team_5x`, `_2`, `_3`, `_4`): among the allowed profiles the

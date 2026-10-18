@@ -32,7 +32,9 @@ function runGate(root?: string, env?: Record<string, string>): { code: number; o
       cwd: REPO_ROOT,
       encoding: "utf8",
       stdio: "pipe",
-      env: { ...process.env, ...env },
+      // Probes assert the 1000-line / 20-declaration HARD caps, which is the `strict` level (#1613);
+      // the live-tree run uses the table's default level.
+      env: { ...process.env, ...(root ? { KANBAN_CODE_HEALTH_LEVEL: "strict" } : {}), ...env },
     });
     return { code: 0, output };
   } catch (e) {
@@ -121,5 +123,37 @@ describe("check-god-modules.mjs — degraded cohesion count when typescript is m
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+// #1613: soft and hard caps. A soft breach is reported and never fails; a hard breach fails.
+describe("check-god-modules.mjs — soft vs hard caps (#1613)", () => {
+  const probe = (lines: number, env: Record<string, string>) => {
+    const root = mkdtempSync(join(tmpdir(), "ak-god-gate-soft-"));
+    try {
+      const libDir = join(root, "packages", "shared", "src", "lib");
+      mkdirSync(libDir, { recursive: true });
+      writeFileSync(join(libDir, "__soft_probe__.ts"), ["// probe"].join("").concat("\n").repeat(lines), "utf8");
+      return runGate(root, env);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  it("relaxed: 1200 lines is a SOFT breach — exits 0 and says so", () => {
+    const { code, output } = probe(1200, { KANBAN_CODE_HEALTH_LEVEL: "relaxed" });
+    expect(code, output).toBe(0);
+    expect(output).toContain("code health: 1 soft breach in 1 file, cleanup ticket at 10 (relaxed)");
+  });
+
+  it("relaxed: 1700 lines is a HARD breach — exits non-zero", () => {
+    const { code, output } = probe(1700, { KANBAN_CODE_HEALTH_LEVEL: "relaxed" });
+    expect(code, output).not.toBe(0);
+    expect(output).toContain("__soft_probe__.ts");
+  });
+
+  it("strict: 900 lines is soft, 1001 is hard", () => {
+    expect(probe(900, { KANBAN_CODE_HEALTH_LEVEL: "strict" }).code).toBe(0);
+    expect(probe(1001, { KANBAN_CODE_HEALTH_LEVEL: "strict" }).code).not.toBe(0);
   });
 });
