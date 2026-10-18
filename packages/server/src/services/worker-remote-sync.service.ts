@@ -256,6 +256,26 @@ export async function classifyRefusedPush(repoPath: string, branch: string): Pro
   }
 }
 
+/** Subjects of `from..to`. */
+async function subjectsBetween(repoPath: string, from: string, to: string): Promise<string[] | null> {
+  const r = await gitExec(["log", "--format=%s", `${from}..${to}`], { cwd: repoPath });
+  return execSucceeded(r) ? r.stdout.split(/\r?\n/).filter(Boolean) : null;
+}
+
+/** True when every commit the branch carries over the base reappears (by subject) in the push. */
+async function keepsTicketSubjects(repoPath: string, baseTip: string, local: string, push: string): Promise<boolean> {
+  const mine = await subjectsBetween(repoPath, baseTip, local);
+  const theirs = await subjectsBetween(repoPath, baseTip, push);
+  if (!mine || !theirs || mine.length === 0) return false;
+  const have = new Set(theirs);
+  return mine.every((s) => have.has(s));
+}
+
+/** Keep the superseded tip reachable under a backup ref before a rebase is adopted over it. */
+async function backupTip(repoPath: string, branch: string, tip: string): Promise<void> {
+  await gitExec(["update-ref", `refs/kanban/backup/${branch}/${tip.slice(0, 12)}`, tip], { cwd: repoPath });
+}
+
 export type AdoptRebaseOutcome =
   | { adopted: true; old: string; sha: string; count: number; summary: string }
   | { adopted: false; reason: string };
@@ -312,7 +332,10 @@ export async function adoptCleanRebase(repoPath: string, branch: string): Promis
     if (!execSucceeded(diff)) return refuse("could not compare the push against base+local");
     const differing = diff.stdout.split("\0").filter(Boolean);
     const unexplained = differing.filter((f) => !conflicted.has(f));
-    if (unexplained.length > 0) {
+    // #1594: a rebase onto the CURRENT base tip that keeps every ticket commit of the branch
+    // (by subject) is what the board asks for; its conflict resolution legitimately changes content.
+    const rebasedOntoTip = mb === baseTip && (await keepsTicketSubjects(repoPath, baseTip, local, push));
+    if (unexplained.length > 0 && !rebasedOntoTip) {
       return refuse(`push is not patch-equivalent to the local branch (differs in ${unexplained.slice(0, 5).join(", ")})`);
     }
 
@@ -323,9 +346,11 @@ export async function adoptCleanRebase(repoPath: string, branch: string): Promis
       if (status.stdout.trim()) return refuse("worktree has uncommitted changes");
       const wtHead = await gitExec(["rev-parse", "HEAD"], { cwd: worktree });
       if (!execSucceeded(wtHead) || wtHead.stdout.trim() !== local) return refuse("worktree HEAD moved since the check");
+      await backupTip(repoPath, branch, local);
       const reset = await gitExec(["reset", "--hard", push], { cwd: worktree });
       if (!execSucceeded(reset)) return refuse(`worktree reset failed: ${reset.stderr.trim()}`);
     } else {
+      await backupTip(repoPath, branch, local);
       await gitExecOrThrow(["update-ref", `refs/heads/${branch}`, push, local], { cwd: repoPath });
     }
     const summary = `adopted clean rebase ${local.slice(0, 8)}..${push.slice(0, 8)} (${count} commits)`;
