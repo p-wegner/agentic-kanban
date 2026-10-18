@@ -244,6 +244,8 @@ describe("merge train livelock fixes (#1153)", () => {
     await git(repoPath, ["checkout", "-q", "main"]);
 
     const a = await seedWorkspace(db, { projectId, statusId, branch: "f1" });
+    // #1601: a non-neutral base move re-gates (bounded), so the intruder lands on every pass.
+    let intrusions = 0;
 
     const runner = createMergeTrainRunner({
       database: db,
@@ -252,7 +254,7 @@ describe("merge train livelock fixes (#1153)", () => {
       // Stand in for the #797 exit-workflow synchronous merge: it lands on the base from
       // OUTSIDE this train, in the gap between the gate passing and the train landing.
       reviewTrain: async () => {
-        await commitOn(repoPath, "main", "intruder.txt", "synchronous merge\n");
+        await commitOn(repoPath, "main", `intruder-${intrusions++}.txt`, "synchronous merge\n");
         return { sided: [], verdict: null, evidence: { status: "skipped", reason: "test" } };
       },
     });
