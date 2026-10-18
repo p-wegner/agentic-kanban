@@ -62,57 +62,9 @@ import { buildWorkerConnectSteps } from "../../lib/worker-connect-steps.js";
 // this function through this module rather than the new lib path directly.
 export { buildWorkerConnectSteps };
 
+import { renderWorkerConnectMarkdown, resolveWindowsToolsDir } from "./worker-connect-markdown.js"; export { renderWorkerConnectMarkdown, resolveWindowsToolsDir } from "./worker-connect-markdown.js";
+import { describeWorkerListFailure, formatPhaseTimings, formatPlacementState } from "./worker-format.js"; export { describeWorkerListFailure, formatPhaseTimings, formatPlacementState } from "./worker-format.js";
 const DEFAULT_BOARD_URL = "http://127.0.0.1:3001";
-
-/** Directory of shipped Windows service/tray scripts, relative to the package root. */
-const WINDOWS_TOOLS_SUBDIR = join("tools", "worker-windows");
-
-/**
- * Absolute path of the shipped Windows service/tray scripts, or null if they are
- * not next to this module.
- *
- * Resolved by walking up from THIS module rather than from `npm prefix -g`,
- * because the same code runs from three different depths — the esbuild bundle at
- * `dist/worker.js`, the tsc output at `dist/cli/commands/worker.js`, and
- * `src/cli/commands/worker.ts` under tsx in a dev checkout — and because a global
- * prefix is exactly the thing that differs per machine (nvm, Scoop, a per-user
- * prefix), so hardcoding one prints a path that does not exist for the reader.
- */
-export function resolveWindowsToolsDir(
-  startDir: string = dirname(fileURLToPath(import.meta.url)),
-): string | null {
-  let dir = startDir;
-  for (let i = 0; i < 6; i++) {
-    const candidate = join(dir, WINDOWS_TOOLS_SUBDIR);
-    // Probe a file, not the directory: an empty `tools/` must not count as a hit.
-    if (existsSync(join(candidate, "ak-worker-service.ps1"))) return candidate;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
-}
-
-/**
- * `worker list` talks to an OWNER route (`GET /api/workers`), mounted only on the board's
- * loopback app — never on the fleet listener a remote worker's `--board` points at (#848).
- * A 404 there is not "board unreachable" (that would be a fetch rejection, never a response
- * at all): it means this URL answered, just not with that route, which is exactly what
- * happens when `--board` was pointed at the fleet port instead of the board's API port.
- * Any OTHER non-OK status (5xx, etc.) keeps the original "is the board running" framing,
- * since those genuinely can indicate a struggling-but-reachable board.
- */
-export function describeWorkerListFailure(status: number, boardUrl: string): string {
-  if (status === 404) {
-    return (
-      `Failed to list workers (404). '${boardUrl}' answered, but 'GET /api/workers' is an owner route ` +
-      "reachable only from the board's own machine (loopback) — never from the fleet port a remote " +
-      "worker's --board points at. Run 'worker list' on the board machine instead, against its API " +
-      "port (default http://127.0.0.1:3001)."
-    );
-  }
-  return `Failed to list workers (${status}). Is the board running at ${boardUrl}?`;
-}
 
 /**
  * The `bin/worker.js` this process runs from — the rollback target for a self-update (#1338).
@@ -149,144 +101,6 @@ function splitList(value?: string): string[] | undefined {
 }
 
 /**
- * Windows-only: point the reader at the service/tray scripts that ship IN the
- * package, so an unattended worker is a documented install step rather than
- * scripts someone hand-copies between machines. Kept out of the numbered steps
- * because it is optional and platform-specific — the foreground `start` above is
- * what proves the pairing works, and this survives the shell closing.
- */
-function renderWindowsServiceSection(): string[] {
-  const toolsDir = resolveWindowsToolsDir();
-  // Not found = running from somewhere the scripts were not shipped to. Say how
-  // to locate them rather than printing a path that is wrong on this machine.
-  const dir = toolsDir ?? "$(Join-Path (npm prefix -g) 'node_modules\\agentic-kanban\\tools\\worker-windows')";
-  const lines: string[] = [];
-  lines.push("## Windows: keep the worker running unattended (optional)");
-  lines.push("");
-  lines.push(
-    "The foreground `start` above dies with its shell. On Windows the package ships scripts that register the " +
-      "worker as the Scheduled Task `AgenticKanbanWorker` — at logon, in YOUR session, so agents keep using this " +
-      "account's provider credentials — under a supervisor that restarts the daemon with backoff, plus a systray " +
-      "dot for its real state. They live inside the installed package here:",
-  );
-  lines.push("");
-  lines.push("```text");
-  lines.push(dir);
-  lines.push("```");
-  lines.push("");
-  lines.push("```powershell");
-  lines.push(`Set-Location "${dir}"`);
-  lines.push("");
-  lines.push("# install + start the background service (-Board is the board's FLEET port)");
-  lines.push(".\\ak-worker-service.ps1 -Install -Board <board-url> -Labels windows -Providers claude -ClaudeConfigDir $env:CLAUDE_CONFIG_DIR");
-  lines.push(".\\ak-worker-service.ps1 -Status");
-  lines.push(".\\ak-worker-service.ps1 -Log -Tail 50");
-  lines.push("");
-  lines.push("# the systray dot (hidden launcher; shortcut it into shell:startup to get it at logon)");
-  lines.push("wscript.exe .\\ak-worker-tray-launch.vbs");
-  lines.push("```");
-  lines.push("");
-  lines.push(
-    "Pair once in the foreground first (the step above): the service reuses the saved per-worker token. No admin " +
-      "rights are needed. Set `-ClaudeConfigDir` explicitly — a Scheduled Task inherits nothing, and an unset " +
-      "`CLAUDE_CONFIG_DIR` silently runs the agents under the default `~/.claude` account. The supervisor also " +
-      "forces `ACP_AUTOCONNECT=0`, without which a headless agent can hang forever with no output. See the " +
-      "README in that directory for the rest.",
-  );
-  lines.push("");
-  return lines;
-}
-
-export function renderWorkerConnectMarkdown(
-  boardUrl: string,
-  pairingToken: string,
-  steps: WorkerConnectStep[],
-): string {
-  const lines: string[] = [];
-  lines.push(`# Connect this machine to ${boardUrl} as a fleet worker`);
-  lines.push("");
-  lines.push(
-    "The board schedules agent sessions onto connected workers. This machine clones the repo from the board over " +
-      "git-over-HTTP, runs the agent in its own checkout, and pushes the result back — the board then lands the " +
-      "branch and its normal review/merge flow takes over.",
-  );
-  lines.push("");
-  steps.forEach((step, index) => {
-    const scope = step.where === "board" ? " *(run on the BOARD machine)*" : step.where === "either" ? " *(either machine)*" : "";
-    lines.push(`## ${index + 1}. ${step.title}${scope}`);
-    lines.push("");
-    lines.push(step.detail);
-    if (step.commands.length > 0) {
-      lines.push("");
-      lines.push("```bash");
-      lines.push(...step.commands);
-      lines.push("```");
-    }
-    lines.push("");
-  });
-  lines.push(...renderWindowsServiceSection());
-  lines.push("## Board-side networking (cross-machine only)");
-  lines.push("");
-  lines.push(
-    "A default board is loopback-only and unreachable from other machines. Do NOT open it with KANBAN_HOST — the " +
-      "board API has no authentication, so binding it to 0.0.0.0 would publish every issue, transcript and merge " +
-      "endpoint to the network. Instead open the two purpose-built listeners, each of which authenticates every " +
-      "request with a bearer token:",
-  );
-  lines.push("");
-  lines.push("```bash");
-  lines.push("KANBAN_FLEET_PORT=3003 KANBAN_GIT_HTTP_PORT=3002 pnpm dev   # board machine");
-  lines.push("");
-  lines.push("# VPN-only: bind both listeners to the VPN interface instead of every interface");
-  lines.push("KANBAN_FLEET_PORT=3003 KANBAN_FLEET_HOST=100.x.y.z \\");
-  lines.push("KANBAN_GIT_HTTP_PORT=3002 KANBAN_GIT_HTTP_HOST=100.x.y.z pnpm dev");
-  lines.push("```");
-  lines.push("");
-  lines.push(
-    "`KANBAN_FLEET_PORT` serves ONLY worker register/heartbeat/WebSocket; `KANBAN_GIT_HTTP_PORT` serves ONLY the " +
-      "git transport (pin it — otherwise it moves every boot and no firewall rule can match). The board API itself " +
-      "stays on 127.0.0.1 and is not reachable from the network at all. Point a remote worker's --board at the " +
-      "FLEET port. Still keep the board on a trusted network (LAN/VPN/Tailscale) rather than the open internet.",
-  );
-  lines.push("");
-  lines.push(
-    "`KANBAN_FLEET_HOST` / `KANBAN_GIT_HTTP_HOST` narrow WHICH interface each listener binds (absent = every " +
-      "interface, as before). On a VPN this is what makes \"trusted network\" a control rather than a hope: " +
-      "with the bind host set to the VPN address, the two ports do not exist on the office LAN, the home LAN or " +
-      "hotel wifi at all, so reaching them requires being on the VPN — the bearer tokens stop being the only " +
-      "thing between a stranger's packet and the board.",
-  );
-  lines.push("");
-  lines.push(
-    "**Do not put a path-based reverse proxy in front of the git transport** (`tailscale serve`, an nginx " +
-      "location prefix). The worker builds its clone URL as `scheme://<board-host>:<git-port>/git/<projectId>` — " +
-      "it discards any path prefix and substitutes the port it was told, so behind a serve-style proxy the clone " +
-      "hangs with no obvious cause. Use the machine's own name/address (e.g. MagicDNS) with the ports directly. " +
-      "Tailscale Funnel must never be used: that is the public internet in front of a board.",
-  );
-  lines.push("");
-  lines.push("## Notes");
-  lines.push("");
-  lines.push(
-    "- **Same machine as the board?** Add `--shares-filesystem` to `worker start`. The worker then runs agents " +
-      "directly in the board's worktrees and skips git transport entirely.",
-  );
-  lines.push(
-    "- **Stopping**: Ctrl+C kills the running agents too; `--leave-agents` leaves them alive. Losing the connection " +
-      "does NOT kill agents — the daemon reconnects with backoff and keeps their exit events queued.",
-  );
-  lines.push(
-    "- **Revoking**: `agentic-kanban worker list` then the Workers UI panel's Revoke button (or " +
-      "`DELETE /api/workers/:id`). The worker's token stops working immediately.",
-  );
-  lines.push(
-    "- **Disk**: the worker keeps one clone per project plus a per-session worktree under `~/.agentic-kanban/worker` " +
-      "(override with `--work-root`).",
-  );
-  return lines.join("\n");
-}
-
-/**
  * `worker` — run this machine as a fleet worker for a (possibly remote) board
  * (epic #1, phase 1b #4). Unlike the rest of the CLI, these commands talk to
  * the board over HTTP/WS only — they never open the local DB, so they work on
@@ -309,32 +123,6 @@ export function registerWorkerCommand(program: Command) {
  * database layer). Everything reachable from here must stay free of
  * board-server imports; see worker/worker-cli.ts.
  */
-/**
- * `[completed]` alone hides a worker-lost run (#1319): the board finalizes it completed / exit 1
- * and an operator reading the list must not mistake it for a success.
- */
-/** `fetch 4.2s · setup 61s · agent 8m12s ...` — recorded phases only, in pipeline order (#1328). */
-export function formatPhaseTimings(phases: NonNullable<SessionPlacementRecord["phases"]>): string {
-  const fmt = (ms: number): string => (ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`);
-  const parts: Array<[string, number | undefined]> = [
-    [phases.fetchKind ?? "fetch", phases.fetchMs],
-    ["worktree", phases.worktreeMs],
-    ["setup", phases.setupMs],
-    ["agent", phases.agentMs],
-    ["push", phases.pushMs],
-    ["land", phases.landMs],
-  ];
-  return parts
-    .filter((p): p is [string, number] => p[1] !== undefined)
-    .map(([label, ms]) => `${label} ${fmt(ms)}`)
-    .join(" · ");
-}
-
-export function formatPlacementState(p: Pick<SessionPlacementRecord, "status" | "exitCode" | "endedBy">): string {
-  if (!p.endedBy) return `[${p.status}]`;
-  const why = p.endedBy === "abandoned" ? "worker abandoned" : "worker lost";
-  return `[${p.status}, exit ${p.exitCode ?? "?"}, ${why}]`;
-}
 
 /** Resolve `<id|name>` to exactly one registered worker, or print why not and exit 1. */
 async function resolveOneWorker(
