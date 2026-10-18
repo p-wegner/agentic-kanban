@@ -9,6 +9,7 @@
  * safety-relevant decision, so every ambiguity must resolve to "run everything". It returns
  * `null` — meaning "no scope, run all packages" — for anything it does not fully understand.
  */
+import { isGuardsOnlyFile } from "./docs-only-diff.js";
 
 /** Package labels as used by `scripts/test-mine.mjs` (its `PACKAGES[].label`). */
 export type TestPackageLabel = "shared" | "server" | "mcp-server" | "client";
@@ -155,7 +156,11 @@ export function scopedTestPackages(changedFiles: readonly string[]): TestPackage
     if (GLOBAL_SCOPE_BREAKERS.some((re) => re.test(path))) return null;
     if (IGNORABLE_UNOWNED_PATHS.some((re) => re.test(path))) continue;
     const owner = PACKAGE_PREFIXES.find((p) => path.startsWith(p.prefix));
-    // A tracked file under no package (a root doc, a stray config, a new top-level dir) is
+    // An unowned path the guards alone check (CONTINUE.md, docs/**, .codex/**, …) adds no
+    // package: its `@gate:always-run` guards are picked by the changed-file list, not by this
+    // scope. Before this, the CONTINUE.md nearly every ticket touches made every train full.
+    if (!owner && isGuardsOnlyFile(path)) continue;
+    // Any other tracked file under no package (a stray config, a new top-level dir) is
     // something this map does not model — fail open rather than guess.
     if (!owner) return null;
     labels.add(owner.label);

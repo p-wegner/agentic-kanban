@@ -72,6 +72,15 @@ describe("scopedTestPackages", () => {
     ]);
   });
 
+  it("does not let an unowned doc (CONTINUE.md, docs/**) widen a code diff to everything", () => {
+    expect(scopedTestPackages(["CONTINUE.md", "docs/agent-guide/merge-trains.md", "packages/server/src/index.ts"])).toEqual([
+      "shared",
+      "server",
+    ]);
+    // A stray unowned config still fails open.
+    expect(scopedTestPackages(["CONTINUE.md", "Makefile", "packages/server/src/index.ts"])).toBeNull();
+  });
+
   it("refuses to scope a path owned by no known package", () => {
     // A new top-level directory is something the map does not model.
     expect(scopedTestPackages(["docs/state.md"])).toBeNull();

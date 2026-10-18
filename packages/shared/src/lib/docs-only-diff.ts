@@ -108,7 +108,7 @@ const GUARDS_ONLY_PATHS: RegExp[] = [
  */
 const CODE_EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs|mts|cts|py|rb|sh|ps1|bat|cmd|kt|kts|java|go|rs|sql|yml|yaml)$/i;
 
-function isGuardsOnlyFile(path: string): boolean {
+export function isGuardsOnlyFile(path: string): boolean {
   const normalized = path.replace(/\\/g, "/");
   if (isDocsOnlyFile(normalized)) return true;
   if (GUARDS_ONLY_PATHS.some((re) => re.test(normalized))) return true;
