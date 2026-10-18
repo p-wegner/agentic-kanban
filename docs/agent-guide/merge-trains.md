@@ -150,7 +150,7 @@ dependencies.
 | Which trains exist, their state and evidence | `pnpm cli -- train list`, `train show <id>`, or `GET /api/merge-queue/trains?projectId=<id>` (`gateEvidence` holds the failure text) |
 | Is the window open, how full | `GET /api/merge-queue/window`, MERGE TRAIN section of `pnpm cli -- status --watch` |
 | What the gate is doing now | `GET /api/workers/console?projectId=<id>` (`chains[]`: worker, stage, age) |
-| Why it went red | `gateEvidence.gateFailure` on the train row; the full log `kanban-verify-train-<label>.log` in the board's temp dir (`D:\tmp` here), written when the gate ends. A failed worker run keeps no copy on the worker (#1571) |
+| Why it went red | `gateEvidence.gateFailure` on the train row; the full log `kanban-verify-train-<label>.log` in the board's temp dir (`os.tmpdir()`, or `TMPDIR`/`TEMP` when set), written when the gate ends. A failed worker run keeps no copy on the worker (#1571) |
 | The story in order | stable board log `<stable checkout>\.kanban\board.log`, grep `\[merge-train\]`, `\[auto-merge\]`, `\[verify-placement\]`, `\[verify-worker\]`, `\[test-impact\]` |
 | Stop a train | `pnpm cli -- train cancel <id>` (the train becomes `abandoned`; the window re-forms with the members) |
 
