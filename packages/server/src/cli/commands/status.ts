@@ -141,7 +141,7 @@ Status indicators:
       // Resolves to null when the console was drawn, else the reason it could not be (#1477).
       const renderConsoleScreen = async (): Promise<{ failure: unknown } | null> => {
         const { resolveBoardServerPort } = await import("@agentic-kanban/shared/lib/board-server-url");
-        const { plainHttp } = await import("../board-server-writes.js");
+        const { plainHttp } = await import("../../lib/board-server-writes.js");
         const { buildConsoleModel, renderConsole, consoleFrame, fetchConsolePayloads } = await import("../status-console.js");
         const baseUrl = `http://127.0.0.1:${resolveBoardServerPort()}`;
         const get = async (path: string): Promise<unknown> => {

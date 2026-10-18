@@ -288,3 +288,6 @@ Cross-references to `refactoring-scout` tickets (siblings, not refiled): #496 `p
 - "MCP DB-vs-HTTP reach is a ring" — documented heterogeneity (`docs/domain/mcp-server.md`); the DBSING-vs-DEPS half IS a ring (→ #605).
 - "validation zod-vs-hand per layer is a ring" — technology difference between MCP SDK and Hono; only the intra-route `parseJsonBody` vs raw `c.req.json()` (3 files) is a fold.
 - "annual rings by era" — repo is ~3.5 months old; every style spans the whole history → reported as co-existing styles.
+
+## Verdict: `server-service->server-cli` (#1617)
+- `services/train-land-local-deps.ts` -> `cli/board-server-writes.ts`: **real**. The module is transport logic (HTTP-vs-direct write choice) with no CLI dependency, used by both CLI commands and a service. Relocated to `lib/board-server-writes.ts` (with its test); importers updated. Rule unchanged.
