@@ -117,7 +117,7 @@ export async function planVerifyPlacement(args: Pick<PlaceVerifyCommandArgs, "ki
 }
 
 /** Run on the worker a plan chose and judge its report through `acceptWorkerVerdict`. */
-export async function runOnPlannedWorker(plan: Extract<VerifyPlan, { target: "worker" }>, args: PlaceVerifyCommandArgs): Promise<PlacedVerifyResult> {
+export async function runOnPlannedWorker(plan: Extract<VerifyPlan, { target: "worker" }>, args: PlaceVerifyCommandArgs, isLoadRetry = false): Promise<PlacedVerifyResult> {
   const log = args.log ?? ((l: string) => console.log(`[verify-placement] ${l}`));
   const request: VerifyRequest = { requestId: randomUUID(), workerId: plan.workerId, sha: args.sha, tier: args.tier };
   log(`${plan.reason} (worker ${plan.workerName})`);
@@ -128,6 +128,17 @@ export async function runOnPlannedWorker(plan: Extract<VerifyPlan, { target: "wo
   if (!verdict.accepted) {
     log(`${args.kind} verdict from ${plan.workerName} refused: ${verdict.reason}`);
     return { result: { exitCode: -1, stdout: "", stderr: `worker verdict refused: ${verdict.reason}` }, target: "worker", workerName: plan.workerName, refused: verdict.reason, report };
+  }
+  // #1589: red on timeouts only from a run where the worker was at capacity is load-suspect, not proof: re-run it
+  // ONCE on a worker with a free slot (the plan already excludes busy / low-RAM workers) before declaring red.
+  if (verdict.verdict === "red" && report.loadSuspect && !isLoadRetry) {
+    const replan = await planVerifyPlacement(args).catch((): VerifyPlan => ({ target: "host", reason: "replan failed" }));
+    if (replan.target === "worker") {
+      log(`${args.kind} red on ${plan.workerName} is load-suspect (timeouts only, worker at capacity); re-running once on ${replan.workerName}`);
+      const second = await runOnPlannedWorker(replan, args, true);
+      if (!second.refused) return { ...second, result: { ...second.result, stdout: `[load-suspect first run on ${plan.workerName}: timeouts only, worker at capacity]\n${second.result.stdout}` } };
+    }
+    log(`${args.kind} red on ${plan.workerName} is load-suspect but no free worker is available for a re-run; recording the red with that evidence`);
   }
   return {
     result: { exitCode: verdict.verdict === "green" ? 0 : report.exitCode || 1, stdout: report.log ?? "", stderr: "", timedOut: report.timedOut === true },

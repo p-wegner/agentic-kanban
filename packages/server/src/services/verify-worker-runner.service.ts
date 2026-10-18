@@ -15,7 +15,7 @@ import { listActiveMergeTrainsForProject, recordMergeTrainWorkerVerify } from ".
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { ensureGitHttpServer } from "./git-http.service.js";
 import type { VerifyRunRequest, VerifyWorkerRunner } from "./verify-job-placement.js";
-import type { VerifyChainKind, VerifyWorkerCandidate, WorkerVerifyReport } from "./verify-placement.js";
+import { isTimeoutOnlyFailure, workerAdmitsAnotherChain, workerWasAtCapacity, type VerifyChainKind, type VerifyWorkerCandidate, type WorkerVerifyReport } from "./verify-placement.js";
 import { active, listActiveVerifyJobs, type ActiveVerifyJob } from "./verify-active-jobs.js";
 import { getWorkerFleet } from "./worker-fleet.service.js";
 
@@ -108,12 +108,16 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
       .map((w) => {
         const cap = w.verify as WorkerVerifyCapability;
         const inFlight = listActiveVerifyJobs().filter((j) => j.workerId === w.id).length;
+        const freeRamGb = w.capacity?.freeRamGb ?? cap.ramGb;
+        // #1589: the host's RAM admission, applied here: a worker already running a chain needs RAM for another.
+        const busy = Math.max(inFlight, cap.slots - cap.freeSlots);
+        const ramAdmits = workerAdmitsAnotherChain(busy, w.capacity?.freeRamGb);
         return {
           id: w.id,
           name: w.name,
           // Our own in-flight count wins over a heartbeat that predates the job's first frame.
-          freeSlots: Math.max(0, Math.min(cap.freeSlots, cap.slots - inFlight, ...budgetSlots(w, () => connections.assignedSessionIds(w.id).length, inFlight))),
-          freeRamGb: w.capacity?.freeRamGb ?? cap.ramGb,
+          freeSlots: ramAdmits ? Math.max(0, Math.min(cap.freeSlots, cap.slots - inFlight, ...budgetSlots(w, () => connections.assignedSessionIds(w.id).length, inFlight))) : 0,
+          freeRamGb,
           thrashing: w.capacity ? w.capacity.thrashing !== "none" : undefined,
           builderSessions: connections.assignedSessionIds?.(w.id).length ?? 0,
         };
@@ -135,6 +139,9 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
     const job: ActiveVerifyJob = {
       jobId, workerId: req.workerId, workerName, kind: req.kind, sha: req.sha, tier: req.tier, stage: "queued", startedAt: new Date(deps.nowMs ?? Date.now()).toISOString(),
     };
+    // #1589: was this worker over capacity when the chain started (another chain beside it, or RAM under the reserve)?
+    const startView = (await registry.listWorkersView()).find((w) => w.id === req.workerId);
+    const atCapacity = workerWasAtCapacity(listActiveVerifyJobs().filter((j) => j.workerId === req.workerId).length, startView?.capacity?.freeRamGb);
     active.set(jobId, job);
     const chunks = new Map<number, string>();
     try {
@@ -187,6 +194,7 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
               timedOut: message.timedOut,
               failingSuites: message.failingSuites,
               durationMs: message.durationMs,
+              ...(failed && atCapacity && isTimeoutOnlyFailure(log) ? { loadSuspect: true } : {}),
               ...(message.refused ? { refused: message.refused, reason: message.reason } : {}),
             });
           }
