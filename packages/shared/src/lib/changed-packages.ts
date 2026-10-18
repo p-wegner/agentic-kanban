@@ -144,10 +144,17 @@ function normalise(path: string): string {
  *   change). `null` means "run everything" — callers must treat it as the safe default and
  *   never as "run nothing".
  */
-export function scopedTestPackages(changedFiles: readonly string[]): TestPackageLabel[] | null {
-  // No files means we could not see the diff (git failed, or the caller had no base branch).
-  // That is ignorance, not proof of a small change — refuse to scope.
-  if (!changedFiles || changedFiles.length === 0) return null;
+export function scopedTestPackages(
+  changedFiles: readonly string[],
+  opts: { diffRead?: boolean } = {},
+): TestPackageLabel[] | null {
+  // No files normally means we could not see the diff (git failed, or the caller had no base
+  // branch). That is ignorance, not proof of a small change — refuse to scope. A caller that
+  // READ the diff successfully and got nothing (an empty marker commit) says so via `diffRead`:
+  // nothing changed, so only the always-run packages apply.
+  if (!changedFiles || changedFiles.length === 0) {
+    return opts.diffRead ? LABEL_ORDER.filter((l) => ALWAYS_RUN.includes(l)) : null;
+  }
 
   const labels = new Set<TestPackageLabel>();
   for (const raw of changedFiles) {
@@ -189,8 +196,11 @@ export function scopedTestPackages(changedFiles: readonly string[]): TestPackage
  * The scope is now passed through verbatim. Every label in it is a `PACKAGES[].label` in
  * test-mine, and `test-mine-scope-labels.test.ts` holds the two lists in lockstep.
  */
-export function testPackagesEnvValue(changedFiles: readonly string[]): string | null {
-  const scope = scopedTestPackages(changedFiles);
+export function testPackagesEnvValue(
+  changedFiles: readonly string[],
+  opts: { diffRead?: boolean } = {},
+): string | null {
+  const scope = scopedTestPackages(changedFiles, opts);
   if (!scope) return null;
   return scope.length > 0 ? scope.join(",") : null;
 }

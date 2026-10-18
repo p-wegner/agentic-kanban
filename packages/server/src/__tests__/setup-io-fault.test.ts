@@ -14,24 +14,24 @@ const SAMPLE_OUTPUT = (storePath: string) =>
 describe("classifySetupFailure (#1125)", () => {
   it("classifies the recorded ERR_PNPM_UNKNOWN / errno -4094 signature as an io-fault", () => {
     const result = classifySetupFailure({
-      stdout: SAMPLE_OUTPUT("C:\\Users\\pwegner\\.pnpm-store\\v10\\files\\42\\a81d86"),
+      stdout: SAMPLE_OUTPUT("C:\\Users\\dev\\.pnpm-store\\v10\\files\\42\\a81d86"),
     });
     expect(result.kind).toBe("io-fault");
   });
 
   it("extracts the offending pnpm-store path from the syscall error", () => {
     const result = classifySetupFailure({
-      stdout: SAMPLE_OUTPUT("C:\\Users\\pwegner\\.pnpm-store\\v10\\files\\42\\a81d86"),
+      stdout: SAMPLE_OUTPUT("C:\\Users\\dev\\.pnpm-store\\v10\\files\\42\\a81d86"),
     });
     expect(result.kind).toBe("io-fault");
     if (result.kind === "io-fault") {
-      expect(result.offendingPath).toBe("C:\\Users\\pwegner\\.pnpm-store\\v10\\files\\42\\a81d86");
+      expect(result.offendingPath).toBe("C:\\Users\\dev\\.pnpm-store\\v10\\files\\42\\a81d86");
     }
   });
 
   it("does not extract a path outside the pnpm store — only the store is safe to delete unasked", () => {
     const result = classifySetupFailure({
-      stdout: "ERR_PNPM_UNKNOWN  UNKNOWN: unknown error, stat 'C:\\Users\\pwegner\\Documents\\secret.txt'",
+      stdout: "ERR_PNPM_UNKNOWN  UNKNOWN: unknown error, stat 'C:\\Users\\dev\\Documents\\secret.txt'",
     });
     expect(result.kind).toBe("io-fault");
     if (result.kind === "io-fault") {
@@ -97,7 +97,7 @@ describe("repairIoFault (#1125)", () => {
 
   it("reports honestly, never silently, when no offending path could be extracted", async () => {
     const classification = classifySetupFailure({
-      stdout: "ERR_PNPM_UNKNOWN  UNKNOWN: unknown error, stat 'C:\\Users\\pwegner\\Documents\\secret.txt'",
+      stdout: "ERR_PNPM_UNKNOWN  UNKNOWN: unknown error, stat 'C:\\Users\\dev\\Documents\\secret.txt'",
     });
     const result = await repairIoFault(classification);
     expect(result.attempted).toBe(false);

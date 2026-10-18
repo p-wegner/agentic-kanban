@@ -81,10 +81,10 @@ describe("translateHostPathsInArg", () => {
 describe("containerCommandFor", () => {
   it("reduces a host-resolved Windows absolute path to the bare program name", () => {
     // Regression: the live containerized launch died with exit 127,
-    // `exec: "C:\\Users\\pwegner\\.local\\bin\\claude.exe": executable file not
+    // `exec: "C:\\Users\\dev\\.local\\bin\\claude.exe": executable file not
     // found in $PATH`, because claude-provider resolves the command via
     // `where claude.exe` on the HOST before the config reaches the wrapper.
-    expect(containerCommandFor("C:\\Users\\pwegner\\.local\\bin\\claude.exe")).toBe("claude");
+    expect(containerCommandFor("C:\\Users\\dev\\.local\\bin\\claude.exe")).toBe("claude");
   });
 
   it("strips the other Windows executable suffixes", () => {
@@ -106,7 +106,7 @@ describe("containerCommandFor", () => {
 describe("wrapLaunchConfigForContainer", () => {
   it("passes the bare agent name to docker exec, never the host binary path", () => {
     const wrapped = wrapLaunchConfigForContainer(
-      baseConfig({ command: "C:\\Users\\pwegner\\.local\\bin\\claude.exe" }),
+      baseConfig({ command: "C:\\Users\\dev\\.local\\bin\\claude.exe" }),
       { handle: HANDLE, pathMappings: MAPPINGS },
     );
     const idIndex = wrapped.args.indexOf("abc123");

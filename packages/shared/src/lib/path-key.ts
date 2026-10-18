@@ -37,7 +37,7 @@ function stripTrailingSeparators(p: string): string {
 
 /**
  * `resolve`, then follow junctions/symlinks (#1289): `C:\projects\work` can be a
- * junction to `D:\projects\work`, while git reports the real path. A path that does
+ * junction to `<projects>\work`, while git reports the real path. A path that does
  * not exist yet resolves its deepest existing ancestor and re-appends the rest.
  */
 function realResolve(p: string): string {

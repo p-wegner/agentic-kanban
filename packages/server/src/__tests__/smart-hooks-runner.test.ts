@@ -32,7 +32,7 @@ describe("smart-hooks-runner wrong-checkout vitest guard", () => {
       {
         tool_name: "PowerShell",
         cwd: "C:/the-organisation/agentic-kanban",
-        transcript_path: "C:/Users/pwegner/.claude/projects/C--the-organisation--.worktrees--feature_ak-123/foo.jsonl",
+        transcript_path: "C:/Users/dev/.claude/projects/C--the-organisation--.worktrees--feature_ak-123/foo.jsonl",
       },
       "pnpm test:mine -- --changed HEAD",
     );
@@ -46,7 +46,7 @@ describe("smart-hooks-runner wrong-checkout vitest guard", () => {
       {
         tool_name: "Bash",
         cwd: "C:/the-organisation/.worktrees/feature_ak-123",
-        transcript_path: "C:/Users/pwegner/.claude/projects/C--the-organisation--.worktrees--feature_ak-123/foo.jsonl",
+        transcript_path: "C:/Users/dev/.claude/projects/C--the-organisation--.worktrees--feature_ak-123/foo.jsonl",
       },
       "cd C:/the-organisation/agentic-kanban && pnpm exec vitest packages/server/src/foo.test.ts",
     );
@@ -59,7 +59,7 @@ describe("smart-hooks-runner wrong-checkout vitest guard", () => {
       {
         tool_name: "PowerShell",
         cwd: "C:/the-organisation/.worktrees/feature_ak-123/packages/server",
-        transcript_path: "C:/Users/pwegner/.claude/projects/C--the-organisation--.worktrees--feature_ak-123/foo.jsonl",
+        transcript_path: "C:/Users/dev/.claude/projects/C--the-organisation--.worktrees--feature_ak-123/foo.jsonl",
       },
       "pnpm exec vitest related src/foo.test.ts",
     );

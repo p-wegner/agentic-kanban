@@ -334,8 +334,11 @@ import {
  * #1562: `ci-status.test.ts` at the ASSUMED 3,000 ms. It imports `scripts/promote-ci.mjs`, which no
  * package-local diff links to, with a `when:` territory of the promote CI/plan scripts, so an
  * ordinary diff does not pay it.
+ *
+ * #1599: `no-machine-local-paths-ratchet.test.ts` at the ASSUMED 3,000 ms. It greps every tracked
+ * text file for this machine's paths, and any diff can add one, so it has no `when:` territory.
  */
-const BASELINE_TOTAL_MS = 507_689;
+const BASELINE_TOTAL_MS = 510_689;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative

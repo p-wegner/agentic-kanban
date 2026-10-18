@@ -325,7 +325,7 @@ never leave it; clean config by default; setup installs claude+codex.
   pin the test ticket.
 
 - **Desktop partial path (D3-D5, used machine, `setup --no-install --config-dir
-  C:\Users\Peter\.claude-worker --state-file <fresh> --name --labels`):** D3 found #1398 (setup
+  C:\Users\dev\.claude-worker --state-file <fresh> --name --labels`):** D3 found #1398 (setup
   ignored --token with --config-dir; hints dropped flags), #1399 (false "login expired"), #1400
   (global install moved another worker's fallback build). D4 verified #1398/#1399, found #1401
   (doctor trust check read ~/.claude; shared default work root) and #1402 (old shim not repinned).
@@ -611,7 +611,7 @@ there, never merge from it). Repo-local `user.email` is now the GitHub noreply a
 - **Remote fleet worker clones** hold the old history: re-clone.
 - **Stable board** (`../agentic-kanban-stable`) is a worktree of this repo, moved to the
   rewritten `stable-20261003`; its built artifact is unchanged. Board servers are stopped.
-- **Tests:** typecheck green; `test:mine` full scope green (657 s, TEMP on `D:\tmp`). The
+- **Tests:** typecheck green; `test:mine` full scope green (657 s, TEMP on a scratch drive). The
   Dev Drive TEMP exposed a real `vital-file-guard` bug: `VITAL_FILES` was split on every `:`,
   so a `D:\…` vital file became the bare entry `D`, which matched any command containing a
   "d" and the real file was never backed up. Fixed in both copies, with a regression test.
@@ -1328,7 +1328,7 @@ Nothing was filed after the #1117 misfire, so these are recorded here rather tha
 
 ### Which `[db] opening` line is normal
 
-The stable board logs `[db] opening C:\Users\pwegner\.agentic-kanban\kanban.db (source: DB_URL)`;
+The stable board logs `[db] opening C:\Users\dev\.agentic-kanban\kanban.db (source: DB_URL)`;
 that is expected. A **worktree** server logging the same file with `(source: home-fallback)` has
 reached the operated DB — the #1095 hazard, not a normal path.
 
@@ -1841,7 +1841,7 @@ through this whole session until `pnpm promote` restarted it deliberately.
 
 ### Which `[db] opening` line is normal
 
-The stable board logs `[db] opening C:\Users\pwegner\.agentic-kanban\kanban.db (source: DB_URL)`;
+The stable board logs `[db] opening C:\Users\dev\.agentic-kanban\kanban.db (source: DB_URL)`;
 that is expected. A **worktree** server logging the same file with `(source: home-fallback)` has
 reached the operated DB. That is the #1095 hazard, not a normal path. The old "home-fallback is
 normal" flag (archived) predates the two-board split.
@@ -2390,7 +2390,7 @@ around that timestamp is the evidence, and a silent death with no log line is th
 ### Operator flag — RESOLVED, not open (corrected 2026-08-27)
 
 `packages/server/kanban.db` does not exist; CLI and server both open
-`C:\Users\pwegner\.agentic-kanban\kanban.db`. The `[db] opening ... (source: home-fallback)`
+`C:\Users\dev\.agentic-kanban\kanban.db`. The `[db] opening ... (source: home-fallback)`
 line is the NORMAL path, not a warning — do not re-file it as a defect.
 
 ## 2026-09-07 (evening) — the gate failures were the board KILLING ITS OWN verify runs (#1059)
@@ -2735,7 +2735,7 @@ The drawbridge was written but had never been RUN. Two runs on the live pair
   it sets `process.exitCode` now. Rehearsal exit code measured: **1**.
 - **Run 5 — a second real promotion**, `stable-20260905-5` on `6fa31957d`, so the stable board
   runs current master with all of the above. 3001: healthy, 17 projects, `agentic-kanban` present,
-  `[db] opening C:\\Users\\pwegner\\.agentic-kanban\\kanban.db (source: DB_URL)`. Dev board on 3101 untouched throughout (healthy, 0 projects).
+  `[db] opening C:\\Users\\dev\\.agentic-kanban\\kanban.db (source: DB_URL)`. Dev board on 3101 untouched throughout (healthy, 0 projects).
 - **Run 6 — the refusal, then a third real promotion (2026-09-05 10:02–10:05).** A plain
   `node scripts/promote.mjs` REFUSED on the direction check exactly as run 1's fix intended: the
   last green sweep (`168e2da63c`) is an ancestor of what stable already ran, so there was nothing
