@@ -5,6 +5,8 @@
 //   1. skills mirror (#1576)
 //   2. check-god-modules.mjs on the STAGED files only (line ceiling needs no deps; branch count uses typescript when present)
 //   3. @gate:always-run ratchets whose `when:` territory the staged files match, within a 10 s budget
+// WARNING ONLY until #1613 (code-health posture) defines hard caps: findings print but never block.
+// Turning blocking on is one edit: make shouldBlock() return true for hard-cap findings.
 // Fails OPEN on anything that is not a verdict (no deps, timeout, spawn error); only a completed non-zero exit blocks.
 // Bypass for a genuine emergency: git commit --no-verify.
 import { spawnSync } from "node:child_process";
@@ -15,6 +17,13 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const GUARD_BUDGET_MS = 10_000;
 const SOURCE = /^packages\/[^/]+\/src\/.*\.tsx?$/;
+
+/** The single switch for blocking (#1613). `finding.kind` is "god-module" | "ratchet". Soft breaches never block. */
+export function shouldBlock(_finding) {
+  return false;
+}
+
+const WARN_NOTE = "[pre-commit] warning only until #1613 (code-health posture) defines hard caps — commit not blocked.";
 
 function run(args, opts = {}) {
   return spawnSync(process.execPath, args, { cwd: ROOT, stdio: "inherit", windowsHide: true, ...opts });
@@ -36,8 +45,9 @@ export function main() {
     const r = run([join(ROOT, "scripts", "check-god-modules.mjs"), "--files", sources.join(",")]);
     // 3 = UNVERIFIED (no typescript): not a verdict, never blocks a commit.
     if (r.status === 1) {
-      console.error("[pre-commit] god-module guard failed on staged files — fix above, re-stage, commit again.");
-      return 1;
+      console.error("[pre-commit] god-module guard flagged staged files — see the fix text above.");
+      if (shouldBlock({ kind: "god-module" })) return 1;
+      console.error(WARN_NOTE);
     }
   }
 
@@ -50,8 +60,9 @@ export function main() {
     if (r.error || r.signal) {
       console.error(`[pre-commit] ratchet check exceeded ${GUARD_BUDGET_MS / 1000}s or could not run — skipped (the train still runs it).`);
     } else if (r.status !== 0) {
-      console.error("[pre-commit] a ratchet whose territory your staged files touch failed — fix above, re-stage, commit again.");
-      return 1;
+      console.error("[pre-commit] a ratchet whose territory your staged files touch failed — see above.");
+      if (shouldBlock({ kind: "ratchet" })) return 1;
+      console.error(WARN_NOTE);
     }
   }
   return 0;
