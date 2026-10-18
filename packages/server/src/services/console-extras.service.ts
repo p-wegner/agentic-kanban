@@ -10,6 +10,9 @@ import { listRecentEndedSessions } from "../repositories/console-stalls.reposito
 import { currentRcCandidate, readRcState, resolveStableCheckoutFor, toRcCandidateSummary } from "./rc-state.js";
 import { parseVerifyPlacement, parseVerifyWorkerAllowlist, verifyPlacementPrefKey, verifyWorkersPrefKey, type VerifyPlacement } from "./verify-placement.js";
 import { getCiSnapshot } from "./ci-status.service.js";
+import { describeCodeHealth, resolveProjectCodeHealth } from "./code-health.service.js";
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { getConnectCodeStore } from "./worker-connect-code.service.js";
 import { listVerifyChains, type VerifyChainSnapshotEntry } from "./verify-chain-semaphore.js";
 
@@ -26,6 +29,8 @@ export interface ConsoleExtras {
   connectCodes: Array<{ codeHint: string; status: string; expiresAt: string; progress: Array<{ step: string; status: string; at: string }> }>;
   /** #1562: sustained-red GitHub workflows on the base branch ("CI red: arch-gate since …, run <url>"). */
   ciRed: string[];
+  /** #1619: `code health: 7 soft breaches in 4 files, cleanup ticket at 10 (relaxed)` from the latest scan; null before any soft breach was recorded. */
+  codeHealth: string | null;
 }
 
 const STALL_WINDOW_MS = 6 * 3600 * 1000;
@@ -57,7 +62,14 @@ export async function buildConsoleExtras(projectId: string, database: Database, 
     const c = classifyStall(s.stderrTail);
     if (c) stalls.push({ issueNumber: s.issueNumber, kind: c.kind, text: c.text, at: s.endedAt });
   }
+  let codeHealth: string | null = null;
+  try {
+    const prefMap = toPrefMap(await getAllPreferencesCached(database));
+    const status = describeCodeHealth(await resolveProjectCodeHealth(projectId, prefMap), prefMap, projectId);
+    codeHealth = status.openSoftBreaches > 0 ? status.line : null;
+  } catch { codeHealth = null; }
   return {
+    codeHealth,
     chains: listVerifyChains(nowMs),
     baseHealth: health
       ? { outcome: health.outcome, sha: health.sha, branch: health.branch, createdAt: health.createdAt, message: health.message ?? null, failedSuites: decodeFailedSuites(health.failedSuites) }
