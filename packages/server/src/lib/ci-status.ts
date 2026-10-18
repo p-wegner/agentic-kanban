@@ -131,11 +131,20 @@ export interface CiSnapshot {
   red: Array<{ workflow: string; since: string | null; runUrl: string; sha: string; runs: number; text: string }>;
 }
 
-export function toCiSnapshot(branch: string, states: readonly WorkflowCiState[], checkedAt: string): CiSnapshot {
+/** Console line for a red run whose branch has moved on locally: the fix may simply not be pushed (#1597). */
+export function formatCiRedUnpushed(state: WorkflowCiState, commitsAhead: number): string {
+  return `${formatCiRed(state)} — ${commitsAhead} commit${commitsAhead === 1 ? "" : "s"} not pushed; the fix may already be local`;
+}
+
+/** `commitsAheadByWorkflow`: base-branch commits beyond the red run's head sha, per workflow (absent/0 = none). */
+export function toCiSnapshot(branch: string, states: readonly WorkflowCiState[], checkedAt: string, commitsAheadByWorkflow: ReadonlyMap<string, number> = new Map()): CiSnapshot {
   return {
     branch,
     checkedAt,
-    red: sustainedRed(states).map((s) => ({ workflow: s.workflow, since: s.redSince, runUrl: s.latest.url, sha: s.latest.headSha, runs: s.redRuns, text: formatCiRed(s) })),
+    red: sustainedRed(states).map((s) => {
+      const ahead = commitsAheadByWorkflow.get(s.workflow) ?? 0;
+      return { workflow: s.workflow, since: s.redSince, runUrl: s.latest.url, sha: s.latest.headSha, runs: s.redRuns, text: ahead > 0 ? formatCiRedUnpushed(s, ahead) : formatCiRed(s) };
+    }),
   };
 }
 
