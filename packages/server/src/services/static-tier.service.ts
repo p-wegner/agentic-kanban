@@ -11,8 +11,9 @@
  *  - the train staging gate, BEFORE the suite run, so a combination red (two branches each fine,
  *    together over a ceiling) costs seconds and the fix agent gets the guard's own message.
  *
- * Fails OPEN on anything that is not a verdict: no script (another project), no installed
- * dependencies (a worker built the tree), a hang, a spawn error. Only a completed non-zero exit is red.
+ * Fails OPEN on anything that is not a verdict: no script (another project), a hang, a spawn
+ * error. A tree with no installed dependencies (a worker built it, #1603) still runs the
+ * dependency-free god-module ceiling, and says it ran only that. Only a completed non-zero exit is red.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -23,6 +24,8 @@ import type { PreMergeGateResult } from "./pre-merge-gate.types.js";
 import { withFailedSuites } from "./verify-failed-suites.js";
 
 export const STATIC_TIER_COMMAND = "node scripts/check-static.mjs";
+/** #1603: the dependency-free slice (line ceiling + cohesion), run when the tree has no node_modules. */
+export const STATIC_TIER_LITE_COMMAND = "node scripts/check-god-modules.mjs";
 const STATIC_TIER_TIMEOUT_MS = 5 * 60 * 1000;
 /** Enough of the guard's own output to carry the rule and the fix (check:arch prints both). */
 const DETAIL_TAIL_CHARS = 4000;
@@ -32,16 +35,18 @@ export interface StaticTierVerdict {
   ran: boolean;
   /** True when green, or when nothing ran (fail open). */
   passed: boolean;
+  /** #1603: true when only the dependency-free slice (god-modules) ran because the tree has no deps. */
+  degraded?: boolean;
   /** One line for the log. */
   message: string;
   /** On red: the guard's own output, tail-trimmed. */
   detail: string | null;
 }
 
-export type StaticTierRunner = (workingDir: string, env: Record<string, string>, signal?: AbortSignal) => Promise<SetupScriptResult>;
+export type StaticTierRunner = (workingDir: string, env: Record<string, string>, signal?: AbortSignal, command?: string) => Promise<SetupScriptResult>;
 
-const runOnHost: StaticTierRunner = (workingDir, env, signal) =>
-  runSetupScript(workingDir, STATIC_TIER_COMMAND, { timeoutMs: STATIC_TIER_TIMEOUT_MS, env, signal });
+const runOnHost: StaticTierRunner = (workingDir, env, signal, command = STATIC_TIER_COMMAND) =>
+  runSetupScript(workingDir, command, { timeoutMs: STATIC_TIER_TIMEOUT_MS, env, signal });
 
 function notRun(message: string): StaticTierVerdict {
   return { ran: false, passed: true, message, detail: null };
@@ -66,23 +71,25 @@ export async function runStaticTier(args: {
   memberGuards?: boolean;
 }): Promise<StaticTierVerdict> {
   const { workingDir, baseBranch, signal } = args;
-  const skip = staticTierSkipReason({
-    hasScript: existsSync(join(workingDir, "scripts", "check-static.mjs")),
-    hasDeps: existsSync(join(workingDir, "node_modules")),
-  });
-  if (skip) return notRun(`static tier skipped: ${skip}`);
+  const hasScript = existsSync(join(workingDir, "scripts", "check-static.mjs"));
+  const hasDeps = existsSync(join(workingDir, "node_modules"));
+  const skip = staticTierSkipReason({ hasScript, hasDeps });
+  // #1603: a remote builder's host tree has no install, but the line ceiling needs none - run that slice.
+  const degraded = !skip ? false : hasScript && !hasDeps && existsSync(join(workingDir, "scripts", "check-god-modules.mjs"));
+  if (skip && !degraded) return notRun(`static tier skipped: ${skip}`);
+  const label = degraded ? "static tier (degraded: god-module ceiling only, no installed dependencies)" : "static tier";
   try {
     const changed = args.changedFiles ?? (baseBranch ? await getChangedFileNames(workingDir, baseBranch).catch(() => [] as string[]) : []);
     const result = await (args.run ?? runOnHost)(workingDir, {
       KANBAN_ARCH_CHANGED_FILES: changed.join(","),
-      ...(args.memberGuards ? { KANBAN_STATIC_MEMBER_GUARDS: "1" } : {}),
-    }, signal);
-    if (result.timedOut) return notRun("static tier timed out (inconclusive, not red)");
-    if (result.exitCode === 0) return { ran: true, passed: true, message: "static tier passed (check:static)", detail: null };
+      ...(args.memberGuards && !degraded ? { KANBAN_STATIC_MEMBER_GUARDS: "1" } : {}),
+    }, signal, degraded ? STATIC_TIER_LITE_COMMAND : STATIC_TIER_COMMAND);
+    if (result.timedOut) return notRun(`${label} timed out (inconclusive, not red)`);
+    if (result.exitCode === 0) return { ran: true, passed: true, ...(degraded ? { degraded } : {}), message: `${label} passed (${degraded ? "check-god-modules" : "check:static"})`, detail: null };
     // exit 3 is check:arch's "could not verify" (no typescript here), a missing runtime — not a finding.
-    if (result.exitCode === 3 || result.exitCode < 0) return notRun(`static tier could not verify (exit ${result.exitCode})`);
+    if (result.exitCode === 3 || result.exitCode < 0) return notRun(`${label} could not verify (exit ${result.exitCode})`);
     const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
-    return { ran: true, passed: false, message: `static tier FAILED (check:static, exit ${result.exitCode})`, detail: output.slice(-DETAIL_TAIL_CHARS) };
+    return { ran: true, passed: false, ...(degraded ? { degraded } : {}), message: `${label} FAILED (${degraded ? "check-god-modules" : "check:static"}, exit ${result.exitCode})`, detail: output.slice(-DETAIL_TAIL_CHARS) };
   } catch (err) {
     return notRun(`static tier errored (not red): ${errorMessage(err)}`);
   }

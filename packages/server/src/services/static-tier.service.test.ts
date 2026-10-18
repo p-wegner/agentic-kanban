@@ -65,6 +65,25 @@ describe("static tier", () => {
     expect(verdict).toMatchObject({ ran: false, passed: true });
   });
 
+  it("#1603: a tree with no deps still runs the god-module ceiling and is red when breached", async () => {
+    const dir = tree({ script: true, deps: false });
+    writeFileSync(join(dir, "scripts", "check-god-modules.mjs"), "console.error('merge-train.service.ts 1022/1000'); process.exit(1);");
+    const verdict = await runStaticTier({ workingDir: dir, baseBranch: "master" });
+    expect(verdict).toMatchObject({ ran: true, passed: false, degraded: true });
+    expect(verdict.message).toContain("god-module ceiling only");
+    expect(verdict.detail).toContain("1022/1000");
+  });
+
+  it("#1603: the degraded run passes green and says it was degraded", async () => {
+    const dir = tree({ script: true, deps: false });
+    writeFileSync(join(dir, "scripts", "check-god-modules.mjs"), "");
+    const run = vi.fn<StaticTierRunner>(async () => result(0));
+    const verdict = await runStaticTier({ workingDir: dir, baseBranch: "master", run, memberGuards: true });
+    expect(verdict).toMatchObject({ ran: true, passed: true, degraded: true });
+    expect(run.mock.calls[0][3]).toBe("node scripts/check-god-modules.mjs");
+    expect(run.mock.calls[0][1].KANBAN_STATIC_MEMBER_GUARDS).toBeUndefined();
+  });
+
   it("the train pre-step returns a red gate result, or null to carry on", async () => {
     const red = await runStaticTierGate(tree(), "master", undefined, undefined).catch(() => null);
     // The real runner is not stubbed here: a tree with an empty script exits 0 under node.

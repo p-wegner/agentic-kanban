@@ -147,10 +147,12 @@ async function readTypecheckCommand(projectId: string, database: Database): Prom
 }
 
 /** One log-line suffix saying whether the static part ran and passed (#1546). */
-export function staticTierNote(verdict: { ran: boolean; passed: boolean } | null): string {
+export function staticTierNote(verdict: { ran: boolean; passed: boolean; degraded?: boolean; message?: string } | null): string {
   if (!verdict) return "static tier: not run (no worktree)";
-  if (!verdict.ran) return "static tier: skipped";
-  return verdict.passed ? "static tier: passed" : "static tier: FAILED";
+  // #1603: never a bare "skipped" - name why, so a missing install is not mistaken for a pass.
+  if (!verdict.ran) return verdict.message ? `static tier: skipped (${verdict.message.replace(/^static tier\s*/, "")})` : "static tier: skipped";
+  const scope = verdict.degraded ? " (god-module ceiling only - no installed dependencies)" : "";
+  return verdict.passed ? `static tier: passed${scope}` : `static tier: FAILED${scope}`;
 }
 
 /** The static-tier verdict, plus a red result for the builder's feedback turn when it failed. */
