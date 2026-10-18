@@ -45,6 +45,8 @@ export interface OneShotRepoContext {
   /** The project repo the worker's git transport serves (and where the temporary branch is pinned). */
   repoPath: string;
   baseBranch?: string;
+  /** #1609: a train label; when the worker's fix cannot be applied it is kept on `kanban/train-fix/<label>`. */
+  keepFixAs?: string;
 }
 
 export interface OneShotDispatchArgs {
@@ -176,12 +178,22 @@ async function buildRequest(
 }
 
 /** Fast-forward the board-side working tree onto the commit the worker pushed. */
-async function applyWorkerFix(cwd: string, sha: string): Promise<void> {
+async function applyWorkerFix(cwd: string, sha: string, keep?: { repoPath: string; label: string }): Promise<void> {
   try {
     await gitExecOrThrow(["merge", "--ff-only", sha], { cwd });
   } catch (err) {
-    throw new Error(`could not apply the worker's fix ${sha.slice(0, 8)} to ${cwd}: ${errorMessage(err).slice(0, 300)}`);
+    // #1609: a cancelled train removes or moves its tree; the shepherd's commit must outlive that.
+    const ref = keep ? await keepTrainFix(keep.repoPath, keep.label, sha) : null;
+    const kept = ref ? `; the fix is kept on ${ref} (reuse it with \`train land-local\` or the next train)` : "";
+    throw new Error(`could not apply the worker's fix ${sha.slice(0, 8)} to ${cwd}: ${errorMessage(err).slice(0, 300)}${kept}`);
   }
+}
+
+/** Pin the fix commit to `refs/heads/kanban/train-fix/<label>`; null when it could not be written. */
+export async function keepTrainFix(repoPath: string, label: string, sha: string): Promise<string | null> {
+  const ref = `kanban/train-fix/${label.replace(/[^A-Za-z0-9._-]/g, "-")}`;
+  const res = await gitExec(["update-ref", `refs/heads/${ref}`, sha], { cwd: repoPath }).catch(() => null);
+  return res && execSucceeded(res) ? ref : null;
 }
 
 /**
@@ -252,7 +264,10 @@ async function settle(
     if (result.launchFailed) return unavailable(`${where} could not launch the one-shot: ${result.error ?? "unknown"}`);
     throw new Error(`${where} one-shot failed: ${result.error ?? "unknown"}`);
   }
-  if (result.pushedSha && args.cwd) await applyWorkerFix(args.cwd, result.pushedSha);
+  if (result.pushedSha && args.cwd) {
+    const keepFixAs = args.repo?.keepFixAs;
+    await applyWorkerFix(args.cwd, result.pushedSha, keepFixAs && args.repo ? { repoPath: args.repo.repoPath, label: keepFixAs } : undefined);
+  }
   console.log(`[oneshot] ran on ${where} (request ${request.requestId}${result.pushedSha ? `, fix ${result.pushedSha.slice(0, 8)}` : ""})`);
   return { handled: true, text: result.text ?? "", worker: placement.workerId };
 }
