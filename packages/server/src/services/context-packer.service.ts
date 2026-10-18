@@ -15,6 +15,7 @@ import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { isTerminalStatusView } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { buildPhaseArtifactsContext } from "./phase-artifacts.service.js";
+import { extractNamedPaths, formatCeilingHeadroom, measureCeilingHeadroom } from "./ceiling-headroom.js";
 import {
   getCandidateIssuesForProject,
   getIssuesMatchingFileBaseNames,
@@ -195,6 +196,14 @@ export async function buildContextPrimer(
       .slice(0, 4);
   } catch { /* best-effort */ }
 
+  // ---- 6. Ceiling headroom for the files the ticket names / likely touches (#1606)
+  let ceilingHeadroom: string | null = null;
+  try {
+    const named = extractNamedPaths(fullText);
+    const files = [...new Set([...named, ...relevantFiles])];
+    ceilingHeadroom = formatCeilingHeadroom(await measureCeilingHeadroom(repoPath, files));
+  } catch { /* best-effort */ }
+
   // ---- Assemble primer ------------------------------------------------
   const sections: string[] = [];
 
@@ -209,6 +218,8 @@ export async function buildContextPrimer(
     sections.push(relevantFiles.map((f) => `- \`${f}\``).join("\n"));
     sections.push("");
   }
+
+  if (ceilingHeadroom) sections.push(ceilingHeadroom);
 
   if (priorIssues.length > 0) {
     sections.push("### Similar Completed Tickets\n");

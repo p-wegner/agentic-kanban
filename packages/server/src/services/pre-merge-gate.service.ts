@@ -21,6 +21,9 @@ import { describeOutstandingRepoInstalls } from "./pre-merge-gate-installs.js";
 import { describeFailedSetupRun } from "./pre-merge-gate-setup-failure.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { buildSmokeCheck, getStackProfile, resolveEffectiveVerify } from "./stack-profile.service.js";
+import { runSmokeStage } from "./pre-merge-gate-smoke.js";
+import { recordFlakySuitesAsRedDebt } from "./pre-merge-gate-flaky-debt.js";
+import { resolveMergeGateWith } from "./merge-gate-resolve.js";
 import { resolveProjectDevServerPlan } from "./dev-server.service.js";
 import { quiesceBuildersEnabled, resolveGateHostAdmission } from "./gate-quiesce.js";
 import { planGateRun, runInHostBuildSlotUnlessOnWorker, runVerifyChainForPlacement, type GateScriptRunner } from "./pre-merge-gate-placement.js";
@@ -92,9 +95,7 @@ export {
   type ResolvedVerifyWorkers,
 };
 
-// `verify_gate_strategy` (the named tier pref), the always-run guard-suite scan, and the
-// pass-message builder live in `pre-merge-gate-tier.ts` (#538) — kept out of this file to stay
-// under the god-module cohesion ceiling (`max-file-size.test.ts` / `check-god-modules.mjs`).
+// `verify_gate_strategy`, the always-run guard scan and the pass-message builder live in `pre-merge-gate-tier.ts` (#538).
 
 /**
  * Failure-message signature of a verify_script that couldn't even resolve its own
@@ -107,39 +108,6 @@ export {
 export { summarizeVerifyFailure };
 
 export { looksLikeMissingDepsFailure, missingDepsEvidence } from "./missing-deps-signature.js";
-
-/**
- * Open a `flaky`-tagged red-debt ledger entry for every suite #894's targeted re-run just
- * cleared (#915). Recording it here means the NEXT gate can consult the ledger's subset rule
- * instead of paying for another 45-minute full re-run to rediscover the same load-induced
- * flake. Best-effort by construction: an unrecordable entry must never turn a passing gate red.
- *
- * The subset rule (#915) compares ledger suite names against `failedSuitesForOutcome`'s output
- * (`failed-suite-parse.ts`), which never carries a package prefix — it normalizes to a bare
- * forward-slash path. `FailedSuite.file` here is ALREADY in that shape (`verify-flake-retry.ts`
- * strips ANSI and backslashes the same way); `packageLabel` exists only to disambiguate
- * same-named files across packages during the retry itself and must NOT be prepended here, or a
- * suite this ledgers as `flaky` would never string-match the base-health probe's un-prefixed
- * name on the next gate run — silently defeating the exact quarantine this exists to provide.
- */
-async function recordFlakySuitesAsRedDebt(args: {
-  flakySuites: FailedSuite[] | undefined;
-  projectId: string;
-  workingDir: string | null;
-  database: Database;
-}): Promise<void> {
-  const { flakySuites, projectId, workingDir, database } = args;
-  if (!flakySuites || flakySuites.length === 0) return;
-  const sinceCommit = workingDir
-    ? ((await revParse(workingDir, "HEAD").catch(() => null)) ?? "unknown")
-    : "unknown";
-  for (const suite of flakySuites) {
-    const suiteName = suite.file;
-    await openRedDebtEntry({ projectId, suite: suiteName, sinceCommit, tag: "flaky" }, database).catch((err) => {
-      console.warn(`[pre-merge-gate] failed to open flaky red-debt entry for ${suiteName} (non-fatal):`, errorMessage(err));
-    });
-  }
-}
 
 export type { PreMergeGateWorkspace, PreMergeGateResult } from "./pre-merge-gate.types.js";
 
@@ -746,81 +714,11 @@ export async function runPreMergeGate(
     }
   }
 
-  // ---- #791 boot/render smoke gate ---------------------------------------------------------
-  // Profile load needs no worktree, so detect "gate applies" before checking workingDir.
-  let smokeApplies = false;
-  // #644: set when the smoke block errored out rather than reaching a verdict. The whole block
-  // used to sit inside ONE catch that logged a warning and fell through to `passed: true`, and
-  // the final message then reported the verify tier as if nothing had been skipped — so an
-  // infrastructure failure in the boot check was indistinguishable from a clean pass. Still
-  // non-fatal (a harness error must not withhold an otherwise-green merge), but no longer
-  // silent: the gate says "smoke inconclusive" and names why.
-  let smokeInconclusive: string | null = null;
-  try {
-    const profile = await getStackProfile(projectId, database);
-    // #657: resolve the same dev-server plan the Diagnostics tab and the dev-server skill
-    // use, so an operator's `health_url_<projectId>` / `dev_command_<projectId>` reaches the
-    // merge gate too. It also supplies the port for a project whose dev ports are computed at
-    // RUNTIME — this repo's own 3001+N/5173+N worktree math, which no static package.json read
-    // can know, and which left `devPort: null` and the smoke gate permanently inert.
-    const plan = await resolveProjectDevServerPlan(projectId, database, {
-      profile,
-      workingDir: workspace.workingDir,
-      isSelfProject: isSelfRepo,
-    }).catch((err: unknown) => {
-      // Non-fatal on purpose: a failed plan read degrades to the profile-only smoke check
-      // that existed before, rather than turning the whole gate inconclusive.
-      console.warn(`[pre-merge-gate] dev-server plan unavailable for project ${projectId}:`, errorMessage(err));
-      return null;
-    });
-    const smokeCheck = buildSmokeCheck(profile, plan);
-    if (smokeCheck) {
-      if (!workspace.workingDir) {
-        // Fail-closed: smoke (UI) gate applies but can't run without a worktree (#826).
-        return { passed: false, skipped: false, stage: "smoke", message: "smoke/UI gate applies (web project) but workspace has no worktree — cannot verify" };
-      }
-      // #198: a docs-only diff can never change boot/render behavior, so skip the (expensive,
-      // cold-JVM-hostile) smoke boot entirely rather than pay for a check whose outcome can't
-      // have changed. `docsOnly` is computed once at the top of the gate from the same diff
-      // read — it is false whenever we could not SEE the diff, so an unknown diff still runs
-      // the smoke check exactly as before.
-      if (docsOnly) {
-        console.log(`[pre-merge-gate] skipping smoke check for workspace ${workspace.id} — diff touches only docs (#198)`);
-      } else {
-        smokeApplies = true;
-        noteMergeGatePhase(workspace.id, "smoke", "boot + render check");
-        // #1095: the smoke boot starts a SECOND full board process next to the live one, and
-        // without isolation it inherits the live board's KANBAN_DB_URL/listener pins (or, absent
-        // those, still resolves the operated `~/.agentic-kanban/kanban.db` home-fallback) — so it
-        // reattached a live agent session and ran its own monitor cycle (auto-merge selection,
-        // auto-start) against the OPERATED database. Same isolation the verify half already gets
-        // (#231, see createSmokeIsolation below): a throwaway AGENTIC_KANBAN_DIR plus the
-        // neutralized DB-location/listener env, and — since even a throwaway DB should not run a
-        // monitor loop — background services skipped outright for this boot.
-        const smokeIsolation = createSmokeIsolation();
-        try {
-          // #949: the chain semaphore, not just the build semaphore. This boots a real dev server
-          // and polls a health URL; under the build semaphore alone (derived width up to 8) it ran
-          // freely alongside ANOTHER gate's verify chain, which is the contention #903 set out to
-          // remove and only removed for the verify half.
-          const smoke = await runUnderVerifyChainSemaphore(
-            () => runUnderBuildSemaphore(() => runSmokeCheck(workspace.workingDir!, smokeCheck, { env: smokeIsolation.env })),
-            `smoke check for workspace ${workspace.id}`,
-          );
-          if (!smoke.passed) {
-            return { passed: false, skipped: false, stage: "smoke", message: `smoke check failed: ${smoke.message}` };
-          }
-        } finally {
-          smokeIsolation.disposeAndWarn(`workspace ${workspace.id}`);
-        }
-      }
-    }
-  } catch (smokeErr) {
-    // NON-FATAL: a harness error (not a failed boot) must not block an otherwise-passing merge.
-    // But it must not be invisible either (#644) — record it so the gate message says so.
-    smokeInconclusive = errorMessage(smokeErr);
-    console.warn(`[pre-merge-gate] smoke check errored (non-fatal) for workspace ${workspace.id}:`, smokeInconclusive);
-  }
+  // #791 boot/render smoke stage — see `pre-merge-gate-smoke.ts`.
+  const smoke = await runSmokeStage({ workspace, projectId, database, isSelfRepo, docsOnly });
+  if (smoke.failure) return smoke.failure;
+  const smokeApplies = smoke.applies;
+  const smokeInconclusive = smoke.inconclusive;
 
   // #660 — the E2E smoke lane, opt-in per project. Lives in `e2e-smoke-lane.ts` with the
   // runner and the decision it acts on; this file only consumes the verdict.
@@ -904,92 +802,10 @@ export {
 } from "./merge-gate-token.js";
 export type { MergeGateEvidence, MergeGateShas, MergeGateToken, ResolvedMergeGate } from "./merge-gate-token.js";
 
-async function runGateAsResolved(
-  workspace: PreMergeGateWorkspace,
-  projectId: string | null,
-  database: Database,
-): Promise<Omit<ResolvedMergeGate, "decision">> {
-  // No project → nothing to look up a gate config against; a clean no-op (mirrors the
-  // pre-refactor `if (project && ...)` guard in doMerge).
-  if (!projectId) {
-    return { passed: true, ran: false, stage: "none", message: "no project — no pre-merge gate applies" };
-  }
-  const gate = await runPreMergeGate(workspace, projectId, database);
-  return {
-    passed: gate.passed,
-    ran: !gate.skipped,
-    stage: gate.stage,
-    message: gate.message,
-    ...(gate.unverified ? { unverified: true } : {}),
-    // #1057 — a HELD gate must stay distinguishable from a red one all the way out to the
-    // caller: it did not run, so "the gate failed" would be a false claim about the diff.
-    ...(gate.held ? { held: true } : {}),
-    ...(gate.impactSelection !== undefined ? { impactSelection: gate.impactSelection } : {}),
-  };
-}
-
-/**
- * Single OWNER of the pre-merge gate DECISION for every merge trigger path.
- *
- * Resolves the caller's {@link MergeGateToken} into whether the merge may proceed,
- * running the shared {@link runPreMergeGate} only when the token says to (or when an
- * `already-passed` token's evidence is stale/absent — the fail-safe that closes the
- * TOCTOU-by-boolean window). `skip-explicit` and valid `already-passed` tokens return
- * `passed: true` WITHOUT running an (expensive) build/boot again.
- */
-export async function resolveMergeGate(args: {
-  token: MergeGateToken;
-  workspace: PreMergeGateWorkspace;
-  projectId: string | null;
-  database: Database;
-  /** Injectable clock for staleness tests; defaults to Date.now(). */
-  now?: number;
-  /**
-   * Injectable current branch/base tips for content-keyed evidence validation; defaults to
-   * reading them from the worktree. Pass this in tests instead of building a real repo.
-   */
-  currentShas?: MergeGateShas;
-}): Promise<ResolvedMergeGate> {
-  const { token, workspace, projectId, database } = args;
-  const now = args.now ?? Date.now();
-
-  if (token.kind === "skip-explicit") {
-    return { passed: true, ran: false, stage: "none", message: `pre-merge gate skipped (explicit): ${token.reason}`, decision: "skip-explicit" };
-  }
-
-  if (token.kind === "already-passed") {
-    // Resolve the CURRENT tips so the evidence can be checked against the state actually
-    // about to merge. `args.currentShas` lets tests pin this without a real repo.
-    const currentShas = args.currentShas ?? (await resolveMergeGateShas(workspace));
-    if (evidenceIsValid(token.evidence, now, currentShas)) {
-      return {
-        passed: true,
-        ran: false,
-        stage: token.evidence.stage,
-        message: `pre-merge gate already passed (${token.evidence.source}, stage ${token.evidence.stage}, ran ${token.evidence.ranAt}`
-          + `${token.evidence.branchSha ? `, branch ${token.evidence.branchSha.slice(0, 8)}` : ""}`
-          + `${token.evidence.baseSha ? `, base ${token.evidence.baseSha.slice(0, 8)}` : ""})`,
-        decision: "already-passed",
-      };
-    }
-    // Stale/absent/fabricated proof → do NOT trust it; run the gate now (closes #943 TOCTOU).
-    // #936/#1220 — the discard reason names WHAT MOVED (branch/base/neither), built in its
-    // own module (see merge-gate-verdict-reason.ts for why the message matters).
-    const reason = buildStaleVerdictReason(token.evidence, currentShas);
-    console.warn(
-      `[merge-gate] workspace ${workspace.id}: DISCARDING an already-passed verdict from `
-        + `${token.evidence.source} (stage ${token.evidence.stage}, ran ${token.evidence.ranAt}) — `
-        + `${reason} — so the gate is being re-run in full (#936).`,
-    );
-    const result = await runGateAsResolved(workspace, projectId, database);
-    return { ...result, decision: "run-gate-stale-evidence" };
-  }
-
-  const result = await runGateAsResolved(workspace, projectId, database);
-  return { ...result, decision: "run-gate" };
-}
-
 // #546's "does this project have a gate" answer lives in ./merge-gate-config.ts (moved when #1231
 // pushed this file past the god-module line ceiling); re-exported so every importer keeps working.
 export { resolveMergeGateConfig } from "./merge-gate-config.js";
 export type { MergeGateConfig } from "./merge-gate-config.js";
+
+/** The #943 merge-gate decision owner (see merge-gate-resolve.ts), bound to this module's `runPreMergeGate`. */
+export const resolveMergeGate = (args: Parameters<typeof resolveMergeGateWith>[1]): ReturnType<typeof resolveMergeGateWith> => resolveMergeGateWith(runPreMergeGate, args);

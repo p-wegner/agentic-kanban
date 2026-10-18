@@ -6059,6 +6059,78 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{id}/code-health/report:
+    post:
+      summary: ledger; the Nth breach files ONE cleanup ticket, later ones append to it. Never blocks.
+      tags:
+        - board-monitor
+      operationId: post_api_projects_id_code-health_report
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                softBreaches:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      file:
+                        type: string
+                      metric:
+                        type: string
+                        enum:
+                          - lines
+                          - branches
+                          - declarations
+                      value:
+                        type: number
+                      cap:
+                        type: number
+                      detail:
+                        type: string
+                    required:
+                      - file
+                      - metric
+                      - value
+                      - cap
+                    additionalProperties: true
+                    x-unknown-keys: stripped
+                ref:
+                  type: string
+              required:
+                - softBreaches
+              additionalProperties: true
+              x-unknown-keys: stripped
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/conductor:
     post:
       summary: calls this when the user picks "conductor" (start) vs manual/monitor (stop).
@@ -6360,6 +6432,72 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/land-local/worker-gate:
+    post:
+      summary: POST /api/projects/:id/land-local/worker-gate
+      tags:
+        - project-land-local
+      operationId: post_api_projects_id_land-local_worker-gate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                branch:
+                  type: string
+                  minLength: 1
+                sha:
+                  type: string
+                  minLength: 1
+                steps:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      command:
+                        type: string
+                        minLength: 1
+                    required:
+                      - name
+                      - command
+                    additionalProperties: true
+                    x-unknown-keys: stripped
+                  minItems: 1
+                changedFiles:
+                  type: array
+                  items:
+                    type: string
+                workerName:
+                  type: string
+                  minLength: 1
+              required:
+                - branch
+                - sha
+                - steps
+                - changedFiles
+              additionalProperties: true
+              x-unknown-keys: stripped
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}

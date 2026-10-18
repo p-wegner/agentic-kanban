@@ -7,6 +7,7 @@ import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 import { listOpenHealTickets } from "./base-health-heal-ticket.service.js";
 import { resolveBaseRedVeto } from "./merge-train-base-veto.js";
+import { describeCodeHealth, resolveProjectCodeHealth } from "./code-health.service.js";
 import { describeBaseSweep, resolveRiskPosture, type RiskPosture } from "./risk-posture.service.js";
 import { detectPostureOverrides } from "./posture-overrides.js";
 import { requireProject } from "./require-project.js";
@@ -51,6 +52,8 @@ export async function getDeliveryStatus(projectId: string, database: Database = 
   return {
     projectId,
     posture,
+    // #1613 — the resolved code-health posture + open-ledger summary, next to the risk posture.
+    codeHealth: describeCodeHealth(await resolveProjectCodeHealth(projectId, prefMap), prefMap, projectId),
     postureOverrides: detectPostureOverrides(prefMap, projectId),
     trainSizeFromOverride,
     trainWindowMaxSize: trainWindow.maxSize,

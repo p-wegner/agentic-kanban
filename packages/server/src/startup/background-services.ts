@@ -56,6 +56,7 @@ import { createWorkspaceSessionService } from "../services/workspace-session.ser
 import { startManualReview } from "../services/review.service.js";
 import { getRecentSessionBriefs } from "../repositories/session.repository.js";
 import { getWorkerBuildService, startWorkerBuildPrewarm } from "../services/worker-build.service.js";
+import { startWorkerAutoUpdate, stopWorkerAutoUpdate } from "../services/worker-auto-update.service.js";
 
 /**
  * Background-service (start/stop) plugin registry — the append target for periodic
@@ -512,6 +513,16 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     async start() {
       if (process.env.VITEST || process.env.NODE_ENV === "test" || process.env.KANBAN_WORKER_BUILD_PREWARM === "0") return;
       return startWorkerBuildPrewarm(await getWorkerBuildService());
+    },
+  },
+  {
+    // #1610 — a promote left workers on the old build (and train gates kept landing on them). Ask each
+    // online worker that runs another worker build to update the moment it is idle, one log line each.
+    name: "worker-auto-update",
+    start({ db }) {
+      if (process.env.VITEST || process.env.NODE_ENV === "test") return;
+      startWorkerAutoUpdate(db);
+      return stopWorkerAutoUpdate;
     },
   },
 ];

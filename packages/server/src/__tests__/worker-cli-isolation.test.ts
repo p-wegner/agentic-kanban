@@ -150,7 +150,8 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 86 -> 87 in the 2026-10-16 hand flush for #1520's `worker/worker-content-index.ts` (marks the
     // worker data dirs not-content-indexed; node builtins + child_process only).
     // Raised 87 -> 88 for #1551's worker-startup-step.ts (restart-after-update connect step).
-    expect(files.size).toBeLessThan(88);
+    // Raised 88 -> 92 for #1605: worker-daemon-register/-shutdown, worker-connect-markdown, worker-format (pure splits, no new deps).
+    expect(files.size).toBeLessThan(92);
   });
 
   it("never reaches the database or board-service layer", () => {

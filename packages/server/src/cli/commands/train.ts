@@ -29,10 +29,20 @@ function formatTrainLine(t: MergeTrainRowDto): string {
   return `${t.id}  [${t.state}]  ${parseMemberCount(t.memberWorkspaceIds)} member(s)  ${window}`;
 }
 
+/** "train/<label> is gating since HH:MM; a commit now moves its base" — mirrors scripts/train-gating-warning.mjs. */
+function formatLiveTrainLine(t: MergeTrainRowDto): string {
+  const started = new Date(t.startedAt);
+  const hhmm = Number.isNaN(started.getTime())
+    ? "?"
+    : `${String(started.getHours()).padStart(2, "0")}:${String(started.getMinutes()).padStart(2, "0")}`;
+  const label = t.label.startsWith("train/") ? t.label : `train/${t.label}`;
+  return `${label} is ${t.state} since ${hhmm}; a commit now moves its base`;
+}
+
 export function registerTrainCommand(program: Command) {
   const trainCmd = program
     .command("train")
-    .description("Inspect and manage merge trains (batched, gated release trains).\n\nSubcommands: list, show, cancel, depart, land-local");
+    .description("Inspect and manage merge trains (batched, gated release trains).\n\nSubcommands: list, status, show, cancel, depart, land-local");
 
   // ── list ─────────────────────────────────────────────────────────────────
   trainCmd
@@ -66,6 +76,32 @@ Examples:
       } else {
         for (const t of trains) console.log(formatTrainLine(t));
       }
+      process.exit(0);
+    }));
+
+  // ── status ───────────────────────────────────────────────────────────────
+  trainCmd
+    .command("status")
+    .description("One line per live (gating/landing) train: a commit on the base now moves its base (#1607). Prints nothing when none is live.")
+    .option("--project <projectId>", "Project ID (default: active project)")
+    .option("--json", "Emit machine-readable JSON")
+    .addHelpText(
+      "after",
+      `
+Run before committing to master in the main checkout:
+  $ pnpm cli -- train status`,
+    )
+    .action(cliAction(async (options: { project?: string; json?: boolean }) => {
+      const projectId = await resolveProjectIdArg(options.project);
+      const res = await fetch(`${apiBase()}/merge-queue/trains?projectId=${encodeURIComponent(projectId)}`);
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; trains?: MergeTrainRowDto[]; error?: string };
+      if (!res.ok || !body.ok) {
+        console.error(`Error ${res.status}: ${body.error ?? "failed to list merge trains"}`);
+        process.exit(1);
+      }
+      const live = (body.trains ?? []).filter((t) => t.state === "gating" || t.state === "landing");
+      if (options.json) console.log(JSON.stringify(live, null, 2));
+      else for (const t of live) console.log(formatLiveTrainLine(t));
       process.exit(0);
     }));
 

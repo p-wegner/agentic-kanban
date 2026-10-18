@@ -34,6 +34,7 @@ import {
   tryRecoverStaleMergeLock,
   describeMergeLock,
   resolveMergeState,
+  listPendingSiblingMerges,
   type GitService,
   type MergeWorkspaceResult,
 } from "./workspace-internals.js";
@@ -272,7 +273,26 @@ export function createWorkspaceMergeService(deps: {
     // Deliberately placed AFTER the refuse/reuse check above: when another merge is already in
     // flight this call is going to be refused anyway, and gating first would burn a full test
     // run to produce that refusal.
-    const gateToken: MergeGateToken = await runPreLockGate({
+    // #1616: a branch already contained in base lands nothing — doMerge's pre-flight finalizes it
+    // (reconcile / already-merged) or keeps it in review (clean-ancestor) BEFORE its own gate. The
+    // pre-lock gate would first rebase it and burn a full verify run to land nothing, so skip it.
+    // Pending sibling work makes resolveMergeState answer `proceed`, which keeps the gate.
+    // Uses plain rev-parse/is-ancestor (not resolveMergeState) so it stays a cheap read with no
+    // effect on the pre-flight's own ancestry probe.
+    let alreadyContained = false;
+    if (!workspace.isDirect && workspace.branch) {
+      try {
+        const base = resolveWorkspaceBase(workspace, { defaultBranch });
+        const branchSha = await gitService.revParse(repoPath, workspace.branch);
+        const baseSha = await gitService.revParse(repoPath, base);
+        if (await gitService.isAncestor(repoPath, branchSha, baseSha)) {
+          const pending = await listPendingSiblingMerges(gitService, database, id);
+          alreadyContained = pending.length === 0;
+        }
+      } catch { /* unresolvable branch/base: fall through to the normal gate */ }
+    }
+
+    const gateToken: MergeGateToken = alreadyContained ? (opts.gate ?? RUN_GATE) : await runPreLockGate({
       workspaceId: id,
       workspace,
       projectId: project?.id ?? null,

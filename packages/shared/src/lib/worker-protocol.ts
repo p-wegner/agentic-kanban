@@ -5,24 +5,22 @@
 // straight into the normal session broadcast/exit machinery.
 
 // #1369: committer identity + package-manager vocabulary lives in its own module.
-import { parseWorkerCapacityInfo } from "./worker-capacity-parse.js";
-import { parseVerifyControlFrame, parseVerifyJobFrame, parseVerifyWorkerFrame, parseWorkerVerifyCapability, type VerifyCancelFrame, type VerifyJobFrame, type VerifyLiveJobsFrame, type VerifyLogChunkFrame, type VerifyProgressFrame, type VerifyResultFrame, type WorkerVerifyCapability } from "./worker-verify-protocol.js";
-import { parseWorkerCommitterIdentity, parseWorkerPackageManagers, type WorkerCommitterIdentity, type WorkerPackageManagers } from "./worker-prerequisites.js";
+import { parseVerifyControlFrame, parseVerifyJobFrame, parseVerifyWorkerFrame, type VerifyCancelFrame, type VerifyJobFrame, type VerifyLiveJobsFrame, type VerifyLogChunkFrame, type VerifyProgressFrame, type VerifyResultFrame, type WorkerVerifyCapability } from "./worker-verify-protocol.js";
+import type { WorkerCommitterIdentity, WorkerPackageManagers } from "./worker-prerequisites.js";
 export { parseWorkerCommitterIdentity, parseWorkerPackageManagers, type WorkerCommitterIdentity, type WorkerPackageManagers } from "./worker-prerequisites.js";
+export { parseWorkerCapabilities } from "./worker-capabilities-parse.js";
+import { parseWorkerCapabilities } from "./worker-capabilities-parse.js";
+import { parseLaunchIntent, parseRepoTransport, parseWorkerRepoOpAuth, parseWorkerRepoOpResult, parseWorkerSessionProbe } from "./worker-protocol-repo-parse.js";
+export { isBareFileName, parseWorkerRepoOpAuth, parseWorkerRepoOpResult, parseWorkerSessionProbe } from "./worker-protocol-repo-parse.js";
 export * from "./worker-doctor-summary.js";
-import { parseWorkerDoctorSummary, type WorkerDoctorSummary } from "./worker-doctor-summary.js";
+import type { WorkerDoctorSummary } from "./worker-doctor-summary.js";
 export * from "./worker-profile-attestation.js";
-import { parseWorkerProfileAttestations, parseWorkerUnattestedProfiles, type WorkerProfileAttestation, type WorkerUnattestedProfile } from "./worker-profile-attestation.js";
+import type { WorkerProfileAttestation, WorkerUnattestedProfile } from "./worker-profile-attestation.js";
+import type { WorkerToolchains } from "./worker-toolchains.js"; // #1382
 import { parseOneShotRequest, parseOneShotResult, type WorkerOneShotRequest, type WorkerOneShotResult } from "./worker-oneshot.js"; // #1431
 export * from "./worker-oneshot.js";
 import { isServiceFrameType, parseServiceBoardFrame, parseServiceWorkerFrame, type WorkerServiceBoardFrame, type WorkerServiceWorkerFrame } from "./worker-services.js"; export * from "./worker-services.js"; // #1447
-import { parseWorkerToolchains, type WorkerToolchains } from "./worker-toolchains.js"; // #1382
-import {
-  parseToolchainInstallStatus,
-  parseWorkerToolchainInstallInfo,
-  type ToolchainInstallStatus,
-  type WorkerToolchainInstallInfo,
-} from "./worker-toolchain-install.js"; // #1371
+import { parseToolchainInstallStatus, type ToolchainInstallStatus, type WorkerToolchainInstallInfo } from "./worker-toolchain-install.js"; // #1371
 
 /**
  * A worker carrying this label shares the board's filesystem, so its assignments
@@ -496,51 +494,6 @@ export function checkProtocolCompatibility(
   return { ok: true, version: effective };
 }
 
-/** Shape-check a capabilities blob off the wire. Unknown/ill-typed fields are dropped. */
-export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | undefined {
-  const rec = asRecord(raw);
-  if (!rec) return undefined;
-  const strings = (value: unknown): string[] | undefined =>
-    Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : undefined;
-  const labels = strings(rec.labels);
-  const providers = strings(rec.providers);
-  const maxConcurrency =
-    typeof rec.maxConcurrency === "number" && Number.isInteger(rec.maxConcurrency) && rec.maxConcurrency > 0
-      ? rec.maxConcurrency
-      : undefined;
-  const capacity = parseWorkerCapacityInfo(rec.capacity);
-  const profiles = parseWorkerProfileAttestations(rec.profiles); const unattestedProfiles = parseWorkerUnattestedProfiles(rec.unattestedProfiles);
-  const packageManagers = parseWorkerPackageManagers(rec.packageManagers);
-  const toolchains = parseWorkerToolchains(rec.toolchains);
-  const toolchainInstall = parseWorkerToolchainInstallInfo(rec.toolchainInstall);
-  const providerNotice = typeof rec.providerNotice === "string" ? rec.providerNotice.trim().slice(0, 400) || undefined : undefined;
-  const doctor = parseWorkerDoctorSummary(rec.doctor);
-  const harnessMode = typeof rec.harnessMode === "string" && rec.harnessMode.trim() ? rec.harnessMode.trim().slice(0, 40) : undefined;
-  const verify = parseWorkerVerifyCapability(rec.verify);
-  if (
-    labels === undefined &&
-    providers === undefined &&
-    maxConcurrency === undefined &&
-    capacity === undefined && profiles === undefined && unattestedProfiles === undefined && packageManagers === undefined && toolchains === undefined && toolchainInstall === undefined && providerNotice === undefined &&
-    doctor === undefined && verify === undefined && harnessMode === undefined
-  ) {
-    return undefined;
-  }
-  return {
-    ...(toolchains ? { toolchains } : {}),
-    ...(toolchainInstall ? { toolchainInstall } : {}),
-    ...(labels ? { labels } : {}),
-    ...(providers ? { providers } : {}),
-    ...(maxConcurrency !== undefined ? { maxConcurrency } : {}),
-    ...(capacity ? { capacity } : {}),
-    ...(profiles ? { profiles } : {}), ...(unattestedProfiles ? { unattestedProfiles } : {}),
-    ...(packageManagers ? { packageManagers } : {}),
-    ...(providerNotice ? { providerNotice } : {}),
-    ...(doctor ? { doctor } : {}),
-    ...(verify ? { verify } : {}),
-    ...(harnessMode ? { harnessMode } : {}),
-  };
-}
 
 export type BoardToWorkerMessage =
   | { type: "assign"; sessionId: string; spec: WorkerLaunchSpec; repo?: WorkerRepoTransport }
@@ -777,161 +730,6 @@ export function parseWorkerToBoardMessage(raw: unknown): WorkerToBoardMessage | 
     default:
       return parseLaterWorkerFrame(msg);
   }
-}
-
-/**
- * Shape-check a repo-op auth blob. Null = drop the whole message: a sync or push with a
- * missing port/token/ref cannot be attempted, and attempting it with defaults would aim a
- * force-push at a ref the board did not name.
- */
-export function parseWorkerRepoOpAuth(raw: unknown): WorkerRepoOpAuth | null {
-  const auth = asRecord(raw);
-  if (!auth) return null;
-  if (
-    typeof auth.projectId !== "string" ||
-    typeof auth.gitPort !== "number" ||
-    typeof auth.gitToken !== "string" ||
-    typeof auth.branch !== "string" ||
-    typeof auth.incomingRef !== "string"
-  ) {
-    return null;
-  }
-  return {
-    projectId: auth.projectId,
-    gitPort: auth.gitPort,
-    gitToken: auth.gitToken,
-    branch: auth.branch,
-    incomingRef: auth.incomingRef,
-  };
-}
-
-const REPO_OP_STATUSES = new Set<string>([
-  "updated", "unchanged", "pushed", "missing", "diverged", "dirty-held", "no-session", "error",
-]);
-
-/** Shape-check a repo-op result off the wire. Null = drop it (the board then times out). */
-export function parseWorkerRepoOpResult(raw: unknown): WorkerRepoOpResult | null {
-  const result = asRecord(raw);
-  if (!result) return null;
-  if (typeof result.requestId !== "string" || typeof result.ok !== "boolean") return null;
-  if (result.op !== "sync" && result.op !== "push") return null;
-  if (typeof result.status !== "string" || !REPO_OP_STATUSES.has(result.status)) return null;
-  return {
-    requestId: result.requestId,
-    op: result.op,
-    ok: result.ok,
-    status: result.status as WorkerRepoOpStatus,
-    ...(typeof result.sha === "string" ? { sha: result.sha } : {}),
-    ...(typeof result.error === "string" ? { error: result.error } : {}),
-  };
-}
-
-const PROBE_STATES = new Set<string>(["unknown", "running", "exited"]);
-
-/**
- * Shape-check a session probe off the wire (#887). Null = drop it, and the board then
- * times out — which is the same outcome as an older worker that never answers, and is
- * deliberately NOT the same as `unknown`.
- */
-export function parseWorkerSessionProbe(raw: unknown): WorkerSessionProbe | null {
-  const probe = asRecord(raw);
-  if (!probe) return null;
-  if (typeof probe.requestId !== "string" || !probe.requestId) return null;
-  if (typeof probe.state !== "string" || !PROBE_STATES.has(probe.state)) return null;
-  const num = (value: unknown): number | undefined =>
-    typeof value === "number" && Number.isFinite(value) ? value : undefined;
-  const pid = num(probe.pid);
-  const startedAtMs = num(probe.startedAtMs);
-  const lastOutputAtMs = num(probe.lastOutputAtMs);
-  const exitedAtMs = num(probe.exitedAtMs);
-  return {
-    requestId: probe.requestId,
-    state: probe.state as WorkerSessionProbeState,
-    ...(pid !== undefined ? { pid } : {}),
-    ...(startedAtMs !== undefined ? { startedAtMs } : {}),
-    ...(lastOutputAtMs !== undefined ? { lastOutputAtMs } : {}),
-    // `null` is meaningful here (killed by signal), so it is kept while `undefined` is not.
-    ...(probe.exitCode === null || num(probe.exitCode) !== undefined ? { exitCode: probe.exitCode as number | null } : {}),
-    ...(exitedAtMs !== undefined ? { exitedAtMs } : {}),
-    ...(typeof probe.stdinOpen === "boolean" ? { stdinOpen: probe.stdinOpen } : {}),
-  };
-}
-
-/**
- * A name that can only ever land directly in the directory it is written to: no path
- * separator, no drive letter, no `.`/`..`. Shared by the board (which builds these names
- * with `basename`) and the worker (which must not trust them).
- */
-export function isBareFileName(name: string): boolean {
-  if (!name || name === "." || name === "..") return false;
-  if (/[\/]/.test(name)) return false;
-  if (/^[a-zA-Z]:/.test(name)) return false;
-  return true;
-}
-
-function parseLaunchIntent(raw: unknown): WorkerLaunchIntent | null {
-  const intent = asRecord(raw);
-  if (!intent) return null;
-  if (typeof intent.provider !== "string" || typeof intent.program !== "string") return null;
-  if (!intent.program.trim()) return null;
-  // #1431: the pinned profile NAME must survive the parse, or a profile-restricted project's launch loses its pin.
-  const profile = typeof intent.profile === "string" ? intent.profile.trim() : "";
-  return { provider: intent.provider, program: intent.program, ...(profile ? { profile } : {}) };
-}
-
-function parseRepoTransport(raw: unknown): WorkerRepoTransport | null {
-  const repo = asRecord(raw);
-  if (!repo) return null;
-  if (
-    typeof repo.projectId !== "string" ||
-    typeof repo.gitPort !== "number" ||
-    typeof repo.gitToken !== "string" ||
-    typeof repo.branch !== "string" ||
-    typeof repo.baseBranch !== "string" ||
-    typeof repo.incomingRef !== "string"
-  ) {
-    return null;
-  }
-  const skills = Array.isArray(repo.skills)
-    ? repo.skills
-        .map((s) => asRecord(s))
-        .filter((s): s is Record<string, unknown> => Boolean(s))
-        .filter((s) => typeof s.name === "string" && typeof s.content === "string")
-        .map((s) => ({
-          name: s.name as string,
-          // Optional on the wire: an older board sends none, and a skill without a
-          // description still materializes (with an empty one) rather than being dropped.
-          ...(typeof s.description === "string" ? { description: s.description } : {}),
-          content: s.content as string,
-        }))
-    : undefined;
-  const contextFiles = Array.isArray(repo.contextFiles)
-    ? repo.contextFiles
-        .map((f) => asRecord(f))
-        .filter((f): f is Record<string, unknown> => Boolean(f))
-        .filter((f) => typeof f.name === "string" && typeof f.content === "string")
-        // A bare filename only: the board writes into the checkout ROOT, and a name
-        // carrying a separator or `..` would escape it. Dropped, not sanitized — a
-        // spec that asks for that is malformed, not merely untidy.
-        .filter((f) => isBareFileName(f.name as string))
-        .map((f) => ({ name: f.name as string, content: f.content as string }))
-    : undefined;
-  const committer = parseWorkerCommitterIdentity(repo.committer);
-  return {
-    projectId: repo.projectId,
-    gitPort: repo.gitPort,
-    gitToken: repo.gitToken,
-    branch: repo.branch,
-    baseBranch: repo.baseBranch,
-    incomingRef: repo.incomingRef,
-    setupScript: typeof repo.setupScript === "string" ? repo.setupScript : undefined,
-    ...(committer ? { committer } : {}),
-    ...(skills && skills.length > 0 ? { skills } : {}),
-    ...(contextFiles && contextFiles.length > 0 ? { contextFiles } : {}),
-    ...(typeof repo.boardMcpToken === "string" && repo.boardMcpToken.length > 0
-      ? { boardMcpToken: repo.boardMcpToken }
-      : {}),
-  };
 }
 
 /** Parse + shape-check a message arriving at a worker. Null = drop it. */

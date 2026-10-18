@@ -52,6 +52,11 @@ export function setVerifyWorkerRunner(next: VerifyWorkerRunner | null): void {
   runner = next;
 }
 
+/** The registered runner, for callers that narrow its worker list (e.g. `train land-local --on-worker <name>`). */
+export function getVerifyWorkerRunner(): VerifyWorkerRunner | null {
+  return runner;
+}
+
 /** `worker` placement with nobody eligible: the job waits, it never silently runs on the host. */
 export class VerifyJobHeldError extends Error {
   constructor(reason: string) {

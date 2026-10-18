@@ -61,17 +61,27 @@ export function msUntilBackgroundSpawnAllowed(nowMs: number = Date.now()): numbe
 // ---------------------------------------------------------------------------
 
 const INFRASTRUCTURE_FRAME = /[\\/]git-(?:exec|spawn-governor)\.[tj]s|[\\/]git-service[\\/]|git\.service|node:internal|node_modules/;
+/**
+ * The same plumbing by FUNCTION name. In the bundled dist every frame is `cli/index.js`, so the
+ * path test above never matches; the names survive bundling (esbuild keeps function names).
+ */
+const INFRASTRUCTURE_FUNCTION = /^\s*at (?:async )?(?:new )?(?:noteGitSpawnCaller|scheduleSpawn|spawnBuffered|gitExec\w*|gitStream|runWithGitPriority|callerFromStack)\b/;
 const FRAME_LOCATION = /\(?((?:file:\/\/\/?)?[^\s()]+?):(\d+):\d+\)?\s*$/;
+const FRAME_FUNCTION = /^\s*at (?:async )?([^\s(]+) \(/;
+/** A bundle's file name says nothing about the caller, so the function name is added there. */
+const BUNDLE_FILE = /^index\.[cm]?js$/;
 
 /** `dir/file.ts:123` of the first stack frame that is not git plumbing, or null. */
 export function callerFromStack(stack: string | undefined): string | null {
   if (!stack) return null;
   for (const line of stack.split("\n").slice(1)) {
-    if (INFRASTRUCTURE_FRAME.test(line)) continue;
+    if (INFRASTRUCTURE_FRAME.test(line) || INFRASTRUCTURE_FUNCTION.test(line)) continue;
     const m = FRAME_LOCATION.exec(line);
     if (!m) continue;
     const parts = m[1].split(/[\\/]/);
-    return `${parts.slice(-2).join("/")}:${m[2]}`;
+    const where = `${parts.slice(-2).join("/")}:${m[2]}`;
+    const fn = FRAME_FUNCTION.exec(line)?.[1];
+    return fn && BUNDLE_FILE.test(parts[parts.length - 1]) ? `${where} ${fn}` : where;
   }
   return null;
 }

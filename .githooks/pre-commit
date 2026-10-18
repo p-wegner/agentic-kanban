@@ -1,4 +1,7 @@
 #!/bin/sh
 # Pre-commit (#1576 skills mirror, #1604 god-module + static ratchets on staged files; warning only until #1613).
 # Installed per clone/worktree by: pnpm hooks:install
-exec node "$(git rev-parse --show-toplevel)/scripts/pre-commit-checks.mjs"
+root="$(git rev-parse --show-toplevel)"
+# Warn (never block) when a commit on the base would move it under a gating train (#1607).
+node "$root/scripts/train-gating-warning.mjs" || true
+exec node "$root/scripts/pre-commit-checks.mjs"

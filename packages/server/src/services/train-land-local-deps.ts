@@ -8,9 +8,10 @@ import { getPreference, setPreference, deletePreferences } from "../repositories
 import { getProjectById } from "../repositories/project.repository.js";
 import { createMergeTrain, getMergeTrain, getIssueNumbersByWorkspaceIds, updateMergeTrainState } from "../repositories/merge-train.repository.js";
 import { getMergeQueueWorkspaceRows } from "../repositories/merge-queue.repository.js";
+import { resolveIssueWriteTransport, boardServerWrite } from "../cli/board-server-writes.js";
 import { holdTrainWindow, readTrainWindow } from "./merge-train-window-state.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
-import type { LandLocalDeps } from "./train-land-local.service.js";
+import type { LandLocalDeps, LandLocalWorkerGateResult } from "./train-land-local.service.js";
 
 const TAIL_LINES = 80;
 
@@ -85,6 +86,15 @@ export function createLandLocalDeps(database: Database = db): LandLocalDeps {
       return { code: r.code, stdout: r.stdout, stderr: r.stderr };
     },
     run: runStreaming,
+    async runOnWorker(request) {
+      const transport = await resolveIssueWriteTransport();
+      if (transport.mode !== "server") return { status: "unavailable", reason: `needs the running board server (${transport.reason})` };
+      const { projectId, ...body } = request;
+      // One request for the whole gate: the verify worker streams into the board's log, the verdict returns when it ends.
+      const res = await boardServerWrite<LandLocalWorkerGateResult & { log?: string }>(transport, "POST", `/api/projects/${projectId}/land-local/worker-gate`, body);
+      if (res.status === "ran") process.stdout.write(res.log.endsWith("\n") ? res.log : `${res.log}\n`);
+      return res;
+    },
     pathExists: existsSync,
     newId: () => randomUUID(),
     nowIso: () => new Date().toISOString(),

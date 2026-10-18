@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join, resolve, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import codeHealthCaps from "../src/lib/code-health-caps.json";
 import { parseGuardSource, readGuardSource } from "./helpers/guard-scan";
 import { listRepoSubdirs, walkRepoTree } from "../../../scripts/lib/repo-tree.mjs";
 
@@ -64,11 +65,15 @@ import { listRepoSubdirs, walkRepoTree } from "../../../scripts/lib/repo-tree.mj
  */
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../../..");
-const MAX_LINES = 1000;
+// #1613: the HARD caps for the gate's default level come from the one caps table
+// (src/lib/code-health-caps.json), the same file scripts/check-god-modules.mjs reads. A SOFT
+// breach is recorded by the script's ledger report and never fails this suite.
+const GATE_CAPS = codeHealthCaps.levels[codeHealthCaps.gateDefaultLevel as keyof typeof codeHealthCaps.levels];
+const MAX_LINES = GATE_CAPS.lines.hard;
 // Top-level function-like declarations, exported AND internal (#889). The count fires
 // alone — no line-count floor (#977). Keep in sync with scripts/check-god-modules.mjs
 // (the merge-blocking gate of record).
-const COHESION_MAX_FN_DECLS = 20;
+const COHESION_MAX_FN_DECLS = GATE_CAPS.declarations.hard;
 
 // Ratchet baseline (#889): large modules grandfathered at their current top-level
 // declaration count so the gate ships green. A baselined file may only SHRINK — the
@@ -139,7 +144,7 @@ const COHESION_BASELINE: Record<string, number> = {
  * failure), and complexity-weighted-by-missing-tests (source-to-test mapping here would be
  * a guess, and the guess is gamed by adding a trivial test).
  */
-const MAX_FUNCTION_BRANCHES = 25;
+const MAX_FUNCTION_BRANCHES = GATE_CAPS.branches.hard;
 
 /**
  * Ratchet baseline measured on the tree at #726 (2026-08-22). Shrink-only, exactly like
@@ -446,19 +451,11 @@ describe("god-module gate (cohesion-aware)", () => {
   it("thresholds and baseline match scripts/check-god-modules.mjs, the gate of record", () => {
     const scriptText = readFileSync(join(REPO_ROOT, "scripts", "check-god-modules.mjs"), "utf8");
 
-    const scalar = (name: string): string | null => {
-      const m = scriptText.match(new RegExp("\\b" + name + "\\s*=\\s*(\\d+)"));
-      return m ? m[1] : null;
-    };
-    expect(scalar("MAX_LINES"), "MAX_LINES differs from the gate of record").toBe(String(MAX_LINES));
-    expect(
-      scalar("COHESION_MAX_FN_DECLS"),
-      "COHESION_MAX_FN_DECLS differs from the gate of record",
-    ).toBe(String(COHESION_MAX_FN_DECLS));
-    expect(
-      scalar("MAX_FUNCTION_BRANCHES"),
-      "MAX_FUNCTION_BRANCHES differs from the gate of record",
-    ).toBe(String(MAX_FUNCTION_BRANCHES));
+    // The thresholds are no longer duplicated scalars (#1613): both sides read the caps table.
+    expect(scriptText).toContain("code-health-caps.json");
+    expect(scriptText).toContain("const MAX_LINES = LEVEL_CAPS.lines.hard");
+    expect(scriptText).toContain("const COHESION_MAX_FN_DECLS = LEVEL_CAPS.declarations.hard");
+    expect(scriptText).toContain("const MAX_FUNCTION_BRANCHES = LEVEL_CAPS.branches.hard");
 
     // Parsed by TEXT rather than imported: the script is a spawned `.mjs` with no export, and
     // giving it one purely to satisfy a test would change the shape of the thing under test.

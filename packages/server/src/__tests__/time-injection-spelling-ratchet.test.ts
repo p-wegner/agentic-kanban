@@ -140,6 +140,8 @@ const BASELINE: Record<string, number> = {
   "endNow: string": 4,
   "nowFn: () => number": 2,
   "nowMs: () => number": 2,
+  // #1611: the startup readiness gate's injected clock (tests drive the 120 s bound).
+  "clock: () => number": 1,
 };
 
 /** #583 — the tree walk every guard suite needs, from the one shared helper. */

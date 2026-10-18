@@ -2,7 +2,7 @@ import { issueComments, issues, projectStatuses, sessions, workflowNodes, worksp
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { graphOwnsReviewSessionExit } from "./exit/workflow-ownership.js";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import type { BoardEventSink } from "../services/board-events.js";
@@ -165,6 +165,29 @@ function isOwnedByAnotherPath(c: ReconcilerCandidateOwnership): boolean {
  * the workspace to "reviewing", so the next pass skips it, and the prior-review guard
  * prevents re-reviewing already-reviewed work.
  */
+/**
+ * Arm readyForMerge only if the workspace is STILL idle with no live session at write time (#1615).
+ * The candidate scan and the running-session check run well before this write (preflight, git
+ * probes); a follow-up turn — notably a REMOTE one, whose launch awaits worker assignment — can
+ * start in that window. Re-checking inside the UPDATE itself closes the race atomically.
+ */
+async function armIfStillIdle(database: Database, wsId: string): Promise<boolean> {
+  const now = new Date().toISOString();
+  const updated = await database.update(workspaces).set({ readyForMerge: true, updatedAt: now })
+    .where(and(
+      eq(workspaces.id, wsId),
+      eq(workspaces.status, "idle"),
+      sql`NOT EXISTS (SELECT 1 FROM sessions WHERE sessions.workspace_id = ${wsId} AND sessions.status = 'running')`,
+    ))
+    .returning({ id: workspaces.id });
+  if (updated.length === 0) {
+    console.log(`[reconcile] workspace ${wsId} gained a live session or left idle — not marking ready (#1615)`);
+    return false;
+  }
+  await stampWorkspaceReadyForMergeAt(wsId, now, database);
+  return true;
+}
+
 export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDeps): Promise<number> {
   const database = deps.database ?? db;
   const { getSessionManager, boardEvents, reviewSessionIds } = deps;
@@ -326,9 +349,7 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
         // still gates, and `readyForMerge` goes back to meaning "reviewed and approved"
         // rather than "and the gate also happened to get a semaphore slot in time".
         {
-          const now = new Date().toISOString();
-          await database.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, c.wsId));
-          await stampWorkspaceReadyForMergeAt(c.wsId, now, database);
+          if (!(await armIfStillIdle(database, c.wsId))) continue;
         }
         boardEvents.broadcast(c.projectId, "workspace_ready_for_merge");
         console.log(`[reconcile] review of workspace ${c.wsId} (#${c.issueNumber ?? "?"}) exited clean but readyForMerge was never armed — arming it (#932)`);
@@ -338,9 +359,7 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
         console.log(`[reconcile] re-launched stranded review for workspace ${c.wsId} (#${c.issueNumber ?? "?"}) session=${sessionId}`);
       } else {
         {
-          const now = new Date().toISOString();
-          await database.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, c.wsId));
-          await stampWorkspaceReadyForMergeAt(c.wsId, now, database);
+          if (!(await armIfStillIdle(database, c.wsId))) continue;
         }
         boardEvents.broadcast(c.projectId, "workspace_ready_for_merge");
         const why = autoReview

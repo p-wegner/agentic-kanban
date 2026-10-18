@@ -18,6 +18,7 @@ import type { VerifyRunRequest, VerifyWorkerRunner } from "./verify-job-placemen
 import { isTimeoutOnlyFailure, workerAdmitsAnotherChain, workerWasAtCapacity, type VerifyChainKind, type VerifyWorkerCandidate, type WorkerVerifyReport } from "./verify-placement.js";
 import { active, listActiveVerifyJobs, type ActiveVerifyJob } from "./verify-active-jobs.js";
 import { getWorkerFleet } from "./worker-fleet.service.js";
+import { isWorkerBuildStale } from "./worker-auto-update.service.js";
 
 export { listActiveVerifyJobs, type ActiveVerifyJob } from "./verify-active-jobs.js";
 
@@ -120,6 +121,7 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
           freeRamGb,
           thrashing: w.capacity ? w.capacity.thrashing !== "none" : undefined,
           builderSessions: connections.assignedSessionIds?.(w.id).length ?? 0,
+          buildStale: isWorkerBuildStale(w.workerVersion),
         };
       });
   }

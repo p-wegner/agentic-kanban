@@ -201,6 +201,7 @@ Inspect and manage merge trains (batched, gated release trains).
 | Command | Does |
 |---|---|
 | `train list` | List merge trains for a project (newest first) |
+| `train status` | One line per live (gating/landing) train: a commit on the base now moves its base (#1607) |
 | `train show <train-id>` | Show a single merge train: state, members, gate evidence, and its bisect-tree attempts |
 | `train cancel <train-id>` | Cancel a merge train (#1153) |
 | `train depart <project>` | Operator 'depart now' (#1186): release a project's merge-train batching window immediately, regardless of size, wait, or a busy gate |

@@ -39,9 +39,21 @@ export function whenStartupComplete(): Promise<void> {
   return ready ? Promise.resolve() : readyPromise;
 }
 
+let currentPhase = "starting";
+
+/** Name the deferred startup phase now running; the 503 body quotes it. */
+export function setStartupPhase(name: string): void {
+  currentPhase = name;
+}
+
+export function getStartupPhase(): string {
+  return currentPhase;
+}
+
 /** Reset the gate — tests only; production has exactly one startup per process. */
 export function resetStartupReadiness(): void {
   ready = false;
+  currentPhase = "starting";
   readyPromise = new Promise<void>((resolve) => { resolveReady = resolve; });
 }
 
@@ -60,6 +72,15 @@ const READ_ONLY_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 export const READINESS_GATE_TIMEOUT_MS = 120_000;
 
 /**
+ * How long a write is held before it is refused with `503` + `Retry-After` (#1611). Holding it
+ * for the full {@link READINESS_GATE_TIMEOUT_MS} looked like a dead board to a client with a
+ * normal timeout (curl reported HTTP 000). A short grace still lets a request that arrives a
+ * moment before completion through; anything longer fails fast and names the phase running.
+ */
+export const READINESS_GATE_GRACE_MS = 3_000;
+export const READINESS_RETRY_AFTER_SEC = 5;
+
+/**
  * Mutating routes that never race the deferred startup reconcilers (#1473). Preference
  * writes touch only the `preferences` table (+ objective.md); the reconcilers repair
  * git/workspace/service-stack state. Holding them cost every `PUT /api/preferences/settings`
@@ -73,24 +94,50 @@ function isUngatedWrite(path: string): boolean {
 }
 
 export function createStartupReadinessGate(
-  opts: { timeoutMs?: number; waitFor?: () => Promise<void>; isComplete?: () => boolean } = {},
+  opts: {
+    timeoutMs?: number;
+    graceMs?: number;
+    waitFor?: () => Promise<void>;
+    isComplete?: () => boolean;
+    clock?: () => number;
+  } = {},
 ): MiddlewareHandler {
   const timeoutMs = opts.timeoutMs ?? READINESS_GATE_TIMEOUT_MS;
+  const graceMs = Math.min(opts.graceMs ?? READINESS_GATE_GRACE_MS, timeoutMs);
   const waitFor = opts.waitFor ?? whenStartupComplete;
   const isComplete = opts.isComplete ?? isStartupComplete;
+  const clock = opts.clock ?? Date.now;
+  const createdAt = clock();
 
   return async (c, next) => {
     if (isComplete() || READ_ONLY_METHODS.has(c.req.method) || isUngatedWrite(c.req.path)) return next();
 
+    // Past the overall bound a hung reconciler must not leave the board permanently
+    // unwritable: run the write anyway (the pre-#282 behaviour).
+    if (clock() - createdAt >= timeoutMs) {
+      console.warn(
+        `[startup] readiness gate gave up after ${timeoutMs}ms for ${c.req.method} ${c.req.path} — readiness gate timed out, proceeding with startup still in flight`,
+      );
+      return next();
+    }
+
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timedOut = await Promise.race([
       waitFor().then(() => false),
-      new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(true), timeoutMs); }),
+      new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(true), graceMs); }),
     ]);
     if (timer) clearTimeout(timer);
     if (timedOut) {
-      console.warn(
-        `[startup] readiness gate timed out after ${timeoutMs}ms for ${c.req.method} ${c.req.path} — proceeding with startup still in flight`,
+      const phase = getStartupPhase();
+      c.header("Retry-After", String(READINESS_RETRY_AFTER_SEC));
+      return c.json(
+        {
+          error: `Board is still starting up (phase: ${phase}); retry shortly`,
+          code: "STARTUP_NOT_READY",
+          phase,
+          retryAfterSec: READINESS_RETRY_AFTER_SEC,
+        },
+        503,
       );
     }
     return next();

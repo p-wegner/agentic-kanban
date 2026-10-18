@@ -324,9 +324,23 @@ export interface PostureOverride {
   postureValue: string;
 }
 
+/** The resolved code-health posture (#1613) and its open-ledger summary, shown next to the risk posture. */
+export interface CodeHealthStatus {
+  level: "strict" | "balanced" | "relaxed";
+  source: "override" | "risk-posture";
+  caps: Record<"lines" | "branches" | "declarations", { soft: number; hard: number }>;
+  cleanupTrigger: { breaches: number; days: number | null };
+  openSoftBreaches: number;
+  files: number;
+  /** `code health: 7 soft breaches in 4 files, cleanup ticket at 10 (relaxed)` */
+  line: string;
+}
+
 export interface DeliveryStatusResponse {
   projectId: string;
   posture: RiskPosture;
+  /** Resolved code-health posture + ledger summary (#1613). */
+  codeHealth?: CodeHealthStatus;
   /** Explicit per-field prefs currently contradicting `posture` (#1560); empty when none. */
   postureOverrides?: PostureOverride[];
   /** Whether the effective train SIZE (the queue's opt-in) came from an explicit

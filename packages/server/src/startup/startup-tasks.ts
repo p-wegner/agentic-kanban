@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { setStartupPhase } from "./readiness.js";
 import { db, rawClient, rawWriteClient } from "../db/index.js";
 import { workspaces, issues, projects, preferences, sessions, pluginViewProcesses, repos as reposTable } from "@agentic-kanban/shared/schema";
 import { and, eq, ne } from "drizzle-orm";
@@ -844,16 +845,20 @@ export async function runCriticalStartupTasks(sessionManager: SessionManager, _d
  */
 export async function runGatedDeferredStartupTasks(deps: { gitService?: GitService } = {}): Promise<void> {
   const gitService = deps.gitService ?? realGitService;
+  setStartupPhase("abortStaleMerges");
   await abortStaleMerges(gitService);
+  setStartupPhase("abortStaleRebases");
   await abortStaleRebases(gitService);
   // Worker fleet (epic #184): land any remote-worker pushes that arrived while the board was
   // down. Must run AFTER cleanupStaleSessions — that sweep finalizes the pid-less remote
   // session rows, and this recovers their work from the incoming ref so a restart mid-flight
   // does not lose it.
+  setStartupPhase("sweepIncomingWorkerRefs");
   await runNonFatal("sweepIncomingWorkerRefs", async () => {
     const { sweepIncomingWorkerRefs } = await import("./worker-incoming-sweep.js");
     await sweepIncomingWorkerRefs();
   });
+  setStartupPhase("reconcileSilentlyMergedWorkspaces");
   await reconcileSilentlyMergedWorkspaces();
 }
 

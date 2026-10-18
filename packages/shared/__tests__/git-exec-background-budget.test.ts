@@ -108,4 +108,14 @@ describe("caller attribution", () => {
     ].join("\n");
     expect(callerFromStack(stack)).toBe("startup/some-reconciler.ts:88");
   });
+
+  it("skips plumbing by function name when every frame is the same bundle file (#1614)", () => {
+    const stack = [
+      "Error",
+      "    at noteGitSpawnCaller (file:///x/dist/cli/index.js:5978:20)",
+      "    at gitExec (file:///x/dist/cli/index.js:6100:3)",
+      "    at getDiffShortstat (file:///x/dist/cli/index.js:7001:9)",
+    ].join("\n");
+    expect(callerFromStack(stack)).toBe("cli/index.js:7001 getDiffShortstat");
+  });
 });

@@ -274,6 +274,11 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // Levels + resolver: shared/lib/risk-posture.ts; the fan-out:
   // server/services/risk-posture.service.ts. See decision 017.
   "risk_posture",
+  // Code-health posture (#1613, decision 021): `code_health_posture_<id>` (`strict | balanced |
+  // relaxed`) overrides the level derived from the risk posture; `code_health_ledger_<id>` is
+  // the JSON ledger of open soft breaches. Logic: shared/lib/code-health.ts.
+  "code_health_posture",
+  "code_health_ledger",
   // Red-debt ledger (#915/#916): `red_debt_max_<id>` / `red_debt_max_age_<id>` cap how many
   // OPEN ledger entries (or how old the oldest one) a `sprint`/`fast` posture may carry
   // before it is forced to degrade one step (sprint -> fast -> standard) — the

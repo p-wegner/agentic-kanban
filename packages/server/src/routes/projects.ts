@@ -45,6 +45,7 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 import { queryFlag, queryInt } from "../middleware/query-params.js";
 import { getBoardStatus } from "../services/board-status.js";
+import { boardStatusCache } from "../services/board-status-cache.js";
 import { requireProject } from "../services/require-project.js";
 function toProjectRepoResponse(row: RepoRow): ProjectRepoResponse {
   return {
@@ -589,9 +590,10 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   // active project. `?all=true` includes closed issues.
   router.get("/:id/status", async (c) => {
     const id = c.req.param("id");
-    const result = await getBoardStatus(
-      { projectId: id === "active" ? undefined : id, includeClosed: c.req.query("all") === "true", tailLines: 1 },
-      database,
+    const all = c.req.query("all") === "true";
+    // #1614: single-flight + 5 s TTL per project, so overlapping polls share one build.
+    const result = await boardStatusCache.get(`${id}:${all}`, () =>
+      getBoardStatus({ projectId: id === "active" ? undefined : id, includeClosed: all, tailLines: 1 }, database),
     );
     return c.json(result);
   });
