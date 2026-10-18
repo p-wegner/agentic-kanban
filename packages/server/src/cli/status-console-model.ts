@@ -66,6 +66,21 @@ export interface ConsoleTrain {
   superseded?: boolean;
   /** #1449: why each dropped member was dropped (`#1431: conflicts with #1435 ...`). */
   droppedDetail?: Array<{ ref: string; reason: string; deferred?: boolean }>;
+  /** #1572: the shepherd line (session, worker, turns, last action), when a shepherd ran on this train. */
+  shepherd?: string;
+}
+
+/** #1572: `shepherd 1a2b3c4d on worker-a · 3 turns · resolving conflict #12 vs #15`. Null without a shepherd. */
+export function formatShepherdLine(ev: { shepherd?: { sessionId?: string; worker?: string; turns?: number; lastAction?: string; costUsd?: number } }): string | null {
+  const s = ev.shepherd;
+  if (!s || typeof s !== "object") return null;
+  const turns = Number(s.turns ?? 0);
+  return [
+    `shepherd${s.sessionId ? ` ${String(s.sessionId).slice(0, 8)}` : ""}${s.worker ? ` on ${s.worker}` : ""}`,
+    `${turns} turn${turns === 1 ? "" : "s"}`,
+    ...(typeof s.costUsd === "number" ? [`$${s.costUsd.toFixed(2)}`] : []),
+    String(s.lastAction ?? "idle"),
+  ].join(" · ");
 }
 export interface ConsoleWindow { pending: number[]; firstSeenAt: string; maxWaitMs: number }
 export interface ConsoleAttention { level: "red" | "yellow"; text: string }
@@ -158,12 +173,14 @@ function columnOf(issue: BoardStatusIssue): ConsoleColumn {
   return isInFlightStatusName(issue.statusName) ? "Build" : "Todo";
 }
 
-function parseEvidence(row: MergeTrainRowDto, refOf: (workspaceId: string) => string = (id) => id.slice(0, 8)): { landed: number; dropped: number; gateRuns: number; members: number; gateFailure: string | null; droppedDetail: NonNullable<ConsoleTrain["droppedDetail"]> } {
+function parseEvidence(row: MergeTrainRowDto, refOf: (workspaceId: string) => string = (id) => id.slice(0, 8)): { landed: number; dropped: number; gateRuns: number; members: number; gateFailure: string | null; droppedDetail: NonNullable<ConsoleTrain["droppedDetail"]>; shepherd?: string } {
   let ev: Record<string, any> = {};
   try { ev = row.gateEvidence ? JSON.parse(row.gateEvidence) : {}; } catch { ev = {}; }
   let members = 0;
   try { members = (JSON.parse(row.memberWorkspaceIds) as unknown[]).length; } catch { members = 0; }
+  const shepherd = formatShepherdLine(ev);
   return {
+    ...(shepherd ? { shepherd } : {}),
     members: ev.memberCount ?? members,
     landed: ev.landedCount ?? ev.landed?.length ?? 0,
     dropped: ev.uniqueDroppedCount ?? ev.dropped?.length ?? 0,

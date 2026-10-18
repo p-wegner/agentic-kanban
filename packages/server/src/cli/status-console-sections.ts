@@ -36,6 +36,7 @@ export function gatesSection(model: ConsoleModel, g: Glyphs): Section | null {
   const lines: Line[] = [heading("GATES & TESTS")];
   for (const t of live) {
     lines.push({ text: ` ${g.a ? ">" : "▶"} ${t.label.padEnd(12)} ${t.state.padEnd(10)} ${t.members} members · gate run ${t.gateRuns}  ${since(t.startedAt, g.nowMs)}`, tone: "cyan" });
+    if (t.shepherd) lines.push({ text: `   ${t.shepherd}`, tone: "dim" });
   }
   for (const c of chains) lines.push(chainLine(c, g));
   if (chains.length === 0 && queued > 0) lines.push({ text: ` ${g.a ? "|" : "⏸"} ${queued} verify chain(s) queued behind ${model.host?.verifyActive ?? 0} running`, tone: "yellow" });

@@ -79,7 +79,7 @@ The full per-level table (sweep cadence, merges per cycle, contention, placement
 a warning:** `train_max_size_<id>`, `train_max_wait_ms_<id>`, `verify_gate_strategy_<id>`. Clear
 them after changing the posture (#1560).
 
-## The train shepherd (#1569 phase 1 shipped; #1572 phase 2 pending)
+## The train shepherd (#1569 phase 1 and #1572 phase 2 shipped)
 
 One persistent agent per train, the **train shepherd** (not the Steward, which is the Monitor
 Butler), owns making the train mergeable: member conflicts and a red gate go to the same session,
@@ -99,11 +99,26 @@ so its context already holds the member tickets.
   messaged. There is no fallback to every member any more.
 - **Caps**: the `merge_train_agent_fix_*` prefs bound the shepherd as a whole.
 
-**Pending (#1572, phase 2):** incremental assembly (the worktree exists from the first member, each
-member merged as it joins, conflicts to the shepherd instead of deferral), one shared runner for
-conflicts and red gates, a placed-session runner that reports usage so the cost cap bites, the held
-outcome in `merge-queue-train.ts` with one attention line, and the shepherd line in
-`status --watch`. Until then a conflicting member is still deferred to the next train.
+**Shipped (#1572, phase 2):**
+- **Incremental assembly** (`merge-train-incremental-assembly.ts`): the train worktree exists from
+  the first member and each member is merged as it joins; a member-vs-member conflict goes to the
+  shepherd (`mergeMembersWithShepherd`) instead of being deferred. A conflict with the BASE is still
+  dropped for its author. The landing-time re-assemblies in `merge-train.service.ts` stay ref-only.
+- **One runner**: `merge-train-shepherd-wiring.ts` builds one `TrainShepherd` per train; conflict
+  turns and the red-gate fix turns share `shepherd.runner`, so a second conflict and the red gate
+  resume the first turn's session id.
+- **Usage**: `createPlacedSessionRunner` (`merge-train-session-runner.ts`) runs Claude with
+  `--output-format json`, so a turn reports session id, tokens and cost and
+  `merge_train_agent_fix_cost_cap_usd` is enforced (conflict turns count toward it). Other
+  providers report no usage, so the cap stays off for them.
+- **Held**: an infra-held shepherd makes the gate inconclusive (`agent_fix_held`): no builder
+  feedback. A red no member owns logs one `ATTENTION` line (`describeUnownedTrainRed`).
+- **Status line**: session id, worker, turns and last action are persisted in
+  `gateEvidence.shepherd` and shown in the train drawer and `status --watch`.
+
+**Known limits:** resume works only on the machine holding the session (a placed turn on another
+worker starts a fresh session, disclosed in the prompt); the assembly worktree has no installed
+dependencies, so conflicts are resolved without running suites there.
 
 Target rules that stay: members are frozen at the sha they joined with (a changed member leaves and
 rejoins the next train), `git rerere` replays earlier resolutions, and each shepherd edit is its own

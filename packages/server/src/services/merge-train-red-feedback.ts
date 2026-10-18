@@ -81,7 +81,8 @@ export function decideTrainRedFeedbackTargets(result: TrainRunResult, members: r
     targets.push({ member: r.member, failedSuites: r.failedSuites });
   }
   // A final-red agent-fix train: nothing landed, nobody was individually rejected, suites named.
-  if (result.redStrategy === "agent-fix" && result.landed.length === 0 && result.gateRejected.length === 0 && result.failedSuites?.length) {
+  // #1572: an inconclusive (held) train is never the builders' to fix.
+  if (!result.inconclusive && result.redStrategy === "agent-fix" && result.landed.length === 0 && result.gateRejected.length === 0 && result.failedSuites?.length) {
     // #1573: environment failures have no owner; only the rest is the builders' to fix.
     const { owned } = splitEnvironmentSuites(result.failedSuites, result.gateFailure);
     if (owned.length === 0) return targets;
@@ -94,6 +95,22 @@ export function decideTrainRedFeedbackTargets(result: TrainRunResult, members: r
     }
   }
   return targets;
+}
+
+/**
+ * #1572: the ONE attention line for a final-red agent-fix train whose failing suites no member
+ * touched (nobody was messaged, see `attributeTrainRedToMembers`). Null when someone owns the red,
+ * the train was inconclusive, or it did not end red this way.
+ */
+export function describeUnownedTrainRed(label: string, result: TrainRunResult, members: readonly TrainMember[]): string | null {
+  if (result.inconclusive || result.redStrategy !== "agent-fix" || result.landed.length > 0 || result.gateRejected.length > 0 || !result.failedSuites?.length) return null;
+  const out = new Set([...result.dropped.map((d) => d.member.workspaceId), ...result.sided.map((s) => s.member.workspaceId)]);
+  // #1573: environment failures have no owner either, but they are reported on their own line.
+  const { owned } = splitEnvironmentSuites(result.failedSuites, result.gateFailure);
+  if (owned.length === 0) return null;
+  if (attributeTrainRedToMembers(owned, members.filter((m) => !out.has(m.workspaceId)), result.gateFailure).length > 0) return null;
+  const shown = owned.slice(0, 3).join(", ");
+  return `ATTENTION ${label}: red after the shepherd's fix and no member changed the failing file(s) (${shown}${owned.length > 3 ? `, +${owned.length - 3} more` : ""}) - no builder was messaged; the train is held for an operator`;
 }
 
 /**
@@ -123,6 +140,8 @@ export async function sendTrainRedFeedback(
     const { environment } = splitEnvironmentSuites(result.failedSuites, result.gateFailure);
     if (environment.length > 0) console.log(`[merge-train] red train: no owner, environment: ${environment.join(", ")}`);
   }
+  const unowned = describeUnownedTrainRed(result.trainRef.replace(/^kanban\//, ""), result, members);
+  if (unowned) console.warn(`[merge-train] ${unowned}`);
   for (const { member, failedSuites } of decideTrainRedFeedbackTargets(result, members)) {
     try {
       const headSha = await deps.headSha(member.branch).catch(() => null);

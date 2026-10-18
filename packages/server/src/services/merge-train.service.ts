@@ -6,17 +6,8 @@ import type { MergeTrainRedStrategy } from "@agentic-kanban/shared/lib/merge-tra
 import { assessBaseMove } from "./base-move-relevance.js";
 import { verifyChainSemaphoreActive, verifyChainSemaphoreConcurrency } from "./verify-chain-semaphore.js";
 import {
-  assembleMergeTrain,
-  assertTrainPreservesAncestry,
-  dedupeConflictClusters,
-  formatTrainLabel,
-  parentTrainLabel,
-  trainDateStamp,
-  trainRefName,
-  type ConflictCluster,
-  type DroppedTrainMember,
-  type TrainAssemblyResult,
-  type TrainMember,
+  assembleMergeTrain, assertTrainPreservesAncestry, dedupeConflictClusters, formatTrainLabel, parentTrainLabel, trainDateStamp, trainRefName,
+  type ConflictCluster, type DroppedTrainMember, type TrainAssemblyResult, type TrainMember,
 } from "./merge-train-assembly.js";
 import { combineHeldBackRegate, decideAttributedOwners, decideSuiteOwnerShortcut, formatSuiteOwnerReason } from "./merge-train-suite-owner.js";
 
@@ -421,6 +412,8 @@ export async function runMergeTrain(args: {
    * every existing caller (a lone per-workspace gate has nothing to cancel) is unaffected.
    */
   signal?: AbortSignal;
+  /** #1572 — the shepherd's incremental assembly for the WHOLE train (default: ref-only); bisect halves get the default. */
+  assemble?: typeof assembleMergeTrain;
   /**
    * #1277 — the project's red-handling strategy. The fix agent itself runs inside `runGate` (it
    * needs the gate's installed worktree); this only decides what happens AFTER it: under
@@ -692,10 +685,11 @@ async function runTrainAttempt(args: {
   waitForLandTurn?: Promise<void>;
   /** #1203 — see `runMergeTrain`'s doc comment; only read here to classify a killed gate. */
   signal?: AbortSignal;
+  assemble?: typeof assembleMergeTrain; // #1572
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, trainId, runGate, closeMember } = args;
 
-  const asm = await assembleMergeTrain({ repoPath, baseBranch, members, label });
+  const asm = await (args.assemble ?? assembleMergeTrain)({ repoPath, baseBranch, members, label });
   if (asm.dropped.length > 0 && args.onDropped) {
     await args.onDropped(asm.dropped, { trainRef: asm.trainRef, tipSha: asm.baseSha })
       .catch((err) => console.warn(`[merge-train] ${label}: send-back of dropped members failed (non-fatal): ${errorMessage(err).slice(0, 200)}`));

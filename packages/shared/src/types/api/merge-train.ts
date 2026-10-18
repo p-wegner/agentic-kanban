@@ -118,6 +118,24 @@ export interface MergeTrainGateEvidenceDto {
    * so the train detail names it. Absent on rows written before #1277.
    */
   redStrategy?: MergeTrainRedStrategyDto;
+  /** #1572 - the train shepherd (one persistent agent for conflicts and the red gate). Absent when none ran. */
+  shepherd?: MergeTrainShepherdDto;
+}
+
+/** #1572 - what the train row / `status --watch` shows about the shepherd, and what is persisted. */
+export interface MergeTrainShepherdDto {
+  sessionId?: string;
+  /** The fleet worker the last turn was placed on; absent for a host run. */
+  worker?: string;
+  /** Turns consumed (infrastructure re-placements are not counted). */
+  turns: number;
+  infraRetries?: number;
+  /** `idle`, `resolving conflict #A vs #B`, or `fixing gate`. */
+  lastAction: string;
+  tokens?: number;
+  costUsd?: number;
+  /** Every member conflict handed to the shepherd and what became of it, in order. */
+  conflicts?: Array<{ workspaceId: string; outcome: "resolved" | "deferred"; reason?: string }>;
 }
 
 /** #1204 - what the control-arm gate said about the bare base sha the train was assembled on. */

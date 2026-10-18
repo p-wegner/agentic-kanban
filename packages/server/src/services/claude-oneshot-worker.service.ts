@@ -67,7 +67,7 @@ export interface OneShotDispatchArgs {
   ackTimeoutMs?: number;
 }
 
-export type OneShotDispatchResult = { handled: false; reason: string } | { handled: true; text: string };
+export type OneShotDispatchResult = { handled: false; reason: string } | { handled: true; text: string; /** #1572: the worker the run was placed on. */ worker?: string };
 
 /** Pin `sha` to a temporary branch in the project repo, so the worker's `fetch refs/heads/*` sees it. */
 async function pinWorkingTree(cwd: string, repoPath: string, branch: string): Promise<boolean> {
@@ -254,5 +254,5 @@ async function settle(
   }
   if (result.pushedSha && args.cwd) await applyWorkerFix(args.cwd, result.pushedSha);
   console.log(`[oneshot] ran on ${where} (request ${request.requestId}${result.pushedSha ? `, fix ${result.pushedSha.slice(0, 8)}` : ""})`);
-  return { handled: true, text: result.text ?? "" };
+  return { handled: true, text: result.text ?? "", worker: placement.workerId };
 }

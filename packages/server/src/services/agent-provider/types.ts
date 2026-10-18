@@ -106,6 +106,13 @@ export interface ProviderLaunchOptions {
    */
   oneShotAllowEdits?: boolean;
   /**
+   * With `oneShotText` (#1572, the merge-train shepherd): print the provider's single JSON result
+   * (answer, session id, usage, cost) instead of plain text, and resume `oneShotResumeId` when set.
+   * Only Claude reports usage this way; other providers ignore both and stay plain text.
+   */
+  oneShotJson?: boolean;
+  oneShotResumeId?: string;
+  /**
    * Builder context (#1302). Policy `isolated` makes the Claude provider add
    * `--setting-sources project,local`; `effort` / `autocompact` become `--effort` /
    * `--autocompact`. Undefined leaves the launch args as before. Other providers ignore it

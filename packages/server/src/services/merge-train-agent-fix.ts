@@ -49,7 +49,7 @@ export type TrainAgentRunner = (args: {
   projectId?: string;
   repoPath?: string;
   baseBranch?: string;
-}) => Promise<{ sessionId?: string; tokens?: number; costUsd?: number }>;
+}) => Promise<{ sessionId?: string; tokens?: number; costUsd?: number; /** #1572: the fleet worker the turn ran on. */ worker?: string }>;
 
 export interface AgentFixMember {
   workspaceId: string;
@@ -95,8 +95,11 @@ export function buildAgentFixBrief(args: {
   failedSuites?: readonly string[];
   failureMessage: string;
   turn: number;
+  /** #1572: the shepherd already carried the members in an earlier (conflict) turn. */
+  membersAlreadySent?: boolean;
 }): string {
   // #1569: only the FIRST turn carries the members; the shepherd session already holds them after that.
+  const sent = args.turn > 1 || args.membersAlreadySent === true;
   const members = args.members.map(describeMemberForBrief).join("\n");
   const suites = args.failedSuites && args.failedSuites.length > 0
     ? args.failedSuites.map((s) => `- ${s}`).join("\n")
@@ -109,7 +112,7 @@ export function buildAgentFixBrief(args: {
     "Each member is green on its own branch; the combination is red, so the cause is usually an interaction",
     "between members (a shared ratchet, a widened type, a drifted snapshot, a duplicated declaration).",
     "",
-    ...(args.turn > 1 ? ["## Members", "(unchanged since your first brief)", ""] : ["## Members", members, ""]),
+    ...(sent ? ["## Members", "(unchanged since your first brief)", ""] : ["## Members", members, ""]),
     "## Failing suites",
     suites,
     "",
@@ -211,6 +214,10 @@ export async function runAgentFix(args: {
   regate: () => Promise<AgentFixGateVerdict>;
   /** #1431: forwarded to the runner so the turn can run on a fleet worker. */
   placement?: { projectId: string; repoPath: string };
+  /** #1572: true when the runner's session already holds the member context (the shepherd ran conflict turns). */
+  membersAlreadySent?: () => boolean;
+  /** #1572: spend the shepherd's conflict turns already put on the shared cost cap. */
+  priorCostUsd?: number;
   writeBrief?: (label: string, brief: string) => Promise<string | undefined>;
 }): Promise<AgentFixOutcome> {
   const { worktree, label, caps } = args;
@@ -239,6 +246,7 @@ export async function runAgentFix(args: {
     const brief = buildAgentFixBrief({
       label, baseBranch: args.baseBranch, members: args.members,
       failedSuites: failure.failedSuites, failureMessage: failure.message, turn: turns,
+      membersAlreadySent: args.membersAlreadySent?.() ?? false,
     });
     briefUrl ??= await (args.writeBrief ?? writeBriefFile)(label, brief).catch(() => undefined);
     try {
@@ -258,7 +266,7 @@ export async function runAgentFix(args: {
       if (verdict.infra) { infraRetries++; turns--; } // the held outcome used no turn either.
       break;
     }
-    if (costUsd > caps.costCapUsd) { outcome = "capped"; capped = "cost"; reason = `fix agent cost $${costUsd.toFixed(2)} passed the $${caps.costCapUsd} cap`; break; }
+    if (costUsd + (args.priorCostUsd ?? 0) > caps.costCapUsd) { outcome = "capped"; capped = "cost"; reason = `fix agent cost $${(costUsd + (args.priorCostUsd ?? 0)).toFixed(2)} passed the $${caps.costCapUsd} cap`; break; }
     try {
       await commitLeftovers(worktree, label);
     } catch (err) {
