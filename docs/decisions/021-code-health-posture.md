@@ -41,6 +41,12 @@ next ticket (one open cleanup ticket at a time).
 to the risk posture. `POST /api/projects/:id/code-health/report` records a scan
 (`node scripts/check-god-modules.mjs --report out.json` produces the body's `softBreaches`).
 
+**The hard cap is the trigger, the soft cap is the target.** A hard-cap breach is fixed only by
+bringing the file/function below its SOFT cap (`1520 lines > hard cap 1600`-style messages state the
+soft cap and the lines to remove), so each firing buys a full soft cap's worth of headroom; squeezing
+under the hard cap does not pass. The consolidated cleanup ticket's acceptance is the same: every
+listed file/function below its soft cap, decomposed behind the existing import path.
+
 ## Consequences
 - The gate script's default level is the table's `gateDefaultLevel` (`relaxed`); `--level` or
   `KANBAN_CODE_HEALTH_LEVEL` overrides it. At adoption the tree has soft breaches (the first batch is #1605).

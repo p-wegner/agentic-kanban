@@ -215,7 +215,7 @@ export function cleanupTicketBody(ledger: readonly LedgerEntry[], level: CodeHea
   const lines = [
     `The code-health ledger crossed its cleanup trigger (${formatCodeHealthLine(ledger, level)}).`,
     ``,
-    `Decompose these files / functions along real seams, behind their existing import paths (facade barrel). Moving a branchy function to another file does not clear it. This ticket runs alone, not in a train with feature work.`,
+    `Acceptance: every listed file / function ends BELOW its soft cap (not merely under the hard cap; trimming comments or blank lines does not count). Decompose along real seams, behind their existing import paths (facade barrel). Moving a branchy function to another file does not clear it. This ticket runs alone, not in a train with feature work.`,
     ``,
     `| File | Metric | Value | Soft cap | First seen | Crossed by |`,
     `|---|---|---|---|---|---|`,

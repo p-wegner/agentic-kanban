@@ -389,7 +389,7 @@ for (const file of files) {
   const rel = relative(REPO_ROOT, file).split(sep).join("/");
   const text = readFileSync(file, "utf8");
   const lines = lineCount(text);
-  if (lines > MAX_LINES) lineOffenders.push(`${rel}  (${lines} lines)`);
+  if (lines > MAX_LINES) lineOffenders.push(`${rel}  (${lines} lines > hard cap ${MAX_LINES}: split along real seams to below the soft cap ${LEVEL_CAPS.lines.soft}, needs -${lines - LEVEL_CAPS.lines.soft + 1}+ lines)`);
   else if (lines > LEVEL_CAPS.lines.soft) softBreaches.push({ file: rel, metric: "lines", value: lines, cap: LEVEL_CAPS.lines.soft });
   if (ts) {
     const worst = maxFunctionBranches(file, text);
@@ -440,6 +440,8 @@ if (lineOffenders.length > 0) {
   failed = true;
   console.error(
     `\n[god-module gate] ${lineOffenders.length} file(s) exceed the ${MAX_LINES}-line hard ceiling.\n` +
+      `The hard cap is the trigger, the SOFT cap (${LEVEL_CAPS.lines.soft}) is the target: a fix that only slips under ${MAX_LINES} (trimming comments, moving one function) does not count.
+` +
       `Decompose them (extract a cohesive sub-module, or split behind a facade barrel —\n` +
       `see packages/shared/src/lib/git-service.ts / workflow-engine.ts / agent-stream-parser.ts):\n  ` +
       lineOffenders.join("\n  "),
@@ -451,7 +453,7 @@ if (cohesionOffenders.length > 0) {
     `\n[god-module gate] ${cohesionOffenders.length} module(s) declare more than ` +
       `${COHESION_MAX_FN_DECLS} top-level functions/classes (exported + internal) — a low-cohesion ` +
       `god-module smell (#889)${cohesionDegraded ? ", UNVERIFIED — typescript is not installed, so this count used a regex heuristic and cannot be trusted as a real violation" : ""}.\n` +
-      `Split by responsibility into cohesive sub-modules re-exported through a facade barrel:\n  ` +
+      `Split by responsibility (target: at most the soft cap of ${LEVEL_CAPS.declarations.soft}, not just under ${COHESION_MAX_FN_DECLS}) into cohesive sub-modules re-exported through a facade barrel:\n  ` +
       cohesionOffenders.join("\n  "),
   );
 }
@@ -461,7 +463,7 @@ if (complexityOffenders.length > 0) {
   console.error(
     `\n[god-module gate] ${complexityOffenders.length} function(s) exceed ${MAX_FUNCTION_BRANCHES} ` +
       `control-flow branches (#726) — the risk signal a file split cannot move.\n` +
-      `RESTRUCTURE the named function (guard clauses, a lookup table instead of a switch, extract ` +
+      `Target: below the soft cap of ${LEVEL_CAPS.branches.soft} branches, not just under ${MAX_FUNCTION_BRANCHES}. RESTRUCTURE the named function (guard clauses, a lookup table instead of a switch, extract ` +
       `the branchy middle). Moving it to another file does NOT clear this: the new path is not in ` +
       `the ratchet baseline, so the flat threshold applies to it there.\n  ` +
       complexityOffenders.join("\n  "),
