@@ -287,15 +287,26 @@ export async function runPreMergeGate(
   // #677: folded over the sibling repos read above, so a LEADING diff that is docs-only can no
   // longer hide sibling SOURCE from `docsOnly` or from the tier's package scoping — both must see
   // every file this merge is about to land, not just the leading repo's half of it.
+  // `diffReadFailed` separates "git said nothing changed" (an empty marker commit) from "git
+  // failed" — both yield `[]`, but only the second must widen the scope to every package.
+  let diffReadFailed = !workspace.workingDir || !workspace.baseBranch;
+  const readDiff = (dir: string, base: string) =>
+    getChangedFileNames(dir, base).catch(() => {
+      diffReadFailed = true;
+      return [] as string[];
+    });
   const leadingChangedFiles = workspace.workingDir && workspace.baseBranch
-    ? await getChangedFileNames(workspace.workingDir, workspace.baseBranch).catch(() => [] as string[])
+    ? await readDiff(workspace.workingDir, workspace.baseBranch)
     : ([] as string[]);
   const siblingChangedFiles = (
     await Promise.all(
       siblingRepos.map(async (repo) => {
         const repoBase = repo.baseBranch || workspace.baseBranch;
-        if (!repo.worktreePath || !repoBase) return [] as string[];
-        return getChangedFileNames(repo.worktreePath, repoBase).catch(() => [] as string[]);
+        if (!repo.worktreePath || !repoBase) {
+          diffReadFailed = true;
+          return [] as string[];
+        }
+        return readDiff(repo.worktreePath, repoBase);
       }),
     )
   ).flat();
@@ -356,7 +367,7 @@ export async function runPreMergeGate(
     // by `scripts/test-mine.mjs`; ignored by any other verify_script, so this is inert for
     // projects that don't use it. `null` (diff unreadable, global config touched, path owned
     // by no package) sets nothing, which means "run every package".
-    const testScope = testPackagesEnvValue(changedFiles);
+    const testScope = testPackagesEnvValue(changedFiles, { diffRead: !diffReadFailed });
     if (testScope) {
       console.log(`[pre-merge-gate] scoping verify tests to [${testScope}] for workspace ${workspace.id} (${changedFiles.length} changed file(s))`);
     }
