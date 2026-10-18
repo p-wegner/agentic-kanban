@@ -248,7 +248,7 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         implementExitCheck: "none",
         contentionMode: "off",
         placementBias: "remote-preferred",
-        summary: "sprint: no per-ticket review, guards-only gate, red base allowed (files a debt ticket), no implement-exit TEST run (it still runs the static tier + the member's own when:-matched guard suites before review), contention off; review-exit gate is typecheck only (tests run once, at merge)",
+        summary: "sprint: no per-ticket review, guards-only gate, red base allowed (files a debt ticket), no implement-exit TEST run (it still runs the static tier + the member's own when:-matched guard suites before review where dependencies are installed; a tree without them gets the god-module ceiling only, and the exit line says so), contention off; review-exit gate is typecheck only (tests run once, at merge)",
       };
     case "iterate":
       return {
