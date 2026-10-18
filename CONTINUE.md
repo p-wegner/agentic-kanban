@@ -26,6 +26,31 @@ re-assemblies in `merge-train.service.ts` (base moved, sided, rebased) still use
 and would drop a shepherd-resolved member instead of re-resolving it; (d) the assembly worktree has no
 installed dependencies, so the shepherd resolves conflicts without running suites there.
 
+## 2026-10-18 day: six trains landed, stable-20261018-3 live, master pushed
+
+- **Stable = `stable-20261018-3` = 46ad62813** (promoted 21:30Z; fresh full rc sweep of
+  rc/20261018-3 green, smoke passed; rollback target `stable-20261018-2` = ecb430e51). Promote ran
+  in herdr pane w1:p62; console (`status --watch -i 60`) in w1:p5Z. Master and the tag are
+  **pushed to GitHub** (scrubbed against the confidential-terms list and for local paths first).
+- **Board is empty:** only #1618 (`status --watch` dies on one failed refresh) is open, In Review.
+- **Trains today**, most landed by the operator in a sibling worktree (check:arch, typecheck,
+  file-scoped suites + guards), subject "Merge train <label> (operator-landed)": 2026-10-18-02
+  (ebf5db42e, #1569 #1583 #1589-#1591), 04 (b4f770200, #1572 #1597 #1598), manual 08 (772b0b2f0,
+  #1599-#1601), board train 08 (48bdfb0d7, #1602-#1604 #1608), 09b (65930fa21, #1605-#1607
+  #1609-#1616), 10 (46ad62813, #1617). Recipe: `docs/agent-guide/merge-trains.md`.
+- **Why trains stalled:** the shepherd had 1 turn and a 20 min budget that also covered its
+  re-gates, and never ran checks before handing back; the gate stops at arch, so tests never ran
+  for it. Now `merge_train_agent_fix_max_turns`=3, `merge_train_agent_fix_timeout_ms`=5400000 on
+  agentic-kanban, plus #1602. Operator actions that broke trains (commits/push during a gate,
+  promote mid-fix, cancel losing the fix, 5 s console polling) are #1601 #1607-#1609 #1614.
+- **Decisions:** `sprint` has no scheduled master sweep; only promote runs the full suite, gates
+  use impact-reduced suites (decision 017, amendment 2026-10-18). The 1000-line ceiling is
+  replaced by the **code-health posture** (#1613, decision 021): soft caps are recorded, hard caps
+  block at pre-commit/implement-exit, a hard-cap breach is fixed to below the SOFT cap, and
+  accumulated soft breaches file one cleanup ticket.
+- **Open question for Peter:** should that cleanup ticket start on its own or wait in Backlog?
+- **ao-pf38 still needs its reboot** (shown `draining` in the console).
+
 ## 2026-10-18 night: trains 05, 07, 08 landed by hand, stable-20261018 live
 
 - **Stable = `stable-20261018` = e1a6bbfa9** (promoted 00:08Z; fresh full rc sweep green in 2680 s,
@@ -43,40 +68,7 @@ installed dependencies, so the shepherd resolves conflicts without running suite
 - `.gitattributes` pins `*.snap` to LF (vitest rewrote both status-console snapshots every run).
 - **Open:** #1569 (shepherd phase 1) conflicts with #1579 and needs a hand resolution in its next
   train; #1572; #1589; #1590. **ao-pf38 needs a reboot by Sunday midday** (FMfn leak ~8.6 GB).
-- Master is 108 commits ahead of origin, **not pushed**.
-
-## 2026-10-17 evening: train 04 landed by hand, stable-20261017-3 live
-
-- **Stable = `stable-20261017-3` = 13e32b7d2** (promoted 16:41Z; fresh full rc sweep green, smoke
-  passed; rollback target `stable-20261017-2`). Promote ran in herdr pane w1:p61.
-- **Train 04 was landed by the operator** (13e32b7d2, 14 tickets #1550 #1554 #1556-#1560 #1564-#1566
-  #1568 #1570 #1571 #1573) after trains 01-04 went red on the board for 5 h. Verified in
-  `.worktrees/agentic-kanban/manual-train-04`: check:arch, typecheck, file-scoped tests + all
-  guards. The board closed the members via `hand-merged-branch-reconciler`. Recipe and what goes
-  wrong in board trains: `docs/agent-guide/merge-trains.md`.
-- #1551 landed through the board afterwards (0509b9a26), not in this stable tag.
-- **Why trains failed:** every train ran the full suite (#1574: any new test file counts as a stale
-  impact map), sprint members reach the train without running guard ratchets (#1575), red handling
-  skipped the fix agent / fanned out to every builder (#1573, landed), a false missing-deps retry
-  (#1570, landed), lost failure output (#1571, landed), worker reports 0 failing suites (#1580).
-- **Train shepherd** (#1569 phase 1 landed earlier, #1572 phase 2): one persistent agent per train.
-  Name is "shepherd"; "Steward" is the Monitor Butler.
-- Master is ~18 commits ahead of origin, **not pushed**.
-
-## 2026-10-17 morning: host rebooted 10:01 local, board back
-
-- `pnpm stable:start` brought `stable-20261017-2` back (smoke passed). All three workers online;
-  wsl-stable started by hand in herdr pane w1:p5Y, console (`status --watch`) in w1:p5Z.
-  Reboot runbook and which view is the full one: `docs/agent-guide/operator-reference.md`
-  "After a host reboot".
-- wsl-stable updated to a15f90a via `pnpm cli -- worker update <name>` (board side, no ACP needed).
-- **Hands-off since ~08:50Z:** `start_mode=monitor`, `risk_posture=sprint` on agentic-kanban;
-  leftover overrides (train size 5, wait 2 min, gate `impact`) cleared 11:2xZ, see #1560
-  (was manual/standard; revert both to go back). Recipe: operator-reference "Hands-off".
-- #1551 (worker restart after self-update hangs before connecting) filed from desktop-stable,
-  back online on a15f90a after a manual restart (by 09:13Z); the monitor auto-started #1551.
-- #1550 (tracker header shows no counts with 0 active issues) building on ao-pf38. #1549 cancelled
-  as a duplicate of `status --watch`.
+- Master is 108 commits ahead of origin, **not pushed** (pushed later that day, see the pass above).
 
 ## Archive
 
@@ -84,6 +76,8 @@ Passes older than today have been moved **verbatim, newest first** into
 [`docs/archive/CONTINUE-archive.md`](docs/archive/CONTINUE-archive.md). Nothing is re-verified or
 edited on the way in, so each pass records what that session believed at the time. The archive
 holds:
+- **2026-10-17 evening + morning (moved 2026-10-18 day):** train 04 by hand, stable-20261017-3,
+  the reboot, hands-off under `sprint`, #1550-#1573.
 - **2026-10-17 (moved 2026-10-18):** UX probe, stable-20261017-2, #1531-#1548.
 - **2026-10-15 (moved 2026-10-16):** stable 95ddbc975 (#1507 boot exit), the host reboot, #1507-#1511.
 - **2026-10-14 evening (moved 2026-10-15):** old worktrees closed, board fast again, trains

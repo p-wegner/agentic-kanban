@@ -11,6 +11,39 @@ First archive pass: 2026-08-27, cutting at the 2026-08-24 boundary (`CONTINUE.md
 
 ---
 
+## 2026-10-17 evening (moved 2026-10-18): train 04 landed by hand, stable-20261017-3 live
+
+- **Stable = `stable-20261017-3` = 13e32b7d2** (promoted 16:41Z; fresh full rc sweep green, smoke
+  passed; rollback target `stable-20261017-2`). Promote ran in herdr pane w1:p61.
+- **Train 04 was landed by the operator** (13e32b7d2, 14 tickets #1550 #1554 #1556-#1560 #1564-#1566
+  #1568 #1570 #1571 #1573) after trains 01-04 went red on the board for 5 h. Verified in
+  `.worktrees/agentic-kanban/manual-train-04`: check:arch, typecheck, file-scoped tests + all
+  guards. The board closed the members via `hand-merged-branch-reconciler`. Recipe and what goes
+  wrong in board trains: `docs/agent-guide/merge-trains.md`.
+- #1551 landed through the board afterwards (0509b9a26), not in this stable tag.
+- **Why trains failed:** every train ran the full suite (#1574: any new test file counts as a stale
+  impact map), sprint members reach the train without running guard ratchets (#1575), red handling
+  skipped the fix agent / fanned out to every builder (#1573, landed), a false missing-deps retry
+  (#1570, landed), lost failure output (#1571, landed), worker reports 0 failing suites (#1580).
+- **Train shepherd** (#1569 phase 1 landed earlier, #1572 phase 2): one persistent agent per train.
+  Name is "shepherd"; "Steward" is the Monitor Butler.
+- Master is ~18 commits ahead of origin, **not pushed**.
+
+## 2026-10-17 morning (moved 2026-10-18): host rebooted 10:01 local, board back
+
+- `pnpm stable:start` brought `stable-20261017-2` back (smoke passed). All three workers online;
+  wsl-stable started by hand in herdr pane w1:p5Y, console (`status --watch`) in w1:p5Z.
+  Reboot runbook and which view is the full one: `docs/agent-guide/operator-reference.md`
+  "After a host reboot".
+- wsl-stable updated to a15f90a via `pnpm cli -- worker update <name>` (board side, no ACP needed).
+- **Hands-off since ~08:50Z:** `start_mode=monitor`, `risk_posture=sprint` on agentic-kanban;
+  leftover overrides (train size 5, wait 2 min, gate `impact`) cleared 11:2xZ, see #1560
+  (was manual/standard; revert both to go back). Recipe: operator-reference "Hands-off".
+- #1551 (worker restart after self-update hangs before connecting) filed from desktop-stable,
+  back online on a15f90a after a manual restart (by 09:13Z); the monitor auto-started #1551.
+- #1550 (tracker header shows no counts with 0 active issues) building on ao-pf38. #1549 cancelled
+  as a duplicate of `status --watch`.
+
 ## 2026-10-17: UX probe landed, stable-20261017-2 live
 
 **Goal (Peter):** a subagent explores the UI and fixes UX flaws; the board implements the rest.
