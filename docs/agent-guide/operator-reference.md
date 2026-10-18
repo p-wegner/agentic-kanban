@@ -125,7 +125,7 @@ One table instead of reading decision 017 and its five amendments in order. Sour
 | Train size / wait | 1 / 0 | 1 / 0 | 1 / 0 | 1 / 0 | 8 / 20 min | 12 / 30 min |
 | Merges / relaunches per cycle | 1 / 1 | 2 / 2 | 2 / 2 | 2 / 2 | 4 / 4 | 8 / 6 |
 | Red base | blocks | blocks | heal ticket | reported only | allowed if known debt | debt ticket |
-| Full-suite base sweep | 12 h | 12 h | 24 h | none (release candidate only) | 6 h | 24 h |
+| Full-suite base sweep | 12 h | 12 h | 24 h | none (release candidate only) | 6 h | none (release candidate only) |
 | File contention | serialize | serialize | serialize | serialize | warn | off |
 | Placement | host-half | host-preferred | host-preferred | host-preferred | remote-preferred | remote-preferred |
 

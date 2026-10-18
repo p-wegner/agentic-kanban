@@ -208,7 +208,7 @@ The pinned table (decision-level; a change to any row amends this record):
 | `standard` | full | **12 h** (was 30 min) |
 | `iterate` | impact | 24 h |
 | `fast` | scoped | 6 h |
-| `sprint` | scoped-base-watch | 24 h |
+| `sprint` | scoped-base-watch | none — release candidate only (amended 2026-10-18) |
 | *(no posture chosen)* | full | never — the opt-in rule (#983) |
 
 Enforcement: `risk-posture.service.test.ts` pins every row (`PINNED_SWEEP_INTERVALS`) and
@@ -365,3 +365,12 @@ the rule. Where the `flow` table above says "builder stop checks `tests-capacity
 **The review-exit gate is not the full gate on every rung.** Since #1260 it runs the full gate on
 `strict` and `standard` only; on `fast`, `sprint`, `iterate` and `flow` it runs the typecheck,
 because the merge path gates the tree that lands anyway (`startup/exit/review-exit-gate.ts`).
+
+### Amendment 2026-10-18: `sprint` has no scheduled master sweep
+
+Operator decision: under `sprint` only a promotion runs the full suite. `sweepIntervalMs` for
+`sprint` is `null`, as for `flow`; the full verdict is the release candidate's fresh sweep that
+`pnpm promote` requests (decision 019). The 24 h master sweep cost a worker 45-70 minutes a day and
+gated nothing, since `sprint` already lets the train window depart on a red base. The per-train
+gate stays the impact selection; #1600 stopped `CONTINUE.md` and `docs/**` in a train diff from
+widening it to the full suite.

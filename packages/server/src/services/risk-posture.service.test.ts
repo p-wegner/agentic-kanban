@@ -161,7 +161,8 @@ describe("resolveBaseSweepIntervalMs — the sweep is OPT-IN (#983)", () => {
     standard: 12 * 60 * 60 * 1000,
     iterate: 24 * 60 * 60 * 1000,
     fast: 6 * 60 * 60 * 1000,
-    sprint: 24 * 60 * 60 * 1000,
+    // Decision 017 amendment 2026-10-18: like `flow`, only the release candidate's sweep.
+    sprint: null,
     // #1240: `null` is a pinned VALUE here, not an absence — `flow` owes its full verdict on the
     // release candidate only (decision 019), so master has no scheduled sweep by design.
     flow: null,

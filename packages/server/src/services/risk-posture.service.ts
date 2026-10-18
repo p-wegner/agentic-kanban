@@ -32,7 +32,8 @@ import { getIssueTagRows } from "../repositories/tag.repository.js";
  *                 not each ticket, red base allowed if the red set is known debt, contention
  *                 downgraded to a warning, placement prefers remote.
  *  - `sprint`   — greenfield/prototype. Guards-only gate, no per-ticket review, red base allowed
- *                 with a debt ticket, no implement-exit check, contention off.
+ *                 with a debt ticket, no implement-exit check, contention off. No scheduled
+ *                 master sweep: like `flow`, the only full-suite run is the release candidate's.
  *  - `flow`     — the fastest honest cycle (#1240, decision 019 part 3), below `iterate` on the
  *                 ladder (`docs/integration-risk-ladder.md`). Per-merge gate = typecheck + the
  *                 test-impact selection + the diff's own tests, with NO guard floor at merge
@@ -232,8 +233,10 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
       return {
         level, source,
         gateTier: "scoped-base-watch",
-        // Makes this level's long-standing description ("full suite on schedule") actually true.
-        sweepIntervalMs: 24 * 60 * 60 * 1000,
+        // Operator decision 2026-10-18: under sprint only a promotion runs the full suite (the
+        // release candidate's fresh sweep, decision 019), as under `flow`. A scheduled master
+        // sweep cost a worker for 45-70 min a day and gated nothing.
+        sweepIntervalMs: null,
         reviewMode: "none",
         redBasePolicy: "allow-file-debt-ticket",
         trainMaxSize: 12,
