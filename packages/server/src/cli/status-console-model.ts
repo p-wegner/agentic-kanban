@@ -173,6 +173,37 @@ function parseEvidence(row: MergeTrainRowDto, refOf: (workspaceId: string) => st
   };
 }
 
+/**
+ * #1583: per red train, how many members are still stuck on it (ready for merge, not landed, not in
+ * a newer train) and which are reworking (workspace present but sent back / new sha).
+ */
+function redTrainMemberStates(rows: MergeTrainRowDto[], issues: BoardStatusIssue[]): Map<string, { stuck: number; reworking: string[] }> {
+  const ids = (json: string | null): string[] => { try { const v = JSON.parse(json ?? "[]"); return Array.isArray(v) ? v.map(String) : []; } catch { return []; } };
+  const landed = new Set<string>();
+  for (const r of rows) {
+    try { for (const id of (JSON.parse(r.gateEvidence ?? "{}").landed ?? []) as unknown[]) landed.add(String(id)); } catch { /* unparseable evidence */ }
+  }
+  const out = new Map<string, { stuck: number; reworking: string[] }>();
+  for (const r of rows) {
+    if (r.state !== "red") continue;
+    const startedMs = new Date(r.startedAt).getTime();
+    const newer = new Set<string>();
+    for (const o of rows) if (o !== r && new Date(o.startedAt).getTime() > startedMs) for (const id of ids(o.memberWorkspaceIds)) newer.add(id);
+    if (ids(r.memberWorkspaceIds).length === 0) continue;
+    let stuck = 0;
+    const reworking: string[] = [];
+    for (const id of ids(r.memberWorkspaceIds)) {
+      if (landed.has(id) || newer.has(id)) continue;
+      const issue = issues.find((i) => i.workspace?.id === id);
+      if (!issue) continue;
+      if (issue.workspace?.readyForMerge) stuck++;
+      else reworking.push(issue.issueNumber != null ? `#${issue.issueNumber}` : id.slice(0, 8));
+    }
+    out.set(r.label, { stuck, reworking });
+  }
+  return out;
+}
+
 /** #1565: expired/missing credentials (not only a refused session) also leave an online worker with nothing to run. */
 function pushCredentialProblem(w: Record<string, any>, workers: ConsoleWorker[], attention: ConsoleAttention[]): void {
   if (w.effectiveStatus !== "online") return;
@@ -247,9 +278,18 @@ export function buildConsoleModel(p: ConsolePayloads): ConsoleModel {
   }));
   const latestLandedMs = Math.max(0, ...trains.filter((t) => t.state === "landed").map((t) => new Date(t.startedAt).getTime()));
   for (const t of trains) t.superseded = t.state === "red" && new Date(t.startedAt).getTime() < latestLandedMs;
+  const redTrainMembers = redTrainMemberStates(p.trains?.trains ?? [], status.issues);
   for (const t of trains) {
     if (t.superseded) continue;
-    if (t.state === "red") attention.push({ level: "red", text: `${t.label} red${t.gateFailure ? `: ${t.gateFailure}` : ""}` });
+    if (t.state === "red") {
+      // #1583: a red train is only actionable while one of its members is still waiting on it.
+      const m = redTrainMembers.get(t.label);
+      if (m && m.stuck === 0) {
+        if (m.reworking.length > 0) attention.push({ level: "yellow", text: `${t.label} red, members reworking: ${m.reworking.join(" ")}` });
+        continue;
+      }
+      attention.push({ level: "red", text: `${t.label} red${t.gateFailure ? `: ${t.gateFailure}` : ""}` });
+    }
     else if (t.dropped > 0 && !t.finishedAt) attention.push({ level: "yellow", text: `${t.label}: ${t.dropped} member(s) dropped/deferred` });
   }
   const trainMergedToday = (p.trains?.trains ?? [])
