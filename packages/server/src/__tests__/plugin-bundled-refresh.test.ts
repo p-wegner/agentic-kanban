@@ -1,7 +1,7 @@
 // @gate:always-run when:packages/server/plugins/jira-sync/kanban-plugin.json,packages/server/src/services/plugin-lifecycle.service.ts
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as schema from "@agentic-kanban/shared/schema";
@@ -76,6 +76,43 @@ describe("bundled plugin manifest refresh + sync scaffold (#1630)", () => {
     expect(demo.manifest?.sync?.config?.map((c) => c.key)).toContain("pullEveryMinutes");
     expect(listed.find((p) => p.pluginId === "outside")!.version).toBe("1.0.0");
     expect(await service.refreshBundledPlugins()).toEqual([]);
+  });
+
+  it("refreshes a row reaching the bundled dir through a symlink/junction and canonicalises localPath (#1637)", async () => {
+    const bundledRoot = makeTempDir("ak-plugin-bundled-root-");
+    process.env.AGENTIC_KANBAN_BUNDLED_PLUGINS_DIR = bundledRoot;
+    const bundled = join(bundledRoot, "demo-sync");
+    mkdirSync(bundled);
+    writeManifest(bundled, { sync: SYNC });
+    const linkParent = makeTempDir("ak-plugin-link-");
+    const link = join(linkParent, "alias");
+    symlinkSync(bundled, link, "junction");
+
+    const service = createPluginService({ database: db as unknown as Database });
+    await service.installPlugin({ source: link });
+    writeManifest(bundled, { version: "0.2.0", sync: SYNC });
+
+    expect(await service.refreshBundledPlugins()).toEqual(["demo-sync"]);
+    const demo = (await service.listPlugins()).find((p) => p.pluginId === "demo-sync")!;
+    expect(demo.version).toBe("0.2.0");
+    expect(demo.localPath).toBe(realpathSync.native(bundled));
+  });
+
+  it("leaves a row outside the bundled dir alone and logs it once (#1637)", async () => {
+    const bundledRoot = makeTempDir("ak-plugin-bundled-root-");
+    process.env.AGENTIC_KANBAN_BUNDLED_PLUGINS_DIR = bundledRoot;
+    const outside = makeTempDir("ak-plugin-outside-");
+    writeFileSync(join(outside, "kanban-plugin.json"), JSON.stringify({ id: "outside", name: "Outside", version: "1.0.0" }));
+    const service = createPluginService({ database: db as unknown as Database });
+    await service.installPlugin({ source: outside });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await service.refreshBundledPlugins()).toEqual([]);
+      const lines = warn.mock.calls.filter((c) => String(c[0]).includes("outside"));
+      expect(lines).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("enable on a sync plugin with settings fields returns no placeholder warning", async () => {
