@@ -1,6 +1,8 @@
 # Jira Sync profile
 
-Filled in once per project, by a human. The sync commands refuse to guess any of this.
+Documentation for this project's Jira scope. When the board's Sync settings (site URL and project
+key) are filled in they answer the three fields below, and the TODOs are not counted or enforced.
+Without Sync settings (and without the headless `JIRA_*` environment), fill these in by hand.
 
 ## Site
 

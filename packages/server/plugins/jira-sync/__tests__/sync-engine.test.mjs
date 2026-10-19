@@ -196,6 +196,65 @@ test("conflict: a board issue edited locally since the last sync is reported, no
   assert.equal(second.nextState.issues["ENG-1"].updated, "2026-09-01T00:00:00.000Z");
 });
 
+test("conflict clears (#1635): once Jira is set to the board's value the next pull resolves it and re-baselines", async () => {
+  const board = fakeBoardClient();
+  const first = await runInboundSync(fakeJiraClient([jiraIssue("ENG-1", { summary: "Original", updated: "u1" })]), board, {
+    ...baseOpts, knownState: { issues: {} },
+  });
+  board.state.issues[0].title = "Board title";
+  board.state.issues[0].updatedAt = "human-edit-1";
+
+  const conflict = await runInboundSync(fakeJiraClient([jiraIssue("ENG-1", { summary: "Jira title", updated: "u2" })]), board, {
+    ...baseOpts, knownState: first.nextState,
+  });
+  assert.equal(conflict.conflicted, 1);
+
+  const agreed = await runInboundSync(fakeJiraClient([jiraIssue("ENG-1", { summary: "Board title", updated: "u3" })]), board, {
+    ...baseOpts, knownState: conflict.nextState,
+  });
+  assert.equal(agreed.conflicted, 0);
+  assert.equal(agreed.details[0].action, "skip");
+  assert.equal(agreed.nextState.issues["ENG-1"].updated, "u3");
+  assert.equal(agreed.nextState.issues["ENG-1"].boardUpdatedAt, "human-edit-1");
+
+  // Jira moves on again with the board untouched since: a plain update, not a conflict.
+  const later = await runInboundSync(fakeJiraClient([jiraIssue("ENG-1", { summary: "Jira later", updated: "u4" })]), board, {
+    ...baseOpts, knownState: agreed.nextState,
+  });
+  assert.equal(later.conflicted, 0);
+  assert.equal(later.updated, 1);
+  assert.equal(board.state.issues[0].title, "Jira later");
+});
+
+test("field edits (#1635): Jira-only edit updates, board-only edit skips, unmapped board change is not a conflict", async () => {
+  const board = fakeBoardClient();
+  const first = await runInboundSync(fakeJiraClient([jiraIssue("ENG-1", { summary: "A", updated: "u1" })]), board, {
+    ...baseOpts, knownState: { issues: {} },
+  });
+  // Board-only edit, Jira unchanged -> skipped, local edit survives.
+  board.state.issues[0].title = "Board edit";
+  board.state.issues[0].updatedAt = "human-edit-1";
+  const boardOnly = await runInboundSync(fakeJiraClient([jiraIssue("ENG-1", { summary: "A", updated: "u1" })]), board, {
+    ...baseOpts, knownState: first.nextState,
+  });
+  assert.equal(boardOnly.skipped, 1);
+  assert.equal(boardOnly.conflicted, 0);
+  assert.equal(board.state.issues[0].title, "Board edit");
+
+  // A board change to an unmapped thing (timestamp moves, mapped fields identical to the snapshot).
+  const fresh = fakeBoardClient();
+  const f1 = await runInboundSync(fakeJiraClient([jiraIssue("ENG-1", { summary: "A", updated: "u1" })]), fresh, {
+    ...baseOpts, knownState: { issues: {} },
+  });
+  fresh.state.issues[0].updatedAt = "tag-edit-1";
+  const jiraOnly = await runInboundSync(fakeJiraClient([jiraIssue("ENG-1", { summary: "B", updated: "u2" })]), fresh, {
+    ...baseOpts, knownState: f1.nextState,
+  });
+  assert.equal(jiraOnly.conflicted, 0);
+  assert.equal(jiraOnly.updated, 1);
+  assert.equal(fresh.state.issues[0].title, "B");
+});
+
 test("conflict: a board issue already carrying externalKey with no local `known` record is reported, not overwritten", async () => {
   const board = fakeBoardClient();
 
