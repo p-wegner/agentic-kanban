@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { basename, resolve, join } from "node:path";
-import { existsSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { pluginEnabledPreferenceKey, type PluginManifest } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
@@ -226,27 +226,44 @@ export function createPluginLifecycleOps(deps: {
   async function refreshBundledPlugins(): Promise<string[]> {
     const root = bundledPluginsDir();
     if (!root) return [];
-    const base = resolve(root).toLowerCase().replace(/\\/g, "/");
+    // #1637: compare canonical paths (junctions/symlinks resolved); textual fallback if realpath fails.
+    const canon = (p: string): { path: string; real: boolean } => {
+      try { return { path: realpathSync.native(p), real: true }; } catch { return { path: resolve(p), real: false }; }
+    };
+    const norm = (p: string) => resolve(p).toLowerCase().replace(/\\/g, "/");
+    const baseCanon = canon(root);
+    const bases = [norm(baseCanon.path), norm(root)];
     const refreshed: string[] = [];
     for (const row of await listPluginRows(database)) {
-      const dir = resolve(row.localPath).toLowerCase().replace(/\\/g, "/");
-      if (!dir.startsWith(`${base}/`)) continue;
+      const found = canon(row.localPath);
+      const dir = norm(found.path);
+      if (!bases.some((b) => dir.startsWith(`${b}/`))) {
+        console.warn(
+          `[plugins] bundled manifest refresh skipped for ${row.pluginId}: localPath ${row.localPath} ` +
+          `${found.real ? "resolves outside the bundled plugins dir" : "does not exist"} (${root})`,
+        );
+        continue;
+      }
+      // Inside the bundled dir but spelled differently (junction, symlink, case): store the real location.
+      const localPath = found.real && found.path !== row.localPath ? found.path : row.localPath;
       try {
-        const { manifest, raw } = readManifestFromDir(row.localPath);
-        if (manifest.id !== row.pluginId || raw.trim() === row.manifestJson.trim()) continue;
+        const { manifest, raw } = readManifestFromDir(localPath);
+        if (manifest.id !== row.pluginId) continue;
+        const manifestChanged = raw.trim() !== row.manifestJson.trim();
+        if (!manifestChanged && localPath === row.localPath) continue;
         await upsertPluginRow(
           {
             id: row.id,
             pluginId: row.pluginId,
             name: manifest.name,
             sourceUrl: row.sourceUrl,
-            localPath: row.localPath,
+            localPath,
             version: manifest.version ?? null,
             manifestJson: raw,
           },
           database,
         );
-        refreshed.push(row.pluginId);
+        if (manifestChanged) refreshed.push(row.pluginId);
       } catch (err) {
         console.warn(`[plugins] bundled manifest refresh skipped for ${row.pluginId}: ${errorMessage(err)}`);
       }
