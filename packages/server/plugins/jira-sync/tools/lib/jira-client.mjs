@@ -2,7 +2,7 @@
 // no npm dependency, so it works offline against a fixture-backed fetch with
 // no install step. See tools/lib/fixtures.mjs for the offline mode.
 
-import { buildAuthHeader } from "./auth.mjs";
+import { buildAuthHeader, JiraAuthError } from "./auth.mjs";
 import { markdownToAdf } from "./adf.mjs";
 import { normalizeHttpError, normalizeNetworkError } from "./errors.mjs";
 
@@ -48,6 +48,7 @@ export class JiraClient {
     this.deployment = deployment;
     if (!siteUrl) throw new Error("siteUrl is required");
     this.siteUrl = siteUrl.replace(/\/+$/, "");
+    this.email = email ?? null;
     this.authHeader = buildAuthHeader({ email, apiToken });
     this.fetchImpl = fetchImpl;
     this.sleepImpl = sleepImpl;
@@ -123,6 +124,26 @@ export class JiraClient {
 
     // Unreachable in practice (the loop always returns or throws), kept for type-safety.
     throw lastError;
+  }
+
+  /**
+   * Proves the credentials are accepted (#1641). Jira Cloud answers a bad Basic-auth token as an
+   * ANONYMOUS user (search: 200 with no issues, every issue: 404), so a successful search proves
+   * nothing. Only `GET myself` returning an identity does. Throws JiraAuthError otherwise; network
+   * and server failures keep their own error.
+   */
+  async verifyCredentials() {
+    const who = this.email ?? "the configured token";
+    const rejected = () => new JiraAuthError(`Jira rejected the credentials for ${who}`);
+    let me;
+    try {
+      me = await this.request(this.deployment === "server" ? "/rest/api/2/myself" : "/rest/api/3/myself");
+    } catch (err) {
+      if (err?.status === 401 || err?.status === 403 || err?.status === 404) throw rejected();
+      throw err;
+    }
+    if (!me || typeof me !== "object" || !(me.accountId || me.key || me.name)) throw rejected();
+    return me;
   }
 
   /**

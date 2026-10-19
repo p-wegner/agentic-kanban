@@ -15,6 +15,27 @@ export const DELETED_TAG = "jira:deleted";
 export const OUT_OF_SCOPE_TAG = "jira:out-of-scope";
 const NO_AUTO_START_TAG = "no-auto-start";
 
+// A pull that would mark more of the known issues deleted than this at once is refused (#1641):
+// that shape is a wrong token, a wrong site or a broken JQL, not a real mass deletion.
+export const MAX_DELETIONS_PER_PULL = 3;
+export const MAX_DELETION_SHARE = 0.2;
+
+export class MassDeletionError extends Error {
+  constructor(count, known) {
+    super(
+      `refusing to apply ${count} deletions out of ${known} known issues at once ` +
+        `(limit: ${MAX_DELETIONS_PER_PULL}, or ${MAX_DELETION_SHARE * 100}% of known issues); ` +
+        "check the credentials, site URL and JQL. Nothing was written.",
+    );
+    this.name = "MassDeletionError";
+    this.code = "MASS_DELETION";
+  }
+}
+
+function exceedsDeletionLimit(count, known) {
+  return count > MAX_DELETIONS_PER_PULL || (count > 1 && count / known > MAX_DELETION_SHARE);
+}
+
 /**
  * @param {import("./jira-client.mjs").JiraClient} client
  * @param {import("./board-client.mjs").BoardClient} boardClient
@@ -26,12 +47,13 @@ const NO_AUTO_START_TAG = "no-auto-start";
  *   dryRun?: boolean,
  *   pendingWritebackKeys?: Set<string>, // keys push created whose board writeback has not landed yet
  *   deletedStatusName?: string,
+ *   now?: string,
  * }} opts
  */
 export async function runInboundSync(
   client,
   boardClient,
-  { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set(), deletedStatusName = "Cancelled" },
+  { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set(), deletedStatusName = "Cancelled", now = new Date().toISOString() },
 ) {
   // dryRun only suppresses WRITES (create/update/tag calls below) — these three are
   // reads, and skipping them would make every issue look brand-new (boardIssuesByKey
@@ -40,7 +62,21 @@ export async function runInboundSync(
   const boardIssuesByKey = await boardClient.listExternallyTrackedIssues(projectId);
   const tagCache = dryRun ? null : new Map((await boardClient.listTags()).map((t) => [t.name.toLowerCase(), t.id]));
 
-  const seenKeys = new Set();
+  // Read everything Jira says BEFORE writing anything, so a refused run (mass deletion) leaves
+  // the board untouched (#1641).
+  const jiraIssues = [];
+  for await (const jiraIssue of client.searchAll(jql, { fields: FIELDS })) jiraIssues.push(jiraIssue);
+  const seenKeys = new Set(jiraIssues.map((i) => i.key));
+  // Entries already marked deleted are settled; they are only revisited when Jira returns them.
+  const activeKnownKeys = Object.keys(knownState.issues).filter((key) => !knownState.issues[key].deletedAt);
+  const missingKeys = activeKnownKeys.filter((key) => !seenKeys.has(key));
+  const classified = new Map();
+  for (const key of missingKeys) classified.set(key, await classifyMissingIssue(client, key));
+  const pendingDeletions = [...classified.values()].filter((r) => r === "deleted").length;
+  if (exceedsDeletionLimit(pendingDeletions, activeKnownKeys.length)) {
+    throw new MassDeletionError(pendingDeletions, activeKnownKeys.length);
+  }
+
   const details = [];
   const nextState = { issues: { ...knownState.issues } };
   let created = 0;
@@ -49,11 +85,21 @@ export async function runInboundSync(
   let conflicted = 0;
   let commentsImported = 0;
 
-  for await (const jiraIssue of client.searchAll(jql, { fields: FIELDS })) {
-    seenKeys.add(jiraIssue.key);
+  const restored = [];
+  for (const jiraIssue of jiraIssues) {
     const mapped = mapJiraIssueToBoardFields(jiraIssue, { siteUrl });
-    const known = knownState.issues[jiraIssue.key];
-    const boardIssue = boardIssuesByKey.get(jiraIssue.key);
+    let known = knownState.issues[jiraIssue.key];
+    let boardIssue = boardIssuesByKey.get(jiraIssue.key);
+
+    // Jira returns an issue we marked deleted: undo the marking (tags, status) and carry on as a
+    // normal pull of a settled issue, not a conflict (#1641).
+    if (known?.deletedAt) {
+      const recovered = await recoverReappeared(boardClient, tagCache, boardIssue, known, boardStatuses, dryRun);
+      boardIssue = recovered.boardIssue ?? boardIssue;
+      known = recovered.known;
+      restored.push(jiraIssue.key);
+      if (!dryRun) nextState.issues[jiraIssue.key] = known;
+    }
 
     if (!boardIssue && pendingWritebackKeys.has(jiraIssue.key)) {
       // push created this Jira issue from a board issue whose externalKey writeback is still
@@ -183,12 +229,11 @@ export async function runInboundSync(
   // run. Never hard-deleted from the board (#1078); since #1624 each is classified
   // (deleted = `GET issue` 404, otherwise out of scope), marked with a tag, and a
   // deleted one is moved out of the startable columns.
-  const missingKeys = Object.keys(knownState.issues).filter((key) => !seenKeys.has(key));
   const outOfScope = [];
   const deleted = [];
   const deletedStatus = boardStatuses.find((st) => st.name.toLowerCase() === String(deletedStatusName).toLowerCase());
   for (const key of missingKeys) {
-    const reason = await classifyMissingIssue(client, key);
+    const reason = classified.get(key);
     const boardIssue = boardIssuesByKey.get(key);
     const entry = { key, reason, localIssueNumber: boardIssue?.issueNumber };
     (reason === "deleted" ? deleted : outOfScope).push(entry);
@@ -204,8 +249,12 @@ export async function runInboundSync(
         if (prior) nextState.issues[key] = { ...prior, boardUpdatedAt: moved.updatedAt };
       }
     }
-    // A deletion is applied once: forget the key so later pulls do not report it again.
-    if (reason === "deleted") delete nextState.issues[key];
+    // A deletion is applied once: keep the entry (comment ids, baseline) marked `deletedAt` so
+    // later pulls do not report it again and a reappearance can be recognised (#1641).
+    if (reason === "deleted") {
+      const prior = nextState.issues[key];
+      nextState.issues[key] = { ...prior, deletedAt: now, preDeleteStatusId: boardIssue?.statusId ?? prior?.preDeleteStatusId, deletedStatusId: deletedStatus?.id };
+    }
   }
   for (const entry of deleted) details.push({ key: entry.key, action: "delete", localIssueNumber: entry.localIssueNumber });
   const reportedOutOfScope = outOfScope.map((o) => o.key);
@@ -219,11 +268,36 @@ export async function runInboundSync(
     conflicted,
     commentsImported,
     reportedOutOfScope,
+    restored,
     outOfScope,
     deleted,
     details,
     nextState,
   };
+}
+
+/**
+ * Undoes the deleted marking of a board issue whose Jira twin is back: drops the `jira:deleted` and
+ * `no-auto-start` tags and, if it still sits in the deleted status, moves it to its pre-delete status.
+ * Returns the state entry without the marker, re-baselined against the restored board issue so the
+ * regular pull flow sees no local edit.
+ */
+async function recoverReappeared(boardClient, tagCache, boardIssue, known, boardStatuses, dryRun) {
+  const { deletedAt: _deletedAt, preDeleteStatusId, deletedStatusId, ...rest } = known;
+  if (!boardIssue) return { boardIssue, known: rest };
+  let restored = boardIssue;
+  if (!dryRun) {
+    const tags = await boardClient.listIssueTags(boardIssue.id);
+    for (const tag of tags) {
+      if (tag.name === DELETED_TAG || tag.name === NO_AUTO_START_TAG) await boardClient.detachTag(boardIssue.id, tag.id);
+    }
+    const target = preDeleteStatusId && boardStatuses.find((st) => st.id === preDeleteStatusId);
+    const inDeletedStatus = boardIssue.statusId === deletedStatusId;
+    if (target && boardIssue.statusId !== target.id && inDeletedStatus) {
+      restored = { ...boardIssue, ...(await boardClient.updateIssue(boardIssue.id, { statusId: target.id })) };
+    }
+  }
+  return { boardIssue: restored, known: { ...rest, boardUpdatedAt: restored.updatedAt, fields: boardFieldsOf(restored) } };
 }
 
 /** `deleted` (Jira answers 404), `out-of-scope` (still exists), or `unknown` (lookup failed). */

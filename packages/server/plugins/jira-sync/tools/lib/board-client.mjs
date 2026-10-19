@@ -127,6 +127,10 @@ export class BoardClient {
     return this.request(`/api/issues/${encodeURIComponent(issueId)}/tags`, { method: "POST", body: { tagId } });
   }
 
+  detachTag(issueId, tagId) {
+    return this.request(`/api/issues/${encodeURIComponent(issueId)}/tags/${encodeURIComponent(tagId)}`, { method: "DELETE" });
+  }
+
   /** The newest page of an issue's comments (`{ comments: [...] }`). */
   async listComments(issueId) {
     const page = await this.request(`/api/issues/${encodeURIComponent(issueId)}/comments?limit=200`);

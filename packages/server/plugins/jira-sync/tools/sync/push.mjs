@@ -12,7 +12,7 @@
 // can be tested with no CLI/env.
 
 import { checkProfile } from "../lib/profile.mjs";
-import { buildClientFromEnv, printResult, isDryRun } from "../lib/cli-client.mjs";
+import { buildClientFromEnv, printResult, isDryRun, checkAuth } from "../lib/cli-client.mjs";
 import {
   readOutbox,
   readWritebacks,
@@ -61,6 +61,9 @@ async function main() {
 
   const stateDir = process.env.JIRA_SYNC_STATE_DIR;
   if (!stateDir) return { ok: false, step: "config", reason: "JIRA_SYNC_STATE_DIR is not set" };
+
+  const authFailure = await checkAuth(ctx.client);
+  if (authFailure) return authFailure;
 
   const dryRun = isDryRun();
   const env = process.env;
