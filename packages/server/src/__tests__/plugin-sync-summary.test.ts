@@ -1,3 +1,4 @@
+// @gate:always-run when:packages/server/plugins/jira-sync/**,packages/server/src/services/plugin-sync-summary.ts - spawns the real jira-sync plugin scripts, invisible to the import graph
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
