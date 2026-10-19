@@ -275,15 +275,12 @@ export interface ImportResult {
   createdDependencies: number; warnings: string[];
 }
 
-export async function applyBacklogMarkdownImport(projectId: string, text: string, opts: ImportOptions = {}, database: Database = db, boardEvents?: BoardEventSink): Promise<ImportResult> {
-  const preview = await previewBacklogMarkdownImport(projectId, text, opts, database);
-  const { doc, rows } = preview;
-  const warnings = [...preview.warnings];
-  const nowIso = new Date().toISOString();
-  // 1. creates → one snapshot import (statuses/tags/milestones/deps/renumbering come for free)
-  const createIdx = rows.map((r, i) => (r.action === "create" ? i : -1)).filter((i) => i >= 0);
-  const createdSourceNumbers = new Set(createIdx.map((i) => doc.issues[i].number).filter((n): n is number => n != null));
-  const snapshotIssues: BacklogSnapshotIssue[] = createIdx.map((i, k) => {
+type LaterEdge = { fromNumber: number; toNumber: number };
+type PendingByTitle = { title: string; dependsOn: number[]; blocks: number[] };
+type ImportCtx = { database: Database; boardEvents?: BoardEventSink };
+
+function buildSnapshotIssues(createIdx: number[], doc: BacklogMdDoc, rows: ImportPreviewRow[], nowIso: string): BacklogSnapshotIssue[] {
+  return createIdx.map((i, k) => {
     const mi = doc.issues[i], r = rows[i];
     return {
       issueNumber: mi.number, title: mi.title, description: mi.description || null, priority: r.priority, issueType: r.issueType, sortOrder: k,
@@ -294,18 +291,108 @@ export async function applyBacklogMarkdownImport(projectId: string, text: string
       updatedAt: nowIso, statusChangedAt: null,
     };
   });
-  // dependencies among CREATED issues that carry numbers ride the snapshot; every other edge
-  // (touching an existing issue, or from an unnumbered new issue) is added after the create pass,
-  // once the new issues have numbers.
+}
+
+/** Dependencies among CREATED issues that carry numbers ride the snapshot; every other edge
+ *  (touching an existing issue, or from an unnumbered new issue) is added after the create pass,
+ *  once the new issues have numbers. */
+function splitCreatedEdges(createIdx: number[], doc: BacklogMdDoc, createdSourceNumbers: Set<number>) {
   const deps: BacklogSnapshot["dependencies"] = [];
-  const laterEdges: Array<{ fromNumber: number; toNumber: number }> = [];
-  const pendingByTitle: Array<{ title: string; dependsOn: number[]; blocks: number[] }> = [];
+  const laterEdges: LaterEdge[] = [];
+  const pendingByTitle: PendingByTitle[] = [];
   for (const i of createIdx) {
     const mi = doc.issues[i];
     if (mi.number == null) { if (mi.dependsOn.length || mi.blocks.length) pendingByTitle.push({ title: mi.title, dependsOn: mi.dependsOn, blocks: mi.blocks }); continue; }
     for (const to of mi.dependsOn) (createdSourceNumbers.has(to) ? deps : laterEdges).push({ fromNumber: mi.number, toNumber: to, type: "depends_on" } as never);
     for (const b of mi.blocks) (createdSourceNumbers.has(b) ? deps : laterEdges).push({ fromNumber: b, toNumber: mi.number, type: "depends_on" } as never);
   }
+  return { deps, laterEdges, pendingByTitle };
+}
+
+/** Unnumbered new issues now have numbers: resolve their edges by title. */
+async function resolvePendingEdges(projectId: string, database: Database, pendingByTitle: PendingByTitle[], laterEdges: LaterEdge[], result: ImportResult): Promise<void> {
+  if (!pendingByTitle.length) return;
+  const { existing: created } = await loadExisting(projectId, database);
+  for (const pnd of pendingByTitle) {
+    const hit = created.find((e) => e.title.trim().toLowerCase() === pnd.title.trim().toLowerCase() && e.issueNumber != null);
+    if (!hit) { result.warnings.push(`"${pnd.title}": could not resolve its number after creation — dependencies skipped`); continue; }
+    for (const to of pnd.dependsOn) laterEdges.push({ fromNumber: hit.issueNumber!, toNumber: to });
+    for (const b of pnd.blocks) laterEdges.push({ fromNumber: b, toNumber: hit.issueNumber! });
+  }
+}
+
+function buildUpdateBody(mi: BacklogMdDoc["issues"][number], r: ImportPreviewRow, ex: Existing, statusIdByName: Map<string, string>): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (r.changes.includes("title")) body.title = mi.title;
+  if (r.changes.includes("description")) body.description = mi.description;
+  if (mi.priority && mi.priority !== ex.priority) body.priority = mi.priority;
+  if (mi.issueType && mi.issueType !== ex.issueType) body.issueType = mi.issueType;
+  if (mi.dueDate && mi.dueDate !== ex.dueDate) body.dueDate = mi.dueDate;
+  const sid = statusIdByName.get(r.status.toLowerCase());
+  if (sid && r.status.toLowerCase() !== ex.status.toLowerCase()) body.statusId = sid;
+  if (r.changes.includes("checklist")) body.checklist = mi.checklist.map((c, j) => ({ id: `md-${j + 1}`, text: c.text, completed: c.done }));
+  return body;
+}
+
+async function assignMissingTags(ex: Existing, tags: string[], database: Database, result: ImportResult): Promise<void> {
+  for (const t of tags) {
+    if (ex.tags.some((x) => x.toLowerCase() === t.toLowerCase())) continue;
+    const found = await getTagByName(t, database);
+    const tagId = found[0]?.id ?? (await createTag(t, null, database)).id;
+    await assignTag(ex.id, tagId, database);
+    if (!found[0]) result.createdTags.push(t);
+  }
+}
+
+/** Field-wise updates through the issue service (events, webhooks, transitions all fire). */
+async function applyUpdates(
+  updateIdx: number[], doc: BacklogMdDoc, rows: ImportPreviewRow[], existing: Existing[], statusIdByName: Map<string, string>,
+  ctx: ImportCtx, laterEdges: LaterEdge[], result: ImportResult,
+): Promise<void> {
+  const issueService = createIssueService({ database: ctx.database, boardEvents: ctx.boardEvents });
+  const byNumber = new Map(existing.filter((e) => e.issueNumber != null).map((e) => [e.issueNumber!, e]));
+  for (const i of updateIdx) {
+    const mi = doc.issues[i], r = rows[i];
+    const ex = r.matchedNumber != null ? byNumber.get(r.matchedNumber) : undefined;
+    if (!ex) continue;
+    const body = buildUpdateBody(mi, r, ex, statusIdByName);
+    try {
+      if (Object.keys(body).length) await issueService.updateIssue(ex.id, body);
+      await assignMissingTags(ex, mi.tags, ctx.database, result);
+      for (const to of mi.dependsOn) if (!ex.dependsOn.includes(to)) laterEdges.push({ fromNumber: ex.issueNumber!, toNumber: to });
+      for (const b of mi.blocks) laterEdges.push({ fromNumber: b, toNumber: ex.issueNumber! });
+      result.updated++; result.updatedNumbers.push(ex.issueNumber!);
+    } catch (e) {
+      result.warnings.push(`#${ex.issueNumber}: update failed — ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+}
+
+/** Cross edges (existing/created, existing/existing): numbers are reloaded after the create pass. */
+async function applyCrossEdges(projectId: string, laterEdges: LaterEdge[], ctx: ImportCtx, result: ImportResult): Promise<void> {
+  const depService = createIssueDependencyService({ database: ctx.database, boardEvents: ctx.boardEvents });
+  const { existing: after } = await loadExisting(projectId, ctx.database);
+  const idByNumber = new Map(after.filter((e) => e.issueNumber != null).map((e) => [e.issueNumber!, e.id]));
+  const seen = new Set<string>();
+  for (const e of laterEdges) {
+    const k = `${e.fromNumber}>${e.toNumber}`; if (seen.has(k)) continue; seen.add(k);
+    const from = idByNumber.get(e.fromNumber), to = idByNumber.get(e.toNumber);
+    if (!from || !to) { result.warnings.push(`dependency #${e.fromNumber} → #${e.toNumber} skipped (unknown number)`); continue; }
+    try { await depService.addDependency(from, to, "depends_on"); result.createdDependencies++; }
+    catch (err) { const m = err instanceof Error ? err.message : String(err); if (!/already|exists|duplicate/i.test(m)) result.warnings.push(`dependency #${e.fromNumber} → #${e.toNumber}: ${m}`); }
+  }
+}
+
+export async function applyBacklogMarkdownImport(projectId: string, text: string, opts: ImportOptions = {}, database: Database = db, boardEvents?: BoardEventSink): Promise<ImportResult> {
+  const preview = await previewBacklogMarkdownImport(projectId, text, opts, database);
+  const { doc, rows } = preview;
+  const warnings = [...preview.warnings];
+  const nowIso = new Date().toISOString();
+  // 1. creates → one snapshot import (statuses/tags/milestones/deps/renumbering come for free)
+  const createIdx = rows.map((r, i) => (r.action === "create" ? i : -1)).filter((i) => i >= 0);
+  const createdSourceNumbers = new Set(createIdx.map((i) => doc.issues[i].number).filter((n): n is number => n != null));
+  const snapshotIssues = buildSnapshotIssues(createIdx, doc, rows, nowIso);
+  const { deps, laterEdges, pendingByTitle } = splitCreatedEdges(createIdx, doc, createdSourceNumbers);
   const result: ImportResult = { created: 0, updated: 0, unchanged: preview.counts.unchanged, createdNumbers: [], updatedNumbers: [], createdStatuses: [], createdTags: [], createdMilestones: [], createdDependencies: 0, warnings };
   if (snapshotIssues.length) {
     const snap: BacklogSnapshot = {
@@ -318,63 +405,14 @@ export async function applyBacklogMarkdownImport(projectId: string, text: string
     result.created = r.createdIssues; result.createdStatuses = r.createdStatuses; result.createdTags = r.createdTags; result.createdMilestones = r.createdMilestones;
     result.createdDependencies += r.createdDependencies; result.warnings.push(...r.warnings);
   }
-  // unnumbered new issues now have numbers — resolve their edges by title
-  if (pendingByTitle.length) {
-    const { existing: created } = await loadExisting(projectId, database);
-    for (const pnd of pendingByTitle) {
-      const hit = created.find((e) => e.title.trim().toLowerCase() === pnd.title.trim().toLowerCase() && e.issueNumber != null);
-      if (!hit) { result.warnings.push(`"${pnd.title}": could not resolve its number after creation — dependencies skipped`); continue; }
-      for (const to of pnd.dependsOn) laterEdges.push({ fromNumber: hit.issueNumber!, toNumber: to });
-      for (const b of pnd.blocks) laterEdges.push({ fromNumber: b, toNumber: hit.issueNumber! });
-    }
-  }
-  // 2. updates — field-wise through the issue service (events, webhooks, transitions all fire)
+  await resolvePendingEdges(projectId, database, pendingByTitle, laterEdges, result);
+  // 2. updates, 3. cross edges
   const updateIdx = rows.map((r, i) => (r.action === "update" ? i : -1)).filter((i) => i >= 0);
   if (updateIdx.length || laterEdges.length) {
-    const issueService = createIssueService({ database, boardEvents });
-    const depService = createIssueDependencyService({ database, boardEvents });
+    const ctx = { database, boardEvents };
     const { existing, statusIdByName } = await loadExisting(projectId, database);
-    const byNumber = new Map(existing.filter((e) => e.issueNumber != null).map((e) => [e.issueNumber!, e]));
-    for (const i of updateIdx) {
-      const mi = doc.issues[i], r = rows[i];
-      const ex = r.matchedNumber != null ? byNumber.get(r.matchedNumber) : undefined;
-      if (!ex) continue;
-      const body: Record<string, unknown> = {};
-      if (r.changes.includes("title")) body.title = mi.title;
-      if (r.changes.includes("description")) body.description = mi.description;
-      if (mi.priority && mi.priority !== ex.priority) body.priority = mi.priority;
-      if (mi.issueType && mi.issueType !== ex.issueType) body.issueType = mi.issueType;
-      if (mi.dueDate && mi.dueDate !== ex.dueDate) body.dueDate = mi.dueDate;
-      const sid = statusIdByName.get(r.status.toLowerCase());
-      if (sid && r.status.toLowerCase() !== ex.status.toLowerCase()) body.statusId = sid;
-      if (r.changes.includes("checklist")) body.checklist = mi.checklist.map((c, j) => ({ id: `md-${j + 1}`, text: c.text, completed: c.done }));
-      try {
-        if (Object.keys(body).length) await issueService.updateIssue(ex.id, body);
-        for (const t of mi.tags) {
-          if (ex.tags.some((x) => x.toLowerCase() === t.toLowerCase())) continue;
-          const found = await getTagByName(t, database);
-          const tagId = found[0]?.id ?? (await createTag(t, null, database)).id;
-          await assignTag(ex.id, tagId, database);
-          if (!found[0]) result.createdTags.push(t);
-        }
-        for (const to of mi.dependsOn) if (!ex.dependsOn.includes(to)) laterEdges.push({ fromNumber: ex.issueNumber!, toNumber: to });
-        for (const b of mi.blocks) laterEdges.push({ fromNumber: b, toNumber: ex.issueNumber! });
-        result.updated++; result.updatedNumbers.push(ex.issueNumber!);
-      } catch (e) {
-        result.warnings.push(`#${ex.issueNumber}: update failed — ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
-    // 3. cross edges (existing ↔ created, existing ↔ existing) — reload numbers after the create pass
-    const { existing: after } = await loadExisting(projectId, database);
-    const idByNumber = new Map(after.filter((e) => e.issueNumber != null).map((e) => [e.issueNumber!, e.id]));
-    const seen = new Set<string>();
-    for (const e of laterEdges) {
-      const k = `${e.fromNumber}>${e.toNumber}`; if (seen.has(k)) continue; seen.add(k);
-      const from = idByNumber.get(e.fromNumber), to = idByNumber.get(e.toNumber);
-      if (!from || !to) { result.warnings.push(`dependency #${e.fromNumber} → #${e.toNumber} skipped (unknown number)`); continue; }
-      try { await depService.addDependency(from, to, "depends_on"); result.createdDependencies++; }
-      catch (err) { const m = err instanceof Error ? err.message : String(err); if (!/already|exists|duplicate/i.test(m)) result.warnings.push(`dependency #${e.fromNumber} → #${e.toNumber}: ${m}`); }
-    }
+    await applyUpdates(updateIdx, doc, rows, existing, statusIdByName, ctx, laterEdges, result);
+    await applyCrossEdges(projectId, laterEdges, ctx, result);
   }
   const { existing: finalRows } = await loadExisting(projectId, database);
   const known = new Set(finalRows.map((e) => e.issueNumber));
