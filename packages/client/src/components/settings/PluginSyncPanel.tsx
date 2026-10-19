@@ -60,6 +60,7 @@ export function RunLine({ label, run }: { label: string; run: PluginSyncRunRecor
     .filter(([, n]) => typeof n === "number")
     .map(([k, n]) => `${n} ${k}`)
     .join(", ");
+  const dryNote = run.dryRun && countText ? ", nothing sent" : "";
   return (
     <div className="text-xs space-y-0.5" data-testid={`plugin-sync-run-${label}`}>
       <div className={run.ok ? "text-green-700 dark:text-green-400" : "text-red-700 dark:text-red-400"}>
@@ -67,7 +68,7 @@ export function RunLine({ label, run }: { label: string; run: PluginSyncRunRecor
         {run.dryRun ? " (dry run)" : ""}
         {run.scheduled ? " (scheduled)" : ""}: {run.ok ? "ok" : "failed"}
         <span className="text-gray-500"> at {new Date(run.finishedAt).toLocaleString("en-US")}</span>
-        {countText ? <span className="text-gray-600 dark:text-gray-300"> - {countText}</span> : null}
+        {countText ? <span className="text-gray-600 dark:text-gray-300"> - {`${run.dryRun ? "dry run: " : ""}${countText}${dryNote}`}</span> : null}
       </div>
       {run.error && <div className="text-red-700 dark:text-red-400 whitespace-pre-wrap break-words">{run.error}</div>}
       {(run.summary?.conflicts ?? []).map((c) => (

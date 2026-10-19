@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { PluginSyncRunRecord, PluginSyncStatusView } from "@agentic-kanban/shared";
-import { SyncStatusBody, applyTriggeredRun, effectiveCadence } from "./PluginSyncPanel.js";
+import { RunLine, SyncStatusBody, applyTriggeredRun, effectiveCadence } from "./PluginSyncPanel.js";
 import { validateSyncField, validateSyncFields } from "./pluginSyncFields.js";
 // @ts-expect-error plain ESM plugin code, no types
 import { runInboundSync } from "../../../../server/plugins/jira-sync/tools/lib/sync-engine.mjs";
@@ -127,5 +127,19 @@ describe("PluginSyncPanel on a summary produced by the real plugin (#1634)", () 
       <SyncStatusBody status={status({ lastRuns: { pull: run({ summary: pullSummary }), push: run({ direction: "push", ok: false, summary: pushSummary }) } })} />,
     );
     expect(html.match(new RegExp(`plugin-sync-board-issue-${number}"`, "g"))?.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("dry-run run line (#1638)", () => {
+  it("renders a dry-run record as planned, not applied", () => {
+    const run = {
+      direction: "push", dryRun: true, ok: true, startedAt: iso(T0), finishedAt: iso(T0 + 5_000),
+      summary: parseRunSummary(JSON.stringify({ step: "push", dryRun: true, appliedCount: 2, failedCount: 0, applied: [] })),
+    } as PluginSyncRunRecord;
+    const html = renderToStaticMarkup(<RunLine label="push" run={run} />);
+    expect(html).toContain("dry run: ");
+    expect(html).toContain("2 planned");
+    expect(html).toContain("nothing sent");
+    expect(html).not.toContain("applied");
   });
 });

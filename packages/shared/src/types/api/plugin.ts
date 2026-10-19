@@ -54,6 +54,11 @@ export interface PluginSyncRunSummary {
     failed?: number;
     outOfScope?: number;
     deleted?: number;
+    /** Dry run only (#1638): planned writes, named so they never read as done. */
+    planned?: number;
+    wouldCreate?: number;
+    wouldUpdate?: number;
+    wouldDelete?: number;
   };
   issues?: Array<{ externalKey: string; externalUrl?: string; localIssueNumber?: number; status?: string }>;
   conflicts?: Array<{ externalKey: string; reason: string; externalUrl?: string; localIssueNumber?: number }>;

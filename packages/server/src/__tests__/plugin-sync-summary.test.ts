@@ -89,3 +89,23 @@ describe("describeRunFailure (#1625)", () => {
     expect(describeRunFailure({ code: null, timedOut: true, stdout: "", stderr: "" })).toBe("sync command timed out");
   });
 });
+
+describe("dry-run summaries name planned writes, not applied ones (#1638)", () => {
+  const push = (dryRun: boolean) =>
+    JSON.stringify({ ok: true, step: "push", dryRun, appliedCount: 2, failedCount: 0, applied: [{ key: "KD-47", kind: "transition" }, { key: "KD-47", kind: "comment" }], failed: [] });
+  it("push: dry run has planned (== real applied) and no applied", () => {
+    const dry = parseRunSummary(push(true));
+    const real = parseRunSummary(push(false));
+    expect(dry?.counts?.applied).toBeUndefined();
+    expect(dry?.counts?.planned).toBe(real?.counts?.applied);
+    expect(dry?.issues?.map((i) => i.status)).toEqual(["would transition", "would comment"]);
+    expect(real?.issues?.map((i) => i.status)).toEqual(["transition", "comment"]);
+  });
+  it("pull: dry run has wouldCreate/wouldUpdate and no created/updated/deleted", () => {
+    const s = parseRunSummary(JSON.stringify({ step: "pull", dryRun: true, created: 1, updated: 2, skipped: 0, deleted: ["x"] }));
+    expect(s?.counts).toMatchObject({ wouldCreate: 1, wouldUpdate: 2, wouldDelete: 1 });
+    expect(s?.counts?.created).toBeUndefined();
+    expect(s?.counts?.updated).toBeUndefined();
+    expect(s?.counts?.deleted).toBeUndefined();
+  });
+});
