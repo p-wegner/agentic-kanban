@@ -22,6 +22,7 @@ export function createBoardFixtureState() {
     issues: [],
     tags: [],
     issueTags: new Map(), // issueId -> Set<tagId>
+    comments: new Map(), // issueId -> comment[]
   };
 }
 
@@ -52,8 +53,15 @@ export function createDefaultBoardFixtureFetch(state = createBoardFixtureState()
       Object.assign(issue, body, { updatedAt: new Date().toISOString() });
       return jsonResponse(200, issue);
     }
-    if (method === "GET" && /^\/api\/issues\/[^/]+\/comments$/.test(path)) {
-      return jsonResponse(200, { comments: [] });
+    const commentsMatch = /^\/api\/issues\/([^/?]+)\/comments(?:\?.*)?$/.exec(path);
+    if (method === "GET" && commentsMatch) {
+      return jsonResponse(200, { comments: state.comments.get(commentsMatch[1]) ?? [] });
+    }
+    if (method === "POST" && commentsMatch) {
+      const comment = { id: randomUUID(), createdAt: new Date().toISOString(), ...body };
+      if (!state.comments.has(commentsMatch[1])) state.comments.set(commentsMatch[1], []);
+      state.comments.get(commentsMatch[1]).push(comment);
+      return jsonResponse(201, comment);
     }
     if (method === "GET" && path === "/api/tags") {
       return jsonResponse(200, state.tags);
