@@ -86,9 +86,11 @@ test("comment: a board-authored comment posts to Jira with an attribution marker
 
   assert.deepEqual(failed, []);
   assert.equal(applied.length, 1);
-  const text = posted[0].body.content[0].content[0].text;
-  assert.match(text, /^Fixed in latest build/);
-  assert.match(text, /Synced from agentic-kanban comment c42/);
+  const [first, marker] = posted[0].body.content;
+  assert.equal(first.content[0].text, "Fixed in latest build");
+  // The marker is rendered as emphasis in Jira, not as literal underscores (#1624).
+  assert.equal(marker.content[0].text, "Synced from agentic-kanban comment c42");
+  assert.deepEqual(marker.content[0].marks, [{ type: "em" }]);
 });
 
 test("create: a board issue with no external_key is created in Jira and the key is written back", async () => {
