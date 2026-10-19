@@ -75,7 +75,7 @@ async function defaultResolveTip(repoPath: string, branch: string): Promise<{ ti
 async function defaultRunScan(repoPath: string): Promise<SoftBreach[] | null> {
   const script = join(repoPath, "scripts", "check-god-modules.mjs");
   if (!existsSync(script)) return null;
-  const dir = await mkdtemp(join(tmpdir(), "code-health-"));
+  const dir = await mkdtemp(join(tmpdir(), "kanban-code-health-"));
   const out = join(dir, "report.json");
   try {
     await runUnderVerifyChainSemaphore(
