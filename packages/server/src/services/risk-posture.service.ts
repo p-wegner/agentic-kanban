@@ -1,6 +1,6 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { RISK_POSTURES } from "@agentic-kanban/shared/lib/risk-posture";
-import type { BaseSweepInfo, ImplementExitCheckLevel, RedBasePolicy, RiskPosture, RiskPostureLevel } from "@agentic-kanban/shared/types";
+import type { BaseSweepInfo, ImplementExitCheckLevel, RcSweepMode, RedBasePolicy, RiskPosture, RiskPostureLevel } from "@agentic-kanban/shared/types";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getIssueTagRows } from "../repositories/tag.repository.js";
@@ -45,7 +45,7 @@ import { getIssueTagRows } from "../repositories/tag.repository.js";
  * this posture skips relative to `standard`, and every gate/merge message that reads a
  * `RiskPosture` must include it.
  */
-export type { RedBasePolicy, RiskPosture, RiskPostureLevel };
+export type { RcSweepMode, RedBasePolicy, RiskPosture, RiskPostureLevel };
 
 // #496: built from the registry, so an unregistered prefix is a COMPILE error.
 const riskPosturePrefDef = projectPref("risk_posture");
@@ -201,6 +201,7 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         // A strict project gates every merge in full, so a sweep only adds value for changes
         // that arrive OUTSIDE a merge (a direct push to the base). Half-daily is enough for that.
         sweepIntervalMs: 12 * 60 * 60 * 1000,
+        rcSweep: "on-promote",
         reviewMode: "thorough",
         redBasePolicy: "block",
         trainMaxSize: 1,
@@ -218,6 +219,7 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         level, source,
         gateTier: "scoped",
         sweepIntervalMs: 6 * 60 * 60 * 1000,
+        rcSweep: "on-promote",
         reviewMode: "train-only",
         redBasePolicy: "allow-known-debt",
         trainMaxSize: 8,
@@ -237,6 +239,9 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         // release candidate's fresh sweep, decision 019), as under `flow`. A scheduled master
         // sweep cost a worker for 45-70 min a day and gated nothing.
         sweepIntervalMs: null,
+        // Operator decision 2026-10-19 (#1631): the full sweep is not paid at promote time. Once
+        // the queue is idle after a landing the board sweeps a rolling candidate on spare slots.
+        rcSweep: "on-idle-after-landing",
         reviewMode: "none",
         redBasePolicy: "allow-file-debt-ticket",
         trainMaxSize: 12,
@@ -259,6 +264,7 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         // (#982), which is what turns the guess into a measured one.
         gateTier: "impact",
         sweepIntervalMs: 24 * 60 * 60 * 1000,
+        rcSweep: "on-promote",
         reviewMode: "standard",
         // #1233 (decision 017 Amendment 2026-09-24): a red nightly sweep FILES a heal ticket and
         // lets the train window depart. Under `block` the same sweep held every train — and the
@@ -287,6 +293,8 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         // `null` = no scheduled base sweep at all, by design — not the opt-in rule's "no posture
         // chosen". `describeBaseSweep` says "release candidate only" for this case.
         sweepIntervalMs: null,
+        // #1631: `flow` owes its only full verdict on the rc, so the rc is swept as soon as it is cheap.
+        rcSweep: "on-idle-after-landing",
         reviewMode: "standard",
         // `report` (rank 3, the softest): a red master never holds the train window and files no
         // heal ticket. The delivery view and the sweep row are where the red is disclosed; the
@@ -319,6 +327,7 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         // in `resolveBaseSweepIntervalMs`, which is what stops idle imported repos burning
         // compute.)
         sweepIntervalMs: 12 * 60 * 60 * 1000,
+        rcSweep: "on-promote",
         reviewMode: "standard",
         redBasePolicy: "block",
         trainMaxSize: 1,

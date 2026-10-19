@@ -25,6 +25,7 @@ function posture(overrides: Partial<RiskPosture> = {}): RiskPosture {
     gateTier: "impact",
     reviewMode: "standard",
     sweepIntervalMs: 24 * 60 * 60 * 1000,
+    rcSweep: "on-promote",
     redBasePolicy: "block",
     trainMaxSize: 1,
     trainMaxWaitMs: 0,
