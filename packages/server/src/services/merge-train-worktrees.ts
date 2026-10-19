@@ -178,16 +178,7 @@ export interface CleanupTrainWorktreesResult {
 }
 
 /**
- * The train service's OWN teardown at a terminal transition (#1235 part 2): every worktree on a
- * `kanban/train/<label>[bisect letters]` branch of this train goes, with its branch. The gate's
- * per-attempt `finally` already removes its worktree on a normal exit, so on the happy path
- * this finds nothing and costs one `git worktree list`; it earns its place when that `finally`
- * was skipped (a killed gate, a guard refusal that has since cleared) or removed the directory
- * but left the branch. Never throws — a transition must not fail on its own housekeeping — and
- * asks no question about the row's state: the caller IS the transition.
- */
-/**
- * #1621 - pin every `kanban/train/<label>*` branch that holds commits no other ref has under
+ * #1621 - pin every `kanban/train/<label>*` branch under
  * `refs/kanban/trains/<attempt label>`, so tearing the worktree/branch down after a failed
  * train never loses a shepherd's fix commit. Best effort, never throws.
  */
@@ -195,8 +186,7 @@ export async function pinTrainRefsForLabel(args: { repoPath: string; label: stri
   const pinned: string[] = [];
   try {
     const listed = await gitExec(["for-each-ref", "--format=%(refname:short) %(objectname)", `refs/heads/${TRAIN_BRANCH_PREFIX}`], { cwd: args.repoPath });
-    for (const line of listed.stdout.split("
-")) {
+    for (const line of listed.stdout.split(/\r?\n/)) {
       const [branch, sha] = line.trim().split(" ");
       if (!branch || !sha) continue;
       const attempt = trainAttemptLabelFromBranch(branch);
@@ -211,6 +201,15 @@ export async function pinTrainRefsForLabel(args: { repoPath: string; label: stri
   return pinned;
 }
 
+/**
+ * The train service's OWN teardown at a terminal transition (#1235 part 2): every worktree on a
+ * `kanban/train/<label>[bisect letters]` branch of this train goes, with its branch. The gate's
+ * per-attempt `finally` already removes its worktree on a normal exit, so on the happy path
+ * this finds nothing and costs one `git worktree list`; it earns its place when that `finally`
+ * was skipped (a killed gate, a guard refusal that has since cleared) or removed the directory
+ * but left the branch. Never throws — a transition must not fail on its own housekeeping — and
+ * asks no question about the row's state: the caller IS the transition.
+ */
 export async function cleanupTrainWorktreesForLabel(args: {
   database: Database;
   repoPath: string;
