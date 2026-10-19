@@ -119,6 +119,7 @@ export function applyConsoleExtras(model: ConsoleModel, p: ConsolePayloads): voi
   model.baseHealth = extras?.baseHealth
     ? { outcome: extras.baseHealth.outcome, sha: extras.baseHealth.sha, createdAt: extras.baseHealth.createdAt, failedSuites: extras.baseHealth.failedSuites }
     : null;
+  model.codeHealth = extras?.codeHealth ?? null;
   model.connectCodes = (extras?.connectCodes ?? []).map((c) => ({ codeHint: c.codeHint, status: c.status, steps: c.progress.map((s) => ({ step: s.step, status: s.status })) }));
 
   for (const text of extras?.profileAttention ?? []) model.attention.push({ level: "yellow", text }); // #1565
