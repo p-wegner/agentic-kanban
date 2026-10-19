@@ -1,6 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import type { MergeTrainState } from "@agentic-kanban/shared/schema";
@@ -193,7 +194,7 @@ export async function pinTrainRefsForLabel(args: { repoPath: string; label: stri
       if (attempt === null || !findTrainRowForAttemptLabel(attempt, [{ label: args.label }])) continue;
       const pin = `refs/kanban/trains/${attempt}`;
       const r = await gitExec(["update-ref", pin, sha], { cwd: args.repoPath });
-      if (r.code === 0) pinned.push(pin);
+      if (execSucceeded(r)) pinned.push(pin);
     }
   } catch (err) {
     (args.log ?? console.log)(`[merge-train] ${args.label}: could not pin train refs (non-fatal): ${errorMessage(err)}`);
