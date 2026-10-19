@@ -89,10 +89,7 @@ const savedGitEnv = {
 beforeAll(async () => {
   const gitHome = await mkdtemp(join(tmpdir(), "kanban-gitcfg-"));
   const globalCfg = join(gitHome, "gitconfig");
-  await writeFile(globalCfg, "[user]
-	name = Test
-	email = test@example.com
-");
+  await writeFile(globalCfg, "[user]\n\tname = Test\n\temail = test@example.com\n");
   process.env.GIT_CONFIG_GLOBAL = globalCfg;
   process.env.GIT_CONFIG_NOSYSTEM = "1";
   ({ db } = createTestDb());
