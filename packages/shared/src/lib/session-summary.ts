@@ -242,6 +242,97 @@ function foldParsedEvent(
 
 // ── Main parser function ──────────────────────────────────────────────
 
+/** Route one stored JSONL line to its canonical provider parser and fold the result. */
+function foldLine(
+  acc: SummaryAccumulator,
+  parseContext: ReturnType<typeof createAgentStreamParseContext>,
+  line: string,
+  storedProvider: AgentStreamProvider | undefined,
+): void {
+  const trimmed = line.trim();
+  if (!trimmed) return;
+
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    return;
+  }
+  if (typeof obj !== "object" || obj === null) return;
+
+  // Prefer a stored provider (arch-review §2.4: session_messages rows now
+  // record it) so we never sniff. When absent (legacy rows), detect per
+  // event; an unrecognized shape is reported as "unknown" + logged rather
+  // than silently claimed as copilot, but is still READ with the tolerant
+  // copilot parser for a best-effort fold.
+  const detected = storedProvider ?? detectAgentEventProviderOrUnknown(obj);
+  const provider: AgentStreamProvider = detected === "unknown" ? "copilot" : detected;
+  let parsed: ParsedStreamEvent | undefined;
+  switch (provider) {
+    case "claude":
+      parsed = parseClaudeEvent(obj, parseContext);
+      break;
+    case "codex":
+      parsed = parseCodexEvent(obj, parseContext);
+      break;
+    case "pi":
+      parsed = parsePiEvent(obj, parseContext);
+      break;
+    case "copilot":
+      parsed = parseCopilotEvent(obj, trimmed, parseContext);
+      break;
+  }
+  if (!parsed) return;
+
+  foldParsedEvent(acc, provider, typeof obj.type === "string" ? obj.type : "", parsed);
+}
+
+const plural = (n: number, word: string): string => `${n} ${word}${n !== 1 ? "s" : ""}`;
+
+function buildSummary(acc: SummaryAccumulator): SessionSummary {
+  const actions: Array<{ type: string; files?: string[]; commands?: string[] }> = [];
+  if (acc.filesRead.size > 0) actions.push({ type: "read", files: [...acc.filesRead] });
+  if (acc.filesEdited.size > 0) actions.push({ type: "edit", files: [...acc.filesEdited] });
+  if (acc.filesWritten.size > 0) actions.push({ type: "write", files: [...acc.filesWritten] });
+  if (acc.commandsRun.length > 0) actions.push({ type: "command", commands: acc.commandsRun });
+
+  const parts: string[] = [];
+  if (acc.initFound) parts.push(`Agent session using ${acc.model}`);
+  if (acc.filesRead.size > 0) parts.push(`read ${plural(acc.filesRead.size, "file")}`);
+  if (acc.filesEdited.size > 0) parts.push(`edited ${plural(acc.filesEdited.size, "file")}`);
+  if (acc.filesWritten.size > 0) parts.push(`wrote ${plural(acc.filesWritten.size, "file")}`);
+  if (acc.commandsRun.length > 0) parts.push(`ran ${plural(acc.commandsRun.length, "command")}`);
+  const overview = parts.length > 0 ? parts.join(", ") : "No activity recorded";
+
+  const agentSummary = acc.agentSummaryParts.length > 0 ? acc.agentSummaryParts.join("\n\n---\n\n") : null;
+
+  const toolUsePatterns: ToolUsePattern[] = [...acc.toolUseCounts.entries()]
+    .map(([tool, { count, failedCount }]) => ({ tool, count, failedCount }))
+    .sort((a, b) => b.count - a.count);
+
+  const repeatedCommands: RepeatedCommand[] = [...acc.commandCounts.entries()]
+    .filter(([, count]) => count >= 2)
+    .map(([command, count]) => ({ command, count }))
+    .sort((a, b) => b.count - a.count);
+
+  return {
+    overview,
+    agentSummary,
+    actions,
+    keyExcerpts: acc.keyExcerpts,
+    errors: acc.errors,
+    filesRead: [...acc.filesRead],
+    filesEdited: [...acc.filesEdited],
+    filesWritten: [...acc.filesWritten],
+    commandsRun: acc.commandsRun,
+    model: acc.model,
+    tasks: [...acc.tasksMap.values()],
+    rateLimits: acc.rateLimits,
+    toolUsePatterns,
+    repeatedCommands,
+  };
+}
+
 /**
  * Parse JSONL session output rows into a structured `SessionSummary`.
  *
@@ -277,90 +368,10 @@ export function parseSessionSummary(
 
   for (const row of rows) {
     if (row.type !== "stdout" || !row.data) continue;
-
-    for (const line of row.data.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      let obj: Record<string, unknown>;
-      try {
-        obj = JSON.parse(trimmed) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
-      if (typeof obj !== "object" || obj === null) continue;
-
-      // Prefer a stored provider (arch-review §2.4: session_messages rows now
-      // record it) so we never sniff. When absent (legacy rows), detect per
-      // event; an unrecognized shape is reported as "unknown" + logged rather
-      // than silently claimed as copilot, but is still READ with the tolerant
-      // copilot parser for a best-effort fold.
-      const detected = opts.provider ?? detectAgentEventProviderOrUnknown(obj);
-      const provider: AgentStreamProvider = detected === "unknown" ? "copilot" : detected;
-      let parsed: ParsedStreamEvent | undefined;
-      switch (provider) {
-        case "claude":
-          parsed = parseClaudeEvent(obj, parseContext);
-          break;
-        case "codex":
-          parsed = parseCodexEvent(obj, parseContext);
-          break;
-        case "pi":
-          parsed = parsePiEvent(obj, parseContext);
-          break;
-        case "copilot":
-          parsed = parseCopilotEvent(obj, trimmed, parseContext);
-          break;
-      }
-      if (!parsed) continue;
-
-      foldParsedEvent(acc, provider, typeof obj.type === "string" ? obj.type : "", parsed);
-    }
+    for (const line of row.data.split("\n")) foldLine(acc, parseContext, line, opts.provider);
   }
 
-  // ── Build result ──────────────────────────────────────────────────
-
-  const actions: Array<{ type: string; files?: string[]; commands?: string[] }> = [];
-  if (acc.filesRead.size > 0) actions.push({ type: "read", files: [...acc.filesRead] });
-  if (acc.filesEdited.size > 0) actions.push({ type: "edit", files: [...acc.filesEdited] });
-  if (acc.filesWritten.size > 0) actions.push({ type: "write", files: [...acc.filesWritten] });
-  if (acc.commandsRun.length > 0) actions.push({ type: "command", commands: acc.commandsRun });
-
-  const parts: string[] = [];
-  if (acc.initFound) parts.push(`Agent session using ${acc.model}`);
-  if (acc.filesRead.size > 0) parts.push(`read ${acc.filesRead.size} file${acc.filesRead.size !== 1 ? "s" : ""}`);
-  if (acc.filesEdited.size > 0) parts.push(`edited ${acc.filesEdited.size} file${acc.filesEdited.size !== 1 ? "s" : ""}`);
-  if (acc.filesWritten.size > 0) parts.push(`wrote ${acc.filesWritten.size} file${acc.filesWritten.size !== 1 ? "s" : ""}`);
-  if (acc.commandsRun.length > 0) parts.push(`ran ${acc.commandsRun.length} command${acc.commandsRun.length !== 1 ? "s" : ""}`);
-  const overview = parts.length > 0 ? parts.join(", ") : "No activity recorded";
-
-  const agentSummary = acc.agentSummaryParts.length > 0 ? acc.agentSummaryParts.join("\n\n---\n\n") : null;
-
-  const toolUsePatterns: ToolUsePattern[] = [...acc.toolUseCounts.entries()]
-    .map(([tool, { count, failedCount }]) => ({ tool, count, failedCount }))
-    .sort((a, b) => b.count - a.count);
-
-  const repeatedCommands: RepeatedCommand[] = [...acc.commandCounts.entries()]
-    .filter(([, count]) => count >= 2)
-    .map(([command, count]) => ({ command, count }))
-    .sort((a, b) => b.count - a.count);
-
-  return {
-    overview,
-    agentSummary,
-    actions,
-    keyExcerpts: acc.keyExcerpts,
-    errors: acc.errors,
-    filesRead: [...acc.filesRead],
-    filesEdited: [...acc.filesEdited],
-    filesWritten: [...acc.filesWritten],
-    commandsRun: acc.commandsRun,
-    model: acc.model,
-    tasks: [...acc.tasksMap.values()],
-    rateLimits: acc.rateLimits,
-    toolUsePatterns,
-    repeatedCommands,
-  };
+  return buildSummary(acc);
 }
 
 // ── Friction stats ────────────────────────────────────────────────────

@@ -8,25 +8,407 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { parseIssueNumberFromBranch } from "@agentic-kanban/shared/lib/branch";
 import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
+type BundledSkillsLib = typeof import("@agentic-kanban/shared/lib/bundled-skills");
+type InstallableSkill = Awaited<ReturnType<BundledSkillsLib["listBundledSkills"]>>[number];
+type PromptSkill = (typeof BUILTIN_SKILLS)[number];
+type InstallSkillOptions = { names?: string; list?: boolean; user?: boolean; link?: boolean };
+
+async function deleteStatusAction(statusId: string): Promise<void> {
+  const status = await getProjectStatusById(statusId);
+  if (!status) {
+    console.error(`Status "${statusId}" not found.`);
+    process.exit(1);
+  }
+  const linkedId = await getFirstIssueIdWithStatus(statusId);
+  if (linkedId) {
+    console.error(`Cannot delete status "${status.name}" -- it has linked issues. Move or delete those issues first.`);
+    process.exit(1);
+  }
+  await deleteProjectStatusById(statusId);
+  console.log(`Deleted status "${status.name}" (${statusId})`);
+  process.exit(0);
+}
+
+async function registerInitProject(path: string, name: string | undefined): Promise<void> {
+  const { registerProject } = await import("../../services/project-registration.js");
+  const { project, created } = await registerProject(path, { name });
+  if (!created) {
+    console.log(`Project "${project.name}" already registered.`);
+    return;
+  }
+  console.log(`Registered project "${project.name}"`);
+  console.log(`  Repo: ${project.repoPath}`);
+  logDefaultBranch(project.defaultBranch);
+}
+
+async function initAction(path?: string, options?: { name?: string }): Promise<void> {
+  try {
+    const { ensureDataDir } = await import("../../db/data-dir.js");
+    const dataDir = ensureDataDir();
+    console.log(`Data directory: ${dataDir}`);
+
+    await runMigrations();
+    console.log("Database migrated.");
+
+    const { seed } = await import("../../db/seed.js");
+    await seed();
+
+    if (path) await registerInitProject(path, options?.name);
+
+    console.log("\nInitialization complete!");
+    if (!path) {
+      console.log("Next: register a project with `agentic-kanban init <path>` or `agentic-kanban register <path>`");
+    } else {
+      console.log("Run `agentic-kanban dev` to start the server.");
+    }
+    process.exit(0);
+  } catch (err) {
+    console.error("Error:", errorMessage(err));
+    process.exit(1);
+  }
+}
+
+function printSkillList(bundled: InstallableSkill[], promptOnly: readonly PromptSkill[]): void {
+  console.log("Bundled skills (directory + references, junctioned on install):");
+  if (!bundled.length) console.log("  (none found — the package's skills/ directory is missing)");
+  for (const s of bundled) console.log(`  ${s.name} — ${s.description}`);
+  console.log("\nPrompt-only built-in skills:");
+  for (const s of promptOnly) console.log(`  ${s.name} — ${s.description}`);
+}
+
+/** Target skill directories: the agent HOMES for --user, else the project's own .claude/skills. */
+async function resolveSkillsDirs(
+  lib: BundledSkillsLib,
+  options: InstallSkillOptions,
+  targetPath: string | undefined,
+  hasBundled: boolean,
+): Promise<string[]> {
+  if (options.user) {
+    const dirs = await lib.discoverUserSkillRoots();
+    if (!dirs.length) {
+      console.error("No user agent directories found (looked for ~/.claude* and ~/.codex). Install an agent CLI first, or pass a project path.");
+      process.exit(1);
+    }
+    return dirs;
+  }
+  const { join } = await import("node:path");
+  const { access } = await import("node:fs/promises");
+  const { ensureCodexSkillsLink } = await import("@agentic-kanban/shared/lib/agent-skill-files");
+  // Already absolute when given (cliPathArg); invocationCwd() is the omitted default.
+  const resolved = targetPath ?? invocationCwd();
+  try {
+    await access(resolved);
+  } catch {
+    console.error(`Target path does not exist: ${resolved}`);
+    process.exit(1);
+  }
+  // Prompt-only skills below do this themselves; do it up front so a bundled-only
+  // install still leaves Codex pointing at the same directory.
+  if (hasBundled) await ensureCodexSkillsLink(resolved);
+  return [join(resolved, ".claude", "skills")];
+}
+
+/** Installs into one skills dir; returns whether any bundled skill had to be copied instead of linked. */
+async function installIntoSkillsDir(
+  lib: BundledSkillsLib,
+  skillsDir: string,
+  selected: { bundled: InstallableSkill[]; promptOnly: readonly PromptSkill[] },
+  link: boolean,
+): Promise<boolean> {
+  const { writeAgentSkillFileInto } = await import("@agentic-kanban/shared/lib/agent-skill-files");
+  let copiedWithoutLink = false;
+  const installed: string[] = [];
+  for (const skill of selected.bundled) {
+    const result = await lib.installBundledSkill(skill, skillsDir, { link });
+    installed.push(`${skill.name} (${result.mode})`);
+    if (result.linkError) {
+      copiedWithoutLink = true;
+      console.warn(`  ! ${skill.name}: could not junction (${result.linkError}) — copied instead`);
+    }
+  }
+  for (const skill of selected.promptOnly) {
+    await writeAgentSkillFileInto(skillsDir, { name: skill.name, description: skill.description, prompt: skill.prompt });
+    installed.push(skill.name);
+  }
+  console.log(`Installed ${installed.length} skill(s) to ${skillsDir}:`);
+  for (const line of installed) console.log(`  - ${line}`);
+  return copiedWithoutLink;
+}
+
+async function installSkillAction(targetPath: string | undefined, options: InstallSkillOptions): Promise<void> {
+  try {
+    const lib = await import("@agentic-kanban/shared/lib/bundled-skills");
+    const bundled = await lib.listBundledSkills();
+    // `selectSkillsToInstall` owns both selection rules (a bundled directory beats a
+    // same-named prompt-only skill; --user is bundled-only by default) — call it rather
+    // than re-deriving either one here.
+    const { promptOnly } = lib.selectSkillsToInstall({ bundled, promptOnly: BUILTIN_SKILLS });
+
+    if (options.list) {
+      printSkillList(bundled, promptOnly);
+      process.exit(0);
+    }
+
+    const selected = lib.selectSkillsToInstall({
+      bundled,
+      promptOnly: BUILTIN_SKILLS,
+      names: options.names?.split(","),
+      user: options.user,
+    });
+    if (options.names && !selected.bundled.length && !selected.promptOnly.length) {
+      const all = [...bundled.map(s => s.name), ...promptOnly.map(s => s.name)].sort();
+      console.error(`No matching skills found. Available: ${all.join(", ")}`);
+      process.exit(1);
+    }
+
+    const skillsDirs = await resolveSkillsDirs(lib, options, targetPath, selected.bundled.length > 0);
+    let copiedWithoutLink = false;
+    for (const skillsDir of skillsDirs) {
+      if (await installIntoSkillsDir(lib, skillsDir, selected, options.link !== false)) copiedWithoutLink = true;
+    }
+
+    if (copiedWithoutLink) {
+      console.log("\nSome skills were copied rather than linked — re-run this command after upgrading the package.");
+    }
+    process.exit(0);
+  } catch (err) {
+    console.error("Error:", errorMessage(err));
+    process.exit(1);
+  }
+}
+
+function openBrowser(url: string, execFile: typeof import("node:child_process").execFile): void {
+  const cmd = process.platform === "win32" ? "cmd" : process.platform === "darwin" ? "open" : "xdg-open";
+  const args = process.platform === "win32" ? ["/c", "start", url] : [url];
+  execFile(cmd, args, (err) => {
+    if (err) console.warn("  Could not open browser:", err.message);
+  });
+}
+
+async function devAction(options: { port: string; host: string; open: boolean }): Promise<void> {
+  try {
+    const { dbExists, ensureDataDir } = await import("../../db/data-dir.js");
+    if (!dbExists()) {
+      console.log("No database found — running first-time setup...");
+      ensureDataDir();
+      await runMigrations();
+      console.log("Database created and migrated.");
+      const { seed } = await import("../../db/seed.js");
+      await seed();
+      console.log();
+    }
+
+    const port = Number(options.port);
+    const host = options.host;
+    process.env.PORT = String(port);
+    process.env.KANBAN_HOST = host;
+
+    const { startServer } = await import("../../server-start.js");
+    await startServer(port, host);
+
+    console.log(`\n  Agentic Kanban running at http://${host}:${port}`);
+    console.log("  Press Ctrl+C to stop\n");
+
+    if (options.open) {
+      const { execFile } = await import("node:child_process");
+      openBrowser(`http://${host}:${port}`, execFile);
+    }
+  } catch (err) {
+    console.error("Error:", errorMessage(err));
+    process.exit(1);
+  }
+}
+
+interface SessionDir { name: string; path: string; issueNum: number | null }
+
+interface SessionResult {
+  issueNum: number | null;
+  dir: string;
+  file: string;
+  fileSizeBytes: number;
+  lastModified: string;
+  linesParsed: number;
+  turns: number;
+  lastAssistantText: string | null;
+  lastToolCall: string | null;
+  stopReason: string | null;
+  sessionStarted: boolean;
+  agentResponded: boolean;
+  sessionId: string | null;
+}
+
+/** Worktree session dirs under ~/.claude/projects, optionally narrowed to one issue. */
+async function collectSessionDirs(issueArg: string | undefined): Promise<SessionDir[]> {
+  const { homedir } = await import("node:os");
+  const { readdirSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const claudeProjects = join(homedir(), ".claude", "projects");
+
+  let allDirs: SessionDir[] = [];
+  try {
+    for (const entry of readdirSync(claudeProjects)) {
+      // Claude names a session dir after the working directory with separators replaced
+      // by `-`, so a worktree's dir carries the branch's `ak-<N>` verbatim. #548: the
+      // shared parser instead of two near-identical regexes — still only consulted for
+      // entries that are worktree dirs, so an unrelated project dir cannot contribute a
+      // number.
+      if (!entry.includes("worktrees")) continue;
+      allDirs.push({ name: entry, path: join(claudeProjects, entry), issueNum: parseIssueNumberFromBranch(entry) });
+    }
+  } catch {
+    console.error(`Cannot read ${claudeProjects}`);
+    process.exit(1);
+  }
+
+  if (issueArg) {
+    const n = parseInt(issueArg, 10);
+    allDirs = allDirs.filter((d) => d.issueNum === n);
+    if (allDirs.length === 0) {
+      console.error(`No session directory found for issue #${n}`);
+      process.exit(1);
+    }
+  }
+  allDirs.sort((a, b) => (a.issueNum ?? 999) - (b.issueNum ?? 999));
+  return allDirs;
+}
+
+type SessionTail = Pick<
+  SessionResult,
+  "turns" | "lastAssistantText" | "lastToolCall" | "stopReason" | "sessionStarted" | "agentResponded" | "sessionId"
+>;
+
+type AssistantBlock = { type: string; text?: string; name?: string; input?: unknown };
+
+/** Folds one assistant message's content blocks into the running tail summary. */
+function foldAssistantMessage(tail: SessionTail, msg: { stop_reason?: string; content?: unknown[] }): void {
+  tail.agentResponded = true;
+  if (msg.stop_reason) tail.stopReason = msg.stop_reason;
+  for (const block of (msg.content ?? []) as AssistantBlock[]) {
+    if (block.type === "text" && block.text) {
+      tail.lastAssistantText = block.text.replace(/\s+/g, " ").slice(0, 300);
+      tail.turns++;
+    }
+    if (block.type === "tool_use" && block.name) {
+      const inputStr = block.input ? JSON.stringify(block.input).slice(0, 80) : "";
+      tail.lastToolCall = `${block.name}  ${inputStr}`;
+    }
+  }
+}
+
+function summarizeSessionLines(lines: string[]): SessionTail {
+  const tail: SessionTail = {
+    turns: 0,
+    lastAssistantText: null,
+    lastToolCall: null,
+    stopReason: null,
+    sessionStarted: false,
+    agentResponded: false,
+    sessionId: null,
+  };
+  for (const line of lines) {
+    let obj: Record<string, unknown>;
+    try {
+      obj = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (!tail.sessionId && (obj.sessionId as string)) tail.sessionId = obj.sessionId as string;
+    if (obj.type === "user") tail.sessionStarted = true;
+    if (obj.type === "assistant") foldAssistantMessage(tail, obj.message as { stop_reason?: string; content?: unknown[] });
+  }
+  return tail;
+}
+
+/** The session transcripts of one dir, newest first (only the latest unless `all`). */
+async function listSessionFiles(dirPath: string, all: boolean | undefined) {
+  const { readdirSync, statSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  let jsonlFiles: { name: string; path: string; mtime: Date; size: number }[] = [];
+  try {
+    for (const f of readdirSync(dirPath).filter((f) => f.endsWith(".jsonl"))) {
+      const fp = join(dirPath, f);
+      const st = statSync(fp);
+      jsonlFiles.push({ name: f, path: fp, mtime: st.mtime, size: st.size });
+    }
+    jsonlFiles.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+  } catch {
+    return null;
+  }
+  return all ? jsonlFiles : jsonlFiles.slice(0, 1);
+}
+
+async function collectSessionResults(
+  allDirs: SessionDir[],
+  options: { all?: boolean },
+  tailLines: number,
+): Promise<SessionResult[]> {
+  const { readFileSync } = await import("node:fs");
+  const results: SessionResult[] = [];
+  for (const dir of allDirs) {
+    const jsonlFiles = await listSessionFiles(dir.path, options.all);
+    if (!jsonlFiles) continue;
+    for (const jf of jsonlFiles) {
+      const allLines = readFileSync(jf.path, "utf8").split("\n").filter(Boolean);
+      const linesToParse = allLines.slice(Math.max(0, allLines.length - tailLines));
+      const tail = summarizeSessionLines(linesToParse);
+      results.push({
+        issueNum: dir.issueNum,
+        dir: dir.name,
+        file: jf.name.replace(".jsonl", "").slice(0, 8) + "--",
+        fileSizeBytes: jf.size,
+        lastModified: jf.mtime.toISOString(),
+        linesParsed: linesToParse.length,
+        ...tail,
+        sessionId: tail.sessionId ? tail.sessionId.slice(0, 8) + "--" : null,
+      });
+    }
+  }
+  return results;
+}
+
+function printSessionResults(results: SessionResult[], tailLines: number): void {
+  console.log(`\n  Claude Session History  (tail: ${tailLines} lines/file)\n`);
+
+  let currentIssue: number | null = -1;
+  for (const r of results) {
+    if (r.issueNum !== currentIssue) {
+      currentIssue = r.issueNum;
+      console.log(`  -- #${r.issueNum ?? "?"} ----------------------------------`);
+    }
+    const size = r.fileSizeBytes < 1024 ? `${r.fileSizeBytes}B` : `${(r.fileSizeBytes / 1024).toFixed(0)}KB`;
+    const age = timeSince(new Date(r.lastModified));
+    const started = r.sessionStarted ? (r.agentResponded ? "OK responded" : "FAIL no response") : "FAIL no prompt";
+    console.log(`  ${r.file}  ${size}  ${age} ago  [${started}]  turns:${r.turns}`);
+    if (r.stopReason) console.log(`    stop_reason: ${r.stopReason}`);
+    if (r.lastToolCall) console.log(`    last tool:   ${r.lastToolCall}`);
+    if (r.lastAssistantText) console.log(`    last text:   ${r.lastAssistantText.slice(0, 200)}`);
+    console.log("");
+  }
+
+  if (results.length === 0) console.log("  No session files found.\n");
+}
+
+async function sessionHistoryAction(
+  issueArg: string | undefined,
+  options: { tail?: string; all?: boolean; json?: boolean },
+): Promise<void> {
+  const tailLines = parseInt(options.tail ?? "60", 10);
+  const allDirs = await collectSessionDirs(issueArg);
+  const results = await collectSessionResults(allDirs, options, tailLines);
+
+  if (options.json) {
+    console.log(JSON.stringify(results, null, 2));
+    process.exit(0);
+  }
+  printSessionResults(results, tailLines);
+  process.exit(0);
+}
+
 export function registerSystemCommands(program: Command) {
   program
     .command("delete-status <status-id>")
     .description("Delete a project status (fails if issues are linked to it)")
-    .action(cliAction(async (statusId: string) => {
-      const status = await getProjectStatusById(statusId);
-      if (!status) {
-        console.error(`Status "${statusId}" not found.`);
-        process.exit(1);
-      }
-      const linkedId = await getFirstIssueIdWithStatus(statusId);
-      if (linkedId) {
-        console.error(`Cannot delete status "${status.name}" -- it has linked issues. Move or delete those issues first.`);
-        process.exit(1);
-      }
-      await deleteProjectStatusById(statusId);
-      console.log(`Deleted status "${status.name}" (${statusId})`);
-      process.exit(0);
-    }));
+    .action(cliAction(deleteStatusAction));
 
   program
     .command("init")
@@ -39,42 +421,7 @@ Examples:
   $ npx agentic-kanban init .                # set up + register current repo
   $ npx agentic-kanban init /path/to/repo    # set up + register specific repo
 `)
-    .action(async (path?: string, options?: { name?: string }) => {
-      try {
-        const { ensureDataDir } = await import("../../db/data-dir.js");
-        const dataDir = ensureDataDir();
-        console.log(`Data directory: ${dataDir}`);
-
-        await runMigrations();
-        console.log("Database migrated.");
-
-        const { seed } = await import("../../db/seed.js");
-        await seed();
-
-        if (path) {
-          const { registerProject } = await import("../../services/project-registration.js");
-          const { project, created } = await registerProject(path, { name: options?.name });
-          if (!created) {
-            console.log(`Project "${project.name}" already registered.`);
-          } else {
-            console.log(`Registered project "${project.name}"`);
-            console.log(`  Repo: ${project.repoPath}`);
-            logDefaultBranch(project.defaultBranch);
-          }
-        }
-
-        console.log("\nInitialization complete!");
-        if (!path) {
-          console.log("Next: register a project with `agentic-kanban init <path>` or `agentic-kanban register <path>`");
-        } else {
-          console.log("Run `agentic-kanban dev` to start the server.");
-        }
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
-        process.exit(1);
-      }
-    });
+    .action(initAction);
 
   program
     .command("install-skill")
@@ -104,94 +451,7 @@ Bundled vs prompt-only:
   Those are per-project working prompts, so --user installs only BUNDLED skills unless you name one
   with -n; a project target still gets both.
 `)
-    .action(async (targetPath: string | undefined, options: { names?: string; list?: boolean; user?: boolean; link?: boolean }) => {
-      try {
-        const { listBundledSkills, installBundledSkill, discoverUserSkillRoots, selectSkillsToInstall } =
-          await import("@agentic-kanban/shared/lib/bundled-skills");
-        const bundled = await listBundledSkills();
-        // `selectSkillsToInstall` owns both selection rules (a bundled directory beats a
-        // same-named prompt-only skill; --user is bundled-only by default) — call it rather
-        // than re-deriving either one here.
-        const { promptOnly } = selectSkillsToInstall({ bundled, promptOnly: BUILTIN_SKILLS });
-
-        if (options.list) {
-          console.log("Bundled skills (directory + references, junctioned on install):");
-          if (!bundled.length) console.log("  (none found — the package's skills/ directory is missing)");
-          for (const s of bundled) console.log(`  ${s.name} — ${s.description}`);
-          console.log("\nPrompt-only built-in skills:");
-          for (const s of promptOnly) console.log(`  ${s.name} — ${s.description}`);
-          process.exit(0);
-        }
-
-        const { bundled: selectedBundled, promptOnly: selectedPrompt } = selectSkillsToInstall({
-          bundled,
-          promptOnly: BUILTIN_SKILLS,
-          names: options.names?.split(","),
-          user: options.user,
-        });
-        if (options.names && !selectedBundled.length && !selectedPrompt.length) {
-          const all = [...bundled.map(s => s.name), ...promptOnly.map(s => s.name)].sort();
-          console.error(`No matching skills found. Available: ${all.join(", ")}`);
-          process.exit(1);
-        }
-
-        const { join } = await import("node:path");
-        const { access } = await import("node:fs/promises");
-        const { writeAgentSkillFileInto, ensureCodexSkillsLink } =
-          await import("@agentic-kanban/shared/lib/agent-skill-files");
-
-        // --user targets the agent HOMES directly (~/.claude/skills); a project target goes
-        // through the project's own .claude/skills, with .codex linked to it as usual.
-        let skillsDirs: string[];
-        if (options.user) {
-          skillsDirs = await discoverUserSkillRoots();
-          if (!skillsDirs.length) {
-            console.error("No user agent directories found (looked for ~/.claude* and ~/.codex). Install an agent CLI first, or pass a project path.");
-            process.exit(1);
-          }
-        } else {
-          // Already absolute when given (cliPathArg); invocationCwd() is the omitted default.
-          const resolved = targetPath ?? invocationCwd();
-          try {
-            await access(resolved);
-          } catch {
-            console.error(`Target path does not exist: ${resolved}`);
-            process.exit(1);
-          }
-          skillsDirs = [join(resolved, ".claude", "skills")];
-          // Prompt-only skills below do this themselves; do it up front so a bundled-only
-          // install still leaves Codex pointing at the same directory.
-          if (selectedBundled.length) await ensureCodexSkillsLink(resolved);
-        }
-
-        let copiedWithoutLink = false;
-        for (const skillsDir of skillsDirs) {
-          const installed: string[] = [];
-          for (const skill of selectedBundled) {
-            const result = await installBundledSkill(skill, skillsDir, { link: options.link !== false });
-            installed.push(`${skill.name} (${result.mode})`);
-            if (result.linkError) {
-              copiedWithoutLink = true;
-              console.warn(`  ! ${skill.name}: could not junction (${result.linkError}) — copied instead`);
-            }
-          }
-          for (const skill of selectedPrompt) {
-            await writeAgentSkillFileInto(skillsDir, { name: skill.name, description: skill.description, prompt: skill.prompt });
-            installed.push(skill.name);
-          }
-          console.log(`Installed ${installed.length} skill(s) to ${skillsDir}:`);
-          for (const line of installed) console.log(`  - ${line}`);
-        }
-
-        if (copiedWithoutLink) {
-          console.log("\nSome skills were copied rather than linked — re-run this command after upgrading the package.");
-        }
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
-        process.exit(1);
-      }
-    });
+    .action(installSkillAction);
 
   program
     .command("dev")
@@ -212,43 +472,7 @@ Network access example (HTTP/2 over TLS):
   $ KANBAN_HOST=0.0.0.0 KANBAN_TLS_CERT=./board.crt KANBAN_TLS_KEY=./board.key agentic-kanban dev
     (Tailscale: 'tailscale cert <name>.ts.net' issues a trusted cert/key.)
 `)
-    .action(async (options: { port: string; host: string; open: boolean }) => {
-      try {
-        const { dbExists, ensureDataDir } = await import("../../db/data-dir.js");
-        if (!dbExists()) {
-          console.log("No database found — running first-time setup...");
-          ensureDataDir();
-          await runMigrations();
-          console.log("Database created and migrated.");
-          const { seed } = await import("../../db/seed.js");
-          await seed();
-          console.log();
-        }
-
-        const port = Number(options.port);
-        const host = options.host;
-        process.env.PORT = String(port);
-        process.env.KANBAN_HOST = host;
-
-        const { startServer } = await import("../../server-start.js");
-        await startServer(port, host);
-
-        console.log(`\n  Agentic Kanban running at http://${host}:${port}`);
-        console.log("  Press Ctrl+C to stop\n");
-
-        if (options.open) {
-          const { execFile } = await import("node:child_process");
-          const cmd = process.platform === "win32" ? "cmd" : process.platform === "darwin" ? "open" : "xdg-open";
-          const args = process.platform === "win32" ? ["/c", "start", `http://${host}:${port}`] : [`http://${host}:${port}`];
-          execFile(cmd, args, (err) => {
-            if (err) console.warn("  Could not open browser:", err.message);
-          });
-        }
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
-        process.exit(1);
-      }
-    });
+    .action(devAction);
 
   const sessionDebugCmd = program
     .command("session-history [issue-number]")
@@ -274,170 +498,7 @@ Via pnpm (use -- to pass args):
   $ pnpm sh -- 17 --all
 `
     )
-    .action(
-      async (issueArg: string | undefined, options: { tail?: string; all?: boolean; json?: boolean }) => {
-        const issueNumber = issueArg;
-        const { homedir } = await import("node:os");
-        const { readdirSync, statSync, readFileSync } = await import("node:fs");
-        const { join } = await import("node:path");
-
-        const claudeProjects = join(homedir(), ".claude", "projects");
-        const tailLines = parseInt(options.tail ?? "60", 10);
-
-        let allDirs: { name: string; path: string; issueNum: number | null }[] = [];
-        try {
-          const entries = readdirSync(claudeProjects);
-          for (const entry of entries) {
-            // Claude names a session dir after the working directory with separators replaced
-            // by `-`, so a worktree's dir carries the branch's `ak-<N>` verbatim. #548: the
-            // shared parser instead of two near-identical regexes — still only consulted for
-            // entries that are worktree dirs, so an unrelated project dir cannot contribute a
-            // number.
-            if (!entry.includes("worktrees")) continue;
-            const issueNum = parseIssueNumberFromBranch(entry);
-            allDirs.push({ name: entry, path: join(claudeProjects, entry), issueNum });
-          }
-        } catch {
-          console.error(`Cannot read ${claudeProjects}`);
-          process.exit(1);
-        }
-
-        if (issueNumber) {
-          const n = parseInt(issueNumber, 10);
-          allDirs = allDirs.filter((d) => d.issueNum === n);
-          if (allDirs.length === 0) {
-            console.error(`No session directory found for issue #${n}`);
-            process.exit(1);
-          }
-        }
-
-        allDirs.sort((a, b) => (a.issueNum ?? 999) - (b.issueNum ?? 999));
-
-        interface SessionResult {
-          issueNum: number | null;
-          dir: string;
-          file: string;
-          fileSizeBytes: number;
-          lastModified: string;
-          linesParsed: number;
-          turns: number;
-          lastAssistantText: string | null;
-          lastToolCall: string | null;
-          stopReason: string | null;
-          sessionStarted: boolean;
-          agentResponded: boolean;
-          sessionId: string | null;
-        }
-
-        const results: SessionResult[] = [];
-
-        for (const dir of allDirs) {
-          let jsonlFiles: { name: string; path: string; mtime: Date; size: number }[] = [];
-          try {
-            const files = readdirSync(dir.path).filter((f) => f.endsWith(".jsonl"));
-            for (const f of files) {
-              const fp = join(dir.path, f);
-              const st = statSync(fp);
-              jsonlFiles.push({ name: f, path: fp, mtime: st.mtime, size: st.size });
-            }
-            jsonlFiles.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
-          } catch {
-            continue;
-          }
-
-          if (!options.all) jsonlFiles = jsonlFiles.slice(0, 1);
-
-          for (const jf of jsonlFiles) {
-            const raw = readFileSync(jf.path, "utf8");
-            const allLines = raw.split("\n").filter(Boolean);
-            const tailStart = Math.max(0, allLines.length - tailLines);
-            const linesToParse = allLines.slice(tailStart);
-
-            let turns = 0;
-            let lastAssistantText: string | null = null;
-            let lastToolCall: string | null = null;
-            let stopReason: string | null = null;
-            let sessionStarted = false;
-            let agentResponded = false;
-            let sessionId: string | null = null;
-
-            for (const line of linesToParse) {
-              let obj: Record<string, unknown>;
-              try {
-                obj = JSON.parse(line) as Record<string, unknown>;
-              } catch {
-                continue;
-              }
-
-              if (!sessionId && (obj.sessionId as string)) sessionId = obj.sessionId as string;
-
-              const type = obj.type as string;
-              if (type === "user") sessionStarted = true;
-
-              if (type === "assistant") {
-                agentResponded = true;
-                const msg = obj.message as { role: string; stop_reason?: string; content?: unknown[] };
-                if (msg.stop_reason) stopReason = msg.stop_reason;
-                const content = msg.content ?? [];
-                for (const block of content as { type: string; text?: string; name?: string; input?: unknown }[]) {
-                  if (block.type === "text" && block.text) {
-                    lastAssistantText = block.text.replace(/\s+/g, " ").slice(0, 300);
-                    turns++;
-                  }
-                  if (block.type === "tool_use" && block.name) {
-                    const inputStr = block.input ? JSON.stringify(block.input).slice(0, 80) : "";
-                    lastToolCall = `${block.name}  ${inputStr}`;
-                  }
-                }
-              }
-            }
-
-            results.push({
-              issueNum: dir.issueNum,
-              dir: dir.name,
-              file: jf.name.replace(".jsonl", "").slice(0, 8) + "--",
-              fileSizeBytes: jf.size,
-              lastModified: jf.mtime.toISOString(),
-              linesParsed: linesToParse.length,
-              turns,
-              lastAssistantText,
-              lastToolCall,
-              stopReason,
-              sessionStarted,
-              agentResponded,
-              sessionId: sessionId ? (sessionId).slice(0, 8) + "--" : null,
-            });
-          }
-        }
-
-        if (options.json) {
-          console.log(JSON.stringify(results, null, 2));
-          process.exit(0);
-        }
-
-        console.log(`\n  Claude Session History  (tail: ${tailLines} lines/file)\n`);
-
-        let currentIssue: number | null = -1;
-        for (const r of results) {
-          if (r.issueNum !== currentIssue) {
-            currentIssue = r.issueNum;
-            console.log(`  -- #${r.issueNum ?? "?"} ----------------------------------`);
-          }
-          const size = r.fileSizeBytes < 1024 ? `${r.fileSizeBytes}B` : `${(r.fileSizeBytes / 1024).toFixed(0)}KB`;
-          const age = timeSince(new Date(r.lastModified));
-          const started = r.sessionStarted ? (r.agentResponded ? "OK responded" : "FAIL no response") : "FAIL no prompt";
-          console.log(`  ${r.file}  ${size}  ${age} ago  [${started}]  turns:${r.turns}`);
-          if (r.stopReason) console.log(`    stop_reason: ${r.stopReason}`);
-          if (r.lastToolCall) console.log(`    last tool:   ${r.lastToolCall}`);
-          if (r.lastAssistantText) console.log(`    last text:   ${r.lastAssistantText.slice(0, 200)}`);
-          console.log("");
-        }
-
-        if (results.length === 0) console.log("  No session files found.\n");
-
-        process.exit(0);
-      }
-    );
+    .action(sessionHistoryAction);
 
   void sessionDebugCmd;
 }

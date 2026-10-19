@@ -4,51 +4,19 @@
 // returns JSX; holds no component state.
 
 import type { DisplayEvent } from "../lib/agent-output-parser.js";
-import { summarizeToolCall, normalizedSearchQuery, eventSearchText, isSkillRead } from "../lib/terminal-transcript.js";
+import { normalizedSearchQuery, eventSearchText } from "../lib/terminal-transcript.js";
 import type { SubagentGroup } from "../lib/terminal-transcript.js";
+import { renderToolUse } from "./TerminalToolUseRenderer.js";
+import type { RenderContext, DerivedRenderState } from "./TerminalRenderShared.js";
+import { highlightText } from "./TerminalRenderShared.js";
+
+export { highlightText };
+export type { RenderContext, DerivedRenderState };
 
 export type { SubagentGroup };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export interface RenderContext {
-  multiTurn?: boolean;
-  expandedSections: Set<number>;
-  toggleExpand: (idx: number) => void;
-  parseOutput: "minimal" | "false";
-  activeSubagentToolUseIds: Set<string>;
-  subagentGroups: Map<string, SubagentGroup>;
-  eventToSubagent: Map<number, string>;
-  isMaximized: boolean;
-  searchQuery: string;
-}
-
-export function highlightText(text: string, query: string): React.ReactNode {
-  const needle = query.trim();
-  if (!needle) return text;
-
-  const lowerText = text.toLowerCase();
-  const lowerNeedle = needle.toLowerCase();
-  const parts: React.ReactNode[] = [];
-  let cursor = 0;
-  let matchIdx = lowerText.indexOf(lowerNeedle);
-
-  while (matchIdx !== -1) {
-    if (matchIdx > cursor) parts.push(text.slice(cursor, matchIdx));
-    const end = matchIdx + needle.length;
-    parts.push(
-      <mark key={`${matchIdx}-${end}`} className="rounded bg-yellow-300 px-0.5 text-gray-950">
-        {text.slice(matchIdx, end)}
-      </mark>,
-    );
-    cursor = end;
-    matchIdx = lowerText.indexOf(lowerNeedle, cursor);
-  }
-
-  if (cursor < text.length) parts.push(text.slice(cursor));
-  return parts;
 }
 
 // ── Per-kind renderer registry ────────────────────────────────────────────────
@@ -59,15 +27,6 @@ export function highlightText(text: string, query: string): React.ReactNode {
 // to DisplayEvent fails to compile until a renderer is registered here.
 
 type EventOf<K extends DisplayEvent["kind"]> = Extract<DisplayEvent, { kind: K }>;
-
-/** Shared, event-agnostic view flags computed once per event before dispatch. */
-export interface DerivedRenderState {
-  isExpanded: boolean;
-  isMinimal: boolean;
-  isInsideSubagent: boolean;
-  isSubagentStart: boolean;
-  isSubagentEnd: boolean;
-}
 
 function deriveRenderState(event: DisplayEvent, key: number, ctx: RenderContext): DerivedRenderState {
   const { expandedSections, parseOutput, subagentGroups, eventToSubagent, searchQuery } = ctx;
@@ -180,154 +139,6 @@ function renderThinking(event: EventOf<"thinking">, key: number, ctx: RenderCont
   );
 }
 
-function renderToolUse(event: EventOf<"tool_use">, key: number, ctx: RenderContext, d: DerivedRenderState): React.ReactNode {
-  const { isMinimal, isExpanded, isInsideSubagent, isSubagentStart } = d;
-  const { activeSubagentToolUseIds, toggleExpand, searchQuery } = ctx;
-  if (event.name === "Agent") {
-    const description = (event.inputParsed?.description as string) || (event.inputParsed?.prompt as string) || "";
-    const subagentType = (event.inputParsed?.subagent_type as string) || "";
-    const isRunning = event.id ? activeSubagentToolUseIds.has(event.id) : false;
-
-    if (isMinimal) {
-      return (
-        <div key={key} data-event-idx={key} className="mb-0.5 text-[11px]">
-          <div className="flex items-center gap-1 bg-brand-50 dark:bg-brand-900/40 rounded px-1.5 py-0.5">
-            {isRunning
-              ? <span className="text-brand-600 dark:text-brand-400 animate-pulse">⟳</span>
-              : <span className="text-brand-600 dark:text-brand-400">⇢</span>}
-            <span className="text-brand-700 dark:text-brand-300 font-medium">Subagent</span>
-            <span className="text-gray-300">{highlightText(description.slice(0, 80) || "delegating to agent", searchQuery)}</span>
-            {subagentType && <span className="text-gray-500 ml-1">({subagentType})</span>}
-            {isRunning && <span className="text-brand-600 dark:text-brand-400 text-[10px] animate-pulse">running</span>}
-          </div>
-        </div>
-      );
-    }
-    return (
-      <div key={key} data-event-idx={key} className="mb-1">
-        <div className={`flex items-center gap-1.5 rounded px-2 py-1 ${isRunning ? "bg-brand-50 dark:bg-brand-900/40 border border-brand-200 dark:border-brand-700" : "bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-700"}`}>
-          {isRunning
-            ? <span className="text-brand-600 dark:text-brand-400 animate-pulse">⟳</span>
-            : <span className="text-brand-600 dark:text-brand-400">⇢</span>}
-          <span className="text-brand-700 dark:text-brand-300 font-semibold text-xs">
-            {isRunning ? "Subagent running" : "Subagent"}
-          </span>
-          {subagentType && <span className="text-brand-600 dark:text-brand-400 text-[10px] bg-brand-100 dark:bg-brand-800/40 px-1 rounded">{subagentType}</span>}
-          <span className="text-gray-300 text-[11px] ml-1">{highlightText(description, searchQuery)}</span>
-        </div>
-      </div>
-    );
-  }
-  const isTaskTool = ["TaskCreate", "TaskUpdate", "TaskGet", "TaskList", "TaskStop"].includes(event.name);
-  const inSubagent = isInsideSubagent && !isSubagentStart;
-
-  if (isTaskTool && isMinimal) {
-    const summary = summarizeToolCall(event.name, event.inputParsed || {});
-    const input = event.inputParsed || {};
-    let icon = "";
-    let color = "text-gray-400";
-    if (event.name === "TaskCreate") { icon = "○"; color = "text-blue-400"; }
-    else if (event.name === "TaskUpdate") {
-      const s = input.status as string;
-      if (s === "completed") { icon = "✓"; color = "text-green-400"; }
-      else if (s === "in_progress") { icon = "●"; color = "text-yellow-400"; }
-      else if (s === "deleted") { icon = "✗"; color = "text-red-400"; }
-      else { icon = "○"; color = "text-gray-400"; }
-    }
-    else if (event.name === "TaskList") { icon = "☰"; color = "text-gray-400"; }
-    else { icon = "·"; color = "text-gray-400"; }
-
-    return (
-      <div key={key} data-event-idx={key} className={`mb-0.5 text-[11px] ${inSubagent ? "ml-6" : "ml-1"}`}>
-        <span className={color}>{icon} </span>
-        <span className="text-gray-300">{highlightText(summary, searchQuery)}</span>
-      </div>
-    );
-  }
-
-  if (isTaskTool && !isMinimal) {
-    const input = event.inputParsed || {};
-    if (event.name === "TaskCreate") {
-      const subject = (input.subject as string) || "";
-      const activeForm = input.activeForm as string | undefined;
-      return (
-        <div key={key} data-event-idx={key} className={`mb-0.5 ${inSubagent ? "ml-6" : "ml-2"} pl-2`}>
-          <span className="text-gray-500 text-[11px]">○ </span>
-          <span className="text-gray-300 text-[11px]">{highlightText(subject, searchQuery)}</span>
-          {activeForm ? <span className="text-blue-400 text-[10px] ml-1">— {activeForm}</span> : null}
-        </div>
-      );
-    }
-    if (event.name === "TaskUpdate") {
-      const s = input.status as string;
-      const subject = (input.subject as string) || "task";
-      let statusIcon = "○";
-      let statusColor = "text-gray-400";
-      if (s === "completed") { statusIcon = "✓"; statusColor = "text-green-400"; }
-      else if (s === "in_progress") { statusIcon = "●"; statusColor = "text-yellow-400"; }
-      else if (s === "pending") { statusIcon = "○"; statusColor = "text-gray-400"; }
-      else if (s === "deleted") { statusIcon = "✗"; statusColor = "text-red-400"; }
-      return (
-        <div key={key} data-event-idx={key} className={`mb-0.5 ${inSubagent ? "ml-6" : "ml-2"} pl-2`}>
-          <span className={statusColor}>{statusIcon} </span>
-          <span className={`text-[11px] ${s === "completed" ? "text-gray-500 line-through" : "text-gray-300"}`}>{highlightText(subject, searchQuery)}</span>
-        </div>
-      );
-    }
-    // TaskList, TaskGet, TaskStop — fall through to generic tool_use
-  }
-
-  if (isMinimal) {
-    const skillName = isSkillRead(event.name, event.inputParsed || {});
-    if (skillName) {
-      return (
-        <div key={key} data-event-idx={key} className={`mb-1 text-[11px] ${inSubagent ? "ml-6" : "ml-1"} flex items-center gap-1.5`}>
-          <span className="text-brand-600 dark:text-brand-400">⚡</span>
-          <span className="text-brand-700 dark:text-brand-300 font-medium">Skill: {highlightText(skillName, searchQuery)}</span>
-        </div>
-      );
-    }
-    const summary = summarizeToolCall(event.name, event.inputParsed || {});
-    return (
-      <div key={key} data-event-idx={key} className={`mb-0.5 text-[11px] ${inSubagent ? "ml-6" : "ml-1"}`}>
-        <span className="text-yellow-500">{highlightText(summary, searchQuery)}</span>
-        {!isExpanded && event.input && (
-          <button
-            className="text-gray-600 text-[10px] ml-1 hover:text-gray-400"
-            onClick={() => toggleExpand(key)}
-          >
-            details
-          </button>
-        )}
-        {isExpanded && (
-          <>
-            <button
-              className="text-gray-600 text-[10px] ml-1 hover:text-gray-400"
-              onClick={() => toggleExpand(key)}
-            >
-              hide
-            </button>
-            <pre className="text-gray-500 text-[10px] mt-0.5 ml-2 whitespace-pre-wrap">{highlightText(event.input, searchQuery)}</pre>
-          </>
-        )}
-      </div>
-    );
-  }
-  return (
-    <div key={key} data-event-idx={key} className={`mb-1 ${inSubagent ? "ml-6" : "ml-2"} pl-2 border-l-2 ${inSubagent ? "border-gray-700" : "border-yellow-600"}`}>
-      <span className={inSubagent ? "text-gray-500 text-[11px]" : "text-yellow-400"}>Tool: {highlightText(event.name, searchQuery)}</span>
-      {event.input && (
-        <div
-          className={`text-gray-500 text-[10px] mt-0.5 cursor-pointer select-none ${isExpanded ? "" : "max-h-5 overflow-hidden"}`}
-          onClick={() => toggleExpand(key)}
-          title={isExpanded ? "Click to collapse" : "Click to expand"}
-        >
-          <pre className="whitespace-pre-wrap">{highlightText(event.input, searchQuery)}</pre>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function renderAgentToolResult(event: EventOf<"tool_result">, key: number, ctx: RenderContext, d: DerivedRenderState): React.ReactNode {
   const { isExpanded, isMinimal } = d;

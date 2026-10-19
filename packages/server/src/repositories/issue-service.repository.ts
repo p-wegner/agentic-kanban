@@ -5,10 +5,14 @@ import { deleteIssueCascade as deleteIssueCascadeShared } from "@agentic-kanban/
 import { eq, and, sql, inArray, desc, asc } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
-import { hasPath } from "../lib/dependency-graph.js";
 import type { BatchIssueInput, BatchDependencyInput } from "../lib/batch-create-issues.js";
-import { issueDependencyColumns } from "./projections.js";
 import { firstRow } from "../lib/first-row.js";
+
+// Decomposed (#1628): these moved to ./issue-service-archive.repository.js; re-exported so import paths are unchanged.
+export { getArchivedStatusId, getDoneStatusIds, getDoneCandidateIssues, archiveIssuesByIds } from "./issue-service-archive.repository.js";
+
+// Decomposed (#1628): these moved to ./issue-service-dependency.repository.js; re-exported so import paths are unchanged.
+export { insertDependency, getDependencyEdge, getDependencyRowsForProjects, deleteDependencyByIdAndIssue, deleteDependencyById, deleteDependencyByIdReturning, applyDependencyEdgeBatch } from "./issue-service-dependency.repository.js";
 
 /** A drizzle connection that is either the base db or an open transaction. */
 type DbOrTx = Database | TransactionClient;
@@ -37,6 +41,8 @@ export async function insertIssue(
   await database.insert(issues).values(values);
 }
 
+
+
 export async function getWorkflowTemplateForProject(
   templateId: string,
   database: DbOrTx = db,
@@ -49,6 +55,8 @@ export async function getWorkflowTemplateForProject(
       .limit(1)
   );
 }
+
+
 
 export async function getFirstProjectStatusId(
   projectId: string,
@@ -68,6 +76,8 @@ export async function getFirstProjectStatusId(
   );
   return row?.id ?? null;
 }
+
+
 
 export async function insertBatchIssue(
   values: {
@@ -91,37 +101,7 @@ export async function insertBatchIssue(
   await database.insert(issues).values(values);
 }
 
-export async function insertDependency(
-  values: { id: string; issueId: string; dependsOnId: string; type: DependencyType; createdAt: string },
-  database: DbOrTx = db,
-): Promise<void> {
-  await database.insert(issueDependencies).values(values);
-}
 
-/**
- * Return the existing dependency edge matching the unique key
- * (issueId, dependsOnId, type), or null. Used by the CLI to detect duplicates
- * BEFORE inserting — driver-independent, unlike matching the insert error string
- * (libsql's message lacks "UNIQUE constraint"; #857).
- */
-export async function getDependencyEdge(
-  issueId: string,
-  dependsOnId: string,
-  type: DependencyType,
-  database: DbOrTx = db,
-): Promise<{ id: string } | null> {
-  return firstRow(
-    database
-      .select({ id: issueDependencies.id })
-      .from(issueDependencies)
-      .where(and(
-        eq(issueDependencies.issueId, issueId),
-        eq(issueDependencies.dependsOnId, dependsOnId),
-        eq(issueDependencies.type, type),
-      ))
-      .limit(1)
-  );
-}
 
 export async function getIssueWebhookSnapshot(
   id: string,
@@ -143,6 +123,8 @@ export async function getIssueWebhookSnapshot(
   );
 }
 
+
+
 export async function updateIssueById(
   id: string,
   updates: Record<string, unknown>,
@@ -150,6 +132,8 @@ export async function updateIssueById(
 ): Promise<void> {
   await database.update(issues).set(updates).where(eq(issues.id, id));
 }
+
+
 
 export async function getProjectStatusName(
   statusId: string,
@@ -163,6 +147,8 @@ export async function getProjectStatusName(
       .limit(1)
   ))?.name ?? null;
 }
+
+
 
 export async function getIssueCurrentNodeInfo(
   id: string,
@@ -178,6 +164,8 @@ export async function getIssueCurrentNodeInfo(
   );
 }
 
+
+
 export async function closeOpenWorkspacesForIssue(
   id: string,
   closedAt: string,
@@ -189,6 +177,8 @@ export async function closeOpenWorkspacesForIssue(
     .where(and(eq(workspaces.issueId, id), sql`${workspaces.status} != 'closed'`));
 }
 
+
+
 export async function getIssueIdsAndProjects(
   ids: string[],
   database: DbOrTx = db,
@@ -199,6 +189,8 @@ export async function getIssueIdsAndProjects(
     .where(inArray(issues.id, ids));
 }
 
+
+
 export async function updateIssuesByIds(
   ids: string[],
   updates: Record<string, unknown>,
@@ -207,12 +199,16 @@ export async function updateIssuesByIds(
   await database.update(issues).set(updates).where(inArray(issues.id, ids));
 }
 
+
+
 export async function getWorkspaceIdsForIssue(
   id: string,
   database: DbOrTx = db,
 ) {
   return database.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.issueId, id));
 }
+
+
 
 export async function getIssueProjectIdsPair(
   issueId: string,
@@ -225,14 +221,7 @@ export async function getIssueProjectIdsPair(
   ]);
 }
 
-export async function deleteDependencyByIdAndIssue(
-  depId: string,
-  issueId: string,
-  database: DbOrTx = db,
-): Promise<void> {
-  await database.delete(issueDependencies)
-    .where(and(eq(issueDependencies.id, depId), eq(issueDependencies.issueId, issueId)));
-}
+
 
 export async function getIssueIdsAndProjectsForBatch(
   issueIds: string[],
@@ -244,40 +233,7 @@ export async function getIssueIdsAndProjectsForBatch(
     .where(inArray(issues.id, issueIds));
 }
 
-export async function getDependencyRowsForProjects(
-  projectIds: string[],
-  database: DbOrTx = db,
-) {
-  return database
-    .select({
-      ...issueDependencyColumns,
-      projectId: issues.projectId,
-    })
-    .from(issueDependencies)
-    .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
-    .where(inArray(issues.projectId, projectIds));
-}
 
-export async function deleteDependencyById(
-  id: string,
-  database: DbOrTx = db,
-): Promise<void> {
-  await database.delete(issueDependencies).where(eq(issueDependencies.id, id));
-}
-
-/**
- * Delete a dependency by id, returning the number of rows removed (0 = not
- * found). Uses `.returning().length` rather than a driver row-count because
- * libsql reports `rowsAffected`/`changes` unreliably for the not-found check
- * (CLI `issue dependency remove`).
- */
-export async function deleteDependencyByIdReturning(
-  id: string,
-  database: DbOrTx = db,
-): Promise<number> {
-  const deleted = await database.delete(issueDependencies).where(eq(issueDependencies.id, id)).returning();
-  return deleted.length;
-}
 
 export async function insertIssueArtifact(
   values: {
@@ -293,6 +249,8 @@ export async function insertIssueArtifact(
 ): Promise<void> {
   await database.insert(issueArtifacts).values(values);
 }
+
+
 
 export async function getLatestSessionsForWorkspaces(
   wsIds: string[],
@@ -315,6 +273,8 @@ export async function getLatestSessionsForWorkspaces(
     .orderBy(desc(sessions.startedAt));
 }
 
+
+
 export async function getDuplicateSourceIssue(
   sourceId: string,
   database: DbOrTx = db,
@@ -334,138 +294,7 @@ export async function getDuplicateSourceIssue(
   );
 }
 
-export async function getArchivedStatusId(
-  projectId: string,
-  database: DbOrTx = db,
-): Promise<string | null> {
-  const row = await firstRow(
-    database
-      .select({ id: projectStatuses.id })
-      .from(projectStatuses)
-      .where(and(eq(projectStatuses.projectId, projectId), eq(projectStatuses.name, "Archived")))
-      .limit(1)
-  );
-  return row?.id ?? null;
-}
 
-export async function getDoneStatusIds(
-  projectId: string,
-  database: DbOrTx = db,
-): Promise<string[]> {
-  const rows = await database
-    .select({ id: projectStatuses.id })
-    .from(projectStatuses)
-    .where(and(eq(projectStatuses.projectId, projectId), eq(projectStatuses.name, "Done")));
-  return rows.map((s) => s.id);
-}
-
-export async function getDoneCandidateIssues(
-  projectId: string,
-  doneStatusIds: string[],
-  database: DbOrTx = db,
-) {
-  return database
-    .select({ id: issues.id, statusChangedAt: issues.statusChangedAt, createdAt: issues.createdAt })
-    .from(issues)
-    .where(and(eq(issues.projectId, projectId), inArray(issues.statusId, doneStatusIds)));
-}
-
-export async function archiveIssuesByIds(
-  issueIds: string[],
-  archivedStatusId: string,
-  now: string,
-  database: DbOrTx = db,
-): Promise<void> {
-  await database
-    .update(issues)
-    .set({ statusId: archivedStatusId, statusChangedAt: now, updatedAt: now })
-    .where(inArray(issues.id, issueIds));
-}
-
-/**
- * Apply a batch of dependency add/remove edges atomically (CLI `issue dependency
- * update-batch`). The caller pre-builds the project/adjacency/edge-key maps from
- * already-fetched rows; this owns the TRANSACTION. Idempotent (existing adds /
- * missing removes are skipped) with in-memory cycle detection. On a cycle it sets
- * `cycleError` and throws to roll back; the outer catch swallows ONLY then and
- * surfaces `cycleError` in the result. The passed maps are mutated in place as
- * bookkeeping (harmless — the CLI does not read them afterward).
- */
-export async function applyDependencyEdgeBatch(
-  args: {
-    edges: Array<{ issueId: string; dependsOnId: string; type?: string; action: "add" | "remove" }>;
-    projectByIssue: Map<string, string>;
-    adjByProject: Map<string, Map<string, Set<string>>>;
-    edgeKeyToRow: Map<string, { id: string; projectId: string }>;
-    directional: Set<string>;
-  },
-  database: Database = db,
-): Promise<{ added: number; removed: number; skipped: { edge: (typeof args.edges)[number]; reason: string }[]; cycleError: string | null }> {
-  const { edges, projectByIssue, adjByProject, edgeKeyToRow, directional } = args;
-  const skipped: { edge: (typeof edges)[number]; reason: string }[] = [];
-  let added = 0;
-  let removed = 0;
-  let cycleError: string | null = null;
-
-  await database
-    .transaction(async (tx) => {
-      for (let i = 0; i < edges.length; i++) {
-        const e = edges[i];
-        const type = (e.type ?? "depends_on") as DependencyType;
-        const srcProj = projectByIssue.get(e.issueId);
-        const tgtProj = projectByIssue.get(e.dependsOnId);
-
-        if (e.action === "add") {
-          if (!srcProj) { skipped.push({ edge: e, reason: "source issue not found" }); continue; }
-          if (!tgtProj) { skipped.push({ edge: e, reason: "target issue not found" }); continue; }
-          if (srcProj !== tgtProj) { skipped.push({ edge: e, reason: "cross-project dependency" }); continue; }
-
-          const key = `${e.issueId}|${e.dependsOnId}|${type}`;
-          if (edgeKeyToRow.has(key)) { skipped.push({ edge: e, reason: "already exists" }); continue; }
-
-          if (directional.has(type)) {
-            let adj = adjByProject.get(srcProj);
-            if (!adj) { adj = new Map(); adjByProject.set(srcProj, adj); }
-            if (hasPath(adj, e.dependsOnId, e.issueId)) {
-              cycleError = `edges[${i}]: would create a cycle (${e.issueId} -> ${e.dependsOnId})`;
-              throw new Error(cycleError);
-            }
-            let set = adj.get(e.issueId);
-            if (!set) { set = new Set(); adj.set(e.issueId, set); }
-            set.add(e.dependsOnId);
-          }
-
-          const id = randomUUID();
-          await tx.insert(issueDependencies).values({
-            id,
-            issueId: e.issueId,
-            dependsOnId: e.dependsOnId,
-            type,
-            createdAt: new Date().toISOString(),
-          });
-          edgeKeyToRow.set(`${e.issueId}|${e.dependsOnId}|${type}`, { id, projectId: srcProj });
-          added++;
-        } else {
-          const key = `${e.issueId}|${e.dependsOnId}|${type}`;
-          const row = edgeKeyToRow.get(key);
-          if (!row) { skipped.push({ edge: e, reason: "dependency does not exist" }); continue; }
-          await tx.delete(issueDependencies).where(eq(issueDependencies.id, row.id));
-          edgeKeyToRow.delete(key);
-          if (directional.has(type)) {
-            const adj = adjByProject.get(row.projectId);
-            adj?.get(e.issueId)?.delete(e.dependsOnId);
-          }
-          removed++;
-        }
-      }
-    })
-    .catch((err) => {
-      if (cycleError) return;
-      throw err;
-    });
-
-  return { added, removed, skipped, cycleError };
-}
 
 /**
  * Cascade-delete an issue and all its data (CLI `issue delete`): every workspace
@@ -486,6 +315,8 @@ export async function applyDependencyEdgeBatch(
 export async function deleteIssueCascade(issueId: string, database: Database = db): Promise<void> {
   await deleteIssueCascadeShared(issueId, database);
 }
+
+
 
 /**
  * Atomically create a batch of issues with sequential per-project numbers,

@@ -717,8 +717,6 @@ export async function runPreMergeGate(
   // #791 boot/render smoke stage — see `pre-merge-gate-smoke.ts`.
   const smoke = await runSmokeStage({ workspace, projectId, database, isSelfRepo, docsOnly });
   if (smoke.failure) return smoke.failure;
-  const smokeApplies = smoke.applies;
-  const smokeInconclusive = smoke.inconclusive;
 
   // #660 — the E2E smoke lane, opt-in per project. Lives in `e2e-smoke-lane.ts` with the
   // runner and the decision it acts on; this file only consumes the verdict.
@@ -729,12 +727,30 @@ export async function runPreMergeGate(
     docsOnly,
     database,
   });
-  const e2eSmokeRan = e2eSmoke.ran;
-  const e2eSmokeInconclusive = e2eSmoke.inconclusive;
   if (e2eSmoke.failure) {
     return { passed: false, skipped: false, stage: "verify", message: e2eSmoke.failure };
   }
 
+  return finishPassingGate({
+    workspace, projectId, treeHash, verificationKey, verifyConfigured, skipVerifyForForeignDocsOnly,
+    smoke, e2eSmoke, docsOnly, changedFiles, gateTierInfo,
+  });
+}
+
+type SmokeStageResult = Awaited<ReturnType<typeof runSmokeStage>>;
+type E2ESmokeStageResult = Awaited<ReturnType<typeof runE2ESmokeGateStage>>;
+
+/** The passing verdict, once verify/smoke/e2e stages all ran without a failure. Extracted from `runPreMergeGate` (branch ceiling). */
+function finishPassingGate(a: {
+  workspace: PreMergeGateWorkspace; projectId: string; treeHash: string | null; verificationKey: string;
+  verifyConfigured: boolean; skipVerifyForForeignDocsOnly: boolean; smoke: SmokeStageResult; e2eSmoke: E2ESmokeStageResult;
+  docsOnly: boolean; changedFiles: string[]; gateTierInfo: GateTierInfo | null;
+}): PreMergeGateResult {
+  const { workspace, projectId, treeHash, verificationKey, verifyConfigured, skipVerifyForForeignDocsOnly, docsOnly, changedFiles, gateTierInfo } = a;
+  const smokeApplies = a.smoke.applies;
+  const smokeInconclusive = a.smoke.inconclusive;
+  const e2eSmokeRan = a.e2eSmoke.ran;
+  const e2eSmokeInconclusive = a.e2eSmoke.inconclusive;
   // `verifyRan` — not `verifyConfigured` — because the verify script only runs when there is a
   // worktree to run it in. Reporting stage "verify" for a run that never happened would write
   // false evidence into `mergeGateStage`, which is exactly the dishonesty #182 set out to
