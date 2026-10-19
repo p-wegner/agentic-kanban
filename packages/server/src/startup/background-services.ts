@@ -13,6 +13,7 @@ import {
   runDuePromoteCadences,
   spawnPromoteCadenceRun,
 } from "../services/promote-cadence.service.js";
+import { getPluginService } from "../services/plugin.service.js";
 import { startAutoMergeOrchestrator, stopAutoMergeOrchestrator } from "./auto-merge-orchestrator.js";
 import { startStrandedReviewReconciler, stopStrandedReviewReconciler } from "./stranded-review-reconciler.js";
 import { startStrandedPlanReconciler, stopStrandedPlanReconciler } from "./plan-mode-reconciler.js";
@@ -109,6 +110,11 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
       const scheduledRunService = createScheduledRunService({ database: db, createWorkspace: workspaceService.createWorkspace });
       setupScheduledTasks({
         runScheduledRun: (id, triggeredBy) => scheduledRunService.run(id, triggeredBy),
+        // #1625 — scheduled plugin syncs (pull/push every N minutes, per project).
+        runPluginSyncTick: async () => {
+          const fired = await getPluginService(db).runScheduledSyncs();
+          for (const r of fired) console.log(`[scheduler] scheduled plugin sync ${r.direction} for project ${r.projectId}: ${r.ok ? "ok" : "failed"}`);
+        },
         // #1238 — the promotion cadence: real prefs, real projects, a detached `promote.mjs` run.
         runPromoteCadenceTick: async () => {
           const fired = await runDuePromoteCadences({

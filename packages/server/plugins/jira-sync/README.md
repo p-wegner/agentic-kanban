@@ -136,3 +136,22 @@ node --test __tests__/*.test.mjs   # the bare directory form fails on Node 24
 
 Every command prints one JSON object to stdout and exits non-zero on failure — safe to run from
 the board's `scripts`/`sync` machinery or straight from a shell.
+
+## Known gaps
+
+- **Operating it.** Settings → Plugins → Jira Sync has Pull now / Push now / Dry run, the last run
+  per direction (counts, failures, conflicts linked to Jira) and the outbox length (#1625). The
+  schedule is the `Pull every (min)` / `Push every (min)` settings (empty or 0 = off); the board's
+  minute scheduler fires it. It is not yet shown in `status --watch`.
+- **Settings are the source of truth.** With site URL and project key saved in the settings, the
+  scaffold profile's TODOs no longer block Test connection, pull or push. A profile that is
+  still all TODOs is only enforced for headless runs that set neither.
+- **Run summary contract.** The board normalizes pull output (`created/updated/skipped/conflicted`,
+  `details`) and push output (`appliedCount/failedCount`, `applied/failed`) into counts, issues,
+  conflicts and failures, and a failed run records the script's `step`/`reason` plus the stderr
+  tail. Jira browse links are built from the saved site URL.
+- **Search API.** `searchIssues` still uses `POST /rest/api/3/search`. Jira's newer search returns
+  no `total`, so `bootstrap` reports the size of the page it fetched (`moreAvailable` says whether there are more).
+- **Never deletes.** Jira issues that leave the JQL scope are reported, not removed from the board.
+- **Outbox is filled elsewhere.** Nothing in this plugin queues board-side edits into
+  `outbox.json`; push applies whatever is there.

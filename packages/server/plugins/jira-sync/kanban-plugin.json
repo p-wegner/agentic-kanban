@@ -86,7 +86,9 @@
       { "key": "jql", "label": "JQL filter", "description": "Restricts which issues sync. Defaults to \"project = <projectKey> ORDER BY updated ASC\" when omitted." },
       { "key": "defaultIssueType", "label": "Default issue type", "description": "Jira issue type for issues created by push. Defaults to Task." },
       { "key": "pushCreate", "label": "Create Jira issues from new board issues", "description": "Set to true to have push create a Jira issue for each new board issue without an external key. Off by default." },
-      { "key": "statusMap", "label": "Status map (JSON)", "description": "Optional override of board status to Jira status name, e.g. {\"Done\": \"Fertig\"}. Without it, board statuses match by Jira status category." }
+      { "key": "statusMap", "label": "Status map (JSON)", "description": "Optional override of board status to Jira status name, e.g. {\"Done\": \"Fertig\"}. Without it, board statuses match by Jira status category." },
+      { "key": "pullEveryMinutes", "label": "Pull every (min)", "description": "Scheduled pull interval in minutes. Empty or 0 = off." },
+      { "key": "pushEveryMinutes", "label": "Push every (min)", "description": "Scheduled push interval in minutes. Empty or 0 = off." }
     ],
     "secrets": ["JIRA_API_TOKEN", "JIRA_EMAIL"]
   },

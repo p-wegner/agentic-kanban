@@ -3,6 +3,7 @@ import type { PluginSyncConnectionTest } from "@agentic-kanban/shared";
 import { apiPost } from "../../lib/api.js";
 import { useApiResource } from "../../hooks/useApiResource.js";
 import { showToast } from "../../lib/toast.js";
+import { PluginSyncPanel } from "./PluginSyncPanel.js";
 
 type SyncConfigView = {
   provider: string;
@@ -145,6 +146,7 @@ export function PluginSyncSettings({ pluginRowId, projectId }: { pluginRowId: st
           Secrets are stored encrypted in kanban.db, never in the repo or the profile.
         </span>
       </div>
+      <PluginSyncPanel pluginRowId={pluginRowId} projectId={projectId} />
       {test && (
         <div
           className={`text-xs rounded border p-2 ${test.ok
