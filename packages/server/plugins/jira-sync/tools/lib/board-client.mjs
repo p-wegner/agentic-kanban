@@ -77,18 +77,30 @@ export class BoardClient {
    * would silently miss externalKey lookups and re-create duplicates every pull.
    */
   async listExternallyTrackedIssues(projectId) {
-    const pageSize = 500;
     const byExternalKey = new Map();
+    for (const issue of await this.listIssues(projectId)) {
+      if (issue.externalKey) byExternalKey.set(issue.externalKey, issue);
+    }
+    return byExternalKey;
+  }
+
+  /** Every issue in the project, paged (see listExternallyTrackedIssues for why). */
+  async listIssues(projectId) {
+    const pageSize = 500;
+    const all = [];
     for (let offset = 0; ; offset += pageSize) {
       const page = await this.request(
         `/api/issues?projectId=${encodeURIComponent(projectId)}&limit=${pageSize}&offset=${offset}`,
       );
-      for (const issue of page) {
-        if (issue.externalKey) byExternalKey.set(issue.externalKey, issue);
-      }
+      all.push(...page);
       if (page.length < pageSize) break;
     }
-    return byExternalKey;
+    return all;
+  }
+
+  async listComments(issueId) {
+    const page = await this.request(`/api/issues/${encodeURIComponent(issueId)}/comments`);
+    return Array.isArray(page) ? page : (page?.comments ?? []);
   }
 
   createIssue(body) {

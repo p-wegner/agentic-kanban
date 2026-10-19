@@ -16,9 +16,10 @@ import { FIELDS, mapJiraIssueToBoardFields, resolveBoardStatusId } from "./field
  *   projectId: string,
  *   knownState: { issues: Record<string, { updated: string, boardIssueId?: string, boardUpdatedAt?: string }> },
  *   dryRun?: boolean,
+ *   pendingWritebackKeys?: Set<string>, // keys push created whose board writeback has not landed yet
  * }} opts
  */
-export async function runInboundSync(client, boardClient, { jql, siteUrl, projectId, knownState, dryRun = false }) {
+export async function runInboundSync(client, boardClient, { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set() }) {
   // dryRun only suppresses WRITES (create/update/tag calls below) — these three are
   // reads, and skipping them would make every issue look brand-new (boardIssuesByKey
   // empty), so a dry run could never report skip/update/conflict, only create.
@@ -39,6 +40,14 @@ export async function runInboundSync(client, boardClient, { jql, siteUrl, projec
     const mapped = mapJiraIssueToBoardFields(jiraIssue, { siteUrl });
     const known = knownState.issues[jiraIssue.key];
     const boardIssue = boardIssuesByKey.get(jiraIssue.key);
+
+    if (!boardIssue && pendingWritebackKeys.has(jiraIssue.key)) {
+      // push created this Jira issue from a board issue whose externalKey writeback is still
+      // pending: importing it now would duplicate that board issue (#1623).
+      skipped++;
+      details.push({ key: jiraIssue.key, action: "skip", reason: "pending writeback to an existing board issue" });
+      continue;
+    }
 
     if (!boardIssue) {
       if (!dryRun) {

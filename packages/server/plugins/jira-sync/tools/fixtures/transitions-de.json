@@ -1,0 +1,7 @@
+{
+  "transitions": [
+    { "id": "11", "name": "Zu erledigen", "to": { "name": "Zu erledigen", "statusCategory": { "key": "new" } } },
+    { "id": "21", "name": "In Arbeit", "to": { "name": "In Arbeit", "statusCategory": { "key": "indeterminate" } } },
+    { "id": "31", "name": "Fertig", "to": { "name": "Fertig", "statusCategory": { "key": "done" } } }
+  ]
+}

@@ -17,10 +17,16 @@ import {
   conflictRegisterPath,
   readCursor,
   cursorPath,
+  readWritebacks,
+  writebacksPath,
+  readBoardSnapshot,
+  boardSnapshotPath,
 } from "../lib/state.mjs";
 import { updateRegister } from "../lib/conflict-register.mjs";
 import { JiraAuthError } from "../lib/auth.mjs";
 import { BoardClient, BoardConfigError, resolveBoardConfigFromEnv } from "../lib/board-client.mjs";
+import { applyWritebacks } from "../lib/writebacks.mjs";
+import { statusNameOf } from "../lib/outbox-producer.mjs";
 import { createDefaultBoardFixtureFetch } from "../lib/board-fixtures.mjs";
 
 async function main() {
@@ -62,6 +68,19 @@ async function main() {
   const dryRun = isDryRun();
   const knownState = readPullState(stateDir);
 
+  // Land any create writebacks first so their Jira keys resolve to the board issue that
+  // spawned them; whatever cannot be applied stays pending and blocks an import below.
+  let writebacks = readWritebacks(stateDir);
+  if (!dryRun) {
+    try {
+      const wb = await applyWritebacks(boardClient, writebacks, { siteUrl: ctx.credentials.siteUrl });
+      writebacks = { keys: wb.keys };
+      if (wb.applied.length > 0) writeJsonFile(writebacksPath(stateDir), writebacks);
+    } catch (err) {
+      return { ok: false, step: "writebacks", reason: err.message };
+    }
+  }
+
   let result;
   try {
     result = await runInboundSync(ctx.client, boardClient, {
@@ -70,6 +89,7 @@ async function main() {
       projectId: boardConfig.projectId,
       knownState,
       dryRun,
+      pendingWritebackKeys: new Set(Object.values(writebacks.keys)),
     });
   } catch (err) {
     return { ok: false, step: "sync", reason: err.message, code: err.code ?? null, retryable: err.retryable ?? false };
@@ -83,6 +103,25 @@ async function main() {
       .map((d) => ({ id: d.key, reason: d.reason }));
     const nextRegister = updateRegister(readConflictRegister(stateDir), conflicts);
     writeJsonFile(conflictRegisterPath(stateDir), nextRegister);
+
+    // What pull wrote to the board came FROM Jira: re-baseline those statuses in push's
+    // snapshot so the next push does not echo them back as board-originated transitions.
+    const snapshot = readBoardSnapshot(stateDir);
+    if (snapshot) {
+      try {
+        const statuses = await boardClient.listStatuses(boardConfig.projectId);
+        const statusNameById = new Map(statuses.map((s) => [s.id, s.name]));
+        const touched = new Set(result.details.filter((d) => d.action === "create" || d.action === "update").map((d) => d.key));
+        for (const issue of await boardClient.listIssues(boardConfig.projectId)) {
+          if (!touched.has(issue.externalKey)) continue;
+          const prev = snapshot.issues[issue.id];
+          snapshot.issues[issue.id] = { ...prev, status: statusNameOf(issue, statusNameById) };
+        }
+        writeJsonFile(boardSnapshotPath(stateDir), snapshot);
+      } catch {
+        // best effort: worst case push attempts one redundant (failing, reported) transition
+      }
+    }
 
     const cursor = readCursor(stateDir);
     writeJsonFile(cursorPath(stateDir), { ...cursor, lastPullAt: new Date().toISOString(), jql });

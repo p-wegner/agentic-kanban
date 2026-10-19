@@ -75,13 +75,18 @@
       "cwd": "plugin",
       "env": {
         "JIRA_SYNC_STATE_DIR": "{{repoPath}}/.jira-sync",
-        "JIRA_SYNC_PROFILE_PATH": "{{repoPath}}/docs/jira-sync/_profile.md"
+        "JIRA_SYNC_PROFILE_PATH": "{{repoPath}}/docs/jira-sync/_profile.md",
+        "JIRA_SYNC_BOARD_URL": "{{boardUrl}}",
+        "JIRA_SYNC_BOARD_PROJECT_ID": "{{projectId}}"
       }
     },
     "config": [
       { "key": "siteUrl", "label": "Site URL", "description": "e.g. https://yourteam.atlassian.net", "required": true },
       { "key": "projectKey", "label": "Project key", "description": "e.g. ENG", "required": true },
-      { "key": "jql", "label": "JQL filter", "description": "Restricts which issues sync. Defaults to \"project = <projectKey> ORDER BY updated ASC\" when omitted." }
+      { "key": "jql", "label": "JQL filter", "description": "Restricts which issues sync. Defaults to \"project = <projectKey> ORDER BY updated ASC\" when omitted." },
+      { "key": "defaultIssueType", "label": "Default issue type", "description": "Jira issue type for issues created by push. Defaults to Task." },
+      { "key": "pushCreate", "label": "Create Jira issues from new board issues", "description": "Set to true to have push create a Jira issue for each new board issue without an external key. Off by default." },
+      { "key": "statusMap", "label": "Status map (JSON)", "description": "Optional override of board status to Jira status name, e.g. {\"Done\": \"Fertig\"}. Without it, board statuses match by Jira status category." }
     ],
     "secrets": ["JIRA_API_TOKEN", "JIRA_EMAIL"]
   },

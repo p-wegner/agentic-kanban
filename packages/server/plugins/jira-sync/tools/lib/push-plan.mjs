@@ -14,12 +14,30 @@
 import { resolveTransitionId, TransitionNotFoundError } from "./transitions.mjs";
 import { attributeComment } from "./comment-marker.mjs";
 
-async function describeAndMaybeApply(client, entry, { dryRun }) {
+/** Plain text -> minimal Atlassian Document Format (Jira Cloud v3 rejects a bare string). */
+function toAdf(text) {
+  return { type: "doc", version: 1, content: [{ type: "paragraph", content: [{ type: "text", text }] }] };
+}
+
+/**
+ * A create entry rarely knows the Jira project; inject the configured project key and
+ * default issue type unless the entry names its own (#1623).
+ */
+export function prepareCreateFields(fields = {}, { projectKey, defaultIssueType } = {}) {
+  const out = { ...fields };
+  if (!out.project && projectKey) out.project = { key: projectKey };
+  if (!out.issuetype && defaultIssueType) out.issuetype = { name: defaultIssueType };
+  if (typeof out.description === "string") out.description = out.description ? toAdf(out.description) : undefined;
+  if (out.description === undefined) delete out.description;
+  return out;
+}
+
+async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaultIssueType, statusMap }) {
   if (entry.kind === "transition") {
     const transitions = await client.listTransitions(entry.key);
     let transitionId;
     try {
-      transitionId = resolveTransitionId(transitions, entry.targetStatus);
+      transitionId = resolveTransitionId(transitions, entry.targetStatus, { overrides: statusMap });
     } catch (err) {
       if (!(err instanceof TransitionNotFoundError)) throw err;
       return { ok: false, failed: { key: entry.key, kind: "transition", reason: err.message } };
@@ -41,9 +59,10 @@ async function describeAndMaybeApply(client, entry, { dryRun }) {
   }
 
   if (entry.kind === "create") {
-    const description = { boardIssueId: entry.boardIssueId, kind: "create", fields: entry.fields };
+    const fields = prepareCreateFields(entry.fields, { projectKey, defaultIssueType });
+    const description = { boardIssueId: entry.boardIssueId, kind: "create", fields };
     if (dryRun) return { ok: true, applied: { ...description, wouldApply: true } };
-    const created = await client.createIssue(entry.fields);
+    const created = await client.createIssue(fields);
     return {
       ok: true,
       applied: { ...description, key: created.key },
@@ -61,7 +80,7 @@ async function describeAndMaybeApply(client, entry, { dryRun }) {
  * report an accurate outcome still runs (e.g. resolving the transition
  * graph) but no WRITE (`transitionIssue`/`addComment`/`createIssue`) does.
  */
-export async function runPush(client, entries, { dryRun = false } = {}) {
+export async function runPush(client, entries, { dryRun = false, projectKey, defaultIssueType, statusMap = {} } = {}) {
   const applied = [];
   const failed = [];
   const remaining = [];
@@ -70,7 +89,7 @@ export async function runPush(client, entries, { dryRun = false } = {}) {
   for (const entry of entries) {
     let outcome;
     try {
-      outcome = await describeAndMaybeApply(client, entry, { dryRun });
+      outcome = await describeAndMaybeApply(client, entry, { dryRun, projectKey, defaultIssueType, statusMap });
     } catch (err) {
       failed.push({ key: entry.key ?? entry.boardIssueId ?? null, kind: entry.kind ?? "unknown", reason: err.message, code: err.code ?? null });
       remaining.push(entry);
