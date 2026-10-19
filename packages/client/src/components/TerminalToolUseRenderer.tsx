@@ -3,8 +3,8 @@
 
 import type { DisplayEvent } from "../lib/agent-output-parser.js";
 import { summarizeToolCall, isSkillRead } from "../lib/terminal-transcript.js";
-import { highlightText } from "./TerminalEventRenderer.js";
-import type { RenderContext, DerivedRenderState } from "./TerminalEventRenderer.js";
+import { highlightText } from "./TerminalRenderShared.js";
+import type { RenderContext, DerivedRenderState } from "./TerminalRenderShared.js";
 
 type ToolUseEvent = Extract<DisplayEvent, { kind: "tool_use" }>;
 

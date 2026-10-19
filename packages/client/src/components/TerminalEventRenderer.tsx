@@ -7,49 +7,16 @@ import type { DisplayEvent } from "../lib/agent-output-parser.js";
 import { normalizedSearchQuery, eventSearchText } from "../lib/terminal-transcript.js";
 import type { SubagentGroup } from "../lib/terminal-transcript.js";
 import { renderToolUse } from "./TerminalToolUseRenderer.js";
+import type { RenderContext, DerivedRenderState } from "./TerminalRenderShared.js";
+import { highlightText } from "./TerminalRenderShared.js";
+
+export { highlightText };
+export type { RenderContext, DerivedRenderState };
 
 export type { SubagentGroup };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export interface RenderContext {
-  multiTurn?: boolean;
-  expandedSections: Set<number>;
-  toggleExpand: (idx: number) => void;
-  parseOutput: "minimal" | "false";
-  activeSubagentToolUseIds: Set<string>;
-  subagentGroups: Map<string, SubagentGroup>;
-  eventToSubagent: Map<number, string>;
-  isMaximized: boolean;
-  searchQuery: string;
-}
-
-export function highlightText(text: string, query: string): React.ReactNode {
-  const needle = query.trim();
-  if (!needle) return text;
-
-  const lowerText = text.toLowerCase();
-  const lowerNeedle = needle.toLowerCase();
-  const parts: React.ReactNode[] = [];
-  let cursor = 0;
-  let matchIdx = lowerText.indexOf(lowerNeedle);
-
-  while (matchIdx !== -1) {
-    if (matchIdx > cursor) parts.push(text.slice(cursor, matchIdx));
-    const end = matchIdx + needle.length;
-    parts.push(
-      <mark key={`${matchIdx}-${end}`} className="rounded bg-yellow-300 px-0.5 text-gray-950">
-        {text.slice(matchIdx, end)}
-      </mark>,
-    );
-    cursor = end;
-    matchIdx = lowerText.indexOf(lowerNeedle, cursor);
-  }
-
-  if (cursor < text.length) parts.push(text.slice(cursor));
-  return parts;
 }
 
 // ── Per-kind renderer registry ────────────────────────────────────────────────
@@ -60,15 +27,6 @@ export function highlightText(text: string, query: string): React.ReactNode {
 // to DisplayEvent fails to compile until a renderer is registered here.
 
 type EventOf<K extends DisplayEvent["kind"]> = Extract<DisplayEvent, { kind: K }>;
-
-/** Shared, event-agnostic view flags computed once per event before dispatch. */
-export interface DerivedRenderState {
-  isExpanded: boolean;
-  isMinimal: boolean;
-  isInsideSubagent: boolean;
-  isSubagentStart: boolean;
-  isSubagentEnd: boolean;
-}
 
 function deriveRenderState(event: DisplayEvent, key: number, ctx: RenderContext): DerivedRenderState {
   const { expandedSections, parseOutput, subagentGroups, eventToSubagent, searchQuery } = ctx;
