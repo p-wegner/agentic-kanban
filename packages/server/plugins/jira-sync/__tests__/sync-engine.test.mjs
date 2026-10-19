@@ -355,10 +355,10 @@ test("deleted vs out of scope: both marked and non-startable, only deleted moves
     knownState: first.nextState,
   });
 
-  assert.deepEqual(second.outOfScope, [
+  assert.deepEqual(second.deleted.map(({ key, reason, movedTo }) => ({ key, reason, movedTo })), [
     { key: "ENG-1", reason: "deleted", movedTo: "Cancelled" },
-    { key: "ENG-2", reason: "out-of-scope" },
   ]);
+  assert.deepEqual(second.outOfScope.map(({ key, reason }) => ({ key, reason })), [{ key: "ENG-2", reason: "out-of-scope" }]);
   assert.equal(board.state.issues.length, 3);
   const byKey = Object.fromEntries(board.state.issues.map((i) => [i.externalKey, i]));
   assert.equal(byKey["ENG-1"].statusId, "status-cancelled");
@@ -373,6 +373,6 @@ test("deleted vs out of scope: both marked and non-startable, only deleted moves
     ...baseOpts,
     knownState: second.nextState,
   });
-  assert.equal(third.outOfScope.find((e) => e.key === "ENG-1").movedTo, undefined);
+  assert.equal(third.deleted.length, 0); // a deletion is reported once, by the run that applied it
   assert.deepEqual(await tagsOf("ENG-1"), ["jira:deleted", "no-auto-start"]);
 });

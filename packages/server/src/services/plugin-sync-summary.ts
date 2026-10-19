@@ -44,6 +44,7 @@ export function parseRunSummary(stdout: string, opts: { siteUrl?: string } = {})
     const n = num(rec[k]);
     if (n !== undefined) counts[k] = n;
   }
+  if (Array.isArray(rec.deleted)) counts.deleted = rec.deleted.length;
   const applied = num(rec.appliedCount);
   const failed = num(rec.failedCount);
   if (applied !== undefined) counts.applied = applied;
@@ -56,12 +57,12 @@ export function parseRunSummary(stdout: string, opts: { siteUrl?: string } = {})
   for (const d of recs(rec.details)) {
     const key = str(d.key);
     if (!key) continue;
-    if (d.action === "conflict") conflicts.push({ externalKey: key, reason: str(d.reason) ?? "", externalUrl: link(key) });
-    else issues.push({ externalKey: key, status: str(d.action), externalUrl: link(key) });
+    if (d.action === "conflict") conflicts.push({ externalKey: key, reason: str(d.reason) ?? "", externalUrl: link(key), localIssueNumber: num(d.localIssueNumber) });
+    else issues.push({ externalKey: key, status: str(d.action), externalUrl: link(key), localIssueNumber: num(d.localIssueNumber) });
   }
   for (const a of recs(rec.applied)) {
     const key = str(a.key);
-    if (key) issues.push({ externalKey: key, status: str(a.kind) ?? "applied", externalUrl: link(key) });
+    if (key) issues.push({ externalKey: key, status: str(a.kind) ?? "applied", externalUrl: link(key), localIssueNumber: num(a.localIssueNumber) });
   }
   for (const i of recs(rec.issues)) {
     const key = str(i.externalKey);
@@ -71,18 +72,30 @@ export function parseRunSummary(stdout: string, opts: { siteUrl?: string } = {})
   }
   for (const c of recs(rec.conflicts)) {
     const key = str(c.externalKey);
-    if (key) conflicts.push({ externalKey: key, reason: String(c.reason ?? ""), externalUrl: link(key, c.externalUrl) });
+    if (key) conflicts.push({ externalKey: key, reason: String(c.reason ?? ""), externalUrl: link(key, c.externalUrl), localIssueNumber: num(c.localIssueNumber) });
   }
   // A generic `{issues: []}` is a statement ("none"), so keep the empty array when the script sent one.
   if (issues.length || Array.isArray(rec.issues)) summary.issues = issues;
   if (conflicts.length || Array.isArray(rec.conflicts)) summary.conflicts = conflicts;
 
   const failures = recs(rec.failed)
-    .map((f) => ({ externalKey: str(f.key) ?? "", reason: str(f.reason) ?? "", kind: str(f.kind) }))
+    .map((f) => ({ externalKey: str(f.key) ?? "", reason: str(f.reason) ?? "", kind: str(f.kind), localIssueNumber: num(f.localIssueNumber) }))
     .filter((f) => f.externalKey || f.reason)
     .map((f) => ({ ...f, externalUrl: f.externalKey ? link(f.externalKey) : undefined }));
   if (failures.length) summary.failures = failures;
   return summary;
+}
+
+/**
+ * A dry run must not create anything: an applied "create" that carries a new Jira key (a dry run
+ * reports wouldApply and no key) means the plugin ignored the dry-run contract (#1634).
+ */
+export function dryRunContractBreach(stdout: string): string | undefined {
+  const rec = parseRunOutput(stdout);
+  if (!rec) return undefined;
+  const created = recs(rec.applied).filter((a) => a.kind === "create" && str(a.key) && a.wouldApply !== true);
+  if (created.length === 0) return undefined;
+  return `dry-run contract breach: the plugin created ${created.map((a) => str(a.key)).join(", ")} during a dry run`;
 }
 
 /** The last lines of stderr, bounded, for a failure message. */

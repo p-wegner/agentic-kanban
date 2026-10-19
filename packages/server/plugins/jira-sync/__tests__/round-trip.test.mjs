@@ -59,7 +59,7 @@ test("a pull-moved deleted issue produces no outbound entry", async () => {
   const first = await runInboundSync(fakeJira([jiraIssue("KD-39")]), client, opts);
   let snapshot = await snapshotAfterPull({ boardClient: client, projectId: "p", snapshot: null, touchedKeys: new Set() });
   const gone = await runInboundSync(fakeJira([], { deleted: ["KD-39"] }), client, { ...opts, knownState: first.nextState });
-  assert.equal(gone.outOfScope[0].movedTo, "Cancelled");
+  assert.equal(gone.deleted[0].movedTo, "Cancelled");
   snapshot = await snapshotAfterPull({ boardClient: client, projectId: "p", snapshot, touchedKeys: new Set(["KD-39"]) });
   const issues = await client.listIssues("p");
   const names = new Map(state.statuses.map((s) => [s.id, s.name]));
@@ -90,4 +90,40 @@ test("push-create sends ADF, the mapped type and labels", () => {
   assert.deepEqual(fields.labels, ["ui", "needs-review"]);
   assert.equal(fields.description.content[0].type, "heading");
   assert.equal(fields.description.content[1].type, "bulletList");
+});
+
+test("a deletion is counted as deleted (once), listed, and not as out of scope (#1634)", async () => {
+  const { state, client } = newBoard();
+  const first = await runInboundSync(fakeJira([jiraIssue("KD-46"), jiraIssue("KD-50")]), client, opts);
+  const gone = fakeJira([jiraIssue("KD-50")], { deleted: ["KD-46"] });
+  const second = await runInboundSync(gone, client, { ...opts, knownState: first.nextState });
+  assert.deepEqual(second.deleted.map((d) => d.key), ["KD-46"]);
+  assert.equal(second.outOfScope.length, 0);
+  assert.equal(second.reportedOutOfScope.length, 0);
+  assert.deepEqual(second.details.filter((d) => d.action === "delete").map((d) => d.key), ["KD-46"]);
+  assert.equal(second.details.find((d) => d.action === "delete").localIssueNumber, state.issues.find((i) => i.externalKey === "KD-46").issueNumber);
+  // the run that applied it reports it; the next one does not
+  const third = await runInboundSync(gone, client, { ...opts, knownState: second.nextState });
+  assert.equal(third.deleted.length, 0);
+});
+
+test("a key that left the JQL scope but still exists stays out of scope, not deleted", async () => {
+  const { client } = newBoard();
+  const first = await runInboundSync(fakeJira([jiraIssue("KD-1")]), client, opts);
+  const next = await runInboundSync(fakeJira([]), client, { ...opts, knownState: first.nextState });
+  assert.equal(next.deleted.length, 0);
+  assert.deepEqual(next.reportedOutOfScope, ["KD-1"]);
+});
+
+test("pull details carry the board issue number for create, update, conflict and skip rows", async () => {
+  const { state, client } = newBoard();
+  const first = await runInboundSync(fakeJira([jiraIssue("KD-1")]), client, opts);
+  assert.equal(first.details[0].localIssueNumber, 1);
+  const again = await runInboundSync(fakeJira([jiraIssue("KD-1")]), client, { ...opts, knownState: first.nextState });
+  assert.equal(again.details[0].localIssueNumber, 1);
+  await new Promise((r) => setTimeout(r, 5)); // the fixture stamps updatedAt in ms
+  await client.updateIssue(state.issues[0].id, { title: "edited" });
+  const conflict = await runInboundSync(fakeJira([jiraIssue("KD-1", {}, "u2")]), client, { ...opts, knownState: first.nextState });
+  assert.equal(conflict.details[0].action, "conflict");
+  assert.equal(conflict.details[0].localIssueNumber, 1);
 });

@@ -1,7 +1,7 @@
 // Builds a fake `fetch` backed by recorded JSON fixtures, so the client, the
 // sync commands and their tests all run with no network. See ../fixtures/*.json.
 
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -41,9 +41,25 @@ export function createScriptedFetch(steps) {
   };
 }
 
+/**
+ * Test seam: when JIRA_SYNC_FIXTURE_LOG names a file, every non-GET call that reaches a fixture
+ * fetch is appended to it (`<label> <METHOD> <url>`), so a contract test can prove a run wrote
+ * nothing. Search is a POST by API design, so it is not a mutation.
+ */
+export function logMutations(fetchImpl, label) {
+  const logPath = process.env.JIRA_SYNC_FIXTURE_LOG;
+  if (!logPath) return fetchImpl;
+  return async (url, init) => {
+    const method = init?.method ?? "GET";
+    const href = typeof url === "string" ? url : url.toString();
+    if (method !== "GET" && !href.includes("/search/jql")) appendFileSync(logPath, `${label} ${method} ${href}\n`);
+    return fetchImpl(url, init);
+  };
+}
+
 /** The default offline scenario: a two-page search, one issue detail/transitions/comment round trip. */
 export function createDefaultFixtureFetch() {
-  return createScriptedFetch([
+  return logMutations(createScriptedFetch([
     {
       match: (url, init) => init?.method === "POST" && url.includes("/rest/api/3/search/jql"),
       respond: (url, init) => {
@@ -73,5 +89,5 @@ export function createDefaultFixtureFetch() {
       match: (url, init) => (init?.method ?? "GET") === "GET" && /\/rest\/api\/3\/issue\/[^/]+$/.test(url),
       respond: () => ({ status: 200, body: loadFixture("issue-detail") }),
     },
-  ]);
+  ]), "jira");
 }

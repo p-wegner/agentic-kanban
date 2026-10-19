@@ -8,6 +8,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { PluginSyncRunRecord, PluginSyncStatusView } from "@agentic-kanban/shared";
 import { SyncStatusBody, applyTriggeredRun, effectiveCadence } from "./PluginSyncPanel.js";
 import { validateSyncField, validateSyncFields } from "./pluginSyncFields.js";
+// @ts-expect-error plain ESM plugin code, no types
+import { runInboundSync } from "../../../../server/plugins/jira-sync/tools/lib/sync-engine.mjs";
+// @ts-expect-error plain ESM plugin code, no types
+import { BoardClient } from "../../../../server/plugins/jira-sync/tools/lib/board-client.mjs";
+// @ts-expect-error plain ESM plugin code, no types
+import { createBoardFixtureState, createDefaultBoardFixtureFetch } from "../../../../server/plugins/jira-sync/tools/lib/board-fixtures.mjs";
+import { parseRunSummary } from "../../../../server/src/services/plugin-sync-summary.js";
 
 const T0 = Date.now() - 10 * 60_000;
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -86,5 +93,39 @@ describe("sync field validation", () => {
       { a: "x", b: "{}", c: "ok" },
     );
     expect(Object.keys(errors)).toEqual(["a"]);
+  });
+});
+
+describe("PluginSyncPanel on a summary produced by the real plugin (#1634)", () => {
+  it("shows #N for conflict and failure rows built from runInboundSync/runPush output", async () => {
+    // Real plugin + real parser, not a hand-written summary: the plugin must emit localIssueNumber.
+    const boardState = createBoardFixtureState();
+    const board = new BoardClient({ boardUrl: "http://board.test", fetchImpl: createDefaultBoardFixtureFetch(boardState) });
+    const jiraIssue = (updated: string) => ({
+      key: "KD-45",
+      fields: { summary: "KD-45", updated, status: { statusCategory: { key: "new" } }, issuetype: { name: "Bug" } },
+    });
+    const jira = (updated: string) => ({
+      async getIssue() { return { key: "KD-45" }; },
+      async *searchAll() { yield jiraIssue(updated); },
+    });
+    const opts = { jql: "project = KD", projectId: "p" };
+    const first = await runInboundSync(jira("u1"), board, { ...opts, knownState: { issues: {} } });
+    await new Promise((r) => setTimeout(r, 5));
+    await board.updateIssue(boardState.issues[0].id, { title: "edited on the board" });
+    const pulled = await runInboundSync(jira("u2"), board, { ...opts, knownState: first.nextState });
+    const { nextState: _drop, ...pullOut } = pulled;
+    const pullSummary = parseRunSummary(JSON.stringify({ ok: true, step: "pull", ...pullOut }), { siteUrl: "https://x.atlassian.net" });
+    const number = boardState.issues[0].issueNumber;
+    expect(pullSummary?.conflicts?.[0]).toMatchObject({ externalKey: "KD-45", localIssueNumber: number });
+
+    const pushSummary = parseRunSummary(JSON.stringify({
+      ok: false, step: "push", appliedCount: 0, failedCount: 1, applied: [],
+      failed: [{ key: "KD-45", kind: "transition", reason: "no transition", localIssueNumber: number }],
+    }));
+    const html = renderToStaticMarkup(
+      <SyncStatusBody status={status({ lastRuns: { pull: run({ summary: pullSummary }), push: run({ direction: "push", ok: false, summary: pushSummary }) } })} />,
+    );
+    expect(html.match(new RegExp(`plugin-sync-board-issue-${number}"`, "g"))?.length).toBeGreaterThanOrEqual(2);
   });
 });

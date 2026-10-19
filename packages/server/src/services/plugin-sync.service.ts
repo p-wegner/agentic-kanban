@@ -18,7 +18,7 @@ import type { PluginRunContext } from "./plugin-loop-types.js";
 import { runPluginCommand } from "./plugin-exec.js";
 import { PluginError } from "./plugin-errors.js";
 import { createPluginSecretStore } from "./plugin-secret-store.js";
-import { describeRunFailure, parseRunSummary } from "./plugin-sync-summary.js";
+import { describeRunFailure, dryRunContractBreach, parseRunSummary } from "./plugin-sync-summary.js";
 
 /**
  * Board-side surface over a plugin's declarative `sync` capability (#1076): per-project config
@@ -391,7 +391,9 @@ export function createPluginSyncOps(deps: {
     const raw = await runPluginCommand(command, { cwd, env });
     const result = { ...raw, stdout: redactSecrets(raw.stdout, secretValues), stderr: redactSecrets(raw.stderr, secretValues) };
     const finishedAt = new Date().toISOString();
-    const ok = !result.timedOut && result.code === 0;
+    // A dry run that reports a created Jira key wrote for real: fail it loudly (#1634).
+    const breach = opts.dryRun ? dryRunContractBreach(result.stdout) : undefined;
+    const ok = !result.timedOut && result.code === 0 && !breach;
     const record: PluginSyncRunRecord = {
       direction: opts.direction,
       dryRun: Boolean(opts.dryRun),
@@ -401,7 +403,7 @@ export function createPluginSyncOps(deps: {
       code: result.code,
       timedOut: result.timedOut || undefined,
       // The script's own `step`/`reason` and the stderr tail, not just the exit code (#1625).
-      error: ok ? undefined : describeRunFailure(result),
+      error: ok ? undefined : (breach ?? describeRunFailure(result)),
       scheduled,
       summary: parseRunSummary(result.stdout, { siteUrl: syncEnv.SYNC_CONFIG_SITEURL }),
     };
