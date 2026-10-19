@@ -340,8 +340,13 @@ import {
  *
  * #1607: `train-gating-warning.test.ts` at the ASSUMED 3,000 ms, with a `when:` territory of its own
  * script and test, so an ordinary diff does not pay it.
+ *
+ * #1625: `plugin-sync-summary.test.ts` at the ASSUMED 3,000 ms. It spawns the real jira-sync
+ * plugin scripts (`plugins/jira-sync/tools/**`), outside its import graph, with a `when:`
+ * territory of that plugin dir and `services/plugin-sync-summary.ts`, so an ordinary diff does
+ * not pay it.
  */
-const BASELINE_TOTAL_MS = 513_689;
+const BASELINE_TOTAL_MS = 516_689;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative

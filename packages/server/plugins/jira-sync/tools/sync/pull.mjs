@@ -133,4 +133,6 @@ async function main() {
 
 const result = await main();
 printResult(result);
-process.exit(result.ok ? 0 : 1);
+// Not process.exit(): on Windows/Node 24 exiting while undici's sockets are still closing
+// aborts with a libuv assertion (0xC0000409) even after a successful run (#1625).
+process.exitCode = result.ok ? 0 : 1;

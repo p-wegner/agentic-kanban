@@ -49,9 +49,12 @@ async function countRows(sessionId: string): Promise<number> {
 /** Wait until the fire-and-forget insert/cap chains have settled (stable count twice in a row). */
 async function waitForStableCount(sessionId: string): Promise<number> {
   let prev = -1;
-  for (let i = 0; i < 200; i++) {
+  let stable = 0;
+  for (let i = 0; i < 400; i++) {
     const c = await countRows(sessionId);
-    if (c === prev) return c;
+    stable = c === prev ? stable + 1 : 0;
+    // Under a loaded gate one quiet 25ms window is not "settled"; require several.
+    if (stable >= 4) return c;
     prev = c;
     await new Promise((r) => setTimeout(r, 25));
   }
