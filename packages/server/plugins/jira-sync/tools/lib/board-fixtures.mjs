@@ -15,6 +15,16 @@ function jsonResponse(status, body) {
   };
 }
 
+// Field names the real board API reads on create/update (routes/issues.ts). The fixture
+// rejects anything else so a misnamed field (#1629: `type` vs `issueType`) fails loudly.
+const WRITABLE_ISSUE_FIELDS = new Set([
+  "title", "description", "priority", "issueType", "skipAutoReview", "sortOrder", "statusId",
+  "workflowTemplateId", "externalKey", "externalUrl", "reposTouched", "tags", "noAutoStart",
+]);
+function unknownFields(body, extra = []) {
+  return Object.keys(body ?? {}).filter((k) => !WRITABLE_ISSUE_FIELDS.has(k) && !extra.includes(k));
+}
+
 /** A fresh in-memory board: one default status, no issues, no tags. */
 export function createBoardFixtureState() {
   return {
@@ -38,9 +48,17 @@ export function createDefaultBoardFixtureFetch(state = createBoardFixtureState()
       return jsonResponse(200, state.statuses);
     }
     if (method === "GET" && path.startsWith("/api/issues?")) {
-      return jsonResponse(200, state.issues);
+      return jsonResponse(
+        200,
+        state.issues.map((i) => ({
+          ...i,
+          tags: state.tags.filter((t) => state.issueTags.get(i.id)?.has(t.id)),
+        })),
+      );
     }
     if (method === "POST" && path === "/api/issues") {
+      const bad = unknownFields(body, ["projectId"]);
+      if (bad.length > 0) return jsonResponse(400, { error: `unknown issue field(s): ${bad.join(", ")}` });
       const now = new Date().toISOString();
       const issue = { id: randomUUID(), createdAt: now, updatedAt: now, ...body };
       state.issues.push(issue);
@@ -50,6 +68,8 @@ export function createDefaultBoardFixtureFetch(state = createBoardFixtureState()
     if (patchMatch) {
       const issue = state.issues.find((i) => i.id === patchMatch[1]);
       if (!issue) return jsonResponse(404, { error: "not found" });
+      const bad = unknownFields(body);
+      if (bad.length > 0) return jsonResponse(400, { error: `unknown issue field(s): ${bad.join(", ")}` });
       Object.assign(issue, body, { updatedAt: new Date().toISOString() });
       return jsonResponse(200, issue);
     }
