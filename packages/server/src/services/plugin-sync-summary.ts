@@ -36,6 +36,7 @@ export function parseRunSummary(stdout: string, opts: { siteUrl?: string } = {})
   const site = opts.siteUrl?.trim().replace(/\/+$/, "");
   const link = (key: string, explicit?: unknown) => str(explicit) ?? (site ? `${site}/browse/${key}` : undefined);
   const summary: PluginSyncRunSummary = {};
+  const wouldBe = (s: string | undefined) => (rec.dryRun === true && s ? `would ${s}` : s);
   const step = str(rec.step);
   if (step) summary.step = step;
 
@@ -50,6 +51,18 @@ export function parseRunSummary(stdout: string, opts: { siteUrl?: string } = {})
   if (applied !== undefined) counts.applied = applied;
   if (failed !== undefined) counts.failed = failed;
   if (Array.isArray(rec.reportedOutOfScope)) counts.outOfScope = rec.reportedOutOfScope.length;
+  // A dry run wrote nothing, so its writes are planned, never applied/created/updated/deleted (#1638).
+  if (rec.dryRun === true) {
+    const rename: Array<[keyof typeof counts, keyof typeof counts]> = [
+      ["created", "wouldCreate"], ["updated", "wouldUpdate"], ["deleted", "wouldDelete"], ["applied", "planned"],
+    ];
+    for (const [from, to] of rename) {
+      if (counts[from] !== undefined) {
+        counts[to] = counts[from];
+        delete counts[from];
+      }
+    }
+  }
   if (Object.keys(counts).length) summary.counts = counts;
 
   const issues: NonNullable<PluginSyncRunSummary["issues"]> = [];
@@ -58,11 +71,11 @@ export function parseRunSummary(stdout: string, opts: { siteUrl?: string } = {})
     const key = str(d.key);
     if (!key) continue;
     if (d.action === "conflict") conflicts.push({ externalKey: key, reason: str(d.reason) ?? "", externalUrl: link(key), localIssueNumber: num(d.localIssueNumber) });
-    else issues.push({ externalKey: key, status: str(d.action), externalUrl: link(key), localIssueNumber: num(d.localIssueNumber) });
+    else issues.push({ externalKey: key, status: wouldBe(str(d.action)), externalUrl: link(key), localIssueNumber: num(d.localIssueNumber) });
   }
   for (const a of recs(rec.applied)) {
     const key = str(a.key);
-    if (key) issues.push({ externalKey: key, status: str(a.kind) ?? "applied", externalUrl: link(key), localIssueNumber: num(a.localIssueNumber) });
+    if (key) issues.push({ externalKey: key, status: wouldBe(str(a.kind) ?? "applied"), externalUrl: link(key), localIssueNumber: num(a.localIssueNumber) });
   }
   for (const i of recs(rec.issues)) {
     const key = str(i.externalKey);
