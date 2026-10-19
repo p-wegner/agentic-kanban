@@ -54,5 +54,10 @@ listed file/function below its soft cap, decomposed behind the existing import p
 - The cleanup ticket is an ordinary ticket (operator, 2026-10-19): default backlog placement, no
   queue jump, no separate "run alone at a quiet moment" scheduling; the board pulls it in like any
   other. This replaces the proposal's run-alone idea.
-- Not yet wired: a scheduled caller of the report endpoint.
+- Wired (#1619): `startup/code-health-scan-reconciler.ts` observes each project's base-branch tip every
+  5 min. A tip not yet scanned (train, single merge or operator hand-merge alike) runs
+  `check-god-modules.mjs --report` on a host verify slot and records the result with `ref` = the sha;
+  the last scanned sha lives in `code_health_scan_<id>`, so a re-observed landing is not re-counted. A
+  failed scan logs one `[code-health-scan]` line and retries next tick; a project with no landings is
+  re-scanned daily so the "N days" trigger fires. `status --watch` shows the ledger line under BASE & RELEASE.
 - Numbers are the proposal's; change them in the JSON only, with this record.

@@ -31,6 +31,7 @@ import { startProjectConductorSupervisor } from "../services/project-conductor.s
 import { startBackupScheduler, stopBackupScheduler } from "./backup-scheduler.js";
 import { startSessionMessagePruner, stopSessionMessagePruner } from "../services/session-message-pruner.service.js";
 import { startBaseBranchHealthReconciler, stopBaseBranchHealthReconciler } from "./base-branch-health-reconciler.js";
+import { startCodeHealthScanReconciler, stopCodeHealthScanReconciler } from "./code-health-scan-reconciler.js";
 import { startCiStatusReconciler, stopCiStatusReconciler } from "./ci-status-reconciler.js";
 import { startWorkerConnectionReaper, stopWorkerConnectionReaper } from "../services/worker-connection-reaper.service.js";
 import { getWorkerFleet } from "../services/worker-fleet.service.js";
@@ -312,6 +313,16 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start({ db }) {
       startCiStatusReconciler(db);
       return stopCiStatusReconciler;
+    },
+  },
+  {
+    // #1619 — the caller of the code-health report: scans each new base-branch tip once (and
+    // re-scans a quiet project daily) so the ledger moves and the cleanup ticket can fire.
+    name: "code-health-scan-reconciler",
+    start({ db }) {
+      if (process.env.VITEST || process.env.NODE_ENV === "test") return;
+      startCodeHealthScanReconciler(db);
+      return stopCodeHealthScanReconciler;
     },
   },
   {

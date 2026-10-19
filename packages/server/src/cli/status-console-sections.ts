@@ -59,6 +59,7 @@ export function baseReleaseSection(model: ConsoleModel, g: Glyphs): Section | nu
   if (model.boardTag || model.unpromoted != null) {
     lines.push({ text: ` stable ${model.boardTag ?? "-"}${model.unpromoted != null ? ` · ${model.unpromoted} merge${model.unpromoted === 1 ? "" : "s"} not yet promoted` : ""}`, tone: model.unpromoted ? "yellow" : null });
   }
+  if (model.codeHealth) lines.push({ text: ` ${model.codeHealth}`, tone: "dim" });
   const p = model.placement;
   if (p) lines.push({ text: ` verify placement ${p.mode}${p.workers.length ? ` · allow ${p.workers.join(", ")}` : p.mode === "host" ? "" : " · allowlist empty (gates stay on host)"}`, tone: null });
   return lines.length > 1 ? { id: "base", lines, keep: true } : null;

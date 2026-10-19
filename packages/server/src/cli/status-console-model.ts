@@ -108,6 +108,8 @@ export interface ConsoleModel {
   /** #1449: every running and queued verify chain, host and worker. */
   chains?: ConsoleChain[];
   baseHealth?: ConsoleBaseHealth | null;
+  /** #1619: the code-health ledger line from the latest scan. */
+  codeHealth?: string | null;
   /** Set while the auto-merge window holds work (`base_red`, `live_train`, ...), naming the held tickets. */
   mergeHold?: ConsoleMergeHold | null;
   rc?: ConsoleRc | null;

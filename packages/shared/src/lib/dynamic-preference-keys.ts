@@ -279,6 +279,9 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // the JSON ledger of open soft breaches. Logic: shared/lib/code-health.ts.
   "code_health_posture",
   "code_health_ledger",
+  // `code_health_scan_<id>`: `{ sha, at }` of the last SUCCESSFUL report scan (#1619), so one sha is
+  // scanned once and a quiet project still re-scans daily.
+  "code_health_scan",
   // Red-debt ledger (#915/#916): `red_debt_max_<id>` / `red_debt_max_age_<id>` cap how many
   // OPEN ledger entries (or how old the oldest one) a `sprint`/`fast` posture may carry
   // before it is forced to degrade one step (sprint -> fast -> standard) — the
