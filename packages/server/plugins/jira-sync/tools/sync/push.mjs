@@ -25,9 +25,12 @@ import {
   cursorPath,
   readBoardSnapshot,
   boardSnapshotPath,
+  readPullState,
+  pullStatePath,
 } from "../lib/state.mjs";
 import { BoardClient, BoardConfigError, resolveBoardConfigFromEnv } from "../lib/board-client.mjs";
 import { createDefaultBoardFixtureFetch } from "../lib/board-fixtures.mjs";
+import { loadBoardState, refreshPullStateAfterPush } from "../lib/state-sync.mjs";
 import { planOutbox } from "../lib/outbox-producer.mjs";
 import { applyWritebacks } from "../lib/writebacks.mjs";
 import { runPush } from "../lib/push-plan.mjs";
@@ -89,6 +92,7 @@ async function main() {
 
   let writebackFailures = [];
   let enqueued = 0;
+  let baselined = 0; // issues recorded as the baseline on a first run: nothing is sent for them
   let plannedEntries = [];
   let pendingWritebacks = readWritebacks(stateDir);
   if (boardClient) {
@@ -98,17 +102,12 @@ async function main() {
       pendingWritebacks = { keys: wb.keys };
       if (!dryRun && wb.applied.length > 0) writeJsonFile(writebacksPath(stateDir), pendingWritebacks);
 
-      const statuses = await boardClient.listStatuses(boardProjectId);
-      const issues = await boardClient.listIssues(boardProjectId);
-      const commentsByIssueId = {};
-      for (const issue of issues) {
-        if (issue.externalKey) commentsByIssueId[issue.id] = await boardClient.listComments(issue.id);
-      }
+      const boardState = await loadBoardState(boardClient, boardProjectId);
+      const priorSnapshot = readBoardSnapshot(stateDir);
+      baselined = priorSnapshot == null ? boardState.issues.length : 0;
       const planned = planOutbox({
-        issues,
-        statusNameById: new Map(statuses.map((st) => [st.id, st.name])),
-        commentsByIssueId,
-        snapshot: readBoardSnapshot(stateDir),
+        ...boardState,
+        snapshot: priorSnapshot,
         outboxEntries: readOutbox(stateDir).entries,
         pendingWritebackIds: new Set(Object.keys(pendingWritebacks.keys)),
         createEnabled,
@@ -143,6 +142,21 @@ async function main() {
       }
     }
 
+    if (boardClient) {
+      try {
+        const refreshed = await refreshPullStateAfterPush({
+          client: ctx.client,
+          boardClient,
+          projectId: boardProjectId,
+          pullState: readPullState(stateDir),
+          applied,
+        });
+        writeJsonFile(pullStatePath(stateDir), refreshed);
+      } catch {
+        // best effort: a missed refresh shows up as a reported conflict on the next pull
+      }
+    }
+
     const failures = failed.map((f) => ({ id: pushFailureIdentity(f), reason: f.reason }));
     const nextRegister = updateRegister(readFailureRegister(stateDir), failures);
     writeJsonFile(failureRegisterPath(stateDir), nextRegister);
@@ -157,6 +171,8 @@ async function main() {
     dryRun,
     total: entries.length,
     enqueued,
+    baselined,
+    ...(baselined > 0 ? { note: `baselined ${baselined} issues, nothing sent` } : {}),
     writebackFailures,
     appliedCount: applied.length,
     failedCount: failed.length,

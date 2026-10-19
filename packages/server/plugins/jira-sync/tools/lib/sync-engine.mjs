@@ -70,7 +70,7 @@ export async function runInboundSync(
           title: mapped.title,
           description: mapped.description ?? undefined,
           priority: mapped.priority,
-          type: mapped.type,
+          issueType: mapped.type,
           statusId: statusId ?? undefined,
           externalKey: mapped.externalKey,
           externalUrl: mapped.externalUrl,
@@ -124,7 +124,7 @@ export async function runInboundSync(
         title: mapped.title,
         description: mapped.description ?? undefined,
         priority: mapped.priority,
-        type: mapped.type,
+        issueType: mapped.type,
         statusId: statusId ?? undefined,
       });
       const existingTags = await boardClient.listIssueTags(boardIssue.id);

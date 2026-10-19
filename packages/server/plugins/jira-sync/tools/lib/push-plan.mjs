@@ -13,11 +13,7 @@
 
 import { resolveTransitionId, TransitionNotFoundError } from "./transitions.mjs";
 import { attributeComment } from "./comment-marker.mjs";
-
-/** Plain text -> minimal Atlassian Document Format (Jira Cloud v3 rejects a bare string). */
-function toAdf(text) {
-  return { type: "doc", version: 1, content: [{ type: "paragraph", content: [{ type: "text", text }] }] };
-}
+import { markdownToAdf } from "./adf.mjs";
 
 /**
  * A create entry rarely knows the Jira project; inject the configured project key and
@@ -27,8 +23,9 @@ export function prepareCreateFields(fields = {}, { projectKey, defaultIssueType 
   const out = { ...fields };
   if (!out.project && projectKey) out.project = { key: projectKey };
   if (!out.issuetype && defaultIssueType) out.issuetype = { name: defaultIssueType };
-  if (typeof out.description === "string") out.description = out.description ? toAdf(out.description) : undefined;
+  if (typeof out.description === "string") out.description = out.description ? markdownToAdf(out.description) : undefined;
   if (out.description === undefined) delete out.description;
+  if (Array.isArray(out.labels) && out.labels.length === 0) delete out.labels;
   return out;
 }
 

@@ -7,6 +7,13 @@
 // the project's history; an issue seen for the first time is baselined the same way.
 
 import { hasAttributionMarker } from "./comment-marker.mjs";
+import { labelsFromBoardTags, mapBoardTypeToJira } from "./field-map.mjs";
+
+const DELETED_TAG = "jira:deleted"; // = sync-engine's DELETED_TAG (not imported: avoids a cycle)
+
+function isTaggedDeleted(issue) {
+  return (issue.tags ?? []).some((t) => (typeof t === "string" ? t : t?.name) === DELETED_TAG);
+}
 
 export function statusNameOf(issue, statusNameById) {
   return (
@@ -55,6 +62,8 @@ export function planOutbox({
     next.issues[issue.id] = { status, ...(prev?.createRequested ? { createRequested: true } : {}) };
 
     if (issue.externalKey) {
+      // Never queue outbound entries for an issue whose Jira twin is gone (#1629).
+      if (isTaggedDeleted(issue)) continue;
       if (!baseline && prev && prev.status !== status && status) {
         const same = (e) => e.kind === "transition" && e.key === issue.externalKey && e.targetStatus === status;
         if (!queued(same)) {
@@ -75,7 +84,12 @@ export function planOutbox({
         entries.push({
           kind: "create",
           boardIssueId: issue.id,
-          fields: { summary: issue.title, description: issue.description ?? undefined },
+          fields: {
+            summary: issue.title,
+            description: issue.description ?? undefined,
+            labels: labelsFromBoardTags(issue.tags),
+            ...(mapBoardTypeToJira(issue.issueType) ? { issuetype: { name: mapBoardTypeToJira(issue.issueType) } } : {}),
+          },
         });
         next.issues[issue.id].createRequested = true;
       }
