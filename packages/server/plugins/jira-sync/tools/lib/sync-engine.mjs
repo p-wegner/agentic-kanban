@@ -63,6 +63,7 @@ export async function runInboundSync(
     }
 
     if (!boardIssue) {
+      let createdIssue;
       if (!dryRun) {
         const statusId = resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses);
         const created_ = await boardClient.createIssue({
@@ -75,6 +76,7 @@ export async function runInboundSync(
           externalKey: mapped.externalKey,
           externalUrl: mapped.externalUrl,
         });
+        createdIssue = created_;
         await attachMissingTags(boardClient, tagCache, created_.id, mapped.tags, []);
         const imported = await importComments(boardClient, created_.id, mapped.comments, known?.commentIds);
         commentsImported += imported.count;
@@ -88,13 +90,13 @@ export async function runInboundSync(
         commentsImported += newComments(mapped.comments, known?.commentIds).length;
       }
       created++;
-      details.push({ key: jiraIssue.key, action: "create" });
+      details.push({ key: jiraIssue.key, action: "create", localIssueNumber: createdIssue?.issueNumber });
       continue;
     }
 
     if (known && known.updated === mapped.jiraUpdated) {
       skipped++;
-      details.push({ key: jiraIssue.key, action: "skip", reason: "unchanged since the last pull" });
+      details.push({ key: jiraIssue.key, action: "skip", reason: "unchanged since the last pull", localIssueNumber: boardIssue.issueNumber });
       continue;
     }
 
@@ -114,7 +116,7 @@ export async function runInboundSync(
         commentsImported += newComments(mapped.comments, known?.commentIds).length;
       }
       conflicted++;
-      details.push({ key: jiraIssue.key, action: "conflict", reason: "board issue changed locally since the last sync; not overwritten" });
+      details.push({ key: jiraIssue.key, action: "conflict", reason: "board issue changed locally since the last sync; not overwritten", localIssueNumber: boardIssue.issueNumber });
       continue;
     }
 
@@ -141,32 +143,39 @@ export async function runInboundSync(
       commentsImported += newComments(mapped.comments, known?.commentIds).length;
     }
     updated++;
-    details.push({ key: jiraIssue.key, action: "update" });
+    details.push({ key: jiraIssue.key, action: "update", localIssueNumber: boardIssue.issueNumber });
   }
 
   // Deletions/moves out of JQL scope: a key we've synced before but did not see this
   // run. Never hard-deleted from the board (#1078); since #1624 each is classified
   // (deleted = `GET issue` 404, otherwise out of scope), marked with a tag, and a
   // deleted one is moved out of the startable columns.
-  const reportedOutOfScope = Object.keys(knownState.issues).filter((key) => !seenKeys.has(key));
+  const missingKeys = Object.keys(knownState.issues).filter((key) => !seenKeys.has(key));
   const outOfScope = [];
+  const deleted = [];
   const deletedStatus = boardStatuses.find((st) => st.name.toLowerCase() === String(deletedStatusName).toLowerCase());
-  for (const key of reportedOutOfScope) {
+  for (const key of missingKeys) {
     const reason = await classifyMissingIssue(client, key);
-    const entry = { key, reason };
-    outOfScope.push(entry);
     const boardIssue = boardIssuesByKey.get(key);
-    if (!boardIssue || reason === "unknown" || dryRun) continue;
-    const tag = reason === "deleted" ? DELETED_TAG : OUT_OF_SCOPE_TAG;
-    const existingTags = await boardClient.listIssueTags(boardIssue.id);
-    await attachMissingTags(boardClient, tagCache, boardIssue.id, [tag, NO_AUTO_START_TAG], existingTags);
-    if (reason === "deleted" && deletedStatus && boardIssue.statusId !== deletedStatus.id) {
-      const moved = await boardClient.updateIssue(boardIssue.id, { statusId: deletedStatus.id });
-      entry.movedTo = deletedStatus.name;
-      const prior = nextState.issues[key];
-      if (prior) nextState.issues[key] = { ...prior, boardUpdatedAt: moved.updatedAt };
+    const entry = { key, reason, localIssueNumber: boardIssue?.issueNumber };
+    (reason === "deleted" ? deleted : outOfScope).push(entry);
+    if (reason === "unknown" || dryRun) continue;
+    if (boardIssue) {
+      const tag = reason === "deleted" ? DELETED_TAG : OUT_OF_SCOPE_TAG;
+      const existingTags = await boardClient.listIssueTags(boardIssue.id);
+      await attachMissingTags(boardClient, tagCache, boardIssue.id, [tag, NO_AUTO_START_TAG], existingTags);
+      if (reason === "deleted" && deletedStatus && boardIssue.statusId !== deletedStatus.id) {
+        const moved = await boardClient.updateIssue(boardIssue.id, { statusId: deletedStatus.id });
+        entry.movedTo = deletedStatus.name;
+        const prior = nextState.issues[key];
+        if (prior) nextState.issues[key] = { ...prior, boardUpdatedAt: moved.updatedAt };
+      }
     }
+    // A deletion is applied once: forget the key so later pulls do not report it again.
+    if (reason === "deleted") delete nextState.issues[key];
   }
+  for (const entry of deleted) details.push({ key: entry.key, action: "delete", localIssueNumber: entry.localIssueNumber });
+  const reportedOutOfScope = outOfScope.map((o) => o.key);
 
   return {
     jql,
@@ -178,6 +187,7 @@ export async function runInboundSync(
     commentsImported,
     reportedOutOfScope,
     outOfScope,
+    deleted,
     details,
     nextState,
   };
