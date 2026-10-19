@@ -42,7 +42,7 @@ import { getProjectById } from "../repositories/project.repository.js";
 import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
 import { buildVerifyResourceEnv } from "./verify-resource-env.js";
 import { resolveVerifyMaxWorkers, resolveVerifyTimeoutMs } from "./verify-tunables.js";
-import { planProbePlacement, runProbeOnWorker } from "./base-branch-health-placement.js";
+import { planProbePlacement, runProbeOnWorker, runShardedProbeOnWorkers, sweepShardingEnabled } from "./base-branch-health-placement.js";
 import { failedSuitesForOutcome } from "./failed-suite-parse.js";
 import { resolveRedProbeOutcome, tail } from "./base-branch-red-outcome.js";
 import { resolveEffectiveVerify, deriveSetupScriptFromProfile, getStackProfile } from "./stack-profile.service.js";
@@ -358,15 +358,21 @@ async function runBaseBranchProbe(
   const placement = await planProbePlacement({ projectId, database, isBaseLane });
   if (placement.target === "hold") return null;
   if (placement.target === "worker") {
-    return runProbeOnWorker({
-      plan: placement, kind: isBaseLane ? "base-probe" : "rc-sweep", projectId, database, repoPath: project.repoPath, branch, sha, verifyScript,
+    const workerArgs = {
+      plan: placement, kind: (isBaseLane ? "base-probe" : "rc-sweep") as "base-probe" | "rc-sweep", projectId, database, repoPath: project.repoPath, branch, sha, verifyScript,
       timeoutMs: await resolveVerifyTimeoutMs(projectId, database), stampKey: baseHealthProbeStartPrefKey(projectId), startedAtIso: now,
-      finish: (result, combined) => {
+      finish: (result: BaseBranchVerifyResult, combined: string) => {
         result.scope = probeScopeFromOutput(combined);
         const idle = { freeGb: null, cpuPct: null };
         return finishBaseProbe({ result, project, branch, isBaseLane, sha, verifyScript, projectId, database, capacityStart: idle, queueWaitMs: 0, chainActiveAtStart: 0, chainQueuedAtStart: 0 });
       },
-    });
+    };
+    // #1632: the full rc sweep, sharded across eligible workers' free slots (opt-in); null = not worth it, run one job.
+    if (!isBaseLane && (await sweepShardingEnabled(projectId, database))) {
+      const sharded = await runShardedProbeOnWorkers(workerArgs);
+      if (sharded) return sharded;
+    }
+    return runProbeOnWorker(workerArgs);
   }
 
   const slug = branch.replace(/[^a-zA-Z0-9._-]/g, "_");

@@ -2,6 +2,7 @@
 // by one half must never look like a foreign change to the other.
 
 import { planOutbox, statusNameOf } from "./outbox-producer.mjs";
+import { boardFieldsOf } from "./field-snapshot.mjs";
 
 /** Issues, status names and (for tracked issues) comments: the inputs planOutbox diffs. */
 export async function loadBoardState(boardClient, projectId) {
@@ -40,6 +41,7 @@ export async function refreshPullStateAfterPush({ client, boardClient, projectId
         updated: jira?.fields?.updated ?? next.issues[key]?.updated ?? null,
         boardIssueId: boardIssue.id,
         boardUpdatedAt: boardIssue.updatedAt,
+        fields: boardFieldsOf(boardIssue),
       };
     } catch {
       // best effort: the pull falls back to reporting a conflict, as before

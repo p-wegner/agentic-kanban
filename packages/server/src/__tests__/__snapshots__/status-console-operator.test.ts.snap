@@ -13,7 +13,7 @@ exports[`operator console frame (#1449) > snapshot at 80 cols, color 1`] = `
 [1mBASE & RELEASE ─────────────────────────────────────────────────────────────────[0m
 [31m master red 1a2b3c4d 2h ago: status-console, worker-cli-isolation +1[0m
 [31m merges held: base_red · holding #1429 #1430[0m
-[36m rc rc/20261013 abc1234 sweeping 5m00s[0m
+[36m rc rc/20261013 abc1234 sweeping 5m00s (full)[0m
 [33m stable stable-20261013-3 · 7 merges not yet promoted[0m
  verify placement prefer-worker · allow ao-pf38
 [1mNEW WORKER CONNECTIONS ─────────────────────────────────────────────────────────[0m
@@ -46,7 +46,7 @@ GATES & TESTS ──────────────────────
 BASE & RELEASE ─────────────────────────────────────────────────────────────────
  master red 1a2b3c4d 2h ago: status-console, worker-cli-isolation +1
  merges held: base_red · holding #1429 #1430
- rc rc/20261013 abc1234 sweeping 5m00s
+ rc rc/20261013 abc1234 sweeping 5m00s (full)
  stable stable-20261013-3 · 7 merges not yet promoted
  verify placement prefer-worker · allow ao-pf38
 NEW WORKER CONNECTIONS ─────────────────────────────────────────────────────────
@@ -79,7 +79,7 @@ exports[`operator console frame (#1449) > snapshot at 140 cols, color 1`] = `
 [1mBASE & RELEASE ─────────────────────────────────────────────────────[0m │ 
 [31m master red 1a2b3c4d 2h ago: status-console, worker-cli-isolation +1[0m │ 
 [31m merges held: base_red · holding #1429 #1430[0m                         │ 
-[36m rc rc/20261013 abc1234 sweeping 5m00s[0m                               │ 
+[36m rc rc/20261013 abc1234 sweeping 5m00s (full)[0m                        │ 
 [33m stable stable-20261013-3 · 7 merges not yet promoted[0m                │ 
  verify placement prefer-worker · allow ao-pf38                      │ 
 [1mNEW WORKER CONNECTIONS ─────────────────────────────────────────────[0m │ 
@@ -104,7 +104,7 @@ GATES & TESTS ──────────────────────
 BASE & RELEASE ───────────────────────────────────────────────────── │ 
  master red 1a2b3c4d 2h ago: status-console, worker-cli-isolation +1 │ 
  merges held: base_red · holding #1429 #1430                         │ 
- rc rc/20261013 abc1234 sweeping 5m00s                               │ 
+ rc rc/20261013 abc1234 sweeping 5m00s (full)                        │ 
  stable stable-20261013-3 · 7 merges not yet promoted                │ 
  verify placement prefer-worker · allow ao-pf38                      │ 
 NEW WORKER CONNECTIONS ───────────────────────────────────────────── │ 

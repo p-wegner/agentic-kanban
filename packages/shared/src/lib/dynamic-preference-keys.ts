@@ -148,6 +148,10 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // of worker names/ids whose verdict may authorize a merge or promotion. See verify-placement.ts.
   "verify_placement",
   "verify_workers",
+  // #1632: `rc_sweep_shards_<id>` = "true" shards the full rc sweep across eligible workers' verify slots
+  // (opt-in); `sweep_shard_timings_<id>` is the JSON timing book the next sweep's plan balances on.
+  "rc_sweep_shards",
+  "sweep_shard_timings",
   // Required toolchains (#1382): `required_toolchains_<id>` is a CSV like `pnpm, java>=21`. A worker
   // that REPORTED its toolchains and misses one is not a candidate; one that reported nothing is unknown.
   "required_toolchains",

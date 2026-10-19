@@ -9,7 +9,7 @@ import {
 import type { Database } from "../db/index.js";
 import { PluginError } from "./plugin-errors.js";
 import { looksLikeGitUrl, readManifestFromDir, resolveInside, commitPathWithRetry } from "./plugin-fs.js";
-import { parseScaffoldFields, applyScaffoldValues } from "./plugin-scaffold.js";
+import { parseScaffoldFields, applyScaffoldValues, syncSettingsComplete } from "./plugin-scaffold.js";
 import { listPluginLoopSessionStats } from "../repositories/plugins.repository.js";
 import type { PluginRow } from "../repositories/plugins.repository.js";
 import type { PluginLoopEngine } from "./plugin-loop.service.js";
@@ -192,7 +192,14 @@ export function createPluginLoopExtras(ctx: PluginLoopExtrasCtx) {
       return { targetPath: scaffold.targetPath, exists: false as const, content: null, fields: [] };
     }
     const content = readFileSync(target, "utf8");
-    return { targetPath: scaffold.targetPath, exists: true as const, content, fields: parseScaffoldFields(content) };
+    // #1635: complete Sync settings answer the profile's questions — report no open fields.
+    const answeredBySettings = await syncSettingsComplete(plugin, projectId, database);
+    return {
+      targetPath: scaffold.targetPath,
+      exists: true as const,
+      content,
+      fields: answeredBySettings ? [] : parseScaffoldFields(content),
+    };
   }
 
   /** Write form values into the scaffold's TODO markers in place (#291). */

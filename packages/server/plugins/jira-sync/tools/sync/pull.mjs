@@ -111,7 +111,7 @@ async function main() {
     try {
       const touched = new Set([
         ...result.details.filter((d) => d.action === "create" || d.action === "update").map((d) => d.key),
-        ...result.outOfScope.filter((o) => o.movedTo).map((o) => o.key),
+        ...[...result.outOfScope, ...result.deleted].filter((o) => o.movedTo).map((o) => o.key),
       ]);
       writeJsonFile(
         boardSnapshotPath(stateDir),

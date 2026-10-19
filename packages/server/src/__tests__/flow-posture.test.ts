@@ -49,6 +49,7 @@ describe("the `flow` risk posture (#1240)", () => {
       source: "risk_posture",
       gateTier: "impact",
       sweepIntervalMs: null,
+      rcSweep: "on-idle-after-landing", // #1631
       reviewMode: "standard",
       redBasePolicy: "report",
       trainMaxSize: 1,

@@ -55,7 +55,8 @@ export function baseReleaseSection(model: ConsoleModel, g: Glyphs): Section | nu
   const h = model.mergeHold;
   if (h) lines.push({ text: ` merges held: ${h.reason}${h.held.length ? ` · holding ${h.held.map(issueRef).join(" ")}` : ""}`, tone: h.reason === "base_red" || h.reason === "breaker_paused" ? "red" : "dim" });
   const rc = model.rc;
-  if (rc) lines.push({ text: ` rc ${rc.branch} ${rc.sha ? rc.sha.slice(0, 7) : "-"} ${rc.state}${rc.updatedAt ? ` ${since(rc.updatedAt, g.nowMs)}` : ""}`, tone: rc.state === "red" ? "red" : rc.state === "sweeping" || rc.state === "cut" ? "cyan" : null });
+  // #1631: a rolling rc is swept on idle, so the line says what a promote would find — `sweeping 9m (full)` / `green, promotable`.
+  if (rc) lines.push({ text: ` rc ${rc.branch} ${rc.sha ? rc.sha.slice(0, 7) : "-"} ${rc.state === "green" ? "green, promotable" : rc.state}${rc.updatedAt ? ` ${since(rc.updatedAt, g.nowMs)}` : ""}${rc.state === "sweeping" ? " (full)" : ""}`, tone: rc.state === "red" ? "red" : rc.state === "sweeping" || rc.state === "cut" ? "cyan" : null });
   if (model.boardTag || model.unpromoted != null) {
     lines.push({ text: ` stable ${model.boardTag ?? "-"}${model.unpromoted != null ? ` · ${model.unpromoted} merge${model.unpromoted === 1 ? "" : "s"} not yet promoted` : ""}`, tone: model.unpromoted ? "yellow" : null });
   }

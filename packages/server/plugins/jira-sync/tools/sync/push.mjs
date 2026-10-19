@@ -94,6 +94,8 @@ async function main() {
   let enqueued = 0;
   let baselined = 0; // issues recorded as the baseline on a first run: nothing is sent for them
   let plannedEntries = [];
+  const issueNumberByKey = new Map(); // Jira key -> board issue number
+  const issueNumberById = new Map(); // board issue id -> board issue number
   let pendingWritebacks = readWritebacks(stateDir);
   if (boardClient) {
     try {
@@ -103,6 +105,10 @@ async function main() {
       if (!dryRun && wb.applied.length > 0) writeJsonFile(writebacksPath(stateDir), pendingWritebacks);
 
       const boardState = await loadBoardState(boardClient, boardProjectId);
+      for (const i of boardState.issues) {
+        issueNumberById.set(i.id, i.issueNumber);
+        if (i.externalKey) issueNumberByKey.set(i.externalKey, i.issueNumber);
+      }
       const priorSnapshot = readBoardSnapshot(stateDir);
       baselined = priorSnapshot == null ? boardState.issues.length : 0;
       const planned = planOutbox({
@@ -126,7 +132,14 @@ async function main() {
   const outbox = readOutbox(stateDir);
   // dry-run does not persist the enqueued entries, so report them as if queued.
   const entries = dryRun ? [...outbox.entries, ...plannedEntries] : outbox.entries;
-  const { applied, failed, remaining, writebacks } = await runPush(ctx.client, entries, pushOptions);
+  const pushResult = await runPush(ctx.client, entries, pushOptions);
+  const { remaining, writebacks } = pushResult;
+  const withNumber = (row) => ({
+    ...row,
+    localIssueNumber: issueNumberById.get(row.boardIssueId) ?? issueNumberByKey.get(row.key) ?? (row.key == null ? undefined : issueNumberById.get(row.key)),
+  });
+  const applied = pushResult.applied.map(withNumber);
+  const failed = pushResult.failed.map(withNumber);
 
   if (!dryRun) {
     writeJsonFile(outboxPath(stateDir), { entries: remaining });

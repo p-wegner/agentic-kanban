@@ -13,6 +13,7 @@ import {
   runDuePromoteCadences,
   spawnPromoteCadenceRun,
 } from "../services/promote-cadence.service.js";
+import { createRollingRcSweepDeps, runRollingRcSweepTick } from "../services/rc-rolling-sweep.service.js";
 import { getPluginService } from "../services/plugin.service.js";
 import { startAutoMergeOrchestrator, stopAutoMergeOrchestrator } from "./auto-merge-orchestrator.js";
 import { startStrandedReviewReconciler, stopStrandedReviewReconciler } from "./stranded-review-reconciler.js";
@@ -120,6 +121,17 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
           for (const r of fired) console.log(`[scheduler] scheduled plugin sync ${r.direction} for project ${r.projectId}: ${r.ok ? "ok" : "failed"}`);
         },
         // #1238 — the promotion cadence: real prefs, real projects, a detached `promote.mjs` run.
+        // #1631 — the rolling release candidate: swept on idle after a landing, so promote only builds.
+        runRcRollingSweepTick: async () => {
+          const results = await runRollingRcSweepTick(createRollingRcSweepDeps(db, async () => {
+            const rows = await db.select({ id: projects.id, repoPath: projects.repoPath }).from(projects);
+            return rows.filter((r) => !!r.repoPath).map((r) => ({ projectId: r.id, repoPath: r.repoPath }));
+          }));
+          for (const r of results) {
+            if (r.started) console.log(`[scheduler] rolling rc sweep started for project ${r.projectId} (${r.decision.action} ${r.branch ?? "?"})`);
+            else if (r.error) console.warn(`[scheduler] rolling rc sweep for project ${r.projectId} failed: ${r.error}`);
+          }
+        },
         runPromoteCadenceTick: async () => {
           const fired = await runDuePromoteCadences({
             listProjects: async () => {

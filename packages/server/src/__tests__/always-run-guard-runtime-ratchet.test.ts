@@ -350,8 +350,16 @@ import {
  * `plugins/jira-sync/kanban-plugin.json` (outside its import graph) to pin the plugin version to
  * its manifest, with a `when:` territory of that manifest and `plugin-lifecycle.service.ts`, so
  * an ordinary diff does not pay it.
+ *
+ * #1631: `rc-rolling-sweep.test.ts` at the ASSUMED 3,000 ms. It imports `scripts/promote-plan.mjs`,
+ * which no package-local diff links to, with a `when:` territory of that script, so an ordinary
+ * diff does not pay it.
+ *
+ * #1634: `plugin-sync-dry-run-contract.test.ts` at the ASSUMED 3,000 ms. It spawns the real
+ * jira-sync plugin scripts through `plugin-sync.service.ts` (outside its import graph), with a
+ * `when:` territory of that plugin dir and the service, so an ordinary diff does not pay it.
  */
-const BASELINE_TOTAL_MS = 519_689;
+const BASELINE_TOTAL_MS = 525_689;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative

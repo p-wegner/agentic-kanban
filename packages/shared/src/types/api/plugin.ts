@@ -53,6 +53,7 @@ export interface PluginSyncRunSummary {
     applied?: number;
     failed?: number;
     outOfScope?: number;
+    deleted?: number;
   };
   issues?: Array<{ externalKey: string; externalUrl?: string; localIssueNumber?: number; status?: string }>;
   conflicts?: Array<{ externalKey: string; reason: string; externalUrl?: string; localIssueNumber?: number }>;

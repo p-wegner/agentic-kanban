@@ -12,7 +12,8 @@ export function isSelfTest(argv = process.argv) {
 }
 
 export function isDryRun(argv = process.argv) {
-  return argv.includes("--dry-run") || process.env.JIRA_SYNC_DRY_RUN === "1";
+  // SYNC_DRY_RUN is the board's contract name (plugin-sync.service); JIRA_SYNC_DRY_RUN is the old alias.
+  return argv.includes("--dry-run") || process.env.SYNC_DRY_RUN === "1" || process.env.JIRA_SYNC_DRY_RUN === "1";
 }
 
 const FIXTURE_CREDENTIALS = {

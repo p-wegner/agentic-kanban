@@ -4,6 +4,7 @@
 // needs to hold state across calls within one process — a plain object works.
 
 import { randomUUID } from "node:crypto";
+import { logMutations } from "./fixtures.mjs";
 
 function jsonResponse(status, body) {
   return {
@@ -38,7 +39,9 @@ export function createBoardFixtureState() {
 
 /** Builds a scripted fetch backed by `state` (defaults to a fresh board). */
 export function createDefaultBoardFixtureFetch(state = createBoardFixtureState()) {
-  return async function boardFixtureFetch(url, init = {}) {
+  return logMutations(boardFixtureFetch, "board");
+
+  async function boardFixtureFetch(url, init = {}) {
     const href = typeof url === "string" ? url : url.toString();
     const method = init.method ?? "GET";
     const body = init.body ? JSON.parse(init.body) : undefined;
@@ -60,7 +63,7 @@ export function createDefaultBoardFixtureFetch(state = createBoardFixtureState()
       const bad = unknownFields(body, ["projectId"]);
       if (bad.length > 0) return jsonResponse(400, { error: `unknown issue field(s): ${bad.join(", ")}` });
       const now = new Date().toISOString();
-      const issue = { id: randomUUID(), createdAt: now, updatedAt: now, ...body };
+      const issue = { id: randomUUID(), issueNumber: state.issues.length + 1, createdAt: now, updatedAt: now, ...body };
       state.issues.push(issue);
       return jsonResponse(201, issue);
     }
