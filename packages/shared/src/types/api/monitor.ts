@@ -79,6 +79,7 @@ export type RiskPostureLevel = (typeof RISK_POSTURES)[number];
  * since there the release candidate's sweep is the only place a full verdict is owed; every
  * other level reaches it only as a softer-only project override.
  */
+export type RcSweepMode = "on-idle-after-landing" | "on-promote";
 export type RedBasePolicy = "block" | "allow-known-debt" | "allow-file-debt-ticket" | "report";
 
 /**
@@ -127,6 +128,14 @@ export interface RiskPosture {
    * background compute on an idle project.
    */
   sweepIntervalMs: number | null;
+  /**
+   * When the release candidate's full sweep runs (#1631, decision 017 Amendment 2026-10-19).
+   * `on-idle-after-landing`: the board keeps a ROLLING candidate — once the merge queue is idle
+   * and master has moved past the last swept candidate, it cuts/refreshes the rc and sweeps it on
+   * spare verify slots, so `pnpm promote` finds a fresh verdict and only builds. `on-promote`:
+   * the sweep is requested by the promote itself (or the project's promote cadence).
+   */
+  rcSweep: RcSweepMode;
   /** Whether a merge is allowed to land on top of a red base branch. */
   redBasePolicy: RedBasePolicy;
   trainMaxSize: number;

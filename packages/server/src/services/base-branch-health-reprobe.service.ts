@@ -398,6 +398,13 @@ export async function requestBaseBranchReprobe(
     readCpuPct?: () => Promise<number | null>;
     /** #1238 — probe this branch (a release candidate) instead of the project's base branch. */
     branch?: string | null;
+    /**
+     * #1631 — nobody is blocked on this probe (the rolling rc sweep): skip the recency /
+     * unchanged-sha refusals like an explicit ask, but keep `gate_running` and
+     * `host_saturated` as deferrals and run at BACKGROUND priority, so it uses spare verify
+     * slots and yields to a train gate. A promote that later joins it escalates it to explicit.
+     */
+    background?: boolean;
   } = {},
 ): Promise<BaseHealthDueVerdict> {
   let verdict: BaseHealthDueVerdict = { due: false, reason: "recent_result" };
@@ -438,6 +445,9 @@ export async function requestBaseBranchReprobe(
       && await reprobePlacementHold(projectId, database, opts.branch ?? null) !== null) {
       verdict = { due: true, reason: "interval_elapsed" };
     }
+    if (opts.background && !verdict.due && (verdict.reason === "recent_result" || verdict.reason === "sha_unchanged")) {
+      verdict = { due: true, reason: "interval_elapsed" };
+    }
     if (!verdict.due) {
       console.log(
         `[base-branch-health] on-demand re-probe for project ${projectId} skipped (${verdict.reason})`,
@@ -456,7 +466,7 @@ export async function requestBaseBranchReprobe(
     // was a lie. Held visibly and retried instead.
     const startProbe = () => {
       void verifyBaseBranchHealth(projectId, database, undefined, {
-        explicit: opts.ignoreRecency === true || Boolean(opts.branch),
+        explicit: opts.background ? false : opts.ignoreRecency === true || Boolean(opts.branch),
         ...(opts.branch ? { branch: opts.branch } : {}),
       }).catch((err) => {
         console.warn(

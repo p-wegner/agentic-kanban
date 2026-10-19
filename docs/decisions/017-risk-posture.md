@@ -374,3 +374,40 @@ Operator decision: under `sprint` only a promotion runs the full suite. `sweepIn
 gated nothing, since `sprint` already lets the train window depart on a red base. The per-train
 gate stays the impact selection; #1600 stopped `CONTINUE.md` and `docs/**` in a train diff from
 widening it to the full suite.
+
+### Amendment 2026-10-19 (#1631): the release candidate is swept on idle after a landing (`rcSweep`)
+
+Operator decision: a promote waited on a fresh full sweep of the release candidate (18 min on
+2026-10-19, up to 40, ceiling 120), and under `sprint` every promote paid it up front because there
+is no scheduled sweep. "Only promotion requires a full run" stays; the run should already be done
+when the promote asks for it.
+
+**New posture field `rcSweep: "on-idle-after-landing" | "on-promote"`.** `sprint` and `flow`
+resolve `on-idle-after-landing`; `strict`, `standard`, `iterate` and `fast` keep their cadence
+(`on-promote`: the sweep is requested by the promote itself or the project's promote cadence).
+
+Under `on-idle-after-landing` (`rc-rolling-sweep.service.ts`, one tick on the scheduler's minute
+timer) the board keeps a ROLLING candidate:
+
+- **Trigger is "landed + idle", not a clock.** The merge queue is idle (no assembling/gating train,
+  no gate running) and master's tip differs from the candidate's. The rc is fast-forwarded when its
+  tip is an ancestor of master, otherwise a fresh `rc/<date>[-N]` is cut (a superseded one is
+  abandoned). A red rc, and a green rc carrying heal commits master lacks, are never cut past.
+- **Debounced.** At most one sweep per project is in flight; a landing during a sweep starts
+  nothing, and the first tick after the verdict lands advances the rc and sweeps again.
+- **Never displaces a gate.** The sweep is requested at BACKGROUND priority
+  (`requestBaseBranchReprobe(..., { background: true })`): it skips the recency refusals like an
+  explicit ask but keeps `gate_running` / `host_saturated` as deferrals, and queues behind gates in
+  the verify chain. A promote that joins it escalates it to explicit, as before.
+- **Verdict recorded on the rc sha.** The probe's row is mirrored into `rc-state.json` as
+  `green` / `red` (+ failing suites); a heal merged onto the rc moves its tip and owes a re-sweep.
+  A red verdict files the heal ticket at once through the probe's existing
+  `reconcileRcSweepAfterProbe`, so the fix starts before anyone asks to promote.
+- **`pnpm promote` is unchanged** and now finds a fresh green verdict for the candidate, so
+  `planSweepAcquisition` requests nothing and the run only builds, migrates, restarts and smokes.
+- **Visible** in `status --watch`: `rc rc/… <sha> sweeping 9m (full)` / `green, promotable`.
+
+Not changed: `sweepIntervalMs` (still `null` for `sprint`/`flow`: no scheduled MASTER sweep), the
+per-train gate, and `red_base_policy`. Enforcement: `rc-rolling-sweep.test.ts` pins one sweep per
+landing, no parallel sweep during one, the per-level `rcSweep` table, and promote's reuse of a
+green verdict.

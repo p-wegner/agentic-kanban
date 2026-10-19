@@ -105,6 +105,37 @@ export function parseRcState(text: string | null | undefined): RcStateFile {
   }
 }
 
+export function serializeRcState(state: RcStateFile): string {
+  return `${JSON.stringify({ version: 1, candidates: state.candidates }, null, 2)}\n`;
+}
+
+/**
+ * Move one candidate to a patched state, creating it when new; returns a NEW state object.
+ * Mirror of `upsertRcCandidate` in `scripts/rc-state.mjs`. The rolling rc sweep (#1631) is the
+ * one server-side WRITER of the lifecycle file — see `rc-rolling-sweep.service.ts`.
+ */
+export function upsertRcCandidate(
+  state: RcStateFile,
+  branch: string,
+  patch: Partial<Omit<RcCandidate, "branch">>,
+  atIso: string = new Date().toISOString(),
+): RcStateFile {
+  const existing = findRcCandidate(state, branch);
+  const next: RcCandidate = {
+    branch,
+    sha: existing?.sha ?? null,
+    state: existing?.state ?? "cut",
+    cutAt: existing?.cutAt ?? atIso,
+    updatedAt: atIso,
+    tag: existing?.tag ?? null,
+    failedSuites: existing?.failedSuites ?? [],
+    note: existing?.note ?? null,
+    ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)),
+  };
+  if (!(RC_STATES as readonly string[]).includes(next.state)) throw new Error(`unknown rc state '${next.state}' for ${branch}`);
+  return { version: 1, candidates: [...state.candidates.filter((c) => c.branch !== branch), next] };
+}
+
 export function findRcCandidate(state: RcStateFile, branch: string): RcCandidate | null {
   return state.candidates.find((c) => c.branch === branch) ?? null;
 }

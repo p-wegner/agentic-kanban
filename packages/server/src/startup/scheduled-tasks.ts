@@ -41,6 +41,12 @@ export interface ScheduledTasksDeps {
    * `pullEveryMinutes`/`pushEveryMinutes` has elapsed. Injected like the cadence tick above.
    */
   runPluginSyncTick?: () => Promise<unknown>;
+  /**
+   * The rolling release-candidate sweep (#1631): on a project whose posture asks for
+   * `on-idle-after-landing`, cut/advance the rc and sweep it once the merge queue is idle.
+   * Injected like the cadence tick; the decision lives in `rc-rolling-sweep.service.ts`.
+   */
+  runRcRollingSweepTick?: () => Promise<unknown>;
 }
 
 let activeScheduledTaskTimers: ScheduledTaskTimers | null = null;
@@ -131,6 +137,15 @@ export function setupScheduledTasks(deps: ScheduledTasksDeps): ScheduledTaskTime
     }
   }
 
+  async function runRcRollingSweepCycle() {
+    if (!deps.runRcRollingSweepTick) return;
+    try {
+      await deps.runRcRollingSweepTick();
+    } catch (err) {
+      console.error("[scheduler] rolling rc sweep cycle error:", err);
+    }
+  }
+
   async function runPluginSyncCycle() {
     if (!deps.runPluginSyncTick) return;
     try {
@@ -146,6 +161,7 @@ export function setupScheduledTasks(deps: ScheduledTasksDeps): ScheduledTaskTime
     runScheduledRunsCycle().catch(() => {});
     runConductorCronCycle().catch(() => {});
     runPromoteCadenceCycle().catch(() => {});
+    runRcRollingSweepCycle().catch(() => {});
   }, 60 * 1000);
   // Initial check after 10s (let server fully start)
   const timer = setTimeout(() => {
