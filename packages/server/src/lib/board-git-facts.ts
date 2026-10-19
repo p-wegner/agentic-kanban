@@ -13,7 +13,7 @@ function git(args: string[]): string | null {
   try { return gitExecSync(args, { cwd: here, timeout: 5000 }).trim(); } catch { return null; }
 }
 
-/** Merges on master since LOCAL midnight — the same boundary and source as `git log --merges --since=midnight`. */
+/** Merges on master since `sinceIso` (the console passes now - 24 h). */
 export function countMergesSince(sinceIso: string): number | null {
   for (const ref of ["master", "origin/master", "HEAD"]) {
     const out = git(["rev-list", "--merges", "--count", `--since=${sinceIso}`, ref]);
@@ -24,8 +24,8 @@ export function countMergesSince(sinceIso: string): number | null {
 
 export function resolveBoardGitFacts(nowMs: number = Date.now()): { tag: string | null; mergedToday: number | null; unpromotedMerges: number | null } {
   if (cached && nowMs - cached.at < CACHE_MS) return cached;
-  const midnight = new Date(nowMs);
-  midnight.setHours(0, 0, 0, 0);
+  // #1620: a rolling 24 h window; a calendar day reset to 0 at midnight right after a busy day.
+  const dayAgo = new Date(nowMs - 24 * 3600 * 1000);
   const tag = git(["describe", "--tags", "--exact-match", "HEAD"])?.split("\n")[0] || null;
   // #1449: merges on master the running stable tag does not contain ("N merges not yet promoted").
   let unpromotedMerges: number | null = null;
@@ -35,6 +35,6 @@ export function resolveBoardGitFacts(nowMs: number = Date.now()): { tag: string 
       if (out && /^\d+$/.test(out)) { unpromotedMerges = Number(out); break; }
     }
   }
-  cached = { at: nowMs, tag, mergedToday: countMergesSince(midnight.toISOString()), unpromotedMerges };
+  cached = { at: nowMs, tag, mergedToday: countMergesSince(dayAgo.toISOString()), unpromotedMerges };
   return cached;
 }
