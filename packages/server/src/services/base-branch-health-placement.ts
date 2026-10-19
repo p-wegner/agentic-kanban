@@ -10,12 +10,17 @@
 import { classifyHeavyProbeSaturation, readCpuBusyPct, readTier0Capacity } from "@agentic-kanban/shared/lib/machine-capacity";
 import type { SetupScriptResult } from "@agentic-kanban/shared/lib/setup-script";
 import type { Database } from "../db/index.js";
-import { setPreference } from "../repositories/preferences.repository.js";
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { resolveRedProbeOutcome } from "./base-branch-red-outcome.js";
 import type { BaseBranchVerifyResult } from "./base-branch-health.service.js";
 import { failedSuitesForOutcome } from "./failed-suite-parse.js";
 import { planVerifyPlacement, runOnPlannedWorker, type VerifyPlan } from "./verify-job-placement.js";
-import type { VerifyChainKind } from "./verify-placement.js";
+import { rankVerifyWorkers, type VerifyChainKind } from "./verify-placement.js";
+import {
+  checkShardCoverage, DEFAULT_SWEEP_PACKAGES, formatSweepProgress, mergeShardVerdicts, parseShardTimings, planSweepShards, recordShardTimings, runShardedSweep,
+  type ShardResult,
+} from "./sweep-shards.js";
 
 type WorkerPlan = Extract<VerifyPlan, { target: "worker" }>;
 
@@ -98,6 +103,84 @@ export async function runProbeOnWorker(args: {
     } else {
       result = { outcome: "green", sha, branch, durationMs, failedSuites: failedSuitesForOutcome("green", combined), message: stamp.trim() };
     }
+    return await args.finish(result, combined);
+  } finally {
+    await setPreference(args.stampKey, "", database).catch(() => {});
+  }
+}
+
+/** #1632: is sharding the full sweep switched on for this project (opt-in)? */
+export async function sweepShardingEnabled(projectId: string, database: Database): Promise<boolean> {
+  return (await getPreference(projectPref("rc_sweep_shards").key(projectId), database).catch(() => null))?.trim().toLowerCase() === "true";
+}
+
+/**
+ * #1632: the full sweep as shards over every eligible worker's free verify slots. One verdict: green only if
+ * every shard is green; a shard lost to a worker drop is retried once elsewhere, then the sweep is `unverified`
+ * (never green). Shard timings are banked so the next plan balances on them. Also usable by a full train gate.
+ * Returns null when sharding cannot help (fewer than two slots on offer): the caller runs the single job.
+ */
+export async function runShardedProbeOnWorkers(args: {
+  plan: WorkerPlan;
+  kind: VerifyChainKind;
+  projectId: string;
+  database: Database;
+  repoPath: string;
+  branch: string;
+  sha: string;
+  timeoutMs: number;
+  finish: (result: BaseBranchVerifyResult, combined: string) => Promise<BaseBranchVerifyResult>;
+  stampKey: string;
+  startedAtIso?: string;
+  log?: (line: string) => void;
+}): Promise<BaseBranchVerifyResult | null> {
+  const { plan, projectId, database, sha, branch, kind } = args;
+  const log = args.log ?? ((l: string) => console.log(`[sweep-shards] ${l}`));
+  const workers = rankVerifyWorkers(plan.allowlist, await Promise.resolve(plan.active.listWorkers()).catch(() => []));
+  if (workers.reduce((n, w) => n + w.freeSlots, 0) < 2) return null;
+
+  const timingKey = projectPref("sweep_shard_timings").key(projectId);
+  const timings = parseShardTimings(await getPreference(timingKey, database).catch(() => null));
+  const shards = planSweepShards({ timings });
+  const problems = checkShardCoverage(shards, [...DEFAULT_SWEEP_PACKAGES.map((p) => p.pkg), "static"]);
+  if (problems.length > 0) {
+    log(`shard plan rejected (${problems.join("; ")}); running the sweep as one job`);
+    return null;
+  }
+  const startedAt = Date.now();
+  await setPreference(args.stampKey, args.startedAtIso ?? new Date().toISOString(), database).catch(() => {});
+  try {
+    const results = await runShardedSweep({
+      shards,
+      workers,
+      onProgress: (done, total) => log(formatSweepProgress(done, total, Date.now() - startedAt)),
+      runShard: async (shard, worker) => {
+        const t0 = Date.now();
+        const out = await runOnPlannedWorker({ ...plan, workerId: worker.id, workerName: worker.name }, {
+          kind, projectId, database, command: shard.command, workingDir: args.repoPath, sha, tier: "full", branch, timeoutMs: args.timeoutMs,
+          runOnHost: hostRefused(worker.name),
+        });
+        const durationMs = out.report?.durationMs ?? Date.now() - t0;
+        // Refused / timed out: nothing was answered for this shard, so it is lost (retried once), never green.
+        if (out.refused || out.result.timedOut) return { outcome: "lost" as const, durationMs, reason: out.refused ?? "timed out" };
+        if (out.result.exitCode !== 0) {
+          const failedSuites = out.report?.failingSuites?.length ? out.report.failingSuites : failedSuitesForOutcome("red", out.result.stdout) ?? [];
+          return { outcome: "red" as const, durationMs, failedSuites };
+        }
+        return { outcome: "green" as const, durationMs };
+      },
+    });
+    await setPreference(timingKey, JSON.stringify(recordShardTimings(timings, results)), database).catch(() => {});
+    const verdict = mergeShardVerdicts(results, shards);
+    const durationMs = Date.now() - startedAt;
+    const names = [...new Set(results.map((r: ShardResult) => r.workerName).filter(Boolean))].join(", ");
+    const answered = results.filter((r) => r.outcome !== "lost").length;
+    const stamp = `[verified in ${shards.length} shards on ${names || "workers"}] ${formatSweepProgress(answered, shards.length, durationMs)}. `;
+    const combined = results.map((r) => `${r.shard.id}: ${r.outcome}${r.attempts > 1 ? " (retried)" : ""} ${Math.round(r.durationMs / 1000)}s${r.workerName ? ` on ${r.workerName}` : ""}`).join("\n");
+    let result: BaseBranchVerifyResult;
+    if (verdict.outcome === "green") result = { outcome: "green", sha, branch, durationMs, failedSuites: [], message: `${stamp}${verdict.message}` };
+    else if (verdict.outcome === "red") result = { outcome: "red", sha, branch, durationMs, failedSuites: verdict.failedSuites.length ? verdict.failedSuites : null, message: `${stamp}${verdict.message}` };
+    else result = { outcome: "unverified", sha, branch, durationMs, message: `${stamp}${verdict.message}. This says nothing about whether the tree is green.` };
     return await args.finish(result, combined);
   } finally {
     await setPreference(args.stampKey, "", database).catch(() => {});
