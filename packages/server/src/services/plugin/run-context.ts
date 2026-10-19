@@ -6,7 +6,7 @@ import {
 import type { Database } from "../../db/index.js";
 import type { PluginRow } from "../../repositories/plugins.repository.js";
 import type { PluginLoopRunContext, PluginRunContext } from "../plugin-loop-types.js";
-import { requireScaffoldReady } from "../plugin-scaffold.js";
+import { requireScaffoldReady, syncSettingsComplete } from "../plugin-scaffold.js";
 import { resolveWorkflowTemplateId } from "./workflow-resolution.js";
 
 /**
@@ -40,7 +40,10 @@ export async function resolvePluginRunContext(
   const plugin = await deps.requirePlugin(pluginRowId);
   const project = await deps.requireProject(projectId);
   const outputRepoPath = await deps.resolveOutputRepoPath(plugin, project);
-  if (opts?.requireScaffoldFor) await requireScaffoldReady(plugin, outputRepoPath, opts.requireScaffoldFor);
+  if (opts?.requireScaffoldFor) {
+    const settingsComplete = await syncSettingsComplete(plugin, projectId, deps.database);
+    await requireScaffoldReady(plugin, outputRepoPath, opts.requireScaffoldFor, { settingsComplete });
+  }
   return {
     plugin,
     project,

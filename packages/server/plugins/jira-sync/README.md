@@ -145,7 +145,14 @@ the board's `scripts`/`sync` machinery or straight from a shell.
   minute scheduler fires it. It is not yet shown in `status --watch`.
 - **Settings are the source of truth.** With site URL and project key saved in the settings, the
   scaffold profile's TODOs no longer block Test connection, pull or push. A profile that is
-  still all TODOs is only enforced for headless runs that set neither.
+  still all TODOs is only enforced for headless runs that set neither. The same holds for the
+  board's loops and the plugin view (#1635): complete settings mean the profile reports no open
+  fields and does not gate *Sync conflicts & failed pushes*.
+- **Conflicts are field-level (#1635).** A moved board `updatedAt` is only a conflict when the
+  mapped fields (title, description, priority, type, status) differ from the last-synced snapshot
+  AND from what Jira now says. Equal to Jira = resolved and re-baselined; unchanged vs the snapshot
+  = a plain update. **Board field edits are not pushed to Jira** (push sends status transitions,
+  comments and creates only), so a board-side edit stays local until Jira is changed to match.
 - **Run summary contract.** The board normalizes pull output (`created/updated/skipped/conflicted`,
   `details`) and push output (`appliedCount/failedCount`, `applied/failed`) into counts, issues,
   conflicts and failures, and a failed run records the script's `step`/`reason` plus the stderr

@@ -10,9 +10,12 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import {
   countScaffoldPlaceholders,
+  pluginSyncConfigPreferenceKey,
   substitutePluginPlaceholders,
   type PluginManifest,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
+import type { Database } from "../db/index.js";
+import { getPreference } from "../repositories/preferences.repository.js";
 import type { PluginRow } from "../repositories/plugins.repository.js";
 import { PluginError } from "./plugin-errors.js";
 import { resolveInside, commitPathWithRetry } from "./plugin-fs.js";
@@ -71,6 +74,33 @@ export async function fanOutScaffold(
     );
   }
   await commitPathWithRetry(repoPath, scaffold.targetPath, `plugin: scaffold ${plugin.pluginId} ${scaffold.targetPath}`);
+}
+
+/**
+ * #1635: a settings-driven plugin (declares `sync.config`) whose required settings are all filled
+ * in has its scaffold's questions answered by them — the profile is documentation, so its TODOs
+ * must not count as unanswered or gate the loop that resolves conflicts.
+ */
+export async function syncSettingsComplete(
+  plugin: PluginWithManifest,
+  projectId: string,
+  database: Database,
+): Promise<boolean> {
+  const fields = plugin.manifest.sync?.config ?? [];
+  if (fields.length === 0) return false;
+  const raw = await getPreference(pluginSyncConfigPreferenceKey(plugin.pluginId, projectId), database);
+  if (!raw) return false;
+  let values: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+    values = parsed as Record<string, unknown>;
+  } catch {
+    return false;
+  }
+  const required = fields.filter((f) => f.required);
+  if (required.length === 0) return false;
+  return required.every((f) => typeof values[f.key] === "string" && (values[f.key] as string).trim() !== "");
 }
 
 /**
@@ -213,7 +243,10 @@ export async function requireScaffoldReady(
   plugin: PluginWithManifest,
   repoPath: string,
   action: "scripts" | "loops",
+  opts: { settingsComplete?: boolean } = {},
 ): Promise<void> {
+  // #1635: complete Sync settings answer the profile's site/project/filter, so its TODOs gate nothing.
+  if (opts.settingsComplete) return;
   const status = scaffoldPlaceholderStatus(plugin, repoPath);
   if (!status) return;
   if (status.remaining > 0) {

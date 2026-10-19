@@ -7,6 +7,7 @@
 
 import { FIELDS, mapJiraIssueToBoardFields, resolveBoardStatusId } from "./field-map.mjs";
 import { hasAttributionMarker } from "./comment-marker.mjs";
+import { boardFieldsOf, fieldsEqual, incomingFieldsOf } from "./field-snapshot.mjs";
 
 // Markers (#1624) for board issues whose Jira twin vanished. Each also carries the
 // board's own `no-auto-start` tag so the unchanged autostart engines skip the issue.
@@ -82,6 +83,7 @@ export async function runInboundSync(
           updated: mapped.jiraUpdated,
           boardIssueId: created_.id,
           boardUpdatedAt: created_.updatedAt,
+          fields: incomingFieldsOf(mapped, statusId),
           commentIds: imported.commentIds,
         };
       } else {
@@ -103,7 +105,37 @@ export async function runInboundSync(
     // No `known` entry at all (lost/reset state file, or externalKey set by another
     // path e.g. outbound sync) means we have no baseline to prove it's safe to
     // overwrite either, so that also counts as locally edited rather than a blind write.
-    const locallyEdited = known == null || boardIssue.updatedAt !== known.boardUpdatedAt;
+    //
+    // #1635: `updatedAt` alone also moves for unmapped edits and never settles once both sides
+    // agree, so a moved timestamp is only a conflict when the MAPPED fields really diverge:
+    // unchanged against the last-synced snapshot -> safe to update; equal to what Jira now says
+    // -> converged, resolve it and re-baseline; otherwise a real conflict.
+    const timestampMoved = known == null || boardIssue.updatedAt !== known.boardUpdatedAt;
+    const currentFields = boardFieldsOf(boardIssue);
+    const incomingStatusId = resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses);
+    const incomingFields = incomingFieldsOf(mapped, incomingStatusId);
+    const boardUnchanged = known?.fields != null && fieldsEqual(currentFields, known.fields);
+    const converged = fieldsEqual(currentFields, incomingFields);
+    if (timestampMoved && !boardUnchanged && converged) {
+      if (!dryRun) {
+        const imported = await importComments(boardClient, boardIssue.id, mapped.comments, known?.commentIds);
+        commentsImported += imported.count;
+        nextState.issues[jiraIssue.key] = {
+          ...known,
+          updated: mapped.jiraUpdated,
+          boardIssueId: boardIssue.id,
+          boardUpdatedAt: boardIssue.updatedAt,
+          fields: currentFields,
+          commentIds: imported.commentIds,
+        };
+      } else {
+        commentsImported += newComments(mapped.comments, known?.commentIds).length;
+      }
+      skipped++;
+      details.push({ key: jiraIssue.key, action: "skip", reason: "board and Jira already agree; conflict resolved" });
+      continue;
+    }
+    const locallyEdited = timestampMoved && !boardUnchanged;
     if (locallyEdited) {
       // Comments are append-only on the board, so importing them can't clobber local edits.
       if (!dryRun) {
@@ -135,6 +167,7 @@ export async function runInboundSync(
         updated: mapped.jiraUpdated,
         boardIssueId: boardIssue.id,
         boardUpdatedAt: updated_.updatedAt,
+        fields: incomingFieldsOf(mapped, statusId),
         commentIds: imported.commentIds,
       };
     } else {
