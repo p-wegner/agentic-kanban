@@ -534,13 +534,7 @@ export function WorkspaceCard({
               Merged
             </span>
           )}
-          <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
-            isThisRunning ? "bg-green-100 text-green-700 animate-pulse" :
-            isLaunching ? "bg-blue-100 text-blue-700 animate-pulse" :
-            badgeColor
-          }`}>
-            {isThisRunning ? "running" : isLaunching ? "launching..." : ws.status}
-          </span>
+          <WorkspaceStatusBadge status={ws.status} isThisRunning={isThisRunning} isLaunching={!!isLaunching} badgeColor={badgeColor} />
         </div>
       </div>
 
@@ -574,16 +568,7 @@ export function WorkspaceCard({
 
       {ws.workingDir && (
         <div className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">
-          {latestCommits[ws.id] === undefined
-            ? null
-            : latestCommits[ws.id] === null
-            ? <span className="text-gray-400 dark:text-gray-500 font-sans">No commits</span>
-            : <span title={latestCommits[ws.id]!.message}>
-                <span className="text-gray-400 dark:text-gray-500">{latestCommits[ws.id]!.sha}</span>
-                {" "}
-                <span className="text-gray-600 dark:text-gray-300">{latestCommits[ws.id]!.message}</span>
-              </span>
-          }
+          <LatestCommitLine commit={latestCommits[ws.id]} />
         </div>
       )}
 
@@ -596,18 +581,7 @@ export function WorkspaceCard({
       )}
 
       {isThisRunning && (ws.contextTokens || ws.lastTool) && (
-        <div className="flex items-center gap-2 text-[10px] text-gray-400 dark:text-gray-500">
-          {ws.contextTokens ? (
-            <span>
-              {ws.contextTokens >= 1000
-                ? `${Math.round(ws.contextTokens / 1000)}k ctx`
-                : `${ws.contextTokens} ctx`}
-            </span>
-          ) : null}
-          {ws.lastTool ? (
-            <span className="truncate" title={ws.lastTool}>{ws.lastTool}</span>
-          ) : null}
-        </div>
+        <WorkspaceRunningMeta contextTokens={ws.contextTokens} lastTool={ws.lastTool} />
       )}
 
       {isSelected && scorecard && (
@@ -620,15 +594,7 @@ export function WorkspaceCard({
       )}
 
       {isSelected && launchingFix?.wsId === ws.id && (
-        <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          <Spinner className="w-4 h-4 text-blue-600 dark:text-blue-400 animate-spin shrink-0" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
-          <div className="text-xs text-blue-700 dark:text-blue-300">
-            <span className="font-medium">
-              {launchingFix.kind === "resolve" ? "Launching conflict resolution…" : "Launching fix &amp; merge…"}
-            </span>
-            <span className="text-blue-600/80 dark:text-blue-400/80"> preparing worktree (rebasing onto {ws.baseBranch || "base"}), then starting the AI agent.</span>
-          </div>
-        </div>
+        <LaunchingFixBanner kind={launchingFix.kind} baseBranch={ws.baseBranch} />
       )}
 
       {isSelected && ws.status === "fixing" && (
@@ -647,31 +613,9 @@ export function WorkspaceCard({
         />
       )}
 
-      {isSelected && !launchingFix && ws.status === "idle" && (() => {
-        const lastFixAndMerge = completedSessions.filter(s => s.triggerType === "fix-and-merge").at(-1);
-        if (!lastFixAndMerge) return null;
-        const succeeded = lastFixAndMerge.status === "completed";
-        return (
-          <div className={`mt-2 p-2 rounded border ${succeeded ? "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800" : "bg-yellow-50 dark:bg-yellow-950 border-yellow-200 dark:border-yellow-800"}`} onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between gap-2">
-              <span className={`text-xs font-medium ${succeeded ? "text-green-700 dark:text-green-400" : "text-yellow-700 dark:text-yellow-400"}`}>
-                {succeeded ? "Fix & Merge completed" : "Fix & Merge stopped"}
-              </span>
-              <button
-                onClick={() => handleViewHistory(lastFixAndMerge.id)}
-                className={`text-xs underline ${succeeded ? "text-green-600 dark:text-green-400 hover:text-green-800" : "text-yellow-600 dark:text-yellow-400 hover:text-yellow-800"}`}
-              >
-                View session output
-              </button>
-            </div>
-            {succeeded && latestCommits[ws.id] && (
-              <div className="mt-1 text-xs font-mono text-gray-500 dark:text-gray-400 truncate" title={latestCommits[ws.id]!.message}>
-                {latestCommits[ws.id]!.sha} {latestCommits[ws.id]!.message}
-              </div>
-            )}
-          </div>
-        );
-      })()}
+      {isSelected && !launchingFix && ws.status === "idle" && (
+        <FixAndMergeResultBanner completedSessions={completedSessions} latestCommit={latestCommits[ws.id]} handleViewHistory={handleViewHistory} />
+      )}
 
       {isSelected && (
         <div className="space-y-2 pt-2 border-t border-gray-200 dark:border-gray-700" onClick={(e) => e.stopPropagation()}>
@@ -695,16 +639,7 @@ export function WorkspaceCard({
             />
           )}
 
-          {(() => {
-            const lastCompleted = completedSessions[completedSessions.length - 1];
-            if (!lastCompleted || lastCompleted.status !== "stopped") return null;
-            return (
-              <FailurePatternHint
-                workspaceId={ws.id}
-                sessionId={lastCompleted.id}
-              />
-            );
-          })()}
+          <StoppedSessionFailureHint wsId={ws.id} completedSessions={completedSessions} />
 
           {!isRunning && ws.status !== "blocked" && (
             <WorkspaceQuickActions
@@ -891,34 +826,13 @@ export function WorkspaceCard({
               <MergeErrorPanel wsId={ws.id} mergeError={mergeError} actionLoading={actionLoading} onFixAndMerge={handleFixAndMerge} mergeHandlers={mergeHandlers} />
             )}
             {conflictState && conflictState.hasConflicts && (
-              <div className="mt-2 p-2 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-red-700 dark:text-red-400">
-                    {conflictState.conflictingFiles.length} conflicting file{conflictState.conflictingFiles.length !== 1 ? "s" : ""}
-                  </span>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleResolveConflicts(ws.id)}
-                      disabled={actionLoading}
-                      className="text-xs bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700 disabled:opacity-50"
-                    >
-                      Resolve with AI
-                    </button>
-                    <button
-                      onClick={() => handleAbortRebase(ws.id)}
-                      disabled={actionLoading}
-                      className="text-xs bg-gray-500 text-white px-2 py-1 rounded hover:bg-gray-600 disabled:opacity-50"
-                    >
-                      Abort
-                    </button>
-                  </div>
-                </div>
-                <ul className="mt-1 text-xs text-red-600 space-y-0.5">
-                  {conflictState.conflictingFiles.map(f => (
-                    <li key={f} className="font-mono">{f}</li>
-                  ))}
-                </ul>
-              </div>
+              <WorkspaceConflictPanel
+                wsId={ws.id}
+                files={conflictState.conflictingFiles}
+                actionLoading={actionLoading}
+                handleResolveConflicts={handleResolveConflicts}
+                handleAbortRebase={handleAbortRebase}
+              />
             )}
             </>
           )}
@@ -936,6 +850,142 @@ export function WorkspaceCard({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function LatestCommitLine({ commit }: { commit: { sha: string; message: string } | null | undefined }) {
+  if (commit === undefined) return null;
+  if (commit === null) return <span className="text-gray-400 dark:text-gray-500 font-sans">No commits</span>;
+  return (
+    <span title={commit.message}>
+      <span className="text-gray-400 dark:text-gray-500">{commit.sha}</span>
+      {" "}
+      <span className="text-gray-600 dark:text-gray-300">{commit.message}</span>
+    </span>
+  );
+}
+
+function WorkspaceStatusBadge({ status, isThisRunning, isLaunching, badgeColor }: {
+  status: string;
+  isThisRunning: boolean;
+  isLaunching: boolean;
+  badgeColor: string;
+}) {
+  const colorClass = isThisRunning
+    ? "bg-green-100 text-green-700 animate-pulse"
+    : isLaunching
+    ? "bg-blue-100 text-blue-700 animate-pulse"
+    : badgeColor;
+  return (
+    <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${colorClass}`}>
+      {isThisRunning ? "running" : isLaunching ? "launching..." : status}
+    </span>
+  );
+}
+
+function WorkspaceRunningMeta({ contextTokens, lastTool }: { contextTokens?: number | null; lastTool?: string | null }) {
+  return (
+    <div className="flex items-center gap-2 text-[10px] text-gray-400 dark:text-gray-500">
+      {contextTokens ? (
+        <span>
+          {contextTokens >= 1000
+            ? `${Math.round(contextTokens / 1000)}k ctx`
+            : `${contextTokens} ctx`}
+        </span>
+      ) : null}
+      {lastTool ? (
+        <span className="truncate" title={lastTool}>{lastTool}</span>
+      ) : null}
+    </div>
+  );
+}
+
+function LaunchingFixBanner({ kind, baseBranch }: { kind: "fix-and-merge" | "resolve"; baseBranch?: string | null }) {
+  return (
+    <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+      <Spinner className="w-4 h-4 text-blue-600 dark:text-blue-400 animate-spin shrink-0" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
+      <div className="text-xs text-blue-700 dark:text-blue-300">
+        <span className="font-medium">
+          {kind === "resolve" ? "Launching conflict resolution…" : "Launching fix &amp; merge…"}
+        </span>
+        <span className="text-blue-600/80 dark:text-blue-400/80"> preparing worktree (rebasing onto {baseBranch || "base"}), then starting the AI agent.</span>
+      </div>
+    </div>
+  );
+}
+
+function FixAndMergeResultBanner({ completedSessions, latestCommit, handleViewHistory }: {
+  completedSessions: SessionInfo[];
+  latestCommit: { sha: string; message: string } | null | undefined;
+  handleViewHistory: (sessionId: string) => void;
+}) {
+  const lastFixAndMerge = completedSessions.filter(s => s.triggerType === "fix-and-merge").at(-1);
+  if (!lastFixAndMerge) return null;
+  const succeeded = lastFixAndMerge.status === "completed";
+  return (
+    <div className={`mt-2 p-2 rounded border ${succeeded ? "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800" : "bg-yellow-50 dark:bg-yellow-950 border-yellow-200 dark:border-yellow-800"}`} onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center justify-between gap-2">
+        <span className={`text-xs font-medium ${succeeded ? "text-green-700 dark:text-green-400" : "text-yellow-700 dark:text-yellow-400"}`}>
+          {succeeded ? "Fix & Merge completed" : "Fix & Merge stopped"}
+        </span>
+        <button
+          onClick={() => handleViewHistory(lastFixAndMerge.id)}
+          className={`text-xs underline ${succeeded ? "text-green-600 dark:text-green-400 hover:text-green-800" : "text-yellow-600 dark:text-yellow-400 hover:text-yellow-800"}`}
+        >
+          View session output
+        </button>
+      </div>
+      {succeeded && latestCommit && (
+        <div className="mt-1 text-xs font-mono text-gray-500 dark:text-gray-400 truncate" title={latestCommit.message}>
+          {latestCommit.sha} {latestCommit.message}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StoppedSessionFailureHint({ wsId, completedSessions }: { wsId: string; completedSessions: SessionInfo[] }) {
+  const lastCompleted = completedSessions[completedSessions.length - 1];
+  if (!lastCompleted || lastCompleted.status !== "stopped") return null;
+  return <FailurePatternHint workspaceId={wsId} sessionId={lastCompleted.id} />;
+}
+
+function WorkspaceConflictPanel({ wsId, files, actionLoading, handleResolveConflicts, handleAbortRebase }: {
+  wsId: string;
+  files: string[];
+  actionLoading: boolean;
+  handleResolveConflicts: (wsId: string) => void;
+  handleAbortRebase: (wsId: string) => void;
+}) {
+  return (
+    <div className="mt-2 p-2 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-red-700 dark:text-red-400">
+          {files.length} conflicting file{files.length !== 1 ? "s" : ""}
+        </span>
+        <div className="flex gap-2">
+          <button
+            onClick={() => handleResolveConflicts(wsId)}
+            disabled={actionLoading}
+            className="text-xs bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700 disabled:opacity-50"
+          >
+            Resolve with AI
+          </button>
+          <button
+            onClick={() => handleAbortRebase(wsId)}
+            disabled={actionLoading}
+            className="text-xs bg-gray-500 text-white px-2 py-1 rounded hover:bg-gray-600 disabled:opacity-50"
+          >
+            Abort
+          </button>
+        </div>
+      </div>
+      <ul className="mt-1 text-xs text-red-600 space-y-0.5">
+        {files.map(f => (
+          <li key={f} className="font-mono">{f}</li>
+        ))}
+      </ul>
     </div>
   );
 }

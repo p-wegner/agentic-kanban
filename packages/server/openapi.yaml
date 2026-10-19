@@ -7797,11 +7797,6 @@ paths:
           content:
             application/json:
               schema: {}
-        "409":
-          description: Error (thrown CONFLICT, status from domainErrorHandler)
-          content:
-            application/json:
-              schema: {}
   /api/projects/{projectId}/backlog.md/preview:
     post:
       summary: POST /api/projects/{projectId}/backlog.md/preview

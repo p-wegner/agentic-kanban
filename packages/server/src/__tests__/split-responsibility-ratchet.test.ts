@@ -54,7 +54,7 @@ const BASELINE: Record<string, number> = {
   // --- split in #728 batch 1: pinned so the extracted halves cannot return ---
   "services/workspace-services.service.ts": 10,
   "services/workspace-services/compose-runner.ts": 4,
-  "repositories/issue.repository.ts": 22,
+  "repositories/issue.repository.ts": 20,
   "repositories/issue/analytics.repository.ts": 4,
   "repositories/issue/touched-files.repository.ts": 4,
   "services/git-info.service.ts": 0,

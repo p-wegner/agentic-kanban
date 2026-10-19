@@ -3,7 +3,7 @@ import { trainGateWorkerName } from "./merge-train-placement.js";
 import type { Database } from "../db/index.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import * as gitService from "./git.service.js";
-import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
+import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { runMergeTrain, trainRefName } from "./merge-train.service.js";
 import { isInconclusiveGate } from "./merge-queue-train-inconclusive.js";
 import { provisionTrainGateSelector } from "./merge-train-gate-selector.js";
@@ -16,6 +16,7 @@ import { getBaseBranchHealthForSha, isBaseHealthAnswer } from "../repositories/b
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { noteMergeGatePhase } from "./merge-job.service.js";
+import { decideRegate, describeFullRegate, describeTargetedRegate } from "./merge-train-targeted-regate.js";
 
 
 /** What one staging gate reports back. `stage`/`failedSuites` ride along on a red run only. */
@@ -71,6 +72,8 @@ export async function runTrainStagingGate(args: {
    * nothing to cancel).
    */
   signal?: AbortSignal;
+  /** #1633 — files the first gate covered (members' changed files); enables the targeted re-gate after a shepherd fix. */
+  coveredFiles?: readonly string[];
   /** #1463 — a queue flush's gate script, run instead of the project's verify command. */
   verifyScriptOverride?: string;
 }): Promise<TrainStagingGateResult> {
@@ -118,7 +121,7 @@ export async function runTrainStagingGate(args: {
     }
     // `memberWorkspaceIds`: the synthetic `train:<label>` id matches no `repos` row, so
     // without it the #628 deferred-install check passes vacuously for the whole train.
-    const gateOnce = async () => (await runStaticTierGate(gateWorktree as string, baseBranch, signal, args.verifyScriptOverride)) ?? runPreMergeGate(
+    const gateOnce = async (scriptOverride?: string) => (await runStaticTierGate(gateWorktree as string, baseBranch, signal, scriptOverride ?? args.verifyScriptOverride)) ?? runPreMergeGate(
       {
         id: `train:${attemptLabel}`,
         workingDir: gateWorktree as string,
@@ -131,9 +134,11 @@ export async function runTrainStagingGate(args: {
       database,
       // #1203: same token — a cancel mid-verify kills the running gate process.
       signal,
-      args.verifyScriptOverride,
+      scriptOverride ?? args.verifyScriptOverride,
     );
     let gate = await gateOnce();
+    // #1633: the gated tip, so a shepherd fix is the diff on top of it.
+    const gatedSha = await gitService.revParse(gateWorktree, "HEAD").catch(() => null);
     // #1277: a red tree gets one directed fix agent, in THIS worktree (deps already installed),
     // before anything is bisected. Each re-gate it asks for runs the same gate; `gate` always
     // holds the latest verdict, so a fixed tree flows on to `afterGreen` like any green one.
@@ -147,7 +152,23 @@ export async function runTrainStagingGate(args: {
         message: gate.message,
         failedSuites: gate.failedSuites,
         regate: async () => {
-          gate = await gateOnce();
+          const lastFailed = gate.failedSuites;
+          // #1633: a small fix inside the covered scope re-gates only what it can affect.
+          let note = "";
+          let script: string | undefined;
+          if (gatedSha && args.coveredFiles && !args.verifyScriptOverride) {
+            const fixSha = await gitService.revParse(gateWorktree as string, "HEAD").catch(() => null);
+            const diff = await gitExec(["diff", "--name-only", gatedSha, "HEAD"], { cwd: gateWorktree as string });
+            const decision = decideRegate({
+              fixFiles: diff.error ? [] : diff.stdout.split(/\r?\n/).filter(Boolean),
+              coveredFiles: args.coveredFiles, failedSuites: lastFailed, gatedSha, fixSha: fixSha ?? "HEAD",
+            });
+            if (decision.mode === "targeted") { script = decision.script; note = describeTargetedRegate(decision); }
+            else note = describeFullRegate(decision.reason);
+            console.log(`[merge-train] ${attemptLabel}: ${note}`);
+          }
+          gate = await gateOnce(script);
+          if (note) gate = { ...gate, message: `${note}\n${gate.message}` };
           return { passed: gate.passed, message: gate.message, failedSuites: gate.failedSuites, ...(isInconclusiveGate(gate) ? { inconclusive: true } : {}) };
         },
       });

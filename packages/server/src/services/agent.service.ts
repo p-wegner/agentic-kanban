@@ -1,17 +1,13 @@
-import { execErrorMessage } from "@agentic-kanban/shared/lib/exec-result";
 import type { AgentLaunchRequest } from "./agent-dispatch.service.js";
-import { readModelHiddenSkills } from "../lib/model-hidden-skills.js";
 import { resolveEffectivePrompt } from "./agent-provider/context-files-prompt.js";
 import { spawn, type ChildProcess } from "node:child_process";
-import { listLocalSkillNamesSync, localSkillFilePath } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { resolveWorktreeDevPorts, materializedSkillFiles, piExtensionFiles } from "./agent-launch-files.js";
+import { killPid, killContainerAgent } from "./agent-kill.js";
 import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync, writeFileSync, readFileSync, appendFileSync, readdirSync, type Dirent } from "node:fs";
-import { join } from "node:path";
 import { buildAgentLaunchConfig, narrowProviderName } from "./agent-provider.js";
 import { warnIfCliVersionRisky } from "./agent-cli-version.service.js";
 import { sessionOutputPath, sessionErrorPath } from "../lib/session-paths.js";
-import { guardProcessKill, auditProcessEvent } from "./process-guard.js";
-import { killProcessTree } from "./process-exec.js";
-import { resolveWorktreeDevPorts as resolveWorktreeDevPortsShared } from "./worktree-ports.js";
+import { auditProcessEvent } from "./process-guard.js";
 import {
   shouldDetachAgent,
   resolveLaunchPorts,
@@ -23,15 +19,7 @@ import {
 import { createSessionTempDir } from "../lib/session-temp-dir.js";
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { wrapLaunchConfigForContainer } from "./agent-provider/container-wrap.js";
-import { dockerExec } from "@agentic-kanban/shared/lib/docker-exec";
 import { isPidAlive as probePid } from "../lib/pid.js";
-import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
-
-function resolveWorktreeDevPorts(worktreePath: string): { serverPort: string; clientPort: string } | null {
-  const ports = resolveWorktreeDevPortsShared(worktreePath);
-  if (!ports) return null;
-  return { serverPort: String(ports.serverPort), clientPort: String(ports.clientPort) };
-}
 
 export interface AgentOutputEvent {
   type: "stdout" | "stderr" | "exit";
@@ -86,33 +74,6 @@ export class AgentState {
 /** Module-level singleton used by all exported functions. */
 export const agentState = new AgentState();
 
-/**
- * The SKILL.md files materialized into a worktree, for Pi's repeated `--skill` flags.
- *
- * Routed through `agent-skill-files` (#553): this used to be a private scan filtering on
- * `entry.isDirectory()` with its own name regex, and readdir reports a junction as a
- * SYMLINK, not a directory — so every PLUGIN skill (fanned out as a junction) was invisible
- * here and never reached the Pi launch, while sitting plainly on disk. `couldHoldSkill` +
- * `isSafeSkillName` already decide both questions, in one place, for every other reader.
- *
- * #1251 — a plugin skill listed `user-invocable-only`/`off` is excluded from this
- * MODEL-INITIATED auto-load list: it is still on disk (so an explicit `/name` invocation or
- * Claude's own slash-command discovery still works), it is just not force-fed into every
- * turn's context via `--skill`.
- */
-function materializedSkillFiles(worktreePath: string): string[] {
-  // #1251: Pi has no "name-only" listing, so a skill the settings hide from the model is omitted.
-  const hidden = readModelHiddenSkills(worktreePath);
-  return listLocalSkillNamesSync(worktreePath)
-    .filter((name) => !hidden.has(name))
-    .map((name) => localSkillFilePath(worktreePath, name))
-    .filter((skillPath) => existsSync(skillPath));
-}
-
-function piExtensionFiles(worktreePath: string): string[] {
-  const extensionPath = join(worktreePath, ".pi", "plugin", "agentic-kanban-hooks.ts");
-  return existsSync(extensionPath) ? [extensionPath] : [];
-}
 
 // sessionOutputPath / sessionErrorPath moved to ../lib/session-paths.ts (re-imported above)
 // so the persistence layer can share them without a repository -> service import.
@@ -135,64 +96,6 @@ function drainCapturedStderr(sessionId: string, onOutput: (event: AgentOutputEve
   }
 }
 
-/**
- * Stop one agent session's process, through the ONE kill seam (#833).
- *
- * It used to branch on `process.platform` here: `taskkill /T /F` on Windows, a bare
- * `process.kill(pid, "SIGTERM")` on POSIX. Both halves were wrong for the same reason
- * #828 exposed. Since #828 every provider ORs `commandCarriesArgs(command)` into
- * `useShell`, so on POSIX an agent launched from an explicit command line
- * (`agentCommand` / `KANBAN_AGENT_COMMAND`, every mock-agent command) is spawned as
- * `sh -c "<command>"` — and `shouldDetachAgent` detaches it, so `pid` is the SHELL's,
- * and that shell leads its own process group. A simple command is `exec`ed through, so
- * the pid usually is the agent; a pipeline, an `&&`, or a trailing redirect leaves `sh`
- * a genuine parent, and then SIGTERM to the bare pid killed the shell and left the agent
- * running while the board recorded the session as stopped.
- *
- * `group: true` signals the process group instead, which reaches the shell and every
- * child it forked; the seam falls back to the bare pid when there is no group. SIGTERM
- * is passed explicitly — the seam's default is SIGKILL, and a stopped agent is asked to
- * shut down, not shot. Windows is unchanged in reach (`taskkill /T /F` was and is a tree
- * kill); it merely moved onto the mockable seam so the platform decision lives in ONE
- * place and the tests are platform-identical.
- *
- * Fire-and-forget: `kill()`/`killAll()` are synchronous, and a kill failure has never
- * been fatal here.
- */
-function killPid(pid: number, context: Record<string, unknown>): boolean {
-  if (!guardProcessKill(pid, context)) return false;
-  void killProcessTree(pid, { timeout: 5000, signal: "SIGTERM", group: true }).catch((err) => {
-    if ((err as NodeJS.ErrnoException)?.code === "ESRCH") return; // already gone
-    console.warn(`[agent] failed to kill pid=${pid}`, err);
-  });
-  return true;
-}
-
-/**
- * Terminate the agent running INSIDE a container (#154).
- *
- * The host-side `killPid()` above only reaches the `docker exec` CLIENT — the
- * exec'd agent process lives in the container's own PID namespace and is not
- * in that process tree, so killing the client orphans it: invisible (output
- * conduit severed, board says "stopped"), still able to edit the bind-mounted
- * worktree while review/merge proceeds. `docker kill` sends SIGKILL to the
- * container's PID 1, which tears down every process in its namespace,
- * including the exec'd one — a single call that doesn't require tracking the
- * inner PID. Fire-and-forget: the docker CLI is a real executable so this
- * never blocks the synchronous `kill()`/`killAll()` callers, and a failure
- * here is logged, never thrown (matches the rest of the devcontainer
- * best-effort contract).
- */
-function killContainerAgent(sessionId: string, containerId: string): void {
-  console.log(`[agent] killing containerized agent: sessionId=${sessionId} containerId=${containerId.slice(0, 12)}`);
-  void dockerExec(["kill", containerId]).then((result) => {
-    if (!execSucceeded(result)) {
-      console.warn(
-        `[agent] docker kill failed: sessionId=${sessionId} containerId=${containerId.slice(0, 12)}: ${execErrorMessage(result)}`,
-      );
-    }
-  });
-}
 
 /**
  * Watch a session output file for new content and feed it to onOutput.

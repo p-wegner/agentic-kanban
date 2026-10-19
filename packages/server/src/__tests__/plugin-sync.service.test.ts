@@ -112,9 +112,9 @@ describe("plugin sync (#1076/#1081)", () => {
     expect(empty.provider).toBe("jira");
     expect(empty.direction).toEqual({ pull: true, push: false });
     expect(empty.fields).toEqual([
-      { key: "siteUrl", label: "Site URL", description: undefined, required: true, value: "" },
-      { key: "projectKey", label: "Project key", description: undefined, required: true, value: "" },
-      { key: "jql", label: "JQL filter", description: undefined, required: false, value: "" },
+      { key: "siteUrl", label: "Site URL", description: undefined, required: true, type: "text", value: "" },
+      { key: "projectKey", label: "Project key", description: undefined, required: true, type: "text", value: "" },
+      { key: "jql", label: "JQL filter", description: undefined, required: false, type: "text", value: "" },
     ]);
     expect(empty.secrets).toEqual([{ name: SECRET_NAME, present: false }]);
 

@@ -427,6 +427,7 @@ async function runDoomedTrainJob(args: {
           // #1203: same token — a cancel mid-gate kills the running install/verify child process.
           signal: abortController.signal,
           verifyScriptOverride: flush?.gateScript,
+          coveredFiles: members.flatMap((m) => (m as { changedFiles?: readonly string[] | null }).changedFiles ?? []),
           onRed: flush ? undefined : buildTrainOnRed({ database, policy, shepherd: shepherdKit.shepherd, label, attemptLabel, baseBranch, included, members, placement: { projectId, repoPath } }),
           afterGreen: async ({ gateWorktree }) => {
             if (flush) return {};

@@ -93,6 +93,26 @@ export function mapJiraIssueType(typeName) {
 }
 
 /**
+ * Inverse of the pull map for push-create (#1629): the Jira type name for a board type, or
+ * null when the board type has no distinct Jira twin (task/chore -> the configured default).
+ */
+export function mapBoardTypeToJira(boardType) {
+  return { bug: "Bug", feature: "Story" }[String(boardType ?? "").toLowerCase()] ?? null;
+}
+
+/** Board tags that ride to Jira as labels: not the plugin's own jira:/epic:/assignee: tags. */
+export function labelsFromBoardTags(tags = []) {
+  const names = tags.map((t) => (typeof t === "string" ? t : t?.name)).filter(Boolean);
+  return [
+    ...new Set(
+      names
+        .filter((n) => !/^(jira|epic|assignee|parent):/i.test(n) && n !== "no-auto-start")
+        .map((n) => n.trim().replace(/\s+/g, "-")),
+    ),
+  ];
+}
+
+/**
  * Maps one Jira issue (a `searchAll`/`getIssue` result) to board issue fields per the
  * declared field map. `siteUrl` is optional and only used to build `externalUrl`.
  *

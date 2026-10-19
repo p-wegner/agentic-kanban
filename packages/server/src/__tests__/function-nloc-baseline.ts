@@ -398,7 +398,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // async check plus its comment line landing inside the existing `if` body.
   "services/issue.service.ts::createIssueService": 629,
   // 618 -> 620 (#968), disclosed in the sixth movement above.
-  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 604,
+  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 559,
   "services/workflow-fork.service.ts::createWorkflowForkService": 581,
   // 573 -> 577 (#1047), disclosed in the tenth movement above. 577 -> 578 (#1164), disclosed
   // in the fourteenth movement above. 578 -> 616 (#1206, rebase): a new `workspace reopen

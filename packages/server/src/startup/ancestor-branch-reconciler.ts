@@ -87,6 +87,143 @@ async function recordSiblingComment(
   });
 }
 
+type AncestorCandidate = Awaited<ReturnType<typeof selectCandidates>>[number];
+/** A candidate that passed the branch/base/repo presence guard. */
+type ReadyCandidate = AncestorCandidate & { branch: string; baseBranch: string; repoPath: string };
+
+/** Live pref read at every tick so disabling via pref takes effect without a restart. */
+async function isReconcilerEnabled(database: Database, override: boolean | undefined): Promise<boolean> {
+  if (override !== undefined) return override;
+  try {
+    const row = await database.select({ value: preferences.value }).from(preferences)
+      .where(eq(preferences.key, PREF_RECONCILER_ANCESTOR_BRANCH_ENABLED)).limit(1);
+    return row.length === 0 || row[0].value !== "false";
+  } catch {
+    return true;
+  }
+}
+
+async function selectCandidates(database: Database) {
+  // Find non-closed, non-direct workspaces whose issue is NOT in a terminal status
+  // and whose mergedAt is null (mergedAt set = already handled by reconcileSilentlyMergedWorkspaces).
+  // In Progress is only eligible when idle+readyForMerge=true: that flag comes
+  // from the review flow, and a dropped merge response can leave reviewed work
+  // parked in that column. Running In Progress work may have uncommitted changes
+  // even when the current branch tip is already an ancestor.
+  return await database
+    .select({
+      wsId: workspaces.id,
+      branch: workspaces.branch,
+      baseBranch: workspaces.baseBranch,
+      baseCommitSha: workspaces.baseCommitSha,
+      workingDir: workspaces.workingDir,
+      wsStatus: workspaces.status,
+      readyForMerge: workspaces.readyForMerge,
+      issueId: issues.id,
+      issueNumber: issues.issueNumber,
+      projectId: issues.projectId,
+      repoPath: projects.repoPath,
+      statusName: projectStatuses.name,
+    })
+    .from(workspaces)
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .innerJoin(projects, eq(issues.projectId, projects.id))
+    .where(
+      and(
+        ne(workspaces.status, "closed"),
+        eq(workspaces.isDirect, false),
+        isNull(workspaces.mergedAt),
+        notInArray(projectStatuses.name, TERMINAL_STATUS_NAMES),
+      ),
+    );
+
+}
+
+async function gatherLandingEvidence(
+  c: ReadyCandidate,
+  result: { baseSha: string; branchSha: string },
+  fns: { commitCounter: typeof countUniqueCommits; getSummaries: typeof getCommitSummariesBetween },
+): Promise<{ uniqueCommits: number; ownCommits: number; evidence: { sha: string; message: string } | undefined }> {
+  const { commitCounter, getSummaries } = fns;
+  let uniqueCommits: number;
+  try {
+    uniqueCommits = await commitCounter(c.repoPath, result.baseSha, result.branchSha);
+  } catch {
+    uniqueCommits = 0;
+  }
+  let ownCommits = 0;
+  if (uniqueCommits === 0 && result.branchSha !== result.baseSha && c.baseCommitSha) {
+    try {
+      ownCommits = await commitCounter(c.repoPath, c.baseCommitSha, result.branchSha);
+    } catch {
+      ownCommits = 0;
+    }
+  }
+  let evidence: { sha: string; message: string } | undefined;
+  if (c.issueNumber != null && result.branchSha !== result.baseSha) {
+    try {
+      const pattern = new RegExp(`(^|[^0-9a-z])(#${c.issueNumber}|ak-${c.issueNumber})(?![0-9])`, "i");
+      evidence = (await getSummaries(c.repoPath, result.branchSha, c.baseBranch)).find((s) => pattern.test(s.message));
+    } catch { /* evidence is best-effort when own commits prove the work */ }
+  }
+
+  return { uniqueCommits, ownCommits, evidence };
+}
+
+async function landPendingSiblings(
+  database: Database,
+  gitSvc: GitService,
+  c: AncestorCandidate,
+  now: string,
+): Promise<{ blocked: boolean; pendingSiblings: PendingSiblingMerge[] }> {
+  let pendingSiblings: PendingSiblingMerge[] = [];
+  try {
+    pendingSiblings = await listPendingSiblingMerges(gitSvc, database, c.wsId);
+  } catch (err) {
+    console.warn(
+      `[ancestor-reconciler] pending-sibling scan failed for workspace ${c.wsId} (proceeding as no-siblings):`,
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  if (pendingSiblings.length > 0) {
+    console.warn(
+      `[ancestor-reconciler] workspace ${c.wsId} leading branch is an ancestor of ${c.baseBranch}, but ${pendingSiblings.length} sibling repo(s) still have unmerged commits — landing siblings before terminalizing`,
+    );
+    const guardFailures = await checkPendingSiblingMergeGuards(gitSvc, pendingSiblings);
+    if (guardFailures.length > 0) {
+      console.warn(`[ancestor-reconciler] cannot land sibling merge(s) for workspace ${c.wsId}: ${guardFailures.join("; ")}`);
+      await recordSiblingComment(database, c, "conflict",
+        `Ancestor-branch reconciliation found the leading branch ${c.branch} already merged into ${c.baseBranch}, but ${pendingSiblings.length} sibling repo(s) still have unmerged commits and could not be landed automatically: ` +
+          guardFailures.join("; ") +
+          ". Leaving the issue open — resolve the blockers and merge the siblings manually, or retry the workspace merge.",
+        { mergeReason: "sibling_merge_pending", failures: guardFailures, detectedAt: now });
+      return { blocked: true, pendingSiblings };
+    }
+
+    const siblingResults = await executeSiblingMerges({ gitService: gitSvc, database, createBackup, workspaceId: c.wsId, plans: pendingSiblings });
+    const failedSiblings = siblingResults.filter((r) => !r.merged);
+    if (failedSiblings.length > 0) {
+      console.warn(`[ancestor-reconciler] ${failedSiblings.length} sibling merge(s) failed for workspace ${c.wsId}`);
+      await recordSiblingComment(database, c, "conflict",
+        `Ancestor-branch reconciliation: leading branch ${c.branch} was already merged into ${c.baseBranch}, but ${failedSiblings.length} sibling repo merge(s) failed: ` +
+          failedSiblings.map((f) => `${f.name ?? f.path}: ${f.error}`).join("; ") +
+          ". Leaving the issue open — the unmerged sibling branches were preserved.",
+        { mergeReason: "sibling_merge_failed", siblingResults, detectedAt: now });
+      return { blocked: true, pendingSiblings };
+    }
+
+    console.log(`[ancestor-reconciler] landed ${siblingResults.length} sibling merge(s) for workspace ${c.wsId} before finalizing`);
+    await recordSiblingComment(database, c, "merged",
+      `Ancestor-branch reconciliation: landed ${siblingResults.length} sibling repo merge(s) alongside the already-merged leading branch ${c.branch}: ` +
+        siblingResults.map((r) => r.name ?? r.path).join(", ") + ".",
+      { siblingResults, reconciledAt: now });
+  }
+
+  return { blocked: false, pendingSiblings };
+}
+
 /**
  * Reconcile workspaces whose branch tip is already an ancestor of the base
  * branch (i.e. the work was genuinely merged into base) but whose issue is
@@ -116,57 +253,12 @@ export async function reconcileAncestorBranchWorkspaces(
   // git-level semantics instead of tripping the missing-repo short-circuit (#277).
   const pathExists = deps.pathExists ?? existsSync;
 
-  // Live pref read at every tick so disabling via pref takes effect without a restart.
-  // The `enabled` override in deps lets tests inject the state directly.
-  const isEnabled = deps.enabled !== undefined
-    ? deps.enabled
-    : await (async () => {
-        try {
-          const row = await database.select({ value: preferences.value }).from(preferences)
-            .where(eq(preferences.key, PREF_RECONCILER_ANCESTOR_BRANCH_ENABLED)).limit(1);
-          return row.length === 0 || row[0].value !== "false";
-        } catch {
-          return true;
-        }
-      })();
-  if (!isEnabled) {
+  if (!(await isReconcilerEnabled(database, deps.enabled))) {
     console.log("[ancestor-reconciler] disabled via preference — skipping tick");
     return 0;
   }
 
-  // Find non-closed, non-direct workspaces whose issue is NOT in a terminal status
-  // and whose mergedAt is null (mergedAt set = already handled by reconcileSilentlyMergedWorkspaces).
-  // In Progress is only eligible when idle+readyForMerge=true: that flag comes
-  // from the review flow, and a dropped merge response can leave reviewed work
-  // parked in that column. Running In Progress work may have uncommitted changes
-  // even when the current branch tip is already an ancestor.
-  const candidates = await database
-    .select({
-      wsId: workspaces.id,
-      branch: workspaces.branch,
-      baseBranch: workspaces.baseBranch,
-      baseCommitSha: workspaces.baseCommitSha,
-      workingDir: workspaces.workingDir,
-      wsStatus: workspaces.status,
-      readyForMerge: workspaces.readyForMerge,
-      issueId: issues.id,
-      issueNumber: issues.issueNumber,
-      projectId: issues.projectId,
-      repoPath: projects.repoPath,
-      statusName: projectStatuses.name,
-    })
-    .from(workspaces)
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .innerJoin(projects, eq(issues.projectId, projects.id))
-    .where(
-      and(
-        ne(workspaces.status, "closed"),
-        eq(workspaces.isDirect, false),
-        isNull(workspaces.mergedAt),
-        notInArray(projectStatuses.name, TERMINAL_STATUS_NAMES),
-      ),
-    );
+  const candidates = await selectCandidates(database);
 
   if (candidates.length === 0) return 0;
 
@@ -210,27 +302,7 @@ export async function reconcileAncestorBranchWorkspaces(
     //  2. otherwise, a base commit newer than the tip that names the issue (`#N` / `ak-N`) — a
     //     hand-landed fix. Matched by issue number only, never by train label: labels are reused
     //     across hand and board trains.
-    let uniqueCommits: number;
-    try {
-      uniqueCommits = await commitCounter(c.repoPath, result.baseSha, result.branchSha);
-    } catch {
-      uniqueCommits = 0;
-    }
-    let ownCommits = 0;
-    if (uniqueCommits === 0 && result.branchSha !== result.baseSha && c.baseCommitSha) {
-      try {
-        ownCommits = await commitCounter(c.repoPath, c.baseCommitSha, result.branchSha);
-      } catch {
-        ownCommits = 0;
-      }
-    }
-    let evidence: { sha: string; message: string } | undefined;
-    if (c.issueNumber != null && result.branchSha !== result.baseSha) {
-      try {
-        const pattern = new RegExp(`(^|[^0-9a-z])(#${c.issueNumber}|ak-${c.issueNumber})(?![0-9])`, "i");
-        evidence = (await getSummaries(c.repoPath, result.branchSha, c.baseBranch)).find((s) => pattern.test(s.message));
-      } catch { /* evidence is best-effort when own commits prove the work */ }
-    }
+    const { uniqueCommits, ownCommits, evidence } = await gatherLandingEvidence(c as ReadyCandidate, result, { commitCounter, getSummaries });
     if (uniqueCommits === 0 && ownCommits === 0 && !evidence) {
       console.log(
         `[ancestor-reconciler] workspace ${c.wsId} (issue #${c.issueNumber ?? "?"}, branch=${c.branch}) — 0 unique commits on branch and no base commit names the issue; skipping`,
@@ -253,49 +325,9 @@ export async function reconcileAncestorBranchWorkspaces(
     // "is the workspace REALLY fully merged?" probe) before terminalizing; if any sibling
     // is pending, land it through the same guarded pipeline reconcileStrandedSiblingMerges
     // uses instead of Done-ing the issue with the sibling stranded.
-    let pendingSiblings: PendingSiblingMerge[] = [];
-    try {
-      pendingSiblings = await listPendingSiblingMerges(gitSvc, database, c.wsId);
-    } catch (err) {
-      console.warn(
-        `[ancestor-reconciler] pending-sibling scan failed for workspace ${c.wsId} (proceeding as no-siblings):`,
-        err instanceof Error ? err.message : err,
-      );
-    }
-
-    if (pendingSiblings.length > 0) {
-      console.warn(
-        `[ancestor-reconciler] workspace ${c.wsId} leading branch is an ancestor of ${c.baseBranch}, but ${pendingSiblings.length} sibling repo(s) still have unmerged commits — landing siblings before terminalizing`,
-      );
-      const guardFailures = await checkPendingSiblingMergeGuards(gitSvc, pendingSiblings);
-      if (guardFailures.length > 0) {
-        console.warn(`[ancestor-reconciler] cannot land sibling merge(s) for workspace ${c.wsId}: ${guardFailures.join("; ")}`);
-        await recordSiblingComment(database, c, "conflict",
-          `Ancestor-branch reconciliation found the leading branch ${c.branch} already merged into ${c.baseBranch}, but ${pendingSiblings.length} sibling repo(s) still have unmerged commits and could not be landed automatically: ` +
-            guardFailures.join("; ") +
-            ". Leaving the issue open — resolve the blockers and merge the siblings manually, or retry the workspace merge.",
-          { mergeReason: "sibling_merge_pending", failures: guardFailures, detectedAt: now });
-        continue;
-      }
-
-      const siblingResults = await executeSiblingMerges({ gitService: gitSvc, database, createBackup, workspaceId: c.wsId, plans: pendingSiblings });
-      const failedSiblings = siblingResults.filter((r) => !r.merged);
-      if (failedSiblings.length > 0) {
-        console.warn(`[ancestor-reconciler] ${failedSiblings.length} sibling merge(s) failed for workspace ${c.wsId}`);
-        await recordSiblingComment(database, c, "conflict",
-          `Ancestor-branch reconciliation: leading branch ${c.branch} was already merged into ${c.baseBranch}, but ${failedSiblings.length} sibling repo merge(s) failed: ` +
-            failedSiblings.map((f) => `${f.name ?? f.path}: ${f.error}`).join("; ") +
-            ". Leaving the issue open — the unmerged sibling branches were preserved.",
-          { mergeReason: "sibling_merge_failed", siblingResults, detectedAt: now });
-        continue;
-      }
-
-      console.log(`[ancestor-reconciler] landed ${siblingResults.length} sibling merge(s) for workspace ${c.wsId} before finalizing`);
-      await recordSiblingComment(database, c, "merged",
-        `Ancestor-branch reconciliation: landed ${siblingResults.length} sibling repo merge(s) alongside the already-merged leading branch ${c.branch}: ` +
-          siblingResults.map((r) => r.name ?? r.path).join(", ") + ".",
-        { siblingResults, reconciledAt: now });
-    }
+    const siblingOutcome = await landPendingSiblings(database, gitSvc, c, now);
+    if (siblingOutcome.blocked) continue;
+    const pendingSiblings = siblingOutcome.pendingSiblings;
 
     try {
       const mergedAt = now;

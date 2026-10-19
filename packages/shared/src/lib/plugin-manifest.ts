@@ -395,7 +395,12 @@ export interface PluginSyncConfigFieldDef {
   description?: string;
   /** Default false — a field the board may leave empty. */
   required?: boolean;
+  /** Input kind for the settings form (#1630); values are still stored as strings. Default "text". */
+  type?: PluginSyncConfigFieldType;
 }
+
+export const PLUGIN_SYNC_CONFIG_FIELD_TYPES = ["text", "boolean", "number", "json"] as const;
+export type PluginSyncConfigFieldType = (typeof PLUGIN_SYNC_CONFIG_FIELD_TYPES)[number];
 
 /**
  * Declarative external-issue-tracker sync capability (#1076).
@@ -709,6 +714,13 @@ export function parsePluginManifest(input: unknown): PluginManifest {
         label: optionalString(c.label, `sync.config[${i}].label`),
         description: optionalString(c.description, `sync.config[${i}].description`),
         required: optionalBoolean(c.required, `sync.config[${i}].required`),
+        type: (() => {
+          if (c.type == null) return undefined;
+          if (typeof c.type !== "string" || !(PLUGIN_SYNC_CONFIG_FIELD_TYPES as readonly string[]).includes(c.type)) {
+            fail(`"sync.config[${i}].type" must be one of ${PLUGIN_SYNC_CONFIG_FIELD_TYPES.join(", ")}`);
+          }
+          return c.type as PluginSyncConfigFieldType;
+        })(),
       };
     });
 

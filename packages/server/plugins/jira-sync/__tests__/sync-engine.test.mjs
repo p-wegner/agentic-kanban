@@ -292,9 +292,9 @@ test("issue type and epic parent: Bug -> bug, Story -> feature, parent becomes a
   await runInboundSync(fakeJiraClient(jira), board, { ...baseOpts, knownState: { issues: {} } });
 
   const byKey = Object.fromEntries(board.state.issues.map((i) => [i.externalKey, i]));
-  assert.equal(byKey["ENG-1"].type, "bug");
-  assert.equal(byKey["ENG-2"].type, "feature");
-  assert.equal(byKey["ENG-3"].type, "task");
+  assert.equal(byKey["ENG-1"].issueType, "bug");
+  assert.equal(byKey["ENG-2"].issueType, "feature");
+  assert.equal(byKey["ENG-3"].issueType, "task");
   assert.equal(byKey["ENG-1"].description, "**Parent:** ENG-9 (Checkout)\n\nBoom");
   const tags = (await board.listIssueTags(byKey["ENG-1"].id)).map((t) => t.name);
   assert.deepEqual(tags, ["epic:ENG-9"]);

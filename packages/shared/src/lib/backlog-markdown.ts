@@ -20,7 +20,8 @@
  * backlog snapshot, of which this format is the readable twin. Spec: docs/backlog-markdown.md.
  */
 
-export const BACKLOG_MD_VERSION = 1;
+export { BACKLOG_MD_VERSION, renderBacklogMarkdown } from "./backlog-markdown-render.js";
+export type { RenderOptions } from "./backlog-markdown-render.js";
 
 export interface BacklogMdChecklistItem { text: string; done: boolean }
 
@@ -106,77 +107,6 @@ export const STATUS_ALIASES: Record<string, string> = {
 export function canonicalStatusName(section: string): string {
   const k = section.trim().toLowerCase().replace(/\s+/g, " ").replace(/\s*\(\d+\)\s*$/, "");
   return STATUS_ALIASES[k] ?? section.trim().replace(/\s*\(\d+\)\s*$/, "");
-}
-
-// ── render (the standard) ─────────────────────────────────────────────────────────────
-
-export interface RenderOptions {
-  project?: string | null;
-  exportedAt?: string | null;
-  /** Section order; sections not listed are appended in first-seen order. */
-  statuses?: string[];
-  filter?: string | null;
-  /** Emit created/updated timestamps in the metadata line (default true). */
-  timestamps?: boolean;
-  /** Emit "Depends on"/"Blocks" — default true. */
-  dependencies?: boolean;
-  /** Front-matter title override; default "<project> — backlog". */
-  title?: string | null;
-}
-
-const esc = (s: string) => s.replace(/\r/g, "");
-
-export function renderBacklogMarkdown(issues: BacklogMdIssue[], opts: RenderOptions = {}): string {
-  const out: string[] = [];
-  const project = opts.project ?? null;
-  const sections: string[] = [...(opts.statuses ?? [])];
-  for (const i of issues) { const s = i.status ?? "Backlog"; if (!sections.includes(s)) sections.push(s); }
-  out.push("---");
-  out.push(`kanban-md: ${BACKLOG_MD_VERSION}`);
-  if (project) out.push(`project: ${yamlStr(project)}`);
-  if (opts.exportedAt) out.push(`exported: ${opts.exportedAt}`);
-  out.push(`statuses: ${sections.map(yamlStr).join(", ")}`);
-  if (opts.filter) out.push(`filter: ${yamlStr(opts.filter)}`);
-  out.push(`issues: ${issues.length}`);
-  out.push("---");
-  out.push("");
-  out.push(`# ${opts.title ?? `${project ?? "Backlog"} — backlog`}`);
-  out.push("");
-  out.push("<!-- Backlog Markdown (kanban-md 1). One `##` per status column, one `###` per issue; the backtick line under a heading is its metadata. Edit freely and re-import — issues match by #number, then by title. Spec: docs/backlog-markdown.md -->");
-  for (const section of sections) {
-    const list = issues.filter((i) => (i.status ?? "Backlog") === section);
-    out.push("", `## ${section}`, "");
-    if (!list.length) { out.push("_(empty)_"); continue; }
-    for (const i of list) {
-      out.push(`### ${i.number != null ? `#${i.number} ` : ""}${esc(i.title).trim()}`);
-      const meta: string[] = [];
-      if (i.priority) meta.push(`priority: ${i.priority}`);
-      if (i.issueType) meta.push(`type: ${i.issueType}`);
-      if (i.tags.length) meta.push(`tags: ${i.tags.join(", ")}`);
-      if (i.milestone) meta.push(`milestone: ${i.milestone}`);
-      if (i.dueDate) meta.push(`due: ${i.dueDate}`);
-      if (opts.dependencies !== false && i.dependsOn.length) meta.push(`depends: ${i.dependsOn.map((n) => `#${n}`).join(", ")}`);
-      if (opts.dependencies !== false && i.blocks.length) meta.push(`blocks: ${i.blocks.map((n) => `#${n}`).join(", ")}`);
-      if (i.externalKey) meta.push(`key: ${i.externalKey}`);
-      if (i.externalUrl) meta.push(`url: ${i.externalUrl}`);
-      if (opts.timestamps !== false && i.createdAt) meta.push(`created: ${i.createdAt.slice(0, 10)}`);
-      if (opts.timestamps !== false && i.updatedAt) meta.push(`updated: ${i.updatedAt.slice(0, 10)}`);
-      if (meta.length) out.push(meta.map((m) => `\`${m}\``).join(" · "));
-      const desc = esc(i.description ?? "").trim();
-      if (desc) out.push("", demoteHeadings(desc));
-      if (i.checklist.length) { out.push(""); for (const c of i.checklist) out.push(`- [${c.done ? "x" : " "}] ${c.text}`); }
-      out.push("");
-    }
-  }
-  return out.join("\n").replace(/\n{3,}/g, "\n\n") + "\n";
-}
-
-function yamlStr(s: string): string {
-  return /[:#,[\]{}&*!|>'"%@`]/.test(s) || /^\s|\s$/.test(s) ? JSON.stringify(s) : s;
-}
-/** Headings inside a description would be read as new issues/sections — push them below ###. */
-function demoteHeadings(desc: string): string {
-  return desc.split("\n").map((l) => (/^#{1,3}\s/.test(l) ? "#### " + l.replace(/^#{1,3}\s+/, "") : l)).join("\n");
 }
 
 // ── parse (liberal) ───────────────────────────────────────────────────────────────────
@@ -291,33 +221,111 @@ function pullInlineHints(issue: BacklogMdIssue, warnings: string[]): void {
   issue.title = t.replace(/\s{2,}/g, " ").trim();
 }
 
+/** Mutable cursor shared by the line handlers of parseBacklogMarkdown. */
+interface ParseState {
+  doc: BacklogMdDoc;
+  section: string | null;
+  cur: BacklogMdIssue | null;
+  curKind: "heading" | "item" | null;
+  descLines: string[];
+  candidateLines: number;
+  placedLines: number;
+  inFence: boolean;
+  issueLevel: number;
+  sectionLevel: number;
+}
+
+/** Reads the `---` front matter into `doc`; returns the index of the first body line. */
+function parseFrontMatter(lines: string[], doc: BacklogMdDoc): number {
+  if (lines[0]?.trim() !== "---") return 0;
+  const end = lines.indexOf("---", 1);
+  if (end <= 0) return 0;
+  for (const l of lines.slice(1, end)) {
+    const m = l.match(/^([\w-]+):\s*(.*)$/); if (!m) continue;
+    const k = m[1].toLowerCase(), v = unyaml(m[2]);
+    if (k === "kanban-md") { doc.version = Number(v) || 1; doc.format = "kanban-md"; }
+    else if (k === "project" || k === "title") doc.project = doc.project ?? v;
+    else if (k === "exported" || k === "exportedat" || k === "date") doc.exportedAt = v;
+    else if (k === "statuses" || k === "columns") doc.statuses = v.split(",").map((s) => unyaml(s.trim())).filter(Boolean);
+    else if (k === "filter") doc.filter = v;
+  }
+  return end + 1;
+}
+
+function flushIssue(st: ParseState): void {
+  const cur = st.cur;
+  if (!cur) return;
+  // description: metadata lines were consumed already; trailing blank lines dropped
+  cur.description = st.descLines.join("\n").replace(/^\n+|\n+$/g, "");
+  pullInlineHints(cur, st.doc.warnings);
+  if (!cur.title) { st.doc.warnings.push(`line ${cur.line}: item without a title skipped`); }
+  else st.doc.issues.push(cur);
+  st.cur = null; st.curKind = null; st.descLines = [];
+}
+
+function handleHeadingLine(st: ParseState, raw: string, h: RegExpMatchArray, ln: number): void {
+  const doc = st.doc;
+  const level = h[1].length, textH = h[2].trim();
+  if (level === 1 && !doc.project && !st.cur) { doc.project = textH.replace(/\s+[—–-]\s+backlog$/i, "").trim() || null; return; }
+  if (st.sectionLevel && level === st.sectionLevel) {     // a section
+    flushIssue(st);
+    st.section = canonicalStatusName(textH);
+    if (!doc.statuses.includes(st.section)) doc.statuses.push(st.section);
+    return;
+  }
+  if (level === st.issueLevel && st.issueLevel > 0) {    // an issue heading
+    flushIssue(st); st.candidateLines++; st.placedLines++;
+    const cur = blankIssue(ln);
+    st.cur = cur; st.curKind = "heading";
+    const { number, title } = splitNumberFromTitle(textH);
+    cur.number = number; cur.title = title; cur.status = st.section;
+    return;
+  }
+  // deeper heading inside an issue → part of the description
+  if (st.cur) st.descLines.push(raw);
+}
+
+function handleListLine(st: ParseState, raw: string, li: RegExpMatchArray, ln: number): void {
+  const indent = li[1].length, box = li[3], body = li[4];
+  if (indent === 0 && (st.curKind !== "heading" || !st.cur)) {
+    // top-level list item = an issue (unless we are inside a heading-issue where lists are content)
+    flushIssue(st); st.candidateLines++; st.placedLines++;
+    const cur = blankIssue(ln);
+    st.cur = cur; st.curKind = "item";
+    const { number, title } = splitNumberFromTitle(body);
+    cur.number = number; cur.title = title; cur.status = st.section; cur.doneMark = !!box && box !== " ";
+    // "Title — description" on one line
+    const dash = cur.title.match(/^(.{3,}?)\s+[—–]\s+(.+)$/);
+    if (dash && !/^\*\*/.test(cur.title)) { cur.title = dash[1].trim(); st.descLines.push(dash[2].trim()); }
+    return;
+  }
+  const cur = st.cur;
+  if (!cur) { st.candidateLines++; return; }   // an orphan list line we could not place
+  if (box !== undefined) { cur.checklist.push({ text: body.trim(), done: box !== " " }); return; }
+  if (indent > 0 && st.curKind === "item" && parseMetaLine(cur, body, st.doc.warnings)) return;
+  if (indent > 0 && st.curKind === "item") { st.descLines.push(body); return; }
+  st.descLines.push(raw);
+}
+
+function handleBodyLine(st: ParseState, raw: string): void {
+  const cur = st.cur;
+  if (cur) {
+    // metadata directly under the heading/item (before any prose): backtick line, **Key:** value, key: value
+    if (st.descLines.every((d) => !d.trim()) && parseMetaLine(cur, raw, st.doc.warnings)) return;
+    // continuation lines under a list-item issue are indented to its body — dedent them
+    st.descLines.push(st.curKind === "item" ? raw.replace(/^\s{1,4}/, "") : raw);
+    return;
+  }
+  // stray text before any issue: ignore, but count key: value pairs at top level as doc metadata
+  const dm = raw.match(/^\**(project|title)\**\s*:\s*(.+)$/i);
+  if (dm && !st.doc.project) st.doc.project = dm[2].trim();
+}
+
 export function parseBacklogMarkdown(text: string): BacklogMdDoc {
   const src = text.replace(/\r\n?/g, "\n");
   const lines = src.split("\n");
   const doc: BacklogMdDoc = { version: null, project: null, exportedAt: null, statuses: [], filter: null, issues: [], warnings: [], confidence: 0, format: "liberal" };
-  let i = 0;
-  // front matter
-  if (lines[0]?.trim() === "---") {
-    const end = lines.indexOf("---", 1);
-    if (end > 0) {
-      for (const l of lines.slice(1, end)) {
-        const m = l.match(/^([\w-]+):\s*(.*)$/); if (!m) continue;
-        const k = m[1].toLowerCase(), v = unyaml(m[2]);
-        if (k === "kanban-md") { doc.version = Number(v) || 1; doc.format = "kanban-md"; }
-        else if (k === "project" || k === "title") doc.project = doc.project ?? v;
-        else if (k === "exported" || k === "exportedat" || k === "date") doc.exportedAt = v;
-        else if (k === "statuses" || k === "columns") doc.statuses = v.split(",").map((s) => unyaml(s.trim())).filter(Boolean);
-        else if (k === "filter") doc.filter = v;
-      }
-      i = end + 1;
-    }
-  }
-  let section: string | null = null;
-  let cur: BacklogMdIssue | null = null;
-  let curKind: "heading" | "item" | null = null;
-  let descLines: string[] = [];
-  let candidateLines = 0, placedLines = 0;
-  let inFence = false;
+  let i = parseFrontMatter(lines, doc);
   const hasH2 = lines.some((l) => /^##\s/.test(l));
   const hasH3 = lines.some((l) => /^###\s/.test(l));
   const hasItems = lines.some((l) => /^([-*+]|\d+[.)])\s+/.test(l));
@@ -325,80 +333,22 @@ export function parseBacklogMarkdown(text: string): BacklogMdDoc {
   // items to be the issues (a `## Todo` + `- [ ] item` file has sections, not heading-issues).
   const issueLevel = hasH3 ? 3 : hasH2 && !hasItems ? 2 : 0;
   const sectionLevel = issueLevel === 3 ? 2 : issueLevel === 0 && hasH2 ? 2 : 0;
-  const flush = () => {
-    if (!cur) return;
-    // description: metadata lines were consumed already; trailing blank lines dropped
-    cur.description = descLines.join("\n").replace(/^\n+|\n+$/g, "");
-    pullInlineHints(cur, doc.warnings);
-    if (!cur.title) { doc.warnings.push(`line ${cur.line}: item without a title skipped`); }
-    else doc.issues.push(cur);
-    cur = null; curKind = null; descLines = [];
-  };
+  const st: ParseState = { doc, section: null, cur: null, curKind: null, descLines: [], candidateLines: 0, placedLines: 0, inFence: false, issueLevel, sectionLevel };
   for (; i < lines.length; i++) {
     const raw = lines[i];
     const ln = i + 1;
-    if (/^\s*```/.test(raw)) { inFence = !inFence; if (cur) descLines.push(raw); continue; }
-    if (inFence) { if (cur) descLines.push(raw); continue; }
+    if (/^\s*```/.test(raw)) { st.inFence = !st.inFence; if (st.cur) st.descLines.push(raw); continue; }
+    if (st.inFence) { if (st.cur) st.descLines.push(raw); continue; }
     const h = raw.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
-    if (h) {
-      const level = h[1].length, textH = h[2].trim();
-      if (level === 1 && !doc.project && !cur) { doc.project = textH.replace(/\s+[—–-]\s+backlog$/i, "").trim() || null; continue; }
-      if (sectionLevel && level === sectionLevel) {     // a section
-        flush();
-        section = canonicalStatusName(textH);
-        if (!doc.statuses.includes(section)) doc.statuses.push(section);
-        continue;
-      }
-      if (level === issueLevel && issueLevel > 0) {    // an issue heading
-        flush(); candidateLines++; placedLines++;
-        cur = blankIssue(ln); curKind = "heading";
-        const { number, title } = splitNumberFromTitle(textH);
-        cur.number = number; cur.title = title; cur.status = section;
-        continue;
-      }
-      // deeper heading inside an issue → part of the description
-      if (cur) { descLines.push(raw); continue; }
-      continue;
-    }
-    // table row `| #12 | Title | high | ... |` with a header row → treat rows as issues (liberal)
+    if (h) { handleHeadingLine(st, raw, h, ln); continue; }
     const li = raw.match(/^(\s*)([-*+]|\d+[.)])\s+(?:\[([ xX])\]\s+)?(.+?)\s*$/);
-    if (li) {
-      const indent = li[1].length, box = li[3], body = li[4];
-      if (indent === 0 && (curKind !== "heading" || !cur)) {
-        // top-level list item = an issue (unless we are inside a heading-issue where lists are content)
-        flush(); candidateLines++; placedLines++;
-        cur = blankIssue(ln); curKind = "item";
-        const { number, title } = splitNumberFromTitle(body);
-        cur.number = number; cur.title = title; cur.status = section; cur.doneMark = !!box && box !== " ";
-        // "Title — description" on one line
-        const dash = cur.title.match(/^(.{3,}?)\s+[—–]\s+(.+)$/);
-        if (dash && !/^\*\*/.test(cur.title)) { cur.title = dash[1].trim(); descLines.push(dash[2].trim()); }
-        continue;
-      }
-      if (cur) {
-        if (box !== undefined) { cur.checklist.push({ text: body.trim(), done: box !== " " }); continue; }
-        if (indent > 0 && curKind === "item" && parseMetaLine(cur, body, doc.warnings)) continue;
-        if (indent > 0 && curKind === "item") { descLines.push(body); continue; }
-        descLines.push(raw); continue;
-      }
-      candidateLines++;   // an orphan list line we could not place
-      continue;
-    }
-    if (cur) {
-      // metadata directly under the heading/item (before any prose): backtick line, **Key:** value, key: value
-      if (descLines.every((d) => !d.trim()) && parseMetaLine(cur, raw, doc.warnings)) continue;
-      // continuation lines under a list-item issue are indented to its body — dedent them
-      descLines.push(curKind === "item" ? raw.replace(/^\s{1,4}/, "") : raw);
-      continue;
-    }
-    // stray text before any issue: ignore, but count key: value pairs at top level as doc metadata
-    const dm = raw.match(/^\**(project|title)\**\s*:\s*(.+)$/i);
-    if (dm && !doc.project) doc.project = dm[2].trim();
+    if (li) { handleListLine(st, raw, li, ln); continue; }
+    handleBodyLine(st, raw);
   }
-  flush();
+  flushIssue(st);
   // done-marked items without a section → status "Done" if the file has such a section or is sectionless
   for (const is of doc.issues) if (is.doneMark && !is.status) is.status = "Done";
-  doc.confidence = candidateLines ? placedLines / candidateLines : (doc.issues.length ? 1 : 0);
+  doc.confidence = st.candidateLines ? st.placedLines / st.candidateLines : (doc.issues.length ? 1 : 0);
   if (!doc.issues.length) doc.warnings.push("no issues recognised — expected `### Title` headings under `## Status` sections, or `- [ ] Title` list items");
   return doc;
 }

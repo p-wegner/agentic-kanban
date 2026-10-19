@@ -26,7 +26,7 @@ import { updateRegister } from "../lib/conflict-register.mjs";
 import { JiraAuthError } from "../lib/auth.mjs";
 import { BoardClient, BoardConfigError, resolveBoardConfigFromEnv } from "../lib/board-client.mjs";
 import { applyWritebacks } from "../lib/writebacks.mjs";
-import { statusNameOf } from "../lib/outbox-producer.mjs";
+import { snapshotAfterPull } from "../lib/state-sync.mjs";
 import { createDefaultBoardFixtureFetch } from "../lib/board-fixtures.mjs";
 
 async function main() {
@@ -106,22 +106,19 @@ async function main() {
     writeJsonFile(conflictRegisterPath(stateDir), nextRegister);
 
     // What pull wrote to the board came FROM Jira: re-baseline those statuses in push's
-    // snapshot so the next push does not echo them back as board-originated transitions.
-    const snapshot = readBoardSnapshot(stateDir);
-    if (snapshot) {
-      try {
-        const statuses = await boardClient.listStatuses(boardConfig.projectId);
-        const statusNameById = new Map(statuses.map((s) => [s.id, s.name]));
-        const touched = new Set(result.details.filter((d) => d.action === "create" || d.action === "update").map((d) => d.key));
-        for (const issue of await boardClient.listIssues(boardConfig.projectId)) {
-          if (!touched.has(issue.externalKey)) continue;
-          const prev = snapshot.issues[issue.id];
-          snapshot.issues[issue.id] = { ...prev, status: statusNameOf(issue, statusNameById) };
-        }
-        writeJsonFile(boardSnapshotPath(stateDir), snapshot);
-      } catch {
-        // best effort: worst case push attempts one redundant (failing, reported) transition
-      }
+    // snapshot so the next push does not echo them back as board-originated transitions
+    // (incl. a deleted issue moved to Cancelled). The first pull also takes the baseline.
+    try {
+      const touched = new Set([
+        ...result.details.filter((d) => d.action === "create" || d.action === "update").map((d) => d.key),
+        ...result.outOfScope.filter((o) => o.movedTo).map((o) => o.key),
+      ]);
+      writeJsonFile(
+        boardSnapshotPath(stateDir),
+        await snapshotAfterPull({ boardClient, projectId: boardConfig.projectId, snapshot: readBoardSnapshot(stateDir), touchedKeys: touched }),
+      );
+    } catch {
+      // best effort: worst case push attempts one redundant (failing, reported) transition
     }
 
     const cursor = readCursor(stateDir);

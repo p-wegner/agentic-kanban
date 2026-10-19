@@ -2,7 +2,6 @@ import { db as realDb, type Database } from "../../db/index.js";
 import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import { randomUUID } from "node:crypto";
 import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.js";
-import * as agentSkillRepo from "../../repositories/agent-skill.repository.js";
 import * as realAgentService from "../agent.service.js";
 import { createAgentDispatch, type AgentExecutionService } from "../agent-dispatch.service.js";
 import { getWorkerFleet, WorkerDispatchUnavailableError } from "../worker-fleet.service.js";
@@ -25,7 +24,7 @@ import type { SessionManagerOptions, SessionState, StartSessionOptions } from ".
 import { workspaceLaunchPreflight } from "../preflight-check.js";
 import { resolveContainerOrWorker, surfaceIsolationDowngrade } from "./devcontainer-launch.js";
 import { WorkspaceError } from "../workspace-internals.js";
-import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../constants/preference-keys.js";
+import { resolveResumeProviderSessionId, resolveSessionSkillName, resolveEffectiveSystemInstructions, applySkipPermissionsArg, injectHandoffIntoPrompt } from "./session-launch-prep.js";
 import { parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
 import { serializeProfileSelectionReason } from "../../lib/profile-selection-reason.js";
 import { loadCodexLicenseRing } from "../codex-license-ring.js";
@@ -200,24 +199,8 @@ export function createSessionLifecycle(
 
     const executor = provider ?? "claude-code";
 
-    // If resuming, look up the previous session's providerSessionId. Session
-    // IDs are provider-local, so never pass a Claude session ID to Copilot or vice versa.
-    let providerSessionId: string | undefined;
-    if (resumeFromId) {
-      const prev = await lifecycleRepo.getPrevSessionResumeInfo(resumeFromId, db);
-      if (prev && prev.providerSessionId && prev.executor === executor) {
-        // Skip mock agent session IDs (e.g. "mock-session-xxx") — they are not resumable
-        const sid = prev.providerSessionId;
-        if (!sid.startsWith("mock-session-")) {
-          providerSessionId = sid;
-          console.log(`[session] resuming: resumeFromId=${resumeFromId} providerSessionId=${providerSessionId}`);
-        } else {
-          console.log(`[session] skipping resume: providerSessionId=${sid} is a mock session ID`);
-        }
-      } else if (prev && prev.providerSessionId) {
-        console.log(`[session] skipping resume: previous executor=${prev.executor} current executor=${executor}`);
-      }
-    }
+    // If resuming, look up the previous session's providerSessionId (provider-local; see session-launch-prep.ts).
+    const providerSessionId = await resolveResumeProviderSessionId(db, resumeFromId, executor);
 
     await awaitStrictLaunchWorker({ database: db, workspaceId, projectId, providerName, explicitPlacement: !!placement, triggerType }); // #1347: strict hold/refusal BEFORE any session row
 
@@ -228,11 +211,7 @@ export function createSessionLifecycle(
     // attribute this session even if the workspace's skill changes later. The name
     // is snapshotted because the agent_skills row may be renamed or deleted.
     const sessionSkillId: string | null = workspace.skillId ?? null;
-    let sessionSkillName: string | null = null;
-    if (sessionSkillId) {
-      const skillRow = await agentSkillRepo.getAgentSkillById(sessionSkillId, db);
-      sessionSkillName = skillRow?.name ?? null;
-    }
+    const sessionSkillName = await resolveSessionSkillName(db, sessionSkillId);
 
     // Cache session context for activity broadcasting
     state.sessionContexts.set(sessionId, { workspaceId, issueId: workspace.issueId, projectId });
@@ -240,16 +219,7 @@ export function createSessionLifecycle(
       state.turnStates.set(sessionId, "processing");
     }
 
-    const guardrailValue = await lifecycleRepo.getPreferenceValue(PREF_BUILDER_GUARDRAILS, db);
-    let effectiveSystemInstructions =
-      systemInstructions === undefined
-        ? (guardrailValue === undefined ? DEFAULT_BUILDER_GUARDRAILS : guardrailValue)
-        : systemInstructions;
-    if (executor === "codex" && builderSession) {
-      // Codex always augments (and never drops) the instructions, so the result is a string.
-      effectiveSystemInstructions =
-        getProviderExitBehavior("codex").injectBuilderInstructions(effectiveSystemInstructions) ?? effectiveSystemInstructions;
-    }
+    const effectiveSystemInstructions = await resolveEffectiveSystemInstructions(db, systemInstructions, executor, builderSession);
     // #1302/#1310: builder context policy, Claude and Codex builders (see agent-provider/builder-context.ts).
     const builderContext = await resolveBuilderContext(builderContextApplies(executor, builderSession), projectId, workspaceId, (key) => lifecycleRepo.getPreferenceValue(key, db), executor === "claude-code", (lean) => applyBuilderSkillListing(effectiveWorkingDir, lean, workspace.isDirect ?? false)); // #1312: lean profile + name-only skills
     const launchDiagnostics = {
@@ -295,20 +265,7 @@ export function createSessionLifecycle(
     const dbSkipPerms = parseBoolSetting("skip_permissions", skipPermRows[0]?.value);
     const skipPermissions = skipPermissionsOpt !== undefined ? skipPermissionsOpt : dbSkipPerms;
 
-    // For Claude only: skip-permissions is conveyed via --dangerously-skip-permissions in agentArgs.
-    let effectiveAgentArgs = agentArgs;
-    if (executor === "claude-code") {
-      if (skipPermissions && !effectiveAgentArgs?.includes("--dangerously-skip-permissions")) {
-        effectiveAgentArgs = effectiveAgentArgs
-          ? `${effectiveAgentArgs} --dangerously-skip-permissions`
-          : "--dangerously-skip-permissions";
-      } else if (!skipPermissions && effectiveAgentArgs?.includes("--dangerously-skip-permissions")) {
-        effectiveAgentArgs = effectiveAgentArgs
-          .split(/\s+/)
-          .filter(a => a && a !== "--dangerously-skip-permissions")
-          .join(" ") || undefined;
-      }
-    }
+    const effectiveAgentArgs = applySkipPermissionsArg(executor, agentArgs, skipPermissions);
 
     // Inject HANDOFF.md context if available and not using provider resume or plan mode.
     //
@@ -322,15 +279,8 @@ export function createSessionLifecycle(
     // role is already in scope here — reuse `builderSession` (line ~130) rather than
     // re-deriving it, and note it already implies `!planMode`.
     let effectivePrompt = prompt;
-    if (effectiveWorkingDir && builderSession && !providerSessionId) {
-      try {
-        const { readHandoffFile } = await import("../handoff.service.js");
-        const handoff = await readHandoffFile(effectiveWorkingDir);
-        if (handoff) {
-          effectivePrompt = `[SESSION HANDOFF — previous session context for this workspace. Use it to avoid re-reading files you already explored.]\n\n${handoff}\n---\n\n${prompt}`;
-          console.log(`[session] HANDOFF.md injected: workspaceId=${workspaceId} size=${handoff.length}`);
-        }
-      } catch { /* handoff not available — proceed without it */ }
+    if (builderSession && !providerSessionId) {
+      effectivePrompt = await injectHandoffIntoPrompt(prompt, effectiveWorkingDir, workspaceId);
     }
 
     // Provider rotation rings (codex license / claude subscription): when the

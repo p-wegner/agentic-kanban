@@ -188,6 +188,52 @@ async function armIfStillIdle(database: Database, wsId: string): Promise<boolean
   return true;
 }
 
+/**
+ * What the prior review sessions of a candidate say about it: "skip" (leave it alone),
+ * "arm" (clean review exited but readyForMerge was never armed, #932) or "none" (no review yet).
+ */
+async function classifyPriorReviews(
+  database: Database,
+  gitService: typeof realGitService,
+  c: { wsId: string; workingDir: string; issueNumber: number | null },
+): Promise<"skip" | "arm" | "none"> {
+  const priorReviews = await database.select({ id: sessions.id, exitCode: sessions.exitCode, status: sessions.status }).from(sessions)
+    .where(and(eq(sessions.workspaceId, c.wsId), eq(sessions.triggerType, "review")));
+  if (priorReviews.length === 0) return "none";
+  {
+    const cleanReview = priorReviews.some((r) => r.status !== "running" && r.exitCode === "0");
+    if (!cleanReview) return "skip";
+    // `readyForMerge: false` after a CLEAN review has two causes, and only one of them is
+    // the #932 stranding. The other is a merge that was ATTEMPTED and deliberately
+    // un-armed the flag: `recordConflictAndClearReadyFlag` on a real conflict,
+    // `keepCleanAncestorInReview` on the 0-commit ancestor guard, and the fix-and-merge
+    // exit's #764 "did not land" path all clear it precisely so a conflicted branch is
+    // NOT silently re-queued as ready. Re-arming those would undo the guard and loop:
+    // arm → auto-merge → conflict → clear → arm again, once every 60s tick, forever.
+    //
+    // Every one of those paths runs only AFTER a merge attempt, and every merge attempt
+    // writes a `merge-attempt` comment for the workspace. So "no merge-attempt row" is
+    // the precise test for "nothing has ever cleared this flag" — which is exactly the
+    // shape #932 describes (a review that finished while a gate held the semaphore, with
+    // no merge yet tried). Conservative by construction: an un-armed workspace we cannot
+    // prove was never merge-attempted is left for the human, not auto-approved.
+    const mergeAttempt = await database.select({ id: issueComments.id }).from(issueComments)
+      .where(and(eq(issueComments.workspaceId, c.wsId), eq(issueComments.kind, "merge-attempt"))).limit(1);
+    const head = await Promise.resolve().then(() => gitService.revParse(c.workingDir, "HEAD")).then((s) => s.trim()).catch(() => null);
+    // #1524: a HELD gate whose retry time has passed overrides an OLDER merge-attempt (e.g. a train
+    // drop the send-back already resolved) — otherwise the scheduled retry never fires.
+    const heldRetryDue = !!head && await isGateHeldRetryDue(database, c.wsId, head);
+    if (mergeAttempt.length > 0 && !heldRetryDue) return "skip";
+    // #1299: the review-exit gate just withheld THIS head. A clean review exit is not a green
+    // gate, and arming here sent auto-merge to re-gate the same red commit.
+    if (head && await isGateWithheldForHead(database, c.wsId, head)) {
+      console.log(`[reconcile] workspace ${c.wsId} (#${c.issueNumber ?? "?"}) gate still withheld/held for ${head.slice(0, 8)} — not arming yet (#1492)`);
+      return "skip";
+    }
+    return "arm";
+  }
+}
+
 export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDeps): Promise<number> {
   const database = deps.database ?? db;
   const { getSessionManager, boardEvents, reviewSessionIds } = deps;
@@ -265,41 +311,9 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
     // handled", it is the stranding this pass exists to undo — arm it below instead of
     // skipping. A review that exited NON-ZERO genuinely wants a human/fix, and a review
     // still in flight is caught by the running-session check above, so neither is armed.
-    const priorReviews = await database.select({ id: sessions.id, exitCode: sessions.exitCode, status: sessions.status }).from(sessions)
-      .where(and(eq(sessions.workspaceId, c.wsId), eq(sessions.triggerType, "review")));
-    let armAfterCleanReview = false;
-    if (priorReviews.length > 0) {
-      const cleanReview = priorReviews.some((r) => r.status !== "running" && r.exitCode === "0");
-      if (!cleanReview) continue;
-      // `readyForMerge: false` after a CLEAN review has two causes, and only one of them is
-      // the #932 stranding. The other is a merge that was ATTEMPTED and deliberately
-      // un-armed the flag: `recordConflictAndClearReadyFlag` on a real conflict,
-      // `keepCleanAncestorInReview` on the 0-commit ancestor guard, and the fix-and-merge
-      // exit's #764 "did not land" path all clear it precisely so a conflicted branch is
-      // NOT silently re-queued as ready. Re-arming those would undo the guard and loop:
-      // arm → auto-merge → conflict → clear → arm again, once every 60s tick, forever.
-      //
-      // Every one of those paths runs only AFTER a merge attempt, and every merge attempt
-      // writes a `merge-attempt` comment for the workspace. So "no merge-attempt row" is
-      // the precise test for "nothing has ever cleared this flag" — which is exactly the
-      // shape #932 describes (a review that finished while a gate held the semaphore, with
-      // no merge yet tried). Conservative by construction: an un-armed workspace we cannot
-      // prove was never merge-attempted is left for the human, not auto-approved.
-      const mergeAttempt = await database.select({ id: issueComments.id }).from(issueComments)
-        .where(and(eq(issueComments.workspaceId, c.wsId), eq(issueComments.kind, "merge-attempt"))).limit(1);
-      const head = await Promise.resolve().then(() => gitService.revParse(c.workingDir!, "HEAD")).then((s) => s.trim()).catch(() => null);
-      // #1524: a HELD gate whose retry time has passed overrides an OLDER merge-attempt (e.g. a train
-      // drop the send-back already resolved) — otherwise the scheduled retry never fires.
-      const heldRetryDue = !!head && await isGateHeldRetryDue(database, c.wsId, head);
-      if (mergeAttempt.length > 0 && !heldRetryDue) continue;
-      // #1299: the review-exit gate just withheld THIS head. A clean review exit is not a green
-      // gate, and arming here sent auto-merge to re-gate the same red commit.
-      if (head && await isGateWithheldForHead(database, c.wsId, head)) {
-        console.log(`[reconcile] workspace ${c.wsId} (#${c.issueNumber ?? "?"}) gate still withheld/held for ${head.slice(0, 8)} — not arming yet (#1492)`);
-        continue;
-      }
-      armAfterCleanReview = true;
-    }
+    const priorReviewVerdict = await classifyPriorReviews(database, gitService, { wsId: c.wsId, workingDir: c.workingDir, issueNumber: c.issueNumber });
+    if (priorReviewVerdict === "skip") continue;
+    const armAfterCleanReview = priorReviewVerdict === "arm";
 
     // #283 — a preflight that already failed its budget for THESE tips is not retried.
     // Checked before the (more expensive) ahead-count so a blocked workspace costs two

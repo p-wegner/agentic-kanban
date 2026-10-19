@@ -8,9 +8,12 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { ValidationError } from "../errors/index.js";
 import { nextIssueNumber } from "./issue-number.repository.js";
-import { issueDependencyColumns, issueTextColumns, projectStatusIdName } from "./projections.js";
+import { issueDependencyColumns, issueTextColumns } from "./projections.js";
 import { listProjectStatusIdNames } from "./project-status.repository.js";
 import { firstRow } from "../lib/first-row.js";
+
+// Decomposed (#1628): these moved to ./issue-export.repository.js; re-exported so import paths are unchanged.
+export { getIssuesForExport, getTagsForIssues } from "./issue-export.repository.js";
 
 // --- CLI-command-specific queries/mutations (#465 decomposition — the blanket
 // /repositories/ cohesion exemption was removed by #957, so this facade ships its
@@ -72,6 +75,7 @@ export async function initializeProjectStatuses(
   return { ...statusIdsByName(existing), ...statusIdsByName(rows) };
 }
 
+
 /**
  * Returns the next issue number for the project and the default statusId.
  * Throws if no statuses are configured for the project.
@@ -111,6 +115,7 @@ export async function resolveNewIssueDefaults(
   return { issueNumber, statusId: statusRows[0].id };
 }
 
+
 /**
  * REST's entry into the shared loader (#506). The six-step chain, the session-selection
  * policy, and the project scoping all live in `shared/lib/issue-summary.ts` now — this
@@ -134,6 +139,7 @@ export async function getIssueSummary(
     parsed.kind === "number" ? { issueNumber: parsed.issueNumber, projectId } : { issueId: parsed.issueId },
   );
 }
+
 
 export async function getIssuesByProject(
   projectId: string,
@@ -199,6 +205,7 @@ export async function getIssuesByProject(
   return hasLimit ? q.limit(Math.floor(opts!.limit!)).offset(offset) : q;
 }
 
+
 /**
  * Total issues matching the same filters, ignoring limit/offset — so a paginated
  * caller can report "showing 50 of 380" without fetching all 380 (#424).
@@ -218,6 +225,7 @@ export async function countIssuesByProject(
     .where(whereClause);
   return Number(rows[0]?.n ?? 0);
 }
+
 
 export async function getIssueDescription(
   issueId: string,
@@ -250,6 +258,7 @@ export async function getIssueDescription(
   );
 }
 
+
 export async function getIssueProjectId(
   issueId: string,
   database: Database = db,
@@ -263,6 +272,7 @@ export async function getIssueProjectId(
   ))?.projectId ?? null;
 }
 
+
 export async function getIssueTags(
   issueId: string,
   database: Database = db,
@@ -273,6 +283,7 @@ export async function getIssueTags(
     .innerJoin(tags, eq(issueTags.tagId, tags.id))
     .where(eq(issueTags.issueId, issueId));
 }
+
 
 export async function getOutgoingDependencies(
   issueId: string,
@@ -292,6 +303,7 @@ export async function getOutgoingDependencies(
     .where(eq(issueDependencies.issueId, issueId));
 }
 
+
 export async function getIncomingDependencies(
   issueId: string,
   database: Database = db,
@@ -309,6 +321,7 @@ export async function getIncomingDependencies(
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
     .where(eq(issueDependencies.dependsOnId, issueId));
 }
+
 
 // --- Reporting read models (#728). Four whole-project projections backing Focus, the
 // cumulative-flow/throughput charts and the standup digest — extracted because their
@@ -344,6 +357,7 @@ export async function getDependenciesForIssues(issueIds: string[], database: Dat
     .from(issueDependencies)
     .where(inArray(issueDependencies.issueId, issueIds));
 }
+
 
 export async function getIssueWorkspaces(
   issueId: string,
@@ -424,6 +438,7 @@ export async function getIssueWorkspaces(
     .where(eq(workspaces.issueId, issueId));
 }
 
+
 export async function getIssueArtifacts(
   issueId: string,
   database: Database = db,
@@ -434,6 +449,7 @@ export async function getIssueArtifacts(
     .where(eq(issueArtifacts.issueId, issueId))
     .orderBy(issueArtifacts.createdAt);
 }
+
 
 /**
  * Attach a tag to an issue. Idempotent (#1107): re-attaching an already-attached tag returns
@@ -460,6 +476,7 @@ export async function assignTag(
   return { id, alreadyExisted: false };
 }
 
+
 export async function removeTag(
   issueId: string,
   tagId: string,
@@ -468,6 +485,7 @@ export async function removeTag(
   await database.delete(issueTags)
     .where(and(eq(issueTags.issueId, issueId), eq(issueTags.tagId, tagId)));
 }
+
 
 export async function deleteArtifact(
   issueId: string,
@@ -478,32 +496,6 @@ export async function deleteArtifact(
     .where(and(eq(issueArtifacts.id, artifactId), eq(issueArtifacts.issueId, issueId)));
 }
 
-/** All issues of a project + their status name, ordered by issue number — for export. */
-export async function getIssuesForExport(projectId: string, database: Database = db) {
-  return database
-    .select({
-      ...issueTextColumns,
-      priority: issues.priority,
-      issueType: issues.issueType,
-      statusName: projectStatuses.name,
-      createdAt: issues.createdAt,
-      updatedAt: issues.updatedAt,
-    })
-    .from(issues)
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(eq(issues.projectId, projectId))
-    .orderBy(issues.issueNumber);
-}
-
-/** Tag names for a batch of issues (issue_tags ⋈ tags). Empty input → empty result. */
-export async function getTagsForIssues(issueIds: string[], database: Database = db) {
-  if (issueIds.length === 0) return [];
-  return database
-    .select({ issueId: issueTags.issueId, tagName: tags.name })
-    .from(issueTags)
-    .innerJoin(tags, eq(issueTags.tagId, tags.id))
-    .where(inArray(issueTags.issueId, issueIds));
-}
 
 /** Resolve an issue id by its per-project issue number (scoped to the project). */
 export async function getIssueIdByNumberInProject(
@@ -520,6 +512,7 @@ export async function getIssueIdByNumberInProject(
   ))?.id ?? null;
 }
 
+
 /** {statusId, statusName} for every issue in a project (board status-count source). */
 export async function getIssueStatusNameRowsForProject(projectId: string, database: Database = db) {
   return database
@@ -528,6 +521,7 @@ export async function getIssueStatusNameRowsForProject(projectId: string, databa
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
     .where(eq(issues.projectId, projectId));
 }
+
 
 /** The first issue id linked to a status (used to block status deletion), or null. */
 export async function getFirstIssueIdWithStatus(statusId: string, database: Database = db): Promise<string | null> {

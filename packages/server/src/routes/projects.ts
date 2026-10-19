@@ -69,17 +69,13 @@ const NEWLINE_RE = /[\r\n]/;
 // docker `--env-file` and shell-sourced, so keys must be valid shell identifiers.
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/**
- * Validate + normalize an incoming `servicesConfig` (from PATCH /api/projects/:id).
- * Returns the JSON string to persist (or null to clear), or an error string for a 422.
- * Mirrors how `symlinkDirs` is validated+serialized in project.service.updateProject.
- */
-function validateServicesConfig(
+type ServicesCfg = Record<string, unknown>;
+/** A validator returns an error string, or null when the field is acceptable. */
+type CfgCheck = (cfg: ServicesCfg) => string | null;
+
+function parseServicesConfigInput(
   value: unknown,
-): { ok: true; json: string | null } | { ok: false; error: string } {
-  if (value === null || value === undefined || value === "") {
-    return { ok: true, json: null };
-  }
+): { ok: true; cfg: ServicesCfg } | { ok: false; error: string } {
   let obj: unknown = value;
   if (typeof value === "string") {
     try {
@@ -91,84 +87,110 @@ function validateServicesConfig(
   if (typeof obj !== "object" || obj === null || Array.isArray(obj)) {
     return { ok: false, error: "servicesConfig must be an object" };
   }
-  const cfg = obj as Record<string, unknown>;
-  if (typeof cfg.enabled !== "boolean") {
-    return { ok: false, error: "servicesConfig.enabled must be a boolean" };
-  }
-  const enabled = cfg.enabled;
+  return { ok: true, cfg: obj as ServicesCfg };
+}
+
+const checkEnabledAndComposeFile: CfgCheck = (cfg) => {
+  if (typeof cfg.enabled !== "boolean") return "servicesConfig.enabled must be a boolean";
   const composeFile = cfg.composeFile;
-  if (enabled) {
+  if (cfg.enabled) {
     if (typeof composeFile !== "string" || composeFile.trim() === "") {
-      return { ok: false, error: "servicesConfig.composeFile must be a non-empty string when enabled" };
+      return "servicesConfig.composeFile must be a non-empty string when enabled";
     }
   } else if (composeFile !== undefined && typeof composeFile !== "string") {
-    return { ok: false, error: "servicesConfig.composeFile must be a string" };
+    return "servicesConfig.composeFile must be a string";
   }
   if (typeof composeFile === "string" && NEWLINE_RE.test(composeFile)) {
-    return { ok: false, error: "servicesConfig.composeFile must not contain newlines" };
+    return "servicesConfig.composeFile must not contain newlines";
   }
-  if (cfg.ports !== undefined) {
-    if (!Array.isArray(cfg.ports) || !cfg.ports.every((p) => typeof p === "string" && SERVICE_PORT_NAME_RE.test(p))) {
-      return { ok: false, error: "servicesConfig.ports must be an array of [a-zA-Z0-9_]+ names" };
-    }
-    // F7: names collapse to KANBAN_SVC_<UPPER>_PORT env vars — a case-insensitive
-    // collision (e.g. ["db","DB"]) would silently clobber one port. Reject it.
-    const portNames = cfg.ports as string[];
-    if (new Set(portNames.map((p) => p.toUpperCase())).size !== portNames.length) {
-      return { ok: false, error: "servicesConfig.ports names must be unique case-insensitively (they map to KANBAN_SVC_<UPPER>_PORT)" };
-    }
+  return null;
+};
+
+const checkPorts: CfgCheck = (cfg) => {
+  if (cfg.ports === undefined) return null;
+  if (!Array.isArray(cfg.ports) || !cfg.ports.every((p) => typeof p === "string" && SERVICE_PORT_NAME_RE.test(p))) {
+    return "servicesConfig.ports must be an array of [a-zA-Z0-9_]+ names";
   }
-  if (cfg.profiles !== undefined) {
-    if (!Array.isArray(cfg.profiles) || !cfg.profiles.every((p) => typeof p === "string")) {
-      return { ok: false, error: "servicesConfig.profiles must be an array of strings (compose profile names)" };
-    }
-    // Profile names go into COMPOSE_PROFILES='a,b' in the shell-sourced --env-file, so each
-    // must be shell-safe AND comma-free (comma is the profile separator). Reject at save.
-    const badProfile = (cfg.profiles as string[]).find(
-      (p) => p.trim() === "" || p.includes(",") || NEWLINE_RE.test(p) || p.includes("'"),
-    );
-    if (badProfile !== undefined) {
-      return { ok: false, error: `servicesConfig.profiles entry ${JSON.stringify(badProfile)} is invalid: profile names must be non-empty and contain no comma, CR/LF, or single quote (they are joined into COMPOSE_PROFILES in the shell-sourced --env-file)` };
-    }
+  // F7: names collapse to KANBAN_SVC_<UPPER>_PORT env vars — a case-insensitive
+  // collision (e.g. ["db","DB"]) would silently clobber one port. Reject it.
+  const portNames = cfg.ports as string[];
+  if (new Set(portNames.map((p) => p.toUpperCase())).size !== portNames.length) {
+    return "servicesConfig.ports names must be unique case-insensitively (they map to KANBAN_SVC_<UPPER>_PORT)";
   }
+  return null;
+};
+
+const checkProfiles: CfgCheck = (cfg) => {
+  if (cfg.profiles === undefined) return null;
+  if (!Array.isArray(cfg.profiles) || !cfg.profiles.every((p) => typeof p === "string")) {
+    return "servicesConfig.profiles must be an array of strings (compose profile names)";
+  }
+  // Profile names go into COMPOSE_PROFILES='a,b' in the shell-sourced --env-file, so each
+  // must be shell-safe AND comma-free (comma is the profile separator). Reject at save.
+  const badProfile = (cfg.profiles as string[]).find(
+    (p) => p.trim() === "" || p.includes(",") || NEWLINE_RE.test(p) || p.includes("'"),
+  );
+  if (badProfile !== undefined) {
+    return `servicesConfig.profiles entry ${JSON.stringify(badProfile)} is invalid: profile names must be non-empty and contain no comma, CR/LF, or single quote (they are joined into COMPOSE_PROFILES in the shell-sourced --env-file)`;
+  }
+  return null;
+};
+
+const checkComposeRepoAndTimeout: CfgCheck = (cfg) => {
   if (cfg.composeRepo !== undefined && cfg.composeRepo !== null && typeof cfg.composeRepo !== "string") {
-    return { ok: false, error: "servicesConfig.composeRepo must be a string or null" };
+    return "servicesConfig.composeRepo must be a string or null";
   }
   if (typeof cfg.composeRepo === "string" && NEWLINE_RE.test(cfg.composeRepo)) {
-    return { ok: false, error: "servicesConfig.composeRepo must not contain newlines" };
+    return "servicesConfig.composeRepo must not contain newlines";
   }
   // F8: 0 or negative would become "no timeout" and hang the `up -d --wait` indefinitely.
   if (cfg.readyTimeoutMs !== undefined && (typeof cfg.readyTimeoutMs !== "number" || !Number.isFinite(cfg.readyTimeoutMs) || cfg.readyTimeoutMs <= 0)) {
-    return { ok: false, error: "servicesConfig.readyTimeoutMs must be a finite number greater than 0" };
+    return "servicesConfig.readyTimeoutMs must be a finite number greater than 0";
   }
-  if (cfg.env !== undefined) {
-    if (
-      typeof cfg.env !== "object" ||
-      cfg.env === null ||
-      Array.isArray(cfg.env) ||
-      !Object.values(cfg.env).every((v) => typeof v === "string")
-    ) {
-      return { ok: false, error: "servicesConfig.env must be a record of strings" };
-    }
-    // F11: a newline in an env value injects extra lines into the generated env file.
-    if (Object.values(cfg.env).some((v) => NEWLINE_RE.test(v as string))) {
-      return { ok: false, error: "servicesConfig.env values must not contain CR/LF (they would inject extra lines into the generated .kanban/services.env)" };
-    }
-    // Mirror the env-writer constraints (isEnvLineSafe in workspace-services.service.ts):
-    // it DROPS entries with non-identifier keys or single-quoted values at provision
-    // time (values are emitted single-quoted). Reject at save time instead of silently
-    // losing the entry later.
-    const badEnvKey = Object.keys(cfg.env).find((k) => !ENV_KEY_RE.test(k));
-    if (badEnvKey !== undefined) {
-      return { ok: false, error: `servicesConfig.env key ${JSON.stringify(badEnvKey)} is invalid: keys must match ^[A-Za-z_][A-Za-z0-9_]*$ (the env file is shell-sourced, so keys must be valid shell identifiers)` };
-    }
-    const quotedEnvEntry = Object.entries(cfg.env).find(([, v]) => (v as string).includes("'"));
-    if (quotedEnvEntry !== undefined) {
-      return { ok: false, error: `servicesConfig.env value for ${JSON.stringify(quotedEnvEntry[0])} must not contain single quotes (values are emitted single-quoted in .kanban/services.env, which cannot represent a ' identically for docker --env-file AND shell sourcing)` };
-    }
+  return null;
+};
+
+const checkEnv: CfgCheck = (cfg) => {
+  if (cfg.env === undefined) return null;
+  if (
+    typeof cfg.env !== "object" ||
+    cfg.env === null ||
+    Array.isArray(cfg.env) ||
+    !Object.values(cfg.env).every((v) => typeof v === "string")
+  ) {
+    return "servicesConfig.env must be a record of strings";
   }
+  // F11: a newline in an env value injects extra lines into the generated env file.
+  if (Object.values(cfg.env).some((v) => NEWLINE_RE.test(v as string))) {
+    return "servicesConfig.env values must not contain CR/LF (they would inject extra lines into the generated .kanban/services.env)";
+  }
+  // Mirror the env-writer constraints (isEnvLineSafe in workspace-services.service.ts):
+  // it DROPS entries with non-identifier keys or single-quoted values at provision
+  // time (values are emitted single-quoted). Reject at save time instead of silently
+  // losing the entry later.
+  const badEnvKey = Object.keys(cfg.env).find((k) => !ENV_KEY_RE.test(k));
+  if (badEnvKey !== undefined) {
+    return `servicesConfig.env key ${JSON.stringify(badEnvKey)} is invalid: keys must match ^[A-Za-z_][A-Za-z0-9_]*$ (the env file is shell-sourced, so keys must be valid shell identifiers)`;
+  }
+  const quotedEnvEntry = Object.entries(cfg.env).find(([, v]) => (v as string).includes("'"));
+  if (quotedEnvEntry !== undefined) {
+    return `servicesConfig.env value for ${JSON.stringify(quotedEnvEntry[0])} must not contain single quotes (values are emitted single-quoted in .kanban/services.env, which cannot represent a ' identically for docker --env-file AND shell sourcing)`;
+  }
+  return null;
+};
+
+const SERVICES_CONFIG_CHECKS: readonly CfgCheck[] = [
+  checkEnabledAndComposeFile,
+  checkPorts,
+  checkProfiles,
+  checkComposeRepoAndTimeout,
+  checkEnv,
+];
+
+function normalizeServicesConfig(cfg: ServicesCfg): ServiceStackConfig {
+  const composeFile = cfg.composeFile;
   const normalized: ServiceStackConfig = {
-    enabled,
+    enabled: cfg.enabled as boolean,
     composeFile:
       typeof composeFile === "string" && composeFile.trim()
         ? composeFile.trim()
@@ -179,7 +201,27 @@ function validateServicesConfig(
   if (cfg.composeRepo !== undefined) normalized.composeRepo = cfg.composeRepo as string | null;
   if (cfg.readyTimeoutMs !== undefined) normalized.readyTimeoutMs = cfg.readyTimeoutMs as number;
   if (cfg.env !== undefined) normalized.env = cfg.env as Record<string, string>;
-  return { ok: true, json: JSON.stringify(normalized) };
+  return normalized;
+}
+
+/**
+ * Validate + normalize an incoming `servicesConfig` (from PATCH /api/projects/:id).
+ * Returns the JSON string to persist (or null to clear), or an error string for a 422.
+ * Mirrors how `symlinkDirs` is validated+serialized in project.service.updateProject.
+ */
+function validateServicesConfig(
+  value: unknown,
+): { ok: true; json: string | null } | { ok: false; error: string } {
+  if (value === null || value === undefined || value === "") {
+    return { ok: true, json: null };
+  }
+  const parsed = parseServicesConfigInput(value);
+  if (!parsed.ok) return parsed;
+  for (const check of SERVICES_CONFIG_CHECKS) {
+    const error = check(parsed.cfg);
+    if (error !== null) return { ok: false, error };
+  }
+  return { ok: true, json: JSON.stringify(normalizeServicesConfig(parsed.cfg)) };
 }
 
 /**

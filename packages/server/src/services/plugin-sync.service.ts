@@ -4,6 +4,7 @@ import {
   substitutePluginEnv,
   substitutePluginPlaceholders,
   type PluginManifest,
+  type PluginSyncConfigFieldType,
   type PluginSyncDef,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
@@ -37,6 +38,7 @@ export interface PluginSyncConfigFieldValue {
   label?: string;
   description?: string;
   required: boolean;
+  type: PluginSyncConfigFieldType;
   value: string;
 }
 
@@ -196,6 +198,7 @@ export function createPluginSyncOps(deps: {
         label: f.label,
         description: f.description,
         required: Boolean(f.required),
+        type: f.type ?? "text",
         value: values[f.key] ?? "",
       })),
       secrets: await resolveSecretPresence(sync, plugin.pluginId, projectId),

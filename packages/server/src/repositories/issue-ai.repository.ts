@@ -1,14 +1,19 @@
 import { eq, and, or, inArray, sql, desc } from "drizzle-orm";
-import { issues, projectStatuses, issueDependencies, agentSkills, tags, issueTags, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, issueDependencies, agentSkills, tags, issueTags, workflowNodes } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
-import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { getStatusIdsByName } from "./project-status.repository.js";
 import { getPreference as canonicalGetPreference } from "./preferences.repository.js";
 import { issueTextColumns } from "./projections.js";
 import { firstRow } from "../lib/first-row.js";
+
+// Decomposed (#1628): these moved to ./issue-ai-touched-files.repository.js; re-exported so import paths are unchanged.
+export { getIssueForTouchedFiles, updateIssueTouchedFiles, getIssuesTouchedFiles } from "./issue-ai-touched-files.repository.js";
+
+// Decomposed (#1628): these moved to ./issue-ai-contract.repository.js; re-exported so import paths are unchanged.
+export { getIssueTitleDescription, getCoupledEdges, getIssuesForContract, countOpenWorkspacesForIssues, setIssueStatus, appendIssueDescription, updateIssueTitleDescription, getProjectDependencyEdges, removeDependencyEdge } from "./issue-ai-contract.repository.js";
 
 export async function getIssueBasics(
   issueId: string,
@@ -23,6 +28,8 @@ export async function getIssueBasics(
   );
 }
 
+
+
 /** #502: one query, in project-status.repository. Kept as a named re-export so callers are unchanged. */
 export async function getTerminalStatusIds(
   projectId: string,
@@ -31,6 +38,8 @@ export async function getTerminalStatusIds(
 ): Promise<string[]> {
   return getStatusIdsByName(projectId, statusNames, database);
 }
+
+
 
 export async function getOpenIssuesWithNode(
   projectId: string,
@@ -48,6 +57,8 @@ export async function getOpenIssuesWithNode(
     .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
     .where(eq(issues.projectId, projectId));
 }
+
+
 
 export async function getSkillPrompt(
   skillName: string,
@@ -67,6 +78,8 @@ export async function getSkillPrompt(
   ))?.prompt ?? null;
 }
 
+
+
 export async function insertIssueDependency(
   values: {
     id: string;
@@ -79,6 +92,8 @@ export async function insertIssueDependency(
 ): Promise<void> {
   await database.insert(issueDependencies).values(values);
 }
+
+
 
 /**
  * All dependency edges between `issueId` and any of `otherIds`, in EITHER direction.
@@ -107,63 +122,14 @@ export async function getDependencyEdgesBetween(
   return rows as Array<{ issueId: string; dependsOnId: string; type: DependencyType }>;
 }
 
+
+
 /** #613: delegates to the canonical reader (which records the db:getPreference metric). */
 export async function getPreferenceValue(key: string, database: Database = db): Promise<string | null> {
   return canonicalGetPreference(key, database);
 }
 
-export async function getIssueForTouchedFiles(
-  issueId: string,
-  database: Database = db,
-) {
-  return firstRow(
-    database
-      .select({
-        id: issues.id,
-        title: issues.title,
-        description: issues.description,
-        projectId: issues.projectId,
-        touchedFilesJson: issues.touchedFilesJson,
-      })
-      .from(issues)
-      .where(eq(issues.id, issueId))
-      .limit(1)
-  );
-}
 
-export async function updateIssueTouchedFiles(
-  issueId: string,
-  touchedFilesJson: string,
-  database: Database = db,
-): Promise<void> {
-  await database
-    .update(issues)
-    .set({ touchedFilesJson })
-    .where(eq(issues.id, issueId));
-}
-
-export async function getIssuesTouchedFiles(
-  issueIds: string[],
-  database: Database = db,
-) {
-  return database
-    .select({ id: issues.id, touchedFilesJson: issues.touchedFilesJson })
-    .from(issues)
-    .where(inArray(issues.id, issueIds));
-}
-
-export async function getIssueTitleDescription(
-  issueId: string,
-  database: Database = db,
-) {
-  return firstRow(
-    database
-      .select({ title: issues.title, description: issues.description })
-      .from(issues)
-      .where(eq(issues.id, issueId))
-      .limit(1)
-  );
-}
 
 export async function getParentOfDependency(
   issueId: string,
@@ -175,6 +141,8 @@ export async function getParentOfDependency(
     .where(and(eq(issueDependencies.issueId, issueId), eq(issueDependencies.type, "parent_of")))
     .limit(1);
 }
+
+
 
 export async function getRecentIssuesWithNode(
   projectId: string,
@@ -195,6 +163,8 @@ export async function getRecentIssuesWithNode(
     .orderBy(desc(issues.updatedAt));
 }
 
+
+
 export async function getProjectNames(
   projectId: string,
   database: Database = db,
@@ -202,6 +172,8 @@ export async function getProjectNames(
   const project = await getProjectById(projectId, database);
   return project ? { name: project.name, repoName: project.repoName } : null;
 }
+
+
 
 export async function getStatusIdByName(
   projectId: string,
@@ -217,6 +189,8 @@ export async function getStatusIdByName(
   ))?.id ?? null;
 }
 
+
+
 export async function getTagByName(
   name: string,
   database: Database = db,
@@ -227,6 +201,8 @@ export async function getTagByName(
     .where(eq(tags.name, name))
     .limit(1);
 }
+
+
 
 export async function insertTag(
   values: {
@@ -241,6 +217,8 @@ export async function insertTag(
   await database.insert(tags).values(values).catch(() => {});
 }
 
+
+
 export async function getDefaultStatusId(
   projectId: string,
   database: Database = db,
@@ -254,6 +232,8 @@ export async function getDefaultStatusId(
       .limit(1)
   ))?.id ?? null;
 }
+
+
 
 export async function insertChildIssue(
   values: {
@@ -275,6 +255,8 @@ export async function insertChildIssue(
   await database.insert(issues).values(values);
 }
 
+
+
 export async function insertIssueDependencySafe(
   values: {
     id: string;
@@ -290,6 +272,8 @@ export async function insertIssueDependencySafe(
   } catch { /* skip duplicate/cycle */ }
 }
 
+
+
 export async function getIssueTagLink(
   issueId: string,
   tagId: string,
@@ -302,6 +286,8 @@ export async function getIssueTagLink(
     .limit(1);
 }
 
+
+
 export async function insertIssueTag(
   values: {
     id: string;
@@ -313,6 +299,8 @@ export async function insertIssueTag(
   await database.insert(issueTags).values(values).catch(() => {});
 }
 
+
+
 export async function updateIssueDescription(
   issueId: string,
   description: string,
@@ -322,120 +310,4 @@ export async function updateIssueDescription(
   await database.update(issues)
     .set({ description, updatedAt })
     .where(eq(issues.id, issueId));
-}
-
-/**
- * All `coupled_with` peer edges within a project, with both endpoints' issue numbers.
- * The contract step (#918) uses these to build connected coupled COMPONENTS — the
- * inverse view of the `parent_of`/`child_of` tree that `decomposeEpic` writes. Returns
- * only edges where both endpoints belong to `projectId`.
- */
-export async function getCoupledEdges(
-  projectId: string,
-  database: Database = db,
-): Promise<Array<{ issueId: string; dependsOnId: string }>> {
-  const rows = await database
-    .select({ issueId: issueDependencies.issueId, dependsOnId: issueDependencies.dependsOnId })
-    .from(issueDependencies)
-    .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
-    .where(and(eq(issueDependencies.type, "coupled_with"), eq(issues.projectId, projectId)));
-  // Keep only edges whose OTHER endpoint is also in this project (defensive — edges are
-  // never cross-project today, but the join above only constrains the `issueId` side).
-  if (rows.length === 0) return [];
-  const otherIds = [...new Set(rows.map((r) => r.dependsOnId))];
-  const inProject = new Set(
-    (await database.select({ id: issues.id }).from(issues)
-      .where(and(eq(issues.projectId, projectId), inArray(issues.id, otherIds)))).map((r) => r.id),
-  );
-  return rows.filter((r) => inProject.has(r.dependsOnId));
-}
-
-/** Title/description/status/number for a set of issues — the contract proposal's source bodies. */
-export async function getIssuesForContract(
-  issueIds: string[],
-  database: Database = db,
-): Promise<Array<{ id: string; issueNumber: number; title: string; description: string | null; statusId: string; projectId: string }>> {
-  if (issueIds.length === 0) return [];
-  const rows = await database
-    .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description, statusId: issues.statusId, projectId: issues.projectId })
-    .from(issues)
-    .where(inArray(issues.id, issueIds));
-  // issue_number is nullable in the schema but backfilled for every real issue
-  // (migration 0006); these are existing issues fetched by id, so it is non-null.
-  return rows.map((r) => ({ ...r, issueNumber: r.issueNumber! }));
-}
-
-/** Whether any of `issueIds` has an OPEN (non-closed) workspace — a contract must not absorb in-flight work. */
-export async function countOpenWorkspacesForIssues(
-  issueIds: string[],
-  database: Database = db,
-): Promise<number> {
-  if (issueIds.length === 0) return 0;
-  const rows = await database
-    .select({ id: workspaces.id })
-    .from(workspaces)
-    .where(and(inArray(workspaces.issueId, issueIds), sql`${workspaces.status} != 'closed'`));
-  return rows.length;
-}
-
-/** Move an issue to a status and stamp updatedAt — used to Cancel members absorbed by a contract. */
-export async function setIssueStatus(
-  issueId: string,
-  statusId: string,
-  updatedAt: string,
-  database: Database = db,
-): Promise<void> {
-  await transitionIssueStatus(database, issueId, statusId, { now: updatedAt });
-}
-
-/** Append text to an issue's description (e.g. the absorbed-into pointer). */
-export async function appendIssueDescription(
-  issueId: string,
-  suffix: string,
-  updatedAt: string,
-  database: Database = db,
-): Promise<void> {
-  const existing = await getIssueTitleDescription(issueId, database);
-  const next = existing?.description ? `${existing.description}\n\n${suffix}` : suffix;
-  await database.update(issues).set({ description: next, updatedAt }).where(eq(issues.id, issueId));
-}
-
-/** Set both title and description (the contract survivor takes the merged body). */
-export async function updateIssueTitleDescription(
-  issueId: string,
-  title: string,
-  description: string,
-  updatedAt: string,
-  database: Database = db,
-): Promise<void> {
-  await database.update(issues).set({ title, description, updatedAt }).where(eq(issues.id, issueId));
-}
-
-/** All dependency edges in a project (any type), as `{ from, to, type }` for the contraction planner. */
-export async function getProjectDependencyEdges(
-  projectId: string,
-  database: Database = db,
-): Promise<Array<{ from: string; to: string; type: DependencyType }>> {
-  const rows = await database
-    .select({ from: issueDependencies.issueId, to: issueDependencies.dependsOnId, type: issueDependencies.type })
-    .from(issueDependencies)
-    .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
-    .where(eq(issues.projectId, projectId));
-  return rows as Array<{ from: string; to: string; type: DependencyType }>;
-}
-
-/** Remove a specific dependency edge by its (issueId, dependsOnId, type) triple. */
-export async function removeDependencyEdge(
-  issueId: string,
-  dependsOnId: string,
-  type: DependencyType,
-  database: Database = db,
-): Promise<void> {
-  await database.delete(issueDependencies).where(
-    and(
-      eq(issueDependencies.issueId, issueId),
-      eq(issueDependencies.dependsOnId, dependsOnId),
-      eq(issueDependencies.type, type),
-    ),
-  );
 }

@@ -65,18 +65,19 @@ const BASELINE: Record<string, number> = {
   // workspace-crud/scorecard entries below, kept for the same reason.
   "mcp-server/src/tools/update-issue.ts::issues-opaque-set": 1,
   "server/src/repositories/issue-service.repository.ts::issues-opaque-set": 2,
-  "server/src/repositories/issue-service.repository.ts::issues-statusId": 1,
   // Bulk multi-row `update(workspaces).set({status:"closed",...}).where(status != 'closed')`
   // across every open workspace of one issue — `setWorkspaceStatus` operates on a single
   // workspaceId, so this doesn't fit the authority's signature without an extra
   // select-then-loop. Left grandfathered; #967 migrated every single-row raw writer.
   "server/src/repositories/issue-service.repository.ts::workspaces-status": 1,
+  "server/src/repositories/issue-service-archive.repository.ts::issues-statusId": 1,
   "server/src/repositories/project-registration.repository.ts::issues-statusId": 1,
   // `setWorkspaceWorkingDir` (workingDir/baseBranch only) + the non-status branch of
   // `applyWorkspaceUpdates` (#967 routes the status-carrying branch through
   // `setWorkspaceStatus`) — both provably carry no `status` column; the opaque-`.set(var)`
   // heuristic can't see that statically, so they stay grandfathered rather than migrated.
-  "server/src/repositories/workspace-crud.repository.ts::workspaces-opaque-set": 2,
+  "server/src/repositories/workspace-crud.repository.ts::workspaces-opaque-set": 1,
+  "server/src/repositories/workspace-crud-maintenance.repository.ts::workspaces-opaque-set": 1,
   // `workspace-scorecard.repository.ts::workspaces-opaque-set` is GONE, not zeroed.
   // `persistScorecard` was a provable non-status write (`{scorecardScore, scorecardJson,
   // scorecardComputedAt}`) that only the opaque-`.set(var)` heuristic flagged; #815's
