@@ -57,6 +57,15 @@ export function failureRegisterPath(stateDir) {
   return join(stateDir, "failure-register.json");
 }
 
+/** What push last saw of the board (statuses, comments), so it can diff out new changes (#1623). */
+export function boardSnapshotPath(stateDir) {
+  return join(stateDir, "board-snapshot.json");
+}
+
+export function readBoardSnapshot(stateDir) {
+  return readJsonFile(boardSnapshotPath(stateDir), null);
+}
+
 export function readPullState(stateDir) {
   return readJsonFile(pullStatePath(stateDir), { issues: {} });
 }

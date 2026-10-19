@@ -52,6 +52,9 @@ export function createDefaultBoardFixtureFetch(state = createBoardFixtureState()
       Object.assign(issue, body, { updatedAt: new Date().toISOString() });
       return jsonResponse(200, issue);
     }
+    if (method === "GET" && /^\/api\/issues\/[^/]+\/comments$/.test(path)) {
+      return jsonResponse(200, { comments: [] });
+    }
     if (method === "GET" && path === "/api/tags") {
       return jsonResponse(200, state.tags);
     }
