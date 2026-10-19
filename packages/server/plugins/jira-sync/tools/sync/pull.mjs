@@ -90,6 +90,7 @@ async function main() {
       knownState,
       dryRun,
       pendingWritebackKeys: new Set(Object.values(writebacks.keys)),
+      deletedStatusName: process.env.JIRA_SYNC_DELETED_STATUS || undefined,
     });
   } catch (err) {
     return { ok: false, step: "sync", reason: err.message, code: err.code ?? null, retryable: err.retryable ?? false };

@@ -3,8 +3,21 @@
 // assignee -> tag. Pure (no fetch, no fs) so it is trivially unit-testable and so a
 // later push half (#1079) can import just this, not the rest of the pull machinery.
 
+import { adfToMarkdown } from "./adf.mjs";
+
 /** The Jira fields a pull needs to fetch to populate every mapped board field. */
-export const FIELDS = ["summary", "description", "status", "priority", "labels", "assignee", "updated"];
+export const FIELDS = [
+  "summary",
+  "description",
+  "status",
+  "priority",
+  "labels",
+  "assignee",
+  "updated",
+  "issuetype",
+  "parent",
+  "comment",
+];
 
 // Mirrors packages/shared/src/lib/issue-priority.ts's canonical vocabulary
 // (critical/high/medium/low). Duplicated rather than imported: this plugin is a
@@ -55,20 +68,28 @@ export function resolveBoardStatusId(statusCategoryKey, boardStatuses) {
   return fallback ? fallback.id : null;
 }
 
-/** Best-effort plain text out of a Jira Cloud v3 description (plain string or ADF). */
-function plainTextFromDescription(description) {
-  if (description == null) return null;
-  if (typeof description === "string") return description;
-  if (typeof description === "object" && Array.isArray(description.content)) {
-    return adfToPlainText(description).trim();
-  }
-  return null;
+/** Description as Markdown (#1624): plain strings pass through, ADF is converted. */
+function markdownFromDescription(description) {
+  return adfToMarkdown(description ?? null);
 }
 
-function adfToPlainText(node) {
-  if (node.type === "text") return node.text ?? "";
-  const children = Array.isArray(node.content) ? node.content.map(adfToPlainText).join("") : "";
-  return node.type === "paragraph" ? `${children}\n\n` : children;
+// Board issue types are task|bug|feature|chore; `epic` is a TAG there, not a type.
+const JIRA_TYPE_TO_BOARD = {
+  bug: "bug",
+  story: "feature",
+  "new feature": "feature",
+  improvement: "feature",
+  epic: "feature",
+  task: "task",
+  "sub-task": "task",
+  subtask: "task",
+};
+
+/** Maps a Jira issue type name to a board `{ type, tags }`; unknown names fall back to `task`. */
+export function mapJiraIssueType(typeName) {
+  const key = String(typeName ?? "").trim().toLowerCase();
+  const type = JIRA_TYPE_TO_BOARD[key] ?? "task";
+  return { type, tags: key === "epic" ? ["epic"] : [] };
 }
 
 /**
@@ -86,11 +107,40 @@ export function mapJiraIssueToBoardFields(jiraIssue, { siteUrl } = {}) {
   const assigneeName = fields.assignee?.displayName ?? fields.assignee?.emailAddress ?? null;
   const tags = assigneeName ? [...labels, `assignee:${assigneeName}`] : [...labels];
 
+  const { type, tags: typeTags } = mapJiraIssueType(fields.issuetype?.name);
+  tags.push(...typeTags);
+
+  // Parent/epic (#1624): an Epic parent becomes `epic:<KEY>`, any other parent
+  // `parent:<KEY>`; the parent key is also written into the description.
+  const parent = fields.parent ?? null;
+  let parentLine = null;
+  if (parent?.key) {
+    const parentIsEpic = String(parent.fields?.issuetype?.name ?? "").toLowerCase() === "epic";
+    tags.push(`${parentIsEpic ? "epic" : "parent"}:${parent.key}`);
+    const parentSummary = parent.fields?.summary;
+    parentLine = `**Parent:** ${parent.key}${parentSummary ? ` (${parentSummary})` : ""}`;
+  }
+  const body = markdownFromDescription(fields.description ?? null);
+  const description = parentLine ? (body ? `${parentLine}
+
+${body}` : parentLine) : body;
+
+  const comments = (fields.comment?.comments ?? [])
+    .map((c) => ({
+      id: String(c.id),
+      author: c.author?.displayName ?? c.author?.emailAddress ?? "unknown",
+      created: c.created ?? null,
+      body: adfToMarkdown(c.body ?? null) ?? "",
+    }))
+    .filter((c) => c.body !== "");
+
   return {
     externalKey: jiraIssue.key,
     externalUrl: siteUrl ? `${siteUrl.replace(/\/+$/, "")}/browse/${jiraIssue.key}` : null,
     title: fields.summary ?? jiraIssue.key,
-    description: plainTextFromDescription(fields.description ?? null),
+    description,
+    type,
+    comments,
     priority: mapJiraPriority(fields.priority?.name ?? null),
     tags,
     statusCategoryKey: fields.status?.statusCategory?.key ?? null,

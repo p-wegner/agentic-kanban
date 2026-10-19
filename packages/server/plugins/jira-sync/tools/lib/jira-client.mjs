@@ -3,6 +3,7 @@
 // no install step. See tools/lib/fixtures.mjs for the offline mode.
 
 import { buildAuthHeader } from "./auth.mjs";
+import { markdownToAdf } from "./adf.mjs";
 import { normalizeHttpError, normalizeNetworkError } from "./errors.mjs";
 
 const DEFAULT_MAX_RETRIES = 3;
@@ -181,9 +182,9 @@ export class JiraClient {
     });
   }
 
-  /** `body` may be plain text (wrapped into ADF) or an already-ADF document. */
+  /** `body` may be Markdown (converted to ADF) or an already-ADF document. */
   async addComment(issueIdOrKey, body) {
-    const adf = typeof body === "string" ? textToAdf(body) : body;
+    const adf = typeof body === "string" ? markdownToAdf(body) : body;
     return this.request(`/rest/api/3/issue/${encodeURIComponent(issueIdOrKey)}/comment`, {
       method: "POST",
       body: { body: adf },

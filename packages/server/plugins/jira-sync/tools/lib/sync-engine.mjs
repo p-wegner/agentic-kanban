@@ -6,6 +6,13 @@
 // our own last write is reported as `conflicted` rather than silently overwritten.
 
 import { FIELDS, mapJiraIssueToBoardFields, resolveBoardStatusId } from "./field-map.mjs";
+import { hasAttributionMarker } from "./comment-marker.mjs";
+
+// Markers (#1624) for board issues whose Jira twin vanished. Each also carries the
+// board's own `no-auto-start` tag so the unchanged autostart engines skip the issue.
+export const DELETED_TAG = "jira:deleted";
+export const OUT_OF_SCOPE_TAG = "jira:out-of-scope";
+const NO_AUTO_START_TAG = "no-auto-start";
 
 /**
  * @param {import("./jira-client.mjs").JiraClient} client
@@ -17,9 +24,14 @@ import { FIELDS, mapJiraIssueToBoardFields, resolveBoardStatusId } from "./field
  *   knownState: { issues: Record<string, { updated: string, boardIssueId?: string, boardUpdatedAt?: string }> },
  *   dryRun?: boolean,
  *   pendingWritebackKeys?: Set<string>, // keys push created whose board writeback has not landed yet
+ *   deletedStatusName?: string,
  * }} opts
  */
-export async function runInboundSync(client, boardClient, { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set() }) {
+export async function runInboundSync(
+  client,
+  boardClient,
+  { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set(), deletedStatusName = "Cancelled" },
+) {
   // dryRun only suppresses WRITES (create/update/tag calls below) — these three are
   // reads, and skipping them would make every issue look brand-new (boardIssuesByKey
   // empty), so a dry run could never report skip/update/conflict, only create.
@@ -34,6 +46,7 @@ export async function runInboundSync(client, boardClient, { jql, siteUrl, projec
   let updated = 0;
   let skipped = 0;
   let conflicted = 0;
+  let commentsImported = 0;
 
   for await (const jiraIssue of client.searchAll(jql, { fields: FIELDS })) {
     seenKeys.add(jiraIssue.key);
@@ -57,16 +70,22 @@ export async function runInboundSync(client, boardClient, { jql, siteUrl, projec
           title: mapped.title,
           description: mapped.description ?? undefined,
           priority: mapped.priority,
+          type: mapped.type,
           statusId: statusId ?? undefined,
           externalKey: mapped.externalKey,
           externalUrl: mapped.externalUrl,
         });
         await attachMissingTags(boardClient, tagCache, created_.id, mapped.tags, []);
+        const imported = await importComments(boardClient, created_.id, mapped.comments, known?.commentIds);
+        commentsImported += imported.count;
         nextState.issues[jiraIssue.key] = {
           updated: mapped.jiraUpdated,
           boardIssueId: created_.id,
           boardUpdatedAt: created_.updatedAt,
+          commentIds: imported.commentIds,
         };
+      } else {
+        commentsImported += newComments(mapped.comments, known?.commentIds).length;
       }
       created++;
       details.push({ key: jiraIssue.key, action: "create" });
@@ -86,6 +105,14 @@ export async function runInboundSync(client, boardClient, { jql, siteUrl, projec
     // overwrite either, so that also counts as locally edited rather than a blind write.
     const locallyEdited = known == null || boardIssue.updatedAt !== known.boardUpdatedAt;
     if (locallyEdited) {
+      // Comments are append-only on the board, so importing them can't clobber local edits.
+      if (!dryRun) {
+        const imported = await importComments(boardClient, boardIssue.id, mapped.comments, known?.commentIds);
+        commentsImported += imported.count;
+        if (known) nextState.issues[jiraIssue.key] = { ...known, commentIds: imported.commentIds };
+      } else {
+        commentsImported += newComments(mapped.comments, known?.commentIds).length;
+      }
       conflicted++;
       details.push({ key: jiraIssue.key, action: "conflict", reason: "board issue changed locally since the last sync; not overwritten" });
       continue;
@@ -97,25 +124,106 @@ export async function runInboundSync(client, boardClient, { jql, siteUrl, projec
         title: mapped.title,
         description: mapped.description ?? undefined,
         priority: mapped.priority,
+        type: mapped.type,
         statusId: statusId ?? undefined,
       });
       const existingTags = await boardClient.listIssueTags(boardIssue.id);
       await attachMissingTags(boardClient, tagCache, boardIssue.id, mapped.tags, existingTags);
+      const imported = await importComments(boardClient, boardIssue.id, mapped.comments, known?.commentIds);
+      commentsImported += imported.count;
       nextState.issues[jiraIssue.key] = {
         updated: mapped.jiraUpdated,
         boardIssueId: boardIssue.id,
         boardUpdatedAt: updated_.updatedAt,
+        commentIds: imported.commentIds,
       };
+    } else {
+      commentsImported += newComments(mapped.comments, known?.commentIds).length;
     }
     updated++;
     details.push({ key: jiraIssue.key, action: "update" });
   }
 
   // Deletions/moves out of JQL scope: a key we've synced before but did not see this
-  // run. Reported, never deleted from the board (#1078's explicit requirement).
+  // run. Never hard-deleted from the board (#1078); since #1624 each is classified
+  // (deleted = `GET issue` 404, otherwise out of scope), marked with a tag, and a
+  // deleted one is moved out of the startable columns.
   const reportedOutOfScope = Object.keys(knownState.issues).filter((key) => !seenKeys.has(key));
+  const outOfScope = [];
+  const deletedStatus = boardStatuses.find((st) => st.name.toLowerCase() === String(deletedStatusName).toLowerCase());
+  for (const key of reportedOutOfScope) {
+    const reason = await classifyMissingIssue(client, key);
+    const entry = { key, reason };
+    outOfScope.push(entry);
+    const boardIssue = boardIssuesByKey.get(key);
+    if (!boardIssue || reason === "unknown" || dryRun) continue;
+    const tag = reason === "deleted" ? DELETED_TAG : OUT_OF_SCOPE_TAG;
+    const existingTags = await boardClient.listIssueTags(boardIssue.id);
+    await attachMissingTags(boardClient, tagCache, boardIssue.id, [tag, NO_AUTO_START_TAG], existingTags);
+    if (reason === "deleted" && deletedStatus && boardIssue.statusId !== deletedStatus.id) {
+      const moved = await boardClient.updateIssue(boardIssue.id, { statusId: deletedStatus.id });
+      entry.movedTo = deletedStatus.name;
+      const prior = nextState.issues[key];
+      if (prior) nextState.issues[key] = { ...prior, boardUpdatedAt: moved.updatedAt };
+    }
+  }
 
-  return { jql, total: details.length, created, updated, skipped, conflicted, reportedOutOfScope, details, nextState };
+  return {
+    jql,
+    total: details.length,
+    created,
+    updated,
+    skipped,
+    conflicted,
+    commentsImported,
+    reportedOutOfScope,
+    outOfScope,
+    details,
+    nextState,
+  };
+}
+
+/** `deleted` (Jira answers 404), `out-of-scope` (still exists), or `unknown` (lookup failed). */
+async function classifyMissingIssue(client, key) {
+  try {
+    await client.getIssue(key, { fields: ["summary"] });
+    return "out-of-scope";
+  } catch (err) {
+    return err?.status === 404 ? "deleted" : "unknown";
+  }
+}
+
+function newComments(comments, importedIds = []) {
+  const seen = new Set(importedIds);
+  return comments.filter((c) => !seen.has(c.id) && !hasAttributionMarker(c.body));
+}
+
+/**
+ * Pulls Jira comments onto the board issue: attributed, de-duplicated (by Jira comment
+ * id, held in sync state AND in each imported comment's payload so a lost state file
+ * can't double-import), and skipping comments that carry the push marker.
+ */
+async function importComments(boardClient, issueId, comments, importedIds = []) {
+  const commentIds = new Set(importedIds);
+  const existing = await boardClient.listComments(issueId);
+  for (const c of existing) {
+    if (c.payload?.jiraCommentId) commentIds.add(String(c.payload.jiraCommentId));
+  }
+  let count = 0;
+  for (const comment of comments) {
+    if (commentIds.has(comment.id)) continue;
+    commentIds.add(comment.id); // marker-carrying echoes are recorded too, never imported
+    if (hasAttributionMarker(comment.body)) continue;
+    const when = comment.created ? ` (${comment.created})` : "";
+    await boardClient.addComment(issueId, {
+      kind: "note",
+      author: "system",
+      body: `**Jira comment by ${comment.author}${when}:**\n\n${comment.body}`,
+      payload: { origin: "jira", jiraCommentId: comment.id },
+    });
+    count++;
+  }
+  return { count, commentIds: [...commentIds] };
 }
 
 /** Ensures each of `tagNames` exists (creating missing ones) and is attached to `issueId`. */
