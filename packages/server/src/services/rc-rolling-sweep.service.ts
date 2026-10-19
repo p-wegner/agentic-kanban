@@ -21,6 +21,7 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import type { RcSweepMode } from "@agentic-kanban/shared/types";
 import type { Database } from "../db/index.js";
@@ -284,7 +285,7 @@ export function createRollingRcSweepDeps(database: Database, listProjects: Rolli
     },
     readMasterSha: async (project) => {
       const r = await git(project, ["rev-parse", await baseBranch(project)]);
-      return r.error || r.code !== 0 ? null : r.stdout.trim() || null;
+      return r.error || !execSucceeded(r) ? null : r.stdout.trim() || null;
     },
     listRcBranches: async (project) => {
       const r = await git(project, ["for-each-ref", "--format=%(refname:short)", "refs/heads/rc/"]);
@@ -292,18 +293,18 @@ export function createRollingRcSweepDeps(database: Database, listProjects: Rolli
     },
     readBranchSha: async (project, branch) => {
       const r = await git(project, ["rev-parse", branch]);
-      return r.error || r.code !== 0 ? null : r.stdout.trim() || null;
+      return r.error || !execSucceeded(r) ? null : r.stdout.trim() || null;
     },
-    isAncestor: async (project, ancestor, descendant) => (await git(project, ["merge-base", "--is-ancestor", ancestor, descendant])).code === 0,
+    isAncestor: async (project, ancestor, descendant) => execSucceeded(await git(project, ["merge-base", "--is-ancestor", ancestor, descendant])),
     isShipped: async (project, sha) => {
       const stable = resolveStableCheckoutFor(project.repoPath);
       const head = await gitExec(["rev-parse", "HEAD"], { cwd: stable });
-      if (head.error || head.code !== 0 || !head.stdout.trim()) return false;
-      return (await git(project, ["merge-base", "--is-ancestor", sha, head.stdout.trim()])).code === 0;
+      if (head.error || !execSucceeded(head) || !head.stdout.trim()) return false;
+      return execSucceeded(await git(project, ["merge-base", "--is-ancestor", sha, head.stdout.trim()]));
     },
     pointBranch: async (project, branch, sha, force) => {
       const r = await git(project, ["branch", ...(force ? ["-f"] : []), branch, sha]);
-      if (r.error || r.code !== 0) throw new Error(`git branch ${branch} ${sha} failed: ${r.stderr || r.error?.message}`);
+      if (r.error || !execSucceeded(r)) throw new Error(`git branch ${branch} ${sha} failed: ${r.stderr || r.error?.message}`);
     },
     readState: (project) => readRcState(resolveStableCheckoutFor(project.repoPath)),
     writeState: (project, state) => {
