@@ -45,10 +45,10 @@ export function createScriptedFetch(steps) {
 export function createDefaultFixtureFetch() {
   return createScriptedFetch([
     {
-      match: (url, init) => init?.method === "POST" && url.includes("/rest/api/3/search"),
+      match: (url, init) => init?.method === "POST" && url.includes("/rest/api/3/search/jql"),
       respond: (url, init) => {
         const body = JSON.parse(init.body);
-        const page = body.startAt >= 2 ? loadFixture("search-page-2") : loadFixture("search-page-1");
+        const page = body.nextPageToken === "tok-page-2" ? loadFixture("search-page-2") : loadFixture("search-page-1");
         return { status: 200, body: page };
       },
     },
