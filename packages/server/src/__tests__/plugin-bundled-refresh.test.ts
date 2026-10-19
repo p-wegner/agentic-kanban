@@ -1,3 +1,4 @@
+// @gate:always-run when:packages/server/plugins/jira-sync/kanban-plugin.json,packages/server/src/services/plugin-lifecycle.service.ts
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
@@ -48,12 +49,12 @@ describe("bundled plugin manifest refresh + sync scaffold (#1630)", () => {
   });
 
   it("startup refreshes a bundled plugin whose manifest file changed, and leaves others alone", async () => {
-    const bundledRoot = makeTempDir("plugin-bundled-root-");
+    const bundledRoot = makeTempDir("ak-plugin-bundled-root-");
     process.env.AGENTIC_KANBAN_BUNDLED_PLUGINS_DIR = bundledRoot;
     const bundled = join(bundledRoot, "demo-sync");
     mkdirSync(bundled);
     writeManifest(bundled, { sync: SYNC });
-    const outside = makeTempDir("plugin-outside-");
+    const outside = makeTempDir("ak-plugin-outside-");
     writeFileSync(join(outside, "kanban-plugin.json"), JSON.stringify({ id: "outside", name: "Outside", version: "1.0.0" }));
 
     const service = createPluginService({ database: db as unknown as Database });
@@ -78,10 +79,10 @@ describe("bundled plugin manifest refresh + sync scaffold (#1630)", () => {
   });
 
   it("enable on a sync plugin with settings fields returns no placeholder warning", async () => {
-    const dir = makeTempDir("plugin-sync-enable-");
+    const dir = makeTempDir("ak-plugin-sync-enable-");
     writeManifest(dir, { sync: SYNC, scaffold: { profileTemplate: "profile-template.md", targetPath: "docs/demo/_profile.md" } });
     writeFileSync(join(dir, "profile-template.md"), "# Profile\n\nProject key: TODO: e.g. ENG\n");
-    const parent = makeTempDir("plugin-sync-parent-");
+    const parent = makeTempDir("ak-plugin-sync-parent-");
     const repo = join(parent, "product-repo");
     mkdirSync(repo);
     gitExecSync(["init"], { cwd: repo });
