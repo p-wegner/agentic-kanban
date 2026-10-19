@@ -52,7 +52,6 @@ function fakeBoard(opts: { mode?: RcSweepMode; masterSha?: string } = {}) {
       board.probeInFlight = true;
       return { started: true, reason: "interval_elapsed" };
     },
-    dateStamp: "20261019",
     get nowMs() { return board.nowMs; },
   };
   return { board, deps };

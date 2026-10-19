@@ -32,7 +32,7 @@ describe("scaffold gate vs. complete Sync settings (#1635)", () => {
   });
 
   it("requireScaffoldReady refuses TODOs unless the settings are complete", async () => {
-    const repo = mkdtempSync(join(tmpdir(), "scaf-"));
+    const repo = mkdtempSync(join(tmpdir(), "ak-scaf-"));
     try {
       mkdirSync(join(repo, "docs/jira-sync"), { recursive: true });
       writeFileSync(join(repo, "docs/jira-sync/_profile.md"), "## Site\n\nTODO: url\n");

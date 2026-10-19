@@ -148,7 +148,6 @@ export interface RollingRcSweepDeps {
   readLatestRcHealth: (projectId: string, branch: string) => Promise<RollingRcHealthRow | null>;
   /** Start a background sweep of the branch; true when one actually started. */
   requestSweep: (projectId: string, branch: string) => Promise<{ started: boolean; reason: string }>;
-  dateStamp?: string;
   nowMs?: number;
 }
 
@@ -224,7 +223,7 @@ async function tickProject(project: RollingRcProject, deps: RollingRcSweepDeps, 
   let branch: string;
   let sha: string;
   if (decision.action === "cut") {
-    branch = nextRcBranch(deps.dateStamp ?? stamp(nowMs), existing);
+    branch = nextRcBranch(stamp(nowMs), existing);
     sha = decision.sha;
     await deps.pointBranch(project, branch, sha, false);
     if (decision.abandon) state = upsertRcCandidate(state, decision.abandon, { state: "abandoned", note: "superseded by the rolling rc sweep (#1631)" }, at);

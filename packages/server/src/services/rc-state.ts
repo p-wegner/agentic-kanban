@@ -118,15 +118,15 @@ export function upsertRcCandidate(
   state: RcStateFile,
   branch: string,
   patch: Partial<Omit<RcCandidate, "branch">>,
-  atIso: string = new Date().toISOString(),
+  now: string = new Date().toISOString(),
 ): RcStateFile {
   const existing = findRcCandidate(state, branch);
   const next: RcCandidate = {
     branch,
     sha: existing?.sha ?? null,
     state: existing?.state ?? "cut",
-    cutAt: existing?.cutAt ?? atIso,
-    updatedAt: atIso,
+    cutAt: existing?.cutAt ?? now,
+    updatedAt: now,
     tag: existing?.tag ?? null,
     failedSuites: existing?.failedSuites ?? [],
     note: existing?.note ?? null,

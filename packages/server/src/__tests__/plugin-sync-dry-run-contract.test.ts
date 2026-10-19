@@ -1,3 +1,4 @@
+// @gate:always-run when:packages/server/plugins/jira-sync/**,packages/server/src/services/plugin-sync.service.ts - spawns the real jira-sync plugin scripts, invisible to the import graph
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -22,7 +23,7 @@ const SECRETS = ["JIRA_API_TOKEN", "JIRA_EMAIL"];
 const tempDirs: string[] = [];
 
 function tmp(prefix: string): string {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+  const dir = mkdtempSync(join(tmpdir(), `ak-${prefix}`));
   tempDirs.push(dir);
   return dir;
 }
@@ -39,7 +40,7 @@ describe("plugin sync dry-run contract (#1634)", () => {
   beforeEach(async () => {
     db = createTestDb().db;
     service = createPluginService({ database: db as unknown as Database });
-    const parent = tmp("ak-dryrun-contract-");
+    const parent = tmp("dryrun-contract-");
     repo = join(parent, "product-repo");
     mkdirSync(repo, { recursive: true });
     gitExecSync(["init"], { cwd: repo });
