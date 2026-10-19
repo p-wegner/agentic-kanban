@@ -1,5 +1,5 @@
 // Trailer + commit message + landing of a merge train, split out of merge-train.service.ts (#1605); re-exported there.
-import { isAncestor, mergeBranch, revParse } from "@agentic-kanban/shared/lib/git-service";
+import { getCurrentBranch, getUncommittedTrackedChanges, isAncestor, mergeBranch, revParse } from "@agentic-kanban/shared/lib/git-service";
 import { assertTrainPreservesAncestry, parentTrainLabel, trainRefName, type TrainMember } from "./merge-train-assembly.js";
 
 /** The structural trailer a landed train's merge commit carries — see {@link buildMergeTrainCommitMessage}. */
@@ -74,6 +74,44 @@ export function buildMergeTrainCommitMessage(args: {
   return [subject, ...body].join("\n");
 }
 
+export interface DirtyBaseWaitOptions {
+  /** Give up (and throw) after this long. Default 10 min. */
+  maxWaitMs?: number;
+  pollMs?: number;
+  /** One ATTENTION line after this long. Default 2 min. */
+  attentionAfterMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+  log?: (message: string) => void;
+}
+
+/**
+ * #1621 - a dirty main checkout at landing time is an infra hold, not a verdict on the train:
+ * wait (bounded) for it to clear instead of letting `mergeBranch` throw and the green train be
+ * discarded. Line-ending-only changes never count (see `getUncommittedTrackedChanges`).
+ */
+async function waitForCleanBase(repoPath: string, baseBranch: string, opts: DirtyBaseWaitOptions = {}): Promise<void> {
+  const { maxWaitMs = 10 * 60_000, pollMs = 15_000, attentionAfterMs = 2 * 60_000 } = opts;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const log = opts.log ?? ((m: string) => console.log(`[merge-train] ${m}`));
+  if ((await getCurrentBranch(repoPath).catch(() => "")) !== baseBranch) return;
+  let waited = 0;
+  let announced = false;
+  for (;;) {
+    const dirty = await getUncommittedTrackedChanges(repoPath);
+    if (dirty.length === 0) return;
+    const names = dirty.slice(0, 5).map((l) => l.replace(/^\S+\s+/, "")).join(", ");
+    if (waited >= maxWaitMs) {
+      throw new Error(`landing held: main checkout has uncommitted ${names} (waited ${Math.round(waited / 1000)}s); the train ref is kept`);
+    }
+    if (!announced && waited >= attentionAfterMs) {
+      announced = true;
+      log(`ATTENTION landing held: main checkout has uncommitted ${names}`);
+    }
+    await sleep(pollMs);
+    waited += pollMs;
+  }
+}
+
 /**
  * Land an assembled, GATED train onto the base branch.
  *
@@ -88,6 +126,7 @@ export function buildMergeTrainCommitMessage(args: {
  * `Merge branch '<trainRef>'`.
  */
 export async function landMergeTrain(args: {
+  dirtyBase?: DirtyBaseWaitOptions;
   repoPath: string;
   baseBranch: string;
   trainRef: string;
@@ -100,6 +139,7 @@ export async function landMergeTrain(args: {
 }): Promise<{ mergeSha: string; mergeMessage: string }> {
   const { repoPath, baseBranch, trainRef, trainSha, baseSha, included, label, evidence } = args;
   if (included.length === 0) throw new Error(`[merge-train] refusing to land empty train ${trainRef}`);
+  await waitForCleanBase(repoPath, baseBranch, args.dirtyBase);
 
   const currentBase = await revParse(repoPath, baseBranch);
   if (currentBase !== baseSha) {
