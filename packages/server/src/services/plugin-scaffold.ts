@@ -61,7 +61,10 @@ export async function fanOutScaffold(
   writeFileSync(target, content, "utf8");
   report.scaffoldWritten = true;
   report.scaffoldPlaceholders = countScaffoldPlaceholders(content);
-  if (report.scaffoldPlaceholders > 0) {
+  // #1630: a sync plugin with settings fields is configured through those (and the secrets), so
+  // its profile is optional documentation, not a precondition worth a warning on every enable.
+  const settingsDriven = (plugin.manifest.sync?.config?.length ?? 0) > 0;
+  if (report.scaffoldPlaceholders > 0 && !settingsDriven) {
     report.warnings.push(
       `scaffold written — ${report.scaffoldPlaceholders} placeholder${report.scaffoldPlaceholders === 1 ? "" : "s"} `
       + `need filling in ${scaffold.targetPath} before this plugin's scripts/loops will run`,

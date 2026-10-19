@@ -55,8 +55,8 @@ export interface PluginSyncRunSummary {
     outOfScope?: number;
   };
   issues?: Array<{ externalKey: string; externalUrl?: string; localIssueNumber?: number; status?: string }>;
-  conflicts?: Array<{ externalKey: string; reason: string; externalUrl?: string }>;
-  failures?: Array<{ externalKey: string; reason: string; kind?: string; externalUrl?: string }>;
+  conflicts?: Array<{ externalKey: string; reason: string; externalUrl?: string; localIssueNumber?: number }>;
+  failures?: Array<{ externalKey: string; reason: string; kind?: string; externalUrl?: string; localIssueNumber?: number }>;
 }
 
 export interface PluginSyncRunRecord {

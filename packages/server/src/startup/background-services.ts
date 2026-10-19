@@ -108,6 +108,10 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
       // invokes the same service function the POST /api/scheduled-runs/:id/run route uses.
       const workspaceService = createWorkspaceService({ database: db, getSessionManager, boardEvents });
       const scheduledRunService = createScheduledRunService({ database: db, createWorkspace: workspaceService.createWorkspace });
+      // #1630 — a promote ships new bundled-plugin code with a stale cached manifest; refresh once at boot.
+      void getPluginService(db).refreshBundledPlugins()
+        .then((ids) => { if (ids.length > 0) console.log(`[plugins] refreshed bundled plugin manifest(s): ${ids.join(", ")}`); })
+        .catch((err) => console.warn("[plugins] bundled manifest refresh failed (non-fatal):", err));
       setupScheduledTasks({
         runScheduledRun: (id, triggeredBy) => scheduledRunService.run(id, triggeredBy),
         // #1625 — scheduled plugin syncs (pull/push every N minutes, per project).

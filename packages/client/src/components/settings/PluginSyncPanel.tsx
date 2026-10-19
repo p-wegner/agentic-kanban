@@ -9,11 +9,49 @@ type Props = { pluginRowId: string; projectId: string };
 const BUTTON_CLASS =
   "text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50";
 
-function scheduleLabel(minutes: number): string {
-  return minutes > 0 ? `every ${minutes} min` : "off";
+/** The scheduler ticks once a minute and a run is due only when a full interval has elapsed since the last START. */
+const SCHEDULER_TICK_MINUTES = 1;
+
+/**
+ * Effective cadence (#1630): a 1-minute setting fired about every 2 minutes, because the tick that
+ * lands just under a full interval after the previous start skips and the next one runs. So the
+ * real cadence is the setting plus one tick; show that and when the next run lands.
+ */
+export function effectiveCadence(minutes: number, lastRun: PluginSyncRunRecord | null): { label: string; nextAt: string | null } {
+  if (minutes <= 0) return { label: "off", nextAt: null };
+  const effective = minutes + SCHEDULER_TICK_MINUTES;
+  const startedMs = lastRun && !lastRun.dryRun ? Date.parse(lastRun.startedAt) : NaN;
+  return {
+    label: `every ~${effective} min (set ${minutes})`,
+    nextAt: Number.isFinite(startedMs) ? new Date(startedMs + effective * 60_000).toLocaleString("en-US") : null,
+  };
 }
 
-function RunLine({ label, run }: { label: string; run: PluginSyncRunRecord | null }) {
+/** Fold a just-finished run into the status so the panel shows it before the reload lands. */
+export function applyTriggeredRun(status: PluginSyncStatusView, run: PluginSyncRunRecord): PluginSyncStatusView {
+  const current = status.lastRuns[run.direction];
+  // Server data at least as new as the folded run wins (e.g. a scheduled run landed meanwhile).
+  if (current && Date.parse(current.finishedAt) >= Date.parse(run.finishedAt)) return status;
+  return { ...status, lastRun: run, lastRuns: { ...status.lastRuns, [run.direction]: run } };
+}
+
+type RunIssue = { externalKey: string; localIssueNumber?: number };
+
+function BoardIssueLink({ number }: { number: number | undefined }) {
+  if (number === undefined) return null;
+  return (
+    <>
+      {" "}
+      <a href={`?issue=${number}`} className="underline" data-testid={`plugin-sync-board-issue-${number}`}>#{number}</a>
+    </>
+  );
+}
+
+function localNumber(row: RunIssue, issues: RunIssue[] | undefined): number | undefined {
+  return row.localIssueNumber ?? issues?.find((i) => i.externalKey === row.externalKey)?.localIssueNumber;
+}
+
+export function RunLine({ label, run }: { label: string; run: PluginSyncRunRecord | null }) {
   if (!run) {
     return <div className="text-xs text-gray-500" data-testid={`plugin-sync-run-${label}`}>{label}: no run yet</div>;
   }
@@ -36,6 +74,7 @@ function RunLine({ label, run }: { label: string; run: PluginSyncRunRecord | nul
         <div key={`c-${c.externalKey}`} className="pl-3 text-amber-700 dark:text-amber-400">
           conflict{" "}
           {c.externalUrl ? <a href={c.externalUrl} target="_blank" rel="noreferrer" className="underline">{c.externalKey}</a> : c.externalKey}
+          <BoardIssueLink number={localNumber(c, run.summary?.issues)} />
           : {c.reason}
         </div>
       ))}
@@ -43,9 +82,30 @@ function RunLine({ label, run }: { label: string; run: PluginSyncRunRecord | nul
         <div key={`f-${f.externalKey}-${i}`} className="pl-3 text-red-700 dark:text-red-400">
           failed{" "}
           {f.externalUrl ? <a href={f.externalUrl} target="_blank" rel="noreferrer" className="underline">{f.externalKey}</a> : f.externalKey}
+          <BoardIssueLink number={localNumber(f, run.summary?.issues)} />
           : {f.reason}
         </div>
       ))}
+    </div>
+  );
+}
+
+export function SyncStatusBody({ status }: { status: PluginSyncStatusView }) {
+  const pull = effectiveCadence(status.schedule.pullEveryMinutes, status.lastRuns.pull);
+  const push = effectiveCadence(status.schedule.pushEveryMinutes, status.lastRuns.push);
+  return (
+    <div className="space-y-1">
+      {!status.configured && (
+        <div className="text-xs text-amber-700 dark:text-amber-400">Sync is not fully configured (settings or credentials missing).</div>
+      )}
+      <RunLine label="pull" run={status.lastRuns.pull} />
+      <RunLine label="push" run={status.lastRuns.push} />
+      <div className="text-xs text-gray-500" data-testid="plugin-sync-outbox">
+        Outbox: {status.outboxLength === null ? "unknown" : `${status.outboxLength} queued`}
+      </div>
+      <div className="text-xs text-gray-500" data-testid="plugin-sync-schedule">
+        Schedule: pull {pull.label}{pull.nextAt ? `, next at ${pull.nextAt}` : ""}; push {push.label}{push.nextAt ? `, next at ${push.nextAt}` : ""}
+      </div>
     </div>
   );
 }
@@ -60,7 +120,8 @@ export function PluginSyncPanel({ pluginRowId, projectId }: Props) {
     `/api/plugins/${pluginRowId}/sync/status?projectId=${encodeURIComponent(projectId)}`,
     { fallbackError: "Could not load sync status" },
   );
-  const status = resource.data;
+  const [triggered, setTriggered] = useState<PluginSyncRunRecord | null>(null);
+  const status = resource.data && triggered ? applyTriggeredRun(resource.data, triggered) : resource.data;
   const [running, setRunning] = useState<string | null>(null);
 
   async function trigger(direction: "pull" | "push", dryRun: boolean) {
@@ -68,12 +129,15 @@ export function PluginSyncPanel({ pluginRowId, projectId }: Props) {
     setRunning(id);
     try {
       const run = await apiPost<PluginSyncRunRecord>(`/api/plugins/${pluginRowId}/sync/trigger`, { projectId, direction, dryRun });
+      setTriggered(run);
       showToast(run.ok ? `${direction}${dryRun ? " dry run" : ""} finished` : `${direction} failed: ${run.error ?? "see the sync panel"}`, run.ok ? "success" : "error");
-      resource.reload();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Sync failed", "error");
     } finally {
       setRunning(null);
+      // Refetch after the run ends (success or failure): the server status is the source of truth,
+      // the locally folded run only bridges the gap until it lands.
+      resource.reload();
     }
   }
 
@@ -95,22 +159,11 @@ export function PluginSyncPanel({ pluginRowId, projectId }: Props) {
           Dry run (push)
         </button>
       </div>
+      {busy && <div className="text-xs text-blue-700 dark:text-blue-400" data-testid="plugin-sync-running">Running {running?.replace("-dry", " (dry run)")}…</div>}
       {!status ? (
         <div className="text-[11px] text-gray-400">Loading sync status…</div>
       ) : (
-        <div className="space-y-1">
-          {!status.configured && (
-            <div className="text-xs text-amber-700 dark:text-amber-400">Sync is not fully configured (settings or credentials missing).</div>
-          )}
-          <RunLine label="pull" run={status.lastRuns.pull} />
-          <RunLine label="push" run={status.lastRuns.push} />
-          <div className="text-xs text-gray-500" data-testid="plugin-sync-outbox">
-            Outbox: {status.outboxLength === null ? "unknown" : `${status.outboxLength} queued`}
-          </div>
-          <div className="text-xs text-gray-500" data-testid="plugin-sync-schedule">
-            Schedule: pull {scheduleLabel(status.schedule.pullEveryMinutes)}, push {scheduleLabel(status.schedule.pushEveryMinutes)}
-          </div>
-        </div>
+        <SyncStatusBody status={status} />
       )}
     </div>
   );
