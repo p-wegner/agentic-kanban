@@ -20,7 +20,7 @@ exports[`renderConsole > snapshot at 80 cols, color 1`] = `
 [1mATTENTION ──────────────────────────────────────────────────────────────────────[0m
 [31m ✖ #1416 exit-check red: temp-dir-namespace-guard (feedback 1/2 sent)[0m
 [33m ⚠ host saturated: 1.9 GB < 2 GB[0m
-[32mMERGED TODAY 22 (since 00:00 local)[0m
+[32mMERGED last 24 h: 22[0m
 [2mq quit · a all issues[0m"
 `;
 
@@ -44,7 +44,7 @@ PIPELINE (7 open) ────────────────────�
 ATTENTION ──────────────────────────────────────────────────────────────────────
  ✖ #1416 exit-check red: temp-dir-namespace-guard (feedback 1/2 sent)
  ⚠ host saturated: 1.9 GB < 2 GB
-MERGED TODAY 22 (since 00:00 local)
+MERGED last 24 h: 22
 q quit · a all issues"
 `;
 
@@ -59,7 +59,7 @@ exports[`renderConsole > snapshot at 140 cols, color 1`] = `
 [33m ⏸ 2 verify chain(s) queued behind 2 running[0m                         │ [1mATTENTION ──────────────────────────────────────────────────────────[0m
 [1mMERGE TRAIN ────────────────────────────────────────────────────────[0m │ [31m ✖ #1416 exit-check red: temp-dir-namespace-guard (feedback 1/2 sen…[0m
  train-11 ✔ 2/2 · train-10 ✔ 2/3 (1 dropped) 2 runs · window #1392 … │ [33m ⚠ host saturated: 1.9 GB < 2 GB[0m
-                                                                     │ [32mMERGED TODAY 22 (since 00:00 local)[0m
+                                                                     │ [32mMERGED last 24 h: 22[0m
 [2mq quit · a all issues[0m"
 `;
 
@@ -74,6 +74,6 @@ GATES & TESTS ──────────────────────
  ⏸ 2 verify chain(s) queued behind 2 running                         │ ATTENTION ──────────────────────────────────────────────────────────
 MERGE TRAIN ──────────────────────────────────────────────────────── │  ✖ #1416 exit-check red: temp-dir-namespace-guard (feedback 1/2 sen…
  train-11 ✔ 2/2 · train-10 ✔ 2/3 (1 dropped) 2 runs · window #1392 … │  ⚠ host saturated: 1.9 GB < 2 GB
-                                                                     │ MERGED TODAY 22 (since 00:00 local)
+                                                                     │ MERGED last 24 h: 22
 q quit · a all issues"
 `;

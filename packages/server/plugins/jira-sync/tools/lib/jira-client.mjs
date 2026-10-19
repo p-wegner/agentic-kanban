@@ -32,6 +32,7 @@ export class JiraClient {
    * @param {(ms:number)=>Promise<void>} [opts.sleepImpl] — injectable so tests don't wait for real backoff
    * @param {number} [opts.maxRetries]
    * @param {number} [opts.retryBaseMs]
+   * @param {"cloud"|"server"} [opts.deployment] — selects the search endpoint (default cloud)
    */
   constructor({
     siteUrl,
@@ -41,7 +42,9 @@ export class JiraClient {
     sleepImpl = defaultSleep,
     maxRetries = DEFAULT_MAX_RETRIES,
     retryBaseMs = DEFAULT_RETRY_BASE_MS,
+    deployment = "cloud",
   }) {
+    this.deployment = deployment;
     if (!siteUrl) throw new Error("siteUrl is required");
     this.siteUrl = siteUrl.replace(/\/+$/, "");
     this.authHeader = buildAuthHeader({ email, apiToken });
@@ -121,25 +124,40 @@ export class JiraClient {
     throw lastError;
   }
 
-  /** One page of `POST /search`. */
-  async searchIssues(jql, { fields, startAt = 0, maxResults = DEFAULT_MAX_RESULTS } = {}) {
-    return this.request("/rest/api/3/search", {
-      method: "POST",
-      body: { jql, fields, startAt, maxResults },
-    });
+  /**
+   * One page of JQL search. Cloud uses `POST /rest/api/3/search/jql` (token-paged: `nextPageToken` /
+   * `isLast`, no `total`/`startAt`); the old `/rest/api/3/search` was removed (CHANGE-2046).
+   * Server/DC (`deployment: "server"`) keeps `POST /rest/api/2/search` with `startAt`.
+   */
+  async searchIssues(jql, { fields, startAt = 0, nextPageToken, maxResults = DEFAULT_MAX_RESULTS } = {}) {
+    if (this.deployment === "server") {
+      return this.request("/rest/api/2/search", { method: "POST", body: { jql, fields, startAt, maxResults } });
+    }
+    const body = { jql, fields, maxResults };
+    if (nextPageToken) body.nextPageToken = nextPageToken;
+    return this.request("/rest/api/3/search/jql", { method: "POST", body });
   }
 
   /** Async generator over every issue matching `jql`, paginating transparently. */
   async *searchAll(jql, { fields, pageSize = DEFAULT_MAX_RESULTS } = {}) {
-    let startAt = 0;
+    if (this.deployment === "server") {
+      let startAt = 0;
+      for (;;) {
+        const page = await this.searchIssues(jql, { fields, startAt, maxResults: pageSize });
+        const issues = page?.issues ?? [];
+        for (const issue of issues) yield issue;
+        const total = page?.total ?? issues.length + startAt;
+        startAt += issues.length;
+        if (issues.length === 0 || startAt >= total) break;
+      }
+      return;
+    }
+    let nextPageToken;
     for (;;) {
-      const page = await this.searchIssues(jql, { fields, startAt, maxResults: pageSize });
-      const issues = page?.issues ?? [];
-      for (const issue of issues) yield issue;
-
-      const total = page?.total ?? issues.length + startAt;
-      startAt += issues.length;
-      if (issues.length === 0 || startAt >= total) break;
+      const page = await this.searchIssues(jql, { fields, nextPageToken, maxResults: pageSize });
+      for (const issue of page?.issues ?? []) yield issue;
+      nextPageToken = page?.nextPageToken;
+      if (page?.isLast === true || !nextPageToken) break;
     }
   }
 

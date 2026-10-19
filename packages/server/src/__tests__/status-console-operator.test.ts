@@ -58,7 +58,7 @@ describe("operator console frame (#1449)", () => {
   it("answers the operator questions from the frame alone", () => {
     const out = renderConsole(model, { ...base, cols: 200, rows: 60, color: false }).join("\n");
     for (const s of ["workspace gate #1435", "held for memory", "master red 1a2b3c4d", "holding #1429 #1430", "rc/20261013", "7 merges not yet promoted",
-      "verify placement prefer-worker", "ram 11.2G disk 84G", "[auth-expired]", "running/fix", "dropped #1429: conflicts with #1430", "NEW WORKER CONNECTIONS", "since 00:00 local"]) {
+      "verify placement prefer-worker", "ram 11.2G disk 84G", "[auth-expired]", "running/fix", "dropped #1429: conflicts with #1430", "NEW WORKER CONNECTIONS", "MERGED last 24 h"]) {
       expect(out).toContain(s);
     }
   });

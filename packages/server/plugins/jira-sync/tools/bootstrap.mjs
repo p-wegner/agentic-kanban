@@ -35,7 +35,8 @@ async function main() {
       selfTest: isSelfTest(),
       siteUrl: ctx.credentials.siteUrl,
       jql,
-      issuesVisible: page?.total ?? 0,
+      issuesVisible: page?.issues?.length ?? 0,
+      moreAvailable: page?.isLast === false,
     };
   } catch (err) {
     return { ok: false, step: "connection", reason: err.message, code: err.code ?? null, retryable: err.retryable ?? false };

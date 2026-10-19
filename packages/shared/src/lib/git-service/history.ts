@@ -84,8 +84,19 @@ export async function getLatestCommit(
  */
 export async function getUncommittedTrackedChanges(repoPath: string): Promise<string[]> {
   try {
-    const output = await execGit(["status", "--porcelain", "--untracked-files=no"], repoPath);
-    return output.trim().split("\n").filter(Boolean);
+    const output = await execGit(["-c", "core.quotepath=off", "status", "--porcelain", "--untracked-files=no"], repoPath);
+    const lines = output.split("\n").map((l) => l.replace(/\r$/, "")).filter((l) => l.trim().length > 0);
+    // #1621: an unstaged modification that is only line endings (an editor/autocrlf rewrite) is
+    // not work anyone could lose and must not block a merge.
+    const real: string[] = [];
+    for (const line of lines) {
+      if (line.startsWith(" M") && !line.slice(3).startsWith('"')) { // a quoted path cannot be used as a pathspec: count it as real
+        const same = await execGit(["diff", "--ignore-cr-at-eol", "--quiet", "--", `:(literal)${line.slice(3)}`], repoPath).then(() => true, () => false);
+        if (same) continue;
+      }
+      real.push(line.trimStart());
+    }
+    return real;
   } catch {
     return [];
   }
