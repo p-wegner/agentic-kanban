@@ -3,7 +3,7 @@
 // everywhere. Centralized so `--self-test` behaves identically across
 // bootstrap/plan/pull/push instead of drifting per script.
 
-import { resolveCredentialsFromEnv } from "./auth.mjs";
+import { JiraAuthError, resolveCredentialsFromEnv } from "./auth.mjs";
 import { JiraClient } from "./jira-client.mjs";
 import { createDefaultFixtureFetch } from "./fixtures.mjs";
 
@@ -37,4 +37,18 @@ export function buildClientFromEnv({ argv = process.argv, env = process.env } = 
 
 export function printResult(result) {
   console.log(JSON.stringify(result, null, 2));
+}
+
+/**
+ * Authenticates before anything trusts a Jira answer (#1641). Returns null when the credentials
+ * are accepted, or a failed result for the caller to return (no board write has happened yet).
+ */
+export async function checkAuth(client) {
+  try {
+    await client.verifyCredentials();
+    return null;
+  } catch (err) {
+    if (err instanceof JiraAuthError) return { ok: false, step: "auth", reason: err.message };
+    return { ok: false, step: "auth", reason: err.message, code: err.code ?? null, retryable: err.retryable ?? false };
+  }
 }

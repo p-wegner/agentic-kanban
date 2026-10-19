@@ -4,7 +4,7 @@
 // outcome is reported as structured JSON on stdout, with a matching exit code.
 
 import { checkProfile } from "./lib/profile.mjs";
-import { buildClientFromEnv, printResult, isSelfTest } from "./lib/cli-client.mjs";
+import { buildClientFromEnv, printResult, isSelfTest, checkAuth } from "./lib/cli-client.mjs";
 import { defaultJql } from "./lib/pull-plan.mjs";
 import { JiraAuthError } from "./lib/auth.mjs";
 
@@ -26,6 +26,9 @@ async function main() {
   } catch (err) {
     return { ok: false, step: "config", reason: err.message };
   }
+
+  const authFailure = await checkAuth(ctx.client);
+  if (authFailure) return authFailure;
 
   try {
     const page = await ctx.client.searchIssues(jql, { maxResults: 1 });

@@ -61,6 +61,10 @@ export function logMutations(fetchImpl, label) {
 export function createDefaultFixtureFetch() {
   return logMutations(createScriptedFetch([
     {
+      match: (url, init) => (init?.method ?? "GET") === "GET" && /\/rest\/api\/[23]\/myself$/.test(url),
+      respond: () => ({ status: 200, body: { accountId: "fixture-account", emailAddress: "fixture@example.com" } }),
+    },
+    {
       match: (url, init) => init?.method === "POST" && url.includes("/rest/api/3/search/jql"),
       respond: (url, init) => {
         const body = JSON.parse(init.body);

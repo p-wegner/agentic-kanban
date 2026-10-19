@@ -6,7 +6,7 @@
 // board writes, and returns the summary that would result.
 
 import { checkProfile } from "../lib/profile.mjs";
-import { buildClientFromEnv, printResult, isDryRun } from "../lib/cli-client.mjs";
+import { buildClientFromEnv, printResult, isDryRun, checkAuth } from "../lib/cli-client.mjs";
 import { defaultJql } from "../lib/pull-plan.mjs";
 import { runInboundSync } from "../lib/sync-engine.mjs";
 import {
@@ -40,6 +40,9 @@ async function main() {
     if (err instanceof JiraAuthError) return { ok: false, step: "credentials", reason: err.message };
     throw err;
   }
+
+  const authFailure = await checkAuth(ctx.client);
+  if (authFailure) return authFailure;
 
   let jql;
   try {

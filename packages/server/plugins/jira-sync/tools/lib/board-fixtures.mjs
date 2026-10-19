@@ -107,6 +107,12 @@ export function createDefaultBoardFixtureFetch(state = createBoardFixtureState()
       return jsonResponse(201, { id: randomUUID() });
     }
 
+    const tagsDeleteMatch = method === "DELETE" && /^\/api\/issues\/([^/]+)\/tags\/([^/]+)$/.exec(path);
+    if (tagsDeleteMatch) {
+      state.issueTags.get(tagsDeleteMatch[1])?.delete(tagsDeleteMatch[2]);
+      return jsonResponse(204);
+    }
+
     throw new Error(`no board fixture route matched ${method} ${href}`);
   };
 }
