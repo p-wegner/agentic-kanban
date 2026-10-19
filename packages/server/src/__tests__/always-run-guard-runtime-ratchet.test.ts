@@ -345,8 +345,13 @@ import {
  * plugin scripts (`plugins/jira-sync/tools/**`), outside its import graph, with a `when:`
  * territory of that plugin dir and `services/plugin-sync-summary.ts`, so an ordinary diff does
  * not pay it.
+ *
+ * #1630: `plugin-bundled-refresh.test.ts` at the ASSUMED 3,000 ms. It reads the shipped
+ * `plugins/jira-sync/kanban-plugin.json` (outside its import graph) to pin the plugin version to
+ * its manifest, with a `when:` territory of that manifest and `plugin-lifecycle.service.ts`, so
+ * an ordinary diff does not pay it.
  */
-const BASELINE_TOTAL_MS = 516_689;
+const BASELINE_TOTAL_MS = 519_689;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative

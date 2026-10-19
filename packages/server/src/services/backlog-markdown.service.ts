@@ -279,7 +279,7 @@ type LaterEdge = { fromNumber: number; toNumber: number };
 type PendingByTitle = { title: string; dependsOn: number[]; blocks: number[] };
 type ImportCtx = { database: Database; boardEvents?: BoardEventSink };
 
-function buildSnapshotIssues(createIdx: number[], doc: BacklogMdDoc, rows: ImportPreviewRow[], nowIso: string): BacklogSnapshotIssue[] {
+function buildSnapshotIssues(createIdx: number[], doc: BacklogMdDoc, rows: ImportPreviewRow[], now: string): BacklogSnapshotIssue[] {
   return createIdx.map((i, k) => {
     const mi = doc.issues[i], r = rows[i];
     return {
@@ -287,8 +287,8 @@ function buildSnapshotIssues(createIdx: number[], doc: BacklogMdDoc, rows: Impor
       status: r.status, milestone: mi.milestone, dueDate: mi.dueDate, externalKey: mi.externalKey, externalUrl: mi.externalUrl,
       pinned: false, skipAutoReview: false,
       checklistJson: mi.checklist.length ? JSON.stringify(mi.checklist.map((c, j) => ({ id: `md-${j + 1}`, text: c.text, completed: c.done }))) : null,
-      touchedFilesJson: null, tags: mi.tags, createdAt: mi.createdAt && /^\d{4}-\d{2}-\d{2}/.test(mi.createdAt) ? new Date(mi.createdAt).toISOString() : nowIso,
-      updatedAt: nowIso, statusChangedAt: null,
+      touchedFilesJson: null, tags: mi.tags, createdAt: mi.createdAt && /^\d{4}-\d{2}-\d{2}/.test(mi.createdAt) ? new Date(mi.createdAt).toISOString() : now,
+      updatedAt: now, statusChangedAt: null,
     };
   });
 }
