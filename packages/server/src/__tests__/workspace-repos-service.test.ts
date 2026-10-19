@@ -79,7 +79,22 @@ let projectId: string;
 let issueId: string;
 let workspaceId: string;
 
+// #1636 — never read the real user's global git config: under load it can be unreadable
+// (`warning: unable to access '~/.gitconfig': Permission denied`) and that warning fails rev-parse.
+const savedGitEnv = {
+  GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL,
+  GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM,
+};
+
 beforeAll(async () => {
+  const gitHome = await mkdtemp(join(tmpdir(), "kanban-gitcfg-"));
+  const globalCfg = join(gitHome, "gitconfig");
+  await writeFile(globalCfg, "[user]
+	name = Test
+	email = test@example.com
+");
+  process.env.GIT_CONFIG_GLOBAL = globalCfg;
+  process.env.GIT_CONFIG_NOSYSTEM = "1";
   ({ db } = createTestDb());
   leadRepo = await createTempRepo("kanban-multirepo-lead-");
   extraRepo = await createTempRepo("kanban-multirepo-extra-");
@@ -97,6 +112,10 @@ beforeAll(async () => {
 }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
 afterAll(async () => {
+  for (const [k, v] of Object.entries(savedGitEnv)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
   for (const dir of [leadRepo, extraRepo]) {
     // Remove the whole mkdtemp parent (repo + its .worktrees sibling).
     try { await rm(join(dir, ".."), { recursive: true, force: true }); } catch { /* best effort */ }

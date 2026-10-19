@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
 import {
+  capJsonSelectionToBudget,
   IMPACT_CLI_CANDIDATES,
   impactCliOrigin,
   matchesExcludeGlob,
@@ -241,6 +242,29 @@ describe("resolveImpactCli", () => {
 
   it("returns null when the skill is installed nowhere (so the caller fails open)", () => {
     expect(resolveImpactCli(root, "")).toBeNull();
+  });
+
+  it("skips a KANBAN_IMPACT_CLI that does not exist on this machine (#1636)", () => {
+    const prev = process.env.KANBAN_IMPACT_CLI;
+    process.env.KANBAN_IMPACT_CLI = "D:\repo\.claude\skills\test-impact\tools\impact.mjs";
+    try {
+      // Falls through to the candidates (none exist under /repo) instead of ending the search.
+      expect(resolveImpactCli(root, "")).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.KANBAN_IMPACT_CLI;
+      else process.env.KANBAN_IMPACT_CLI = prev;
+    }
+  });
+});
+
+describe("capJsonSelectionToBudget pkgfile answer (#1636)", () => {
+  it("uses pkgfile lines returned for --json instead of discarding the selection", () => {
+    const out = "packages/server: src/__tests__/a.test.ts
+";
+    expect(capJsonSelectionToBudget(out, 60000, "60s")).toBe(out);
+  });
+  it("still returns null for unreadable non-selection output", () => {
+    expect(capJsonSelectionToBudget("garbage", 60000, "60s")).toBeNull();
   });
 });
 
