@@ -128,6 +128,13 @@ export const pluginSyncSecretsBody = z.object({
   values: z.record(z.string(), z.unknown()).default({}),
 }).passthrough();
 
+/** `POST /api/plugins/:id/sync/resolve` (#1643): no `keep` = read-only three-way field table. */
+export const pluginSyncResolveBody = z.object({
+  projectId,
+  key: z.string({ required_error: '"key" is required', invalid_type_error: '"key" must be a string' }),
+  keep: z.enum(["board", "jira"], { invalid_type_error: '"keep" must be "board" or "jira"' }).optional(),
+}).passthrough();
+
 /** `POST /api/plugins/:id/sync/trigger` (#1081). */
 export const pluginSyncTriggerBody = z.object({
   projectId,

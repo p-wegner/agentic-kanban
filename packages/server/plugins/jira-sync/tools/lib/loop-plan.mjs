@@ -20,17 +20,37 @@
 
 import { outstandingEntries } from "./conflict-register.mjs";
 
+const cell = (v) => String(v ?? "(none)").replace(/\s*\n\s*/g, " / ").replace(/\|/g, "\\|") || "(empty)";
+
+/** The three-way field table (board now / last sync / Jira now); empty when the register holds no fields. */
+export function fieldTableMarkdown(fields) {
+  if (!Array.isArray(fields) || fields.length === 0) return "";
+  const rows = fields.map(
+    (f) => `| ${f.field}${f.differs ? " **(differs)**" : ""} | ${cell(f.board)} | ${cell(f.lastSync)} | ${cell(f.jira)} |`,
+  );
+  return ["| Field | Board now | Last sync | Jira now |", "| --- | --- | --- | --- |", ...rows].join("\n");
+}
+
 function conflictUnit(entry) {
+  const table = fieldTableMarkdown(entry.fields);
   return {
     id: `conflict:${entry.id}:r${entry.round}`,
     title: `Resolve sync conflict: ${entry.id}`,
     description:
       `The board issue linked to Jira issue ${entry.id} changed locally after the last pull, so ` +
       `the inbound sync left it alone instead of overwriting it. ${entry.reason ?? ""}\n\n` +
-      `Decide which side should win (the board edit or the Jira update), reconcile the two ` +
-      `manually, then re-run \`node tools/sync/pull.mjs\` — this ticket is generated straight from ` +
-      `the conflict register (${entry.id} round ${entry.round}) and closing it is what marks the ` +
-      `conflict resolved for the next pull.`,
+      (table
+        ? `What each side holds, per field (as of the pull that found the conflict):\n\n${table}\n\n`
+        : `(No field values were recorded for this conflict; read them live with the "show" call below.)\n\n`) +
+      `Decide which side should win, then apply the decision through the board. You have no Jira ` +
+      `credentials and \`node tools/sync/*.mjs\` will not run for you:\n\n` +
+      `- Read the live three-way values: \`POST /api/plugins/<jira-sync plugin id>/sync/resolve\` ` +
+      `\`{ "projectId": "<this project>", "key": "${entry.id}" }\` (no \`keep\` = show).\n` +
+      `- Board wins: same call with \`"keep": "board"\`. It pushes the board's mapped fields to Jira once.\n` +
+      `- Jira wins: same call with \`"keep": "jira"\`. It overwrites the board issue from Jira.\n\n` +
+      `Do not decide "the board wins" without looking at the Jira column: Jira may have been changed on purpose. ` +
+      `Closing this ticket does NOT resolve the conflict by itself; only the sync does, once the two sides agree ` +
+      `(${entry.id} round ${entry.round}). If it is still outstanding after this ticket closes, the loop opens the next round.`,
   };
 }
 
@@ -40,9 +60,10 @@ function failureUnit(entry) {
     title: `Fix failed push: ${entry.id}`,
     description:
       `Pushing a queued change for ${entry.id} back to Jira failed and was left in the outbox. ${entry.reason ?? ""}\n\n` +
-      `Fix the underlying problem (e.g. a missing transition, a stale Jira issue), then re-run ` +
-      `\`node tools/sync/push.mjs\` — this ticket is generated from the failure register (${entry.id} ` +
-      `round ${entry.round}) and closing it is what marks the failure resolved for the next push.`,
+      `Fix the underlying problem (e.g. a missing transition, a stale Jira issue), then let the next push ` +
+      `run (the board or a human triggers it; you have no Jira access) — this ticket is generated from the failure register (${entry.id} ` +
+      `round ${entry.round}). Closing this ticket does not resolve the failure by itself; the next push does, once the cause is gone, ` +
+      `and the board then closes this ticket if it is still open.`,
   };
 }
 

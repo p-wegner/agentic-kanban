@@ -12,7 +12,7 @@
 
 /**
  * @param {{ entries: Record<string, { round: number, resolved: boolean, detectedAt: string, resolvedAt?: string, reason?: string }> }} register
- * @param {Array<{ id: string, reason?: string }>} current - identities the latest run still reports as outstanding
+ * @param {Array<{ id: string, reason?: string, fields?: object[] }>} current - identities the latest run still reports as outstanding
  * @param {{ now?: string }} [opts]
  */
 export function updateRegister(register, current, { now = new Date().toISOString() } = {}) {
@@ -27,6 +27,7 @@ export function updateRegister(register, current, { now = new Date().toISOString
         resolved: false,
         detectedAt: now,
         reason: item.reason,
+        ...(item.fields ? { fields: item.fields } : {}),
       };
     } else {
       // Still open from a previous run: keep the round and detectedAt, just refresh the reason.
@@ -47,7 +48,7 @@ export function updateRegister(register, current, { now = new Date().toISOString
 export function outstandingEntries(register) {
   return Object.entries(register.entries)
     .filter(([, entry]) => !entry.resolved)
-    .map(([id, entry]) => ({ id, round: entry.round, reason: entry.reason, detectedAt: entry.detectedAt }));
+    .map(([id, entry]) => ({ id, round: entry.round, reason: entry.reason, detectedAt: entry.detectedAt, ...(entry.fields ? { fields: entry.fields } : {}) }));
 }
 
 /** Stable identity for a push-plan `failed` entry — its Jira key when known, else the board issue id. */

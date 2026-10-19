@@ -7,7 +7,7 @@
 
 import { FIELDS, mapJiraIssueToBoardFields, resolveBoardStatusId } from "./field-map.mjs";
 import { hasAttributionMarker } from "./comment-marker.mjs";
-import { boardFieldsOf, fieldsEqual, incomingFieldsOf } from "./field-snapshot.mjs";
+import { boardFieldsOf, fieldsEqual, incomingFieldsOf, fieldTable } from "./field-snapshot.mjs";
 
 // Markers (#1624) for board issues whose Jira twin vanished. Each also carries the
 // board's own `no-auto-start` tag so the unchanged autostart engines skip the issue.
@@ -47,13 +47,14 @@ function exceedsDeletionLimit(count, known) {
  *   dryRun?: boolean,
  *   pendingWritebackKeys?: Set<string>, // keys push created whose board writeback has not landed yet
  *   deletedStatusName?: string,
+ *   forceKeys?: Set<string>, // keys whose Jira state overwrites the board even when it was edited locally (`sync resolve --keep jira`)
  *   now?: string,
  * }} opts
  */
 export async function runInboundSync(
   client,
   boardClient,
-  { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set(), deletedStatusName = "Cancelled", now = new Date().toISOString() },
+  { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set(), deletedStatusName = "Cancelled", forceKeys = new Set(), now = new Date().toISOString() },
 ) {
   // dryRun only suppresses WRITES (create/update/tag calls below) — these three are
   // reads, and skipping them would make every issue look brand-new (boardIssuesByKey
@@ -142,7 +143,7 @@ export async function runInboundSync(
       continue;
     }
 
-    if (known && known.updated === mapped.jiraUpdated) {
+    if (known && known.updated === mapped.jiraUpdated && !forceKeys.has(jiraIssue.key)) {
       skipped++;
       details.push({ key: jiraIssue.key, action: "skip", reason: "unchanged since the last pull", localIssueNumber: boardIssue.issueNumber });
       continue;
@@ -183,7 +184,7 @@ export async function runInboundSync(
       details.push({ key: jiraIssue.key, action: "skip", reason: "board and Jira already agree; conflict resolved" });
       continue;
     }
-    const locallyEdited = timestampMoved && !boardUnchanged;
+    const locallyEdited = timestampMoved && !boardUnchanged && !forceKeys.has(jiraIssue.key);
     if (locallyEdited) {
       // Comments are append-only on the board, so importing them can't clobber local edits.
       if (!dryRun) {
@@ -194,7 +195,14 @@ export async function runInboundSync(
         commentsImported += newComments(mapped.comments, known?.commentIds).length;
       }
       conflicted++;
-      details.push({ key: jiraIssue.key, action: "conflict", reason: "board issue changed locally since the last sync; not overwritten", localIssueNumber: boardIssue.issueNumber });
+      const statusName = (id) => boardStatuses.find((st) => st.id === id)?.name ?? id;
+      details.push({
+        key: jiraIssue.key,
+        action: "conflict",
+        reason: "board issue changed locally since the last sync; not overwritten",
+        localIssueNumber: boardIssue.issueNumber,
+        fields: fieldTable(currentFields, known?.fields ?? null, incomingFields, { statusName }),
+      });
       continue;
     }
 

@@ -8,6 +8,13 @@ import { listPluginLoopIssues } from "../../repositories/plugins.repository.js";
 import type { CreateIssueInput, CreateIssueResult } from "../issue.service.js";
 import type { LoopAdvanceResult, LoopCreatedTicket } from "../plugin-loop-types.js";
 import { keyPrefix } from "./loop-identity.js";
+import {
+  closeResolvedUnitTickets,
+  isFailedRound,
+  nextRoundUnitId,
+  priorRoundNote,
+  type ClosedUnitTicket,
+} from "./loop-unit-reconcile.js";
 
 /**
  * Turning a plan's UNITS into tickets — where the loop's central invariant lives.
@@ -42,6 +49,8 @@ export interface TicketedUnits {
   created: LoopCreatedTicket[];
   skippedExisting: LoopAdvanceResult["skippedExisting"];
   capped: number;
+  /** Open tickets closed because their unit left the plan (`reconcileUnits` loops only, #1643). */
+  closed: ClosedUnitTicket[];
   /** The cap notice, if any — phrased for the caller's `warnings` list verbatim. */
   warnings: string[];
 }
@@ -52,6 +61,13 @@ export async function ticketPlannedUnits(args: {
   pluginSlug: string;
   projectId: string;
   workflowTemplateId?: string | null;
+  /**
+   * Whether the plan is a trustworthy statement of what is still outstanding: a converged plan, or
+   * one that lists units. `units: [], converged: false` is the documented "blocked, not done" state,
+   * where an empty list means "unknown", and must never close anything.
+   */
+  planIsAuthoritative?: boolean;
+  now?: string;
   createIssue: (input: CreateIssueInput) => Promise<CreateIssueResult>;
   database: Database;
 }): Promise<TicketedUnits> {
@@ -63,14 +79,27 @@ export async function ticketPlannedUnits(args: {
   const created: LoopCreatedTicket[] = [];
   const skippedExisting: LoopAdvanceResult["skippedExisting"] = [];
   const warnings: string[] = [];
+  const reconcile = loop.reconcileUnits === true;
+  // Keys the CURRENT plan maps to (a re-opened round's key, not the planner's own) - what the close pass keeps.
+  const activeKeys = new Set<string>();
   const cap = loop.maxUnitsPerAdvance ?? DEFAULT_LOOP_MAX_UNITS_PER_ADVANCE;
   let capped = 0;
 
   for (const unit of args.units) {
-    const key = pluginLoopUnitKey(pluginSlug, loop.name, unit.id);
-    const prior = byKey.get(key);
+    let unitId = unit.id;
+    let key = pluginLoopUnitKey(pluginSlug, loop.name, unitId);
+    let prior = byKey.get(key);
+    let followUp: string | undefined;
+    // #1643: walk past Done rounds the plan still reports, to the first round without a settled ticket.
+    while (reconcile && prior && isFailedRound(prior)) {
+      followUp = priorRoundNote(prior, unitId);
+      unitId = nextRoundUnitId(unitId);
+      key = pluginLoopUnitKey(pluginSlug, loop.name, unitId);
+      prior = byKey.get(key);
+    }
+    activeKeys.add(key);
     if (prior) {
-      skippedExisting.push({ unitId: unit.id, issueId: prior.id, issueNumber: prior.issueNumber, statusName: prior.statusName });
+      skippedExisting.push({ unitId, issueId: prior.id, issueNumber: prior.issueNumber, statusName: prior.statusName });
       continue;
     }
     if (created.length >= cap) {
@@ -80,7 +109,7 @@ export async function ticketPlannedUnits(args: {
     const issue = await args.createIssue({
       projectId,
       title: unit.title,
-      description: buildUnitDescription(loop, unit.description),
+      description: buildUnitDescription(loop, followUp ? `${followUp}\n\n${unit.description ?? ""}`.trim() : unit.description),
       issueType: "task",
       priority: "medium",
       externalKey: key,
@@ -93,7 +122,7 @@ export async function ticketPlannedUnits(args: {
       workflowTemplateId: args.workflowTemplateId ?? null,
     });
     created.push({
-      unitId: unit.id,
+      unitId,
       issueId: issue.id,
       issueNumber: issue.issueNumber ?? null,
       title: unit.title,
@@ -103,7 +132,13 @@ export async function ticketPlannedUnits(args: {
   if (capped > 0) {
     warnings.push(`${capped} more unit(s) planned than this advance may create (cap ${cap}); they replan next advance.`);
   }
-  return { created, skippedExisting, capped, warnings };
+  let closed: ClosedUnitTicket[] = [];
+  if (reconcile && args.planIsAuthoritative) {
+    const result = await closeResolvedUnitTickets({ loop, pluginSlug, projectId, existing, activeKeys, database, now: args.now });
+    closed = result.closed;
+    warnings.push(...result.warnings);
+  }
+  return { created, skippedExisting, capped, closed, warnings };
 }
 
 /**

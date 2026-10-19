@@ -160,12 +160,13 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       loop, vars, repoPath: args.repoPath, pluginLocalPath: args.pluginLocalPath,
     });
 
-    const { created, skippedExisting, capped, warnings } = await ticketPlannedUnits({
+    const { created, skippedExisting, capped, closed, warnings } = await ticketPlannedUnits({
       loop,
       units: plan.units,
       pluginSlug: args.pluginSlug,
       projectId: args.projectId,
       workflowTemplateId: args.workflowTemplateId,
+      planIsAuthoritative: (plan.converged ?? plan.units.length === 0) || plan.units.length > 0,
       createIssue,
       database,
     });
@@ -270,6 +271,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       created,
       skippedExisting,
       capped,
+      ...(closed.length > 0 ? { closedResolved: closed } : {}),
       startMode: policy.mode,
       startOutcomes,
       startNotices,

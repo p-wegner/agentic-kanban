@@ -49,6 +49,7 @@
       "description": "One ticket per outstanding inbound-pull conflict or outbound-push failure, generated from the sync state pull/push already persist.",
       "skill": "sync-conflict",
       "maxUnitsPerAdvance": 3,
+      "reconcileUnits": true,
       "plan": {
         "command": "node tools/loop-plan.mjs",
         "cwd": "plugin",
@@ -76,6 +77,15 @@
       "env": {
         "JIRA_SYNC_STATE_DIR": "{{repoPath}}/.jira-sync",
         "JIRA_SYNC_PROFILE_PATH": "{{repoPath}}/docs/jira-sync/_profile.md",
+        "JIRA_SYNC_BOARD_URL": "{{boardUrl}}",
+        "JIRA_SYNC_BOARD_PROJECT_ID": "{{projectId}}"
+      }
+    },
+    "resolve": {
+      "command": "node tools/sync/resolve.mjs",
+      "cwd": "plugin",
+      "env": {
+        "JIRA_SYNC_STATE_DIR": "{{repoPath}}/.jira-sync",
         "JIRA_SYNC_BOARD_URL": "{{boardUrl}}",
         "JIRA_SYNC_BOARD_PROJECT_ID": "{{projectId}}"
       }
