@@ -908,8 +908,12 @@ export function impactCliOrigin(cli, root = ROOT, home = process.env.USERPROFILE
 
 /** Absolute path to the impact CLI, or null when the skill is not installed here. */
 export function resolveImpactCli(root = ROOT, home = process.env.USERPROFILE || process.env.HOME || "") {
+  // #1636 — an explicit path that does not exist on THIS machine (a board-side path such as
+  // `D:\repo\...` exported to a worker or a land-local worktree) falls through to the worktree and
+  // $HOME candidates instead of ending the search: the board resolves skills by location, not by a
+  // path someone else's disk had.
   const explicit = (process.env.KANBAN_IMPACT_CLI || "").trim();
-  if (explicit) return existsSync(explicit) ? explicit : null;
+  if (explicit && existsSync(explicit)) return explicit;
   const candidates = [
     ...IMPACT_CLI_CANDIDATES.map((rel) => resolve(root, rel)),
     ...(home ? IMPACT_CLI_CANDIDATES.map((rel) => resolve(home, rel)) : []),
@@ -1252,6 +1256,15 @@ export function capSelectionToBudget(selected, budgetMs) {
  * `vitest related`, the wider run) when the JSON cannot be read.
  */
 export function capJsonSelectionToBudget(stdout, budgetMs, budgetLabel = `${budgetMs}ms`) {
+  // #1636 — the selector can answer `--json` with pkgfile lines (`packages/x: file`) when its JSON
+  // mode is not honoured. Those lines ARE a selection; discarding them as "unreadable" threw the
+  // selection away and widened the run to `vitest related`. Use them uncapped, and say so.
+  if (!stdout.includes("{") && /^[\w./-]+:\s*\S/m.test(stdout)) {
+    console.warn(
+      `[test:mine] impact selector answered --json with pkgfile lines — using them WITHOUT the ${budgetLabel} budget cap.`,
+    );
+    return stdout;
+  }
   let parsed;
   try {
     parsed = JSON.parse(stdout.slice(Math.max(0, stdout.indexOf("{"))));
