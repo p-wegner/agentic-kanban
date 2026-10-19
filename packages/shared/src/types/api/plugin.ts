@@ -41,6 +41,51 @@ export interface PluginSyncConnectionTest {
   timedOut: boolean;
 }
 
+/** One run's structured facts (#1625) - the single contract `parseRunSummary` normalizes into. */
+export interface PluginSyncRunSummary {
+  /** The script's own step (`pull`, `push`, `profile`, ...). */
+  step?: string;
+  counts?: {
+    created?: number;
+    updated?: number;
+    skipped?: number;
+    conflicted?: number;
+    applied?: number;
+    failed?: number;
+    outOfScope?: number;
+  };
+  issues?: Array<{ externalKey: string; externalUrl?: string; localIssueNumber?: number; status?: string }>;
+  conflicts?: Array<{ externalKey: string; reason: string; externalUrl?: string }>;
+  failures?: Array<{ externalKey: string; reason: string; kind?: string; externalUrl?: string }>;
+}
+
+export interface PluginSyncRunRecord {
+  direction: "pull" | "push";
+  dryRun: boolean;
+  startedAt: string;
+  finishedAt: string;
+  ok: boolean;
+  error?: string;
+  code?: number | null;
+  timedOut?: boolean;
+  /** Set when the board's schedule (not a person) started the run. */
+  scheduled?: boolean;
+  summary?: PluginSyncRunSummary;
+}
+
+/** `GET /api/plugins/:id/sync/status` (#1625): last run per direction, outbox length, schedule. */
+export interface PluginSyncStatusView {
+  provider: string | null;
+  configured: boolean;
+  /** The most recent run of either direction. */
+  lastRun: PluginSyncRunRecord | null;
+  lastRuns: { pull: PluginSyncRunRecord | null; push: PluginSyncRunRecord | null };
+  /** Queued, not-yet-pushed entries in the plugin's outbox; null when it cannot be read. */
+  outboxLength: number | null;
+  /** Minutes between scheduled runs per direction; 0 = off. */
+  schedule: { pullEveryMinutes: number; pushEveryMinutes: number };
+}
+
 /**
  * Periodic progress snapshot for a still-running plugin script (#1229) — elapsed time, the
  * streamed output tail so far, and the timeout limit, so a caller can show both before the

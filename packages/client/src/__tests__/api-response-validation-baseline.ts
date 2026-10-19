@@ -110,6 +110,7 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "POST /api/plugins/:param/sync/config",
   "POST /api/plugins/:param/sync/secrets",
   "POST /api/plugins/:param/sync/test-connection",
+  "POST /api/plugins/:param/sync/trigger",
   "POST /api/plugins/:param/scripts/:param/run",
   "POST /api/plugins/:param/update",
   "POST /api/plugins/:param/views/:param/start",

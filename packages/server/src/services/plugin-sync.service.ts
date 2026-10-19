@@ -7,8 +7,9 @@ import {
   type PluginSyncDef,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
-import { extractModelJson } from "@agentic-kanban/shared/lib/model-json";
-import type { PluginSyncConnectionTest } from "@agentic-kanban/shared";
+import type { PluginSyncConnectionTest, PluginSyncRunRecord, PluginSyncStatusView } from "@agentic-kanban/shared";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import type { PluginRow } from "../repositories/plugins.repository.js";
@@ -16,6 +17,7 @@ import type { PluginRunContext } from "./plugin-loop-types.js";
 import { runPluginCommand } from "./plugin-exec.js";
 import { PluginError } from "./plugin-errors.js";
 import { createPluginSecretStore } from "./plugin-secret-store.js";
+import { describeRunFailure, parseRunSummary } from "./plugin-sync-summary.js";
 
 /**
  * Board-side surface over a plugin's declarative `sync` capability (#1076): per-project config
@@ -61,31 +63,7 @@ export interface PluginSyncValidationResult {
 
 export type { PluginSyncConnectionTest };
 
-/** Best-effort structured facts a pull/push command's own stdout reported about its run. */
-export interface PluginSyncRunSummary {
-  counts?: { created?: number; updated?: number; skipped?: number; failed?: number };
-  issues?: Array<{ externalKey: string; externalUrl?: string; localIssueNumber?: number; status?: string }>;
-  conflicts?: Array<{ externalKey: string; reason: string; externalUrl?: string }>;
-}
-
-export interface PluginSyncRunRecord {
-  direction: "pull" | "push";
-  dryRun: boolean;
-  startedAt: string;
-  finishedAt: string;
-  ok: boolean;
-  error?: string;
-  code?: number | null;
-  timedOut?: boolean;
-  summary?: PluginSyncRunSummary;
-}
-
-export interface PluginSyncStatusView {
-  provider: string | null;
-  /** The last `validateSync` verdict, so the empty/error states can be told apart at a glance. */
-  configured: boolean;
-  lastRun: PluginSyncRunRecord | null;
-}
+export type { PluginSyncRunRecord, PluginSyncStatusView };
 
 const SYNC_DIRECTIONS = ["pull", "push"] as const;
 export type PluginSyncDirection = (typeof SYNC_DIRECTIONS)[number];
@@ -284,73 +262,90 @@ export function createPluginSyncOps(deps: {
     };
   }
 
-  /** Best-effort parse of a pull/push command's stdout as a run summary — absent when it isn't JSON. */
-  function parseRunSummary(stdout: string): PluginSyncRunSummary | undefined {
-    const text = stdout.trim();
-    if (!text) return undefined;
-    let raw: unknown;
+  /** The stored record: the latest run, plus the latest run PER DIRECTION under `runs` (#1625). */
+  type StoredRun = PluginSyncRunRecord & { runs?: { pull?: PluginSyncRunRecord; push?: PluginSyncRunRecord } };
+
+  async function readStoredRun(pluginSlug: string, projectId: string): Promise<StoredRun | null> {
+    const raw = await getPreference(pluginSyncStatusPreferenceKey(pluginSlug, projectId), database);
+    if (!raw) return null;
     try {
-      raw = extractModelJson(text, { shape: "object", prefer: "last" });
+      const parsed: unknown = JSON.parse(raw);
+      return parsed != null && typeof parsed === "object" ? (parsed as StoredRun) : null;
     } catch {
-      return undefined;
+      return null;
     }
-    if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-    const rec = raw as Record<string, unknown>;
-    const summary: PluginSyncRunSummary = {};
-    if (rec.counts && typeof rec.counts === "object" && !Array.isArray(rec.counts)) {
-      summary.counts = rec.counts as PluginSyncRunSummary["counts"];
-    }
-    if (Array.isArray(rec.issues)) {
-      summary.issues = rec.issues
-        .filter((i): i is Record<string, unknown> => i != null && typeof i === "object")
-        .map((i) => ({
-          externalKey: String(i.externalKey ?? ""),
-          externalUrl: typeof i.externalUrl === "string" ? i.externalUrl : undefined,
-          localIssueNumber: typeof i.localIssueNumber === "number" ? i.localIssueNumber : undefined,
-          status: typeof i.status === "string" ? i.status : undefined,
-        }))
-        .filter((i) => i.externalKey);
-    }
-    if (Array.isArray(rec.conflicts)) {
-      summary.conflicts = rec.conflicts
-        .filter((c): c is Record<string, unknown> => c != null && typeof c === "object")
-        .map((c) => ({
-          externalKey: String(c.externalKey ?? ""),
-          reason: String(c.reason ?? ""),
-          externalUrl: typeof c.externalUrl === "string" ? c.externalUrl : undefined,
-        }))
-        .filter((c) => c.externalKey);
-    }
-    return summary;
   }
 
   async function recordSyncRun(pluginSlug: string, projectId: string, record: PluginSyncRunRecord): Promise<void> {
+    const previous = await readStoredRun(pluginSlug, projectId);
+    const { runs: previousRuns, ...previousLatest } = previous ?? ({} as StoredRun);
+    const runs = {
+      ...(previousRuns ?? (previous?.direction ? { [previous.direction]: previousLatest as PluginSyncRunRecord } : {})),
+      [record.direction]: record,
+    };
     await setPreferenceChecked(database, [
-      { key: pluginSyncStatusPreferenceKey(pluginSlug, projectId), value: JSON.stringify(record) },
+      { key: pluginSyncStatusPreferenceKey(pluginSlug, projectId), value: JSON.stringify({ ...record, runs }) },
     ]);
+  }
+
+  /** Minutes between scheduled runs; blank / non-numeric / <= 0 = off. */
+  function parseEveryMinutes(raw: string | undefined): number {
+    const n = Math.floor(Number(raw?.trim()));
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  /** Queued entries in the plugin's outbox, found via the push command's `*_STATE_DIR` env. Null when unreadable. */
+  async function readOutboxLength(
+    plugin: PluginRow & { manifest: PluginManifest },
+    pluginRowId: string,
+    projectId: string,
+  ): Promise<number | null> {
+    const pushEnv = plugin.manifest.sync?.push?.env;
+    if (!pushEnv) return null;
+    try {
+      const ctx = await resolvePluginRunContext(pluginRowId, projectId);
+      const env = substitutePluginEnv(pushEnv, ctx.vars);
+      const dirKey = Object.keys(env).find((k) => k.endsWith("_STATE_DIR"));
+      if (!dirKey) return null;
+      const file = join(env[dirKey]!, "outbox.json");
+      if (!existsSync(file)) return 0;
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as { entries?: unknown };
+      return Array.isArray(parsed.entries) ? parsed.entries.length : null;
+    } catch {
+      return null;
+    }
   }
 
   async function getSyncStatus(pluginRowId: string, projectId: string): Promise<PluginSyncStatusView> {
     const plugin = await requirePlugin(pluginRowId);
     const sync = plugin.manifest.sync;
     await requireProject(projectId);
-    const raw = await getPreference(pluginSyncStatusPreferenceKey(plugin.pluginId, projectId), database);
-    let lastRun: PluginSyncRunRecord | null = null;
-    if (raw) {
-      try {
-        lastRun = JSON.parse(raw) as PluginSyncRunRecord;
-      } catch {
-        lastRun = null;
-      }
-    }
+    const stored = await readStoredRun(plugin.pluginId, projectId);
+    const { runs, ...latest } = stored ?? ({} as StoredRun);
+    const lastRun = stored ? (latest as PluginSyncRunRecord) : null;
+    const lastRuns = {
+      pull: runs?.pull ?? (lastRun?.direction === "pull" ? lastRun : null),
+      push: runs?.push ?? (lastRun?.direction === "push" ? lastRun : null),
+    };
     const configured = sync ? (await validateSync(pluginRowId, projectId)).ok : false;
-    return { provider: sync?.provider ?? null, configured, lastRun };
+    const values = await readSyncConfigValues(plugin.pluginId, projectId);
+    return {
+      provider: sync?.provider ?? null,
+      configured,
+      lastRun,
+      lastRuns,
+      outboxLength: sync ? await readOutboxLength(plugin, pluginRowId, projectId) : null,
+      schedule: {
+        pullEveryMinutes: parseEveryMinutes(values.pullEveryMinutes),
+        pushEveryMinutes: parseEveryMinutes(values.pushEveryMinutes),
+      },
+    };
   }
 
   async function triggerSync(
     pluginRowId: string,
     projectId: string,
-    opts: { direction: PluginSyncDirection; dryRun?: boolean },
+    opts: { direction: PluginSyncDirection; dryRun?: boolean; scheduled?: boolean },
   ): Promise<PluginSyncRunRecord> {
     const plugin = await requirePlugin(pluginRowId);
     const sync = requireSyncDef(plugin);
@@ -364,6 +359,7 @@ export function createPluginSyncOps(deps: {
     await requireProject(projectId);
 
     const startedAt = new Date().toISOString();
+    const scheduled = opts.scheduled || undefined;
     // Fail CLOSED: refuse to run pull/push at all when config/secrets are incomplete, and record
     // that refusal as this project's last run so the status view shows WHY nothing happened.
     const validation = await validateSync(pluginRowId, projectId);
@@ -375,12 +371,13 @@ export function createPluginSyncOps(deps: {
         finishedAt: startedAt,
         ok: false,
         error: validation.error,
+        scheduled,
       };
       await recordSyncRun(plugin.pluginId, projectId, record);
       return record;
     }
 
-    const { env: syncEnv } = await resolveSyncEnv(plugin, projectId);
+    const { env: syncEnv, secretValues } = await resolveSyncEnv(plugin, projectId);
     const dryRunEnv: Record<string, string> = opts.dryRun ? { SYNC_DRY_RUN: "1" } : {};
 
     const ctx = await resolvePluginRunContext(pluginRowId, projectId);
@@ -388,7 +385,8 @@ export function createPluginSyncOps(deps: {
     const env = { ...substitutePluginEnv(cmdDef.env, ctx.vars), ...syncEnv, ...dryRunEnv };
     const command = substitutePluginPlaceholders(cmdDef.command, ctx.vars);
 
-    const result = await runPluginCommand(command, { cwd, env });
+    const raw = await runPluginCommand(command, { cwd, env });
+    const result = { ...raw, stdout: redactSecrets(raw.stdout, secretValues), stderr: redactSecrets(raw.stderr, secretValues) };
     const finishedAt = new Date().toISOString();
     const ok = !result.timedOut && result.code === 0;
     const record: PluginSyncRunRecord = {
@@ -399,12 +397,57 @@ export function createPluginSyncOps(deps: {
       ok,
       code: result.code,
       timedOut: result.timedOut || undefined,
-      error: ok ? undefined : (result.timedOut ? "sync command timed out" : `sync command exited with code ${result.code}`),
-      summary: parseRunSummary(result.stdout),
+      // The script's own `step`/`reason` and the stderr tail, not just the exit code (#1625).
+      error: ok ? undefined : describeRunFailure(result),
+      scheduled,
+      summary: parseRunSummary(result.stdout, { siteUrl: syncEnv.SYNC_CONFIG_SITEURL }),
     };
     await recordSyncRun(plugin.pluginId, projectId, record);
     return record;
   }
 
-  return { getSyncConfig, setSyncConfig, setSyncSecrets, validateSync, triggerSync, getSyncStatus, resolveSyncEnv, redactSecrets };
+  const runningSchedules = new Set<string>();
+
+  /**
+   * The scheduler tick (#1625): for every (plugin, project) pair, run each direction whose
+   * `<direction>EveryMinutes` config says it is due, measured from the start of that direction's
+   * last run (failed or not, so a broken sync is retried at its cadence rather than hammered).
+   * A pair that is not fully configured is skipped silently: nothing to run, nothing to record.
+   */
+  async function runDueSyncSchedules(
+    targets: Array<{ pluginRowId: string; projectId: string }>,
+    nowMs: number = Date.now(),
+  ): Promise<Array<{ pluginRowId: string; projectId: string; direction: PluginSyncDirection; ok: boolean }>> {
+    const fired: Array<{ pluginRowId: string; projectId: string; direction: PluginSyncDirection; ok: boolean }> = [];
+    for (const { pluginRowId, projectId } of targets) {
+      let status: PluginSyncStatusView;
+      try {
+        status = await getSyncStatus(pluginRowId, projectId);
+      } catch {
+        continue;
+      }
+      if (!status.configured) continue;
+      for (const direction of SYNC_DIRECTIONS) {
+        const every = direction === "pull" ? status.schedule.pullEveryMinutes : status.schedule.pushEveryMinutes;
+        if (every <= 0) continue;
+        const last = status.lastRuns[direction];
+        // A dry run doesn't count as the sync having happened.
+        if (last && !last.dryRun && nowMs - Date.parse(last.startedAt) < every * 60_000) continue;
+        const key = `${pluginRowId}:${projectId}:${direction}`;
+        if (runningSchedules.has(key)) continue;
+        runningSchedules.add(key);
+        try {
+          const record = await triggerSync(pluginRowId, projectId, { direction, scheduled: true });
+          fired.push({ pluginRowId, projectId, direction, ok: record.ok });
+        } catch {
+          fired.push({ pluginRowId, projectId, direction, ok: false });
+        } finally {
+          runningSchedules.delete(key);
+        }
+      }
+    }
+    return fired;
+  }
+
+  return { getSyncConfig, setSyncConfig, setSyncSecrets, validateSync, triggerSync, getSyncStatus, runDueSyncSchedules, resolveSyncEnv, redactSecrets };
 }

@@ -36,6 +36,11 @@ export interface ScheduledTasksDeps {
    * wiring, a test of the scheduled_runs table) changes nothing.
    */
   runPromoteCadenceTick?: () => Promise<unknown>;
+  /**
+   * The plugin sync schedule tick (#1625): runs every enabled sync whose per-project
+   * `pullEveryMinutes`/`pushEveryMinutes` has elapsed. Injected like the cadence tick above.
+   */
+  runPluginSyncTick?: () => Promise<unknown>;
 }
 
 let activeScheduledTaskTimers: ScheduledTaskTimers | null = null;
@@ -126,8 +131,18 @@ export function setupScheduledTasks(deps: ScheduledTasksDeps): ScheduledTaskTime
     }
   }
 
+  async function runPluginSyncCycle() {
+    if (!deps.runPluginSyncTick) return;
+    try {
+      await deps.runPluginSyncTick();
+    } catch (err) {
+      console.error("[scheduler] plugin sync cycle error:", err);
+    }
+  }
+
   // Check every minute
   const interval = setInterval(() => {
+    runPluginSyncCycle().catch(() => {});
     runScheduledRunsCycle().catch(() => {});
     runConductorCronCycle().catch(() => {});
     runPromoteCadenceCycle().catch(() => {});

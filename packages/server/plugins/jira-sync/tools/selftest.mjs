@@ -150,4 +150,4 @@ async function main() {
 
 const result = await main();
 console.log(JSON.stringify(result, null, 2));
-process.exit(result.ok ? 0 : 1);
+process.exitCode = result.ok ? 0 : 1;

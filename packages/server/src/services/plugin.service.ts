@@ -24,6 +24,7 @@ import { createPluginLifecycleOps } from "./plugin-lifecycle.service.js";
 import { createPluginListingOps } from "./plugin-listing.service.js";
 import { createPluginProjectSurfaceOps } from "./plugin-project-surface.service.js";
 import { createPluginSyncOps } from "./plugin-sync.service.js";
+import { describeRunFailure } from "./plugin-sync-summary.js";
 import type { PluginSyncConnectionTest } from "./plugin-sync.service.js";
 import { buildButlerFragments } from "./plugin/butler-fragments.js";
 import {
@@ -188,7 +189,12 @@ export function createPluginService(deps: {
     const plugin = await requirePlugin(pluginRowId);
     const script = (plugin.manifest.scripts ?? []).find((s) => s.name === scriptName);
     if (!script) throw new PluginError(`Script "${scriptName}" not found in plugin manifest`, "NOT_FOUND");
-    const { outputRepoPath, vars } = await resolvePluginRunContext(pluginRowId, projectId, { requireScaffoldFor: "scripts" });
+    // Complete sync settings are the single source of truth (#1625): the scaffold profile's TODOs
+    // (site, project, JQL) duplicate them, so they must not block a script the settings already cover.
+    const settingsCover = Boolean(plugin.manifest.sync) && (await validateSync(pluginRowId, projectId)).ok;
+    const { outputRepoPath, vars } = await resolvePluginRunContext(
+      pluginRowId, projectId, settingsCover ? undefined : { requireScaffoldFor: "scripts" },
+    );
     // A plugin with a `sync` block gets its board-held config + secrets in every script's env
     // (#1275); one without is untouched. Secret values are masked in the captured output.
     const { env: syncEnv, secretValues } = await resolveSyncEnv(plugin, projectId);
@@ -210,7 +216,7 @@ export function createPluginService(deps: {
     if (!validation.ok) return { ok: false, error: validation.error, code: null, stdout: "", stderr: "", timedOut: false };
     const result = await runScript(pluginRowId, "bootstrap", projectId);
     const ok = !result.timedOut && result.code === 0;
-    return { ok, error: ok ? undefined : (result.timedOut ? "bootstrap timed out" : `bootstrap exited with code ${result.code}`), ...result };
+    return { ok, ...result, error: ok ? undefined : describeRunFailure(result) };
   }
 
   /**
@@ -270,7 +276,7 @@ export function createPluginService(deps: {
   // External-issue-tracker sync (#1076 declares it, #1081 wires it up) — extracted to its own
   // module (god-module ceiling), same shape as the output-location ops above.
   const {
-    getSyncConfig, setSyncConfig, setSyncSecrets, validateSync, triggerSync, getSyncStatus, resolveSyncEnv, redactSecrets,
+    getSyncConfig, setSyncConfig, setSyncSecrets, validateSync, triggerSync, getSyncStatus, runDueSyncSchedules, resolveSyncEnv, redactSecrets,
   } = createPluginSyncOps({
     database, requirePlugin, requireProject, resolvePluginRunContext,
   });
@@ -358,6 +364,16 @@ export function createPluginService(deps: {
     validateSync,
     triggerSync,
     getSyncStatus,
+    /** The scheduler tick (#1625): runs every enabled sync whose pull/push interval has elapsed. */
+    async runScheduledSyncs(nowMs?: number) {
+      const targets: Array<{ pluginRowId: string; projectId: string }> = [];
+      const enabled = await enabledSlugsByProject();
+      const rows = (await listPluginRows(database)).filter((r) => parsePluginManifest(r.manifestJson).sync);
+      for (const [projectId, slugs] of enabled) {
+        for (const row of rows) if (slugs.has(row.pluginId)) targets.push({ pluginRowId: row.id, projectId });
+      }
+      return runDueSyncSchedules(targets, nowMs);
+    },
   };
 }
 

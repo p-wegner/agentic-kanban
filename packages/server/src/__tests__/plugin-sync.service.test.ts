@@ -285,7 +285,14 @@ describe("plugin sync (#1076/#1081)", () => {
       const projectId = await insertProject(db, makeProjectRepo());
 
       const status = await service.getSyncStatus(plugin.id, projectId);
-      expect(status).toEqual({ provider: "jira", configured: false, lastRun: null });
+      expect(status).toEqual({
+        provider: "jira",
+        configured: false,
+        lastRun: null,
+        lastRuns: { pull: null, push: null },
+        outboxLength: null,
+        schedule: { pullEveryMinutes: 0, pushEveryMinutes: 0 },
+      });
     });
 
     it("throws for a plugin id that does not exist (view's error state)", async () => {
