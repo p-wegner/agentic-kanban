@@ -9,7 +9,7 @@ import { parseIssueNumberFromBranch } from "@agentic-kanban/shared/lib/branch";
 import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
 type BundledSkillsLib = typeof import("@agentic-kanban/shared/lib/bundled-skills");
-type BundledSkill = Awaited<ReturnType<BundledSkillsLib["listBundledSkills"]>>[number];
+type InstallableSkill = Awaited<ReturnType<BundledSkillsLib["listBundledSkills"]>>[number];
 type PromptSkill = (typeof BUILTIN_SKILLS)[number];
 type InstallSkillOptions = { names?: string; list?: boolean; user?: boolean; link?: boolean };
 
@@ -68,7 +68,7 @@ async function initAction(path?: string, options?: { name?: string }): Promise<v
   }
 }
 
-function printSkillList(bundled: BundledSkill[], promptOnly: readonly PromptSkill[]): void {
+function printSkillList(bundled: InstallableSkill[], promptOnly: readonly PromptSkill[]): void {
   console.log("Bundled skills (directory + references, junctioned on install):");
   if (!bundled.length) console.log("  (none found — the package's skills/ directory is missing)");
   for (const s of bundled) console.log(`  ${s.name} — ${s.description}`);
@@ -112,7 +112,7 @@ async function resolveSkillsDirs(
 async function installIntoSkillsDir(
   lib: BundledSkillsLib,
   skillsDir: string,
-  selected: { bundled: BundledSkill[]; promptOnly: readonly PromptSkill[] },
+  selected: { bundled: InstallableSkill[]; promptOnly: readonly PromptSkill[] },
   link: boolean,
 ): Promise<boolean> {
   const { writeAgentSkillFileInto } = await import("@agentic-kanban/shared/lib/agent-skill-files");

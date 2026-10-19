@@ -78,9 +78,9 @@ async function fetchSessionRows(deps: ToolDeps, pid: string, sinceIso: string) {
     .orderBy(schema.sessions.startedAt);
 }
 
-type SessionRow = Awaited<ReturnType<typeof fetchSessionRows>>[number];
+type FixSessionRow = Awaited<ReturnType<typeof fetchSessionRows>>[number];
 
-function newWorkspaceEntry(r: SessionRow): WS {
+function newWorkspaceEntry(r: FixSessionRow): WS {
   return {
     workspaceId: r.workspaceId,
     issueNumber: r.issueNumber ?? 0,
@@ -95,7 +95,7 @@ function newWorkspaceEntry(r: SessionRow): WS {
   };
 }
 
-function groupByWorkspace(rows: SessionRow[], nowMs: number): Map<string, WS> {
+function groupByWorkspace(rows: FixSessionRow[], nowMs: number): Map<string, WS> {
   const byWs = new Map<string, WS>();
   for (const r of rows) {
     const kind = classifyTrigger(r.triggerType);

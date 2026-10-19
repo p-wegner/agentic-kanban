@@ -95,13 +95,11 @@ const COHESION_BASELINE: Record<string, number> = {
   "packages/server/src/services/butler-sdk.service.ts": 30,
   // #957: the blanket /repositories/ cohesion exemption was removed — the large
   // aggregate repositories are now RATCHETED instead of invisible. They may only shrink.
-  "packages/server/src/repositories/issue.repository.ts": 36,
   // session.repository.ts decomposed into ./session/* sub-modules (#45); the facade
   // barrel re-exports only, so its baseline entry is removed.
   // stack-profile.service.ts decomposed behind a facade barrel (#911) — entry removed.
   // git-info.service.ts: the source-tree walk moved to ./git-info/code-metrics.ts (#340),
   // taking it under the flat threshold — entry removed.
-  "packages/server/src/services/agent.service.ts": 28, // #167 added a legitimate write site
   "packages/server/src/services/insights.service.ts": 23,
   // agent-questions.service.ts decomposed into ./agent-questions/* sub-modules (#912);
   // the facade barrel re-exports only, so its baseline entry is removed.
@@ -109,16 +107,11 @@ const COHESION_BASELINE: Record<string, number> = {
   // files sat in the old blind spot — under 600 lines but over 20 top-level function
   // declarations — and are grandfathered at their current count. Shrink-only, same as
   // every entry above.
-  "packages/server/src/repositories/issue-ai.repository.ts": 31,
-  "packages/server/src/repositories/issue-service.repository.ts": 30,
-  "packages/server/src/repositories/workspace-crud.repository.ts": 27,
-  "packages/server/src/scripts/mock-agent.ts": 23,
   // workspace.repository.ts decomposed into ./workspace-{reads,mutations,analytics,
   // project-resolution,issue-status}.repository.ts (#913); the facade barrel
   // re-exports only, so its baseline entry is removed.
   "packages/server/src/repositories/session-lifecycle.repository.ts": 22, // #172 added updateSessionContainerId
   "packages/server/src/services/stale-dev-processes.ts": 21, // #172 zombie-fleet sweep additions
-  "packages/shared/src/lib/openspec.ts": 21,
 };
 
 /**
@@ -157,31 +150,13 @@ const MAX_FUNCTION_BRANCHES = GATE_CAPS.branches.hard;
  */
 const COMPLEXITY_BASELINE: Record<string, number> = {
   "packages/client/src/components/BoardColumn.tsx": 26,
-  "packages/client/src/components/TerminalEventRenderer.tsx": 36,
-  "packages/client/src/components/WorkspaceCard.tsx": 32,
-  "packages/client/src/lib/butler-event-reducer.ts": 31,
-  "packages/client/src/lib/terminal-transcript.ts": 27,
-  "packages/mcp-server/src/tools/reviewer-fixes.ts": 26,
-  "packages/server/src/cli/commands/status.ts": 30,
-  "packages/server/src/cli/commands/system.ts": 32,
-  "packages/server/src/routes/projects.ts": 30,
-  "packages/server/src/services/backlog-markdown.service.ts": 41,
   // 37 -> 34 (#956): the verify-env assembly moved into `buildVerifyEnv` in
   // `pre-merge-gate-tier.ts`, where the scoping resolvers it combines already live.
-  "packages/server/src/services/pre-merge-gate.service.ts": 34,
   "packages/server/src/services/preflight-check.ts": 23,
-  "packages/server/src/services/session-manager/session-lifecycle.ts": 38,
-  "packages/server/src/services/workspace-scorecard.service.ts": 27,
-  "packages/server/src/startup/ancestor-branch-reconciler.ts": 26,
   // monitor-auto-start.ts: runAutoStart restructured into runInProgressBackfill /
   // runTodoPull / evaluateStartCandidate (#802) — 59 branches down to 4, and the file's
   // worst function is now 17, under the flat threshold. Entry REMOVED, not lowered.
   "packages/server/src/startup/monitor-cycle.ts": 24,
-  "packages/server/src/startup/monitor-setup.ts": 26,
-  "packages/shared/src/lib/agent-stream/copilot.ts": 41,
-  "packages/shared/src/lib/backlog-markdown.ts": 41,
-  "packages/shared/src/lib/session-summary.ts": 29,
-  "packages/shared/src/lib/workflow-engine/graph-validation.ts": 28,
 };
 
 // Directory exclusion (`node_modules`, `dist`, a nested `.worktrees` or linked worktree BELOW
