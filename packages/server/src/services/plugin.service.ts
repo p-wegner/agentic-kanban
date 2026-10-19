@@ -161,7 +161,7 @@ export function createPluginService(deps: {
   // Install/update/remove of a plugin ROW extracted to its own module (god-module
   // ceiling) — see plugin-lifecycle.service.ts. Depends on `fanOutSkills` above so a
   // manifest update can re-materialize a newly declared skill (#443).
-  const { installPlugin, updatePlugin, removePlugin } = createPluginLifecycleOps({
+  const { installPlugin, updatePlugin, removePlugin, refreshBundledPlugins } = createPluginLifecycleOps({
     database, requireProject, enabledSlugsByProject, fanOutSkills,
   });
 
@@ -344,6 +344,8 @@ export function createPluginService(deps: {
     summarizeLoopGate,
     validatePluginSource,
     removePlugin: invalidatesPluginList(removePlugin),
+    /** Startup (#1630): re-read the manifest of bundled plugins whose file changed (a promote). */
+    refreshBundledPlugins: invalidatesPluginList(refreshBundledPlugins),
     enableForProject: invalidatesPluginList(enableForProject),
     disableForProject: invalidatesPluginList(disableForProject),
     setSkillListingModeForProject: invalidatesPluginList(setSkillListingModeForProject),

@@ -9,12 +9,13 @@ import type { Database } from "../db/index.js";
 import {
   deletePluginRow,
   getPluginRowById,
+  listPluginRows,
   listPluginEnabledPreferences,
   upsertPluginRow,
   type PluginRow,
 } from "../repositories/plugins.repository.js";
 import { pluginsHomeDir, looksLikeGitUrl, readManifestFromDir } from "./plugin-fs.js";
-import { normalizeGitUrl } from "./plugin-marketplace.js";
+import { bundledPluginsDir, normalizeGitUrl } from "./plugin-marketplace.js";
 import { stopPluginViews } from "./plugin-views.service.js";
 import { deletePluginViewProcessesForPlugin } from "../repositories/plugin-view-processes.repository.js";
 import { PluginError } from "./plugin-errors.js";
@@ -214,6 +215,45 @@ export function createPluginLifecycleOps(deps: {
     };
   }
 
+  /**
+   * Startup refresh (#1630): the board caches `manifestJson` at install time, but a bundled
+   * plugin's scripts run from `localPath` inside the board checkout, so a promote ships new
+   * code with a stale manifest (new sync config fields invisible until a manual update).
+   * Re-reads the manifest of every row whose `localPath` is inside the bundled plugins dir and
+   * rewrites the row when the file changed. Never pulls, never touches views or skills; a
+   * broken or id-changed manifest is skipped so one bad plugin cannot block startup.
+   */
+  async function refreshBundledPlugins(): Promise<string[]> {
+    const root = bundledPluginsDir();
+    if (!root) return [];
+    const base = resolve(root).toLowerCase().replace(/\\/g, "/");
+    const refreshed: string[] = [];
+    for (const row of await listPluginRows(database)) {
+      const dir = resolve(row.localPath).toLowerCase().replace(/\\/g, "/");
+      if (!dir.startsWith(`${base}/`)) continue;
+      try {
+        const { manifest, raw } = readManifestFromDir(row.localPath);
+        if (manifest.id !== row.pluginId || raw.trim() === row.manifestJson.trim()) continue;
+        await upsertPluginRow(
+          {
+            id: row.id,
+            pluginId: row.pluginId,
+            name: manifest.name,
+            sourceUrl: row.sourceUrl,
+            localPath: row.localPath,
+            version: manifest.version ?? null,
+            manifestJson: raw,
+          },
+          database,
+        );
+        refreshed.push(row.pluginId);
+      } catch (err) {
+        console.warn(`[plugins] bundled manifest refresh skipped for ${row.pluginId}: ${errorMessage(err)}`);
+      }
+    }
+    return refreshed;
+  }
+
   /** Delete the row + running views. Never deletes cloned files on disk. */
   async function removePlugin(id: string): Promise<void> {
     const row = await getPluginRowById(id, database);
@@ -230,5 +270,5 @@ export function createPluginLifecycleOps(deps: {
     await deletePluginRow(id, database);
   }
 
-  return { installPlugin, updatePlugin, removePlugin };
+  return { installPlugin, updatePlugin, removePlugin, refreshBundledPlugins };
 }

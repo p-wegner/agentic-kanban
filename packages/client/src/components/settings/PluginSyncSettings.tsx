@@ -4,10 +4,11 @@ import { apiPost } from "../../lib/api.js";
 import { useApiResource } from "../../hooks/useApiResource.js";
 import { showToast } from "../../lib/toast.js";
 import { PluginSyncPanel } from "./PluginSyncPanel.js";
+import { validateSyncFields, type SyncFieldType } from "./pluginSyncFields.js";
 
 type SyncConfigView = {
   provider: string;
-  fields: Array<{ key: string; label?: string; description?: string; required: boolean; value: string }>;
+  fields: Array<{ key: string; label?: string; description?: string; required: boolean; type?: SyncFieldType; value: string }>;
   secrets: Array<{ name: string; present: boolean }>;
 };
 
@@ -31,6 +32,7 @@ export function PluginSyncSettings({ pluginRowId, projectId }: { pluginRowId: st
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [test, setTest] = useState<PluginSyncConnectionTest | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (view) setFieldValues(Object.fromEntries(view.fields.map((f) => [f.key, f.value])));
@@ -46,6 +48,12 @@ export function PluginSyncSettings({ pluginRowId, projectId }: { pluginRowId: st
   }, [resource.error]);
 
   async function save(): Promise<boolean> {
+    const errors = validateSyncFields((view?.fields ?? []).map((f) => ({ key: f.key, type: f.type ?? "text" })), fieldValues);
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      showToast("Fix the highlighted sync settings before saving", "error");
+      return false;
+    }
     setSaving(true);
     try {
       await apiPost(`/api/plugins/${pluginRowId}/sync/config`, { projectId, values: fieldValues });
@@ -89,21 +97,44 @@ export function PluginSyncSettings({ pluginRowId, projectId }: { pluginRowId: st
 
   return (
     <div className="space-y-1.5" data-testid="plugin-sync-settings">
-      {view.fields.map((f) => (
-        <label key={f.key} className="flex items-center gap-2">
-          <span className="w-28 shrink-0 text-xs text-gray-700 dark:text-gray-300">
-            {f.label ?? f.key}{f.required ? " *" : ""}
-          </span>
-          <input
-            type="text"
-            value={fieldValues[f.key] ?? ""}
-            placeholder={f.description}
-            onChange={(e) => setFieldValues((v) => ({ ...v, [f.key]: e.target.value }))}
-            className={INPUT_CLASS}
-            data-testid={`plugin-sync-field-${f.key}`}
-          />
-        </label>
-      ))}
+      {view.fields.map((f) => {
+        const type = f.type ?? "text";
+        const error = fieldErrors[f.key];
+        const set = (value: string) => {
+          setFieldValues((v) => ({ ...v, [f.key]: value }));
+          setFieldErrors((e) => { const { [f.key]: _drop, ...rest } = e; return rest; });
+        };
+        return (
+          <div key={f.key}>
+            <label className="flex items-center gap-2">
+              <span className="w-28 shrink-0 text-xs text-gray-700 dark:text-gray-300">
+                {f.label ?? f.key}{f.required ? " *" : ""}
+              </span>
+              {type === "boolean" ? (
+                <input
+                  type="checkbox"
+                  checked={(fieldValues[f.key] ?? "").trim() === "true"}
+                  onChange={(e) => set(e.target.checked ? "true" : "false")}
+                  title={f.description}
+                  data-testid={`plugin-sync-field-${f.key}`}
+                />
+              ) : (
+                <input
+                  type={type === "number" ? "number" : "text"}
+                  min={type === "number" ? 0 : undefined}
+                  step={type === "number" ? 1 : undefined}
+                  value={fieldValues[f.key] ?? ""}
+                  placeholder={f.description}
+                  onChange={(e) => set(e.target.value)}
+                  className={`${INPUT_CLASS}${type === "json" ? " font-mono" : ""}${error ? " border-red-500" : ""}`}
+                  data-testid={`plugin-sync-field-${f.key}`}
+                />
+              )}
+            </label>
+            {error && <div className="ml-[7.5rem] text-[11px] text-red-600 dark:text-red-400" data-testid={`plugin-sync-field-error-${f.key}`}>{error}</div>}
+          </div>
+        );
+      })}
       {view.secrets.map((s) => (
         <label key={s.name} className="flex items-center gap-2">
           <span className="w-28 shrink-0 text-xs font-mono text-gray-700 dark:text-gray-300">{s.name}</span>
