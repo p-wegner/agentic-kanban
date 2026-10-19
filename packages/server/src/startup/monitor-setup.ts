@@ -16,6 +16,7 @@ import { getRecentAgentExcerpts, logMonitorAction, shouldSkipNudge, type Monitor
 import { processWorkspaceCandidates } from "./monitor-cycle.js";
 import { createMonitorWorkspaceActions } from "./monitor-workspace-actions.js";
 import { buildMonitorNudgePrompt } from "../services/review.service.js";
+import { positivePref, resolveCycleBudgetMs, summarizeResourceSnapshot } from "./monitor-cycle-prefs.js";
 import { snapshotAndCleanStaleDevProcesses, type BoardMonitorResourceSnapshot } from "../services/stale-dev-processes.js";
 import { healWorkspaceSummaryProjection } from "../services/workspace-summary-projection.service.js";
 import {
@@ -109,15 +110,6 @@ export type { MonitorWarning };
  * guard, so a slow scan can never again pace the board or pile up on itself.
  */
 const HEALTH_WARNING_REFRESH_INTERVAL_MS = 10 * 60_000;
-
-/**
- * #416: fraction of the configured monitor interval a cycle may spend before it stops
- * starting NEW project sub-passes (the carry-over cursor resumes them next cycle). 2/3
- * leaves the remaining third of every interval genuinely idle for interactive traffic —
- * the measured failure mode was cycle duration >= interval at 10 driven projects, which
- * made `cycleInFlight` permanently true and starved the event loop continuously.
- */
-const CYCLE_BUDGET_INTERVAL_FRACTION = 2 / 3;
 
 // Shape lives in shared (#567) — it is part of the monitor-status wire payload.
 export type { MonitorResourceSummary };
@@ -383,23 +375,8 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
         console.warn(`[monitor] resource sweep failed (continuing with the cycle): ${errorMessage(err)}`);
         return null;
       });
-      if (resourceSnapshot) {
-        monitorState.lastResourceSnapshot = resourceSnapshot;
-        resourceSummary = {
-          processCount: resourceSnapshot.processes.length,
-          listenerCount: resourceSnapshot.listeners.length,
-          activeWorkspaceCount: resourceSnapshot.activeWorkspaces.length,
-          keptCount: resourceSnapshot.kept.length,
-          cleanedCount: resourceSnapshot.cleaned.filter((item) => item.action === "cleaned").length,
-          cleanupFailedCount: resourceSnapshot.cleaned.filter((item) => item.action === "cleanup_failed").length,
-        };
-      }
-      if (resourceSummary) {
-        console.log(
-          `[monitor] Resource snapshot: processes=${resourceSummary.processCount} listeners=${resourceSummary.listenerCount} ` +
-          `activeWorkspaces=${resourceSummary.activeWorkspaceCount} kept=${resourceSummary.keptCount} cleaned=${resourceSummary.cleanedCount} failed=${resourceSummary.cleanupFailedCount}`,
-        );
-      }
+      if (resourceSnapshot) monitorState.lastResourceSnapshot = resourceSnapshot;
+      resourceSummary = summarizeResourceSnapshot(resourceSnapshot);
       setPhase("loading-candidates");
       const activeStatuses = await db.select({ id: projectStatuses.id }).from(projectStatuses).where(sql`${projectStatuses.name} NOT IN ('Done', 'Cancelled')`);
       const activeStatusIds = activeStatuses.map((s) => s.id);
@@ -457,11 +434,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       // #416: global cycle wall-clock budget — 2/3 of the interval by default (pref
       // `monitor_cycle_budget_ms` overrides). Measured against the cycle's own start, so
       // the resource sweep and candidate loading already count against it.
-      const intervalMinForBudget = getNumber(prefMap, "auto_monitor_interval");
-      const budgetPrefMs = Number(prefMap.get("monitor_cycle_budget_ms"));
-      const cycleBudgetMs = Number.isFinite(budgetPrefMs) && budgetPrefMs > 0
-        ? budgetPrefMs
-        : Math.round((Number.isFinite(intervalMinForBudget) && intervalMinForBudget > 0 ? intervalMinForBudget : 4) * 60_000 * CYCLE_BUDGET_INTERVAL_FRACTION);
+      const cycleBudgetMs = resolveCycleBudgetMs(prefMap);
       // #1102: the per-project half of THE auto-merge resolver, not a second key parse.
       const autoMergeDisabledProjectIds = listAutoMergeDisabledProjectIds(prefMap);
       setPhase("processing-candidates");
@@ -488,17 +461,11 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
         getRecentAgentExcerpts,
         shouldSkipNudge,
         stuckBuilderTimeoutMs: (() => {
-          const minutes = Number(prefMap.get("monitor_stuck_builder_timeout_min"));
-          return Number.isFinite(minutes) && minutes > 0 ? minutes * 60 * 1000 : undefined;
+          const minutes = positivePref(prefMap, "monitor_stuck_builder_timeout_min");
+          return minutes === undefined ? undefined : minutes * 60 * 1000;
         })(),
-        projectTimeBudgetMs: (() => {
-          const ms = Number(prefMap.get("monitor_project_time_budget_ms"));
-          return Number.isFinite(ms) && ms > 0 ? ms : undefined;
-        })(),
-        candidateTimeoutMs: (() => {
-          const ms = Number(prefMap.get("monitor_candidate_timeout_ms"));
-          return Number.isFinite(ms) && ms > 0 ? ms : undefined;
-        })(),
+        projectTimeBudgetMs: positivePref(prefMap, "monitor_project_time_budget_ms"),
+        candidateTimeoutMs: positivePref(prefMap, "monitor_candidate_timeout_ms"),
         cycleDeadlineMs: cycleStartMs + cycleBudgetMs,
         // #919: the per-cycle merge/relaunch caps come from the project's risk posture.
         // Resolved from this cycle's already-loaded prefMap; the per-ticket `risk:<level>`
