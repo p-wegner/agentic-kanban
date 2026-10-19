@@ -314,6 +314,19 @@ export function isSkillRead(name: string, input: Record<string, unknown>): strin
   return null;
 }
 
+const TASK_UPDATE_PREFIX: Record<string, string> = {
+  completed: "Done",
+  in_progress: "Starting",
+  deleted: "Removed",
+};
+
+function summarizeTaskUpdate(input: Record<string, unknown>): string {
+  const status = input.status as string;
+  const subject = input.subject as string;
+  const prefix = Object.hasOwn(TASK_UPDATE_PREFIX, status) ? TASK_UPDATE_PREFIX[status] : "Task update";
+  return `${prefix}: ${subject || "task"}`;
+}
+
 export function summarizeToolCall(name: string, input: Record<string, unknown>): string {
   switch (name) {
     case "Read":
@@ -350,14 +363,8 @@ export function summarizeToolCall(name: string, input: Record<string, unknown>):
       return "Fetching URL";
     case "TaskCreate":
       return `Task: ${(input.subject as string) || "new task"}`;
-    case "TaskUpdate": {
-      const status = input.status as string;
-      const subject = input.subject as string;
-      if (status === "completed") return `Done: ${subject || "task"}`;
-      if (status === "in_progress") return `Starting: ${subject || "task"}`;
-      if (status === "deleted") return `Removed: ${subject || "task"}`;
-      return `Task update: ${subject || "task"}`;
-    }
+    case "TaskUpdate":
+      return summarizeTaskUpdate(input);
     case "TaskList":
       return "Listing tasks";
     case "TaskGet":

@@ -189,6 +189,87 @@ function settlePendingTools<S extends ButlerChatState>(state: S): S {
   };
 }
 
+function reduceQuestion<S extends ButlerChatState>(
+  state: S,
+  buf: AssistantBuf,
+  event: Extract<ButlerEvent, { type: "question" }>,
+  deps: ReducerDeps,
+): { state: S; buf: AssistantBuf } {
+  // The question card replaces the streamed text run, like a tool call does.
+  const nextBuf: AssistantBuf = { buf: "", msgId: null, textSeen: buf.textSeen };
+  if (state.chatMessages.some((m) => m.question?.askId === event.askId)) return { state, buf: nextBuf };
+  return {
+    state: {
+      ...state,
+      chatMessages: [...state.chatMessages, {
+        id: `ask-${event.askId}`,
+        role: "question",
+        text: event.questions[0]?.question ?? "",
+        ts: deps.now(),
+        question: { askId: event.askId, questions: event.questions },
+      }],
+    },
+    buf: nextBuf,
+  };
+}
+
+function reduceQuestionResolved<S extends ButlerChatState>(
+  state: S,
+  buf: AssistantBuf,
+  event: Extract<ButlerEvent, { type: "question-resolved" }>,
+): { state: S; buf: AssistantBuf } {
+  const idx = state.chatMessages.findIndex((m) => m.question?.askId === event.askId);
+  if (idx === -1) return { state, buf };
+  const msg = state.chatMessages[idx];
+  if (msg.question?.resolved) return { state, buf };
+  const next = [...state.chatMessages];
+  next[idx] = { ...msg, question: { ...msg.question!, resolved: { answers: event.answers, reason: event.reason } } };
+  return { state: { ...state, chatMessages: next }, buf };
+}
+
+function findToolResultIndex(messages: ButlerChatMessage[], toolId: string | undefined): number {
+  if (toolId) return messages.findIndex((m) => m.id === `tool-${toolId}`);
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "tool" && messages[i].tool?.status === "pending") return i;
+  }
+  return -1;
+}
+
+function reduceToolResult<S extends ButlerChatState>(
+  state: S,
+  buf: AssistantBuf,
+  event: Extract<ButlerEvent, { type: "tool-result" }>,
+): { state: S; buf: AssistantBuf } {
+  const idx = findToolResultIndex(state.chatMessages, event.toolId);
+  if (idx === -1) return { state, buf };
+  const msg = state.chatMessages[idx];
+  const next = [...state.chatMessages];
+  next[idx] = { ...msg, tool: { ...msg.tool!, output: event.output, status: event.isError ? "error" : "done" } };
+  return { state: { ...state, chatMessages: next }, buf };
+}
+
+function reduceResult<S extends ButlerChatState>(
+  state: S,
+  buf: AssistantBuf,
+  event: Extract<ButlerEvent, { type: "result" }>,
+  deps: ReducerDeps,
+): { state: S; buf: AssistantBuf } {
+  let result = { state, buf };
+  if (event.text && !buf.textSeen) {
+    result = event.isError
+      ? {
+          state: {
+            ...state,
+            chatMessages: [...state.chatMessages, { id: `err-${deps.now()}`, role: "activity", text: `Error: ${event.text}`, ts: deps.now() }],
+          },
+          buf,
+        }
+      : appendAssistantText(state, buf, event.text, deps);
+  }
+  const settled = settlePendingTools(result.state);
+  return { state: { ...settled, sending: false }, buf: emptyAssistantBuf() };
+}
+
 /**
  * Apply one SSE event to a tab's chat state + assistant buffer, returning fresh
  * copies (never mutates the inputs). Behaviour is a faithful port of the original
@@ -230,71 +311,18 @@ export function reduceButlerEvent<S extends ButlerChatState>(
     }
     case "text":
       return appendAssistantText(state, buf, event.text, deps);
-    case "question": {
-      // The question card replaces the streamed text run, like a tool call does.
-      const nextBuf: AssistantBuf = { buf: "", msgId: null, textSeen: buf.textSeen };
-      if (state.chatMessages.some((m) => m.question?.askId === event.askId)) return { state, buf: nextBuf };
-      return {
-        state: {
-          ...state,
-          chatMessages: [...state.chatMessages, {
-            id: `ask-${event.askId}`,
-            role: "question",
-            text: event.questions[0]?.question ?? "",
-            ts: deps.now(),
-            question: { askId: event.askId, questions: event.questions },
-          }],
-        },
-        buf: nextBuf,
-      };
-    }
-    case "question-resolved": {
-      const idx = state.chatMessages.findIndex((m) => m.question?.askId === event.askId);
-      if (idx === -1) return { state, buf };
-      const msg = state.chatMessages[idx];
-      if (msg.question?.resolved) return { state, buf };
-      const next = [...state.chatMessages];
-      next[idx] = { ...msg, question: { ...msg.question!, resolved: { answers: event.answers, reason: event.reason } } };
-      return { state: { ...state, chatMessages: next }, buf };
-    }
+    case "question":
+      return reduceQuestion(state, buf, event, deps);
+    case "question-resolved":
+      return reduceQuestionResolved(state, buf, event);
     case "subagent-text":
       return appendSubagentText(state, buf, event, deps);
     case "tool":
       return appendToolCall(state, buf, event, deps);
-    case "tool-result": {
-      const targetId = event.toolId ? `tool-${event.toolId}` : undefined;
-      let idx = -1;
-      if (targetId) {
-        idx = state.chatMessages.findIndex((m) => m.id === targetId);
-      } else {
-        for (let i = state.chatMessages.length - 1; i >= 0; i--) {
-          if (state.chatMessages[i].role === "tool" && state.chatMessages[i].tool?.status === "pending") { idx = i; break; }
-        }
-      }
-      if (idx === -1) return { state, buf };
-      const msg = state.chatMessages[idx];
-      const next = [...state.chatMessages];
-      next[idx] = { ...msg, tool: { ...msg.tool!, output: event.output, status: event.isError ? "error" : "done" } };
-      return { state: { ...state, chatMessages: next }, buf };
-    }
-    case "result": {
-      let result = { state, buf };
-      if (event.text && !buf.textSeen) {
-        if (event.isError) {
-          result = {
-            state: {
-              ...state,
-              chatMessages: [...state.chatMessages, { id: `err-${deps.now()}`, role: "activity", text: `Error: ${event.text}`, ts: deps.now() }],
-            },
-            buf,
-          };
-        } else {
-          result = appendAssistantText(state, buf, event.text, deps);
-        }
-      }
-      const settled = settlePendingTools(result.state);
-      return { state: { ...settled, sending: false }, buf: emptyAssistantBuf() };
-    }
+    case "tool-result":
+      return reduceToolResult(state, buf, event);
+    case "result":
+      return reduceResult(state, buf, event, deps);
     case "error": {
       const withMsg: S = {
         ...state,
