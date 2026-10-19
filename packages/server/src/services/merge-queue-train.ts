@@ -28,7 +28,7 @@ import {
 } from "../repositories/merge-train.repository.js";
 import { runMergeTrain, formatTrainLabel, trainDateStamp, trainRefName, type OnTrainDropped } from "./merge-train.service.js";
 import { isMergeTrainLabelLive, noteMergeTrainGateActivity, withMergeTrainGateActivity, registerLiveMergeTrain, unregisterLiveMergeTrain } from "./merge-train-live-registry.js";
-import { cleanupTrainWorktreesForLabel } from "./merge-train-worktrees.js";
+import { cleanupTrainWorktreesForLabel, pinTrainRefsForLabel } from "./merge-train-worktrees.js";
 import { describeInconclusiveGate, describeTrainGateRed, finalTrainStateFields, inconclusiveSkipEvents, isInconclusiveGate } from "./merge-queue-train-inconclusive.js";
 export { describeTrainGateRed } from "./merge-queue-train-inconclusive.js";
 import { finishFlushRun, type FlushRunSpec } from "./merge-train-flush-run.js";
@@ -495,7 +495,9 @@ async function runDoomedTrainJob(args: {
     await updateMergeTrainState(trainId, { state: "red", reconciledReason: reason, finishedAt: new Date().toISOString() }, database).catch(() => undefined);
     unregisterLiveMergeTrain(trainId);
     boardEvents?.broadcast(projectId, "merge_train_changed");
-    return { ok: false, reason: `train orchestrator threw: ${reason}` };
+    // #1621: the teardown below deletes the train branches; keep the shepherd's commits reachable.
+    const pins = await pinTrainRefsForLabel({ repoPath, label });
+    return { ok: false, reason: `train orchestrator threw: ${reason}${pins.length > 0 ? ` (train kept at ${pins.join(", ")})` : ""}` };
   } finally {
     await kit?.flush(); // #1572: no live shepherd write may land after the train's final evidence write
     // #1568: retake the lock for the teardown; a timeout here only skips it (reconcilers are the backstop).

@@ -1,6 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import type { MergeTrainState } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
@@ -174,6 +175,30 @@ export async function removeTrainWorktree(args: RemoveTrainWorktreeArgs): Promis
 export interface CleanupTrainWorktreesResult {
   removed: string[];
   failed: Array<{ path: string; message: string }>;
+}
+
+/**
+ * #1621 - pin every `kanban/train/<label>*` branch under
+ * `refs/kanban/trains/<attempt label>`, so tearing the worktree/branch down after a failed
+ * train never loses a shepherd's fix commit. Best effort, never throws.
+ */
+export async function pinTrainRefsForLabel(args: { repoPath: string; label: string; log?: (m: string) => void }): Promise<string[]> {
+  const pinned: string[] = [];
+  try {
+    const listed = await gitExec(["for-each-ref", "--format=%(refname:short) %(objectname)", `refs/heads/${TRAIN_BRANCH_PREFIX}`], { cwd: args.repoPath });
+    for (const line of listed.stdout.split(/\r?\n/)) {
+      const [branch, sha] = line.trim().split(" ");
+      if (!branch || !sha) continue;
+      const attempt = trainAttemptLabelFromBranch(branch);
+      if (attempt === null || !findTrainRowForAttemptLabel(attempt, [{ label: args.label }])) continue;
+      const pin = `refs/kanban/trains/${attempt}`;
+      const r = await gitExec(["update-ref", pin, sha], { cwd: args.repoPath });
+      if (r.code === 0) pinned.push(pin);
+    }
+  } catch (err) {
+    (args.log ?? console.log)(`[merge-train] ${args.label}: could not pin train refs (non-fatal): ${errorMessage(err)}`);
+  }
+  return pinned;
 }
 
 /**
