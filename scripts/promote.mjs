@@ -1181,7 +1181,21 @@ function listRcBranches() {
  * cut the new branch ref from master's tip (`git branch`, never a checkout switch — the main
  * checkout's working tree is untouched), and record the transition. A dry run only decides.
  */
-function resolveRcCandidate({ masterTip, dryRun }) {
+async function fetchOpenHealTicketProbe() {
+  try {
+    const projectId = await resolveProjectId(null);
+    const res = await fetch(`${boardUrl}/api/projects/${projectId}/rc`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return () => null;
+    const body = await res.json();
+    const rcBranch = body?.rc?.branch;
+    const count = Array.isArray(body?.healTickets) ? body.healTickets.length : null;
+    return (branch) => (count === null || rcBranch !== branch ? null : count > 0);
+  } catch {
+    return () => null; // no board answered: unknown, never abandon on a guess
+  }
+}
+
+async function resolveRcCandidate({ masterTip, dryRun }) {
   let state = readRcState(stableCheckout);
   const existing = listRcBranches();
   const stableHead = git(["rev-parse", "HEAD"], stableCheckout).stdout;
@@ -1189,7 +1203,8 @@ function resolveRcCandidate({ masterTip, dryRun }) {
   const isShipped = (sha) => Boolean(stableHead) && git(["merge-base", "--is-ancestor", sha, stableHead], MAIN_CHECKOUT).code === 0;
   // A candidate that does not descend from stable's HEAD can never be promoted (diverged, e.g. a rewrite).
   const isDiverged = (sha) => Boolean(stableHead) && git(["merge-base", "--is-ancestor", stableHead, sha], MAIN_CHECKOUT).code !== 0;
-  const plan = planRcCandidate({ dateStamp: stableTagDate(), state, existingBranches: existing, cadenceMs: DEFAULT_RC_CADENCE_MS, isShipped, isDiverged });
+  const hasOpenHealTicket = await fetchOpenHealTicketProbe();
+  const plan = planRcCandidate({ dateStamp: stableTagDate(), state, existingBranches: existing, cadenceMs: DEFAULT_RC_CADENCE_MS, isShipped, isDiverged, hasOpenHealTicket });
   const at = new Date().toISOString();
   if (plan.abandon) {
     log(`[promote] rc: ABANDONING ${plan.abandon} — ${plan.reason}`);
@@ -1296,7 +1311,7 @@ async function main() {
   // consult no sweep, so there is no candidate for them to gate, and they say so loudly below.
   const masterTip = gitOrThrow(["rev-parse", baseBranch], MAIN_CHECKOUT);
   const onRcLane = !opts.forceSweep && !opts.recover;
-  const rc = onRcLane ? resolveRcCandidate({ masterTip, dryRun: opts.dryRun }) : null;
+  const rc = onRcLane ? await resolveRcCandidate({ masterTip, dryRun: opts.dryRun }) : null;
   const gatedBranch = rc ? rc.branch : baseBranch;
 
   const verdictFor = (sweep) =>

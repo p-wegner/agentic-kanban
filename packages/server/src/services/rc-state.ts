@@ -146,6 +146,9 @@ export function currentRcCandidate(state: RcStateFile): RcCandidate | null {
   return newest ? byBranch.get(newest) ?? null : null;
 }
 
+/** A red rc this young may not have had its heal ticket filed yet. */
+export const DRIVERLESS_GRACE_MS = 15 * 60_000;
+
 export function planRcCandidate({
   dateStamp,
   state,
@@ -154,6 +157,7 @@ export function planRcCandidate({
   cadenceMs = DEFAULT_RC_CADENCE_MS,
   isShipped = () => false,
   isDiverged = () => false,
+  hasOpenHealTicket = () => null,
 }: {
   dateStamp: string;
   state: RcStateFile;
@@ -164,6 +168,8 @@ export function planRcCandidate({
   isShipped?: (sha: string) => boolean;
   /** Is this sha neither in nor ahead of what the stable board runs? Such a candidate is abandoned (see the script). */
   isDiverged?: (sha: string) => boolean;
+  /** Does this rc have an open heal ticket? `null` = unknown (never abandons). A red rc with `false` has no driver (#1648). */
+  hasOpenHealTicket?: (branch: string) => boolean | null;
 }): RcCandidatePlan {
   const inFlight = state.candidates
     .filter((c) => !isTerminalRcState(c.state) && existingBranches.includes(c.branch))
@@ -191,6 +197,14 @@ export function planRcCandidate({
     const sinceMs = candidate.updatedAt ? Date.parse(candidate.updatedAt) : Number.NaN;
     const ageMs = Number.isFinite(sinceMs) ? nowMs - sinceMs : Number.NaN;
     const stuckRed = candidate.state === "red" && Number.isFinite(ageMs) && ageMs > cadenceMs;
+    if (candidate.state === "red" && !stuckRed && Number.isFinite(ageMs) && ageMs > DRIVERLESS_GRACE_MS && hasOpenHealTicket(candidate.branch) === false) {
+      return {
+        action: "cut",
+        branch: nextRcBranch(dateStamp, existingBranches),
+        abandon: candidate.branch,
+        reason: `${candidate.branch} is red (${(ageMs / 3600_000).toFixed(1)}h) with no open heal ticket — nothing is driving it (cancelled?), so abandoning it now and cutting a fresh candidate from master's tip rather than waiting out the ${(cadenceMs / 3600_000).toFixed(0)}h cadence`,
+      };
+    }
     if (!stuckRed) {
       return {
         action: "reuse",
