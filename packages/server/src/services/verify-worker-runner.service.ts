@@ -6,6 +6,7 @@
 // It never decides trust: the caller feeds the report through `acceptWorkerVerdict`, which judges it
 // against the request the BOARD built (sha, tier, worker), not against anything in the frame. This
 // service also never invents a verdict: a worker that vanishes or goes silent yields a refusal.
+import { noteMergeTrainGateResultReceived } from "./merge-train-live-registry.js";
 import { workerBelowRamFloor } from "@agentic-kanban/shared/lib/worker-settings";
 import type { VerifyJobFrame, VerifyStage, WorkerVerifyCapability } from "@agentic-kanban/shared/lib/worker-verify-protocol";
 import { writeFileSync } from "node:fs";
@@ -177,6 +178,7 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
             const failed = !message.passed && !message.refused;
             const saved = failed ? persistFailedWorkerLog(req.kind, jobId, log, deps.logDir) : null;
             if (saved?.logPath) console.log(`[verify-worker] failed output of ${jobId} saved to ${saved.logPath}`);
+            if (req.kind === "train-gate" && req.projectId) noteMergeTrainGateResultReceived(req.projectId, deps.nowMs);
             if (req.kind === "train-gate" && req.projectId && failed) {
               const suites = message.failingSuites ?? [];
               void persistTrainWorkerVerify(deps.database, req.projectId, {

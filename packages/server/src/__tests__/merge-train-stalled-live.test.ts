@@ -4,9 +4,11 @@ import { eq } from "drizzle-orm";
 import { mergeTrains, projects } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMergeTrain, getMergeTrain, updateMergeTrainState } from "../repositories/merge-train.repository.js";
-import { reconcileStrandedMergeTrains, STALLED_LIVE_TRAIN_MS } from "../startup/merge-train-reconciler.js";
+import { reconcileStrandedMergeTrains, STALLED_LIVE_TRAIN_MS, HUNG_GATE_CEILING_MS } from "../startup/merge-train-reconciler.js";
 import {
   isMergeTrainLive,
+  describeLiveGate,
+  noteMergeTrainGateResultReceived,
   isMergeTrainStalled,
   noteMergeTrainGateActivity,
   registerLiveMergeTrain,
@@ -54,7 +56,7 @@ describe("reconcileStrandedMergeTrains - stalled live train (#1513)", () => {
     expect(isMergeTrainLive(trainId)).toBe(false);
   });
 
-  it("leaves a train alone while a gate is running, however old", async () => {
+  it("leaves a train alone while a gate is running within the ceiling", async () => {
     const { db } = createTestDb();
     const { trainId } = await seedGating(db);
     registerLiveMergeTrain({ trainId, label: "train/stalled-01", projectId: (await getMergeTrain(trainId, db))!.projectId, nowMs: NOW - 2 * STALLED_LIVE_TRAIN_MS });
@@ -62,5 +64,22 @@ describe("reconcileStrandedMergeTrains - stalled live train (#1513)", () => {
     const result = await reconcileStrandedMergeTrains({ database: db, now: new Date(NOW).toISOString(), log: () => undefined, liveTrains: snapshotLiveMergeTrains() });
     expect(result.skippedLive).toEqual([trainId]);
     expect((await getMergeTrain(trainId, db))?.state).toBe("gating");
+  });
+});
+
+describe("hung gate (#1646)", () => {
+  it("abandons a train whose gate is active past the ceiling, naming the hung gate", async () => {
+    const { db } = createTestDb();
+    const { trainId } = await seedGating(db);
+    const projectId = (await getMergeTrain(trainId, db))!.projectId;
+    registerLiveMergeTrain({ trainId, label: "train/stalled-01", projectId, nowMs: NOW - 2 * HUNG_GATE_CEILING_MS });
+    noteMergeTrainGateActivity(trainId, true, NOW - 2 * HUNG_GATE_CEILING_MS);
+    noteMergeTrainGateResultReceived(projectId, NOW - 2 * HUNG_GATE_CEILING_MS + 1000);
+    expect(describeLiveGate(trainId, NOW)?.state).toBe("result-received-not-resumed");
+    const result = await reconcileStrandedMergeTrains({ database: db, now: new Date(NOW).toISOString(), log: () => undefined, liveTrains: snapshotLiveMergeTrains() });
+    expect(result.abandoned).toEqual([trainId]);
+    const reason = (await getMergeTrain(trainId, db))?.reconciledReason ?? "";
+    expect(reason).toContain("gate hung");
+    expect(reason).toContain("never resumed");
   });
 });

@@ -37,6 +37,10 @@ export interface LiveMergeTrain {
   activeGates?: number;
   /** #1513 — epoch ms of the job's last gate start/end; what "idle with no job" is measured from. */
   lastActivityMs?: number;
+  /** #1646 — epoch ms the oldest currently-running gate started; cleared when no gate is active. */
+  gateStartedMs?: number;
+  /** #1646 — epoch ms a verify worker's result for this job's gate reached the board (cleared when the gate ends). */
+  gateResultAtMs?: number;
 }
 
 /** Read-only view of the registry a sweep decides against. */
@@ -69,6 +73,38 @@ export function noteMergeTrainGateActivity(trainId: string, started: boolean, no
   if (!entry) return;
   entry.activeGates = Math.max(0, (entry.activeGates ?? 0) + (started ? 1 : -1));
   entry.lastActivityMs = nowMs;
+  if (started && entry.gateStartedMs === undefined) entry.gateStartedMs = nowMs;
+  if (entry.activeGates === 0) {
+    entry.gateStartedMs = undefined;
+    entry.gateResultAtMs = undefined;
+  }
+}
+
+/** #1646 — a verify worker's verdict for a train gate reached the board; the job should resume right after. */
+export function noteMergeTrainGateResultReceived(projectId: string, nowMs: number = Date.now()): void {
+  for (const entry of live.values()) {
+    if (entry.projectId === projectId && (entry.activeGates ?? 0) > 0) entry.gateResultAtMs = nowMs;
+  }
+}
+
+/**
+ * #1646 — a gate that has been ACTIVE longer than `ceilingMs`: `activeGates > 0` hides it from
+ * {@link isMergeTrainStalled}, so a job hung inside its gate (after the worker answered, say)
+ * was never abandoned. Pure over the entry.
+ */
+export function isMergeTrainGateHung(entry: Pick<LiveMergeTrain, "activeGates" | "gateStartedMs">, nowMs: number, ceilingMs: number): boolean {
+  return (entry.activeGates ?? 0) > 0 && entry.gateStartedMs !== undefined && nowMs - entry.gateStartedMs >= ceilingMs;
+}
+
+/** #1646 — the live gate state for the train panel / `train show`; null when no gate is active. */
+export function describeLiveGate(trainId: string, nowMs: number = Date.now()): { state: "running" | "result-received-not-resumed"; text: string } | null {
+  const entry = live.get(trainId);
+  if (!entry || (entry.activeGates ?? 0) === 0) return null;
+  if (entry.gateResultAtMs !== undefined) {
+    return { state: "result-received-not-resumed", text: `gate result received at ${new Date(entry.gateResultAtMs).toISOString()}, train job not resumed` };
+  }
+  const mins = Math.round((nowMs - (entry.gateStartedMs ?? nowMs)) / 60_000);
+  return { state: "running", text: `gate running for ${mins}m` };
 }
 
 /** #1513: bracket one staging gate, so a job with NO gate running can be told from one mid-verify. */

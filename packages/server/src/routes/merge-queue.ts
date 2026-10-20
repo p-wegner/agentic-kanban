@@ -1,4 +1,5 @@
 import { streamSSE } from "hono/streaming";
+import { describeLiveGate } from "../services/merge-train-live-registry.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { mergeQueueBody, mergeQueueWindowHoldBody, mergeQueueWindowReleaseBody } from "./merge-queue-body-schemas.js";
@@ -170,6 +171,7 @@ export function createMergeQueueRoute(
         gateEvidence,
         bisectResult,
         attempts: (gateEvidence as { attempts?: unknown[] } | null)?.attempts ?? [],
+        liveGate: describeLiveGate(id),
       },
     });
   });
