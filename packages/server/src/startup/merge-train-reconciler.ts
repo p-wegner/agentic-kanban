@@ -60,6 +60,7 @@ import {
   abortLiveMergeTrain,
   findLiveMergeTrainForProject,
   isMergeTrainStalled,
+  isMergeTrainGateHung,
   unregisterLiveMergeTrain,
   snapshotLiveMergeTrains,
   type LiveMergeTrainSnapshot,
@@ -71,6 +72,9 @@ const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 
 /** #1513: a live train with no gate running for this long has no job behind it, whatever the registry says. */
 export const STALLED_LIVE_TRAIN_MS = 20 * 60 * 1000;
+
+/** #1646 — a single gate active longer than this is hung (worker verify budget + slack), even with activeGates > 0. */
+export const HUNG_GATE_CEILING_MS = 90 * 60 * 1000;
 
 export type MergeTrainReconcileAction = "resume" | "abandon";
 
@@ -210,9 +214,13 @@ async function abandonIfStalled(
   boardEvents: BoardEventSink | undefined,
 ): Promise<boolean> {
   const entry = live.get(row.id);
-  if (!entry || !isMergeTrainStalled(entry, nowMs, STALLED_LIVE_TRAIN_MS)) return false;
+  if (!entry) return false;
+  const hung = isMergeTrainGateHung(entry, nowMs, HUNG_GATE_CEILING_MS);
+  if (!hung && !isMergeTrainStalled(entry, nowMs, STALLED_LIVE_TRAIN_MS)) return false;
   const idleMinutes = Math.round((nowMs - (entry.lastActivityMs ?? nowMs)) / 60_000);
-  const reason = `stalled: registered live in this process but no gate, bisect or fix agent ran for ${idleMinutes}m - abandoned so its members can be re-assembled`;
+  const reason = hung
+    ? `stalled: gate hung - a staging gate was active for ${Math.round((nowMs - (entry.gateStartedMs ?? nowMs)) / 60_000)}m${entry.gateResultAtMs !== undefined ? ` (worker result received at ${new Date(entry.gateResultAtMs).toISOString()}, train job never resumed)` : ""} - abandoned so its members can be re-assembled`
+    : `stalled: registered live in this process but no gate, bisect or fix agent ran for ${idleMinutes}m - abandoned so its members can be re-assembled`;
   abortLiveMergeTrain(row.id);
   unregisterLiveMergeTrain(row.id);
   await updateMergeTrainState(row.id, { state: "abandoned", reconciledReason: reason, finishedAt: now, guardStates: ["assembling", "gating"] }, database).catch(() => undefined);
