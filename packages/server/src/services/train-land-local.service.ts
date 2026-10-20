@@ -89,6 +89,8 @@ export interface LandLocalInput {
   /** A train row id; absent with `fromWindow`. */
   trainId?: string;
   fromWindow?: boolean;
+  /** Window runs only: name the worktree label explicitly (e.g. `local-202610201757`) instead of deriving it. */
+  label?: string;
   /** Re-run the gate in the worktree a previous red run left behind. */
   continueRun?: boolean;
   skipInstall?: boolean;
@@ -153,6 +155,26 @@ function windowLabel(now: string): string {
   return `local-${now.slice(0, 16).replace(/[-:T]/g, "")}`;
 }
 
+/** Leftover `land-local/*` worktrees of the repo, from `git worktree list --porcelain`. */
+async function listLandLocalWorktrees(deps: LandLocalDeps, repo: string): Promise<Array<{ path: string; label: string; branch: string | null }>> {
+  const listed = await deps.git(["worktree", "list", "--porcelain"], repo);
+  if (listed.code !== 0) return [];
+  const out: Array<{ path: string; label: string; branch: string | null }> = [];
+  for (const block of listed.stdout.split(/\r?\n\s*\r?\n/)) {
+    const path = /^worktree (.+)$/m.exec(block)?.[1]?.trim();
+    if (!path) continue;
+    const m = /[\\/]land-local[\\/]([^\\/]+)$/.exec(path);
+    if (!m) continue;
+    out.push({ path, label: m[1], branch: /^branch refs\/heads\/(.+)$/m.exec(block)?.[1]?.trim() ?? null });
+  }
+  return out;
+}
+
+/** The window-run worktrees a red run left: `land-local/local-*` checked out on `kanban/land-local/local-*`. */
+function windowLeftovers<T extends { label: string; branch: string | null }>(all: T[]): T[] {
+  return all.filter((w) => w.label.startsWith("local-") && w.branch === landLocalBranchName(w.label));
+}
+
 /** `--only` / `--skip`: the operator's explicit member overrides, each skip logged. */
 function filterByIssueFlags(members: LandLocalMember[], input: Pick<LandLocalInput, "only" | "skip">, log: (line: string) => void): LandLocalMember[] {
   const only = input.only?.length ? new Set(input.only) : null;
@@ -191,7 +213,36 @@ export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps)
   } else if (input.fromWindow) {
     memberIds = await deps.getWindowMemberIds(projectId);
     if (memberIds.length === 0) return { status: "error", message: "no open merge-train window with pending members" };
-    label = windowLabel(deps.nowIso());
+    if (input.label) {
+      label = input.label.replace(/^train\//, "");
+    } else {
+      // The label is minute-stamped, so a later call cannot re-derive it: find the red run's worktree instead.
+      const all = await listLandLocalWorktrees(deps, repo);
+      const leftovers = windowLeftovers(all);
+      if (input.continueRun) {
+        if (leftovers.length === 1) {
+          label = leftovers[0].label;
+          deps.log(`--continue: resuming window worktree ${leftovers[0].path}`);
+        } else {
+          const existing = (leftovers.length ? leftovers : all).map((w) => w.path);
+          return {
+            status: "error",
+            message: leftovers.length > 1
+              ? `--continue: ${leftovers.length} window worktrees exist - pick one with --label <label>:\n  ${leftovers.map((w) => `${w.label}  ${w.path}`).join("\n  ")}`
+              : `--continue: no window worktree found${existing.length ? `; land-local worktrees that exist:\n  ${existing.join("\n  ")}` : " (no land-local worktrees exist)"}`,
+          };
+        }
+      } else {
+        if (leftovers.length) {
+          return {
+            status: "error",
+            message: `window worktree(s) already exist from an earlier run - fix and re-run with --continue --label <label>, or remove:\n  ${leftovers.map((w) => `${w.label}  ${w.path}`).join("\n  ")}`,
+            worktree: leftovers[0].path,
+          };
+        }
+        label = windowLabel(deps.nowIso());
+      }
+    }
   } else {
     return { status: "error", message: "give a train id or --from-window" };
   }
@@ -202,7 +253,8 @@ export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps)
   const branch = landLocalBranchName(label);
   const worktreeExists = deps.pathExists(worktree);
   if (input.continueRun && !worktreeExists) {
-    return { status: "error", message: `--continue: no worktree at ${worktree}` };
+    const others = (await listLandLocalWorktrees(deps, repo)).map((w) => w.path);
+    return { status: "error", message: `--continue: no worktree at ${worktree}${others.length ? `; land-local worktrees that exist:\n  ${others.join("\n  ")}` : ""}` };
   }
   if (!input.continueRun && worktreeExists) {
     return { status: "error", message: `worktree ${worktree} already exists from an earlier run - fix it and re-run with --continue (or --continue --on-worker to move the re-run to a verify worker; a fresh --on-worker run refuses on the leftover worktree)`, worktree };
