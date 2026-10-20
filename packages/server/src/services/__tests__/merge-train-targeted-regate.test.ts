@@ -47,7 +47,6 @@ describe("targeted re-gate runs vitest inside the package (#1656)", () => {
     const d = decideRegate({ ...base, fixFiles: ["packages/server/src/b.ts"], failedSuites: ["packages/server/src/__tests__/x.test.ts"] });
     if (d.mode !== "targeted") throw new Error("expected targeted");
     expect(d.script).toContain("cd 'packages/server' && pnpm exec vitest run --maxWorkers=4 'src/__tests__/x.test.ts'");
-    expect(d.script.split(" && ").filter((p) => p.startsWith("pnpm exec vitest"))).toEqual([]);
   });
   it("goes full when a suite cannot be placed", () => {
     const d = decideRegate({ coveredFiles: ["packages/server/a.ts", "packages/shared/b.ts"], gatedSha: "a".repeat(40), fixSha: "f", fixFiles: ["packages/server/c.ts"], failedSuites: ["src/x.test.ts"] });
