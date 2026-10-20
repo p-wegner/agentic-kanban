@@ -844,7 +844,11 @@ describe("workspace.service", () => {
 
       // Warning comment was recorded asynchronously. The seeded project has no verify_script,
       // so an "unverified" warning (#377) also lands ahead of the synchronous "merged" note.
-      const events = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
+      // The cleanup warning is written after removeWorktree throws, so wait for it too.
+      const events = await waitFor(async () => {
+        const rows = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
+        return rows.length >= 3 ? rows : null;
+      }, "the cleanup warning comment");
       expect(events.map((event) => JSON.parse(event.payload ?? "{}").eventType)).toEqual(["warning", "merged", "warning"]);
       expect(events[2].body).toContain("recoverable warning");
       expect(events[2].body).toContain("already merged before this response returned");
