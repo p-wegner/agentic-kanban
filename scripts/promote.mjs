@@ -92,6 +92,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitExecSyncResult } from "./git-exec.mjs";
 import { mergeBackRc } from "./promote-merge-back.mjs";
+import { fetchWhileStarting } from "./promote-startup-retry.mjs";
 import { PACK_STAMP_PATH, restorePackStamp } from "./pack-stamp.mjs";
 import { spawnSyncPnpm } from "./pnpm-exec.mjs";
 import { parseNetstatListeners, planPortOwnerKill } from "./dev-port-guard.mjs";
@@ -538,12 +539,14 @@ async function resolveProjectId(knownId) {
 }
 
 async function postTrainHold(projectId, minutes) {
-  const res = await fetch(`${boardUrl}/api/merge-queue/window/hold`, {
+  const send = () => fetch(`${boardUrl}/api/merge-queue/window/hold`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ projectId, minutes }),
     signal: AbortSignal.timeout(10_000),
   });
+  // #1651: the release runs right after a restart — wait out 503 STARTUP_NOT_READY.
+  const res = minutes === 0 ? await fetchWhileStarting(send) : await send();
   if (!res.ok) throw new Error(`POST merge-queue/window/hold -> ${res.status}`);
 }
 
@@ -1629,7 +1632,8 @@ async function main() {
           requestWorkspace: () => requestMergeBack(projectId, rc.branch, tag),
           reprobe: async () => {
             if (!projectId) return false;
-            const res = await fetch(`${boardUrl}/api/projects/${projectId}/base-branch-health/reprobe`, { method: "POST", signal: AbortSignal.timeout(30_000) });
+            // #1651: right after the restart the board answers 503 STARTUP_NOT_READY — retry, bounded.
+            const res = await fetchWhileStarting(() => fetch(`${boardUrl}/api/projects/${projectId}/base-branch-health/reprobe`, { method: "POST", signal: AbortSignal.timeout(30_000) }));
             return res.ok;
           },
           markAttention: async (reason) => {
