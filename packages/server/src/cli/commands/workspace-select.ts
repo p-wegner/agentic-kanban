@@ -1,12 +1,10 @@
 // Picking the workspace a CLI command acts on from an issue (#1652), and closing it over the
 // board API. Pure selection + an injectable fetch so the refusal rules are unit-testable.
+import type { BranchClaim } from "@agentic-kanban/shared/lib/worktree-claim";
 import { buildWorkspaceApiUrl } from "./workspace-api-url.js";
 
-export interface SelectableWorkspace {
-  id: string;
-  branch: string;
-  status: string;
-}
+/** A workspace row as the CLI picks from it: id, status and branch (the shared `BranchClaim` shape). */
+export type SelectableWorkspace = BranchClaim;
 
 /** A workspace is open until it is closed or merged. */
 export function isOpenWorkspace(ws: { status: string }): boolean {
