@@ -830,7 +830,10 @@ describe("workspace.service", () => {
 
       // Let the background task run. The chain awaits several times before it reaches
       // removeWorktree, so a single tick starts it without ever getting there.
-      await flushDeferred();
+      // Wait for the call itself (not a fixed tick count): the chain awaits several DB calls
+      // first and, under a loaded sweep, can take far longer than 25 ticks to get there.
+      await vi.waitFor(() => expect(gitService.removeWorktree).toHaveBeenCalled(), { timeout: 10_000 });
+      await vi.waitFor(() => expect(dbStateWhenCleanupRan).not.toBeNull(), { timeout: 10_000 });
 
       // Workspace was already in "closed" state when the background cleanup fired.
       expect(dbStateWhenCleanupRan).not.toBeNull();
