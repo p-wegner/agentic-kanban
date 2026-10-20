@@ -70,6 +70,25 @@ describe("resolveIssueWriteTransport", () => {
     expect(calls).toBe(1);
   });
 
+  it("waits out a lagging board (answers after 2 s) and uses the server, not the DB (#1650)", async () => {
+    const port = await fakeBoard((_req, _b, res) => { setTimeout(() => json(res, 200, { status: "ok", db: { path: DB } }), 2000); });
+    const t = await resolveIssueWriteTransport({ port, cliDbPath: DB, env, platform: "win32" });
+    expect(t).toEqual({ mode: "server", baseUrl: `http://127.0.0.1:${port}` });
+  }, 15000);
+
+  it("fails with 'up but not answering' when a live listener never answers", async () => {
+    const port = await fakeBoard(() => { /* accept, never answer */ });
+    await expect(resolveIssueWriteTransport({ port, cliDbPath: DB, env, timeoutMs: 100 })).rejects.toThrow("up but not answering");
+  });
+
+  it("falls back to direct with the existing note when nothing is listening", async () => {
+    const port = await fakeBoard((_req, _b, res) => json(res, 200, {}));
+    await new Promise<void>((r) => server!.close(() => r()));
+    server = null;
+    const t = await resolveIssueWriteTransport({ port, cliDbPath: DB, env });
+    expect(t).toEqual({ mode: "direct", reason: `no board server answered on 127.0.0.1:${port}` });
+  });
+
   it("KANBAN_CLI_WRITE_TRANSPORT=direct skips the probe", async () => {
     let calls = 0;
     const http = async () => { calls++; throw new Error("must not be called"); };
