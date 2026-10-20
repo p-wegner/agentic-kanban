@@ -121,6 +121,21 @@ describe("reuse vs cut vs abandon (#1238 items 1 and 4)", () => {
     expect(DEFAULT_RC_CADENCE_MS).toBe(24 * 3600_000);
   });
 
+  it("#1648: abandons a red candidate with no open heal ticket now, not after the cadence", () => {
+    const state = upsertRcCandidate(fixture(), "rc/20260923", { state: "red" }, hoursAgo(2));
+    const plan = planRcCandidate({ dateStamp: "20260924", state, existingBranches: branches, nowMs: NOW, hasOpenHealTicket: () => false });
+    expect(plan).toMatchObject({ action: "cut", branch: "rc/20260924", abandon: "rc/20260923" });
+    expect(plan.reason).toContain("no open heal ticket");
+  });
+
+  it("#1648: keeps a red candidate whose heal ticket is open, unknown, or too fresh to have one", () => {
+    const old = upsertRcCandidate(fixture(), "rc/20260923", { state: "red" }, hoursAgo(2));
+    expect(planRcCandidate({ dateStamp: "20260924", state: old, existingBranches: branches, nowMs: NOW, hasOpenHealTicket: () => true }).action).toBe("reuse");
+    expect(planRcCandidate({ dateStamp: "20260924", state: old, existingBranches: branches, nowMs: NOW, hasOpenHealTicket: () => null }).action).toBe("reuse");
+    const fresh = upsertRcCandidate(fixture(), "rc/20260923", { state: "red" }, new Date(NOW - 60_000).toISOString());
+    expect(planRcCandidate({ dateStamp: "20260924", state: fresh, existingBranches: branches, nowMs: NOW, hasOpenHealTicket: () => false }).action).toBe("reuse");
+  });
+
   it("honours a shorter cadence for the abandon rule", () => {
     const state = upsertRcCandidate(fixture(), "rc/20260923", { state: "red" }, hoursAgo(2));
     const plan = planRcCandidate({ dateStamp: "20260924", state, existingBranches: branches, nowMs: NOW, cadenceMs: 3600_000 });

@@ -174,10 +174,16 @@ export function upsertRcCandidate(state, branch, patch, atIso = new Date().toISO
  *    2026-10-03 history rewrite left rc/20261002 `sweeping` on a pre-rewrite sha, and every
  *    run reused it and then refused it as not-a-descendant.
  *
+ *  - a RED candidate past a short grace with no open heal ticket (`hasOpenHealTicket(branch) === false`;
+ *    `null`/unknown never abandons) has no driver and is abandoned now (#1648).
+ *
  * An rc from an EARLIER day that is still in flight is reused too: a candidate is a candidate
  * until it is promoted or abandoned, and the date in its name is when it was cut, not a TTL.
  */
-export function planRcCandidate({ dateStamp, state, existingBranches = [], nowMs = Date.now(), cadenceMs = DEFAULT_RC_CADENCE_MS, isShipped = () => false, isDiverged = () => false } = {}) {
+/** A red rc this young may simply not have had its heal ticket filed yet (the sweep files it right after the verdict). */
+export const DRIVERLESS_GRACE_MS = 15 * 60_000;
+
+export function planRcCandidate({ dateStamp, state, existingBranches = [], nowMs = Date.now(), cadenceMs = DEFAULT_RC_CADENCE_MS, isShipped = () => false, isDiverged = () => false, hasOpenHealTicket = () => null } = {}) {
   const inFlight = state.candidates
     .filter((c) => !isTerminalRcState(c.state) && existingBranches.includes(c.branch))
     .map((c) => c.branch);
@@ -204,6 +210,15 @@ export function planRcCandidate({ dateStamp, state, existingBranches = [], nowMs
     const sinceMs = candidate.updatedAt ? Date.parse(candidate.updatedAt) : Number.NaN;
     const ageMs = Number.isFinite(sinceMs) ? nowMs - sinceMs : Number.NaN;
     const stuckRed = candidate.state === "red" && Number.isFinite(ageMs) && ageMs > cadenceMs;
+    // #1648 — a red rc nobody drives (its heal ticket was cancelled) waits out the whole cadence otherwise.
+    if (candidate.state === "red" && !stuckRed && Number.isFinite(ageMs) && ageMs > DRIVERLESS_GRACE_MS && hasOpenHealTicket(candidate.branch) === false) {
+      return {
+        action: "cut",
+        branch: nextRcBranch(dateStamp, existingBranches),
+        abandon: candidate.branch,
+        reason: `${candidate.branch} is red (${(ageMs / 3600_000).toFixed(1)}h) with no open heal ticket — nothing is driving it (cancelled?), so abandoning it now and cutting a fresh candidate from master's tip rather than waiting out the ${(cadenceMs / 3600_000).toFixed(0)}h cadence`,
+      };
+    }
     if (!stuckRed) {
       return {
         action: "reuse",
