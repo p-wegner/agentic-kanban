@@ -155,6 +155,33 @@ describe("landTrainLocal (#1586)", () => {
     expect(none.deps.closeMember).not.toHaveBeenCalled();
   });
 
+  it("defaults to a worker when one is connected, falls back to a capped host gate without one, --on-host skips the worker (#1649)", async () => {
+    const steps = [{ name: "g", command: "true" }];
+    const run = vi.fn(async () => ({ code: 0, tail: "" }));
+    const ran = vi.fn(async () => ({ status: "ran" as const, workerName: "w-1", passed: true, log: "" }));
+    const placed = makeDeps({ run, runOnWorker: ran, hostMaxWorkers: () => 4 });
+    expect((await landTrainLocal({ projectId: "p1", trainId: "t1", gateSteps: steps }, placed.deps)).status).toBe("landed");
+    expect(ran).toHaveBeenCalledTimes(1);
+    expect(run).not.toHaveBeenCalled();
+
+    const none = vi.fn(async () => ({ status: "unavailable" as const, reason: "no worker" }));
+    const hostRun = vi.fn(async () => ({ code: 0, tail: "" }));
+    const fallback = makeDeps({ run: hostRun, runOnWorker: none, hostMaxWorkers: () => 4 });
+    expect((await landTrainLocal({ projectId: "p1", trainId: "t1", skipInstall: true, gateSteps: steps }, fallback.deps)).status).toBe("landed");
+    expect(hostRun).toHaveBeenCalledWith("true", expect.any(String), expect.objectContaining({ KANBAN_TEST_MAX_WORKERS: "4", VITEST_MAX_WORKERS: "4" }));
+
+    const ran2 = vi.fn(async () => ({ status: "ran" as const, workerName: "w-1", passed: true, log: "" }));
+    const host = makeDeps({ run: vi.fn(async () => ({ code: 0, tail: "" })), runOnWorker: ran2 });
+    await landTrainLocal({ projectId: "p1", trainId: "t1", onHost: true, skipInstall: true, gateSteps: steps }, host.deps);
+    expect(ran2).not.toHaveBeenCalled();
+  });
+
+  it("the leftover-worktree error names --continue --on-worker (#1649)", async () => {
+    const { deps } = makeDeps({ pathExists: () => true });
+    expect(await landTrainLocal({ projectId: "p1", trainId: "t1" }, deps))
+      .toMatchObject({ status: "error", message: expect.stringContaining("--continue --on-worker") });
+  });
+
   it("derives a sibling .worktrees path and parses failing suites", () => {
     expect(landLocalWorktreePath("/r/proj", "train/2026-10-17-04").replace(/\\/g, "/")).toBe("/r/.worktrees/proj/land-local/2026-10-17-04");
     expect(parseFailedSuites("FAIL  a/b.test.ts > x\n ❯ c/d.test.tsx 3 tests")).toEqual(["a/b.test.ts", "c/d.test.tsx"]);

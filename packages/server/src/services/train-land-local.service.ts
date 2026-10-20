@@ -78,6 +78,8 @@ export interface LandLocalDeps {
   git(args: string[], cwd: string): Promise<{ code: number | null; stdout: string; stderr: string }>;
   run(command: string, cwd: string, env: Record<string, string>): Promise<LandLocalRunResult>;
   pathExists(path: string): boolean;
+  /** #1649: vitest worker cap for a host-side gate (what the box can spare); absent = package default. */
+  hostMaxWorkers?(): number;
   newId(): string;
   nowIso(): string;
 }
@@ -92,6 +94,8 @@ export interface LandLocalInput {
   skipInstall?: boolean;
   /** #1612: place install + the gate on a verify worker (`true` = any, a string = that worker) instead of this host. */
   onWorker?: boolean | string;
+  /** #1649: gate on this host even when a verify worker is connected (the default is a worker when one is). */
+  onHost?: boolean;
   /** Operator override (#1590): assemble only these issue numbers. */
   only?: number[];
   /** Operator override (#1590): leave these issue numbers out. */
@@ -201,7 +205,7 @@ export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps)
     return { status: "error", message: `--continue: no worktree at ${worktree}` };
   }
   if (!input.continueRun && worktreeExists) {
-    return { status: "error", message: `worktree ${worktree} already exists from an earlier run - fix it and re-run with --continue`, worktree };
+    return { status: "error", message: `worktree ${worktree} already exists from an earlier run - fix it and re-run with --continue (or --continue --on-worker to move the re-run to a verify worker; a fresh --on-worker run refuses on the leftover worktree)`, worktree };
   }
 
   // 1. Pause auto-merge + hold the window. Restored in `finally`, red or thrown.
@@ -226,16 +230,24 @@ export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps)
     const diff = await deps.git(["diff", "--name-only", `${base}...HEAD`], worktree);
     const changed = diff.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
     const gateSteps = input.gateSteps ?? LAND_LOCAL_GATE_STEPS;
-    if (input.onWorker) {
-      const red = await gateOnWorker({ deps, input, repo, branch, worktree, changed, gateSteps });
-      if (red) return red;
-    } else {
+    // #1649: a connected verify worker is the default placement; the host gates only without one, or on --on-host.
+    const auto = !input.onWorker && !input.onHost && !!deps.runOnWorker;
+    let onHost = !input.onWorker && !auto;
+    if (!onHost) {
+      const red = await gateOnWorker({ deps, input, repo, branch, worktree, changed, gateSteps, auto });
+      if (red === "fallback") onHost = true;
+      else if (red) return red;
+    }
+    if (onHost) {
+      const cap = deps.hostMaxWorkers?.();
+      const hostEnv: Record<string, string> = cap ? { KANBAN_TEST_MAX_WORKERS: String(cap), VITEST_MAX_WORKERS: String(cap), VITEST_TEST_TIMEOUT: "240000" } : { VITEST_TEST_TIMEOUT: "240000" };
+      if (cap) deps.log(`gating on this host with vitest capped to ${cap} worker(s)`);
       const installOutcome = input.skipInstall || input.continueRun ? null : await step(deps, "install", "pnpm install -r", worktree, {});
       if (installOutcome && installOutcome.code !== 0) {
         return { status: "red", step: "install", failedSuites: [], worktree, tail: installOutcome.tail };
       }
       for (const gate of gateSteps) {
-        const result = await step(deps, gate.name, gate.command, worktree, { KANBAN_TEST_FILES: changed.join(",") });
+        const result = await step(deps, gate.name, gate.command, worktree, { ...hostEnv, KANBAN_TEST_FILES: changed.join(",") });
         if (result.code !== 0) {
           deps.log(`gate RED at ${gate.name}; worktree left at ${worktree} - commit a fix there, then re-run with --continue`);
           return { status: "red", step: gate.name, failedSuites: parseFailedSuites(result.tail), worktree, tail: result.tail };
@@ -252,19 +264,23 @@ export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps)
   }
 }
 
-/** Null = green on the worker; otherwise the outcome to return. The worker installs (its setup script, plus an explicit install step unless skipped). */
+/** Null = green on the worker; "fallback" = auto placement found no worker; otherwise the outcome to return. The worker installs (its setup script, plus an explicit install step unless skipped). */
 async function gateOnWorker(a: {
-  deps: LandLocalDeps; input: LandLocalInput; repo: string; branch: string; worktree: string; changed: string[]; gateSteps: ReadonlyArray<{ name: string; command: string }>;
-}): Promise<LandLocalOutcome | null> {
+  deps: LandLocalDeps; input: LandLocalInput; repo: string; branch: string; worktree: string; changed: string[]; gateSteps: ReadonlyArray<{ name: string; command: string }>; auto?: boolean;
+}): Promise<LandLocalOutcome | "fallback" | null> {
   const { deps, input, repo, branch, worktree } = a;
   if (!deps.runOnWorker) return { status: "error", message: "--on-worker is not available in this environment", worktree };
   const sha = (await deps.git(["rev-parse", branch], repo)).stdout.trim();
   const steps = [...(input.skipInstall ? [] : [{ name: "install", command: "pnpm install -r" }]), ...a.gateSteps];
   const workerName = typeof input.onWorker === "string" ? input.onWorker : undefined;
-  deps.log(`gate placed on a verify worker${workerName ? ` (${workerName})` : ""}: ${steps.map((s) => s.name).join(" -> ")} at ${sha.slice(0, 12)}`);
+  deps.log(`gate placed on a verify worker${a.auto ? " (default placement; --on-host to gate here)" : ""}${workerName ? ` (${workerName})` : ""}: ${steps.map((s) => s.name).join(" -> ")} at ${sha.slice(0, 12)}`);
   const started = Date.now();
   const result = await deps.runOnWorker({ projectId: input.projectId, branch, sha, steps, changedFiles: a.changed, ...(workerName ? { workerName } : {}) });
   if (result.status === "unavailable") {
+    if (a.auto) {
+      deps.log(`no verify worker available (${result.reason}); gating on this host (pass --on-worker to require one)`);
+      return "fallback";
+    }
     return { status: "error", message: `--on-worker: ${result.reason}. Worktree kept; re-run with --continue, or without --on-worker to gate on this host.`, worktree };
   }
   deps.log(`worker ${result.workerName} ${result.passed ? "passed" : "FAILED"} the gate in ${Math.round((Date.now() - started) / 1000)}s`);
