@@ -16,7 +16,7 @@ import { getBaseBranchHealthForSha, isBaseHealthAnswer } from "../repositories/b
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { noteMergeGatePhase } from "./merge-job.service.js";
-import { decideRegate, describeFullRegate, describeTargetedRegate } from "./merge-train-targeted-regate.js";
+import { decideRegate, describeFullRegate, isMissingToolNoTests, describeTargetedRegate } from "./merge-train-targeted-regate.js";
 
 
 /** What one staging gate reports back. `stage`/`failedSuites` ride along on a red run only. */
@@ -168,6 +168,12 @@ export async function runTrainStagingGate(args: {
             console.log(`[merge-train] ${attemptLabel}: ${note}`);
           }
           gate = await gateOnce(script);
+          if (script && isMissingToolNoTests(gate)) {
+            // #1656: the targeted run never executed a test (missing tool) - fall back to the full gate.
+            note = describeFullRegate("targeted re-gate hit a missing tool and ran 0 tests");
+            console.log(`[merge-train] ${attemptLabel}: ${note}`);
+            gate = await gateOnce();
+          }
           if (note) gate = { ...gate, message: `${note}\n${gate.message}` };
           return { passed: gate.passed, message: gate.message, failedSuites: gate.failedSuites, ...(isInconclusiveGate(gate) ? { inconclusive: true } : {}) };
         },
