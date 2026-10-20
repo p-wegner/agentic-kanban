@@ -104,7 +104,7 @@ async function main() {
 
     const conflicts = result.details
       .filter((d) => d.action === "conflict")
-      .map((d) => ({ id: d.key, reason: d.reason }));
+      .map((d) => ({ id: d.key, reason: d.reason, fields: d.fields }));
     const nextRegister = updateRegister(readConflictRegister(stateDir), conflicts);
     writeJsonFile(conflictRegisterPath(stateDir), nextRegister);
 

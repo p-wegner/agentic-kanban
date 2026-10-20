@@ -501,6 +501,44 @@ describe("plugin manifest — converging loops", () => {
   });
 });
 
+describe("loop reconcileUnits and sync.resolve (#1643)", () => {
+  const LOOP_MANIFEST = {
+    id: "p",
+    name: "P",
+    skills: [{ dir: ".claude/skills/s" }],
+    loops: [{ name: "l", skill: "s", plan: { command: "node plan.mjs" } }],
+  };
+  it("parses reconcileUnits as an opt-in boolean and rejects non-boolean values", () => {
+    expect(parsePluginManifest(LOOP_MANIFEST).loops?.[0].reconcileUnits).toBeUndefined();
+    expect(parsePluginManifest({
+      ...LOOP_MANIFEST,
+      loops: [{ ...LOOP_MANIFEST.loops[0], reconcileUnits: true }],
+    }).loops?.[0].reconcileUnits).toBe(true);
+    expect(() => parsePluginManifest({
+      ...LOOP_MANIFEST,
+      loops: [{ ...LOOP_MANIFEST.loops[0], reconcileUnits: "yes" }],
+    })).toThrow(/reconcileUnits.*boolean/);
+  });
+
+  it("parses an optional sync.resolve command like pull/push", () => {
+    const manifest = parsePluginManifest({
+      id: "p",
+      name: "P",
+      sync: {
+        provider: "jira",
+        pull: { command: "node pull.mjs" },
+        resolve: { command: "node resolve.mjs", cwd: "plugin", env: { A: "b" } },
+      },
+    });
+    expect(manifest.sync?.resolve).toEqual({ command: "node resolve.mjs", cwd: "plugin", env: { A: "b" } });
+    expect(() => parsePluginManifest({
+      id: "p",
+      name: "P",
+      sync: { provider: "jira", pull: { command: "x" }, resolve: {} },
+    })).toThrow(/sync\.resolve/);
+  });
+});
+
 describe("parsePluginLoopPlan", () => {
   it("reads the last JSON value, so a shell banner ahead of the plan is tolerated", () => {
     const plan = parsePluginLoopPlan(

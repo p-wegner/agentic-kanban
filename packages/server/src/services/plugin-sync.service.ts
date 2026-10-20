@@ -411,6 +411,58 @@ export function createPluginSyncOps(deps: {
     return record;
   }
 
+  /**
+   * Settle ONE diverged issue on an agent's behalf (#1643). The agent has no Jira credentials; the
+   * board runs the plugin's `sync.resolve` command with them injected, so the secret never leaves
+   * the board. No `keep` = read-only: the three-way field table (board / last sync / Jira now).
+   * `keep: "jira"` overwrites the board issue from Jira, `keep: "board"` writes the board's
+   * mapped fields to Jira once. Fails closed on incomplete config, like `triggerSync`.
+   */
+  async function resolveSyncIssue(
+    pluginRowId: string,
+    projectId: string,
+    opts: { key: string; keep?: "board" | "jira" },
+  ): Promise<{ ok: boolean; mode: "show" | "keep"; key: string; keep?: string; result?: unknown; error?: string }> {
+    const plugin = await requirePlugin(pluginRowId);
+    const sync = requireSyncDef(plugin);
+    if (!sync.resolve) {
+      throw new PluginError(`Plugin "${plugin.pluginId}" does not declare a "sync.resolve" command`, "BAD_REQUEST");
+    }
+    if (!/^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(opts.key ?? "")) {
+      throw new PluginError('"key" must be an external issue key such as "KD-49"', "BAD_REQUEST");
+    }
+    if (opts.keep != null && opts.keep !== "board" && opts.keep !== "jira") {
+      throw new PluginError('"keep" must be "board" or "jira"', "BAD_REQUEST");
+    }
+    await requireProject(projectId);
+    const mode = opts.keep ? "keep" : "show";
+    const validation = await validateSync(pluginRowId, projectId);
+    if (!validation.ok) return { ok: false, mode, key: opts.key, keep: opts.keep, error: validation.error };
+
+    const { env: syncEnv, secretValues } = await resolveSyncEnv(plugin, projectId);
+    const ctx = await resolvePluginRunContext(pluginRowId, projectId);
+    const cwd = sync.resolve.cwd === "repo" ? ctx.outputRepoPath : plugin.localPath;
+    const env = {
+      ...substitutePluginEnv(sync.resolve.env, ctx.vars),
+      ...syncEnv,
+      SYNC_RESOLVE_KEY: opts.key,
+      ...(opts.keep ? { SYNC_RESOLVE_KEEP: opts.keep } : {}),
+    };
+    const raw = await runPluginCommand(substitutePluginPlaceholders(sync.resolve.command, ctx.vars), { cwd, env });
+    const stdout = redactSecrets(raw.stdout, secretValues);
+    let parsed: unknown = null;
+    try { parsed = JSON.parse(stdout); } catch { parsed = stdout.trim() || null; }
+    const ok = !raw.timedOut && raw.code === 0;
+    return {
+      ok,
+      mode,
+      key: opts.key,
+      keep: opts.keep,
+      result: parsed,
+      error: ok ? undefined : describeRunFailure({ ...raw, stdout, stderr: redactSecrets(raw.stderr, secretValues) }),
+    };
+  }
+
   const runningSchedules = new Set<string>();
 
   /**
@@ -454,5 +506,5 @@ export function createPluginSyncOps(deps: {
     return fired;
   }
 
-  return { getSyncConfig, setSyncConfig, setSyncSecrets, validateSync, triggerSync, getSyncStatus, runDueSyncSchedules, resolveSyncEnv, redactSecrets };
+  return { getSyncConfig, setSyncConfig, setSyncSecrets, validateSync, triggerSync, resolveSyncIssue, getSyncStatus, runDueSyncSchedules, resolveSyncEnv, redactSecrets };
 }

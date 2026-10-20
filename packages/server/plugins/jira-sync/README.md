@@ -112,11 +112,34 @@ touches Jira or the board, and never throws:
   "already handled".
 
 A unit's own ticket (the `sync-conflict` skill) never writes back "resolved" anywhere — closing it
-out means fixing the real disagreement and re-running `sync/pull.mjs`/`sync/push.mjs`, which
-recomputes the register from what's actually still outstanding. That is the "state carried by the
-tickets, not a private run log" property: the register is a snapshot of current reality, not an
-append-only log, and the loop's own state is otherwise exactly the tickets the board already
-tracks.
+does NOT resolve the conflict (#1643). Only the sync does: it recomputes the register from what's
+actually still outstanding. That is the "state carried by the tickets, not a private run log"
+property: the register is a snapshot of current reality, not an append-only log.
+
+The loop declares `reconcileUnits`, so the board keeps its tickets in step with the plan:
+
+- A unit whose ticket is **Done** while the register still lists it is not skipped: the next
+  advance opens round 2 (`conflict:KD-49:r2`), whose brief points back at the round that did not
+  settle it. (`Cancelled` stays a skip: that is a human's "won't do".)
+- An open ticket whose unit has left the plan (the cause went away, e.g. a status map fixed by
+  hand) is closed with a "Resolved by sync at <time>" comment. An empty-but-not-converged plan
+  ("no pull yet") never closes anything.
+
+### Resolving from an agent (`sync/resolve.mjs`, #1643)
+
+A conflict ticket's agent has no Jira credentials and cannot run `sync/pull.mjs` itself. The board
+runs `sync.resolve` for it, credentials injected server-side:
+`POST /api/plugins/:id/sync/resolve { projectId, key, keep? }`.
+
+- no `keep`: read-only; returns the three-way field table per mapped field (board now / last sync /
+  Jira now). The conflict register records the same table when the pull finds the conflict, and the
+  ticket brief renders it.
+- `keep: "jira"`: force-pulls that one issue, overwriting the board issue.
+- `keep: "board"`: writes the board's mapped fields (title, description, priority, type) to Jira
+  once, the one sanctioned field write (push never sends field edits). Status moves stay with push.
+
+Both write modes re-baseline the issue's sync state and mark its conflict entry resolved, so the
+next pull reports no conflict.
 
 ## Running it
 

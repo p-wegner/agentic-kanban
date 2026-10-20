@@ -219,4 +219,12 @@ export class JiraClient {
       body: { fields },
     });
   }
+
+  /** `PUT /rest/api/3/issue/{key}` — edits fields in place (summary, description as ADF, priority, ...). */
+  async updateIssueFields(issueIdOrKey, fields) {
+    await this.request(`/rest/api/3/issue/${encodeURIComponent(issueIdOrKey)}`, {
+      method: "PUT",
+      body: { fields },
+    });
+  }
 }

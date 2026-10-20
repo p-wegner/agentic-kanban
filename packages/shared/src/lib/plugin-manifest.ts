@@ -224,6 +224,15 @@ export interface PluginLoopDef {
    * without review remains a deliberate, per-loop authorial decision.
    */
   autoLand?: boolean;
+  /**
+   * Opt-in: the loop's tickets follow the plan, not just the other way round (#1643).
+   * (1) A unit whose ticket is Done/Cancelled but which the plan STILL reports is not left as a
+   * silent skip: the board opens the next round (`…:r1` -> `…:r2`) so the loop cannot dead-end.
+   * (2) An open, not-running ticket whose unit has left the plan (its cause went away) is closed
+   * with a comment. Off by default: most loops mint their own fresh ids and never drop a unit
+   * they are still working on.
+   */
+  reconcileUnits?: boolean;
 }
 
 export interface PluginLoopPlanDef {
@@ -418,6 +427,13 @@ export interface PluginSyncDef {
   pull?: PluginSyncCommandDef;
   /** Deterministic command pushing local state to the remote tracker. At least one of pull/push is required. */
   push?: PluginSyncCommandDef;
+  /**
+   * Optional command that settles ONE diverged issue on request (#1643): the board runs it with the
+   * sync credentials injected plus `SYNC_RESOLVE_KEY` and, to act, `SYNC_RESOLVE_KEEP=board|jira`
+   * (no KEEP = read-only show). It exists so an agent without credentials can still resolve a
+   * conflict, through the board.
+   */
+  resolve?: PluginSyncCommandDef;
   /** Config fields the board should collect before running pull/push (site URL, project key, JQL, …). */
   config?: PluginSyncConfigFieldDef[];
   /**
@@ -660,6 +676,11 @@ export function parsePluginManifest(input: unknown): PluginManifest {
       if (typeof rec.autoLand !== "boolean") fail(`"loops[${i}].autoLand" must be a boolean`);
       autoLand = rec.autoLand;
     }
+    let reconcileUnits: boolean | undefined;
+    if (rec.reconcileUnits != null) {
+      if (typeof rec.reconcileUnits !== "boolean") fail(`"loops[${i}].reconcileUnits" must be a boolean`);
+      reconcileUnits = rec.reconcileUnits;
+    }
     return {
       name: loopName,
       label: optionalString(rec.label, `loops[${i}].label`),
@@ -668,6 +689,7 @@ export function parsePluginManifest(input: unknown): PluginManifest {
       workflow: optionalString(rec.workflow, `loops[${i}].workflow`),
       maxUnitsPerAdvance: maxUnits,
       autoLand,
+      reconcileUnits,
       plan: {
         command: requireString(plan.command, `loops[${i}].plan.command`),
         cwd: optionalCwd(plan.cwd, `loops[${i}].plan.cwd`),
@@ -699,6 +721,7 @@ export function parsePluginManifest(input: unknown): PluginManifest {
     }
     const pull = rec.pull == null ? undefined : parseSyncCommand(rec.pull, "sync.pull");
     const push = rec.push == null ? undefined : parseSyncCommand(rec.push, "sync.push");
+    const resolve = rec.resolve == null ? undefined : parseSyncCommand(rec.resolve, "sync.resolve");
     // A sync that can do neither direction is not a sync — declaring it would render a capability
     // with nothing behind it, and the board would have no command to offer.
     if (!pull && !push) fail(`"sync" must declare at least one of "pull"/"push"`);
@@ -740,7 +763,7 @@ export function parsePluginManifest(input: unknown): PluginManifest {
       return name;
     });
 
-    return { provider, pull, push, config, secrets };
+    return { provider, pull, push, resolve, config, secrets };
   })();
 
   const butler = obj.butler == null ? undefined : (() => {

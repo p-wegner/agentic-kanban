@@ -18,6 +18,7 @@ import {
   pluginSyncConfigBody,
   pluginSyncSecretsBody,
   pluginSyncTriggerBody,
+  pluginSyncResolveBody,
 } from "./plugin-body-schemas.js";
 import { getPluginService, PluginError } from "../services/plugin.service.js";
 import { createIssueService } from "../services/issue.service.js";
@@ -93,6 +94,9 @@ import { listPluginDocs, readPluginDoc } from "../services/plugin-docs.service.j
  *   POST   /api/plugins/:id/sync/trigger { projectId, direction: "pull"|"push", dryRun? } →
  *            runs the manifest's pull/push command (refusing, same as validate, when
  *            unconfigured) and records the outcome as this project's last sync run
+ *   POST   /api/plugins/:id/sync/resolve { projectId, key, keep?: "board"|"jira" } (#1643) →
+ *            settles ONE diverged issue with the credentials kept server-side; no `keep` just
+ *            returns the three-way field table (board / last sync / Jira now)
  *   GET    /api/plugins/:id/sync/status?projectId=     last-run record (time, direction,
  *            outcome, and — best-effort, parsed from the command's own stdout — counts,
  *            per-issue links and conflicts) for the sync-status plugin view
@@ -383,6 +387,11 @@ export function createPluginsRoute(
       direction: body.direction,
       dryRun: body.dryRun,
     }));
+  });
+
+  router.post("/:id/sync/resolve", async (c) => {
+    const body = await parsePluginBody(c, pluginSyncResolveBody);
+    return c.json(await service.resolveSyncIssue(c.req.param("id"), body.projectId, { key: body.key, keep: body.keep }));
   });
 
   router.get("/:id/sync/status", async (c) => {
