@@ -25,6 +25,7 @@
 
 import { killProcessesInDir, killProcessesOnPorts, killDevServerSupervisorOnPorts } from "./process-cleanup.js";
 import { runScript } from "./script-runner.js";
+import { recordTeardownResult } from "./teardown-failure-tracker.js";
 import { resolveWorktreeDevPorts } from "./worktree-ports.js";
 import { auditProcessEvent, guardProcessKill } from "./process-guard.js";
 import { removeGradleUserHomeForWorktree } from "@agentic-kanban/shared/lib/gradle-env";
@@ -197,8 +198,10 @@ export async function teardownWorktree(
       env.KANBAN_WORKTREE_CLIENT_PORT = String(ports.clientPort);
     }
     try {
-      const r = await run(teardownScript, workingDir, `teardown:${label}`, env);
+      // teardownScript is POSIX shell by contract (#1657): Git Bash on Windows, not cmd.exe.
+      const r = await run(teardownScript, workingDir, `teardown:${label}`, env, { posix: true });
       result.scriptRan = true;
+      recordTeardownResult(teardownScript, r.ok, r.output);
       console.log(`[teardown:${label}] script ${r.ok ? "ok" : "failed"} — ${r.output.slice(0, 100)}`);
     } catch (err) {
       console.warn(`[teardown:${label}] script threw (non-fatal):`, errorMessage(err));

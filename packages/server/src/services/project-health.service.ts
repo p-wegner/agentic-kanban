@@ -12,6 +12,7 @@ import {
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { getLatestBaseBranchHealth, isBaseHealthAnswer } from "../repositories/base-branch-health.repository.js";
 import { listProjectRepos } from "../repositories/repo.repository.js";
+import { teardownFailureWarning } from "./teardown-failure-tracker.js";
 
 /** Last path segment, for labelling a sibling repo whose row carries no name. */
 function baseName(path: string): string {
@@ -158,6 +159,11 @@ export async function getProjectHealth(database: Database = db): Promise<Project
       } catch {
         // non-fatal — base-branch health is a best-effort signal
       }
+
+      // #1657 — a teardown script that fails run after run is non-fatal by design, so
+      // surface the streak here instead of leaving it as a log line.
+      const teardownWarning = teardownFailureWarning(project.teardownScript);
+      if (teardownWarning) warnings.push(teardownWarning);
 
       const issueCounts = countsByProject.get(project.id) ?? {};
       const totalIssues = Object.values(issueCounts).reduce((sum, n) => sum + n, 0);

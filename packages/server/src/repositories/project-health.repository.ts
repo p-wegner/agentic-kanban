@@ -12,6 +12,7 @@ export async function getProjectHealthRows(database: Database = db) {
     color: p.color,
     repoPath: p.repoPath,
     defaultBranch: p.defaultBranch,
+    teardownScript: p.teardownScript,
   }));
 }
 
