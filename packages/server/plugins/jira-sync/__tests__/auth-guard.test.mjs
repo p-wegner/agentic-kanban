@@ -43,7 +43,7 @@ test("verifyCredentials accepts an accountId", async () => {
 });
 
 test("test connection, pull and push fail with an auth reason", () => {
-  const dir = mkdtempSync(join(tmpdir(), "jira-auth-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-jira-auth-"));
   const preload = join(dir, "preload.mjs");
   writeFileSync(
     preload,
