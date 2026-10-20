@@ -44,6 +44,29 @@ function snap(over: Partial<TicketDriverSnapshot>): TicketDriverSnapshot {
 
 const READY: Partial<TicketDriverSnapshot> = { stage: "in_review", readyForMerge: true };
 
+describe("#1653 train-window driver", () => {
+  const WINDOW_MAX_WAIT_MS = 30 * 60_000;
+  // Window opened 20 min ago with a 30 min max wait: departs 10 min from NOW.
+  const inWindow = (over: Partial<TicketDriverSnapshot> = {}) =>
+    snap({ ...READY, workspaceUpdatedAt: ago(20), trainWindowDepartsAtMs: NOW - 20 * 60_000 + WINDOW_MAX_WAIT_MS, ...over });
+
+  it("a ready member 20 min into a 30 min window is driven by train-window, not escalated", () => {
+    expect(decideTicketDriver(inWindow(), NOW)).toEqual({ driven: true, driver: "train-window" });
+  });
+
+  it("stays driven through the slack after the projected departure, then is undriven again", () => {
+    const s = inWindow();
+    expect(decideTicketDriver(s, NOW + 12 * 60_000)).toEqual({ driven: true, driver: "train-window" });
+    const late = decideTicketDriver(s, NOW + 16 * 60_000);
+    expect(late.driven).toBe(false);
+  });
+
+  it("without a window the same ticket still escalates as ready-idle", () => {
+    const v = decideTicketDriver(snap({ ...READY, workspaceUpdatedAt: ago(20) }), NOW);
+    expect(v).toMatchObject({ driven: false, shape: "ready-idle", recovery: "escalate" });
+  });
+});
+
 /** Today's stall shapes: state in -> no driver -> the recovery chosen. A new shape is a new row. */
 const VIOLATION_TABLE: Array<{ name: string; state: Partial<TicketDriverSnapshot>; shape: StallShape; recovery: RecoveryAction }> = [
   {

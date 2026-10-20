@@ -21,6 +21,8 @@ import { listActiveMergeTrainsForProject } from "../repositories/merge-train.rep
 import { clearMergeBackoffState } from "../repositories/merge-backoff.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
+import { readTrainWindowsFromPrefMap } from "../services/merge-train-window-state.js";
+import { resolveTrainWindowConfig } from "../services/merge-train-window.js";
 import { monitorDrivenProjectIds } from "../services/start-policy.service.js";
 import { workspaceHasCommittedWork } from "../services/workspace-commits.js";
 import { implementExitHoldReason } from "../services/implement-exit-check-state.js";
@@ -95,16 +97,29 @@ async function loadDefaultSnapshots(database: Database, nowMs: number): Promise<
     }
     trainMembers.set(projectId, members);
   }
+  // #1653: workspace id -> projected departure of the accumulating window it is pending in.
+  const windowDepartures = new Map<string, number>();
+  for (const [projectId, w] of readTrainWindowsFromPrefMap(prefMap)) {
+    if (w.pendingIds.length === 0) continue;
+    const departs = Date.parse(w.firstSeenAt) + resolveTrainWindowConfig(prefMap, projectId).maxWaitMs;
+    if (!Number.isFinite(departs)) continue;
+    for (const id of w.pendingIds) windowDepartures.set(id, departs);
+  }
   const snapshots: TicketDriverSnapshot[] = [];
   for (const r of rows) {
     // Forks and plan-mode workspaces are driven by their join / the plan reconciler, not by this invariant.
     if (r.parentWorkspaceId || r.planMode) continue;
-    snapshots.push(await toSnapshot(r, trainMembers.get(r.projectId), database));
+    snapshots.push(await toSnapshot(r, trainMembers.get(r.projectId), windowDepartures.get(r.workspaceId) ?? null, database));
   }
   return snapshots;
 }
 
-async function toSnapshot(r: OpenTicketRow, members: Set<string> | undefined, database: Database): Promise<TicketDriverSnapshot> {
+async function toSnapshot(
+  r: OpenTicketRow,
+  members: Set<string> | undefined,
+  windowDepartsAtMs: number | null,
+  database: Database,
+): Promise<TicketDriverSnapshot> {
   const job = peekMergeJob(r.workspaceId);
   const openAttempt = job ? [...job.attempts].reverse().find((a) => !a.finishedAt) : undefined;
   let hasCommits: boolean | null = null;
@@ -142,6 +157,7 @@ async function toSnapshot(r: OpenTicketRow, members: Set<string> | undefined, da
     backoff: r.backoff,
     branchHeadSha,
     inActiveTrain: members?.has(r.workspaceId) ?? false,
+    trainWindowDepartsAtMs: windowDepartsAtMs,
     hold: r.mergeHeld ? "merge-hold" : r.blockedByUnresolved ? "blocked-by" : null,
   };
 }
