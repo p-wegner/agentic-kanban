@@ -67,6 +67,8 @@ const MERGEABLE_STATUS_NAMES = ["In Review", "AI Reviewed"] as const;
 const MAX_RECONCILER_ATTEMPTS = 2;
 /** A reconciler session with 0 output messages after this many ms is treated as a zombie and reaped. */
 const ZOMBIE_TIMEOUT_MS = 5 * 60_000;
+/** A window that lost every member keeps its `firstSeenAt` this long in case they come back (#1653). */
+const TRAIN_WINDOW_EMPTY_GRACE_MS = 3 * 60_000;
 
 const autoMergeDisabledPref = projectPref("auto_merge_disabled");
 const verifyScriptPref = projectPref("verify_script");
@@ -602,6 +604,11 @@ export function createAutoMergeOrchestrator(deps: {
             lastEvaluatedAt: now,
             heldUntil: existing.heldUntil,
           });
+        } else if (accumulating && nowMs - new Date(existing.lastEvaluatedAt).getTime() < TRAIN_WINDOW_EMPTY_GRACE_MS) {
+          // #1653: members that flip blocked -> idle within a few ticks (escalation, then the
+          // reconciler's auto-recovery) get their window back with its ORIGINAL firstSeenAt. Keep
+          // the record untouched — `lastEvaluatedAt` is deliberately not refreshed, so the grace
+          // is measured from the last tick that saw members.
         } else {
           await dropWindow(projectId, existing);
         }
