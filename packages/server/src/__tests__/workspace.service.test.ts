@@ -830,7 +830,10 @@ describe("workspace.service", () => {
 
       // Let the background task run. The chain awaits several times before it reaches
       // removeWorktree, so a single tick starts it without ever getting there.
-      await flushDeferred();
+      // Wait for the call itself (not a fixed tick count): the chain awaits several DB calls
+      // first and, under a loaded sweep, can take far longer than 25 ticks to get there.
+      await vi.waitFor(() => expect(gitService.removeWorktree).toHaveBeenCalled(), { timeout: 10_000 });
+      await vi.waitFor(() => expect(dbStateWhenCleanupRan).not.toBeNull(), { timeout: 10_000 });
 
       // Workspace was already in "closed" state when the background cleanup fired.
       expect(dbStateWhenCleanupRan).not.toBeNull();
@@ -841,7 +844,11 @@ describe("workspace.service", () => {
 
       // Warning comment was recorded asynchronously. The seeded project has no verify_script,
       // so an "unverified" warning (#377) also lands ahead of the synchronous "merged" note.
-      const events = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
+      // The cleanup warning is written after removeWorktree throws, so wait for it too.
+      const events = await waitFor(async () => {
+        const rows = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
+        return rows.length >= 3 ? rows : null;
+      }, "the cleanup warning comment");
       expect(events.map((event) => JSON.parse(event.payload ?? "{}").eventType)).toEqual(["warning", "merged", "warning"]);
       expect(events[2].body).toContain("recoverable warning");
       expect(events[2].body).toContain("already merged before this response returned");
