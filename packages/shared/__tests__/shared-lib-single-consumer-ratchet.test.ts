@@ -133,6 +133,8 @@ const GRANDFATHERED: Readonly<Record<string, string>> = {
   "ticket-group.ts": "server",
   "transcript-cwd-encoding.ts": "server",
   "ttl-memo.ts": "server",
+  // #1658: slice 1 of the worker load metrics; the worker (cpu sampling) and server (placement, console) consume it in the next slices.
+  "worker-load.ts": "-",
 };
 
 /** Top-level modules under `shared/src/lib` (the barrel layer; nested dirs are internals). */
