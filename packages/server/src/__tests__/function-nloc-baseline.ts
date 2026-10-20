@@ -380,7 +380,9 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 723 -> 719, a banked SHRINK (2026-09-27): the issue WRITES (create/update/move, incl. the
   // AK-535 terminal-move guard) moved into `cli/commands/issue-writes.ts`, which routes them
   // through a running board server when it serves the same DB, so an open board broadcasts.
-  "cli/commands/issue.ts::registerIssueCommand": 718,
+  // 718 -> 732 (#1652): `issue move --close-workspace` (the one-step cancel-and-discard) adds the
+  // option declarations and the close-then-move branch to the action in this builder.
+  "cli/commands/issue.ts::registerIssueCommand": 732,
   // 621 -> 623, a DELIBERATE raise (#815). The eight `latest_setup_*` columns moved off
   // `workspaces` into `workspace_setup_run`, and writing a child row costs an
   // `insertWorkspaceSetupRun(...)` call where eight inline field assignments used to sit.
@@ -406,7 +408,9 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // -> POST the action endpoint), to recover a workspace closed while its branch still carried
   // unmerged commits. Landed independently on master while #1164 was in flight; both features
   // are present after the rebase, so the number is the sum of the two additions, re-measured.
-  "cli/commands/workspace.ts::registerWorkspaceCommand": 616,
+  // 616 -> 640 (#1652): `workspace close` accepts an issue number via the workspace-select
+  // resolver, adding the option/resolve branches to this builder.
+  "cli/commands/workspace.ts::registerWorkspaceCommand": 640,
   // 637 -> 638 (#1027), disclosed in the ninth movement above.
   // 289 -> 292 (#1328), disclosed in the seventeenth movement above.
   "services/agent-remote.service.ts::createRemoteAgentService": 296,

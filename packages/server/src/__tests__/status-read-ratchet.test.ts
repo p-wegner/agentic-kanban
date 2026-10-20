@@ -60,6 +60,9 @@ const BASELINE: Record<string, number> = {
   "client/src/lib/tableView-cells.ts": 2,
   "mcp-server/src/tools/contract-coupled-issues.ts": 2,
   "mcp-server/src/tools/get-board-status.ts": 3,
+  // #1652 — `issue move --close-workspace` is only valid for the target status name "Cancelled",
+  // a user-typed argument, not an issue's derived status; there is no issue view to ask.
+  "server/src/cli/commands/issue.ts": 1,
   "server/src/repositories/workspace-issue-status.repository.ts": 3,
   "server/src/services/board-status.ts": 3,
   "server/src/services/dependency-auto-chain.service.ts": 2,
