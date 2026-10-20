@@ -42,7 +42,7 @@ describe("teardown failure streak (#1657)", () => {
       killDir: async () => 0,
       killPorts: async () => 0,
       killSupervisor: async () => 0,
-      runScript: vi.fn(async () => ({ ok: false, output: "rm not found" })),
+      runScript: vi.fn(async (..._args: unknown[]) => ({ ok: false, output: "rm not found" })),
     };
     for (let i = 0; i < TEARDOWN_FAILURE_WARN_THRESHOLD; i++) {
       await teardownWorktree(
