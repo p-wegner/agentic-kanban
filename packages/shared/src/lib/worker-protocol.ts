@@ -405,6 +405,19 @@ export interface WorkerCapacityInfo {
   freeDiskGb?: number;
   /** #1456: logical cores. Absent = an older worker. */
   totalCores?: number;
+  /** #1658: CPU utilisation % over the last heartbeat interval. Absent = older worker ("?"), never 0. */
+  cpuPct?: number;
+  /** #1658: worker-kept 1/5/15-minute average CPU %. */
+  cpuAvgPct?: { m1: number; m5: number; m15: number };
+  /** #1658: swap/pagefile in use (GB). */
+  swapUsedGb?: number;
+  /** #1658: the worker's own running jobs by kind (train-gate, rc-sweep, base-probe, workspace-gate, agent-session). */
+  jobCounts?: Record<string, number>;
+  /** #1658: heavy processes (node/vitest/java/gradle/claude) the worker did not start. */
+  foreignHeavyProcs?: number;
+  /** #1658: physical host identity — workers with the same fingerprint share CPU. */
+  hostname?: string;
+  hostFingerprint?: string;
 }
 
 /**
