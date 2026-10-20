@@ -34,3 +34,21 @@ export function incomingFieldsOf(mapped, statusId) {
 export function fieldsEqual(a, b) {
   return ["title", "description", "priority", "type", "statusId"].every((k) => k === "statusId" && !b[k] ? true : a[k] === b[k]);
 }
+
+const TABLE_FIELDS = ["title", "description", "priority", "type", "statusId"];
+
+/**
+ * The three-way view of a diverged issue, one row per mapped field: what the board holds now, what the
+ * last sync agreed on, and what Jira says now. `lastSync` is null when no baseline was ever recorded.
+ * `statusName` turns a board status id into something a reader (or an agent) can compare.
+ */
+export function fieldTable(board, lastSync, jira, { statusName = (id) => id } = {}) {
+  const show = (field, value) => (field === "statusId" && value ? statusName(value) : value ?? null);
+  return TABLE_FIELDS.map((field) => ({
+    field: field === "statusId" ? "status" : field,
+    board: show(field, board?.[field]),
+    lastSync: lastSync ? show(field, lastSync[field]) : null,
+    jira: show(field, jira?.[field]),
+    differs: (board?.[field] ?? "") !== (jira?.[field] ?? ""),
+  }));
+}

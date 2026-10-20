@@ -276,7 +276,7 @@ export function createPluginService(deps: {
   // External-issue-tracker sync (#1076 declares it, #1081 wires it up) — extracted to its own
   // module (god-module ceiling), same shape as the output-location ops above.
   const {
-    getSyncConfig, setSyncConfig, setSyncSecrets, validateSync, triggerSync, getSyncStatus, runDueSyncSchedules, resolveSyncEnv, redactSecrets,
+    getSyncConfig, setSyncConfig, setSyncSecrets, validateSync, triggerSync, resolveSyncIssue, getSyncStatus, runDueSyncSchedules, resolveSyncEnv, redactSecrets,
   } = createPluginSyncOps({
     database, requirePlugin, requireProject, resolvePluginRunContext,
   });
@@ -365,6 +365,7 @@ export function createPluginService(deps: {
     testSyncConnection,
     validateSync,
     triggerSync,
+    resolveSyncIssue,
     getSyncStatus,
     /** The scheduler tick (#1625): runs every enabled sync whose pull/push interval has elapsed. */
     async runScheduledSyncs(nowMs?: number) {

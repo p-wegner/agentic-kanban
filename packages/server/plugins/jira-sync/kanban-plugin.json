@@ -1,7 +1,7 @@
 {
   "id": "jira-sync",
   "name": "Jira Sync",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Two-way sync between the board and a Jira project: pull tickets in via JQL, push status transitions and comments back. Zero-dependency REST client, fully offline self-testable against recorded fixtures.",
   "skills": [
     {
@@ -49,6 +49,7 @@
       "description": "One ticket per outstanding inbound-pull conflict or outbound-push failure, generated from the sync state pull/push already persist.",
       "skill": "sync-conflict",
       "maxUnitsPerAdvance": 3,
+      "reconcileUnits": true,
       "plan": {
         "command": "node tools/loop-plan.mjs",
         "cwd": "plugin",
@@ -76,6 +77,15 @@
       "env": {
         "JIRA_SYNC_STATE_DIR": "{{repoPath}}/.jira-sync",
         "JIRA_SYNC_PROFILE_PATH": "{{repoPath}}/docs/jira-sync/_profile.md",
+        "JIRA_SYNC_BOARD_URL": "{{boardUrl}}",
+        "JIRA_SYNC_BOARD_PROJECT_ID": "{{projectId}}"
+      }
+    },
+    "resolve": {
+      "command": "node tools/sync/resolve.mjs",
+      "cwd": "plugin",
+      "env": {
+        "JIRA_SYNC_STATE_DIR": "{{repoPath}}/.jira-sync",
         "JIRA_SYNC_BOARD_URL": "{{boardUrl}}",
         "JIRA_SYNC_BOARD_PROJECT_ID": "{{projectId}}"
       }

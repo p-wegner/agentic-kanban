@@ -67,6 +67,10 @@ const BASELINE: Record<string, number> = {
   "server/src/services/followup-workspace.service.ts": 1,
   "server/src/services/merge-cleanup.service.ts": 1,
   "server/src/services/plugin-loop-stall.ts": 1,
+  // #1643 — `isFailedRound` asks "was this round closed as Done?" on purpose: a Cancelled ticket
+  // is a human's "won't do" and must stay a skip, so the terminal-view predicate (Done OR
+  // Cancelled) is the wrong question. The file's other comparison uses `isTerminalStatusName`.
+  "server/src/services/plugin/loop-unit-reconcile.ts": 1,
   "server/src/services/workspace-launch-failures.service.ts": 2,
   "server/src/services/workspace-risk.service.ts": 2,
   "server/src/startup/ancestor-branch-reconciler.ts": 1,

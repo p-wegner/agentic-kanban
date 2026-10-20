@@ -74,6 +74,8 @@ export interface LoopAdvanceResult {
   skippedExisting: Array<{ unitId: string; issueId: string; issueNumber: number | null; statusName: string }>;
   /** Units dropped because the advance hit `maxUnitsPerAdvance` — replanned next time. */
   capped: number;
+  /** Open tickets this advance closed because the sync resolved their unit (`reconcileUnits` loops, #1643). */
+  closedResolved?: Array<{ unitId: string; issueId: string; issueNumber: number | null }>;
   /**
    * What this advance DID about starting each ticket it created (#351/#354/#357). The surface and
    * the butler must report from this, never from a pipeline-level word like "generating": the two

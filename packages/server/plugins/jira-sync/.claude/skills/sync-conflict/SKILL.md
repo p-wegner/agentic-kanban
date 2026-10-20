@@ -11,17 +11,24 @@ from one entry in the plugin's own conflict or failure register
 description names the Jira key (or board issue id) and the reason the sync ran into
 trouble — read it before doing anything else.
 
+## You have no Jira access: act through the board
+
+The agent environment has no `JIRA_*` credentials and `node tools/sync/*.mjs` will refuse to run
+for you. The board does it with the credentials kept server-side:
+`POST /api/plugins/<jira-sync plugin id>/sync/resolve` with `{ "projectId", "key" }` (read the
+three-way table: board now / last sync / **Jira now**), then again with `"keep": "board"` or
+`"keep": "jira"` to apply your decision. The ticket brief carries the table recorded at detection
+time; read the live one before deciding, since Jira may have been edited on purpose.
+
 ## Two kinds of ticket
 
 **"Resolve sync conflict: `<key>`"** — the board issue linked to Jira key `<key>` was edited
 locally after the last successful pull, so `sync/pull.mjs` left it alone instead of silently
 overwriting a human's edit (see `plugins/jira-sync/tools/lib/sync-engine.mjs`). Decide which
 side should win:
-- If the board edit should win: update the Jira issue to match (via the Jira UI, or
-  `plugins/jira-sync/tools/lib/jira-client.mjs`'s `transitionIssue`/`addComment` if it's a status
-  or comment difference) so the next pull sees them agree.
-- If the Jira update should win: apply the same change on the board (via the board's own API/UI)
-  so the board issue's `updatedAt` reflects it, then let the next pull proceed normally.
+- If the board edit should win: `resolve` with `"keep": "board"` (pushes the board's mapped fields to
+  Jira once; a status difference is a push transition, not part of this).
+- If the Jira update should win: `resolve` with `"keep": "jira"` (overwrites the board issue).
 
 **"Fix failed push: `<key or board issue id>`"** — a queued outbound change (a transition, a
 comment, or a new-issue create) failed to apply and is sitting in the outbox
@@ -32,19 +39,12 @@ underneath the queued entry. Fix the root cause rather than editing the outbox b
 
 ## Closing it out
 
-There is no separate "mark resolved" step to run by hand. Once the underlying disagreement is
-gone, re-run the relevant half of sync from the plugin directory:
-
-```sh
-node tools/sync/pull.mjs     # for a conflict ticket
-node tools/sync/push.mjs     # for a failed-push ticket
-```
-
-That run recomputes the conflict/failure register from what's *actually* still outstanding
-(`plugins/jira-sync/tools/lib/conflict-register.mjs`) — if this entry no longer reproduces, the
-register marks it resolved and the next loop advance stops re-ticketing it. If it still
-reproduces, the ticket's own unit id stays the same (same round) and the loop leaves this ticket
-alone rather than opening a duplicate.
+Closing this ticket does NOT resolve the conflict. The sync does, once the two sides agree: a
+`resolve --keep` call settles it immediately, and otherwise the next pull/push recomputes the
+register (`plugins/jira-sync/tools/lib/conflict-register.mjs`). If the entry no longer reproduces,
+the register marks it resolved, the loop converges, and the board closes any ticket still open for
+it. If it is still outstanding after this ticket is Done, the next advance opens round 2 for the
+same key, so say in your write-up what you decided and why.
 
 Commit whatever you changed (a transition graph fix, a field-map fix, anything under
 `plugins/jira-sync/`) if you touched the plugin itself; a Jira/board-side edit alone needs no
