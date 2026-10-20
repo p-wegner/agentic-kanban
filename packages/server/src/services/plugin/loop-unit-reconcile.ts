@@ -1,4 +1,5 @@
 import { pluginLoopUnitKey, type PluginLoopDef } from "@agentic-kanban/shared/lib/plugin-manifest";
+import { isTerminalStatusName } from "@agentic-kanban/shared/lib/status-view";
 import type { Database } from "../../db/index.js";
 import { insertIssueComment } from "../../repositories/issue-comments.repository.js";
 import { setIssueStatus } from "../../repositories/issue-ai-contract.repository.js";
@@ -63,7 +64,7 @@ export async function closeResolvedUnitTickets(args: {
 }): Promise<{ closed: ClosedUnitTicket[]; warnings: string[] }> {
   const now = args.now ?? new Date().toISOString();
   const stale = args.existing.filter(
-    (row) => row.statusName !== "Done" && row.statusName !== "Cancelled"
+    (row) => !isTerminalStatusName(row.statusName)
       && !args.activeKeys.has(row.externalKey) && !row.hasLiveWorkspace,
   );
   if (stale.length === 0) return { closed: [], warnings: [] };
