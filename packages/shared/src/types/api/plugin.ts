@@ -90,6 +90,8 @@ export interface PluginSyncStatusView {
   outboxLength: number | null;
   /** Minutes between scheduled runs per direction; 0 = off. */
   schedule: { pullEveryMinutes: number; pushEveryMinutes: number };
+  /** The plugin's `syncDirection` setting (#1672); null = not set (the plugin's own default applies). */
+  syncDirection?: string | null;
 }
 
 /**
