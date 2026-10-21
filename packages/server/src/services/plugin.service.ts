@@ -276,7 +276,7 @@ export function createPluginService(deps: {
   // External-issue-tracker sync (#1076 declares it, #1081 wires it up) — extracted to its own
   // module (god-module ceiling), same shape as the output-location ops above.
   const {
-    getSyncConfig, setSyncConfig, setSyncSecrets, validateSync, triggerSync, resolveSyncIssue, getSyncStatus, runDueSyncSchedules, resolveSyncEnv, redactSecrets,
+    getSyncConfig, setSyncConfig, setSyncSecrets, validateSync, triggerSync, resolveSyncIssue, getSyncStatus, getSyncHealth, runDueSyncSchedules, resolveSyncEnv, redactSecrets,
   } = createPluginSyncOps({
     database, requirePlugin, requireProject, resolvePluginRunContext,
   });
@@ -367,6 +367,15 @@ export function createPluginService(deps: {
     triggerSync,
     resolveSyncIssue,
     getSyncStatus,
+    /** #1673: sync health for every enabled sync plugin of one project, from stored run summaries and local registers. */
+    async listSyncHealth(projectId: string) {
+      const slugs = (await enabledSlugsByProject()).get(projectId);
+      if (!slugs || slugs.size === 0) return [];
+      const rows = (await listPluginRows(database)).filter((r) => slugs.has(r.pluginId) && parsePluginManifest(r.manifestJson).sync);
+      const out = [];
+      for (const row of rows) out.push(await getSyncHealth(row.id, projectId).catch(() => null));
+      return out.filter((h): h is NonNullable<typeof h> => h !== null);
+    },
     /** The scheduler tick (#1625): runs every enabled sync whose pull/push interval has elapsed. */
     async runScheduledSyncs(nowMs?: number) {
       const targets: Array<{ pluginRowId: string; projectId: string }> = [];

@@ -77,3 +77,10 @@ export function connectSection(model: ConsoleModel, g: Glyphs): Section | null {
   }
   return { id: "connect", lines };
 }
+
+/** #1673: one line per project with an enabled sync plugin; absent for projects without one. */
+export function syncSection(model: ConsoleModel): Section | null {
+  const lines = model.syncLines ?? [];
+  if (lines.length === 0) return null;
+  return { id: "sync", lines: [heading("SYNC"), ...lines.map((l): Line => ({ text: ` ${l.text}`, tone: l.level === "red" ? "red" : l.level === "yellow" ? "yellow" : null }))] };
+}

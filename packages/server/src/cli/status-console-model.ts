@@ -110,6 +110,8 @@ export interface ConsoleModel {
   baseHealth?: ConsoleBaseHealth | null;
   /** #1619: the code-health ledger line from the latest scan. */
   codeHealth?: string | null;
+  /** #1673: one line per project sync plugin (last pull/push, conflicts, failed pushes, outbox, next run). */
+  syncLines?: Array<{ level: "red" | "yellow" | "ok"; text: string }>;
   /** Set while the auto-merge window holds work (`base_red`, `live_train`, ...), naming the held tickets. */
   mergeHold?: ConsoleMergeHold | null;
   rc?: ConsoleRc | null;

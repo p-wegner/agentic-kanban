@@ -56,8 +56,8 @@ win over the injected values):
   Jira Server/Data Center Personal Access Token (sent as a bearer token)
 - `JIRA_SYNC_BOARD_URL` + `JIRA_SYNC_BOARD_PROJECT_ID` for `sync/pull.mjs` — where and which
   board project to write issues into. The manifest's `sync.pull.env` already fills these from
-  `{{boardUrl}}`/`{{projectId}}` once something invokes `sync.pull` through the board (still
-  unwired — see "Known gaps" below); set them by hand for a manual run.
+  `{{boardUrl}}`/`{{projectId}}` whenever the board invokes `sync.pull` (the panel's Pull now and
+  the schedule, #1625); set them by hand for a manual run.
 
 `JIRA_SITE_URL`, `JIRA_PROJECT_KEY` and `JIRA_JQL` fall back to `SYNC_CONFIG_SITEURL`,
 `SYNC_CONFIG_PROJECTKEY` and `SYNC_CONFIG_JQL` when unset.
@@ -141,6 +141,19 @@ runs `sync.resolve` for it, credentials injected server-side:
 Both write modes re-baseline the issue's sync state and mark its conflict entry resolved, so the
 next pull reports no conflict.
 
+## Resolving a conflict
+
+A conflict (the board issue and Jira both changed a mapped field) is listed in the panel and in
+`conflict-register.json`, and the sync-conflicts loop opens one ticket per entry. Resolve it by
+asking `sync.resolve` (`POST /api/plugins/:id/sync/resolve { projectId, key, keep? }`, #1643):
+
+1. Without `keep`, read the three-way field table (board now / last sync / Jira now).
+2. Pick a winner: `keep: "jira"` overwrites the board issue from Jira; `keep: "board"` writes the
+   board's title, description, priority and type to Jira once.
+3. Either choice re-baselines the issue and marks the entry resolved; the next pull reports no
+   conflict. Closing the loop's ticket alone resolves nothing - a Done ticket whose conflict is
+   still registered re-opens as the next round.
+
 ## Running it
 
 ```sh
@@ -180,8 +193,15 @@ the board's `scripts`/`sync` machinery or straight from a shell.
   `details`) and push output (`appliedCount/failedCount`, `applied/failed`) into counts, issues,
   conflicts and failures, and a failed run records the script's `step`/`reason` plus the stderr
   tail. Jira browse links are built from the saved site URL.
-- **Search API.** `searchIssues` still uses `POST /rest/api/3/search`. Jira's newer search returns
-  no `total`, so `bootstrap` reports the size of the page it fetched (`moreAvailable` says whether there are more).
+- **Search API.** `searchIssues` uses `POST /rest/api/3/search/jql` with `nextPageToken` paging
+  (#1622, `tools/lib/jira-client.mjs`). That endpoint returns no `total`, so `bootstrap` reports
+  the size of the page it fetched (`moreAvailable` says whether there are more).
 - **Never deletes.** Jira issues that leave the JQL scope are reported, not removed from the board.
-- **Outbox is filled elsewhere.** Nothing in this plugin queues board-side edits into
-  `outbox.json`; push applies whatever is there.
+- **Outbox is filled by the plugin (#1623).** `tools/lib/outbox-producer.mjs` queues board-side
+  status transitions, comments and creates into `outbox.json`; push applies what is there. Board
+  field edits (title, description, priority, type) are still not queued - see "Conflicts are
+  field-level" above and "Resolving a conflict" below.
+- **Health surfaces (#1673).** `status --watch` shows one SYNC line per project with Jira Sync
+  enabled (last pull/push, open conflicts, failed pushes, outbox, next run) and ATTENTION lists a
+  failed scheduled run, a direction silent for 3 schedule intervals, or conflicts open over a
+  day. Both read the stored run summaries and local registers; no Jira calls.
