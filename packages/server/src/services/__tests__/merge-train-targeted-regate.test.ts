@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideRegate, describeFullRegate, describeTargetedRegate, formatTrainTimings } from "../merge-train-targeted-regate.js";
+import { decideRegate, isMissingToolNoTests, describeFullRegate, describeTargetedRegate, formatTrainTimings } from "../merge-train-targeted-regate.js";
 
 const base = { coveredFiles: ["packages/server/src/a.ts"], gatedSha: "a".repeat(40), fixSha: "abc1234ffff" };
 
@@ -33,5 +33,29 @@ describe("decideRegate (#1633)", () => {
   });
   it("formats per-train timings", () => {
     expect(formatTrainTimings({ assemblyMs: 30000, gateMs: 25 * 60000, regateMs: 5 * 60000 })).toBe("assembly 30s · gate 25m · regate 5m");
+  });
+});
+
+describe("targeted re-gate runs vitest inside the package (#1656)", () => {
+  it("maps a package-relative suite to the covered package", () => {
+    const d = decideRegate({ ...base, fixFiles: ["packages/server/src/b.ts"], failedSuites: ["src/__tests__/a.test.ts"] });
+    expect(d.mode).toBe("targeted");
+    if (d.mode !== "targeted") return;
+    expect(d.script).toContain("(cd 'packages/server' && pnpm exec vitest run --maxWorkers=4 'src/__tests__/a.test.ts')");
+  });
+  it("strips the packages/<pkg>/ prefix and never runs vitest from the root", () => {
+    const d = decideRegate({ ...base, fixFiles: ["packages/server/src/b.ts"], failedSuites: ["packages/server/src/__tests__/x.test.ts"] });
+    if (d.mode !== "targeted") throw new Error("expected targeted");
+    expect(d.script).toContain("cd 'packages/server' && pnpm exec vitest run --maxWorkers=4 'src/__tests__/x.test.ts'");
+  });
+  it("goes full when a suite cannot be placed", () => {
+    const d = decideRegate({ coveredFiles: ["packages/server/a.ts", "packages/shared/b.ts"], gatedSha: "a".repeat(40), fixSha: "f", fixFiles: ["packages/server/c.ts"], failedSuites: ["src/x.test.ts"] });
+    expect(d.mode).toBe("full");
+  });
+  it("treats vitest-not-found with 0 failing suites as infrastructure", () => {
+    const msg = 'Der Befehl "vitest" ist entweder falsch geschrieben\nERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL Command "vitest" not found';
+    expect(isMissingToolNoTests({ passed: false, message: msg, failedSuites: [] })).toBe(true);
+    expect(isMissingToolNoTests({ passed: false, message: msg, failedSuites: ["a.test.ts"] })).toBe(false);
+    expect(isMissingToolNoTests({ passed: false, message: "assertion failed" })).toBe(false);
   });
 });
