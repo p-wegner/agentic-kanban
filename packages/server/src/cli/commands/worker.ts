@@ -18,6 +18,9 @@ import { repinLegacyShim } from "../../worker/worker-repin.js";
 import { applyWorkerUpdate } from "../../worker/worker-control.js";
 import type { WorkerUpdateReport } from "../../lib/worker-update.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "../../worker/worker-repo.js";
+import { setLastGaspContext } from "../../worker/worker-last-gasp.js";
+import { readAgentRecords } from "../../worker/worker-agent-registry.js";
+import { resolveDoctorStateFile } from "../../worker/worker-state-discovery.js";
 import { SHARES_FILESYSTEM_LABEL, type WorkerProfileAttestation, type WorkerUnattestedProfile } from "@agentic-kanban/shared/lib/worker-protocol"; import { profilesSuffix } from "../../lib/worker-profile-attestation.js";
 // #879 — pure, so it stays safe for the standalone worker binary (no db graph).
 import { formatBuildFreshness, type WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
@@ -253,6 +256,8 @@ async function runWorkerStart(rawOptions: WorkerStartOptions & ToolchainStartOpt
     if (shim) console.log(`[worker] stable restart command: ${shim} start ...`);
     const logFile = workerLogFileFor(options.stateFile ?? defaultWorkerStateFile());
     console.log(`[worker] logging to ${logFile}`);
+    // #1661: a last line (exit code, running jobs, memory) lands in worker.log however the process ends.
+    setLastGaspContext({ logFile, describeJobs: () => readAgentRecords(options.workRoot ?? defaultWorkerWorkRoot(options.stateFile ?? defaultWorkerStateFile())).map((r) => `session:${r.sessionId}`) });
     // #1366: pairing with a stale global install (the printed steps failed mid-build) must not pass silently.
     if (options.token) {
       const cmp = await compareWithBoardBuild({
@@ -635,7 +640,10 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       codexHome?: string;
       json?: boolean;
     }) => {
-      const doctorStateFile = options.stateFile ?? defaultWorkerStateFile();
+      // #1661: find the daemon's own state before falling back to the global default, and say which was read.
+      const resolvedState = resolveDoctorStateFile(options.stateFile, defaultWorkerStateFile());
+      const doctorStateFile = resolvedState.stateFile;
+      if (!options.json) console.log(`[doctor] state file: ${doctorStateFile} (${resolvedState.source})`);
       const harnessCfg = resolveInspectedHarness(doctorStateFile, {
         inheritUserConfig: options.inheritUserConfig,
         clean: options.clean,

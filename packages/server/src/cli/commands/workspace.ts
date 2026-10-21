@@ -4,14 +4,15 @@ import type { DiffResponse } from "@agentic-kanban/shared/types";
 import { getIssueIdByNumberInProject } from "../../repositories/issue.repository.js";
 import { getIssueById } from "../../repositories/followup-workspace.repository.js";
 import { getProjectById } from "../../repositories/project.repository.js";
-import { getWorkspaceById, getLatestWorkspaceForIssue } from "../../repositories/workspace.repository.js";
+import { getWorkspaceById, getLatestWorkspaceForIssue, getWorkspacesByIssueId } from "../../repositories/workspace.repository.js";
 import { getWorkspacesForIssues } from "../../repositories/board-status.repository.js";
 import { insertWorkspaceRecordRow } from "../../repositories/workspace-crud.repository.js";
 import { getIssueTitleAndDescription } from "../../repositories/workspace-session.repository.js";
 import { getProjectIssueIds } from "../../repositories/review-effectiveness.repository.js";
 import { randomUUID } from "node:crypto";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
-import { resolveProjectIdArg, describeIssueNumberMiss, cliAction } from "../shared.js";
+import { resolveProjectIdArg, describeIssueNumberMiss, resolveIssueArg, runMigrations, cliAction } from "../shared.js";
+import { selectOpenWorkspaceForIssue } from "./workspace-select.js";
 import { buildWorkspaceApiUrl, buildApiUrl } from "./workspace-api-url.js";
 import { registerWorkspaceInteractionCommands } from "./workspace-interaction.js";
 import { registerWorkspaceMergeControlCommands } from "./workspace-merge-control.js";
@@ -562,15 +563,39 @@ Example:
     });
 
   wsCmd
-    .command("close <workspace-id>")
-    .description("Close a workspace without merging.\n\nUse for direct workspaces or abandoned work. Use 'merge' instead if you want to merge the branch. Requires the kanban server to be running (pnpm dev).")
+    .command("close [workspace-id]")
+    .description("Close a workspace without merging.\n\nUse for direct workspaces or abandoned work. Use 'merge' instead if you want to merge the branch. With --issue <number> the issue's single open workspace is closed; refuses when it has several unless one is named. Requires the kanban server to be running (pnpm dev).")
     .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
+    .option("--issue <number>", "Resolve the workspace from an issue number (or id) instead of a workspace id")
+    .option("--project <idOrName>", "Target project by id or name for --issue (default: the active project)")
     .addHelpText("after", `
-Example:
+Examples:
   $ agentic-kanban workspace close <workspace-id>
+  $ agentic-kanban workspace close --issue 1644
+  $ agentic-kanban workspace close <workspace-id> --issue 1644   # pick one of several open workspaces
 `)
-    .action(async (workspaceId: string, options: { project?: string; port?: string }) => {
+    .action(async (workspaceIdArg: string | undefined, options: { project?: string; port?: string; issue?: string }) => {
       try {
+        let workspaceId = workspaceIdArg;
+        if (options.issue) {
+          await runMigrations();
+          const resolved = await resolveIssueArg(options.issue, options);
+          if (!resolved.ok) {
+            console.error(resolved.message);
+            process.exit(1);
+          }
+          const label = resolved.issue.issueNumber != null ? `Issue #${resolved.issue.issueNumber}` : `Issue '${resolved.issue.id}'`;
+          const selection = selectOpenWorkspaceForIssue(label, await getWorkspacesByIssueId(resolved.issue.id), workspaceIdArg);
+          if (!selection.ok) {
+            console.error(selection.message);
+            process.exit(1);
+          }
+          workspaceId = selection.workspace.id;
+        }
+        if (!workspaceId) {
+          console.error("Give a <workspace-id> or --issue <number>.");
+          process.exit(1);
+        }
         const port = options.port ?? "";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "close"), {
           method: "POST",

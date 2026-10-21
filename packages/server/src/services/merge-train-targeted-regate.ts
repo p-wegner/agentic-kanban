@@ -57,7 +57,19 @@ export function decideRegate(args: {
   const staticChecks = files.some((f) => SOURCE_RE.test(f));
   const steps: string[] = [];
   if (staticChecks) steps.push("pnpm check:arch", "pnpm typecheck");
-  if (failing.length > 0) steps.push(`pnpm exec vitest run --maxWorkers=4 ${failing.map(shq).join(" ")}`);
+  if (failing.length > 0) {
+    // #1656: vitest lives in the packages, not the root - run each suite inside its own package.
+    const pkgs = [...covered].filter((p) => p !== ".");
+    const byPkg = new Map<string, string[]>();
+    for (const raw of failing) {
+      const suite = raw.replace(/\\/g, "/");
+      const m = /^(packages\/[^/]+)\/(.+)$/.exec(suite);
+      const pkg = m ? m[1] : pkgs.length === 1 ? pkgs[0] : null;
+      if (!pkg) return { mode: "full", reason: `failing suite ${raw} cannot be mapped to a package` };
+      byPkg.set(pkg, [...(byPkg.get(pkg) ?? []), m ? m[2] : suite]);
+    }
+    for (const [pkg, suites] of byPkg) steps.push(`(cd ${shq(pkg)} && pnpm exec vitest run --maxWorkers=4 ${suites.map(shq).join(" ")})`);
+  }
   // Related suites + the always-run guards whose `when:` globs match the fix: test:mine scoped to the fix diff.
   steps.push(`pnpm test:mine -- --changed ${shq(args.gatedSha)}`);
   return { mode: "targeted", script: steps.join(" && "), files, failingSuites: failing, staticChecks, fixSha: args.fixSha, gatedSha: args.gatedSha };
@@ -81,4 +93,10 @@ export function formatTrainTimings(t: TrainTimings): string {
   return (["assembly", "gate", "shepherd", "regate", "land"] as const)
     .map((k) => { const v = fmt(t[`${k}Ms` as keyof TrainTimings]); return v ? `${k} ${v}` : null; })
     .filter(Boolean).join(" · ");
+}
+
+/** #1656: the gate died on a missing tool and ran no test - infrastructure, never the train's red. */
+export function isMissingToolNoTests(gate: { passed: boolean; message: string; failedSuites?: readonly string[] }): boolean {
+  if (gate.passed || (gate.failedSuites?.length ?? 0) > 0) return false;
+  return /Command "?vitest"? not found|ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL|vitest(?:["']|\s)+(?:ist entweder falsch|is not recognized|: command not found|: not found)|Der Befehl "vitest"/i.test(gate.message);
 }

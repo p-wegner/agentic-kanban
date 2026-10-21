@@ -151,7 +151,8 @@ describe("agentic-kanban-worker binary isolation", () => {
     // worker data dirs not-content-indexed; node builtins + child_process only).
     // Raised 87 -> 88 for #1551's worker-startup-step.ts (restart-after-update connect step).
     // Raised 88 -> 92 for #1605: worker-daemon-register/-shutdown, worker-connect-markdown, worker-format (pure splits, no new deps).
-    expect(files.size).toBeLessThan(92);
+    // Raised 92 -> 94 for #1661: worker-last-gasp.ts, worker-state-discovery.ts (standalone, no db).
+    expect(files.size).toBeLessThan(94);
   });
 
   it("never reaches the database or board-service layer", () => {

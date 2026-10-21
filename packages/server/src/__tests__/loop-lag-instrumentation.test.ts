@@ -15,7 +15,9 @@ function blockEventLoop(ms: number): void {
   while (Date.now() < until) { /* deliberate spin */ }
 }
 
-describe("loop lag monitor (#347)", () => {
+// Real-time lag measurements: a loaded box (concurrent gate + sweep) can stall the loop in an "idle" or
+// "quiet" window and trip these. A retry distinguishes a loaded host from a broken monitor.
+describe("loop lag monitor (#347)", { retry: 2 }, () => {
   it("measures a real synchronous block, which a setInterval probe could not", async () => {
     // perf_hooks samples at the libuv level, off-thread, so it keeps measuring WHILE JS is
     // blocked. A JS-timer probe is delayed by the very block it is trying to observe.

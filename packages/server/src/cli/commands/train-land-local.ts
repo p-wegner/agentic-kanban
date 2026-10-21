@@ -17,6 +17,7 @@ export function registerTrainLandLocal(trainCmd: Command): void {
     .option("--continue", "Re-run the gate in the worktree a red run left behind (after committing a fix there)")
     .option("--skip-install", "Skip 'pnpm install -r' in the worktree")
     .option("--on-worker [name]", "Run install + the gate on a verify worker through the board's normal placement (any, or the named one) instead of this host; needs the board server running (#1612)")
+    .option("--on-host", "Gate on this host even when a verify worker is connected (default placement is a worker when one is; #1649)")
     .option("--only <issueNumbers>", "Assemble only these issue numbers (comma-separated)")
     .option("--skip <issueNumbers>", "Leave these issue numbers out (comma-separated)")
     .option("--project <projectId>", "Project ID (default: the train's project, else the active project)")
@@ -30,12 +31,12 @@ Examples:
   $ pnpm cli -- train land-local <train-id> --on-worker          # low-memory host: gate runs on a worker
   $ pnpm cli -- train land-local <train-id> --on-worker verify-1`,
     )
-    .action(cliAction(async (trainId: string | undefined, options: { fromWindow?: boolean; continue?: boolean; skipInstall?: boolean; onWorker?: boolean | string; only?: string; skip?: string; project?: string }) => {
+    .action(cliAction(async (trainId: string | undefined, options: { fromWindow?: boolean; continue?: boolean; skipInstall?: boolean; onWorker?: boolean | string; onHost?: boolean; only?: string; skip?: string; project?: string }) => {
       const deps = createLandLocalDeps();
       const trainProject = trainId && !options.project ? await deps.getTrainProjectId(trainId) : null;
       const projectId = trainProject ?? await resolveProjectIdArg(options.project);
       const outcome = await landTrainLocal(
-        { projectId, trainId, fromWindow: options.fromWindow, continueRun: options.continue, skipInstall: options.skipInstall, onWorker: options.onWorker, only: parseNumbers(options.only), skip: parseNumbers(options.skip) },
+        { projectId, trainId, fromWindow: options.fromWindow, continueRun: options.continue, skipInstall: options.skipInstall, onWorker: options.onWorker, onHost: options.onHost, only: parseNumbers(options.only), skip: parseNumbers(options.skip) },
         deps,
       );
       switch (outcome.status) {

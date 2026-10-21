@@ -66,7 +66,10 @@ export declare function planRcCandidate(opts: {
   isShipped?: (sha: string) => boolean;
   /** Is this sha neither in nor ahead of what the stable board runs? Such a candidate is abandoned. */
   isDiverged?: (sha: string) => boolean;
+  /** Does this rc have an open heal ticket? null = unknown (never abandons); false on a red rc = driverless (#1648). */
+  hasOpenHealTicket?: (branch: string) => boolean | null;
 }): RcCandidatePlan;
+export declare const DRIVERLESS_GRACE_MS: number;
 export declare function rcStatePath(stableCheckout: string): string;
 export declare function readRcState(stableCheckout: string): RcStateFile;
 export declare function writeRcState(stableCheckout: string, state: RcStateFile): string;

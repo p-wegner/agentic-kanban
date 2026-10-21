@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { cpus } from "node:os";
 import { randomUUID } from "node:crypto";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { db } from "../db/index.js";
@@ -96,6 +97,7 @@ export function createLandLocalDeps(database: Database = db): LandLocalDeps {
       return res;
     },
     pathExists: existsSync,
+    hostMaxWorkers: () => Math.max(2, Math.floor(cpus().length / 2) - 2),
     newId: () => randomUUID(),
     nowIso: () => new Date().toISOString(),
   };

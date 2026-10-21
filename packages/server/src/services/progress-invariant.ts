@@ -37,11 +37,15 @@ export const PROGRESS_BUDGETS_MS = {
   gateHeld: 30 * 60_000,
 } as const;
 
+/** Slack past a window's projected departure before its members count as undriven again. */
+export const TRAIN_WINDOW_SLACK_MS = 5 * 60_000;
+
 export type DriverKind =
   | "running-session"
   | "merge-job"
   | "scheduled-retry"
   | "merge-train"
+  | "train-window"
   | "merge-hold"
   | "blocked-by"
   | "quota-cooldown"
@@ -99,6 +103,11 @@ export interface TicketDriverSnapshot {
   backoff: { nextRetryAt: string | null; branchSha: string | null } | null;
   branchHeadSha: string | null;
   inActiveTrain: boolean;
+  /**
+   * Epoch ms of the projected departure (`firstSeenAt + maxWaitMs`) of the accumulating train window
+   * this workspace is pending in; null/absent when it is in no window (#1653).
+   */
+  trainWindowDepartsAtMs?: number | null;
   hold: "merge-hold" | "blocked-by" | "quota-cooldown" | null;
 }
 
@@ -181,6 +190,17 @@ function decideMergeJob(s: TicketDriverSnapshot, nowMs: number): ProgressVerdict
   );
 }
 
+/**
+ * #1653: a ready ticket pending in an accumulating train window is driven by that window until its
+ * projected departure (plus slack). Without this the 15-min `readyIdle` budget escalated every
+ * member of a window that waits longer (sprint: 30 min), which dropped the window and its clock.
+ */
+function isWindowDriven(s: TicketDriverSnapshot, nowMs: number): boolean {
+  if (!s.readyForMerge || s.mergeJob?.state === "running") return false;
+  const departs = s.trainWindowDepartsAtMs;
+  return typeof departs === "number" && Number.isFinite(departs) && nowMs < departs + TRAIN_WINDOW_SLACK_MS;
+}
+
 /** Ready-for-merge ticket with no job: which retry/train/hold, if any, is driving it? */
 function decideReady(s: TicketDriverSnapshot, nowMs: number): ProgressVerdict {
   if (backoffIsLive(s, nowMs)) return { driven: true, driver: "scheduled-retry" };
@@ -232,6 +252,7 @@ export function decideTicketDriver(s: TicketDriverSnapshot, nowMs: number): Prog
   if (s.hold === "quota-cooldown") return { driven: true, driver: "quota-cooldown" };
   if (s.workspaceStatus === "blocked") return { driven: true, driver: "attention-marked" };
   if (s.inActiveTrain) return { driven: true, driver: "merge-train" };
+  if (isWindowDriven(s, nowMs)) return { driven: true, driver: "train-window" };
   if (s.workspaceStatus === "closed") {
     return violation(
       "no-live-workspace",

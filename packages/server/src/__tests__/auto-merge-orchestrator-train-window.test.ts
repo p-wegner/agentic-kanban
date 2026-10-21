@@ -165,10 +165,32 @@ describe("auto-merge orchestrator train batching window (#905)", () => {
 
     // The workspace is no longer ready (e.g. closed by a reconcile pass) — the next tick sees
     // an empty rows array and must not keep waiting on a member that no longer exists.
-    const released = await orchestrator.applyTrainWindow([], new Date(new Date(t0).getTime() + 1000).toISOString());
+    // Past the empty-window grace (#1653), so the record is really gone.
+    const released = await orchestrator.applyTrainWindow([], new Date(new Date(t0).getTime() + 4 * 60_000).toISOString());
     expect(released).toEqual([]);
     expect(orchestrator.state.trainWindows.has(projectId)).toBe(false);
     void ws;
+  });
+
+  it("#1653: members that flip blocked and back within the grace keep the window's firstSeenAt", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusId } = await seedProject(db);
+    const ws = await seedReadyWorkspace(db, projectId, statusId);
+
+    const orchestrator = createAutoMergeOrchestrator({ database: db });
+    const t0 = new Date("2026-08-26T12:00:00.000Z").toISOString();
+    await orchestrator.applyTrainWindow(await orchestrator.findCompletedWorkspaceRows(), t0);
+
+    // One tick with nobody ready (every member escalated to blocked) ...
+    const t1 = new Date(new Date(t0).getTime() + 30_000).toISOString();
+    expect(await orchestrator.applyTrainWindow([], t1)).toEqual([]);
+    expect(orchestrator.state.trainWindows.get(projectId)?.firstSeenAt).toBe(t0);
+
+    // ... then the reconciler recovers them: same window, same clock.
+    const t2 = new Date(new Date(t0).getTime() + 60_000).toISOString();
+    await orchestrator.applyTrainWindow(await orchestrator.findCompletedWorkspaceRows(), t2);
+    expect(orchestrator.state.trainWindows.get(projectId)?.firstSeenAt).toBe(t0);
+    expect(orchestrator.state.trainWindows.get(projectId)?.pendingIds).toEqual([ws]);
   });
 
   it("accumulates independently per project", async () => {

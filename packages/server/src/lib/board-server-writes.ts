@@ -17,7 +17,9 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
  * (`DB_URL`, a test harness, a worktree) must never write into whatever board happens to
  * listen on 3001.
  *
- * ONE probe (`GET /api/health`, short timeout), never a polling loop.
+ * One health probe (`GET /api/health`). Only a connection failure (nothing listening) falls
+ * back to the DB; a TIMEOUT is a live-but-lagging board and is retried (3 tries, ~10 s), then
+ * the command fails rather than writing around the server (#1650).
  * `KANBAN_CLI_WRITE_TRANSPORT=direct` skips the probe entirely (the spawn-based CLI test
  * harness sets it, so no test ever talks to a board that happens to be running).
  *
@@ -35,6 +37,14 @@ export type HttpLike = (
   url: string,
   init: { method: string; body?: string; timeoutMs?: number },
 ) => Promise<HttpAnswer>;
+
+/** The socket connected (or was idle) but no answer came in time: a live, busy listener. */
+export class ProbeTimeoutError extends Error {
+  constructor(timeoutMs: number | undefined) {
+    super(`timed out after ${timeoutMs} ms`);
+    this.name = "ProbeTimeoutError";
+  }
+}
 
 /** One request, no connection reuse, so no socket outlives it. */
 export const plainHttp: HttpLike = (url, init) =>
@@ -59,7 +69,7 @@ export const plainHttp: HttpLike = (url, init) =>
       }));
       res.on("error", reject);
     });
-    req.on("timeout", () => req.destroy(new Error(`timed out after ${init.timeoutMs} ms`)));
+    req.on("timeout", () => req.destroy(new ProbeTimeoutError(init.timeoutMs)));
     req.on("error", reject);
     req.end(init.body);
   });
@@ -75,7 +85,8 @@ export interface ResolveTransportOptions {
   env?: Record<string, string | undefined>;
 }
 
-const PROBE_TIMEOUT_MS = 1500;
+/** Three tries, ~10 s total, before "up but not answering". */
+const PROBE_TIMEOUTS_MS = [3000, 3000, 4000];
 
 function samePath(a: string, b: string, platform: NodeJS.Platform): boolean {
   const na = resolve(a);
@@ -105,11 +116,22 @@ export async function resolveIssueWriteTransport(opts: ResolveTransportOptions =
   const baseUrl = `http://127.0.0.1:${port}`;
   const where = `127.0.0.1:${port}`;
 
-  let answer: HttpAnswer;
-  try {
-    answer = await (opts.http ?? plainHttp)(`${baseUrl}/api/health`, { method: "GET", timeoutMs: opts.timeoutMs ?? PROBE_TIMEOUT_MS });
-  } catch {
-    return { mode: "direct", reason: `no board server answered on ${where}` };
+  // A refused/failed connection means no board: fall back. A TIMEOUT means a listener that is
+  // busy (event-loop lag): never write around it (#1650). Retry, then fail loudly.
+  let answer: HttpAnswer | null = null;
+  const timeouts = opts.timeoutMs !== undefined ? [opts.timeoutMs, opts.timeoutMs, opts.timeoutMs] : PROBE_TIMEOUTS_MS;
+  for (const timeoutMs of timeouts) {
+    try {
+      answer = await (opts.http ?? plainHttp)(`${baseUrl}/api/health`, { method: "GET", timeoutMs });
+      break;
+    } catch (err) {
+      if (!(err instanceof ProbeTimeoutError)) {
+        return { mode: "direct", reason: `no board server answered on ${where}` };
+      }
+    }
+  }
+  if (!answer) {
+    throw new Error(`the board on ${where} is up but not answering (health probe timed out ${timeouts.length} times); not writing to the database behind it. Retry in a moment.`);
   }
   if (answer.status < 200 || answer.status >= 300) {
     return { mode: "direct", reason: `the board server on ${where} reported unhealthy (HTTP ${answer.status})` };

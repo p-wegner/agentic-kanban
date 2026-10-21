@@ -92,6 +92,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitExecSyncResult } from "./git-exec.mjs";
 import { mergeBackRc } from "./promote-merge-back.mjs";
+import { fetchWhileStarting } from "./promote-startup-retry.mjs";
 import { PACK_STAMP_PATH, restorePackStamp } from "./pack-stamp.mjs";
 import { spawnSyncPnpm } from "./pnpm-exec.mjs";
 import { parseNetstatListeners, planPortOwnerKill } from "./dev-port-guard.mjs";
@@ -538,12 +539,14 @@ async function resolveProjectId(knownId) {
 }
 
 async function postTrainHold(projectId, minutes) {
-  const res = await fetch(`${boardUrl}/api/merge-queue/window/hold`, {
+  const send = () => fetch(`${boardUrl}/api/merge-queue/window/hold`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ projectId, minutes }),
     signal: AbortSignal.timeout(10_000),
   });
+  // #1651: the release runs right after a restart — wait out 503 STARTUP_NOT_READY.
+  const res = minutes === 0 ? await fetchWhileStarting(send) : await send();
   if (!res.ok) throw new Error(`POST merge-queue/window/hold -> ${res.status}`);
 }
 
@@ -1181,7 +1184,21 @@ function listRcBranches() {
  * cut the new branch ref from master's tip (`git branch`, never a checkout switch — the main
  * checkout's working tree is untouched), and record the transition. A dry run only decides.
  */
-function resolveRcCandidate({ masterTip, dryRun }) {
+async function fetchOpenHealTicketProbe() {
+  try {
+    const projectId = await resolveProjectId(null);
+    const res = await fetch(`${boardUrl}/api/projects/${projectId}/rc`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return () => null;
+    const body = await res.json();
+    const rcBranch = body?.rc?.branch;
+    const count = Array.isArray(body?.healTickets) ? body.healTickets.length : null;
+    return (branch) => (count === null || rcBranch !== branch ? null : count > 0);
+  } catch {
+    return () => null; // no board answered: unknown, never abandon on a guess
+  }
+}
+
+async function resolveRcCandidate({ masterTip, dryRun }) {
   let state = readRcState(stableCheckout);
   const existing = listRcBranches();
   const stableHead = git(["rev-parse", "HEAD"], stableCheckout).stdout;
@@ -1189,7 +1206,8 @@ function resolveRcCandidate({ masterTip, dryRun }) {
   const isShipped = (sha) => Boolean(stableHead) && git(["merge-base", "--is-ancestor", sha, stableHead], MAIN_CHECKOUT).code === 0;
   // A candidate that does not descend from stable's HEAD can never be promoted (diverged, e.g. a rewrite).
   const isDiverged = (sha) => Boolean(stableHead) && git(["merge-base", "--is-ancestor", stableHead, sha], MAIN_CHECKOUT).code !== 0;
-  const plan = planRcCandidate({ dateStamp: stableTagDate(), state, existingBranches: existing, cadenceMs: DEFAULT_RC_CADENCE_MS, isShipped, isDiverged });
+  const hasOpenHealTicket = await fetchOpenHealTicketProbe();
+  const plan = planRcCandidate({ dateStamp: stableTagDate(), state, existingBranches: existing, cadenceMs: DEFAULT_RC_CADENCE_MS, isShipped, isDiverged, hasOpenHealTicket });
   const at = new Date().toISOString();
   if (plan.abandon) {
     log(`[promote] rc: ABANDONING ${plan.abandon} — ${plan.reason}`);
@@ -1296,7 +1314,7 @@ async function main() {
   // consult no sweep, so there is no candidate for them to gate, and they say so loudly below.
   const masterTip = gitOrThrow(["rev-parse", baseBranch], MAIN_CHECKOUT);
   const onRcLane = !opts.forceSweep && !opts.recover;
-  const rc = onRcLane ? resolveRcCandidate({ masterTip, dryRun: opts.dryRun }) : null;
+  const rc = onRcLane ? await resolveRcCandidate({ masterTip, dryRun: opts.dryRun }) : null;
   const gatedBranch = rc ? rc.branch : baseBranch;
 
   const verdictFor = (sweep) =>
@@ -1629,7 +1647,8 @@ async function main() {
           requestWorkspace: () => requestMergeBack(projectId, rc.branch, tag),
           reprobe: async () => {
             if (!projectId) return false;
-            const res = await fetch(`${boardUrl}/api/projects/${projectId}/base-branch-health/reprobe`, { method: "POST", signal: AbortSignal.timeout(30_000) });
+            // #1651: right after the restart the board answers 503 STARTUP_NOT_READY — retry, bounded.
+            const res = await fetchWhileStarting(() => fetch(`${boardUrl}/api/projects/${projectId}/base-branch-health/reprobe`, { method: "POST", signal: AbortSignal.timeout(30_000) }));
             return res.ok;
           },
           markAttention: async (reason) => {
