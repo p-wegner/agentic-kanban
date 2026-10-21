@@ -358,8 +358,13 @@ import {
  * #1634: `plugin-sync-dry-run-contract.test.ts` at the ASSUMED 3,000 ms. It spawns the real
  * jira-sync plugin scripts through `plugin-sync.service.ts` (outside its import graph), with a
  * `when:` territory of that plugin dir and the service, so an ordinary diff does not pay it.
+ *
+ * Train 2026-10-20-05: 525,689 -> 528,689 (+3,000 ms, one more suite at the ASSUMED 3,000 ms).
+ * Four members each carry a new always-run suite (`promote-startup-retry`, `rc-state`,
+ * `worker-cli-isolation`, `shared-lib-single-consumer-ratchet`); they read scripts/worker state
+ * outside their import graph, and the measured total is the sum of their estimates.
  */
-const BASELINE_TOTAL_MS = 525_689;
+const BASELINE_TOTAL_MS = 528_689;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative

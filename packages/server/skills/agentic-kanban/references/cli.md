@@ -103,9 +103,9 @@ Manage issue dependencies.
 
 | Command | Does |
 |---|---|
-| `issue dependency list <issue-id>` | List dependencies for an issue |
-| `issue dependency add <issue-id> <target-id>` | Add a dependency between two issues |
-| `issue dependency remove <dependency-id>` | Remove a dependency by its ID |
+| `issue dependency list <issue>` | List dependencies for an issue (number or id) |
+| `issue dependency add <issue> <target>` | Add a dependency between two issues (numbers or ids) |
+| `issue dependency remove <dependency-id-or-issue> [target]` | Remove a dependency by its ID, or by the two issues it links |
 | `issue dependency analyze <issue-number>` | Analyze dependencies for an issue against the current board |
 | `issue dependency update-batch <jsonFile>` | Add or remove multiple dependency edges atomically from a JSON file |
 
@@ -278,7 +278,7 @@ Manage workspaces (git worktrees linked to issues).
 | `workspace diff <workspace-id>` | Get the git diff for a workspace |
 | `workspace scorecard <workspace-id>` | Get the PR quality scorecard for a workspace |
 | `workspace merge <workspace-id>` | Merge a workspace branch into the project's default branch |
-| `workspace close <workspace-id>` | Close a workspace without merging |
+| `workspace close [workspace-id]` | Close a workspace without merging |
 | `workspace stop <workspace-id>` | Stop any running agent session for a workspace |
 | `workspace delete <workspace-id>` | Delete a workspace and all its sessions, messages, and diff comments |
 | `workspace relaunch <workspace-id>` | Relaunch an idle workspace by starting a new agent session |

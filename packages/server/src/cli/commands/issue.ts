@@ -31,6 +31,7 @@ import { getWorkspaceArtifactTarget } from "../../repositories/phase-artifacts.r
 import { buildIssueSummaryLines, buildIssueStatusLines, validateAttachArtifactOptions, formatAttachArtifactOutput, buildIssueSummaryJson, buildIssueStatusJson, formatResolvedProjectLine } from "../../lib/issue-cli-format.js";
 import { extractLastAgentMessageFromRows } from "../../lib/session-message-extraction.js";
 import { registerIssueDependencyCommands } from "./issue-dependency.js";
+import { closeOpenWorkspaces } from "./workspace-select.js";
 import { normalizeBatchInput, validateBatchIssueInputs, formatBatchCreateResult } from "../../lib/batch-create-issues.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -296,7 +297,9 @@ Examples:
 Tip: Use 'issue list' to find the issue ID and see available status names.
 `)
     .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
-    .action(cliAction(async (issueId: string, statusName: string, options: { project?: string }) => {
+    .option("--close-workspace", "With status Cancelled: close the issue's open workspace(s) first (discarding their branches) and move in one step")
+    .option("-p, --port <port>", "Server port for --close-workspace (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
+    .action(cliAction(async (issueId: string, statusName: string, options: { project?: string; closeWorkspace?: boolean; port?: string }) => {
 
       const resolved = await resolveIssueArg(issueId, options);
       if (!resolved.ok) {
@@ -310,6 +313,19 @@ Tip: Use 'issue list' to find the issue ID and see available status names.
       if (!target) {
         console.error(`Status '${statusName}' not found. Available: ${statuses.map((s) => s.name).join(", ")}`);
         process.exit(1);
+      }
+
+      if (options.closeWorkspace) {
+        if (statusName !== "Cancelled") {
+          console.error("--close-workspace only applies when moving to 'Cancelled'.");
+          process.exit(1);
+        }
+        const closed = await closeOpenWorkspaces(options.port ?? "", await getWorkspacesByIssueId(issue.id));
+        for (const branch of closed.discarded) console.log(`Discarded branch ${branch}`);
+        if (closed.error) {
+          console.error(closed.error);
+          process.exit(1);
+        }
       }
 
       const refused = await moveIssueOnBoard(issue.id, target.id, statusName);

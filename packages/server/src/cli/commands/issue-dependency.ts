@@ -6,7 +6,7 @@ import type { Command } from "commander";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { resolveProjectIdArg, describeIssueNumberMiss, cliAction } from "../shared.js";
+import { resolveProjectIdArg, describeIssueNumberMiss, resolveIssueArg, cliAction } from "../shared.js";
 import { cliPathArg } from "../cli-path.js";
 import { getIssueIdByNumberInProject, getOutgoingDependencies, getIncomingDependencies } from "../../repositories/issue.repository.js";
 import {
@@ -24,18 +24,33 @@ import { resolveIssueWriteTransport, boardServerWrite, directWriteNotice } from 
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { isDirectionalDependencyType, DIRECTIONAL_DEPENDENCY_TYPES } from "@agentic-kanban/shared/lib/dependency-type-traits";
 
+const PROJECT_OPTION_HELP = "Target project by id or name for issue numbers (default: the active project). Flag wins; the active-project preference stays the fallback (#389)";
+
+/** Issue number (with --project / the active project) or issue id, as a uuid. Exits on a miss. */
+async function resolveIssueId(issueArg: string, options: { project?: string }): Promise<string> {
+  const resolved = await resolveIssueArg(issueArg, options);
+  if (!resolved.ok) {
+    console.error(resolved.message);
+    process.exit(1);
+  }
+  return resolved.issue.id;
+}
+
 export function registerIssueDependencyCommands(issueCmd: Command) {
   // ── dependency sub-commands ──
   const depCmd = issueCmd.command("dependency").description("Manage issue dependencies.\n\nDependencies link issues together with typed relationships. Available types: depends_on, blocked_by, related_to, duplicates, parent_of, child_of.\n\nSubcommands: list, add, remove");
 
   depCmd
-    .command("list <issue-id>")
-    .description("List dependencies for an issue.\n\nShows both outgoing (this issue depends on others) and incoming (others depend on this issue) dependencies.")
+    .command("list <issue>")
+    .description("List dependencies for an issue (number or id).\n\nShows both outgoing (this issue depends on others) and incoming (others depend on this issue) dependencies.")
+    .option("--project <idOrName>", PROJECT_OPTION_HELP)
     .addHelpText("after", `
-Example:
+Examples:
+  $ agentic-kanban issue dependency list 42
   $ agentic-kanban issue dependency list abc123-def456-...
 `)
-    .action(cliAction(async (issueId: string) => {
+    .action(cliAction(async (issueArg: string, options: { project?: string }) => {
+      const issueId = await resolveIssueId(issueArg, options);
 
       const outgoing = await getOutgoingDependencies(issueId);
       const incoming = await getIncomingDependencies(issueId);
@@ -66,16 +81,19 @@ Example:
     }));
 
   depCmd
-    .command("add <issue-id> <target-id>")
-    .description("Add a dependency between two issues.\n\nCreates a typed link from <issue-id> to <target-id>. Both issues must belong to the same project. Self-dependencies and duplicate links are rejected.")
+    .command("add <issue> <target>")
+    .description("Add a dependency between two issues (numbers or ids).\n\nCreates a typed link from <issue> to <target>. Both issues must belong to the same project. Self-dependencies and duplicate links are rejected.")
     .option("-t, --type <type>", "Dependency type: depends_on, blocked_by, related_to, duplicates, parent_of, child_of (default: depends_on)")
+    .option("--project <idOrName>", PROJECT_OPTION_HELP)
     .addHelpText("after", `
 Examples:
-  $ agentic-kanban issue dependency add abc123 def456                       # abc123 depends_on def456
-  $ agentic-kanban issue dependency add abc123 def456 -t blocked_by         # abc123 is blocked_by def456
-  $ agentic-kanban issue dependency add abc123 def456 -t parent_of          # abc123 is parent_of def456
+  $ agentic-kanban issue dependency add 42 17                               # #42 depends_on #17
+  $ agentic-kanban issue dependency add 42 17 -t blocked_by --project foo   # #42 is blocked_by #17
+  $ agentic-kanban issue dependency add abc123 def456 -t parent_of          # by id
 `)
-    .action(cliAction(async (issueId: string, targetId: string, options: { project?: string; type?: string }) => {
+    .action(cliAction(async (issueArg: string, targetArg: string, options: { project?: string; type?: string }) => {
+      const issueId = await resolveIssueId(issueArg, options);
+      const targetId = await resolveIssueId(targetArg, options);
 
       const depType = options.type || "depends_on";
       const validTypes = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of", "coupled_with"];
@@ -147,14 +165,29 @@ Examples:
     }));
 
   depCmd
-    .command("remove <dependency-id>")
-    .description("Remove a dependency by its ID.\n\nUse 'issue dependency list' to find the dependency ID.")
+    .command("remove <dependency-id-or-issue> [target]")
+    .description("Remove a dependency by its ID, or by the two issues it links.\n\nWith one argument it is the dependency ID ('issue dependency list' shows it). With two, they are issue numbers or ids and the edge <issue> -> <target> of --type (default: depends_on) is removed.")
+    .option("-t, --type <type>", "Dependency type of the edge when removing by issues (default: depends_on)")
+    .option("--project <idOrName>", PROJECT_OPTION_HELP)
     .addHelpText("after", `
-Example:
-  $ agentic-kanban issue dependency list abc123  # find the dependency ID
+Examples:
+  $ agentic-kanban issue dependency list 42      # find the dependency ID
   $ agentic-kanban issue dependency remove dep-abc-def
+  $ agentic-kanban issue dependency remove 42 17 -t blocked_by
 `)
-    .action(cliAction(async (dependencyId: string) => {
+    .action(cliAction(async (first: string, target: string | undefined, options: { project?: string; type?: string }) => {
+      let dependencyId = first;
+      if (target !== undefined) {
+        const issueId = await resolveIssueId(first, options);
+        const targetId = await resolveIssueId(target, options);
+        const depType = (options.type || "depends_on") as DependencyType;
+        const edge = await getDependencyEdge(issueId, targetId, depType);
+        if (!edge) {
+          console.error(`No '${depType}' dependency from '${first}' to '${target}'.`);
+          process.exit(1);
+        }
+        dependencyId = edge.id;
+      }
 
       const removedCount = await deleteDependencyByIdReturning(dependencyId);
       if (removedCount === 0) {
