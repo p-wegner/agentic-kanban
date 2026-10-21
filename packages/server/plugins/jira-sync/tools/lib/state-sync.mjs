@@ -17,8 +17,8 @@ export async function loadBoardState(boardClient, projectId) {
 
 /**
  * After a successful push of a transition/create, the board issue's `updatedAt` moved (and
- * Jira's `updated` with it). Record both so the next pull does not call our own push a
- * local edit. Returns a new pull-state; per-key lookup failures leave that key untouched.
+ * Jira's `updated` with it). Re-baseline the board side so the next pull does not call our own
+ * push a local edit; the Jira `updated` cursor of a tracked issue is deliberately kept (#1677). Returns a new pull-state; per-key lookup failures leave that key untouched.
  */
 export async function refreshPullStateAfterPush({ client, boardClient, projectId, pullState, applied }) {
   const keys = [
@@ -35,10 +35,16 @@ export async function refreshPullStateAfterPush({ client, boardClient, projectId
     const boardIssue = byKey.get(key);
     if (!boardIssue) continue;
     try {
-      const jira = await client.getIssue(key, { fields: ["updated"] });
+      // #1677: Jira's post-push `updated` also covers Jira-side edits/comments made since the last
+      // pull, so an already-tracked issue keeps its previous cursor: the next pull sees the issue
+      // as moved and imports them. Only the board side (fields, boardUpdatedAt) is re-baselined,
+      // which is what stops the pull treating the push as a local edit (#1629). A freshly
+      // created issue has no earlier cursor to protect.
+      const prior = next.issues[key];
+      const jira = prior?.updated != null ? null : await client.getIssue(key, { fields: ["updated"] });
       next.issues[key] = {
-        ...next.issues[key],
-        updated: jira?.fields?.updated ?? next.issues[key]?.updated ?? null,
+        ...prior,
+        updated: prior?.updated != null ? prior.updated : (jira?.fields?.updated ?? null),
         boardIssueId: boardIssue.id,
         boardUpdatedAt: boardIssue.updatedAt,
         fields: boardFieldsOf(boardIssue),
