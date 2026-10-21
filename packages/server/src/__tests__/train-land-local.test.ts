@@ -187,3 +187,49 @@ describe("landTrainLocal (#1586)", () => {
     expect(parseFailedSuites("FAIL  a/b.test.ts > x\n ❯ c/d.test.tsx 3 tests")).toEqual(["a/b.test.ts", "c/d.test.tsx"]);
   });
 });
+
+describe("landTrainLocal --from-window label discovery (#1660)", () => {
+  const wt = (label: string) => `worktree /r/.worktrees/proj/land-local/${label}\nHEAD abc\nbranch refs/heads/kanban/land-local/${label}\n\n`;
+  const withList = (labels: string[], over: Partial<LandLocalDeps> = {}) =>
+    makeDeps({
+      git: async (args) => {
+        if (args[0] === "worktree" && args[1] === "list") return { code: 0, stdout: `worktree /r/proj\nHEAD x\nbranch refs/heads/master\n\n${labels.map(wt).join("")}`, stderr: "" };
+        if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") return { code: 0, stdout: "master\n", stderr: "" };
+        if (args[0] === "rev-parse" && args[1] === "--verify") return { code: 1, stdout: "", stderr: "" };
+        if (args[0] === "rev-parse") return { code: 0, stdout: "abcdef1234567890\n", stderr: "" };
+        if (args[0] === "diff") return { code: 0, stdout: "a.ts\n", stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+      pathExists: (p) => labels.some((l) => p.replace(/\\/g, "/").endsWith(`/land-local/${l}`)),
+      nowIso: () => "2026-10-20T18:04:00.000Z",
+      ...over,
+    });
+  const gate = [{ name: "g", command: "true" }];
+
+  it("--continue minutes later resumes the red run's worktree and branch", async () => {
+    const { deps, gitCalls } = withList(["local-202610201757"]);
+    const out = await landTrainLocal({ projectId: "p1", fromWindow: true, continueRun: true, gateSteps: gate }, deps);
+    expect(out.status).toBe("landed");
+    expect(out).toMatchObject({ label: "local-202610201757" });
+    expect(gitCalls.some((a) => a.join(" ").includes("local-202610201804"))).toBe(false);
+  });
+
+  it("two leftovers and no --label refuses naming both; --label picks one", async () => {
+    const two = withList(["local-202610201757", "local-202610201759"]);
+    const out = await landTrainLocal({ projectId: "p1", fromWindow: true, continueRun: true, gateSteps: gate }, two.deps);
+    expect(out.status).toBe("error");
+    const msg = (out as { message: string }).message;
+    expect(msg).toContain("local-202610201757");
+    expect(msg).toContain("local-202610201759");
+    const picked = withList(["local-202610201757", "local-202610201759"]);
+    const ok = await landTrainLocal({ projectId: "p1", fromWindow: true, continueRun: true, label: "local-202610201759", gateSteps: gate }, picked.deps);
+    expect(ok.status).toBe("landed");
+  });
+
+  it("no worktree: the error lists the land-local worktrees that exist", async () => {
+    const { deps } = withList(["train-x"]);
+    const out = await landTrainLocal({ projectId: "p1", fromWindow: true, continueRun: true, gateSteps: gate }, deps);
+    expect(out.status).toBe("error");
+    expect((out as { message: string }).message).toContain("/land-local/train-x");
+  });
+});
