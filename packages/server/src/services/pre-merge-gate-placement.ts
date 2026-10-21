@@ -55,6 +55,14 @@ export interface GateRunPlan {
   hold: { phaseNote: string; message: string };
   /** Maps a failed gate result to HELD when the worker REFUSED the job (nothing was verified, so it must not read as red). Identity otherwise. */
   holdIfRefused: <R extends object>(result: R) => R | (R & { held: true; message: string });
+  /** #1671: true when the worker job ended because the board cancelled it (not a worker refusal). */
+  wasCancelled?: () => boolean;
+}
+
+/** The refusal text for a cancelled job, or null for a real refusal (#1671). */
+export function describeCancelledRefusal(refusal: string): string | null {
+  const m = /\(cancelled\):\s*(.*)$/s.exec(refusal);
+  return m ? `gate cancelled: ${m[1]!.replace(/^cancelled:\s*/, "")}` : null;
 }
 
 /** A worker that REFUSED the job (sha mismatch, no slot, unreachable) verified nothing: not red, not green. */
@@ -119,8 +127,8 @@ export async function planGateRun(args: {
     return out.refused ? refusedAsHeld(placed.workerName, out.refused) : out.result;
   };
   const holdIfRefused = <R extends object>(result: R): R | (R & { held: true; message: string }) =>
-    refusal === null ? result : { ...result, held: true, message: `pre-merge gate HELD — verify worker ${placed.workerName} refused the job (${refusal}). Nothing was verified and nothing failed; the merge is deferred and will be retried on the next cycle.` };
+    refusal === null ? result : describeCancelledRefusal(refusal) !== null ? { ...result, held: true, message: `pre-merge gate HELD — ${describeCancelledRefusal(refusal)}. Nothing was verified and nothing failed; the merge is deferred and will be retried on the next cycle.` } : { ...result, held: true, message: `pre-merge gate HELD — verify worker ${placed.workerName} refused the job (${refusal}). Nothing was verified and nothing failed; the merge is deferred and will be retried on the next cycle.` };
   // The chain line reads "on a+b (2 shards)"; each shard's stage and files done/total show as its own active job.
   const workerName = shardPlans.length >= 2 ? `${shardPlans.map((p) => p.workerName).join("+")} (${shardPlans.length} shards)` : placed.workerName;
-  return { proceed, run, workerName, hold, holdIfRefused };
+  return { proceed, run, workerName, hold, holdIfRefused, wasCancelled: () => refusal !== null && describeCancelledRefusal(refusal) !== null };
 }

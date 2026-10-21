@@ -812,6 +812,8 @@ export async function recordVerifyGateOutcome(args: {
   source?: string; // the row's origin: the merge gate's `ci` by default, `implement-exit` for that check
   runCommand?: RunImpactCommand;
   log?: (message: string) => void;
+  /** #1671: the run was ended by a cancel (workspace closed, head moved, train abandoned): not an observation. */
+  cancelled?: boolean;
 }): Promise<RecordGateOutcomeResult> {
   const { workspaceId, outcome } = args;
   const log = args.log ?? ((message: string) => console.warn(`[test-impact] ${message}`));
@@ -823,6 +825,9 @@ export async function recordVerifyGateOutcome(args: {
   // #1470: names that could not be placed stay visible (raw) in what the gate reports; the ledger
   // below still receives only the placed ones.
   const named = { failedSuites: [...classified.files, ...(classified.unattributed ?? [])], guardFailure: classified.guardFailure, guardSuites: classified.guardSuites };
+  if (args.cancelled) {
+    return { recorded: false, reason: "the run was cancelled — not an observation", ...named };
+  }
   if (outcome.failure?.timedOut) {
     return { recorded: false, reason: "the run timed out or was killed — inconclusive, so it is not an observation", ...named };
   }
