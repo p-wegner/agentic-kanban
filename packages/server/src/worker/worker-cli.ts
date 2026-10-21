@@ -15,6 +15,7 @@
 // `worker-cli-isolation.test.ts` fails the build if that happens.
 
 import { workerLog } from "./worker-updater.js";
+import { installLastGasp } from "./worker-last-gasp.js";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -77,6 +78,7 @@ function installProcessGuards(): void {
 }
 
 installProcessGuards();
+installLastGasp(); // #1661: the line a silent death never left; pointed at the log by `worker start`
 
 const program = new Command();
 
