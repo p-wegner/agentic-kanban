@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import * as schema from "@agentic-kanban/shared/schema";
 import { buildTicketContextMarkdown } from "@agentic-kanban/shared/lib/ticket-context";
@@ -9,7 +9,11 @@ let db: TestDb;
 let projectId: string;
 let statusId: string;
 
-const iso = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
+// Offsets are taken from one instant per test, not from Date.now() at each call: on a loaded
+// gate the seconds between two inserts used to push a "before merge" note past the merge.
+let base = Date.now();
+beforeEach(() => { base = Date.now(); });
+const iso = (offsetMs: number) => new Date(base + offsetMs).toISOString();
 
 async function createIssue(): Promise<string> {
   const id = randomUUID();
