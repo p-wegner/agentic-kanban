@@ -167,7 +167,11 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
           // #1465: after a reconnect, any frame for this job proves the worker still knows it.
           if (job.reattached) clearGrace();
           if (message.type === "verify_progress") {
-            Object.assign(job, { stage: message.stage, filesDone: message.filesDone ?? job.filesDone, filesTotal: message.filesTotal ?? job.filesTotal });
+            // #1669: a frame carrying a count is authoritative for the total too — absent means "unknown now",
+            // not "keep the last one" (that left 581/20). A stage-only frame keeps both; done > total drops the total.
+            const filesDone = message.filesDone ?? job.filesDone;
+            const filesTotal = message.filesDone !== undefined ? message.filesTotal : (message.filesTotal ?? job.filesTotal);
+            Object.assign(job, { stage: message.stage, filesDone, filesTotal: filesTotal !== undefined && filesDone !== undefined && filesDone > filesTotal ? undefined : filesTotal });
           } else if (message.type === "verify_log_chunk") {
             chunks.set(message.seq, message.data);
           } else if (message.type === "verify_result") {
