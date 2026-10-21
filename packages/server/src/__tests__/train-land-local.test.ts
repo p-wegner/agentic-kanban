@@ -200,7 +200,7 @@ describe("landTrainLocal --from-window label discovery (#1660)", () => {
         if (args[0] === "diff") return { code: 0, stdout: "a.ts\n", stderr: "" };
         return { code: 0, stdout: "", stderr: "" };
       },
-      pathExists: (p) => labels.some((l) => p.endsWith(`/land-local/${l}`)),
+      pathExists: (p) => labels.some((l) => p.replace(/\\/g, "/").endsWith(`/land-local/${l}`)),
       nowIso: () => "2026-10-20T18:04:00.000Z",
       ...over,
     });
