@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { resolveProjectIdArg, describeIssueNumberMiss, resolveIssueArg, runMigrations, cliAction } from "../shared.js";
 import { selectOpenWorkspaceForIssue } from "./workspace-select.js";
+import { postJsonNoTimeout } from "./long-post.js";
 import { buildWorkspaceApiUrl, buildApiUrl } from "./workspace-api-url.js";
 import { registerWorkspaceInteractionCommands } from "./workspace-interaction.js";
 import { registerWorkspaceMergeControlCommands } from "./workspace-merge-control.js";
@@ -541,15 +542,28 @@ Example:
     .action(async (workspaceId: string, options: { project?: string; port?: string }) => {
       try {
         const port = options.port ?? "";
-        const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "merge"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        });
-        const data = await res.json() as MergeResponse;
+        // The route is held open for the whole pre-merge gate (30-45 min); plain fetch dies
+        // after undici's 300 s headers timeout (#1670), so use a transport with no timeout.
+        let res;
+        try {
+          res = await postJsonNoTimeout(buildWorkspaceApiUrl(port, workspaceId, "merge"), {});
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          if (code === "ECONNRESET" || code === "UND_ERR_HEADERS_TIMEOUT" || code === "ETIMEDOUT") {
+            console.error(
+              `Lost the connection while waiting (${errorMessage(err)}). The board may still be merging; ` +
+              `check with: pnpm cli -- workspace review ${workspaceId}  (cancel: workspace merge-cancel ${workspaceId})`,
+            );
+            process.exit(1);
+          }
+          throw err;
+        }
+        let data: MergeResponse = {};
+        try { data = JSON.parse(res.body) as MergeResponse; } catch { /* non-JSON body */ }
+        const ok = res.status >= 200 && res.status < 300;
 
-        if (!res.ok) {
-          console.error(`Merge failed: ${data.error ?? res.statusText}`);
+        if (!ok) {
+          console.error(`Merge failed: ${data.error ?? (res.statusText || `HTTP ${res.status}`)}`);
           process.exit(1);
         }
 
