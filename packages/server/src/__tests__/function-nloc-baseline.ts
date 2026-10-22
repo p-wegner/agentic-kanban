@@ -409,8 +409,10 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // unmerged commits. Landed independently on master while #1164 was in flight; both features
   // are present after the rebase, so the number is the sum of the two additions, re-measured.
   // 616 -> 640 (#1652): `workspace close` accepts an issue number via the workspace-select
-  // resolver, adding the option/resolve branches to this builder.
-  "cli/commands/workspace.ts::registerWorkspaceCommand": 640,
+  // resolver, adding the option/resolve branches to this builder. 640 -> 651 (#1670):
+  // `workspace merge` posts through a transport with no headers timeout, so a 30-45 min gate
+  // no longer ends in "fetch failed", and a lost connection says the board may still be merging.
+  "cli/commands/workspace.ts::registerWorkspaceCommand": 651,
   // 637 -> 638 (#1027), disclosed in the ninth movement above.
   // 289 -> 292 (#1328), disclosed in the seventeenth movement above.
   "services/agent-remote.service.ts::createRemoteAgentService": 296,
