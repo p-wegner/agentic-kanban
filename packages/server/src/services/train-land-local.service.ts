@@ -53,7 +53,7 @@ export interface LandLocalWorkerGateRequest {
 }
 
 export type LandLocalWorkerGateResult =
-  | { status: "ran"; workerName: string; passed: boolean; log: string; failedStep?: string; failedSuites?: string[] }
+  | { status: "ran"; workerName: string; passed: boolean; log: string; timedOut?: boolean; failedStep?: string; failedSuites?: string[] }
   | { status: "unavailable"; reason: string };
 
 export interface LandLocalDeps {
@@ -338,7 +338,9 @@ async function gateOnWorker(a: {
   deps.log(`worker ${result.workerName} ${result.passed ? "passed" : "FAILED"} the gate in ${Math.round((Date.now() - started) / 1000)}s`);
   if (result.passed) return null;
   const failed = result.failedStep ?? "gate";
-  deps.log(`gate RED at ${failed} on ${result.workerName}; worktree left at ${worktree} - commit a fix there, then re-run with --continue`);
+  // A timeout is not a red: nothing failed, the worker stopped the run (no fix to commit, just re-run).
+  if (result.timedOut) deps.log(`gate TIMED OUT during ${failed} on ${result.workerName} - no suite failed; worktree left at ${worktree}, re-run with --continue`);
+  else deps.log(`gate RED at ${failed} on ${result.workerName}; worktree left at ${worktree} - commit a fix there, then re-run with --continue`);
   const tail = result.log.split(/\r?\n/).slice(-80).join("\n");
   return { status: "red", step: failed, failedSuites: result.failedSuites?.length ? result.failedSuites : parseFailedSuites(result.log), worktree, tail };
 }

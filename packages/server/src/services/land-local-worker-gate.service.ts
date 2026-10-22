@@ -9,7 +9,8 @@ import { parseFailedSuites } from "./train-land-local.service.js";
  */
 
 export const LAND_LOCAL_STEP_MARKER = "::land-local-step ";
-const WORKER_GATE_TIMEOUT_MS = 45 * 60 * 1000;
+// A land-local train diff usually trips the full server suite; 45 min cut a green gate off mid-mcp-server on ao-pf38.
+export const WORKER_GATE_TIMEOUT_MS = 90 * 60 * 1000;
 
 export interface WorkerGateStep { name: string; command: string }
 
@@ -25,7 +26,7 @@ export interface WorkerGateRequest {
 }
 
 export type WorkerGateResult =
-  | { status: "ran"; workerName: string; passed: boolean; exitCode: number; log: string; failedStep?: string; failedSuites: string[] }
+  | { status: "ran"; workerName: string; passed: boolean; exitCode: number; log: string; timedOut?: boolean; failedStep?: string; failedSuites: string[] }
   | { status: "unavailable"; reason: string };
 
 /** One shell line that announces each step before running it, so the log says which step failed. */
@@ -78,6 +79,7 @@ export async function runLandLocalWorkerGate(
   const passed = placed.result.exitCode === 0;
   return {
     status: "ran", workerName, passed, exitCode: placed.result.exitCode ?? 1, log,
+    ...(placed.result.timedOut ? { timedOut: true } : {}),
     ...(passed ? { failedSuites: [] } : { failedStep: failedStepFromLog(log, req.steps), failedSuites: placed.report?.failingSuites?.length ? placed.report.failingSuites : parseFailedSuites(log) }),
   } as WorkerGateResult;
 }

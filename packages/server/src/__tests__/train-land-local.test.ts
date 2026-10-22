@@ -155,6 +155,15 @@ describe("landTrainLocal (#1586)", () => {
     expect(none.deps.closeMember).not.toHaveBeenCalled();
   });
 
+  it("--on-worker timeout says TIMED OUT, not RED, and still lands nothing", async () => {
+    const lines: string[] = [];
+    const timedOut = makeDeps({ log: (l: string) => lines.push(l), runOnWorker: async () => ({ status: "ran", workerName: "w-1", passed: false, timedOut: true, failedStep: "test:mine", log: "" }) });
+    expect(await landTrainLocal({ projectId: "p1", trainId: "t1", onWorker: true }, timedOut.deps)).toMatchObject({ status: "red", step: "test:mine" });
+    expect(lines.some((l) => l.includes("TIMED OUT during test:mine"))).toBe(true);
+    expect(lines.some((l) => l.includes("gate RED"))).toBe(false);
+    expect(timedOut.deps.closeMember).not.toHaveBeenCalled();
+  });
+
   it("defaults to a worker when one is connected, falls back to a capped host gate without one, --on-host skips the worker (#1649)", async () => {
     const steps = [{ name: "g", command: "true" }];
     const run = vi.fn(async () => ({ code: 0, tail: "" }));
