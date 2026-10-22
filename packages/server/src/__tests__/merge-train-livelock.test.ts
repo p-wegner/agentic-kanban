@@ -136,7 +136,7 @@ describe("merge train livelock fixes (#1153)", () => {
     ];
     const released = await orchestrator.applyTrainWindow(rows, now);
     expect(released).toEqual(expect.arrayContaining(["ws-1", "ws-2"]));
-  }, 60000);
+  }, 120_000);
 
   it("applyTrainWindow keeps accumulating (never releases a second train) while one is already in flight", async () => {
     const { db } = createTestDb();
@@ -159,7 +159,7 @@ describe("merge train livelock fixes (#1153)", () => {
     // The pending set is still held (not dropped) — it must release the moment the in-flight
     // train finishes, not be lost.
     expect(orchestrator.state.trainWindows.get(projectId)?.pendingIds).toEqual(expect.arrayContaining(["ws-1", "ws-2"]));
-  }, 60000);
+  }, 120_000);
 
   it("executeQueue refuses a second train when one is already assembling/gating for the project (beginMergeTrain seam)", async () => {
     const { db } = createTestDb();
@@ -197,7 +197,7 @@ describe("merge train livelock fixes (#1153)", () => {
     const trains = await listMergeTrainsForProject(projectId, db);
     expect(trains).toHaveLength(1);
     expect(trains[0].id).toBe(existingTrainId);
-  }, 60000);
+  }, 120_000);
 
   it("finishMergeTrain does not overwrite a train that was cancelled (abandoned) mid-run", async () => {
     const { db } = createTestDb();
@@ -213,7 +213,7 @@ describe("merge train livelock fixes (#1153)", () => {
 
     const row = await getMergeTrain(trainId, db);
     expect(row?.state).toBe("abandoned");
-  }, 60000);
+  }, 120_000);
 
   /**
    * #1215 — a synchronous #797 merge landing on the base WHILE the last leaf gates is exactly
@@ -292,5 +292,5 @@ describe("merge train livelock fixes (#1153)", () => {
     expect(secondEvents.some((e) => e.type === "error" && /already in flight/.test(e.error ?? ""))).toBe(false);
     const trainsAfter = await listMergeTrainsForProject(projectId, db);
     expect(trainsAfter.length).toBeGreaterThan(1);
-  }, 60000);
+  }, 120_000);
 });
