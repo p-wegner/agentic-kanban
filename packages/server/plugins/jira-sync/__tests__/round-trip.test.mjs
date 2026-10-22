@@ -49,9 +49,36 @@ test("push then pull yields no conflict for the pushed issue", async () => {
     pullState: first.nextState,
     applied: [{ kind: "transition", key: "KD-1", targetStatus: "Done" }],
   });
-  const next = await runInboundSync(fakeJira([jiraIssue("KD-1", {}, "u2")]), client, { ...opts, knownState: pullState });
+  const next = await runInboundSync(fakeJira([jiraIssue("KD-1", { status: { statusCategory: { key: "done" } } }, "u2")]), client, { ...opts, knownState: pullState });
   assert.equal(next.conflicted, 0);
-  assert.equal(next.skipped, 1);
+  assert.equal(state.issues[0].statusId, "status-done");
+});
+
+const pushed = async (client, state, jira, first) => {
+  await client.updateIssue(state.issues[0].id, { statusId: "status-done" });
+  return refreshPullStateAfterPush({
+    client: jira, boardClient: client, projectId: "p", pullState: first.nextState,
+    applied: [{ kind: "transition", key: "KD-1", targetStatus: "Done" }],
+  });
+};
+
+test("a Jira comment made before a push is still pulled after it (#1677)", async () => {
+  const { state, client } = newBoard();
+  const first = await runInboundSync(fakeJira([jiraIssue("KD-1")]), client, opts);
+  const pullState = await pushed(client, state, fakeJira([]), first);
+  const withComment = jiraIssue("KD-1", { comment: { comments: [{ id: "c1", body: "hello", author: { displayName: "A" }, created: "t" }] } }, "u2");
+  const next = await runInboundSync(fakeJira([withComment]), client, { ...opts, knownState: pullState });
+  assert.equal(next.commentsImported, 1);
+  assert.equal(next.conflicted, 0);
+});
+
+test("a Jira summary edit made before a push is pulled, not skipped (#1677)", async () => {
+  const { state, client } = newBoard();
+  const first = await runInboundSync(fakeJira([jiraIssue("KD-1")]), client, opts);
+  const pullState = await pushed(client, state, fakeJira([]), first);
+  const next = await runInboundSync(fakeJira([jiraIssue("KD-1", { summary: "renamed in Jira" }, "u2")]), client, { ...opts, knownState: pullState });
+  assert.equal(next.details[0].action, "update");
+  assert.equal(state.issues[0].title, "renamed in Jira");
 });
 
 test("a pull-moved deleted issue produces no outbound entry", async () => {
