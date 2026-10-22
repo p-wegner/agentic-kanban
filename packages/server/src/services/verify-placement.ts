@@ -103,9 +103,14 @@ export function decideVerifyPlacement(input: {
   hostHeld: boolean;
   allowlist: Set<string>;
   workers: VerifyWorkerCandidate[];
+  /** #1681: a train / land-local / workspace gate is running now. A background rc sweep yields to it unless a second worker is free. */
+  gateActive?: boolean;
 }): VerifyPlacementDecision {
   const { placement, kind, hostHeld, allowlist, workers } = input;
   if (placement === "host") return { target: "host", reason: "verify_placement=host" };
+  if (kind === "rc-sweep" && input.gateActive && rankVerifyWorkers(allowlist, workers).length <= 1) {
+    return { target: "hold", reason: "rc sweep yields to a running merge gate (#1681): fewer than two workers are eligible" };
+  }
   if (placement === "prefer-worker" && !hostHeld) {
     return { target: "host", reason: "verify_placement=prefer-worker, host has room" };
   }

@@ -170,4 +170,44 @@ describe("rc-state writer mirror", () => {
     const state = upsertRcCandidate(emptyRcState(), "rc/20261019", { sha: "m1", state: "cut" }, "2026-10-19T10:00:00.000Z");
     expect(serializeRcState(state)).toBe(`${JSON.stringify({ version: 1, candidates: state.candidates }, null, 2)}\n`);
   });
+
+  describe("#1681: no re-sweep of a promoted or already-green sha", () => {
+    it("plans nothing when master is already contained in the stable board's HEAD", async () => {
+      const { board, deps } = fakeBoard();
+      deps.isShipped = async () => true;
+      const [r] = await runRollingRcSweepTick(deps);
+      expect(r!.decision).toEqual({ action: "skip", reason: "master_shipped" });
+      expect(board.sweeps).toHaveLength(0);
+      expect(board.state.candidates).toHaveLength(0);
+    });
+
+    it("plans nothing when master's sha already has a green full sweep", async () => {
+      const { board, deps } = fakeBoard();
+      deps.readShaEvidence = async () => ({ green: true, red: 0 });
+      const [r] = await runRollingRcSweepTick(deps);
+      expect(r!.decision).toEqual({ action: "skip", reason: "master_swept_green" });
+      expect(board.sweeps).toHaveLength(0);
+    });
+
+    it("a first red on a sha that swept green is not red: one re-run is owed, and a second red is red", async () => {
+      const { board, deps } = fakeBoard();
+      let evidence = { green: false, red: 0 };
+      deps.readShaEvidence = async () => evidence;
+      await runRollingRcSweepTick(deps);
+      expect(board.sweeps).toHaveLength(1);
+
+      board.probeInFlight = false;
+      board.health = { sha: "m1", outcome: "red", failedSuites: ["a.test.ts"] };
+      evidence = { green: true, red: 1 };
+      const [rerun] = await runRollingRcSweepTick(deps);
+      expect(rerun!.decision).toMatchObject({ action: "sweep", branch: "rc/20261019" });
+      expect(board.sweeps).toHaveLength(2);
+
+      board.probeInFlight = false;
+      evidence = { green: true, red: 2 };
+      const [second] = await runRollingRcSweepTick(deps);
+      expect(second!.decision).toEqual({ action: "skip", reason: "rc_red" });
+      expect(findRcCandidate(board.state, "rc/20261019")).toMatchObject({ state: "red" });
+    });
+  });
 });

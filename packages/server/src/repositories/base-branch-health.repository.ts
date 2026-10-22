@@ -187,6 +187,20 @@ export async function getBaseBranchHealthForSha(
   return rows.find((row) => row.sha === sha) ?? null;
 }
 
+/**
+ * What the recorded history says about ONE sha (#1681): has a full sweep ever passed on it, and how
+ * many times has it gone red. A red on a sha that already swept green is load-suspect, not a regression.
+ */
+export async function getShaSweepEvidence(
+  projectId: string,
+  sha: string,
+  database: Database = db,
+): Promise<{ green: boolean; red: number }> {
+  const rows = await database.select().from(baseBranchHealth).where(eq(baseBranchHealth.projectId, projectId));
+  const at = rows.filter((row) => row.sha === sha);
+  return { green: at.some((row) => row.outcome === "green"), red: at.filter((row) => row.outcome === "red").length };
+}
+
 /** Most-recent-first history for a project, capped by limit (default 20). */
 export async function listBaseBranchHealth(
   projectId: string,
