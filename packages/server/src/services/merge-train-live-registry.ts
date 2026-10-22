@@ -41,6 +41,8 @@ export interface LiveMergeTrain {
   gateStartedMs?: number;
   /** #1646 — epoch ms a verify worker's result for this job's gate reached the board (cleared when the gate ends). */
   gateResultAtMs?: number;
+  /** #1679 — epoch ms of the last worker progress/heartbeat frame for the running gate; cleared when the gate ends. */
+  lastProgressMs?: number;
 }
 
 /** Read-only view of the registry a sweep decides against. */
@@ -77,6 +79,7 @@ export function noteMergeTrainGateActivity(trainId: string, started: boolean, no
   if (entry.activeGates === 0) {
     entry.gateStartedMs = undefined;
     entry.gateResultAtMs = undefined;
+    entry.lastProgressMs = undefined;
   }
 }
 
@@ -85,6 +88,41 @@ export function noteMergeTrainGateResultReceived(projectId: string, nowMs: numbe
   for (const entry of live.values()) {
     if (entry.projectId === projectId && (entry.activeGates ?? 0) > 0) entry.gateResultAtMs = nowMs;
   }
+}
+
+/** #1679 — the verify worker reported progress (stage / files / log chunk) or a heartbeat for this project's train gate. */
+export function noteMergeTrainGateProgress(projectId: string, nowMs: number = Date.now()): void {
+  for (const entry of live.values()) {
+    if (entry.projectId === projectId && (entry.activeGates ?? 0) > 0) entry.lastProgressMs = nowMs;
+  }
+}
+
+/** #1679 — verdict of {@link judgeMergeTrainGate}. */
+export type GateJudgement =
+  | { hung: false }
+  | { hung: true; kind: "no-progress" | "age-ceiling"; ceilingMs: number; idleMs: number };
+
+/**
+ * #1679 — "hung" means NO PROGRESS, not "long". A gate whose worker reports progress
+ * (`lastProgressMs`) is abandoned only when that signal went quiet for `noProgressMs`, or, as a
+ * last resort, when it outlives `ceilingMs` (derived from the scope by the caller). A gate with
+ * no progress signal at all (a local run) falls back to the age rule alone. Pure over the entry.
+ */
+export function judgeMergeTrainGate(
+  entry: Pick<LiveMergeTrain, "activeGates" | "gateStartedMs" | "lastProgressMs" | "gateResultAtMs">,
+  nowMs: number,
+  limits: { ceilingMs: number; noProgressMs: number },
+): GateJudgement {
+  if ((entry.activeGates ?? 0) === 0 || entry.gateStartedMs === undefined) return { hung: false };
+  const age = nowMs - entry.gateStartedMs;
+  if (entry.lastProgressMs !== undefined) {
+    const idleMs = nowMs - entry.lastProgressMs;
+    if (idleMs >= limits.noProgressMs) return { hung: true, kind: "no-progress", ceilingMs: limits.ceilingMs, idleMs };
+    if (age >= limits.ceilingMs) return { hung: true, kind: "age-ceiling", ceilingMs: limits.ceilingMs, idleMs };
+    return { hung: false };
+  }
+  if (age >= limits.ceilingMs) return { hung: true, kind: entry.gateResultAtMs !== undefined ? "no-progress" : "age-ceiling", ceilingMs: limits.ceilingMs, idleMs: age };
+  return { hung: false };
 }
 
 /**
