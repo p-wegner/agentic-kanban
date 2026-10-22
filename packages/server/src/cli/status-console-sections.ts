@@ -21,7 +21,7 @@ function chainLine(c: ConsoleChain, g: Glyphs): Line {
   const what = `${c.kind} ${c.ref}`.trim();
   if (c.state === "running") {
     // Elapsed leads the progress so a narrow column truncates the stage text, never the clock (#1462).
-    const files = c.filesTotal ? ` ${c.filesDone ?? 0}/${c.filesTotal}` : c.filesDone ? ` ${c.filesDone}` : "";
+    const files = c.filesTotal && (c.filesDone ?? 0) <= c.filesTotal ? ` ${c.filesDone ?? 0}/${c.filesTotal}` : c.filesDone ? ` ${c.filesDone}` : "";
     const elapsed = c.ageMs > 0 ? formatElapsed(c.ageMs).padStart(6) : "";
     return { text: ` ${g.a ? ">" : "▶"} ${what.padEnd(22)} ${c.where.padEnd(8)} ${elapsed}${c.stage ? `  ${c.stage}` : ""}${files}`, tone: "cyan" };
   }

@@ -197,7 +197,7 @@ const show = (v: unknown): string => (v === undefined ? "default" : Array.isArra
 
 /** One `verify job:` line of `worker status` (kept out of renderStatus for its branch budget, #726). */
 function renderVerifyJobLine(j: VerifyJobStatus): string {
-  const files = j.filesTotal ? ` ${j.filesDone ?? 0}/${j.filesTotal} files` : j.filesDone ? ` ${j.filesDone} files` : "";
+  const files = j.filesTotal && (j.filesDone ?? 0) <= j.filesTotal ? ` ${j.filesDone ?? 0}/${j.filesTotal} files` : j.filesDone ? ` ${j.filesDone} files` : "";
   return `verify job:   ${j.jobId.slice(0, 8)} ${j.tier} @ ${String(j.sha).slice(0, 9)} ${j.stage}${files} (since ${j.startedAt})${j.dir ? ` dir ${j.dir}` : ""}${j.pid ? ` pid ${j.pid}` : ""}`;
 }
 
