@@ -25,6 +25,7 @@ import {
 import { updateRegister } from "../lib/conflict-register.mjs";
 import { JiraAuthError } from "../lib/auth.mjs";
 import { BoardClient, BoardConfigError, resolveBoardConfigFromEnv } from "../lib/board-client.mjs";
+import { resolveSyncDirections } from "../lib/sync-direction.mjs";
 import { applyWritebacks } from "../lib/writebacks.mjs";
 import { snapshotAfterPull } from "../lib/state-sync.mjs";
 import { createDefaultBoardFixtureFetch } from "../lib/board-fixtures.mjs";
@@ -92,6 +93,7 @@ async function main() {
       projectId: boardConfig.projectId,
       knownState,
       dryRun,
+      directions: resolveSyncDirections(process.env),
       pendingWritebackKeys: new Set(Object.values(writebacks.keys)),
       deletedStatusName: process.env.JIRA_SYNC_DELETED_STATUS || undefined,
     });
@@ -129,7 +131,7 @@ async function main() {
   }
 
   const { nextState: _nextState, ...summary } = result;
-  return { ok: true, step: "pull", dryRun, applied: !dryRun, ...summary };
+  return { ok: true, step: "pull", syncDirection: resolveSyncDirections(process.env).default, dryRun, applied: !dryRun, ...summary };
 }
 
 const result = await main();

@@ -104,6 +104,11 @@ export function SyncStatusBody({ status }: { status: PluginSyncStatusView }) {
       <div className="text-xs text-gray-500" data-testid="plugin-sync-outbox">
         Outbox: {status.outboxLength === null ? "unknown" : `${status.outboxLength} queued`}
       </div>
+      {status.provider === "jira" && (
+        <div className="text-xs text-gray-500" data-testid="plugin-sync-direction">
+          Direction: {status.syncDirection ?? "jira-to-board (default)"}
+        </div>
+      )}
       <div className="text-xs text-gray-500" data-testid="plugin-sync-schedule">
         Schedule: pull {pull.label}{pull.nextAt ? `, next at ${pull.nextAt}` : ""}; push {push.label}{push.nextAt ? `, next at ${push.nextAt}` : ""}
       </div>

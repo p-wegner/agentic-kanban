@@ -167,3 +167,6 @@ ${body}` : parentLine) : body;
     jiraUpdated: fields.updated ?? null,
   };
 }
+
+/** Board priority -> Jira priority name, the inverse of the pull map (#1643, #1672). */
+export const BOARD_PRIORITY_TO_JIRA = { critical: "Highest", high: "High", medium: "Medium", low: "Low" };

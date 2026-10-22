@@ -10,12 +10,10 @@
 //
 // Pure over injected clients and state, like the rest of lib/, so it is testable without a CLI.
 
-import { FIELDS, mapJiraIssueToBoardFields, mapBoardTypeToJira, resolveBoardStatusId } from "./field-map.mjs";
+import { FIELDS, BOARD_PRIORITY_TO_JIRA, mapJiraIssueToBoardFields, mapBoardTypeToJira, resolveBoardStatusId } from "./field-map.mjs";
 import { markdownToAdf } from "./adf.mjs";
 import { boardFieldsOf, fieldTable, incomingFieldsOf } from "./field-snapshot.mjs";
 import { runInboundSync } from "./sync-engine.mjs";
-
-const BOARD_PRIORITY_TO_JIRA = { critical: "Highest", high: "High", medium: "Medium", low: "Low" };
 
 export const KEEP_SIDES = ["board", "jira"];
 

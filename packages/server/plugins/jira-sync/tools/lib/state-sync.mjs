@@ -1,7 +1,7 @@
 // Keeps pull-state and push's board snapshot coherent with each other (#1629): a write
 // by one half must never look like a foreign change to the other.
 
-import { planOutbox, statusNameOf } from "./outbox-producer.mjs";
+import { planOutbox, pushFieldsOf, statusNameOf } from "./outbox-producer.mjs";
 import { boardFieldsOf } from "./field-snapshot.mjs";
 
 /** Issues, status names and (for tracked issues) comments: the inputs planOutbox diffs. */
@@ -24,7 +24,7 @@ export async function refreshPullStateAfterPush({ client, boardClient, projectId
   const keys = [
     ...new Set(
       applied
-        .filter((a) => (a.kind === "transition" || a.kind === "create") && a.key && !a.wouldApply)
+        .filter((a) => (a.kind === "transition" || a.kind === "create" || a.kind === "fields") && a.key && !a.wouldApply)
         .map((a) => a.key),
     ),
   ];
@@ -61,7 +61,7 @@ export async function snapshotAfterPull({ boardClient, projectId, snapshot, touc
   const next = { ...snapshot, issues: { ...snapshot.issues } };
   for (const issue of state.issues) {
     if (!touchedKeys.has(issue.externalKey)) continue;
-    next.issues[issue.id] = { ...next.issues[issue.id], status: statusNameOf(issue, state.statusNameById) };
+    next.issues[issue.id] = { ...next.issues[issue.id], status: statusNameOf(issue, state.statusNameById), fields: pushFieldsOf(issue) };
   }
   return next;
 }

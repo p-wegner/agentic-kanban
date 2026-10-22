@@ -10,9 +10,12 @@ import {
   readPullState,
   writeJsonFile,
   pullStatePath,
+  readBoardSnapshot,
+  boardSnapshotPath,
   readConflictRegister,
   conflictRegisterPath,
 } from "../lib/state.mjs";
+import { snapshotAfterPull } from "../lib/state-sync.mjs";
 import { outstandingEntries, updateRegister } from "../lib/conflict-register.mjs";
 import { JiraAuthError } from "../lib/auth.mjs";
 import { BoardClient, BoardConfigError, resolveBoardConfigFromEnv } from "../lib/board-client.mjs";
@@ -72,6 +75,18 @@ async function main() {
     const register = readConflictRegister(stateDir);
     const stillOutstanding = outstandingEntries(register).filter((e) => e.id !== key);
     writeJsonFile(conflictRegisterPath(stateDir), updateRegister(register, stillOutstanding));
+    // Push's snapshot must see the settled fields as already agreed, or the next push echoes them (#1672).
+    try {
+      const snapshot = readBoardSnapshot(stateDir);
+      if (snapshot) {
+        writeJsonFile(
+          boardSnapshotPath(stateDir),
+          await snapshotAfterPull({ boardClient, projectId: boardConfig.projectId, snapshot, touchedKeys: new Set([key]) }),
+        );
+      }
+    } catch {
+      // best effort
+    }
   }
   return { step: "resolve", ...summary };
 }
