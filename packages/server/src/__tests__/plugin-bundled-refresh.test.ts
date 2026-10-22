@@ -143,7 +143,7 @@ describe("bundled plugin manifest refresh + sync scaffold (#1630)", () => {
     const digest = createHash("sha256").update(JSON.stringify(rest)).digest("hex").slice(0, 16);
     // When this fails: you changed the manifest. Bump `version` there, then add a NEW entry here
     // (keep the old ones out: a version must map to exactly one manifest shape).
-    const PINNED: Record<string, string> = { "0.3.0": "681c97ae6d36c1a8" };
+    const PINNED: Record<string, string> = { "0.3.0": "681c97ae6d36c1a8", "0.4.0": "144d5c73d2c88d8a" };
     expect(PINNED[version], `jira-sync manifest changed; version ${version} needs a new pin (digest ${digest})`).toBe(digest);
   });
 });

@@ -292,6 +292,7 @@ describe("plugin sync (#1076/#1081)", () => {
         lastRuns: { pull: null, push: null },
         outboxLength: null,
         schedule: { pullEveryMinutes: 0, pushEveryMinutes: 0 },
+        syncDirection: null,
       });
     });
 

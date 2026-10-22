@@ -7,6 +7,7 @@
 
 import { FIELDS, mapJiraIssueToBoardFields, resolveBoardStatusId } from "./field-map.mjs";
 import { hasAttributionMarker } from "./comment-marker.mjs";
+import { LEGACY_DIRECTIONS, pullsField } from "./sync-direction.mjs";
 import { boardFieldsOf, fieldsEqual, incomingFieldsOf, fieldTable } from "./field-snapshot.mjs";
 
 // Markers (#1624) for board issues whose Jira twin vanished. Each also carries the
@@ -47,6 +48,7 @@ function exceedsDeletionLimit(count, known) {
  *   dryRun?: boolean,
  *   pendingWritebackKeys?: Set<string>, // keys push created whose board writeback has not landed yet
  *   deletedStatusName?: string,
+ *   directions?: per-field sync direction (#1672); a `board-to-jira` field is never overwritten by pull
  *   forceKeys?: Set<string>, // keys whose Jira state overwrites the board even when it was edited locally (`sync resolve --keep jira`)
  *   now?: string,
  * }} opts
@@ -54,7 +56,7 @@ function exceedsDeletionLimit(count, known) {
 export async function runInboundSync(
   client,
   boardClient,
-  { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set(), deletedStatusName = "Cancelled", forceKeys = new Set(), now = new Date().toISOString() },
+  { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set(), deletedStatusName = "Cancelled", forceKeys = new Set(), directions = LEGACY_DIRECTIONS, now = new Date().toISOString() },
 ) {
   // dryRun only suppresses WRITES (create/update/tag calls below) — these three are
   // reads, and skipping them would make every issue look brand-new (boardIssuesByKey
@@ -162,7 +164,11 @@ export async function runInboundSync(
     const timestampMoved = known == null || boardIssue.updatedAt !== known.boardUpdatedAt;
     const currentFields = boardFieldsOf(boardIssue);
     const incomingStatusId = resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses);
-    const incomingFields = incomingFieldsOf(mapped, incomingStatusId);
+    const jiraFields = incomingFieldsOf(mapped, incomingStatusId);
+    // A field the board owns (#1672) is not Jira's to change: compare as if Jira agreed with the board,
+    // so a board edit to it is neither a conflict nor overwritten. The conflict view still shows Jira's value.
+    const incomingFields = { ...jiraFields };
+    for (const f of ["title", "description", "priority", "type"]) if (!pullsField(directions, f)) incomingFields[f] = currentFields[f];
     const boardUnchanged = known?.fields != null && fieldsEqual(currentFields, known.fields);
     const converged = fieldsEqual(currentFields, incomingFields);
     if (timestampMoved && !boardUnchanged && converged) {
@@ -201,7 +207,7 @@ export async function runInboundSync(
         action: "conflict",
         reason: "board issue changed locally since the last sync; not overwritten",
         localIssueNumber: boardIssue.issueNumber,
-        fields: fieldTable(currentFields, known?.fields ?? null, incomingFields, { statusName }),
+        fields: fieldTable(currentFields, known?.fields ?? null, jiraFields, { statusName }),
       });
       continue;
     }
@@ -209,21 +215,23 @@ export async function runInboundSync(
     if (!dryRun) {
       const statusId = resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses);
       const updated_ = await boardClient.updateIssue(boardIssue.id, {
-        title: mapped.title,
-        description: mapped.description ?? undefined,
-        priority: mapped.priority,
-        issueType: mapped.type,
+        ...(pullsField(directions, "title") ? { title: mapped.title } : {}),
+        ...(pullsField(directions, "description") ? { description: mapped.description ?? undefined } : {}),
+        ...(pullsField(directions, "priority") ? { priority: mapped.priority } : {}),
+        ...(pullsField(directions, "type") ? { issueType: mapped.type } : {}),
         statusId: statusId ?? undefined,
       });
       const existingTags = await boardClient.listIssueTags(boardIssue.id);
-      await attachMissingTags(boardClient, tagCache, boardIssue.id, mapped.tags, existingTags);
+      // Labels the board owns are not re-imported; the assignee/epic/parent tags are not labels.
+      const tagsToApply = pullsField(directions, "labels") ? mapped.tags : mapped.tags.filter((t) => /^(assignee|epic|parent):/i.test(t));
+      await attachMissingTags(boardClient, tagCache, boardIssue.id, tagsToApply, existingTags);
       const imported = await importComments(boardClient, boardIssue.id, mapped.comments, known?.commentIds);
       commentsImported += imported.count;
       nextState.issues[jiraIssue.key] = {
         updated: mapped.jiraUpdated,
         boardIssueId: boardIssue.id,
         boardUpdatedAt: updated_.updatedAt,
-        fields: incomingFieldsOf(mapped, statusId),
+        fields: incomingFields,
         commentIds: imported.commentIds,
       };
     } else {

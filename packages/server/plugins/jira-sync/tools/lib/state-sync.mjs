@@ -1,7 +1,7 @@
 // Keeps pull-state and push's board snapshot coherent with each other (#1629): a write
 // by one half must never look like a foreign change to the other.
 
-import { planOutbox, statusNameOf } from "./outbox-producer.mjs";
+import { planOutbox, pushFieldsOf, statusNameOf } from "./outbox-producer.mjs";
 import { boardFieldsOf } from "./field-snapshot.mjs";
 
 /** Issues, status names and (for tracked issues) comments: the inputs planOutbox diffs. */
@@ -17,14 +17,14 @@ export async function loadBoardState(boardClient, projectId) {
 
 /**
  * After a successful push of a transition/create, the board issue's `updatedAt` moved (and
- * Jira's `updated` with it). Record both so the next pull does not call our own push a
- * local edit. Returns a new pull-state; per-key lookup failures leave that key untouched.
+ * Jira's `updated` with it). Re-baseline the board side so the next pull does not call our own
+ * push a local edit; the Jira `updated` cursor of a tracked issue is deliberately kept (#1677). Returns a new pull-state; per-key lookup failures leave that key untouched.
  */
 export async function refreshPullStateAfterPush({ client, boardClient, projectId, pullState, applied }) {
   const keys = [
     ...new Set(
       applied
-        .filter((a) => (a.kind === "transition" || a.kind === "create") && a.key && !a.wouldApply)
+        .filter((a) => (a.kind === "transition" || a.kind === "create" || a.kind === "fields") && a.key && !a.wouldApply)
         .map((a) => a.key),
     ),
   ];
@@ -35,10 +35,16 @@ export async function refreshPullStateAfterPush({ client, boardClient, projectId
     const boardIssue = byKey.get(key);
     if (!boardIssue) continue;
     try {
-      const jira = await client.getIssue(key, { fields: ["updated"] });
+      // #1677: Jira's post-push `updated` also covers Jira-side edits/comments made since the last
+      // pull, so an already-tracked issue keeps its previous cursor: the next pull sees the issue
+      // as moved and imports them. Only the board side (fields, boardUpdatedAt) is re-baselined,
+      // which is what stops the pull treating the push as a local edit (#1629). A freshly
+      // created issue has no earlier cursor to protect.
+      const prior = next.issues[key];
+      const jira = prior?.updated != null ? null : await client.getIssue(key, { fields: ["updated"] });
       next.issues[key] = {
-        ...next.issues[key],
-        updated: jira?.fields?.updated ?? next.issues[key]?.updated ?? null,
+        ...prior,
+        updated: prior?.updated != null ? prior.updated : (jira?.fields?.updated ?? null),
         boardIssueId: boardIssue.id,
         boardUpdatedAt: boardIssue.updatedAt,
         fields: boardFieldsOf(boardIssue),
@@ -61,7 +67,7 @@ export async function snapshotAfterPull({ boardClient, projectId, snapshot, touc
   const next = { ...snapshot, issues: { ...snapshot.issues } };
   for (const issue of state.issues) {
     if (!touchedKeys.has(issue.externalKey)) continue;
-    next.issues[issue.id] = { ...next.issues[issue.id], status: statusNameOf(issue, state.statusNameById) };
+    next.issues[issue.id] = { ...next.issues[issue.id], status: statusNameOf(issue, state.statusNameById), fields: pushFieldsOf(issue) };
   }
   return next;
 }

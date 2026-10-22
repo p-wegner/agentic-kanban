@@ -3,11 +3,27 @@
 //   - a tracked issue (has `externalKey`) whose status changed  -> one transition entry
 //   - a new board comment that did not originate in Jira        -> one comment entry
 //   - (opt-in) a new issue with no `externalKey`                -> one create entry
+//   - (#1672) a tracked issue whose pushed fields differ from the snapshot, for fields whose
+//     direction is not jira-to-board                             -> ONE coalesced `fields` entry
 // The very first run only records a baseline, so enabling sync never floods Jira with
 // the project's history; an issue seen for the first time is baselined the same way.
 
 import { hasAttributionMarker } from "./comment-marker.mjs";
 import { labelsFromBoardTags, mapBoardTypeToJira } from "./field-map.mjs";
+import { LEGACY_DIRECTIONS, pushesField } from "./sync-direction.mjs";
+
+const norm = (v) => String(v ?? "").replace(/\r\n/g, "\n").trim();
+
+/** The board fields push can write to Jira, in comparable form (the snapshot's `fields`). */
+export function pushFieldsOf(issue) {
+  return {
+    title: norm(issue.title),
+    description: norm(issue.description),
+    priority: norm(issue.priority),
+    type: norm(issue.issueType ?? issue.type),
+    labels: labelsFromBoardTags(issue.tags).sort(),
+  };
+}
 
 const DELETED_TAG = "jira:deleted"; // = sync-engine's DELETED_TAG (not imported: avoids a cycle)
 
@@ -38,7 +54,9 @@ export function isOutboundComment(comment) {
  *   commentsByIssueId: Record<string, Array<object>>,
  *   snapshot: {issues: Record<string,{status:string|null,createRequested?:boolean}>, commentsSeen: string[]}|null,
  *   outboxEntries?: Array<object>, pendingWritebackIds?: Set<string>, createEnabled?: boolean,
+ *   directions?: ReturnType<typeof import("./sync-direction.mjs").resolveSyncDirections>,
  * }} input
+ * @returns `supersedeKeys`: Jira keys whose already-queued `fields` entry this run replaces.
  */
 export function planOutbox({
   issues,
@@ -48,37 +66,57 @@ export function planOutbox({
   outboxEntries = [],
   pendingWritebackIds = new Set(),
   createEnabled = false,
+  directions = LEGACY_DIRECTIONS,
 }) {
   const baseline = snapshot == null;
   const prevIssues = snapshot?.issues ?? {};
   const seen = new Set(snapshot?.commentsSeen ?? []);
   const entries = [];
+  const supersedeKeys = [];
   const next = { issues: {}, commentsSeen: [] };
   const queued = (pred) => outboxEntries.some(pred) || entries.some(pred);
 
   for (const issue of issues) {
     const status = statusNameOf(issue, statusNameById);
     const prev = prevIssues[issue.id];
-    next.issues[issue.id] = { status, ...(prev?.createRequested ? { createRequested: true } : {}) };
+    const fields = pushFieldsOf(issue);
+    next.issues[issue.id] = { status, fields, ...(prev?.createRequested ? { createRequested: true } : {}) };
 
     if (issue.externalKey) {
       // Never queue outbound entries for an issue whose Jira twin is gone (#1629).
       if (isTaggedDeleted(issue)) continue;
-      if (!baseline && prev && prev.status !== status && status) {
+      if (directions.pushStatus && !baseline && prev && prev.status !== status && status) {
         const same = (e) => e.kind === "transition" && e.key === issue.externalKey && e.targetStatus === status;
         if (!queued(same)) {
           entries.push({ kind: "transition", key: issue.externalKey, targetStatus: status, boardIssueId: issue.id });
         }
       }
+      if (!baseline && prev?.fields) {
+        const changed = Object.keys(fields).filter(
+          (f) => pushesField(directions, f) && JSON.stringify(fields[f]) !== JSON.stringify(prev.fields[f]),
+        );
+        if (changed.length > 0) {
+          // Coalesce per issue: the entry carries the LATEST values of every changed field and
+          // replaces a still-queued one, so n edits before a push make one Jira write.
+          const queuedFields = outboxEntries.find((e) => e.kind === "fields" && e.key === issue.externalKey)?.fields ?? {};
+          entries.push({
+            kind: "fields",
+            key: issue.externalKey,
+            boardIssueId: issue.id,
+            fields: { ...queuedFields, ...Object.fromEntries(changed.map((f) => [f, fields[f]])) },
+          });
+          supersedeKeys.push(issue.externalKey);
+        }
+      }
       for (const c of commentsByIssueId[issue.id] ?? []) {
         next.commentsSeen.push(c.id);
-        if (seen.has(c.id) || baseline || !prev || !isOutboundComment(c)) continue;
+        if (!directions.pushComments || seen.has(c.id) || baseline || !prev || !isOutboundComment(c)) continue;
         const same = (e) => e.kind === "comment" && e.comment?.boardCommentId === c.id;
         if (!queued(same)) {
           entries.push({ kind: "comment", key: issue.externalKey, comment: { body: c.body, boardCommentId: c.id } });
         }
       }
-    } else if (createEnabled && !baseline && !prev && !pendingWritebackIds.has(issue.id)) {
+    } else if (createEnabled && directions.pushCreates && !baseline && !prev && !pendingWritebackIds.has(issue.id)) {
       const same = (e) => e.kind === "create" && e.boardIssueId === issue.id;
       if (!queued(same)) {
         entries.push({
@@ -95,5 +133,5 @@ export function planOutbox({
       }
     }
   }
-  return { entries, nextSnapshot: next };
+  return { entries, nextSnapshot: next, supersedeKeys };
 }

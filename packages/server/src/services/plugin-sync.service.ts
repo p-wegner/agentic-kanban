@@ -342,6 +342,7 @@ export function createPluginSyncOps(deps: {
         pullEveryMinutes: parseEveryMinutes(values.pullEveryMinutes),
         pushEveryMinutes: parseEveryMinutes(values.pushEveryMinutes),
       },
+      syncDirection: values.syncDirection?.trim() || null,
     };
   }
 
