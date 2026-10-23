@@ -64,7 +64,7 @@ const healReviewPosturePref = projectPref("heal_review_posture");
 
 const MAX_LISTED_COMMITS = 60;
 
-export type RcHealAction = "created" | "updated" | "commented" | "closed" | "retargeted" | "skipped_no_verdict" | "noop";
+export type RcHealAction = "created" | "updated" | "commented" | "closed" | "retargeted" | "skipped_no_verdict" | "deferred_rerun" | "noop";
 
 export interface RcHealResult {
   action: RcHealAction;
@@ -92,6 +92,11 @@ export interface RcSweepInput {
   lastGreenLabel?: string | null;
   /** The project's `verify_script`, for the reproduce line; null = the generic instruction. */
   verifyScript?: string | null;
+  /**
+   * #1681: this red is the FIRST on a sha that already has a green full sweep — "flaky under load".
+   * No heal ticket is filed (or refreshed) until one re-run on an idle worker has also gone red.
+   */
+  flakeRerunOwed?: boolean;
   /** ISO; persisted onto comments and status stamps, hence `now?: string`. */
   now?: string;
   /** Injected issue creator — defaults to the real `issue.service` one. */
@@ -120,6 +125,14 @@ export async function reconcileRcSweep(input: RcSweepInput, database: Database =
   try {
     if (outcome !== "red" && outcome !== "green") {
       return { action: "skipped_no_verdict", reason: `rc sweep outcome '${outcome}' is not a verdict about ${rcBranch}`, issueIds: [], issueNumbers: [] };
+    }
+    if (input.flakeRerunOwed) {
+      return {
+        action: "deferred_rerun",
+        reason: `${rcBranch} red at ${shortSha(input.sha)} but that sha already swept green: flaky under load, no heal ticket until one idle re-run is also red (#1681)`,
+        issueIds: [],
+        issueNumbers: [],
+      };
     }
     const open = await listOpenRcHealTickets(projectId, rcBranch, database);
     if (outcome === "green") return await commentGreen(input, open, database);
