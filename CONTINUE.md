@@ -26,6 +26,33 @@ re-assemblies in `merge-train.service.ts` (base moved, sided, rebased) still use
 and would drop a shepherd-resolved member instead of re-resolving it; (d) the assembly worktree has no
 installed dependencies, so the shepherd resolves conflicts without running suites there.
 
+## 2026-10-23: batch 2 landed, stable-20261023-3 live, master pushed
+
+- **Stable = `stable-20261023-3` = 996283865** (promoted 07:10Z; rc/20261023-2 re-swept green
+  after a red sweep of 120 s timeouts under load; smoke passed; rollback target `stable-20261023`
+  = ddae464d7, promoted 06:16Z). Master is **pushed to GitHub** (31 commits, scrubbed against the
+  confidential-terms list, 0 hits). After the reboot: `pnpm stable:start` in herdr pane w1:p62,
+  `status --watch` in w1:p5Z, `wsl-stable` worker in w1:p63.
+- **Landed:** train 2026-10-21-02 (dc5b7d37b: #1669 #1670 #1672 #1677) and train 2026-10-23-01
+  (996283865: #1671 #1673 #1675 #1676 #1679 #1681 #1691), both by `train land-local` plus a
+  gate-less land (`landTrainLocal` with `gateSteps: []`) after split worker runs: install,
+  check:arch, typecheck, then the server suite and shared + mcp-server + client as separate
+  `POST /api/projects/:id/land-local/worker-gate` requests. One request covering the whole train
+  gate runs past 45 min. Train 23-01 needed two fixes: #1671's empty-after-rebase skip read a git
+  error as "0 commits" and skipped the gate (now strict `rev-list` + `execSucceeded`), and #1673
+  put `createPluginSyncOps` at 406 nloc.
+- **Fixed directly:** #1688 (worker-gate timeout 90 min; a timeout reads TIMED OUT, not RED) and
+  #1693 (a land-local takeover cancels the board train through its cancel route, so its staging
+  gate stops; before, the orphaned gate ran beside ours on ao-pf38 and caused the timeouts).
+- **Board trains 2026-10-22-01 to -07 were all abandoned** as "gate hung ... worker result
+  received, train job never resumed". #1679, now live, is the reconciler half of that.
+- **Board:** empty apart from #1674 (Backlog by design) and #1695 (promote's `pnpm build` hit EPERM
+  on `packages/server/dist` and rolled back once; the retry worked). Heals #1690 #1692 #1694 closed:
+  load timeouts, the rc re-swept green.
+- **Open:** desktop-stable reports one claude profile's credentials missing (`worker list`) (re-login).
+  Round 6 of the Jira loop test (lab `jira-kd-lab5`, open conflict KD-56) is next now that #1675 is
+  live; then switch off lab5's 10-minute sync schedule.
+
 ## 2026-10-18 day: six trains landed, stable-20261018-3 live, master pushed
 
 - **Stable = `stable-20261018-3` = 46ad62813** (promoted 21:30Z; fresh full rc sweep of
@@ -51,31 +78,14 @@ installed dependencies, so the shepherd resolves conflicts without running suite
 - The cleanup ticket is an ordinary ticket (Peter, 2026-10-19): default placement, the board pulls it in like any other.
 - **ao-pf38 still needs its reboot** (shown `draining` in the console).
 
-## 2026-10-18 night: trains 05, 07, 08 landed by hand, stable-20261018 live
-
-- **Stable = `stable-20261018` = e1a6bbfa9** (promoted 00:08Z; fresh full rc sweep green in 2680 s,
-  smoke passed; rollback target `stable-20261017-3`). Promote ran in herdr pane w1:p61; set
-  `[Console]::OutputEncoding = [Text.Encoding]::UTF8` before piping it to `Out-File`, or the log
-  holds `ÔÇö` for every em dash.
-- **Operator-landed trains** (Peter: "you can fix the train and merge it"), each gated in a sibling
-  worktree with check:arch, typecheck and file-scoped `test:mine` + guards:
-  train 05 (47dd09cca, 10 tickets), train 07 (95bacc62b, 8: #1562 #1574 #1581 #1582 #1584-#1587),
-  train 08 (e1a6bbfa9, #1579 only). Fixes were guard ratchets tripped by single members.
-- **rc heal:** the first two promotes of rc/20261018 were refused (worker lost the job; then a
-  90 s timeout because the rc-sweep and train 08's gate shared ao-pf38, #1589). The rc was
-  fast-forwarded to master and re-swept with the train window held; heal ticket #1588 closed.
-- `train land-local` (#1586) works but assembled a member the board had deferred (#1590, building).
-- `.gitattributes` pins `*.snap` to LF (vitest rewrote both status-console snapshots every run).
-- **Open:** #1569 (shepherd phase 1) conflicts with #1579 and needs a hand resolution in its next
-  train; #1572; #1589; #1590. **ao-pf38 needs a reboot by Sunday midday** (FMfn leak ~8.6 GB).
-- Master is 108 commits ahead of origin, **not pushed** (pushed later that day, see the pass above).
-
 ## Archive
 
 Passes older than today have been moved **verbatim, newest first** into
 [`docs/archive/CONTINUE-archive.md`](docs/archive/CONTINUE-archive.md). Nothing is re-verified or
 edited on the way in, so each pass records what that session believed at the time. The archive
 holds:
+- **2026-10-18 night (moved 2026-10-23):** trains 05, 07, 08 by hand, stable-20261018, the
+  rc/20261018 heal (#1588).
 - **2026-10-17 evening + morning (moved 2026-10-18 day):** train 04 by hand, stable-20261017-3,
   the reboot, hands-off under `sprint`, #1550-#1573.
 - **2026-10-17 (moved 2026-10-18):** UX probe, stable-20261017-2, #1531-#1548.

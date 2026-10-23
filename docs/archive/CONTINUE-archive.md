@@ -11,6 +11,27 @@ First archive pass: 2026-08-27, cutting at the 2026-08-24 boundary (`CONTINUE.md
 
 ---
 
+## 2026-10-18 night: trains 05, 07, 08 landed by hand, stable-20261018 live
+
+- **Stable = `stable-20261018` = e1a6bbfa9** (promoted 00:08Z; fresh full rc sweep green in 2680 s,
+  smoke passed; rollback target `stable-20261017-3`). Promote ran in herdr pane w1:p61; set
+  `[Console]::OutputEncoding = [Text.Encoding]::UTF8` before piping it to `Out-File`, or the log
+  holds `ÔÇö` for every em dash.
+- **Operator-landed trains** (Peter: "you can fix the train and merge it"), each gated in a sibling
+  worktree with check:arch, typecheck and file-scoped `test:mine` + guards:
+  train 05 (47dd09cca, 10 tickets), train 07 (95bacc62b, 8: #1562 #1574 #1581 #1582 #1584-#1587),
+  train 08 (e1a6bbfa9, #1579 only). Fixes were guard ratchets tripped by single members.
+- **rc heal:** the first two promotes of rc/20261018 were refused (worker lost the job; then a
+  90 s timeout because the rc-sweep and train 08's gate shared ao-pf38, #1589). The rc was
+  fast-forwarded to master and re-swept with the train window held; heal ticket #1588 closed.
+- `train land-local` (#1586) works but assembled a member the board had deferred (#1590, building).
+- `.gitattributes` pins `*.snap` to LF (vitest rewrote both status-console snapshots every run).
+- **Open:** #1569 (shepherd phase 1) conflicts with #1579 and needs a hand resolution in its next
+  train; #1572; #1589; #1590. **ao-pf38 needs a reboot by Sunday midday** (FMfn leak ~8.6 GB).
+- Master is 108 commits ahead of origin, **not pushed** (pushed later that day, see the pass above).
+
+---
+
 ## 2026-10-17 evening (moved 2026-10-18): train 04 landed by hand, stable-20261017-3 live
 
 - **Stable = `stable-20261017-3` = 13e32b7d2** (promoted 16:41Z; fresh full rc sweep green, smoke
