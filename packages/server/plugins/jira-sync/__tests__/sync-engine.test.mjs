@@ -226,19 +226,18 @@ test("conflict clears (#1635): once Jira is set to the board's value the next pu
   assert.equal(board.state.issues[0].title, "Jira later");
 });
 
-test("field edits (#1635): Jira-only edit updates, board-only edit skips, unmapped board change is not a conflict", async () => {
+test("field edits (#1635): Jira-only edit updates, board-only edit is reported, unmapped board change is not a conflict", async () => {
   const board = fakeBoardClient();
   const first = await runInboundSync(fakeJiraClient([jiraIssue("ENG-1", { summary: "A", updated: "u1" })]), board, {
     ...baseOpts, knownState: { issues: {} },
   });
-  // Board-only edit, Jira unchanged -> skipped, local edit survives.
+  // Board-only edit to a Jira-owned field, Jira unchanged -> reported as a conflict (#1696), local edit survives.
   board.state.issues[0].title = "Board edit";
   board.state.issues[0].updatedAt = "human-edit-1";
   const boardOnly = await runInboundSync(fakeJiraClient([jiraIssue("ENG-1", { summary: "A", updated: "u1" })]), board, {
     ...baseOpts, knownState: first.nextState,
   });
-  assert.equal(boardOnly.skipped, 1);
-  assert.equal(boardOnly.conflicted, 0);
+  assert.equal(boardOnly.conflicted, 1);
   assert.equal(board.state.issues[0].title, "Board edit");
 
   // A board change to an unmapped thing (timestamp moves, mapped fields identical to the snapshot).

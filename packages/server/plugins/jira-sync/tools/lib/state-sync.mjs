@@ -3,6 +3,14 @@
 
 import { planOutbox, pushFieldsOf, statusNameOf } from "./outbox-producer.mjs";
 import { boardFieldsOf } from "./field-snapshot.mjs";
+import { LEGACY_DIRECTIONS, pushesField } from "./sync-direction.mjs";
+
+function baselineAfterPush(boardFields, priorFields, directions) {
+  if (!priorFields) return boardFields;
+  const out = { ...boardFields };
+  for (const f of ["title", "description", "priority", "type"]) if (!pushesField(directions, f) && f in priorFields) out[f] = priorFields[f];
+  return out;
+}
 
 /** Issues, status names and (for tracked issues) comments: the inputs planOutbox diffs. */
 export async function loadBoardState(boardClient, projectId) {
@@ -20,7 +28,7 @@ export async function loadBoardState(boardClient, projectId) {
  * Jira's `updated` with it). Re-baseline the board side so the next pull does not call our own
  * push a local edit; the Jira `updated` cursor of a tracked issue is deliberately kept (#1677). Returns a new pull-state; per-key lookup failures leave that key untouched.
  */
-export async function refreshPullStateAfterPush({ client, boardClient, projectId, pullState, applied }) {
+export async function refreshPullStateAfterPush({ client, boardClient, projectId, pullState, applied, directions = LEGACY_DIRECTIONS }) {
   const keys = [
     ...new Set(
       applied
@@ -47,7 +55,9 @@ export async function refreshPullStateAfterPush({ client, boardClient, projectId
         updated: prior?.updated != null ? prior.updated : (jira?.fields?.updated ?? null),
         boardIssueId: boardIssue.id,
         boardUpdatedAt: boardIssue.updatedAt,
-        fields: boardFieldsOf(boardIssue),
+        // A field push does not own (jira-to-board) keeps its last-agreed value: re-baselining it to the
+        // board's would turn an unpushed board edit into silent drift or let the next pull overwrite it (#1696).
+        fields: baselineAfterPush(boardFieldsOf(boardIssue), prior?.fields, directions),
       };
     } catch {
       // best effort: the pull falls back to reporting a conflict, as before
@@ -60,14 +70,22 @@ export async function refreshPullStateAfterPush({ client, boardClient, projectId
  * Pull-side snapshot upkeep. With no snapshot yet, the board is baselined NOW (first pull)
  * so edits made before the first push are still pushed; otherwise the issues pull wrote are
  * re-baselined so push never echoes them. Returns the snapshot to persist.
+ *
+ * `jiraValues` (#1696): `{ [jiraKey]: { field: valueJiraHolds } }` for board-owned fields Jira differs
+ * on. Push's snapshot records Jira's value for them, so the next push sees the board value as a
+ * change and puts it back into Jira instead of leaving the two sides apart for good.
  */
-export async function snapshotAfterPull({ boardClient, projectId, snapshot, touchedKeys }) {
+export async function snapshotAfterPull({ boardClient, projectId, snapshot, touchedKeys, jiraValues = {} }) {
   const state = await loadBoardState(boardClient, projectId);
   if (!snapshot) return planOutbox({ ...state, snapshot: null }).nextSnapshot;
   const next = { ...snapshot, issues: { ...snapshot.issues } };
   for (const issue of state.issues) {
-    if (!touchedKeys.has(issue.externalKey)) continue;
-    next.issues[issue.id] = { ...next.issues[issue.id], status: statusNameOf(issue, state.statusNameById), fields: pushFieldsOf(issue) };
+    const override = jiraValues[issue.externalKey];
+    if (touchedKeys.has(issue.externalKey)) {
+      next.issues[issue.id] = { ...next.issues[issue.id], status: statusNameOf(issue, state.statusNameById), fields: { ...pushFieldsOf(issue), ...override } };
+    } else if (override && next.issues[issue.id]?.fields) {
+      next.issues[issue.id] = { ...next.issues[issue.id], fields: { ...next.issues[issue.id].fields, ...override } };
+    }
   }
   return next;
 }

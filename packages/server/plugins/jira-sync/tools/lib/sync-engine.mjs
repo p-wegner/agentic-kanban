@@ -7,7 +7,7 @@
 
 import { FIELDS, mapJiraIssueToBoardFields, resolveBoardStatusId } from "./field-map.mjs";
 import { hasAttributionMarker } from "./comment-marker.mjs";
-import { LEGACY_DIRECTIONS, pullsField } from "./sync-direction.mjs";
+import { LEGACY_DIRECTIONS, pullsField, pushesField } from "./sync-direction.mjs";
 import { boardFieldsOf, fieldsEqual, incomingFieldsOf, fieldTable } from "./field-snapshot.mjs";
 
 // Markers (#1624) for board issues whose Jira twin vanished. Each also carries the
@@ -145,9 +145,22 @@ export async function runInboundSync(
       continue;
     }
 
-    if (known && known.updated === mapped.jiraUpdated && !forceKeys.has(jiraIssue.key)) {
+    // Ownership (#1696). A board edit to a `jira-to-board` field is never silent drift: it is reported as a
+    // conflict on every pull until resolved, whether or not Jira changed in between. A `board-to-jira`
+    // field is the board's: where Jira differs, the pull records WHAT Jira holds (`jiraDiffers`) so the
+    // next push sends the board value back, and lastSync never stores a value Jira does not hold.
+    const OWNABLE = ["title", "description", "priority", "type"];
+    const jiraOwned = OWNABLE.filter((f) => !pushesField(directions, f));
+    const boardOwned = OWNABLE.filter((f) => !pullsField(directions, f));
+    const earlyCurrent = boardFieldsOf(boardIssue);
+    const earlyJira = incomingFieldsOf(mapped, resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses));
+    const ownedEdits = known?.fields ? jiraOwned.filter((f) => earlyCurrent[f] !== known.fields[f]) : [];
+    const jiraDiffers = Object.fromEntries(boardOwned.filter((f) => earlyCurrent[f] !== earlyJira[f]).map((f) => [f, earlyJira[f]]));
+    const driftNote = Object.keys(jiraDiffers).length > 0 ? { jiraDiffers } : {};
+
+    if (known && known.updated === mapped.jiraUpdated && !forceKeys.has(jiraIssue.key) && ownedEdits.length === 0) {
       skipped++;
-      details.push({ key: jiraIssue.key, action: "skip", reason: "unchanged since the last pull", localIssueNumber: boardIssue.issueNumber });
+      details.push({ key: jiraIssue.key, action: "skip", reason: "unchanged since the last pull", localIssueNumber: boardIssue.issueNumber, ...driftNote });
       continue;
     }
 
@@ -180,14 +193,14 @@ export async function runInboundSync(
           updated: mapped.jiraUpdated,
           boardIssueId: boardIssue.id,
           boardUpdatedAt: boardIssue.updatedAt,
-          fields: currentFields,
+          fields: { ...currentFields, ...jiraDiffers },
           commentIds: imported.commentIds,
         };
       } else {
         commentsImported += newComments(mapped.comments, known?.commentIds).length;
       }
       skipped++;
-      details.push({ key: jiraIssue.key, action: "skip", reason: "board and Jira already agree; conflict resolved" });
+      details.push({ key: jiraIssue.key, action: "skip", reason: "board and Jira already agree; conflict resolved", ...driftNote });
       continue;
     }
     const locallyEdited = timestampMoved && !boardUnchanged && !forceKeys.has(jiraIssue.key);
@@ -208,37 +221,64 @@ export async function runInboundSync(
         reason: "board issue changed locally since the last sync; not overwritten",
         localIssueNumber: boardIssue.issueNumber,
         fields: fieldTable(currentFields, known?.fields ?? null, jiraFields, { statusName }),
+        ...driftNote,
       });
       continue;
     }
 
+    // Only a real board write counts as an update (#1696): a mapped field pull would change, a status
+    // move, a label to attach, or a comment to import.
+    const statusId = resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses);
+    const writtenDiff = OWNABLE.filter((f) => pullsField(directions, f) && currentFields[f] !== jiraFields[f]);
+    const statusMoves = statusId != null && statusId !== boardIssue.statusId;
+    let boardChanged = writtenDiff.length > 0 || statusMoves;
     if (!dryRun) {
-      const statusId = resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses);
-      const updated_ = await boardClient.updateIssue(boardIssue.id, {
-        ...(pullsField(directions, "title") ? { title: mapped.title } : {}),
-        ...(pullsField(directions, "description") ? { description: mapped.description ?? undefined } : {}),
-        ...(pullsField(directions, "priority") ? { priority: mapped.priority } : {}),
-        ...(pullsField(directions, "type") ? { issueType: mapped.type } : {}),
-        statusId: statusId ?? undefined,
-      });
+      let boardUpdatedAt = boardIssue.updatedAt;
+      if (writtenDiff.length > 0 || statusMoves) {
+        const updated_ = await boardClient.updateIssue(boardIssue.id, {
+          ...(pullsField(directions, "title") ? { title: mapped.title } : {}),
+          ...(pullsField(directions, "description") ? { description: mapped.description ?? undefined } : {}),
+          ...(pullsField(directions, "priority") ? { priority: mapped.priority } : {}),
+          ...(pullsField(directions, "type") ? { issueType: mapped.type } : {}),
+          statusId: statusId ?? undefined,
+        });
+        boardUpdatedAt = updated_.updatedAt;
+      }
       const existingTags = await boardClient.listIssueTags(boardIssue.id);
       // Labels the board owns are not re-imported; the assignee/epic/parent tags are not labels.
       const tagsToApply = pullsField(directions, "labels") ? mapped.tags : mapped.tags.filter((t) => /^(assignee|epic|parent):/i.test(t));
+      const attachedNames = new Set(existingTags.map((t) => String(t.name ?? "").toLowerCase()));
+      if (tagsToApply.some((t) => !attachedNames.has(t.toLowerCase()))) boardChanged = true;
       await attachMissingTags(boardClient, tagCache, boardIssue.id, tagsToApply, existingTags);
       const imported = await importComments(boardClient, boardIssue.id, mapped.comments, known?.commentIds);
       commentsImported += imported.count;
+      if (imported.count > 0) boardChanged = true;
       nextState.issues[jiraIssue.key] = {
         updated: mapped.jiraUpdated,
         boardIssueId: boardIssue.id,
-        boardUpdatedAt: updated_.updatedAt,
-        fields: incomingFields,
+        boardUpdatedAt,
+        // lastSync is what Jira holds, which after this write is also what the board holds for every
+        // field pull owns; a board-owned field Jira disagrees on is NOT recorded as agreed (#1696).
+        fields: jiraFields,
         commentIds: imported.commentIds,
       };
     } else {
-      commentsImported += newComments(mapped.comments, known?.commentIds).length;
+      const fresh = newComments(mapped.comments, known?.commentIds).length;
+      commentsImported += fresh;
+      if (fresh > 0) boardChanged = true;
+    }
+    if (!boardChanged) {
+      skipped++;
+      details.push({ key: jiraIssue.key, action: "skip", reason: "no board-side change", localIssueNumber: boardIssue.issueNumber, ...driftNote });
+      continue;
     }
     updated++;
-    details.push({ key: jiraIssue.key, action: "update", localIssueNumber: boardIssue.issueNumber });
+    details.push({
+      key: jiraIssue.key,
+      action: "update",
+      localIssueNumber: boardIssue.issueNumber,
+      ...driftNote,
+    });
   }
 
   // Deletions/moves out of JQL scope: a key we've synced before but did not see this

@@ -406,9 +406,11 @@ export interface PluginSyncConfigFieldDef {
   required?: boolean;
   /** Input kind for the settings form (#1630); values are still stored as strings. Default "text". */
   type?: PluginSyncConfigFieldType;
+  /** The allowed values of a `select` field (the settings form renders a dropdown; empty stays allowed). */
+  options?: string[];
 }
 
-export const PLUGIN_SYNC_CONFIG_FIELD_TYPES = ["text", "boolean", "number", "json"] as const;
+export const PLUGIN_SYNC_CONFIG_FIELD_TYPES = ["text", "boolean", "number", "json", "select"] as const;
 export type PluginSyncConfigFieldType = (typeof PLUGIN_SYNC_CONFIG_FIELD_TYPES)[number];
 
 /**
@@ -744,8 +746,17 @@ export function parsePluginManifest(input: unknown): PluginManifest {
           }
           return c.type as PluginSyncConfigFieldType;
         })(),
+        options: (() => {
+          if (c.options == null) return undefined;
+          const list = requireArray(c.options, `sync.config[${i}].options`).map((o, j) => requireString(o, `sync.config[${i}].options[${j}]`));
+          if (c.type !== "select") fail(`"sync.config[${i}].options" needs "type": "select"`);
+          return list;
+        })(),
       };
     });
+    for (const [i, c] of (config ?? []).entries()) {
+      if (c.type === "select" && !(c.options?.length)) fail(`"sync.config[${i}]" is a select and needs a non-empty "options" list`);
+    }
 
     const seenSecrets = new Set<string>();
     const secrets = rec.secrets == null ? undefined : requireArray(rec.secrets, "sync.secrets").map((entry, i) => {
