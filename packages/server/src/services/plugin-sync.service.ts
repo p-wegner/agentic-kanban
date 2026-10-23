@@ -107,6 +107,19 @@ export function invalidSyncConfigValues(
   return problems;
 }
 
+/** The fail-closed error of `validateSyncConfig`: what is missing, then what is invalid (#1696). */
+function failClosedMessage(missingConfig: string[], missingSecrets: string[], invalidConfig: string[]): string {
+  const parts: string[] = [];
+  if (missingConfig.length) parts.push(`missing required config: ${missingConfig.join(", ")}`);
+  if (missingSecrets.length) {
+    parts.push(`missing credentials: ${missingSecrets.join(", ")} (enter them in the plugin's settings, or set them as environment variables on the board host)`);
+  }
+  return [
+    parts.length ? `Sync is not configured — ${parts.join("; ")}.` : "",
+    invalidConfig.length ? `Invalid config: ${invalidConfig.join("; ")}.` : "",
+  ].filter(Boolean).join(" ");
+}
+
 export type { PluginSyncConnectionTest };
 
 export type { PluginSyncRunRecord, PluginSyncStatusView };
@@ -321,15 +334,6 @@ export function createPluginSyncOps(deps: {
     return getSyncConfig(pluginRowId, projectId);
   }
 
-  function failClosedMessage(missingConfig: string[], missingSecrets: string[]): string {
-    const parts: string[] = [];
-    if (missingConfig.length) parts.push(`missing required config: ${missingConfig.join(", ")}`);
-    if (missingSecrets.length) {
-      parts.push(`missing credentials: ${missingSecrets.join(", ")} (enter them in the plugin's settings, or set them as environment variables on the board host)`);
-    }
-    return `Sync is not configured — ${parts.join("; ")}.`;
-  }
-
   async function validateSync(pluginRowId: string, projectId: string): Promise<PluginSyncValidationResult> {
     const plugin = await requirePlugin(pluginRowId);
     const sync = requireSyncDef(plugin);
@@ -348,12 +352,7 @@ export function createPluginSyncOps(deps: {
       missingConfig,
       missingSecrets,
       ...(invalidConfig.length > 0 ? { invalidConfig } : {}),
-      error: ok
-        ? undefined
-        : [
-            missingConfig.length || missingSecrets.length ? failClosedMessage(missingConfig, missingSecrets) : "",
-            invalidConfig.length ? `Invalid config: ${invalidConfig.join("; ")}.` : "",
-          ].filter(Boolean).join(" "),
+      error: ok ? undefined : failClosedMessage(missingConfig, missingSecrets, invalidConfig),
     };
   }
 

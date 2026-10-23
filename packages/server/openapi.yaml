@@ -3949,21 +3949,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                projectId:
-                  type: string
-                key:
-                  type: string
-                keep:
-                  type: string
-                  enum:
-                    - board
-                    - jira
-              required:
-                - projectId
-                - key
               additionalProperties: true
-              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
