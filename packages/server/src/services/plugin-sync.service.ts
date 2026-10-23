@@ -71,23 +71,38 @@ export type { PluginSyncRunRecord, PluginSyncStatusView };
 export interface PluginSyncHealth {
   pluginName: string;
   status: PluginSyncStatusView;
-  conflicts: { count: number; oldestAt: string | null } | null;
+  conflicts: { count: number; oldestAt: string | null; needsHuman?: number } | null;
   failures: { count: number; oldestAt: string | null } | null;
+  /** #1697: the project this health belongs to (the console lists every project with a sync plugin enabled). */
+  projectId?: string;
+  projectName?: string;
+  /** #1697: whether an open (non-terminal) loop ticket is working the open conflicts; null when unknown. */
+  conflictsDriven?: boolean | null;
 }
 
 /** Unresolved entries of a conflict/failure register (#1673): how many, and when the oldest was detected. */
-function readOpenRegister(dir: string | null, fileName: string): { count: number; oldestAt: string | null } | null {
+function readOpenRegister(dir: string | null, fileName: string): { count: number; oldestAt: string | null; needsHuman?: number } | null {
   if (!dir) return null;
   try {
     const file = join(dir, fileName);
     if (!existsSync(file)) return { count: 0, oldestAt: null };
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as { entries?: Record<string, { resolved?: boolean; detectedAt?: string }> };
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as { entries?: Record<string, { resolved?: boolean; detectedAt?: string; needsHuman?: boolean }> };
     const open = Object.values(parsed.entries ?? {}).filter((e) => e && !e.resolved);
     const times = open.map((e) => e.detectedAt).filter((t): t is string => typeof t === "string" && Number.isFinite(Date.parse(t))).sort();
-    return { count: open.length, oldestAt: times[0] ?? null };
+    return { count: open.length, oldestAt: times[0] ?? null, needsHuman: open.filter((e) => e.needsHuman).length };
   } catch {
     return null;
   }
+}
+
+/** `sync/resolve` decision (#1697): a whole-issue side, "needs-human" (write nothing), or a side per field. */
+export type SyncResolveKeep = "board" | "jira" | "needs-human" | Record<string, "board" | "jira">;
+
+export function isSyncResolveKeep(value: unknown): value is SyncResolveKeep {
+  if (value === "board" || value === "jira" || value === "needs-human") return true;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const entries = Object.entries(value);
+  return entries.length > 0 && entries.every(([, side]) => side === "board" || side === "jira");
 }
 
 const SYNC_DIRECTIONS = ["pull", "push"] as const;
@@ -472,9 +487,11 @@ export function createPluginSyncOps(deps: {
   async function resolveSyncIssue(
     pluginRowId: string,
     projectId: string,
-    opts: { key: string; keep?: "board" | "jira" },
-  ): Promise<{ ok: boolean; mode: "show" | "keep"; key: string; keep?: string; result?: unknown; error?: string }> {
+    opts: { key: string; keep?: SyncResolveKeep; ticket?: string | number; reason?: string },
+  ): Promise<{ ok: boolean; mode: "show" | "keep"; key: string; keep?: SyncResolveKeep; result?: unknown; error?: string }> {
     const plugin = await requirePlugin(pluginRowId);
+    // The route accepts the manifest slug ("jira-sync") as well as the row id, so a loop brief can name it.
+    pluginRowId = plugin.id;
     const sync = requireSyncDef(plugin);
     if (!sync.resolve) {
       throw new PluginError(`Plugin "${plugin.pluginId}" does not declare a "sync.resolve" command`, "BAD_REQUEST");
@@ -482,8 +499,8 @@ export function createPluginSyncOps(deps: {
     if (!/^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(opts.key ?? "")) {
       throw new PluginError('"key" must be an external issue key such as "KD-49"', "BAD_REQUEST");
     }
-    if (opts.keep != null && opts.keep !== "board" && opts.keep !== "jira") {
-      throw new PluginError('"keep" must be "board" or "jira"', "BAD_REQUEST");
+    if (opts.keep != null && !isSyncResolveKeep(opts.keep)) {
+      throw new PluginError('"keep" must be "board", "jira", "needs-human" or a per-field map such as {"title":"board","priority":"jira"}', "BAD_REQUEST");
     }
     await requireProject(projectId);
     const mode = opts.keep ? "keep" : "show";
@@ -497,7 +514,9 @@ export function createPluginSyncOps(deps: {
       ...substitutePluginEnv(sync.resolve.env, ctx.vars),
       ...syncEnv,
       SYNC_RESOLVE_KEY: opts.key,
-      ...(opts.keep ? { SYNC_RESOLVE_KEEP: opts.keep } : {}),
+      ...(opts.keep ? { SYNC_RESOLVE_KEEP: typeof opts.keep === "string" ? opts.keep : JSON.stringify(opts.keep) } : {}),
+      ...(opts.ticket != null ? { SYNC_RESOLVE_TICKET: String(opts.ticket) } : {}),
+      ...(opts.reason ? { SYNC_RESOLVE_REASON: opts.reason } : {}),
     };
     const raw = await runPluginCommand(substitutePluginPlaceholders(sync.resolve.command, ctx.vars), { cwd, env });
     const stdout = redactSecrets(raw.stdout, secretValues);

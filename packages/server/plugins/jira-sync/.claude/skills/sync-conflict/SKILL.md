@@ -14,11 +14,27 @@ trouble — read it before doing anything else.
 ## You have no Jira access: act through the board
 
 The agent environment has no `JIRA_*` credentials and `node tools/sync/*.mjs` will refuse to run
-for you. The board does it with the credentials kept server-side:
-`POST /api/plugins/<jira-sync plugin id>/sync/resolve` with `{ "projectId", "key" }` (read the
-three-way table: board now / last sync / **Jira now**), then again with `"keep": "board"` or
-`"keep": "jira"` to apply your decision. The ticket brief carries the table recorded at detection
-time; read the live one before deciding, since Jira may have been edited on purpose.
+for you. The board does it with the credentials kept server-side. The ticket brief names the exact
+endpoint (`POST <board>/api/plugins/jira-sync/sync/resolve`, body `{ "projectId", "key" }`); use it
+as written rather than listing plugins or projects.
+
+1. **Show** (no `keep`): the three-way table (board now / last sync / **Jira now**) and, for every
+   differing field, `evidence`: when each side last changed it and by whom (Jira changelog
+   author/time; the board issue's updatedAt, and the editor where known; `approximate` means only an
+   issue-level time is known). The brief's table is from detection time; read the live one.
+2. **Decide** from that evidence, not from taste. Pick one of:
+   - `"keep": "board"` or `"keep": "jira"`: whole issue.
+   - `"keep": {"title": "board", "priority": "jira"}`: per field; only those fields move.
+   - `"keep": "needs-human", "reason": "..."`: use this when both sides edited the same field after
+     the last sync and nothing orders them or shows intent (a deliberate correction vs. an
+     independent edit). It writes NOTHING to Jira or the board; the conflict stays outstanding,
+     marked needs-human, in the loop.
+   Always send `"ticket": "<this ticket's number>"`.
+3. **Audit**: every overwrite posts a comment on the losing side (Jira comment for keep board, board
+   comment for keep jira) listing each overwritten field with its previous value and the ticket.
+4. **Record**: the response carries `artifact: { path, content }`. Write `content` to
+   `docs/jira-sync/conflicts/<key>.md` (the table, the evidence, the decision) and **commit it**, also
+   for needs-human, so review has something to look at.
 
 ## Two kinds of ticket
 
@@ -26,9 +42,9 @@ time; read the live one before deciding, since Jira may have been edited on purp
 locally after the last successful pull, so `sync/pull.mjs` left it alone instead of silently
 overwriting a human's edit (see `plugins/jira-sync/tools/lib/sync-engine.mjs`). Decide which
 side should win:
-- If the board edit should win: `resolve` with `"keep": "board"` (pushes the board's mapped fields to
+- If the board edit should win: `"keep": "board"` (pushes the board's mapped fields to
   Jira once; a status difference is a push transition, not part of this).
-- If the Jira update should win: `resolve` with `"keep": "jira"` (overwrites the board issue).
+- If the Jira update should win: `"keep": "jira"` (overwrites the board issue).
 
 **"Fix failed push: `<key or board issue id>`"** — a queued outbound change (a transition, a
 comment, or a new-issue create) failed to apply and is sitting in the outbox
@@ -46,6 +62,6 @@ the register marks it resolved, the loop converges, and the board closes any tic
 it. If it is still outstanding after this ticket is Done, the next advance opens round 2 for the
 same key, so say in your write-up what you decided and why.
 
-Commit whatever you changed (a transition graph fix, a field-map fix, anything under
-`plugins/jira-sync/`) if you touched the plugin itself; a Jira/board-side edit alone needs no
-commit here.
+Commit the conflict record (`docs/jira-sync/conflicts/<key>.md`) and whatever else you changed under
+`plugins/jira-sync/` (a transition graph fix, a field-map fix). A needs-human outcome still commits its record
+and says so in the write-up.

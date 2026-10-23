@@ -132,7 +132,14 @@ export const pluginSyncSecretsBody = z.object({
 export const pluginSyncResolveBody = z.object({
   projectId,
   key: z.string({ required_error: '"key" is required', invalid_type_error: '"key" must be a string' }),
-  keep: z.enum(["board", "jira"], { invalid_type_error: '"keep" must be "board" or "jira"' }).optional(),
+  keep: z.union([
+    z.enum(["board", "jira", "needs-human"]),
+    z.record(z.enum(["board", "jira"])).refine((m) => Object.keys(m).length > 0, "per-field keep needs at least one field"),
+  ], { invalid_type_error: '"keep" must be "board", "jira", "needs-human" or a per-field map' }).optional(),
+  /** The loop ticket that decided (#1697): named in the audit comment on the losing side. */
+  ticket: z.union([z.string(), z.number()]).optional(),
+  /** Why a decision is "needs-human" (or what tipped it). */
+  reason: z.string().optional(),
 }).passthrough();
 
 /** `POST /api/plugins/:id/sync/trigger` (#1081). */

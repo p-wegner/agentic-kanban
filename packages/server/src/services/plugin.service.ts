@@ -9,6 +9,9 @@ import { resolvePublicBoardUrl } from "../runtime-port.js";
 import { runPluginCommand, type PluginCommandProgress, type PluginCommandResult } from "./plugin-exec.js";
 import { createPluginLoopEngine, type LoopAdvanceResult, type LoopStatus } from "./plugin-loop.service.js";
 import { getProjectById } from "../repositories/project.repository.js";
+import { listPluginLoopIssues } from "../repositories/plugins.repository.js";
+import { isTerminalStatusName } from "@agentic-kanban/shared/lib/status-view";
+import { keyPrefix } from "./plugin/loop-identity.js";
 import { createPluginOutputLocationOps } from "./plugin-output-location.service.js";
 import {
   getPluginRowById,
@@ -367,14 +370,36 @@ export function createPluginService(deps: {
     triggerSync,
     resolveSyncIssue,
     getSyncStatus,
-    /** #1673: sync health for every enabled sync plugin of one project, from stored run summaries and local registers. */
-    async listSyncHealth(projectId: string) {
-      const slugs = (await enabledSlugsByProject()).get(projectId);
-      if (!slugs || slugs.size === 0) return [];
-      const rows = (await listPluginRows(database)).filter((r) => slugs.has(r.pluginId) && parsePluginManifest(r.manifestJson).sync);
+    /**
+     * #1673: sync health for every enabled sync plugin, from stored run summaries and local registers.
+     * #1697: without `projectId` it covers EVERY project with a sync plugin enabled, each tagged with its
+     * project and whether an open loop ticket is driving its open conflicts.
+     */
+    async listSyncHealth(projectId?: string) {
+      const enabled = await enabledSlugsByProject();
+      const allRows = (await listPluginRows(database)).filter((r) => parsePluginManifest(r.manifestJson).sync);
       const out = [];
-      for (const row of rows) out.push(await getSyncHealth(row.id, projectId).catch(() => null));
-      return out.filter((h): h is NonNullable<typeof h> => h !== null);
+      for (const [pid, slugs] of enabled) {
+        if (projectId && pid !== projectId) continue;
+        if (slugs.size === 0) continue;
+        const project = await getProjectById(pid, database).catch(() => null);
+        for (const row of allRows.filter((r) => slugs.has(r.pluginId))) {
+          const health = await getSyncHealth(row.id, pid).catch(() => null);
+          if (!health) continue;
+          let conflictsDriven: boolean | null = null;
+          if ((health.conflicts?.count ?? 0) > 0) {
+            try {
+              const manifest = parsePluginManifest(row.manifestJson);
+              const tickets = (await Promise.all(
+                (manifest.loops ?? []).map((l) => listPluginLoopIssues(pid, keyPrefix(row.pluginId, l.name), database)),
+              )).flat();
+              conflictsDriven = tickets.some((t) => !isTerminalStatusName(t.statusName));
+            } catch { conflictsDriven = null; }
+          }
+          out.push({ ...health, projectId: pid, projectName: project?.name, conflictsDriven });
+        }
+      }
+      return out;
     },
     /** The scheduler tick (#1625): runs every enabled sync whose pull/push interval has elapsed. */
     async runScheduledSyncs(nowMs?: number) {

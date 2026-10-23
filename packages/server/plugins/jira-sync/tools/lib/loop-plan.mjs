@@ -31,8 +31,32 @@ export function fieldTableMarkdown(fields) {
   return ["| Field | Board now | Last sync | Jira now |", "| --- | --- | --- | --- |", ...rows].join("\n");
 }
 
-function conflictUnit(entry) {
+/** The plugin slug the board's `/api/plugins/:id` routes accept in place of the row id. */
+export const PLUGIN_SLUG = "jira-sync";
+
+/** How the agent reaches the resolve endpoint (#1697): real values where the board gave them, no `<...>` to guess. */
+function resolveInstructions(board, key) {
+  const base = board?.boardUrl ? board.boardUrl.replace(/\/+$/, "") : null;
+  const projectId = board?.projectId ?? null;
+  const endpoint = base ? `${base}/api/plugins/${PLUGIN_SLUG}/sync/resolve` : `/api/plugins/${PLUGIN_SLUG}/sync/resolve (on the board your board tools use)`;
+  const show = projectId ? JSON.stringify({ projectId, key }) : `{ "projectId": "(this ticket's project id)", "key": "${key}" }`;
+  return (
+    `Call \`POST ${endpoint}\` with a JSON body (the board holds the Jira credentials, you do not):\n\n` +
+    `- Read the live values, with when and by whom each differing field last changed on each side: \`${show}\` (no \`keep\` = show).\n` +
+    `- Board wins: add \`"keep": "board"\`. Jira wins: add \`"keep": "jira"\`.\n` +
+    `- Per field: \`"keep": {"title": "board", "priority": "jira"}\` moves only those fields.\n` +
+    `- Cannot tell: \`"keep": "needs-human", "reason": "why"\` writes NOTHING to Jira or the board.\n` +
+    `- Always add \`"ticket": "<this ticket's number>"\`: the audit comment on the overwritten side names it.\n\n`
+  );
+}
+
+function conflictUnit(entry, board) {
   const table = fieldTableMarkdown(entry.fields);
+  const handedOff = entry.needsHuman
+    ? `**An earlier round marked this conflict needs-human** (${entry.needsHumanReason ?? "no reason recorded"}). ` +
+      `Do not decide it again: leave Jira and the board untouched, write the table to ` +
+      `\`docs/jira-sync/conflicts/${entry.id}.md\`, commit it, and finish so a human can look.\n\n`
+    : "";
   return {
     id: `conflict:${entry.id}:r${entry.round}`,
     title: `Resolve sync conflict: ${entry.id}`,
@@ -42,12 +66,11 @@ function conflictUnit(entry) {
       (table
         ? `What each side holds, per field (as of the pull that found the conflict):\n\n${table}\n\n`
         : `(No field values were recorded for this conflict; read them live with the "show" call below.)\n\n`) +
-      `Decide which side should win, then apply the decision through the board. You have no Jira ` +
-      `credentials and \`node tools/sync/*.mjs\` will not run for you:\n\n` +
-      `- Read the live three-way values: \`POST /api/plugins/<jira-sync plugin id>/sync/resolve\` ` +
-      `\`{ "projectId": "<this project>", "key": "${entry.id}" }\` (no \`keep\` = show).\n` +
-      `- Board wins: same call with \`"keep": "board"\`. It pushes the board's mapped fields to Jira once.\n` +
-      `- Jira wins: same call with \`"keep": "jira"\`. It overwrites the board issue from Jira.\n\n` +
+      handedOff +
+      `Decide which side should win (per field when each side changed different fields), or that nobody can tell. ` +
+      `\`node tools/sync/*.mjs\` will not run for you; go through the board:\n\n` +
+      resolveInstructions(board, entry.id) +
+      `Then write the returned \`artifact\` to \`docs/jira-sync/conflicts/${entry.id}.md\` and commit it.\n\n` +
       `Do not decide "the board wins" without looking at the Jira column: Jira may have been changed on purpose. ` +
       `Closing this ticket does NOT resolve the conflict by itself; only the sync does, once the two sides agree ` +
       `(${entry.id} round ${entry.round}). If it is still outstanding after this ticket closes, the loop opens the next round.`,
@@ -75,14 +98,18 @@ function failureUnit(entry) {
  * }} state
  * @returns {{ units: Array<{id:string,title:string,description:string}>, converged: boolean, note?: string }}
  */
-export function buildLoopPlan({ cursor, conflictRegister, failureRegister }) {
+export function buildLoopPlan({ cursor, conflictRegister, failureRegister, board = null }) {
   if (!cursor?.lastPullAt) {
     return { units: [], converged: false, note: "no successful pull has run yet; nothing to plan" };
   }
 
   const conflicts = outstandingEntries(conflictRegister);
   const failures = outstandingEntries(failureRegister);
-  const units = [...conflicts.map(conflictUnit), ...failures.map(failureUnit)];
+  const units = [
+    ...conflicts.map((e) => ({ ...conflictUnit(e, board), ...(e.needsHuman ? { needsHuman: true } : {}) })),
+    ...failures.map(failureUnit),
+  ];
+  const needsHuman = conflicts.filter((e) => e.needsHuman).length;
 
   if (units.length === 0) {
     return { units: [], converged: true, note: "no outstanding sync conflicts or failed pushes" };
@@ -91,6 +118,6 @@ export function buildLoopPlan({ cursor, conflictRegister, failureRegister }) {
   return {
     units,
     converged: false,
-    note: `${conflicts.length} conflict(s), ${failures.length} failed push(es) outstanding`,
+    note: `${conflicts.length} conflict(s)${needsHuman ? ` (${needsHuman} needs-human)` : ""}, ${failures.length} failed push(es) outstanding`,
   };
 }

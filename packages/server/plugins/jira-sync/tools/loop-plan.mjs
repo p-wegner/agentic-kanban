@@ -17,6 +17,9 @@ const plan = buildLoopPlan({
   cursor: readCursor(stateDir),
   conflictRegister: readConflictRegister(stateDir),
   failureRegister: readFailureRegister(stateDir),
+  board: process.env.JIRA_SYNC_BOARD_URL && process.env.JIRA_SYNC_BOARD_PROJECT_ID
+    ? { boardUrl: process.env.JIRA_SYNC_BOARD_URL, projectId: process.env.JIRA_SYNC_BOARD_PROJECT_ID }
+    : null,
 });
 
 console.log(JSON.stringify(plan, null, 2));
