@@ -81,3 +81,31 @@ describe("extractModelJson (#550)", () => {
     expect(() => extractModelJson('{"a":1', { shape: "object" })).toThrow(ModelJsonError);
   });
 });
+
+describe("extractModelJson — fences inside JSON strings (#1675)", () => {
+  const fence = "```";
+  const doc = {
+    counts: { conflicted: 2 },
+    details: [{ fields: [{ field: "description", board: `${fence}kotlin\nval x = 1\n${fence}` }] }],
+  };
+  const pretty = JSON.stringify(doc, null, 2);
+
+  it.each([
+    [{}],
+    [{ shape: "object" as const }],
+    [{ prefer: "last" as const }],
+    [{ prefer: "last" as const, shape: "object" as const }],
+    [{ prefer: "first" as const, shape: "any" as const }],
+  ])("returns the whole document for %j", (opts) => {
+    expect(extractModelJson(pretty, opts)).toEqual(doc);
+  });
+
+  it("still parses a fenced block surrounded by prose", () => {
+    const text = `Here you go:\n${fence}json\n{"a": 1}\n${fence}\nHope that helps.`;
+    expect(extractModelJson(text, { shape: "object" })).toEqual({ a: 1 });
+  });
+
+  it("keeps a fence inside a string when the document has a banner before it", () => {
+    expect(extractModelJson(`npm notice\n${pretty}`, { prefer: "last" })).toEqual(doc);
+  });
+});

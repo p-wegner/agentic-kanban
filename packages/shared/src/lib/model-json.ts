@@ -83,7 +83,20 @@ function findBalancedEnd(text: string, start: number): number {
  * before scanning — and doing it first is what lets a fenced block surrounded by prose parse.
  */
 function stripFences(text: string): string {
-  return text.replace(/```[a-zA-Z0-9_-]*[ \t]*\r?\n?/g, "\n");
+  // Line-anchored: a fence inside a JSON string (a Jira code block in a description) is not a fence line.
+  return text.replace(/^[ \t]*```[a-zA-Z0-9_-]*[ \t]*$/gm, "");
+}
+
+/** The whole text is already one JSON value of the requested shape (the common case for script output). */
+function parseWhole(text: string, shape: ModelJsonShape): { value: unknown } | undefined {
+  const trimmed = text.trim();
+  const first = trimmed[0];
+  if (!first || !OPENERS[shape].includes(first)) return undefined;
+  try {
+    return { value: JSON.parse(trimmed) };
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -97,6 +110,9 @@ export function extractModelJson(text: string, opts: ExtractModelJsonOptions = {
   const tail = (text ?? "").slice(-400);
 
   if (!text || !text.trim()) throw new ModelJsonError("empty model response", tail);
+
+  const whole = parseWhole(text, shape);
+  if (whole) return whole.value;
 
   const body = stripFences(text);
   const openers = OPENERS[shape];
