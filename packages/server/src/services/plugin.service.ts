@@ -15,6 +15,7 @@ import { keyPrefix } from "./plugin/loop-identity.js";
 import { createPluginOutputLocationOps } from "./plugin-output-location.service.js";
 import {
   getPluginRowById,
+  getPluginRowBySlug,
   listPluginRows,
   type PluginRow,
 } from "../repositories/plugins.repository.js";
@@ -140,7 +141,7 @@ export function createPluginService(deps: {
   });
 
   async function requirePlugin(id: string): Promise<PluginRow & { manifest: PluginManifest }> {
-    const row = await getPluginRowById(id, database);
+    const row = (await getPluginRowById(id, database)) ?? (await getPluginRowBySlug(id, database));
     if (!row) throw new PluginError("Plugin not found", "NOT_FOUND");
     return { ...row, manifest: parsePluginManifest(row.manifestJson) };
   }
