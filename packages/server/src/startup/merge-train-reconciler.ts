@@ -60,11 +60,12 @@ import {
   abortLiveMergeTrain,
   findLiveMergeTrainForProject,
   isMergeTrainStalled,
-  isMergeTrainGateHung,
+  judgeMergeTrainGate,
   unregisterLiveMergeTrain,
   snapshotLiveMergeTrains,
   type LiveMergeTrainSnapshot,
 } from "../services/merge-train-live-registry.js";
+import { GATE_AGE_ABANDON_MARKER } from "../services/merge-train-age-split.js";
 import { getHeldWorkspaceIdsAmong } from "../repositories/merge-hold.repository.js";
 
 /** How often the reconciler sweeps for stranded trains (defence in depth beyond the boot pass). */
@@ -75,6 +76,12 @@ export const STALLED_LIVE_TRAIN_MS = 20 * 60 * 1000;
 
 /** #1646 — a single gate active longer than this is hung (worker verify budget + slack), even with activeGates > 0. */
 export const HUNG_GATE_CEILING_MS = 90 * 60 * 1000;
+
+/** #1679 — a gate whose worker reports progress is hung only after this long without any (stage, files, log chunk). */
+export const NO_PROGRESS_GATE_MS = 15 * 60 * 1000;
+
+/** #1679 — last-resort wall-clock ceiling for a gate that IS reporting progress (a full 4-package sweep ran 92m+). */
+export const PROGRESSING_GATE_CEILING_MS = 4 * 60 * 60 * 1000;
 
 export type MergeTrainReconcileAction = "resume" | "abandon";
 
@@ -215,11 +222,18 @@ async function abandonIfStalled(
 ): Promise<boolean> {
   const entry = live.get(row.id);
   if (!entry) return false;
-  const hung = isMergeTrainGateHung(entry, nowMs, HUNG_GATE_CEILING_MS);
+  // #1679: a gate whose worker reports progress gets a scope-derived ceiling and is judged on
+  // silence; only a gate with no progress signal falls back to the plain age floor.
+  const ceilingMs = (entry.lastProgressMs !== undefined ? PROGRESSING_GATE_CEILING_MS : HUNG_GATE_CEILING_MS);
+  const judgement = judgeMergeTrainGate(entry, nowMs, { ceilingMs, noProgressMs: NO_PROGRESS_GATE_MS });
+  const hung = judgement.hung;
   if (!hung && !isMergeTrainStalled(entry, nowMs, STALLED_LIVE_TRAIN_MS)) return false;
   const idleMinutes = Math.round((nowMs - (entry.lastActivityMs ?? nowMs)) / 60_000);
-  const reason = hung
-    ? `stalled: gate hung - a staging gate was active for ${Math.round((nowMs - (entry.gateStartedMs ?? nowMs)) / 60_000)}m${entry.gateResultAtMs !== undefined ? ` (worker result received at ${new Date(entry.gateResultAtMs).toISOString()}, train job never resumed)` : ""} - abandoned so its members can be re-assembled`
+  const gateMinutes = Math.round((nowMs - (entry.gateStartedMs ?? nowMs)) / 60_000);
+  const reason = judgement.hung
+    ? judgement.kind === "age-ceiling"
+      ? `stalled: gate hung (${GATE_AGE_ABANDON_MARKER}) - a staging gate was active for ${gateMinutes}m, past its ${Math.round(ceilingMs / 60_000)}m ceiling${entry.gateResultAtMs !== undefined ? ` (worker result received at ${new Date(entry.gateResultAtMs).toISOString()}, train job never resumed)` : ""} - abandoned so its members can be re-assembled (split)`
+      : `stalled: gate hung - a staging gate was active for ${gateMinutes}m with no progress for ${Math.round(judgement.idleMs / 60_000)}m (limit ${Math.round(NO_PROGRESS_GATE_MS / 60_000)}m, ceiling ${Math.round(ceilingMs / 60_000)}m)${entry.gateResultAtMs !== undefined ? ` (worker result received at ${new Date(entry.gateResultAtMs).toISOString()}, train job never resumed)` : ""} - abandoned so its members can be re-assembled`
     : `stalled: registered live in this process but no gate, bisect or fix agent ran for ${idleMinutes}m - abandoned so its members can be re-assembled`;
   abortLiveMergeTrain(row.id);
   unregisterLiveMergeTrain(row.id);
