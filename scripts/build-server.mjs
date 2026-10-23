@@ -7,8 +7,20 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const distDir = resolve(root, "packages/server/dist");
 
-// Clean dist directory before building
-rmSync(distDir, { recursive: true, force: true });
+// Clean dist directory before building. On Windows the running board (or an agent's MCP server
+// it just started) can hold a handle under dist for a moment, so rm gets EPERM/EBUSY (#1695):
+// retry through that lock window rather than failing the build (and rolling back a promote).
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+for (let attempt = 1; ; attempt++) {
+  try {
+    rmSync(distDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    break;
+  } catch (err) {
+    const transient = ["EPERM", "EBUSY", "EACCES", "ENOTEMPTY"].includes(err?.code);
+    if (!transient || attempt >= 15) throw err;
+    sleepSync(1000);
+  }
+}
 mkdirSync(distDir, { recursive: true });
 
 const external = [
