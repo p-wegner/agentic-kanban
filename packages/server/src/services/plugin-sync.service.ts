@@ -75,6 +75,21 @@ export interface PluginSyncHealth {
   failures: { count: number; oldestAt: string | null } | null;
 }
 
+/** Unresolved entries of a conflict/failure register (#1673): how many, and when the oldest was detected. */
+function readOpenRegister(dir: string | null, fileName: string): { count: number; oldestAt: string | null } | null {
+  if (!dir) return null;
+  try {
+    const file = join(dir, fileName);
+    if (!existsSync(file)) return { count: 0, oldestAt: null };
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as { entries?: Record<string, { resolved?: boolean; detectedAt?: string }> };
+    const open = Object.values(parsed.entries ?? {}).filter((e) => e && !e.resolved);
+    const times = open.map((e) => e.detectedAt).filter((t): t is string => typeof t === "string" && Number.isFinite(Date.parse(t))).sort();
+    return { count: open.length, oldestAt: times[0] ?? null };
+  } catch {
+    return null;
+  }
+}
+
 const SYNC_DIRECTIONS = ["pull", "push"] as const;
 export type PluginSyncDirection = (typeof SYNC_DIRECTIONS)[number];
 
@@ -336,21 +351,6 @@ export function createPluginSyncOps(deps: {
       if (!existsSync(file)) return 0;
       const parsed = JSON.parse(readFileSync(file, "utf8")) as { entries?: unknown };
       return Array.isArray(parsed.entries) ? parsed.entries.length : null;
-    } catch {
-      return null;
-    }
-  }
-
-  /** Unresolved entries of a conflict/failure register (#1673): how many, and when the oldest was detected. */
-  function readOpenRegister(dir: string | null, fileName: string): { count: number; oldestAt: string | null } | null {
-    if (!dir) return null;
-    try {
-      const file = join(dir, fileName);
-      if (!existsSync(file)) return { count: 0, oldestAt: null };
-      const parsed = JSON.parse(readFileSync(file, "utf8")) as { entries?: Record<string, { resolved?: boolean; detectedAt?: string }> };
-      const open = Object.values(parsed.entries ?? {}).filter((e) => e && !e.resolved);
-      const times = open.map((e) => e.detectedAt).filter((t): t is string => typeof t === "string" && Number.isFinite(Date.parse(t))).sort();
-      return { count: open.length, oldestAt: times[0] ?? null };
     } catch {
       return null;
     }

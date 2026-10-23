@@ -28,7 +28,7 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getLatestIssueCommentByKind } from "../repositories/issue-comments.repository.js";
 import { getMergeGateEvidence, setMergeGateEvidence } from "../repositories/merge-gate.repository.js";
-import { countUniqueCommits } from "@agentic-kanban/shared/lib/git-service";
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import * as realGitService from "./git.service.js";
 import { WorkspaceError, listPendingSiblingMerges } from "./workspace-internals.js";
 import {
@@ -596,9 +596,12 @@ export async function runPreLockGate(args: {
   // #1671 — a rebase can drop every commit (the base already carries the change): nothing is left
   // to land, so a verify run would only burn a worker for 30 min. doMerge's pre-flight finalizes it.
   if (rebased && workspace.workingDir) {
-    const emptyAfterRebase = await Promise.resolve().then(async () =>
-      (await countUniqueCommits(workspace.workingDir!, baseBranch, "HEAD")) === 0
-      && (await listPendingSiblingMerges(realGitService, database, workspaceId)).length === 0).catch(() => false);
+    // rev-list must answer "0": countUniqueCommits reads a git error as 0, which would skip the gate on any failure.
+    const emptyAfterRebase = await Promise.resolve().then(async () => {
+      const ahead = await gitExec(["rev-list", "--count", `${baseBranch}..HEAD`], { cwd: workspace.workingDir! });
+      return ahead.code === 0 && ahead.stdout.trim() === "0"
+        && (await listPendingSiblingMerges(realGitService, database, workspaceId)).length === 0;
+    }).catch(() => false);
     if (emptyAfterRebase) {
       const reason = `no commits beyond '${baseBranch}' after the rebase (#1671) — nothing to land, gate skipped`;
       console.log(`[workspace-merge] ${reason} for workspace ${workspaceId}`);
