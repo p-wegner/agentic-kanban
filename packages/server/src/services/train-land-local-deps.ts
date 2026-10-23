@@ -73,6 +73,14 @@ export function createLandLocalDeps(database: Database = db): LandLocalDeps {
       await holdTrainWindow(projectId, minutes, database);
     },
     async abandonTrain(trainId, reason) {
+      // A row write alone leaves the board's live train job running, and its staging gate keeps a worker busy beside ours (#1693); the cancel route also aborts it.
+      const transport = await resolveIssueWriteTransport();
+      if (transport.mode === "server") {
+        try {
+          await boardServerWrite(transport, "POST", `/api/merge-queue/trains/${trainId}/cancel`);
+          return;
+        } catch { /* route refused or unreachable: fall back to the row write */ }
+      }
       await updateMergeTrainState(trainId, { state: "abandoned", reconciledReason: reason, finishedAt: new Date().toISOString() }, database);
     },
     createTrainRow: (row) => createMergeTrain({ ...row }, database),
