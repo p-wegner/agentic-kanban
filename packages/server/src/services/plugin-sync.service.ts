@@ -67,6 +67,14 @@ export type { PluginSyncConnectionTest };
 
 export type { PluginSyncRunRecord, PluginSyncStatusView };
 
+/** #1673: one sync plugin's health for one project, as `status --watch` and ATTENTION read it. */
+export interface PluginSyncHealth {
+  pluginName: string;
+  status: PluginSyncStatusView;
+  conflicts: { count: number; oldestAt: string | null } | null;
+  failures: { count: number; oldestAt: string | null } | null;
+}
+
 const SYNC_DIRECTIONS = ["pull", "push"] as const;
 export type PluginSyncDirection = (typeof SYNC_DIRECTIONS)[number];
 
@@ -297,26 +305,68 @@ export function createPluginSyncOps(deps: {
     return Number.isFinite(n) && n > 0 ? n : 0;
   }
 
-  /** Queued entries in the plugin's outbox, found via the push command's `*_STATE_DIR` env. Null when unreadable. */
-  async function readOutboxLength(
+  /** The plugin's state dir, found via the push command's `*_STATE_DIR` env. Null when it cannot be resolved. */
+  async function resolveStateDir(
     plugin: PluginRow & { manifest: PluginManifest },
     pluginRowId: string,
     projectId: string,
-  ): Promise<number | null> {
+  ): Promise<string | null> {
     const pushEnv = plugin.manifest.sync?.push?.env;
     if (!pushEnv) return null;
     try {
       const ctx = await resolvePluginRunContext(pluginRowId, projectId);
       const env = substitutePluginEnv(pushEnv, ctx.vars);
       const dirKey = Object.keys(env).find((k) => k.endsWith("_STATE_DIR"));
-      if (!dirKey) return null;
-      const file = join(env[dirKey]!, "outbox.json");
+      return dirKey ? env[dirKey]! : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Queued entries in the plugin's outbox. Null when unreadable. */
+  async function readOutboxLength(
+    plugin: PluginRow & { manifest: PluginManifest },
+    pluginRowId: string,
+    projectId: string,
+  ): Promise<number | null> {
+    const dir = await resolveStateDir(plugin, pluginRowId, projectId);
+    if (!dir) return null;
+    try {
+      const file = join(dir, "outbox.json");
       if (!existsSync(file)) return 0;
       const parsed = JSON.parse(readFileSync(file, "utf8")) as { entries?: unknown };
       return Array.isArray(parsed.entries) ? parsed.entries.length : null;
     } catch {
       return null;
     }
+  }
+
+  /** Unresolved entries of a conflict/failure register (#1673): how many, and when the oldest was detected. */
+  function readOpenRegister(dir: string | null, fileName: string): { count: number; oldestAt: string | null } | null {
+    if (!dir) return null;
+    try {
+      const file = join(dir, fileName);
+      if (!existsSync(file)) return { count: 0, oldestAt: null };
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as { entries?: Record<string, { resolved?: boolean; detectedAt?: string }> };
+      const open = Object.values(parsed.entries ?? {}).filter((e) => e && !e.resolved);
+      const times = open.map((e) => e.detectedAt).filter((t): t is string => typeof t === "string" && Number.isFinite(Date.parse(t))).sort();
+      return { count: open.length, oldestAt: times[0] ?? null };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Everything `status --watch` shows for one (sync plugin, project): stored run summaries plus the local registers. No Jira calls. */
+  async function getSyncHealth(pluginRowId: string, projectId: string): Promise<PluginSyncHealth> {
+    const plugin = await requirePlugin(pluginRowId);
+    const status = await getSyncStatus(pluginRowId, projectId);
+    const dir = await resolveStateDir(plugin, pluginRowId, projectId);
+    return {
+      pluginName: plugin.manifest.name ?? plugin.pluginId,
+      status,
+      conflicts: readOpenRegister(dir, "conflict-register.json"),
+      failures: readOpenRegister(dir, "failure-register.json"),
+    };
   }
 
   async function getSyncStatus(pluginRowId: string, projectId: string): Promise<PluginSyncStatusView> {
@@ -507,5 +557,5 @@ export function createPluginSyncOps(deps: {
     return fired;
   }
 
-  return { getSyncConfig, setSyncConfig, setSyncSecrets, validateSync, triggerSync, resolveSyncIssue, getSyncStatus, runDueSyncSchedules, resolveSyncEnv, redactSecrets };
+  return { getSyncConfig, setSyncConfig, setSyncSecrets, validateSync, triggerSync, resolveSyncIssue, getSyncStatus, getSyncHealth, runDueSyncSchedules, resolveSyncEnv, redactSecrets };
 }

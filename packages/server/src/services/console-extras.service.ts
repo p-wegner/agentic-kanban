@@ -14,6 +14,8 @@ import { describeCodeHealth, resolveProjectCodeHealth } from "./code-health.serv
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { getConnectCodeStore } from "./worker-connect-code.service.js";
+import { getPluginService } from "./plugin.service.js";
+import type { PluginSyncHealth } from "./plugin-sync.service.js";
 import { listVerifyChains, type VerifyChainSnapshotEntry } from "./verify-chain-semaphore.js";
 
 export type ConsoleStallKind = "watchdog" | "no_worker" | "push_refused";
@@ -31,6 +33,8 @@ export interface ConsoleExtras {
   ciRed: string[];
   /** #1619: `code health: 7 soft breaches in 4 files, cleanup ticket at 10 (relaxed)` from the latest scan; null before any soft breach was recorded. */
   codeHealth: string | null;
+  /** #1673: Jira-style sync health per enabled sync plugin of the project, from stored run summaries (no provider calls). */
+  syncHealth: PluginSyncHealth[];
 }
 
 const STALL_WINDOW_MS = 6 * 3600 * 1000;
@@ -68,8 +72,10 @@ export async function buildConsoleExtras(projectId: string, database: Database, 
     const status = describeCodeHealth(await resolveProjectCodeHealth(projectId, prefMap), prefMap, projectId);
     codeHealth = status.openSoftBreaches > 0 ? status.line : null;
   } catch { codeHealth = null; }
+  const syncHealth = await getPluginService(database).listSyncHealth(projectId).catch(() => []);
   return {
     codeHealth,
+    syncHealth,
     chains: listVerifyChains(nowMs),
     baseHealth: health
       ? { outcome: health.outcome, sha: health.sha, branch: health.branch, createdAt: health.createdAt, message: health.message ?? null, failedSuites: decodeFailedSuites(health.failedSuites) }

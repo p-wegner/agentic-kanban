@@ -3,7 +3,7 @@ import {
   type ConsoleHost, type ConsoleModel, type ConsoleWorker,
 } from "./status-console-model.js";
 import {
-  baseReleaseSection, connectSection, gatesSection, heading, isLive, issueRef, since,
+  baseReleaseSection, connectSection, gatesSection, heading, isLive, issueRef, since, syncSection,
   type Glyphs, type Line, type Section, type Tone,
 } from "./status-console-sections.js";
 export * from "./status-console-model.js";
@@ -231,13 +231,13 @@ export function renderConsole(model: ConsoleModel, opts: ConsoleRenderOptions): 
   const merged: Section = { id: "merged", lines: [{ text: `MERGED last 24 h: ${model.mergedToday}`, tone: model.mergedToday > 0 ? "green" : "dim" }] };
   let active = [
     headerSection(model, opts), workersSection(model, g, opts.allIssues), gatesSection(model, g), baseReleaseSection(model, g),
-    connectSection(model, g), trainSection(model, g),
+    connectSection(model, g), syncSection(model), trainSection(model, g),
     pipelineSection(model, opts.allIssues), attentionSection(model, g, rows), merged,
   ].filter((s): s is Section => s !== null);
 
   // Drop history first when the screen is short; WORKERS and ATTENTION are never dropped and
   // PIPELINE shrinks to its one-line stage summary rather than disappearing.
-  for (const id of ["merged", "pipeline", "connect", "gates", "base", "train"]) {
+  for (const id of ["merged", "pipeline", "connect", "sync", "gates", "base", "train"]) {
     if (layoutSections(active, cols, g, opts.color).length + 1 <= rows) break;
     if (id === "pipeline") {
       const summary = pipelineSummarySection(model);
