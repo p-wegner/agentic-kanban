@@ -6,7 +6,7 @@
 // It never decides trust: the caller feeds the report through `acceptWorkerVerdict`, which judges it
 // against the request the BOARD built (sha, tier, worker), not against anything in the frame. This
 // service also never invents a verdict: a worker that vanishes or goes silent yields a refusal.
-import { noteMergeTrainGateResultReceived } from "./merge-train-live-registry.js";
+import { noteMergeTrainGateProgress, noteMergeTrainGateResultReceived } from "./merge-train-live-registry.js";
 import { workerBelowRamFloor } from "@agentic-kanban/shared/lib/worker-settings";
 import type { VerifyJobFrame, VerifyStage, WorkerVerifyCapability } from "@agentic-kanban/shared/lib/worker-verify-protocol";
 import { writeFileSync } from "node:fs";
@@ -166,6 +166,7 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
           if (workerId !== req.workerId || !("jobId" in message) || message.jobId !== jobId) return;
           // #1465: after a reconnect, any frame for this job proves the worker still knows it.
           if (job.reattached) clearGrace();
+          if (req.kind === "train-gate" && req.projectId && (message.type === "verify_progress" || message.type === "verify_log_chunk")) noteMergeTrainGateProgress(req.projectId, deps.nowMs);
           if (message.type === "verify_progress") {
             // #1669: a frame carrying a count is authoritative for the total too — absent means "unknown now",
             // not "keep the last one" (that left 581/20). A stage-only frame keeps both; done > total drops the total.

@@ -42,13 +42,13 @@ export async function placementAwareSaturation(saturated: string | null, project
 }
 
 /** Host / worker / hold for one probe or sweep. Reads host load only when the project opted into placement. */
-export async function planProbePlacement(args: { projectId: string; database: Database; isBaseLane: boolean }): Promise<VerifyPlan> {
+export async function planProbePlacement(args: { projectId: string; database: Database; isBaseLane: boolean; gateActive?: boolean }): Promise<VerifyPlan> {
   const kind: VerifyChainKind = args.isBaseLane ? "base-probe" : "rc-sweep";
-  const first = await planVerifyPlacement({ kind, projectId: args.projectId, database: args.database, hostHeld: false });
+  const first = await planVerifyPlacement({ kind, projectId: args.projectId, database: args.database, hostHeld: false, gateActive: args.gateActive });
   if (first.target !== "host") return first; // `worker` / `hold` do not depend on host load
   // `prefer-worker` answers "host" while the host has room: ask again with the real load.
   const saturated = await hostTooTightForProbe().catch(() => null);
-  return saturated === null ? first : planVerifyPlacement({ kind, projectId: args.projectId, database: args.database, hostHeld: true });
+  return saturated === null ? first : planVerifyPlacement({ kind, projectId: args.projectId, database: args.database, hostHeld: true, gateActive: args.gateActive });
 }
 
 const hostRefused = (name: string): (() => Promise<SetupScriptResult>) => async () => ({

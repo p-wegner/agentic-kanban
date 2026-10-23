@@ -686,6 +686,7 @@ export async function runPreMergeGate(
       repoPath: projectRepoPath,
       baseBranch: workspace.baseBranch,
       outcome,
+      cancelled: combinedSignal?.aborted === true || placed.wasCancelled?.() === true,
       tierInfo: gateTierInfo,
       // #1463 — a flush's arch+typecheck run is no selection: counted apart from impact misses (`FLUSH_LEDGER_SOURCE`).
       source: flushLedgerSource(verifyScriptOverride),

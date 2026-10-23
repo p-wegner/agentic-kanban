@@ -351,7 +351,7 @@ async function reprobePlacementHold(projectId: string, database: Database, branc
   try {
     const project = await getProjectById(projectId, database);
     if (!project?.defaultBranch) return null;
-    const plan = await planProbePlacement({ projectId, database, isBaseLane: !branch || branch === project.defaultBranch });
+    const plan = await planProbePlacement({ projectId, database, isBaseLane: !branch || branch === project.defaultBranch, gateActive: resolveGateBusy() });
     return plan.target === "hold" ? plan.reason : null;
   } catch {
     return null;

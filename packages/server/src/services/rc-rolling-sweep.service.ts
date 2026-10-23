@@ -27,7 +27,7 @@ import type { RcSweepMode } from "@agentic-kanban/shared/types";
 import type { Database } from "../db/index.js";
 import { getAllPreferences, getPreference } from "../repositories/preferences.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
-import { getLatestBaseBranchHealth, decodeFailedSuites, isBaseHealthAnswer } from "../repositories/base-branch-health.repository.js";
+import { getLatestBaseBranchHealth, getShaSweepEvidence, decodeFailedSuites, isBaseHealthAnswer } from "../repositories/base-branch-health.repository.js";
 import { listActiveMergeTrainsForProject } from "../repositories/merge-train.repository.js";
 import { baseHealthProbeStartPrefKey } from "./base-branch-health.service.js";
 import { requestBaseBranchReprobe, resolveGateBusy } from "./base-branch-health-reprobe.service.js";
@@ -56,6 +56,8 @@ export type RollingRcSkip =
   | "no_master_sha"
   | "already_green"
   | "rc_red"
+  | "master_shipped"
+  | "master_swept_green"
   | "rc_ahead_of_master"
   | "retry_backoff";
 
@@ -79,6 +81,10 @@ export interface RollingRcInput {
   tipIsAncestorOfMaster: boolean;
   /** Does the stable board already contain the candidate's tip? Such a candidate is superseded. */
   shipped: boolean;
+  /** #1681: master's own tip is already contained in the stable board's HEAD — nothing new to sweep. */
+  masterShipped?: boolean;
+  /** #1681: master's tip already has a green full sweep. */
+  masterSweptGreen?: boolean;
   nowMs: number;
 }
 
@@ -92,6 +98,9 @@ export function decideRollingRcSweep(input: RollingRcInput): RollingRcDecision {
   if (input.probeInFlight) return { action: "skip", reason: "sweep_in_flight" };
   const master = input.masterSha;
   if (!master) return { action: "skip", reason: "no_master_sha" };
+  // Waits until master moves: re-sweeping a promoted / already-green sha only samples load flakes.
+  if (input.masterShipped) return { action: "skip", reason: "master_shipped" };
+  if (input.masterSweptGreen) return { action: "skip", reason: "master_swept_green" };
   const c = input.candidate;
   if (!c) return { action: "cut", sha: master, abandon: null };
   if (input.shipped) return { action: "cut", sha: master, abandon: c.branch };
@@ -147,6 +156,8 @@ export interface RollingRcSweepDeps {
   readState: (project: RollingRcProject) => RcStateFile;
   writeState: (project: RollingRcProject, state: RcStateFile) => void;
   readLatestRcHealth: (projectId: string, branch: string) => Promise<RollingRcHealthRow | null>;
+  /** #1681: green / red history of one sha, across every branch that swept it. */
+  readShaEvidence?: (projectId: string, sha: string) => Promise<{ green: boolean; red: number }>;
   /** Start a background sweep of the branch; true when one actually started. */
   requestSweep: (projectId: string, branch: string) => Promise<{ started: boolean; reason: string }>;
   nowMs?: number;
@@ -194,9 +205,17 @@ async function tickProject(project: RollingRcProject, deps: RollingRcSweepDeps, 
   if (candidate && tipSha && (candidate.state === "cut" || candidate.state === "sweeping")) {
     const row = await deps.readLatestRcHealth(projectId, candidate.branch);
     if (row && row.sha === tipSha && isBaseHealthAnswer(row.outcome)) {
-      state = upsertRcCandidate(state, candidate.branch, { sha: tipSha, state: row.outcome === "green" ? "green" : "red", failedSuites: row.outcome === "green" ? [] : row.failedSuites, note: `rolling sweep: ${row.outcome}` }, at);
-      deps.writeState(project, state);
-      candidate = inFlightCandidate(state, existing);
+      const evidence = row.outcome === "red" && deps.readShaEvidence ? await deps.readShaEvidence(projectId, tipSha) : null;
+      if (evidence && evidence.green && evidence.red <= 1) {
+        // Flaky under load: the sha swept green before. No heal ticket was filed; owe ONE re-run.
+        state = upsertRcCandidate(state, candidate.branch, { sha: tipSha, state: "cut", failedSuites: [], note: `red on a sha that swept green before (${row.failedSuites.join(", ") || "no suites named"}): flaky under load, one idle re-run owed (#1681)` }, at);
+        deps.writeState(project, state);
+        candidate = inFlightCandidate(state, existing);
+      } else {
+        state = upsertRcCandidate(state, candidate.branch, { sha: tipSha, state: row.outcome === "green" ? "green" : "red", failedSuites: row.outcome === "green" ? [] : row.failedSuites, note: `rolling sweep: ${row.outcome}` }, at);
+        deps.writeState(project, state);
+        candidate = inFlightCandidate(state, existing);
+      }
     }
   }
   // A heal merged ONTO the rc moves its tip: the recorded verdict no longer describes it.
@@ -216,6 +235,9 @@ async function tickProject(project: RollingRcProject, deps: RollingRcSweepDeps, 
     candidate: candidate && tipSha ? { ...candidate, tipSha } : null,
     tipIsAncestorOfMaster: candidate && tipSha && masterSha ? await deps.isAncestor(project, tipSha, masterSha) : false,
     shipped: candidate && tipSha ? await deps.isShipped(project, tipSha) : false,
+    masterShipped: masterSha ? await deps.isShipped(project, masterSha) : false,
+    // A flaky-red re-run (candidate re-armed to `cut` at master's tip) is owed even though the sha swept green before.
+    masterSweptGreen: masterSha && deps.readShaEvidence && !(candidate?.state === "cut" && tipSha === masterSha) ? await masterGreenSweptOnce(deps, projectId, masterSha) : false,
     nowMs,
   });
   if (decision.action === "skip") return { projectId, decision, branch: candidate?.branch ?? null, started: false };
@@ -316,9 +338,16 @@ export function createRollingRcSweepDeps(database: Database, listProjects: Rolli
       const row = await getLatestBaseBranchHealth(projectId, database, { branch }).catch(() => null);
       return row ? { sha: row.sha, outcome: row.outcome, failedSuites: decodeFailedSuites(row.failedSuites) } : null;
     },
+    readShaEvidence: (projectId, sha) => getShaSweepEvidence(projectId, sha, database).catch(() => ({ green: false, red: 0 })),
     requestSweep: async (projectId, branch) => {
       const verdict = await requestBaseBranchReprobe(projectId, database, undefined, undefined, { branch, background: true });
       return { started: verdict.due, reason: verdict.reason };
     },
   };
+}
+
+/** Green at least once and not yet confirmed red by a re-run (a confirmed red is the rc's to heal, not to re-sweep). */
+async function masterGreenSweptOnce(deps: RollingRcSweepDeps, projectId: string, sha: string): Promise<boolean> {
+  const e = await deps.readShaEvidence!(projectId, sha);
+  return e.green && e.red < 2;
 }

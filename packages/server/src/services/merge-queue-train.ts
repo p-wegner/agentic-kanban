@@ -24,8 +24,10 @@ import {
   createMergeTrain,
   getMergeTrain,
   listActiveMergeTrainsForProject,
+  listRecentMergeTrainsForProject,
   updateMergeTrainState,
 } from "../repositories/merge-train.repository.js";
+import { decideAgeAbandonSplit } from "./merge-train-age-split.js";
 import { runMergeTrain, formatTrainLabel, trainDateStamp, trainRefName, type OnTrainDropped } from "./merge-train.service.js";
 import { isMergeTrainLabelLive, noteMergeTrainGateActivity, withMergeTrainGateActivity, registerLiveMergeTrain, unregisterLiveMergeTrain } from "./merge-train-live-registry.js";
 import { cleanupTrainWorktreesForLabel, pinTrainRefsForLabel } from "./merge-train-worktrees.js";
@@ -592,7 +594,29 @@ export function createMergeTrainRunner(deps: {
       yield { type: "done", merged: [], failed: [], skipped: held.map((h) => h.member.workspaceId) };
       return;
     }
-    const members = admitted;
+    let members = admitted;
+    // #1679: a train abandoned for gate age must not be re-gated identically - split or escalate.
+    {
+      const firstIssue = (plan.order.find((ws) => ws.id === members[0].workspaceId) ?? plan.order[0]);
+      const issueRows = await getMergeQueueIssueRows([firstIssue.issueId], database);
+      const pid = issueRows[0]?.projectId;
+      const recent = pid ? await listRecentMergeTrainsForProject(pid, 5, database).catch(() => []) : [];
+      const split = decideAgeAbandonSplit(members.map((m) => m.workspaceId), recent, pid ?? undefined);
+      if (split.action === "escalate") {
+        console.warn(`[merge-train] ${split.reason}`);
+        yield { type: "skipped", workspaceId: firstIssue.id, issueNumber: firstIssue.issueNumber, issueTitle: firstIssue.issueTitle, reason: split.reason };
+        yield { type: "done", merged: [], failed: [], skipped: members.map((m) => m.workspaceId) };
+        return;
+      }
+      if (split.action === "split") {
+        console.log(`[merge-train] ${split.reason}`);
+        const deferred = new Set(split.deferred);
+        for (const m of members.filter((x) => deferred.has(x.workspaceId))) {
+          yield { type: "skipped", workspaceId: m.workspaceId, issueNumber: m.issueNumber ?? null, issueTitle: "", reason: split.reason };
+        }
+        members = members.filter((x) => !deferred.has(x.workspaceId));
+      }
+    }
     // A member that conflicts with the base is sent back to its builder the moment assembly
     // drops it (`onDropped` inside the train), not after the whole gate and bisect: observed
     // live (#1253/#1261), a drop recorded only at the end never reached the builder when the

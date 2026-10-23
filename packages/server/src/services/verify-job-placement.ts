@@ -105,7 +105,7 @@ export type VerifyPlan =
   | { target: "worker"; reason: string; workerId: string; workerName: string; active: VerifyWorkerRunner; allowlist: Set<string> };
 
 /** Decide host / worker / hold for one chain WITHOUT running it (#1437): callers that must act on a hold (the gate, the sweep) use this. */
-export async function planVerifyPlacement(args: Pick<PlaceVerifyCommandArgs, "kind" | "projectId" | "database" | "hostHeld" | "workerRunner">): Promise<VerifyPlan> {
+export async function planVerifyPlacement(args: Pick<PlaceVerifyCommandArgs, "kind" | "projectId" | "database" | "hostHeld" | "workerRunner"> & { gateActive?: boolean }): Promise<VerifyPlan> {
   const [rawPlacement, rawAllow] = await Promise.all([
     getPreference(verifyPlacementPrefKey(args.projectId), args.database).catch(() => null),
     getPreference(verifyWorkersPrefKey(args.projectId), args.database).catch(() => null),
@@ -115,7 +115,7 @@ export async function planVerifyPlacement(args: Pick<PlaceVerifyCommandArgs, "ki
   const active = args.workerRunner === undefined ? runner : args.workerRunner;
   const allowlist = parseVerifyWorkerAllowlist(rawAllow);
   const workers = active ? await Promise.resolve(active.listWorkers()).catch(() => []) : [];
-  const decision = decideVerifyPlacement({ placement, kind: args.kind, hostHeld: args.hostHeld ?? false, allowlist, workers });
+  const decision = decideVerifyPlacement({ placement, kind: args.kind, hostHeld: args.hostHeld ?? false, allowlist, workers, gateActive: args.gateActive });
   if (decision.target === "hold") return { target: "hold", reason: decision.reason };
   if (decision.target === "host" || !active) return { target: "host", reason: decision.reason };
   return { target: "worker", reason: decision.reason, workerId: decision.workerId, workerName: decision.workerName, active, allowlist };

@@ -1,6 +1,7 @@
 import type { BoardStatusIssue } from "@agentic-kanban/shared";
 import { isInFlightStatusName } from "@agentic-kanban/shared/lib/status-view";
 import type { ConsoleExtras } from "../services/console-extras.service.js";
+import { syncHealthAttention, syncHealthLines } from "./sync-health.js";
 import type { ConsoleModel, ConsolePayloads } from "./status-console-model.js";
 
 // #1449: the console's operator-lookup data (verify chains, base verdict, rc, placement, stalls,
@@ -121,6 +122,9 @@ export function applyConsoleExtras(model: ConsoleModel, p: ConsolePayloads): voi
     : null;
   model.codeHealth = extras?.codeHealth ?? null;
   model.connectCodes = (extras?.connectCodes ?? []).map((c) => ({ codeHint: c.codeHint, status: c.status, steps: c.progress.map((s) => ({ step: s.step, status: s.status })) }));
+
+  model.syncLines = syncHealthLines(extras?.syncHealth ?? [], p.nowMs);
+  for (const a of syncHealthAttention(extras?.syncHealth ?? [], p.nowMs)) model.attention.push(a); // #1673
 
   for (const text of extras?.profileAttention ?? []) model.attention.push({ level: "yellow", text }); // #1565
 

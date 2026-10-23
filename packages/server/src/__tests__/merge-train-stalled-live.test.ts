@@ -9,12 +9,15 @@ import {
   isMergeTrainLive,
   describeLiveGate,
   noteMergeTrainGateResultReceived,
+  noteMergeTrainGateProgress,
   isMergeTrainStalled,
   noteMergeTrainGateActivity,
   registerLiveMergeTrain,
   resetLiveMergeTrainRegistryForTests,
   snapshotLiveMergeTrains,
 } from "../services/merge-train-live-registry.js";
+
+import { decideAgeAbandonSplit, GATE_AGE_ABANDON_MARKER } from "../services/merge-train-age-split.js";
 
 /**
  * #1513 — a train whose fix agent ended red sat `gating` with a registered live job and nothing
@@ -81,5 +84,56 @@ describe("hung gate (#1646)", () => {
     const reason = (await getMergeTrain(trainId, db))?.reconciledReason ?? "";
     expect(reason).toContain("gate hung");
     expect(reason).toContain("never resumed");
+  });
+
+  it("#1679: does not abandon a 120m gate whose progress advanced 5m ago", async () => {
+    const { db } = createTestDb();
+    const { trainId } = await seedGating(db);
+    const projectId = (await getMergeTrain(trainId, db))!.projectId;
+    registerLiveMergeTrain({ trainId, label: "train/stalled-01", projectId, nowMs: NOW - 120 * 60_000 });
+    noteMergeTrainGateActivity(trainId, true, NOW - 120 * 60_000);
+    noteMergeTrainGateProgress(projectId, NOW - 5 * 60_000);
+    const result = await reconcileStrandedMergeTrains({ database: db, now: new Date(NOW).toISOString(), log: () => undefined, liveTrains: snapshotLiveMergeTrains() });
+    expect(result.abandoned).toEqual([]);
+    expect((await getMergeTrain(trainId, db))?.state).toBe("gating");
+  });
+
+  it("#1679: abandons a gate with no progress for 20m, naming the idle time", async () => {
+    const { db } = createTestDb();
+    const { trainId } = await seedGating(db);
+    const projectId = (await getMergeTrain(trainId, db))!.projectId;
+    registerLiveMergeTrain({ trainId, label: "train/stalled-01", projectId, nowMs: NOW - 40 * 60_000 });
+    noteMergeTrainGateActivity(trainId, true, NOW - 40 * 60_000);
+    noteMergeTrainGateProgress(projectId, NOW - 20 * 60_000);
+    const result = await reconcileStrandedMergeTrains({ database: db, now: new Date(NOW).toISOString(), log: () => undefined, liveTrains: snapshotLiveMergeTrains() });
+    expect(result.abandoned).toEqual([trainId]);
+    expect((await getMergeTrain(trainId, db))?.reconciledReason).toContain("no progress for 20m");
+  });
+
+  it("#1679: an age-ceiling abandon is marked so the next window splits", async () => {
+    const { db } = createTestDb();
+    const { trainId } = await seedGating(db);
+    const projectId = (await getMergeTrain(trainId, db))!.projectId;
+    registerLiveMergeTrain({ trainId, label: "train/stalled-01", projectId, nowMs: NOW - 2 * HUNG_GATE_CEILING_MS });
+    noteMergeTrainGateActivity(trainId, true, NOW - 2 * HUNG_GATE_CEILING_MS);
+    await reconcileStrandedMergeTrains({ database: db, now: new Date(NOW).toISOString(), log: () => undefined, liveTrains: snapshotLiveMergeTrains() });
+    expect((await getMergeTrain(trainId, db))?.reconciledReason).toContain(GATE_AGE_ABANDON_MARKER);
+  });
+});
+
+describe("decideAgeAbandonSplit (#1679)", () => {
+  const aged = { state: "abandoned" as const, reconciledReason: `stalled: gate hung (${GATE_AGE_ABANDON_MARKER})`, memberWorkspaceIds: JSON.stringify(["a", "b", "c", "d"]) };
+  it("splits an identical member set in half", () => {
+    const d = decideAgeAbandonSplit(["a", "b", "c", "d"], [aged]);
+    expect(d).toMatchObject({ action: "split", members: ["a", "b"], deferred: ["c", "d"] });
+  });
+  it("escalates a single member to land-local --on-worker", () => {
+    const d = decideAgeAbandonSplit(["a"], [aged]);
+    expect(d.action).toBe("escalate");
+    expect((d as { reason: string }).reason).toContain("land-local --on-worker");
+  });
+  it("leaves other abandon reasons and unrelated members alone", () => {
+    expect(decideAgeAbandonSplit(["a", "b"], [{ ...aged, reconciledReason: "stalled: gate hung - no progress" }]).action).toBe("none");
+    expect(decideAgeAbandonSplit(["a", "z"], [aged]).action).toBe("none");
   });
 });

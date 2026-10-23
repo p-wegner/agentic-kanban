@@ -9,7 +9,7 @@
  * when that is empty, so a re-swept rc that was green before lists just what moved since.
  */
 import type { Database } from "../db/index.js";
-import { getLastGreenBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
+import { getLastGreenBaseBranchHealth, getShaSweepEvidence } from "../repositories/base-branch-health.repository.js";
 import type { BaseBranchVerifyResult } from "./base-branch-health.service.js";
 import { reconcileRcSweep, type RcHealResult } from "./rc-heal-ticket.service.js";
 
@@ -29,7 +29,10 @@ export async function reconcileRcSweepAfterProbe(
   const previousGreen = args.lastGreen
     ?? await getLastGreenBaseBranchHealth(args.projectId, database, { anyRc: true }).catch(() => null)
     ?? await getLastGreenBaseBranchHealth(args.projectId, database).catch(() => null);
+  // #1681: a red on a sha that already swept green is a load flake until an idle re-run says otherwise.
+  const evidence = args.result.outcome === "red" ? await getShaSweepEvidence(args.projectId, args.result.sha, database).catch(() => null) : null;
   return reconcileRcSweep({
+    flakeRerunOwed: evidence ? evidence.green && evidence.red <= 1 : false,
     projectId: args.projectId,
     rcBranch: args.branch,
     sha: args.result.sha,

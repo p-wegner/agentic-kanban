@@ -15,9 +15,22 @@ type StatusIssue = BoardStatusResult["issues"][number];
 /** Mutable watch-loop state shared by the render paths and the key handler. */
 type PollState = { allIssues: boolean; lastPollMs: number };
 
+/** The console's own HTTP timeout; a poll counts as at most this long for the backoff (#1676). */
+export const POLL_TIMEOUT_MS = 15_000;
+const BACKOFF_CAP_SEC = 300;
+const BACKOFF_CAP_FACTOR = 5;
+
 // #1614: polls never overlap; a slow answer (> half the interval) doubles the wait to 2x its duration.
-function intervalSecFor(baseSec: number, lastPollMs: number): number {
-  return Math.max(baseSec, Math.ceil((lastPollMs * 2) / 1000));
+// #1676: capped at 5x the base interval (and 5 min), so one hung poll cannot stall the console for hours.
+export function intervalSecFor(baseSec: number, lastPollMs: number): number {
+  const cap = Math.max(baseSec, Math.min(baseSec * BACKOFF_CAP_FACTOR, BACKOFF_CAP_SEC));
+  const wanted = Math.max(baseSec, Math.ceil((lastPollMs * 2) / 1000));
+  return Math.min(wanted, cap);
+}
+
+/** A poll that ran past its timeout counts as a timeout, not its real duration. */
+export function pollDurationForBackoff(elapsedMs: number): number {
+  return Math.min(elapsedMs, POLL_TIMEOUT_MS);
 }
 
 function issueNum(issue: StatusIssue): string {
@@ -139,10 +152,11 @@ async function renderConsoleScreen(
   try {
     payloads = await fetchConsolePayloads((path) => boardGet(baseUrl, path), { projectId, all: poll.allIssues, nowMs: startedMs });
   } catch (failure) {
-    poll.lastPollMs = Date.now() - startedMs;
+    poll.lastPollMs = pollDurationForBackoff(Date.now() - startedMs);
     return { failure };
   }
-  poll.lastPollMs = Date.now() - startedMs;
+  const answerMs = Date.now() - startedMs;
+  poll.lastPollMs = pollDurationForBackoff(answerMs);
   const model = buildConsoleModel(payloads);
   const intervalSec = intervalSecFor(baseIntervalSec(), poll.lastPollMs);
   const lines = renderConsole(model, {
@@ -153,7 +167,7 @@ async function renderConsoleScreen(
     intervalSec,
     nowMs: Date.now(),
     allIssues: poll.allIssues,
-    backoffNote: intervalSec > baseIntervalSec() ? `slow answer ${(poll.lastPollMs / 1000).toFixed(1)}s, backing off` : undefined,
+    backoffNote: intervalSec > baseIntervalSec() ? `backing off (slow answer ${Math.round(answerMs / 1000)} s), next refresh in ${intervalSec} s` : undefined,
   });
   process.stdout.write(process.stdout.isTTY ? consoleFrame(lines) : lines.join("\n") + "\n");
   return null;
