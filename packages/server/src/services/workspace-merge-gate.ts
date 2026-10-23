@@ -28,7 +28,9 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getLatestIssueCommentByKind } from "../repositories/issue-comments.repository.js";
 import { getMergeGateEvidence, setMergeGateEvidence } from "../repositories/merge-gate.repository.js";
-import { WorkspaceError } from "./workspace-internals.js";
+import { countUniqueCommits } from "@agentic-kanban/shared/lib/git-service";
+import * as realGitService from "./git.service.js";
+import { WorkspaceError, listPendingSiblingMerges } from "./workspace-internals.js";
 import {
   gateAlreadyPassed,
   resolveMergeGateShas,
@@ -484,9 +486,9 @@ async function refuseIfBaseIsStale(args: {
   database: Database;
   recordMergeAttempt: RecordMergeAttempt;
   rebaseOntoBase?: RebaseOntoBase;
-}): Promise<void> {
+}): Promise<boolean> {
   const { workspaceId, workspace, baseBranch, database, recordMergeAttempt, rebaseOntoBase } = args;
-  if (!workspace.workingDir) return;
+  if (!workspace.workingDir) return false;
   // `Promise.resolve().then(...)`: a SYNCHRONOUS throw (a test's partial git mock, a missing
   // export) must fail open exactly like a rejected promise does — this check may never mask the gate.
   const workingDir = workspace.workingDir;
@@ -497,7 +499,7 @@ async function refuseIfBaseIsStale(args: {
     );
     return null;
   });
-  if (behindCount === null || behindCount <= STALE_BASE_REFUSAL_THRESHOLD_COMMITS) return;
+  if (behindCount === null || behindCount <= STALE_BASE_REFUSAL_THRESHOLD_COMMITS) return false;
   // A refusal only tells a human to press update-base; the merge attempt is what should press
   // it. Measured 2026-09-16: four In-Review branches sat 12-23 commits behind for a day while
   // nothing rebased them, and each cost a full gate run (or a refusal) per monitor cycle. So
@@ -517,7 +519,7 @@ async function refuseIfBaseIsStale(args: {
         `[workspace-merge] rebased workspace ${workspaceId} onto '${baseBranch}' before the pre-lock gate `
           + `(was ${behindCount} commits behind, #1169) — the gate runs on the rebased tree`,
       );
-      return;
+      return true;
     }
     if (rebased) {
       const files = rebased.conflictingFiles?.length ? ` conflicting: ${rebased.conflictingFiles.join(", ")}.` : "";
@@ -589,7 +591,20 @@ export async function runPreLockGate(args: {
   // #1169 — before paying for the gate, refuse a badly-stale branch instead of running a gate
   // whose failure (a reversion of everything base gained meanwhile) is guaranteed and
   // misattributed to whichever base file the reversion touches.
-  await refuseIfBaseIsStale({ workspaceId, workspace, baseBranch, database, recordMergeAttempt, rebaseOntoBase });
+  const rebased = await refuseIfBaseIsStale({ workspaceId, workspace, baseBranch, database, recordMergeAttempt, rebaseOntoBase });
+
+  // #1671 — a rebase can drop every commit (the base already carries the change): nothing is left
+  // to land, so a verify run would only burn a worker for 30 min. doMerge's pre-flight finalizes it.
+  if (rebased && workspace.workingDir) {
+    const emptyAfterRebase = await Promise.resolve().then(async () =>
+      (await countUniqueCommits(workspace.workingDir!, baseBranch, "HEAD")) === 0
+      && (await listPendingSiblingMerges(realGitService, database, workspaceId)).length === 0).catch(() => false);
+    if (emptyAfterRebase) {
+      const reason = `no commits beyond '${baseBranch}' after the rebase (#1671) — nothing to land, gate skipped`;
+      console.log(`[workspace-merge] ${reason} for workspace ${workspaceId}`);
+      return { kind: "skip-explicit", reason };
+    }
+  }
 
   console.log(`[workspace-merge] pre-lock gate phase=start workspaceId=${workspaceId}`);
   const preGate = await runGateWithEvidence({
