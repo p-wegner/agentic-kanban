@@ -29,6 +29,7 @@ import type { Database } from "../db/index.js";
 import { getLatestIssueCommentByKind } from "../repositories/issue-comments.repository.js";
 import { getMergeGateEvidence, setMergeGateEvidence } from "../repositories/merge-gate.repository.js";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 import * as realGitService from "./git.service.js";
 import { WorkspaceError, listPendingSiblingMerges } from "./workspace-internals.js";
 import {
@@ -599,7 +600,7 @@ export async function runPreLockGate(args: {
     // rev-list must answer "0": countUniqueCommits reads a git error as 0, which would skip the gate on any failure.
     const emptyAfterRebase = await Promise.resolve().then(async () => {
       const ahead = await gitExec(["rev-list", "--count", `${baseBranch}..HEAD`], { cwd: workspace.workingDir! });
-      return ahead.code === 0 && ahead.stdout.trim() === "0"
+      return execSucceeded(ahead) && ahead.stdout.trim() === "0"
         && (await listPendingSiblingMerges(realGitService, database, workspaceId)).length === 0;
     }).catch(() => false);
     if (emptyAfterRebase) {
