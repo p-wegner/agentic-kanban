@@ -72,11 +72,11 @@ export interface OneShotDispatchArgs {
 export type OneShotDispatchResult = { handled: false; reason: string } | { handled: true; text: string; /** #1572: the worker the run was placed on. */ worker?: string };
 
 /** Pin `sha` to a temporary branch in the project repo, so the worker's `fetch refs/heads/*` sees it. */
-async function pinWorkingTree(cwd: string, repoPath: string, branch: string): Promise<boolean> {
+async function pinWorkingTree(cwd: string, repoPath: string, branch: string): Promise<string | null> {
   const head = await gitExec(["rev-parse", "HEAD"], { cwd });
-  if (head.error || !head.stdout.trim()) return false;
+  if (head.error || !head.stdout.trim()) return null;
   const pinned = await gitExec(["update-ref", `refs/heads/${branch}`, head.stdout.trim()], { cwd: repoPath });
-  return execSucceeded(pinned);
+  return execSucceeded(pinned) ? head.stdout.trim() : null;
 }
 
 async function unpin(repoPath: string, branch: string): Promise<void> {
@@ -178,8 +178,21 @@ async function buildRequest(
 }
 
 /** Fast-forward the board-side working tree onto the commit the worker pushed. */
-async function applyWorkerFix(cwd: string, sha: string, keep?: { repoPath: string; label: string }): Promise<void> {
+export async function applyWorkerFix(cwd: string, sha: string, keep?: { repoPath: string; label: string }, pinnedHead?: string): Promise<void> {
   try {
+    // #1711: the member merge that conflicted is still open in the tree (MERGE_HEAD + unmerged index),
+    // which makes `merge --ff-only` refuse. The worker built its resolution on the pre-merge head, so
+    // abort the open merge first; but only fast-forward a fix that really descends from that head.
+    const mergeHead = await gitExec(["rev-parse", "-q", "--verify", "MERGE_HEAD"], { cwd });
+    if (execSucceeded(mergeHead) && mergeHead.stdout.trim()) {
+      await gitExecOrThrow(["merge", "--abort"], { cwd });
+    }
+    if (pinnedHead) {
+      const descends = await gitExec(["merge-base", "--is-ancestor", pinnedHead, sha], { cwd });
+      if (!execSucceeded(descends)) {
+        throw new Error(`the fix ${sha.slice(0, 8)} is not built on the tree's pre-merge head ${pinnedHead.slice(0, 8)}`);
+      }
+    }
     await gitExecOrThrow(["merge", "--ff-only", sha], { cwd });
   } catch (err) {
     // #1609: a cancelled train removes or moves its tree; the shepherd's commit must outlive that.
@@ -236,7 +249,7 @@ export async function dispatchOneShotToWorker(args: OneShotDispatchArgs): Promis
       doneTimeoutMs: args.timeoutMs + (request.repo ? REPO_GRACE_MS : NO_REPO_GRACE_MS),
       send: () => manager.send(placement!.kind === "remote" ? placement!.workerId : "", request),
     });
-    return await settle(args, placement, result, request);
+    return await settle(args, placement, result, request, pinned || undefined);
   } finally {
     endDispatch?.();
     if (placement?.kind === "remote") releaseWorkerSlot(placement.reservationId);
@@ -249,6 +262,7 @@ async function settle(
   placement: RemotePlacement,
   result: WorkerOneShotResult | null,
   request: WorkerOneShotRequest,
+  pinnedHead?: string,
 ): Promise<OneShotDispatchResult> {
   const where = `fleet worker ${placement.workerId}`;
   const unavailable = (why: string): OneShotDispatchResult => {
@@ -266,7 +280,7 @@ async function settle(
   }
   if (result.pushedSha && args.cwd) {
     const keepFixAs = args.repo?.keepFixAs;
-    await applyWorkerFix(args.cwd, result.pushedSha, keepFixAs && args.repo ? { repoPath: args.repo.repoPath, label: keepFixAs } : undefined);
+    await applyWorkerFix(args.cwd, result.pushedSha, keepFixAs && args.repo ? { repoPath: args.repo.repoPath, label: keepFixAs } : undefined, pinnedHead);
   }
   console.log(`[oneshot] ran on ${where} (request ${request.requestId}${result.pushedSha ? `, fix ${result.pushedSha.slice(0, 8)}` : ""})`);
   return { handled: true, text: result.text ?? "", worker: placement.workerId };
