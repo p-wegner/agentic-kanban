@@ -391,7 +391,7 @@ export function createPluginsRoute(
 
   router.post("/:id/sync/resolve", async (c) => {
     const body = await parsePluginBody(c, pluginSyncResolveBody);
-    return c.json(await service.resolveSyncIssue(c.req.param("id"), body.projectId, { key: body.key, keep: body.keep, ticket: body.ticket, reason: body.reason }));
+    return c.json(await service.resolveSyncIssue(c.req.param("id"), body.projectId, { key: body.key, keep: body.keep, ticket: body.ticket, reason: body.reason, override: body.override }));
   });
 
   router.get("/:id/sync/status", async (c) => {

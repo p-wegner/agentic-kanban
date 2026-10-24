@@ -25,6 +25,8 @@ as written rather than listing plugins or projects.
 2. **Decide** from that evidence, not from taste. Pick one of:
    - `"keep": "board"` or `"keep": "jira"`: whole issue.
    - `"keep": {"title": "board", "priority": "jira"}`: per field; only those fields move.
+   - Every `keep` needs a `"reason"`. Each differing field has an `owner` (from the sync direction): the owner's side is the
+     default winner, and a keep against it is refused unless the body adds `"override": true` and a reason that says why.
    - `"keep": "needs-human", "reason": "..."`: use this when both sides edited the same field after
      the last sync and nothing orders them or shows intent (a deliberate correction vs. an
      independent edit). It writes NOTHING to Jira or the board; the conflict stays outstanding,

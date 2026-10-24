@@ -3969,6 +3969,8 @@ paths:
                     - type: number
                 reason:
                   type: string
+                override:
+                  type: boolean
               required:
                 - projectId
                 - key

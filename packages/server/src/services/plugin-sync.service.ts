@@ -128,7 +128,7 @@ export type { PluginSyncRunRecord, PluginSyncStatusView };
 export interface PluginSyncHealth {
   pluginName: string;
   status: PluginSyncStatusView;
-  conflicts: { count: number; oldestAt: string | null; needsHuman?: number } | null;
+  conflicts: { count: number; oldestAt: string | null; needsHuman?: number; needsHumanUnits?: Array<{ key: string; since: string | null }> } | null;
   failures: { count: number; oldestAt: string | null } | null;
   /** #1697: the project this health belongs to (the console lists every project with a sync plugin enabled). */
   projectId?: string;
@@ -138,15 +138,17 @@ export interface PluginSyncHealth {
 }
 
 /** Unresolved entries of a conflict/failure register (#1673): how many, and when the oldest was detected. */
-function readOpenRegister(dir: string | null, fileName: string): { count: number; oldestAt: string | null; needsHuman?: number } | null {
+function readOpenRegister(dir: string | null, fileName: string): { count: number; oldestAt: string | null; needsHuman?: number; needsHumanUnits?: Array<{ key: string; since: string | null }> } | null {
   if (!dir) return null;
   try {
     const file = join(dir, fileName);
     if (!existsSync(file)) return { count: 0, oldestAt: null };
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as { entries?: Record<string, { resolved?: boolean; detectedAt?: string; needsHuman?: boolean }> };
-    const open = Object.values(parsed.entries ?? {}).filter((e) => e && !e.resolved);
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as { entries?: Record<string, { resolved?: boolean; detectedAt?: string; needsHuman?: boolean; needsHumanAt?: string }> };
+    const openEntries = Object.entries(parsed.entries ?? {}).filter(([, e]) => e && !e.resolved);
+    const open = openEntries.map(([, e]) => e);
     const times = open.map((e) => e.detectedAt).filter((t): t is string => typeof t === "string" && Number.isFinite(Date.parse(t))).sort();
-    return { count: open.length, oldestAt: times[0] ?? null, needsHuman: open.filter((e) => e.needsHuman).length };
+    return { count: open.length, oldestAt: times[0] ?? null, needsHuman: open.filter((e) => e.needsHuman).length,
+      needsHumanUnits: openEntries.filter(([, e]) => e.needsHuman).map(([key, e]) => ({ key, since: e.needsHumanAt ?? null })) };
   } catch {
     return null;
   }
@@ -540,7 +542,7 @@ export function createPluginSyncOps(deps: {
   async function resolveSyncIssue(
     pluginRowId: string,
     projectId: string,
-    opts: { key: string; keep?: SyncResolveKeep; ticket?: string | number; reason?: string },
+    opts: { key: string; keep?: SyncResolveKeep; ticket?: string | number; reason?: string; override?: boolean },
   ): Promise<{ ok: boolean; mode: "show" | "keep"; key: string; keep?: SyncResolveKeep; result?: unknown; error?: string }> {
     const plugin = await requirePlugin(pluginRowId);
     // The route accepts the manifest slug ("jira-sync") as well as the row id, so a loop brief can name it.
@@ -554,6 +556,9 @@ export function createPluginSyncOps(deps: {
     }
     if (opts.keep != null && !isSyncResolveKeep(opts.keep)) {
       throw new PluginError('"keep" must be "board", "jira", "needs-human" or a per-field map such as {"title":"board","priority":"jira"}', "BAD_REQUEST");
+    }
+    if (opts.keep != null && !opts.reason?.trim()) {
+      throw new PluginError('"reason" is required for every keep: say why this side wins (or why nobody can tell)', "BAD_REQUEST");
     }
     await requireProject(projectId);
     const mode = opts.keep ? "keep" : "show";
@@ -570,6 +575,7 @@ export function createPluginSyncOps(deps: {
       ...(opts.keep ? { SYNC_RESOLVE_KEEP: typeof opts.keep === "string" ? opts.keep : JSON.stringify(opts.keep) } : {}),
       ...(opts.ticket != null ? { SYNC_RESOLVE_TICKET: String(opts.ticket) } : {}),
       ...(opts.reason ? { SYNC_RESOLVE_REASON: opts.reason } : {}),
+      ...(opts.override === true ? { SYNC_RESOLVE_OVERRIDE: "true" } : {}),
     };
     const raw = await runPluginCommand(substitutePluginPlaceholders(sync.resolve.command, ctx.vars), { cwd, env });
     const stdout = redactSecrets(raw.stdout, secretValues);

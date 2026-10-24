@@ -21,6 +21,10 @@ import { markdownToAdf } from "./adf.mjs";
 import { attributeComment } from "./comment-marker.mjs";
 import { boardFieldsOf, fieldTable, incomingFieldsOf } from "./field-snapshot.mjs";
 import { runInboundSync } from "./sync-engine.mjs";
+import { DIRECTION_FIELDS, withOwners } from "./sync-direction.mjs";
+
+/** No ownership known (a caller that did not pass the board's directions): every field is shared, nothing is refused. */
+const SHARED_DIRECTIONS = Object.freeze({ fields: Object.freeze(Object.fromEntries(DIRECTION_FIELDS.map((f) => [f, "both"]))) });
 
 export const KEEP_SIDES = ["board", "jira"];
 export const NEEDS_HUMAN = "needs-human";
@@ -85,9 +89,17 @@ function overwriteLines(rows, loser, fields) {
   return rows.filter((r) => r.differs && fields.includes(r.field)).map((r) => `- ${r.field}: was ${show(r[loser])}, now ${show(r[winner])}`);
 }
 
-function auditText({ key, ticket, winner, lines }) {
+/** "kept from the board: priority / kept from Jira: title" (#1709): which fields came from which side. */
+function keptSummary({ fromBoard, fromJira }) {
+  return [
+    ...(fromBoard.length ? [`kept from the board: ${fromBoard.join(", ")}`] : []),
+    ...(fromJira.length ? [`kept from Jira: ${fromJira.join(", ")}`] : []),
+  ].join(" / ");
+}
+
+function auditText({ key, ticket, kept, reason, lines }) {
   const by = ticket != null ? `ticket ${ticketRef(ticket)}` : "a sync-conflicts loop ticket";
-  return `**Sync conflict on ${key} resolved by ${by}: the ${winner}'s values were kept.**\n\nOverwritten here (restore by hand if this was wrong):\n${lines.join("\n")}`;
+  return `**Sync conflict on ${key} resolved by ${by}: ${kept}.**\n\n${reason ? `Reason: ${reason}\n\n` : ""}Overwritten here (restore by hand if this was wrong):\n${lines.join("\n")}`;
 }
 
 function conflictRecord({ key, ticket, rows, decision, reason, audit }) {
@@ -114,23 +126,23 @@ function conflictRecord({ key, ticket, rows, decision, reason, audit }) {
   ].join("\n");
 }
 
-async function postJiraAudit(client, key, lines, { ticket }) {
+async function postJiraAudit(client, key, lines, { ticket, kept, reason }) {
   if (lines.length === 0) return { posted: false, reason: "nothing overwritten" };
   try {
-    await client.addComment(key, attributeComment(auditText({ key, ticket, winner: "board", lines }), { boardCommentId: "sync-resolve" }));
+    await client.addComment(key, attributeComment(auditText({ key, ticket, kept, reason, lines }), { boardCommentId: "sync-resolve" }));
     return { posted: true };
   } catch (err) {
     return { posted: false, error: err.message };
   }
 }
 
-async function postBoardAudit(boardClient, issueId, lines, { key, ticket }) {
+async function postBoardAudit(boardClient, issueId, lines, { key, ticket, kept, reason }) {
   if (lines.length === 0) return { posted: false, reason: "nothing overwritten" };
   try {
     await boardClient.addComment(issueId, {
       kind: "note",
       author: "system",
-      body: auditText({ key, ticket, winner: "Jira", lines }),
+      body: auditText({ key, ticket, kept, reason, lines }),
       // origin "jira" keeps push from echoing this audit note back into Jira.
       payload: { origin: "jira", syncResolve: true },
     });
@@ -143,16 +155,18 @@ async function postBoardAudit(boardClient, issueId, lines, { key, ticket }) {
 /**
  * @returns {Promise<{ ok: boolean, mode: "show"|"keep", key: string, keep?: unknown, fields?: object[], nextState?: object, needsHuman?: boolean, artifact?: { path: string, content: string }, reason?: string }>}
  */
-export async function resolveIssue({ client, boardClient, projectId, siteUrl, key, keep, ticket, reason, knownState, now = new Date().toISOString() }) {
+export async function resolveIssue({ client, boardClient, projectId, siteUrl, key, keep, ticket, reason, knownState, directions = SHARED_DIRECTIONS, override = false, now = new Date().toISOString() }) {
   if (!key) return { ok: false, mode: keep ? "keep" : "show", key, reason: "an issue key is required" };
   const decision = keep != null ? parseKeep(keep) : null;
   if (decision?.error) return { ok: false, mode: "keep", key, reason: decision.error };
+  // Every decision records WHY (#1709): the record and the audit comment are all a later reader has.
+  if (decision && !String(reason ?? "").trim()) return { ok: false, mode: "keep", key, reason: '"reason" is required for every keep: say why this side wins (or why nobody can tell)' };
   const sides = await loadSides({ client, boardClient, projectId, siteUrl, key });
   if (sides.error) return { ok: false, mode: keep ? "keep" : "show", key, reason: sides.error };
   const { jiraIssue, boardIssue, boardStatuses, mapped } = sides;
   const known = knownState.issues[key];
   const statusName = (id) => boardStatuses.find((st) => st.id === id)?.name ?? id;
-  const rows = addEvidence(
+  const rows = withOwners(addEvidence(
     fieldTable(
       boardFieldsOf(boardIssue),
       known?.fields ?? null,
@@ -161,7 +175,7 @@ export async function resolveIssue({ client, boardClient, projectId, siteUrl, ke
     ),
     jiraIssue,
     boardIssue,
-  );
+  ), directions);
   const artifactPath = `docs/jira-sync/conflicts/${key}.md`;
 
   if (keep == null) return { ok: true, mode: "show", key, fields: rows };
@@ -178,6 +192,22 @@ export async function resolveIssue({ client, boardClient, projectId, siteUrl, ke
     });
   }
 
+  // Ownership (#1709): a keep that writes against the owner of a differing field needs an explicit override.
+  const against = (winner) => (f) => rows.find((r) => r.field === f)?.owner === (winner === "board" ? "jira" : "board");
+  const differing = (f) => rows.find((r) => r.field === f)?.differs === true;
+  const sideFor = (f) => (decision.kind === "fields" ? decision.map[f] : decision.kind);
+  const violations = decision.kind === "human" ? [] : KEEP_FIELDS.filter((f) => differing(f) && sideFor(f) && against(sideFor(f))(f));
+  if (violations.length && override !== true) {
+    return {
+      ok: false,
+      mode: "keep",
+      key,
+      fields: rows,
+      reason: `${violations.map((f) => `${f} is owned by ${rows.find((r) => r.field === f).owner} (${rows.find((r) => r.field === f).owner === "jira" ? "jira-to-board" : "board-to-jira"})`).join(", ")}: keeping ${[...new Set(violations.map(sideFor))].join("/")} writes against the owner. Keep the owner's side, or repeat the call with "override": true and a reason that says why.`,
+    };
+  }
+  const overrideNote = violations.length ? ` (override: ${violations.join(", ")} written against the owner)` : "";
+
   if (decision.kind === "jira") {
     // A one-issue pull. The engine classifies every KNOWN key missing from the search as deleted
     // or out of scope, so it is handed only this key's state, and the result merged back.
@@ -191,12 +221,13 @@ export async function resolveIssue({ client, boardClient, projectId, siteUrl, ke
     });
     const nextState = { issues: { ...knownState.issues, ...(result.nextState.issues[key] ? { [key]: result.nextState.issues[key] } : {}) } };
     const lines = overwriteLines(rows, "board", KEEP_FIELDS);
-    const auditComment = { board: await postBoardAudit(boardClient, boardIssue.id, lines, { key, ticket }) };
+    const kept = keptSummary({ fromBoard: [], fromJira: rows.filter((r) => r.differs && KEEP_FIELDS.includes(r.field)).map((r) => r.field) });
+    const auditComment = { board: await postBoardAudit(boardClient, boardIssue.id, lines, { key, ticket, kept, reason }) };
     return finish({
       nextState,
       applied: "board overwritten from Jira",
       auditComment,
-      artifact: { path: artifactPath, content: conflictRecord({ key, ticket, rows, decision: "Kept Jira: the board issue was overwritten from Jira.", reason, audit: lines.join("\n") }) },
+      artifact: { path: artifactPath, content: conflictRecord({ key, ticket, rows, decision: `Kept Jira: the board issue was overwritten from Jira${overrideNote}.`, reason, audit: lines.join("\n") }) },
     });
   }
 
@@ -228,8 +259,9 @@ export async function resolveIssue({ client, boardClient, projectId, siteUrl, ke
   const jiraLines = overwriteLines(rows, "jira", boardFields);
   const boardLines = overwriteLines(rows, "board", jiraFields);
   const auditComment = {};
-  if (jiraLines.length) auditComment.jira = await postJiraAudit(client, key, jiraLines, { ticket });
-  if (boardLines.length) auditComment.board = await postBoardAudit(boardClient, boardIssue.id, boardLines, { key, ticket });
+  const kept = keptSummary({ fromBoard: boardFields.filter((f) => differing(f)), fromJira: jiraFields });
+  if (jiraLines.length) auditComment.jira = await postJiraAudit(client, key, jiraLines, { ticket, kept, reason });
+  if (boardLines.length) auditComment.board = await postBoardAudit(boardClient, boardIssue.id, boardLines, { key, ticket, kept, reason });
   const audit = [...jiraLines.map((l) => `Jira ${l}`), ...boardLines.map((l) => `Board ${l}`)].join("\n");
 
   // Re-baseline against what Jira holds NOW (after the audit comment, which bumps `updated`), so the
@@ -248,8 +280,8 @@ export async function resolveIssue({ client, boardClient, projectId, siteUrl, ke
     },
   };
   const summary = decision.kind === "board"
-    ? "Kept the board: Jira was updated from the board."
-    : `Per field: ${Object.entries(decision.map).map(([f, side]) => `${f} from ${side}`).join(", ")}.`;
+    ? `Kept the board: Jira was updated from the board${overrideNote}.`
+    : `Per field: ${Object.entries(decision.map).map(([f, side]) => `${f} from ${side}`).join(", ")}${overrideNote}.`;
   return finish({
     nextState,
     auditComment,

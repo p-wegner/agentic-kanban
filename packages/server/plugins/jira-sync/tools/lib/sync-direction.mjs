@@ -48,3 +48,12 @@ export const LEGACY_DIRECTIONS = Object.freeze({
 
 export const pushesField = (directions, field) => directions.fields[field] !== "jira-to-board";
 export const pullsField = (directions, field) => directions.fields[field] !== "board-to-jira";
+
+/** Which side owns a field (#1709): "jira" (jira-to-board), "board" (board-to-jira), "both", or null for an unmapped row such as status. */
+export function ownerOf(directions, field) {
+  const dir = directions.fields[field];
+  return dir === "jira-to-board" ? "jira" : dir === "board-to-jira" ? "board" : dir === "both" ? "both" : null;
+}
+
+/** The three-way rows with each mapped field's `owner` attached. */
+export const withOwners = (rows, directions) => rows.map((r) => ({ ...r, owner: ownerOf(directions, r.field) }));

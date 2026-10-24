@@ -149,7 +149,7 @@ test("resolve show: reads board / last sync / Jira without writing anything", as
 
 test("resolve --keep jira: the board is overwritten, the next pull has no conflict, the register entry resolves", async () => {
   const { board, jira, state, pull } = await conflictedFixture();
-  const result = await resolveIssue({ client: writableJira(jira), boardClient: board, projectId: "p", key: "ENG-1", keep: "jira", knownState: state });
+  const result = await resolveIssue({ client: writableJira(jira), boardClient: board, projectId: "p", key: "ENG-1", keep: "jira", reason: "r", knownState: state });
   assert.equal(result.ok, true);
   assert.equal(board.state.issues[0].title, "Jira title");
 
@@ -164,7 +164,7 @@ test("resolve --keep jira: the board is overwritten, the next pull has no confli
 test("resolve --keep board: Jira gets the board's fields once, and the next pull reports no conflict", async () => {
   const { board, jira, state } = await conflictedFixture();
   const jc = writableJira(jira);
-  const result = await resolveIssue({ client: jc, boardClient: board, projectId: "p", key: "ENG-1", keep: "board", knownState: state });
+  const result = await resolveIssue({ client: jc, boardClient: board, projectId: "p", key: "ENG-1", keep: "board", reason: "r", knownState: state });
   assert.equal(result.ok, true);
   assert.equal(jc.writes.length, 1);
   assert.equal(jc.writes[0].fields.summary, "Board title");
@@ -236,7 +236,7 @@ test("resolve show: per differing field, when and by whom each side last changed
 test("per-field keep writes only the chosen fields each way; next pull is quiet", async () => {
   const { board, jira, state } = await bothFieldsFixture();
   const jc = jiraWithComments(jira);
-  const result = await resolveIssue({ client: jc, boardClient: board, projectId: "p", key: "ENG-1", keep: { title: "board", priority: "jira" }, ticket: 7, knownState: state });
+  const result = await resolveIssue({ client: jc, boardClient: board, projectId: "p", key: "ENG-1", keep: { title: "board", priority: "jira" }, ticket: 7, reason: "r", knownState: state });
   assert.equal(result.ok, true, result.reason);
   assert.deepEqual(jc.writes.map((w) => Object.keys(w.fields)), [["summary"]], "only the title goes to Jira");
   assert.equal(jira[0].fields.summary, "Board title");
@@ -252,7 +252,7 @@ test("per-field keep writes only the chosen fields each way; next pull is quiet"
 test("keep posts the audit comment on the losing side with the previous values and the ticket", async () => {
   const { board, jira, state } = await bothFieldsFixture();
   const jc = jiraWithComments(jira);
-  const result = await resolveIssue({ client: jc, boardClient: board, projectId: "p", key: "ENG-1", keep: "board", ticket: 7, knownState: state });
+  const result = await resolveIssue({ client: jc, boardClient: board, projectId: "p", key: "ENG-1", keep: "board", ticket: 7, reason: "r", knownState: state });
   assert.equal(result.auditComment.jira.posted, true);
   assert.equal(jc.comments.length, 1);
   assert.match(jc.comments[0].body, /ticket #7/);
@@ -263,7 +263,7 @@ test("keep posts the audit comment on the losing side with the previous values a
   assert.match(result.artifact.content, /Jo Jira/);
 
   const second = await bothFieldsFixture();
-  await resolveIssue({ client: jiraWithComments(second.jira), boardClient: second.board, projectId: "p", key: "ENG-1", keep: "jira", ticket: "#8", knownState: second.state });
+  await resolveIssue({ client: jiraWithComments(second.jira), boardClient: second.board, projectId: "p", key: "ENG-1", keep: "jira", ticket: "#8", reason: "r", knownState: second.state });
   const note = second.board.state.comments[0];
   assert.match(note.body, /ticket #8/);
   assert.match(note.body, /title: was "Board title", now "Jira title"/);
@@ -287,9 +287,10 @@ test("needs-human writes nothing, and the loop reports the unit as needs-human",
   register.entries["ENG-1"].needsHuman = true;
   register.entries["ENG-1"].needsHumanReason = "no ordering signal";
   const plan = buildLoopPlan({ cursor: { lastPullAt: "x" }, conflictRegister: register, failureRegister: { entries: {} } });
-  assert.equal(plan.units[0].needsHuman, true);
+  assert.deepEqual(plan.units, [], "a needs-human unit gets no agent ticket (#1709)");
+  assert.equal(plan.converged, false);
   assert.match(plan.note, /1 needs-human/);
-  assert.match(plan.units[0].description, /needs-human/);
+  assert.match(plan.note, /ENG-1/);
 });
 
 test("resolve rejects an unknown field or side in a per-field keep", async () => {
@@ -314,4 +315,62 @@ test("the brief carries the real endpoint and project id, no <...> placeholder",
   assert.match(brief, /needs-human/);
   assert.match(brief, /docs\/jira-sync\/conflicts\/ENG-1\.md/);
   assert.doesNotMatch(brief, /<jira-sync plugin id>|<this project>/);
+});
+
+const JIRA_OWNS = { fields: { title: "jira-to-board", description: "jira-to-board", priority: "jira-to-board", type: "jira-to-board", labels: "jira-to-board" } };
+
+test("show returns the owner per field (#1709)", async () => {
+  const { board, jira, state } = await bothFieldsFixture();
+  const result = await resolveIssue({ client: jiraWithComments(jira), boardClient: board, projectId: "p", key: "ENG-1", knownState: state, directions: JIRA_OWNS });
+  assert.equal(result.fields.find((f) => f.field === "title").owner, "jira");
+  assert.equal(result.fields.find((f) => f.field === "status").owner, null);
+});
+
+test("keep board on a jira-to-board field is refused without override, applied with override and reason", async () => {
+  const refused = await bothFieldsFixture();
+  const rjc = jiraWithComments(refused.jira);
+  const no = await resolveIssue({ client: rjc, boardClient: refused.board, projectId: "p", key: "ENG-1", keep: "board", reason: "r", knownState: refused.state, directions: JIRA_OWNS });
+  assert.equal(no.ok, false);
+  assert.match(no.reason, /title is owned by jira/);
+  assert.match(no.reason, /override/);
+  assert.deepEqual(rjc.writes, []);
+
+  const { board, jira, state } = await bothFieldsFixture();
+  const jc = jiraWithComments(jira);
+  const yes = await resolveIssue({ client: jc, boardClient: board, projectId: "p", key: "ENG-1", keep: "board", reason: "Jira was edited by mistake", override: true, ticket: 7, knownState: state, directions: JIRA_OWNS });
+  assert.equal(yes.ok, true);
+  assert.match(yes.artifact.content, /Reason: Jira was edited by mistake/);
+  assert.match(yes.artifact.content, /override/);
+  assert.match(jc.comments[0].body, /Reason: Jira was edited by mistake/);
+});
+
+test("keep without a reason is refused", async () => {
+  const { board, jira, state } = await bothFieldsFixture();
+  const r = await resolveIssue({ client: jiraWithComments(jira), boardClient: board, projectId: "p", key: "ENG-1", keep: "jira", knownState: state });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /"reason" is required/);
+});
+
+test("a per-field audit names which fields came from which side, and carries the reason", async () => {
+  const { board, jira, state } = await bothFieldsFixture();
+  const jc = jiraWithComments(jira);
+  await resolveIssue({ client: jc, boardClient: board, projectId: "p", key: "ENG-1", keep: { title: "jira", priority: "board" }, reason: "priority was triaged on the board", ticket: 7, knownState: state });
+  assert.match(jc.comments[0].body, /kept from the board: priority \/ kept from Jira: title/);
+  assert.match(jc.comments[0].body, /Reason: priority was triaged on the board/);
+  assert.match(board.state.comments[0].body, /kept from the board: priority \/ kept from Jira: title/);
+});
+
+test("the brief names the owner, the ticket number token and has no <...> placeholder", () => {
+  const register = updateRegister({ entries: {} }, [{ id: "ENG-1", reason: "diverged", fields: [{ field: "title", board: "a", lastSync: "b", jira: "c", differs: true, owner: "jira" }] }]);
+  const plan = buildLoopPlan({
+    cursor: { lastPullAt: "x" },
+    conflictRegister: register,
+    failureRegister: { entries: {} },
+    board: { boardUrl: "http://localhost:3001", projectId: "proj-123" },
+  });
+  const brief = plan.units[0].description;
+  assert.match(brief, /Jira owns title here: the default is keep jira/);
+  assert.match(brief, /"ticket": \{\{issueNumber\}\}/);
+  assert.match(brief, /\.mcp-kanban\.json/);
+  assert.doesNotMatch(brief, /<[^>\n]*number[^>\n]*>/);
 });

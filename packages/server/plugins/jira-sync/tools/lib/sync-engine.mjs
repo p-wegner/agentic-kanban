@@ -7,8 +7,8 @@
 
 import { FIELDS, mapJiraIssueToBoardFields, resolveBoardStatusId } from "./field-map.mjs";
 import { hasAttributionMarker } from "./comment-marker.mjs";
-import { LEGACY_DIRECTIONS, pullsField, pushesField } from "./sync-direction.mjs";
 import { runLinkPull } from "./link-sync.mjs";
+import { LEGACY_DIRECTIONS, pullsField, pushesField, withOwners } from "./sync-direction.mjs";
 import { boardFieldsOf, fieldsEqual, incomingFieldsOf, fieldTable } from "./field-snapshot.mjs";
 
 // Markers (#1624) for board issues whose Jira twin vanished. Each also carries the
@@ -216,12 +216,16 @@ export async function runInboundSync(
       }
       conflicted++;
       const statusName = (id) => boardStatuses.find((st) => st.id === id)?.name ?? id;
+      // #1709: name the ownership case, so the resolver knows the default winner.
+      const reason = ownedEdits.length > 0
+        ? `${ownedEdits.map((f) => `${f} is jira-to-board: a board edit is not pushed; resolve keep jira, or change the direction`).join("; ")}`
+        : "board issue changed locally since the last sync; not overwritten";
       details.push({
         key: jiraIssue.key,
         action: "conflict",
-        reason: "board issue changed locally since the last sync; not overwritten",
+        reason,
         localIssueNumber: boardIssue.issueNumber,
-        fields: fieldTable(currentFields, known?.fields ?? null, jiraFields, { statusName }),
+        fields: withOwners(fieldTable(currentFields, known?.fields ?? null, jiraFields, { statusName }), directions),
         ...driftNote,
       });
       continue;

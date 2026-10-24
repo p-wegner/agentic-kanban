@@ -72,3 +72,16 @@ describe("sync health across projects (#1697)", () => {
     expect(syncHealthAttention([b], NOW)).toEqual([]);
   });
 });
+describe("sync health round 8 (#1709)", () => {
+  it("every SYNC and ATTENTION line carries a project label, falling back to the id", () => {
+    const h = health({}, { projectId: "d1c5d9c1-4897", conflicts: { count: 1, oldestAt: iso(60_000) }, conflictsDriven: false });
+    expect(syncHealthLines([h], NOW)[0]!.text.startsWith("d1c5d9c1 / Jira Sync")).toBe(true);
+    expect(syncHealthAttention([h], NOW)[0]!.text.startsWith("d1c5d9c1 / Jira Sync")).toBe(true);
+  });
+  it("ATTENTION names a needs-human unit and since when", () => {
+    const since = iso(3600_000);
+    const h = health({}, { projectName: "lab5", conflicts: { count: 1, oldestAt: iso(60_000), needsHuman: 1, needsHumanUnits: [{ key: "KD-56", since }] }, conflictsDriven: true });
+    const texts = syncHealthAttention([h], NOW).map((a) => a.text);
+    expect(texts).toContain(`lab5 / Jira Sync (Settings > Plugins > Jira Sync): KD-56 needs a human decision since ${since}`);
+  });
+});
