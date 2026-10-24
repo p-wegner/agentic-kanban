@@ -41,8 +41,8 @@ export function syncHealthLines(health: PluginSyncHealth[], nowMs: number): Arra
     const failures = h.failures?.count ?? 0;
     const failed = [lastRuns.pull, lastRuns.push].some((r) => r && !r.dryRun && !r.ok);
     const text = [
-      `${h.pluginName}: ${runPart("pull", lastRuns.pull, nowMs)}, ${runPart("push", lastRuns.push, nowMs)}`,
-      `${h.conflicts ? conflicts : "?"} conflicts`,
+      `${h.projectName ? `${h.projectName} / ` : ""}${h.pluginName}: ${runPart("pull", lastRuns.pull, nowMs)}, ${runPart("push", lastRuns.push, nowMs)}`,
+      `${h.conflicts ? conflicts : "?"} conflicts${h.conflicts?.needsHuman ? ` (${h.conflicts.needsHuman} needs-human)` : ""}${conflicts > 0 && h.conflictsDriven === false ? " (no ticket)" : ""}`,
       `${h.failures ? failures : "?"} failed pushes`,
       `outbox ${h.status.outboxLength ?? "?"}`,
       nextRun(h, nowMs),
@@ -54,7 +54,7 @@ export function syncHealthLines(health: PluginSyncHealth[], nowMs: number): Arra
 export function syncHealthAttention(health: PluginSyncHealth[], nowMs: number): ConsoleAttention[] {
   const out: ConsoleAttention[] = [];
   for (const h of health) {
-    const where = `${h.pluginName} (${PANEL} > ${h.pluginName})`;
+    const where = `${h.projectName ? `${h.projectName} / ` : ""}${h.pluginName} (${PANEL} > ${h.pluginName})`;
     for (const dir of ["pull", "push"] as const) {
       const run = h.status.lastRuns[dir];
       const every = dir === "pull" ? h.status.schedule.pullEveryMinutes : h.status.schedule.pushEveryMinutes;
@@ -68,7 +68,10 @@ export function syncHealthAttention(health: PluginSyncHealth[], nowMs: number): 
         }
       }
     }
-    if (h.conflicts && h.conflicts.count > 0 && h.conflicts.oldestAt && nowMs - Date.parse(h.conflicts.oldestAt) > DAY_MS) {
+    if (h.conflicts && h.conflicts.count > 0 && h.conflictsDriven === false) {
+      // #1697: nothing is working the conflict, so it waits for an operator or the next loop advance; say so now.
+      out.push({ level: "yellow", text: `${where}: ${h.conflicts.count} open conflict(s) with no open loop ticket${h.conflicts.needsHuman ? ` (${h.conflicts.needsHuman} needs-human)` : ""}` });
+    } else if (h.conflicts && h.conflicts.count > 0 && h.conflicts.oldestAt && nowMs - Date.parse(h.conflicts.oldestAt) > DAY_MS) {
       out.push({ level: "yellow", text: `${where}: ${h.conflicts.count} open conflict(s), oldest ${formatAge(nowMs - Date.parse(h.conflicts.oldestAt))}` });
     }
   }

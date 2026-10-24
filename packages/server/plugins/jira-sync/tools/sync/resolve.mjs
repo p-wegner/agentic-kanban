@@ -50,7 +50,16 @@ async function main() {
   });
 
   const key = process.env.SYNC_RESOLVE_KEY?.trim();
-  const keep = process.env.SYNC_RESOLVE_KEEP?.trim() || undefined;
+  let keep = process.env.SYNC_RESOLVE_KEEP?.trim() || undefined;
+  if (keep?.startsWith("{")) {
+    try {
+      keep = JSON.parse(keep);
+    } catch {
+      return { ok: false, step: "resolve", reason: "SYNC_RESOLVE_KEEP is not valid JSON" };
+    }
+  }
+  const ticket = process.env.SYNC_RESOLVE_TICKET?.trim() || undefined;
+  const reason = process.env.SYNC_RESOLVE_REASON?.trim() || undefined;
   let result;
   try {
     result = await resolveIssue({
@@ -60,6 +69,8 @@ async function main() {
       siteUrl: ctx.credentials.siteUrl,
       key,
       keep,
+      ticket,
+      reason,
       knownState: readPullState(stateDir),
     });
   } catch (err) {
@@ -68,6 +79,15 @@ async function main() {
   if (!result.ok) return { ...result, step: "resolve" };
 
   const { nextState, ...summary } = result;
+  if (result.needsHuman) {
+    // Nothing was written to either side. The entry stays outstanding, marked, so the loop shows it.
+    const register = readConflictRegister(stateDir);
+    const entry = register.entries[key];
+    if (entry && !entry.resolved) {
+      const marked = { ...entry, needsHuman: true, needsHumanReason: result.reason, needsHumanAt: new Date().toISOString(), ...(ticket ? { needsHumanTicket: ticket } : {}) };
+      writeJsonFile(conflictRegisterPath(stateDir), { entries: { ...register.entries, [key]: marked } });
+    }
+  }
   if (nextState) {
     writeJsonFile(pullStatePath(stateDir), nextState);
     // The two sides agree now, so the conflict entry is settled without waiting for the next pull

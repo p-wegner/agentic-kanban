@@ -33,7 +33,7 @@ export interface ConsoleExtras {
   ciRed: string[];
   /** #1619: `code health: 7 soft breaches in 4 files, cleanup ticket at 10 (relaxed)` from the latest scan; null before any soft breach was recorded. */
   codeHealth: string | null;
-  /** #1673: Jira-style sync health per enabled sync plugin of the project, from stored run summaries (no provider calls). */
+  /** #1673/#1697: Jira-style sync health per enabled sync plugin of EVERY project, from stored run summaries (no provider calls). */
   syncHealth: PluginSyncHealth[];
 }
 
@@ -72,7 +72,7 @@ export async function buildConsoleExtras(projectId: string, database: Database, 
     const status = describeCodeHealth(await resolveProjectCodeHealth(projectId, prefMap), prefMap, projectId);
     codeHealth = status.openSoftBreaches > 0 ? status.line : null;
   } catch { codeHealth = null; }
-  const syncHealth = await getPluginService(database).listSyncHealth(projectId).catch(() => []);
+  const syncHealth = await getPluginService(database).listSyncHealth().catch(() => []);
   return {
     codeHealth,
     syncHealth,
