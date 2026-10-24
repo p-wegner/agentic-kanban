@@ -104,7 +104,7 @@ async function main() {
   if (!dryRun) {
     writeJsonFile(pullStatePath(stateDir), result.nextState);
 
-    const conflicts = result.details
+    const conflicts = [...result.details, ...result.links.details]
       .filter((d) => d.action === "conflict")
       .map((d) => ({ id: d.key, reason: d.reason, fields: d.fields }));
     const nextRegister = updateRegister(readConflictRegister(stateDir), conflicts);
@@ -121,7 +121,7 @@ async function main() {
       const jiraValues = Object.fromEntries(result.details.filter((d) => d.jiraDiffers).map((d) => [d.key, d.jiraDiffers]));
       writeJsonFile(
         boardSnapshotPath(stateDir),
-        await snapshotAfterPull({ boardClient, projectId: boardConfig.projectId, snapshot: readBoardSnapshot(stateDir), touchedKeys: touched, jiraValues }),
+        await snapshotAfterPull({ boardClient, projectId: boardConfig.projectId, snapshot: readBoardSnapshot(stateDir), touchedKeys: touched, jiraValues, linkAdjust: result.linkSnapshotAdjust }),
       );
     } catch {
       // best effort: worst case push attempts one redundant (failing, reported) transition
@@ -131,7 +131,7 @@ async function main() {
     writeJsonFile(cursorPath(stateDir), { ...cursor, lastPullAt: new Date().toISOString(), jql });
   }
 
-  const { nextState: _nextState, ...summary } = result;
+  const { nextState: _nextState, linkSnapshotAdjust: _linkAdjust, ...summary } = result;
   return { ok: true, step: "pull", syncDirection: resolveSyncDirections(process.env).default, dryRun, applied: !dryRun, ...summary };
 }
 

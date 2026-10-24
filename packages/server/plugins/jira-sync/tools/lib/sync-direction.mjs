@@ -3,7 +3,7 @@
 // `jira-to-board`, so an existing install never starts writing to Jira by surprise.
 
 export const DIRECTIONS = ["both", "jira-to-board", "board-to-jira"];
-export const DIRECTION_FIELDS = ["title", "description", "priority", "type", "labels"];
+export const DIRECTION_FIELDS = ["title", "description", "priority", "type", "labels", "links"];
 export const DEFAULT_DIRECTION = "jira-to-board";
 
 const FIELD_ALIASES = { summary: "title", issuetype: "type", issuetypename: "type", tags: "labels" };
