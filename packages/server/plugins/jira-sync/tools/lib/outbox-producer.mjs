@@ -116,7 +116,7 @@ export function planOutbox({
           entries.push({ kind: "comment", key: issue.externalKey, comment: { body: c.body, boardCommentId: c.id } });
         }
       }
-    } else if (createEnabled && directions.pushCreates && !baseline && !prev && !pendingWritebackIds.has(issue.id)) {
+    } else if (createEnabled && !baseline && !prev && !pendingWritebackIds.has(issue.id)) {
       const same = (e) => e.kind === "create" && e.boardIssueId === issue.id;
       if (!queued(same)) {
         entries.push({

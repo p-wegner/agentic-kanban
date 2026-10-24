@@ -182,3 +182,136 @@ test("resolve refuses an unknown side and an unlinked key", async () => {
   const none = await resolveIssue({ client: writableJira(jira), boardClient: board, projectId: "p", key: "ENG-99", knownState: state });
   assert.equal(none.ok, false);
 });
+
+// ---- #1697: evidence, per-field keep, needs-human, audit comments, brief placeholders ----
+
+/** Both fields changed on both sides, like KD-56 in round 7. */
+async function bothFieldsFixture() {
+  const board = fakeBoardClient();
+  const jira = [jiraIssue("ENG-1", { summary: "Set up CI", updated: "2026-09-01T00:00:00.000Z", priority: "Medium" })];
+  const first = await runInboundSync(fakeJiraClient(jira), board, { jql: "project = ENG", projectId: "p", knownState: { issues: {} } });
+  Object.assign(board.state.issues[0], { title: "Board title", priority: "high", updatedAt: "2026-09-04T00:00:00.000Z" });
+  jira[0].fields.summary = "Jira title";
+  jira[0].fields.priority = { name: "Low" };
+  jira[0].fields.updated = "2026-09-05T00:00:00.000Z";
+  jira[0].changelog = {
+    histories: [
+      { created: "2026-09-02T00:00:00.000Z", author: { displayName: "Early Eve" }, items: [{ field: "summary" }] },
+      { created: "2026-09-05T00:00:00.000Z", author: { displayName: "Jo Jira" }, items: [{ field: "summary" }, { field: "priority" }] },
+    ],
+  };
+  return { board, jira, state: first.nextState };
+}
+
+/** Jira fake applying summary/priority writes and recording comments. */
+function jiraWithComments(issues) {
+  const client = fakeJiraClient(issues);
+  client.writes = [];
+  client.comments = [];
+  client.getIssue = async (key) => issues.find((i) => i.key === key);
+  client.updateIssueFields = async (key, fields) => {
+    client.writes.push({ key, fields });
+    const issue = issues.find((i) => i.key === key);
+    if (fields.summary != null) issue.fields.summary = fields.summary;
+    if (fields.priority) issue.fields.priority = fields.priority;
+    issue.fields.updated = "2026-09-09T00:00:00.000Z";
+  };
+  client.addComment = async (key, body) => {
+    client.comments.push({ key, body });
+    issues.find((i) => i.key === key).fields.updated = "2026-09-09T00:00:01.000Z";
+  };
+  return client;
+}
+
+test("resolve show: per differing field, when and by whom each side last changed it", async () => {
+  const { board, jira, state } = await bothFieldsFixture();
+  const result = await resolveIssue({ client: jiraWithComments(jira), boardClient: board, projectId: "p", key: "ENG-1", knownState: state });
+  const title = result.fields.find((f) => f.field === "title");
+  assert.equal(title.evidence.jira.by, "Jo Jira");
+  assert.equal(title.evidence.jira.at, "2026-09-05T00:00:00.000Z", "the newest changelog entry for the field wins");
+  assert.equal(title.evidence.board.at, "2026-09-04T00:00:00.000Z");
+  assert.equal(result.fields.find((f) => f.field === "type").evidence, undefined, "equal rows carry no evidence");
+});
+
+test("per-field keep writes only the chosen fields each way; next pull is quiet", async () => {
+  const { board, jira, state } = await bothFieldsFixture();
+  const jc = jiraWithComments(jira);
+  const result = await resolveIssue({ client: jc, boardClient: board, projectId: "p", key: "ENG-1", keep: { title: "board", priority: "jira" }, ticket: 7, knownState: state });
+  assert.equal(result.ok, true, result.reason);
+  assert.deepEqual(jc.writes.map((w) => Object.keys(w.fields)), [["summary"]], "only the title goes to Jira");
+  assert.equal(jira[0].fields.summary, "Board title");
+  assert.equal(board.state.issues[0].title, "Board title");
+  assert.equal(board.state.issues[0].priority, "low", "priority came from Jira");
+  assert.equal(jira[0].fields.priority.name, "Low");
+
+  const next = await runInboundSync(fakeJiraClient(jira), board, { jql: "project = ENG", projectId: "p", knownState: result.nextState });
+  assert.equal(next.conflicted, 0);
+  assert.equal(next.updated, 0);
+});
+
+test("keep posts the audit comment on the losing side with the previous values and the ticket", async () => {
+  const { board, jira, state } = await bothFieldsFixture();
+  const jc = jiraWithComments(jira);
+  const result = await resolveIssue({ client: jc, boardClient: board, projectId: "p", key: "ENG-1", keep: "board", ticket: 7, knownState: state });
+  assert.equal(result.auditComment.jira.posted, true);
+  assert.equal(jc.comments.length, 1);
+  assert.match(jc.comments[0].body, /ticket #7/);
+  assert.match(jc.comments[0].body, /title: was "Jira title", now "Board title"/);
+  assert.match(jc.comments[0].body, /priority: was "low"/);
+  assert.equal(board.state.comments.length, 0, "the winning side gets no comment");
+  assert.equal(result.artifact.path, "docs/jira-sync/conflicts/ENG-1.md");
+  assert.match(result.artifact.content, /Jo Jira/);
+
+  const second = await bothFieldsFixture();
+  await resolveIssue({ client: jiraWithComments(second.jira), boardClient: second.board, projectId: "p", key: "ENG-1", keep: "jira", ticket: "#8", knownState: second.state });
+  const note = second.board.state.comments[0];
+  assert.match(note.body, /ticket #8/);
+  assert.match(note.body, /title: was "Board title", now "Jira title"/);
+  assert.equal(note.payload.origin, "jira", "push must not echo the audit note to Jira");
+});
+
+test("needs-human writes nothing, and the loop reports the unit as needs-human", async () => {
+  const { board, jira, state } = await bothFieldsFixture();
+  const jc = jiraWithComments(jira);
+  const result = await resolveIssue({ client: jc, boardClient: board, projectId: "p", key: "ENG-1", keep: "needs-human", reason: "no ordering signal", ticket: 7, knownState: state });
+  assert.equal(result.ok, true);
+  assert.equal(result.needsHuman, true);
+  assert.equal(result.nextState, undefined);
+  assert.deepEqual(jc.writes, []);
+  assert.deepEqual(jc.comments, []);
+  assert.equal(board.state.comments.length, 0);
+  assert.equal(board.state.issues[0].title, "Board title");
+  assert.match(result.artifact.content, /Needs a human/);
+
+  const register = updateRegister({ entries: {} }, [{ id: "ENG-1", reason: "diverged" }]);
+  register.entries["ENG-1"].needsHuman = true;
+  register.entries["ENG-1"].needsHumanReason = "no ordering signal";
+  const plan = buildLoopPlan({ cursor: { lastPullAt: "x" }, conflictRegister: register, failureRegister: { entries: {} } });
+  assert.equal(plan.units[0].needsHuman, true);
+  assert.match(plan.note, /1 needs-human/);
+  assert.match(plan.units[0].description, /needs-human/);
+});
+
+test("resolve rejects an unknown field or side in a per-field keep", async () => {
+  const { board, jira, state } = await bothFieldsFixture();
+  for (const keep of [{ labels: "board" }, { title: "both" }, {}]) {
+    const r = await resolveIssue({ client: jiraWithComments(jira), boardClient: board, projectId: "p", key: "ENG-1", keep, knownState: state });
+    assert.equal(r.ok, false);
+  }
+});
+
+test("the brief carries the real endpoint and project id, no <...> placeholder", async () => {
+  const register = updateRegister({ entries: {} }, [{ id: "ENG-1", reason: "diverged" }]);
+  const plan = buildLoopPlan({
+    cursor: { lastPullAt: "x" },
+    conflictRegister: register,
+    failureRegister: { entries: {} },
+    board: { boardUrl: "http://board.example:3001/", projectId: "proj-123" },
+  });
+  const brief = plan.units[0].description;
+  assert.match(brief, /POST http:\/\/board\.example:3001\/api\/plugins\/jira-sync\/sync\/resolve/);
+  assert.match(brief, /"projectId":"proj-123"/);
+  assert.match(brief, /needs-human/);
+  assert.match(brief, /docs\/jira-sync\/conflicts\/ENG-1\.md/);
+  assert.doesNotMatch(brief, /<jira-sync plugin id>|<this project>/);
+});

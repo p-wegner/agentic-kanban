@@ -48,7 +48,7 @@ export function updateRegister(register, current, { now = new Date().toISOString
 export function outstandingEntries(register) {
   return Object.entries(register.entries)
     .filter(([, entry]) => !entry.resolved)
-    .map(([id, entry]) => ({ id, round: entry.round, reason: entry.reason, detectedAt: entry.detectedAt, ...(entry.fields ? { fields: entry.fields } : {}) }));
+    .map(([id, entry]) => ({ id, round: entry.round, reason: entry.reason, detectedAt: entry.detectedAt, ...(entry.fields ? { fields: entry.fields } : {}), ...(entry.needsHuman ? { needsHuman: true, needsHumanReason: entry.needsHumanReason } : {}) }));
 }
 
 /** Stable identity for a push-plan `failed` entry — its Jira key when known, else the board issue id. */

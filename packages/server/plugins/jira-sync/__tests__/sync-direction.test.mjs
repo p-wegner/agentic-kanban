@@ -15,7 +15,7 @@ test("resolveSyncDirections: unset = jira-to-board; overrides and toggles parse"
   const d = resolveSyncDirections({});
   assert.equal(d.default, "jira-to-board");
   assert.ok(Object.values(d.fields).every((v) => v === "jira-to-board"));
-  assert.ok(d.pushStatus && d.pushComments && d.pushCreates);
+  assert.ok(d.pushStatus && d.pushComments);
   const o = resolveSyncDirections({
     SYNC_CONFIG_SYNCDIRECTION: "both",
     SYNC_CONFIG_FIELDDIRECTIONS: '{"description":"jira-to-board"}',
@@ -152,4 +152,50 @@ test("no echo: after a pull writes a field, the push snapshot already holds it",
   const sn = { issues: { i1: { status: "Todo", fields: { title: "Old", description: "D", priority: "medium", type: "task", labels: [] } } }, commentsSeen: [] };
   const next = await snapshotAfterPull({ boardClient: board, projectId: "p", snapshot: sn, touchedKeys: new Set(["KD-1"]) });
   assert.equal(next.issues.i1.fields.title, "From Jira");
+});
+
+// ---- #1696 ----
+const lastSync = { title: "S", description: "", priority: "medium", type: "task", statusId: "s-todo" };
+const stateFor = (over = {}) => ({ issues: { "KD-1": { updated: "j1", boardIssueId: "i1", boardUpdatedAt: "u0", fields: lastSync, ...over } } });
+
+test("board-to-jira: a Jira edit is not recorded as agreed; push restores Jira to the board value", async () => {
+  const directions = resolveSyncDirections({ SYNC_CONFIG_SYNCDIRECTION: "board-to-jira" });
+  const board = fakeBoard({ id: "i1", externalKey: "KD-1", title: "S", description: "", priority: "medium", issueType: "task", statusId: "s-todo", updatedAt: "u0" });
+  const r = await runInboundSync(fakeJiraRead([jiraIssue("Jira edit", "j2")]), board, { jql: "x", projectId: "p", knownState: stateFor(), directions });
+  assert.equal(board.st.issue.title, "S");
+  assert.equal(r.updated, 0, "no board write, no update count");
+  assert.equal(r.nextState.issues["KD-1"].fields.title, "Jira edit", "lastSync holds what Jira holds");
+  assert.deepEqual(r.details[0].jiraDiffers, { title: "Jira edit" });
+  // pull.mjs hands jiraDiffers to the push snapshot: the board title then reads as a change.
+  const base = plan({ issues: [issue({ title: "S" })], directions }).nextSnapshot;
+  base.issues.i1.fields = { ...base.issues.i1.fields, ...r.details[0].jiraDiffers };
+  const pushed = plan({ issues: [issue({ title: "S" })], snapshot: base, directions });
+  assert.deepEqual(pushed.entries[0].fields, { title: "S" });
+});
+
+test("jira-to-board: a board edit to a Jira-owned field is a conflict with or without a Jira change", async () => {
+  for (const jiraUpdated of ["j1", "j2"]) {
+    const board = fakeBoard({ id: "i1", externalKey: "KD-1", title: "Board edit", description: "", priority: "medium", issueType: "task", statusId: "s-todo", updatedAt: "u-edit" });
+    const r = await runInboundSync(fakeJiraRead([jiraIssue("S", jiraUpdated)]), board, { jql: "x", projectId: "p", knownState: stateFor(), directions: resolveSyncDirections({}) });
+    assert.equal(r.conflicted, 1, `jira updated=${jiraUpdated}`);
+    assert.equal(board.st.issue.title, "Board edit");
+  }
+});
+
+test("push does not re-baseline an unpushed jira-to-board edit as agreed", async () => {
+  const { refreshPullStateAfterPush } = await import("../tools/lib/state-sync.mjs");
+  const directions = resolveSyncDirections({ SYNC_CONFIG_SYNCDIRECTION: "both", SYNC_CONFIG_FIELDDIRECTIONS: '{"priority":"jira-to-board"}' });
+  const boardIssue = { id: "i1", externalKey: "KD-1", title: "New", description: "", priority: "high", issueType: "task", statusId: "s-todo", updatedAt: "u2" };
+  const boardClient = { async listExternallyTrackedIssues() { return new Map([["KD-1", boardIssue]]); } };
+  const next = await refreshPullStateAfterPush({ client: {}, boardClient, projectId: "p", pullState: stateFor(), applied: [{ kind: "fields", key: "KD-1" }], directions });
+  assert.equal(next.issues["KD-1"].fields.title, "New");
+  assert.equal(next.issues["KD-1"].fields.priority, "medium");
+});
+
+test("one create switch: pushCreate alone enables push-create", () => {
+  const issues = [issue({ externalKey: null, id: "n1" })];
+  const sn = plan({ issues: [], snapshot: { issues: {}, commentsSeen: [] }, createEnabled: true }).nextSnapshot;
+  const r = plan({ issues, snapshot: sn, createEnabled: true });
+  assert.equal(r.entries.length, 1);
+  assert.equal(r.entries[0].kind, "create");
 });

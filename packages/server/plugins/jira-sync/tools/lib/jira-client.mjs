@@ -183,9 +183,12 @@ export class JiraClient {
     }
   }
 
-  async getIssue(issueIdOrKey, { fields } = {}) {
+  async getIssue(issueIdOrKey, { fields, expand } = {}) {
+    const query = {};
+    if (fields) query.fields = Array.isArray(fields) ? fields.join(",") : fields;
+    if (expand) query.expand = expand;
     return this.request(`/rest/api/3/issue/${encodeURIComponent(issueIdOrKey)}`, {
-      query: fields ? { fields: Array.isArray(fields) ? fields.join(",") : fields } : undefined,
+      query: Object.keys(query).length ? query : undefined,
     });
   }
 

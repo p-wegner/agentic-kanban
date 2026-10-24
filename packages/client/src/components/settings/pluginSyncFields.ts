@@ -1,4 +1,4 @@
-export type SyncFieldType = "text" | "boolean" | "number" | "json";
+export type SyncFieldType = "text" | "boolean" | "number" | "json" | "select";
 
 /** Error text for a field value that cannot be saved, or null. Empty is always valid (required is the server's check). */
 export function validateSyncField(type: SyncFieldType, value: string): string | null {

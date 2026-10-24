@@ -50,3 +50,25 @@ describe("sync health (#1673)", () => {
     expect(syncHealthAttention([health({}, { conflicts: { count: 1, oldestAt: iso(3600_000) } })], NOW)).toEqual([]);
   });
 });
+describe("sync health across projects (#1697)", () => {
+  it("lists a second project's conflict on its own line, tagged with the project", () => {
+    const a = health({}, { projectName: "alpha" });
+    const b = health({}, { projectName: "lab5", conflicts: { count: 1, oldestAt: iso(60_000), needsHuman: 1 }, conflictsDriven: false });
+    const lines = syncHealthLines([a, b], NOW);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]!.level).toBe("yellow");
+    expect(lines[1]!.text).toContain("lab5 / Jira Sync");
+    expect(lines[1]!.text).toContain("1 conflicts (1 needs-human) (no ticket)");
+  });
+  it("a conflict nobody is working raises ATTENTION at once, not after 24h", () => {
+    const b = health({}, { projectName: "lab5", conflicts: { count: 1, oldestAt: iso(60_000) }, conflictsDriven: false });
+    const a = syncHealthAttention([b], NOW);
+    expect(a).toHaveLength(1);
+    expect(a[0]!.text).toContain("lab5 / Jira Sync");
+    expect(a[0]!.text).toContain("no open loop ticket");
+  });
+  it("a conflict with an open loop ticket stays quiet until it is a day old", () => {
+    const b = health({}, { conflicts: { count: 1, oldestAt: iso(60_000) }, conflictsDriven: true });
+    expect(syncHealthAttention([b], NOW)).toEqual([]);
+  });
+});

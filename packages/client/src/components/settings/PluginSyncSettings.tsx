@@ -8,7 +8,7 @@ import { validateSyncFields, type SyncFieldType } from "./pluginSyncFields.js";
 
 type SyncConfigView = {
   provider: string;
-  fields: Array<{ key: string; label?: string; description?: string; required: boolean; type?: SyncFieldType; value: string }>;
+  fields: Array<{ key: string; label?: string; description?: string; required: boolean; type?: SyncFieldType; options?: string[]; value: string }>;
   secrets: Array<{ name: string; present: boolean }>;
 };
 
@@ -118,6 +118,17 @@ export function PluginSyncSettings({ pluginRowId, projectId }: { pluginRowId: st
                   title={f.description}
                   data-testid={`plugin-sync-field-${f.key}`}
                 />
+              ) : type === "select" ? (
+                <select
+                  value={fieldValues[f.key] ?? ""}
+                  onChange={(e) => set(e.target.value)}
+                  title={f.description}
+                  className={INPUT_CLASS}
+                  data-testid={`plugin-sync-field-${f.key}`}
+                >
+                  <option value="">(default)</option>
+                  {(f.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
               ) : (
                 <input
                   type={type === "number" ? "number" : "text"}
