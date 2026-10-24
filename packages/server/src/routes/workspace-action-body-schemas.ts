@@ -56,10 +56,7 @@ export const updateWorkspaceCommentBody = z.object({
  * from a non-boolean one.
  */
 export const resolveWorkspaceCommentBody = z.object({
-  resolved: z.boolean({
-    required_error: "resolved (boolean) is required",
-    invalid_type_error: "resolved (boolean) is required",
-  }),
+  resolved: z.boolean({ error: "resolved (boolean) is required" }),
 }).passthrough();
 
 /**

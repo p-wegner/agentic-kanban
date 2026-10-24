@@ -8,6 +8,7 @@
 import { FIELDS, mapJiraIssueToBoardFields, resolveBoardStatusId } from "./field-map.mjs";
 import { hasAttributionMarker } from "./comment-marker.mjs";
 import { LEGACY_DIRECTIONS, pullsField, pushesField } from "./sync-direction.mjs";
+import { runLinkPull } from "./link-sync.mjs";
 import { boardFieldsOf, fieldsEqual, incomingFieldsOf, fieldTable } from "./field-snapshot.mjs";
 
 // Markers (#1624) for board issues whose Jira twin vanished. Each also carries the
@@ -281,6 +282,12 @@ export async function runInboundSync(
     });
   }
 
+  // Issue links -> board dependencies (#1700), once every issue of this run has a board id.
+  const idByKey = new Map([...boardIssuesByKey].map(([k, i]) => [k, i.id]));
+  for (const [k, entry] of Object.entries(nextState.issues)) if (entry.boardIssueId && !entry.deletedAt) idByKey.set(k, entry.boardIssueId);
+  const linkResult = await runLinkPull(boardClient, { jiraIssues, idByKey, knownLinks: knownState.links ?? {}, directions, dryRun });
+  nextState.links = linkResult.nextLinks;
+
   // Deletions/moves out of JQL scope: a key we've synced before but did not see this
   // run. Never hard-deleted from the board (#1078); since #1624 each is classified
   // (deleted = `GET issue` 404, otherwise out of scope), marked with a tag, and a
@@ -328,6 +335,15 @@ export async function runInboundSync(
     outOfScope,
     deleted,
     details,
+    links: {
+      created: linkResult.created,
+      removed: linkResult.removed,
+      skipped: linkResult.skipped,
+      unsupported: linkResult.unsupported,
+      conflicted: linkResult.conflicted,
+      details: linkResult.details,
+    },
+    linkSnapshotAdjust: linkResult.snapshotAdjust,
     nextState,
   };
 }

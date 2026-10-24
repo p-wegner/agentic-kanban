@@ -131,6 +131,19 @@ export class BoardClient {
     return this.request(`/api/issues/${encodeURIComponent(issueId)}/tags/${encodeURIComponent(tagId)}`, { method: "DELETE" });
   }
 
+  /** `{ dependencies: [{ id, issueId, dependsOnId, type }] }`, both directions. */
+  getDependencies(issueId) {
+    return this.request(`/api/issues/${encodeURIComponent(issueId)}/dependencies`);
+  }
+
+  addDependency(issueId, dependsOnId, type) {
+    return this.request(`/api/issues/${encodeURIComponent(issueId)}/dependencies`, { method: "POST", body: { dependsOnId, type } });
+  }
+
+  removeDependency(issueId, dependencyId) {
+    return this.request(`/api/issues/${encodeURIComponent(issueId)}/dependencies/${encodeURIComponent(dependencyId)}`, { method: "DELETE" });
+  }
+
   /** The newest page of an issue's comments (`{ comments: [...] }`). */
   async listComments(issueId) {
     const page = await this.request(`/api/issues/${encodeURIComponent(issueId)}/comments?limit=200`);

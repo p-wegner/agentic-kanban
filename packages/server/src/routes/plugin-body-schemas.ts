@@ -131,11 +131,11 @@ export const pluginSyncSecretsBody = z.object({
 /** `POST /api/plugins/:id/sync/resolve` (#1643): no `keep` = read-only three-way field table. */
 export const pluginSyncResolveBody = z.object({
   projectId,
-  key: z.string({ required_error: '"key" is required', invalid_type_error: '"key" must be a string' }),
+  key: z.string({ error: (iss) => (iss.input === undefined ? '"key" is required' : '"key" must be a string') }),
   keep: z.union([
     z.enum(["board", "jira", "needs-human"]),
-    z.record(z.enum(["board", "jira"])).refine((m) => Object.keys(m).length > 0, "per-field keep needs at least one field"),
-  ], { invalid_type_error: '"keep" must be "board", "jira", "needs-human" or a per-field map' }).optional(),
+    z.record(z.string(), z.enum(["board", "jira"])).refine((m) => Object.keys(m).length > 0, "per-field keep needs at least one field"),
+  ], { error: '"keep" must be "board", "jira", "needs-human" or a per-field map' }).optional(),
   /** The loop ticket that decided (#1697): named in the audit comment on the losing side. */
   ticket: z.union([z.string(), z.number()]).optional(),
   /** Why a decision is "needs-human" (or what tipped it). */
@@ -145,9 +145,6 @@ export const pluginSyncResolveBody = z.object({
 /** `POST /api/plugins/:id/sync/trigger` (#1081). */
 export const pluginSyncTriggerBody = z.object({
   projectId,
-  direction: z.enum(["pull", "push"], {
-    required_error: '"direction" must be "pull" or "push"',
-    invalid_type_error: '"direction" must be "pull" or "push"',
-  }),
+  direction: z.enum(["pull", "push"], { error: '"direction" must be "pull" or "push"' }),
   dryRun: z.boolean().optional(),
 }).passthrough();

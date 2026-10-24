@@ -223,6 +223,19 @@ export class JiraClient {
     });
   }
 
+  /** `POST /rest/api/3/issueLink`; `inwardIssue` is the end that reads "is blocked by". */
+  async createIssueLink({ typeName, inwardKey, outwardKey }) {
+    await this.request("/rest/api/3/issueLink", {
+      method: "POST",
+      body: { type: { name: typeName }, inwardIssue: { key: inwardKey }, outwardIssue: { key: outwardKey } },
+    });
+  }
+
+  /** `DELETE /rest/api/3/issueLink/{id}` */
+  async deleteIssueLink(linkId) {
+    await this.request(`/rest/api/3/issueLink/${encodeURIComponent(linkId)}`, { method: "DELETE" });
+  }
+
   /** `PUT /rest/api/3/issue/{key}` — edits fields in place (summary, description as ADF, priority, ...). */
   async updateIssueFields(issueIdOrKey, fields) {
     await this.request(`/rest/api/3/issue/${encodeURIComponent(issueIdOrKey)}`, {

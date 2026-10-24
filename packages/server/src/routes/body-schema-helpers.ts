@@ -43,7 +43,7 @@ import { z } from "zod";
  */
 export function required(message: string) {
   return z
-    .string({ required_error: message, invalid_type_error: message })
+    .string({ error: message })
     .refine((v) => v.trim().length > 0, message);
 }
 
@@ -52,7 +52,7 @@ export function required(message: string) {
  * `if (!body.x) return c.json({ error: message }, 400)`.
  */
 export function requiredRaw(message: string) {
-  return z.string({ required_error: message, invalid_type_error: message }).min(1, message);
+  return z.string({ error: message }).min(1, message);
 }
 
 /**
@@ -137,7 +137,7 @@ export function stringOnly(message: string) {
  */
 export function requiredTrimmed(message: string) {
   return z
-    .string({ required_error: message, invalid_type_error: message })
+    .string({ error: message })
     .refine((v) => v.trim().length > 0, message)
     .transform((v) => v.trim());
 }

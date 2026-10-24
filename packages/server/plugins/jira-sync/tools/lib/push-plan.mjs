@@ -7,6 +7,7 @@
 //   { kind: "transition", key, targetStatus }
 //   { kind: "comment", key, comment: { body, boardCommentId, origin? } }
 //   { kind: "create", boardIssueId, fields }
+//   { kind: "link", action: "add"|"remove", linkKey, linkType: "blocks"|"relates", from, to }   (#1700)
 //   { kind: "fields", key, boardIssueId, fields: { title?, description?, priority?, type?, labels? } }
 // A comment entry with `comment.origin === "jira"` is an import echo of a
 // Jira comment reflected onto the board — pushing it back would loop, so it
@@ -16,6 +17,7 @@ import { resolveTransitionId, TransitionNotFoundError } from "./transitions.mjs"
 import { attributeComment } from "./comment-marker.mjs";
 import { markdownToAdf } from "./adf.mjs";
 import { BOARD_PRIORITY_TO_JIRA, mapBoardTypeToJira } from "./field-map.mjs";
+import { jiraLinksOf, linkKey } from "./link-sync.mjs";
 
 /**
  * A create entry rarely knows the Jira project; inject the configured project key and
@@ -120,6 +122,24 @@ async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaul
         reason: `Jira refused field(s) ${rejectedNames.join(", ")}: ${Object.entries(rejected).map(([f, m]) => `${f}: ${m}`).join("; ")}`,
       },
     };
+  }
+
+  if (entry.kind === "link") {
+    const typeName = entry.linkType === "relates" ? "Relates" : "Blocks";
+    const description = { key: entry.from, kind: "link", action: entry.action, linkType: entry.linkType, from: entry.from, to: entry.to };
+    // Read the live links first: an add is idempotent and a remove needs the Jira link id.
+    const issue = await client.getIssue(entry.from, { fields: ["issuelinks"] });
+    const existing = jiraLinksOf(issue).filter((l) => l.kind === entry.linkType && linkKey(l.kind, l.from, l.to) === entry.linkKey);
+    if (entry.action === "add") {
+      if (existing.length > 0) return { ok: true, applied: { ...description, skipped: "already linked in Jira" } };
+      if (dryRun) return { ok: true, applied: { ...description, wouldApply: true } };
+      await client.createIssueLink({ typeName, inwardKey: entry.to, outwardKey: entry.from });
+      return { ok: true, applied: description };
+    }
+    if (existing.length === 0) return { ok: true, applied: { ...description, skipped: "no such link in Jira" } };
+    if (dryRun) return { ok: true, applied: { ...description, wouldApply: true } };
+    for (const l of existing) await client.deleteIssueLink(l.id);
+    return { ok: true, applied: description };
   }
 
   if (entry.kind === "create") {
