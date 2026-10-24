@@ -53,9 +53,12 @@ describe("incremental assembly with the shepherd (#1572)", () => {
     },
     removeWorktree: async (repoPath: string, dir: string) => { git(repoPath, "worktree", "remove", "--force", dir); },
   });
-  /** A shepherd stand-in: resolves whatever merge is in progress in `worktree` keeping both sides. */
+  /** A shepherd stand-in: the turn starts from the clean tree (#1711), runs the merge named in the brief itself, keeps both sides. */
   const resolvingRunner = (calls: Array<Parameters<TrainAgentRunner>[0]>): TrainAgentRunner => async (a) => {
     calls.push(a);
+    const branch = /git merge --no-ff ([^\s`]+)/.exec(a.prompt)?.[1] as string;
+    expect(() => git(a.worktree, "rev-parse", "-q", "--verify", "MERGE_HEAD")).toThrow(); // no merge left pending
+    try { git(a.worktree, "-c", "user.email=s@s", "-c", "user.name=s", "merge", "--no-ff", "-q", branch); } catch { /* conflicts: resolved below */ }
     writeFileSync(join(a.worktree, "f.txt"), "one\nTWO-from-1\nTWO-from-2\nthree\n");
     git(a.worktree, "add", "f.txt");
     git(a.worktree, "-c", "user.email=s@s", "-c", "user.name=s", "commit", "--no-edit", "-q");

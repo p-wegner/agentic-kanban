@@ -26,6 +26,7 @@ describe("merge-train red strategy (#1277)", () => {
         timeoutMs: MERGE_TRAIN_AGENT_FIX_DEFAULT_TIMEOUT_MS,
         costCapUsd: MERGE_TRAIN_AGENT_FIX_DEFAULT_COST_CAP_USD,
       },
+      conflictResolution: "shepherd",
     });
   });
 

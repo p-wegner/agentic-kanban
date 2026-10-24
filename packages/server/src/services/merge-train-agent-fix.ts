@@ -16,6 +16,7 @@
  * Pure orchestration over ports (`runAgent`, `regate`, git), so the cap behaviour is testable
  * without an agent, a gate or a repo.
  */
+import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -251,6 +252,13 @@ export async function runAgentFix(args: {
 
   const baseHead = await headSha(worktree).catch(() => null);
   while (turns < caps.maxTurns) {
+    // #1711: a missing cwd makes spawn report a misleading binary ENOENT. It is infrastructure, not a
+    // red fix: hold the train, name the directory, and spend no turn.
+    if (!existsSync(worktree)) {
+      outcome = "held"; reason = `fix agent cwd missing: ${worktree}`; infraRetries++;
+      console.warn(`[merge-train-agent-fix] ${label}: ${reason}`);
+      break;
+    }
     const remaining = caps.timeoutMs - (Date.now() - startedMs);
     if (remaining <= 0) { outcome = "capped"; capped = "timeout"; reason = `fix agent exceeded ${caps.timeoutMs}ms`; break; }
     turns++;
