@@ -130,9 +130,29 @@ so its context already holds the member tickets.
 - **Status line**: session id, worker, turns and last action are persisted in
   `gateEvidence.shepherd` and shown in the train drawer and `status --watch`.
 
+- **Member conflicts (#1711)**: `merge_train_conflict_resolution_<projectId>` (Settings > Workflow, next
+  to the risk posture) picks what assembly does with a member that collides with a sibling:
+  `shepherd` (default; needs a fix-agent strategy, otherwise it is `defer`), `defer` (the later member
+  waits for the next train) or `author` (dropped without `deferred`, so it goes back to the member's own
+  workspace like a base conflict). A held or failed shepherd conflict turn falls back to `defer` for that
+  member, never a drop, and the train log says so (`shepherd fallback - deferring ...`).
+- **Conflict turns start from a CLEAN tree (#1711)**: the shepherd aborts the pending merge before the
+  turn and the brief tells the agent to run `git merge --no-ff <branch>` itself. A worker checks out only
+  the committed HEAD (it never saw a merge left in progress) and its commit is fast-forwarded into the
+  host tree, which a pending merge would refuse. That is why conflict turns never ran on a worker-gated
+  train.
+- **Missing host tree (#1711)**: the host path a turn is spawned in is the staging gate's worktree. A
+  worker-gated train spends its gate elsewhere and that directory could be gone when the red verdict
+  returned; `spawn claude.exe` then reported a binary ENOENT, which classified as red and ended trains
+  with zero fix turns. `ensureGateWorktree` re-creates it at the train ref before the fix turn; if it is
+  still missing the turn holds the train as inconclusive (`fix agent cwd missing: <path>`) and
+  consumes no turn. The exact mechanism that removed the directory was not captured in a log.
+
 **Known limits:** resume works only on the machine holding the session (a placed turn on another
 worker starts a fresh session, disclosed in the prompt); the assembly worktree has no installed
-dependencies, so conflicts are resolved without running suites there.
+dependencies, so conflicts are resolved without running suites there. A re-created gate worktree
+has no installed dependencies either (the regate runs on the worker). `author` and `defer` are not
+applied to a bisect half, which assembles as before.
 
 Target rules that stay: members are frozen at the sha they joined with (a changed member leaves and
 rejoins the next train), `git rerere` replays earlier resolutions, and each shepherd edit is its own

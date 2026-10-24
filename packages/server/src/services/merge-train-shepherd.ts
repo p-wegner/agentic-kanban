@@ -8,6 +8,7 @@
  * testable without git, a gate or an agent. PHASE 1: nothing calls `mergeMembersWithShepherd` from
  * `assembleMergeTrain` yet - see CONTINUE.md for the remaining wiring.
  */
+import { existsSync } from "node:fs";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { MergeTrainShepherdDto } from "@agentic-kanban/shared/types";
 import type { MergeTrainAgentFixCaps } from "@agentic-kanban/shared/lib/merge-train-red-strategy";
@@ -140,8 +141,8 @@ export function buildConflictBrief(args: {
     "```",
     "",
     "## Scope",
-    `- A merge of \`${args.member.branch}\` is in progress in this directory. Resolve every conflict keeping BOTH members' intent.`,
-    "- Complete the merge with a plain commit (no rebase, no squash). Work only in this directory.",
+    `- This directory is the clean train tree. Run \`git merge --no-ff ${args.member.branch}\` here (the branch is available locally); it conflicts as shown above.`,
+    "- Resolve every conflict keeping BOTH members' intent, then complete the merge with a plain commit (no rebase, no squash). Work only in this directory.",
   ].join("\n");
 }
 
@@ -205,12 +206,18 @@ export async function mergeMembersWithShepherd(args: {
     const remaining = caps.timeoutMs - (Date.now() - startedMs);
     if (remaining <= 0) { await defer(m, `shepherd timeout ${caps.timeoutMs}ms reached`); continue; }
 
+    if (!existsSync(args.worktree)) { held = true; await defer(m, `shepherd cwd missing: ${args.worktree}`); continue; }
+
     const rivalId = m.conflictsWith?.issueNumber != null ? `#${m.conflictsWith.issueNumber}` : m.conflictsWith?.branch ?? "the train";
     shepherd.setAction(`resolving conflict ${m.issueNumber != null ? `#${m.issueNumber}` : m.branch} vs ${rivalId}`);
     const prompt = buildConflictBrief({
       label: args.label, baseBranch: args.baseBranch, member: m, alreadyOnTrain: included,
       detail: attempt.detail, first: shepherd.needsFullBrief,
     });
+    // #1711: the turn may run on a worker that checks out only the committed HEAD (it never sees a merge left
+    // in progress here) and whose commit is fast-forwarded in, which a pending merge would refuse. So the turn
+    // starts from the clean tree and performs the merge itself, wherever it runs.
+    await args.abortMerge().catch(() => undefined);
     let ran = false;
     let lastError = "";
     while (!ran && shepherd.infraRetries <= SHEPHERD_MAX_INFRA_RETRIES) {

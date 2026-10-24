@@ -1,4 +1,5 @@
 // Staging gate + base-alone control arm for a release train, split out of merge-queue-train.ts (#1605).
+import { existsSync } from "node:fs";
 import { trainGateWorkerName } from "./merge-train-placement.js";
 import type { Database } from "../db/index.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -22,6 +23,21 @@ import { noteMergeTrainGateProgress } from "./merge-train-live-registry.js";
 /** A shepherd turn's liveness beat, well inside the reconciler's 15-minute no-progress limit. */
 const SHEPHERD_BEAT_MS = 60_000;
 
+
+/**
+ * #1711: the fix turn is spawned (or pinned for a worker) with this host directory as its cwd, and a worker-gated
+ * train's directory can be gone by the time the red verdict returns (the gate ran elsewhere for a long while, and a
+ * missing cwd made `spawn claude.exe` report ENOENT). Put the tree back at `ref` when it is missing; false when it
+ * could not be (the fix loop then holds the train as inconclusive, naming the path).
+ */
+export async function ensureGateWorktree(repoPath: string, worktree: string, ref: string): Promise<boolean> {
+  if (existsSync(worktree)) return true;
+  await gitExec(["worktree", "prune"], { cwd: repoPath });
+  const added = await gitExec(["worktree", "add", "--force", worktree, ref], { cwd: repoPath });
+  const ok = !added.error && existsSync(worktree);
+  console.warn(`[merge-train] gate worktree ${worktree} was missing before the fix turn; ${ok ? `re-created at ${ref}` : "could not be re-created"}`);
+  return ok;
+}
 
 /** What one staging gate reports back. `stage`/`failedSuites` ride along on a red run only. */
 export interface TrainStagingGateResult {
@@ -153,6 +169,7 @@ export async function runTrainStagingGate(args: {
     if (!gate.passed && !inconclusive && args.onRed && !signal?.aborted) {
       // The shepherd's turn runs inside this gate's bracket and sends no worker progress, so the reconciler read a
       // 20-minute turn as a hung gate and abandoned the train mid-fix (2026-10-23-03). Beat while it runs; the age ceiling still caps it.
+      await ensureGateWorktree(repoPath, gateWorktree, ref).catch(() => false);
       const beat = setInterval(() => noteMergeTrainGateProgress(projectId), SHEPHERD_BEAT_MS);
       beat.unref?.();
       const fix = await args.onRed({
