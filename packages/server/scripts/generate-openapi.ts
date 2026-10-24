@@ -1149,6 +1149,19 @@ function zodFactoryToSchema(
     }
     case "record":
       return { schema: { type: "object", additionalProperties: true }, optional: false };
+    // #1697: `keep: z.union([z.enum([...]), z.record(...)])` left the whole sync/resolve body unreadable.
+    // String enums merge into one enum; anything else is documented as `anyOf`, never as its first member.
+    case "union": {
+      const arg = call.getArguments()[0];
+      if (!arg || !Node.isArrayLiteralExpression(arg)) return undefined;
+      const members = arg.getElements().map((e) => zodExprToSchema(e, sf, typeParams, depth + 1));
+      if (members.length === 0 || members.some((m) => m === undefined)) return undefined;
+      const schemas = members.map((m) => m!.schema);
+      if (schemas.every((s) => s.type === "string" && Array.isArray(s.enum))) {
+        return { schema: { type: "string", enum: [...new Set(schemas.flatMap((s) => s.enum as string[]))] }, optional: false };
+      }
+      return { schema: { anyOf: schemas }, optional: false };
+    }
     case "enum": {
       const arg = call.getArguments()[0];
       if (!arg || !Node.isArrayLiteralExpression(arg)) return undefined;

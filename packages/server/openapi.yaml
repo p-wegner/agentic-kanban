@@ -3949,7 +3949,31 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                key:
+                  type: string
+                keep:
+                  anyOf:
+                    - type: string
+                      enum:
+                        - board
+                        - jira
+                        - needs-human
+                    - type: object
+                      additionalProperties: true
+                ticket:
+                  anyOf:
+                    - type: string
+                    - type: number
+                reason:
+                  type: string
+              required:
+                - projectId
+                - key
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
