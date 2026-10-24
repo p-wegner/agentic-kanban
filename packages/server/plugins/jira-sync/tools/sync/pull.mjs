@@ -118,9 +118,10 @@ async function main() {
         ...result.details.filter((d) => d.action === "create" || d.action === "update").map((d) => d.key),
         ...[...result.outOfScope, ...result.deleted].filter((o) => o.movedTo).map((o) => o.key),
       ]);
+      const jiraValues = Object.fromEntries(result.details.filter((d) => d.jiraDiffers).map((d) => [d.key, d.jiraDiffers]));
       writeJsonFile(
         boardSnapshotPath(stateDir),
-        await snapshotAfterPull({ boardClient, projectId: boardConfig.projectId, snapshot: readBoardSnapshot(stateDir), touchedKeys: touched }),
+        await snapshotAfterPull({ boardClient, projectId: boardConfig.projectId, snapshot: readBoardSnapshot(stateDir), touchedKeys: touched, jiraValues }),
       );
     } catch {
       // best effort: worst case push attempts one redundant (failing, reported) transition

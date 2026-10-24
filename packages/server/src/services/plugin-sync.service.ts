@@ -39,6 +39,8 @@ export interface PluginSyncConfigFieldValue {
   description?: string;
   required: boolean;
   type: PluginSyncConfigFieldType;
+  /** Allowed values of a `select` field. */
+  options?: string[];
   value: string;
 }
 
@@ -60,7 +62,49 @@ export interface PluginSyncValidationResult {
   provider: string | null;
   missingConfig: string[];
   missingSecrets: string[];
+  /** Config values the plugin cannot use (a select outside its options, a bad `fieldDirections`), one message each (#1696). */
+  invalidConfig?: string[];
   error?: string;
+}
+
+const DIRECTION_VALUES = ["both", "jira-to-board", "board-to-jira"];
+const DIRECTION_FIELD_NAMES = ["title", "description", "priority", "type", "labels", "summary", "issuetype", "tags"];
+
+/** One message per config value that is not usable; empty values are always fine (required is a separate check). */
+export function invalidSyncConfigValues(
+  fields: Array<{ key: string; type?: string; options?: string[] }>,
+  values: Record<string, string>,
+): string[] {
+  const problems: string[] = [];
+  for (const f of fields) {
+    const v = (values[f.key] ?? "").trim();
+    if (v === "") continue;
+    if (f.type === "select" && f.options && !f.options.includes(v)) {
+      problems.push(`${f.key}: "${v}" is not allowed; use one of ${f.options.join(" | ")}`);
+    }
+    if (f.key === "fieldDirections") {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(v);
+      } catch {
+        problems.push(`${f.key}: not valid JSON`);
+        continue;
+      }
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        problems.push(`${f.key}: must be a JSON object of field -> direction`);
+        continue;
+      }
+      for (const [name, dir] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!DIRECTION_FIELD_NAMES.includes(name.trim().toLowerCase())) {
+          problems.push(`${f.key}: unknown field "${name}"; use one of title | description | priority | type | labels`);
+        }
+        if (typeof dir !== "string" || !DIRECTION_VALUES.includes(dir.trim().toLowerCase())) {
+          problems.push(`${f.key}: "${String(dir)}" for "${name}" is not allowed; use one of ${DIRECTION_VALUES.join(" | ")}`);
+        }
+      }
+    }
+  }
+  return problems;
 }
 
 export type { PluginSyncConnectionTest };
@@ -222,6 +266,7 @@ export function createPluginSyncOps(deps: {
         description: f.description,
         required: Boolean(f.required),
         type: f.type ?? "text",
+        ...(f.options ? { options: f.options } : {}),
         value: values[f.key] ?? "",
       })),
       secrets: await resolveSecretPresence(sync, plugin.pluginId, projectId),
@@ -253,6 +298,8 @@ export function createPluginSyncOps(deps: {
       }
       merged[key] = value;
     }
+    const invalid = invalidSyncConfigValues(sync.config ?? [], Object.fromEntries(Object.keys(values ?? {}).map((k) => [k, merged[k] ?? ""])));
+    if (invalid.length > 0) throw new PluginError(`Invalid sync config: ${invalid.join("; ")}`, "BAD_REQUEST");
     await setPreferenceChecked(database, [
       { key: pluginSyncConfigPreferenceKey(plugin.pluginId, projectId), value: JSON.stringify(merged) },
     ]);
@@ -278,13 +325,20 @@ export function createPluginSyncOps(deps: {
       .map((f) => f.key);
     const resolvedSecrets = await resolveSecretValues(sync, plugin.pluginId, projectId);
     const missingSecrets = (sync.secrets ?? []).filter((name) => !(name in resolvedSecrets));
-    const ok = missingConfig.length === 0 && missingSecrets.length === 0;
+    const invalidConfig = invalidSyncConfigValues(sync.config ?? [], values);
+    const ok = missingConfig.length === 0 && missingSecrets.length === 0 && invalidConfig.length === 0;
     return {
       ok,
       provider: sync.provider,
       missingConfig,
       missingSecrets,
-      error: ok ? undefined : failClosedMessage(missingConfig, missingSecrets),
+      ...(invalidConfig.length > 0 ? { invalidConfig } : {}),
+      error: ok
+        ? undefined
+        : [
+            missingConfig.length || missingSecrets.length ? failClosedMessage(missingConfig, missingSecrets) : "",
+            invalidConfig.length ? `Invalid config: ${invalidConfig.join("; ")}.` : "",
+          ].filter(Boolean).join(" "),
     };
   }
 

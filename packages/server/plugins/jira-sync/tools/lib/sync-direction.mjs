@@ -14,7 +14,7 @@ function normField(name) {
   return FIELD_ALIASES[k] ?? k;
 }
 
-/** @returns {{ default: string, fields: Record<string,string>, pushStatus: boolean, pushComments: boolean, pushCreates: boolean }} */
+/** @returns {{ default: string, fields: Record<string,string>, pushStatus: boolean, pushComments: boolean }} */
 export function resolveSyncDirections(env = process.env) {
   const raw = String(env.SYNC_CONFIG_SYNCDIRECTION ?? "").trim().toLowerCase();
   const base = DIRECTIONS.includes(raw) ? raw : DEFAULT_DIRECTION;
@@ -35,7 +35,6 @@ export function resolveSyncDirections(env = process.env) {
     fields,
     pushStatus: flag(env.SYNC_CONFIG_PUSHSTATUS),
     pushComments: flag(env.SYNC_CONFIG_PUSHCOMMENTS),
-    pushCreates: flag(env.SYNC_CONFIG_PUSHCREATES),
   };
 }
 
@@ -45,7 +44,6 @@ export const LEGACY_DIRECTIONS = Object.freeze({
   fields: Object.freeze(Object.fromEntries(DIRECTION_FIELDS.map((f) => [f, DEFAULT_DIRECTION]))),
   pushStatus: true,
   pushComments: true,
-  pushCreates: true,
 });
 
 export const pushesField = (directions, field) => directions.fields[field] !== "jira-to-board";

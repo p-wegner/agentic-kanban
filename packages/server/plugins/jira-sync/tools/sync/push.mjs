@@ -174,6 +174,7 @@ async function main() {
           projectId: boardProjectId,
           pullState: readPullState(stateDir),
           applied,
+          directions,
         });
         writeJsonFile(pullStatePath(stateDir), refreshed);
       } catch {
