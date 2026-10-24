@@ -53,6 +53,7 @@ import {
   decideTrainWorktreeAction,
   findTrainRowForAttemptLabel,
   noteUnknownTrainWorktreeOnce,
+  pinTrainRefsForLabel,
   removeTrainWorktree,
   trainAttemptLabelFromBranch,
 } from "../services/merge-train-worktrees.js";
@@ -547,6 +548,8 @@ export async function sweepStaleTrainWorktrees(
         log(`would remove stale train staging worktree ${wt.path} (project ${project.id}, train ${owned.id} terminal: ${owned.state})`);
         continue;
       }
+      // An abandoned train's branch can carry a shepherd fix no member has (2026-10-23-03's 6df584aad was left dangling): pin it first.
+      await pinTrainRefsForLabel({ repoPath: project.repoPath, label: owned.label, log });
       const outcome = await removeTrainWorktree({
         database,
         repoPath: project.repoPath,
