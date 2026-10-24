@@ -11,7 +11,7 @@ export function registerApproveToolUse(server: McpServer) {
     "Internal tool used by Claude Code's --permission-prompt-tool flag. Routes tool approval requests to the agentic-kanban UI for user approval. Returns allow/deny/allow_session/deny_session.",
     {
       tool_name: z.string().describe("The tool Claude wants to use"),
-      tool_input: z.record(z.unknown()).describe("The input Claude wants to pass to the tool"),
+      tool_input: z.record(z.string(), z.unknown()).describe("The input Claude wants to pass to the tool"),
     },
     async ({ tool_name, tool_input }, extra) => {
       // Get the session ID from the MCP meta (injected by Claude Code)
