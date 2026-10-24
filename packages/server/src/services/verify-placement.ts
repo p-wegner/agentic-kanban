@@ -157,6 +157,25 @@ export function isTimeoutOnlyFailure(log: string | undefined): boolean {
   return !!log && TIMEOUT_RE.test(log) && !NON_TIMEOUT_FAILURE_RE.test(log);
 }
 
+const RUNTIME_REFUSAL_RE = /Your node version is not supported|Unsupported engine|ERR_PNPM_UNSUPPORTED_ENGINE|requires node (?:version )?[<>=^~]|The engine "node" is incompatible/i;
+
+/** #1710: a verify log that says the toolchain refused to start (an unsupported Node runtime), not that the tree failed. */
+export function isRuntimeRefusalLog(log: string | undefined): boolean {
+  return !!log && RUNTIME_REFUSAL_RE.test(log);
+}
+
+/**
+ * #1710: a failed base/rc sweep run that says nothing about the tree: the toolchain refused the worker's runtime,
+ * or it failed with ZERO failing suites (like a missing tool, `isMissingToolNoTests`). Worth ONE re-run on another
+ * worker before any heal is filed; never judged on the train/workspace gates, where a zero-suite red is a real lint/type failure.
+ */
+export function isInfraInconclusiveRed(kind: VerifyChainKind, report: { passed: boolean; log?: string; failingSuites?: string[]; timedOut?: boolean }): boolean {
+  if (report.passed || report.timedOut) return false;
+  if (kind !== "base-probe" && kind !== "rc-sweep") return false;
+  if ((report.failingSuites?.length ?? 0) > 0) return false;
+  return true;
+}
+
 /** What a worker reports for one verify run it was sent. */
 export type WorkerVerifyReport = {
   requestId: string;
@@ -173,6 +192,8 @@ export type WorkerVerifyReport = {
   durationMs?: number;
   /** #1589: red on timeouts only, from a run where the worker was at capacity; the red is load-suspect evidence, not proof. */
   loadSuspect?: boolean;
+  /** #1710: the worker's connection dropped while this job ran (reconnected within the grace). */
+  disconnectedDuringRun?: boolean;
   /** Set when the worker REFUSED to run (sha mismatch, no slot, ...): nothing was verified, so it is neither green nor red. */
   refused?: string;
   reason?: string;

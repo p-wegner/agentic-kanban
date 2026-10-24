@@ -105,7 +105,12 @@ export function createLandLocalDeps(database: Database = db): LandLocalDeps {
       return res;
     },
     pathExists: existsSync,
-    hostMaxWorkers: () => Math.max(2, Math.floor(cpus().length / 2) - 2),
+    async hostMaxWorkers() {
+      // The operator cap (setting, default 4); never above half the cores.
+      const raw = await getPreference("land_local_host_max_workers", database);
+      const cap = Number(raw === null || raw === undefined || raw === "" ? 4 : raw);
+      return Math.max(1, Math.min(Number.isFinite(cap) && cap > 0 ? Math.floor(cap) : 4, cpus().length));
+    },
     newId: () => randomUUID(),
     nowIso: () => new Date().toISOString(),
   };

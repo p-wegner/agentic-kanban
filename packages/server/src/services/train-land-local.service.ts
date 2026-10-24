@@ -79,7 +79,7 @@ export interface LandLocalDeps {
   run(command: string, cwd: string, env: Record<string, string>): Promise<LandLocalRunResult>;
   pathExists(path: string): boolean;
   /** #1649: vitest worker cap for a host-side gate (what the box can spare); absent = package default. */
-  hostMaxWorkers?(): number;
+  hostMaxWorkers?(): number | Promise<number>;
   newId(): string;
   nowIso(): string;
 }
@@ -291,7 +291,7 @@ export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps)
       else if (red) return red;
     }
     if (onHost) {
-      const cap = deps.hostMaxWorkers?.();
+      const cap = await deps.hostMaxWorkers?.();
       const hostEnv: Record<string, string> = cap ? { KANBAN_TEST_MAX_WORKERS: String(cap), VITEST_MAX_WORKERS: String(cap), VITEST_TEST_TIMEOUT: "240000" } : { VITEST_TEST_TIMEOUT: "240000" };
       if (cap) deps.log(`gating on this host with vitest capped to ${cap} worker(s)`);
       const installOutcome = input.skipInstall || input.continueRun ? null : await step(deps, "install", "pnpm install -r", worktree, {});

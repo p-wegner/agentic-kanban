@@ -105,6 +105,7 @@ export const SETTINGS_REGISTRY = {
   auto_rebase_on_continue: { type: "bool", default: "false" },
   skip_preflight: { type: "bool", default: "false" },
   dependency_auto_chain: { type: "bool", default: "false" },
+  land_local_host_max_workers: { type: "number", default: "4" },
   coupling_overlap_threshold: { type: "number", default: "0.5" },
   coupling_contract_min_size: { type: "number", default: "2" },
   workflow_fork_max_per_workspace: { type: "number", default: "2" },

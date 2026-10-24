@@ -203,7 +203,8 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
               timedOut: message.timedOut,
               failingSuites: message.failingSuites,
               durationMs: message.durationMs,
-              ...(failed && atCapacity && isTimeoutOnlyFailure(log) ? { loadSuspect: true } : {}),
+              ...(failed && (atCapacity || job.reattached) && isTimeoutOnlyFailure(log) ? { loadSuspect: true } : {}),
+              ...(job.reattached ? { disconnectedDuringRun: true } : {}),
               ...(message.refused ? { refused: message.refused, reason: message.reason } : {}),
             });
           }
