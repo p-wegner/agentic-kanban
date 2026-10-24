@@ -8,21 +8,26 @@
 // The very first run only records a baseline, so enabling sync never floods Jira with
 // the project's history; an issue seen for the first time is baselined the same way.
 
+import { customPrefixesFromSetting, stripAttachmentFooter } from "./jira-context.mjs";
 import { hasAttributionMarker } from "./comment-marker.mjs";
 import { labelsFromBoardTags, mapBoardTypeToJira } from "./field-map.mjs";
 import { LEGACY_DIRECTIONS, pushesField } from "./sync-direction.mjs";
 import { boardLinksOf, parseLinkKey } from "./link-sync.mjs";
 
+// Custom-field-map prefixes (#1701) are board-only tags like sprint:/version:; read from the plugin's own setting env
+// so every caller (push, pull re-baselining) filters the same labels.
+const configuredPrefixes = () => customPrefixesFromSetting(process.env.SYNC_CONFIG_CUSTOMFIELDMAP);
+
 const norm = (v) => String(v ?? "").replace(/\r\n/g, "\n").trim();
 
 /** The board fields push can write to Jira, in comparable form (the snapshot's `fields`). */
-export function pushFieldsOf(issue) {
+export function pushFieldsOf(issue, { extraPrefixes = configuredPrefixes() } = {}) {
   return {
     title: norm(issue.title),
-    description: norm(issue.description),
+    description: norm(stripAttachmentFooter(issue.description)),
     priority: norm(issue.priority),
     type: norm(issue.issueType ?? issue.type),
-    labels: labelsFromBoardTags(issue.tags).sort(),
+    labels: labelsFromBoardTags(issue.tags, { extraPrefixes }).sort(),
   };
 }
 
@@ -69,6 +74,7 @@ export function planOutbox({
   createEnabled = false,
   directions = LEGACY_DIRECTIONS,
   dependencies = [],
+  extraPrefixes = configuredPrefixes(),
 }) {
   const baseline = snapshot == null;
   const prevIssues = snapshot?.issues ?? {};
@@ -81,7 +87,7 @@ export function planOutbox({
   for (const issue of issues) {
     const status = statusNameOf(issue, statusNameById);
     const prev = prevIssues[issue.id];
-    const fields = pushFieldsOf(issue);
+    const fields = pushFieldsOf(issue, { extraPrefixes });
     next.issues[issue.id] = { status, fields, ...(prev?.createRequested ? { createRequested: true } : {}) };
 
     if (issue.externalKey) {
@@ -126,8 +132,8 @@ export function planOutbox({
           boardIssueId: issue.id,
           fields: {
             summary: issue.title,
-            description: issue.description ?? undefined,
-            labels: labelsFromBoardTags(issue.tags),
+            description: stripAttachmentFooter(issue.description) ?? undefined,
+            labels: labelsFromBoardTags(issue.tags, { extraPrefixes }),
             ...(mapBoardTypeToJira(issue.issueType) ? { issuetype: { name: mapBoardTypeToJira(issue.issueType) } } : {}),
           },
         });

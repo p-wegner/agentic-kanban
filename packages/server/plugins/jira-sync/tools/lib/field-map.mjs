@@ -4,6 +4,7 @@
 // later push half (#1079) can import just this, not the rest of the pull machinery.
 
 import { adfToMarkdown } from "./adf.mjs";
+import { hasManagedPrefix, jiraContextOf } from "./jira-context.mjs";
 
 /** The Jira fields a pull needs to fetch to populate every mapped board field. */
 export const FIELDS = [
@@ -18,6 +19,8 @@ export const FIELDS = [
   "parent",
   "comment",
   "issuelinks",
+  "fixVersions",
+  "attachment",
 ];
 
 // Mirrors packages/shared/src/lib/issue-priority.ts's canonical vocabulary
@@ -101,13 +104,16 @@ export function mapBoardTypeToJira(boardType) {
   return { bug: "Bug", feature: "Story" }[String(boardType ?? "").toLowerCase()] ?? null;
 }
 
-/** Board tags that ride to Jira as labels: not the plugin's own jira:/epic:/assignee: tags. */
-export function labelsFromBoardTags(tags = []) {
+/**
+ * Board tags that ride to Jira as labels: not the plugin's own jira:/epic:/assignee:/sprint:/version: tags
+ * (#1701), nor a custom-field-map prefix (`extraPrefixes`).
+ */
+export function labelsFromBoardTags(tags = [], { extraPrefixes = [] } = {}) {
   const names = tags.map((t) => (typeof t === "string" ? t : t?.name)).filter(Boolean);
   return [
     ...new Set(
       names
-        .filter((n) => !/^(jira|epic|assignee|parent):/i.test(n) && n !== "no-auto-start")
+        .filter((n) => !/^(jira|epic|assignee|parent|sprint|version):/i.test(n) && !hasManagedPrefix(n, extraPrefixes) && n !== "no-auto-start")
         .map((n) => n.trim().replace(/\s+/g, "-")),
     ),
   ];
@@ -122,7 +128,7 @@ export function labelsFromBoardTags(tags = []) {
  * the ticket's field map, and this is the one board concept that already generalizes
  * over free-text categorization.
  */
-export function mapJiraIssueToBoardFields(jiraIssue, { siteUrl } = {}) {
+export function mapJiraIssueToBoardFields(jiraIssue, { siteUrl, sprintFieldId = null, customFields = [] } = {}) {
   const fields = jiraIssue.fields ?? {};
   const labels = Array.isArray(fields.labels) ? fields.labels : [];
   const assigneeName = fields.assignee?.displayName ?? fields.assignee?.emailAddress ?? null;
@@ -146,6 +152,7 @@ export function mapJiraIssueToBoardFields(jiraIssue, { siteUrl } = {}) {
 
 ${body}` : parentLine) : body;
 
+  const context = jiraContextOf(jiraIssue, { sprintFieldId, customFields });
   const comments = (fields.comment?.comments ?? [])
     .map((c) => ({
       id: String(c.id),
@@ -164,6 +171,9 @@ ${body}` : parentLine) : body;
     comments,
     priority: mapJiraPriority(fields.priority?.name ?? null),
     tags,
+    // Read-only Jira context (#1701): kept apart from `tags` (labels) and the description body.
+    contextTags: context.tags,
+    attachmentFooter: context.footer,
     statusCategoryKey: fields.status?.statusCategory?.key ?? null,
     jiraUpdated: fields.updated ?? null,
   };

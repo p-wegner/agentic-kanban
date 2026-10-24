@@ -82,6 +82,24 @@ export function invalidSyncConfigValues(
     if (f.type === "select" && f.options && !f.options.includes(v)) {
       problems.push(`${f.key}: "${v}" is not allowed; use one of ${f.options.join(" | ")}`);
     }
+    if (f.key === "customFieldMap") {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(v);
+      } catch {
+        problems.push(`${f.key}: not valid JSON`);
+        continue;
+      }
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        problems.push(`${f.key}: must be a JSON object of Jira field -> tag:<prefix>`);
+        continue;
+      }
+      for (const [name, target] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof target !== "string" || !/^(tag:)?\s*[^\s:]+\s*$/i.test(target)) {
+          problems.push(`${f.key}: "${name}" needs a target of the form tag:<prefix>`);
+        }
+      }
+    }
     if (f.key === "fieldDirections") {
       let parsed: unknown;
       try {

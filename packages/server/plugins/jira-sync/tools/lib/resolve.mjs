@@ -16,6 +16,7 @@
 //
 // Pure over injected clients and state, like the rest of lib/, so it is testable without a CLI.
 
+import { stripAttachmentFooter } from "./jira-context.mjs";
 import { FIELDS, BOARD_PRIORITY_TO_JIRA, mapJiraIssueToBoardFields, mapBoardTypeToJira, resolveBoardStatusId } from "./field-map.mjs";
 import { markdownToAdf } from "./adf.mjs";
 import { attributeComment } from "./comment-marker.mjs";
@@ -208,7 +209,7 @@ export async function resolveIssue({ client, boardClient, projectId, siteUrl, ke
 
   const jiraPatch = {};
   if (boardFields.includes("title")) jiraPatch.summary = boardIssue.title;
-  if (boardFields.includes("description") && boardIssue.description != null) jiraPatch.description = markdownToAdf(boardIssue.description);
+  if (boardFields.includes("description") && boardIssue.description != null) jiraPatch.description = markdownToAdf(stripAttachmentFooter(boardIssue.description));
   const priority = BOARD_PRIORITY_TO_JIRA[String(boardIssue.priority ?? "").toLowerCase()];
   if (boardFields.includes("priority") && priority) jiraPatch.priority = { name: priority };
   const issueType = mapBoardTypeToJira(boardIssue.issueType);
