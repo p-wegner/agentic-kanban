@@ -258,6 +258,9 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "merge_train_agent_fix_max_turns",
   "merge_train_agent_fix_timeout_ms",
   "merge_train_agent_fix_cost_cap_usd",
+  // #1711: `merge_train_conflict_resolution_<id>` is `shepherd` (default) | `defer` | `author` -
+  // what train assembly does with a member that collides with a sibling already on the train.
+  "merge_train_conflict_resolution",
   // Merge-train batching window STATE (#1186): `train_window_<id>` is the JSON record of the
   // per-project accumulator the auto-merge orchestrator used to keep in memory only — pending
   // workspace ids, `firstSeenAt`, the last verdict + reason, and the operator controls

@@ -70,6 +70,18 @@ describe("buildAgentFixBrief", () => {
 });
 
 describe("runAgentFix", () => {
+  it("#1711: a missing cwd is reported by name, holds the train (not red) and consumes no turn", async () => {
+    const runAgent = vi.fn(async () => ({}));
+    const regate = vi.fn(async () => ({ passed: true, message: "" }));
+    const gone = join(repo, "does-not-exist");
+    const out = await runAgentFix({ worktree: gone, label: "train/x", baseBranch: "main", members, initialFailure: failure, caps, runAgent, regate });
+    expect(runAgent).not.toHaveBeenCalled();
+    expect(out.attempt.agentFix?.outcome).toBe("held");
+    expect(out.attempt.agentFix?.turns).toBe(0);
+    expect(out.attempt.verdict).not.toBe("agent_fix_red");
+    expect(out.attempt.failureHead).toContain(`fix agent cwd missing: ${gone}`);
+  });
+
   it("#1585: a held/cancelled re-gate is not a red fix - capped, inconclusive, not failed", async () => {
     const regate = vi.fn(async () => ({ passed: false, inconclusive: true, message: "pre-merge gate HELD - verify worker refused the job (cancelled)" }));
     const out = await runAgentFix({ worktree: repo, label: "train/x", baseBranch: "main", members, initialFailure: failure, caps, runAgent: writingAgent({ commit: true }), regate });

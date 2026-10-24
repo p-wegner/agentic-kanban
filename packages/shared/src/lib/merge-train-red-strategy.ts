@@ -23,6 +23,22 @@ export const mergeTrainAgentFixMaxTurnsPref = projectPref("merge_train_agent_fix
 export const mergeTrainAgentFixTimeoutMsPref = projectPref("merge_train_agent_fix_timeout_ms");
 export const mergeTrainAgentFixCostCapUsdPref = projectPref("merge_train_agent_fix_cost_cap_usd");
 
+// #1711: how train ASSEMBLY resolves a member that collides with a sibling already on the train.
+//   shepherd  (default) the train shepherd resolves it in the train tree
+//   defer     the later member waits for the next train (the pre-#1572 behaviour)
+//   author    the conflict goes back to the member's own workspace, as a base conflict does
+export const MERGE_TRAIN_CONFLICT_RESOLUTIONS = ["shepherd", "defer", "author"] as const;
+export type MergeTrainConflictResolution = (typeof MERGE_TRAIN_CONFLICT_RESOLUTIONS)[number];
+export const MERGE_TRAIN_CONFLICT_RESOLUTION_DEFAULT: MergeTrainConflictResolution = "shepherd";
+export const mergeTrainConflictResolutionPref = projectPref("merge_train_conflict_resolution");
+
+export function parseMergeTrainConflictResolution(raw: string | null | undefined): MergeTrainConflictResolution {
+  const value = raw?.trim();
+  return (MERGE_TRAIN_CONFLICT_RESOLUTIONS as readonly string[]).includes(value ?? "")
+    ? (value as MergeTrainConflictResolution)
+    : MERGE_TRAIN_CONFLICT_RESOLUTION_DEFAULT;
+}
+
 /** The caps that stop a fix agent burning forever; tripping any one falls back to bisect. */
 export interface MergeTrainAgentFixCaps {
   maxTurns: number;
@@ -37,6 +53,8 @@ export interface MergeTrainRedPolicy {
   /** May a failed (or capped) fix agent fall through to the control arm + bisect? */
   bisectAfter: boolean;
   caps: MergeTrainAgentFixCaps;
+  /** #1711: what assembly does with a member-vs-member conflict. */
+  conflictResolution: MergeTrainConflictResolution;
 }
 
 /** Case-sensitive on purpose: an unknown value falls back to the default rather than being coerced. */
@@ -59,6 +77,7 @@ export function resolveMergeTrainRedPolicy(prefMap: Map<string, string>, project
     strategy,
     agentFix: strategy !== "bisect",
     bisectAfter: strategy !== "agent-fix",
+    conflictResolution: parseMergeTrainConflictResolution(prefMap.get(mergeTrainConflictResolutionPref.key(projectId))),
     caps: {
       maxTurns: Math.floor(positiveNumber(prefMap.get(mergeTrainAgentFixMaxTurnsPref.key(projectId)), MERGE_TRAIN_AGENT_FIX_DEFAULT_MAX_TURNS)),
       timeoutMs: Math.floor(positiveNumber(prefMap.get(mergeTrainAgentFixTimeoutMsPref.key(projectId)), MERGE_TRAIN_AGENT_FIX_DEFAULT_TIMEOUT_MS)),

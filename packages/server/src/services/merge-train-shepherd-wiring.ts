@@ -52,7 +52,16 @@ export function createTrainShepherdKit(args: {
   return {
     shepherd,
     assemble: (a) => {
-      if (!policy.agentFix || a.label !== label) return assembleMergeTrain(a);
+      if (a.label !== label) return assembleMergeTrain(a);
+      // #1711: `defer` / `author` never reach the shepherd; a strategy without a fix agent has no shepherd either.
+      if (policy.conflictResolution === "author") {
+        return assembleMergeTrain(a).then((res) => {
+          const sentBack = res.dropped.filter((d) => d.deferred).length;
+          if (sentBack > 0) console.log(`[merge-train] ${label}: conflict resolution "author" - ${sentBack} member(s) that collide with a sibling go back to their own workspace`);
+          return { ...res, dropped: res.dropped.map(({ deferred: _deferred, ...d }) => d) };
+        });
+      }
+      if (!policy.agentFix || policy.conflictResolution === "defer") return assembleMergeTrain(a);
       const members = a.members.map((m): ShepherdAssemblyMember => ({ ...m, ...(full.get(m.workspaceId)?.issueId ? { issueId: full.get(m.workspaceId)!.issueId } : {}) }));
       return assembleMergeTrainWithShepherd({ ...a, members }, { database, shepherd, caps: policy.caps, placement: { projectId, repoPath: a.repoPath } });
     },

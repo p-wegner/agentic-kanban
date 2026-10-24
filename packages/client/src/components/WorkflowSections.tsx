@@ -5,12 +5,15 @@ import {
   MERGE_TRAIN_AGENT_FIX_DEFAULT_COST_CAP_USD,
   MERGE_TRAIN_AGENT_FIX_DEFAULT_MAX_TURNS,
   MERGE_TRAIN_AGENT_FIX_DEFAULT_TIMEOUT_MS,
+  MERGE_TRAIN_CONFLICT_RESOLUTIONS,
   MERGE_TRAIN_RED_STRATEGIES,
   mergeTrainAgentFixCostCapUsdPref,
   mergeTrainAgentFixMaxTurnsPref,
   mergeTrainAgentFixTimeoutMsPref,
+  mergeTrainConflictResolutionPref,
   mergeTrainRedStrategyPref,
   resolveMergeTrainRedPolicy,
+  type MergeTrainConflictResolution,
   type MergeTrainRedStrategy,
 } from "@agentic-kanban/shared/lib/merge-train-red-strategy";
 import { Field, Toggle } from "./SettingsPrimitives.js";
@@ -100,10 +103,22 @@ const TRAIN_RED_STRATEGY_LABELS: Record<MergeTrainRedStrategy, string> = {
   bisect: "Bisect only — no fix agent",
 };
 
+const TRAIN_CONFLICT_RESOLUTION_LABELS: Record<MergeTrainConflictResolution, string> = {
+  shepherd: "Train shepherd resolves it (default)",
+  defer: "Defer the later member to the next train",
+  author: "Send it back to the member's author",
+};
+const TRAIN_CONFLICT_RESOLUTION_HINTS: Record<MergeTrainConflictResolution, string> = {
+  shepherd: "A member that collides with a sibling goes to the train shepherd, which resolves it in the train tree; if it cannot, that member waits for the next train.",
+  defer: "The later member simply waits for the next train, once its sibling has landed (the old behaviour).",
+  author: "The conflict goes back to the member's own workspace to rebase, as a conflict with the base does.",
+};
+
 /** #1277 — what a merge train does when its assembled tree goes red, and the caps on the fix agent. */
 function WorkflowTrainRedStrategy({ settings, set, activeProjectId }: Pick<WorkflowSectionProps, "settings" | "set"> & { activeProjectId: string }) {
   const policy = resolveMergeTrainRedPolicy(new Map(Object.entries(settings).filter((e): e is [string, string] => typeof e[1] === "string")), activeProjectId);
   const strategyKey = mergeTrainRedStrategyPref.key(activeProjectId) as keyof Settings;
+  const conflictKey = mergeTrainConflictResolutionPref.key(activeProjectId) as keyof Settings;
   const capInput = (pref: typeof mergeTrainAgentFixMaxTurnsPref, label: string, hint: string, fallback: number) => {
     const key = pref.key(activeProjectId) as keyof Settings;
     return (
@@ -136,6 +151,19 @@ function WorkflowTrainRedStrategy({ settings, set, activeProjectId }: Pick<Workf
             <option key={s} value={s}>{TRAIN_RED_STRATEGY_LABELS[s]}</option>
           ))}
         </select>
+      </Field>
+      <Field label="Merge-train member conflicts" hint="How train assembly handles a member that conflicts with another member on the same train.">
+        <select
+          value={policy.conflictResolution}
+          onChange={(e) => set(conflictKey)(e.target.value)}
+          data-testid="train-conflict-resolution-select"
+          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
+        >
+          {MERGE_TRAIN_CONFLICT_RESOLUTIONS.map((r) => (
+            <option key={r} value={r}>{TRAIN_CONFLICT_RESOLUTION_LABELS[r]}</option>
+          ))}
+        </select>
+        <p className="mt-1.5 text-[11px] text-gray-400 dark:text-gray-500 leading-snug" data-testid="train-conflict-resolution-hint">{TRAIN_CONFLICT_RESOLUTION_HINTS[policy.conflictResolution]}</p>
       </Field>
       {capInput(mergeTrainAgentFixMaxTurnsPref, "Fix agent: max turns", "Agent turns (each followed by a gate re-run) before giving up.", MERGE_TRAIN_AGENT_FIX_DEFAULT_MAX_TURNS)}
       {capInput(mergeTrainAgentFixTimeoutMsPref, "Fix agent: timeout (ms)", "Wall-clock budget for the whole fix attempt.", MERGE_TRAIN_AGENT_FIX_DEFAULT_TIMEOUT_MS)}
