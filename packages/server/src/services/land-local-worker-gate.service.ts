@@ -1,6 +1,7 @@
 import type { Database } from "../db/index.js";
 import { getVerifyWorkerRunner, planVerifyPlacement, runOnPlannedWorker, type VerifyWorkerRunner } from "./verify-job-placement.js";
 import { parseFailedSuites } from "./train-land-local.service.js";
+import { CONTENTION_RETRY_ENV } from "./verify-flake-retry.js";
 
 /**
  * `train land-local --on-worker` (#1612): the gate (install + check:arch + typecheck + scoped tests) of a
@@ -23,6 +24,8 @@ export interface WorkerGateRequest {
   changedFiles: string[];
   /** Pin a worker by name or id; absent = the normal ranking picks one. */
   workerName?: string;
+  /** #1713: a contention re-run: `KANBAN_RETRY_TEST_FILES` value (`pkg:file,...`), run on one vitest worker. */
+  retryScope?: string;
 }
 
 export type WorkerGateResult =
@@ -69,7 +72,9 @@ export async function runLandLocalWorkerGate(
     tier: "land-local",
     branch: req.branch,
     timeoutMs: WORKER_GATE_TIMEOUT_MS,
-    env: { KANBAN_TEST_FILES: req.changedFiles.join(",") },
+    env: req.retryScope
+      ? { KANBAN_TEST_FILES: req.changedFiles.join(","), ...CONTENTION_RETRY_ENV, KANBAN_RETRY_TEST_FILES: req.retryScope }
+      : { KANBAN_TEST_FILES: req.changedFiles.join(",") },
     runOnHost: async () => ({ exitCode: -1, stdout: "", stderr: "ran on host" }),
     log: deps.log,
   });

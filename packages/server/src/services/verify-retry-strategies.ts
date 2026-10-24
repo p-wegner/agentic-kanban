@@ -23,7 +23,8 @@
  * Everything the caller needs is injected as a callback, so this module reaches no database,
  * spawns no process of its own, and is exercised without a worktree.
  */
-import { type FailedSuite, decideFlakeRetry, environmentNote, parseFailedSuites, retryScopeEnvValue } from "./verify-flake-retry.js";
+import { CONTENTION_NOTE, type FailedSuite, decideFlakeRetry, environmentNote, parseFailedSuites, retryScopeEnvValue } from "./verify-flake-retry.js";
+import { isTimeoutOnlyFailure } from "./verify-placement.js";
 import { type FailedSuiteClassification, classifyFailedSuites } from "./verify-failed-suites.js";
 
 export interface VerifyRunResult {
@@ -250,7 +251,8 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
   const failedSuites = parseFailedSuites(combinedOutput(result));
   const classify = input.classifySuites ?? ((suites: FailedSuite[]) => classifyFailedSuites(input.workingDir ?? null, suites));
   const attributed = attributeForRetry(failedSuites, classify);
-  const flake = decideFlakeRetry({ ...attributed, timedOut: result.timedOut, scoped: input.scoped });
+  const timeoutOnly = isTimeoutOnlyFailure(combinedOutput(result));
+  const flake = decideFlakeRetry({ ...attributed, timedOut: result.timedOut, scoped: input.scoped, timeoutOnly });
   if (flake.retry) {
     const names = suiteNames(flake.suites);
     log(
@@ -265,7 +267,7 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
         failure: null,
         flakeRetryNote:
           `— ${flake.suites.length} suite(s) failed under load and PASSED on a targeted re-run: ${names} ` +
-          `[retried because ${flake.reason}]${environmentNote(combinedOutput(result))}`,
+          `[retried because ${flake.reason}]${timeoutOnly ? ` [${CONTENTION_NOTE}: timeouts only]` : ""}${environmentNote(combinedOutput(result))}`,
         flakySuites: flake.suites,
         // The gate PASSED, but these suites did fail on the way there. The ledger records the
         // pass (that is the verdict) alongside what failed, so a suite that keeps needing a retry
