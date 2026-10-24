@@ -11,6 +11,7 @@
 import { hasAttributionMarker } from "./comment-marker.mjs";
 import { labelsFromBoardTags, mapBoardTypeToJira } from "./field-map.mjs";
 import { LEGACY_DIRECTIONS, pushesField } from "./sync-direction.mjs";
+import { boardLinksOf, parseLinkKey } from "./link-sync.mjs";
 
 const norm = (v) => String(v ?? "").replace(/\r\n/g, "\n").trim();
 
@@ -67,6 +68,7 @@ export function planOutbox({
   pendingWritebackIds = new Set(),
   createEnabled = false,
   directions = LEGACY_DIRECTIONS,
+  dependencies = [],
 }) {
   const baseline = snapshot == null;
   const prevIssues = snapshot?.issues ?? {};
@@ -132,6 +134,23 @@ export function planOutbox({
         next.issues[issue.id].createRequested = true;
       }
     }
+  }
+  // Dependencies between two tracked issues -> Jira links (#1700). Always recorded in the snapshot (so a
+  // later switch of direction does not flood Jira); only queued when the direction pushes links.
+  const keyById = new Map(issues.filter((i) => i.externalKey && !isTaggedDeleted(i)).map((i) => [i.id, i.externalKey]));
+  const boardLinks = boardLinksOf(dependencies, keyById);
+  const linkKeys = [...new Set(boardLinks.map((l) => l.key))].sort();
+  next.links = linkKeys;
+  if (pushesField(directions, "links") && !baseline && snapshot?.links) {
+    const before = new Set(snapshot.links);
+    const now = new Set(linkKeys);
+    const push = (action, key) => {
+      const { kind, from, to } = parseLinkKey(key);
+      const same = (e) => e.kind === "link" && e.action === action && e.linkKey === key;
+      if (!queued(same)) entries.push({ kind: "link", action, linkKey: key, linkType: kind, from, to });
+    };
+    for (const k of linkKeys) if (!before.has(k)) push("add", k);
+    for (const k of before) if (!now.has(k)) push("remove", k);
   }
   return { entries, nextSnapshot: next, supersedeKeys };
 }

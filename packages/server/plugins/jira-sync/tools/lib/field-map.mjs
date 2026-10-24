@@ -17,6 +17,7 @@ export const FIELDS = [
   "issuetype",
   "parent",
   "comment",
+  "issuelinks",
 ];
 
 // Mirrors packages/shared/src/lib/issue-priority.ts's canonical vocabulary

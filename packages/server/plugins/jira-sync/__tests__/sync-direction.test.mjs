@@ -112,6 +112,7 @@ function fakeBoard(issue) {
   return {
     st,
     async listStatuses() { return [{ id: "s-todo", name: "Todo", isDefault: true }]; },
+    async getDependencies() { return { dependencies: [] }; },
     async listExternallyTrackedIssues() { return new Map([[st.issue.externalKey, st.issue]]); },
     async updateIssue(id, body) { Object.assign(st.issue, body, { updatedAt: `u${Math.random()}` }); return st.issue; },
     async listTags() { return []; },

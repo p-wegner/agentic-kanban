@@ -34,6 +34,7 @@ export function createBoardFixtureState() {
     tags: [],
     issueTags: new Map(), // issueId -> Set<tagId>
     comments: new Map(), // issueId -> comment[]
+    dependencies: [], // { id, issueId, dependsOnId, type }
   };
 }
 
@@ -85,6 +86,20 @@ export function createDefaultBoardFixtureFetch(state = createBoardFixtureState()
       if (!state.comments.has(commentsMatch[1])) state.comments.set(commentsMatch[1], []);
       state.comments.get(commentsMatch[1]).push(comment);
       return jsonResponse(201, comment);
+    }
+    const depsMatch = /^\/api\/issues\/([^/]+)\/dependencies$/.exec(path);
+    if (method === "GET" && depsMatch) {
+      return jsonResponse(200, { dependencies: state.dependencies.filter((d) => d.issueId === depsMatch[1] || d.dependsOnId === depsMatch[1]) });
+    }
+    if (method === "POST" && depsMatch) {
+      const dep = { id: randomUUID(), issueId: depsMatch[1], dependsOnId: body.dependsOnId, type: body.type ?? "depends_on" };
+      state.dependencies.push(dep);
+      return jsonResponse(201, { id: dep.id, type: dep.type });
+    }
+    const depDelMatch = method === "DELETE" && /^\/api\/issues\/([^/]+)\/dependencies\/([^/]+)$/.exec(path);
+    if (depDelMatch) {
+      state.dependencies = state.dependencies.filter((d) => d.id !== depDelMatch[2]);
+      return jsonResponse(200, { success: true });
     }
     if (method === "GET" && path === "/api/tags") {
       return jsonResponse(200, state.tags);

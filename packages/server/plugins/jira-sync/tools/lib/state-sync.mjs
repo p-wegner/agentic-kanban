@@ -3,6 +3,7 @@
 
 import { planOutbox, pushFieldsOf, statusNameOf } from "./outbox-producer.mjs";
 import { boardFieldsOf } from "./field-snapshot.mjs";
+import { uniqueByDepId } from "./link-sync.mjs";
 import { LEGACY_DIRECTIONS, pushesField } from "./sync-direction.mjs";
 
 function baselineAfterPush(boardFields, priorFields, directions) {
@@ -20,7 +21,11 @@ export async function loadBoardState(boardClient, projectId) {
   for (const issue of issues) {
     if (issue.externalKey) commentsByIssueId[issue.id] = await boardClient.listComments(issue.id);
   }
-  return { issues, statusNameById: new Map(statuses.map((s) => [s.id, s.name])), commentsByIssueId };
+  const edges = [];
+  for (const issue of issues) {
+    if (issue.externalKey) edges.push(...((await boardClient.getDependencies(issue.id)).dependencies ?? []));
+  }
+  return { issues, statusNameById: new Map(statuses.map((s) => [s.id, s.name])), commentsByIssueId, dependencies: uniqueByDepId(edges) };
 }
 
 /**
@@ -75,10 +80,17 @@ export async function refreshPullStateAfterPush({ client, boardClient, projectId
  * on. Push's snapshot records Jira's value for them, so the next push sees the board value as a
  * change and puts it back into Jira instead of leaving the two sides apart for good.
  */
-export async function snapshotAfterPull({ boardClient, projectId, snapshot, touchedKeys, jiraValues = {} }) {
+export async function snapshotAfterPull({ boardClient, projectId, snapshot, touchedKeys, jiraValues = {}, linkAdjust = null }) {
   const state = await loadBoardState(boardClient, projectId);
   if (!snapshot) return planOutbox({ ...state, snapshot: null }).nextSnapshot;
   const next = { ...snapshot, issues: { ...snapshot.issues } };
+  if (linkAdjust && snapshot.links) {
+    // Links pull wrote or removed must not echo as board changes; board-owned drift is put back as a change.
+    const links = new Set(snapshot.links);
+    for (const k of [...linkAdjust.add, ...linkAdjust.extra]) links.add(k);
+    for (const k of [...linkAdjust.drop, ...linkAdjust.forget]) links.delete(k);
+    next.links = [...links].sort();
+  }
   for (const issue of state.issues) {
     const override = jiraValues[issue.externalKey];
     if (touchedKeys.has(issue.externalKey)) {
