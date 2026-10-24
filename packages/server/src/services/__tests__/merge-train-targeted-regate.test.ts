@@ -11,7 +11,7 @@ describe("decideRegate (#1633)", () => {
     expect(d.script).toContain("pnpm check:arch && pnpm typecheck");
     expect(d.script).toContain("vitest run");
     expect(d.script).toContain("x.test.ts");
-    expect(d.script).toContain(`--changed '${base.gatedSha}'`);
+    expect(d.script).toContain(`--changed ${base.gatedSha}`);
   });
   it("forces the full gate for a lockfile fix", () => {
     const d = decideRegate({ ...base, fixFiles: ["pnpm-lock.yaml"] });
@@ -41,12 +41,12 @@ describe("targeted re-gate runs vitest inside the package (#1656)", () => {
     const d = decideRegate({ ...base, fixFiles: ["packages/server/src/b.ts"], failedSuites: ["src/__tests__/a.test.ts"] });
     expect(d.mode).toBe("targeted");
     if (d.mode !== "targeted") return;
-    expect(d.script).toContain("(cd 'packages/server' && pnpm exec vitest run --maxWorkers=4 'src/__tests__/a.test.ts')");
+    expect(d.script).toContain("(cd packages/server && pnpm exec vitest run --maxWorkers=4 src/__tests__/a.test.ts)");
   });
   it("strips the packages/<pkg>/ prefix and never runs vitest from the root", () => {
     const d = decideRegate({ ...base, fixFiles: ["packages/server/src/b.ts"], failedSuites: ["packages/server/src/__tests__/x.test.ts"] });
     if (d.mode !== "targeted") throw new Error("expected targeted");
-    expect(d.script).toContain("cd 'packages/server' && pnpm exec vitest run --maxWorkers=4 'src/__tests__/x.test.ts'");
+    expect(d.script).toContain("cd packages/server && pnpm exec vitest run --maxWorkers=4 src/__tests__/x.test.ts");
   });
   it("goes full when a suite cannot be placed", () => {
     const d = decideRegate({ coveredFiles: ["packages/server/a.ts", "packages/shared/b.ts"], gatedSha: "a".repeat(40), fixSha: "f", fixFiles: ["packages/server/c.ts"], failedSuites: ["src/x.test.ts"] });
@@ -57,5 +57,22 @@ describe("targeted re-gate runs vitest inside the package (#1656)", () => {
     expect(isMissingToolNoTests({ passed: false, message: msg, failedSuites: [] })).toBe(true);
     expect(isMissingToolNoTests({ passed: false, message: msg, failedSuites: ["a.test.ts"] })).toBe(false);
     expect(isMissingToolNoTests({ passed: false, message: "assertion failed" })).toBe(false);
+  });
+});
+
+describe("targeted re-gate script runs under cmd.exe and sh alike (2026-10-23)", () => {
+  it("emits no single quotes, which cmd.exe keeps literally", () => {
+    const d = decideRegate({ ...base, fixFiles: ["packages/server/src/b.ts"], failedSuites: ["packages/server/src/__tests__/x.test.ts"] });
+    if (d.mode !== "targeted") throw new Error("expected targeted");
+    expect(d.script).not.toContain("'");
+  });
+  it("goes full for a token that would need quoting", () => {
+    expect(decideRegate({ ...base, fixFiles: ["packages/server/src/b.ts"], failedSuites: ["src/__tests__/a b.test.ts"] })).toMatchObject({ mode: "full", reason: expect.stringContaining("shell-safe") });
+    expect(decideRegate({ ...base, fixFiles: ["packages/server/src/b.ts"], failedSuites: ["src/__tests__/a&b.test.ts"] }).mode).toBe("full");
+  });
+  it("treats a missing directory with 0 failing suites as infrastructure", () => {
+    expect(isMissingToolNoTests({ passed: false, message: "Das System kann den angegebenen Pfad nicht finden.", failedSuites: [] })).toBe(true);
+    expect(isMissingToolNoTests({ passed: false, message: "The system cannot find the path specified." })).toBe(true);
+    expect(isMissingToolNoTests({ passed: false, message: "sh: cd: packages/x: No such file or directory" })).toBe(true);
   });
 });

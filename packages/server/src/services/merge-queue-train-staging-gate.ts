@@ -17,6 +17,10 @@ import { getProjectSetupScript } from "../repositories/stack-profile.repository.
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { noteMergeGatePhase } from "./merge-job.service.js";
 import { decideRegate, describeFullRegate, isMissingToolNoTests, describeTargetedRegate } from "./merge-train-targeted-regate.js";
+import { noteMergeTrainGateProgress } from "./merge-train-live-registry.js";
+
+/** A shepherd turn's liveness beat, well inside the reconciler's 15-minute no-progress limit. */
+const SHEPHERD_BEAT_MS = 60_000;
 
 
 /** What one staging gate reports back. `stage`/`failedSuites` ride along on a red run only. */
@@ -147,6 +151,10 @@ export async function runTrainStagingGate(args: {
     // there is nothing for a fix agent to fix, so it never gets one.
     let inconclusive = isInconclusiveGate(gate);
     if (!gate.passed && !inconclusive && args.onRed && !signal?.aborted) {
+      // The shepherd's turn runs inside this gate's bracket and sends no worker progress, so the reconciler read a
+      // 20-minute turn as a hung gate and abandoned the train mid-fix (2026-10-23-03). Beat while it runs; the age ceiling still caps it.
+      const beat = setInterval(() => noteMergeTrainGateProgress(projectId), SHEPHERD_BEAT_MS);
+      beat.unref?.();
       const fix = await args.onRed({
         gateWorktree,
         message: gate.message,
@@ -177,7 +185,7 @@ export async function runTrainStagingGate(args: {
           if (note) gate = { ...gate, message: `${note}\n${gate.message}` };
           return { passed: gate.passed, message: gate.message, failedSuites: gate.failedSuites, ...(isInconclusiveGate(gate) ? { inconclusive: true } : {}) };
         },
-      });
+      }).finally(() => clearInterval(beat));
       if (fix) agentFix = { attempt: fix.attempt, ...(fix.fixedTrainSha ? { fixedTrainSha: fix.fixedTrainSha } : {}) };
       // #1572: a shepherd that could not be placed (infra) says nothing about the code: inconclusive, never red.
       if (fix?.attempt.verdict === "agent_fix_held") inconclusive = true;
