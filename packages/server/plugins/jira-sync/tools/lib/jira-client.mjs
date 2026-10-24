@@ -248,4 +248,17 @@ export class JiraClient {
       body: { fields },
     });
   }
+
+  /** `PUT /rest/api/3/issue/{key}/assignee` — assigns by accountId; `null` unassigns (#1702). */
+  async assignIssue(issueIdOrKey, accountId) {
+    await this.request(`/rest/api/3/issue/${encodeURIComponent(issueIdOrKey)}/assignee`, {
+      method: "PUT",
+      body: { accountId: accountId ?? null },
+    });
+  }
+
+  /** `GET /rest/api/3/user?accountId=` — the user, or throws (404 when the accountId does not exist). */
+  async getUser(accountId) {
+    return this.request("/rest/api/3/user", { query: { accountId } });
+  }
 }

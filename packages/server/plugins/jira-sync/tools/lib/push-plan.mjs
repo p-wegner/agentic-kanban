@@ -8,6 +8,7 @@
 //   { kind: "comment", key, comment: { body, boardCommentId, origin? } }
 //   { kind: "create", boardIssueId, fields }
 //   { kind: "link", action: "add"|"remove", linkKey, linkType: "blocks"|"relates", from, to }   (#1700)
+//   { kind: "assignee", key, boardIssueId, name }   (#1702; name "" unassigns; the accountId comes from assigneeMap)
 //   { kind: "fields", key, boardIssueId, fields: { title?, description?, priority?, type?, labels? } }
 // A comment entry with `comment.origin === "jira"` is an import echo of a
 // Jira comment reflected onto the board — pushing it back would loop, so it
@@ -17,7 +18,7 @@ import { resolveTransitionId, TransitionNotFoundError } from "./transitions.mjs"
 import { attributeComment } from "./comment-marker.mjs";
 import { markdownToAdf } from "./adf.mjs";
 import { stripAttachmentFooter } from "./jira-context.mjs";
-import { BOARD_PRIORITY_TO_JIRA, mapBoardTypeToJira } from "./field-map.mjs";
+import { BOARD_PRIORITY_TO_JIRA, accountIdForAssignee, mapBoardTypeToJira } from "./field-map.mjs";
 import { jiraLinksOf, linkKey } from "./link-sync.mjs";
 
 /**
@@ -81,7 +82,7 @@ async function applyFieldUpdate(client, key, payload) {
   return { sent: current, rejected };
 }
 
-async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaultIssueType, statusMap }) {
+async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaultIssueType, statusMap, assigneeMap }) {
   if (entry.kind === "transition") {
     const transitions = await client.listTransitions(entry.key);
     let transitionId;
@@ -147,6 +148,19 @@ async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaul
     return { ok: true, applied: description };
   }
 
+  if (entry.kind === "assignee") {
+    const name = String(entry.name ?? "").trim();
+    // Never guess via user search: a name without a map entry is a failure, and nothing is written.
+    const accountId = name === "" ? null : accountIdForAssignee(name, assigneeMap);
+    if (name !== "" && !accountId) {
+      return { ok: false, failed: { key: entry.key, boardIssueId: entry.boardIssueId, kind: "assignee", reason: `assignee ${name} has no accountId in assigneeMap` } };
+    }
+    const description = { key: entry.key, boardIssueId: entry.boardIssueId, kind: "assignee", accountId };
+    if (dryRun) return { ok: true, applied: { ...description, wouldApply: true } };
+    await client.assignIssue(entry.key, accountId);
+    return { ok: true, applied: description };
+  }
+
   if (entry.kind === "create") {
     const fields = prepareCreateFields(entry.fields, { projectKey, defaultIssueType });
     const description = { boardIssueId: entry.boardIssueId, kind: "create", fields };
@@ -169,7 +183,7 @@ async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaul
  * report an accurate outcome still runs (e.g. resolving the transition
  * graph) but no WRITE (`transitionIssue`/`addComment`/`createIssue`) does.
  */
-export async function runPush(client, entries, { dryRun = false, projectKey, defaultIssueType, statusMap = {} } = {}) {
+export async function runPush(client, entries, { dryRun = false, projectKey, defaultIssueType, statusMap = {}, assigneeMap = {} } = {}) {
   const applied = [];
   const failed = [];
   const remaining = [];
@@ -178,7 +192,7 @@ export async function runPush(client, entries, { dryRun = false, projectKey, def
   for (const entry of entries) {
     let outcome;
     try {
-      outcome = await describeAndMaybeApply(client, entry, { dryRun, projectKey, defaultIssueType, statusMap });
+      outcome = await describeAndMaybeApply(client, entry, { dryRun, projectKey, defaultIssueType, statusMap, assigneeMap });
     } catch (err) {
       failed.push({ key: entry.key ?? entry.boardIssueId ?? null, kind: entry.kind ?? "unknown", reason: err.message, code: err.code ?? null });
       remaining.push(entry);

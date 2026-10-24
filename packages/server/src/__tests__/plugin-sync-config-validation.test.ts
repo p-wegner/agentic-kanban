@@ -23,6 +23,15 @@ describe("invalidSyncConfigValues (#1696)", () => {
     expect(invalidSyncConfigValues(fields, {})).toEqual([]);
     expect(invalidSyncConfigValues(fields, { syncDirection: "both", fieldDirections: '{"summary":"jira-to-board","priority":"both"}' })).toEqual([]);
   });
+
+  it("checks the assigneeMap shape (#1702)", () => {
+    const f = [{ key: "assigneeMap", type: "json" }];
+    expect(invalidSyncConfigValues(f, { assigneeMap: '{"acc1":"Peter"}' })).toEqual([]);
+    expect(invalidSyncConfigValues(f, { assigneeMap: '[{"accountId":"acc1","name":"Peter"}]' })).toEqual([]);
+    expect(invalidSyncConfigValues(f, { assigneeMap: "nope" })[0]).toContain("not valid JSON");
+    expect(invalidSyncConfigValues(f, { assigneeMap: '{"acc1":""}' })[0]).toContain("non-empty");
+    expect(invalidSyncConfigValues(fields, { fieldDirections: '{"assignee":"both"}' })).toEqual([]);
+  });
 });
 
 describe("customFieldMap (#1701)", () => {

@@ -5,6 +5,7 @@
 // three-way field table. See ../lib/resolve.mjs for what each side does.
 
 import { buildClientFromEnv, printResult, checkAuth } from "../lib/cli-client.mjs";
+import { assigneeMapFromEnv } from "../lib/field-map.mjs";
 import { resolveIssue } from "../lib/resolve.mjs";
 import {
   readPullState,
@@ -75,6 +76,7 @@ async function main() {
       directions: resolveSyncDirections(process.env),
       override: /^(1|true|yes)$/i.test(process.env.SYNC_RESOLVE_OVERRIDE ?? ""),
       knownState: readPullState(stateDir),
+      assigneeMap: assigneeMapFromEnv(process.env),
     });
   } catch (err) {
     return { ok: false, step: "resolve", reason: err.message, code: err.code ?? null, retryable: err.retryable ?? false };
