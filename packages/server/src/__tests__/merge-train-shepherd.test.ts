@@ -35,7 +35,7 @@ describe("mergeMembersWithShepherd (#1569)", () => {
     const conflicting = new Set(["w2", "w3"]);
     const merged: string[] = [];
     const args = {
-      label: "train/x", baseBranch: "main", worktree: "/wt", shepherd, caps,
+      label: "train/x", baseBranch: "main", worktree: process.cwd(), shepherd, caps,
       tryMerge: async (x: ShepherdMember) => conflicting.has(x.workspaceId) ? ({ ok: false as const, detail: "CONFLICT in f.ts", conflictsWith: m(1) }) : (merged.push(x.workspaceId), { ok: true as const }),
       isResolved: async (x: ShepherdMember) => { if (resolves) merged.push(x.workspaceId); return resolves; },
       abortMerge: vi.fn(async () => undefined),
