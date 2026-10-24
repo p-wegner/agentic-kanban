@@ -83,8 +83,8 @@ overrides:
   #
   # Unlike the ip-address entry, this one does NOT force past a declared range:
   # express@5.2.1 declares `body-parser: "^2.2.1"` (verified in the installed
-  # manifest), so 2.3.0 is in range and this merely raises a floor.
-  body-parser: "^2.3.0"
+  # manifest), so 2.4.0 (GHSA-27r3-jxmh-p828 fix) is in range and this merely raises a floor.
+  body-parser: ">=2.4.0 <3"
   # GHSA-jqcg-44mw-7w3h (critical, IPv4-mapped IPv6 trust-subnet spoofing), under
   # @modelcontextprotocol/sdk>express. express@5.2.1 declares ^2.0.7, so 2.0.8 is in range.
   proxy-addr: "^2.0.8"
