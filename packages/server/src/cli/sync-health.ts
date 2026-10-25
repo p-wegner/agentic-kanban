@@ -34,6 +34,12 @@ function nextRun(h: PluginSyncHealth, nowMs: number): string {
   return wait <= 0 ? "next run due" : `next in ${formatAge(wait)}`;
 }
 
+/** #1709: every console line names its project; a project without a name falls back to its id. */
+const projectLabel = (h: PluginSyncHealth): string => {
+  const name = h.projectName || (h.projectId ? h.projectId.slice(0, 8) : "");
+  return name ? `${name} / ` : "";
+};
+
 export function syncHealthLines(health: PluginSyncHealth[], nowMs: number): Array<{ level: "red" | "yellow" | "ok"; text: string }> {
   return health.map((h) => {
     const { lastRuns } = h.status;
@@ -41,7 +47,7 @@ export function syncHealthLines(health: PluginSyncHealth[], nowMs: number): Arra
     const failures = h.failures?.count ?? 0;
     const failed = [lastRuns.pull, lastRuns.push].some((r) => r && !r.dryRun && !r.ok);
     const text = [
-      `${h.projectName ? `${h.projectName} / ` : ""}${h.pluginName}: ${runPart("pull", lastRuns.pull, nowMs)}, ${runPart("push", lastRuns.push, nowMs)}`,
+      `${projectLabel(h)}${h.pluginName}: ${runPart("pull", lastRuns.pull, nowMs)}, ${runPart("push", lastRuns.push, nowMs)}`,
       `${h.conflicts ? conflicts : "?"} conflicts${h.conflicts?.needsHuman ? ` (${h.conflicts.needsHuman} needs-human)` : ""}${conflicts > 0 && h.conflictsDriven === false ? " (no ticket)" : ""}`,
       `${h.failures ? failures : "?"} failed pushes`,
       `outbox ${h.status.outboxLength ?? "?"}`,
@@ -54,7 +60,7 @@ export function syncHealthLines(health: PluginSyncHealth[], nowMs: number): Arra
 export function syncHealthAttention(health: PluginSyncHealth[], nowMs: number): ConsoleAttention[] {
   const out: ConsoleAttention[] = [];
   for (const h of health) {
-    const where = `${h.projectName ? `${h.projectName} / ` : ""}${h.pluginName} (${PANEL} > ${h.pluginName})`;
+    const where = `${projectLabel(h)}${h.pluginName} (${PANEL} > ${h.pluginName})`;
     for (const dir of ["pull", "push"] as const) {
       const run = h.status.lastRuns[dir];
       const every = dir === "pull" ? h.status.schedule.pullEveryMinutes : h.status.schedule.pushEveryMinutes;
@@ -67,6 +73,9 @@ export function syncHealthAttention(health: PluginSyncHealth[], nowMs: number): 
           out.push({ level: "yellow", text: `${where}: no ${dir} for ${formatAge(nowMs - real)} (every ${every} min)` });
         }
       }
+    }
+    for (const u of h.conflicts?.needsHumanUnits ?? []) {
+      out.push({ level: "yellow", text: `${where}: ${u.key} needs a human decision${u.since ? ` since ${u.since}` : ""}` });
     }
     if (h.conflicts && h.conflicts.count > 0 && h.conflictsDriven === false) {
       // #1697: nothing is working the conflict, so it waits for an operator or the next loop advance; say so now.

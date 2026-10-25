@@ -138,8 +138,10 @@ export const pluginSyncResolveBody = z.object({
   ], { error: '"keep" must be "board", "jira", "needs-human" or a per-field map' }).optional(),
   /** The loop ticket that decided (#1697): named in the audit comment on the losing side. */
   ticket: z.union([z.string(), z.number()]).optional(),
-  /** Why a decision is "needs-human" (or what tipped it). */
+  /** Why this side wins, or why nobody can tell; required for every `keep` (#1709). */
   reason: z.string().optional(),
+  /** Allows a keep that writes against a field's owner (#1709); needs a `reason`. */
+  override: z.boolean().optional(),
 }).passthrough();
 
 /** `POST /api/plugins/:id/sync/trigger` (#1081). */

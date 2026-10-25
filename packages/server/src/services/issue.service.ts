@@ -205,7 +205,8 @@ export function createIssueService(deps: {
           id,
           issueNumber,
           title: input.title,
-          description: input.description ?? null,
+          // #1709: a brief may name its own ticket number, which is only known here.
+          description: input.description?.replaceAll("{{issueNumber}}", String(issueNumber)) ?? null,
           priority: input.priority ?? "medium",
           issueType: input.issueType ?? "task",
           skipAutoReview: input.skipAutoReview ?? false,

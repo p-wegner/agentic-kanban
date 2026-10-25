@@ -46,8 +46,18 @@ function resolveInstructions(board, key) {
     `- Board wins: add \`"keep": "board"\`. Jira wins: add \`"keep": "jira"\`.\n` +
     `- Per field: \`"keep": {"title": "board", "priority": "jira"}\` moves only those fields.\n` +
     `- Cannot tell: \`"keep": "needs-human", "reason": "why"\` writes NOTHING to Jira or the board.\n` +
-    `- Always add \`"ticket": "<this ticket's number>"\`: the audit comment on the overwritten side names it.\n\n`
+    `- Every \`keep\` needs a \`"reason"\` (it goes into the record and the audit comment) and \`"ticket": {{issueNumber}}\` (the audit comment names it).\n` +
+    `- Check the \`owner\` of each differing field in the show output: the owner's side is the default winner. ` +
+    `A keep against the owner is refused unless the body also has \`"override": true\` and a reason that says why.\n` +
+    localhostNote(base) +
+    "\n"
   );
+}
+
+/** A host-only address is useless to an agent on a fleet worker (#1709): say where the reachable one is. */
+function localhostNote(base) {
+  if (!base || !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(base)) return "";
+  return `- That address is the board's own host. If you run on another machine, use the board address your board MCP server is configured with (see \`.mcp-kanban.json\`) and keep the path.\n`;
 }
 
 function conflictUnit(entry, board) {
@@ -56,6 +66,10 @@ function conflictUnit(entry, board) {
     ? `**An earlier round marked this conflict needs-human** (${entry.needsHumanReason ?? "no reason recorded"}). ` +
       `Do not decide it again: leave Jira and the board untouched, write the table to ` +
       `\`docs/jira-sync/conflicts/${entry.id}.md\`, commit it, and finish so a human can look.\n\n`
+    : "";
+  const owned = (entry.fields ?? []).filter((f) => f.differs && (f.owner === "jira" || f.owner === "board"));
+  const ownership = owned.length
+    ? owned.map((f) => `${f.owner === "jira" ? "Jira" : "The board"} owns ${f.field} here: the default is keep ${f.owner === "jira" ? "jira" : "board"}.`).join(" ") + "\n\n"
     : "";
   return {
     id: `conflict:${entry.id}:r${entry.round}`,
@@ -67,6 +81,7 @@ function conflictUnit(entry, board) {
         ? `What each side holds, per field (as of the pull that found the conflict):\n\n${table}\n\n`
         : `(No field values were recorded for this conflict; read them live with the "show" call below.)\n\n`) +
       handedOff +
+      ownership +
       `Decide which side should win (per field when each side changed different fields), or that nobody can tell. ` +
       `\`node tools/sync/*.mjs\` will not run for you; go through the board:\n\n` +
       resolveInstructions(board, entry.id) +
@@ -105,11 +120,21 @@ export function buildLoopPlan({ cursor, conflictRegister, failureRegister, board
 
   const conflicts = outstandingEntries(conflictRegister);
   const failures = outstandingEntries(failureRegister);
+  // #1709: a needs-human conflict is waiting for a person; another agent round would only re-commit the same record.
+  const waiting = conflicts.filter((e) => e.needsHuman);
   const units = [
-    ...conflicts.map((e) => ({ ...conflictUnit(e, board), ...(e.needsHuman ? { needsHuman: true } : {}) })),
+    ...conflicts.filter((e) => !e.needsHuman).map((e) => conflictUnit(e, board)),
     ...failures.map(failureUnit),
   ];
-  const needsHuman = conflicts.filter((e) => e.needsHuman).length;
+  const needsHuman = waiting.length;
+
+  if (units.length === 0 && needsHuman > 0) {
+    return {
+      units: [],
+      converged: false,
+      note: `${conflicts.length} conflict(s) outstanding, ${needsHuman} needs-human (no agent ticket: ${waiting.map((e) => e.id).join(", ")} wait for a human decision)`,
+    };
+  }
 
   if (units.length === 0) {
     return { units: [], converged: true, note: "no outstanding sync conflicts or failed pushes" };
