@@ -139,6 +139,7 @@ import {
   stableTagDate,
 } from "./promote-plan.mjs";
 import { evaluatePromoteCi, formatCiRefusal, parseRequiredWorkflows, readCiForSha } from "./promote-ci.mjs";
+import { acquirePromoteLock, releasePromoteLock } from "./promote-lock.mjs";
 import { MISSES_RELPATH, OUTCOMES_RELPATH, formatGateEvidence, formatMissRate, parseOutcomeRows, summarizeGateEvidence, summarizeMissRate } from "./promote-evidence.mjs";
 import {
   DEFAULT_RC_CADENCE_MS,
@@ -823,9 +824,16 @@ function stableSpawnEnv() {
   return buildStableSpawnEnv({ baseEnv: process.env, dbUrl, port: stablePort, fleetConfig });
 }
 
+let distBuiltByPromote = false;
+function builtCliPath() {
+  return join(stableCheckout, "packages", "server", "dist", "cli", "index.js");
+}
+
 function startStableBoard() {
-  const cli = join(stableCheckout, "packages", "server", "dist", "cli", "index.js");
-  if (!existsSync(cli)) throw new Error(`built CLI missing: ${cli} (did the build step run?)`);
+  const cli = builtCliPath();
+  if (!existsSync(cli)) {
+    throw new Error(distBuiltByPromote ? `dist changed under the promote (worker-build?): ${cli} existed after pnpm build and is gone` : `built CLI missing: ${cli} (did the build step run?)`);
+  }
   mkdirSync(dirname(boardLogPath), { recursive: true });
   const out = openSync(boardLogPath, "a");
   const child = spawn(process.execPath, [cli, "dev", "--port", String(stablePort), "--no-open"], {
@@ -836,6 +844,7 @@ function startStableBoard() {
     stdio: ["ignore", out, out],
   });
   child.unref();
+  releasePromoteLock(stableCheckout); // #1724: build-to-restart is over
   // #1504 — remember the child so a failed smoke can say what became of it.
   let logOffset = 0;
   try {
@@ -989,6 +998,8 @@ function lockHash(cwd) {
  * only onto a tag this script itself created.
  */
 function deployRef(ref, { hard = false } = {}) {
+  acquirePromoteLock(stableCheckout);
+  process.once("exit", () => releasePromoteLock(stableCheckout));
   const lockBefore = lockHash(stableCheckout);
   gitOrThrow(hard ? ["reset", "--hard", ref] : ["merge", "--ff-only", ref], stableCheckout);
   log(`[promote] ${stableCheckout} ${hard ? "reset" : "fast-forwarded"} to ${ref} (${gitOrThrow(["rev-parse", "HEAD"], stableCheckout)})`);
@@ -1004,6 +1015,8 @@ function deployRef(ref, { hard = false } = {}) {
     log("[promote] pnpm-lock.yaml unchanged — skipping install");
   }
   pnpmInStable(["build"], "pnpm build");
+  distBuiltByPromote = existsSync(builtCliPath());
+  if (!distBuiltByPromote) throw new Error(`built CLI missing right after pnpm build: ${builtCliPath()}`);
   pnpmInStable(["--filter", "agentic-kanban", "db:migrate"], "pnpm db:migrate");
 }
 

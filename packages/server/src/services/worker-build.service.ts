@@ -55,6 +55,8 @@ export interface WorkerBuildServiceDeps {
   resolveBuildId?: () => Promise<string | null>;
   /** Test seam: produce the tarball into `outDir`. Defaults to running scripts/pack-worker.mjs. */
   pack?: (outDir: string) => Promise<PackResult>;
+  /** Test seam: whether a promote currently holds the checkout lock. */
+  promoteLockHeld?: () => boolean;
   /** Test seam for the retry window after a failed build. */
   nowMs?: number;
 }
@@ -81,9 +83,32 @@ function sha256File(file: string): Promise<string> {
   });
 }
 
+/**
+ * #1724: the pack args for a board's own checkout. ALWAYS `--skip-build`: a full pack runs
+ * `build:server`, whose first step deletes `packages/server/dist` — the dist the running board
+ * loads from and `promote.mjs` just built into this checkout. The tarball packs the existing dist.
+ */
+export function buildPackArgs(repoRoot: string, outDir: string): string[] {
+  return [join(repoRoot, "scripts", "pack-worker.mjs"), "--out-dir", outDir, "--json", "--skip-build"];
+}
+
+/** #1724: a promote holds `.kanban/promote.lock` from build to restart (scripts/promote-lock.mjs). */
+export function isPromoteLockHeld(repoRoot: string, nowMs: number = Date.now()): boolean {
+  const file = join(repoRoot, ".kanban", "promote.lock");
+  if (!existsSync(file)) return false;
+  try {
+    const { atMs } = JSON.parse(readFileSync(file, "utf8")) as { atMs?: number };
+    return typeof atMs === "number" ? nowMs - atMs < 45 * 60 * 1000 : true;
+  } catch {
+    return true;
+  }
+}
+
 function runPackScript(repoRoot: string, outDir: string, buildId: string): Promise<PackResult> {
-  const skipBuild = process.env.KANBAN_WORKER_BUILD_SKIP_BUILD === "1";
-  const args = [join(repoRoot, "scripts", "pack-worker.mjs"), "--out-dir", outDir, "--json", ...(skipBuild ? ["--skip-build"] : [])];
+  if (!existsSync(join(repoRoot, "packages", "server", "dist", "cli", "index.js"))) {
+    return Promise.reject(new Error("this board has no built dist/ to pack, and a worker build never builds inside the board's own checkout"));
+  }
+  const args = buildPackArgs(repoRoot, outDir);
   return new Promise((resolvePack, reject) => {
     execFile(
       process.execPath,
@@ -184,6 +209,8 @@ export function createWorkerBuildService(deps: WorkerBuildServiceDeps): WorkerBu
     if (!deps.pack && !repoRoot) {
       return { state: "unavailable", reason: "this board has no source checkout (scripts/pack-worker.mjs), so it cannot build a worker tarball" };
     }
+    // #1724: a promote is rebuilding this very checkout — wait for it rather than pack a half-built dist.
+    if (deps.promoteLockHeld ? deps.promoteLockHeld() : repoRoot ? isPromoteLockHeld(repoRoot) : false) return { state: "building" };
     const buildId = await currentBuildId();
     if (!buildId) return { state: "unavailable", reason: "could not determine the board's commit" };
     const cached = readCached(buildId);
