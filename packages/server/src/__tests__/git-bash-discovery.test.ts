@@ -1,3 +1,4 @@
+// @gate:always-run when:packages/server/src/startup/merge-workflow.ts,packages/server/src/__tests__/git-bash-discovery.test.ts — reads merge-workflow.ts source from disk outside its own import graph (#538).
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
