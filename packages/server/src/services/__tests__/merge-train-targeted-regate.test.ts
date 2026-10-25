@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideRegate, isMissingToolNoTests, describeFullRegate, describeTargetedRegate, formatTrainTimings } from "../merge-train-targeted-regate.js";
+import { describeBrokenRegateScript, decideRegate, isMissingToolNoTests, describeFullRegate, describeTargetedRegate, formatTrainTimings } from "../merge-train-targeted-regate.js";
 
 const base = { coveredFiles: ["packages/server/src/a.ts"], gatedSha: "a".repeat(40), fixSha: "abc1234ffff" };
 
@@ -41,12 +41,12 @@ describe("targeted re-gate runs vitest inside the package (#1656)", () => {
     const d = decideRegate({ ...base, fixFiles: ["packages/server/src/b.ts"], failedSuites: ["src/__tests__/a.test.ts"] });
     expect(d.mode).toBe("targeted");
     if (d.mode !== "targeted") return;
-    expect(d.script).toContain("(cd packages/server && pnpm exec vitest run --maxWorkers=4 src/__tests__/a.test.ts)");
+    expect(d.script).toContain("pnpm --dir packages/server exec vitest run --maxWorkers=4 src/__tests__/a.test.ts");
   });
   it("strips the packages/<pkg>/ prefix and never runs vitest from the root", () => {
     const d = decideRegate({ ...base, fixFiles: ["packages/server/src/b.ts"], failedSuites: ["packages/server/src/__tests__/x.test.ts"] });
     if (d.mode !== "targeted") throw new Error("expected targeted");
-    expect(d.script).toContain("cd packages/server && pnpm exec vitest run --maxWorkers=4 src/__tests__/x.test.ts");
+    expect(d.script).toContain("pnpm --dir packages/server exec vitest run --maxWorkers=4 src/__tests__/x.test.ts");
   });
   it("goes full when a suite cannot be placed", () => {
     const d = decideRegate({ coveredFiles: ["packages/server/a.ts", "packages/shared/b.ts"], gatedSha: "a".repeat(40), fixSha: "f", fixFiles: ["packages/server/c.ts"], failedSuites: ["src/x.test.ts"] });
@@ -74,5 +74,39 @@ describe("targeted re-gate script runs under cmd.exe and sh alike (2026-10-23)",
     expect(isMissingToolNoTests({ passed: false, message: "Das System kann den angegebenen Pfad nicht finden.", failedSuites: [] })).toBe(true);
     expect(isMissingToolNoTests({ passed: false, message: "The system cannot find the path specified." })).toBe(true);
     expect(isMissingToolNoTests({ passed: false, message: "sh: cd: packages/x: No such file or directory" })).toBe(true);
+  });
+});
+
+describe("targeted re-gate script keeps cwd at the repo root (#1714)", () => {
+  const decide = () => {
+    const d = decideRegate({ ...base, fixFiles: ["packages/server/src/b.ts"], failedSuites: ["packages/server/src/__tests__/x.test.ts"] });
+    if (d.mode !== "targeted") throw new Error("expected targeted");
+    return d;
+  };
+  it("has no bare cd or parenthesised group, and test:mine is its own root step", () => {
+    const d = decide();
+    expect(d.script).not.toMatch(/cd|[()]/);
+    // Fake cmd-like shell: cwd persists across steps; only `--dir` scopes a step.
+    let cwd = ".";
+    const cwdAtTestMine: string[] = [];
+    for (const step of d.script.split(" && ")) {
+      const cd = /^cd (\S+)$/.exec(step);
+      if (cd) cwd = cd[1];
+      if (step.startsWith("pnpm test:mine")) cwdAtTestMine.push(cwd);
+    }
+    expect(cwdAtTestMine).toEqual(["."]);
+  });
+  it("does not call a broken script a missing tool, and keeps the passing evidence", () => {
+    const d = decide();
+    const gate = { passed: false, failedSuites: [] as string[], message: "Tests  32 passed (32)\nERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command \"test:mine\" not found" };
+    expect(isMissingToolNoTests(gate)).toBe(true); // legacy regex alone would misread it
+    const msg = describeBrokenRegateScript(d.script, gate, 5);
+    expect(msg).toContain("script failed at step 4");
+    expect(msg).toContain("failing 5 passed; related step did not run");
+    expect(msg).not.toContain("0 tests");
+  });
+  it("leaves a real missing vitest to the missing-tool path", () => {
+    const gate = { passed: false, failedSuites: [] as string[], message: 'Command "vitest" not found' };
+    expect(describeBrokenRegateScript("pnpm --dir packages/server exec vitest run", gate)).toBeNull();
   });
 });

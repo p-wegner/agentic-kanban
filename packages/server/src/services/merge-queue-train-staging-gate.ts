@@ -17,7 +17,7 @@ import { getBaseBranchHealthForSha, isBaseHealthAnswer } from "../repositories/b
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { noteMergeGatePhase } from "./merge-job.service.js";
-import { decideRegate, describeFullRegate, isMissingToolNoTests, describeTargetedRegate } from "./merge-train-targeted-regate.js";
+import { decideRegate, describeFullRegate, isMissingToolNoTests, describeTargetedRegate, describeBrokenRegateScript } from "./merge-train-targeted-regate.js";
 import { noteMergeTrainGateProgress } from "./merge-train-live-registry.js";
 
 /** A shepherd turn's liveness beat, well inside the reconciler's 15-minute no-progress limit. */
@@ -193,7 +193,12 @@ export async function runTrainStagingGate(args: {
             console.log(`[merge-train] ${attemptLabel}: ${note}`);
           }
           gate = await gateOnce(script);
-          if (script && isMissingToolNoTests(gate)) {
+          const broken = script ? describeBrokenRegateScript(script, gate, lastFailed?.length ?? 0) : null;
+          if (script && broken) {
+            note = describeFullRegate(broken);
+            console.log(`[merge-train] ${attemptLabel}: ${note}`);
+            gate = await gateOnce();
+          } else if (script && isMissingToolNoTests(gate)) {
             // #1656: the targeted run never executed a test (missing tool) - fall back to the full gate.
             note = describeFullRegate("targeted re-gate hit a missing tool and ran 0 tests");
             console.log(`[merge-train] ${attemptLabel}: ${note}`);
