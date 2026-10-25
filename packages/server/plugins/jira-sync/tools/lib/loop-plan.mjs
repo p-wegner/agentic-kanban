@@ -18,6 +18,7 @@
 // fresh round (and therefore a fresh unit id) from the register; this module just
 // renders whatever the register currently says into the plan shape.
 
+import { isNonJiraKey } from "./outbox-producer.mjs";
 import { outstandingEntries } from "./conflict-register.mjs";
 
 const cell = (v) => String(v ?? "(none)").replace(/\s*\n\s*/g, " / ").replace(/\|/g, "\\|") || "(empty)";
@@ -119,7 +120,8 @@ export function buildLoopPlan({ cursor, conflictRegister, failureRegister, board
   }
 
   const conflicts = outstandingEntries(conflictRegister);
-  const failures = outstandingEntries(failureRegister);
+  // A loop ticket's own key is not a Jira issue (#1718): never plan a failed push for it.
+  const failures = outstandingEntries(failureRegister).filter((e) => e.id.startsWith("board:") || !isNonJiraKey(e.id));
   // #1709: a needs-human conflict is waiting for a person; another agent round would only re-commit the same record.
   const waiting = conflicts.filter((e) => e.needsHuman);
   const units = [
@@ -127,11 +129,14 @@ export function buildLoopPlan({ cursor, conflictRegister, failureRegister, board
     ...failures.map(failureUnit),
   ];
   const needsHuman = waiting.length;
+  // Held, not resolved (#1718): the board must not close an open ticket of a waiting unit as "Resolved by sync".
+  const held = waiting.map((e) => `conflict:${e.id}:r${e.round}`);
 
   if (units.length === 0 && needsHuman > 0) {
     return {
       units: [],
       converged: false,
+      held,
       note: `${conflicts.length} conflict(s) outstanding, ${needsHuman} needs-human (no agent ticket: ${waiting.map((e) => e.id).join(", ")} wait for a human decision)`,
     };
   }
@@ -143,6 +148,7 @@ export function buildLoopPlan({ cursor, conflictRegister, failureRegister, board
   return {
     units,
     converged: false,
+    ...(held.length ? { held } : {}),
     note: `${conflicts.length} conflict(s)${needsHuman ? ` (${needsHuman} needs-human)` : ""}, ${failures.length} failed push(es) outstanding`,
   };
 }

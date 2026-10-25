@@ -92,6 +92,29 @@ comment, or creating a Jira issue for a board issue with no `external_key` yet â
 `{ applied, failed, remaining }`. A successful (non-dry-run) run persists `failed` entries into
 `failure-register.json` and stamps `cursor.json`'s `lastPushAt`.
 
+## Issue links and board dependencies (#1700, #1718)
+
+| Jira link type | Board dependency | Direction |
+| --- | --- | --- |
+| `Blocks` (A blocks B) | B `depends_on` A | A is the blocker, B the blocked ticket |
+| `Relates` | `related_to` | symmetric |
+| anything else | not synced | counted as `unsupported` in the pull summary |
+
+- **Out-of-scope ends:** a link is synced only when BOTH issues are in the synced scope (the JQL result or
+  already tracked). A link to an issue outside it is skipped and reported (`other end KD-9 is outside the synced scope`).
+- **Direction field:** `links` is one of the per-field directions (like `title` or `priority`). With
+  `jira-to-board` links are only pulled, with `board-to-jira` only pushed (and a Jira link the board lacks is removed
+  by the next push), with `both` they follow both ways.
+- **A hand-added dependency** between two synced tickets is pushed to Jira as a link when `links` pushes. If the
+  link later disappears in Jira, the pull removes only dependencies the plugin created; a hand-added one is kept
+  and reported as a conflict.
+- **Refused links:** a link the board refuses (a cycle, a missing end) is skipped and named in the summary
+  (`skipped KD-56â†’KD-54: would create a cycle`); the pull stays `ok:true` and goes on.
+- **Push mapping:** `POST /issueLink` fills `inwardIssue` with the blocker and `outwardIssue` with the blocked issue,
+  so "KD-56 depends_on KD-54" shows in Jira as "KD-54 blocks KD-56".
+- **Loop tickets are not Jira issues:** tickets whose `externalKey` is not a Jira key (the loop's own
+  `plugin-loop:...` tickets) are ignored by push and never planned as failed pushes.
+
 ## The sync-conflicts loop (#1080)
 
 The manifest's `loops.sync-conflicts` turns whatever's outstanding in the conflict/failure

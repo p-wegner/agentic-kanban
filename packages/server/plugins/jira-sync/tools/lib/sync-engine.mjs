@@ -229,6 +229,12 @@ export async function runInboundSync(
         const imported = await importComments(boardClient, boardIssue.id, mapped.comments, known?.commentIds);
         commentsImported += imported.count;
         await syncContextTags(boardClient, tagCache, boardIssue.id, mapped.contextTags, context.managedPrefixes);
+        // The attachments footer is read-only context too (#1701) and never conflicts: apply it, keep the board's own text (#1719).
+        if (attachmentFooterOf(boardIssue.description) !== mapped.attachmentFooter) {
+          await boardClient.updateIssue(boardIssue.id, {
+            description: withAttachmentFooter(stripAttachmentFooter(boardIssue.description ?? ""), mapped.attachmentFooter) || undefined,
+          });
+        }
         if (known) nextState.issues[jiraIssue.key] = { ...known, commentIds: imported.commentIds };
       } else {
         commentsImported += newComments(mapped.comments, known?.commentIds).length;
@@ -262,6 +268,11 @@ export async function runInboundSync(
     const footerChanged = attachmentFooterOf(boardIssue.description) !== mapped.attachmentFooter;
     const descriptionWrite = pullsField(directions, "description") ? mapped.description ?? "" : stripAttachmentFooter(boardIssue.description ?? "");
     let boardChanged = columnDiff.length > 0 || statusMoves || footerChanged || assigneeMoves;
+    // What changed, named for the run summary (#1718).
+    const changes = [];
+    if (columnDiff.length > 0) changes.push(`fields ${columnDiff.join(", ")}`);
+    if (statusMoves) changes.push("status");
+    if (footerChanged) changes.push("attachments footer");
     if (!dryRun) {
       let boardUpdatedAt = boardIssue.updatedAt;
       if (columnDiff.length > 0 || statusMoves || footerChanged) {
@@ -280,9 +291,15 @@ export async function runInboundSync(
       const tagsToApply = (pullsField(directions, "labels") ? mapped.tags : mapped.tags.filter((t) => /^(epic|parent):/i.test(t))).filter((t) => !/^assignee:/i.test(t));
       if (pullsField(directions, "assignee") && mapped.assignee) tagsToApply.push(`assignee:${mapped.assignee}`);
       const attachedNames = new Set(existingTags.map((t) => String(t.name ?? "").toLowerCase()));
-      if (tagsToApply.some((t) => !attachedNames.has(t.toLowerCase()))) boardChanged = true;
+      if (tagsToApply.some((t) => !attachedNames.has(t.toLowerCase()))) {
+        boardChanged = true;
+        changes.push(`tags +${tagsToApply.filter((t) => !attachedNames.has(t.toLowerCase())).join(", ")}`);
+      }
       await attachMissingTags(boardClient, tagCache, boardIssue.id, tagsToApply, existingTags);
-      if (await syncContextTags(boardClient, tagCache, boardIssue.id, mapped.contextTags, context.managedPrefixes)) boardChanged = true;
+      if (await syncContextTags(boardClient, tagCache, boardIssue.id, mapped.contextTags, context.managedPrefixes)) {
+        boardChanged = true;
+        changes.push(`context ${mapped.contextTags.join(", ") || "cleared"}`);
+      }
       if (pullsField(directions, "assignee")) {
         // Reassigned or unassigned in Jira: drop the assignee tags that no longer hold (#1702).
         const wanted = mapped.assignee ? `assignee:${mapped.assignee}`.toLowerCase() : null;
@@ -291,12 +308,16 @@ export async function runInboundSync(
           if (/^assignee:/.test(name) && name !== wanted) {
             await boardClient.detachTag(boardIssue.id, t.id);
             boardChanged = true;
+            if (!mapped.assignee) changes.push("assignee cleared");
           }
         }
       }
       const imported = await importComments(boardClient, boardIssue.id, mapped.comments, known?.commentIds);
       commentsImported += imported.count;
-      if (imported.count > 0) boardChanged = true;
+      if (imported.count > 0) {
+        boardChanged = true;
+        changes.push(`comments +${imported.count}`);
+      }
       nextState.issues[jiraIssue.key] = {
         updated: mapped.jiraUpdated,
         boardIssueId: boardIssue.id,
@@ -310,7 +331,17 @@ export async function runInboundSync(
     } else {
       const fresh = newComments(mapped.comments, known?.commentIds).length;
       commentsImported += fresh;
-      if (fresh > 0) boardChanged = true;
+      if (fresh > 0) {
+        boardChanged = true;
+        changes.push(`comments +${fresh}`);
+      }
+      // Reads only: a dry run still names a context-tag change instead of reporting a skip (#1718).
+      const have = new Set((await boardClient.listIssueTags(boardIssue.id)).map((t) => String(t.name ?? "").toLowerCase()));
+      const addedContext = mapped.contextTags.filter((t) => !have.has(t.toLowerCase()));
+      if (addedContext.length > 0) {
+        boardChanged = true;
+        changes.push(`context ${addedContext.join(", ")}`);
+      }
     }
     if (!boardChanged) {
       skipped++;
@@ -322,6 +353,7 @@ export async function runInboundSync(
       key: jiraIssue.key,
       action: "update",
       localIssueNumber: boardIssue.issueNumber,
+      ...(changes.length > 0 ? { changes } : {}),
       ...driftNote,
     });
   }
@@ -331,6 +363,30 @@ export async function runInboundSync(
   for (const [k, entry] of Object.entries(nextState.issues)) if (entry.boardIssueId && !entry.deletedAt) idByKey.set(k, entry.boardIssueId);
   const linkResult = await runLinkPull(boardClient, { jiraIssues, idByKey, knownLinks: knownState.links ?? {}, directions, dryRun });
   nextState.links = linkResult.nextLinks;
+  // An issue whose only change is a link is not a "skip" (#1718): name the link on the issue's own line.
+  const linkChanges = new Map();
+  const noteLink = (key, text) => linkChanges.set(key, [...(linkChanges.get(key) ?? []), text]);
+  for (const d of linkResult.details) {
+    if (d.action === "link-create") {
+      noteLink(d.to, d.kind === "blocks" ? `links +1 (blocked by ${d.from})` : `links +1 (related to ${d.from})`);
+      if (d.kind === "relates") noteLink(d.from, `links +1 (related to ${d.to})`);
+      else noteLink(d.from, `links +1 (blocks ${d.to})`);
+    } else if (d.action === "link-remove") {
+      noteLink(d.to, `links -1 (${d.kind} ${d.from})`);
+      noteLink(d.from, `links -1 (${d.kind} ${d.to})`);
+    }
+  }
+  for (const [key, texts] of linkChanges) {
+    const entry = details.find((x) => x.key === key && (x.action === "skip" || x.action === "update"));
+    if (!entry) continue;
+    if (entry.action === "skip") {
+      entry.action = "update";
+      delete entry.reason;
+      skipped--;
+      updated++;
+    }
+    entry.changes = [...(entry.changes ?? []), ...texts];
+  }
 
   // Deletions/moves out of JQL scope: a key we've synced before but did not see this
   // run. Never hard-deleted from the board (#1078); since #1624 each is classified

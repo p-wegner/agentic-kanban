@@ -34,6 +34,9 @@ export function pushFieldsOf(issue, { extraPrefixes = configuredPrefixes() } = {
   };
 }
 
+/** Not a Jira issue key (#1718): a loop ticket's `plugin-loop:...` key, or anything else foreign to Jira. */
+export const isNonJiraKey = (key) => !/^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(String(key ?? ""));
+
 const DELETED_TAG = "jira:deleted"; // = sync-engine's DELETED_TAG (not imported: avoids a cycle)
 
 function isTaggedDeleted(issue) {
@@ -94,6 +97,7 @@ export function planOutbox({
     const fields = pushFieldsOf(issue, { extraPrefixes });
     next.issues[issue.id] = { status, fields, ...(prev?.createRequested ? { createRequested: true } : {}) };
 
+    if (issue.externalKey && isNonJiraKey(issue.externalKey)) continue;
     if (issue.externalKey) {
       // Never queue outbound entries for an issue whose Jira twin is gone (#1629).
       if (isTaggedDeleted(issue)) continue;
@@ -107,7 +111,10 @@ export function planOutbox({
         // A baseline from before a field existed (#1702: assignee) has no value for it: not a change.
         const differs = (f) => f in prev.fields && JSON.stringify(fields[f]) !== JSON.stringify(prev.fields[f]);
         const changed = Object.keys(fields).filter((f) => f !== "assignee" && pushesField(directions, f) && differs(f));
-        if (pushesField(directions, "assignee") && differs("assignee")) {
+        // A queued assignee entry for another name is stale (#1719): the board no longer says it, so it is
+        // replaced by the current state instead of failing on every push.
+        const staleAssignee = outboxEntries.some((e) => e.kind === "assignee" && e.key === issue.externalKey && String(e.name ?? "") !== fields.assignee);
+        if (pushesField(directions, "assignee") && (differs("assignee") || staleAssignee)) {
           entries.push({ kind: "assignee", key: issue.externalKey, boardIssueId: issue.id, name: fields.assignee });
           supersedeAssigneeKeys.push(issue.externalKey);
         }
@@ -151,7 +158,7 @@ export function planOutbox({
   }
   // Dependencies between two tracked issues -> Jira links (#1700). Always recorded in the snapshot (so a
   // later switch of direction does not flood Jira); only queued when the direction pushes links.
-  const keyById = new Map(issues.filter((i) => i.externalKey && !isTaggedDeleted(i)).map((i) => [i.id, i.externalKey]));
+  const keyById = new Map(issues.filter((i) => i.externalKey && !isNonJiraKey(i.externalKey) && !isTaggedDeleted(i)).map((i) => [i.id, i.externalKey]));
   const boardLinks = boardLinksOf(dependencies, keyById);
   const linkKeys = [...new Set(boardLinks.map((l) => l.key))].sort();
   next.links = linkKeys;

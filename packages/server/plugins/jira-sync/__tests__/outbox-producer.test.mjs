@@ -85,3 +85,10 @@ test("create -> writeback -> pull yields 0 created for that key", async () => {
   assert.equal(stored.externalUrl, `https://fixture.atlassian.net/browse/${jiraKey}`);
   assert.notEqual((await run()).details.find((d) => d.key === jiraKey).action, "create");
 });
+
+test("a Done loop ticket (plugin-loop: key) queues no outbox entry (#1718)", () => {
+  const loop = issue({ id: "L1", externalKey: "plugin-loop:jira-sync:sync-conflicts:conflict:KD-54:r2" });
+  const first = plan({ issues: [loop] });
+  const done = plan({ issues: [{ ...loop, statusId: "s-prog" }], snapshot: first.nextSnapshot });
+  assert.deepEqual(done.entries, []);
+});

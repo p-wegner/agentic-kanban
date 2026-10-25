@@ -36,6 +36,13 @@ export function prepareCreateFields(fields = {}, { projectKey, defaultIssueType 
   return out;
 }
 
+export class UnmappablePriorityError extends Error {
+  constructor(value) {
+    super(`priority ${value} has no Jira mapping`);
+    this.name = "UnmappablePriorityError";
+  }
+}
+
 /** Board-side field values -> a Jira `fields` payload (summary, ADF description, priority name, issue type, labels). */
 export function prepareFieldUpdate(fields = {}, { defaultIssueType } = {}) {
   const out = {};
@@ -46,7 +53,8 @@ export function prepareFieldUpdate(fields = {}, { defaultIssueType } = {}) {
   }
   if ("priority" in fields) {
     const name = BOARD_PRIORITY_TO_JIRA[String(fields.priority ?? "").toLowerCase()];
-    if (name) out.priority = { name };
+    if (!name) throw new UnmappablePriorityError(fields.priority);
+    out.priority = { name };
   }
   if ("type" in fields) {
     const name = mapBoardTypeToJira(fields.type) ?? defaultIssueType;
@@ -109,37 +117,46 @@ async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaul
   }
 
   if (entry.kind === "fields") {
-    const payload = prepareFieldUpdate(entry.fields, { defaultIssueType });
+    // A priority with no Jira mapping is a failure, never "applied" (#1719); the other fields still go out.
+    const unmapped = "priority" in entry.fields && !BOARD_PRIORITY_TO_JIRA[String(entry.fields.priority ?? "").toLowerCase()] ? entry.fields.priority : undefined;
+    const sendable = unmapped === undefined ? entry.fields : Object.fromEntries(Object.entries(entry.fields).filter(([f]) => f !== "priority"));
+    const unmappedFailure = unmapped === undefined ? undefined : { key: entry.key, boardIssueId: entry.boardIssueId, kind: "fields", reason: new UnmappablePriorityError(unmapped).message };
+    const payload = prepareFieldUpdate(sendable, { defaultIssueType });
     const description = { key: entry.key, boardIssueId: entry.boardIssueId, kind: "fields", fields: Object.keys(payload).map((f) => JIRA_FIELD_TO_BOARD[f] ?? f) };
-    if (dryRun) return { ok: true, applied: { ...description, wouldApply: true, payload } };
+    if (dryRun) return { ok: true, applied: { ...description, wouldApply: true, payload }, ...(unmappedFailure ? { failedFields: unmappedFailure } : {}) };
     const { sent, rejected } = await applyFieldUpdate(client, entry.key, payload);
     const rejectedNames = Object.keys(rejected).map((f) => JIRA_FIELD_TO_BOARD[f] ?? f);
     const applied = { ...description, fields: Object.keys(sent).map((f) => JIRA_FIELD_TO_BOARD[f] ?? f) };
-    if (rejectedNames.length === 0) return { ok: true, applied };
+    const appliedOrNone = Object.keys(sent).length > 0 ? applied : undefined;
+    if (rejectedNames.length === 0) return { ok: true, applied: appliedOrNone, ...(unmappedFailure ? { failedFields: unmappedFailure } : {}) };
     // The entry is consumed (not retried forever): what Jira accepted was written, and the
     // refused fields land in the failed-push register by name.
     return {
       ok: true,
-      applied: Object.keys(sent).length > 0 ? applied : undefined,
+      applied: appliedOrNone,
       failedFields: {
         key: entry.key,
         boardIssueId: entry.boardIssueId,
         kind: "fields",
-        reason: `Jira refused field(s) ${rejectedNames.join(", ")}: ${Object.entries(rejected).map(([f, m]) => `${f}: ${m}`).join("; ")}`,
+        reason: `Jira refused field(s) ${rejectedNames.join(", ")}: ${Object.entries(rejected).map(([f, m]) => `${f}: ${m}`).join("; ")}${unmappedFailure ? `; ${unmappedFailure.reason}` : ""}`,
       },
     };
   }
 
   if (entry.kind === "link") {
     const typeName = entry.linkType === "relates" ? "Relates" : "Blocks";
-    const description = { key: entry.from, kind: "link", action: entry.action, linkType: entry.linkType, from: entry.from, to: entry.to };
+    const verb = entry.linkType === "relates" ? "related to" : "blocks";
+    const description = {
+      key: entry.from, kind: "link", action: entry.action, linkType: entry.linkType, from: entry.from, to: entry.to,
+      change: `${entry.from}: links ${entry.action === "add" ? "+1" : "-1"} (${verb} ${entry.to})`,
+    };
     // Read the live links first: an add is idempotent and a remove needs the Jira link id.
     const issue = await client.getIssue(entry.from, { fields: ["issuelinks"] });
     const existing = jiraLinksOf(issue).filter((l) => l.kind === entry.linkType && linkKey(l.kind, l.from, l.to) === entry.linkKey);
     if (entry.action === "add") {
       if (existing.length > 0) return { ok: true, applied: { ...description, skipped: "already linked in Jira" } };
       if (dryRun) return { ok: true, applied: { ...description, wouldApply: true } };
-      await client.createIssueLink({ typeName, inwardKey: entry.to, outwardKey: entry.from });
+      await client.createIssueLink({ typeName, inwardKey: entry.from, outwardKey: entry.to });
       return { ok: true, applied: description };
     }
     if (existing.length === 0) return { ok: true, applied: { ...description, skipped: "no such link in Jira" } };
@@ -155,7 +172,10 @@ async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaul
     if (name !== "" && !accountId) {
       return { ok: false, failed: { key: entry.key, boardIssueId: entry.boardIssueId, kind: "assignee", reason: `assignee ${name} has no accountId in assigneeMap` } };
     }
-    const description = { key: entry.key, boardIssueId: entry.boardIssueId, kind: "assignee", accountId };
+    const description = {
+      key: entry.key, boardIssueId: entry.boardIssueId, kind: "assignee", accountId,
+      change: name === "" ? `${entry.key}: assignee cleared` : `${entry.key}: assignee ${name}`,
+    };
     if (dryRun) return { ok: true, applied: { ...description, wouldApply: true } };
     await client.assignIssue(entry.key, accountId);
     return { ok: true, applied: description };
