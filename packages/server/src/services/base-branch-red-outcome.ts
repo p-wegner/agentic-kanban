@@ -5,7 +5,8 @@
  * evidence pushed the service past the 1000-line god-module ceiling.
  */
 import type { BaseBranchVerifyResult } from "./base-branch-health.service.js";
-import { type FailedSuite, decideFlakeRetry, parseFailedSuites as parseFlakeRetrySuites, retryScopeEnvValue } from "./verify-flake-retry.js";
+import { type FailedSuite, CONTENTION_NOTE, decideFlakeRetry, parseFailedSuites as parseFlakeRetrySuites, retryScopeEnvValue } from "./verify-flake-retry.js";
+import { isTimeoutOnlyFailure } from "./verify-placement.js";
 import { type FailedSuiteClassification, classifyFailedSuites } from "./verify-failed-suites.js";
 import { failedSuitesForOutcome } from "./failed-suite-parse.js";
 import { summarizeVerifyFailure } from "./verify-failure-summary.js";
@@ -107,7 +108,8 @@ export async function resolveRedProbeOutcome(input: {
   const cause = crashed.length > 0 ? "were left unreported by a crashed vitest worker" : "failed under load";
   const classify = input.classifySuites ?? ((suites: FailedSuite[]) => classifyFailedSuites(input.workingDir ?? null, suites));
   const attributed = attributeForRetry(parsed, classify);
-  const flake = decideFlakeRetry({ ...attributed, timedOut: false, scoped });
+  const timeoutOnly = isTimeoutOnlyFailure(combined);
+  const flake = decideFlakeRetry({ ...attributed, timedOut: false, scoped, timeoutOnly });
   if (flake.retry) {
     const names = flake.suites.map((s) => `${s.packageLabel}/${s.file}`).join(", ");
     console.log(
@@ -127,7 +129,7 @@ export async function resolveRedProbeOutcome(input: {
         branch,
         durationMs: now() - startedAt,
         flaky: true,
-        message: `${flake.suites.length} suite(s) ${cause} and passed on a targeted re-run: ${names}`,
+        message: `${flake.suites.length} suite(s) ${cause} and passed on a targeted re-run: ${names}${timeoutOnly ? ` [${CONTENTION_NOTE}: timeouts only]` : ""}`,
         failedSuites: [],
         retried: retriedNames,
       };

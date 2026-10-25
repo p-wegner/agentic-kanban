@@ -94,6 +94,7 @@ async function main() {
       knownState,
       dryRun,
       directions: resolveSyncDirections(process.env),
+      customFieldMap: process.env.SYNC_CONFIG_CUSTOMFIELDMAP ?? "",
       pendingWritebackKeys: new Set(Object.values(writebacks.keys)),
       deletedStatusName: process.env.JIRA_SYNC_DELETED_STATUS || undefined,
     });

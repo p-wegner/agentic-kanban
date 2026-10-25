@@ -71,7 +71,12 @@ export function parseRunSummary(stdout: string, opts: { siteUrl?: string } = {})
     const key = str(d.key);
     if (!key) continue;
     if (d.action === "conflict") conflicts.push({ externalKey: key, reason: str(d.reason) ?? "", externalUrl: link(key), localIssueNumber: num(d.localIssueNumber) });
-    else issues.push({ externalKey: key, status: wouldBe(str(d.action)), externalUrl: link(key), localIssueNumber: num(d.localIssueNumber) });
+    else {
+      // #1709: board-to-jira drift is not a plain skip: say which fields Jira differs on.
+      const drift = isRec(d.jiraDiffers) ? Object.keys(d.jiraDiffers) : [];
+      const note = drift.length ? `: Jira differs on ${drift.join(", ")}; the next push restores the board value` : "";
+      issues.push({ externalKey: key, status: wouldBe(`${str(d.action) ?? ""}${note}` || undefined), externalUrl: link(key), localIssueNumber: num(d.localIssueNumber) });
+    }
   }
   for (const a of recs(rec.applied)) {
     const key = str(a.key);

@@ -109,3 +109,11 @@ describe("dry-run summaries name planned writes, not applied ones (#1638)", () =
     expect(s?.counts?.deleted).toBeUndefined();
   });
 });
+
+describe("board-to-jira drift in the run summary (#1709)", () => {
+  it("a skip whose details carry jiraDiffers names the fields and the next push", () => {
+    const s = parseRunSummary(JSON.stringify({ step: "pull", details: [{ key: "KD-53", action: "skip", jiraDiffers: { title: "x" } }, { key: "KD-54", action: "skip" }] }));
+    expect(s?.issues?.[0]?.status).toBe("skip: Jira differs on title; the next push restores the board value");
+    expect(s?.issues?.[1]?.status).toBe("skip");
+  });
+});

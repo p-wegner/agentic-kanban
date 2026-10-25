@@ -6,9 +6,21 @@
 // our own last write is reported as `conflicted` rather than silently overwritten.
 
 import { FIELDS, mapJiraIssueToBoardFields, resolveBoardStatusId } from "./field-map.mjs";
+import {
+  SPRINT_PREFIX,
+  VERSION_PREFIX,
+  attachmentFooterOf,
+  findSprintFieldId,
+  hasManagedPrefix,
+  parseCustomFieldMap,
+  resolveCustomFieldMap,
+  stripAttachmentFooter,
+  unknownFieldsMessage,
+  withAttachmentFooter,
+} from "./jira-context.mjs";
 import { hasAttributionMarker } from "./comment-marker.mjs";
-import { LEGACY_DIRECTIONS, pullsField, pushesField } from "./sync-direction.mjs";
 import { runLinkPull } from "./link-sync.mjs";
+import { LEGACY_DIRECTIONS, pullsField, pushesField, withOwners } from "./sync-direction.mjs";
 import { boardFieldsOf, fieldsEqual, incomingFieldsOf, fieldTable } from "./field-snapshot.mjs";
 
 // Markers (#1624) for board issues whose Jira twin vanished. Each also carries the
@@ -51,13 +63,14 @@ function exceedsDeletionLimit(count, known) {
  *   deletedStatusName?: string,
  *   directions?: per-field sync direction (#1672); a `board-to-jira` field is never overwritten by pull
  *   forceKeys?: Set<string>, // keys whose Jira state overwrites the board even when it was edited locally (`sync resolve --keep jira`)
+ *   customFieldMap?: string, // raw `customFieldMap` setting (#1701): Jira field -> tag:<prefix>, read-only
  *   now?: string,
  * }} opts
  */
 export async function runInboundSync(
   client,
   boardClient,
-  { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set(), deletedStatusName = "Cancelled", forceKeys = new Set(), directions = LEGACY_DIRECTIONS, now = new Date().toISOString() },
+  { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set(), deletedStatusName = "Cancelled", forceKeys = new Set(), directions = LEGACY_DIRECTIONS, customFieldMap = "", now = new Date().toISOString() },
 ) {
   // dryRun only suppresses WRITES (create/update/tag calls below) — these three are
   // reads, and skipping them would make every issue look brand-new (boardIssuesByKey
@@ -68,8 +81,10 @@ export async function runInboundSync(
 
   // Read everything Jira says BEFORE writing anything, so a refused run (mass deletion) leaves
   // the board untouched (#1641).
+  const context = await resolveJiraContext(client, customFieldMap);
+  const mapOpts = { siteUrl, sprintFieldId: context.sprintFieldId, customFields: context.customFields };
   const jiraIssues = [];
-  for await (const jiraIssue of client.searchAll(jql, { fields: FIELDS })) jiraIssues.push(jiraIssue);
+  for await (const jiraIssue of client.searchAll(jql, { fields: context.fields })) jiraIssues.push(jiraIssue);
   const seenKeys = new Set(jiraIssues.map((i) => i.key));
   // Entries already marked deleted are settled; they are only revisited when Jira returns them.
   const activeKnownKeys = Object.keys(knownState.issues).filter((key) => !knownState.issues[key].deletedAt);
@@ -91,7 +106,7 @@ export async function runInboundSync(
 
   const restored = [];
   for (const jiraIssue of jiraIssues) {
-    const mapped = mapJiraIssueToBoardFields(jiraIssue, { siteUrl });
+    const mapped = mapJiraIssueToBoardFields(jiraIssue, mapOpts);
     let known = knownState.issues[jiraIssue.key];
     let boardIssue = boardIssuesByKey.get(jiraIssue.key);
 
@@ -120,7 +135,7 @@ export async function runInboundSync(
         const created_ = await boardClient.createIssue({
           projectId,
           title: mapped.title,
-          description: mapped.description ?? undefined,
+          description: withAttachmentFooter(mapped.description ?? "", mapped.attachmentFooter) || undefined,
           priority: mapped.priority,
           issueType: mapped.type,
           statusId: statusId ?? undefined,
@@ -128,7 +143,7 @@ export async function runInboundSync(
           externalUrl: mapped.externalUrl,
         });
         createdIssue = created_;
-        await attachMissingTags(boardClient, tagCache, created_.id, mapped.tags, []);
+        await attachMissingTags(boardClient, tagCache, created_.id, [...mapped.tags, ...mapped.contextTags], []);
         const imported = await importComments(boardClient, created_.id, mapped.comments, known?.commentIds);
         commentsImported += imported.count;
         nextState.issues[jiraIssue.key] = {
@@ -210,18 +225,23 @@ export async function runInboundSync(
       if (!dryRun) {
         const imported = await importComments(boardClient, boardIssue.id, mapped.comments, known?.commentIds);
         commentsImported += imported.count;
+        await syncContextTags(boardClient, tagCache, boardIssue.id, mapped.contextTags, context.managedPrefixes);
         if (known) nextState.issues[jiraIssue.key] = { ...known, commentIds: imported.commentIds };
       } else {
         commentsImported += newComments(mapped.comments, known?.commentIds).length;
       }
       conflicted++;
       const statusName = (id) => boardStatuses.find((st) => st.id === id)?.name ?? id;
+      // #1709: name the ownership case, so the resolver knows the default winner.
+      const reason = ownedEdits.length > 0
+        ? `${ownedEdits.map((f) => `${f} is jira-to-board: a board edit is not pushed; resolve keep jira, or change the direction`).join("; ")}`
+        : "board issue changed locally since the last sync; not overwritten";
       details.push({
         key: jiraIssue.key,
         action: "conflict",
-        reason: "board issue changed locally since the last sync; not overwritten",
+        reason,
         localIssueNumber: boardIssue.issueNumber,
-        fields: fieldTable(currentFields, known?.fields ?? null, jiraFields, { statusName }),
+        fields: withOwners(fieldTable(currentFields, known?.fields ?? null, jiraFields, { statusName }), directions),
         ...driftNote,
       });
       continue;
@@ -232,13 +252,16 @@ export async function runInboundSync(
     const statusId = resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses);
     const writtenDiff = OWNABLE.filter((f) => pullsField(directions, f) && currentFields[f] !== jiraFields[f]);
     const statusMoves = statusId != null && statusId !== boardIssue.statusId;
-    let boardChanged = writtenDiff.length > 0 || statusMoves;
+    // The attachment footer (#1701) is plugin-owned and not a snapshot field: a changed footer is a plain update.
+    const footerChanged = attachmentFooterOf(boardIssue.description) !== mapped.attachmentFooter;
+    const descriptionWrite = pullsField(directions, "description") ? mapped.description ?? "" : stripAttachmentFooter(boardIssue.description ?? "");
+    let boardChanged = writtenDiff.length > 0 || statusMoves || footerChanged;
     if (!dryRun) {
       let boardUpdatedAt = boardIssue.updatedAt;
-      if (writtenDiff.length > 0 || statusMoves) {
+      if (writtenDiff.length > 0 || statusMoves || footerChanged) {
         const updated_ = await boardClient.updateIssue(boardIssue.id, {
           ...(pullsField(directions, "title") ? { title: mapped.title } : {}),
-          ...(pullsField(directions, "description") ? { description: mapped.description ?? undefined } : {}),
+          ...(pullsField(directions, "description") || footerChanged ? { description: withAttachmentFooter(descriptionWrite, mapped.attachmentFooter) || undefined } : {}),
           ...(pullsField(directions, "priority") ? { priority: mapped.priority } : {}),
           ...(pullsField(directions, "type") ? { issueType: mapped.type } : {}),
           statusId: statusId ?? undefined,
@@ -251,6 +274,7 @@ export async function runInboundSync(
       const attachedNames = new Set(existingTags.map((t) => String(t.name ?? "").toLowerCase()));
       if (tagsToApply.some((t) => !attachedNames.has(t.toLowerCase()))) boardChanged = true;
       await attachMissingTags(boardClient, tagCache, boardIssue.id, tagsToApply, existingTags);
+      if (await syncContextTags(boardClient, tagCache, boardIssue.id, mapped.contextTags, context.managedPrefixes)) boardChanged = true;
       const imported = await importComments(boardClient, boardIssue.id, mapped.comments, known?.commentIds);
       commentsImported += imported.count;
       if (imported.count > 0) boardChanged = true;
@@ -413,6 +437,49 @@ async function importComments(boardClient, issueId, comments, importedIds = []) 
     count++;
   }
   return { count, commentIds: [...commentIds] };
+}
+
+/**
+ * Read-only Jira context (#1701): the sprint field id (found via `GET /field`, never hard-coded), the
+ * resolved custom-field map, every Jira field a pull must fetch, and the tag prefixes this plugin owns.
+ * A bad or unknown `customFieldMap` row aborts the pull before anything is written, naming the field.
+ */
+export async function resolveJiraContext(client, customFieldMap = "") {
+  const parsed = parseCustomFieldMap(customFieldMap);
+  if (parsed.error) throw Object.assign(new Error(parsed.error), { code: "BAD_CONFIG" });
+  let catalog = [];
+  if (typeof client.listFields === "function") {
+    try {
+      catalog = (await client.listFields()) ?? [];
+    } catch (err) {
+      // Without the catalog only the sprint tags are lost; a configured map cannot be resolved at all.
+      if (parsed.rows.length > 0) throw err;
+    }
+  } else if (parsed.rows.length > 0) {
+    throw Object.assign(new Error("customFieldMap: the Jira client cannot list fields"), { code: "BAD_CONFIG" });
+  }
+  const { resolved, unknown } = resolveCustomFieldMap(parsed.rows, catalog);
+  const message = unknownFieldsMessage(unknown);
+  if (message) throw Object.assign(new Error(message), { code: "BAD_CONFIG" });
+  const sprintFieldId = findSprintFieldId(catalog);
+  return {
+    sprintFieldId,
+    customFields: resolved,
+    fields: [...new Set([...FIELDS, ...(sprintFieldId ? [sprintFieldId] : []), ...resolved.map((r) => r.id)])],
+    managedPrefixes: [VERSION_PREFIX, ...(sprintFieldId ? [SPRINT_PREFIX] : []), ...resolved.map((r) => r.prefix)],
+  };
+}
+
+/** Attaches the wanted context tags and detaches stale ones of a managed prefix (a changed sprint replaces the old tag). Returns whether anything changed. */
+async function syncContextTags(boardClient, tagCache, issueId, wanted, managedPrefixes) {
+  const existing = await boardClient.listIssueTags(issueId);
+  const have = new Set(existing.map((t) => String(t.name ?? "").toLowerCase()));
+  const want = new Set(wanted.map((t) => t.toLowerCase()));
+  const stale = existing.filter((t) => hasManagedPrefix(t.name, managedPrefixes) && !want.has(String(t.name).toLowerCase()));
+  const missing = wanted.filter((t) => !have.has(t.toLowerCase()));
+  for (const tag of stale) await boardClient.detachTag(issueId, tag.id);
+  await attachMissingTags(boardClient, tagCache, issueId, missing, existing);
+  return stale.length > 0 || missing.length > 0;
 }
 
 /** Ensures each of `tagNames` exists (creating missing ones) and is attached to `issueId`. */

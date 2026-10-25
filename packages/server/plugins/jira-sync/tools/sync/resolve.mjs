@@ -15,6 +15,7 @@ import {
   readConflictRegister,
   conflictRegisterPath,
 } from "../lib/state.mjs";
+import { resolveSyncDirections } from "../lib/sync-direction.mjs";
 import { snapshotAfterPull } from "../lib/state-sync.mjs";
 import { outstandingEntries, updateRegister } from "../lib/conflict-register.mjs";
 import { JiraAuthError } from "../lib/auth.mjs";
@@ -71,6 +72,8 @@ async function main() {
       keep,
       ticket,
       reason,
+      directions: resolveSyncDirections(process.env),
+      override: /^(1|true|yes)$/i.test(process.env.SYNC_RESOLVE_OVERRIDE ?? ""),
       knownState: readPullState(stateDir),
     });
   } catch (err) {

@@ -66,6 +66,19 @@ export interface FailedSuite {
 export const MAX_RETRYABLE_SUITES = 5;
 
 /**
+ * Ceiling when EVERY failure is a vitest timeout (#1713). Under machine load (a starved worker,
+ * image jobs beside the gate) a dozen DB-heavy suites time out together while the same code passes
+ * in seconds on an idle box; a timeouts-only red is contention evidence however many suites it names.
+ */
+export const MAX_TIMEOUT_ONLY_RETRYABLE_SUITES = 40;
+
+/** Env for a contention re-run (#1713): one vitest worker, so the re-run does not recreate the load it is testing. */
+export const CONTENTION_RETRY_ENV: Readonly<Record<string, string>> = { KANBAN_TEST_MAX_WORKERS: "1" };
+
+/** The note a green contention re-run carries in the evidence (#1713). */
+export const CONTENTION_NOTE = "contention";
+
+/**
  * `[test:mine] server: node vitest run …` — the line that tells us which package the FAIL
  * lines below it belong to. Needed because vitest runs with the PACKAGE as cwd, so its
  * `FAIL src/__tests__/x.test.ts` paths are ambiguous across packages on their own: every
@@ -145,6 +158,8 @@ export function decideFlakeRetry(input: {
   timedOut?: boolean;
   /** Whether the verify_script honours suite scoping at all. */
   scoped: boolean;
+  /** Every failure in the run is a timeout (#1713): lifts the suite ceiling to {@link MAX_TIMEOUT_ONLY_RETRYABLE_SUITES}. */
+  timeoutOnly?: boolean;
 }): FlakeRetryDecision {
   const suites = input.suites ?? parseFailedSuites(input.output ?? "");
   if (input.timedOut) {
@@ -186,11 +201,12 @@ export function decideFlakeRetry(input: {
         `(${guards.map((s) => s.file).join(", ")}) — the same commit fails them the same way, so a re-run cannot clear it`,
     };
   }
-  if (suites.length > MAX_RETRYABLE_SUITES) {
+  const ceiling = input.timeoutOnly ? MAX_TIMEOUT_ONLY_RETRYABLE_SUITES : MAX_RETRYABLE_SUITES;
+  if (suites.length > ceiling) {
     return {
       retry: false,
       suites,
-      reason: `${suites.length} suites failed, above the ${MAX_RETRYABLE_SUITES}-suite flake ceiling — this reads as a regression, not contention`,
+      reason: `${suites.length} suites failed, above the ${ceiling}-suite flake ceiling — this reads as a regression, not contention`,
     };
   }
   return {

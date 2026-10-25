@@ -4,6 +4,7 @@ import { invalidSyncConfigValues } from "../services/plugin-sync.service.js";
 const fields = [
   { key: "syncDirection", type: "select", options: ["both", "jira-to-board", "board-to-jira"] },
   { key: "fieldDirections", type: "json" },
+  { key: "customFieldMap", type: "json" },
 ];
 
 describe("invalidSyncConfigValues (#1696)", () => {
@@ -21,5 +22,13 @@ describe("invalidSyncConfigValues (#1696)", () => {
   it("accepts empty values, valid directions and aliases", () => {
     expect(invalidSyncConfigValues(fields, {})).toEqual([]);
     expect(invalidSyncConfigValues(fields, { syncDirection: "both", fieldDirections: '{"summary":"jira-to-board","priority":"both"}' })).toEqual([]);
+  });
+});
+
+describe("customFieldMap (#1701)", () => {
+  it("rejects a non-object and a target without a prefix; accepts field -> tag:<prefix>", () => {
+    expect(invalidSyncConfigValues(fields, { customFieldMap: "[1]" })[0]).toContain("JSON object");
+    expect(invalidSyncConfigValues(fields, { customFieldMap: '{"Team":"x y"}' })[0]).toContain('"Team"');
+    expect(invalidSyncConfigValues(fields, { customFieldMap: '{"Story Points":"tag:sp"}' })).toEqual([]);
   });
 });

@@ -17,6 +17,7 @@ import { getProjectSetupScript } from "../repositories/stack-profile.repository.
 import { ensureGitHttpServer } from "./git-http.service.js";
 import type { VerifyRunRequest, VerifyWorkerRunner } from "./verify-job-placement.js";
 import { isTimeoutOnlyFailure, workerAdmitsAnotherChain, workerWasAtCapacity, type VerifyChainKind, type VerifyWorkerCandidate, type WorkerVerifyReport } from "./verify-placement.js";
+import { recordVerifyDuration } from "./verify-slow-worker.js";
 import { active, listActiveVerifyJobs, type ActiveVerifyJob } from "./verify-active-jobs.js";
 import { getWorkerFleet } from "./worker-fleet.service.js";
 import { isWorkerBuildStale } from "./worker-auto-update.service.js";
@@ -179,6 +180,11 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
             const log = [...chunks.entries()].sort(([a], [b]) => a - b).map(([, d]) => d).join("") || message.logTail;
             // #1495: the verdict's receipt (placement and refusals were logged, the verdict was not).
             console.log(`[verify-worker] ${req.kind} verify_result from ${workerName} sha ${message.sha.slice(0, 9)}: ${message.refused ? `refused (${message.refused})` : message.passed ? "passed" : "failed"}, ${message.failingSuites?.length ?? 0} failing suite(s)${describeFailingSuites(message.failingSuites)}, ${Math.round((message.durationMs ?? 0) / 1000)}s`);
+            // #1713: a gate far slower than this worker's own median says the worker is starved.
+            if (!message.refused && message.durationMs) {
+              const slowNote = recordVerifyDuration(req.workerId, `${req.kind}|${req.tier}`, message.durationMs);
+              if (slowNote) console.warn(`[verify-worker] ${workerName}: ${slowNote}`);
+            }
             // #1571: the output must hit disk BEFORE any retry decision sees the verdict.
             const failed = !message.passed && !message.refused;
             const saved = failed ? persistFailedWorkerLog(req.kind, jobId, log, deps.logDir) : null;
@@ -203,7 +209,8 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
               timedOut: message.timedOut,
               failingSuites: message.failingSuites,
               durationMs: message.durationMs,
-              ...(failed && atCapacity && isTimeoutOnlyFailure(log) ? { loadSuspect: true } : {}),
+              ...(failed && (atCapacity || job.reattached) && isTimeoutOnlyFailure(log) ? { loadSuspect: true } : {}),
+              ...(job.reattached ? { disconnectedDuringRun: true } : {}),
               ...(message.refused ? { refused: message.refused, reason: message.reason } : {}),
             });
           }

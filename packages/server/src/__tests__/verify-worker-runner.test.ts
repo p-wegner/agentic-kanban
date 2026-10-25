@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { parseBoardToWorkerMessage, parseWorkerToBoardMessage, type BoardToWorkerMessage, type WorkerToBoardMessage } from "@agentic-kanban/shared/lib/worker-protocol";
 import { VERIFY_LOG_CHUNK_BYTES } from "@agentic-kanban/shared/lib/worker-verify-protocol";
 import type { Database } from "../db/index.js";
@@ -17,6 +20,9 @@ import { planGateRun } from "../services/pre-merge-gate-placement.js";
 import type { BaseBranchVerifyResult } from "../services/base-branch-health.service.js";
 
 const db = {} as Database;
+// #1713: failed-output logs go to a temp dir, never the real verify-log directory.
+const LOG_DIR = mkdtempSync(join(tmpdir(), "ak-verify-runner-test-"));
+afterAll(() => rmSync(LOG_DIR, { recursive: true, force: true }));
 const SHA = "a".repeat(40);
 const WORKER = { id: "w1", name: "desktop-stable" };
 
@@ -62,6 +68,7 @@ function wire(opts: { checkout?: CheckoutOutcome; script?: ScriptOutcome; slots?
     fleet: { connections, registry } as never,
     issueGitAuth: async () => ({ gitPort: 9, gitToken: "tok" }),
     readSetupScript: async () => "pnpm install install",
+    logDir: LOG_DIR,
   });
   return { runner, frames, seen, worker };
 }

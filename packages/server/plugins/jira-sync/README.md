@@ -175,6 +175,15 @@ the board's `scripts`/`sync` machinery or straight from a shell.
 
 ## Known gaps
 
+- **Read-only Jira context on pull (#1701).** An active or future sprint becomes `sprint:<name>`
+  (the sprint field is found via `GET /rest/api/3/field`, never hard-coded) and each fix version
+  `version:<name>`; a changed sprint replaces the old tag. The `customFieldMap` setting
+  (`{"Story Points": "tag:sp", "Team": "tag:team"}`) pulls other fields as `<prefix>:<value>` tags
+  (option -> value, user -> displayName, array -> one tag per item); an unknown field fails the pull and
+  Test connection and names it. Attachments are listed (name, size, Jira URL, no binary) in a footer
+  fenced by `<!-- jira-sync:attachments -->`; re-pulls replace it and it is stripped before any
+  description push. None of this is a snapshot field, none is pushed (`sprint:`, `version:` and the
+  custom prefixes stay out of pushed labels), and a change is a plain update, never a conflict.
 - **Operating it.** Settings → Plugins → Jira Sync has Pull now / Push now / Dry run, the last run
   per direction (counts, failures, conflicts linked to Jira) and the outbox length (#1625). The
   schedule is the `Pull every (min)` / `Push every (min)` settings (empty or 0 = off); the board's

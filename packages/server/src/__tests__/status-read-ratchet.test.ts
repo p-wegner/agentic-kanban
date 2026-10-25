@@ -67,6 +67,10 @@ const BASELINE: Record<string, number> = {
   "server/src/services/board-status.ts": 3,
   "server/src/services/dependency-auto-chain.service.ts": 2,
   "server/src/services/drive-dashboard.service.ts": 1,
+  // #1710 — both ask "did the operator CANCEL this?" on purpose (a cancelled heal stays suppressed;
+  // a finishing session must not reopen a Cancelled ticket); Done is a different answer, so the
+  // terminal-view predicate (Done OR Cancelled) is the wrong question.
+  "server/src/services/dependency-advisory-heal.service.ts": 1,
   "server/src/services/followup-workspace.service.ts": 1,
   "server/src/services/merge-cleanup.service.ts": 1,
   "server/src/services/plugin-loop-stall.ts": 1,
@@ -78,7 +82,7 @@ const BASELINE: Record<string, number> = {
   "server/src/services/workspace-risk.service.ts": 2,
   "server/src/startup/ancestor-branch-reconciler.ts": 1,
   "server/src/startup/completion-state-reconciler.ts": 1,
-  "server/src/startup/exit-workflow.ts": 1,
+  "server/src/startup/exit-workflow.ts": 2,
   "shared/src/lib/drive-retro.ts": 1,
 };
 

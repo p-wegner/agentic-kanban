@@ -21,7 +21,7 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import { getDoneStatusIds, updateIssueById } from "../repositories/issue-service.repository.js";
-import { getMinIssueSortOrder, listIssuesByExternalKeyPrefix } from "../repositories/issue/heal-ticket.repository.js";
+import { getMinIssueSortOrder, listIssuesByExternalKeyPrefix, listIssuesByTitleContaining } from "../repositories/issue/heal-ticket.repository.js";
 import { createIssueService, type CreateIssueInput, type CreateIssueResult } from "./issue.service.js";
 import { applyIssueTag } from "./repo-tags.service.js";
 
@@ -88,6 +88,34 @@ export function runAdvisoryScan(repoPath: string): Promise<AdvisoryScanResult> {
   });
 }
 
+/** How long an operator-cancelled advisory heal stays suppressed while the advisory is unchanged (#1710). */
+export const CANCELLED_ADVISORY_SUPPRESS_DAYS = 14;
+
+/**
+ * Why no heal should be FILED for this advisory, or null to file. Two reasons (#1710): another open
+ * issue already names the GHSA in its title (the operator's own #1698/#1699), or an earlier heal
+ * for the same advisory and the same fixed-in was cancelled less than N days ago.
+ */
+export async function advisoryFilingSuppression(
+  projectId: string,
+  b: AdvisoryBreach,
+  nowMs: number,
+  database: Database,
+): Promise<string | null> {
+  const named = await listIssuesByTitleContaining(projectId, b.ghsa, database);
+  const covering = named.find((r) => !LEGACY_TERMINAL_STATUS_NAMES.has(r.statusName ?? ""));
+  if (covering) return `open ticket #${covering.issueNumber} already names ${b.ghsa}`;
+  const segment = b.patched ? `(fixed in ${b.patched})` : "";
+  const windowMs = CANCELLED_ADVISORY_SUPPRESS_DAYS * 86_400_000;
+  const cancelled = named.find((r) => {
+    if (r.statusName !== "Cancelled") return false;
+    const sameFix = b.patched ? r.title.includes(segment) : !r.title.includes("fixed in");
+    const at = r.statusChangedAt ? Date.parse(r.statusChangedAt) : NaN;
+    return sameFix && Number.isFinite(at) && nowMs - at < windowMs;
+  });
+  return cancelled ? `ticket #${cancelled.issueNumber} for ${b.ghsa} was cancelled; unchanged advisory suppressed for ${CANCELLED_ADVISORY_SUPPRESS_DAYS} days` : null;
+}
+
 export interface AdvisoryReconcileResult {
   created: number[];
   refreshed: number[];
@@ -127,6 +155,11 @@ export async function reconcileDependencyAdvisoryTickets(
       if (existing) {
         await updateIssueById(existing.id, { title: advisoryTicketTitle(b), description: advisoryTicketBody(b), priority: "critical", updatedAt: now }, database);
         result.refreshed.push(existing.issueNumber ?? 0);
+        continue;
+      }
+      const suppressed = await advisoryFilingSuppression(projectId, b, Date.parse(now), database);
+      if (suppressed) {
+        console.log(`[dependency-advisory] project ${projectId}: not filing ${b.ghsa} - ${suppressed}`);
         continue;
       }
       const minSort = await getMinIssueSortOrder(projectId, database);
