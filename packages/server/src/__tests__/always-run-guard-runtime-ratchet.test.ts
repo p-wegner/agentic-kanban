@@ -363,8 +363,12 @@ import {
  * Four members each carry a new always-run suite (`promote-startup-retry`, `rc-state`,
  * `worker-cli-isolation`, `shared-lib-single-consumer-ratchet`); they read scripts/worker state
  * outside their import graph, and the measured total is the sum of their estimates.
+ *
+ * Train 2026-10-25-02: 528,689 -> 531,689 (+3,000 ms, one more suite at the ASSUMED 3,000 ms).
+ * #1716's `git-bash-discovery.test.ts` reads `startup/merge-workflow.ts` from disk, outside its
+ * import graph; its `when:` territory is that file plus the test, but the floor counts every marker.
  */
-const BASELINE_TOTAL_MS = 528_689;
+const BASELINE_TOTAL_MS = 531_689;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative
