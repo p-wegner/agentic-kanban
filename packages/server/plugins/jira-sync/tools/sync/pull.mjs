@@ -25,6 +25,7 @@ import {
 import { updateRegister } from "../lib/conflict-register.mjs";
 import { JiraAuthError } from "../lib/auth.mjs";
 import { BoardClient, BoardConfigError, resolveBoardConfigFromEnv } from "../lib/board-client.mjs";
+import { assigneeMapFromEnv } from "../lib/field-map.mjs";
 import { resolveSyncDirections } from "../lib/sync-direction.mjs";
 import { applyWritebacks } from "../lib/writebacks.mjs";
 import { snapshotAfterPull } from "../lib/state-sync.mjs";
@@ -95,6 +96,7 @@ async function main() {
       dryRun,
       directions: resolveSyncDirections(process.env),
       customFieldMap: process.env.SYNC_CONFIG_CUSTOMFIELDMAP ?? "",
+      assigneeMap: assigneeMapFromEnv(process.env),
       pendingWritebackKeys: new Set(Object.values(writebacks.keys)),
       deletedStatusName: process.env.JIRA_SYNC_DELETED_STATUS || undefined,
     });

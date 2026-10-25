@@ -7,6 +7,7 @@
 // so a snapshot is the only record that a board-side edit has been seen and agreed on.
 
 import { stripAttachmentFooter } from "./jira-context.mjs";
+import { assigneeFromTags } from "./field-map.mjs";
 
 // The attachment footer (#1701) is plugin-owned and not a snapshot field: stripped before comparing.
 const norm = (v) => String(v ?? "").replace(/\r\n/g, "\n").trim();
@@ -19,6 +20,7 @@ export function boardFieldsOf(boardIssue) {
     priority: norm(boardIssue.priority),
     type: norm(boardIssue.issueType ?? boardIssue.type),
     statusId: norm(boardIssue.statusId),
+    assignee: norm(assigneeFromTags(boardIssue.tags)),
   };
 }
 
@@ -30,15 +32,19 @@ export function incomingFieldsOf(mapped, statusId) {
     priority: norm(mapped.priority),
     type: norm(mapped.type),
     statusId: norm(statusId),
+    assignee: norm(mapped.assignee),
   };
 }
 
 /** Field-by-field equality; `statusId` is skipped when `b` has none (project without statuses). */
 export function fieldsEqual(a, b) {
-  return ["title", "description", "priority", "type", "statusId"].every((k) => k === "statusId" && !b[k] ? true : a[k] === b[k]);
+  // A baseline recorded before `assignee` was a snapshot field (#1702) has no value: not a difference.
+  return ["title", "description", "priority", "type", "statusId", "assignee"].every((k) =>
+    (k === "statusId" && !b[k]) || (k === "assignee" && b[k] === undefined) ? true : a[k] === b[k],
+  );
 }
 
-const TABLE_FIELDS = ["title", "description", "priority", "type", "statusId"];
+const TABLE_FIELDS = ["title", "description", "priority", "type", "statusId", "assignee"];
 
 /**
  * The three-way view of a diverged issue, one row per mapped field: what the board holds now, what the

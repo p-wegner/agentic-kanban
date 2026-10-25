@@ -120,6 +120,69 @@ export function labelsFromBoardTags(tags = [], { extraPrefixes = [] } = {}) {
 }
 
 /**
+ * Parses the `assigneeMap` setting (#1702): rows of Jira accountId -> board name, either an object
+ * `{ "<accountId>": "<name>" }` or an array of `{ accountId, name }`. Never throws: `problems` names
+ * every unusable row, and `map` holds the usable ones.
+ * @returns {{ map: Record<string,string>, problems: string[] }}
+ */
+export function parseAssigneeMap(raw) {
+  const map = {};
+  const problems = [];
+  if (raw == null || (typeof raw === "string" && raw.trim() === "")) return { map, problems };
+  let parsed = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { map, problems: ["not valid JSON"] };
+    }
+  }
+  const rows = Array.isArray(parsed)
+    ? parsed.map((r) => [r?.accountId, r?.name])
+    : parsed && typeof parsed === "object"
+      ? Object.entries(parsed)
+      : null;
+  if (!rows) return { map, problems: ["must be a JSON object of accountId -> board name"] };
+  for (const [accountId, name] of rows) {
+    if (typeof accountId !== "string" || accountId.trim() === "" || typeof name !== "string" || name.trim() === "") {
+      problems.push(`row ${JSON.stringify([accountId, name])} needs a non-empty accountId and name`);
+      continue;
+    }
+    map[accountId.trim()] = name.trim();
+  }
+  return { map, problems };
+}
+
+/** The assigneeMap from the board's `SYNC_CONFIG_ASSIGNEEMAP` env (unusable rows are dropped; validation reports them). */
+export function assigneeMapFromEnv(env = process.env) {
+  return parseAssigneeMap(env.SYNC_CONFIG_ASSIGNEEMAP).map;
+}
+
+/** The board assignee name for a Jira assignee: the mapped name when the accountId is mapped, else the displayName. */
+export function boardAssigneeName(jiraAssignee, assigneeMap = {}) {
+  if (!jiraAssignee) return null;
+  const mapped = jiraAssignee.accountId ? assigneeMap[jiraAssignee.accountId] : null;
+  return mapped ?? jiraAssignee.displayName ?? jiraAssignee.emailAddress ?? null;
+}
+
+/** The board name carried by an issue's `assignee:<name>` tag ("" when none). */
+export function assigneeFromTags(tags = []) {
+  for (const t of tags) {
+    const name = typeof t === "string" ? t : t?.name;
+    const m = /^assignee:(.*)$/i.exec(String(name ?? ""));
+    if (m && m[1].trim()) return m[1].trim();
+  }
+  return "";
+}
+
+/** The Jira accountId a board assignee name maps to (case-insensitive), or null: never guessed via user search. */
+export function accountIdForAssignee(name, assigneeMap = {}) {
+  const wanted = String(name ?? "").trim().toLowerCase();
+  if (!wanted) return null;
+  return Object.keys(assigneeMap).find((id) => assigneeMap[id].toLowerCase() === wanted) ?? null;
+}
+
+/**
  * Maps one Jira issue (a `searchAll`/`getIssue` result) to board issue fields per the
  * declared field map. `siteUrl` is optional and only used to build `externalUrl`.
  *
@@ -128,10 +191,10 @@ export function labelsFromBoardTags(tags = [], { extraPrefixes = [] } = {}) {
  * the ticket's field map, and this is the one board concept that already generalizes
  * over free-text categorization.
  */
-export function mapJiraIssueToBoardFields(jiraIssue, { siteUrl, sprintFieldId = null, customFields = [] } = {}) {
+export function mapJiraIssueToBoardFields(jiraIssue, { siteUrl, sprintFieldId = null, customFields = [], assigneeMap = {} } = {}) {
   const fields = jiraIssue.fields ?? {};
   const labels = Array.isArray(fields.labels) ? fields.labels : [];
-  const assigneeName = fields.assignee?.displayName ?? fields.assignee?.emailAddress ?? null;
+  const assigneeName = boardAssigneeName(fields.assignee, assigneeMap);
   const tags = assigneeName ? [...labels, `assignee:${assigneeName}`] : [...labels];
 
   const { type, tags: typeTags } = mapJiraIssueType(fields.issuetype?.name);
@@ -170,6 +233,8 @@ ${body}` : parentLine) : body;
     type,
     comments,
     priority: mapJiraPriority(fields.priority?.name ?? null),
+    assignee: assigneeName ?? "",
+    assigneeAccountId: fields.assignee?.accountId ?? null,
     tags,
     // Read-only Jira context (#1701): kept apart from `tags` (labels) and the description body.
     contextTags: context.tags,

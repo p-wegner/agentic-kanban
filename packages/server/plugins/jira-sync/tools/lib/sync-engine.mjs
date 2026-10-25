@@ -62,6 +62,7 @@ function exceedsDeletionLimit(count, known) {
  *   pendingWritebackKeys?: Set<string>, // keys push created whose board writeback has not landed yet
  *   deletedStatusName?: string,
  *   directions?: per-field sync direction (#1672); a `board-to-jira` field is never overwritten by pull
+ *   assigneeMap?: Jira accountId -> board name (#1702); an unmapped accountId falls back to the displayName
  *   forceKeys?: Set<string>, // keys whose Jira state overwrites the board even when it was edited locally (`sync resolve --keep jira`)
  *   customFieldMap?: string, // raw `customFieldMap` setting (#1701): Jira field -> tag:<prefix>, read-only
  *   now?: string,
@@ -70,7 +71,7 @@ function exceedsDeletionLimit(count, known) {
 export async function runInboundSync(
   client,
   boardClient,
-  { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set(), deletedStatusName = "Cancelled", forceKeys = new Set(), directions = LEGACY_DIRECTIONS, customFieldMap = "", now = new Date().toISOString() },
+  { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set(), deletedStatusName = "Cancelled", forceKeys = new Set(), directions = LEGACY_DIRECTIONS, customFieldMap = "", assigneeMap = {}, now = new Date().toISOString() },
 ) {
   // dryRun only suppresses WRITES (create/update/tag calls below) — these three are
   // reads, and skipping them would make every issue look brand-new (boardIssuesByKey
@@ -82,7 +83,7 @@ export async function runInboundSync(
   // Read everything Jira says BEFORE writing anything, so a refused run (mass deletion) leaves
   // the board untouched (#1641).
   const context = await resolveJiraContext(client, customFieldMap);
-  const mapOpts = { siteUrl, sprintFieldId: context.sprintFieldId, customFields: context.customFields };
+  const mapOpts = { siteUrl, sprintFieldId: context.sprintFieldId, customFields: context.customFields, assigneeMap };
   const jiraIssues = [];
   for await (const jiraIssue of client.searchAll(jql, { fields: context.fields })) jiraIssues.push(jiraIssue);
   const seenKeys = new Set(jiraIssues.map((i) => i.key));
@@ -151,6 +152,7 @@ export async function runInboundSync(
           boardIssueId: created_.id,
           boardUpdatedAt: created_.updatedAt,
           fields: incomingFieldsOf(mapped, statusId),
+          assigneeAccountId: mapped.assigneeAccountId,
           commentIds: imported.commentIds,
         };
       } else {
@@ -165,12 +167,12 @@ export async function runInboundSync(
     // conflict on every pull until resolved, whether or not Jira changed in between. A `board-to-jira`
     // field is the board's: where Jira differs, the pull records WHAT Jira holds (`jiraDiffers`) so the
     // next push sends the board value back, and lastSync never stores a value Jira does not hold.
-    const OWNABLE = ["title", "description", "priority", "type"];
+    const OWNABLE = ["title", "description", "priority", "type", "assignee"];
     const jiraOwned = OWNABLE.filter((f) => !pushesField(directions, f));
     const boardOwned = OWNABLE.filter((f) => !pullsField(directions, f));
     const earlyCurrent = boardFieldsOf(boardIssue);
     const earlyJira = incomingFieldsOf(mapped, resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses));
-    const ownedEdits = known?.fields ? jiraOwned.filter((f) => earlyCurrent[f] !== known.fields[f]) : [];
+    const ownedEdits = known?.fields ? jiraOwned.filter((f) => known.fields[f] !== undefined && earlyCurrent[f] !== known.fields[f]) : [];
     const jiraDiffers = Object.fromEntries(boardOwned.filter((f) => earlyCurrent[f] !== earlyJira[f]).map((f) => [f, earlyJira[f]]));
     const driftNote = Object.keys(jiraDiffers).length > 0 ? { jiraDiffers } : {};
 
@@ -197,7 +199,7 @@ export async function runInboundSync(
     // A field the board owns (#1672) is not Jira's to change: compare as if Jira agreed with the board,
     // so a board edit to it is neither a conflict nor overwritten. The conflict view still shows Jira's value.
     const incomingFields = { ...jiraFields };
-    for (const f of ["title", "description", "priority", "type"]) if (!pullsField(directions, f)) incomingFields[f] = currentFields[f];
+    for (const f of OWNABLE) if (!pullsField(directions, f)) incomingFields[f] = currentFields[f];
     const boardUnchanged = known?.fields != null && fieldsEqual(currentFields, known.fields);
     const converged = fieldsEqual(currentFields, incomingFields);
     if (timestampMoved && !boardUnchanged && converged) {
@@ -210,6 +212,7 @@ export async function runInboundSync(
           boardIssueId: boardIssue.id,
           boardUpdatedAt: boardIssue.updatedAt,
           fields: { ...currentFields, ...jiraDiffers },
+          assigneeAccountId: mapped.assigneeAccountId,
           commentIds: imported.commentIds,
         };
       } else {
@@ -251,14 +254,17 @@ export async function runInboundSync(
     // move, a label to attach, or a comment to import.
     const statusId = resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses);
     const writtenDiff = OWNABLE.filter((f) => pullsField(directions, f) && currentFields[f] !== jiraFields[f]);
+    // The assignee is a tag, not an issue column: it is applied below with the other tags.
+    const columnDiff = writtenDiff.filter((f) => f !== "assignee");
+    const assigneeMoves = writtenDiff.includes("assignee");
     const statusMoves = statusId != null && statusId !== boardIssue.statusId;
     // The attachment footer (#1701) is plugin-owned and not a snapshot field: a changed footer is a plain update.
     const footerChanged = attachmentFooterOf(boardIssue.description) !== mapped.attachmentFooter;
     const descriptionWrite = pullsField(directions, "description") ? mapped.description ?? "" : stripAttachmentFooter(boardIssue.description ?? "");
-    let boardChanged = writtenDiff.length > 0 || statusMoves || footerChanged;
+    let boardChanged = columnDiff.length > 0 || statusMoves || footerChanged || assigneeMoves;
     if (!dryRun) {
       let boardUpdatedAt = boardIssue.updatedAt;
-      if (writtenDiff.length > 0 || statusMoves || footerChanged) {
+      if (columnDiff.length > 0 || statusMoves || footerChanged) {
         const updated_ = await boardClient.updateIssue(boardIssue.id, {
           ...(pullsField(directions, "title") ? { title: mapped.title } : {}),
           ...(pullsField(directions, "description") || footerChanged ? { description: withAttachmentFooter(descriptionWrite, mapped.attachmentFooter) || undefined } : {}),
@@ -270,11 +276,24 @@ export async function runInboundSync(
       }
       const existingTags = await boardClient.listIssueTags(boardIssue.id);
       // Labels the board owns are not re-imported; the assignee/epic/parent tags are not labels.
-      const tagsToApply = pullsField(directions, "labels") ? mapped.tags : mapped.tags.filter((t) => /^(assignee|epic|parent):/i.test(t));
+      // The assignee tag follows the assignee direction (#1702), not the labels one.
+      const tagsToApply = (pullsField(directions, "labels") ? mapped.tags : mapped.tags.filter((t) => /^(epic|parent):/i.test(t))).filter((t) => !/^assignee:/i.test(t));
+      if (pullsField(directions, "assignee") && mapped.assignee) tagsToApply.push(`assignee:${mapped.assignee}`);
       const attachedNames = new Set(existingTags.map((t) => String(t.name ?? "").toLowerCase()));
       if (tagsToApply.some((t) => !attachedNames.has(t.toLowerCase()))) boardChanged = true;
       await attachMissingTags(boardClient, tagCache, boardIssue.id, tagsToApply, existingTags);
       if (await syncContextTags(boardClient, tagCache, boardIssue.id, mapped.contextTags, context.managedPrefixes)) boardChanged = true;
+      if (pullsField(directions, "assignee")) {
+        // Reassigned or unassigned in Jira: drop the assignee tags that no longer hold (#1702).
+        const wanted = mapped.assignee ? `assignee:${mapped.assignee}`.toLowerCase() : null;
+        for (const t of existingTags) {
+          const name = String(t.name ?? "").toLowerCase();
+          if (/^assignee:/.test(name) && name !== wanted) {
+            await boardClient.detachTag(boardIssue.id, t.id);
+            boardChanged = true;
+          }
+        }
+      }
       const imported = await importComments(boardClient, boardIssue.id, mapped.comments, known?.commentIds);
       commentsImported += imported.count;
       if (imported.count > 0) boardChanged = true;
@@ -285,6 +304,7 @@ export async function runInboundSync(
         // lastSync is what Jira holds, which after this write is also what the board holds for every
         // field pull owns; a board-owned field Jira disagrees on is NOT recorded as agreed (#1696).
         fields: jiraFields,
+        assigneeAccountId: mapped.assigneeAccountId,
         commentIds: imported.commentIds,
       };
     } else {

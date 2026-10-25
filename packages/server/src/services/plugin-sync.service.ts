@@ -68,7 +68,7 @@ export interface PluginSyncValidationResult {
 }
 
 const DIRECTION_VALUES = ["both", "jira-to-board", "board-to-jira"];
-const DIRECTION_FIELD_NAMES = ["title", "description", "priority", "type", "labels", "summary", "issuetype", "tags"];
+const DIRECTION_FIELD_NAMES = ["title", "description", "priority", "type", "labels", "assignee", "summary", "issuetype", "tags"];
 
 /** One message per config value that is not usable; empty values are always fine (required is a separate check). */
 export function invalidSyncConfigValues(
@@ -100,6 +100,30 @@ export function invalidSyncConfigValues(
         }
       }
     }
+    if (f.key === "assigneeMap") {
+      // Rows of Jira accountId -> board name (#1702): an object, or an array of { accountId, name }.
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(v);
+      } catch {
+        problems.push(`${f.key}: not valid JSON`);
+        continue;
+      }
+      const rows: Array<[unknown, unknown]> | null = Array.isArray(parsed)
+        ? parsed.map((r) => [(r as { accountId?: unknown } | null)?.accountId, (r as { name?: unknown } | null)?.name])
+        : parsed !== null && typeof parsed === "object"
+          ? Object.entries(parsed as Record<string, unknown>)
+          : null;
+      if (!rows) {
+        problems.push(`${f.key}: must be a JSON object of accountId -> board name`);
+        continue;
+      }
+      for (const [accountId, name] of rows) {
+        if (typeof accountId !== "string" || accountId.trim() === "" || typeof name !== "string" || name.trim() === "") {
+          problems.push(`${f.key}: row ${JSON.stringify([accountId, name])} needs a non-empty accountId and board name`);
+        }
+      }
+    }
     if (f.key === "fieldDirections") {
       let parsed: unknown;
       try {
@@ -114,7 +138,7 @@ export function invalidSyncConfigValues(
       }
       for (const [name, dir] of Object.entries(parsed as Record<string, unknown>)) {
         if (!DIRECTION_FIELD_NAMES.includes(name.trim().toLowerCase())) {
-          problems.push(`${f.key}: unknown field "${name}"; use one of title | description | priority | type | labels`);
+          problems.push(`${f.key}: unknown field "${name}"; use one of title | description | priority | type | labels | assignee`);
         }
         if (typeof dir !== "string" || !DIRECTION_VALUES.includes(dir.trim().toLowerCase())) {
           problems.push(`${f.key}: "${String(dir)}" for "${name}" is not allowed; use one of ${DIRECTION_VALUES.join(" | ")}`);

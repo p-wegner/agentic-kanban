@@ -5,6 +5,7 @@
 
 import { checkProfile } from "./lib/profile.mjs";
 import { buildClientFromEnv, printResult, isSelfTest, checkAuth } from "./lib/cli-client.mjs";
+import { parseAssigneeMap } from "./lib/field-map.mjs";
 import { defaultJql } from "./lib/pull-plan.mjs";
 import { resolveJiraContext } from "./lib/sync-engine.mjs";
 import { JiraAuthError } from "./lib/auth.mjs";
@@ -39,9 +40,23 @@ async function main() {
 
   try {
     const page = await ctx.client.searchIssues(jql, { maxResults: 1 });
+    // assigneeMap (#1702): every mapped accountId must exist in Jira; the bad rows are reported by name.
+    const { map, problems } = parseAssigneeMap(process.env.SYNC_CONFIG_ASSIGNEEMAP);
+    const badRows = problems.map((p) => ({ problem: p }));
+    for (const [accountId, name] of Object.entries(map)) {
+      try {
+        await ctx.client.getUser(accountId);
+      } catch (err) {
+        badRows.push({ accountId, name, problem: err?.status === 404 || err?.status === 400 ? "no such accountId in Jira" : err.message });
+      }
+    }
+    if (badRows.length > 0) {
+      return { ok: false, step: "assigneeMap", reason: `${badRows.length} assigneeMap row(s) are not usable`, badRows };
+    }
     return {
       ok: true,
       step: "connection",
+      assigneeMapRows: Object.keys(map).length,
       selfTest: isSelfTest(),
       siteUrl: ctx.credentials.siteUrl,
       jql,

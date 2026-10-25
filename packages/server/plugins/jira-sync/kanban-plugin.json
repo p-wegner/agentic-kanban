@@ -1,7 +1,7 @@
 {
   "id": "jira-sync",
   "name": "Jira Sync",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Two-way sync between the board and a Jira project: pull tickets in via JQL, push status transitions and comments back. Zero-dependency REST client, fully offline self-testable against recorded fixtures.",
   "skills": [
     {
@@ -99,8 +99,9 @@
       { "key": "defaultIssueType", "label": "Default issue type", "description": "Jira issue type for issues created by push. Defaults to Task." },
       { "key": "pushCreate", "type": "boolean", "label": "Create Jira issues from new board issues", "description": "Set to true to have push create a Jira issue for each new board issue without an external key. Off by default." },
       { "key": "syncDirection", "type": "select", "options": ["both", "jira-to-board", "board-to-jira"], "label": "Sync direction", "description": "both | jira-to-board | board-to-jira, for the mapped fields (title, description, priority, type, labels). Empty = jira-to-board (no field edits are written to Jira); choose both to push board edits as well." },
-      { "key": "fieldDirections", "type": "json", "label": "Per-field direction (JSON)", "description": "Optional override per field (values: both, jira-to-board, board-to-jira), e.g. {\"description\": \"jira-to-board\", \"priority\": \"both\"}. Fields: title, description, priority, type, labels." },
+      { "key": "fieldDirections", "type": "json", "label": "Per-field direction (JSON)", "description": "Optional override per field (values: both, jira-to-board, board-to-jira), e.g. {\"description\": \"jira-to-board\", \"priority\": \"both\"}. Fields: title, description, priority, type, labels, assignee." },
       { "key": "customFieldMap", "type": "json", "label": "Custom field map (JSON, read-only)", "description": "Jira field (id or display name) to tag:<prefix>, pulled as tags, e.g. {\"Story Points\": \"tag:sp\", \"Team\": \"tag:team\"} gives sp:5 and team:Platform. An unknown field fails the pull and Test connection, naming it. Sprint (sprint:<name>) and fix versions (version:<name>) are always pulled; none of these tags are pushed." },
+      { "key": "assigneeMap", "type": "json", "label": "Assignee map (JSON)", "description": "Jira accountId to board name, e.g. {\"5b10ac8d82e05b22cc7d4ef5\": \"Peter\"}. Pull tags the issue assignee:<name> from it (default: the Jira display name); push assigns by the accountId found here and never guesses via user search. Test connection checks that every accountId exists." },
       { "key": "pushStatus", "type": "boolean", "label": "Push status transitions", "description": "On unless set to false." },
       { "key": "pushComments", "type": "boolean", "label": "Push comments", "description": "On unless set to false." },
       { "key": "statusMap", "type": "json", "label": "Status map (JSON)", "description": "Optional override of board status to Jira status name, e.g. {\"Done\": \"Fertig\"}. Without it, board statuses match by Jira status category." },

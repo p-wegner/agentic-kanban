@@ -206,6 +206,19 @@ the board's `scripts`/`sync` machinery or straight from a shell.
   (#1622, `tools/lib/jira-client.mjs`). That endpoint returns no `total`, so `bootstrap` reports
   the size of the page it fetched (`moreAvailable` says whether there are more).
 - **Never deletes.** Jira issues that leave the JQL scope are reported, not removed from the board.
+- **Assignee (#1702).** The board has no assignee column, so the assignee stays an
+  `assignee:<name>` tag. The `assigneeMap` setting (`{"<accountId>": "<board name>"}`) names the
+  tag for a mapped accountId; an unmapped one falls back to the Jira display name, an unassigned
+  issue carries no tag, and pull stores the accountId per issue in `pull-state.json`. `assignee`
+  is a sync-direction field (default `jira-to-board`, so nothing is pushed until you choose
+  `both`/`board-to-jira`): a changed tag then queues one `PUT /issue/{key}/assignee` with the
+  accountId from the map, or `null` when the tag was removed. A name with no map entry is a push
+  failure ("assignee X has no accountId in assigneeMap"), nothing is written, and the entry stays
+  queued; user search is never used to guess. `assignee` is also a snapshot field: changed on both
+  sides is a conflict row, resolvable per field (`keep: {"assignee": "board"}`). Test connection
+  checks every mapped accountId with `GET /user?accountId=` and lists the bad rows; the saved
+  setting is shape-checked offline. A tag renamed on the board is a change to another person, not
+  a rename: edit the map when a person's board name changes.
 - **Outbox is filled by the plugin (#1623).** `tools/lib/outbox-producer.mjs` queues board-side
   status transitions, comments and creates into `outbox.json`; push applies what is there. Board
   field edits (title, description, priority, type) are still not queued - see "Conflicts are

@@ -5,12 +5,14 @@
 //   - (opt-in) a new issue with no `externalKey`                -> one create entry
 //   - (#1672) a tracked issue whose pushed fields differ from the snapshot, for fields whose
 //     direction is not jira-to-board                             -> ONE coalesced `fields` entry
+//   - (#1702) a changed `assignee:` tag, when assignee is not jira-to-board -> ONE `assignee` entry
+//     ({ name }: the board name, "" = unassigned; the accountId is resolved when it is applied)
 // The very first run only records a baseline, so enabling sync never floods Jira with
 // the project's history; an issue seen for the first time is baselined the same way.
 
 import { customPrefixesFromSetting, stripAttachmentFooter } from "./jira-context.mjs";
 import { hasAttributionMarker } from "./comment-marker.mjs";
-import { labelsFromBoardTags, mapBoardTypeToJira } from "./field-map.mjs";
+import { assigneeFromTags, labelsFromBoardTags, mapBoardTypeToJira } from "./field-map.mjs";
 import { LEGACY_DIRECTIONS, pushesField } from "./sync-direction.mjs";
 import { boardLinksOf, parseLinkKey } from "./link-sync.mjs";
 
@@ -28,6 +30,7 @@ export function pushFieldsOf(issue, { extraPrefixes = configuredPrefixes() } = {
     priority: norm(issue.priority),
     type: norm(issue.issueType ?? issue.type),
     labels: labelsFromBoardTags(issue.tags, { extraPrefixes }).sort(),
+    assignee: norm(assigneeFromTags(issue.tags)),
   };
 }
 
@@ -62,7 +65,7 @@ export function isOutboundComment(comment) {
  *   outboxEntries?: Array<object>, pendingWritebackIds?: Set<string>, createEnabled?: boolean,
  *   directions?: ReturnType<typeof import("./sync-direction.mjs").resolveSyncDirections>,
  * }} input
- * @returns `supersedeKeys`: Jira keys whose already-queued `fields` entry this run replaces.
+ * @returns `supersedeKeys` / `supersedeAssigneeKeys`: Jira keys whose already-queued `fields` / `assignee` entry this run replaces.
  */
 export function planOutbox({
   issues,
@@ -81,6 +84,7 @@ export function planOutbox({
   const seen = new Set(snapshot?.commentsSeen ?? []);
   const entries = [];
   const supersedeKeys = [];
+  const supersedeAssigneeKeys = [];
   const next = { issues: {}, commentsSeen: [] };
   const queued = (pred) => outboxEntries.some(pred) || entries.some(pred);
 
@@ -100,9 +104,13 @@ export function planOutbox({
         }
       }
       if (!baseline && prev?.fields) {
-        const changed = Object.keys(fields).filter(
-          (f) => pushesField(directions, f) && JSON.stringify(fields[f]) !== JSON.stringify(prev.fields[f]),
-        );
+        // A baseline from before a field existed (#1702: assignee) has no value for it: not a change.
+        const differs = (f) => f in prev.fields && JSON.stringify(fields[f]) !== JSON.stringify(prev.fields[f]);
+        const changed = Object.keys(fields).filter((f) => f !== "assignee" && pushesField(directions, f) && differs(f));
+        if (pushesField(directions, "assignee") && differs("assignee")) {
+          entries.push({ kind: "assignee", key: issue.externalKey, boardIssueId: issue.id, name: fields.assignee });
+          supersedeAssigneeKeys.push(issue.externalKey);
+        }
         if (changed.length > 0) {
           // Coalesce per issue: the entry carries the LATEST values of every changed field and
           // replaces a still-queued one, so n edits before a push make one Jira write.
@@ -158,5 +166,5 @@ export function planOutbox({
     for (const k of linkKeys) if (!before.has(k)) push("add", k);
     for (const k of before) if (!now.has(k)) push("remove", k);
   }
-  return { entries, nextSnapshot: next, supersedeKeys };
+  return { entries, nextSnapshot: next, supersedeKeys, supersedeAssigneeKeys };
 }

@@ -17,7 +17,7 @@
 // Pure over injected clients and state, like the rest of lib/, so it is testable without a CLI.
 
 import { stripAttachmentFooter } from "./jira-context.mjs";
-import { FIELDS, BOARD_PRIORITY_TO_JIRA, mapJiraIssueToBoardFields, mapBoardTypeToJira, resolveBoardStatusId } from "./field-map.mjs";
+import { FIELDS, BOARD_PRIORITY_TO_JIRA, accountIdForAssignee, mapJiraIssueToBoardFields, mapBoardTypeToJira, resolveBoardStatusId } from "./field-map.mjs";
 import { markdownToAdf } from "./adf.mjs";
 import { attributeComment } from "./comment-marker.mjs";
 import { boardFieldsOf, fieldTable, incomingFieldsOf } from "./field-snapshot.mjs";
@@ -30,9 +30,9 @@ const SHARED_DIRECTIONS = Object.freeze({ fields: Object.freeze(Object.fromEntri
 export const KEEP_SIDES = ["board", "jira"];
 export const NEEDS_HUMAN = "needs-human";
 /** Fields a per-field keep may name. Status is a push transition, never part of a resolve. */
-export const KEEP_FIELDS = ["title", "description", "priority", "type"];
+export const KEEP_FIELDS = ["title", "description", "priority", "type", "assignee"];
 
-const JIRA_CHANGELOG_FIELD = { title: "summary", description: "description", priority: "priority", type: "issuetype", status: "status" };
+const JIRA_CHANGELOG_FIELD = { title: "summary", description: "description", priority: "priority", type: "issuetype", status: "status", assignee: "assignee" };
 
 /** Per mapped field: when Jira last changed it and who did it, from the issue's changelog (`expand=changelog`). */
 export function jiraFieldEvidence(jiraIssue) {
@@ -56,12 +56,12 @@ function addEvidence(rows, jiraIssue, boardIssue) {
   return rows.map((r) => (r.differs ? { ...r, evidence: { board, jira: jira[r.field] ?? fallback } } : r));
 }
 
-async function loadSides({ client, boardClient, projectId, siteUrl, key }) {
+async function loadSides({ client, boardClient, projectId, siteUrl, key, assigneeMap }) {
   const jiraIssue = await client.getIssue(key, { fields: FIELDS, expand: "changelog" });
   const boardIssue = (await boardClient.listExternallyTrackedIssues(projectId)).get(key);
   if (!boardIssue) return { error: `no board issue is linked to ${key}` };
   const boardStatuses = await boardClient.listStatuses(projectId);
-  return { jiraIssue, boardIssue, boardStatuses, mapped: mapJiraIssueToBoardFields(jiraIssue, { siteUrl }) };
+  return { jiraIssue, boardIssue, boardStatuses, mapped: mapJiraIssueToBoardFields(jiraIssue, { siteUrl, assigneeMap }) };
 }
 
 /** Normalises `keep` to { kind: "board"|"jira"|"human"|"fields", ... } or { error }. */
@@ -127,6 +127,17 @@ function conflictRecord({ key, ticket, rows, decision, reason, audit }) {
   ].join("\n");
 }
 
+/** Makes `name` the board issue's only `assignee:` tag ("" / null = none). */
+async function setBoardAssignee(boardClient, issueId, name) {
+  const wanted = name ? `assignee:${name}` : null;
+  const existing = await boardClient.listIssueTags(issueId);
+  for (const t of existing) {
+    if (/^assignee:/i.test(String(t.name ?? "")) && String(t.name).toLowerCase() !== wanted?.toLowerCase()) await boardClient.detachTag(issueId, t.id);
+  }
+  if (!wanted || existing.some((t) => String(t.name ?? "").toLowerCase() === wanted.toLowerCase())) return;
+  const tag = (await boardClient.listTags()).find((t) => t.name.toLowerCase() === wanted.toLowerCase()) ?? (await boardClient.createTag(wanted));
+  await boardClient.attachTag(issueId, tag.id);
+}
 async function postJiraAudit(client, key, lines, { ticket, kept, reason }) {
   if (lines.length === 0) return { posted: false, reason: "nothing overwritten" };
   try {
@@ -156,13 +167,13 @@ async function postBoardAudit(boardClient, issueId, lines, { key, ticket, kept, 
 /**
  * @returns {Promise<{ ok: boolean, mode: "show"|"keep", key: string, keep?: unknown, fields?: object[], nextState?: object, needsHuman?: boolean, artifact?: { path: string, content: string }, reason?: string }>}
  */
-export async function resolveIssue({ client, boardClient, projectId, siteUrl, key, keep, ticket, reason, knownState, directions = SHARED_DIRECTIONS, override = false, now = new Date().toISOString() }) {
+export async function resolveIssue({ client, boardClient, projectId, siteUrl, key, keep, ticket, reason, knownState, directions = SHARED_DIRECTIONS, override = false, assigneeMap = {}, now = new Date().toISOString() }) {
   if (!key) return { ok: false, mode: keep ? "keep" : "show", key, reason: "an issue key is required" };
   const decision = keep != null ? parseKeep(keep) : null;
   if (decision?.error) return { ok: false, mode: "keep", key, reason: decision.error };
   // Every decision records WHY (#1709): the record and the audit comment are all a later reader has.
   if (decision && !String(reason ?? "").trim()) return { ok: false, mode: "keep", key, reason: '"reason" is required for every keep: say why this side wins (or why nobody can tell)' };
-  const sides = await loadSides({ client, boardClient, projectId, siteUrl, key });
+  const sides = await loadSides({ client, boardClient, projectId, siteUrl, key, assigneeMap });
   if (sides.error) return { ok: false, mode: keep ? "keep" : "show", key, reason: sides.error };
   const { jiraIssue, boardIssue, boardStatuses, mapped } = sides;
   const known = knownState.issues[key];
@@ -218,6 +229,7 @@ export async function resolveIssue({ client, boardClient, projectId, siteUrl, ke
       projectId,
       knownState: { issues: known ? { [key]: known } : {} },
       forceKeys: new Set([key]),
+      assigneeMap,
       now,
     });
     const nextState = { issues: { ...knownState.issues, ...(result.nextState.issues[key] ? { [key]: result.nextState.issues[key] } : {}) } };
@@ -238,6 +250,16 @@ export async function resolveIssue({ client, boardClient, projectId, siteUrl, ke
   const boardFields = KEEP_FIELDS.filter((f) => sideOf[f] === "board" && (decision.kind === "board" || differs(f)));
   const jiraFields = KEEP_FIELDS.filter((f) => sideOf[f] === "jira" && differs(f));
 
+  // The assignee goes through its own endpoint and by accountId only (#1702): an unmapped name stops the
+  // whole resolve before anything is written.
+  let assigneeAccountId;
+  const pushAssignee = boardFields.includes("assignee") && differs("assignee");
+  if (pushAssignee) {
+    const name = boardFieldsOf(boardIssue).assignee;
+    assigneeAccountId = name ? accountIdForAssignee(name, assigneeMap) : null;
+    if (name && !assigneeAccountId) return { ok: false, mode: "keep", key, reason: `assignee ${name} has no accountId in assigneeMap` };
+  }
+
   const jiraPatch = {};
   if (boardFields.includes("title")) jiraPatch.summary = boardIssue.title;
   if (boardFields.includes("description") && boardIssue.description != null) jiraPatch.description = markdownToAdf(stripAttachmentFooter(boardIssue.description));
@@ -246,6 +268,7 @@ export async function resolveIssue({ client, boardClient, projectId, siteUrl, ke
   const issueType = mapBoardTypeToJira(boardIssue.issueType);
   if (boardFields.includes("type") && issueType) jiraPatch.issuetype = { name: issueType };
   if (Object.keys(jiraPatch).length) await client.updateIssueFields(key, jiraPatch);
+  if (pushAssignee) await client.assignIssue(key, assigneeAccountId);
 
   let finalBoard = boardIssue;
   if (jiraFields.length) {
@@ -254,7 +277,8 @@ export async function resolveIssue({ client, boardClient, projectId, siteUrl, ke
     if (jiraFields.includes("description")) boardPatch.description = mapped.description;
     if (jiraFields.includes("priority")) boardPatch.priority = mapped.priority;
     if (jiraFields.includes("type")) boardPatch.issueType = mapped.type;
-    finalBoard = { ...boardIssue, ...boardPatch, ...((await boardClient.updateIssue(boardIssue.id, boardPatch)) ?? {}) };
+    if (Object.keys(boardPatch).length) finalBoard = { ...boardIssue, ...boardPatch, ...((await boardClient.updateIssue(boardIssue.id, boardPatch)) ?? {}) };
+    if (jiraFields.includes("assignee")) await setBoardAssignee(boardClient, boardIssue.id, mapped.assignee);
   }
 
   const jiraLines = overwriteLines(rows, "jira", boardFields);
@@ -268,15 +292,18 @@ export async function resolveIssue({ client, boardClient, projectId, siteUrl, ke
   // Re-baseline against what Jira holds NOW (after the audit comment, which bumps `updated`), so the
   // next pull sees "unchanged", not a conflict.
   const after = await client.getIssue(key, { fields: FIELDS });
+  const finalFields = boardFieldsOf(finalBoard);
+  finalFields.assignee = jiraFields.includes("assignee") ? String(mapped.assignee ?? "") : boardFieldsOf(boardIssue).assignee;
   const nextState = {
     issues: {
       ...knownState.issues,
       [key]: {
         ...known,
-        updated: mapJiraIssueToBoardFields(after, { siteUrl }).jiraUpdated,
+        updated: mapJiraIssueToBoardFields(after, { siteUrl, assigneeMap }).jiraUpdated,
         boardIssueId: boardIssue.id,
         boardUpdatedAt: finalBoard.updatedAt ?? boardIssue.updatedAt,
-        fields: boardFieldsOf(finalBoard),
+        fields: finalFields,
+        ...(jiraFields.includes("assignee") ? { assigneeAccountId: mapped.assigneeAccountId } : {}),
       },
     },
   };

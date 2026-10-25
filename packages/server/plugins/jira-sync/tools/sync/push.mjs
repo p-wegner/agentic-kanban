@@ -31,6 +31,7 @@ import {
 import { BoardClient, BoardConfigError, resolveBoardConfigFromEnv } from "../lib/board-client.mjs";
 import { createDefaultBoardFixtureFetch } from "../lib/board-fixtures.mjs";
 import { loadBoardState, refreshPullStateAfterPush } from "../lib/state-sync.mjs";
+import { assigneeMapFromEnv } from "../lib/field-map.mjs";
 import { resolveSyncDirections } from "../lib/sync-direction.mjs";
 import { planOutbox } from "../lib/outbox-producer.mjs";
 import { applyWritebacks } from "../lib/writebacks.mjs";
@@ -75,6 +76,7 @@ async function main() {
     projectKey: ctx.projectKey,
     defaultIssueType: env.SYNC_CONFIG_DEFAULTISSUETYPE || env.JIRA_DEFAULT_ISSUE_TYPE || "Task",
     statusMap,
+    assigneeMap: assigneeMapFromEnv(env),
   };
   const directions = resolveSyncDirections(env);
   const createEnabled = /^(1|true|yes|on)$/i.test(env.SYNC_CONFIG_PUSHCREATE ?? env.JIRA_SYNC_PUSH_CREATE ?? "");
@@ -100,6 +102,8 @@ async function main() {
   let baselined = 0; // issues recorded as the baseline on a first run: nothing is sent for them
   let plannedEntries = [];
   let supersede = new Set(); // keys whose queued `fields` entry the freshly planned one replaces (#1672)
+  let supersedeAssignee = new Set(); // same for `assignee` entries (#1702)
+  const isSuperseded = (e) => (e.kind === "fields" && supersede.has(e.key)) || (e.kind === "assignee" && supersedeAssignee.has(e.key));
   const issueNumberByKey = new Map(); // Jira key -> board issue number
   const issueNumberById = new Map(); // board issue id -> board issue number
   let pendingWritebacks = readWritebacks(stateDir);
@@ -128,8 +132,9 @@ async function main() {
       enqueued = planned.entries.length;
       plannedEntries = planned.entries;
       supersede = new Set(planned.supersedeKeys);
+      supersedeAssignee = new Set(planned.supersedeAssigneeKeys);
       if (!dryRun) {
-        const kept = readOutbox(stateDir).entries.filter((e) => !(e.kind === "fields" && supersede.has(e.key)));
+        const kept = readOutbox(stateDir).entries.filter((e) => !isSuperseded(e));
         writeJsonFile(outboxPath(stateDir), { entries: [...kept, ...planned.entries] });
         writeJsonFile(boardSnapshotPath(stateDir), planned.nextSnapshot);
       }
@@ -141,7 +146,7 @@ async function main() {
   const outbox = readOutbox(stateDir);
   // dry-run does not persist the enqueued entries, so report them as if queued.
   const entries = dryRun
-    ? [...outbox.entries.filter((e) => !(e.kind === "fields" && supersede.has(e.key))), ...plannedEntries]
+    ? [...outbox.entries.filter((e) => !isSuperseded(e)), ...plannedEntries]
     : outbox.entries;
   const pushResult = await runPush(ctx.client, entries, pushOptions);
   const { remaining, writebacks } = pushResult;
@@ -174,6 +179,7 @@ async function main() {
           projectId: boardProjectId,
           pullState: readPullState(stateDir),
           applied,
+          failed,
           directions,
         });
         writeJsonFile(pullStatePath(stateDir), refreshed);

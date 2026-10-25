@@ -6,10 +6,12 @@ import { boardFieldsOf } from "./field-snapshot.mjs";
 import { uniqueByDepId } from "./link-sync.mjs";
 import { LEGACY_DIRECTIONS, pushesField } from "./sync-direction.mjs";
 
-function baselineAfterPush(boardFields, priorFields, directions) {
+function baselineAfterPush(boardFields, priorFields, directions, assigneeNotPushed = false) {
   if (!priorFields) return boardFields;
   const out = { ...boardFields };
-  for (const f of ["title", "description", "priority", "type"]) if (!pushesField(directions, f) && f in priorFields) out[f] = priorFields[f];
+  // A queued assignee change Jira has not taken yet (unmapped name, #1702) stays a divergence.
+  if (assigneeNotPushed && "assignee" in priorFields) out.assignee = priorFields.assignee;
+  for (const f of ["title", "description", "priority", "type", "assignee"]) if (!pushesField(directions, f) && f in priorFields) out[f] = priorFields[f];
   return out;
 }
 
@@ -33,11 +35,12 @@ export async function loadBoardState(boardClient, projectId) {
  * Jira's `updated` with it). Re-baseline the board side so the next pull does not call our own
  * push a local edit; the Jira `updated` cursor of a tracked issue is deliberately kept (#1677). Returns a new pull-state; per-key lookup failures leave that key untouched.
  */
-export async function refreshPullStateAfterPush({ client, boardClient, projectId, pullState, applied, directions = LEGACY_DIRECTIONS }) {
+export async function refreshPullStateAfterPush({ client, boardClient, projectId, pullState, applied, failed = [], directions = LEGACY_DIRECTIONS }) {
+  const assigneeFailed = new Set(failed.filter((f) => f.kind === "assignee").map((f) => f.key));
   const keys = [
     ...new Set(
       applied
-        .filter((a) => (a.kind === "transition" || a.kind === "create" || a.kind === "fields") && a.key && !a.wouldApply)
+        .filter((a) => (a.kind === "transition" || a.kind === "create" || a.kind === "fields" || a.kind === "assignee") && a.key && !a.wouldApply)
         .map((a) => a.key),
     ),
   ];
@@ -62,7 +65,7 @@ export async function refreshPullStateAfterPush({ client, boardClient, projectId
         boardUpdatedAt: boardIssue.updatedAt,
         // A field push does not own (jira-to-board) keeps its last-agreed value: re-baselining it to the
         // board's would turn an unpushed board edit into silent drift or let the next pull overwrite it (#1696).
-        fields: baselineAfterPush(boardFieldsOf(boardIssue), prior?.fields, directions),
+        fields: baselineAfterPush(boardFieldsOf(boardIssue), prior?.fields, directions, assigneeFailed.has(key)),
       };
     } catch {
       // best effort: the pull falls back to reporting a conflict, as before
