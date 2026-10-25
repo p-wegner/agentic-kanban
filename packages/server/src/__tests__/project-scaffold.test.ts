@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -10,6 +10,7 @@ import {
   ensureHookScaffold,
   normalizeHookCommand,
   ensureVerifyGateRunner,
+  HOOKS_PACKAGE_TYPE,
   commitProjectScaffoldArtifacts,
   ensurePnpmBuildApproval,
   ensureBuildableFromClean,
@@ -205,6 +206,48 @@ describe("project-scaffold", () => {
   });
 
   describe("ensureHookScaffold", () => {
+    it("keeps the CommonJS hooks loadable in a project whose package.json says \"type\": \"module\"", async () => {
+      const dir = await tmp();
+      try {
+        await gitInit(dir);
+        await writeFile(join(dir, "package.json"), JSON.stringify({ name: "esm-app", type: "module" }));
+        ensureHookScaffold(dir);
+        ensureVerifyGateRunner(dir);
+
+        const hooksDir = join(dir, ".claude", "hooks");
+        expect(JSON.parse(await readFile(join(hooksDir, "package.json"), "utf8")).type).toBe(HOOKS_PACKAGE_TYPE);
+        // Every .js hook must at least load: before the pin, each one died on its first require
+        const hooks = (await readdir(hooksDir)).filter((f) => f.endsWith(".js"));
+        expect(hooks.length).toBeGreaterThan(3);
+        for (const hook of hooks) {
+          let stderr = "";
+          try {
+            execFileSync(process.execPath, [join(hooksDir, hook), "PreToolUse"], {
+              cwd: dir, input: "{}", windowsHide: true, timeout: 15_000, stdio: ["pipe", "pipe", "pipe"],
+            });
+          } catch (e) {
+            stderr = String((e as { stderr?: Buffer }).stderr ?? "");
+          }
+          expect(stderr, hook).not.toMatch(/require is not defined|ERR_REQUIRE_ESM|Cannot use import statement/);
+        }
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("pins the hooks dir to CommonJS without dropping the fields of an existing package.json", async () => {
+      const dir = await tmp();
+      try {
+        const hooksDir = join(dir, ".claude", "hooks");
+        await mkdir(hooksDir, { recursive: true });
+        await writeFile(join(hooksDir, "package.json"), JSON.stringify({ private: true, type: "module" }));
+        ensureHookScaffold(dir, { includeWorktreeGuard: false });
+        expect(JSON.parse(await readFile(join(hooksDir, "package.json"), "utf8"))).toEqual({ private: true, type: "commonjs" });
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
     it("creates .claude/hooks directory and writes vital-files.json + smart-hooks-config.json + README", async () => {
       const dir = await tmp();
       try {

@@ -497,10 +497,38 @@ function writeBoardHookIfOutdated(targetPath: string, source: string | null): vo
   writeFileSync(targetPath, source, "utf8");
 }
 
+/**
+ * Pin `.claude/hooks/` to CommonJS with its own package.json.
+ *
+ * The board's hooks are CommonJS `.js` (`require(...)`). Node takes a `.js` file's module type
+ * from the nearest package.json, so in a project whose root says `"type": "module"` every hook
+ * died on its first `require` — a non-blocking hook error to Claude Code, so the guards looked
+ * installed and never ran (habithub-backend, every PreToolUse and Stop call). A package.json in
+ * the hooks dir is nearer than the root's and makes them CommonJS in any project, without
+ * renaming a file or a settings entry. `.mjs` hooks stay ES modules by their extension.
+ * An existing file keeps its other fields; one we cannot parse is left alone.
+ */
+export const HOOKS_PACKAGE_TYPE = "commonjs";
+
+function ensureHooksAreCommonJs(hooksDir: string): void {
+  const pkgPath = join(hooksDir, "package.json");
+  let pkg: Record<string, unknown> = {};
+  if (existsSync(pkgPath)) {
+    try {
+      pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+    } catch {
+      return;
+    }
+    if (pkg.type === HOOKS_PACKAGE_TYPE) return;
+  }
+  writeFileSync(pkgPath, JSON.stringify({ ...pkg, type: HOOKS_PACKAGE_TYPE }, null, 2) + "\n", "utf8");
+}
+
 export function ensureHookScaffold(repoPath: string, options: HookScaffoldOptions = {}): void {
   try {
     const hooksDir = join(repoPath, ".claude", "hooks");
     mkdirSync(hooksDir, { recursive: true });
+    ensureHooksAreCommonJs(hooksDir);
 
     // --- vital-file-guard.js ---
     const vitalGuardPath = join(hooksDir, "vital-file-guard.js");
@@ -663,6 +691,7 @@ export function ensureVerifyGateRunner(repoPath: string): void {
   try {
     const hooksDir = join(repoPath, ".claude", "hooks");
     if (!existsSync(hooksDir)) mkdirSync(hooksDir, { recursive: true });
+    ensureHooksAreCommonJs(hooksDir);
 
     const destRunner = join(hooksDir, "verify-gate-runner.js");
     if (!existsSync(destRunner)) {

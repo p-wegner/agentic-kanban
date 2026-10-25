@@ -28,6 +28,9 @@ export const DURABLE_CLAUDE_SCAFFOLD_PATHS = [
   ".claude/hooks/verify-gate-runner.js",
   ".claude/hooks/verify-gate.config.json",
   ".claude/hooks/disclose-context.mjs",
+  // Pins the hooks dir to CommonJS, so a `"type": "module"` project can still load them: a
+  // builder's worktree needs it as much as the hooks themselves.
+  ".claude/hooks/package.json",
   // .claude/smart-hooks-rules.json is deliberately ABSENT: it is machine-regenerated
   // per checkout and gitignored (ca79487c). Force-committing it here put a volatile
   // file on master AND every branch, which made every merge conflict on it.

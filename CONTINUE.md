@@ -7,6 +7,20 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
 promote): read `docs/agent-guide/operator-reference.md` first.** Full console:
 `pnpm cli -- status --watch`. This line is standing; keep it when passes are archived.
 
+## 2026-10-25: scaffolded hooks load in `"type": "module"` projects
+
+Done: `ensureHookScaffold` and `ensureVerifyGateRunner` write `.claude/hooks/package.json` with
+`"type": "commonjs"` (and keep any other fields), and the scaffold commit carries it. Before, every
+board hook in an ESM project (habithub-backend, any TS project with `"type": "module"`) died on its
+first `require`: Claude Code reports that as a non-blocking hook error, so the vital-file guard and the
+smart-hooks runner looked installed and never ran. Verified by the two tests "keeps the CommonJS hooks
+loadable …" (runs every scaffolded `.js` hook with node in an ESM project; fails with the pin removed)
+and "pins the hooks dir to CommonJS …", plus `project-scaffold.test.ts` and
+`scaffold-commit-covers-hooks.test.ts` green (63/63, one worker). **Not done:** a project reaches the
+fix only when the scaffold runs again there (registration or import) on a build that has it, i.e. after
+the next stable promote; already-registered ESM projects (the `exp` fixtures) keep broken hooks until
+then. `tsc` for the server package was not run (memory under 4 GB).
+
 ## #1569/#1572 train shepherd: phases 1 and 2 landed (#691 residual below)
 
 Done: one `TrainShepherd` per train, shared by incremental assembly and the red gate
