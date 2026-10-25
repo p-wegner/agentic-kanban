@@ -73,7 +73,8 @@ export function decideRegate(args: {
       if (!pkg) return { mode: "full", reason: `failing suite ${raw} cannot be mapped to a package` };
       byPkg.set(pkg, [...(byPkg.get(pkg) ?? []), m ? m[2] : suite]);
     }
-    for (const [pkg, suites] of byPkg) steps.push(`(cd ${pkg} && pnpm exec vitest run --maxWorkers=4 ${suites.join(" ")})`);
+    // `--dir`, not `cd`: under cmd `( )` is not a subshell, so a `cd` leaked into the later root-level steps (#1714).
+    for (const [pkg, suites] of byPkg) steps.push(`pnpm --dir ${pkg} exec vitest run --maxWorkers=4 ${suites.join(" ")}`);
   }
   // Related suites + the always-run guards whose `when:` globs match the fix: test:mine scoped to the fix diff.
   steps.push(`pnpm test:mine -- --changed ${args.gatedSha}`);
@@ -104,4 +105,21 @@ export function formatTrainTimings(t: TrainTimings): string {
 export function isMissingToolNoTests(gate: { passed: boolean; message: string; failedSuites?: readonly string[] }): boolean {
   if (gate.passed || (gate.failedSuites?.length ?? 0) > 0) return false;
   return /Command "?vitest"? not found|ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL|vitest(?:["']|\s)+(?:ist entweder falsch|is not recognized|: command not found|: not found)|Der Befehl "vitest"|Das System kann den angegebenen Pfad nicht finden|The system cannot find the path specified|cd: [^\n]*: No such file or directory/i.test(gate.message);
+}
+
+/**
+ * #1714: a targeted script step failed with "Command X not found" for something other than vitest - the script is
+ * broken (e.g. a leaked cwd), not a tool missing. Returns the honest message, or null when this is not that case.
+ * `evidence` records suites that passed in the same run, so the full fallback does not erase them.
+ */
+export function describeBrokenRegateScript(script: string, gate: { passed: boolean; message: string; failedSuites?: readonly string[] }, failingCount = 0): string | null {
+  if (gate.passed || (gate.failedSuites?.length ?? 0) > 0) return null;
+  const m = /Command "?([^"\s]+)"? not found/i.exec(gate.message);
+  if (!m || m[1].toLowerCase() === "vitest") return null;
+  const steps = script.split(" && ");
+  const idx = steps.findIndex((s) => s.includes(m[1]));
+  const n = idx >= 0 ? idx + 1 : steps.length;
+  const vitestRan = /Tests\s+\d+ passed/i.test(gate.message) || /Test Files\s+\d+ passed/i.test(gate.message);
+  const evidence = vitestRan ? ` (failing ${failingCount} passed; related step did not run)` : "";
+  return `targeted re-gate script failed at step ${n} (Command "${m[1]}" not found - broken script, not a missing tool)${evidence}`;
 }
