@@ -122,9 +122,14 @@ async function main() {
         ...[...result.outOfScope, ...result.deleted].filter((o) => o.movedTo).map((o) => o.key),
       ]);
       const jiraValues = Object.fromEntries(result.details.filter((d) => d.jiraDiffers).map((d) => [d.key, d.jiraDiffers]));
+      const agreedFields = Object.fromEntries(
+        Object.entries(result.nextState.issues)
+          .filter(([k, e]) => e?.fields && JSON.stringify(e.fields) !== JSON.stringify(knownState.issues?.[k]?.fields))
+          .map(([k, e]) => [k, e.fields]),
+      );
       writeJsonFile(
         boardSnapshotPath(stateDir),
-        await snapshotAfterPull({ boardClient, projectId: boardConfig.projectId, snapshot: readBoardSnapshot(stateDir), touchedKeys: touched, jiraValues, linkAdjust: result.linkSnapshotAdjust }),
+        await snapshotAfterPull({ boardClient, projectId: boardConfig.projectId, snapshot: readBoardSnapshot(stateDir), touchedKeys: touched, jiraValues, linkAdjust: result.linkSnapshotAdjust, agreedFields, directions: resolveSyncDirections(process.env) }),
       );
     } catch {
       // best effort: worst case push attempts one redundant (failing, reported) transition

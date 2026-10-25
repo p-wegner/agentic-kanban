@@ -229,6 +229,12 @@ export async function runInboundSync(
         const imported = await importComments(boardClient, boardIssue.id, mapped.comments, known?.commentIds);
         commentsImported += imported.count;
         await syncContextTags(boardClient, tagCache, boardIssue.id, mapped.contextTags, context.managedPrefixes);
+        // The attachments footer is read-only context too (#1701) and never conflicts: apply it, keep the board's own text (#1719).
+        if (attachmentFooterOf(boardIssue.description) !== mapped.attachmentFooter) {
+          await boardClient.updateIssue(boardIssue.id, {
+            description: withAttachmentFooter(stripAttachmentFooter(boardIssue.description ?? ""), mapped.attachmentFooter) || undefined,
+          });
+        }
         if (known) nextState.issues[jiraIssue.key] = { ...known, commentIds: imported.commentIds };
       } else {
         commentsImported += newComments(mapped.comments, known?.commentIds).length;

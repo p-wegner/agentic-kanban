@@ -6,6 +6,7 @@ import { analyzeDependencies, enhanceIssue, decomposeEpic, confirmEpicDecomposit
 import { markTooSmallToDecompose } from "../services/decompose-verdict.service.js";
 import { scanForTicketGroups, scanMergeTrainConflictsForTicketGroups, scanTouchedFilesForTicketGroups } from "../services/ticket-group-scan.service.js";
 import type { DecomposeChildProposal, DecomposeDependencyProposal } from "../services/issue-ai.service.js";
+import { normalizeIssuePriority } from "@agentic-kanban/shared/lib/issue-priority";
 import { createIssueService } from "../services/issue.service.js";
 import {
   unrecognizedIssueUpdateKeys,
@@ -119,6 +120,11 @@ function unrecognizedFieldsBody(ignoredKeys: string[], recognized: ReadonlySet<s
  * visible while still taking the lines off `createIssuesRoute`, which sits on the
  * `function-nloc-ratchet` (#800) shrink-only ring and had no room for the #987 guard.
  */
+/** A legacy alias ("urgent") is stored as its canonical priority (#1719). */
+function withNormalizedPriority<T extends Record<string, unknown>>(updates: T): T {
+  return typeof updates.priority === "string" ? { ...updates, priority: normalizeIssuePriority(updates.priority) } : updates;
+}
+
 function registerIssueUpdateRoutes(router: Hono, issueService: ReturnType<typeof createIssueService>): void {
 // PATCH /api/issues/bulk - update N issues in one request
 router.patch("/bulk", async (c) => {
@@ -128,7 +134,7 @@ router.patch("/bulk", async (c) => {
   // accepting `checklist` here would report success for a field `updateIssuesBulk` never reads.
   const ignoredKeys = unrecognizedIssueUpdateKeys(body.updates, RECOGNIZED_BULK_ISSUE_UPDATE_KEYS);
   if (ignoredKeys.length > 0) return c.json(unrecognizedFieldsBody(ignoredKeys, RECOGNIZED_BULK_ISSUE_UPDATE_KEYS, "a bulk issue update"), 422);
-  const result = await issueService.updateIssuesBulk(body.issueIds, body.updates);
+  const result = await issueService.updateIssuesBulk(body.issueIds, withNormalizedPriority(body.updates));
   return c.json({ updated: result.updated });
 });
 
@@ -149,7 +155,7 @@ router.patch("/:id", async (c) => {
   const body = await parseJsonBody(c);
   const ignoredKeys = unrecognizedIssueUpdateKeys(body as Record<string, unknown>);
   if (ignoredKeys.length > 0) return c.json(unrecognizedFieldsBody(ignoredKeys, RECOGNIZED_ISSUE_UPDATE_KEYS, "an issue update"), 422);
-  const result = await issueService.updateIssue(c.req.param("id"), body as Record<string, unknown>);
+  const result = await issueService.updateIssue(c.req.param("id"), withNormalizedPriority(body as Record<string, unknown>));
   return c.json(result);
 });
 }
@@ -341,7 +347,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
       projectId: body.projectId,
       title: body.title,
       description: body.description,
-      priority: body.priority,
+      priority: typeof body.priority === "string" ? normalizeIssuePriority(body.priority) : body.priority,
       issueType: body.issueType,
       skipAutoReview: body.skipAutoReview,
       sortOrder: body.sortOrder,
