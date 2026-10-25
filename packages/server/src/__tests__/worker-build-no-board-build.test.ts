@@ -1,3 +1,4 @@
+// @gate:always-run when:scripts/promote-lock.mjs,scripts/pack-worker.mjs,packages/server/src/services/worker-build.service.ts — imports the repo's promote-lock script (#1724).
 // #1724: a worker tarball build never writes into the board's own checkout, and yields to a promote.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,7 +10,7 @@ import { acquirePromoteLock, releasePromoteLock } from "../../../../scripts/prom
 
 const dirs: string[] = [];
 function tmp(): string {
-  const d = mkdtempSync(join(tmpdir(), "wb-1724-"));
+  const d = mkdtempSync(join(tmpdir(), "ak-wb-1724-"));
   dirs.push(d);
   return d;
 }
