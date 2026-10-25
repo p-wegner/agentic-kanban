@@ -730,11 +730,12 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     const reviewDecision = resolveProjectReviewMode(prefMap, projectId);
     if (!reviewDecision.run && !workspace.requiresReview) {
       console.log(`[workflow] skipping per-ticket auto-review for workspace ${workspaceId}${formatPostureNote(reviewDecision.posture)}`);
-      if (backoffSuperseded) {
-        await rearmReadyForMerge(workspaceId, now, db);
-        boardEvents.broadcast(projectId, "workspace_ready_for_merge");
-        console.log(`[workflow] workspace ${workspaceId} re-marked ready after a fix superseded its merge backoff (#1556)`);
-      }
+      // #1721: no review session will arm readyForMerge under this posture, so the builder exit does
+      // it NOW. Otherwise the workspace sits In Review with no driver until the progress invariant
+      // escalates (~30 min). Gate evidence stays unset: the merge queue gates it.
+      await rearmReadyForMerge(workspaceId, now, db);
+      boardEvents.broadcast(projectId, "workspace_ready_for_merge");
+      console.log(`[workflow] workspace ${workspaceId} marked ready for the merge queue (review skipped by posture${backoffSuperseded ? "; fix superseded its merge backoff, #1556" : ""}, #1721)`);
       return;
     }
     const autoReview = !skipAutoReview && (workspace.requiresReview || isAutoReviewEnabled(prefMap.get(AUTO_REVIEW_PREF_KEY)));
