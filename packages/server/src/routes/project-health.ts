@@ -107,6 +107,8 @@ export function createProjectHealthRoute(database: Database) {
     const projectId = c.req.param("id");
     // #1238 — `?branch=rc/…` sweeps a release candidate; the route stays body-less.
     const branch = branchQuery(c.req.query("branch"));
+    // #1717: log on ARRIVAL, so a handler that never answers still shows in the board log.
+    console.log(`[base-branch-health] reprobe request received for project ${projectId} (branch ${branch ?? "base"})`);
     const previous = await getLatestBaseBranchHealth(projectId, database, { branch }).catch(() => null);
     const alreadyRunning = inFlightBaseBranchProbeCount() > 0;
     const verdict = await requestBaseBranchReprobe(projectId, database, undefined, undefined, {

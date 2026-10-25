@@ -143,6 +143,7 @@ const FOREIGN: Record<string, string> = {
   // OS / shell
   NO_COLOR: "the no-color.org convention — `status --watch` drops ANSI colour when set",
   PATH: "OS — executable search path, used to resolve an agent CLI",
+  Path: "Windows — the casing the process env carries for PATH; the Git Bash lookup reads it (#1716)",
   PATHEXT: "Windows — the extensions that make a file executable (.EXE/.CMD/.BAT/.PS1)",
   APPDATA: "Windows — roaming app data, where a global npm install puts its bin",
   LOCALAPPDATA: "Windows — local app data, a candidate Node install location",

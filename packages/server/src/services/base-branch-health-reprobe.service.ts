@@ -13,6 +13,7 @@
  * The sweep now imports DOWN into here, which is the direction the layering already allows.
  */
 
+import { TimeoutError, withTimeout } from "../lib/with-timeout.js";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import {
@@ -183,7 +184,9 @@ export interface BaseHealthDueVerdict {
     | "gate_running"
     | "sha_unchanged"
     | "host_saturated"
-    | "placement_held";
+    | "placement_held"
+    /** #1717: the decision did not settle in time (a placement / git / pref read hung); answered instead of hanging the caller. */
+    | "placement_unreadable";
   /** Only with `placement_held` (#1471): why the probe could not be placed, and when it is retried. */
   held?: string;
   retryAt?: string;
@@ -387,6 +390,9 @@ async function reprobePlacementHold(projectId: string, database: Database, branc
  * an hour, and both callers (a failing merge gate, an HTTP route) need to carry on immediately.
  * The probe itself runs detached; its result lands in the next read of the health row.
  */
+/** #1717: the reprobe decision answers "at once"; past this a hung read becomes `placement_unreadable`. */
+export const REPROBE_DECISION_TIMEOUT_MS = 15_000;
+
 export async function requestBaseBranchReprobe(
   projectId: string,
   database: Database = db,
@@ -405,7 +411,26 @@ export async function requestBaseBranchReprobe(
      * slots and yields to a train gate. A promote that later joins it escalates it to explicit.
      */
     background?: boolean;
+    /** Test seam for the decision deadline (#1717). */
+    decisionTimeoutMs?: number;
   } = {},
+): Promise<BaseHealthDueVerdict> {
+  const ms = opts.decisionTimeoutMs ?? REPROBE_DECISION_TIMEOUT_MS;
+  try {
+    return await withTimeout(decideBaseBranchReprobe(projectId, database, intervalMs, nowMs, opts), ms, "re-probe decision");
+  } catch (err) {
+    if (!(err instanceof TimeoutError)) throw err;
+    console.warn(`[base-branch-health] on-demand re-probe for project ${projectId} gave up deciding after ${ms}ms (placement_unreadable)`);
+    return { due: false, reason: "placement_unreadable" };
+  }
+}
+
+async function decideBaseBranchReprobe(
+  projectId: string,
+  database: Database,
+  intervalMs: number,
+  nowMs: number,
+  opts: Parameters<typeof requestBaseBranchReprobe>[4] & object,
 ): Promise<BaseHealthDueVerdict> {
   let verdict: BaseHealthDueVerdict = { due: false, reason: "recent_result" };
   try {

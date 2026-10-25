@@ -38,6 +38,7 @@ import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.reposit
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { runNonFatal } from "./run-non-fatal.js";
+import { describeGitBash } from "../services/script-runner.js";
 import { reapStaleBaseHealthProbeStampsLogged } from "./base-health-probe-stamp-reaper.js";
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
@@ -127,6 +128,7 @@ export async function killOrphanedServers(): Promise<void> {
   } catch (err) {
     console.warn("[startup] orphan cleanup failed (non-fatal):", errorMessage(err));
   }
+  try { console.log(`[startup] ${describeGitBash()}`); } catch { /* diagnostics only */ }
 }
 
 /**
