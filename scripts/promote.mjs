@@ -433,6 +433,8 @@ async function latestSweepRow(projectId, branch) {
  * own `probe_in_flight` guard makes a no-op while the probe really is alive.
  */
 const PROBE_RECHECK_MS = 5 * 60_000;
+/** #1717: consecutive timed-out reprobe requests after which the board is declared not answering. */
+const REPROBE_TIMEOUT_LIMIT = 4;
 
 async function acquireFreshSweep(projectId, previousRow, waitMs, branch, sameSha = null) {
   const deadline = Date.now() + waitMs;
@@ -449,11 +451,13 @@ async function acquireFreshSweep(projectId, previousRow, waitMs, branch, sameSha
   const ceiling = Date.now() + Math.max(waitMs * 3, 120 * 60_000);
   let probeLive = false;
   let probeSince = "";
+  let reprobeTimeouts = 0;
   log(`[promote] requesting a fresh full sweep of ${branch} for project ${projectId} (waiting up to ${Math.round(waitMs / 60_000)} min, longer while the board's probe is live, ceiling ${Math.round((ceiling - Date.now()) / 60_000)} min)`);
   while (Date.now() < deadline || (probeLive && Date.now() < ceiling)) {
     if (Date.now() >= nextAskAt) {
       try {
         const answer = await requestReprobe(projectId, branch);
+        reprobeTimeouts = 0;
         const probing = isProbingThisProject(answer);
         nextAskAt = Date.now() + (probing ? PROBE_RECHECK_MS : SWEEP_POLL_INTERVAL_MS);
         probeLive = probing;
@@ -484,6 +488,10 @@ async function acquireFreshSweep(projectId, previousRow, waitMs, branch, sameSha
         );
       } catch (e) {
         nextAskAt = Date.now() + SWEEP_POLL_INTERVAL_MS;
+        if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError") && ++reprobeTimeouts >= REPROBE_TIMEOUT_LIMIT) {
+          log(`[promote] the board is not answering the reprobe route (POST /api/projects/${projectId}/base-branch-health/reprobe timed out ${reprobeTimeouts}x in a row); giving up on requesting a sweep instead of retrying until the budget runs out`);
+          return { row: null, probeLive: false, reason: `the board is not answering the reprobe route (POST /api/projects/${projectId}/base-branch-health/reprobe)` };
+        }
         log(`[promote] reprobe request failed: ${e instanceof Error ? e.message : String(e)} — retrying`);
       }
     }

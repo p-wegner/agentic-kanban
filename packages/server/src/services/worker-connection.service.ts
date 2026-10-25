@@ -163,6 +163,12 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
         );
       }
       try { existing.ws.close(); } catch { /* already gone */ }
+      // #1717: the old socket's own close is ignored by `handleClose` (it no longer owns the mapping),
+      // so anything waiting on a reply over it (a verify run) would never hear it ended. Announce it.
+      connections.delete(workerId);
+      for (const listener of disconnectListeners) {
+        try { listener(workerId); } catch (err) { console.error(`[worker-connection] disconnect-listener error`, err); }
+      }
     }
     const conn: WorkerConnection = {
       ws,
