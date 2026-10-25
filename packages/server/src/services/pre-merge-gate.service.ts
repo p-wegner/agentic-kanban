@@ -59,7 +59,7 @@ import { summarizeVerifyFailure } from "./verify-failure-summary.js";
 import { VERIFY_NEUTRALIZED_DB_LOCATION_ENV, VERIFY_NEUTRALIZED_LISTENER_ENV } from "../lib/verify-env.js";
 import { createSmokeIsolation } from "../lib/smoke-isolation.js";
 import { resolveVerifyOutcome } from "./verify-retry-strategies.js";
-import type { FailedSuite } from "./verify-flake-retry.js";
+import { CONTENTION_RETRY_ENV, type FailedSuite } from "./verify-flake-retry.js";
 import { parseVerifyStepTimings, type VerifyStepTiming } from "./verify-step-timings.js";
 import { recordVerifyGateOutcome, resolveGateImpactTierFields } from "./test-impact-outcome.service.js";
 import { withFailedSuites } from "./verify-failed-suites.js";
@@ -613,7 +613,7 @@ export async function runPreMergeGate(
         runVerifyWithRetryScope: (retryScope) => {
           noteMergeGatePhase(workspace.id, "flake-retry", "re-running only the failing tests");
           return runInHostBuildSlotUnlessOnWorker(workerRun, () =>
-            runVerifyScript({ ...verifyEnv, KANBAN_RETRY_TEST_FILES: retryScope })
+            runVerifyScript({ ...verifyEnv, ...CONTENTION_RETRY_ENV, KANBAN_RETRY_TEST_FILES: retryScope })
               .catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
           runUnderBuildSemaphore);
         },

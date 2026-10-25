@@ -12,6 +12,8 @@ import type { SetupScriptResult } from "@agentic-kanban/shared/lib/setup-script"
 import type { Database } from "../db/index.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
+import { verifyHonoursSuiteScope } from "./self-project.js";
+import { CONTENTION_RETRY_ENV } from "./verify-flake-retry.js";
 import { resolveRedProbeOutcome } from "./base-branch-red-outcome.js";
 import type { BaseBranchVerifyResult } from "./base-branch-health.service.js";
 import { failedSuitesForOutcome } from "./failed-suite-parse.js";
@@ -98,8 +100,8 @@ export async function runProbeOnWorker(args: {
       result = { outcome: "unverified", sha, branch, durationMs, message: `${stamp}the verify toolchain refused this worker's runtime. The tree was NOT verified; this says nothing about whether it is green.` };
     } else if (out.result.exitCode !== 0) {
       result = await resolveRedProbeOutcome({
-        projectId, sha, branch, exitCode: out.result.exitCode, combined, stdout: combined, stderr: "", startedAt, scoped: false, workingDir: null,
-        runRetry: async (scope) => (await run({ KANBAN_RETRY_TEST_FILES: scope })).result,
+        projectId, sha, branch, exitCode: out.result.exitCode, combined, stdout: combined, stderr: "", startedAt, scoped: verifyHonoursSuiteScope({ repoPath: args.repoPath, verifyScript: args.verifyScript }), workingDir: args.repoPath,
+        runRetry: async (scope) => (await run({ ...CONTENTION_RETRY_ENV, KANBAN_RETRY_TEST_FILES: scope })).result,
       });
       result.message = `${stamp}${result.message ?? ""}`;
       result.failedSuites = result.failedSuites ?? (out.report?.failingSuites?.length ? out.report.failingSuites : null);

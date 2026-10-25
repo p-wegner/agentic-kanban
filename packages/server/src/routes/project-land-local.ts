@@ -10,6 +10,7 @@ const bodySchema = z.object({
   steps: z.array(z.object({ name: z.string().regex(/^[\w:.-]+$/), command: z.string().min(1) })).min(1),
   changedFiles: z.array(z.string()),
   workerName: z.string().min(1).optional(),
+  retryScope: z.string().min(1).optional(),
 });
 
 /** `train land-local --on-worker` (#1612): place the gate of a locally assembled train on a verify worker. */

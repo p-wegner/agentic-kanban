@@ -1,6 +1,8 @@
 import { basename, dirname, join } from "node:path";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { buildMergeTrainCommitMessage } from "./merge-train.service.js";
+import { CONTENTION_NOTE, CONTENTION_RETRY_ENV, decideFlakeRetry, parseFailedSuites as parseFlakeSuites, retryScopeEnvValue, type FailedSuite } from "./verify-flake-retry.js";
+import { isTimeoutOnlyFailure } from "./verify-placement.js";
 import { trainRefName, type TrainMember } from "./merge-train-assembly.js";
 
 /**
@@ -50,6 +52,8 @@ export interface LandLocalWorkerGateRequest {
   steps: Array<{ name: string; command: string }>;
   changedFiles: string[];
   workerName?: string;
+  /** #1713: contention re-run scope (`pkg:file,...`); the gate runs only those suites on one vitest worker. */
+  retryScope?: string;
 }
 
 export type LandLocalWorkerGateResult =
@@ -149,6 +153,22 @@ export function excludedFromEvidence(evidence: Record<string, unknown> | null | 
     }
   }
   return [...out].map(([workspaceId, reason]) => ({ workspaceId, reason }));
+}
+
+/**
+ * #1713: the suites of a red land-local gate that earn ONE contention re-run - every failure a timeout
+ * (or a small failing set), each attributable to a package, none a guard. Null = take the red as final.
+ * Shares `decideFlakeRetry` with the train gate and the rc sweep.
+ */
+export function contentionRerunSuites(log: string, failedSuites: readonly string[]): FailedSuite[] | null {
+  let suites = parseFlakeSuites(log);
+  if (suites.length === 0 || suites.some((s) => s.packageLabel === null)) {
+    // Worker logs may not order headers before FAIL lines: fall back to repo-relative paths.
+    const placed = failedSuites.map((f) => /^packages\/([^/]+)\/(.+)$/.exec(f.replace(/\\/g, "/")));
+    if (placed.length > 0 && placed.every(Boolean)) suites = placed.map((m) => ({ packageLabel: m![1]!, file: m![2]! }));
+  }
+  const decision = decideFlakeRetry({ suites, scoped: true, timeoutOnly: isTimeoutOnlyFailure(log) });
+  return decision.retry ? decision.suites : null;
 }
 
 function windowLabel(now: string): string {
@@ -300,6 +320,17 @@ export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps)
       }
       for (const gate of gateSteps) {
         const result = await step(deps, gate.name, gate.command, worktree, { ...hostEnv, KANBAN_TEST_FILES: changed.join(",") });
+        if (result.code !== 0 && gate.name === "test:mine") {
+          const rerun = contentionRerunSuites(result.tail, parseFailedSuites(result.tail));
+          if (rerun) {
+            deps.log(`gate failed on ${rerun.length} suite(s); re-running only those on one vitest worker to tell contention from a regression (#1713)`);
+            const second = await step(deps, `${gate.name} (contention re-run)`, gate.command, worktree, { ...hostEnv, ...CONTENTION_RETRY_ENV, KANBAN_TEST_FILES: changed.join(","), KANBAN_RETRY_TEST_FILES: retryScopeEnvValue(rerun) });
+            if (second.code === 0) {
+              deps.log(`gate GREEN on the targeted re-run (${CONTENTION_NOTE})`);
+              continue;
+            }
+          }
+        }
         if (result.code !== 0) {
           deps.log(`gate RED at ${gate.name}; worktree left at ${worktree} - commit a fix there, then re-run with --continue`);
           return { status: "red", step: gate.name, failedSuites: parseFailedSuites(result.tail), worktree, tail: result.tail };
@@ -337,6 +368,18 @@ async function gateOnWorker(a: {
   }
   deps.log(`worker ${result.workerName} ${result.passed ? "passed" : "FAILED"} the gate in ${Math.round((Date.now() - started) / 1000)}s`);
   if (result.passed) return null;
+  if (!result.timedOut) {
+    const rerun = contentionRerunSuites(result.log, result.failedSuites ?? parseFailedSuites(result.log));
+    if (rerun) {
+      deps.log(`gate failed on ${rerun.length} suite(s) (${isTimeoutOnlyFailure(result.log) ? "timeouts only" : "small set"}); re-running only those on one vitest worker to tell contention from a regression (#1713)`);
+      const second = await deps.runOnWorker({ projectId: input.projectId, branch, sha, steps, changedFiles: a.changed, retryScope: retryScopeEnvValue(rerun), ...(workerName ? { workerName } : {}) });
+      if (second.status === "ran" && second.passed) {
+        deps.log(`gate GREEN on the targeted re-run (${CONTENTION_NOTE}: ${rerun.map((r) => `${r.packageLabel}/${r.file}`).join(", ")}) - landing`);
+        return null;
+      }
+      if (second.status === "ran") deps.log("the same suites failed again on the targeted re-run - a real failure, not machine load");
+    }
+  }
   const failed = result.failedStep ?? "gate";
   // A timeout is not a red: nothing failed, the worker stopped the run (no fix to commit, just re-run).
   if (result.timedOut) deps.log(`gate TIMED OUT during ${failed} on ${result.workerName} - no suite failed; worktree left at ${worktree}, re-run with --continue`);
