@@ -352,6 +352,11 @@ export interface PluginLoopPlan {
    * report `converged: false` with no units to mean "blocked, not done").
    */
   converged?: boolean;
+  /**
+   * Unit ids still outstanding but waiting for a human (jira-sync needs-human, #1718): no ticket is
+   * created for them, and an already-open ticket of such a unit is NOT closed as "resolved".
+   */
+  held?: string[];
   /** Free-text note surfaced in the UI (e.g. "3/19 modules converged"). */
   note?: string;
   /** Human-approval gate the loop is blocked on (#286). Meaningful with `units: []`. */
@@ -906,6 +911,7 @@ export function parsePluginLoopPlan(
   return {
     units,
     converged: (obj.converged as boolean | undefined) ?? units.length === 0,
+    ...(obj.held !== undefined ? { held: requireArray(obj.held, "held").map((h, i) => requireString(h, `held[${i}]`)) } : {}),
     note: optionalString(obj.note, "note"),
     gate: parseLoopGate(obj.gate),
     progress: parseLoopProgress(obj.progress),

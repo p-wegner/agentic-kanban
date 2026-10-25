@@ -228,7 +228,7 @@ export class JiraClient {
     });
   }
 
-  /** `POST /rest/api/3/issueLink`; `inwardIssue` is the end that reads "is blocked by". */
+  /** `POST /rest/api/3/issueLink`; the `inwardIssue` end is the blocker (POST maps the other way round than the issue view reads: `inwardIssue` X, `outwardIssue` Y gives "X blocks Y"). */
   async createIssueLink({ typeName, inwardKey, outwardKey }) {
     await this.request("/rest/api/3/issueLink", {
       method: "POST",

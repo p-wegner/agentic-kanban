@@ -52,6 +52,12 @@ export function boardLinksOf(deps, keyById) {
   return out;
 }
 
+/** The board's refusal text, trimmed to the reason ("Adding this dependency would create a cycle" -> "would create a cycle"). */
+function linkRefusalReason(err) {
+  const m = String(err?.message ?? err ?? "refused").replace(/^sync:\s*/i, "");
+  return m.replace(/^Adding this dependency\s+/i, "");
+}
+
 export const uniqueByDepId = (deps) => [...new Map(deps.map((d) => [d.id, d])).values()];
 
 /**
@@ -115,7 +121,15 @@ export async function runLinkPull(boardClient, { jiraIssues, idByKey, knownLinks
     }
     let boardDependencyId;
     if (!dryRun) {
-      const dep = await boardClient.addDependency(toId, fromId, l.kind === "blocks" ? "depends_on" : "related_to");
+      // A dependency the board refuses (a cycle, a missing end) is skipped and reported; the pull goes on (#1718).
+      let dep;
+      try {
+        dep = await boardClient.addDependency(toId, fromId, l.kind === "blocks" ? "depends_on" : "related_to");
+      } catch (err) {
+        skipped++;
+        details.push({ key: k, action: "skip", from: l.from, to: l.to, reason: `skipped ${l.from}→${l.to}: ${linkRefusalReason(err)}` });
+        continue;
+      }
       boardDependencyId = dep?.id;
       nextLinks[k] = { kind: l.kind, from: l.from, to: l.to, pluginCreated: true, boardDependencyId };
       adjust.add.push(k);

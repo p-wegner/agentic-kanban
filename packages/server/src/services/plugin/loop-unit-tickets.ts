@@ -67,6 +67,8 @@ export async function ticketPlannedUnits(args: {
    * where an empty list means "unknown", and must never close anything.
    */
   planIsAuthoritative?: boolean;
+  /** Units waiting for a human (#1718): their open tickets are kept, not closed as resolved. */
+  heldUnitIds?: string[];
   now?: string;
   createIssue: (input: CreateIssueInput) => Promise<CreateIssueResult>;
   database: Database;
@@ -84,6 +86,7 @@ export async function ticketPlannedUnits(args: {
   const activeKeys = new Set<string>();
   const cap = loop.maxUnitsPerAdvance ?? DEFAULT_LOOP_MAX_UNITS_PER_ADVANCE;
   let capped = 0;
+  for (const heldId of args.heldUnitIds ?? []) activeKeys.add(pluginLoopUnitKey(pluginSlug, loop.name, heldId));
 
   for (const unit of args.units) {
     let unitId = unit.id;

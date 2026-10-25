@@ -166,7 +166,8 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       pluginSlug: args.pluginSlug,
       projectId: args.projectId,
       workflowTemplateId: args.workflowTemplateId,
-      planIsAuthoritative: (plan.converged ?? plan.units.length === 0) || plan.units.length > 0,
+      planIsAuthoritative: (plan.converged ?? plan.units.length === 0) || plan.units.length > 0 || (plan.held?.length ?? 0) > 0,
+      heldUnitIds: plan.held,
       createIssue,
       database,
     });
