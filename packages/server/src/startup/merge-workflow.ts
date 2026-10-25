@@ -439,7 +439,7 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
               if (workspace.workingDir) {
                 try { await killProcessesInDir(workspace.workingDir); } catch {}
                 if (teardownScript) {
-                  try { await runScript(teardownScript, workspace.workingDir, `teardown:${workspace.id}`); } catch {}
+                  try { await runScript(teardownScript, workspace.workingDir, `teardown:${workspace.id}`, undefined, { posix: true }); } catch {}
                 }
               }
               await tagIfNeedsVisualVerification(repoPath, workspace.branch, workspace.baseBranch, issueId, now, projectId);
