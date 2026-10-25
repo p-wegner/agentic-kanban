@@ -19,6 +19,8 @@ import {
   parseVerifyWorkerAllowlist,
   verifyPlacementPrefKey,
   verifyWorkersPrefKey,
+  isInfraInconclusiveRed,
+  isRuntimeRefusalLog,
   type VerifyChainKind,
   type VerifyRequest,
   type VerifyWorkerCandidate,
@@ -136,10 +138,12 @@ export async function runOnPlannedWorker(plan: Extract<VerifyPlan, { target: "wo
   }
   // #1589: red on timeouts only from a run where the worker was at capacity is load-suspect, not proof: re-run it
   // ONCE on a worker with a free slot (the plan already excludes busy / low-RAM workers) before declaring red.
-  if (verdict.verdict === "red" && report.loadSuspect && !isLoadRetry) {
+  // #1710: a zero-suite red or a runtime-version refusal on a sweep is the worker's toolchain, not the tree: same single re-run.
+  const infraSuspect = verdict.verdict === "red" && (isInfraInconclusiveRed(args.kind, report) || (isRuntimeRefusalLog(report.log) && (args.kind === "base-probe" || args.kind === "rc-sweep")));
+  if (verdict.verdict === "red" && (report.loadSuspect || infraSuspect) && !isLoadRetry) {
     const replan = await planVerifyPlacement(args).catch((): VerifyPlan => ({ target: "host", reason: "replan failed" }));
     if (replan.target === "worker") {
-      log(`${args.kind} red on ${plan.workerName} is load-suspect (timeouts only, worker at capacity); re-running once on ${replan.workerName}`);
+      log(`${args.kind} red on ${plan.workerName} is load-suspect or infrastructure-inconclusive (${report.disconnectedDuringRun ? "worker disconnected mid-run" : "timeouts only, zero failing suites or runtime refusal"}); re-running once on ${replan.workerName}`);
       const second = await runOnPlannedWorker(replan, args, true);
       if (!second.refused) return { ...second, result: { ...second.result, stdout: `[load-suspect first run on ${plan.workerName}: timeouts only, worker at capacity]\n${second.result.stdout}` } };
     }

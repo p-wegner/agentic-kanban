@@ -16,7 +16,7 @@ import { resolveRedProbeOutcome } from "./base-branch-red-outcome.js";
 import type { BaseBranchVerifyResult } from "./base-branch-health.service.js";
 import { failedSuitesForOutcome } from "./failed-suite-parse.js";
 import { planVerifyPlacement, runOnPlannedWorker, type VerifyPlan } from "./verify-job-placement.js";
-import { rankVerifyWorkers, type VerifyChainKind } from "./verify-placement.js";
+import { isRuntimeRefusalLog, rankVerifyWorkers, type VerifyChainKind } from "./verify-placement.js";
 import {
   checkShardCoverage, DEFAULT_SWEEP_PACKAGES, formatSweepProgress, mergeShardVerdicts, parseShardTimings, planSweepShards, recordShardTimings, runShardedSweep,
   type ShardResult,
@@ -93,6 +93,9 @@ export async function runProbeOnWorker(args: {
         outcome: "timeout", sha, branch, durationMs, failedSuites: failedSuitesForOutcome("timeout", combined),
         message: `${stamp}verify_script timed out after ${args.timeoutMs}ms on the worker. This is NOT a verdict about the tree: the probe could not answer, so its health is UNKNOWN.`,
       };
+    } else if (out.result.exitCode !== 0 && isRuntimeRefusalLog(combined)) {
+      // #1710: the toolchain refused the worker's runtime (and no other worker took the re-run): the worker's fault, not the tree's.
+      result = { outcome: "unverified", sha, branch, durationMs, message: `${stamp}the verify toolchain refused this worker's runtime. The tree was NOT verified; this says nothing about whether it is green.` };
     } else if (out.result.exitCode !== 0) {
       result = await resolveRedProbeOutcome({
         projectId, sha, branch, exitCode: out.result.exitCode, combined, stdout: combined, stderr: "", startedAt, scoped: false, workingDir: null,

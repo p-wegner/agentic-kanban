@@ -568,6 +568,12 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
   async function handleBuilderSessionExit(ctx: ExitContext): Promise<void> {
     const { workspace, projectId, issueId, sessionId, skipAutoReview, now, prefMap, statuses, findStatus, defaultBranch } = ctx;
     const workspaceId = workspace.id;
+    // #1710: a session that finishes after the operator cancelled the ticket must not move it.
+    const terminalRows = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
+    if (terminalRows.length > 0 && statuses.find((s) => s.id === terminalRows[0].statusId)?.name === "Cancelled") {
+      console.log(`[workflow] session ${sessionId} finished on cancelled issue ${issueId}  leaving it Cancelled (#1710)`);
+      return;
+    }
     const committedChanges = await hasCommittedChanges(workspace, defaultBranch, workspaceId, db);
     if (await isSpecPlanningNode(db, workspace.currentNodeId)) {
       console.log(`[workflow] planning phase session ${sessionId} completed; waiting for explicit user approval before advancing`);

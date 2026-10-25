@@ -117,3 +117,36 @@ export async function getIssueExternalKey(issueId: string, database: Database = 
   );
   return row?.externalKey ?? null;
 }
+
+export interface IssueTitleMatchRow {
+  id: string;
+  issueNumber: number | null;
+  title: string;
+  statusName: string | null;
+  statusChangedAt: string | null;
+}
+
+/**
+ * Issues in this project whose TITLE contains `needle` (a literal; case-insensitive), with status
+ * name and the time of the last status change. The advisory heal asks it whether an operator-made
+ * ticket (#1698 "body-parser GHSA-…") or a cancelled earlier heal already covers an advisory (#1710).
+ */
+export async function listIssuesByTitleContaining(
+  projectId: string,
+  needle: string,
+  database: Database = db,
+): Promise<IssueTitleMatchRow[]> {
+  const pattern = `%${needle.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  return database
+    .select({
+      id: issues.id,
+      issueNumber: issues.issueNumber,
+      title: issues.title,
+      statusName: projectStatuses.name,
+      statusChangedAt: issues.statusChangedAt,
+    })
+    .from(issues)
+    .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .where(and(eq(issues.projectId, projectId), sql`lower(${issues.title}) LIKE lower(${pattern}) ESCAPE '\\'`))
+    .orderBy(desc(issues.createdAt));
+}
