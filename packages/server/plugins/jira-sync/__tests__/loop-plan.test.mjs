@@ -70,3 +70,18 @@ test("push failures are surfaced as their own unit kind, independent of conflict
   assert.equal(plan.units[0].id, "push-failed:board:b1:r1");
   assert.equal(plan.converged, false);
 });
+
+test("a plugin-loop: key in the failure register is never planned as a failed push (#1718)", () => {
+  const failureRegister = updateRegister(EMPTY_REGISTER, [{ id: "plugin-loop:jira-sync:sync-conflicts:conflict:KD-54:r2", reason: "x" }]);
+  const plan = buildLoopPlan({ cursor: CURSOR, conflictRegister: EMPTY_REGISTER, failureRegister });
+  assert.deepEqual(plan.units, []);
+  assert.equal(plan.converged, true);
+});
+
+test("a needs-human conflict is reported as held so its open ticket is not closed as resolved (#1718)", () => {
+  const conflictRegister = updateRegister(EMPTY_REGISTER, [{ id: "KD-56", reason: "r" }, { id: "KD-57", reason: "r" }]);
+  conflictRegister.entries["KD-56"].needsHuman = true;
+  const plan = buildLoopPlan({ cursor: CURSOR, conflictRegister, failureRegister: EMPTY_REGISTER });
+  assert.deepEqual(plan.held, ["conflict:KD-56:r1"]);
+  assert.deepEqual(plan.units.map((u) => u.id), ["conflict:KD-57:r1"]);
+});

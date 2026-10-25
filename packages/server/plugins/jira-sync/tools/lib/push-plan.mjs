@@ -132,14 +132,18 @@ async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaul
 
   if (entry.kind === "link") {
     const typeName = entry.linkType === "relates" ? "Relates" : "Blocks";
-    const description = { key: entry.from, kind: "link", action: entry.action, linkType: entry.linkType, from: entry.from, to: entry.to };
+    const verb = entry.linkType === "relates" ? "related to" : "blocks";
+    const description = {
+      key: entry.from, kind: "link", action: entry.action, linkType: entry.linkType, from: entry.from, to: entry.to,
+      change: `${entry.from}: links ${entry.action === "add" ? "+1" : "-1"} (${verb} ${entry.to})`,
+    };
     // Read the live links first: an add is idempotent and a remove needs the Jira link id.
     const issue = await client.getIssue(entry.from, { fields: ["issuelinks"] });
     const existing = jiraLinksOf(issue).filter((l) => l.kind === entry.linkType && linkKey(l.kind, l.from, l.to) === entry.linkKey);
     if (entry.action === "add") {
       if (existing.length > 0) return { ok: true, applied: { ...description, skipped: "already linked in Jira" } };
       if (dryRun) return { ok: true, applied: { ...description, wouldApply: true } };
-      await client.createIssueLink({ typeName, inwardKey: entry.to, outwardKey: entry.from });
+      await client.createIssueLink({ typeName, inwardKey: entry.from, outwardKey: entry.to });
       return { ok: true, applied: description };
     }
     if (existing.length === 0) return { ok: true, applied: { ...description, skipped: "no such link in Jira" } };
@@ -155,7 +159,10 @@ async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaul
     if (name !== "" && !accountId) {
       return { ok: false, failed: { key: entry.key, boardIssueId: entry.boardIssueId, kind: "assignee", reason: `assignee ${name} has no accountId in assigneeMap` } };
     }
-    const description = { key: entry.key, boardIssueId: entry.boardIssueId, kind: "assignee", accountId };
+    const description = {
+      key: entry.key, boardIssueId: entry.boardIssueId, kind: "assignee", accountId,
+      change: name === "" ? `${entry.key}: assignee cleared` : `${entry.key}: assignee ${name}`,
+    };
     if (dryRun) return { ok: true, applied: { ...description, wouldApply: true } };
     await client.assignIssue(entry.key, accountId);
     return { ok: true, applied: description };

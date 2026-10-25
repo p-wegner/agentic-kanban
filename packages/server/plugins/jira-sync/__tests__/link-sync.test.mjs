@@ -121,7 +121,7 @@ test("board dependency added with direction both: one issueLink POST; next pull 
   assert.deepEqual(planned.entries[0], { kind: "link", action: "add", linkKey: "blocks:KD-1>KD-2", linkType: "blocks", from: "KD-1", to: "KD-2" });
   const res = await runPush(t.client, planned.entries, {});
   assert.equal(res.failed.length, 0);
-  assert.deepEqual(t.client.created, [{ typeName: "Blocks", inwardKey: "KD-2", outwardKey: "KD-1" }]);
+  assert.deepEqual(t.client.created, [{ typeName: "Blocks", inwardKey: "KD-1", outwardKey: "KD-2" }]);
   assert.equal(planOutbox({ ...(await loadBoardState(t.board, "p")), snapshot: planned.nextSnapshot, directions: both }).entries.length, 0);
   t.setJira([jiraIssue("KD-1", [blocks("20", { out: "KD-2" })]), jiraIssue("KD-2", [blocks("20", { inn: "KD-1" })])]);
   const pulled = await t.pull(both);
@@ -177,4 +177,41 @@ test("dry run push of a link entry sends nothing", async () => {
   const res = await runPush(t.client, [entry], { dryRun: true });
   assert.equal(res.applied[0].wouldApply, true);
   assert.equal(t.client.created.length, 0);
+});
+
+test("a push maps the blocker to inwardIssue: the Jira link reads 'blocker blocks blocked' (#1718)", async () => {
+  const t = setup();
+  t.setJira([jiraIssue("KD-54"), jiraIssue("KD-56")]);
+  await t.pull(both);
+  const snap = await baseline(t, both);
+  await t.board.addDependency(t.id("KD-56"), t.id("KD-54"), "depends_on");
+  const planned = planOutbox({ ...(await loadBoardState(t.board, "p")), snapshot: snap, directions: both });
+  const res = await runPush(t.client, planned.entries, {});
+  assert.deepEqual(t.client.created, [{ typeName: "Blocks", inwardKey: "KD-54", outwardKey: "KD-56" }]);
+  assert.match(res.applied[0].change, /KD-54: links \+1 \(blocks KD-56\)/);
+});
+
+test("a dependency the board refuses is skipped and reported; the pull stays ok (#1718)", async () => {
+  const t = setup();
+  t.setJira([jiraIssue("KD-1", [blocks("10", { out: "KD-2" })]), jiraIssue("KD-2"), jiraIssue("KD-3", [blocks("11", { out: "KD-1" })])]);
+  const real = t.board.addDependency.bind(t.board);
+  t.board.addDependency = async (issueId, dependsOnId, type) => {
+    if (issueId === t.id("KD-2")) throw new Error("sync: Adding this dependency would create a cycle");
+    return real(issueId, dependsOnId, type);
+  };
+  const r = await t.pull();
+  assert.equal(r.links.created, 1);
+  assert.equal(r.links.skipped, 1);
+  assert.match(r.links.details.find((d) => d.action === "skip").reason, /skipped KD-1.KD-2: would create a cycle/);
+});
+
+test("a pull that only adds a link names it on the issue instead of skip (#1718)", async () => {
+  const t = setup();
+  t.setJira([jiraIssue("KD-1"), jiraIssue("KD-2")]);
+  await t.pull();
+  t.setJira([jiraIssue("KD-1", [blocks("10", { out: "KD-2" })]), jiraIssue("KD-2", [blocks("10", { inn: "KD-1" })])]);
+  const r = await t.pull();
+  const line = r.details.find((d) => d.key === "KD-2");
+  assert.equal(line.action, "update");
+  assert.deepEqual(line.changes, ["links +1 (blocked by KD-1)"]);
 });
