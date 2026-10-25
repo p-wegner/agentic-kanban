@@ -143,14 +143,14 @@ test("both sides changed: a conflict row on assignee, resolvable per field", asy
 
   const jiraWrites = [];
   const client = { ...jiraRead(jiraNow), async assignIssue(k, id) { jiraWrites.push([k, id]); }, async updateIssueFields() {}, async addComment() {} };
-  const keepJira = await resolveIssue({ client, boardClient: board, projectId: "p", key: "KD-1", keep: { assignee: "jira" }, knownState: state, assigneeMap });
+  const keepJira = await resolveIssue({ client, boardClient: board, projectId: "p", key: "KD-1", keep: { assignee: "jira" }, reason: "test", knownState: state, assigneeMap });
   assert.equal(keepJira.ok, true);
   assert.deepEqual(board.st.tags, ["assignee:Carl"]);
   assert.equal(keepJira.nextState.issues["KD-1"].fields.assignee, "Carl");
   assert.equal(jiraWrites.length, 0);
 
   board.st.tags = ["assignee:Anna"];
-  const keepBoard = await resolveIssue({ client, boardClient: board, projectId: "p", key: "KD-1", keep: { assignee: "board" }, knownState: state, assigneeMap });
+  const keepBoard = await resolveIssue({ client, boardClient: board, projectId: "p", key: "KD-1", keep: { assignee: "board" }, reason: "test", knownState: state, assigneeMap });
   assert.equal(keepBoard.ok, true);
   assert.deepEqual(jiraWrites, [["KD-1", "acc2"]]);
 });
@@ -160,7 +160,7 @@ test("keep board with an unmapped name stops before writing anything", async () 
   board.st.tags = ["assignee:Nobody"];
   const writes = [];
   const client = { ...jiraRead(jiraIssue({ assignee: person("acc1", "Peter W."), updated: "j2" })), async assignIssue() { writes.push("a"); }, async updateIssueFields() { writes.push("f"); }, async addComment() {} };
-  const r = await resolveIssue({ client, boardClient: board, projectId: "p", key: "KD-1", keep: "board", knownState: state, assigneeMap });
+  const r = await resolveIssue({ client, boardClient: board, projectId: "p", key: "KD-1", keep: "board", reason: "test", knownState: state, assigneeMap });
   assert.equal(r.ok, false);
   assert.match(r.reason, /no accountId in assigneeMap/);
   assert.deepEqual(writes, []);

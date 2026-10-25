@@ -83,7 +83,7 @@ export async function runInboundSync(
   // Read everything Jira says BEFORE writing anything, so a refused run (mass deletion) leaves
   // the board untouched (#1641).
   const context = await resolveJiraContext(client, customFieldMap);
-  const mapOpts = { siteUrl, sprintFieldId: context.sprintFieldId, customFields: context.customFields };
+  const mapOpts = { siteUrl, sprintFieldId: context.sprintFieldId, customFields: context.customFields, assigneeMap };
   const jiraIssues = [];
   for await (const jiraIssue of client.searchAll(jql, { fields: context.fields })) jiraIssues.push(jiraIssue);
   const seenKeys = new Set(jiraIssues.map((i) => i.key));
