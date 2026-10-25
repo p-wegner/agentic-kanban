@@ -376,6 +376,14 @@ export async function runInboundSync(
       noteLink(d.from, `links -1 (${d.kind} ${d.to})`);
     }
   }
+  // A refused / out-of-scope / drifting link has no issue line of its own: say why on the issue entries of its ends.
+  for (const d of linkResult.details) {
+    if ((d.action !== "skip" && d.action !== "drift") || !d.reason) continue;
+    for (const end of new Set([d.from, d.to])) {
+      const entry = end && details.find((x) => x.key === end && x.action !== "conflict");
+      if (entry) entry.linkNotes = [...(entry.linkNotes ?? []), d.reason];
+    }
+  }
   for (const [key, texts] of linkChanges) {
     const entry = details.find((x) => x.key === key && (x.action === "skip" || x.action === "update"));
     if (!entry) continue;

@@ -128,7 +128,24 @@ describe("board-to-jira drift in the run summary (#1709)", () => {
     }));
     expect(s?.issues?.[0]?.status).toBe("update: fields title; assignee cleared");
     expect(s?.issues?.[1]?.status).toBe("skip: skipped KD-55->KD-54: would create a cycle");
-    expect(s?.issues?.[2]?.status).toBe("assignee: assignee cleared");
+    expect(s?.issues?.[2]?.status).toBe("assignee cleared");
     expect(s?.issues?.[3]?.status).toBe("link");
+  });
+
+  it("shows a link skip / drift on the issue entry of its end (#1722)", () => {
+    const s = parseRunSummary(JSON.stringify({
+      step: "pull",
+      details: [{ key: "KD-55", action: "skip", reason: "no board-side change", linkNotes: ["skipped KD-55->KD-54: would create a cycle"] }],
+    }));
+    expect(s?.issues?.[0]?.status).toBe("skip: no board-side change; skipped KD-55->KD-54: would create a cycle");
+  });
+
+  it("carries the dropped-entry note and a once-only push change text (#1722)", () => {
+    const s = parseRunSummary(JSON.stringify({
+      step: "push", droppedNote: "dropped 1 outbox entry for a non-Jira key",
+      applied: [{ key: "KD-55", kind: "assignee", change: "assignee Peter" }],
+    }));
+    expect(s?.notes).toEqual(["dropped 1 outbox entry for a non-Jira key"]);
+    expect(s?.issues?.[0]?.status).toBe("assignee Peter");
   });
 });

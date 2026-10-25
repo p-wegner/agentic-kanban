@@ -61,6 +61,8 @@ export interface PluginSyncRunSummary {
     wouldDelete?: number;
   };
   issues?: Array<{ externalKey: string; externalUrl?: string; localIssueNumber?: number; status?: string }>;
+  /** Run-level remarks the plugin wants shown, e.g. a one-time outbox cleanup (#1722). */
+  notes?: string[];
   conflicts?: Array<{ externalKey: string; reason: string; externalUrl?: string; localIssueNumber?: number }>;
   failures?: Array<{ externalKey: string; reason: string; kind?: string; externalUrl?: string; localIssueNumber?: number }>;
 }

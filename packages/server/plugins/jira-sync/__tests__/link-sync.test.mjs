@@ -188,7 +188,7 @@ test("a push maps the blocker to inwardIssue: the Jira link reads 'blocker block
   const planned = planOutbox({ ...(await loadBoardState(t.board, "p")), snapshot: snap, directions: both });
   const res = await runPush(t.client, planned.entries, {});
   assert.deepEqual(t.client.created, [{ typeName: "Blocks", inwardKey: "KD-54", outwardKey: "KD-56" }]);
-  assert.match(res.applied[0].change, /KD-54: links \+1 \(blocks KD-56\)/);
+  assert.match(res.applied[0].change, /^links \+1 \(blocks KD-56\)/);
 });
 
 test("a dependency the board refuses is skipped and reported; the pull stays ok (#1718)", async () => {
