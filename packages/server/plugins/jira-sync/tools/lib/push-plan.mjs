@@ -148,7 +148,7 @@ async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaul
     const verb = entry.linkType === "relates" ? "related to" : "blocks";
     const description = {
       key: entry.from, kind: "link", action: entry.action, linkType: entry.linkType, from: entry.from, to: entry.to,
-      change: `${entry.from}: links ${entry.action === "add" ? "+1" : "-1"} (${verb} ${entry.to})`,
+      change: `links ${entry.action === "add" ? "+1" : "-1"} (${verb} ${entry.to})`,
     };
     // Read the live links first: an add is idempotent and a remove needs the Jira link id.
     const issue = await client.getIssue(entry.from, { fields: ["issuelinks"] });
@@ -174,7 +174,7 @@ async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaul
     }
     const description = {
       key: entry.key, boardIssueId: entry.boardIssueId, kind: "assignee", accountId,
-      change: name === "" ? `${entry.key}: assignee cleared` : `${entry.key}: assignee ${name}`,
+      change: name === "" ? "assignee cleared" : `assignee ${name}`,
     };
     if (dryRun) return { ok: true, applied: { ...description, wouldApply: true } };
     await client.assignIssue(entry.key, accountId);

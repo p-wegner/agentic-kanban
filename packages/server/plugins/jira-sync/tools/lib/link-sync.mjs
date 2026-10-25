@@ -93,7 +93,7 @@ export async function runLinkPull(boardClient, { jiraIssues, idByKey, knownLinks
     if (outside.length > 0) {
       skipped++;
       outOfScope.add(k);
-      details.push({ key: k, action: "skip", reason: `other end ${outside.join(", ")} is outside the synced scope` });
+      details.push({ key: k, action: "skip", from: l.from, to: l.to, reason: `other end ${outside.join(", ")} is outside the synced scope` });
     } else inScope.set(k, l);
   }
 
@@ -116,7 +116,7 @@ export async function runLinkPull(boardClient, { jiraIssues, idByKey, knownLinks
     if (!pulls) {
       // Jira has a link the board (which owns links) does not: the next push removes it from Jira.
       adjust.extra.push(k);
-      details.push({ key: k, action: "drift", reason: "Jira link missing on the board; board-to-jira will remove it" });
+      details.push({ key: k, action: "drift", from: l.from, to: l.to, reason: "Jira link missing on the board; board-to-jira will remove it" });
       continue;
     }
     let boardDependencyId;

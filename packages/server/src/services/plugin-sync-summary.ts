@@ -64,6 +64,8 @@ export function parseRunSummary(stdout: string, opts: { siteUrl?: string } = {})
     }
   }
   if (Object.keys(counts).length) summary.counts = counts;
+  const note = str(rec.droppedNote);
+  if (note) summary.notes = [note];
 
   const issues: NonNullable<PluginSyncRunSummary["issues"]> = [];
   const conflicts: NonNullable<PluginSyncRunSummary["conflicts"]> = [];
@@ -77,13 +79,14 @@ export function parseRunSummary(stdout: string, opts: { siteUrl?: string } = {})
       const note = drift.length ? `: Jira differs on ${drift.join(", ")}; the next push restores the board value` : "";
       // #1720: carry the plugin's own words (what changed / why it was refused) into the status.
       const what = (Array.isArray(d.changes) ? d.changes.filter((c): c is string => typeof c === "string").join("; ") : str(d.changes)) || str(d.reason);
-      const text = what ? `: ${what}` : "";
+      const linkNotes = Array.isArray(d.linkNotes) ? d.linkNotes.filter((c): c is string => typeof c === "string") : [];
+      const text = what || linkNotes.length ? `: ${[what, ...linkNotes].filter(Boolean).join("; ")}` : "";
       issues.push({ externalKey: key, status: wouldBe(`${str(d.action) ?? ""}${text}${note}` || undefined), externalUrl: link(key), localIssueNumber: num(d.localIssueNumber) });
     }
   }
   for (const a of recs(rec.applied)) {
     const key = str(a.key);
-    if (key) issues.push({ externalKey: key, status: wouldBe(str(a.change) ? `${str(a.kind) ?? "applied"}: ${str(a.change)}` : str(a.kind) ?? "applied"), externalUrl: link(key), localIssueNumber: num(a.localIssueNumber) });
+    if (key) issues.push({ externalKey: key, status: wouldBe(str(a.change) ?? str(a.kind) ?? "applied"), externalUrl: link(key), localIssueNumber: num(a.localIssueNumber) });
   }
   for (const i of recs(rec.issues)) {
     const key = str(i.externalKey);
