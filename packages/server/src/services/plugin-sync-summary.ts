@@ -75,12 +75,15 @@ export function parseRunSummary(stdout: string, opts: { siteUrl?: string } = {})
       // #1709: board-to-jira drift is not a plain skip: say which fields Jira differs on.
       const drift = isRec(d.jiraDiffers) ? Object.keys(d.jiraDiffers) : [];
       const note = drift.length ? `: Jira differs on ${drift.join(", ")}; the next push restores the board value` : "";
-      issues.push({ externalKey: key, status: wouldBe(`${str(d.action) ?? ""}${note}` || undefined), externalUrl: link(key), localIssueNumber: num(d.localIssueNumber) });
+      // #1720: carry the plugin's own words (what changed / why it was refused) into the status.
+      const what = (Array.isArray(d.changes) ? d.changes.filter((c): c is string => typeof c === "string").join("; ") : str(d.changes)) || str(d.reason);
+      const text = what ? `: ${what}` : "";
+      issues.push({ externalKey: key, status: wouldBe(`${str(d.action) ?? ""}${text}${note}` || undefined), externalUrl: link(key), localIssueNumber: num(d.localIssueNumber) });
     }
   }
   for (const a of recs(rec.applied)) {
     const key = str(a.key);
-    if (key) issues.push({ externalKey: key, status: wouldBe(str(a.kind) ?? "applied"), externalUrl: link(key), localIssueNumber: num(a.localIssueNumber) });
+    if (key) issues.push({ externalKey: key, status: wouldBe(str(a.change) ? `${str(a.kind) ?? "applied"}: ${str(a.change)}` : str(a.kind) ?? "applied"), externalUrl: link(key), localIssueNumber: num(a.localIssueNumber) });
   }
   for (const i of recs(rec.issues)) {
     const key = str(i.externalKey);

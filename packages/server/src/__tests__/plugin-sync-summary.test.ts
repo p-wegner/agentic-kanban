@@ -116,4 +116,19 @@ describe("board-to-jira drift in the run summary (#1709)", () => {
     expect(s?.issues?.[0]?.status).toBe("skip: Jira differs on title; the next push restores the board value");
     expect(s?.issues?.[1]?.status).toBe("skip");
   });
+
+  it("carries change text and refusal reasons into the status (#1720)", () => {
+    const s = parseRunSummary(JSON.stringify({
+      step: "pull",
+      details: [
+        { key: "KD-53", action: "update", changes: ["fields title", "assignee cleared"] },
+        { key: "KD-55", action: "skip", reason: "skipped KD-55->KD-54: would create a cycle" },
+      ],
+      applied: [{ key: "KD-55", kind: "assignee", change: "assignee cleared" }, { key: "KD-54", kind: "link" }],
+    }));
+    expect(s?.issues?.[0]?.status).toBe("update: fields title; assignee cleared");
+    expect(s?.issues?.[1]?.status).toBe("skip: skipped KD-55->KD-54: would create a cycle");
+    expect(s?.issues?.[2]?.status).toBe("assignee: assignee cleared");
+    expect(s?.issues?.[3]?.status).toBe("link");
+  });
 });
