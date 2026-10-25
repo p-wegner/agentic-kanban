@@ -6539,6 +6539,9 @@ paths:
                 workerName:
                   type: string
                   minLength: 1
+                retryScope:
+                  type: string
+                  minLength: 1
               required:
                 - branch
                 - sha

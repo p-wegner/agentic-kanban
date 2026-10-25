@@ -1,7 +1,7 @@
 {
   "id": "jira-sync",
   "name": "Jira Sync",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Two-way sync between the board and a Jira project: pull tickets in via JQL, push status transitions and comments back. Zero-dependency REST client, fully offline self-testable against recorded fixtures.",
   "skills": [
     {

@@ -21,7 +21,7 @@ import type { BaseBranchVerifyResult } from "../services/base-branch-health.serv
 
 const db = {} as Database;
 // #1713: failed-output logs go to a temp dir, never the real verify-log directory.
-const LOG_DIR = mkdtempSync(join(tmpdir(), "verify-runner-test-"));
+const LOG_DIR = mkdtempSync(join(tmpdir(), "ak-verify-runner-test-"));
 afterAll(() => rmSync(LOG_DIR, { recursive: true, force: true }));
 const SHA = "a".repeat(40);
 const WORKER = { id: "w1", name: "desktop-stable" };
