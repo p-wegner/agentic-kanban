@@ -6,13 +6,16 @@
 // Board field edits are NOT pushed to Jira (push sends transitions, comments and creates only),
 // so a snapshot is the only record that a board-side edit has been seen and agreed on.
 
+import { stripAttachmentFooter } from "./jira-context.mjs";
+
+// The attachment footer (#1701) is plugin-owned and not a snapshot field: stripped before comparing.
 const norm = (v) => String(v ?? "").replace(/\r\n/g, "\n").trim();
 
 /** The mapped fields of a board issue, in comparable form. */
 export function boardFieldsOf(boardIssue) {
   return {
     title: norm(boardIssue.title),
-    description: norm(boardIssue.description),
+    description: norm(stripAttachmentFooter(boardIssue.description)),
     priority: norm(boardIssue.priority),
     type: norm(boardIssue.issueType ?? boardIssue.type),
     statusId: norm(boardIssue.statusId),

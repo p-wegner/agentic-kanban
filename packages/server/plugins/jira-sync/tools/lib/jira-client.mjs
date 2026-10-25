@@ -183,6 +183,11 @@ export class JiraClient {
     }
   }
 
+  /** `GET /rest/api/3/field`: every system and custom field (id, name, schema), to resolve ids once (#1701). */
+  async listFields() {
+    return this.request("/rest/api/3/field");
+  }
+
   async getIssue(issueIdOrKey, { fields, expand } = {}) {
     const query = {};
     if (fields) query.fields = Array.isArray(fields) ? fields.join(",") : fields;

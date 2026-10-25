@@ -16,6 +16,7 @@
 import { resolveTransitionId, TransitionNotFoundError } from "./transitions.mjs";
 import { attributeComment } from "./comment-marker.mjs";
 import { markdownToAdf } from "./adf.mjs";
+import { stripAttachmentFooter } from "./jira-context.mjs";
 import { BOARD_PRIORITY_TO_JIRA, mapBoardTypeToJira } from "./field-map.mjs";
 import { jiraLinksOf, linkKey } from "./link-sync.mjs";
 
@@ -27,6 +28,7 @@ export function prepareCreateFields(fields = {}, { projectKey, defaultIssueType 
   const out = { ...fields };
   if (!out.project && projectKey) out.project = { key: projectKey };
   if (!out.issuetype && defaultIssueType) out.issuetype = { name: defaultIssueType };
+  if (typeof out.description === "string") out.description = stripAttachmentFooter(out.description);
   if (typeof out.description === "string") out.description = out.description ? markdownToAdf(out.description) : undefined;
   if (out.description === undefined) delete out.description;
   if (Array.isArray(out.labels) && out.labels.length === 0) delete out.labels;
@@ -37,7 +39,10 @@ export function prepareCreateFields(fields = {}, { projectKey, defaultIssueType 
 export function prepareFieldUpdate(fields = {}, { defaultIssueType } = {}) {
   const out = {};
   if ("title" in fields) out.summary = fields.title;
-  if ("description" in fields) out.description = fields.description ? markdownToAdf(fields.description) : null;
+  if ("description" in fields) {
+    const body = stripAttachmentFooter(fields.description);
+    out.description = body ? markdownToAdf(body) : null;
+  }
   if ("priority" in fields) {
     const name = BOARD_PRIORITY_TO_JIRA[String(fields.priority ?? "").toLowerCase()];
     if (name) out.priority = { name };

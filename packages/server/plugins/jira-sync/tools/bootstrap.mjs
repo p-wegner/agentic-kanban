@@ -6,6 +6,7 @@
 import { checkProfile } from "./lib/profile.mjs";
 import { buildClientFromEnv, printResult, isSelfTest, checkAuth } from "./lib/cli-client.mjs";
 import { defaultJql } from "./lib/pull-plan.mjs";
+import { resolveJiraContext } from "./lib/sync-engine.mjs";
 import { JiraAuthError } from "./lib/auth.mjs";
 
 async function main() {
@@ -29,6 +30,12 @@ async function main() {
 
   const authFailure = await checkAuth(ctx.client);
   if (authFailure) return authFailure;
+
+  try {
+    await resolveJiraContext(ctx.client, process.env.SYNC_CONFIG_CUSTOMFIELDMAP ?? "");
+  } catch (err) {
+    if (err?.code === "BAD_CONFIG") return { ok: false, step: "config", reason: err.message };
+  }
 
   try {
     const page = await ctx.client.searchIssues(jql, { maxResults: 1 });
