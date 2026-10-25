@@ -33,7 +33,7 @@ import { createDefaultBoardFixtureFetch } from "../lib/board-fixtures.mjs";
 import { loadBoardState, refreshPullStateAfterPush } from "../lib/state-sync.mjs";
 import { assigneeMapFromEnv } from "../lib/field-map.mjs";
 import { resolveSyncDirections } from "../lib/sync-direction.mjs";
-import { planOutbox } from "../lib/outbox-producer.mjs";
+import { planOutbox, isNonJiraKey } from "../lib/outbox-producer.mjs";
 import { applyWritebacks } from "../lib/writebacks.mjs";
 import { runPush } from "../lib/push-plan.mjs";
 import { updateRegister, pushFailureIdentity } from "../lib/conflict-register.mjs";
@@ -143,7 +143,12 @@ async function main() {
     }
   }
 
-  const outbox = readOutbox(stateDir);
+  // A plugin-loop entry queued before #1718 can never reach Jira: drop it, once (#1720).
+  const isLoopEntry = (e) => e.key != null && isNonJiraKey(e.key);
+  const stored = readOutbox(stateDir);
+  const droppedEntries = stored.entries.filter(isLoopEntry);
+  const outbox = { ...stored, entries: stored.entries.filter((e) => !isLoopEntry(e)) };
+  if (!dryRun && droppedEntries.length > 0) writeJsonFile(outboxPath(stateDir), { entries: outbox.entries });
   // dry-run does not persist the enqueued entries, so report them as if queued.
   const entries = dryRun
     ? [...outbox.entries.filter((e) => !isSuperseded(e)), ...plannedEntries]
@@ -206,6 +211,9 @@ async function main() {
     baselined,
     ...(baselined > 0 ? { note: `baselined ${baselined} issues, nothing sent` } : {}),
     writebackFailures,
+    ...(droppedEntries.length > 0
+      ? { droppedNonJira: droppedEntries.map((e) => e.key), droppedNote: `${dryRun ? "would drop" : "dropped"} ${droppedEntries.length} outbox entr${droppedEntries.length === 1 ? "y" : "ies"} for a non-Jira key` }
+      : {}),
     appliedCount: applied.length,
     failedCount: failed.length,
     applied,
