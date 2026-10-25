@@ -189,6 +189,23 @@ async function applyRecovery(
   }
 }
 
+const EXPECTED_DRIVER: Record<string, string> = {
+  "gate-unplaced": "a placed merge job",
+  "gate-silent": "a live merge job",
+  "stale-backoff": "a scheduled merge retry",
+  "builder-exited-no-commit": "a builder follow-up turn",
+  "builder-exited-committed": "the implement-exit check",
+  "review-not-running": "a review session",
+  "ready-without-commits": "a human (nothing to merge)",
+  "ready-idle": "a merge job, scheduled retry, merge train or hold (auto-merge enqueue)",
+  "no-live-workspace": "a live workspace",
+};
+
+/** #1721: name the driver the ticket should have had, so the log line says what is missing. */
+function expectedDriverFor(shape: string): string {
+  return EXPECTED_DRIVER[shape] ?? "a running session, merge job, train or hold";
+}
+
 /** One pass of the invariant over every open ticket. */
 export async function runProgressInvariantPass(
   deps: ProgressInvariantDeps,
@@ -218,7 +235,7 @@ export async function runProgressInvariantPass(
       recordSkipped(report, label, `${verdict.shape}: ${step === "none" ? "already escalated" : "recovery in progress"}`);
       continue;
     }
-    log(`${label} has no driver since ${verdict.since}: ${verdict.detail} [${verdict.shape} -> ${step === "escalate" ? "escalate" : verdict.recovery}]`);
+    log(`${label} has no driver since ${verdict.since}: ${verdict.detail} (expected driver: ${expectedDriverFor(verdict.shape)}) [${verdict.shape} -> ${step === "escalate" ? "escalate" : verdict.recovery}]`);
     try {
       if (step === "escalate") {
         await deps.recovery.escalate(s, `${verdict.shape}: ${verdict.detail}`);
