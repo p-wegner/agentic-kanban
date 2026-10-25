@@ -107,7 +107,10 @@ export function planOutbox({
         // A baseline from before a field existed (#1702: assignee) has no value for it: not a change.
         const differs = (f) => f in prev.fields && JSON.stringify(fields[f]) !== JSON.stringify(prev.fields[f]);
         const changed = Object.keys(fields).filter((f) => f !== "assignee" && pushesField(directions, f) && differs(f));
-        if (pushesField(directions, "assignee") && differs("assignee")) {
+        // A queued assignee entry for another name is stale (#1719): the board no longer says it, so it is
+        // replaced by the current state instead of failing on every push.
+        const staleAssignee = outboxEntries.some((e) => e.kind === "assignee" && e.key === issue.externalKey && String(e.name ?? "") !== fields.assignee);
+        if (pushesField(directions, "assignee") && (differs("assignee") || staleAssignee)) {
           entries.push({ kind: "assignee", key: issue.externalKey, boardIssueId: issue.id, name: fields.assignee });
           supersedeAssigneeKeys.push(issue.externalKey);
         }

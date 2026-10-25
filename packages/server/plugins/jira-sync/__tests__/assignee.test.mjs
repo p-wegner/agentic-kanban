@@ -165,3 +165,31 @@ test("keep board with an unmapped name stops before writing anything", async () 
   assert.match(r.reason, /no accountId in assigneeMap/);
   assert.deepEqual(writes, []);
 });
+
+test("#1719: a failing queued assignee entry is superseded when the tag changes or goes", () => {
+  const board = statefulBoard();
+  board.st.tags = [];
+  const snapshot = plan(board, null).nextSnapshot;
+  const stale = { kind: "assignee", key: "KD-1", boardIssueId: "i1", name: "Nobody" };
+  const gone = plan(board, snapshot, [stale]);
+  assert.deepEqual(gone.supersedeAssigneeKeys, ["KD-1"]);
+  assert.deepEqual(gone.entries, [{ kind: "assignee", key: "KD-1", boardIssueId: "i1", name: "" }]);
+  board.st.tags = ["assignee:Anna"];
+  const changed = plan(board, snapshot, [stale]);
+  assert.equal(changed.entries[0].name, "Anna");
+});
+
+test("#1719: a tag pull recorded as agreed is measured against, so a later removal is pushed", async () => {
+  const { snapshotAfterPull } = await import("../tools/lib/state-sync.mjs");
+  const board = statefulBoard();
+  board.st.exists = true;
+  board.listIssues = async () => [{ ...board.st.issue, tags: board.st.tags.map((n) => ({ name: n })) }];
+  board.getDependencies = async () => ({ dependencies: [] });
+  const stale = plan(board, null).nextSnapshot; // taken before the pull added the tag
+  board.st.tags = ["assignee:Peter"];
+  const agreedFields = { "KD-1": { assignee: "Peter" } };
+  const snap = await snapshotAfterPull({ boardClient: board, projectId: "p", snapshot: stale, touchedKeys: new Set(), agreedFields, directions: both });
+  board.st.tags = [];
+  assert.equal(plan(board, stale).entries.length, 0);
+  assert.equal(plan(board, snap).entries[0].name, "");
+});

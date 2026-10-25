@@ -4,7 +4,7 @@
 import { planOutbox, pushFieldsOf, statusNameOf } from "./outbox-producer.mjs";
 import { boardFieldsOf } from "./field-snapshot.mjs";
 import { uniqueByDepId } from "./link-sync.mjs";
-import { LEGACY_DIRECTIONS, pushesField } from "./sync-direction.mjs";
+import { LEGACY_DIRECTIONS, pullsField, pushesField } from "./sync-direction.mjs";
 
 function baselineAfterPush(boardFields, priorFields, directions, assigneeNotPushed = false) {
   if (!priorFields) return boardFields;
@@ -74,6 +74,8 @@ export async function refreshPullStateAfterPush({ client, boardClient, projectId
   return next;
 }
 
+const PULL_AGREED_FIELDS = ["title", "description", "priority", "type", "assignee"];
+
 /**
  * Pull-side snapshot upkeep. With no snapshot yet, the board is baselined NOW (first pull)
  * so edits made before the first push are still pushed; otherwise the issues pull wrote are
@@ -83,7 +85,7 @@ export async function refreshPullStateAfterPush({ client, boardClient, projectId
  * on. Push's snapshot records Jira's value for them, so the next push sees the board value as a
  * change and puts it back into Jira instead of leaving the two sides apart for good.
  */
-export async function snapshotAfterPull({ boardClient, projectId, snapshot, touchedKeys, jiraValues = {}, linkAdjust = null }) {
+export async function snapshotAfterPull({ boardClient, projectId, snapshot, touchedKeys, jiraValues = {}, linkAdjust = null, agreedFields = {}, directions = LEGACY_DIRECTIONS }) {
   const state = await loadBoardState(boardClient, projectId);
   if (!snapshot) return planOutbox({ ...state, snapshot: null }).nextSnapshot;
   const next = { ...snapshot, issues: { ...snapshot.issues } };
@@ -96,6 +98,14 @@ export async function snapshotAfterPull({ boardClient, projectId, snapshot, touc
   }
   for (const issue of state.issues) {
     const override = jiraValues[issue.externalKey];
+    // Fields pull recorded as agreed (#1719) -- incl. a tag it attached on a path that is not an "update"
+    // -- are what the board held after the pull, so a later board edit is measured against them.
+    const agreed = Object.fromEntries(
+      Object.entries(agreedFields[issue.externalKey] ?? {}).filter(([f, v]) => PULL_AGREED_FIELDS.includes(f) && v !== undefined && pullsField(directions, f)),
+    );
+    if (Object.keys(agreed).length > 0 && next.issues[issue.id]?.fields && !touchedKeys.has(issue.externalKey)) {
+      next.issues[issue.id] = { ...next.issues[issue.id], fields: { ...next.issues[issue.id].fields, ...agreed } };
+    }
     if (touchedKeys.has(issue.externalKey)) {
       next.issues[issue.id] = { ...next.issues[issue.id], status: statusNameOf(issue, state.statusNameById), fields: { ...pushFieldsOf(issue), ...override } };
     } else if (override && next.issues[issue.id]?.fields) {

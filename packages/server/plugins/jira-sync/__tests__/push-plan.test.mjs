@@ -143,3 +143,12 @@ test("dry-run: still reports a transition-resolution failure instead of hiding i
   assert.equal(failed.length, 1);
   assert.match(failed[0].reason, /no transition to status "Blocked"/);
 });
+
+test("#1719: a priority with no Jira mapping fails the entry instead of reporting it applied", async () => {
+  const written = [];
+  const client = { async updateIssueFields(key, payload) { written.push(payload); } };
+  const r = await runPush(client, [{ kind: "fields", key: "KD-1", boardIssueId: "i", fields: { priority: "urgent" } }], {});
+  assert.deepEqual(r.applied, []);
+  assert.equal(r.failed[0].reason, "priority urgent has no Jira mapping");
+  assert.deepEqual(written, []);
+});
