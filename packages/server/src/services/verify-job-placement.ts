@@ -7,6 +7,7 @@
 // `setVerifyWorkerRunner`, no worker is offered and every job runs on the host exactly as before
 // (`prefer-worker`) or is held (`worker`). A worker's verdict is only believed through
 // `acceptWorkerVerdict` (sha/tier/request pinned); a refused verdict is a failed run, never a pass.
+import { withTimeout } from "../lib/with-timeout.js";
 import { randomUUID } from "node:crypto";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import type { SetupScriptResult } from "@agentic-kanban/shared/lib/setup-script";
@@ -107,6 +108,9 @@ export type VerifyPlan =
   | { target: "worker"; reason: string; workerId: string; workerName: string; active: VerifyWorkerRunner; allowlist: Set<string> };
 
 /** Decide host / worker / hold for one chain WITHOUT running it (#1437): callers that must act on a hold (the gate, the sweep) use this. */
+/** Upper bound on the worker read inside a placement decision (#1717). */
+export const PLACEMENT_READ_TIMEOUT_MS = 5_000;
+
 export async function planVerifyPlacement(args: Pick<PlaceVerifyCommandArgs, "kind" | "projectId" | "database" | "hostHeld" | "workerRunner"> & { gateActive?: boolean }): Promise<VerifyPlan> {
   const [rawPlacement, rawAllow] = await Promise.all([
     getPreference(verifyPlacementPrefKey(args.projectId), args.database).catch(() => null),
@@ -116,7 +120,8 @@ export async function planVerifyPlacement(args: Pick<PlaceVerifyCommandArgs, "ki
   if (placement === "host") return { target: "host", reason: "verify_placement=host" };
   const active = args.workerRunner === undefined ? runner : args.workerRunner;
   const allowlist = parseVerifyWorkerAllowlist(rawAllow);
-  const workers = active ? await Promise.resolve(active.listWorkers()).catch(() => []) : [];
+  // #1717: a worker read that never settles must not hang the caller; unreadable means nobody eligible.
+  const workers = active ? await withTimeout(Promise.resolve(active.listWorkers()), PLACEMENT_READ_TIMEOUT_MS, "placement worker read").catch(() => []) : [];
   const decision = decideVerifyPlacement({ placement, kind: args.kind, hostHeld: args.hostHeld ?? false, allowlist, workers, gateActive: args.gateActive });
   if (decision.target === "hold") return { target: "hold", reason: decision.reason };
   if (decision.target === "host" || !active) return { target: "host", reason: decision.reason };
