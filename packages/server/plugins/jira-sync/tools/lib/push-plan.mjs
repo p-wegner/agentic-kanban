@@ -100,7 +100,7 @@ async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaul
       if (!(err instanceof TransitionNotFoundError)) throw err;
       return { ok: false, failed: { key: entry.key, kind: "transition", reason: err.message } };
     }
-    const description = { key: entry.key, kind: "transition", targetStatus: entry.targetStatus, transitionId };
+    const description = { key: entry.key, kind: "transition", targetStatus: entry.targetStatus, transitionId, change: `status → ${entry.targetStatus}` };
     if (dryRun) return { ok: true, applied: { ...description, wouldApply: true } };
     await client.transitionIssue(entry.key, transitionId);
     return { ok: true, applied: description };
@@ -108,12 +108,12 @@ async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaul
 
   if (entry.kind === "comment") {
     if (entry.comment?.origin === "jira") {
-      return { ok: true, applied: { key: entry.key, kind: "comment", skipped: "echo-suppressed" } };
+      return { ok: true, applied: { key: entry.key, kind: "comment", skipped: "echo-suppressed", change: "comment skipped: echo-suppressed" } };
     }
     const body = attributeComment(entry.comment.body, { boardCommentId: entry.comment.boardCommentId });
-    if (dryRun) return { ok: true, applied: { key: entry.key, kind: "comment", wouldApply: true, preview: body } };
+    if (dryRun) return { ok: true, applied: { key: entry.key, kind: "comment", wouldApply: true, preview: body, change: "comment added" } };
     await client.addComment(entry.key, body);
-    return { ok: true, applied: { key: entry.key, kind: "comment" } };
+    return { ok: true, applied: { key: entry.key, kind: "comment", change: "comment added" } };
   }
 
   if (entry.kind === "fields") {
@@ -123,10 +123,12 @@ async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaul
     const unmappedFailure = unmapped === undefined ? undefined : { key: entry.key, boardIssueId: entry.boardIssueId, kind: "fields", reason: new UnmappablePriorityError(unmapped).message };
     const payload = prepareFieldUpdate(sendable, { defaultIssueType });
     const description = { key: entry.key, boardIssueId: entry.boardIssueId, kind: "fields", fields: Object.keys(payload).map((f) => JIRA_FIELD_TO_BOARD[f] ?? f) };
+    description.change = `fields ${description.fields.join(", ")}`;
     if (dryRun) return { ok: true, applied: { ...description, wouldApply: true, payload }, ...(unmappedFailure ? { failedFields: unmappedFailure } : {}) };
     const { sent, rejected } = await applyFieldUpdate(client, entry.key, payload);
     const rejectedNames = Object.keys(rejected).map((f) => JIRA_FIELD_TO_BOARD[f] ?? f);
-    const applied = { ...description, fields: Object.keys(sent).map((f) => JIRA_FIELD_TO_BOARD[f] ?? f) };
+    const sentNames = Object.keys(sent).map((f) => JIRA_FIELD_TO_BOARD[f] ?? f);
+    const applied = { ...description, fields: sentNames, change: `fields ${sentNames.join(", ")}` };
     const appliedOrNone = Object.keys(sent).length > 0 ? applied : undefined;
     if (rejectedNames.length === 0) return { ok: true, applied: appliedOrNone, ...(unmappedFailure ? { failedFields: unmappedFailure } : {}) };
     // The entry is consumed (not retried forever): what Jira accepted was written, and the

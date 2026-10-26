@@ -166,13 +166,16 @@ export function decideMergeTrainRelease(
   state: MergeTrainWindowState,
   config: MergeTrainWindowConfig,
   nowMs: number,
-  opts?: { gateBusy?: boolean; gateBusyGraceMs?: number; heldUntilMs?: number | null; releaseRequested?: boolean },
+  opts?: { gateBusy?: boolean; gateBusyGraceMs?: number; heldUntilMs?: number | null; releaseRequested?: boolean; inconclusiveRetry?: boolean },
 ): MergeTrainWindowVerdict {
   if (opts?.heldUntilMs != null && Number.isFinite(opts.heldUntilMs) && nowMs < opts.heldUntilMs) {
     return { release: false, reason: "held" };
   }
   if (opts?.releaseRequested) {
     return { release: true, reason: "operator_release" };
+  }
+  if (opts?.inconclusiveRetry) {
+    return { release: true, reason: "inconclusive_retry" };
   }
   const waitedMs = nowMs - new Date(state.firstSeenAt).getTime();
   if (state.pendingIds.length >= config.maxSize) {

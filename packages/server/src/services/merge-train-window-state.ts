@@ -23,7 +23,7 @@ export type { PersistedMergeTrainWindow };
 
 export const trainWindowPref = projectPref("train_window");
 
-const RELEASE_REASONS = new Set(["max_size", "max_wait", "gate_busy_grace_elapsed", "operator_release"]);
+const RELEASE_REASONS = new Set(["max_size", "max_wait", "gate_busy_grace_elapsed", "operator_release", "inconclusive_retry"]);
 const HOLD_REASONS = new Set(["accumulating", "gate_busy", "held", "live_train", "base_red", "breaker_paused"]);
 
 function isIsoString(value: unknown): value is string {

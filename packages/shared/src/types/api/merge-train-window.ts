@@ -12,7 +12,9 @@ export type MergeTrainWindowReleaseReason =
   | "max_wait"
   | "gate_busy_grace_elapsed"
   /** `POST /api/merge-queue/window/release` — an operator asked it to depart now. */
-  | "operator_release";
+  | "operator_release"
+  /** #1727 — the last train over these members ended inconclusive (nothing judged); retry at once. */
+  | "inconclusive_retry";
 
 /** Why the window is still holding its pending set. */
 export type MergeTrainWindowHoldReason =
