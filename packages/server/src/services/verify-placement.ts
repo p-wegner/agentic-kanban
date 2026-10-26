@@ -63,6 +63,8 @@ export type VerifyWorkerCandidate = {
   builderSessions?: number;
   /** #1610: the worker runs a different worker build than the board; it gets no chains until it has updated. */
   buildStale?: boolean;
+  /** #1723: measured median duration (ms) per chain kind from this worker's finished jobs; absent without history. */
+  expectedMs?: Partial<Record<VerifyChainKind, number>>;
 };
 
 export type VerifyPlacementDecision =
@@ -76,13 +78,16 @@ export function isWorkerTrusted(allowlist: Set<string>, worker: Pick<VerifyWorke
 }
 
 /** Eligible = allowlisted, has a free slot, runs the board's worker build (#1610). Best first: no builder session, calm, then most free RAM, then name (stable). */
-export function rankVerifyWorkers(allowlist: Set<string>, workers: VerifyWorkerCandidate[]): VerifyWorkerCandidate[] {
+export function rankVerifyWorkers(allowlist: Set<string>, workers: VerifyWorkerCandidate[], kind?: VerifyChainKind): VerifyWorkerCandidate[] {
+  // #1723: shortest measured duration for this kind first; only when both have history (else today's order). Free slots never decide.
+  const expected = (w: VerifyWorkerCandidate) => (kind ? w.expectedMs?.[kind] : undefined);
   return workers
     .filter((w) => w.freeSlots > 0 && !w.buildStale && isWorkerTrusted(allowlist, w))
     .sort(
       (a, b) =>
         (a.builderSessions ?? 0) - (b.builderSessions ?? 0) ||
         Number(a.thrashing ?? false) - Number(b.thrashing ?? false) ||
+        ((expected(a) !== undefined && expected(b) !== undefined ? expected(a)! - expected(b)! : 0)) ||
         (b.freeRamGb ?? -1) - (a.freeRamGb ?? -1) ||
         a.name.localeCompare(b.name),
     );
@@ -114,13 +119,17 @@ export function decideVerifyPlacement(input: {
   if (placement === "prefer-worker" && !hostHeld) {
     return { target: "host", reason: "verify_placement=prefer-worker, host has room" };
   }
-  const best = rankVerifyWorkers(allowlist, workers)[0];
+  const ranked = rankVerifyWorkers(allowlist, workers, kind);
+  const best = ranked[0];
   if (best) {
+    const mins = (w: VerifyWorkerCandidate) => (w.expectedMs?.[kind] !== undefined ? Math.round(w.expectedMs[kind]! / 60_000) : undefined);
+    const other = ranked.slice(1).find((w) => mins(w) !== undefined);
+    const why = mins(best) !== undefined && other ? `: expected ${mins(best)} min vs ${other.name} ${mins(other)} min` : "";
     return {
       target: "worker",
       workerId: best.id,
       workerName: best.name,
-      reason: `${kind} placed on ${best.name} (verify_placement=${placement}${hostHeld ? ", host held for memory" : ""})`,
+      reason: `${kind} placed on ${best.name}${why} (verify_placement=${placement}${hostHeld ? ", host held for memory" : ""})`,
     };
   }
   const why =

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtemp, rm, readFile, writeFile, mkdir, readdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, mkdir, access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -217,9 +217,18 @@ describe("project-scaffold", () => {
         const hooksDir = join(dir, ".claude", "hooks");
         expect(JSON.parse(await readFile(join(hooksDir, "package.json"), "utf8")).type).toBe(HOOKS_PACKAGE_TYPE);
         // Every .js hook must at least load: before the pin, each one died on its first require
-        const hooks = (await readdir(hooksDir)).filter((f) => f.endsWith(".js"));
-        expect(hooks.length).toBeGreaterThan(3);
+        // Named rather than listed: a private readdir trips private-tree-walker-ratchet (#1241).
+        const hooks = [
+          "vital-file-guard.js",
+          "prevent-cross-worktree-writes.js",
+          "git-topology-cache.js",
+          "hook-posture.js",
+          "machine-capacity.js",
+          "smart-hooks-runner.js",
+          "verify-gate-runner.js",
+        ];
         for (const hook of hooks) {
+          await access(join(hooksDir, hook));
           let stderr = "";
           try {
             execFileSync(process.execPath, [join(hooksDir, hook), "PreToolUse"], {

@@ -1,4 +1,5 @@
 import { ConflictError, UnprocessableError } from "../errors/index.js";
+import { verifyThroughputByKind } from "../services/verify-slow-worker.js";
 import type { Context, Hono } from "hono";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
@@ -167,6 +168,8 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
         ...w,
         // #1437: which verify jobs (gate / train gate / rc sweep / ...) the board has placed on this worker right now.
         verifyJobs: listActiveVerifyJobs().filter((j) => j.workerId === w.workerId),
+        // #1723: measured median minutes per verify kind, from this worker's finished jobs.
+        verifyThroughputMin: verifyThroughputByKind(w.workerId),
       })),
       fleet: {
         registered: fleet.registered,

@@ -7,6 +7,8 @@ const HISTORY_CAP = 20;
 
 const history = new Map<string, number[]>();
 const slow = new Map<string, string>();
+// #1723: durations per worker and chain kind (any tier), for placement and /api/workers.
+const byKind = new Map<string, number[]>();
 
 const median = (xs: readonly number[]): number => {
   const s = [...xs].sort((a, b) => a - b);
@@ -27,6 +29,8 @@ export function recordVerifyDuration(workerId: string, scope: string, durationMs
   if (!(durationMs > 0)) return null;
   const key = `${workerId}|${scope}`;
   const prior = history.get(key) ?? [];
+  const kindKey = `${workerId}|${scope.split("|")[0]}`;
+  byKind.set(kindKey, [...(byKind.get(kindKey) ?? []), durationMs].slice(-HISTORY_CAP));
   const note = verifySlowNote(durationMs, prior);
   history.set(key, [...prior, durationMs].slice(-HISTORY_CAP));
   if (note) slow.set(workerId, note);
@@ -39,7 +43,24 @@ export function slowVerifyNote(workerId: string): string | null {
   return slow.get(workerId) ?? null;
 }
 
+/** #1723: median measured duration (ms) of this worker's finished jobs of one kind, or null without history. */
+export function expectedVerifyDurationMs(workerId: string, kind: string): number | null {
+  const xs = byKind.get(`${workerId}|${kind}`);
+  return xs && xs.length > 0 ? median(xs) : null;
+}
+
+/** #1723: measured median minutes per kind for one worker (for /api/workers). */
+export function verifyThroughputByKind(workerId: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, xs] of byKind) {
+    if (!k.startsWith(`${workerId}|`) || xs.length === 0) continue;
+    out[k.slice(workerId.length + 1)] = Math.round((median(xs) / 60_000) * 10) / 10;
+  }
+  return out;
+}
+
 export function resetVerifySlowHistory(): void {
+  byKind.clear();
   history.clear();
   slow.clear();
 }
