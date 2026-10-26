@@ -40,7 +40,7 @@ test("transition: resolves the target status via the transition graph and applie
 
   assert.deepEqual(failed, []);
   assert.deepEqual(remaining, []);
-  assert.deepEqual(applied, [{ key: "ENG-1", kind: "transition", targetStatus: "Done", transitionId: "21" }]);
+  assert.deepEqual(applied, [{ key: "ENG-1", kind: "transition", targetStatus: "Done", transitionId: "21", change: "status → Done" }]);
   assert.deepEqual(calls, [{ transition: { id: "21" } }]);
 });
 
@@ -65,7 +65,7 @@ test("comment: a comment that originated as a Jira import is never re-posted (ec
   const { applied, failed } = await runPush(client, [entry]);
 
   assert.deepEqual(failed, []);
-  assert.deepEqual(applied, [{ key: "ENG-1", kind: "comment", skipped: "echo-suppressed" }]);
+  assert.deepEqual(applied, [{ key: "ENG-1", kind: "comment", skipped: "echo-suppressed", change: "comment skipped: echo-suppressed" }]);
 });
 
 test("comment: a board-authored comment posts to Jira with an attribution marker", async () => {
@@ -86,6 +86,7 @@ test("comment: a board-authored comment posts to Jira with an attribution marker
 
   assert.deepEqual(failed, []);
   assert.equal(applied.length, 1);
+  assert.equal(applied[0].change, "comment added");
   const [first, marker] = posted[0].body.content;
   assert.equal(first.content[0].text, "Fixed in latest build");
   // The marker is rendered as emphasis in Jira, not as literal underscores (#1624).
@@ -127,8 +128,8 @@ test("dry-run: refuses every write, across transition/comment/create, and still 
   assert.deepEqual(remaining, []);
   assert.deepEqual(writebacks, []);
   assert.deepEqual(applied, [
-    { key: "ENG-1", kind: "transition", targetStatus: "Done", transitionId: "21", wouldApply: true },
-    { key: "ENG-2", kind: "comment", wouldApply: true, preview: "hello\n\n_Synced from agentic-kanban comment c1_" },
+    { key: "ENG-1", kind: "transition", targetStatus: "Done", transitionId: "21", change: "status → Done", wouldApply: true },
+    { key: "ENG-2", kind: "comment", wouldApply: true, preview: "hello\n\n_Synced from agentic-kanban comment c1_", change: "comment added" },
     { boardIssueId: "board-issue-2", kind: "create", fields: { summary: "New" }, wouldApply: true },
   ]);
 });
@@ -151,4 +152,16 @@ test("#1719: a priority with no Jira mapping fails the entry instead of reportin
   assert.deepEqual(r.applied, []);
   assert.equal(r.failed[0].reason, "priority urgent has no Jira mapping");
   assert.deepEqual(written, []);
+});
+
+test("fields: an applied title+priority entry names its fields in `change`", async () => {
+  const fetchImpl = createScriptedFetch([
+    { match: (url, init) => init?.method === "PUT" && /\/issue\/ENG-1$/.test(url), respond: () => ({ status: 204 }) },
+  ]);
+  const client = new JiraClient({ siteUrl: "https://fixture.atlassian.net", apiToken: "x", fetchImpl });
+  const entry = { kind: "fields", key: "ENG-1", boardIssueId: "b1", fields: { title: "New", priority: "high" } };
+  const { applied } = await runPush(client, [entry]);
+  assert.equal(applied[0].change, "fields title, priority");
+  const dry = await runPush(client, [entry], { dryRun: true });
+  assert.equal(dry.applied[0].change, "fields title, priority");
 });
