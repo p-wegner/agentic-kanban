@@ -52,6 +52,8 @@ export interface TrainStagingGateResult {
   agentFix?: { attempt: MergeTrainAttemptDto; fixedTrainSha?: string };
   /** #1413 — the gate was killed/timed out/held rather than judging the tree; see `TrainGate`. */
   inconclusive?: boolean;
+  /** #1727 — on an inconclusive run: the shepherd's commits (`baseSha..tipSha`) to carry into the retry. */
+  carriedFix?: { baseSha: string; tipSha: string };
 }
 
 /**
@@ -215,7 +217,14 @@ export async function runTrainStagingGate(args: {
     // #1585: the fix agent's re-gate can be the held/cancelled one — judge the LATEST verdict.
     const finalInconclusive = isInconclusiveGate(gate);
     if (!gate.passed) {
+      // #1727: an inconclusive run after a shepherd commit must not lose that commit with the train branch.
+      let carriedFix: TrainStagingGateResult["carriedFix"];
+      if ((inconclusive || finalInconclusive) && gatedSha) {
+        const tipSha = await gitService.revParse(gateWorktree, "HEAD").catch(() => null);
+        if (tipSha && tipSha !== gatedSha) carriedFix = { baseSha: gatedSha, tipSha };
+      }
       return {
+        ...(carriedFix ? { carriedFix } : {}),
         passed: false,
         message: gate.message,
         stage: gate.stage,
