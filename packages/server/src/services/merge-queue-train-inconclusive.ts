@@ -10,6 +10,27 @@ export function isInconclusiveGate(gate: { passed: boolean; timedOut?: boolean; 
   return !gate.passed && (gate.timedOut === true || gate.held === true);
 }
 
+/** Prefix of the `reconciledReason` an inconclusive train is closed out with. */
+export const INCONCLUSIVE_ABANDON_MARKER = "gate inconclusive, will be retried";
+
+/**
+ * #1727 — nothing was judged, so the retry has no reason to wait a fresh batching window: true
+ * when the newest finished train was abandoned inconclusive and the pending members all rode it.
+ * `recentTrains` is newest first.
+ */
+export function isInconclusiveRetry(
+  pendingIds: readonly string[],
+  recentTrains: ReadonlyArray<{ state: string; reconciledReason?: string | null; memberWorkspaceIds: string }>,
+): boolean {
+  const last = recentTrains.find((t) => t.state !== "assembling" && t.state !== "gating");
+  if (!last || last.state !== "abandoned" || !last.reconciledReason?.startsWith(INCONCLUSIVE_ABANDON_MARKER)) return false;
+  let prior: unknown;
+  try { prior = JSON.parse(last.memberWorkspaceIds); } catch { return false; }
+  if (!Array.isArray(prior) || pendingIds.length === 0) return false;
+  const set = new Set(prior);
+  return pendingIds.every((id) => set.has(id));
+}
+
 export function describeInconclusiveGate(label: string, attemptLabel: string, message: string): string {
   return `${label}: gate INCONCLUSIVE (${attemptLabel}) - not red, no fix agent, no bisect; will re-gate later: ${message.slice(0, 200)}`;
 }
@@ -23,7 +44,7 @@ export function finalTrainStateFields(result: { landed: readonly unknown[]; inco
   const inconclusive = result.landed.length === 0 && result.inconclusive === true;
   return {
     state: result.landed.length > 0 ? ("landed" as const) : inconclusive ? ("abandoned" as const) : ("red" as const),
-    ...(inconclusive ? { reconciledReason: `gate inconclusive, will be retried: ${(result.gateFailure ?? "").slice(0, 300)}` } : {}),
+    ...(inconclusive ? { reconciledReason: `${INCONCLUSIVE_ABANDON_MARKER}: ${(result.gateFailure ?? "").slice(0, 300)}` } : {}),
   };
 }
 

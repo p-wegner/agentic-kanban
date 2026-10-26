@@ -30,6 +30,7 @@ import {
 import { decideAgeAbandonSplit } from "./merge-train-age-split.js";
 import { runMergeTrain, formatTrainLabel, trainDateStamp, trainRefName, type OnTrainDropped } from "./merge-train.service.js";
 import { isMergeTrainLabelLive, noteMergeTrainGateActivity, withMergeTrainGateActivity, registerLiveMergeTrain, unregisterLiveMergeTrain } from "./merge-train-live-registry.js";
+import { clearCarriedFix, pinCarriedFix, withCarriedFix, type CarryState } from "./merge-train-carry-fix.js";
 import { cleanupTrainWorktreesForLabel, pinTrainRefsForLabel } from "./merge-train-worktrees.js";
 import { describeInconclusiveGate, describeTrainGateRed, finalTrainStateFields, inconclusiveSkipEvents, isInconclusiveGate } from "./merge-queue-train-inconclusive.js";
 export { describeTrainGateRed } from "./merge-queue-train-inconclusive.js";
@@ -379,6 +380,7 @@ async function runDoomedTrainJob(args: {
     // #1277: the project's red-handling policy, read once per train through the preference layer.
     const policy = resolveMergeTrainRedPolicy(toPrefMap(await getAllPreferencesCached(database).catch(() => [])), projectId);
     // #1572: ONE shepherd per train, shared by incremental assembly (conflicts) and the red gate.
+    const carryState: CarryState = {};
     const shepherdKit = kit = createTrainShepherdKit({ database, agentRunner, policy, trainId, projectId, label, members, boardEvents });
     const result = await runMergeTrain({
       repoPath,
@@ -399,7 +401,7 @@ async function runDoomedTrainJob(args: {
       // latest, rather than continuing through the rest of a bisect tree.
       signal: abortController.signal,
       onDropped,
-      ...(flush ? {} : { assemble: shepherdKit.assemble }),
+      ...(flush ? {} : { assemble: withCarriedFix(shepherdKit.assemble, label, carryState) }),
       runGate: ({ trainRef, included, label: attemptLabel }) => withMergeTrainGateActivity(trainId, async () => {
         // Gate the TREE THAT LANDS. A per-member gate never tests the merge commit, which is
         // how two individually-green branches can produce a red base with no conflict.
@@ -458,6 +460,10 @@ async function runDoomedTrainJob(args: {
         });
         if (!gate.passed && gate.inconclusive) {
           console.log(`[merge-train] ${describeInconclusiveGate(label, attemptLabel, gate.message)}`);
+          if (gate.carriedFix && !flush) {
+            const pinned = await pinCarriedFix({ repoPath, memberWorkspaceIds: members.map((m) => m.workspaceId), label, baseSha: carryState.preCarrySha ?? gate.carriedFix.baseSha, tipSha: gate.carriedFix.tipSha });
+            if (pinned) console.log(`[merge-train] ${pinned}`);
+          }
         } else if (!gate.passed) {
           // Name the red: train, members, stage and suite(s), for the whole train and each half.
           const gatedMembers = included.map((m) => members.find((x) => x.workspaceId === m.workspaceId) ?? { workspaceId: m.workspaceId });
@@ -693,6 +699,7 @@ export function createMergeTrainRunner(deps: {
       unregisterLiveMergeTrain(trainId);
     }
 
+    if (result.landed.length > 0) await clearCarriedFix(repoPath, members.map((m) => m.workspaceId)).catch(() => undefined);
     await sendTrainRedFeedback(result, members, { sendTurn, headSha: (branch) => gitService.revParse(repoPath, branch) });
     logTrainConflictClusters(label, result);
 
