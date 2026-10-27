@@ -32,7 +32,7 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 - **HARNESS_SHARE = 100%** - at most this share of the WIP may run `harness`-tagged tickets (gate, guards, ratchets, impact map, hooks, merge path); the rest goes to product work. 100% disables the budget.
 
 ## RISK POSTURE (generated - do not hand-edit)
-- **RISK POSTURE = sprint** - Skips pre-merge review entirely (a review ticket is filed after the fact); gate runs guards-only per train, full suite on schedule. Red base allowed and tracked as debt. Set via Settings -> Workflow; a ticket may override with a `risk:<posture>` tag.
+- **RISK POSTURE = flow** - The fastest honest cycle (decision 019, #1240): the per-merge gate is typecheck + the test-impact SELECTION + the diff's own tests, with NO always-run guard floor at merge; a red base is reported, never blocking and never ticketed; and the full suite runs on the release candidate ONLY — master has no scheduled sweep by design. Per-ticket review as Standard. For a repo whose only deployment is a promoted release candidate (this board's own development); wrong wherever master itself must be green. Set via Settings -> Workflow; a ticket may override with a `risk:<posture>` tag.
 
 ## STRATEGY WEIGHTS (generated - do not hand-edit)
 - Frontend: weight 5/5, area, provider claude
