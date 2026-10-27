@@ -10,6 +10,9 @@
  * (logged); the retry then simply gates uncarried.
  */
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
@@ -78,6 +81,27 @@ export function withCarriedFix<A extends { repoPath: string; label: string; memb
   };
 }
 
+/**
+ * Three-way tree merge. `merge-tree --merge-base` needs git >= 2.40; on older gits (exit 129, usage)
+ * fall back to a trivial `read-tree -m` in a throwaway index, which refuses any file both sides
+ * touched (that skips the carry, same as a conflict). Returns the merged tree id, or null.
+ */
+async function mergeTrees(repoPath: string, baseSha: string, trainSha: string, tipSha: string): Promise<string | null> {
+  const merged = await gitExec(["merge-tree", "--write-tree", `--merge-base=${baseSha}`, trainSha, tipSha], { cwd: repoPath });
+  if (execSucceeded(merged)) return merged.stdout.split(/\r?\n/)[0]?.trim() || null;
+  if (merged.code !== 129) return null;
+  const dir = mkdtempSync(join(tmpdir(), "kanban-train-idx-"));
+  try {
+    const env = { ...process.env, GIT_INDEX_FILE: join(dir, "index") };
+    const read = await gitExec(["read-tree", "-i", "-m", "--aggressive", baseSha, trainSha, tipSha], { cwd: repoPath, env });
+    if (!execSucceeded(read)) return null;
+    const wrote = await gitExec(["write-tree"], { cwd: repoPath, env });
+    return execSucceeded(wrote) ? wrote.stdout.trim() || null : null;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 export type ApplyCarriedFixResult =
   | { applied: true; newSha: string; preCarrySha: string; log: string }
   | { applied: false; log: string };
@@ -90,11 +114,10 @@ export async function applyCarriedFix(args: { repoPath: string; trainRef: string
   const { repoPath, trainRef, trainSha, label, carried } = args;
   const commits = await describeCommits(repoPath, carried.baseSha, carried.tipSha);
   try {
-    const merged = await gitExec(["merge-tree", "--write-tree", `--merge-base=${carried.baseSha}`, trainSha, carried.tipSha], { cwd: repoPath });
-    if (!execSucceeded(merged)) return { applied: false, log: `${label}: carried shepherd fix (${commits}) does not apply to the re-formed train - gating without it` };
-    const tree = merged.stdout.split(/\r?\n/)[0]?.trim();
+    const tree = await mergeTrees(repoPath, carried.baseSha, trainSha, carried.tipSha);
+    if (!tree) return { applied: false, log: `${label}: carried shepherd fix (${commits}) does not apply to the re-formed train - gating without it` };
     const current = await gitExec(["rev-parse", `${trainSha}^{tree}`], { cwd: repoPath });
-    if (!tree || tree === current.stdout.trim()) return { applied: false, log: `${label}: carried shepherd fix (${commits}) is already in the re-formed train` };
+    if (tree === current.stdout.trim()) return { applied: false, log: `${label}: carried shepherd fix (${commits}) is already in the re-formed train` };
     const commit = await gitExec(
       ["-c", "user.name=kanban-train", "-c", "user.email=train@kanban.local", "commit-tree", tree, "-p", trainSha, "-m", `fix(train ${label}): carry shepherd fix from the inconclusive train\n\n${commits}`],
       { cwd: repoPath },
