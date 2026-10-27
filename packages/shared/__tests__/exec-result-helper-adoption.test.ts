@@ -111,6 +111,12 @@ const ALLOWED: Record<string, [count: number, why: string]> = {
     "`allowedExitCodes.includes(code)` — a bisect step's caller declares WHICH non-zero exits " +
       "are expected, so the raw number is the datum and 'did it succeed' is the wrong question",
   ],
+  "server/src/services/merge-train-carry-fix.ts": [
+    1,
+    "`code !== 129` — git's usage-error exit (merge-tree lacks --merge-base before git 2.40) is " +
+      "read as DATA to choose the read-tree fallback; any other failure means 'skip the carry', " +
+      "so no execSucceeded/execFailedToRun call expresses it",
+  ],
   "server/src/startup/commit-msg-hook-backfill.ts": [
     2,
     "`git config --get` exits 1 for an unset key, which is a legitimate answer, not a failure — " +
