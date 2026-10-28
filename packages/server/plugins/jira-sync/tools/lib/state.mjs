@@ -3,20 +3,55 @@
 // plugin checkout, under the env-provided JIRA_SYNC_STATE_DIR.
 
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+
+/** A state file that exists but does not parse. Never papered over with a fallback: a
+ * truncated file silently read as empty drops pending pushes/writebacks (#1732). */
+export class StateFileError extends Error {
+  constructor(path) {
+    super(`${basename(path)} is not valid JSON`);
+    this.name = "StateFileError";
+    this.path = path;
+  }
+}
 
 export function readJsonFile(path, fallback) {
   if (!existsSync(path)) return fallback;
   try {
     return JSON.parse(readFileSync(path, "utf8"));
   } catch {
-    return fallback;
+    throw new StateFileError(path);
   }
 }
 
+/** Atomic: write `<file>.tmp`, then rename over the live file. */
 export function writeJsonFile(path, value) {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}
+`, "utf8");
+  renameSync(tmp, path);
+}
+
+/** Loud pre-flight: `{ ok:false, step:"state", reason }` if any state file is corrupt, else null. */
+export function checkStateFiles(stateDir) {
+  for (const path of [
+    pullStatePath(stateDir),
+    outboxPath(stateDir),
+    writebacksPath(stateDir),
+    cursorPath(stateDir),
+    conflictRegisterPath(stateDir),
+    failureRegisterPath(stateDir),
+    boardSnapshotPath(stateDir),
+  ]) {
+    try {
+      readJsonFile(path, null);
+    } catch (err) {
+      if (err instanceof StateFileError) return { ok: false, step: "state", reason: err.message };
+      throw err;
+    }
+  }
+  return null;
 }
 
 export function pullStatePath(stateDir) {

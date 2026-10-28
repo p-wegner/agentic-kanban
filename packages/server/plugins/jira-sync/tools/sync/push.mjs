@@ -25,6 +25,7 @@ import {
   cursorPath,
   readBoardSnapshot,
   boardSnapshotPath,
+  checkStateFiles,
   readPullState,
   pullStatePath,
   migrateLegacyState,
@@ -55,6 +56,9 @@ async function main() {
   const stateDir = process.env.JIRA_SYNC_STATE_DIR;
   if (!stateDir) return { ok: false, step: "config", reason: "JIRA_SYNC_STATE_DIR is not set" };
   migrateLegacyState(stateDir);
+
+  const stateFailure = checkStateFiles(stateDir);
+  if (stateFailure) return stateFailure;
 
   const authFailure = await checkAuth(ctx.client);
   if (authFailure) return authFailure;
