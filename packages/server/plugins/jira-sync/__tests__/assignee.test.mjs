@@ -110,7 +110,7 @@ test("unmapped name: a push failure with the reason, nothing written, entry stay
   const r = await runPush(jira, [entry], { assigneeMap });
   assert.equal(jira.calls.length, 0);
   assert.equal(r.failed[0].reason, "assignee Nobody has no accountId in assigneeMap");
-  assert.deepEqual(r.remaining, [entry]);
+  assert.deepEqual(r.remaining, [{ ...entry, failures: 1, lastReason: r.failed[0].reason }]);
 });
 
 test("jira-to-board: a tag change is not pushed", async () => {

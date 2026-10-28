@@ -54,7 +54,36 @@ test("transition: an unresolvable target status fails without ever calling trans
   assert.equal(failed.length, 1);
   assert.equal(failed[0].key, "ENG-1");
   assert.match(failed[0].reason, /no transition to status "Blocked"/);
-  assert.deepEqual(remaining, [{ kind: "transition", key: "ENG-1", targetStatus: "Blocked" }]);
+  assert.equal(remaining.length, 1);
+  assert.equal(remaining[0].failures, 1);
+});
+
+test("transition: a stale entry (board issue left the target status) is dropped without any Jira call (#1733)", async () => {
+  const fetchImpl = createScriptedFetch([refusingRoute("transitionIssue")]);
+  const client = new JiraClient({ siteUrl: "https://fixture.atlassian.net", apiToken: "x", fetchImpl });
+  const entry = { kind: "transition", key: "ENG-1", targetStatus: "In Review", boardIssueId: "i1" };
+  const { applied, failed, remaining, stale } = await runPush(client, [entry], { boardStatusById: new Map([["i1", "Done"]]) });
+  assert.deepEqual([applied, failed, remaining], [[], [], []]);
+  assert.equal(stale.length, 1);
+  assert.match(stale[0].reason, /stale/);
+});
+
+test("an entry failing identically N times is parked: reported, not retried (#1733)", async () => {
+  let listCalls = 0;
+  const client = { listTransitions: async () => { listCalls++; return []; } };
+  let entries = [{ kind: "transition", key: "ENG-1", targetStatus: "Blocked", boardIssueId: "i1" }];
+  let last;
+  for (let i = 0; i < 3; i++) {
+    last = await runPush(client, entries, { maxFailures: 3 });
+    entries = last.remaining;
+  }
+  assert.equal(listCalls, 3);
+  assert.equal(entries[0].parked, true);
+  assert.match(last.failed[0].reason, /parked after 3 identical failures/);
+  const again = await runPush(client, entries, { maxFailures: 3 });
+  assert.equal(listCalls, 3);
+  assert.match(again.failed[0].reason, /parked/);
+  assert.equal(again.remaining.length, 1);
 });
 
 test("comment: a comment that originated as a Jira import is never re-posted (echo suppression)", async () => {
