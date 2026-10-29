@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { listRepoSubdirs } from "../../../../scripts/lib/repo-tree.mjs";
 
 /**
  * #1313 — root CLAUDE.md is loaded by every session, builders included, on every turn
@@ -26,6 +27,49 @@ const OPERATOR_ONLY_HEADINGS = [
   "## Board Operations",
   "## Agent Skills",
 ];
+
+/**
+ * #1759 — nested `packages/<pkg>/CLAUDE.md` files are injected as nested memory on the first
+ * Read/Grep/Glob/Bash under the package and stay for the whole session; `server` was 46.9 KB
+ * (~11.6k tokens, 4x root). Same split rule: rules stay, rationale moves to
+ * `docs/agent-guide/<package>-notes.md` with a pointer. `packages/shared` is grandfathered at
+ * its current size (shrink-only: lower the ceiling as it is split).
+ */
+const NESTED_DEFAULT_BYTES = 12_000;
+const NESTED_CEILINGS: Record<string, number> = { "packages/shared/CLAUDE.md": 20_500 };
+
+function findNestedClaudeMd(): string[] {
+  const out: string[] = [];
+  for (const dir of listRepoSubdirs(path.join(repoRoot, "packages"))) {
+    if (fs.existsSync(path.join(dir, "CLAUDE.md"))) out.push(`packages/${path.basename(dir)}/CLAUDE.md`);
+  }
+  return out;
+}
+
+describe("nested packages/*/CLAUDE.md budget (#1759)", () => {
+  const files = findNestedClaudeMd();
+
+  it("finds the nested memory files", () => {
+    expect(files).toContain("packages/server/CLAUDE.md");
+  });
+
+  it.each(files)("%s stays under its byte cap", (rel) => {
+    const cap = NESTED_CEILINGS[rel] ?? NESTED_DEFAULT_BYTES;
+    const bytes = Buffer.byteLength(read(rel), "utf8");
+    expect(
+      bytes,
+      `${rel} is ${bytes} bytes (cap ${cap}). Nested memory is paid on every turn — move rationale to ` +
+        "docs/agent-guide/<package>-notes.md and leave a one-line pointer.",
+    ).toBeLessThanOrEqual(cap);
+  });
+
+  it("server and client point at their notes pages", () => {
+    for (const pkg of ["server", "client"]) {
+      expect(read(`packages/${pkg}/CLAUDE.md`)).toContain(`docs/agent-guide/${pkg}-notes.md`);
+      expect(read(`docs/agent-guide/${pkg}-notes.md`).length).toBeGreaterThan(500);
+    }
+  });
+});
 
 describe("root CLAUDE.md builder budget (#1313)", () => {
   const root = read("CLAUDE.md");

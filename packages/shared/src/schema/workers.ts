@@ -67,6 +67,8 @@ export const workerGitTokens = sqliteTable("worker_git_tokens", {
   projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
   /** The one ref a receive-pack under this token may update. NULL = read-only in practice. */
   incomingRef: text("incoming_ref"),
+  /** The session the token was issued to (#1751), so the #1407 supersession check survives a restart. NULL = legacy row. */
+  sessionId: text("session_id"),
   /** Epoch ms — the clock the assignment-settle window is measured from. */
   issuedAtMs: integer("issued_at_ms").notNull(),
   /** Epoch ms ceiling. Not the bound that matters (see #753), but it bounds this table's growth. */

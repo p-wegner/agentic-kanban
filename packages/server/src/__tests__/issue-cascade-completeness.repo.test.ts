@@ -453,7 +453,12 @@ describe("deleteIssueCascade — completeness vs the schema FK graph", () => {
     // plugin_view_processes.project_id went the OTHER way and now carries a real cascading FK
     // (migration 0120) — it is an ephemeral pid/port registry, so a row outliving its project
     // is a stale process record nobody will reap, not history worth keeping.
+    //
+    // worker_git_tokens.session_id (#1748/#1751) is a supersession HINT, not ownership: the
+    // row already cascades with its project, authority is re-derived from `sessions` on every
+    // request (#753), and NULL means a legacy row. A dangling id just fails that check.
     const ALLOWED_FKLESS = new Set([
+      "worker_git_tokens.session_id",
       "scheduled_run_history.issue_id",
       "scheduled_run_history.workspace_id",
       "plugin_loop_events.project_id",
