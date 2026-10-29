@@ -16,7 +16,7 @@
 
 import { resolveTransitionId, TransitionNotFoundError } from "./transitions.mjs";
 import { attributeComment } from "./comment-marker.mjs";
-import { markdownToAdf } from "./adf.mjs";
+import { markdownToAdf, lossyAdfNodes } from "./adf.mjs";
 import { stripAttachmentFooter } from "./jira-context.mjs";
 import { BOARD_PRIORITY_TO_JIRA, accountIdForAssignee, mapBoardTypeToJira } from "./field-map.mjs";
 import { jiraLinksOf, linkKey } from "./link-sync.mjs";
@@ -119,8 +119,19 @@ async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaul
   if (entry.kind === "fields") {
     // A priority with no Jira mapping is a failure, never "applied" (#1719); the other fields still go out.
     const unmapped = "priority" in entry.fields && !BOARD_PRIORITY_TO_JIRA[String(entry.fields.priority ?? "").toLowerCase()] ? entry.fields.priority : undefined;
-    const sendable = unmapped === undefined ? entry.fields : Object.fromEntries(Object.entries(entry.fields).filter(([f]) => f !== "priority"));
-    const unmappedFailure = unmapped === undefined ? undefined : { key: entry.key, boardIssueId: entry.boardIssueId, kind: "fields", reason: new UnmappablePriorityError(unmapped).message };
+    // A Jira description the Markdown round trip would degrade (media, table, panel, expand) is never overwritten.
+    let lossy = [];
+    if ("description" in entry.fields) {
+      const live = await client.getIssue(entry.key, { fields: ["description"] });
+      lossy = lossyAdfNodes(live?.fields?.description);
+    }
+    const dropped = (f) => (f === "priority" && unmapped !== undefined) || (f === "description" && lossy.length > 0);
+    const sendable = Object.fromEntries(Object.entries(entry.fields).filter(([f]) => !dropped(f)));
+    const reasons = [
+      ...(unmapped === undefined ? [] : [new UnmappablePriorityError(unmapped).message]),
+      ...(lossy.length === 0 ? [] : [`description not pushed: the Jira description holds ${lossy.join(", ")} content that Markdown cannot round-trip`]),
+    ];
+    const unmappedFailure = reasons.length === 0 ? undefined : { key: entry.key, boardIssueId: entry.boardIssueId, kind: "fields", reason: reasons.join("; ") };
     const payload = prepareFieldUpdate(sendable, { defaultIssueType });
     const description = { key: entry.key, boardIssueId: entry.boardIssueId, kind: "fields", fields: Object.keys(payload).map((f) => JIRA_FIELD_TO_BOARD[f] ?? f) };
     description.change = `fields ${description.fields.join(", ")}`;

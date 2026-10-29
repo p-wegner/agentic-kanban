@@ -11,10 +11,21 @@ export const ATTACHMENT_FOOTER_END = "<!-- /jira-sync:attachments -->";
 
 const FOOTER_RE = /\n*<!-- jira-sync:attachments -->[\s\S]*?<!-- \/jira-sync:attachments -->[ \t]*\n*/g;
 
-/** The description without the plugin-owned attachment footer. */
+export const PARENT_BLOCK_START = "<!-- jira-sync:parent -->";
+export const PARENT_BLOCK_END = "<!-- /jira-sync:parent -->";
+const PARENT_RE = /<!-- jira-sync:parent -->[\s\S]*?<!-- \/jira-sync:parent -->[ \t]*\n*/g;
+// Unmarked line written by versions before the block was marked.
+const LEGACY_PARENT_RE = /^\*\*Parent:\*\* [^\n]*\n*/;
+
+/** The plugin-owned parent line, wrapped in markers so it can be stripped again. */
+export function parentBlock(line) {
+  return `${PARENT_BLOCK_START}${line}${PARENT_BLOCK_END}`;
+}
+
+/** The description without the plugin-owned blocks (attachment footer, parent line). */
 export function stripAttachmentFooter(description) {
   if (description == null) return description;
-  return String(description).replace(FOOTER_RE, "").replace(/\s+$/, "");
+  return String(description).replace(FOOTER_RE, "").replace(PARENT_RE, "").replace(LEGACY_PARENT_RE, "").replace(/^\s+/, "").replace(/\s+$/, "");
 }
 
 /** The footer block currently in a description ('' when none), for change detection. */

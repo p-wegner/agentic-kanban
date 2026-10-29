@@ -203,6 +203,7 @@ node tools/sync/push.mjs --dry-run     # what the outbox would send
 node tools/selftest.mjs --self-test
 JIRA_SYNC_SELF_TEST=1 node tools/bootstrap.mjs
 node --test __tests__/*.test.mjs   # the bare directory form fails on Node 24
+# the merge gate runs the same command: packages/server/src/__tests__/plugin-jira-sync-node-tests.test.ts (@gate:always-run)
 ```
 
 Every command prints one JSON object to stdout and exits non-zero on failure — safe to run from

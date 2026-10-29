@@ -28,7 +28,7 @@ export function boardFieldsOf(boardIssue) {
 export function incomingFieldsOf(mapped, statusId) {
   return {
     title: norm(mapped.title),
-    description: norm(mapped.description),
+    description: norm(stripAttachmentFooter(mapped.description)),
     priority: norm(mapped.priority),
     type: norm(mapped.type),
     statusId: norm(statusId),

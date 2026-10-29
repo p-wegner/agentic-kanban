@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { runInboundSync, resolveJiraContext } from "../tools/lib/sync-engine.mjs";
 import { planOutbox } from "../tools/lib/outbox-producer.mjs";
 import { runPush } from "../tools/lib/push-plan.mjs";
+import { stripAttachmentFooter, parentBlock } from "../tools/lib/jira-context.mjs";
 import { labelsFromBoardTags } from "../tools/lib/field-map.mjs";
 import { resolveSyncDirections } from "../tools/lib/sync-direction.mjs";
 
@@ -92,7 +93,7 @@ test("a description push carries no footer and no sprint/version/custom label", 
   const body = "text\n\n<!-- jira-sync:attachments -->\n- a\n<!-- /jira-sync:attachments -->";
   assert.deepEqual(labelsFromBoardTags(["sprint:S", "version:1", "sp:5", "keep"], { extraPrefixes: ["sp"] }), ["keep"]);
   const calls = [];
-  const client = { updateIssueFields: async (k, f) => calls.push(f) };
+  const client = { updateIssueFields: async (k, f) => calls.push(f), getIssue: async () => ({ fields: {} }) };
   const e = { kind: "fields", key: "KD-1", boardIssueId: "i1", fields: { description: body } };
   await runPush(client, [e]);
   assert.ok(!JSON.stringify(calls[0]).includes("jira-sync:attachments"));
@@ -109,4 +110,15 @@ test("an unknown customFieldMap field fails and names it", async () => {
     resolveJiraContext(jira([]), JSON.stringify({ Nonesuch: "tag:x" })),
     /unknown Jira field "Nonesuch"/,
   );
+});
+
+test("the plugin-owned parent block (marked or legacy) is stripped before any push", () => {
+  const body = "real text";
+  assert.equal(stripAttachmentFooter(`${parentBlock("**Parent:** KD-1 (Epic)")}
+
+${body}`), body);
+  assert.equal(stripAttachmentFooter(`**Parent:** KD-1 (Epic)
+
+${body}`), body);
+  assert.equal(stripAttachmentFooter(parentBlock("**Parent:** KD-1")), "");
 });
