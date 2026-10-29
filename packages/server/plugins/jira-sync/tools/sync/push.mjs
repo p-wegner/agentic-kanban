@@ -32,23 +32,13 @@ import {
 import { BoardClient, BoardConfigError, resolveBoardConfigFromEnv } from "../lib/board-client.mjs";
 import { createDefaultBoardFixtureFetch } from "../lib/board-fixtures.mjs";
 import { loadBoardState, refreshPullStateAfterPush } from "../lib/state-sync.mjs";
-import { assigneeMapFromEnv } from "../lib/field-map.mjs";
+import { assigneeMapFromEnv, parseStatusMap } from "../lib/field-map.mjs";
 import { resolveSyncDirections } from "../lib/sync-direction.mjs";
 import { planOutbox, isNonJiraKey, statusNameOf } from "../lib/outbox-producer.mjs";
 import { applyWritebacks } from "../lib/writebacks.mjs";
 import { runPush } from "../lib/push-plan.mjs";
 import { updateRegister, pushFailureIdentity } from "../lib/conflict-register.mjs";
 import { JiraAuthError } from "../lib/auth.mjs";
-
-function parseStatusMap(raw) {
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
 
 async function main() {
   const profile = checkProfile(process.env.JIRA_SYNC_PROFILE_PATH);

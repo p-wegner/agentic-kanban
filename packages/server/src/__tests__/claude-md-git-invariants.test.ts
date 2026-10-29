@@ -3,6 +3,7 @@
 // a stand-in for reading the tree.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { DISCLOSE_CONTEXT_COMMAND } from "../services/project-scaffold.js";
 
@@ -152,6 +153,20 @@ describe("CLAUDE.md git/worktree invariants (#598)", () => {
       if (n > 0) perMatcher.set(entry.matcher ?? "", (perMatcher.get(entry.matcher ?? "") ?? 0) + n);
     }
     expect([...perMatcher.values()], "disclose-context.mjs wired more than once under one matcher").toEqual([1]);
+  });
+});
+
+describe("board-written agent-context files are never tracked (#1757)", () => {
+  const tracked = (spec: string): string[] =>
+    execFileSync("git", ["ls-files", "--", spec], { cwd: repoRoot, encoding: "utf8", windowsHide: true })
+      .split(/\r?\n/).filter(Boolean);
+
+  it("no settings.local.json is tracked: a tracked one makes writePluginSkillOverrides skip, so the lean listing is inert", () => {
+    expect(tracked("*settings.local.json")).toEqual([]);
+  });
+
+  it(".codex/skills is a board-created junction to .claude/skills, never a tracked copy (#1760)", () => {
+    expect(tracked(".codex/skills")).toEqual([]);
   });
 });
 

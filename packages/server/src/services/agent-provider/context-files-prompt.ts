@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { DESCRIPTION_IN_PROMPT_POINTER } from "@agentic-kanban/shared/lib/ticket-context";
 
 /**
  * How a provider receives its `contextFiles` — and why codex needs the prompt (#524).
@@ -27,7 +28,7 @@ export function appendContextFilesToPrompt(prompt: string, contextFiles: string[
   const sections: string[] = [];
   for (const file of contextFiles) {
     try {
-      const content = readFileSync(file, "utf-8").trim();
+      const content = dropDescriptionAlreadyIn(prompt, readFileSync(file, "utf-8").trim());
       if (content) {
         sections.push(`### ${file}\n\n${content}`);
       }
@@ -40,6 +41,19 @@ export function appendContextFilesToPrompt(prompt: string, contextFiles: string[
 
   if (sections.length === 0) return prompt;
   return `${prompt}\n\n[Attached context files]\n\n${sections.join("\n\n---\n\n")}`;
+}
+
+/**
+ * #1762: the codex prompt is the first message AND carries the whole context file, so a
+ * `## Description` body the prompt already contains would sit in one message twice. Swap
+ * it for the pointer. Files written with the description already omitted pass through.
+ */
+function dropDescriptionAlreadyIn(prompt: string, content: string): string {
+  const m = /(^|\n)## Description\n\n([\s\S]*?)(?=\n## |\s*$)/.exec(content);
+  const body = m?.[2]?.trim();
+  if (!m || !body || body === DESCRIPTION_IN_PROMPT_POINTER || !prompt.includes(body)) return content;
+  const start = m.index + m[1].length;
+  return `${content.slice(0, start)}## Description\n\n${DESCRIPTION_IN_PROMPT_POINTER}\n${content.slice(m.index + m[0].length)}`;
 }
 
 /**

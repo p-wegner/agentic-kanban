@@ -34,6 +34,7 @@ const BOARD_STATUS_CATEGORY = {
   "in progress": "indeterminate",
   "in review": "indeterminate",
   done: "done",
+  cancelled: "done",
 };
 
 export function categoryForBoardStatus(name) {

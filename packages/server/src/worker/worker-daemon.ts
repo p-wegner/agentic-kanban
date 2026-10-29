@@ -272,6 +272,26 @@ function adoptPersistedProfiles(opts: WorkerDaemonOptions, aliases: ReturnType<t
   return override ? swapAttestedProfiles(opts, aliases, log, override.profiles, "config") : null;
 }
 
+/** #754: the 401 give-up texts, kept out of `startWorkerDaemon` (nloc ratchet). */
+function tokenRejectedMessage(where: string, stateFile: string): string {
+  return (
+    `board rejected this worker's token (401 on ${where}). It was probably revoked, or the ` +
+    `board's database was reset. Mint a new pairing token on the board ` +
+    `('agentic-kanban worker pair') and restart with --token <token>; the stale pairing in ` +
+    `${stateFile} is dropped automatically when you do.`
+  );
+}
+
+function repairExhaustedMessage(where: string, attempts: number): string {
+  return (
+    `board rejected this worker's token again after ${attempts} re-pairing attempt(s) ` +
+    `(401 on ${where}). A pairing token is single-use, so this is not something another ` +
+    `token will fix: check that the board still lists this worker ` +
+    `('agentic-kanban worker list' on the board machine) and that --board points at the ` +
+    `fleet port of the board you paired with.`
+  );
+}
+
 export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<WorkerDaemonHandle> {
   const stateFile = opts.stateFile ?? defaultWorkerStateFile();
   // #1381: flags pin their keys; the rest start from what the board last pushed.
@@ -379,22 +399,11 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   const handleUnauthorized = async (where: string): Promise<void> => {
     if (stopped || fatal || repairing) return;
     if (!opts.pairingToken) {
-      giveUp(
-        `board rejected this worker's token (401 on ${where}). It was probably revoked, or the ` +
-          `board's database was reset. Mint a new pairing token on the board ` +
-          `('agentic-kanban worker pair') and restart with --token <token>; the stale pairing in ` +
-          `${stateFile} is dropped automatically when you do.`,
-      );
+      giveUp(tokenRejectedMessage(where, stateFile));
       return;
     }
     if (repairAttempts >= MAX_REPAIR_ATTEMPTS) {
-      giveUp(
-        `board rejected this worker's token again after ${repairAttempts} re-pairing attempt(s) ` +
-          `(401 on ${where}). A pairing token is single-use, so this is not something another ` +
-          `token will fix: check that the board still lists this worker ` +
-          `('agentic-kanban worker list' on the board machine) and that --board points at the ` +
-          `fleet port of the board you paired with.`,
-      );
+      giveUp(repairExhaustedMessage(where, repairAttempts));
       return;
     }
     // One repair at a time, and never re-entrantly: a 401 arrives on BOTH the heartbeat and

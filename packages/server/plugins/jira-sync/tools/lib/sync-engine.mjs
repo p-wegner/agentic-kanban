@@ -77,6 +77,7 @@ function exceedsDeletionLimit(count, known) {
  *   pendingWritebackKeys?: Set<string>, // keys push created whose board writeback has not landed yet
  *   deletedStatusName?: string,
  *   directions?: per-field sync direction (#1672); a `board-to-jira` field is never overwritten by pull
+ *   statusMap?: board status -> Jira status name (#1730); applied inversely when placing a pulled issue
  *   assigneeMap?: Jira accountId -> board name (#1702); an unmapped accountId falls back to the displayName
  *   forceKeys?: Set<string>, // keys whose Jira state overwrites the board even when it was edited locally (`sync resolve --keep jira`)
  *   customFieldMap?: string, // raw `customFieldMap` setting (#1701): Jira field -> tag:<prefix>, read-only
@@ -86,8 +87,10 @@ function exceedsDeletionLimit(count, known) {
 export async function runInboundSync(
   client,
   boardClient,
-  { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set(), deletedStatusName = "Cancelled", forceKeys = new Set(), directions = LEGACY_DIRECTIONS, customFieldMap = "", assigneeMap = {}, maxIssuesPerRun, outOfScopeRecheckMs = DEFAULT_OUT_OF_SCOPE_RECHECK_MS, now = new Date().toISOString() },
+  { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set(), deletedStatusName = "Cancelled", forceKeys = new Set(), directions = LEGACY_DIRECTIONS, customFieldMap = "", assigneeMap = {}, statusMap = {}, maxIssuesPerRun, outOfScopeRecheckMs = DEFAULT_OUT_OF_SCOPE_RECHECK_MS, now = new Date().toISOString() },
 ) {
+  const statusFor = (mapped, currentStatusId = null) =>
+    resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses, { statusMap, jiraStatusName: mapped.statusName, currentStatusId });
   // dryRun only suppresses WRITES (create/update/tag calls below) — these three are
   // reads, and skipping them would make every issue look brand-new (boardIssuesByKey
   // empty), so a dry run could never report skip/update/conflict, only create.
@@ -182,7 +185,7 @@ export async function runInboundSync(
     if (!boardIssue) {
       let createdIssue;
       if (!dryRun) {
-        const statusId = resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses);
+        const statusId = statusFor(mapped);
         const created_ = await boardClient.createIssue({
           projectId,
           title: mapped.title,
@@ -221,7 +224,7 @@ export async function runInboundSync(
     const jiraOwned = OWNABLE.filter((f) => !pushesField(directions, f));
     const boardOwned = OWNABLE.filter((f) => !pullsField(directions, f));
     const earlyCurrent = boardFieldsOf(boardIssue);
-    const earlyJira = incomingFieldsOf(mapped, resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses));
+    const earlyJira = incomingFieldsOf(mapped, statusFor(mapped, boardIssue?.statusId));
     const ownedEdits = known?.fields ? jiraOwned.filter((f) => known.fields[f] !== undefined && earlyCurrent[f] !== known.fields[f]) : [];
     const jiraDiffers = Object.fromEntries(boardOwned.filter((f) => earlyCurrent[f] !== earlyJira[f]).map((f) => [f, earlyJira[f]]));
     const driftNote = Object.keys(jiraDiffers).length > 0 ? { jiraDiffers } : {};
@@ -244,7 +247,7 @@ export async function runInboundSync(
     // -> converged, resolve it and re-baseline; otherwise a real conflict.
     const timestampMoved = known == null || boardIssue.updatedAt !== known.boardUpdatedAt;
     const currentFields = boardFieldsOf(boardIssue);
-    const incomingStatusId = resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses);
+    const incomingStatusId = statusFor(mapped, boardIssue?.statusId);
     const jiraFields = incomingFieldsOf(mapped, incomingStatusId);
     // A field the board owns (#1672) is not Jira's to change: compare as if Jira agreed with the board,
     // so a board edit to it is neither a conflict nor overwritten. The conflict view still shows Jira's value.
@@ -308,7 +311,7 @@ export async function runInboundSync(
 
     // Only a real board write counts as an update (#1696): a mapped field pull would change, a status
     // move, a label to attach, or a comment to import.
-    const statusId = resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses);
+    const statusId = statusFor(mapped, boardIssue?.statusId);
     const writtenDiff = OWNABLE.filter((f) => pullsField(directions, f) && currentFields[f] !== jiraFields[f]);
     // The assignee is a tag, not an issue column: it is applied below with the other tags.
     const columnDiff = writtenDiff.filter((f) => f !== "assignee");

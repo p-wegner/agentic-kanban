@@ -1,9 +1,11 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { CORE_BUILDER_SKILLS } from "@agentic-kanban/shared/lib/builder-skill-policy";
 import type { BuilderLeanProfile } from "./types.js";
 
 /**
  * Lean Claude builder profile (#1312): under `isolated`, what a Claude builder drops from its first
- * request, and what a project can add back. Measured on this repo (Claude Code 2.1.291, sonnet):
+ * request, and what a project can add back. Hand-measured once on this repo (the live number is
+ * `firstTurnContextTokens` in each session's stats, #1765) (Claude Code 2.1.291, sonnet):
  * 40.0k -> 23.1k tokens (-42%), each lever alone against the base:
  *
  * - auto-memory off (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`): -7.8k. Also a correctness fix: the
@@ -28,19 +30,9 @@ export const LEAN_DISALLOWED_TOOLS = [
   "SendMessage", "TaskStop",
 ] as const;
 
-/** Skills listed in full under the lean base, each with the reason it earns its description tokens. */
-export const CORE_BUILDER_SKILLS: Record<string, string> = {
-  "scope-guard": "pre-commit scope check the builder workflow prescribes",
-  "flaky-test-triage": "decides whether a red test is real, on every failing run",
-  "dev-server": "worktree-safe server start/stop; the wrong way flashes windows and kills other agents",
-  "db-doctor": "the only sanctioned DB repair path; the alternative is a destructive guess",
-  "shared-checkout-commit": "commit recipe when other agents share the checkout",
-  "e2e-author": "anti-flake scaffold for new Playwright tests",
-  "playwright-cli": "browser automation entry point for UI work",
-  "board-navigator": "board tool/command reference",
-  "kanban-workflow": "how to report progress on the board",
-  "code-review": "the review prompt itself",
-};
+/** Skills listed in full under the lean base: one list with the prompt announcement (#1763), owned by shared. */
+export { CORE_BUILDER_SKILLS };
+
 
 export function defaultBuilderLeanProfile(): BuilderLeanProfile {
   return { autoMemory: false, disallowedTools: [...LEAN_DISALLOWED_TOOLS], skillsFull: [], claudeAiMcp: false, mcpConfigs: [], pluginDirs: [] };

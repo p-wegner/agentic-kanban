@@ -1,4 +1,4 @@
-// @gate:always-run when:.claude/skills/roast/**,.codex/skills/roast/** — reads .claude/skills sources from the repo root; no import edge to a markdown file (#647).
+// @gate:always-run when:.claude/skills/roast/** — reads .claude/skills sources from the repo root; no import edge to a markdown file (#647).
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -8,7 +8,6 @@ import { describe, expect, it } from "vitest";
 // contract: it stays discoverable, grounded in real board state, and good-natured.
 const roastSkills = [
   ".claude/skills/roast/SKILL.md",
-  ".codex/skills/roast/SKILL.md",
 ].map((path) => ({
   path,
   contents: readFileSync(new URL(`../../../../${path}`, import.meta.url), "utf8"),

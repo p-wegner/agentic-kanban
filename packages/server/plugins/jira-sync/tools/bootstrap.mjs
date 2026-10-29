@@ -5,7 +5,8 @@
 
 import { checkProfile } from "./lib/profile.mjs";
 import { buildClientFromEnv, printResult, isSelfTest, checkAuth } from "./lib/cli-client.mjs";
-import { parseAssigneeMap } from "./lib/field-map.mjs";
+import { parseAssigneeMap, parseStatusMap, resolveBoardStatusId, StatusMappingError } from "./lib/field-map.mjs";
+import { BoardClient, resolveBoardConfigFromEnv } from "./lib/board-client.mjs";
 import { defaultJql } from "./lib/pull-plan.mjs";
 import { resolveJiraContext } from "./lib/sync-engine.mjs";
 import { JiraAuthError } from "./lib/auth.mjs";
@@ -52,6 +53,26 @@ async function main() {
     }
     if (badRows.length > 0) {
       return { ok: false, step: "assigneeMap", reason: `${badRows.length} assigneeMap row(s) are not usable`, badRows };
+    }
+    // statusMap (#1730): a Jira-Done issue needs a done-like board column, or the pull fails with step "config".
+    const statusMap = parseStatusMap(process.env.SYNC_CONFIG_STATUSMAP ?? process.env.JIRA_SYNC_STATUS_MAP);
+    if (statusMap === null) return { ok: false, step: "config", reason: "statusMap must be a JSON object of board status -> Jira status name" };
+    if (!isSelfTest()) {
+      let statuses = null;
+      try {
+        const board = resolveBoardConfigFromEnv();
+        statuses = await new BoardClient({ boardUrl: board.boardUrl }).listStatuses(board.projectId);
+      } catch {
+        // Board not reachable from here: the pull itself reports it.
+      }
+      if (statuses) {
+        try {
+          resolveBoardStatusId("done", statuses, { statusMap, jiraStatusName: "Done" });
+        } catch (err) {
+          if (err instanceof StatusMappingError) return { ok: false, step: "config", reason: err.message };
+          throw err;
+        }
+      }
     }
     return {
       ok: true,
