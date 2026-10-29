@@ -1,0 +1,11 @@
+docs(#1739): jira-sync docs match the code
+
+- Jira Server/Data Center claim dropped (the client cannot reach it); README,
+  profile template and butler fragment say Jira Cloud only.
+- Butler fragment now agrees with README on the secret store and the TODO gate.
+- Field-push note corrected (#1672), sync-conflict skill points at statusMap,
+  README file tree/test list refreshed, dead duplicate listComments removed.
+- Test that butler fragment, README and profile template agree on the secret store.
+- Manifest version 0.6.0 (state dir + new config keys) and its pin.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

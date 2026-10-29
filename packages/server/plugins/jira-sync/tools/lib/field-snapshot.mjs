@@ -3,8 +3,8 @@
 // What decides a conflict is whether the MAPPED fields (title, description, priority, type,
 // status) differ from the last-synced snapshot and from what Jira now says.
 //
-// Board field edits are NOT pushed to Jira (push sends transitions, comments and creates only),
-// so a snapshot is the only record that a board-side edit has been seen and agreed on.
+// Board field edits ARE pushed when syncDirection / fieldDirections allow it (#1672), but a
+// jira-to-board field never is, so a snapshot is the only record that a board-side edit has been seen and agreed on.
 
 import { stripAttachmentFooter } from "./jira-context.mjs";
 import { assigneeFromTags } from "./field-map.mjs";
