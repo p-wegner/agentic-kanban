@@ -10,7 +10,7 @@ import { builderProfilePref, describeBuilderLeanProfile, parseBuilderLeanProfile
  * personal profile.
  *
  * - `isolated` (default): `--setting-sources project,local`. Measured on the board's Claude
- *   Code: user skills drop out of the init message (122 -> 90 here), the user `CLAUDE.md` is
+ *   Code (one-off; live first-request size: `stats.firstTurnContextTokens`, #1765): user skills drop out of the init message (122 -> 90 here), the user `CLAUDE.md` is
  *   not loaded, and user hooks are not registered. The project's `.claude/settings.json`
  *   (safety hooks, permissions), its skills and `CLAUDE.md` stay. Credentials are not a
  *   settings source, so OAuth profiles (`CLAUDE_CONFIG_DIR`) keep authenticating, and

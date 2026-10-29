@@ -42,6 +42,8 @@ export interface MainWorkspaceInfo {
   mergedAt?: string | null;
   commitCount?: number | null;
   contextTokens?: number | null;
+  /** First request size of the latest session (#1765). */
+  firstTurnContextTokens?: number | null;
   lastTool?: string | null;
   lastAssistantMessage?: string | null;
   /** True when a non-plan-mode session completed (idle) but produced no file changes. */
@@ -203,6 +205,8 @@ export interface WorkspaceResponse {
   closedAt?: string | null;
   mergedAt?: string | null;
   contextTokens?: number | null;
+  /** First request size of the latest session (#1765). */
+  firstTurnContextTokens?: number | null;
   lastTool?: string | null;
   latestCommit?: { sha: string; message: string } | null;
   conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null;

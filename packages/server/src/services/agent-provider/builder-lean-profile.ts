@@ -3,7 +3,8 @@ import type { BuilderLeanProfile } from "./types.js";
 
 /**
  * Lean Claude builder profile (#1312): under `isolated`, what a Claude builder drops from its first
- * request, and what a project can add back. Measured on this repo (Claude Code 2.1.291, sonnet):
+ * request, and what a project can add back. Hand-measured once on this repo (the live number is
+ * `firstTurnContextTokens` in each session's stats, #1765) (Claude Code 2.1.291, sonnet):
  * 40.0k -> 23.1k tokens (-42%), each lever alone against the base:
  *
  * - auto-memory off (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`): -7.8k. Also a correctness fix: the
