@@ -7,7 +7,7 @@ import {
   type WorkerRegistry,
 } from "../services/worker-registry.service.js";
 import type { Database } from "../db/index.js";
-import { tokenNeedsRotation } from "../worker/worker-token-rotation.js";
+import { tokenNeedsRotation } from "../worker/worker-state.js";
 import { parseBoardToWorkerMessage, parseWorkerToBoardMessage } from "@agentic-kanban/shared/lib/worker-protocol";
 
 describe("worker token expiry + rotation (#1766)", () => {
