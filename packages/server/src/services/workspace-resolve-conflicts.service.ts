@@ -130,6 +130,10 @@ export function createWorkspaceResolveConflictsService(deps: ResolveConflictsDep
       workspaceId: id, prompt, agentCommand, agentArgs, profile, model,
       provider: executorProvider, multiTurn: executorProvider === "codex" ? false : true, triggerType: "fix-conflicts",
       skipLaunchPreflight: true,
+      // #1776: the conflicted rebase lives in THIS host worktree. A remote worker works in its own
+      // clone where no rebase is in progress, so it would find nothing to resolve. An explicit host
+      // placement also bypasses the strict-dispatch hold (strict-launch-hold.ts).
+      placement: { kind: "host" },
     });
 
     await updateWorkspaceStatus(id, "fixing", {}, database);
