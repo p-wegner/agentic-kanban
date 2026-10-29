@@ -35,7 +35,7 @@ export async function deliverLateResult(
   database: Database = realDb,
 ): Promise<LateDeliveryOutcome> {
   const { repoPath, branch, workerId } = params;
-  const candidates = await findLiveWorkspacesOnBranch(branch, database);
+  const candidates = await findLiveWorkspacesOnBranch(branch, database, params.projectId);
   if (candidates.length === 0) return { delivered: false, reason: "no open workspace on this branch" };
 
   // Any live session means the normal exit path will land this push itself.
