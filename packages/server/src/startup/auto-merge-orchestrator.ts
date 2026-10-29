@@ -688,8 +688,7 @@ export function createAutoMergeOrchestrator(deps: {
         const { released: departing, remaining } = splitTrainRelease(ids, config.maxSize);
         console.log(`[auto-merge] train window closed for project ${projectId} (${hold.reason}, size ${config.maxSize}/wait ${config.maxWaitMs}ms): releasing ${departing.length} of ${ids.length} ready workspace(s) (max_size ${config.maxSize})${config.batchingFromPosture ? formatPostureNote(config.posture) : ""}`);
         released.push(...departing);
-        if (remaining.length === 0) await dropWindow(projectId, existing);
-        else await persistWindow(projectId, existing, { pendingIds: remaining, firstSeenAt, lastVerdict: hold, lastEvaluatedAt: now });
+        await (remaining.length === 0 ? dropWindow(projectId, existing) : persistWindow(projectId, existing, { pendingIds: remaining, firstSeenAt, lastVerdict: hold, lastEvaluatedAt: now }));
       } else {
         await persistWindow(projectId, existing, {
           pendingIds: ids,
