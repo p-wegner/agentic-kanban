@@ -146,3 +146,15 @@ Full symptom→cause→fix in `docs/install.md` (“Clean-clone / first-start go
     restores the old behaviour. It also PRINTS the accumulated pre-merge-gate evidence from the
     test-impact ledger since the last sweep (#1045) — explicitly labelled as the weaker, different
     measurement it is, and authorizing nothing.
+
+## Per-target start budget (#1775)
+
+`decideTargetStartBudget` (`services/start-slot-decision.ts`, pure) budgets new starts per execution
+target (host, each worker) instead of one project-wide number: thrashing / below RAM floor / spacing
+since the last start hold the target; otherwise budget = `startsPerCycle` override, else
+`floor((freeRam - reserve) / perSessionGb)` from the live RAM watch, else 1 (host default); capped by
+free slots minus 2 per running verify job. `decideStartSlots` accepts `targetBudgets`: then
+`maxNewStartsPerCycle` is only the total ceiling and a `start_cap` hold carries `holdDetail`
+("held: host spacing"). Status: the function and its tests are in; feeding it from heartbeats /
+`readMachineCapacity`, the `startsPerCycle` worker-config setting and the autopilot / placement-explain
+wiring are follow-up work.
