@@ -164,6 +164,10 @@ describe("board-written agent-context files are never tracked (#1757)", () => {
   it("no settings.local.json is tracked: a tracked one makes writePluginSkillOverrides skip, so the lean listing is inert", () => {
     expect(tracked("*settings.local.json")).toEqual([]);
   });
+
+  it(".codex/skills is a board-created junction to .claude/skills, never a tracked copy (#1760)", () => {
+    expect(tracked(".codex/skills")).toEqual([]);
+  });
 });
 
 /**

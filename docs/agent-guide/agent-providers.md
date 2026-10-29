@@ -77,3 +77,17 @@ attesting only a forbidden profile gets nothing. Nothing attested = today's #651
 is also what every protocol-1 worker gets: `WORKER_PROTOCOL_VERSION` is 2 but
 `MIN_SUPPORTED` stays 1, since `profiles` is an optional capability field.
 
+
+## What a Codex builder sees that a Claude builder does not (and vice versa) (#1760)
+
+- **Skills:** both read the same set. `.codex/skills` is a board-created junction to `.claude/skills`
+  (`ensureCodexSkillsLink`), never a tracked copy — both paths are gitignored and a guard test
+  (`claude-md-git-invariants.test.ts`) fails if `.codex/skills/**` is tracked. A DB-row or plugin skill
+  written into `.claude/skills` therefore shows on both sides.
+- **No lean listing for Codex:** `BUILDER_CONTEXT_SUPPORT` has no Codex skill-listing lever, so every
+  skill description loads in full; Claude builders get non-core skills `name-only` (#1312).
+- **Context files:** Codex gets the whole `CLAUDE.local.md` appended to its prompt
+  (`context-files-prompt.ts`) and an `AGENTS.md` that says "read CLAUDE.md" — a file written for Claude
+  Code tools (Bash/PowerShell sections, `mcp__agentic-kanban__*` names). Claude loads `CLAUDE.md` natively.
+- **Settings:** Claude reads `.claude/settings*.json` (`--setting-sources project,local`); Codex reads
+  `.codex/hooks.json` and its own config.
