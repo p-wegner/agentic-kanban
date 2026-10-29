@@ -46,6 +46,20 @@ export class MassDeletionError extends Error {
   }
 }
 
+// The same shape refused for out-of-scope marking (#1731): a typo'd or narrowed JQL would otherwise
+// tag every known issue `no-auto-start` in one run.
+export class MassOutOfScopeError extends Error {
+  constructor(count, known) {
+    super(
+      `refusing to mark ${count} out of ${known} known issues out of scope at once ` +
+        `(limit: ${MAX_DELETIONS_PER_PULL}, or ${MAX_DELETION_SHARE * 100}% of known issues); ` +
+        "check the JQL. Nothing was written.",
+    );
+    this.name = "MassOutOfScopeError";
+    this.code = "MASS_OUT_OF_SCOPE";
+  }
+}
+
 function exceedsDeletionLimit(count, known) {
   return count > MAX_DELETIONS_PER_PULL || (count > 1 && count / known > MAX_DELETION_SHARE);
 }
@@ -89,12 +103,18 @@ export async function runInboundSync(
   const seenKeys = new Set(jiraIssues.map((i) => i.key));
   // Entries already marked deleted are settled; they are only revisited when Jira returns them.
   const activeKnownKeys = Object.keys(knownState.issues).filter((key) => !knownState.issues[key].deletedAt);
-  const missingKeys = activeKnownKeys.filter((key) => !seenKeys.has(key));
+  // Likewise for entries already marked out of scope: not re-classified (no GET) or re-reported
+  // until they return (#1731).
+  const missingKeys = activeKnownKeys.filter((key) => !seenKeys.has(key) && !knownState.issues[key].outOfScopeAt);
   const classified = new Map();
   for (const key of missingKeys) classified.set(key, await classifyMissingIssue(client, key));
   const pendingDeletions = [...classified.values()].filter((r) => r === "deleted").length;
   if (exceedsDeletionLimit(pendingDeletions, activeKnownKeys.length)) {
     throw new MassDeletionError(pendingDeletions, activeKnownKeys.length);
+  }
+  const pendingOutOfScope = [...classified.values()].filter((r) => r === "out-of-scope").length;
+  if (exceedsDeletionLimit(pendingOutOfScope, activeKnownKeys.length)) {
+    throw new MassOutOfScopeError(pendingOutOfScope, activeKnownKeys.length);
   }
 
   const details = [];
@@ -106,6 +126,7 @@ export async function runInboundSync(
   let commentsImported = 0;
 
   const restored = [];
+  const restoredFromScope = new Set();
   for (const jiraIssue of jiraIssues) {
     const mapped = mapJiraIssueToBoardFields(jiraIssue, mapOpts);
     let known = knownState.issues[jiraIssue.key];
@@ -118,6 +139,15 @@ export async function runInboundSync(
       boardIssue = recovered.boardIssue ?? boardIssue;
       known = recovered.known;
       restored.push(jiraIssue.key);
+      if (!dryRun) nextState.issues[jiraIssue.key] = known;
+    }
+
+    // Back in the JQL result after being marked out of scope: drop the tags the plugin attached (#1731).
+    if (known?.outOfScopeAt) {
+      const recovered = await recoverFromOutOfScope(boardClient, boardIssue, known, dryRun);
+      known = recovered.known;
+      restored.push(jiraIssue.key);
+      restoredFromScope.add(jiraIssue.key);
       if (!dryRun) nextState.issues[jiraIssue.key] = known;
     }
 
@@ -358,6 +388,12 @@ export async function runInboundSync(
     });
   }
 
+  // The detail line of an issue that came back into scope names the restore (#1731).
+  for (const key of restoredFromScope) {
+    const entry = details.find((x) => x.key === key);
+    if (entry) entry.restored = true;
+  }
+
   // Issue links -> board dependencies (#1700), once every issue of this run has a board id.
   const idByKey = new Map([...boardIssuesByKey].map(([k, i]) => [k, i.id]));
   for (const [k, entry] of Object.entries(nextState.issues)) if (entry.boardIssueId && !entry.deletedAt) idByKey.set(k, entry.boardIssueId);
@@ -412,6 +448,7 @@ export async function runInboundSync(
     if (boardIssue) {
       const tag = reason === "deleted" ? DELETED_TAG : OUT_OF_SCOPE_TAG;
       const existingTags = await boardClient.listIssueTags(boardIssue.id);
+      entry.noAutoStartWasPresent = existingTags.some((t) => t.name === NO_AUTO_START_TAG);
       await attachMissingTags(boardClient, tagCache, boardIssue.id, [tag, NO_AUTO_START_TAG], existingTags);
       if (reason === "deleted" && deletedStatus && boardIssue.statusId !== deletedStatus.id) {
         const moved = await boardClient.updateIssue(boardIssue.id, { statusId: deletedStatus.id });
@@ -425,6 +462,14 @@ export async function runInboundSync(
     if (reason === "deleted") {
       const prior = nextState.issues[key];
       nextState.issues[key] = { ...prior, deletedAt: now, preDeleteStatusId: boardIssue?.statusId ?? prior?.preDeleteStatusId, deletedStatusId: deletedStatus?.id };
+    }
+    // Out of scope is applied once too (`outOfScopeAt`), remembering whether `no-auto-start` was
+    // the plugin's own or a hand-added tag so the return only removes what it attached.
+    if (reason === "out-of-scope") {
+      const prior = nextState.issues[key];
+      const noAutoStartAttached = boardIssue ? entry.noAutoStartWasPresent === false : false;
+      delete entry.noAutoStartWasPresent;
+      nextState.issues[key] = { ...prior, outOfScopeAt: now, noAutoStartAttached };
     }
   }
   for (const entry of deleted) details.push({ key: entry.key, action: "delete", localIssueNumber: entry.localIssueNumber });
@@ -478,6 +523,24 @@ async function recoverReappeared(boardClient, tagCache, boardIssue, known, board
     }
   }
   return { boardIssue: restored, known: { ...rest, boardUpdatedAt: restored.updatedAt, fields: boardFieldsOf(restored) } };
+}
+
+/**
+ * Undoes the out-of-scope marking of a board issue whose Jira twin is back in the JQL result: drops
+ * `jira:out-of-scope`, and `no-auto-start` only when the plugin attached it (not a hand-added one).
+ * The returned entry has no marker and keeps its baseline, so the regular pull flow carries on.
+ */
+async function recoverFromOutOfScope(boardClient, boardIssue, known, dryRun) {
+  const { outOfScopeAt: _outOfScopeAt, noAutoStartAttached, ...rest } = known;
+  if (boardIssue && !dryRun) {
+    const tags = await boardClient.listIssueTags(boardIssue.id);
+    for (const tag of tags) {
+      if (tag.name === OUT_OF_SCOPE_TAG || (tag.name === NO_AUTO_START_TAG && noAutoStartAttached)) {
+        await boardClient.detachTag(boardIssue.id, tag.id);
+      }
+    }
+  }
+  return { known: rest };
 }
 
 /** `deleted` (Jira answers 404), `out-of-scope` (still exists), or `unknown` (lookup failed). */
