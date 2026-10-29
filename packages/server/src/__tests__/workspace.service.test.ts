@@ -368,7 +368,8 @@ describe("workspace.service", () => {
         const ctx = (await readFile(join(worktreeDir, "CLAUDE.local.md"), "utf-8")).trim();
         // Seed issue: number 1, title "Implement feature", description "Do the thing"
         expect(ctx).toContain("# Ticket #1: Implement feature");
-        expect(ctx).toContain("Do the thing");
+        // #1762: the description rides in the first prompt, not repeated in the file.
+        expect(ctx).not.toContain("Do the thing");
         expect(sessionManager.startSession).toHaveBeenCalledWith(expect.objectContaining({
           contextFiles: [join(worktreeDir, "CLAUDE.local.md")],
         }));

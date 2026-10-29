@@ -357,6 +357,9 @@
  * are the start stamps and the hand-off. Both factories still want splitting; this is not
  * the ticket that does it.
  *
+ * -- (#1762) createWorkspaceProvisionService 397 -> 400 (+3): writeWorktreeTicketContext takes
+ *    `promptCarries` and forwards two flags so the file omits descriptions the prompt already carries.
+ *
  * -- Eighteenth disclosed movement (2026-10-10, #1356 resolve-prompt-skill timing) --------
  *
  *   services/workspace-provision.service.ts::createWorkspaceProvisionService   394 -> 397  (+3)
@@ -472,7 +475,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 393 -> 407 (#1025) -> 409 (#1026), disclosed in the seventh and eighth movements above.
   // 409 -> 394 (#1214), a SHRINK banked per the fourteenth movement above.
   // 394 -> 397 (#1356), disclosed in the eighteenth movement above.
-  "services/workspace-provision.service.ts::createWorkspaceProvisionService": 397,
+  "services/workspace-provision.service.ts::createWorkspaceProvisionService": 400,
   // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.
   // 399 -> 384, banked (#1164), disclosed in the fourteenth movement above. 384 -> 388
   // (#1206, rebase): a new `POST /:id/reopen` route, one more `router.post(...)` block in the

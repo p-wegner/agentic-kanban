@@ -11,7 +11,7 @@ const MEMBER = "UNIQUE-MEMBER-MARKER: second ticket body.";
 const count = (hay: string, needle: string) => hay.split(needle).length - 1;
 
 function fileWith(md: string): string {
-  const p = join(mkdtempSync(join(tmpdir(), "tc-")), "CLAUDE.local.md");
+  const p = join(mkdtempSync(join(tmpdir(), "ak-tc-")), "CLAUDE.local.md");
   writeFileSync(p, md);
   return p;
 }
