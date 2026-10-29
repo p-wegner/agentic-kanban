@@ -68,6 +68,7 @@ export function parseFlushState(text: string | null | undefined): FlushStateFile
           sweepTarget: typeof r.sweepTarget === "string" ? r.sweepTarget : "master",
           state: (FLUSH_STATES as readonly string[]).includes(String(r.state)) ? (r.state as FlushState) : "flushed",
           openHealTickets: asNumberArray(r.openHealTickets),
+          ...(typeof r.gateScript === "string" ? { gateScript: r.gateScript } : {}),
           updatedAt: typeof r.updatedAt === "string" ? r.updatedAt : (r.at as string),
         })),
     };

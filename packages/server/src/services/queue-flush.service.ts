@@ -39,7 +39,7 @@ import {
   queueFlushThresholdsPrefKey, supersedesInFlight, type QueueFlushMode,
 } from "./queue-flush-trigger.service.js";
 import { formatFlushMessage } from "./merge-train-flush.js";
-import { DEFAULT_FLUSH_GATE_SCRIPT, type FlushLanding, type FlushRunSpec } from "./merge-train-flush-run.js";
+import { resolveFlushGate, type FlushLanding, type FlushRunSpec } from "./merge-train-flush-run.js";
 import { getQueuePressure, readQueuePressureMembers } from "./queue-pressure.service.js";
 import { listOpenHealTickets, reconcileBaseHealthHealTicket } from "./base-health-heal-ticket.service.js";
 import { requestBaseBranchReprobe } from "./base-branch-health-reprobe.service.js";
@@ -58,6 +58,8 @@ export interface QueueFlushDeps {
   requestSweep?: (projectId: string, database: Database, opts?: { branch?: string | null }) => Promise<unknown>;
   /** Where a flush's lifecycle file lives; defaults to the project's stable checkout. */
   stableCheckoutFor?: (repoPath: string) => string;
+  /** Test seam: a trusted script that runs INSTEAD of the resolved gate (bypasses the allowlist; never set in production). */
+  gateScriptOverride?: string;
 }
 
 export interface FlushPlan {
@@ -69,6 +71,8 @@ export interface FlushPlan {
   /** `previous flush is red, will be abandoned and its heal tickets carried over`. */
   supersedes: FlushRecord | null;
   dryRunText: string;
+  /** The non-default gate script that will run (#1742); null = arch + typecheck. */
+  gateScript: string | null;
 }
 
 export interface FlushOutcome {
@@ -107,6 +111,8 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
     const stable = stableOf(project.repoPath);
     const flushes = sortFlushes(readFlushState(stable).flushes);
     const rcSweeping = currentRcCandidate(readRcState(stable))?.state === "sweeping";
+    const gate = resolveFlushGate(prefMap.get(queueFlushGatePref.key(projectId)));
+    if (gate.warning) console.warn(`[queue-flush] ${gate.warning}`);
     const members = (await readQueuePressureMembers(projectId, database)).map((m) => ({ workspaceId: m.workspaceId, issueNumber: m.issueNumber }));
 
     let refusal = checkQueueFlushRails({
@@ -124,9 +130,9 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
     const dryRunText = formatQueueFlushDryRun({
       refusal: refusal ? { reason: refusal } : null,
       memberBranches: members.map((m) => (m.issueNumber != null ? `#${m.issueNumber}` : m.workspaceId)),
-      healTarget,
+      healTarget, gateScript: gate.override,
     }) + (supersedes && !refusal ? ` (supersedes red flush ${supersedes.id})` : "");
-    return { plan: { projectId, mode, healTarget, refusal, members, supersedes, dryRunText }, repoPath: project.repoPath, prefMap };
+    return { plan: { projectId, mode, healTarget, refusal, members, supersedes, dryRunText, gateScript: gate.override }, repoPath: project.repoPath, prefMap };
   }
 
   async function runFlush(
@@ -145,10 +151,10 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
     const stable = stableOf(repoPath);
     let flush: FlushRecord | undefined;
     const spec: FlushRunSpec = {
-      gateScript: prefMap.get(queueFlushGatePref.key(projectId))?.trim() || DEFAULT_FLUSH_GATE_SCRIPT,
+      gateScript: deps.gateScriptOverride ?? resolveFlushGate(prefMap.get(queueFlushGatePref.key(projectId))).script,
       now,
       onFinished: async (landing) => {
-        flush = await recordLanding({ projectId, stable, landing, healTarget: p.healTarget, triggeredBy: opts.triggeredBy, now, supersedes: p.supersedes });
+        flush = await recordLanding({ projectId, stable, landing, healTarget: p.healTarget, triggeredBy: opts.triggeredBy, now, supersedes: p.supersedes, gateScript: p.gateScript });
       },
     };
     const outcome: FlushOutcome = { ok: false, plan: p, ...empty };
@@ -166,7 +172,7 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
     outcome.flush = flush;
     outcome.ok = outcome.merged.length > 0 && Boolean(flush);
     if (flush) {
-      outcome.message = formatFlushMessage({ landedCount: outcome.merged.length, healTarget: p.healTarget });
+      outcome.message = formatFlushMessage({ landedCount: outcome.merged.length, healTarget: p.healTarget, gateScript: p.gateScript });
       // Start the sweep right away; failures here are the next tick's job, never the flush's.
       await reconcileHeal(projectId, { now }).catch((err) => console.warn(`[queue-flush] first heal pass failed (non-fatal): ${errorMessage(err)}`));
     } else if (!outcome.message) {
@@ -177,7 +183,7 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
 
   async function recordLanding(args: {
     projectId: string; stable: string; landing: FlushLanding; healTarget: HealTarget;
-    triggeredBy: "manual" | "cli" | "auto"; now: string; supersedes: FlushRecord | null;
+    triggeredBy: "manual" | "cli" | "auto"; now: string; supersedes: FlushRecord | null; gateScript?: string | null;
   }): Promise<FlushRecord | undefined> {
     const { landing, healTarget, now } = args;
     const { run, tag } = landing;
@@ -195,10 +201,11 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
       landingSha: run.mergeSha ?? null, tag,
       sweepTarget: healTarget === "rc" ? "rc" : "master",
       state: "flushed", openHealTickets: carriedTickets, updatedAt: now,
+      ...(args.gateScript ? { gateScript: args.gateScript } : {}),
     };
     appendFlushRecord(args.stable, record);
     const body = `Landed in queue flush ${tag} (${run.landed.length} branch(es), landing ${run.mergeSha?.slice(0, 8)}): `
-      + `gate = arch + typecheck only; the full suite is deferred to the ${healTarget} sweep — a red will be filed as a heal ticket.`;
+      + `gate = ${args.gateScript ?? "arch + typecheck"} only; the full suite is deferred to the ${healTarget} sweep — a red will be filed as a heal ticket.`;
     for (const m of run.landed) {
       const ws = await getWorkspaceById(m.workspaceId, database).catch(() => undefined);
       if (!ws) continue;

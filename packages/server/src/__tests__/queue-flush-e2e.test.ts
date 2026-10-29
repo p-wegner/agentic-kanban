@@ -22,6 +22,8 @@ import { reconcileQueueFlush } from "../startup/queue-flush-sweep.js";
 
 const git = (repoPath: string, args: string[]) => gitExecOrThrow(args, { cwd: repoPath });
 const dirs: string[] = [];
+// The real default gate is `pnpm check:arch && pnpm typecheck` — far too heavy for a fixture repo.
+const FIXTURE_GATE = 'node -e "process.exit(0)"';
 
 async function commitOn(repoPath: string, branch: string, file: string) {
   await git(repoPath, ["checkout", "-q", branch]);
@@ -93,7 +95,7 @@ describe("queue flush, end to end (#1463)", { timeout: 300_000 }, () => {
     await setPref(db, `queue_flush_gate_${projectId}`, 'node -e "process.exit(0)"');
 
     app = new Hono();
-    app.route("/api/projects", createProjectQueueFlushRoute(db as never, () => ({}) as never, { flushDeps: { requestSweep } }));
+    app.route("/api/projects", createProjectQueueFlushRoute(db as never, () => ({}) as never, { flushDeps: { requestSweep, gateScriptOverride: FIXTURE_GATE } }));
   }, 180_000);
 
   afterEach(() => {
@@ -123,6 +125,18 @@ describe("queue flush, end to end (#1463)", { timeout: 300_000 }, () => {
     expect(body.dryRun).toBe(true);
     expect(body.plan.dryRunText).toMatch(/would flush 2 branch\(es\).*heal target: master/);
     expect((await git(repoPath, ["tag", "--list", "flush/*"])).trim()).toBe("");
+  });
+
+  it("#1742: an allowlisted gate override is named in the dry-run; 'echo ok' fails closed to the default", async () => {
+    await setPref(db, `queue_flush_gate_${projectId}`, "typecheck");
+    const named = (await (await post({ dryRun: true })).json() as { plan: { dryRunText: string; gateScript: string | null } }).plan;
+    expect(named.dryRunText).toContain("gate = pnpm typecheck");
+    expect(named.gateScript).toBe("pnpm typecheck");
+
+    await setPref(db, `queue_flush_gate_${projectId}`, "echo ok");
+    const refused = (await (await post({ dryRun: true })).json() as { plan: { dryRunText: string; gateScript: string | null } }).plan;
+    expect(refused.dryRunText).toContain("gate = arch + typecheck");
+    expect(refused.gateScript).toBeNull();
   });
 
   it("route -> train -> tag -> record -> member comment -> sweep -> heal ticket -> merged-back", async () => {
@@ -187,7 +201,7 @@ describe("queue flush, end to end (#1463)", { timeout: 300_000 }, () => {
 
   it("auto: the tick fires a flush when the thresholds hold, and not when mode is manual", async () => {
     const queue = createMergeQueueService({ database: db });
-    const service = createQueueFlushService({ database: db, executeQueue: (ids, opts) => queue.executeQueue(ids, opts), requestSweep });
+    const service = createQueueFlushService({ database: db, executeQueue: (ids, opts) => queue.executeQueue(ids, opts), requestSweep, gateScriptOverride: FIXTURE_GATE });
     expect((await service.evaluateAuto(projectId)).fired).toBe(false);
 
     await setPref(db, `queue_flush_${projectId}`, "auto");

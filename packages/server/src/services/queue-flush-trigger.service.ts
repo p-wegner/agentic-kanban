@@ -189,8 +189,10 @@ export function formatQueueFlushDryRun(args: {
   refusal: QueueFlushRefusal | FlushRefusal | null;
   memberBranches: readonly string[];
   healTarget: string;
+  /** The non-default gate script that will run (#1742); absent = arch + typecheck. */
+  gateScript?: string | null;
 }): string {
   if (args.refusal) return `flush refused: ${args.refusal.reason}`;
   const members = args.memberBranches.length > 0 ? args.memberBranches.join(", ") : "(none ready)";
-  return `would flush ${args.memberBranches.length} branch(es): ${members} — gate = arch + typecheck, heal target: ${args.healTarget}`;
+  return `would flush ${args.memberBranches.length} branch(es): ${members} — gate = ${args.gateScript ?? "arch + typecheck"}, heal target: ${args.healTarget}`;
 }
