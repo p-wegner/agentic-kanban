@@ -184,7 +184,8 @@ function Get-ControlStatus {
   } catch { return $null }
 }
 function ConvertTo-ProfileNames($list) {
-  @($list | ForEach-Object { if ($_ -is [string]) { $_ } elseif ($_.profile) { $_.profile } elseif ($_.name) { $_.name } } | Where-Object { $_ })
+  # the daemon reports 'provider:name'; --profiles / config set take the bare name
+  @($list | ForEach-Object { if ($_ -is [string]) { ($_ -split ':')[-1] } elseif ($_.profile) { $_.profile } elseif ($_.name) { $_.name } } | Where-Object { $_ } | Select-Object -Unique)
 }
 function Get-ConfiguredProfiles {
   if (-not (Test-Path $ConfigFile)) { return @() }
@@ -198,19 +199,20 @@ function Get-CurrentProfiles($cs) {
   if ($l) { return @(ConvertTo-ProfileNames $l) }
   return @(Get-ConfiguredProfiles)
 }
-# Persist FIRST (so a restart or reboot keeps it), then try the live re-attest
-# endpoint; a daemon without it (or without a control file) gets a service restart.
+# Persist FIRST (so a restart or reboot keeps it), then apply it live via
+# `config set profiles`; a daemon without a control file (or without a control file) gets a service restart.
 function Set-ProfileSet([string[]]$Names) {
   $cfg = Get-Content $ConfigFile -Raw | ConvertFrom-Json
-  $cfg | Add-Member -NotePropertyName profiles -NotePropertyValue ($Names -join ',') -Force
+  $cfg | Add-Member -NotePropertyName profiles -NotePropertyValue $(if ($Names.Count -gt 0) { $Names -join ',' } else { 'none' }) -Force
   $cfg | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigFile -Encoding utf8
+  # Live path (#1773): `config set profiles` is re-read by the running daemon on every beat.
   $live = $false
-  $cs = Get-ControlStatus
-  if ($cs) {
+  $cmd = Get-Command agentic-kanban-worker -ErrorAction SilentlyContinue
+  if ($cmd -and (Get-ControlStatus)) {
     try {
-      Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$($cs.ctl.port)/profiles" -Headers @{ 'x-worker-control-token' = $cs.ctl.token } `
-        -ContentType 'application/json' -Body (@{ profiles = $Names } | ConvertTo-Json -Compress) -TimeoutSec 10 | Out-Null
-      $live = $true
+      $csv = if ($Names.Count -gt 0) { $Names -join ',' } else { 'none' }
+      $p = Start-Process -FilePath $cmd.Source -ArgumentList @('config','set','profiles',$csv) -WindowStyle Hidden -Wait -PassThru
+      $live = ($p.ExitCode -eq 0)
     } catch { }
   }
   if (-not $live) { try { & $svc '-Restart' } catch { } }

@@ -1166,8 +1166,8 @@ Not a bug, not fixable by more plumbing — write it down so it is not re-opened
 The systray (`tools/worker-windows/ak-worker-tray.ps1`) has an **Attested profiles** submenu: the profiles
 the running daemon reports on its loopback control endpoint, checked when attested. Clicking one toggles it.
 The new set is written to `config.json` (`profiles`, which `ak-worker-run.ps1` passes as `--profiles`), then
-sent to the daemon's live re-attest endpoint (`POST /profiles`, companion ticket). A daemon without that
-endpoint gets a service restart instead, so the toggle always takes effect and always persists. The list is the
+applied live with `agentic-kanban-worker config set profiles <csv>` (#1773; the daemon re-reads it each beat). A daemon
+that is not reachable, or a missing CLI, gets a service restart instead, so the toggle always takes effect and always persists. The list is the
 attested set plus the configured one; a never-attested profile appears only once it is in `config.json`.
 
 `worker doctor` has a `systray` check (Windows only, `warn` when no `ak-worker-tray.ps1` process runs), and
