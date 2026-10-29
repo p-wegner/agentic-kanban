@@ -27,6 +27,11 @@ export function classifyInfraRed(gate: InfraRedInput, scopedSuiteCount?: number)
   if (failing === 0) {
     return REAL_FAILURE_MARKER.test(gate.message) ? null : "gate failed with 0 failing suite(s) and no recognisable failure - the runner produced no verdict";
   }
+  // No caller passes the scoped count, so read the total from vitest's own "Test Files  N failed | M passed (T)" line.
+  if (scopedSuiteCount === undefined) {
+    const total = /Test Files\s[^\n(]*\((\d+)\)/.exec(gate.message);
+    if (total) scopedSuiteCount = Number(total[1]);
+  }
   if (scopedSuiteCount && scopedSuiteCount > 0 && failing >= INFRA_RED_MIN_FAILING && failing / scopedSuiteCount > INFRA_RED_FAILING_RATIO) {
     return `${failing} of ${scopedSuiteCount} scoped suites failed (> ${Math.round(INFRA_RED_FAILING_RATIO * 100)}%) - the environment, not the code`;
   }
