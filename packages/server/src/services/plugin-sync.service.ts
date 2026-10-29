@@ -213,6 +213,30 @@ export function isPluginSyncDirection(value: unknown): value is PluginSyncDirect
   return value === "pull" || value === "push";
 }
 
+/**
+ * One in-process lock per (plugin row, project) over everything that touches the plugin's state
+ * dir: pull, push, resolve, test-connection and the scheduler (#1734). Held in memory on purpose —
+ * a lock file would outlive a killed board; here a restart clears it, and `finally` releases it
+ * when the plugin command times out (runPluginCommand always settles).
+ */
+const syncLocks = new Map<string, { label: string; startedAt: string }>();
+
+export async function withSyncLock<T>(pluginRowId: string, projectId: string, label: string, fn: () => Promise<T>): Promise<T> {
+  const key = `${pluginRowId}:${projectId}`;
+  const held = syncLocks.get(key);
+  if (held) throw new PluginError(`sync already running (${held.label}, started ${held.startedAt})`, "CONFLICT");
+  syncLocks.set(key, { label, startedAt: new Date().toISOString() });
+  try {
+    return await fn();
+  } finally {
+    syncLocks.delete(key);
+  }
+}
+
+export function isSyncLocked(pluginRowId: string, projectId: string): boolean {
+  return syncLocks.has(`${pluginRowId}:${projectId}`);
+}
+
 export function createPluginSyncOps(deps: {
   database: Database;
   requirePlugin: (id: string) => Promise<PluginRow & { manifest: PluginManifest }>;
@@ -523,7 +547,17 @@ export function createPluginSyncOps(deps: {
       throw new PluginError(`Plugin "${plugin.pluginId}" does not declare a "${opts.direction}" sync command`, "BAD_REQUEST");
     }
     await requireProject(projectId);
+    return withSyncLock(plugin.id, projectId, opts.direction, () => runSyncLocked(plugin, sync, cmdDef, pluginRowId, projectId, opts));
+  }
 
+  async function runSyncLocked(
+    plugin: PluginRow & { manifest: PluginManifest },
+    sync: PluginSyncDef,
+    cmdDef: NonNullable<PluginSyncDef["pull"]>,
+    pluginRowId: string,
+    projectId: string,
+    opts: { direction: PluginSyncDirection; dryRun?: boolean; scheduled?: boolean },
+  ): Promise<PluginSyncRunRecord> {
     const startedAt = new Date().toISOString();
     const scheduled = opts.scheduled || undefined;
     // Fail CLOSED: refuse to run pull/push at all when config/secrets are incomplete, and record
@@ -603,15 +637,26 @@ export function createPluginSyncOps(deps: {
       throw new PluginError('"reason" is required for every keep: say why this side wins (or why nobody can tell)', "BAD_REQUEST");
     }
     await requireProject(projectId);
+    return withSyncLock(plugin.id, projectId, "resolve", () => resolveLocked(plugin, sync, pluginRowId, projectId, opts));
+  }
+
+  async function resolveLocked(
+    plugin: PluginRow & { manifest: PluginManifest },
+    sync: PluginSyncDef,
+    pluginRowId: string,
+    projectId: string,
+    opts: { key: string; keep?: SyncResolveKeep; ticket?: string | number; reason?: string; override?: boolean },
+  ): Promise<{ ok: boolean; mode: "show" | "keep"; key: string; keep?: SyncResolveKeep; result?: unknown; error?: string }> {
+    const resolveDef = sync.resolve!;
     const mode = opts.keep ? "keep" : "show";
     const validation = await validateSync(pluginRowId, projectId);
     if (!validation.ok) return { ok: false, mode, key: opts.key, keep: opts.keep, error: validation.error };
 
     const { env: syncEnv, secretValues } = await resolveSyncEnv(plugin, projectId);
     const ctx = await resolvePluginRunContext(pluginRowId, projectId);
-    const cwd = sync.resolve.cwd === "repo" ? ctx.outputRepoPath : plugin.localPath;
+    const cwd = resolveDef.cwd === "repo" ? ctx.outputRepoPath : plugin.localPath;
     const env = {
-      ...substitutePluginEnv(sync.resolve.env, ctx.vars),
+      ...substitutePluginEnv(resolveDef.env, ctx.vars),
       ...syncEnv,
       SYNC_RESOLVE_KEY: opts.key,
       ...(opts.keep ? { SYNC_RESOLVE_KEEP: typeof opts.keep === "string" ? opts.keep : JSON.stringify(opts.keep) } : {}),
@@ -619,7 +664,7 @@ export function createPluginSyncOps(deps: {
       ...(opts.reason ? { SYNC_RESOLVE_REASON: opts.reason } : {}),
       ...(opts.override === true ? { SYNC_RESOLVE_OVERRIDE: "true" } : {}),
     };
-    const raw = await runPluginCommand(substitutePluginPlaceholders(sync.resolve.command, ctx.vars), { cwd, env });
+    const raw = await runPluginCommand(substitutePluginPlaceholders(resolveDef.command, ctx.vars), { cwd, env });
     const stdout = redactSecrets(raw.stdout, secretValues);
     let parsed: unknown = null;
     try { parsed = JSON.parse(stdout); } catch { parsed = stdout.trim() || null; }
@@ -663,6 +708,8 @@ export function createPluginSyncOps(deps: {
         if (last && !last.dryRun && nowMs - Date.parse(last.startedAt) < every * 60_000) continue;
         const key = `${pluginRowId}:${projectId}:${direction}`;
         if (runningSchedules.has(key)) continue;
+        // A manual trigger/resolve holds the pair's lock: skip this tick rather than fail it.
+        if (isSyncLocked((await requirePlugin(pluginRowId)).id, projectId)) continue;
         runningSchedules.add(key);
         try {
           const record = await triggerSync(pluginRowId, projectId, { direction, scheduled: true });

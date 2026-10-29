@@ -27,7 +27,7 @@ import { createPluginEnablementOps } from "./plugin-enablement.service.js";
 import { createPluginLifecycleOps } from "./plugin-lifecycle.service.js";
 import { createPluginListingOps } from "./plugin-listing.service.js";
 import { createPluginProjectSurfaceOps } from "./plugin-project-surface.service.js";
-import { createPluginSyncOps } from "./plugin-sync.service.js";
+import { createPluginSyncOps, withSyncLock } from "./plugin-sync.service.js";
 import { describeRunFailure } from "./plugin-sync-summary.js";
 import type { PluginSyncConnectionTest } from "./plugin-sync.service.js";
 import { buildButlerFragments } from "./plugin/butler-fragments.js";
@@ -218,9 +218,12 @@ export function createPluginService(deps: {
   async function testSyncConnection(pluginRowId: string, projectId: string): Promise<PluginSyncConnectionTest> {
     const validation = await validateSync(pluginRowId, projectId);
     if (!validation.ok) return { ok: false, error: validation.error, code: null, stdout: "", stderr: "", timedOut: false };
-    const result = await runScript(pluginRowId, "bootstrap", projectId);
-    const ok = !result.timedOut && result.code === 0;
-    return { ok, ...result, error: ok ? undefined : describeRunFailure(result) };
+    const plugin = await requirePlugin(pluginRowId);
+    return withSyncLock(plugin.id, projectId, "test-connection", async () => {
+      const result = await runScript(pluginRowId, "bootstrap", projectId);
+      const ok = !result.timedOut && result.code === 0;
+      return { ok, ...result, error: ok ? undefined : describeRunFailure(result) };
+    });
   }
 
   /**
