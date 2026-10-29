@@ -557,6 +557,9 @@ export type BoardToWorkerMessage =
   /** #1489: drop a verify job the board no longer wants / reap every verify job not in the live set. */
   | VerifyCancelFrame | VerifyLiveJobsFrame;
 
+/** #1754: board close code telling a daemon that ANOTHER process already holds its identity — stop, do not reconnect. */
+export const WORKER_DUPLICATE_IDENTITY_CLOSE_CODE = 4409;
+
 export type WorkerToBoardMessage =
   | {
       type: "hello";
@@ -565,6 +568,8 @@ export type WorkerToBoardMessage =
       /** #754: absent means a pre-handshake worker build. */
       protocolVersion?: number;
       workerVersion?: string;
+      /** #1754: random per daemon PROCESS; two processes sharing one pairing differ here. Absent = older build. */
+      instanceId?: string;
       /** #754: re-declared on every connect, not frozen at first pairing. */
       capabilities?: WorkerCapabilities;
     }
@@ -700,6 +705,7 @@ export function parseWorkerToBoardMessage(raw: unknown): WorkerToBoardMessage | 
         // malformed — which is the failure mode #754 exists to remove.
         ...(typeof msg.protocolVersion === "number" ? { protocolVersion: msg.protocolVersion } : {}),
         ...(typeof msg.workerVersion === "string" ? { workerVersion: msg.workerVersion } : {}),
+        ...(typeof msg.instanceId === "string" && msg.instanceId ? { instanceId: msg.instanceId } : {}),
         ...(capabilities ? { capabilities } : {}),
       };
     }

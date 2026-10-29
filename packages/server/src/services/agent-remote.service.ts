@@ -192,6 +192,7 @@ export function createRemoteAgentService(
   const liveness = createRemoteLiveness({
     sessions,
     send: (workerId, message) => manager.send(workerId, message),
+    assignedInstanceOf: (sessionId) => manager.assignedInstanceOf?.(sessionId),
     loseSession,
     report,
     // Spread FIRST so the resolved `assignSettleMs` below wins over an absent override; the
@@ -282,7 +283,7 @@ export function createRemoteAgentService(
       // names. It exits non-zero even when the branch landed cleanly: the board never
       // saw the agent's own verdict, and recording an unobserved run as a clean
       // success is the one outcome worse than a visible failure.
-      liveness.reconcileHello(workerId, message.runningSessionIds);
+      liveness.reconcileHello(workerId, message.runningSessionIds, message.instanceId);
       const unknown = message.runningSessionIds.filter((id) => !sessions.has(id));
       if (unknown.length === 0) return;
       void stopUntrackedSessions({ manager, database, workerId, sessionIds: unknown });

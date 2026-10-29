@@ -33,6 +33,7 @@
 
 import { runStartupStep, refreshPreConnectState } from "./worker-startup-step.js";
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { homedir, platform, arch, totalmem, cpus } from "node:os";
 import {
   findIdentity,
@@ -54,6 +55,7 @@ import WebSocket from "ws";
 import { dropSocketIfBoardHasNone, startSocketKeepalive } from "./worker-socket-keepalive.js";
 import {
   parseBoardToWorkerMessage,
+  WORKER_DUPLICATE_IDENTITY_CLOSE_CODE,
   WORKER_PROTOCOL_VERSION,
   WORKER_UPDATE_REMEDIATION,
   type WorkerCapabilities, type WorkerDoctorSummary,
@@ -333,6 +335,8 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   const pendingCritical: WorkerToBoardMessage[] = [];
   const workerVersion = resolveWorkerVersion();
+  /** #1754: identifies this PROCESS, so the board can tell it from a second daemon sharing the same pairing. */
+  const instanceId = randomUUID();
 
   /**
    * Give up on this board for good (#754): stop reconnecting and tell the caller why.
@@ -519,6 +523,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           // gained docker (or changed its ceiling) says so without being re-paired.
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
+          instanceId,
           capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctor.takeCurrent(), toolchains.installer.info(), verifyJobs.capability(), workRoot, profileAttestor.unattested()),
         } satisfies WorkerToBoardMessage));
         while (pendingCritical.length > 0) {
@@ -609,6 +614,13 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       // like. Without the code both render identically and a self-sustaining
       // reconnect/evict loop is indistinguishable from a flaky link.
       const detail = reason.length > 0 ? `: ${reason.toString("utf8").trim()}` : "";
+      if (code === WORKER_DUPLICATE_IDENTITY_CLOSE_CODE) {
+        giveUp(
+          `another daemon process already holds worker ${identity.workerId} on the board (duplicate identity${detail}). ` +
+            `Two daemons cannot share one pairing/worker-state.json: stop one, or give this machine its own pairing.`,
+        );
+        return;
+      }
       const kind = code === 1006 ? "transport failed, no close frame" : "closed by board";
       scheduleReconnect(`code ${code}${detail} - ${kind}`, code === 1001);
     });
