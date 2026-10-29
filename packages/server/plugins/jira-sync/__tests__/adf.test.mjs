@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { adfToMarkdown, markdownToAdf } from "../tools/lib/adf.mjs";
+import { adfToMarkdown, markdownToAdf, lossyAdfNodes } from "../tools/lib/adf.mjs";
 
 const doc = (...content) => ({ type: "doc", version: 1, content });
 const p = (...content) => ({ type: "paragraph", content });
@@ -105,4 +105,11 @@ test("round trip: ADF -> Markdown -> ADF -> Markdown is stable", () => {
   );
   const md = adfToMarkdown(original);
   assert.equal(adfToMarkdown(markdownToAdf(md)), md);
+});
+
+test("lossyAdfNodes names the nodes Markdown cannot round-trip", () => {
+  assert.deepEqual(lossyAdfNodes(doc(p(t("plain")))), []);
+  const rich = doc(p(t("x")), { type: "panel", content: [{ type: "mediaSingle", content: [{ type: "media" }] }] }, { type: "table", content: [] });
+  assert.deepEqual(lossyAdfNodes(rich).sort(), ["media", "mediaSingle", "panel", "table"]);
+  assert.deepEqual(lossyAdfNodes(null), []);
 });

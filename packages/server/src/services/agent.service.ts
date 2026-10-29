@@ -1,7 +1,8 @@
 import type { AgentLaunchRequest } from "./agent-dispatch.service.js";
 import { resolveEffectivePrompt } from "./agent-provider/context-files-prompt.js";
 import { spawn, type ChildProcess } from "node:child_process";
-import { resolveWorktreeDevPorts, materializedSkillFiles, piExtensionFiles } from "./agent-launch-files.js";
+import { resolveLaunchGuardStatus } from "./agent-provider/safety-hooks.js";
+import { resolveWorktreeDevPorts,materializedSkillFiles, piExtensionFiles } from "./agent-launch-files.js";
 import { killPid, killContainerAgent } from "./agent-kill.js";
 import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync, writeFileSync, readFileSync, appendFileSync, readdirSync, type Dirent } from "node:fs";
 import { buildAgentLaunchConfig, narrowProviderName } from "./agent-provider.js";
@@ -337,6 +338,8 @@ export function launch(request: AgentLaunchRequest): ChildProcess {
   } = request;
   // #524: shared with the remote path, which used to skip this entirely.
   const effectivePrompt = resolveEffectivePrompt(prompt, provider, contextFiles);
+  const guardStatus = provider ? resolveLaunchGuardStatus(provider, worktreePath) : undefined;
+  if (guardStatus?.warning) console.warn(`[agent] ${guardStatus.warning}`);
   const hostLaunchConfig = buildAgentLaunchConfig({
     agentArgs,
     providerSessionId,

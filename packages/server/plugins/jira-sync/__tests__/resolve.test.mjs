@@ -374,3 +374,19 @@ test("the brief names the owner, the ticket number token and has no <...> placeh
   assert.match(brief, /\.mcp-kanban\.json/);
   assert.doesNotMatch(brief, /<[^>\n]*number[^>\n]*>/);
 });
+
+test("resolve --keep board writes only the differing fields and never retypes an Epic or drops media", async () => {
+  const { board, jira, state } = await conflictedFixture();
+  jira[0].fields.issuetype = { name: "Epic" };
+  jira[0].fields.description = { type: "doc", version: 1, content: [{ type: "mediaSingle", content: [{ type: "media", attrs: {} }] }] };
+  board.state.issues[0].issueType = "feature";
+  board.state.issues[0].description = "board text";
+  const jc = writableJira(jira);
+  const result = await resolveIssue({ client: jc, boardClient: board, projectId: "p", key: "ENG-1", keep: "board", reason: "r", knownState: state });
+  assert.equal(result.ok, true);
+  assert.equal(jc.writes.length, 1);
+  assert.equal(jc.writes[0].fields.summary, "Board title");
+  assert.ok(!("issuetype" in jc.writes[0].fields), "Epic is never rewritten as Story");
+  assert.ok(!("description" in jc.writes[0].fields), "a description with media is not pushed");
+  assert.ok(!("priority" in jc.writes[0].fields), "unchanged fields are not written");
+});

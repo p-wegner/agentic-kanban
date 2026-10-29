@@ -376,8 +376,12 @@ import {
  * a `when:` territory (the last three got theirs in this train), so an ordinary diff does not pay
  * them; the floor counts every marker regardless. Expect the placeholder to shrink at the next
  * `durations.json` capture.
+ *
+ * +2 994 ms (train 2026-10-29-21): `plugin-jira-sync-node-tests` (#1736) runs the jira-sync plugin's
+ * node:test suites, which vitest excludes, so nothing else covers them. It already carries a
+ * `when:packages/server/plugins/jira-sync/**` territory; the floor counts it at the assumed 3000ms.
  */
-const BASELINE_TOTAL_MS = 546_689;
+const BASELINE_TOTAL_MS = 549_683;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative

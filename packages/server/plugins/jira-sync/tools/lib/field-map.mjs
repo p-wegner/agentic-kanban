@@ -5,7 +5,7 @@
 
 import { adfToMarkdown } from "./adf.mjs";
 import { categoryForBoardStatus } from "./transitions.mjs";
-import { hasManagedPrefix, jiraContextOf } from "./jira-context.mjs";
+import { hasManagedPrefix, jiraContextOf, parentBlock } from "./jira-context.mjs";
 
 /** The Jira fields a pull needs to fetch to populate every mapped board field. */
 export const FIELDS = [
@@ -253,7 +253,7 @@ export function mapJiraIssueToBoardFields(jiraIssue, { siteUrl, sprintFieldId = 
     const parentIsEpic = String(parent.fields?.issuetype?.name ?? "").toLowerCase() === "epic";
     tags.push(`${parentIsEpic ? "epic" : "parent"}:${parent.key}`);
     const parentSummary = parent.fields?.summary;
-    parentLine = `**Parent:** ${parent.key}${parentSummary ? ` (${parentSummary})` : ""}`;
+    parentLine = parentBlock(`**Parent:** ${parent.key}${parentSummary ? ` (${parentSummary})` : ""}`);
   }
   const body = markdownFromDescription(fields.description ?? null);
   const description = parentLine ? (body ? `${parentLine}

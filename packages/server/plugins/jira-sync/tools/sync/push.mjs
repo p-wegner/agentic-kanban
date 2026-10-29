@@ -25,6 +25,7 @@ import {
   cursorPath,
   readBoardSnapshot,
   boardSnapshotPath,
+  checkStateFiles,
   readPullState,
   pullStatePath,
   migrateLegacyState,
@@ -55,6 +56,9 @@ async function main() {
   const stateDir = process.env.JIRA_SYNC_STATE_DIR;
   if (!stateDir) return { ok: false, step: "config", reason: "JIRA_SYNC_STATE_DIR is not set" };
   migrateLegacyState(stateDir);
+
+  const stateFailure = checkStateFiles(stateDir);
+  if (stateFailure) return stateFailure;
 
   const authFailure = await checkAuth(ctx.client);
   if (authFailure) return authFailure;
@@ -160,7 +164,7 @@ async function main() {
   const failed = pushResult.failed.map(withNumber);
 
   if (!dryRun) {
-    writeJsonFile(outboxPath(stateDir), { entries: remaining });
+    // Writebacks first, outbox last: a crash in between re-sends at worst, and never loses a created key (#1732).
     if (writebacks.length > 0) {
       const existing = readWritebacks(stateDir);
       for (const wb of writebacks) existing.keys[wb.boardIssueId] = wb.key;
@@ -172,6 +176,7 @@ async function main() {
         writeJsonFile(writebacksPath(stateDir), { keys: landed.keys });
       }
     }
+    writeJsonFile(outboxPath(stateDir), { entries: remaining });
 
     if (boardClient) {
       try {

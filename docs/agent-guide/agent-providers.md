@@ -101,3 +101,17 @@ Claude's `--mcp-config` carries `KANBAN_MCP_ALLOWED_TOOLS` so the stdio server r
 tools; Codex gets `-c mcp_servers.agentic-kanban.enabled_tools=[...]` (it has no tool deferral, so every
 exposed schema is paid per request). `inherit` keeps the full surface. `REVIEW_BOARD_TOOLS` adds the diff
 and scorecard readers for reviewer launches; reviewers are not `builderSession` and are not yet wired to it.
+
+## Safety-hook (tool-call guard) matrix (#1758)
+
+Declared in `packages/server/src/services/agent-provider/safety-hooks.ts`, pinned by the `safety-hooks` row of `provider-pair-parity.test.ts`.
+
+| Provider | PreToolUse guards | Stop checks | Nested CLAUDE.md disclosure |
+|---|---|---|---|
+| claude | `.claude/settings.json` (all) | all | `disclose-context.mjs` PostToolUse |
+| codex | `.codex/hooks.json` PreToolUse (relative `node .claude/hooks/...`; depends on cwd = worktree root, unverified after the agent `cd`s) | 3 Stop checks | none |
+| pi | `.pi/plugin/agentic-kanban-hooks.ts` via `--extension` | none | none |
+| copilot | **none (declared unsupported)** | none | none |
+
+An unguarded launch (copilot, or pi without the extension file) logs `[agent] <provider>: no tool-call guards ...` / `[agent] pi: no agentic-kanban-hooks extension in <worktree>; builder runs unguarded`.
+Not yet done: persisting the flag on the session row and refusing the launch under `strict`/`standard` posture.

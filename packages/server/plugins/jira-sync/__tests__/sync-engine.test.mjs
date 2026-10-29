@@ -356,7 +356,7 @@ test("issue type and epic parent: Bug -> bug, Story -> feature, parent becomes a
   assert.equal(byKey["ENG-1"].issueType, "bug");
   assert.equal(byKey["ENG-2"].issueType, "feature");
   assert.equal(byKey["ENG-3"].issueType, "task");
-  assert.equal(byKey["ENG-1"].description, "**Parent:** ENG-9 (Checkout)\n\nBoom");
+  assert.equal(byKey["ENG-1"].description, "<!-- jira-sync:parent -->**Parent:** ENG-9 (Checkout)<!-- /jira-sync:parent -->\n\nBoom");
   const tags = (await board.listIssueTags(byKey["ENG-1"].id)).map((t) => t.name);
   assert.deepEqual(tags, ["epic:ENG-9"]);
 });
