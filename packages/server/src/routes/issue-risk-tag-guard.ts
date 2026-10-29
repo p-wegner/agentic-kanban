@@ -29,9 +29,10 @@ export function createRiskTagGuard(database: Database): MiddlewareHandler {
     const path = new URL(c.req.url).pathname.replace(/\/+$/, "");
     const tagMatch = /\/issues\/([^/]+)\/tags$/.exec(path);
     const isCreate = /\/issues$/.test(path);
-    if (!tagMatch && !isCreate) return next();
+    const isBatch = /\/issues\/batch$/.test(path);
+    if (!tagMatch && !isCreate && !isBatch) return next();
 
-    const body = await c.req.json().catch(() => null) as { tagId?: unknown; tags?: unknown; projectId?: unknown } | null;
+    const body = await c.req.json().catch(() => null) as { tagId?: unknown; tags?: unknown; projectId?: unknown; issues?: unknown } | null;
     let issueId: string | null = tagMatch?.[1] ?? null;
     let projectId: string | null = typeof body?.projectId === "string" ? body.projectId : null;
     let names: string[] = [];
@@ -39,6 +40,9 @@ export function createRiskTagGuard(database: Database): MiddlewareHandler {
       const tag = typeof body?.tagId === "string" ? await getTagById(body.tagId, database) : null;
       names = tag ? [tag.name] : [];
       projectId = issueId ? await getIssueProjectId(issueId, database) ?? null : null;
+    } else if (isBatch) {
+      const items = Array.isArray(body?.issues) ? body.issues as { tags?: unknown }[] : [];
+      names = items.flatMap((i) => (Array.isArray(i?.tags) ? i.tags : [])).filter((t): t is string => typeof t === "string").map((t) => t.trim());
     } else if (Array.isArray(body?.tags)) {
       names = body.tags.filter((t): t is string => typeof t === "string").map((t) => t.trim());
     }
@@ -55,7 +59,28 @@ export function createRiskTagGuard(database: Database): MiddlewareHandler {
     await next();
 
     if (c.res.status >= 400) return;
-    const source = `REST ${tagMatch ? "POST /api/issues/:id/tags" : "POST /api/issues"} (${operator ? "operator" : "agent"})`;
+    const source = `REST ${tagMatch ? "POST /api/issues/:id/tags" : isBatch ? "POST /api/issues/batch" : "POST /api/issues"} (${operator ? "operator" : "agent"})`;
+    const record = async (id: string, name: string) => {
+      const level = riskTagLevel(name);
+      if (!level) return;
+      await insertIssueComment({
+        issueId: id,
+        kind: "note",
+        author: operator ? "user" : "agent",
+        body: describeRiskTagApplied(level, source),
+        payload: { riskTag: name, source },
+      }, database).catch(() => {});
+    };
+    if (isBatch) {
+      const created = await c.res.clone().json().then((r) => (r as { issues?: { id?: string }[] }).issues ?? []).catch(() => []);
+      const items = Array.isArray(body?.issues) ? body.issues as { tags?: unknown }[] : [];
+      for (let i = 0; i < created.length; i++) {
+        const id = created[i]?.id;
+        const tags = Array.isArray(items[i]?.tags) ? (items[i].tags as unknown[]) : [];
+        if (id) for (const t of tags) if (typeof t === "string") await record(id, t.trim());
+      }
+      return;
+    }
     if (!issueId) {
       issueId = await c.res.clone().json().then((r) => (r as { id?: string }).id ?? null).catch(() => null);
     }
