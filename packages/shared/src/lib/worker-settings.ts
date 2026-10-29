@@ -159,3 +159,17 @@ export function workerBelowRamFloor(
   if (floor === undefined || freeRamGb === undefined || freeRamGb >= floor) return { below: false };
   return { below: true, reason: `free RAM ${freeRamGb.toFixed(1)} GB is under this worker's minFreeRamGb ${floor} GB` };
 }
+
+/** #1768: free disk under which a worker takes no verify job (the suites write thousands of fixture DBs). */
+export const MIN_FREE_DISK_GB_VERIFY = 10;
+/** #1768: builders write far less than a verify run, so their floor is lower. */
+export const MIN_FREE_DISK_GB_BUILDER = 3;
+
+/** #1768: is the worker's reported free disk under `floorGb`? Unreported disk is never "below" (unknown is not zero). */
+export function workerBelowDiskFloor(
+  freeDiskGb: number | undefined,
+  floorGb: number = MIN_FREE_DISK_GB_VERIFY,
+): { below: false } | { below: true; reason: string } {
+  if (freeDiskGb === undefined || freeDiskGb >= floorGb) return { below: false };
+  return { below: true, reason: `free disk ${freeDiskGb.toFixed(1)} GB is under the ${floorGb} GB floor for ${floorGb === MIN_FREE_DISK_GB_VERIFY ? "verify work" : "new sessions"}` };
+}

@@ -7,7 +7,7 @@
 // against the request the BOARD built (sha, tier, worker), not against anything in the frame. This
 // service also never invents a verdict: a worker that vanishes or goes silent yields a refusal.
 import { noteMergeTrainGateProgress, noteMergeTrainGateResultReceived } from "./merge-train-live-registry.js";
-import { workerBelowRamFloor } from "@agentic-kanban/shared/lib/worker-settings";
+import { workerBelowDiskFloor, workerBelowRamFloor } from "@agentic-kanban/shared/lib/worker-settings";
 import type { VerifyJobFrame, VerifyStage, WorkerVerifyCapability } from "@agentic-kanban/shared/lib/worker-verify-protocol";
 import { writeFileSync } from "node:fs";
 import type { Database } from "../db/index.js";
@@ -16,7 +16,7 @@ import { listActiveMergeTrainsForProject, recordMergeTrainWorkerVerify } from ".
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { ensureGitHttpServer } from "./git-http.service.js";
 import type { VerifyRunRequest, VerifyWorkerRunner } from "./verify-job-placement.js";
-import { isTimeoutOnlyFailure, workerAdmitsAnotherChain, workerWasAtCapacity, type VerifyChainKind, type VerifyWorkerCandidate, type WorkerVerifyReport } from "./verify-placement.js";
+import { isDiskFullLog, isTimeoutOnlyFailure, workerAdmitsAnotherChain, workerWasAtCapacity, type VerifyChainKind, type VerifyWorkerCandidate, type WorkerVerifyReport } from "./verify-placement.js";
 import { expectedVerifyDurationMs, recordVerifyDuration } from "./verify-slow-worker.js";
 import { active, listActiveVerifyJobs, type ActiveVerifyJob } from "./verify-active-jobs.js";
 import { getWorkerFleet } from "./worker-fleet.service.js";
@@ -106,6 +106,8 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
       .filter((w) => w.effectiveStatus === "online" && connections.isConnected(w.id) && w.verify)
       // #1451: under its own minFreeRamGb floor a worker takes no new verify job
       .filter((w) => !workerBelowRamFloor(w.desiredSettings?.settings, w.capacity?.freeRamGb).below)
+      // #1768: nor does a worker whose disk is nearly full (SQLITE_FULL reads as hundreds of red suites)
+      .filter((w) => !workerBelowDiskFloor(w.capacity?.freeDiskGb).below)
       // #1456: an auto worker in live back-off takes no new verify job either
       .filter((w) => !w.concurrency?.hold)
       .map((w) => {
@@ -187,7 +189,11 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
               if (slowNote) console.warn(`[verify-worker] ${workerName}: ${slowNote}`);
             }
             // #1571: the output must hit disk BEFORE any retry decision sees the verdict.
-            const failed = !message.passed && !message.refused;
+            // #1768: a disk-full worker's red is infrastructure, not a verdict: report it as a refusal so it is
+            // never accepted (no breaker increment, no send-back) and the job is re-placed elsewhere.
+            const diskFull = !message.passed && !message.refused && isDiskFullLog(log);
+            if (diskFull) console.warn(`[verify-worker] ${workerName}: output shows the disk is full (SQLITE_FULL/ENOSPC) - inconclusive (infra), not a failure; worker doctor: disk warning`);
+            const failed = !message.passed && !message.refused && !diskFull;
             const saved = failed ? persistFailedWorkerLog(req.kind, jobId, log, deps.logDir) : null;
             if (saved?.logPath) console.log(`[verify-worker] failed output of ${jobId} saved to ${saved.logPath}`);
             if (req.kind === "train-gate" && req.projectId) noteMergeTrainGateResultReceived(req.projectId, deps.nowMs);
@@ -213,6 +219,7 @@ export function createVerifyWorkerRunner(deps: VerifyRunnerDeps): VerifyWorkerRu
               ...(failed && (atCapacity || job.reattached) && isTimeoutOnlyFailure(log) ? { loadSuspect: true } : {}),
               ...(job.reattached ? { disconnectedDuringRun: true } : {}),
               ...(message.refused ? { refused: message.refused, reason: message.reason } : {}),
+              ...(diskFull ? { refused: "infra_disk_full", reason: `inconclusive (infra): ${workerName} ran out of disk (SQLITE_FULL/ENOSPC in the output)` } : {}),
             });
           }
         });

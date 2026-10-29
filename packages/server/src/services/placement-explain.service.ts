@@ -31,7 +31,7 @@
 // resolver stays the single place a placement is decided.
 import { authExpiredProfileNames, describeAuthExpired } from "../lib/worker-profile-attestation.js";
 import { fleetForProject } from "./worker-project-scope.js";
-import { workerAllowsProject, workerBelowRamFloor, type WorkerSettings } from "@agentic-kanban/shared/lib/worker-settings";
+import { MIN_FREE_DISK_GB_BUILDER, workerAllowsProject, workerBelowDiskFloor, workerBelowRamFloor, type WorkerSettings } from "@agentic-kanban/shared/lib/worker-settings";
 import {
   allowedProfilesPrefKey,
   rosterPrefKey,
@@ -250,11 +250,14 @@ function ineligibleReasonFor(
     authExpired?: string | null;
     /** #1451: free RAM is under the worker's `minFreeRamGb` floor. */
     lowRam?: string | null;
+    /** #1768: free disk is under the verify floor. */
+    lowDisk?: string | null;
   },
 ): string | null {
   if (worker.effectiveStatus !== "online") {
     return `status is ${worker.effectiveStatus} (heartbeat too old, or draining)`;
   }
+  if (ctx.lowDisk) return ctx.lowDisk;
   if (ctx.lowRam) return ctx.lowRam; // #1451: named before the socket check, which a recovering worker may also fail
   if (!ctx.connected) return "heartbeat is fresh but the board holds no WebSocket for it";
   // #901 — the failure the two checks above cannot see: both are answered by the daemon's
@@ -345,6 +348,7 @@ async function describeWorkers(
         authExpiredProfileNames(w.profiles, providerName),
       ),
       projectBarred: projectId ? barredReason(w.desiredSettings?.settings, projectId) : null,
+      lowDisk: ((v) => (v.below ? v.reason : null))(workerBelowDiskFloor(w.capacity?.freeDiskGb, MIN_FREE_DISK_GB_BUILDER)), // #1768
       lowRam: ((v) => (v.below ? v.reason : null))(workerBelowRamFloor(w.desiredSettings?.settings, w.capacity?.freeRamGb)) ?? w.concurrency?.hold ?? null, // #1456: auto back-off
     });
     return {
