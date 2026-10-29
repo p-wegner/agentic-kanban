@@ -263,9 +263,15 @@ async function subjectsBetween(repoPath: string, from: string, to: string): Prom
 }
 
 /** True when every commit the branch carries over the base reappears (by subject) in the push. */
-async function keepsTicketSubjects(repoPath: string, baseTip: string, local: string, push: string): Promise<boolean> {
+async function keepsTicketSubjects(
+  repoPath: string,
+  baseTip: string,
+  local: string,
+  push: string,
+  pushBase: string = baseTip,
+): Promise<boolean> {
   const mine = await subjectsBetween(repoPath, baseTip, local);
-  const theirs = await subjectsBetween(repoPath, baseTip, push);
+  const theirs = await subjectsBetween(repoPath, pushBase, push);
   if (!mine || !theirs || mine.length === 0) return false;
   const have = new Set(theirs);
   return mine.every((s) => have.has(s));
@@ -332,9 +338,11 @@ export async function adoptCleanRebase(repoPath: string, branch: string): Promis
     if (!execSucceeded(diff)) return refuse("could not compare the push against base+local");
     const differing = diff.stdout.split("\0").filter(Boolean);
     const unexplained = differing.filter((f) => !conflicted.has(f));
-    // #1594: a rebase onto the CURRENT base tip that keeps every ticket commit of the branch
-    // (by subject) is what the board asks for; its conflict resolution legitimately changes content.
-    const rebasedOntoTip = mb === baseTip && (await keepsTicketSubjects(repoPath, baseTip, local, push));
+    // #1594: a rebase onto the base that keeps every ticket commit of the branch (by subject)
+    // is what the board asks for; its conflict resolution legitimately changes content.
+    // #1777: the base may have moved on since the worker rebased (mb is a strict ancestor of the
+    // tip, already verified above), so the ticket commits are counted against `mb`, not the tip.
+    const rebasedOntoTip = await keepsTicketSubjects(repoPath, baseTip, local, push, mb);
     if (unexplained.length > 0 && !rebasedOntoTip) {
       return refuse(`push is not patch-equivalent to the local branch (differs in ${unexplained.slice(0, 5).join(", ")})`);
     }

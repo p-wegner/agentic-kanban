@@ -98,6 +98,23 @@ describe("adoptCleanRebase (#1446)", () => {
     expect(git(dir, "rev-parse", `refs/kanban/backup/feat/${old.slice(0, 12)}`)).toBe(old);
   });
 
+  it("adopts a conflict-resolving rebase even after the base moved on again (#1777)", async () => {
+    const dir = repo();
+    git(dir, "checkout", "-b", "feat");
+    writeFileSync(join(dir, "f"), "mine"); git(dir, "add", "."); git(dir, "commit", "-m", "one");
+    git(dir, "checkout", "master");
+    writeFileSync(join(dir, "f"), "base"); git(dir, "add", "."); git(dir, "commit", "-m", "base moves");
+    git(dir, "checkout", "-b", "worker", "master");
+    writeFileSync(join(dir, "f"), "resolved"); git(dir, "add", "."); git(dir, "commit", "-m", "one");
+    const push = git(dir, "rev-parse", "HEAD");
+    git(dir, "update-ref", incomingRefFor("feat"), push);
+    git(dir, "checkout", "master");
+    writeFileSync(join(dir, "z"), "z"); git(dir, "add", "."); git(dir, "commit", "-m", "base moves again");
+    const out = await adoptCleanRebase(dir, "feat");
+    expect(out.adopted).toBe(true);
+    expect(git(dir, "rev-parse", "feat")).toBe(push);
+  });
+
   it("refuses when the worktree holding the branch is dirty", async () => {
     const dir = staleSetup();
     git(dir, "checkout", "feat");
