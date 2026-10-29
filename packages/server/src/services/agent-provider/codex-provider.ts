@@ -86,7 +86,7 @@ export class CodexProvider implements AgentProvider {
       }
       // #1310: isolated builders drop the operator's user scope. Still before `resume`.
       if (options.builderContext?.policy === "isolated") {
-        args.push(...codexIsolationConfigArgs(options.builderContext.codexUserScope));
+        args.push(...codexIsolationConfigArgs(options.builderContext.codexUserScope, options.builderContext.boardTools));
       }
       // Denied-flag stripping is applied centrally (see DENIED_ARGS); codex has no
       // denied flags today, but routing through spliceAgentArgs keeps the guard uniform.

@@ -1,3 +1,4 @@
+import { MCP_ALLOWED_TOOLS_ENV } from "@agentic-kanban/shared/lib/board-tool-allowlist";
 import { readBoardEnv } from "../../lib/env-registry.js";
 import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -110,11 +111,12 @@ export const COPILOT_DEFAULT_ALLOWED_TOOLS = [
  * The content-compare-before-write from #1106 is kept as defense against a corrupted or
  * hand-edited file at that path.
  */
-export function getMcpConfigPath(fs: FileSystem = nodeFileSystem): string {
+export function getMcpConfigPath(fs: FileSystem = nodeFileSystem, allowedTools?: readonly string[]): string {
   const invocation = resolveMcpServerInvocation(fs);
   const config = {
     mcpServers: {
-      "agentic-kanban": invocation,
+      // #1761: a builder's config pins the tool surface; the content hash keeps it a separate file.
+      "agentic-kanban": allowedTools?.length ? { ...invocation, env: { [MCP_ALLOWED_TOOLS_ENV]: allowedTools.join(",") } } : invocation,
     },
   };
   const expectedContent = JSON.stringify(config, null, 2);

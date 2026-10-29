@@ -91,3 +91,13 @@ is also what every protocol-1 worker gets: `WORKER_PROTOCOL_VERSION` is 2 but
   Code tools (Bash/PowerShell sections, `mcp__agentic-kanban__*` names). Claude loads `CLAUDE.md` natively.
 - **Settings:** Claude reads `.claude/settings*.json` (`--setting-sources project,local`); Codex reads
   `.codex/hooks.json` and its own config.
+
+## Board MCP surface for host builders (#1761)
+
+A host builder (`builderSession`, isolated policy) gets `BUILDER_BOARD_TOOLS`
+(`shared/lib/board-tool-allowlist.ts`): the remote bridge's `REMOTE_BOARD_TOOLS` — the SAME constant,
+imported by `fleet-mcp-bridge.service.ts` — plus `propose_transition` and `approve_tool_use`.
+Claude's `--mcp-config` carries `KANBAN_MCP_ALLOWED_TOOLS` so the stdio server registers only those
+tools; Codex gets `-c mcp_servers.agentic-kanban.enabled_tools=[...]` (it has no tool deferral, so every
+exposed schema is paid per request). `inherit` keeps the full surface. `REVIEW_BOARD_TOOLS` adds the diff
+and scorecard readers for reviewer launches; reviewers are not `builderSession` and are not yet wired to it.

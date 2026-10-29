@@ -17,6 +17,8 @@ export interface BuilderContext {
   codexUserScope?: { mcpServers: string[]; skillPaths: string[] };
   /** Claude only, isolated only (#1312): the lean profile with the project's add-backs applied. */
   lean?: BuilderLeanProfile;
+  /** Isolated only (#1761): the board MCP tools this builder may call; every other board tool is not registered. */
+  boardTools?: readonly string[];
 }
 
 /** What the lean Claude builder drops and re-adds; see `builder-lean-profile.ts`. */

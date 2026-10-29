@@ -39,6 +39,7 @@
  * Digests only either way: `createExpiringDigestStore` never keeps a clear token.
  */
 import { Hono } from "hono";
+import { REMOTE_BOARD_TOOLS } from "@agentic-kanban/shared/lib/board-tool-allowlist";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createExpiringDigestStore, extractBearer } from "../lib/bearer-token.js";
@@ -83,14 +84,9 @@ export const REMOTE_MCP_CONFIG_FILENAME = ".mcp-kanban.json";
  * `delete_*`, no `start_workspace`/`relaunch_workspace` (a worker able to start work is a way to
  * spend the operator's quota), and no session/transcript readers.
  */
-export const REMOTE_BOARD_TOOLS: readonly string[] = [
-  "get_issue",
-  "list_issues",
-  "create_issue",
-  "get_board_status",
-  // #799 — the one WRITE that is a builder's own voice rather than a board decision.
-  "add_comment",
-];
+// #1761: the allowlist lives in shared so host builders and this bridge cannot diverge.
+export { REMOTE_BOARD_TOOLS };
+
 
 /** How long a per-assignment token lives. Matches `DEFAULT_GIT_TOKEN_TTL_MS`: same assignment. */
 export const DEFAULT_FLEET_MCP_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
