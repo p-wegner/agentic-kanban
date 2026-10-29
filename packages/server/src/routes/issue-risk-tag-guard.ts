@@ -57,7 +57,7 @@ export function createRiskTagGuard(database: Database): MiddlewareHandler {
     if (c.res.status >= 400) return;
     const source = `REST ${tagMatch ? "POST /api/issues/:id/tags" : "POST /api/issues"} (${operator ? "operator" : "agent"})`;
     if (!issueId) {
-      issueId = await c.res.clone().json().then((r: { id?: string }) => r.id ?? null).catch(() => null);
+      issueId = await c.res.clone().json().then((r) => (r as { id?: string }).id ?? null).catch(() => null);
     }
     if (!issueId) return;
     for (const name of riskNames) {
