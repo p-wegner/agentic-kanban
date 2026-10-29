@@ -43,6 +43,7 @@ $StateDir   = Join-Path $env:LOCALAPPDATA 'agentic-kanban-worker'
 $ConfigFile = Join-Path $StateDir 'config.json'
 $LogFile    = Join-Path $StateDir 'worker.log'
 $TaskName   = 'AgenticKanbanWorker'
+$ControlFile = Join-Path (Join-Path $HOME '.agentic-kanban') 'worker-control.json'
 
 # ── icons, built once ─────────────────────────────────────────────────────────
 function New-DotIcon {
@@ -140,6 +141,8 @@ $miStart   = $menu.Items.Add('Start')
 $miStop    = $menu.Items.Add('Stop')
 $miRestart = $menu.Items.Add('Restart')
 $menu.Items.Add('-') | Out-Null
+$miProfiles = New-Object System.Windows.Forms.ToolStripMenuItem 'Attested profiles'
+$menu.Items.Add($miProfiles) | Out-Null
 $miLog     = $menu.Items.Add('Open log')
 $miDash    = $menu.Items.Add('Open dashboard (live)')
 $menu.Items.Add('-') | Out-Null
@@ -170,6 +173,73 @@ $miExit.Add_Click({
   foreach ($i in $Icons.Values) { $i.Dispose() }
   [System.Windows.Forms.Application]::Exit()
 })
+# ── attested profiles (#1774) ─────────────────────────────────────────────────
+# Ask the RUNNING daemon (loopback control endpoint, token from worker-control.json)
+# which profiles it attests; the submenu is rebuilt only when that set changes.
+function Get-ControlStatus {
+  if (-not (Test-Path $ControlFile)) { return $null }
+  try {
+    $c = Get-Content $ControlFile -Raw | ConvertFrom-Json
+    return @{ ctl = $c; status = (Invoke-RestMethod -Uri "http://127.0.0.1:$($c.port)/status" -Headers @{ 'x-worker-control-token' = $c.token } -TimeoutSec 3) }
+  } catch { return $null }
+}
+function ConvertTo-ProfileNames($list) {
+  @($list | ForEach-Object { if ($_ -is [string]) { $_ } elseif ($_.profile) { $_.profile } elseif ($_.name) { $_.name } } | Where-Object { $_ })
+}
+function Get-ConfiguredProfiles {
+  if (-not (Test-Path $ConfigFile)) { return @() }
+  try { $p = (Get-Content $ConfigFile -Raw | ConvertFrom-Json).profiles; if ($p) { return @(([string]$p) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) } } catch { }
+  return @()
+}
+# Persist FIRST (so a restart or reboot keeps it), then try the live re-attest
+# endpoint; a daemon without it (or without a control file) gets a service restart.
+function Set-ProfileSet([string[]]$Names) {
+  $cfg = Get-Content $ConfigFile -Raw | ConvertFrom-Json
+  $cfg | Add-Member -NotePropertyName profiles -NotePropertyValue ($Names -join ',') -Force
+  $cfg | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigFile -Encoding utf8
+  $live = $false
+  $cs = Get-ControlStatus
+  if ($cs) {
+    try {
+      Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$($cs.ctl.port)/profiles" -Headers @{ 'x-worker-control-token' = $cs.ctl.token } `
+        -ContentType 'application/json' -Body (@{ profiles = $Names } | ConvertTo-Json -Compress) -TimeoutSec 10 | Out-Null
+      $live = $true
+    } catch { }
+  }
+  if (-not $live) { try { & $svc '-Restart' } catch { } }
+}
+$script:profileKey = $null
+function Update-ProfileMenu {
+  $cs = Get-ControlStatus
+  $attested = if ($cs) { @(ConvertTo-ProfileNames $(if ($cs.status.profiles) { $cs.status.profiles } else { $cs.status.attestedProfiles })) } else { @() }
+  $all = @($attested + (Get-ConfiguredProfiles) | Select-Object -Unique)
+  $key = ($(if ($cs) { 'up' } else { 'down' })) + '|' + ($all -join ',') + '|' + ($attested -join ',')
+  if ($key -eq $script:profileKey) { return }
+  $script:profileKey = $key
+  $miProfiles.DropDownItems.Clear()
+  if (-not $cs) { $miProfiles.Text = 'Attested profiles (daemon not reachable)' } else { $miProfiles.Text = "Attested profiles ($($attested.Count))" }
+  if ($all.Count -eq 0) { $e = $miProfiles.DropDownItems.Add('(none reported)'); $e.Enabled = $false; return }
+  foreach ($n in $all) {
+    $it = New-Object System.Windows.Forms.ToolStripMenuItem $n
+    $it.CheckOnClick = $false
+    $it.Checked = ($attested -contains $n)
+    $it.Tag = $n
+    $it.Add_Click({
+      param($sender, $e)
+      try {
+        $name = [string]$sender.Tag
+        $cur = @()
+        $cs2 = Get-ControlStatus
+        if ($cs2) { $cur = @(ConvertTo-ProfileNames $(if ($cs2.status.profiles) { $cs2.status.profiles } else { $cs2.status.attestedProfiles })) }
+        $new = if ($cur -contains $name) { @($cur | Where-Object { $_ -ne $name }) } else { @($cur + $name) }
+        Set-ProfileSet $new
+        $script:profileKey = $null
+      } catch { }
+    })
+    $miProfiles.DropDownItems.Add($it) | Out-Null
+  }
+}
+
 # Double-click is the fast path to the log, which is where every answer has been.
 $tray.Add_DoubleClick({ try { if (Test-Path $LogFile) { Start-Process notepad.exe $LogFile } } catch { } })
 
@@ -197,6 +267,7 @@ $timer.Add_Tick({
     $t = "kanban worker: $($v.text)"
     if ($t.Length -gt 63) { $t = $t.Substring(0, 60) + '...' }
     $tray.Text = $t
+    if ($script:tick % 3 -eq 1) { Update-ProfileMenu }
     $miState.Text = "$($v.text) - $reach$(if ($s.since) { " - since $($s.since)" })"
   } catch { }
 })
