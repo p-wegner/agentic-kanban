@@ -276,6 +276,8 @@ export interface FlushRecord {
   state: FlushState;
   /** Open heal ticket numbers filed against this flush's red, if any. */
   openHealTickets: number[];
+  /** The gate script that ACTUALLY ran when it was not the default `check:arch + typecheck` (#1742). */
+  gateScript?: string;
   updatedAt: string;
 }
 
