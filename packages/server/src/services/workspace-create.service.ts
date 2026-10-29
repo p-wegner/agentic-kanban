@@ -561,6 +561,7 @@ export function createWorkspaceCreateService(deps: {
         t = Date.now();
         contextPrimer = await packContextPrimer(input, issue, project);
         timing("context-packer", t);
+        console.log(`[workspaces-timing] workspaceId=${id} phase=context-primer-size chars=${contextPrimer?.length ?? 0}`);
       }
 
       // Inject ticket details (+ context primer + stack profile) into the worktree as a

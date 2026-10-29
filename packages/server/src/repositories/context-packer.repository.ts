@@ -13,6 +13,7 @@ export async function getCandidateIssuesForProject(
       issueNumber: issues.issueNumber,
       title: issues.title,
       description: issues.description,
+      externalKey: issues.externalKey,
       statusName: projectStatuses.name,
       currentNodeId: issues.currentNodeId,
       currentNodeType: workflowNodes.nodeType,
