@@ -160,6 +160,25 @@ describe("queue flush, end to end (#1463)", { timeout: 300_000 }, () => {
     expect(outcome.message).toContain("already in flight for this project");
   });
 
+  it("#1743: a tagged landing with no record (onFinished threw) is reconstructed by the next heal pass, and the sweep is requested", async () => {
+    await git(repoPath, ["checkout", "-q", "main"]);
+    writeFileSync(join(repoPath, "landed.txt"), "x\n", "utf8");
+    await git(repoPath, ["add", "landed.txt"]);
+    await git(repoPath, ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "Merge train 2026-10-29-01: #1 #2"]);
+    await git(repoPath, ["tag", "flush/2026-10-29-1"]);
+    expect(readFlushState(stable).flushes).toHaveLength(0);
+
+    const service = createQueueFlushService({ database: db, executeQueue: () => { throw new Error("not used"); }, requestSweep });
+    await service.reconcileHeal(projectId);
+    const [rec] = readFlushState(stable).flushes;
+    expect(rec).toMatchObject({ id: "flush/2026-10-29-1", memberIssueNumbers: [1, 2], state: "sweeping" });
+    expect(rec.landingSha).toBe((await git(repoPath, ["rev-parse", "main"])).trim());
+    expect(requestSweep).toHaveBeenCalledTimes(1);
+    // Idempotent: a second tick adds nothing.
+    await service.reconcileHeal(projectId);
+    expect(readFlushState(stable).flushes).toHaveLength(1);
+  });
+
   it("route -> train -> tag -> record -> member comment -> sweep -> heal ticket -> merged-back", async () => {
     const res = await post({ wait: true });
     expect(res.status).toBe(200);

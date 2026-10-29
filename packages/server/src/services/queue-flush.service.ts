@@ -47,6 +47,7 @@ import { requestBaseBranchReprobe } from "./base-branch-health-reprobe.service.j
 import * as gitService from "./git.service.js";
 import type { MergeQueueEvent } from "./merge-queue.service.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const queueFlushGatePref = projectPref("queue_flush_gate");
@@ -233,6 +234,10 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
     const project = await requireProject(projectId, database);
     const stable = stableOf(project.repoPath);
     const moved: FlushRecord[] = [];
+    // #1743: a landing whose record write never happened (crash / reload between tag and record) is rebuilt from git.
+    if (!running.has(projectId)) {
+      await reconstructMissingRecords(projectId, project.repoPath, stable).catch((err) => console.warn(`[queue-flush] flush record reconstruction failed (non-fatal): ${errorMessage(err)}`));
+    }
     for (const rec of readFlushState(stable).flushes) {
       if (isTerminalFlushState(rec.state)) continue;
       try {
@@ -243,6 +248,34 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
       }
     }
     return moved;
+  }
+
+  /**
+   * #1743 — every `flush/*` tag on the project's repo with no record in flush-state.json gets one
+   * (`flushed`, landing sha = tag target, members from the merge commit subject's `#N` list), so
+   * the heal machine, the daily cap and the member trail see a landing the process died before recording.
+   */
+  async function reconstructMissingRecords(projectId: string, repoPath: string, stable: string): Promise<FlushRecord[]> {
+    const known = new Set(readFlushState(stable).flushes.map((f) => f.id));
+    const tags = (await gitExecOrThrow(["tag", "--list", "flush/*"], { cwd: repoPath })).split(/\r?\n/).map((t) => t.trim()).filter(Boolean);
+    const missing = tags.filter((t) => !known.has(t));
+    if (missing.length === 0) return [];
+    const healTarget = resolveHealTarget(toPrefMap(await getAllPreferences(database)), projectId);
+    const rebuilt: FlushRecord[] = [];
+    for (const tag of missing) {
+      const [sha = "", at = "", subject = ""] = (await gitExecOrThrow(["log", "-1", "--format=%H%x09%cI%x09%s", `${tag}^{commit}`], { cwd: repoPath })).trim().split("\t");
+      if (!sha) continue;
+      const memberIssueNumbers = [...subject.matchAll(/#(\d+)/g)].map((m) => Number(m[1]));
+      const record: FlushRecord = {
+        id: tag, at: new Date(at).toISOString(), triggeredBy: "auto", memberIssueNumbers, memberBranches: [],
+        landingSha: sha, tag, sweepTarget: healTarget === "rc" ? "rc" : "master",
+        state: "flushed", openHealTickets: [], updatedAt: new Date().toISOString(),
+      };
+      appendFlushRecord(stable, record);
+      rebuilt.push(record);
+      console.warn(`[queue-flush] reconstructed missing flush record for ${tag} (landing ${sha.slice(0, 8)}, members ${memberIssueNumbers.map((n) => `#${n}`).join(" ") || "unknown"}) — the process died between the tag and the record`);
+    }
+    return rebuilt;
   }
 
   async function advance(projectId: string, repoPath: string, stable: string, rec: FlushRecord, now: string): Promise<FlushRecord | null> {
