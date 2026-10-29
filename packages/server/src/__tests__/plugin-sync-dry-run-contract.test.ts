@@ -8,6 +8,7 @@ import * as schema from "@agentic-kanban/shared/schema";
 import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createPluginService, stopAllPluginViewsAsync } from "../services/plugin.service.js";
+import { pluginProjectDataDir } from "../services/plugin-fs.js";
 import { dryRunContractBreach } from "../services/plugin-sync-summary.js";
 import type { Database } from "../db/index.js";
 
@@ -35,6 +36,7 @@ describe("plugin sync dry-run contract (#1634)", () => {
   let logPath: string;
   let pluginId: string;
   let projectId: string;
+  let stateDir: string;
   const saved: Record<string, string | undefined> = {};
 
   beforeEach(async () => {
@@ -47,10 +49,11 @@ describe("plugin sync dry-run contract (#1634)", () => {
     logPath = join(parent, "mutations.log");
     writeFileSync(logPath, "");
 
-    for (const k of [...SECRETS, "JIRA_SYNC_SELF_TEST", "JIRA_SYNC_FIXTURE_LOG"]) saved[k] = process.env[k];
+    for (const k of [...SECRETS, "JIRA_SYNC_SELF_TEST", "JIRA_SYNC_FIXTURE_LOG", "AGENTIC_KANBAN_PLUGIN_DATA_DIR"]) saved[k] = process.env[k];
     for (const k of SECRETS) process.env[k] = "secret";
     process.env.JIRA_SYNC_SELF_TEST = "1";
     process.env.JIRA_SYNC_FIXTURE_LOG = logPath;
+    process.env.AGENTIC_KANBAN_PLUGIN_DATA_DIR = join(parent, "plugin-data");
 
     const now = new Date().toISOString();
     projectId = randomUUID();
@@ -62,7 +65,7 @@ describe("plugin sync dry-run contract (#1634)", () => {
     await service.setSyncConfig(pluginId, projectId, { siteUrl: "https://fixture.atlassian.net", projectKey: "ENG" });
 
     // An outbox with a transition, a comment and a create: every kind of Jira write push can make.
-    const stateDir = join(repo, ".jira-sync");
+    stateDir = pluginProjectDataDir(plugin.pluginId, projectId);
     mkdirSync(stateDir, { recursive: true });
     writeFileSync(join(stateDir, "outbox.json"), JSON.stringify({
       entries: [
@@ -93,14 +96,14 @@ describe("plugin sync dry-run contract (#1634)", () => {
   });
 
   it("dry run (push) makes zero mutating calls and persists nothing", async () => {
-    const before = readFileSync(join(repo, ".jira-sync", "outbox.json"), "utf8");
+    const before = readFileSync(join(stateDir, "outbox.json"), "utf8");
     const record = await service.triggerSync(pluginId, projectId, { direction: "push", dryRun: true });
     expect(record.error).toBeUndefined();
     expect(record.ok).toBe(true);
     expect(record.dryRun).toBe(true);
     expect(mutations()).toEqual([]);
-    expect(readFileSync(join(repo, ".jira-sync", "outbox.json"), "utf8")).toBe(before);
-    expect(existsSync(join(repo, ".jira-sync", "writebacks.json"))).toBe(false);
+    expect(readFileSync(join(stateDir, "outbox.json"), "utf8")).toBe(before);
+    expect(existsSync(join(stateDir, "writebacks.json"))).toBe(false);
   });
 
   it("dry run (pull) makes zero mutating calls", async () => {
@@ -108,7 +111,7 @@ describe("plugin sync dry-run contract (#1634)", () => {
     expect(record.error).toBeUndefined();
     expect(record.ok).toBe(true);
     expect(mutations()).toEqual([]);
-    expect(existsSync(join(repo, ".jira-sync", "pull-state.json"))).toBe(false);
+    expect(existsSync(join(stateDir, "pull-state.json"))).toBe(false);
   });
 
   it("control: a real pull does write to the board fixture", async () => {

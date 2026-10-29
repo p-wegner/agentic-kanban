@@ -6,6 +6,7 @@ import {
 import type { Database } from "../../db/index.js";
 import type { PluginRow } from "../../repositories/plugins.repository.js";
 import type { PluginLoopRunContext, PluginRunContext } from "../plugin-loop-types.js";
+import { pluginProjectDataDir } from "../plugin-fs.js";
 import { requireScaffoldReady, syncSettingsComplete } from "../plugin-scaffold.js";
 import { resolveWorkflowTemplateId } from "./workflow-resolution.js";
 
@@ -55,6 +56,7 @@ export async function resolvePluginRunContext(
       pluginPath: plugin.localPath,
       boardUrl: deps.boardUrl,
       projectId,
+      pluginDataDir: pluginProjectDataDir(plugin.pluginId, projectId),
     }),
   };
 }

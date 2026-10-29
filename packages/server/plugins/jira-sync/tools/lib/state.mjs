@@ -2,7 +2,7 @@
 // Per docs/plugin-development.md's design guidance: keep state out of the
 // plugin checkout, under the env-provided JIRA_SYNC_STATE_DIR.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export function readJsonFile(path, fallback) {
@@ -88,4 +88,25 @@ export function readConflictRegister(stateDir) {
 
 export function readFailureRegister(stateDir) {
   return readJsonFile(failureRegisterPath(stateDir), { entries: {} });
+}
+
+/**
+ * One-time move of the pre-#1737 state dir (`<repo>/.jira-sync`, uncommitted-by-luck and shared by
+ * every project on that repo) into the board-owned per-project `stateDir`. Runs only while the new
+ * dir holds no state yet; the legacy dir is renamed to `<name>.migrated` afterwards so a second
+ * project on the same repo does not inherit the first one's baseline. Never throws.
+ * Returns "migrated" | "none" | "failed".
+ */
+export function migrateLegacyState(stateDir, legacyDir = process.env.JIRA_SYNC_LEGACY_STATE_DIR) {
+  try {
+    if (!legacyDir || !existsSync(legacyDir) || legacyDir === stateDir) return "none";
+    if (readdirSync(legacyDir).length === 0) return "none";
+    if (existsSync(pullStatePath(stateDir)) || existsSync(outboxPath(stateDir))) return "none";
+    mkdirSync(stateDir, { recursive: true });
+    cpSync(legacyDir, stateDir, { recursive: true });
+    renameSync(legacyDir, `${legacyDir}.migrated`);
+    return "migrated";
+  } catch {
+    return "failed";
+  }
 }

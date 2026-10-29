@@ -13,6 +13,7 @@ import type { Database } from "../../db/index.js";
 import { insertIssueComment } from "../../repositories/issue-comments.repository.js";
 import { insertPluginLoopEvent, latestPluginLoopEvent } from "../../repositories/plugin-loop-events.repository.js";
 import { listPluginLoopIssues } from "../../repositories/plugins.repository.js";
+import { pluginProjectDataDir } from "../plugin-fs.js";
 import { runPluginCommand } from "../plugin-exec.js";
 import type { LoopAdvanceResult } from "../plugin-loop-types.js";
 import { loopAdvanceLockKey, withLoopAdvanceLock } from "./loop-advance-lock.js";
@@ -107,6 +108,7 @@ export async function resolveLoopGate(
         pluginPath: args.pluginLocalPath,
         boardUrl,
         projectId: args.projectId,
+        pluginDataDir: pluginProjectDataDir(args.pluginSlug, args.projectId),
       });
       // The human's text goes through a FILE: it is arbitrary prose, and no amount of
       // quoting makes interpolating it into a shell command safe.

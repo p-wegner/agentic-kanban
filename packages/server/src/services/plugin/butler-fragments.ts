@@ -7,7 +7,7 @@ import {
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../../db/index.js";
 import { listEnabledPlugins } from "../plugin-enabled.js";
-import { resolveInside } from "../plugin-fs.js";
+import { pluginProjectDataDir, resolveInside } from "../plugin-fs.js";
 
 /**
  * What the project's BUTLER is told about the enabled plugins.
@@ -55,6 +55,7 @@ export async function buildButlerFragments(
         pluginPath: row.localPath,
         boardUrl: deps.boardUrl,
         projectId,
+        pluginDataDir: pluginProjectDataDir(row.pluginId, projectId),
       });
 
       const parts: string[] = [];

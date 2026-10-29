@@ -79,6 +79,7 @@ describe("plugin-placeholders (#554)", () => {
         "port",
         "boardUrl",
         "projectId",
+        "pluginDataDir",
       ]);
     });
   });

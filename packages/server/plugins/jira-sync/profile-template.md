@@ -25,8 +25,7 @@ encrypted in `kanban.db` and handed to `bootstrap`/`plan`/`pull`/`push` as envir
 variables; no board restart or shell environment is needed.
 
 - `JIRA_EMAIL` — the Atlassian account email (Jira Cloud basic auth)
-- `JIRA_API_TOKEN` — an API token (Jira Cloud) or a Personal Access Token (Jira Server/Data
-  Center)
+- `JIRA_API_TOKEN` — an API token (Jira Cloud). Jira Server/Data Center is not supported.
 
 A hand-set `JIRA_SITE_URL` / `JIRA_PROJECT_KEY` / `JIRA_JQL` / `JIRA_EMAIL` / `JIRA_API_TOKEN` in
 the board host's environment still works for headless setups.
