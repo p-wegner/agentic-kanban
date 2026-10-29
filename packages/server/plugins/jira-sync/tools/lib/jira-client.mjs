@@ -9,6 +9,8 @@ import { normalizeHttpError, normalizeNetworkError } from "./errors.mjs";
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_BASE_MS = 250;
 const DEFAULT_MAX_RESULTS = 50;
+/** Longest Retry-After the client will sleep; a longer one is reported instead of waited out (#1738). */
+const DEFAULT_MAX_RETRY_AFTER_MS = 60_000;
 
 function defaultSleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -44,7 +46,15 @@ export class JiraClient {
     maxRetries = DEFAULT_MAX_RETRIES,
     retryBaseMs = DEFAULT_RETRY_BASE_MS,
     deployment = "cloud",
+    maxRetryAfterMs = DEFAULT_MAX_RETRY_AFTER_MS,
+    deadlineMs = null,
+    nowMs = () => Date.now(),
   }) {
+    this.maxRetryAfterMs = maxRetryAfterMs;
+    // Epoch ms by which the whole run must be finished (the plugin runs under a hard timeout);
+    // a retry sleep that would cross it is reported as a rate limit instead of slept.
+    this.deadlineMs = deadlineMs;
+    this.nowMs = nowMs;
     this.deployment = deployment;
     if (!siteUrl) throw new Error("siteUrl is required");
     this.siteUrl = siteUrl.replace(/\/+$/, "");
@@ -114,11 +124,14 @@ export class JiraClient {
 
       if (!error.retryable || attempt === this.maxRetries) throw error;
 
-      const delay = JiraClient.backoffDelayMs({
-        attempt,
-        retryAfterHeader: response.headers?.get?.("retry-after") ?? null,
-        baseMs: this.retryBaseMs,
-      });
+      const retryAfterHeader = response.headers?.get?.("retry-after") ?? null;
+      const delay = JiraClient.backoffDelayMs({ attempt, retryAfterHeader, baseMs: this.retryBaseMs });
+      const overDeadline = this.deadlineMs != null && this.nowMs() + delay > this.deadlineMs;
+      if (error.status === 429 && (delay > this.maxRetryAfterMs || overDeadline)) {
+        error.retryAfterSeconds = Math.ceil(delay / 1000);
+        error.rateLimited = true;
+        throw error;
+      }
       await this.sleepImpl(delay);
     }
 

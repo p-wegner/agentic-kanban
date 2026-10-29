@@ -16,6 +16,8 @@ export function isDryRun(argv = process.argv) {
   return argv.includes("--dry-run") || process.env.SYNC_DRY_RUN === "1" || process.env.JIRA_SYNC_DRY_RUN === "1";
 }
 
+const RUN_BUDGET_MS = 4 * 60_000;
+
 const FIXTURE_CREDENTIALS = {
   siteUrl: "https://fixture.atlassian.net",
   email: "fixture@example.com",
@@ -29,6 +31,8 @@ export function buildClientFromEnv({ argv = process.argv, env = process.env } = 
   const client = new JiraClient({
     ...credentials,
     fetchImpl: selfTest ? createDefaultFixtureFetch() : undefined,
+    // The board kills a sync command at 5 minutes; stop sleeping on a throttle well before that.
+    deadlineMs: Date.now() + RUN_BUDGET_MS,
   });
   const projectKey = env.JIRA_PROJECT_KEY || env.SYNC_CONFIG_PROJECTKEY || (selfTest ? "ENG" : undefined);
   const jql = env.JIRA_JQL || env.SYNC_CONFIG_JQL || undefined;
@@ -49,6 +53,21 @@ export async function checkAuth(client) {
     return null;
   } catch (err) {
     if (err instanceof JiraAuthError) return { ok: false, step: "auth", reason: err.message };
-    return { ok: false, step: "auth", reason: err.message, code: err.code ?? null, retryable: err.retryable ?? false };
+    return rateLimitResult(err) ?? { ok: false, step: "auth", reason: err.message, code: err.code ?? null, retryable: err.retryable ?? false };
   }
+}
+
+/**
+ * A Jira 429 whose Retry-After the client refused to sleep (too long, or past the run deadline),
+ * as the failed result the board's status line renders; null for any other error (#1738).
+ */
+export function rateLimitResult(err) {
+  if (!err?.rateLimited) return null;
+  return {
+    ok: false,
+    step: "rate-limit",
+    reason: `Jira rate limited the request; retry after ${err.retryAfterSeconds}s`,
+    retryable: true,
+    retryAfterSeconds: err.retryAfterSeconds,
+  };
 }

@@ -33,6 +33,7 @@ const NO_AUTO_START_TAG = "no-auto-start";
 // that shape is a wrong token, a wrong site or a broken JQL, not a real mass deletion.
 export const MAX_DELETIONS_PER_PULL = 3;
 export const MAX_DELETION_SHARE = 0.2;
+export const DEFAULT_OUT_OF_SCOPE_RECHECK_MS = 24 * 3_600_000;
 
 export class MassDeletionError extends Error {
   constructor(count, known) {
@@ -85,7 +86,7 @@ function exceedsDeletionLimit(count, known) {
 export async function runInboundSync(
   client,
   boardClient,
-  { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set(), deletedStatusName = "Cancelled", forceKeys = new Set(), directions = LEGACY_DIRECTIONS, customFieldMap = "", assigneeMap = {}, now = new Date().toISOString() },
+  { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set(), deletedStatusName = "Cancelled", forceKeys = new Set(), directions = LEGACY_DIRECTIONS, customFieldMap = "", assigneeMap = {}, maxIssuesPerRun, outOfScopeRecheckMs = DEFAULT_OUT_OF_SCOPE_RECHECK_MS, now = new Date().toISOString() },
 ) {
   // dryRun only suppresses WRITES (create/update/tag calls below) — these three are
   // reads, and skipping them would make every issue look brand-new (boardIssuesByKey
@@ -99,15 +100,34 @@ export async function runInboundSync(
   const context = await resolveJiraContext(client, customFieldMap);
   const mapOpts = { siteUrl, sprintFieldId: context.sprintFieldId, customFields: context.customFields, assigneeMap };
   const jiraIssues = [];
-  for await (const jiraIssue of client.searchAll(jql, { fields: context.fields })) jiraIssues.push(jiraIssue);
+  let moreAvailable = false;
+  for await (const jiraIssue of client.searchAll(jql, { fields: context.fields })) {
+    if (maxIssuesPerRun && jiraIssues.length >= maxIssuesPerRun) {
+      moreAvailable = true;
+      break;
+    }
+    jiraIssues.push(jiraIssue);
+  }
   const seenKeys = new Set(jiraIssues.map((i) => i.key));
   // Entries already marked deleted are settled; they are only revisited when Jira returns them.
   const activeKnownKeys = Object.keys(knownState.issues).filter((key) => !knownState.issues[key].deletedAt);
-  // Likewise for entries already marked out of scope: not re-classified (no GET) or re-reported
-  // until they return (#1731).
-  const missingKeys = activeKnownKeys.filter((key) => !seenKeys.has(key) && !knownState.issues[key].outOfScopeAt);
+  // A truncated read (maxIssuesPerRun) cannot say which known keys left the JQL: classify nothing.
+  // Entries already marked out of scope are not re-classified (no GET) or re-reported until they
+  // return (#1731).
+  const missingKeys = moreAvailable ? [] : activeKnownKeys.filter((key) => !seenKeys.has(key) && !knownState.issues[key].outOfScopeAt);
+  // Keys already classified out of scope are re-checked only after `outOfScopeRecheckMs` (#1738);
+  // a returning key is in `seenKeys` and so never lands here.
+  const nowMs = Date.parse(now);
+  const cachedOutOfScope = new Set(
+    missingKeys.filter((key) => {
+      const checked = Date.parse(knownState.issues[key].outOfScopeCheckedAt ?? "");
+      return Number.isFinite(checked) && nowMs - checked < outOfScopeRecheckMs;
+    }),
+  );
   const classified = new Map();
-  for (const key of missingKeys) classified.set(key, await classifyMissingIssue(client, key));
+  for (const key of missingKeys) {
+    if (!cachedOutOfScope.has(key)) classified.set(key, await classifyMissingIssue(client, key));
+  }
   const pendingDeletions = [...classified.values()].filter((r) => r === "deleted").length;
   if (exceedsDeletionLimit(pendingDeletions, activeKnownKeys.length)) {
     throw new MassDeletionError(pendingDeletions, activeKnownKeys.length);
@@ -439,7 +459,16 @@ export async function runInboundSync(
   const outOfScope = [];
   const deleted = [];
   const deletedStatus = boardStatuses.find((st) => st.name.toLowerCase() === String(deletedStatusName).toLowerCase());
+  // A key that came back into scope drops its out-of-scope marker.
+  for (const key of seenKeys) {
+    const entry = nextState.issues[key];
+    if (entry?.outOfScopeCheckedAt) {
+      const { outOfScopeCheckedAt: _marker, ...rest } = entry;
+      nextState.issues[key] = rest;
+    }
+  }
   for (const key of missingKeys) {
+    if (cachedOutOfScope.has(key)) continue;
     const reason = classified.get(key);
     const boardIssue = boardIssuesByKey.get(key);
     const entry = { key, reason, localIssueNumber: boardIssue?.issueNumber };
@@ -456,6 +485,9 @@ export async function runInboundSync(
         const prior = nextState.issues[key];
         if (prior) nextState.issues[key] = { ...prior, boardUpdatedAt: moved.updatedAt };
       }
+    }
+    if (reason === "out-of-scope" && !dryRun && nextState.issues[key]) {
+      nextState.issues[key] = { ...nextState.issues[key], outOfScopeCheckedAt: now };
     }
     // A deletion is applied once: keep the entry (comment ids, baseline) marked `deletedAt` so
     // later pulls do not report it again and a reappearance can be recognised (#1641).
@@ -484,6 +516,8 @@ export async function runInboundSync(
     conflicted,
     commentsImported,
     reportedOutOfScope,
+    outOfScopeCached: cachedOutOfScope.size,
+    moreAvailable,
     restored,
     outOfScope,
     deleted,

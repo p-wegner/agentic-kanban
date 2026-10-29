@@ -6,7 +6,7 @@
 // board writes, and returns the summary that would result.
 
 import { checkProfile } from "../lib/profile.mjs";
-import { buildClientFromEnv, printResult, isDryRun, checkAuth } from "../lib/cli-client.mjs";
+import { buildClientFromEnv, printResult, isDryRun, checkAuth, rateLimitResult } from "../lib/cli-client.mjs";
 import { defaultJql } from "../lib/pull-plan.mjs";
 import { runInboundSync } from "../lib/sync-engine.mjs";
 import {
@@ -101,9 +101,11 @@ async function main() {
       assigneeMap: assigneeMapFromEnv(process.env),
       pendingWritebackKeys: new Set(Object.values(writebacks.keys)),
       deletedStatusName: process.env.JIRA_SYNC_DELETED_STATUS || undefined,
+      maxIssuesPerRun: positiveInt(process.env.SYNC_CONFIG_MAXISSUESPERRUN),
+      outOfScopeRecheckMs: positiveInt(process.env.SYNC_CONFIG_OUTOFSCOPERECHECKHOURS, 24) * 3_600_000,
     });
   } catch (err) {
-    return { ok: false, step: "sync", reason: err.message, code: err.code ?? null, retryable: err.retryable ?? false };
+    return rateLimitResult(err) ?? { ok: false, step: "sync", reason: err.message, code: err.code ?? null, retryable: err.retryable ?? false };
   }
 
   if (!dryRun) {
@@ -143,6 +145,11 @@ async function main() {
 
   const { nextState: _nextState, linkSnapshotAdjust: _linkAdjust, ...summary } = result;
   return { ok: true, step: "pull", syncDirection: resolveSyncDirections(process.env).default, dryRun, applied: !dryRun, ...summary };
+}
+
+function positiveInt(raw, fallback) {
+  const n = Math.floor(Number(String(raw ?? "").trim()));
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
 const result = await main();

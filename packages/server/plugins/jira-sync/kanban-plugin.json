@@ -111,6 +111,8 @@
       { "key": "pushStatus", "type": "boolean", "label": "Push status transitions", "description": "On unless set to false." },
       { "key": "pushComments", "type": "boolean", "label": "Push comments", "description": "On unless set to false." },
       { "key": "statusMap", "type": "json", "label": "Status map (JSON)", "description": "Optional override of board status to Jira status name, e.g. {\"Done\": \"Fertig\"}. Without it, board statuses match by Jira status category." },
+      { "key": "maxIssuesPerRun", "type": "number", "label": "Max issues per pull", "description": "Optional cap on issues read per pull; the summary reports moreAvailable when it truncates. A truncated pull classifies no missing keys. Empty = unlimited." },
+      { "key": "outOfScopeRecheckHours", "type": "number", "label": "Re-check out-of-scope keys (hours)", "description": "A known key missing from the JQL result is looked up once, then not again for this many hours. Default 24." },
       { "key": "pullEveryMinutes", "type": "number", "label": "Pull every (min)", "description": "Scheduled pull interval in minutes. Empty or 0 = off." },
       { "key": "pushEveryMinutes", "type": "number", "label": "Push every (min)", "description": "Scheduled push interval in minutes. Empty or 0 = off." }
     ],
