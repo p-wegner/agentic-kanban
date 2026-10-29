@@ -14,12 +14,14 @@ import { describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { baseBranchHealth, issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
+import { baseBranchHealth, issues, preferences, redDebt, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { invalidatePreferencesCache } from "../repositories/preferences.repository.js";
 import { createAutoMergeOrchestrator } from "../startup/auto-merge-orchestrator.js";
 import { getDeliveryStatus } from "../services/delivery-status.service.js";
 import { resolveBaseRedVeto } from "../services/merge-train-base-veto.js";
+import { decideWindowHold } from "../services/merge-train-window.js";
+import { DEFAULT_RED_DEBT_MAX_ENTRIES } from "../lib/red-debt-cap.js";
 import { riskPosturePrefKey } from "../services/risk-posture.service.js";
 
 type Db = ReturnType<typeof createTestDb>["db"];
@@ -130,5 +132,29 @@ describe("the train window's red-base veto reads the risk posture (#1233)", () =
     const projectId = await seedRedProject(db, "standard");
     const iterateLike = { redBasePolicy: "allow-file-debt-ticket", level: "iterate", source: "risk_posture" };
     await expect(resolveBaseRedVeto(projectId, db, { posture: iterateLike as never })).resolves.toBeNull();
+  });
+});
+
+describe("the red-debt cap (#916) reaches the train window and the chip (#1740)", () => {
+  it("soft posture (`iterate`; `fast` is no longer a level) + over-cap ledger + red base → the veto holds, decideWindowHold says base_red, the chip says degraded", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedRedProject(db, "iterate");
+    const now = new Date().toISOString();
+    for (let i = 0; i < DEFAULT_RED_DEBT_MAX_ENTRIES + 1; i++) {
+      await db.insert(redDebt).values({
+        id: randomUUID(), projectId, suite: `suite-${i}`, tag: "real", sinceCommit: RED_SHA, openedAt: now,
+      });
+    }
+    invalidatePreferencesCache();
+
+    const veto = await resolveBaseRedVeto(projectId, db);
+    expect(veto).toMatchObject({ healthSha: RED_SHA });
+    expect(
+      decideWindowHold({ verdict: { release: true, reason: "operator_release" }, breakerPaused: false, baseRed: veto !== null }),
+    ).toMatchObject({ release: false, reason: "base_red" });
+
+    const delivery = await getDeliveryStatus(projectId, db);
+    expect(delivery.redBase).toMatchObject({ policy: "block", holdingWindow: true });
+    expect(delivery.redBase.capNote).toContain("red-debt cap");
   });
 });

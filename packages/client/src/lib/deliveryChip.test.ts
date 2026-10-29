@@ -259,3 +259,13 @@ describe("buildDeliveryChipView live merge state", () => {
     expect(shortTrainLabel("q1790000000000")).toBe("q1790000000000");
   });
 });
+
+describe("describeRedBase cap note (#1740)", () => {
+  it("names the red-debt cap degrade next to the effective policy", () => {
+    const line = describeRedBase({
+      policy: "block", capNote: "red-debt cap exceeded (11 open debt entries exceed the cap of 10)",
+      latestOutcome: "red", latestSha: null, holdingWindow: true, openHealTickets: 0,
+    });
+    expect(line).toContain("block (degraded: red-debt cap exceeded");
+  });
+});

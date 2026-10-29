@@ -1,11 +1,13 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import type { PostureOverride } from "@agentic-kanban/shared/types";
 import { resolveRiskPosture } from "./risk-posture.service.js";
+import { DEFAULT_FLUSH_GATE_SCRIPT, resolveFlushGate } from "./merge-train-flush-run.js";
 
 const trainMaxSizePref = projectPref("train_max_size");
 const trainMaxWaitMsPref = projectPref("train_max_wait_ms");
 const verifyGateStrategyPref = projectPref("verify_gate_strategy");
 const fileContentionPref = projectPref("file_contention");
+const queueFlushGatePref = projectPref("queue_flush_gate");
 
 /**
  * Every explicit per-field pref that CONTRADICTS the project's resolved risk posture (#1560).
@@ -39,6 +41,10 @@ export function detectPostureOverrides(prefMap: Map<string, string>, projectId: 
   const contention = prefMap.get(fileContentionPref.key(projectId))?.trim().toLowerCase();
   if (contention && contention !== posture.contentionMode) {
     out.push({ key: fileContentionPref.key(projectId), label: "file contention", value: contention, postureValue: posture.contentionMode });
+  }
+  const gate = resolveFlushGate(prefMap.get(queueFlushGatePref.key(projectId)));
+  if (gate.override) {
+    out.push({ key: queueFlushGatePref.key(projectId), label: "flush gate", value: gate.override, postureValue: DEFAULT_FLUSH_GATE_SCRIPT });
   }
   return out;
 }
