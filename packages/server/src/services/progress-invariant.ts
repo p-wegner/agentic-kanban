@@ -46,6 +46,8 @@ export type DriverKind =
   | "scheduled-retry"
   | "merge-train"
   | "train-window"
+  | "train-in-flight"
+  | "breaker-paused"
   | "merge-hold"
   | "blocked-by"
   | "quota-cooldown"
@@ -109,6 +111,13 @@ export interface TicketDriverSnapshot {
    */
   trainWindowDepartsAtMs?: number | null;
   hold: "merge-hold" | "blocked-by" | "quota-cooldown" | null;
+  /**
+   * #1767: the project has a train in `gating`/`landing`. A ticket that became ready after
+   * that train's window closed has no driver until the next window opens: the train IS its driver.
+   */
+  projectTrainInFlight?: boolean;
+  /** #1767: the project's auto-merge breaker is paused; every ready ticket is driverless on purpose. */
+  projectBreakerPaused?: boolean;
 }
 
 export type ProgressVerdict =
@@ -252,6 +261,8 @@ export function decideTicketDriver(s: TicketDriverSnapshot, nowMs: number): Prog
   if (s.hold === "quota-cooldown") return { driven: true, driver: "quota-cooldown" };
   if (s.workspaceStatus === "blocked") return { driven: true, driver: "attention-marked" };
   if (s.inActiveTrain) return { driven: true, driver: "merge-train" };
+  if (s.readyForMerge && s.projectBreakerPaused) return { driven: true, driver: "breaker-paused" };
+  if (s.readyForMerge && s.projectTrainInFlight) return { driven: true, driver: "train-in-flight" };
   if (isWindowDriven(s, nowMs)) return { driven: true, driver: "train-window" };
   if (s.workspaceStatus === "closed") {
     return violation(
