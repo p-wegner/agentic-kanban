@@ -4,10 +4,14 @@
  */
 import type { MergeQueueEvent } from "./merge-queue.service.js";
 import { describeFailedSuites } from "./verify-failed-suites.js";
+import { classifyInfraRed } from "./merge-train-verdict.js";
 
 /** A watchdog kill / timeout / held run is inconclusive, not red — nothing for a fix agent to fix. */
-export function isInconclusiveGate(gate: { passed: boolean; timedOut?: boolean; held?: boolean }): boolean {
-  return !gate.passed && (gate.timedOut === true || gate.held === true);
+export function isInconclusiveGate(gate: { passed: boolean; timedOut?: boolean; held?: boolean; message?: string; failedSuites?: readonly string[] }, scopedSuiteCount?: number): boolean {
+  if (gate.passed) return false;
+  if (gate.timedOut === true || gate.held === true) return true;
+  // #1772: an infra red (full disk, zero-suite worker failure, a mass failure) is never a verdict on the code.
+  return gate.message !== undefined && classifyInfraRed({ passed: false, message: gate.message, failedSuites: gate.failedSuites }, scopedSuiteCount) !== null;
 }
 
 /** Prefix of the `reconciledReason` an inconclusive train is closed out with. */

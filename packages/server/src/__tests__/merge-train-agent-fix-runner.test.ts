@@ -30,7 +30,7 @@ vi.mock("../services/gate-quiesce.js", async (importOriginal) => {
  * assembled tree holds `b.txt` and no `fixed.txt`.
  */
 const git = (repoPath: string, args: string[]) => gitExecOrThrow(args, { cwd: repoPath });
-const VERIFY_RED_ON_B_UNLESS_FIXED = `node -e "process.exit(require('fs').existsSync('b.txt')&&!require('fs').existsSync('fixed.txt')?1:0)"`;
+const VERIFY_RED_ON_B_UNLESS_FIXED = `node -e "const r=require('fs').existsSync('b.txt')&&!require('fs').existsSync('fixed.txt');if(r)console.log('FAIL b.txt present without fixed.txt');process.exit(r?1:0)"`;
 
 let repoPath: string;
 let db: TestDb;
