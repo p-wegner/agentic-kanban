@@ -257,6 +257,20 @@ function buildProfileAttestor(opts: WorkerDaemonOptions, aliases: ReturnType<typ
   });
 }
 
+/** #1773: re-point `opts.profiles` and build the new attestor; null when the set is unchanged. */
+function swapAttestedProfiles(opts: WorkerDaemonOptions, aliases: ReturnType<typeof resolveProfileAliases>, log: (m: string) => void, next: string[] | undefined, via: string): WorkerProfileAttestor | null {
+  if (JSON.stringify(next ?? null) === JSON.stringify(opts.profiles ?? null)) return null;
+  opts.profiles = next;
+  log(`[worker] attested profiles changed (${via}) -> ${next ? next.join(",") : "every discovered login"}`);
+  return buildProfileAttestor(opts, aliases, log);
+}
+
+/** #1773: `worker config set|unset profiles` edits the state file; the heartbeat picks it up (no restart, no reconnect). */
+function adoptPersistedProfiles(opts: WorkerDaemonOptions, aliases: ReturnType<typeof resolveProfileAliases>, log: (m: string) => void, stateFile: string, desired: string[] | undefined): WorkerProfileAttestor | null {
+  const override = persistedProfilesOverride(stateFile, desired);
+  return override ? swapAttestedProfiles(opts, aliases, log, override.profiles, "config") : null;
+}
+
 export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<WorkerDaemonHandle> {
   const stateFile = opts.stateFile ?? defaultWorkerStateFile();
   // #1381: flags pin their keys; the rest start from what the board last pushed.
@@ -641,19 +655,10 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     });
   }
 
-  /** #1773: swap the attested set in place; the next heartbeat (sent now) re-attests on the live socket. Running sessions are untouched. */
-  function applyProfiles(next: string[] | undefined): void {
-    if (JSON.stringify(next ?? null) === JSON.stringify(opts.profiles ?? null)) return;
-    opts.profiles = next;
-    profileAttestor = buildProfileAttestor(opts, profileAliases, log);
-    log(`[worker] attested profiles changed -> ${next ? next.join(",") : "every discovered login"}`);
-    void sendHeartbeat();
-  }
-
   const settingsControls = {
     setMaxConcurrency: (n: number) => { opts.maxConcurrency = n; runner.setMaxConcurrency(n); },
     setLabels: (labels: string[]) => { opts.labels = labels; },
-    setProfiles: (profiles: string[]) => applyProfiles(profiles.length > 0 ? profiles : undefined), // #1773
+    setProfiles: (profiles: string[]) => { const swapped = swapAttestedProfiles(opts, profileAliases, log, profiles.length > 0 ? profiles : undefined, "live"); if (swapped) { profileAttestor = swapped; void sendHeartbeat(); } }, // #1773: swap in place; the heartbeat sent now re-attests on the live socket, running sessions untouched
     setDrain: (on: boolean) => { if (on === draining) return; draining = on; if (!on) announceOnline = true; void sendHeartbeat(); },
   };
   selfUpdate?.begin();
@@ -698,12 +703,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       log(`[worker] profile quota refresh failed (continuing): ${errorMessage(err)}`);
     }
     // #1773: `worker config set|unset profiles` edits the state file; pick it up here (no restart, no reconnect).
-    const override = persistedProfilesOverride(stateFile, settings.desired()?.profiles);
-    if (override && JSON.stringify(override.profiles ?? null) !== JSON.stringify(opts.profiles ?? null)) {
-      opts.profiles = override.profiles;
-      profileAttestor = buildProfileAttestor(opts, profileAliases, log);
-      log(`[worker] attested profiles changed (config) -> ${override.profiles ? override.profiles.join(",") : "every discovered login"}`);
-    }
+    profileAttestor = adoptPersistedProfiles(opts, profileAliases, log, stateFile, settings.desired()?.profiles) ?? profileAttestor;
     // #1370: re-run the doctor in the background every few minutes; it never delays a beat.
     doctor.refreshIfDue();
     const doctorToSend = doctor.pending();
