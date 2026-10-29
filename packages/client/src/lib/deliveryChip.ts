@@ -114,10 +114,11 @@ export function describeRedBase(redBase: DeliveryStatusResponse["redBase"] | und
   const verdict = redBase.latestOutcome
     ? `latest sweep ${redBase.latestOutcome}${redBase.latestSha ? ` at ${redBase.latestSha.slice(0, 8)}` : ""}`
     : "never swept";
+  const policy = redBase.capNote ? `${redBase.policy} (degraded: ${redBase.capNote})` : redBase.policy;
   const hold = redBase.holdingWindow
-    ? "HOLDING the train window"
+    ? `HOLDING the train window${redBase.capNote ? ` (policy ${policy})` : ""}`
     : redBase.latestOutcome === "red"
-      ? `not holding the window (policy '${redBase.policy}')`
+      ? `not holding the window (policy '${policy}')`
       : "not holding the window";
   const heal = redBase.openHealTickets > 0
     ? `, ${redBase.openHealTickets} open heal ticket${redBase.openHealTickets === 1 ? "" : "s"}`

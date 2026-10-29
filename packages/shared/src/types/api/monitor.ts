@@ -443,7 +443,10 @@ export interface RcCandidateSummary {
  * past holds the window; under every other policy it is reported here and never holds.
  */
 export interface RedBaseStatus {
+  /** The EFFECTIVE policy: the posture's, after the #916 red-debt cap (#1740). */
   policy: RedBasePolicy;
+  /** The red-debt cap note when the cap degraded `policy` (e.g. to `block`), else null/absent. */
+  capNote?: string | null;
   /** The latest sweep's outcome for this project, or null when it was never swept. */
   latestOutcome: "green" | "red" | "timeout" | "unverified" | null;
   /** The sha that outcome was recorded at. */

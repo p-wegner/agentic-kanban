@@ -53,12 +53,8 @@ import {
 } from "./base-branch-health.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { getPreference } from "../repositories/preferences.repository.js";
-import { listRedDebt, openRedDebtEntry } from "../repositories/red-debt.repository.js";
-import {
-  redDebtMaxPrefKey,
-  redDebtMaxAgePrefKey,
-  resolveEffectiveRedBasePolicy,
-} from "../lib/red-debt-cap.js";
+import { openRedDebtEntry } from "../repositories/red-debt.repository.js";
+import { resolveEffectiveRedBasePolicyFor } from "./red-base-policy.service.js";
 import { resolveRedDebtGateVerdict, redDebtGatePostureForPolicy } from "../lib/red-debt-gate.js";
 import {
   riskPosturePrefKey,
@@ -704,23 +700,11 @@ export async function runPreLockGate(args: {
         if (redBasePolicyRaw) prefMap.set(redBasePolicyPrefKey(projectId), redBasePolicyRaw);
         const requestedPosture = resolveRiskPosture(prefMap, projectId);
         // #916 — a ledger over its cap must not keep softening verdicts forever; it degrades
-        // the EFFECTIVE policy instead. Evaluated against the SAME open-ledger snapshot the
-        // verdict itself reads below, so a degrade to `block` reliably falls out of the check.
-        const ledger = await listRedDebt(projectId, {}, database);
-        const oldestOpenEntryAgeMs = ledger.length > 0
-          ? Date.now() - Math.min(...ledger.map((e) => Date.parse(e.openedAt)).filter((n) => !Number.isNaN(n)))
-          : null;
-        const [maxEntriesRaw, maxAgeMsRaw] = await Promise.all([
-          getPreference(redDebtMaxPrefKey(projectId), database).catch(() => null),
-          getPreference(redDebtMaxAgePrefKey(projectId), database).catch(() => null),
-        ]);
-        const capResult = resolveEffectiveRedBasePolicy({
-          policy: requestedPosture.redBasePolicy,
-          openEntryCount: ledger.length,
-          oldestOpenEntryAgeMs,
-          maxEntriesRaw,
-          maxAgeMsRaw,
-        });
+        // the EFFECTIVE policy instead (#1740: through the one resolver the train veto and the
+        // delivery chip also read). Same open-ledger snapshot the verdict reads below.
+        const effective = await resolveEffectiveRedBasePolicyFor(projectId, database, { posture: requestedPosture });
+        const ledger = effective.ledger;
+        const capResult = effective.cap;
         const redBasePolicy = capResult.effectivePolicy;
         if (capResult.degraded) {
           console.log(`[workspace-merge] ${capResult.note}`);

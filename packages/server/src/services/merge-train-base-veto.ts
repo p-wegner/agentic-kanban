@@ -31,13 +31,12 @@
  * switch alone answers the measured problem; `BaseRedVetoFacts` is the seam a refinement would
  * extend.
  */
-import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import type { RedBasePolicy } from "@agentic-kanban/shared/types";
 import { getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
-import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { getProjectRepoFields } from "../repositories/project.repository.js";
 import * as gitService from "./git.service.js";
-import { resolveRiskPosture, type RiskPosture } from "./risk-posture.service.js";
+import type { RiskPosture } from "./risk-posture.service.js";
+import { resolveEffectiveRedBasePolicyFor } from "./red-base-policy.service.js";
 import type { Database } from "../db/index.js";
 
 export interface BaseRedVetoFacts {
@@ -104,26 +103,26 @@ export async function resolveBaseRedVeto(
 ): Promise<BaseRedVeto | null> {
   const health = await getLatestBaseBranchHealth(projectId, database).catch(() => undefined);
   if (!health) return null;
-  const posture = opts.posture ?? resolveRiskPosture(
-    toPrefMap(await getAllPreferencesCached(database).catch(() => [])),
-    projectId,
-  );
-  if (posture.redBasePolicy !== "block") {
+  // #1740 — the policy is the CAPPED one: a ledger over its #916 cap degrades it to `block`.
+  const effective = await resolveEffectiveRedBasePolicyFor(projectId, database, { posture: opts.posture });
+  const { posture, policy } = effective;
+  if (policy !== "block") {
     if (health.outcome === "red") {
       console.log(
         `[merge-train-base-veto] project ${projectId}: base is red at ${health.sha.slice(0, 8)} but `
-          + `redBasePolicy '${posture.redBasePolicy}' (risk posture '${posture.level}') reports rather than holds — `
+          + `redBasePolicy '${policy}' (risk posture '${posture.level}') reports rather than holds — `
           + `the train window may depart (#1233)`,
       );
     }
     return null;
   }
+  if (effective.capNote) console.log(`[merge-train-base-veto] project ${projectId}: ${effective.capNote} (#1740)`);
   const repo = await getProjectRepoFields(projectId, database).catch(() => undefined);
   const baseAheadOfHealthSha = repo?.repoPath
     ? await isBaseAhead(repo.repoPath, repo.defaultBranch ?? health.branch, health.sha)
     : false;
   return decideBaseRedVeto(
-    { outcome: health.outcome, healthSha: health.sha, baseAheadOfHealthSha, redBasePolicy: posture.redBasePolicy },
+    { outcome: health.outcome, healthSha: health.sha, baseAheadOfHealthSha, redBasePolicy: policy },
     health.message,
   );
 }
