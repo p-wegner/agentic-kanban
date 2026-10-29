@@ -354,7 +354,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   const currentUrl = (): string => boardUrls[urlIndex]!;
   let ws: WebSocket | null = null;
   let stopped = false;
-  const acceptFrame = createFrameGate(identity.workerToken, opts.requireSignedFrames ?? process.env.KANBAN_WORKER_REQUIRE_SIGNED_FRAMES === "1", log); // #1756
+  const acceptFrame = createFrameGate(() => identity.workerToken, opts.requireSignedFrames ?? process.env.KANBAN_WORKER_REQUIRE_SIGNED_FRAMES === "1", log); // #1756
   let draining = settings.startDrained();
   let fatal: string | null = null;
   /** Re-pairings attempted, and whether one is in flight (#754 â€” see handleUnauthorized). */

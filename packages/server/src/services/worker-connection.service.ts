@@ -301,6 +301,9 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
         const requestId = message.requestId;
         void registry.rotateWorkerToken(workerId).then((r) => {
           send(workerId, r ? { type: "token_rotate", requestId, workerToken: r.workerToken, tokenExpiresAt: r.tokenExpiresAt } : { type: "token_rotate", requestId, error: "unknown worker" });
+          // #1756: the worker switches keys on receipt; this frame was signed with the old one.
+          const held = connections.get(workerId);
+          if (r && held?.frameKey) held.frameKey = frameKeyFromToken(r.workerToken);
         }).catch((err) => {
           console.error(`[worker-connection] token rotation failed: workerId=${workerId}`, err);
           send(workerId, { type: "token_rotate", requestId, error: "rotation failed" });

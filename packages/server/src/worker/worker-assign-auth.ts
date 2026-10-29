@@ -63,11 +63,14 @@ export function verifyFrame(key: string, raw: string, lastSeq: number, nowMs = D
  * is refused, so an injected assign (setupScript = code execution) cannot run. An old board never
  * signs, so until then unsigned frames are accepted (deliberate compatibility window).
  */
-export function createFrameGate(workerToken: string, requireSigned: boolean | undefined, log: (line: string) => void): (raw: string) => boolean {
-  const key = frameKeyFromToken(workerToken);
+export function createFrameGate(getToken: () => string, requireSigned: boolean | undefined, log: (line: string) => void): (raw: string) => boolean {
+  let token = getToken();
+  let key = frameKeyFromToken(token); // follows token rotation / re-pairing (#1766)
   let lastSeq = 0;
   let signedSeen = false;
   return (raw) => {
+    const current = getToken();
+    if (current !== token) { token = current; key = frameKeyFromToken(token); }
     const verdict = verifyFrame(key, raw, lastSeq);
     if (verdict.ok) { lastSeq = verdict.seq; signedSeen = true; return true; }
     if (requireSigned || signedSeen || verdict.reason !== "unsigned") {
