@@ -191,6 +191,13 @@ function Get-ConfiguredProfiles {
   try { $p = (Get-Content $ConfigFile -Raw | ConvertFrom-Json).profiles; if ($p) { return @(([string]$p) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) } } catch { }
   return @()
 }
+# Daemon-reported set; a daemon that does not report one yet falls back to the configured set,
+# so a toggle never collapses the set to the single clicked profile.
+function Get-CurrentProfiles($cs) {
+  $l = if ($cs.status.profiles) { $cs.status.profiles } else { $cs.status.attestedProfiles }
+  if ($l) { return @(ConvertTo-ProfileNames $l) }
+  return @(Get-ConfiguredProfiles)
+}
 # Persist FIRST (so a restart or reboot keeps it), then try the live re-attest
 # endpoint; a daemon without it (or without a control file) gets a service restart.
 function Set-ProfileSet([string[]]$Names) {
@@ -211,7 +218,7 @@ function Set-ProfileSet([string[]]$Names) {
 $script:profileKey = $null
 function Update-ProfileMenu {
   $cs = Get-ControlStatus
-  $attested = if ($cs) { @(ConvertTo-ProfileNames $(if ($cs.status.profiles) { $cs.status.profiles } else { $cs.status.attestedProfiles })) } else { @() }
+  $attested = if ($cs) { @(Get-CurrentProfiles $cs) } else { @() }
   $all = @($attested + (Get-ConfiguredProfiles) | Select-Object -Unique)
   $key = ($(if ($cs) { 'up' } else { 'down' })) + '|' + ($all -join ',') + '|' + ($attested -join ',')
   if ($key -eq $script:profileKey) { return }
@@ -230,7 +237,7 @@ function Update-ProfileMenu {
         $name = [string]$sender.Tag
         $cur = @()
         $cs2 = Get-ControlStatus
-        if ($cs2) { $cur = @(ConvertTo-ProfileNames $(if ($cs2.status.profiles) { $cs2.status.profiles } else { $cs2.status.attestedProfiles })) }
+        if ($cs2) { $cur = @(Get-CurrentProfiles $cs2) } else { $cur = @(Get-ConfiguredProfiles) }
         $new = if ($cur -contains $name) { @($cur | Where-Object { $_ -ne $name }) } else { @($cur + $name) }
         Set-ProfileSet $new
         $script:profileKey = $null

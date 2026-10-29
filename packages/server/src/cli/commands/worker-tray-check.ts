@@ -27,7 +27,7 @@ export function trayLauncherPath(): string | null {
   return null;
 }
 
-export const TRAY_REMEDY = "Start it: wscript tools\worker-windows\ak-worker-tray-launch.vbs (or `agentic-kanban-worker setup` offers to).";
+export const TRAY_REMEDY = "Start it: wscript tools\\worker-windows\\ak-worker-tray-launch.vbs (or `agentic-kanban-worker setup` offers to).";
 
 /** Pure: Windows-only; `running` null (probe failed) is `unknown`, never a pass. */
 export function describeTray(platform: string, running: boolean | null): DoctorCheck | null {
