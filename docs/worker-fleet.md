@@ -418,7 +418,7 @@ worker. Before binding a LAN address on a Windows board machine:
    `192.168.0.0/24`) and to the **Private profile only** — not `Any`/`Domain,Public`.
 3. Keep the tailnet rules from `scripts/fleet-firewall.ps1` as they are; do not widen them to cover the LAN.
 
-TLS or a frame MAC on these listeners (so the LAN path stops being a plaintext RCE channel) is out of
+TLS on these listeners is out of
 scope here and still open.
 
 ### Threat model: everything here is plaintext
@@ -431,7 +431,7 @@ because "keep it on a trusted network" is too vague to act on:
 | The per-worker bearer token (every heartbeat, and the WS upgrade) | Impersonate that worker: take its assignments, stream fabricated output into its sessions | — |
 | The per-assignment git token (in the `assign` frame, then `Authorization: Basic` on every git request) | Clone that one project, for as long as that assignment is current | Push a chosen tree to that branch's incoming ref |
 | Repo contents, both directions | Source disclosure | — |
-| The board-authored `setupScript` inside the `assign` frame | — | **Arbitrary code execution on the worker machine**, as the worker's user |
+| The board-authored `setupScript` inside the `assign` frame | — | ~~Arbitrary code execution~~ — **blocked for an off-path injector by frame signing (#1756)**; still open for anyone who captured the WS upgrade's bearer token (see below) |
 
 The last row decides the posture: this is not merely a confidentiality-sensitive transport,
 it is an **RCE channel into every worker** for anyone who can inject frames. So:
@@ -445,7 +445,18 @@ it is an **RCE channel into every worker** for anyone who can inject frames. So:
 - **Do not put a TLS-terminating proxy in front of the git transport.** The worker rebuilds
   the URL itself and drops any path prefix (section 8), so such a proxy is bypassed rather
   than enforced.
-- TLS on either listener is **not implemented**. Until it is, the network *is* the control.
+- **Frame authentication (#1756, protocol 3).** Every board->worker frame carries `auth: { seq, mac }`:
+  HMAC-SHA256 over the frame, keyed from the worker's bearer token (the board derives the same key
+  from the stored token digest; `lib/worker-frame-auth.ts`). `seq` is strictly increasing per worker
+  and doubles as a timestamp. The daemon verifies before parsing and drops frames that are bad-MAC,
+  replayed (`seq` not above the last accepted) or older than 15 minutes. Once it has seen one signed
+  frame, or when started with `requireSignedFrames`, it also refuses **unsigned** frames, so an
+  injected `assign`/`stop`/`verify_job` no longer runs. Until the first signed frame an unsigned
+  frame is accepted, so an old (unsigning) board keeps working; set `requireSignedFrames` to close
+  that window. **Limit:** the bearer token itself still travels in the clear in the upgrade header, so
+  an on-path attacker who *captured that handshake* can derive the key. Signing stops blind
+  injection and replay, not a passive sniffer; confidentiality and that case still need the tailnet.
+- TLS on either listener is **not implemented** (the alternative control in #1756 was not chosen).
 
 The scoping in #247 / #246 / #753 bounds what a stolen *git* token is worth — one worker, one
 project, one ref, and only while its dispatch is current. It does not make the channel

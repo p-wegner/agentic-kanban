@@ -323,8 +323,13 @@ export function parseWorkerPhaseTimings(raw: unknown): WorkerPhaseTimings | unde
  * capability field, so a protocol-1 worker parses and connects exactly as it did — it
  * simply attests nothing, and a restricted project keeps getting today's refusal. The
  * number moves so `worker list` and the update-check can SEE which side is older.
+ *
+ * **3 (#1756)** — every board->worker frame carries `auth: { seq, mac }` (HMAC over the frame, keyed
+ * from the worker token, see `server/src/lib/worker-frame-auth.ts`). An extra field, so protocol-2
+ * peers interoperate unchanged (MIN_SUPPORTED is NOT raised); the number moves so a signing board
+ * and a verifying worker are visible in `worker list`.
  */
-export const WORKER_PROTOCOL_VERSION = 2;
+export const WORKER_PROTOCOL_VERSION = 3;
 
 /** The oldest protocol a board will talk to. Raise this only with a real breaking change. */
 export const MIN_SUPPORTED_WORKER_PROTOCOL_VERSION = 1;

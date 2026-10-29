@@ -17,6 +17,7 @@ import {
   type BoardToWorkerMessage,
   type WorkerToBoardMessage,
 } from "@agentic-kanban/shared/lib/worker-protocol";
+import { frameKeyFromToken, signFrame } from "../lib/worker-frame-auth.js";
 import type { WorkerRegistry } from "./worker-registry.service.js";
 import type { DeferredLaunchFailure } from "./agent-dispatch.service.js";
 // The worker builds this refusal from the same constant, so the classifier cannot drift
@@ -81,8 +82,13 @@ interface WorkerConnection {
   missedPings: number;
   /** Last pong or frame from the worker (epoch ms) — the real silence, independent of how many ticks fired. */
   lastHeardAt: number;
+<<<<<<< HEAD
   /** #1754: the daemon process behind this socket, from its latest `hello` (absent for an older build). */
   instanceId?: string;
+=======
+  /** #1756: key board->worker frames are signed with; absent only for test doubles that skip the upgrade. */
+  frameKey?: string;
+>>>>>>> 8907bea62 (feat(#1756): HMAC-sign board->worker frames; daemon refuses unsigned/replayed ones)
 }
 
 /** #1754: a second daemon process tried to take over a live worker identity. */
@@ -151,6 +157,7 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
   // manager built on a registry honours it, not just the fleet facade's.
   registry.onRevoke((workerId) => { closeConnection(workerId); });
 
+<<<<<<< HEAD
   /**
    * #1754: a newer socket arrives while the registered one is demonstrably alive (answered a ping/frame
    * within two keepalive intervals) and its daemon identified itself. Whether the newcomer is the SAME
@@ -185,6 +192,11 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
   }
 
   function adopt(workerId: string, ws: WSContext): void {
+=======
+  const frameSeq = new Map<string, number>(); // #1756: last signed seq per worker, across reconnects
+
+  function handleOpen(workerId: string, ws: WSContext, frameKey?: string): void {
+>>>>>>> 8907bea62 (feat(#1756): HMAC-sign board->worker frames; daemon refuses unsigned/replayed ones)
     // A reconnect replaces the previous socket (stale after e.g. a NAT rebind).
     //
     // Say so in the log. This eviction is indistinguishable from a network drop
@@ -224,6 +236,7 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
       pendingSessionIds: new Map(),
       missedPings: 0,
       lastHeardAt: Date.now(),
+      ...(frameKey ? { frameKey } : {}),
     };
     connections.set(workerId, conn);
     const raw = rawSocket(ws);
@@ -348,7 +361,16 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     const conn = connections.get(workerId);
     if (!conn) return false;
     try {
-      conn.ws.send(JSON.stringify(message));
+      // #1756: sign when the upgrade gave us the key (always, on the real route); seq survives reconnects.
+      let wire: string;
+      if (conn.frameKey) {
+        const seq = Math.max((frameSeq.get(workerId) ?? 0) + 1, now);
+        frameSeq.set(workerId, seq);
+        wire = signFrame(conn.frameKey, message, seq);
+      } else {
+        wire = JSON.stringify(message);
+      }
+      conn.ws.send(wire);
       // A delivered `assign` occupies a slot from THIS moment, not from the
       // agent's first output (#248).
       if (message.type === "assign") {
@@ -582,7 +604,8 @@ export function createWorkerWsRoute(
     }
     return {
       onOpen(_event: Event, ws: WSContext) {
-        manager.handleOpen(workerId, ws);
+        const token = extractToken(c); // already authenticated by the middleware below
+        manager.handleOpen(workerId, ws, token ? frameKeyFromToken(token) : undefined);
       },
       onMessage(event: MessageEvent, _ws: WSContext) {
         manager.handleMessage(workerId, typeof event.data === "string" ? event.data : String(event.data), _ws);
