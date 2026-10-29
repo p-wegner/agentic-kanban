@@ -154,6 +154,29 @@ export async function listWorkerBranchAssignments(
     .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
 }
 
+/** One fleet dispatch by session id, with the project and branch it was for (#1750). */
+export async function findWorkerSessionDispatch(
+  sessionId: string,
+  database: Database = db,
+): Promise<(WorkerBranchAssignment & { projectId: string }) | null> {
+  const [row] = await database
+    .select({
+      sessionId: sessions.id,
+      workerId: sessions.workerId,
+      branch: workspaces.branch,
+      projectId: issues.projectId,
+      status: sessions.status,
+      startedAt: sessions.startedAt,
+      endedAt: sessions.endedAt,
+    })
+    .from(sessions)
+    .innerJoin(workspaces, eq(workspaces.id, sessions.workspaceId))
+    .innerJoin(issues, eq(issues.id, workspaces.issueId))
+    .where(and(eq(sessions.id, sessionId), isNotNull(sessions.workerId)))
+    .limit(1);
+  return row ? { ...row, workerId: row.workerId! } : null;
+}
+
 /**
  * Is a dispatch still current — running, or ended recently enough that its result is
  * still expected?
