@@ -1,4 +1,4 @@
-// @gate:always-run walks the server source tree for callers of the per-ticket risk-tag readers
+// @gate:always-run when:packages/server/src/** — walks the server source tree for callers of the per-ticket risk-tag readers
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";

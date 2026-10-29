@@ -13,6 +13,8 @@ import { getIssueProjectId } from "../repositories/issue.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getTagById } from "../repositories/tag.repository.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
+import { parseJsonBody } from "../middleware/parse-body.js";
+import { riskTagGuardPeekBody } from "./issue-body-schemas.js";
 
 /**
  * #1745 — REST guard for the two paths that can attach a `risk:<level>` tag to an issue
@@ -32,7 +34,9 @@ export function createRiskTagGuard(database: Database): MiddlewareHandler {
     const isBatch = /\/issues\/batch$/.test(path);
     if (!tagMatch && !isCreate && !isBatch) return next();
 
-    const body = await c.req.json().catch(() => null) as { tagId?: unknown; tags?: unknown; projectId?: unknown; issues?: unknown } | null;
+    // The three handlers behind this guard all `parseJsonBody` the same body, so invalid JSON
+    // gets the same 400 here as it would there; the schema deliberately checks nothing else.
+    const body = await parseJsonBody(c, riskTagGuardPeekBody);
     let issueId: string | null = tagMatch?.[1] ?? null;
     let projectId: string | null = typeof body?.projectId === "string" ? body.projectId : null;
     let names: string[] = [];

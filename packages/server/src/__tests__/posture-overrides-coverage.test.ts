@@ -1,4 +1,4 @@
-// @gate:always-run scans the posture resolver modules for projectPref declarations
+// @gate:always-run when:packages/server/src/services/**,packages/server/src/startup/**,packages/shared/src/lib/** — reads the posture resolver modules off disk for projectPref declarations
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";

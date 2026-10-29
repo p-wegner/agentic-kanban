@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
 import { describeRiskTagApplied, refuseSofterRiskTags, riskPosturePrefKeyFor, riskTagLevel } from "@agentic-kanban/shared/lib/risk-tag-guard";
 import type { ToolDeps } from "./tools/deps.js";
-import { mcpStructuredError } from "./db-utils.js";
+import { mcpStructuredError, readPreferenceValue } from "./db-utils.js";
 
 /**
  * #1745 — MCP tools are agent-facing: a `risk:<level>` tag SOFTER than the project posture is
@@ -15,9 +14,8 @@ export async function guardRiskTags(
   tagNames: readonly string[],
 ) {
   if (!tagNames.some((n) => riskTagLevel(n))) return null;
-  const rows = await db.select({ value: schema.preferences.value }).from(schema.preferences)
-    .where(eq(schema.preferences.key, riskPosturePrefKeyFor(projectId))).limit(1);
-  const refusal = refuseSofterRiskTags(tagNames, rows[0]?.value);
+  const posture = await readPreferenceValue(db, schema, riskPosturePrefKeyFor(projectId));
+  const refusal = refuseSofterRiskTags(tagNames, posture);
   return refusal ? mcpStructuredError("RISK_TAG_SOFTER_THAN_PROJECT", refusal) : null;
 }
 

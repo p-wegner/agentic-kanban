@@ -371,8 +371,17 @@ import {
  * Train 2026-10-25-04: 531,689 -> 534,689 (+3,000 ms, one more suite at the ASSUMED 3,000 ms).
  * #1724's `worker-build-no-board-build.test.ts` imports `scripts/promote-lock.mjs`, outside its
  * package's import graph; its `when:` territory is that script, pack-worker and the service.
+ *
+ * Train 2026-10-29-18: 534,689 -> 546,689 (+12,000 ms, four more suites at the ASSUMED 3,000 ms).
+ * #1737's `jira-sync-docs-agree.test.ts` reads the plugin's docs and manifest off disk; #1745's
+ * `train-gate-no-softened-pass.test.ts`, `posture-overrides-coverage.test.ts` and
+ * `risk-tag-reader-ratchet.test.ts` read train-path, posture-resolver and server sources off disk
+ * (the forged-`risk:` tag they pin is a gate-softening path, so none is optional). All four carry
+ * a `when:` territory (the last three got theirs in this train), so an ordinary diff does not pay
+ * them; the floor counts every marker regardless. Expect the placeholder to shrink at the next
+ * `durations.json` capture.
  */
-const BASELINE_TOTAL_MS = 534_689;
+const BASELINE_TOTAL_MS = 546_689;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative

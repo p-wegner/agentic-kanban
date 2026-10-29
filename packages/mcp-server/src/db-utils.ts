@@ -143,12 +143,26 @@ export async function resolveActiveProjectIdOrNull(
   providedId?: string,
 ): Promise<string | null> {
   if (providedId) return providedId;
+  return (await readPreferenceValue(db, schema, "activeProjectId")) || null;
+}
+
+/**
+ * The MCP side's one `preferences` reader (#613): a single key's stored value, or `null` when
+ * the key has no row. `mcp-no-server-internals` forbids importing the server's
+ * `preferences.repository`, so this is its equivalent here — tools read a preference through
+ * it rather than querying the table themselves (`preference-access-single-source.test.ts`).
+ */
+export async function readPreferenceValue(
+  db: ToolDb,
+  schema: typeof schemaModule,
+  key: string,
+): Promise<string | null> {
   const pref = await db
     .select({ value: schema.preferences.value })
     .from(schema.preferences)
-    .where(eq(schema.preferences.key, "activeProjectId"))
+    .where(eq(schema.preferences.key, key))
     .limit(1);
-  return pref[0]?.value || null;
+  return pref[0]?.value ?? null;
 }
 
 /**

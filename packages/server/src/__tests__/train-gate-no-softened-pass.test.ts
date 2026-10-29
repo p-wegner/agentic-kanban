@@ -1,4 +1,4 @@
-// @gate:always-run scans the train-path sources for the red-debt subset rule
+// @gate:always-run when:packages/server/src/services/merge-queue-train-staging-gate.ts,packages/server/src/services/merge-queue-train.ts,packages/server/src/services/pre-merge-gate.service.ts,packages/server/src/services/risk-posture.service.ts — reads the three train-path sources off disk for the red-debt subset rule
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
