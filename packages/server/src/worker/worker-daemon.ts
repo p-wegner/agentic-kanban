@@ -69,7 +69,7 @@ import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
 import { packageManagersField, toolchainsField } from "../cli/commands/worker-doctor-git-prereqs.js";
 import { cleanUpBeforeStart, createPendingDeleteSweeper } from "./agent-process-tree.js";
 import { attestAndNotice, attestProviders } from "./worker-provider-notice.js";
-import { flushCritical, reattestProviders } from "./worker-daemon-helpers.js";
+import { duplicateIdentityGiveUp, flushCritical, newInstanceId, reattestProviders } from "./worker-daemon-helpers.js";
 export { attestProviders };
 import { defaultWorkerName, sameNamedNotice } from "./worker-name.js";
 import { createDoctorSummaryTracker } from "../cli/commands/worker-doctor-daemon.js";
@@ -333,6 +333,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   const pendingCritical: WorkerToBoardMessage[] = [];
   const workerVersion = resolveWorkerVersion();
+  const instanceId = newInstanceId(); // #1754
 
   /**
    * Give up on this board for good (#754): stop reconnecting and tell the caller why.
@@ -519,6 +520,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           // gained docker (or changed its ceiling) says so without being re-paired.
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
+          instanceId,
           capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctor.takeCurrent(), toolchains.installer.info(), verifyJobs.capability(), workRoot, profileAttestor.unattested()),
         } satisfies WorkerToBoardMessage));
         while (pendingCritical.length > 0) {
@@ -609,6 +611,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       // like. Without the code both render identically and a self-sustaining
       // reconnect/evict loop is indistinguishable from a flaky link.
       const detail = reason.length > 0 ? `: ${reason.toString("utf8").trim()}` : "";
+      const duplicate = duplicateIdentityGiveUp(code, identity.workerId, detail); if (duplicate) return giveUp(duplicate); // #1754
       const kind = code === 1006 ? "transport failed, no close frame" : "closed by board";
       scheduleReconnect(`code ${code}${detail} - ${kind}`, code === 1001);
     });

@@ -48,6 +48,8 @@ export interface RemoteLivenessDeps {
   /** The service's live session map. Read here; mutated only through the callbacks below. */
   sessions: Map<string, RemoteSession>;
   send: (workerId: string, message: BoardToWorkerMessage) => boolean;
+  /** #1754: the daemon instance that received this session's assign, when known. */
+  assignedInstanceOf?: (sessionId: string) => string | undefined;
   /**
    * The worker is up and does not have this session: land anything it pushed, then finalize
    * non-zero. Used for a hello that omits a session the board has SEEN the worker speak about.
@@ -239,10 +241,20 @@ export function createRemoteLiveness(deps: RemoteLivenessDeps) {
    * and has said what it holds — and the exit can no longer reach us in any branch, so holding
    * would hang the workspace forever.
    */
-  function reconcileHello(workerId: string, runningSessionIds: string[]): void {
+  function reconcileHello(workerId: string, runningSessionIds: string[], helloInstanceId?: string): void {
     const listed = new Set(runningSessionIds);
     for (const [sessionId, session] of sessions) {
       if (session.workerId !== workerId) continue;
+      // #1754: a hello from a DIFFERENT daemon process than the one that took the assign says nothing about
+      // this session — the other process (same pairing) may still hold it. Never lose it on that evidence.
+      const assignedTo = deps.assignedInstanceOf?.(sessionId);
+      if (!listed.has(sessionId) && helloInstanceId && assignedTo && assignedTo !== helloInstanceId) {
+        log(
+          `worker ${workerId} hello from instance ${helloInstanceId} does not list session ${sessionId}, which instance ` +
+            `${assignedTo} received; not treating it as lost (a second process may share this pairing)`,
+        );
+        continue;
+      }
       if (listed.has(sessionId)) {
         // #1518: listed (running or still in setup — `pnpm install` can take minutes before the
         // agent spawns) is positive proof the assignment arrived; a pending never-started check
