@@ -9,6 +9,7 @@ import { createProjectStackProfileRoute } from "./project-stack-profile.js";
 import { createProjectScriptsRoute } from "./project-scripts.js";
 import { createDriveRoute } from "./drive.js";
 import { createIssuesRoute } from "./issues.js";
+import { createRiskTagGuard } from "./issue-risk-tag-guard.js";
 import { createWorkspacesRoute } from "./workspaces.js";
 import { createWorkspaceActionsRoute } from "./workspace-actions.js";
 import { createWorkspaceMergeBankShrinksRoute } from "./workspace-merge-bank-shrinks.js";
@@ -98,6 +99,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/butler-definitions", createButlerDefinitionsRoute(database));
   routes.route("/projects", createAgentQuestionsRoute(database, getSessionManager, options));
   routes.route("/projects", createVoiceCaptureRoute(database, options));
+  routes.use("/issues/*", createRiskTagGuard(database));
   routes.route("/issues", createIssuesRoute(database, { ...options, getSessionManager }));
   routes.route("/workspaces", createWorkspacesRoute(database, getSessionManager, options));
   routes.route("/workspaces", createWorkspaceActionsRoute(getSessionManager, database, options));

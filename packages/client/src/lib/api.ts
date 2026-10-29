@@ -88,7 +88,7 @@ async function throwApiError(res: Response): Promise<never> {
 
 export async function apiFetch<T>(path: string, init?: RequestInit, schema?: ResponseSchema<T>): Promise<T> {
   const res = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    headers: { "Content-Type": "application/json", "x-kanban-actor": "operator", ...init?.headers },
     ...init,
   });
   if (!res.ok) await throwApiError(res);

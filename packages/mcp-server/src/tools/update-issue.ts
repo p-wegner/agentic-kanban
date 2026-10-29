@@ -8,6 +8,7 @@ import { fireIssueStatusWebhook } from "@agentic-kanban/shared/lib/issue-status-
 import { isTerminalStatusName } from "@agentic-kanban/shared/lib";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { ISSUE_TYPES } from "@agentic-kanban/shared";
+import { guardRiskTags, recordRiskTagApplied } from "../risk-tag-guard.js";
 
 export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
@@ -34,6 +35,10 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
 
       const now = new Date().toISOString();
       const updates: Record<string, unknown> = { updatedAt: now };
+
+      // #1745: an agent may not soften a ticket's posture with a `risk:<level>` tag.
+      const riskRefusal = await guardRiskTags(db, schema, existing.projectId, tags?.add ?? []);
+      if (riskRefusal) return riskRefusal;
 
       if (title !== undefined) updates.title = title;
       if (description !== undefined) updates.description = description;
@@ -68,6 +73,7 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
       await db.update(schema.issues).set(updates).where(eq(schema.issues.id, issueId));
 
       const tagsChanged = await applyTagChanges(db, schema, issueId, tags, now);
+      if (tagsChanged) await recordRiskTagApplied(db, schema, issueId, tags?.add ?? [], "MCP update_issue", now);
 
       if (resolvedStatusId) {
         await transitionIssueStatus(db, issueId, resolvedStatusId, { now });

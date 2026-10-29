@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { guardRiskTags, recordRiskTagApplied } from "../risk-tag-guard.js";
 import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
@@ -46,6 +47,10 @@ export function registerCreateIssue(server: McpServer, deps: ToolDeps = prodDeps
         .map((t) => t.trim())
         .filter(Boolean);
 
+      // #1745: an agent may not born-tag a ticket with a softer-than-project `risk:<level>`.
+      const riskRefusal = await guardRiskTags(db, schema, pid, requestedTagNames);
+      if (riskRefusal) return riskRefusal;
+
       const { id, issueNumber } = await withUniqueIssueNumber(
         () => nextIssueNumber(db, schema, pid),
         async (allocatedNumber) => {
@@ -88,6 +93,7 @@ export function registerCreateIssue(server: McpServer, deps: ToolDeps = prodDeps
               seenTagIds.add(tagId);
               await db.insert(schema.issueTags).values({ id: randomUUID(), issueId: newId, tagId });
             }
+            await recordRiskTagApplied(db, schema, newId, requestedTagNames, "MCP create_issue", now);
           } catch { /* tagging is best-effort; the issue itself must still be returned as created */ }
           return { id: newId, issueNumber: allocatedNumber };
         },

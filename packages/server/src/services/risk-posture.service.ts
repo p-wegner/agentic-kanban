@@ -29,7 +29,7 @@ import { getIssueTagRows } from "../repositories/tag.repository.js";
  *                 `allow-file-debt-ticket`): master only moves through trains, so a red
  *                 nightly under `block` froze the project until a human hand-landed a fix.
  *  - `fast`     — large backlog, trusted agents. Scoped gate once per train, review the train
- *                 not each ticket, red base allowed if the red set is known debt, contention
+ *                 not each ticket, red base allowed if the red set is known debt (single-ticket merges only, #1746), contention
  *                 downgraded to a warning, placement prefers remote.
  *  - `sprint`   — greenfield/prototype. Guards-only gate, no per-ticket review, red base allowed
  *                 with a debt ticket, no implement-exit check, contention off. No scheduled
@@ -229,7 +229,7 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         implementExitCheck: "typecheck",
         contentionMode: "warn",
         placementBias: "remote-preferred",
-        summary: "fast: skips per-ticket review (reviews the train instead), gate once per train, red base allowed if it is known debt, implement-exit check is typecheck only; review-exit gate is typecheck only (tests run once, at merge)",
+        summary: "fast: skips per-ticket review (reviews the train instead), gate once per train, red base allowed if it is known debt (single-ticket merges only: a train gate is not softened by known debt, #1746), implement-exit check is typecheck only; review-exit gate is typecheck only (tests run once, at merge)",
       };
     case "sprint":
       return {
@@ -253,7 +253,7 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
         implementExitCheck: "none",
         contentionMode: "off",
         placementBias: "remote-preferred",
-        summary: "sprint: no per-ticket review, guards-only gate, red base allowed (files a debt ticket), no implement-exit TEST run (it still runs the static tier + the member's own when:-matched guard suites before review where dependencies are installed; a tree without them gets the god-module ceiling only, and the exit line says so), contention off; review-exit gate is typecheck only (tests run once, at merge)",
+        summary: "sprint: no per-ticket review, guards-only gate, red base allowed (files a debt ticket; the known-debt subset rule applies to single-ticket merges only, a train gate is not softened, #1746), no implement-exit TEST run (it still runs the static tier + the member's own when:-matched guard suites before review where dependencies are installed; a tree without them gets the god-module ceiling only, and the exit line says so), contention off; review-exit gate is typecheck only (tests run once, at merge)",
       };
     case "iterate":
       return {
