@@ -36,6 +36,7 @@ import {
   type NpmPrefixInfo,
   type SetupOs,
 } from "./worker-setup-installers.js";
+import { checkTray, probeTrayRunning, startTray } from "./worker-tray-check.js";
 import { renderWorkerSetupGuide } from "./worker-setup-guide.js";
 
 export const SETUP_STEPS = ["git", "cli", "auth", "pair", "doctor"] as const;
@@ -84,6 +85,10 @@ export interface SetupDeps {
   profileAddsDir?: (dir: string) => boolean;
   /** #1374: apply the worker's PATH policy (saved dirs, WSL /mnt entries off) before probing. */
   applyPath?: (stateFile: string) => void;
+  /** #1774: is the Windows tray running (null = unknown)? Unset = skip the tray step. */
+  trayRunning?: () => boolean | null;
+  /** #1774: start the tray; false = launcher not found. Unset = real launcher. */
+  startTray?: () => boolean;
 }
 
 const DEFAULT_BOARD_URL = "http://127.0.0.1:3001";
@@ -173,6 +178,7 @@ export function defaultSetupDeps(start?: () => Promise<void>): SetupDeps {
     auth: (provider, opts) => runWorkerAuth(provider, opts),
     interactive: () => Boolean(process.stdin.isTTY),
     doctor: runWorkerDoctor,
+    trayRunning: probeTrayRunning,
     ...(start ? { start } : {}),
   };
 }
@@ -453,6 +459,20 @@ async function stepDoctor(deps: SetupDeps, opts: WorkerDoctorOptions): Promise<O
 }
 
 /** Run the selected steps in order. Returns the process exit code. */
+/** #1774: warn when the systray is not running and offer to start it. Never fails setup. */
+async function stepTray(deps: SetupDeps, options: SetupOptions): Promise<void> {
+  if (!deps.trayRunning) return;
+  const check = checkTray("win32", deps.trayRunning());
+  if (!check || check.status !== "warn") return;
+  deps.print(`WARNING: ${check.detail}`);
+  if (!(options.yes || (await deps.confirm("Start the worker tray now?")))) {
+    if (check.remedy) deps.print(`  ${check.remedy}`);
+    return;
+  }
+  const started = (deps.startTray ?? startTray)();
+  deps.print(started ? "tray started (it guards itself against a second instance)." : "tray launcher not found in this install; start ak-worker-tray-launch.vbs from the repo's tools/worker-windows.");
+}
+
 export async function runWorkerSetup(options: SetupOptions, deps: SetupDeps): Promise<number> {
   if (options.guide) {
     deps.print(renderWorkerSetupGuide());
@@ -506,6 +526,7 @@ export async function runWorkerSetup(options: SetupOptions, deps: SetupDeps): Pr
       harness: harnessFor("claude"),
     }));
   }
+  if (deps.os === "win32") await stepTray(deps, options);
   const failed = results.includes("FAILED");
   deps.print(failed ? "setup finished with FAILED steps (see above)." : "setup finished.");
   if (!failed && selected.has("pair") && !options.start) {
