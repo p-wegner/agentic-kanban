@@ -577,6 +577,9 @@ export function createWorkspaceCreateService(deps: {
             siblingWorktrees.map((s) => ({ name: s.name, worktreePath: s.worktreePath })),
             null,
             groupMembers,
+            // buildAgentPrompt puts title+description in the first message unless a custom
+            // prompt replaces it; the group section is always appended (#1762).
+            { lead: !input.customPrompt, group: groupMembers.length > 0 },
           )
         : null;
       if (ticketContextPath) timing("ticket-context", t);
