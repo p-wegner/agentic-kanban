@@ -191,8 +191,7 @@ export function createRemoteAgentService(
    */
   const liveness = createRemoteLiveness({
     sessions,
-    send: (workerId, message) => manager.send(workerId, message),
-    assignedInstanceOf: (sessionId) => manager.assignedInstanceOf?.(sessionId),
+    send: (workerId, message) => manager.send(workerId, message), assignedInstanceOf: (id) => manager.assignedInstanceOf?.(id),
     loseSession,
     report,
     // Spread FIRST so the resolved `assignSettleMs` below wins over an absent override; the
