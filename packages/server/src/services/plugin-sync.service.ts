@@ -15,7 +15,7 @@ import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import type { PluginRow } from "../repositories/plugins.repository.js";
 import type { PluginRunContext } from "./plugin-loop-types.js";
-import { runPluginCommand } from "./plugin-exec.js";
+import { runPluginCommand, type PluginCommandResult } from "./plugin-exec.js";
 import { PluginError } from "./plugin-errors.js";
 import { createPluginSecretStore } from "./plugin-secret-store.js";
 import { describeRunFailure, dryRunContractBreach, parseRunSummary } from "./plugin-sync-summary.js";
@@ -231,7 +231,7 @@ function buildRunRecord(
   opts: { direction: PluginSyncDirection; dryRun?: boolean },
   startedAt: string,
   finishedAt: string,
-  result: { code: number | null; timedOut: boolean; stdout: string; stderr: string },
+  result: PluginCommandResult,
   scheduled: true | undefined,
   siteUrl: string | undefined,
 ): PluginSyncRunRecord {

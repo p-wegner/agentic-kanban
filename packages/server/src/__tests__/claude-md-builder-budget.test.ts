@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { listRepoSubdirs } from "../../../../scripts/lib/repo-tree.mjs";
 
 /**
  * #1313 — root CLAUDE.md is loaded by every session, builders included, on every turn
@@ -39,10 +40,8 @@ const NESTED_CEILINGS: Record<string, number> = { "packages/shared/CLAUDE.md": 2
 
 function findNestedClaudeMd(): string[] {
   const out: string[] = [];
-  for (const pkg of fs.readdirSync(path.join(repoRoot, "packages"), { withFileTypes: true })) {
-    if (pkg.isDirectory() && fs.existsSync(path.join(repoRoot, "packages", pkg.name, "CLAUDE.md"))) {
-      out.push(`packages/${pkg.name}/CLAUDE.md`);
-    }
+  for (const dir of listRepoSubdirs(path.join(repoRoot, "packages"))) {
+    if (fs.existsSync(path.join(dir, "CLAUDE.md"))) out.push(`packages/${path.basename(dir)}/CLAUDE.md`);
   }
   return out;
 }
