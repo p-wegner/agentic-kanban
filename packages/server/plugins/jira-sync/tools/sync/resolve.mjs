@@ -15,6 +15,7 @@ import {
   boardSnapshotPath,
   readConflictRegister,
   conflictRegisterPath,
+  migrateLegacyState,
 } from "../lib/state.mjs";
 import { resolveSyncDirections } from "../lib/sync-direction.mjs";
 import { snapshotAfterPull } from "../lib/state-sync.mjs";
@@ -36,6 +37,7 @@ async function main() {
 
   const stateDir = process.env.JIRA_SYNC_STATE_DIR;
   if (!stateDir) return { ok: false, step: "config", reason: "JIRA_SYNC_STATE_DIR is not set" };
+  migrateLegacyState(stateDir);
 
   let boardConfig;
   try {

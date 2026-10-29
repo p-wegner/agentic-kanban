@@ -39,6 +39,10 @@ export async function ensureGateWorktree(repoPath: string, worktree: string, ref
   return ok;
 }
 
+/** #1746: decision — the #915 known-debt subset rule is NOT applied to trains; a red train is never softened. */
+export const TRAIN_DEBT_RULE_NOTE =
+  "\n[red-debt subset rule (#915) applies to single-ticket merges only; a train gate is not softened by known red debt]";
+
 /** What one staging gate reports back. `stage`/`failedSuites` ride along on a red run only. */
 export interface TrainStagingGateResult {
   passed: boolean;
@@ -226,7 +230,8 @@ export async function runTrainStagingGate(args: {
       return {
         ...(carriedFix ? { carriedFix } : {}),
         passed: false,
-        message: gate.message,
+        // #1746: the #915 red-debt subset rule is sequential-only — say so on a red train verdict.
+        message: gate.failedSuites?.length ? `${gate.message}${TRAIN_DEBT_RULE_NOTE}` : gate.message,
         stage: gate.stage,
         ...(gate.failedSuites ? { failedSuites: gate.failedSuites, guardFailure: gate.guardFailure === true } : {}),
         ...(agentFix ? { agentFix } : {}),

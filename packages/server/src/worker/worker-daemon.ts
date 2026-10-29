@@ -44,6 +44,7 @@ import {
   normalizeBoardUrl,
   parseBoardList,
   saveIdentity,
+  createTokenRotator,
   urlsOfBoard,
   type BoardProbe,
   type WorkerIdentity,
@@ -69,7 +70,7 @@ import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
 import { packageManagersField, toolchainsField } from "../cli/commands/worker-doctor-git-prereqs.js";
 import { cleanUpBeforeStart, createPendingDeleteSweeper } from "./agent-process-tree.js";
 import { attestAndNotice, attestProviders } from "./worker-provider-notice.js";
-import { flushCritical, reattestProviders } from "./worker-daemon-helpers.js";
+import { duplicateIdentityGiveUp, flushCritical, newInstanceId, reattestProviders } from "./worker-daemon-helpers.js";
 export { attestProviders };
 import { defaultWorkerName, sameNamedNotice } from "./worker-name.js";
 import { createDoctorSummaryTracker } from "../cli/commands/worker-doctor-daemon.js";
@@ -333,6 +334,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   const pendingCritical: WorkerToBoardMessage[] = [];
   const workerVersion = resolveWorkerVersion();
+  const instanceId = newInstanceId(); // #1754
 
   /**
    * Give up on this board for good (#754): stop reconnecting and tell the caller why.
@@ -402,6 +404,8 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       giveUp(`re-registration after a 401 failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
+
+  const tokenRotator = createTokenRotator({ getIdentity: () => identity, setIdentity: (next) => { identity = next; }, stateFile, boardUrl: () => currentUrl(), urls: () => urlsOfBoard(boardUrls, probes, identity.boardId), send: (m) => sendToBoard(m), log }); // #1766
 
   const sendToBoard = (message: WorkerToBoardMessage): void => {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -519,13 +523,14 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           // gained docker (or changed its ceiling) says so without being re-paired.
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
+          instanceId,
           capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctor.takeCurrent(), toolchains.installer.info(), verifyJobs.capability(), workRoot, profileAttestor.unattested()),
         } satisfies WorkerToBoardMessage));
         while (pendingCritical.length > 0) {
           socket.send(JSON.stringify(pendingCritical.shift()));
         }
         retryRetainedResults(runner, sendToBoard, log); verifyJobs.onConnected(); // #1465: re-announce running verify jobs, deliver verdicts buffered while disconnected
-        selfUpdate?.onConnected();
+        selfUpdate?.onConnected(); tokenRotator.reset(); tokenRotator.maybeRotate(); // #1766
         resolveConnected();
       } catch (err) {
         log(`[worker] open-handler error (daemon staying up): ${err instanceof Error ? err.message : String(err)}`);
@@ -541,7 +546,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         log(`[worker] dropping malformed board message`);
         return;
       }
-      if (toolchains.handle(message) || oneShots.handle(message) || verifyJobs.handle(message) || services.handle(message)) return; // #1431, #1437, #1447
+      if (tokenRotator.handle(message) || toolchains.handle(message) || oneShots.handle(message) || verifyJobs.handle(message) || services.handle(message)) return; // #1431, #1437, #1447
       try {
         dispatchBoardMessage(message, runner, sendToBoard, draining);
       } catch (err) {
@@ -609,6 +614,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       // like. Without the code both render identically and a self-sustaining
       // reconnect/evict loop is indistinguishable from a flaky link.
       const detail = reason.length > 0 ? `: ${reason.toString("utf8").trim()}` : "";
+      const duplicate = duplicateIdentityGiveUp(code, identity.workerId, detail); if (duplicate) return giveUp(duplicate); // #1754
       const kind = code === 1006 ? "transport failed, no close frame" : "closed by board";
       scheduleReconnect(`code ${code}${detail} - ${kind}`, code === 1001);
     });
@@ -687,7 +693,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       log(`[worker] profile quota refresh failed (continuing): ${errorMessage(err)}`);
     }
     // #1370: re-run the doctor in the background every few minutes; it never delays a beat.
-    doctor.refreshIfDue();
+    doctor.refreshIfDue(); tokenRotator.maybeRotate(); // #1766: no-op unless the token is near expiry
     const doctorToSend = doctor.pending();
     let res: Response;
     try {

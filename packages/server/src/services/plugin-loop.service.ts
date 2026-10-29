@@ -4,6 +4,7 @@ import {
   pluginLoopPausedPreferenceKey,
   type PluginManifest,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
+import { pluginProjectDataDir } from "./plugin-fs.js";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
 import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
@@ -154,6 +155,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       pluginPath: args.pluginLocalPath,
       boardUrl,
       projectId: args.projectId,
+      pluginDataDir: pluginProjectDataDir(args.pluginSlug, args.projectId),
     });
 
     const plan = await runLoopPlan({

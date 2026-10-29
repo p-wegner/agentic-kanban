@@ -30,6 +30,16 @@ export async function updateWorkerHeartbeat(
     .where(eq(workers.id, id));
 }
 
+/** #1766: swap in a rotated token, keeping the replaced digest for its grace window. */
+export async function updateWorkerToken(
+  id: string,
+  patch: { tokenHash: string; tokenExpiresAt: string; prevTokenHash: string | null; prevTokenValidUntil: string | null },
+  at: string,
+  database: Database = db,
+): Promise<void> {
+  await database.update(workers).set({ ...patch, updatedAt: at }).where(eq(workers.id, id));
+}
+
 export async function updateWorkerStatus(
   id: string,
   status: string,

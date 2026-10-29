@@ -13,6 +13,7 @@ import { extractBearer } from "../lib/bearer-token.js";
 import type { UpgradeWebSocket, WSContext } from "hono/ws";
 import {
   parseWorkerToBoardMessage,
+  WORKER_DUPLICATE_IDENTITY_CLOSE_CODE,
   type BoardToWorkerMessage,
   type WorkerToBoardMessage,
 } from "@agentic-kanban/shared/lib/worker-protocol";
@@ -80,7 +81,15 @@ interface WorkerConnection {
   missedPings: number;
   /** Last pong or frame from the worker (epoch ms) — the real silence, independent of how many ticks fired. */
   lastHeardAt: number;
+  /** #1754: the daemon process behind this socket, from its latest `hello` (absent for an older build). */
+  instanceId?: string;
 }
+
+/** #1754: a second daemon process tried to take over a live worker identity. */
+export type DuplicateIdentityListener = (
+  workerId: string,
+  info: { heldInstanceId?: string; newInstanceId?: string },
+) => void;
 
 /** Minimal view of the underlying `ws` socket (`WSContext.raw`) the keepalive needs. */
 interface RawPingSocket {
@@ -131,13 +140,51 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
   const listeners = new Set<WorkerMessageListener>();
   const connectListeners = new Set<(workerId: string) => void>();
   const disconnectListeners = new Set<(workerId: string) => void>();
+  const duplicateListeners = new Set<DuplicateIdentityListener>();
+  /** Newer sockets held back until their `hello` says whether they are a duplicate process (#1754). */
+  const parked = new Set<WSContext>();
+  /** sessionId -> daemon instance that received its `assign` (#1754). */
+  const assignInstances = new Map<string, string>();
   // A revoked worker's bearer token stops authenticating NEW requests, but an
   // already-upgraded socket is never re-checked — so revocation has to reach in
   // and close it. Wired here (the manager already owns the registry) so every
   // manager built on a registry honours it, not just the fleet facade's.
   registry.onRevoke((workerId) => { closeConnection(workerId); });
 
+  /**
+   * #1754: a newer socket arrives while the registered one is demonstrably alive (answered a ping/frame
+   * within two keepalive intervals) and its daemon identified itself. Whether the newcomer is the SAME
+   * process reconnecting (adopt, as before) or a DIFFERENT process sharing the pairing (refuse) is only
+   * knowable from its `hello`, so the socket is parked until then.
+   */
+  function shouldParkNewcomer(existing: WorkerConnection): boolean {
+    return existing.instanceId !== undefined &&
+      existing.missedPings === 0 &&
+      Date.now() - existing.lastHeardAt < WS_KEEPALIVE_INTERVAL_MS * 2;
+  }
+
+  function rejectDuplicate(workerId: string, ws: WSContext, held: WorkerConnection, instanceId: string | undefined): void {
+    const reason = `duplicate identity: another daemon process (instance ${held.instanceId}) already holds worker ${workerId}`;
+    console.warn(
+      `[worker-connection] duplicate_identity id=${workerId}: a hello from instance ${instanceId ?? "unknown"} arrived while instance ` +
+        `${held.instanceId} is still answering pings; telling the newcomer to stop. Two daemons share one pairing (copied worker-state.json / VM snapshot / double start).`,
+    );
+    try { ws.close(WORKER_DUPLICATE_IDENTITY_CLOSE_CODE, reason); } catch { /* already gone */ }
+    for (const listener of duplicateListeners) {
+      try { listener(workerId, { heldInstanceId: held.instanceId, newInstanceId: instanceId }); } catch (err) { console.error(`[worker-connection] duplicate-listener error`, err); }
+    }
+  }
+
   function handleOpen(workerId: string, ws: WSContext): void {
+    const held = connections.get(workerId);
+    if (held && shouldParkNewcomer(held)) {
+      parked.add(ws);
+      return;
+    }
+    adopt(workerId, ws);
+  }
+
+  function adopt(workerId: string, ws: WSContext): void {
     // A reconnect replaces the previous socket (stale after e.g. a NAT rebind).
     //
     // Say so in the log. This eviction is indistinguishable from a network drop
@@ -188,11 +235,22 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     }
   }
 
-  function handleMessage(workerId: string, raw: unknown): void {
+  function handleMessage(workerId: string, raw: unknown, from?: WSContext): void {
     const message = parseWorkerToBoardMessage(raw);
     if (!message) {
       console.warn(`[worker-connection] dropping malformed message from worker ${workerId}`);
       return;
+    }
+    if (from && parked.has(from)) {
+      // #1754: a parked socket may only introduce itself.
+      if (message.type !== "hello") return;
+      parked.delete(from);
+      const held = connections.get(workerId);
+      if (held && held.instanceId !== undefined && message.instanceId !== undefined && message.instanceId !== held.instanceId && shouldParkNewcomer(held)) {
+        rejectDuplicate(workerId, from, held, message.instanceId);
+        return;
+      }
+      adopt(workerId, from);
     }
     const conn = connections.get(workerId);
     if (conn) {
@@ -202,6 +260,7 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
         // The worker just declared what it actually holds — that supersedes every
         // board-side guess, so the pending set is reconciled away entirely.
         conn.runningSessionIds = new Set(message.runningSessionIds);
+        conn.instanceId = message.instanceId;
         conn.pendingSessionIds.clear();
         // The declaration is itself the freshest thing we know about each of them,
         // so the silence clock restarts here — otherwise a reconnect would inherit
@@ -228,6 +287,15 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
           conn.runningSessionIds.add(message.event.sessionId);
           conn.lastEventAt.set(message.event.sessionId, Date.now());
         }
+      } else if (message.type === "token_rotate_request") {
+        // #1766: the socket is authenticated; hand back a new token (old one stays valid briefly).
+        const requestId = message.requestId;
+        void registry.rotateWorkerToken(workerId).then((r) => {
+          send(workerId, r ? { type: "token_rotate", requestId, workerToken: r.workerToken, tokenExpiresAt: r.tokenExpiresAt } : { type: "token_rotate", requestId, error: "unknown worker" });
+        }).catch((err) => {
+          console.error(`[worker-connection] token rotation failed: workerId=${workerId}`, err);
+          send(workerId, { type: "token_rotate", requestId, error: "rotation failed" });
+        });
       } else if (message.type === "toolchain_install_status") {
         registry.noteToolchainInstallStatus?.(workerId, message.status);
       } else if (message.type === "assign_failed") {
@@ -263,6 +331,7 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
   }
 
   function handleClose(workerId: string, ws: WSContext): void {
+    parked.delete(ws);
     // Only forget the mapping if it still points at THIS socket — a reconnect
     // may already have replaced it.
     if (connections.get(workerId)?.ws === ws) {
@@ -284,6 +353,8 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
       // agent's first output (#248).
       if (message.type === "assign") {
         conn.pendingSessionIds.set(message.sessionId, now + PENDING_ASSIGN_TTL_MS);
+        if (conn.instanceId) assignInstances.set(message.sessionId, conn.instanceId);
+        else assignInstances.delete(message.sessionId);
       } else if (message.type === "stop") {
         // The board ended this session (#1415): release its slot now rather than waiting
         // for an exit frame a stopped/killed worker may never send. A reconnect's `hello`
@@ -442,6 +513,15 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     return () => disconnectListeners.delete(listener);
   }
 
+  function onDuplicateIdentity(listener: DuplicateIdentityListener): () => void {
+    duplicateListeners.add(listener);
+    return () => duplicateListeners.delete(listener);
+  }
+
+  function assignedInstanceOf(sessionId: string): string | undefined {
+    return assignInstances.get(sessionId);
+  }
+
   return {
     handleOpen,
     handleMessage,
@@ -457,6 +537,8 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     onMessage,
     onConnect,
     onDisconnect,
+    onDuplicateIdentity,
+    assignedInstanceOf,
   };
 }
 
@@ -503,7 +585,7 @@ export function createWorkerWsRoute(
         manager.handleOpen(workerId, ws);
       },
       onMessage(event: MessageEvent, _ws: WSContext) {
-        manager.handleMessage(workerId, typeof event.data === "string" ? event.data : String(event.data));
+        manager.handleMessage(workerId, typeof event.data === "string" ? event.data : String(event.data), _ws);
       },
       onClose(_event: CloseEvent, ws: WSContext) {
         manager.handleClose(workerId, ws);

@@ -96,3 +96,21 @@ test("request: a non-retryable error (400) throws immediately with no sleep", as
   await assert.rejects(() => client.getIssue("ENG-1"));
   assert.deepEqual(sleeps, []);
 });
+
+test("request: a Retry-After above the cap is reported, not slept (#1738)", async () => {
+  const sleeps = [];
+  const fetchImpl = createScriptedFetch([
+    { match: (url) => url.endsWith("/rest/api/3/issue/ENG-1"), respond: () => ({ status: 429, body: {}, headers: { "retry-after": "600" } }) },
+  ]);
+  const client = new JiraClient({ siteUrl: "https://fixture.atlassian.net", apiToken: "x", fetchImpl, sleepImpl: async (ms) => sleeps.push(ms) });
+  await assert.rejects(client.getIssue("ENG-1"), (err) => err.rateLimited === true && err.retryAfterSeconds === 600);
+  assert.deepEqual(sleeps, []);
+});
+
+test("request: a Retry-After that would cross the run deadline is reported (#1738)", async () => {
+  const fetchImpl = createScriptedFetch([
+    { match: (url) => url.endsWith("/rest/api/3/issue/ENG-1"), respond: () => ({ status: 429, body: {}, headers: { "retry-after": "30" } }) },
+  ]);
+  const client = new JiraClient({ siteUrl: "https://fixture.atlassian.net", apiToken: "x", fetchImpl, sleepImpl: async () => {}, nowMs: () => 1000, deadlineMs: 10_000 });
+  await assert.rejects(client.getIssue("ENG-1"), (err) => err.rateLimited === true && err.retryAfterSeconds === 30);
+});

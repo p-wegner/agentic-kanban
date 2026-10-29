@@ -12,6 +12,7 @@ import { join, resolve, sep, dirname } from "node:path";
 import { homedir } from "node:os";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { PLUGIN_MANIFEST_FILENAME, parsePluginManifest, type PluginManifest } from "@agentic-kanban/shared/lib/plugin-manifest";
+import { DATA_DIR } from "../db/data-dir.js";
 import { PluginError } from "./plugin-errors.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
@@ -19,6 +20,16 @@ import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 /** Where cloned plugins live. Overridable so tests never touch a real plugin store. */
 export function pluginsHomeDir(): string {
   return process.env.AGENTIC_KANBAN_PLUGINS_DIR || join(homedir(), ".agentic-kanban", "plugins");
+}
+
+/**
+ * Board-owned state dir for one (plugin, project) pair (`{{pluginDataDir}}`, #1737). Lives in the
+ * board's data dir, never in a repo checkout: not committable by accident, and distinct per
+ * project even when several projects share one `repoPath`.
+ */
+export function pluginProjectDataDir(pluginSlug: string, projectId: string): string {
+  const root = process.env.AGENTIC_KANBAN_PLUGIN_DATA_DIR || join(DATA_DIR, "plugin-data");
+  return join(root, pluginSlug, projectId);
 }
 
 /**

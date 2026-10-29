@@ -95,6 +95,13 @@ export interface StartSlotInput {
   fleetOverflow: boolean;
   /** Whether this project is auto-started at all. Absent = yes (the monitor loops only run for such projects). */
   autoStart?: boolean;
+  /**
+   * #1775: per-execution-target budgets (`decideTargetStartBudget`, one per machine). When given,
+   * `maxNewStartsPerCycle` is only the TOTAL ceiling; starts remaining is also bounded by the sum
+   * of the targets' remaining budgets, and a `start_cap` hold names the machines that are full.
+   * Absent = the legacy project-wide cap alone.
+   */
+  targetBudgets?: TargetStartBudget[];
 }
 
 export interface StartSlotDecision {
@@ -113,6 +120,86 @@ export interface StartSlotDecision {
   /** Saturated AND no fleet overflow — the #908 binary hold. */
   hostFull: boolean;
   holdReason: StartSlotHoldReason | null;
+  /** #1775: hold text naming the machine(s), e.g. "held: host spacing". Null when no target explains the hold. */
+  holdDetail: string | null;
+}
+
+/** Why one execution target may start nothing right now (#1775). */
+export type TargetHoldReason = "thrashing" | "ram_floor" | "spacing" | "no_slots" | "no_ram" | "cycle_budget_used";
+
+export interface TargetStartInput {
+  /** Stable id: "host" or the worker id. */
+  id: string;
+  /** Name shown in hold reasons: "host", "desktop-stable". */
+  label: string;
+  /** Operator override (`worker config startsPerCycle`); wins over every derivation. */
+  startsPerCycleOverride?: number;
+  /** Budget when nothing is measured (the host's sparing default). Defaults to 1. */
+  defaultStartsPerCycle?: number;
+  /** Live free RAM (heartbeat / host console watch), GB. Absent = not measured. */
+  freeRamGb?: number;
+  /** RAM to keep untouched (host reserve / worker RAM floor #1451), GB. */
+  reserveGb?: number;
+  /** Measured per-session footprint (session stats), GB. Defaults to 8. */
+  perSessionGb?: number;
+  /** Free agent slots on this target. */
+  freeSlots: number;
+  /** Verify (merge-gate) jobs running there; each weighs as two builders. */
+  verifyJobs?: number;
+  thrashing?: boolean;
+  belowRamFloor?: boolean;
+  /** Starts already made on this target this cycle. */
+  startedThisCycle: number;
+  /** Minimum ms between two starts on this target; 0/absent = no spacing. */
+  minIntervalMs?: number;
+  /** Ms since the last start on this target; null/absent = never started. */
+  msSinceLastStart?: number | null;
+}
+
+export interface TargetStartBudget {
+  id: string;
+  label: string;
+  /** Starts still allowed on this target this cycle. */
+  remaining: number;
+  /** The cycle budget before subtracting what already started. */
+  budget: number;
+  holdReason: TargetHoldReason | null;
+  /** e.g. "held: host spacing" — null when the target can take a start. */
+  holdDetail: string | null;
+}
+
+const DEFAULT_PER_SESSION_GB = 8;
+const VERIFY_JOB_WEIGHT = 2;
+
+/**
+ * DECISION (pure, #1775): how many starts may land on ONE execution target this cycle?
+ * Hard holds first (thrashing, RAM floor, spacing); then budget = override, else the live RAM
+ * headroom `floor((free - reserve) / perSession)` when measured, else the default (1); capped by
+ * free slots minus verify-job weight; minus starts already made this cycle.
+ */
+export function decideTargetStartBudget(t: TargetStartInput): TargetStartBudget {
+  const held = (holdReason: TargetHoldReason, text: string): TargetStartBudget =>
+    ({ id: t.id, label: t.label, remaining: 0, budget: 0, holdReason, holdDetail: `held: ${t.label} ${text}` });
+  const interval = t.minIntervalMs ?? 0;
+  if (t.thrashing) return held("thrashing", "thrashing");
+  if (t.belowRamFloor) return held("ram_floor", "below RAM floor");
+  if (interval > 0 && t.msSinceLastStart != null && t.msSinceLastStart < interval) return held("spacing", "spacing");
+
+  let budget: number;
+  if (t.startsPerCycleOverride !== undefined) budget = t.startsPerCycleOverride;
+  else if (t.freeRamGb !== undefined) {
+    const perSession = t.perSessionGb && t.perSessionGb > 0 ? t.perSessionGb : DEFAULT_PER_SESSION_GB;
+    budget = Math.floor((t.freeRamGb - (t.reserveGb ?? 0)) / perSession);
+    if (budget <= 0) return held("no_ram", "has no spare RAM");
+  } else budget = t.defaultStartsPerCycle ?? 1;
+
+  const verifyJobs = t.verifyJobs ?? 0;
+  const usableSlots = t.freeSlots - verifyJobs * VERIFY_JOB_WEIGHT;
+  if (usableSlots <= 0) return held("no_slots", verifyJobs > 0 ? "busy with verify jobs" : "has no free slots");
+  budget = Math.max(0, Math.min(budget, usableSlots));
+  const remaining = Math.max(0, budget - t.startedThisCycle);
+  if (remaining === 0) return { id: t.id, label: t.label, remaining, budget, holdReason: "cycle_budget_used", holdDetail: `held: ${t.label} cycle budget used` };
+  return { id: t.id, label: t.label, remaining, budget, holdReason: null, holdDetail: null };
 }
 
 export function decideStartSlots(input: StartSlotInput): StartSlotDecision {
@@ -120,7 +207,13 @@ export function decideStartSlots(input: StartSlotInput): StartSlotDecision {
   // `hold` is the snapshot's own normalized verdict — see `isHostSaturated` for why it is not
   // re-derived from `headroomProcesses` here.
   const hostFull = input.machineCapacity.hold && !input.fleetOverflow;
-  const startsRemaining = Math.max(0, input.maxNewStartsPerCycle - input.startedThisCycle);
+  const ceilingRemaining = Math.max(0, input.maxNewStartsPerCycle - input.startedThisCycle);
+  const targets = input.targetBudgets;
+  const targetRemaining = targets ? targets.reduce((n, b) => n + b.remaining, 0) : Infinity;
+  const startsRemaining = Math.min(ceilingRemaining, targetRemaining);
+  const targetHoldDetail = targets && targets.length > 0 && targetRemaining <= 0
+    ? targets.map((b) => b.holdDetail).filter((d): d is string => d !== null).join("; ") || null
+    : null;
 
   let holdReason: StartSlotHoldReason | null = null;
   if (input.autoStart === false) holdReason = "manual_mode";
@@ -130,5 +223,8 @@ export function decideStartSlots(input: StartSlotInput): StartSlotDecision {
 
   const wipSlots = holdReason === null || holdReason === "start_cap" ? Math.max(0, clamp.effective - input.active) : 0;
   const slots = holdReason === null ? Math.min(wipSlots, startsRemaining) : 0;
-  return { slots, wipSlots, startsRemaining, effectiveLimit: clamp.effective, clamp, hostFull, holdReason };
+  return {
+    slots, wipSlots, startsRemaining, effectiveLimit: clamp.effective, clamp, hostFull, holdReason,
+    holdDetail: holdReason === "start_cap" ? targetHoldDetail : null,
+  };
 }

@@ -8,6 +8,11 @@
 /** More changed files than this and the fix is no longer "small". */
 export const TARGETED_REGATE_MAX_FILES = 8;
 
+/** #1772: more failing suites than this go to the full gate; the list is never put on the command line. */
+export const TARGETED_REGATE_MAX_SUITES = 40;
+/** #1772: well under cmd.exe's 8191-char line limit (the worker prefixes its own steps). */
+export const TARGETED_REGATE_MAX_SCRIPT_CHARS = 6000;
+
 /** A fix touching any of these changes what the gate itself is - never narrow the gate for it. */
 const SCOPE_BREAKERS: RegExp[] = [
   /^pnpm-lock\.yaml$/, /^package\.json$/, /^pnpm-workspace\.yaml$/, /^tsconfig[^/]*\.json$/,
@@ -45,6 +50,7 @@ export function decideRegate(args: {
   gatedSha: string;
   fixSha: string;
   maxFiles?: number;
+  maxSuites?: number;
 }): RegateDecision {
   const files = [...new Set(args.fixFiles.map((f) => f.replace(/\\/g, "/")))];
   const max = args.maxFiles ?? TARGETED_REGATE_MAX_FILES;
@@ -57,6 +63,10 @@ export function decideRegate(args: {
   if (outside) return { mode: "full", reason: `fix touches ${packageOf(outside)}, which the first gate did not cover` };
 
   const failing = [...new Set(args.failedSuites ?? [])];
+  // #1772: 689 paths on one command line hit cmd.exe's 8191-char limit ("Die Befehlszeile ist zu lang"). The suite
+  // list never rides the command line past a bound; a bigger list is no "small fix" re-gate, so run the full gate.
+  const maxSuites = args.maxSuites ?? TARGETED_REGATE_MAX_SUITES;
+  if (failing.length > maxSuites) return { mode: "full", reason: `${failing.length} failing suites (> ${maxSuites}) cannot ride the command line` };
   const unsafe = [args.gatedSha, ...covered, ...failing].find((t) => !SHELL_SAFE.test(t.replace(/\\/g, "/")));
   if (unsafe) return { mode: "full", reason: `${unsafe} is not shell-safe for the worker's shell` };
   const staticChecks = files.some((f) => SOURCE_RE.test(f));
@@ -78,7 +88,9 @@ export function decideRegate(args: {
   }
   // Related suites + the always-run guards whose `when:` globs match the fix: test:mine scoped to the fix diff.
   steps.push(`pnpm test:mine -- --changed ${args.gatedSha}`);
-  return { mode: "targeted", script: steps.join(" && "), files, failingSuites: failing, staticChecks, fixSha: args.fixSha, gatedSha: args.gatedSha };
+  const script = steps.join(" && ");
+  if (script.length > TARGETED_REGATE_MAX_SCRIPT_CHARS) return { mode: "full", reason: `targeted script is ${script.length} chars (> ${TARGETED_REGATE_MAX_SCRIPT_CHARS}, cmd.exe limit)` };
+  return { mode: "targeted", script, files, failingSuites: failing, staticChecks, fixSha: args.fixSha, gatedSha: args.gatedSha };
 }
 
 /** Gate-evidence label; never reads like a full gate. */

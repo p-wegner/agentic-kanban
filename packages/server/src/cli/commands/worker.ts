@@ -487,7 +487,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         process.exit(1);
       }
       const body = await res.json() as {
-        workers: Array<{ id: string; name: string; effectiveStatus: string; status: string; os: string | null; labels: string | null; maxConcurrency: number; concurrency?: { mode: string; reason: string }; lastHeartbeatAt: string | null; protocolVersion?: number; workerVersion?: string; buildFreshness?: WorkerBuildFreshness; update?: WorkerUpdateReport; updateRequested?: boolean; toolchainInstall?: { state: string; toolchains: string[]; reason?: string }; profiles?: WorkerProfileAttestation[]; unattestedProfiles?: WorkerUnattestedProfile[] }>;
+        workers: Array<{ id: string; name: string; effectiveStatus: string; status: string; os: string | null; labels: string | null; maxConcurrency: number; concurrency?: { mode: string; reason: string }; lastHeartbeatAt: string | null; tokenExpiresAt?: string | null; protocolVersion?: number; workerVersion?: string; buildFreshness?: WorkerBuildFreshness; update?: WorkerUpdateReport; updateRequested?: boolean; toolchainInstall?: { state: string; toolchains: string[]; reason?: string }; profiles?: WorkerProfileAttestation[]; unattestedProfiles?: WorkerUnattestedProfile[] }>;
         fleet?: { boardWorkerVersion?: string | null };
       };
       if (options.json) {
@@ -505,7 +505,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         // distinct: ahead is a normal dev-machine state), and a `?` build gets no verdict.
         const freshness = formatBuildFreshness(w.buildFreshness, body.fleet?.boardWorkerVersion);
         const build = ` protocol=${w.protocolVersion ?? "?"} build=${w.workerVersion ?? "?"}${freshness ? ` (${freshness})` : ""}${formatUpdateState(w.update, w.updateRequested)}${formatToolchainInstall(w.toolchainInstall)}`;
-        console.log(`  ${w.name} [${w.effectiveStatus}] id=${w.id} os=${w.os ?? "?"} maxConcurrency=${w.maxConcurrency}${w.concurrency ? ` (${w.concurrency.reason})` : ""}${labels}${build} lastHeartbeat=${w.lastHeartbeatAt ?? "never"}${profilesSuffix(w.profiles, w.unattestedProfiles)}`);
+        console.log(`  ${w.name} [${w.effectiveStatus}] id=${w.id} os=${w.os ?? "?"} maxConcurrency=${w.maxConcurrency}${w.concurrency ? ` (${w.concurrency.reason})` : ""}${labels}${build} lastHeartbeat=${w.lastHeartbeatAt ?? "never"} tokenExpires=${w.tokenExpiresAt ?? "never"}${profilesSuffix(w.profiles, w.unattestedProfiles)}`);
       }
       console.log("\nRetire a worker with: agentic-kanban worker revoke <workerId|name>");
     });

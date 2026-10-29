@@ -544,6 +544,8 @@ export type BoardToWorkerMessage =
    * answers (the worker's wait times out and it falls back to its normal retry).
    */
   | { type: "git_token"; sessionId: string; requestId: string; gitToken?: string; error?: string }
+  /** #1766: the board's answer to `token_rotate_request` - a NEW worker bearer token; the old one stays valid for a short grace. */
+  | { type: "token_rotate"; requestId: string; workerToken?: string; tokenExpiresAt?: string; error?: string }
   /**
    * #1371: ask the worker to install missing project toolchains through mise. A REQUEST: the worker's
    * own `--toolchain-install` policy decides whether anything runs. Optional on the wire — an older
@@ -557,6 +559,9 @@ export type BoardToWorkerMessage =
   /** #1489: drop a verify job the board no longer wants / reap every verify job not in the live set. */
   | VerifyCancelFrame | VerifyLiveJobsFrame;
 
+/** #1754: board close code telling a daemon that ANOTHER process already holds its identity — stop, do not reconnect. */
+export const WORKER_DUPLICATE_IDENTITY_CLOSE_CODE = 4409;
+
 export type WorkerToBoardMessage =
   | {
       type: "hello";
@@ -565,6 +570,8 @@ export type WorkerToBoardMessage =
       /** #754: absent means a pre-handshake worker build. */
       protocolVersion?: number;
       workerVersion?: string;
+      /** #1754: random per daemon PROCESS; two processes sharing one pairing differ here. Absent = older build. */
+      instanceId?: string;
       /** #754: re-declared on every connect, not frozen at first pairing. */
       capabilities?: WorkerCapabilities;
     }
@@ -601,6 +608,8 @@ export type WorkerToBoardMessage =
    * wire like `undelivered_result`: an older board drops it and the worker's wait times out.
    */
   | { type: "git_token_request"; sessionId: string; requestId: string }
+  /** #1766: ask for a fresh worker bearer token over the authenticated socket. Optional on the wire like `git_token_request`. */
+  | { type: "token_rotate_request"; requestId: string }
   /** #1371: progress of one `toolchain_install` request (pending approval / installing / failed / done). */
   | { type: "toolchain_install_status"; status: ToolchainInstallStatus }
   /** #1431: the `accepted` ack and the outcome of one `oneshot`. */
@@ -700,6 +709,7 @@ export function parseWorkerToBoardMessage(raw: unknown): WorkerToBoardMessage | 
         // malformed — which is the failure mode #754 exists to remove.
         ...(typeof msg.protocolVersion === "number" ? { protocolVersion: msg.protocolVersion } : {}),
         ...(typeof msg.workerVersion === "string" ? { workerVersion: msg.workerVersion } : {}),
+        ...(typeof msg.instanceId === "string" && msg.instanceId ? { instanceId: msg.instanceId } : {}),
         ...(capabilities ? { capabilities } : {}),
       };
     }
@@ -738,6 +748,9 @@ export function parseWorkerToBoardMessage(raw: unknown): WorkerToBoardMessage | 
     case "git_token_request":
       if (typeof msg.sessionId !== "string" || typeof msg.requestId !== "string" || !msg.requestId) return null;
       return { type: "git_token_request", sessionId: msg.sessionId, requestId: msg.requestId };
+    case "token_rotate_request":
+      if (typeof msg.requestId !== "string" || !msg.requestId) return null;
+      return { type: "token_rotate_request", requestId: msg.requestId };
     case "undelivered_result":
       return parseUndeliveredResult(msg);
     default:
@@ -746,8 +759,20 @@ export function parseWorkerToBoardMessage(raw: unknown): WorkerToBoardMessage | 
 }
 
 /** Parse + shape-check a message arriving at a worker. Null = drop it. */
+function parseTokenRotate(msg: Record<string, unknown>): BoardToWorkerMessage | null {
+  if (typeof msg.requestId !== "string" || !msg.requestId) return null;
+  return {
+    type: "token_rotate",
+    requestId: msg.requestId,
+    ...(typeof msg.workerToken === "string" && msg.workerToken ? { workerToken: msg.workerToken } : {}),
+    ...(typeof msg.tokenExpiresAt === "string" ? { tokenExpiresAt: msg.tokenExpiresAt } : {}),
+    ...(typeof msg.error === "string" ? { error: msg.error } : {}),
+  };
+}
+
 export function parseBoardToWorkerMessage(raw: unknown): BoardToWorkerMessage | null {
   const msg = parseJson(raw);
+  if (msg?.type === "token_rotate") return parseTokenRotate(msg); // #1766: sessionless
   if (!msg || isServiceFrameType(msg.type) || typeof msg.sessionId !== "string") return parseToolchainInstallRequest(msg); // sessionless frames (#1447: the services frames carry a sessionId but are not a session's)
   switch (msg.type) {
     case "assign": {
