@@ -445,7 +445,7 @@ it is an **RCE channel into every worker** for anyone who can inject frames. So:
 - **Do not put a TLS-terminating proxy in front of the git transport.** The worker rebuilds
   the URL itself and drops any path prefix (section 8), so such a proxy is bypassed rather
   than enforced.
-- **Frame authentication (#1756, protocol 3).** Every board->worker frame carries `auth: { seq, mac }`:
+- **Frame authentication (#1756, protocol 3).** Every board->worker frame carries `frameAuth: { seq, mac }`:
   HMAC-SHA256 over the frame, keyed from the worker's bearer token (the board derives the same key
   from the stored token digest; `worker/worker-assign-auth.ts`). `seq` is strictly increasing per worker
   and doubles as a timestamp. The daemon verifies before parsing and drops frames that are bad-MAC,

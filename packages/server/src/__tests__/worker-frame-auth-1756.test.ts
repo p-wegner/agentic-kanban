@@ -29,8 +29,8 @@ describe("board->worker frame authentication (#1756)", () => {
 
   it("an attacker cannot move a valid mac onto a different seq", () => {
     const now = Date.now();
-    const forged = JSON.parse(signFrame(key, assign, now)) as { auth: { seq: number } };
-    forged.auth.seq = now + 5;
+    const forged = JSON.parse(signFrame(key, assign, now)) as { frameAuth: { seq: number } };
+    forged.frameAuth.seq = now + 5;
     expect(verifyFrame(key, JSON.stringify(forged), 0, now + 5)).toEqual({ ok: false, reason: "bad-mac" });
   });
 });

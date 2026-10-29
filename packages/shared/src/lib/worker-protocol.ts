@@ -324,7 +324,7 @@ export function parseWorkerPhaseTimings(raw: unknown): WorkerPhaseTimings | unde
  * simply attests nothing, and a restricted project keeps getting today's refusal. The
  * number moves so `worker list` and the update-check can SEE which side is older.
  *
- * **3 (#1756)** — every board->worker frame carries `auth: { seq, mac }` (HMAC over the frame, keyed
+ * **3 (#1756)** — every board->worker frame carries `frameAuth: { seq, mac }` (HMAC over the frame, keyed
  * from the worker token, see `server/src/worker/worker-assign-auth.ts`). An extra field, so protocol-2
  * peers interoperate unchanged (MIN_SUPPORTED is NOT raised); the number moves so a signing board
  * and a verifying worker are visible in `worker list`.
