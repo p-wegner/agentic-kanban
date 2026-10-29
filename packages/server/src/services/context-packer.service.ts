@@ -13,6 +13,7 @@
 
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { isTerminalStatusView } from "@agentic-kanban/shared";
+import { HEAL_TICKET_KEY_PREFIX, MERGE_BACK_KEY_PREFIX } from "../lib/heal-ticket-key.js";
 import type { Database } from "../db/index.js";
 import { buildPhaseArtifactsContext } from "./phase-artifacts.service.js";
 import { extractNamedPaths, formatCeilingHeadroom, measureCeilingHeadroom } from "./ceiling-headroom.js";
@@ -46,6 +47,47 @@ export interface ContextPackerResult {
 const MAX_PRIMER_CHARS = 8_000;
 const MAX_RELEVANT_FILES = 12;
 const MAX_PRIOR_ISSUES = 3;
+/** Fewer keyword hits than this is shared project vocabulary, not prior art (#1764). */
+const MIN_PRIOR_SIMILARITY = 2;
+const PRIOR_EXCERPT_CHARS = 120;
+/** `externalKey` prefixes the board itself mints — their tickets are generated, not prior art. */
+const BOARD_OWNED_KEY_PREFIXES = [
+  HEAL_TICKET_KEY_PREFIX,
+  MERGE_BACK_KEY_PREFIX,
+  "ci-heal:",
+  "code-health-cleanup:",
+  "dep-advisory:",
+  "plugin-loop:",
+  "onboarding:",
+];
+
+/** Auto-generated ticket (heal, reopen, plugin-loop unit, ...) — excluded from prior art. */
+export function isBoardGeneratedTicket(c: { title: string; externalKey?: string | null }): boolean {
+  if (c.externalKey && BOARD_OWNED_KEY_PREFIXES.some((p) => c.externalKey!.startsWith(p))) return true;
+  return /^(heal|reopen(ed)?)\b/i.test(c.title.trim());
+}
+
+/**
+ * One-line excerpt cut at a line boundary (a word boundary when the first line alone is too
+ * long), with backticks balanced so it cannot leave an unterminated span in the memory file.
+ */
+export function priorArtExcerpt(description: string | null | undefined, max = PRIOR_EXCERPT_CHARS): string {
+  const lines = (description ?? "").split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("```"));
+  const kept: string[] = [];
+  let len = 0;
+  for (const line of lines) {
+    if (len + line.length + (kept.length ? 1 : 0) > max) break;
+    kept.push(line);
+    len += line.length + (kept.length > 1 ? 1 : 0);
+  }
+  let out = kept.join(" ");
+  if (!out && lines[0]) {
+    const cut = lines[0].slice(0, max);
+    out = cut.slice(0, Math.max(cut.lastIndexOf(" "), 0) || max).trimEnd() + "…";
+  }
+  if ((out.match(/`/g)?.length ?? 0) % 2 === 1) out = out.slice(0, out.lastIndexOf("`")).trimEnd();
+  return out;
+}
 const MAX_RECENT_COMMITS = 5;
 
 async function execGitSafe(args: string[], cwd: string): Promise<string> {
@@ -155,9 +197,9 @@ export async function buildContextPrimer(
     const candidates = await getCandidateIssuesForProject(projectId, issueId, database);
 
     priorIssues = candidates
-      .filter((c) => isTerminalStatusView(c))
+      .filter((c) => isTerminalStatusView(c) && !isBoardGeneratedTicket(c))
       .map((c) => ({ ...c, sim: titleSimilarity(c.title + " " + (c.description ?? ""), keywords) }))
-      .filter((c) => c.sim > 0)
+      .filter((c) => c.sim >= MIN_PRIOR_SIMILARITY)
       .sort((a, b) => b.sim - a.sim)
       .slice(0, MAX_PRIOR_ISSUES);
   } catch { /* best-effort */ }
@@ -225,7 +267,7 @@ export async function buildContextPrimer(
     sections.push("### Similar Completed Tickets\n");
     for (const p of priorIssues) {
       const num = p.issueNumber != null ? `#${p.issueNumber} ` : "";
-      const desc = p.description?.trim().slice(0, 120);
+      const desc = priorArtExcerpt(p.description);
       sections.push(`- **${num}${p.title}**${desc ? ` — ${desc}` : ""}`);
     }
     sections.push("");

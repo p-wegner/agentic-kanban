@@ -143,6 +143,12 @@ export interface ParsedStreamEvent {
   liveStats?: {
     model: string;
     contextTokens: number;
+    /**
+     * Full size of this request: input + cache-creation + cache-read (#1765). `contextTokens`
+     * omits cache creation, which on a session's FIRST request is most of it. Providers that
+     * report no breakdown leave this unset and the first `contextTokens` stands in.
+     */
+    requestTokens?: number;
     toolUses?: number;
     subagentDelta?: number;
   };

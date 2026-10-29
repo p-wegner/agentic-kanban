@@ -42,6 +42,8 @@ export interface WorkspaceDetails {
   remoteLastOutputAt?: string | null;
   lastSessionTriggerType: string | null;
   contextTokens: number | null;
+  /** First request size of the latest session (#1765) — context size, unlike the cost total. */
+  firstTurnContextTokens?: number | null;
   lastTool: string | null;
   /** True when a RUNNING session has emitted no persisted activity signal yet (#930) — distinguishes "no news" from "zero activity". */
   activityUnknown: boolean;
@@ -153,6 +155,17 @@ export function mapSymlinkRun(row: {
     endedAt: row.latestSymlinkEndedAt,
     error: row.latestSymlinkError,
   };
+}
+
+/** First-request size recorded by the broadcaster (#1765), or null. */
+export function parseFirstTurnContextTokens(stats: string | null): number | null {
+  if (!stats) return null;
+  try {
+    const v = (JSON.parse(stats) as Record<string, unknown>).firstTurnContextTokens;
+    return typeof v === "number" && v > 0 ? v : null;
+  } catch {
+    return null;
+  }
 }
 
 /** contextTokens (explicit, else input+cacheRead), lastTool, and lastActivityAt from a session stats blob. */
@@ -269,6 +282,7 @@ export function mapWorkspaceDetailsRow(row: WorkspaceDetailsRow, sess: Workspace
     lastSessionId: sess?.id ?? null,
     lastSessionTriggerType: sess?.triggerType ?? null,
     contextTokens,
+    firstTurnContextTokens: parseFirstTurnContextTokens(sess?.stats ?? null),
     lastTool,
     activityUnknown,
     latestSetup: mapLatestSetup(row),

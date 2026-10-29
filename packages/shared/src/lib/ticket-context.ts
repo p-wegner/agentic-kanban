@@ -82,6 +82,14 @@ export type TicketContext = {
    */
   groupTickets?: Array<{ issueNumber: number | null; title: string; description?: string | null }> | null;
   /**
+   * The lead ticket's description is already in the agent's first prompt (#1762). The file
+   * is loaded as project memory on EVERY turn, so repeating it there pays for it twice for
+   * the life of the session; render a pointer instead.
+   */
+  descriptionInPrompt?: boolean;
+  /** Same as {@link descriptionInPrompt}, for the group members' descriptions. */
+  groupDescriptionsInPrompt?: boolean;
+  /**
    * The project's resolved risk posture (#912) — carried into the worktree so the
    * builder AND its Stop hook agree on what verification tier applies, without either
    * one re-reading preferences. Omitted (or null) renders no section, which is
@@ -582,6 +590,9 @@ export function retargetTicketContextForRemoteWorker(
   return [head, "", buildRemoteWorkerSection(), "", feedback ?? "", ""].join("\n");
 }
 
+/** What the file says in place of a description the first prompt already carries (#1762). */
+export const DESCRIPTION_IN_PROMPT_POINTER = "_(The full description is in your first task message — not repeated here.)_";
+
 /**
  * Build the markdown body injected into the worktree as `CLAUDE.local.md`.
  * Frames the ticket as an authoritative reference doc so the agent treats it as
@@ -608,7 +619,11 @@ export function buildTicketContextMarkdown(ctx: TicketContext): string {
     "",
     "## Description",
     "",
-    ctx.description?.trim() ? ctx.description.trim() : "_(No description provided.)_",
+    ctx.description?.trim()
+      ? ctx.descriptionInPrompt
+        ? DESCRIPTION_IN_PROMPT_POINTER
+        : ctx.description.trim()
+      : "_(No description provided.)_",
     "",
   ];
   const reopen = ctx.reopenComments?.filter((c) => c.body.trim()) ?? [];
@@ -642,7 +657,11 @@ export function buildTicketContextMarkdown(ctx: TicketContext): string {
       lines.push(
         `### Ticket ${t.issueNumber != null ? `#${t.issueNumber}` : ""}: ${t.title}`.replace("Ticket :", "Ticket:"),
         "",
-        t.description?.trim() ? t.description.trim() : "_(No description provided.)_",
+        t.description?.trim()
+          ? ctx.groupDescriptionsInPrompt
+            ? DESCRIPTION_IN_PROMPT_POINTER
+            : t.description.trim()
+          : "_(No description provided.)_",
         "",
       );
     }

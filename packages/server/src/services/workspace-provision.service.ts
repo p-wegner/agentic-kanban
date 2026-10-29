@@ -778,6 +778,8 @@ export function createWorkspaceProvisionService(deps: {
     } | null,
     // Ticket group (#661): the member tickets rendered in full below the lead one.
     groupTickets?: Array<{ issueNumber: number | null; title: string; description: string | null }> | null,
+    // #1762: descriptions the first prompt already carries are not repeated in the file.
+    promptCarries?: { lead: boolean; group: boolean },
   ): Promise<string | null> {
     let stackProfile = null;
     try {
@@ -810,6 +812,8 @@ export function createWorkspaceProvisionService(deps: {
       serviceStack,
       boardFeedback,
       groupTickets,
+      descriptionInPrompt: promptCarries?.lead,
+      groupDescriptionsInPrompt: promptCarries?.group,
       riskPosture: await readRiskPosture(issue.projectId, database),
     });
   }

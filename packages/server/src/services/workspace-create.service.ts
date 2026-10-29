@@ -395,8 +395,8 @@ export function createWorkspaceCreateService(deps: {
     let createClaim: BranchCreateClaimToken | null = null;
 
     const phaseStart = Date.now();
-    const timing = (phase: string, startMs: number) =>
-      console.log(`[workspaces-timing] workspaceId=${id} phase=${phase} durationMs=${Date.now() - startMs}`);
+    const timing = (phase: string, startMs: number, extra = "") =>
+      console.log(`[workspaces-timing] workspaceId=${id} phase=${phase} durationMs=${Date.now() - startMs}${extra}`);
 
     try {
       let t = Date.now();
@@ -560,7 +560,7 @@ export function createWorkspaceCreateService(deps: {
       if (!isDirect && !input.skipContextPacker) {
         t = Date.now();
         contextPrimer = await packContextPrimer(input, issue, project);
-        timing("context-packer", t);
+        timing("context-packer", t, ` primerChars=${contextPrimer?.length ?? 0}`);
       }
 
       // Inject ticket details (+ context primer + stack profile) into the worktree as a
@@ -576,7 +576,9 @@ export function createWorkspaceCreateService(deps: {
             contextPrimer,
             siblingWorktrees.map((s) => ({ name: s.name, worktreePath: s.worktreePath })),
             null,
-            groupMembers,
+            // buildAgentPrompt carries title+description unless a custom prompt replaces it;
+            // the group section is always appended (#1762).
+            groupMembers, { lead: !input.customPrompt, group: groupMembers.length > 0 },
           )
         : null;
       if (ticketContextPath) timing("ticket-context", t);
