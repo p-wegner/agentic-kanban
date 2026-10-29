@@ -17,6 +17,7 @@ import {
   type BoardToWorkerMessage,
   type WorkerToBoardMessage,
 } from "@agentic-kanban/shared/lib/worker-protocol";
+import { frameKeyFromToken, signFrame } from "../worker/worker-assign-auth.js";
 import type { WorkerRegistry } from "./worker-registry.service.js";
 import type { DeferredLaunchFailure } from "./agent-dispatch.service.js";
 // The worker builds this refusal from the same constant, so the classifier cannot drift
@@ -83,6 +84,8 @@ interface WorkerConnection {
   lastHeardAt: number;
   /** #1754: the daemon process behind this socket, from its latest `hello` (absent for an older build). */
   instanceId?: string;
+  /** #1756: key board->worker frames are signed with; absent only for test doubles that skip the upgrade. */
+  frameKey?: string;
 }
 
 /** #1754: a second daemon process tried to take over a live worker identity. */
@@ -151,6 +154,10 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
   // manager built on a registry honours it, not just the fleet facade's.
   registry.onRevoke((workerId) => { closeConnection(workerId); });
 
+  const frameSeq = new Map<string, number>(); // #1756: last signed seq per worker, across reconnects
+  /** #1756: frame key of each parked socket, applied when it is adopted. */
+  const parkedKeys = new WeakMap<WSContext, string>();
+
   /**
    * #1754: a newer socket arrives while the registered one is demonstrably alive (answered a ping/frame
    * within two keepalive intervals) and its daemon identified itself. Whether the newcomer is the SAME
@@ -175,16 +182,17 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     }
   }
 
-  function handleOpen(workerId: string, ws: WSContext): void {
+  function handleOpen(workerId: string, ws: WSContext, frameKey?: string): void {
     const held = connections.get(workerId);
     if (held && shouldParkNewcomer(held)) {
       parked.add(ws);
+      if (frameKey) parkedKeys.set(ws, frameKey);
       return;
     }
-    adopt(workerId, ws);
+    adopt(workerId, ws, frameKey);
   }
 
-  function adopt(workerId: string, ws: WSContext): void {
+  function adopt(workerId: string, ws: WSContext, frameKey?: string): void {
     // A reconnect replaces the previous socket (stale after e.g. a NAT rebind).
     //
     // Say so in the log. This eviction is indistinguishable from a network drop
@@ -224,6 +232,7 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
       pendingSessionIds: new Map(),
       missedPings: 0,
       lastHeardAt: Date.now(),
+      ...(frameKey ? { frameKey } : {}),
     };
     connections.set(workerId, conn);
     const raw = rawSocket(ws);
@@ -250,7 +259,7 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
         rejectDuplicate(workerId, from, held, message.instanceId);
         return;
       }
-      adopt(workerId, from);
+      adopt(workerId, from, parkedKeys.get(from));
     }
     const conn = connections.get(workerId);
     if (conn) {
@@ -292,6 +301,9 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
         const requestId = message.requestId;
         void registry.rotateWorkerToken(workerId).then((r) => {
           send(workerId, r ? { type: "token_rotate", requestId, workerToken: r.workerToken, tokenExpiresAt: r.tokenExpiresAt } : { type: "token_rotate", requestId, error: "unknown worker" });
+          // #1756: the worker switches keys on receipt; this frame was signed with the old one.
+          const held = connections.get(workerId);
+          if (r && held?.frameKey) held.frameKey = frameKeyFromToken(r.workerToken);
         }).catch((err) => {
           console.error(`[worker-connection] token rotation failed: workerId=${workerId}`, err);
           send(workerId, { type: "token_rotate", requestId, error: "rotation failed" });
@@ -348,7 +360,16 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     const conn = connections.get(workerId);
     if (!conn) return false;
     try {
-      conn.ws.send(JSON.stringify(message));
+      // #1756: sign when the upgrade gave us the key (always, on the real route); seq survives reconnects.
+      let wire: string;
+      if (conn.frameKey) {
+        const seq = Math.max((frameSeq.get(workerId) ?? 0) + 1, now);
+        frameSeq.set(workerId, seq);
+        wire = signFrame(conn.frameKey, message, seq);
+      } else {
+        wire = JSON.stringify(message);
+      }
+      conn.ws.send(wire);
       // A delivered `assign` occupies a slot from THIS moment, not from the
       // agent's first output (#248).
       if (message.type === "assign") {
@@ -582,7 +603,8 @@ export function createWorkerWsRoute(
     }
     return {
       onOpen(_event: Event, ws: WSContext) {
-        manager.handleOpen(workerId, ws);
+        const token = extractToken(c); // already authenticated by the middleware below
+        manager.handleOpen(workerId, ws, token ? frameKeyFromToken(token) : undefined);
       },
       onMessage(event: MessageEvent, _ws: WSContext) {
         manager.handleMessage(workerId, typeof event.data === "string" ? event.data : String(event.data), _ws);

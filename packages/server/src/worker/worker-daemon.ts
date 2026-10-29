@@ -31,6 +31,7 @@
 //  * `hello` and `register` carry a protocol version; an incompatible board
 //    refuses with a sentence instead of failing as a silence.
 
+import { createFrameGate } from "./worker-assign-auth.js"; // #1756
 import { runStartupStep, refreshPreConnectState } from "./worker-startup-step.js";
 import { readFileSync } from "node:fs";
 import { homedir, platform, arch, totalmem, cpus } from "node:os";
@@ -174,6 +175,8 @@ export interface WorkerDaemonOptions extends VerifySlotsStartOption { // #1496: 
   log?: (line: string) => void;
   /** How long `stop()` waits for in-flight result pushes (#754). */
   drainTimeoutMs?: number;
+  /** #1756: refuse unsigned board frames from the first one (otherwise required once the board has signed one). */
+  requireSignedFrames?: boolean;
   lifecycle?: (ctx: import("./worker-lifecycle.js").LifecycleCtx) => import("./worker-lifecycle.js").LifecycleHandlers; // #1443: status details + stop/restart for the control endpoint
   /**
    * Called once when this daemon can never work against this board again â€” a 401 with no
@@ -351,6 +354,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   const currentUrl = (): string => boardUrls[urlIndex]!;
   let ws: WebSocket | null = null;
   let stopped = false;
+  const acceptFrame = createFrameGate(() => identity.workerToken, opts.requireSignedFrames ?? process.env.KANBAN_WORKER_REQUIRE_SIGNED_FRAMES === "1", log); // #1756
   let draining = settings.startDrained();
   let fatal: string | null = null;
   /** Re-pairings attempted, and whether one is in flight (#754 â€” see handleUnauthorized). */
@@ -565,7 +569,9 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     socket.on("message", (data) => {
       // `data` is ws's RawData: Buffer | ArrayBuffer | Buffer[]. A bare `.toString()` on the
       // array case yields comma-joined garbage rather than the frame (no-base-to-string).
-      const message = parseBoardToWorkerMessage(rawDataToBuffer(data).toString("utf8"));
+      const rawFrame = rawDataToBuffer(data).toString("utf8");
+      if (!acceptFrame(rawFrame)) return; // #1756: authenticate BEFORE parsing/dispatching
+      const message = parseBoardToWorkerMessage(rawFrame);
       if (!message) {
         log(`[worker] dropping malformed board message`);
         return;
