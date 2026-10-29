@@ -199,6 +199,7 @@ unambiguous prefix" is an argument about the NAME and says nothing about what ea
 |---|---|
 | `AGENTIC_KANBAN_DIR` | Data directory. Decides where `kanban.db` lives when no explicit `KANBAN_DB_URL` is set. |
 | `AGENTIC_KANBAN_PLUGINS_DIR` | Where installed plugin checkouts live. Default `~/.agentic-kanban/plugins`. |
+| `AGENTIC_KANBAN_PLUGIN_DATA_DIR` | Where plugins keep their per-project state (e.g. jira-sync). Default `<data dir>/plugin-data`. Read in `packages/server/src/services/plugin-fs.ts`. |
 | `AGENTIC_KANBAN_BUNDLED_PLUGINS_DIR` | Override the directory the marketplace reads bundled plugins from. |
 | `AGENTIC_KANBAN_BACKUP_DIR` | Where DB backups are written. Default `<data dir>/.db-backups`. |
 | `AGENTIC_KANBAN_BACKUP_MAX_BYTES` | Cap on total backup size before the oldest are pruned. |

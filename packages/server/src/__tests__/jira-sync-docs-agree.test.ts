@@ -1,3 +1,5 @@
+// @gate:always-run when:packages/server/plugins/jira-sync/**,packages/server/src/**,docs/**
+// @gate:static — source-scanning docs/code agreement check.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
