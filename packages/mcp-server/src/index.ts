@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { MCP_ALLOWED_TOOLS_ENV } from "@agentic-kanban/shared/lib/board-tool-allowlist";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { db, schema } from "./db.js";
@@ -316,7 +315,7 @@ async function main() {
   const disabledTools = await getDisabledTools();
   // #1761: a builder's launch pins the surface to its allowlist, so unlisted tools never register
   // (no schema cost on providers without tool deferral, no delete/merge/preference tools to call).
-  const allowed = process.env[MCP_ALLOWED_TOOLS_ENV]?.split(",").map((t) => t.trim()).filter(Boolean);
+  const allowed = process.env.KANBAN_MCP_ALLOWED_TOOLS?.split(",").map((t) => t.trim()).filter(Boolean);
   if (allowed?.length) for (const name of Object.keys(TOOL_REGISTRARS)) if (!allowed.includes(name)) disabledTools.add(name);
   const { server, registered, skipped } = createConfiguredServer(disabledTools);
 
