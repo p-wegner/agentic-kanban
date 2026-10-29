@@ -447,7 +447,7 @@ export { checkGitInstalled, checkGitIdentity, checkGitSafeDirectory, checkPackag
 // god-module gate's 20-declaration ceiling (#889), and the check pushed it to 21.
 import { checkNodeVersion } from "./worker-doctor-node-check.js";
 export { MIN_SUPPORTED_NODE_MAJOR, checkNodeVersion } from "./worker-doctor-node-check.js";
-import { checkGlobalLauncher, checkLogonTaskLauncher, checkWorkerBuild, probeGlobalVersion, readEntryVersion } from "./worker-doctor-build-check.js";
+import { checkGlobalLauncher, checkLogonTaskLauncher, checkLogonTaskProfiles, checkWorkerBuild, probeGlobalVersion, readEntryVersion } from "./worker-doctor-build-check.js";
 import { installedBuildOf, launcherCommand, useLauncherInRemedies } from "./worker-update-notes.js";
 import { parseBuildId } from "../../lib/worker-update.js";
 import { checkBoardBuild } from "./worker-board-build.js";
@@ -721,6 +721,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   }
   checks.push(...checkProfileCredentials(opts.home, undefined, opts.profiles, undefined, opts.profileAliases, opts.harness?.dirFor("claude")));
   checks.push(checkAttestedProfiles(discoverLocalProfiles(opts.home, bindDefaultAlias(parseProfileAliases(opts.profileAliases), opts.harness?.dirFor("claude"))), opts.profiles, daemonStatus ? { daemonRunning: true, daemonProfiles: daemonAttestedProfiles(daemonStatus) } : undefined));
+  if (daemonStatus) checks.push(checkLogonTaskProfiles({ attested: ((daemonStatus.profiles ?? daemonStatus.attestedProfiles) as string[] | undefined) ?? null })); // #1773
   // #1372: while the global launcher is stale or absent, remedies name the shim that always runs the current build.
   const launcher = launcherCommand({
     stateFile: opts.stateFile,

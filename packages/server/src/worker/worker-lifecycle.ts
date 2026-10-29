@@ -16,7 +16,7 @@ import type { WorkerControlHandlers } from "./worker-control.js";
 import { freeDiskGb, readWorkerCapacity } from "./worker-resources.js";
 import { evaluateWorkerConcurrency } from "@agentic-kanban/shared/lib/worker-concurrency";
 
-export const START_CONFIG_KEYS = ["maxConcurrency", "verifySlots", "labels", "providers", "profileAlias"] as const;
+export const START_CONFIG_KEYS = ["maxConcurrency", "verifySlots", "labels", "providers", "profileAlias", "profiles"] as const;
 export type StartConfigKey = (typeof START_CONFIG_KEYS)[number];
 
 /** The `start` flag behind each key; the key is also the `worker start` option property it fills. */
@@ -26,6 +26,7 @@ const KEY_FLAG: Record<StartConfigKey, string> = {
   labels: "--labels",
   providers: "--providers",
   profileAlias: "--profile-alias",
+  profiles: "--profiles",
 };
 
 export interface StartConfig {
@@ -92,6 +93,7 @@ interface StartConfigurable {
   labels?: string;
   providers?: string;
   profileAlias?: string;
+  profiles?: string;
 }
 
 /** Fold the persisted start config over the parsed `start` options (set wins over argv; unset drops it). */
@@ -107,6 +109,22 @@ export function applyStartConfig<T extends StartConfigurable>(options: T, stateF
   return out as T;
 }
 
+/**
+ * #1773: the `profiles` a running daemon should attest according to `config set|unset profiles`, read
+ * from the state file on every beat so the edit applies live. `null` = no persisted opinion (leave the
+ * current set alone); `undefined` inside = unset/empty (attest every discovered login, or the board's set).
+ */
+export function persistedProfilesOverride(stateFile: string, boardProfiles?: string[]): { profiles: string[] | undefined } | null {
+  const cfg = loadStartConfig(stateFile);
+  const split = (v: string): string[] | undefined => {
+    const l = v.split(",").map((x) => x.trim()).filter(Boolean);
+    return l.length > 0 ? l : undefined;
+  };
+  if (cfg.set.profiles !== undefined) return { profiles: split(cfg.set.profiles) };
+  if (cfg.unset.includes("profiles")) return { profiles: boardProfiles && boardProfiles.length > 0 ? boardProfiles : undefined };
+  return null;
+}
+
 // --- status -----------------------------------------------------------------------------------
 
 export interface LifecycleCtx {
@@ -115,7 +133,7 @@ export interface LifecycleCtx {
   boardUrl: string;
   draining(): boolean;
   sessionsLeft(): number;
-  effective(): { maxConcurrency?: number; verifySlots?: number; labels?: string[]; providers?: string[]; profileAliases?: string[] };
+  effective(): { maxConcurrency?: number; verifySlots?: number; labels?: string[]; providers?: string[]; profileAliases?: string[]; profiles?: string[] };
   pinned(): WorkerSettingKey[];
   desired(): WorkerSettings | undefined;
   /** #1451: attested provider:profile pairs and the harness mode (absent on older callers). */
@@ -144,6 +162,7 @@ export function buildLifecycleDetails(ctx: LifecycleCtx): Record<string, unknown
     labels: eff.labels,
     providers: eff.providers,
     profileAlias: eff.profileAliases,
+    profiles: eff.profiles,
   };
   const settings: StatusSetting[] = START_CONFIG_KEYS.map((key) => ({
     key,

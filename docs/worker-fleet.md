@@ -190,6 +190,14 @@ worker was started with a flag for (`--labels`, `--max-concurrency`, `--provider
 projects are enforced by the board in placement (`fleetForProject`; `worker explain` names the
 bar). Each change is a `settings_changed` row in the worker's event timeline.
 
+**Attested profiles change live (#1773).** `profiles` (the board's setting, or `worker config set
+profiles a,b` on the machine) is applied by the running daemon without a restart or reconnect: it
+rebuilds its attestation and sends a heartbeat at once, so the board sees the new set within one beat.
+Sessions already running on a removed profile finish; no new placement goes to it. `config set` persists
+in the state file, and `start` (so also `restart --drain` and a reboot) applies persisted config over the
+original start flags. `config unset profiles` returns to the board's set, else every discovered login.
+`worker doctor` warns when the logon task's `--profiles` differs from what the daemon attests.
+
 ## 5. Opting a project in, and strict dispatch
 
 > **There is a UI for this now (#774).** Command palette → **Worker Fleet** → *Remote
