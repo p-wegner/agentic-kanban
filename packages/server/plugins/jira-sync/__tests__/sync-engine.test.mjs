@@ -472,3 +472,50 @@ test("maxIssuesPerRun (#1738): truncates, flags moreAvailable, and classifies no
   assert.deepEqual(capped.reportedOutOfScope, []);
   assert.equal(capped.skipped, 1);
 });
+
+function withStatuses(board, names) {
+  board.state.statuses = names.map((name, i) => ({ id: `s-${name.toLowerCase().replace(/\s+/g, "-")}`, name, isDefault: i === 0 }));
+}
+
+function jiraWithStatus(key, updated, name, category) {
+  const issue = jiraIssue(key, { summary: "S", updated });
+  issue.fields.status = { name, statusCategory: { key: category } };
+  return issue;
+}
+
+test("a board column move inside the same Jira status category is not reverted by a later pull (#1730)", async () => {
+  const board = fakeBoardClient();
+  withStatuses(board, ["Todo", "In Progress", "In Review", "Done"]);
+  const baseOpts = { jql: "project = KD", projectId: "proj-1" };
+  const first = await runInboundSync(fakeJiraClient([jiraWithStatus("KD-1", "2026-09-01T00:00:00.000Z", "In Progress", "indeterminate")]), board, {
+    ...baseOpts,
+    knownState: { issues: {} },
+  });
+  assert.equal(board.state.issues[0].statusId, "s-in-progress");
+
+  // The user moves the card; push transitions Jira and re-baselines the board side.
+  const moved = await board.updateIssue(board.state.issues[0].id, { statusId: "s-in-review" });
+  const state = structuredClone(first.nextState);
+  state.issues["KD-1"].boardUpdatedAt = moved.updatedAt;
+  state.issues["KD-1"].fields.statusId = "s-in-review";
+
+  const second = await runInboundSync(fakeJiraClient([jiraWithStatus("KD-1", "2026-09-02T00:00:00.000Z", "In Progress", "indeterminate")]), board, {
+    ...baseOpts,
+    knownState: state,
+  });
+  assert.equal(board.state.issues[0].statusId, "s-in-review");
+  assert.ok(!second.details.some((d) => d.changes?.includes("status")));
+});
+
+test("a Jira-Done issue never lands in the default column; statusMap steers the pull inversely (#1730)", async () => {
+  const board = fakeBoardClient();
+  withStatuses(board, ["Backlog", "Shipped"]);
+  const opts = { jql: "project = KD", projectId: "proj-1", knownState: { issues: {} } };
+  const jira = fakeJiraClient([jiraWithStatus("KD-1", "2026-09-01T00:00:00.000Z", "Done", "done")]);
+
+  await assert.rejects(runInboundSync(jira, board, opts), (err) => err.code === "STATUS_CONFIG" && /statusMap/.test(err.message));
+  assert.equal(board.state.issues.length, 0);
+
+  await runInboundSync(jira, board, { ...opts, statusMap: { Shipped: "Done" } });
+  assert.equal(board.state.issues[0].statusId, "s-shipped");
+});
