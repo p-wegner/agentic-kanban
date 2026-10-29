@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { BUILDER_BOARD_TOOLS } from "@agentic-kanban/shared/lib/board-tool-allowlist";
 import { ClaudeProvider } from "../services/agent-provider/claude-provider.js";
 import {
   parseBuilderContextPolicy,
@@ -63,7 +64,7 @@ describe("pinned builder tuning: --effort / --autocompact", () => {
 
   it("isolated with no prefs pins the defaults the user scope used to supply", async () => {
     const ctx = await resolveBuilderContext(true, pid, "ws", prefs({}));
-    expect(ctx).toEqual({ policy: "isolated", effort: "medium", autocompact: "500000" });
+    expect(ctx).toEqual({ policy: "isolated", effort: "medium", autocompact: "500000", boardTools: [...BUILDER_BOARD_TOOLS] });
     const { args } = provider.buildLaunchConfig({ ...base, builderContext: ctx });
     expect(flag(args, "--effort")).toBe("medium");
     expect(flag(args, "--autocompact")).toBe("500000");

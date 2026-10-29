@@ -113,6 +113,7 @@ Set by the board on an agent subprocess; read by hooks and skills inside a workt
 | `KANBAN_SESSION_ID` | Board session id for the running agent. |
 | `KANBAN_ISSUES_URL` | GitHub issues URL used by the `gh-issue` board-feedback mode. |
 | `KANBAN_MCP_TOKEN` | Bearer token the spawned MCP server authenticates with. |
+| `KANBAN_MCP_ALLOWED_TOOLS` | Comma-separated board-tool allowlist the spawned MCP server registers (#1761); absent = every tool. Set by the host builder launch; name pinned by `MCP_ALLOWED_TOOLS_ENV` in `board-tool-allowlist.ts`. |
 | `KANBAN_REPOS_DIR` | Root directory the board clones project repos into. |
 | `KANBAN_AGENT_HANG_TIMEOUT_MS` | How long an agent may produce nothing before it is treated as hung. |
 

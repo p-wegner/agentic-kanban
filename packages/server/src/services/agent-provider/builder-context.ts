@@ -1,3 +1,4 @@
+import { BUILDER_BOARD_TOOLS } from "@agentic-kanban/shared/lib/board-tool-allowlist";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -77,8 +78,10 @@ const SHELL_SAFE_VALUE = /^[\w.:\\/-]+$/;
 // The board's own MCP server must survive isolation.
 const KEPT_CODEX_MCP_SERVERS = new Set(["agentic-kanban"]);
 
-export function codexIsolationConfigArgs(scope?: BuilderContext["codexUserScope"]): string[] {
+export function codexIsolationConfigArgs(scope?: BuilderContext["codexUserScope"], boardTools?: readonly string[]): string[] {
   const overrides: string[] = [...CODEX_ISOLATION_BASE_OVERRIDES];
+  // #1761: Codex has no tool deferral, so every exposed schema is paid per request.
+  if (boardTools?.length) overrides.push(`mcp_servers.agentic-kanban.enabled_tools=[${boardTools.map((t) => `'${t}'`).join(",")}]`);
   for (const name of scope?.mcpServers ?? []) overrides.push(`mcp_servers.${name}.enabled=false`);
   // One array: repeated `-c skills.config=` overrides replace each other (last wins), measured.
   if (scope?.skillPaths.length) overrides.push(`skills.config=[${scope.skillPaths.map((p) => `{path='${p}',enabled=false}`).join(",")}]`);
@@ -148,7 +151,7 @@ export async function resolveBuilderContext(
   const lean = isolated && claudeLean ? parseBuilderLeanProfile(await read(builderProfilePref.key(projectId))) : undefined;
   if (lean) await onLean?.(lean);
   console.log(`[session] builder context: ${policy} effort=${effort ?? "-"} autocompact=${autocompact ?? "-"}${lean ? ` lean: ${describeBuilderLeanProfile(lean)}` : ""} workspaceId=${workspaceId}`);
-  return { policy, ...(effort ? { effort } : {}), ...(autocompact ? { autocompact } : {}), ...(lean ? { lean } : {}) };
+  return { policy, ...(effort ? { effort } : {}), ...(autocompact ? { autocompact } : {}), ...(lean ? { lean } : {}), ...(isolated ? { boardTools: BUILDER_BOARD_TOOLS } : {}) };
 }
 
 /** A recognised effort level, or undefined (unset or unknown: the default decides). */

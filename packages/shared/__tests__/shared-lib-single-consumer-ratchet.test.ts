@@ -102,6 +102,7 @@ const CONSUMER_ROOTS: ReadonlyArray<readonly [name: string, absDir: string]> = [
  */
 const GRANDFATHERED: Readonly<Record<string, string>> = {
   "backlog-markdown.ts": "server",
+  "board-tool-allowlist.ts": "server",
   "builder-skill-policy.ts": "server",
   "bundled-skills.ts": "mcp-server",
   "butler-ticket-prompt.ts": "client",
