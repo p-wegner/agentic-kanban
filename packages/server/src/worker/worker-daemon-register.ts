@@ -108,6 +108,7 @@ export async function registerWithBoard(
   const body = await res.json().catch(() => ({})) as {
     workerId?: string;
     workerToken?: string;
+    tokenExpiresAt?: string;
     error?: string;
     boardProtocolVersion?: number; sameNamed?: { id: string }[];
     boardId?: string; // #1337
@@ -126,5 +127,5 @@ export async function registerWithBoard(
     throw new Error(`Registration failed (${res.status}): ${detail}`);
   }
   if (body.sameNamed?.length) (opts.log ?? console.log)(sameNamedNotice(name, body.sameNamed)); // #1390
-  return { workerId: body.workerId, workerToken: body.workerToken, name, ...(body.boardId ? { boardId: body.boardId } : {}) };
+  return { workerId: body.workerId, workerToken: body.workerToken, ...(body.tokenExpiresAt ? { tokenExpiresAt: body.tokenExpiresAt } : {}), name, ...(body.boardId ? { boardId: body.boardId } : {}) };
 }

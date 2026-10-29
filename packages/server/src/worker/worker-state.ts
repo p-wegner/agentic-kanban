@@ -17,6 +17,8 @@ import { dirname } from "node:path";
 export interface WorkerIdentity {
   workerId: string;
   workerToken: string;
+  /** ISO expiry of `workerToken` (#1766). Absent = a pairing from before expiry existed. */
+  tokenExpiresAt?: string;
   name: string;
   /** The board's stable id, when the board sent one (#1337). */
   boardId?: string;
