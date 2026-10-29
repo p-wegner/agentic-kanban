@@ -339,7 +339,7 @@ export function launch(request: AgentLaunchRequest): ChildProcess {
   // #524: shared with the remote path, which used to skip this entirely.
   const effectivePrompt = resolveEffectivePrompt(prompt, provider, contextFiles);
   const guardStatus = provider ? resolveLaunchGuardStatus(provider, worktreePath) : undefined;
-  if (guardStatus?.warning) console.warn(guardStatus.warning);
+  if (guardStatus?.warning) console.warn(`[agent] ${guardStatus.warning}`);
   const hostLaunchConfig = buildAgentLaunchConfig({
     agentArgs,
     providerSessionId,

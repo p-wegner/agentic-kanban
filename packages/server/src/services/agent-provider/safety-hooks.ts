@@ -24,12 +24,12 @@ export interface LaunchGuardStatus {
 export function resolveLaunchGuardStatus(provider: string, worktreePath: string): LaunchGuardStatus {
   const entry = (SAFETY_HOOKS as Record<string, { guarded: boolean } | undefined>)[provider];
   if (entry && !entry.guarded) {
-    return { guarded: false, warning: `[agent] ${provider}: no tool-call guards on this provider; builder runs unguarded` };
+    return { guarded: false, warning: `${provider}: no tool-call guards on this provider; builder runs unguarded` };
   }
   if (provider === "pi" && !existsSync(join(worktreePath, ".pi", "plugin", "agentic-kanban-hooks.ts"))) {
     return {
       guarded: false,
-      warning: `[agent] pi: no agentic-kanban-hooks extension in ${worktreePath}; builder runs unguarded`,
+      warning: `pi: no agentic-kanban-hooks extension in ${worktreePath}; builder runs unguarded`,
     };
   }
   return { guarded: true };
