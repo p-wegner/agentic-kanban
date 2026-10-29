@@ -27,6 +27,7 @@ import {
   boardSnapshotPath,
   readPullState,
   pullStatePath,
+  migrateLegacyState,
 } from "../lib/state.mjs";
 import { BoardClient, BoardConfigError, resolveBoardConfigFromEnv } from "../lib/board-client.mjs";
 import { createDefaultBoardFixtureFetch } from "../lib/board-fixtures.mjs";
@@ -63,6 +64,7 @@ async function main() {
 
   const stateDir = process.env.JIRA_SYNC_STATE_DIR;
   if (!stateDir) return { ok: false, step: "config", reason: "JIRA_SYNC_STATE_DIR is not set" };
+  migrateLegacyState(stateDir);
 
   const authFailure = await checkAuth(ctx.client);
   if (authFailure) return authFailure;

@@ -21,6 +21,7 @@ import {
   writebacksPath,
   readBoardSnapshot,
   boardSnapshotPath,
+  migrateLegacyState,
 } from "../lib/state.mjs";
 import { updateRegister } from "../lib/conflict-register.mjs";
 import { JiraAuthError } from "../lib/auth.mjs";
@@ -55,6 +56,7 @@ async function main() {
 
   const stateDir = process.env.JIRA_SYNC_STATE_DIR;
   if (!stateDir) return { ok: false, step: "config", reason: "JIRA_SYNC_STATE_DIR is not set" };
+  migrateLegacyState(stateDir);
 
   let boardConfig;
   try {
