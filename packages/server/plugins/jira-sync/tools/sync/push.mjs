@@ -164,7 +164,7 @@ async function main() {
   const failed = pushResult.failed.map(withNumber);
 
   if (!dryRun) {
-    writeJsonFile(outboxPath(stateDir), { entries: remaining });
+    // Writebacks first, outbox last: a crash in between re-sends at worst, and never loses a created key (#1732).
     if (writebacks.length > 0) {
       const existing = readWritebacks(stateDir);
       for (const wb of writebacks) existing.keys[wb.boardIssueId] = wb.key;
@@ -176,6 +176,7 @@ async function main() {
         writeJsonFile(writebacksPath(stateDir), { keys: landed.keys });
       }
     }
+    writeJsonFile(outboxPath(stateDir), { entries: remaining });
 
     if (boardClient) {
       try {
