@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { baseBranchHealth, issueComments, issues, preferences, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
+import { createMergeTrain } from "../repositories/merge-train.repository.js";
 import { initializeProjectStatuses } from "../repositories/issue.repository.js";
 import { invalidatePreferencesCache } from "../repositories/preferences.repository.js";
 import { createProjectQueueFlushRoute } from "../routes/project-queue-flush.js";
@@ -137,6 +138,26 @@ describe("queue flush, end to end (#1463)", { timeout: 300_000 }, () => {
     const refused = (await (await post({ dryRun: true })).json() as { plan: { dryRunText: string; gateScript: string | null } }).plan;
     expect(refused.dryRunText).toContain("gate = arch + typecheck");
     expect(refused.gateScript).toBeNull();
+  });
+
+  it("#1744: a live merge train refuses the flush with its label; nothing starts", async () => {
+    await createMergeTrain({ id: randomUUID(), projectId, label: "train/2026-10-29-01", memberWorkspaceIds: ["w1"] }, db);
+    const res = await post({});
+    expect(res.status).toBe(409);
+    expect((await res.json() as { refused: string }).refused).toBe("a merge train is in flight (train/2026-10-29-01) — wait for it or cancel it");
+  });
+
+  it("#1744: runFlush names the train's skip reasons when nothing landed", async () => {
+    const service = createQueueFlushService({
+      database: db, requestSweep,
+      executeQueue: async function* () {
+        yield { type: "skipped", workspaceId: "w", issueNumber: 1, issueTitle: "", reason: "a merge train is already in flight for this project — not assembling a second one" } as const;
+        yield { type: "done", merged: [], failed: [], skipped: ["w"] } as const;
+      },
+    });
+    const outcome = await service.runFlush(projectId, { triggeredBy: "manual" });
+    expect(outcome.ok).toBe(false);
+    expect(outcome.message).toContain("already in flight for this project");
   });
 
   it("route -> train -> tag -> record -> member comment -> sweep -> heal ticket -> merged-back", async () => {

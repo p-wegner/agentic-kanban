@@ -25,6 +25,7 @@ import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { getWorkspaceById } from "../repositories/workspace-reads.repository.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import { getLatestBaseBranchHealth, getLastGreenBaseBranchHealth, decodeFailedSuites, isBaseHealthAnswer } from "../repositories/base-branch-health.repository.js";
+import { listActiveMergeTrainsForProject } from "../repositories/merge-train.repository.js";
 import { requireProject } from "./require-project.js";
 import { resolveRiskPosture } from "./risk-posture.service.js";
 import { currentRcCandidate, readRcState, resolveStableCheckoutFor } from "./rc-state.js";
@@ -100,7 +101,8 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
   const requestSweep = deps.requestSweep
     ?? ((projectId: string, db: Database, opts?: { branch?: string | null }) =>
       requestBaseBranchReprobe(projectId, db, undefined, Date.now(), { ignoreRecency: true, branch: opts?.branch ?? null }));
-  const running = new Set<string>();
+  /** projectId -> repoPath of every flush running in this process. */
+  const running = new Map<string, string>();
 
   async function plan(projectId: string, now: string): Promise<{ plan: FlushPlan; repoPath: string; prefMap: Map<string, string> }> {
     const project = await requireProject(projectId, database);
@@ -115,10 +117,13 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
     if (gate.warning) console.warn(`[queue-flush] ${gate.warning}`);
     const members = (await readQueuePressureMembers(projectId, database)).map((m) => ({ workspaceId: m.workspaceId, issueNumber: m.issueNumber }));
 
+    const liveTrains = await listActiveMergeTrainsForProject(projectId, ["assembling", "gating"], database).catch(() => []);
     let refusal = checkQueueFlushRails({
       mode, posture: posture.level, flushTimestamps: flushes.map((f) => f.at),
       dailyCap: parseQueueFlushDailyCap(prefMap.get(queueFlushDailyCapPrefKey(projectId))), now,
       promotionSweeping: rcSweeping,
+      liveTrainLabel: liveTrains[0]?.label ?? null,
+      otherFlushOnSameRepo: [...running].some(([pid, rp]) => pid !== projectId && rp === project.repoPath),
     })?.reason ?? null;
     if (!refusal && running.has(projectId)) refusal = "a flush is already running for this project";
     if (!refusal && members.length === 0) refusal = "nothing is ready for merge — the queue is empty";
@@ -147,7 +152,7 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
 
     // Re-checked with no await between the check and the add, so two racing starts cannot both pass.
     if (running.has(projectId)) return { ok: false, refused: "a flush is already running for this project", plan: p, ...empty };
-    running.add(projectId);
+    running.set(projectId, repoPath);
     const stable = stableOf(repoPath);
     let flush: FlushRecord | undefined;
     const spec: FlushRunSpec = {
@@ -158,10 +163,13 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
       },
     };
     const outcome: FlushOutcome = { ok: false, plan: p, ...empty };
+    const skipReasons: string[] = [];
     try {
       for await (const ev of executeQueue(p.members.map((m) => m.workspaceId), { flush: spec })) {
         if (ev.type === "done") {
           outcome.merged = ev.merged; outcome.failed = ev.failed; outcome.skipped = ev.skipped;
+        } else if (ev.type === "skipped") {
+          if (!skipReasons.includes(ev.reason)) skipReasons.push(ev.reason);
         } else if (ev.type === "error" && !outcome.message) {
           outcome.message = ev.error;
         }
@@ -176,7 +184,9 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
       // Start the sweep right away; failures here are the next tick's job, never the flush's.
       await reconcileHeal(projectId, { now }).catch((err) => console.warn(`[queue-flush] first heal pass failed (non-fatal): ${errorMessage(err)}`));
     } else if (!outcome.message) {
-      outcome.message = "the flush train landed nothing (gate red, or every member was sided)";
+      outcome.message = skipReasons.length > 0
+        ? `the flush train landed nothing: ${skipReasons.slice(0, 3).join("; ")}`
+        : "the flush train landed nothing (gate red, or every member was sided)";
     }
     return outcome;
   }

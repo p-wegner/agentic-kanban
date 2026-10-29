@@ -162,6 +162,10 @@ export interface QueueFlushRailsInput {
   now: string;
   /** `rc-state.json`'s own `sweeping` flag — a flush never runs while a promotion sweep is in flight. */
   promotionSweeping: boolean;
+  /** Label of a live (assembling/gating) merge train for the project, if any (#1744). */
+  liveTrainLabel?: string | null;
+  /** True when an in-process flush of ANOTHER project is running on the same repo path (#1744). */
+  otherFlushOnSameRepo?: boolean;
 }
 
 /**
@@ -174,6 +178,12 @@ export function checkQueueFlushRails(input: QueueFlushRailsInput): QueueFlushRef
   if (postureRefusal) return postureRefusal;
   if (input.promotionSweeping) {
     return { reason: "a promotion sweep is currently in flight (rc-state.json: sweeping) — a flush never runs alongside one" };
+  }
+  if (input.liveTrainLabel) {
+    return { reason: `a merge train is in flight (${input.liveTrainLabel}) — wait for it or cancel it` };
+  }
+  if (input.otherFlushOnSameRepo) {
+    return { reason: "a flush of another project is running on the same repository — wait for it" };
   }
   if (isDailyCapReached(input.flushTimestamps, input.dailyCap, input.now)) {
     return { reason: `daily flush cap (${input.dailyCap}) already reached for today` };
