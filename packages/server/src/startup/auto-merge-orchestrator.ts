@@ -15,7 +15,7 @@ import type { SessionManager } from "../services/session.manager.js";
 import { resolveMergePolicy } from "./merge-strategy.js";
 import { resolveMergeGateConfig } from "../services/pre-merge-gate.service.js";
 import { listActiveMergeTrainsForProject, listRecentMergeTrainsForProject } from "../repositories/merge-train.repository.js";
-import { isInconclusiveRetry } from "../services/merge-queue-train-inconclusive.js";
+import { decideInconclusiveRetry, logInconclusiveExhausted } from "../services/merge-queue-train-inconclusive.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import type { StackProfile } from "@agentic-kanban/shared";
 import {
@@ -653,12 +653,15 @@ export function createAutoMergeOrchestrator(deps: {
       // Preserve the ORIGINAL firstSeenAt across ticks so the wait bound is measured from when
       // the set first started accumulating, not re-armed every tick a new member joins.
       // #1727: an inconclusive train judged nothing - its retry departs on this tick, not after a new max_wait.
-      const inconclusiveRetry = isInconclusiveRetry(ids, await listRecentMergeTrainsForProject(projectId, 3, database).catch(() => []));
+      // #1741: repeated inconclusive abandons wait a 15/30/60 min ramp, then hold as inconclusive_exhausted.
+      const inc = decideInconclusiveRetry(ids, await listRecentMergeTrainsForProject(projectId, 8, database).catch(() => []), nowMs);
+      if (inc.kind === "exhausted") logInconclusiveExhausted(projectId, inc);
       const verdict: MergeTrainWindowVerdict = decideMergeTrainRelease({ pendingIds: ids, firstSeenAt }, config, nowMs, {
         gateBusy: verifyChainSemaphoreActive() > 0,
         heldUntilMs,
         releaseRequested: existing?.releaseRequestedAt !== undefined,
-        inconclusiveRetry,
+        inconclusiveRetry: inc.kind === "retry",
+        inconclusiveHold: inc.kind === "exhausted" ? "inconclusive_exhausted" : inc.kind === "backoff" ? "inconclusive_backoff" : undefined,
       });
       // The two veto READS, in the order their precedence demands. #1207's breaker is asked
       // first and unconditionally, because a paused project must not gate at all; #1204's

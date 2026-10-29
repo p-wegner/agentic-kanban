@@ -166,13 +166,16 @@ export function decideMergeTrainRelease(
   state: MergeTrainWindowState,
   config: MergeTrainWindowConfig,
   nowMs: number,
-  opts?: { gateBusy?: boolean; gateBusyGraceMs?: number; heldUntilMs?: number | null; releaseRequested?: boolean; inconclusiveRetry?: boolean },
+  opts?: { gateBusy?: boolean; gateBusyGraceMs?: number; heldUntilMs?: number | null; releaseRequested?: boolean; inconclusiveRetry?: boolean; inconclusiveHold?: "inconclusive_exhausted" | "inconclusive_backoff" },
 ): MergeTrainWindowVerdict {
   if (opts?.heldUntilMs != null && Number.isFinite(opts.heldUntilMs) && nowMs < opts.heldUntilMs) {
     return { release: false, reason: "held" };
   }
   if (opts?.releaseRequested) {
     return { release: true, reason: "operator_release" };
+  }
+  if (opts?.inconclusiveHold) {
+    return { release: false, reason: opts.inconclusiveHold };
   }
   if (opts?.inconclusiveRetry) {
     return { release: true, reason: "inconclusive_retry" };
