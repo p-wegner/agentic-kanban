@@ -27,12 +27,26 @@
  * the main checkout — they never execute as a worktree agent, so materializing
  * them into a worktree only buys context tax.
  */
-export const BUILDER_SKILL_ALLOWLIST: readonly string[] = [
-  "board-navigator",
-  "kanban-workflow",
-  "scope-guard",
-  "code-review",
-];
+/**
+ * The ONE list of skills a builder keeps listed in full AND is told about (#1763). The lean
+ * profile (#1312) lists everything outside it `name-only`; each entry names why it earns its
+ * description tokens.
+ */
+export const CORE_BUILDER_SKILLS: Readonly<Record<string, string>> = {
+  "scope-guard": "pre-commit scope check the builder workflow prescribes",
+  "flaky-test-triage": "decides whether a red test is real, on every failing run",
+  "dev-server": "worktree-safe server start/stop; the wrong way flashes windows and kills other agents",
+  "db-doctor": "the only sanctioned DB repair path; the alternative is a destructive guess",
+  "shared-checkout-commit": "commit recipe when other agents share the checkout",
+  "e2e-author": "anti-flake scaffold for new Playwright tests",
+  "playwright-cli": "browser automation entry point for UI work",
+  "board-navigator": "board tool/command reference",
+  "kanban-workflow": "how to report progress on the board",
+  "code-review": "the review prompt itself",
+};
+
+/** The announced set: derived from `CORE_BUILDER_SKILLS` so the two lists cannot disagree (#1763). */
+export const BUILDER_SKILL_ALLOWLIST: readonly string[] = Object.keys(CORE_BUILDER_SKILLS);
 
 /** Whether a skill is worth materializing into a worktree at all. */
 export function isBuilderRelevantSkill(name: string): boolean {
@@ -76,6 +90,6 @@ export function buildSkillInvocationBlock(skillNames: readonly string[]): string
     "",
     list,
     "",
-    `Each is a \`.claude/skills/<name>/SKILL.md\` in this worktree holding the worked-out steps for its task. Invoke one (e.g. \`/${unique[0]}\`) when its description matches what you are about to do — do not re-derive its steps by hand. Skills not listed above are not available here.`,
+    `Each is a \`.claude/skills/<name>/SKILL.md\` in this worktree holding the worked-out steps for its task. Invoke one (e.g. \`/${unique[0]}\`) when its description matches what you are about to do — do not re-derive its steps by hand.`,
   ].join("\n");
 }
