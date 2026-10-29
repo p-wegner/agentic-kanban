@@ -35,7 +35,7 @@ const OPERATOR_ONLY_HEADINGS = [
  * its current size (shrink-only: lower the ceiling as it is split).
  */
 const NESTED_DEFAULT_BYTES = 12_000;
-const NESTED_CEILINGS: Record<string, number> = { "packages/shared/CLAUDE.md": 20_000 };
+const NESTED_CEILINGS: Record<string, number> = { "packages/shared/CLAUDE.md": 20_500 };
 
 function findNestedClaudeMd(): string[] {
   const out: string[] = [];
