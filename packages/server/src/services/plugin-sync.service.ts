@@ -19,6 +19,8 @@ import { runPluginCommand } from "./plugin-exec.js";
 import { PluginError } from "./plugin-errors.js";
 import { createPluginSecretStore } from "./plugin-secret-store.js";
 import { describeRunFailure, dryRunContractBreach, parseRunSummary } from "./plugin-sync-summary.js";
+import { isSyncLocked, withSyncLock } from "./plugin-sync-lock.js";
+export { isSyncLocked, withSyncLock } from "./plugin-sync-lock.js";
 
 /**
  * Board-side surface over a plugin's declarative `sync` capability (#1076): per-project config
@@ -213,28 +215,42 @@ export function isPluginSyncDirection(value: unknown): value is PluginSyncDirect
   return value === "pull" || value === "push";
 }
 
-/**
- * One in-process lock per (plugin row, project) over everything that touches the plugin's state
- * dir: pull, push, resolve, test-connection and the scheduler (#1734). Held in memory on purpose —
- * a lock file would outlive a killed board; here a restart clears it, and `finally` releases it
- * when the plugin command times out (runPluginCommand always settles).
- */
-const syncLocks = new Map<string, { label: string; startedAt: string }>();
-
-export async function withSyncLock<T>(pluginRowId: string, projectId: string, label: string, fn: () => Promise<T>): Promise<T> {
-  const key = `${pluginRowId}:${projectId}`;
-  const held = syncLocks.get(key);
-  if (held) throw new PluginError(`sync already running (${held.label}, started ${held.startedAt})`, "CONFLICT");
-  syncLocks.set(key, { label, startedAt: new Date().toISOString() });
-  try {
-    return await fn();
-  } finally {
-    syncLocks.delete(key);
-  }
+function assertValidResolveOpts(opts: { key: string; keep?: SyncResolveKeep; reason?: string }): void {
+    if (!/^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(opts.key ?? "")) {
+      throw new PluginError('"key" must be an external issue key such as "KD-49"', "BAD_REQUEST");
+    }
+    if (opts.keep != null && !isSyncResolveKeep(opts.keep)) {
+      throw new PluginError('"keep" must be "board", "jira", "needs-human" or a per-field map such as {"title":"board","priority":"jira"}', "BAD_REQUEST");
+    }
+    if (opts.keep != null && !opts.reason?.trim()) {
+      throw new PluginError('"reason" is required for every keep: say why this side wins (or why nobody can tell)', "BAD_REQUEST");
+    }
 }
 
-export function isSyncLocked(pluginRowId: string, projectId: string): boolean {
-  return syncLocks.has(`${pluginRowId}:${projectId}`);
+function buildRunRecord(
+  opts: { direction: PluginSyncDirection; dryRun?: boolean },
+  startedAt: string,
+  finishedAt: string,
+  result: { code: number | null; timedOut: boolean; stdout: string; stderr: string },
+  scheduled: true | undefined,
+  siteUrl: string | undefined,
+): PluginSyncRunRecord {
+    // A dry run that reports a created Jira key wrote for real: fail it loudly (#1634).
+    const breach = opts.dryRun ? dryRunContractBreach(result.stdout) : undefined;
+    const ok = !result.timedOut && result.code === 0 && !breach;
+    return {
+      direction: opts.direction,
+      dryRun: Boolean(opts.dryRun),
+      startedAt,
+      finishedAt,
+      ok,
+      code: result.code,
+      timedOut: result.timedOut || undefined,
+      // The script's own `step`/`reason` and the stderr tail, not just the exit code (#1625).
+      error: ok ? undefined : (breach ?? describeRunFailure(result)),
+      scheduled,
+      summary: parseRunSummary(result.stdout, { siteUrl }),
+    };
 }
 
 export function createPluginSyncOps(deps: {
@@ -588,22 +604,7 @@ export function createPluginSyncOps(deps: {
     const raw = await runPluginCommand(command, { cwd, env });
     const result = { ...raw, stdout: redactSecrets(raw.stdout, secretValues), stderr: redactSecrets(raw.stderr, secretValues) };
     const finishedAt = new Date().toISOString();
-    // A dry run that reports a created Jira key wrote for real: fail it loudly (#1634).
-    const breach = opts.dryRun ? dryRunContractBreach(result.stdout) : undefined;
-    const ok = !result.timedOut && result.code === 0 && !breach;
-    const record: PluginSyncRunRecord = {
-      direction: opts.direction,
-      dryRun: Boolean(opts.dryRun),
-      startedAt,
-      finishedAt,
-      ok,
-      code: result.code,
-      timedOut: result.timedOut || undefined,
-      // The script's own `step`/`reason` and the stderr tail, not just the exit code (#1625).
-      error: ok ? undefined : (breach ?? describeRunFailure(result)),
-      scheduled,
-      summary: parseRunSummary(result.stdout, { siteUrl: syncEnv.SYNC_CONFIG_SITEURL }),
-    };
+    const record = buildRunRecord(opts, startedAt, finishedAt, result, scheduled, syncEnv.SYNC_CONFIG_SITEURL);
     await recordSyncRun(plugin.pluginId, projectId, record);
     return record;
   }
@@ -627,15 +628,7 @@ export function createPluginSyncOps(deps: {
     if (!sync.resolve) {
       throw new PluginError(`Plugin "${plugin.pluginId}" does not declare a "sync.resolve" command`, "BAD_REQUEST");
     }
-    if (!/^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(opts.key ?? "")) {
-      throw new PluginError('"key" must be an external issue key such as "KD-49"', "BAD_REQUEST");
-    }
-    if (opts.keep != null && !isSyncResolveKeep(opts.keep)) {
-      throw new PluginError('"keep" must be "board", "jira", "needs-human" or a per-field map such as {"title":"board","priority":"jira"}', "BAD_REQUEST");
-    }
-    if (opts.keep != null && !opts.reason?.trim()) {
-      throw new PluginError('"reason" is required for every keep: say why this side wins (or why nobody can tell)', "BAD_REQUEST");
-    }
+    assertValidResolveOpts(opts);
     await requireProject(projectId);
     return withSyncLock(plugin.id, projectId, "resolve", () => resolveLocked(plugin, sync, pluginRowId, projectId, opts));
   }
@@ -679,8 +672,6 @@ export function createPluginSyncOps(deps: {
     };
   }
 
-  const runningSchedules = new Set<string>();
-
   /**
    * The scheduler tick (#1625): for every (plugin, project) pair, run each direction whose
    * `<direction>EveryMinutes` config says it is due, measured from the start of that direction's
@@ -706,18 +697,13 @@ export function createPluginSyncOps(deps: {
         const last = status.lastRuns[direction];
         // A dry run doesn't count as the sync having happened.
         if (last && !last.dryRun && nowMs - Date.parse(last.startedAt) < every * 60_000) continue;
-        const key = `${pluginRowId}:${projectId}:${direction}`;
-        if (runningSchedules.has(key)) continue;
         // A manual trigger/resolve holds the pair's lock: skip this tick rather than fail it.
         if (isSyncLocked((await requirePlugin(pluginRowId)).id, projectId)) continue;
-        runningSchedules.add(key);
         try {
           const record = await triggerSync(pluginRowId, projectId, { direction, scheduled: true });
           fired.push({ pluginRowId, projectId, direction, ok: record.ok });
         } catch {
           fired.push({ pluginRowId, projectId, direction, ok: false });
-        } finally {
-          runningSchedules.delete(key);
         }
       }
     }
