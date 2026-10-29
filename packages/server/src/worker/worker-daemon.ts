@@ -75,6 +75,7 @@ import { defaultWorkerName, sameNamedNotice } from "./worker-name.js";
 import { createDoctorSummaryTracker } from "../cli/commands/worker-doctor-daemon.js";
 import { resolveProfileAliases } from "./worker-profile-aliases.js";
 import { createWorkerSettingsApplier } from "./worker-settings-apply.js";
+import { persistedProfilesOverride } from "./worker-lifecycle.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
 import type { WorkerHarness } from "./worker-harness.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -284,7 +285,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // carriers each time, so a role a human just changed with claude-pick takes effect
   // without restarting the daemon â€” the same freshness rule the board's own roster has.
   const profileAliases = resolveProfileAliases(stateFile, opts.profileAliases, log, opts.harness?.dirFor("claude"));
-  const profileAttestor = buildProfileAttestor(opts, profileAliases, log);
+  let profileAttestor = buildProfileAttestor(opts, profileAliases, log);
   const attestedProfiles = (): WorkerProfileAttestation[] => profileAttestor.current();
   const declaredProviders = opts.providers;
   let providerNotice: string | undefined;
@@ -466,7 +467,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         boardUrl,
         workerVersion,
         log,
-        handlers: { updateNow: () => selfUpdate.updateNow(), status: () => selfUpdate.controlStatus(), ...opts.lifecycle?.({ stateFile, workRoot, boardUrl, draining: () => draining, sessionsLeft: () => runner.runningSessionIds().length + (verifyJobs.capability().jobIds?.length ?? 0), /* #1559: a drain also waits for in-flight verify jobs */ effective: () => ({ ...settings.effectiveOptions(opts), verifySlots }), pinned: () => settings.report().pinned, desired: () => settings.desired(), profiles: () => attestedProfiles().map((p) => `${p.provider}:${p.name}`), harnessMode: () => opts.harness?.mode, verify: () => ({ ...verifyJobs.capability(), jobs: verifyJobs.jobs() }) }) }, // #1443/#1451/#1479
+        handlers: { updateNow: () => selfUpdate.updateNow(), status: () => selfUpdate.controlStatus(), ...opts.lifecycle?.({ stateFile, workRoot, boardUrl, draining: () => draining, sessionsLeft: () => runner.runningSessionIds().length + (verifyJobs.capability().jobIds?.length ?? 0), /* #1559: a drain also waits for in-flight verify jobs */ effective: () => ({ ...settings.effectiveOptions(opts), profiles: opts.profiles, verifySlots }), pinned: () => settings.report().pinned, desired: () => settings.desired(), profiles: () => attestedProfiles().map((p) => `${p.provider}:${p.name}`), harnessMode: () => opts.harness?.mode, verify: () => ({ ...verifyJobs.capability(), jobs: verifyJobs.jobs() }) }) }, // #1443/#1451/#1479
       })
     : null;
 
@@ -640,9 +641,19 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     });
   }
 
+  /** #1773: swap the attested set in place; the next heartbeat (sent now) re-attests on the live socket. Running sessions are untouched. */
+  function applyProfiles(next: string[] | undefined): void {
+    if (JSON.stringify(next ?? null) === JSON.stringify(opts.profiles ?? null)) return;
+    opts.profiles = next;
+    profileAttestor = buildProfileAttestor(opts, profileAliases, log);
+    log(`[worker] attested profiles changed -> ${next ? next.join(",") : "every discovered login"}`);
+    void sendHeartbeat();
+  }
+
   const settingsControls = {
     setMaxConcurrency: (n: number) => { opts.maxConcurrency = n; runner.setMaxConcurrency(n); },
     setLabels: (labels: string[]) => { opts.labels = labels; },
+    setProfiles: (profiles: string[]) => applyProfiles(profiles.length > 0 ? profiles : undefined), // #1773
     setDrain: (on: boolean) => { if (on === draining) return; draining = on; if (!on) announceOnline = true; void sendHeartbeat(); },
   };
   selfUpdate?.begin();
@@ -685,6 +696,13 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       await profileAttestor.refreshQuota();
     } catch (err) {
       log(`[worker] profile quota refresh failed (continuing): ${errorMessage(err)}`);
+    }
+    // #1773: `worker config set|unset profiles` edits the state file; pick it up here (no restart, no reconnect).
+    const override = persistedProfilesOverride(stateFile, settings.desired()?.profiles);
+    if (override && JSON.stringify(override.profiles ?? null) !== JSON.stringify(opts.profiles ?? null)) {
+      opts.profiles = override.profiles;
+      profileAttestor = buildProfileAttestor(opts, profileAliases, log);
+      log(`[worker] attested profiles changed (config) -> ${override.profiles ? override.profiles.join(",") : "every discovered login"}`);
     }
     // #1370: re-run the doctor in the background every few minutes; it never delays a beat.
     doctor.refreshIfDue();
