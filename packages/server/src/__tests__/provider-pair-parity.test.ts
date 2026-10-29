@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { PROVIDER_NAMES, type ProviderName } from "../services/agent-provider/types.js";
+import { SAFETY_HOOKS } from "../services/agent-provider/safety-hooks.js";
 import { getProviderExitBehavior } from "../services/agent-provider/provider-exit-behavior.js";
 
 /**
@@ -71,6 +72,19 @@ const CAPABILITIES: Capability[] = [
       copilot: "no skills concept — Copilot CLI has no equivalent surface to filter",
       pi: "the filter is centralized board logic (materializedSkillFiles in agent.service.ts, gating which --skill flags Pi receives), not a per-provider pi-provider.ts module",
       herdr: "hosts a provider in a pane; not itself a skill-listing surface",
+    },
+  },
+  {
+    // #1758: guard wiring lives in one table (`safety-hooks.ts`); a provider with `guarded: false`
+    // points at a file that never exists, so it must be declared here with its reason.
+    name: "safety-hooks",
+    modulePath: (p) =>
+      SAFETY_HOOKS[p].guarded
+        ? path.join(providerDir, "safety-hooks.ts")
+        : path.join(providerDir, `${p}-safety-hooks.ts`),
+    unsupported: {
+      copilot: "Copilot CLI launch has no hook wiring; the launch logs 'no tool-call guards on this provider' instead",
+      herdr: "hosts another provider in a pane; the guards belong to that provider",
     },
   },
 ];
