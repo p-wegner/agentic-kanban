@@ -73,7 +73,8 @@ describe("a git token is bound to a LIVE dispatch, not to its own TTL (#753)", (
     status: string;
     startedAt?: string;
     endedAt?: string | null;
-  }): Promise<void> {
+    sessionId?: string;
+  }): Promise<string> {
     const issueId = randomUUID();
     const workspaceId = randomUUID();
     const now = new Date().toISOString();
@@ -85,12 +86,14 @@ describe("a git token is bound to a LIVE dispatch, not to its own TTL (#753)", (
       id: workspaceId, issueId, branch: opts.branch, baseBranch: "master", status: "active",
       createdAt: now, updatedAt: now,
     } as typeof workspaces.$inferInsert);
+    const sessionId = opts.sessionId ?? randomUUID();
     await db.insert(sessions).values({
-      id: randomUUID(), workspaceId, status: opts.status,
+      id: sessionId, workspaceId, status: opts.status,
       startedAt: opts.startedAt ?? now,
       endedAt: opts.endedAt ?? null,
       workerId: opts.workerId ?? WORKER,
     } as typeof sessions.$inferInsert);
+    return sessionId;
   }
 
   beforeEach(async () => {
@@ -191,6 +194,56 @@ describe("a git token is bound to a LIVE dispatch, not to its own TTL (#753)", (
       });
       await seedDispatch({ branch, issueNumber: 6, status: "running" });
       expect(await findCurrentWorkerAssignment({ projectId: PROJECT_ID, workerId: WORKER, branch }, db)).not.toBeNull();
+    });
+  });
+
+  describe("a restarted board (#1751, #1748)", () => {
+    const infoRefs = (port: number, token: string) =>
+      fetch(`http://127.0.0.1:${port}/git/${PROJECT_ID}/info/refs?service=git-upload-pack`, {
+        headers: { Authorization: `Basic ${Buffer.from(`x-token:${token}`).toString("base64")}` },
+      });
+
+    it("still refuses a superseded session's token after the in-memory store is lost (#1751)", async () => {
+      const branch = "feature/ak-70-restart";
+      const ref = `${KANBAN_INCOMING_REF_PREFIX}${branch}`;
+      const s1 = await seedDispatch({ branch, issueNumber: 70, status: "running", startedAt: ago(120_000) });
+      const first = await startGitHttpServer({ database: db, host: "127.0.0.1" });
+      let token: string;
+      try {
+        token = first.issueToken({ workerId: WORKER, projectId: PROJECT_ID, incomingRef: ref, sessionId: s1 });
+      } finally {
+        await first.close();
+      }
+      // The relaunch: S2 on the same worker and branch, S1 still running.
+      await seedDispatch({ branch, issueNumber: 71, status: "running" });
+      const second = await startGitHttpServer({ database: db, host: "127.0.0.1" });
+      try {
+        expect((await infoRefs(second.port, token)).status).toBe(403);
+      } finally {
+        await second.close();
+      }
+    });
+
+    it("answers 503 and keeps the token when the assignment lookup throws once (#1748)", async () => {
+      const branch = "feature/ak-72-busy";
+      const ref = `${KANBAN_INCOMING_REF_PREFIX}${branch}`;
+      await seedDispatch({ branch, issueNumber: 72, status: "running" });
+      let calls = 0;
+      const handle = await startGitHttpServer({
+        database: db,
+        host: "127.0.0.1",
+        assignmentLookup: async (q) => {
+          if (calls++ === 0) throw new Error("SQLITE_BUSY");
+          return (await findCurrentWorkerAssignment(q, db)) !== null;
+        },
+      });
+      try {
+        const token = handle.issueToken({ workerId: WORKER, projectId: PROJECT_ID, incomingRef: ref });
+        expect((await infoRefs(handle.port, token)).status).toBe(503);
+        expect((await infoRefs(handle.port, token)).status).toBe(200);
+      } finally {
+        await handle.close();
+      }
     });
   });
 

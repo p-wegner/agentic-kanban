@@ -9493,11 +9493,6 @@ paths:
         - workers
       operationId: get_api_workers_build
       parameters:
-        - name: token
-          in: query
-          required: false
-          schema:
-            type: string
         - name: wait
           in: query
           required: false
@@ -9531,11 +9526,6 @@ paths:
         - workers
       operationId: get_api_workers_build_tarball
       parameters:
-        - name: token
-          in: query
-          required: false
-          schema:
-            type: string
         - name: wait
           in: query
           required: false
