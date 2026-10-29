@@ -82,13 +82,10 @@ interface WorkerConnection {
   missedPings: number;
   /** Last pong or frame from the worker (epoch ms) — the real silence, independent of how many ticks fired. */
   lastHeardAt: number;
-<<<<<<< HEAD
   /** #1754: the daemon process behind this socket, from its latest `hello` (absent for an older build). */
   instanceId?: string;
-=======
   /** #1756: key board->worker frames are signed with; absent only for test doubles that skip the upgrade. */
   frameKey?: string;
->>>>>>> 8907bea62 (feat(#1756): HMAC-sign board->worker frames; daemon refuses unsigned/replayed ones)
 }
 
 /** #1754: a second daemon process tried to take over a live worker identity. */
@@ -157,7 +154,10 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
   // manager built on a registry honours it, not just the fleet facade's.
   registry.onRevoke((workerId) => { closeConnection(workerId); });
 
-<<<<<<< HEAD
+  const frameSeq = new Map<string, number>(); // #1756: last signed seq per worker, across reconnects
+  /** #1756: frame key of each parked socket, applied when it is adopted. */
+  const parkedKeys = new WeakMap<WSContext, string>();
+
   /**
    * #1754: a newer socket arrives while the registered one is demonstrably alive (answered a ping/frame
    * within two keepalive intervals) and its daemon identified itself. Whether the newcomer is the SAME
@@ -182,21 +182,17 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     }
   }
 
-  function handleOpen(workerId: string, ws: WSContext): void {
+  function handleOpen(workerId: string, ws: WSContext, frameKey?: string): void {
     const held = connections.get(workerId);
     if (held && shouldParkNewcomer(held)) {
       parked.add(ws);
+      if (frameKey) parkedKeys.set(ws, frameKey);
       return;
     }
-    adopt(workerId, ws);
+    adopt(workerId, ws, frameKey);
   }
 
-  function adopt(workerId: string, ws: WSContext): void {
-=======
-  const frameSeq = new Map<string, number>(); // #1756: last signed seq per worker, across reconnects
-
-  function handleOpen(workerId: string, ws: WSContext, frameKey?: string): void {
->>>>>>> 8907bea62 (feat(#1756): HMAC-sign board->worker frames; daemon refuses unsigned/replayed ones)
+  function adopt(workerId: string, ws: WSContext, frameKey?: string): void {
     // A reconnect replaces the previous socket (stale after e.g. a NAT rebind).
     //
     // Say so in the log. This eviction is indistinguishable from a network drop
@@ -263,7 +259,7 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
         rejectDuplicate(workerId, from, held, message.instanceId);
         return;
       }
-      adopt(workerId, from);
+      adopt(workerId, from, parkedKeys.get(from));
     }
     const conn = connections.get(workerId);
     if (conn) {
