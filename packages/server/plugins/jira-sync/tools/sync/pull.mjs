@@ -26,7 +26,7 @@ import {
 import { updateRegister } from "../lib/conflict-register.mjs";
 import { JiraAuthError } from "../lib/auth.mjs";
 import { BoardClient, BoardConfigError, resolveBoardConfigFromEnv } from "../lib/board-client.mjs";
-import { assigneeMapFromEnv } from "../lib/field-map.mjs";
+import { assigneeMapFromEnv, parseStatusMap, StatusMappingError } from "../lib/field-map.mjs";
 import { resolveSyncDirections } from "../lib/sync-direction.mjs";
 import { applyWritebacks } from "../lib/writebacks.mjs";
 import { snapshotAfterPull } from "../lib/state-sync.mjs";
@@ -88,6 +88,9 @@ async function main() {
     }
   }
 
+  const statusMap = parseStatusMap(process.env.SYNC_CONFIG_STATUSMAP ?? process.env.JIRA_SYNC_STATUS_MAP);
+  if (statusMap === null) return { ok: false, step: "config", reason: "statusMap must be a JSON object of board status -> Jira status name" };
+
   let result;
   try {
     result = await runInboundSync(ctx.client, boardClient, {
@@ -99,12 +102,14 @@ async function main() {
       directions: resolveSyncDirections(process.env),
       customFieldMap: process.env.SYNC_CONFIG_CUSTOMFIELDMAP ?? "",
       assigneeMap: assigneeMapFromEnv(process.env),
+      statusMap,
       pendingWritebackKeys: new Set(Object.values(writebacks.keys)),
       deletedStatusName: process.env.JIRA_SYNC_DELETED_STATUS || undefined,
       maxIssuesPerRun: positiveInt(process.env.SYNC_CONFIG_MAXISSUESPERRUN),
       outOfScopeRecheckMs: positiveInt(process.env.SYNC_CONFIG_OUTOFSCOPERECHECKHOURS, 24) * 3_600_000,
     });
   } catch (err) {
+    if (err instanceof StatusMappingError) return { ok: false, step: "config", reason: err.message, code: err.code };
     return rateLimitResult(err) ?? { ok: false, step: "sync", reason: err.message, code: err.code ?? null, retryable: err.retryable ?? false };
   }
 
