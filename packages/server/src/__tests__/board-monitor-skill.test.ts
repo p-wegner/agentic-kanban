@@ -1,10 +1,9 @@
-// @gate:always-run when:.claude/skills/board-monitor/**,.codex/skills/board-monitor/**,scripts/board-monitor/** — reads .claude/.codex skill files + a repo-root script, never imported (#538).
+// @gate:always-run when:.claude/skills/board-monitor/**,scripts/board-monitor/** — reads .claude skill files + a repo-root script, never imported (#538).
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const boardMonitorSkills = [
   ".claude/skills/board-monitor/SKILL.md",
-  ".codex/skills/board-monitor/SKILL.md",
 ].map((path) => ({
   path,
   contents: readFileSync(new URL(`../../../../${path}`, import.meta.url), "utf8"),

@@ -1,4 +1,4 @@
-// @gate:always-run when:.claude/skills/set-provider-default/**,.codex/skills/set-provider-default/** — scans skill markdown for a write to the retired global default_model key.
+// @gate:always-run when:.claude/skills/set-provider-default/** — scans skill markdown for a write to the retired global default_model key.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,14 +10,13 @@ import { SETTINGS_KEYS } from "../services/preference.service.js";
  * rejected the whole PUT (422) even though the other keys were applied, so the skill's own
  * verify step reported ok:false for a write that had actually succeeded.
  *
- * This guard makes sure the skill (both the .claude and .codex copies) never again emits a
+ * This guard makes sure the skill (.claude copy) never again emits a
  * key that PUT /api/preferences/settings would reject.
  */
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..", "..", "..");
 const SKILL_PATHS = [
   join(REPO_ROOT, ".claude", "skills", "set-provider-default", "SKILL.md"),
-  join(REPO_ROOT, ".codex", "skills", "set-provider-default", "SKILL.md"),
 ];
 
 describe("#929 — set-provider-default skill only writes whitelisted setting keys", () => {

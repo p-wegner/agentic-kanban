@@ -1,3 +1,4 @@
+// @gate:always-run when:packages/shared/src/lib/ticket-context.ts,packages/server/src/services/workspace-provision.service.ts — reads two prompt-source files from the repo root; no import edge to them (#1761).
 import { describe, expect, it } from "vitest";
 import { BUILDER_BOARD_TOOLS, REMOTE_BOARD_TOOLS, REVIEW_BOARD_TOOLS } from "@agentic-kanban/shared/lib/board-tool-allowlist";
 import { REMOTE_BOARD_TOOLS as BRIDGE_TOOLS } from "../services/fleet-mcp-bridge.service.js";
