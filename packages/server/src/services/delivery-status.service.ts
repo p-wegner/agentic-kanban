@@ -7,6 +7,7 @@ import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 import { listOpenHealTickets } from "./base-health-heal-ticket.service.js";
 import { resolveBaseRedVeto } from "./merge-train-base-veto.js";
+import { resolveEffectiveRedBasePolicyFor } from "./red-base-policy.service.js";
 import { describeCodeHealth, resolveProjectCodeHealth } from "./code-health.service.js";
 import { describeBaseSweep, resolveRiskPosture, type RiskPosture } from "./risk-posture.service.js";
 import { detectPostureOverrides } from "./posture-overrides.js";
@@ -97,10 +98,12 @@ async function describeRedBase(
   database: Database,
 ): Promise<RedBaseStatus> {
   const veto = await resolveBaseRedVeto(projectId, database, { posture }).catch(() => null);
+  const effective = await resolveEffectiveRedBasePolicyFor(projectId, database, { posture }).catch(() => null);
   const openHealTickets = await listOpenHealTickets(projectId, database).catch(() => []);
   const outcome = baseHealth?.outcome;
   return {
-    policy: posture.redBasePolicy,
+    policy: effective?.policy ?? posture.redBasePolicy,
+    capNote: effective?.capNote ?? null,
     latestOutcome: outcome === "green" || outcome === "red" || outcome === "timeout" || outcome === "unverified" ? outcome : null,
     latestSha: baseHealth?.sha ?? null,
     holdingWindow: veto !== null,
