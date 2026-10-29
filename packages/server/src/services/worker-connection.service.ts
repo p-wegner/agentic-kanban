@@ -17,7 +17,7 @@ import {
   type BoardToWorkerMessage,
   type WorkerToBoardMessage,
 } from "@agentic-kanban/shared/lib/worker-protocol";
-import { frameKeyFromToken, signFrame } from "../lib/worker-frame-auth.js";
+import { frameKeyFromToken, signFrame } from "../worker/worker-assign-auth.js";
 import type { WorkerRegistry } from "./worker-registry.service.js";
 import type { DeferredLaunchFailure } from "./agent-dispatch.service.js";
 // The worker builds this refusal from the same constant, so the classifier cannot drift

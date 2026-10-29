@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FRAME_MAX_AGE_MS, frameKeyFromToken, frameKeyFromTokenHash, signFrame, verifyFrame } from "../lib/worker-frame-auth.js";
+import { FRAME_MAX_AGE_MS, frameKeyFromToken, frameKeyFromTokenHash, signFrame, verifyFrame } from "../worker/worker-assign-auth.js";
 import { sha256Hex } from "../lib/bearer-token.js";
 
 const key = frameKeyFromToken("tok");

@@ -447,7 +447,7 @@ it is an **RCE channel into every worker** for anyone who can inject frames. So:
   than enforced.
 - **Frame authentication (#1756, protocol 3).** Every board->worker frame carries `auth: { seq, mac }`:
   HMAC-SHA256 over the frame, keyed from the worker's bearer token (the board derives the same key
-  from the stored token digest; `lib/worker-frame-auth.ts`). `seq` is strictly increasing per worker
+  from the stored token digest; `worker/worker-assign-auth.ts`). `seq` is strictly increasing per worker
   and doubles as a timestamp. The daemon verifies before parsing and drops frames that are bad-MAC,
   replayed (`seq` not above the last accepted) or older than 15 minutes. Once it has seen one signed
   frame, or when started with `requireSignedFrames`, it also refuses **unsigned** frames, so an

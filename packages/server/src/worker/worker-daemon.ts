@@ -31,7 +31,7 @@
 //  * `hello` and `register` carry a protocol version; an incompatible board
 //    refuses with a sentence instead of failing as a silence.
 
-import { frameKeyFromToken, verifyFrame } from "../lib/worker-frame-auth.js"; // #1756
+import { createFrameGate } from "./worker-assign-auth.js"; // #1756
 import { runStartupStep, refreshPreConnectState } from "./worker-startup-step.js";
 import { readFileSync } from "node:fs";
 import { homedir, platform, arch, totalmem, cpus } from "node:os";
@@ -354,7 +354,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   const currentUrl = (): string => boardUrls[urlIndex]!;
   let ws: WebSocket | null = null;
   let stopped = false;
-  let lastFrameSeq = 0; let signedBoardSeen = false;
+  const acceptFrame = createFrameGate(identity.workerToken, opts.requireSignedFrames, log); // #1756
   let draining = settings.startDrained();
   let fatal: string | null = null;
   /** Re-pairings attempted, and whether one is in flight (#754 â€” see handleUnauthorized). */
@@ -570,17 +570,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       // `data` is ws's RawData: Buffer | ArrayBuffer | Buffer[]. A bare `.toString()` on the
       // array case yields comma-joined garbage rather than the frame (no-base-to-string).
       const rawFrame = rawDataToBuffer(data).toString("utf8");
-      // #1756: authenticate BEFORE parsing/dispatching. Once a signed frame has been seen (or
-      // --require-signed-frames is set) an unsigned/invalid/replayed frame is refused, so an
-      // injected assign (setupScript = code execution) cannot run. An old board never signs, so
-      // until then unsigned frames are accepted (deliberate compatibility window).
-      const verdict = verifyFrame(frameKeyFromToken(identity.workerToken), rawFrame, lastFrameSeq);
-      if (verdict.ok) lastFrameSeq = verdict.seq;
-      else if (opts.requireSignedFrames || signedBoardSeen || verdict.reason !== "unsigned") {
-        log(`[worker] REFUSED board frame: ${verdict.reason} (signing ${signedBoardSeen || opts.requireSignedFrames ? "required" : "optional"})`);
-        return;
-      }
-      if (verdict.ok) signedBoardSeen = true;
+      if (!acceptFrame(rawFrame)) return; // #1756: authenticate BEFORE parsing/dispatching
       const message = parseBoardToWorkerMessage(rawFrame);
       if (!message) {
         log(`[worker] dropping malformed board message`);

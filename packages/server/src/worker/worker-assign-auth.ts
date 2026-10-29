@@ -13,8 +13,10 @@
 // WebSocket upgrade header, so an on-path observer of that header can derive the key. This stops
 // blind injection and replay, not a sniffer that captured the pairing handshake; TLS is the control
 // for that adversary.
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { sha256Hex } from "./bearer-token.js";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+
+// Local (not ./bearer-token) so the worker binary graph gains one file, not two (worker-cli-isolation).
+const sha256Hex = (v: string): string => createHash("sha256").update(v).digest("hex");
 
 export const FRAME_MAX_AGE_MS = 15 * 60 * 1000;
 
@@ -52,4 +54,26 @@ export function verifyFrame(key: string, raw: string, lastSeq: number, nowMs = D
   if (auth.seq <= lastSeq) return { ok: false, reason: "replay" };
   if (nowMs - auth.seq > FRAME_MAX_AGE_MS) return { ok: false, reason: "stale" };
   return { ok: true, seq: auth.seq };
+}
+
+// --- worker-side gate (kept out of `startWorkerDaemon`: function-nloc ratchet) ---
+
+/**
+ * Once a signed frame has been seen (or `requireSigned` is set) an unsigned/invalid/replayed frame
+ * is refused, so an injected assign (setupScript = code execution) cannot run. An old board never
+ * signs, so until then unsigned frames are accepted (deliberate compatibility window).
+ */
+export function createFrameGate(workerToken: string, requireSigned: boolean | undefined, log: (line: string) => void): (raw: string) => boolean {
+  const key = frameKeyFromToken(workerToken);
+  let lastSeq = 0;
+  let signedSeen = false;
+  return (raw) => {
+    const verdict = verifyFrame(key, raw, lastSeq);
+    if (verdict.ok) { lastSeq = verdict.seq; signedSeen = true; return true; }
+    if (requireSigned || signedSeen || verdict.reason !== "unsigned") {
+      log(`[worker] REFUSED board frame: ${verdict.reason} (signing ${signedSeen || requireSigned ? "required" : "optional"})`);
+      return false;
+    }
+    return true;
+  };
 }
