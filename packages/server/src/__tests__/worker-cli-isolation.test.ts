@@ -152,7 +152,8 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 87 -> 88 for #1551's worker-startup-step.ts (restart-after-update connect step).
     // Raised 88 -> 92 for #1605: worker-daemon-register/-shutdown, worker-connect-markdown, worker-format (pure splits, no new deps).
     // Raised 92 -> 94 for #1661: worker-last-gasp.ts, worker-state-discovery.ts (standalone, no db).
-    expect(files.size).toBeLessThan(94);
+    // Raised 94 -> 95 for #1768: worker disk-floor module (standalone, node builtins only).
+    expect(files.size).toBeLessThan(95);
   });
 
   it("never reaches the database or board-service layer", () => {
