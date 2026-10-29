@@ -1,5 +1,6 @@
 // One assemble -> gate -> land -> close attempt, split out of merge-train.service.ts (#1605); the
 // service re-exports deleteTrainRef. Types come from the service (type-only: no runtime cycle).
+import { attributeStaticTierFailure } from "./merge-train-static-attribution.js";
 import { revParse } from "@agentic-kanban/shared/lib/git-service";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -148,9 +149,13 @@ export async function runTrainAttempt(args: {
       }
       // #1154/#1189: an environment failure is the train's, not a member's — its own leaf kind.
       const verdict: MergeTrainAttemptVerdict = args.isEnvironmentFailure(gate.message) ? "env_failure" : "red";
+      // #1769: a static-tier guard names an offending FILE, not a suite — map it to the members
+      // touching it so the train attributes (and re-gates without them) instead of going unattributed.
+      const guardOwners = !gate.failedSuites?.length && verdict === "red" ? attributeStaticTierFailure(gate.message, asm.included) : null;
+      const failedSuites = gate.failedSuites && gate.failedSuites.length > 0 ? gate.failedSuites : guardOwners?.files;
       return await finish({
         trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], sided: [], gateRuns: 1, gateFailure: gate.message,
-        ...(gate.failedSuites && gate.failedSuites.length > 0 ? { failedSuites: gate.failedSuites } : {}),
+        ...(failedSuites && failedSuites.length > 0 ? { failedSuites } : {}),
       }, verdict);
     }
 

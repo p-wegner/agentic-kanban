@@ -24,6 +24,7 @@ import { getProjectRepoFields } from "../repositories/project.repository.js";
 import { getSetupRunForGate } from "../repositories/workspace-setup-run.repository.js";
 import { revParse } from "@agentic-kanban/shared/lib/git-service";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { attributeStaticTierFailure } from "./merge-train-static-attribution.js";
 import type { Database } from "../db/index.js";
 import { placeAutoMergeBranchHold } from "./auto-merge-branch-hold.js";
 
@@ -84,6 +85,16 @@ export function classifyBreakerTrip(state: AutoMergeBreakerState | null): "branc
   if (state?.branchHeldAt && state.attributedWorkspaceId) return "branch";
   if (state?.pausedAt) return "project";
   return null;
+}
+
+/**
+ * #1769: the ONE member a guard failure's named file maps to (null when none or several).
+ * Feed it to `recordAutoMergeGateFailure` as `fileOwnerWorkspaceId` so the streak trips
+ * branch-scoped instead of "not attributable to a single branch".
+ */
+export function fileOwnerOfFailure(message: string, members: ReadonlyArray<{ workspaceId: string; branch: string; changedFiles?: readonly string[] | null }>): string | null {
+  const attributed = attributeStaticTierFailure(message, members);
+  return attributed?.owners.length === 1 ? attributed.owners[0].workspaceId : null;
 }
 
 export function autoMergeBreakerKey(projectId: string): string {
@@ -260,6 +271,8 @@ export async function recordAutoMergeGateFailure(args: {
   database: Database;
   broadcast?: (projectId: string) => void;
   now?: string;
+  /** #1769: the one member a file named in the guard output maps to, when the caller could attribute it. */
+  fileOwnerWorkspaceId?: string | null;
 }): Promise<AutoMergeBreakerState> {
   const { projectId, workspaceId, message, database } = args;
   const now = args.now ?? new Date().toISOString();
@@ -269,7 +282,7 @@ export async function recordAutoMergeGateFailure(args: {
     baseSha: await currentBaseSha(projectId, database),
     workspaceId,
     setupVerdict: workspaceId ? await currentSetupVerdict(workspaceId, database) : null,
-    attributedWorkspaceId: workspaceId && isBranchAloneFailure(message) ? workspaceId : null,
+    attributedWorkspaceId: args.fileOwnerWorkspaceId ?? (workspaceId && isBranchAloneFailure(message) ? workspaceId : null),
   }, now);
 
   if (classifyBreakerTrip(next) === "branch" && next.attributedWorkspaceId) {
