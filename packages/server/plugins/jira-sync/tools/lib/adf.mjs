@@ -113,6 +113,20 @@ function blocks(nodes) {
   return nodes.map(block).filter((s) => s !== "").join("\n\n");
 }
 
+const LOSSY_NODES = new Set(["media", "mediaSingle", "mediaGroup", "table", "panel", "expand", "nestedExpand"]);
+
+/** Names of the node types in an ADF description that Markdown cannot carry back (media, table, panel, expand). */
+export function lossyAdfNodes(doc) {
+  const found = new Set();
+  const walk = (n) => {
+    if (!n || typeof n !== "object") return;
+    if (LOSSY_NODES.has(n.type)) found.add(n.type);
+    if (Array.isArray(n.content)) n.content.forEach(walk);
+  };
+  walk(doc);
+  return [...found];
+}
+
 /** ADF document (or plain string / null) -> Markdown string, or null when not a document. */
 export function adfToMarkdown(doc) {
   if (doc == null) return null;

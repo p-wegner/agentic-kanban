@@ -18,7 +18,7 @@
 
 import { stripAttachmentFooter } from "./jira-context.mjs";
 import { FIELDS, BOARD_PRIORITY_TO_JIRA, accountIdForAssignee, mapJiraIssueToBoardFields, mapBoardTypeToJira, resolveBoardStatusId } from "./field-map.mjs";
-import { markdownToAdf } from "./adf.mjs";
+import { markdownToAdf, lossyAdfNodes } from "./adf.mjs";
 import { attributeComment } from "./comment-marker.mjs";
 import { boardFieldsOf, fieldTable, incomingFieldsOf } from "./field-snapshot.mjs";
 import { runInboundSync } from "./sync-engine.mjs";
@@ -247,7 +247,7 @@ export async function resolveIssue({ client, boardClient, projectId, siteUrl, ke
   // keep board (whole issue) or per field
   const sideOf = decision.kind === "board" ? Object.fromEntries(KEEP_FIELDS.map((f) => [f, "board"])) : decision.map;
   const differs = (f) => rows.find((r) => r.field === f)?.differs === true;
-  const boardFields = KEEP_FIELDS.filter((f) => sideOf[f] === "board" && (decision.kind === "board" || differs(f)));
+  const boardFields = KEEP_FIELDS.filter((f) => sideOf[f] === "board" && differs(f));
   const jiraFields = KEEP_FIELDS.filter((f) => sideOf[f] === "jira" && differs(f));
 
   // The assignee goes through its own endpoint and by accountId only (#1702): an unmapped name stops the
@@ -262,11 +262,14 @@ export async function resolveIssue({ client, boardClient, projectId, siteUrl, ke
 
   const jiraPatch = {};
   if (boardFields.includes("title")) jiraPatch.summary = boardIssue.title;
-  if (boardFields.includes("description") && boardIssue.description != null) jiraPatch.description = markdownToAdf(stripAttachmentFooter(boardIssue.description));
+  const lossy = lossyAdfNodes(jiraIssue.fields?.description);
+  if (boardFields.includes("description") && boardIssue.description != null && lossy.length === 0) jiraPatch.description = markdownToAdf(stripAttachmentFooter(boardIssue.description));
   const priority = BOARD_PRIORITY_TO_JIRA[String(boardIssue.priority ?? "").toLowerCase()];
   if (boardFields.includes("priority") && priority) jiraPatch.priority = { name: priority };
   const issueType = mapBoardTypeToJira(boardIssue.issueType);
-  if (boardFields.includes("type") && issueType) jiraPatch.issuetype = { name: issueType };
+  // Only a Jira type the board maps back (Bug, Story, Task) may be rewritten: never an Epic or Sub-task.
+  const jiraTypeInvertible = ["bug", "story", "task"].includes(String(jiraIssue.fields?.issuetype?.name ?? "").toLowerCase());
+  if (boardFields.includes("type") && issueType && jiraTypeInvertible) jiraPatch.issuetype = { name: issueType };
   if (Object.keys(jiraPatch).length) await client.updateIssueFields(key, jiraPatch);
   if (pushAssignee) await client.assignIssue(key, assigneeAccountId);
 
@@ -313,7 +316,7 @@ export async function resolveIssue({ client, boardClient, projectId, siteUrl, ke
   return finish({
     nextState,
     auditComment,
-    applied: `Jira updated from the board (${Object.keys(jiraPatch).join(", ") || "nothing"})${jiraFields.length ? `; board updated from Jira (${jiraFields.join(", ")})` : ""}; status is not written here, push handles transitions`,
+    applied: `Jira updated from the board (${Object.keys(jiraPatch).join(", ") || "nothing"})${jiraFields.length ? `; board updated from Jira (${jiraFields.join(", ")})` : ""}${boardFields.includes("description") && lossy.length ? `; description NOT written: the Jira description holds ${lossy.join(", ")} content that Markdown cannot round-trip` : ""}; status is not written here, push handles transitions`,
     artifact: { path: artifactPath, content: conflictRecord({ key, ticket, rows, decision: summary, reason, audit }) },
   });
 }
