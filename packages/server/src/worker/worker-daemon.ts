@@ -44,6 +44,7 @@ import {
   normalizeBoardUrl,
   parseBoardList,
   saveIdentity,
+  createTokenRotator,
   urlsOfBoard,
   type BoardProbe,
   type WorkerIdentity,
@@ -404,6 +405,8 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     }
   };
 
+  const tokenRotator = createTokenRotator({ getIdentity: () => identity, setIdentity: (next) => { identity = next; }, stateFile, boardUrl: () => currentUrl(), urls: () => urlsOfBoard(boardUrls, probes, identity.boardId), send: (m) => sendToBoard(m), log }); // #1766
+
   const sendToBoard = (message: WorkerToBoardMessage): void => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(message));
@@ -527,7 +530,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           socket.send(JSON.stringify(pendingCritical.shift()));
         }
         retryRetainedResults(runner, sendToBoard, log); verifyJobs.onConnected(); // #1465: re-announce running verify jobs, deliver verdicts buffered while disconnected
-        selfUpdate?.onConnected();
+        selfUpdate?.onConnected(); tokenRotator.reset(); tokenRotator.maybeRotate(); // #1766
         resolveConnected();
       } catch (err) {
         log(`[worker] open-handler error (daemon staying up): ${err instanceof Error ? err.message : String(err)}`);
@@ -543,7 +546,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         log(`[worker] dropping malformed board message`);
         return;
       }
-      if (toolchains.handle(message) || oneShots.handle(message) || verifyJobs.handle(message) || services.handle(message)) return; // #1431, #1437, #1447
+      if (tokenRotator.handle(message) || toolchains.handle(message) || oneShots.handle(message) || verifyJobs.handle(message) || services.handle(message)) return; // #1431, #1437, #1447
       try {
         dispatchBoardMessage(message, runner, sendToBoard, draining);
       } catch (err) {
@@ -690,7 +693,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       log(`[worker] profile quota refresh failed (continuing): ${errorMessage(err)}`);
     }
     // #1370: re-run the doctor in the background every few minutes; it never delays a beat.
-    doctor.refreshIfDue();
+    doctor.refreshIfDue(); tokenRotator.maybeRotate(); // #1766: no-op unless the token is near expiry
     const doctorToSend = doctor.pending();
     let res: Response;
     try {

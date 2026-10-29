@@ -27,6 +27,11 @@ export const workers = sqliteTable("workers", {
   desiredSettings: text("desired_settings"),
   status: text("status").notNull().default("online"),
   tokenHash: text("token_hash").notNull(),
+  /** #1766: ISO expiry of the bearer token. NULL = a pre-rotation worker; never expires until it rotates. */
+  tokenExpiresAt: text("token_expires_at"),
+  /** #1766: digest of the token a rotation replaced, honoured until `prevTokenValidUntil`. */
+  prevTokenHash: text("prev_token_hash"),
+  prevTokenValidUntil: text("prev_token_valid_until"),
   lastHeartbeatAt: text("last_heartbeat_at"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),

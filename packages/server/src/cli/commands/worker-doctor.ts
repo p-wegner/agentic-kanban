@@ -757,6 +757,7 @@ interface BoardWorkerRow {
   ineligibleReason: string | null;
   workerVersion?: string;
   lastHeartbeatAt?: string | null;
+  tokenExpiresAt?: string | null;
 }
 
 /** Offline longer than this earns a "consider `worker revoke`" hint. */
@@ -935,7 +936,14 @@ export async function runBoardDoctor(opts: {
       });
       continue;
     }
-    checks.push(ok(`worker ${w.name}`, `online, connected, eligible - ${w.freeSlots}/${w.maxConcurrency} slots free`));
+    // #1766: show the bearer-token expiry; warn when a connected worker is past it or about to be.
+    const expMs = w.tokenExpiresAt ? Date.parse(w.tokenExpiresAt) : NaN;
+    const expiry = Number.isFinite(expMs) ? `, token expires ${w.tokenExpiresAt}` : "";
+    if (Number.isFinite(expMs) && expMs - (opts.nowMs ?? Date.now()) < 3 * 24 * 60 * 60 * 1000) {
+      checks.push({ name: `worker ${w.name}`, status: "warn", detail: `online, but its bearer token expires ${w.tokenExpiresAt}`, remedy: "The worker rotates its token over the socket; if this persists it runs a pre-rotation build - `worker update` it." });
+      continue;
+    }
+    checks.push(ok(`worker ${w.name}`, `online, connected, eligible - ${w.freeSlots}/${w.maxConcurrency} slots free${expiry}`));
   }
 
   if (reachableEligible.length === 0) {

@@ -287,6 +287,15 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
           conn.runningSessionIds.add(message.event.sessionId);
           conn.lastEventAt.set(message.event.sessionId, Date.now());
         }
+      } else if (message.type === "token_rotate_request") {
+        // #1766: the socket is authenticated; hand back a new token (old one stays valid briefly).
+        const requestId = message.requestId;
+        void registry.rotateWorkerToken(workerId).then((r) => {
+          send(workerId, r ? { type: "token_rotate", requestId, workerToken: r.workerToken, tokenExpiresAt: r.tokenExpiresAt } : { type: "token_rotate", requestId, error: "unknown worker" });
+        }).catch((err) => {
+          console.error(`[worker-connection] token rotation failed: workerId=${workerId}`, err);
+          send(workerId, { type: "token_rotate", requestId, error: "rotation failed" });
+        });
       } else if (message.type === "toolchain_install_status") {
         registry.noteToolchainInstallStatus?.(workerId, message.status);
       } else if (message.type === "assign_failed") {
