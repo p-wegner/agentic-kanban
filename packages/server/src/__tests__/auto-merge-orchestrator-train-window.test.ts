@@ -101,6 +101,38 @@ describe("auto-merge orchestrator train batching window (#905)", () => {
     expect(orchestrator.state.trainWindows.has(projectId)).toBe(false);
   });
 
+  async function capCase(prefs: Record<string, string>) {
+    const { db } = createTestDb();
+    const { projectId, statusId } = await seedProject(db);
+    for (const [k, v] of Object.entries(prefs)) {
+      await db.insert(preferences).values({ key: k.replace("<id>", projectId), value: v, updatedAt: new Date().toISOString() });
+    }
+    invalidatePreferencesCache();
+    const ids: string[] = [];
+    for (let i = 0; i < 20; i++) ids.push(await seedReadyWorkspace(db, projectId, statusId));
+    const orchestrator = createAutoMergeOrchestrator({ database: db });
+    const rows = await orchestrator.findCompletedWorkspaceRows();
+    const released = await orchestrator.applyTrainWindow(rows, new Date().toISOString());
+    return { orchestrator, projectId, released };
+  }
+
+  it("caps the released train at train_max_size and keeps the rest pending (#1771)", async () => {
+    const { orchestrator, projectId, released } = await capCase({ "train_max_size_<id>": "4" });
+    expect(released).toHaveLength(4);
+    const win = orchestrator.state.trainWindows.get(projectId)!;
+    expect(win.pendingIds).toHaveLength(16);
+    expect(win.pendingIds.some((id) => released.includes(id))).toBe(false);
+    expect(Number.isFinite(new Date(win.firstSeenAt).getTime())).toBe(true);
+  });
+
+  it("caps at the posture's trainMaxSize when no explicit pref is set (#1771)", async () => {
+    const { orchestrator, projectId, released } = await capCase({ "risk_posture_<id>": "flow" });
+    const win = orchestrator.state.trainWindows.get(projectId)!;
+    expect(released.length).toBeGreaterThan(0);
+    expect(released.length).toBeLessThan(20);
+    expect(released.length + win.pendingIds.length).toBe(20);
+  });
+
   it("releases once the oldest pending member crosses train_max_wait_ms_<projectId>, even below max size", async () => {
     const { db } = createTestDb();
     const { projectId, statusId } = await seedProject(db);

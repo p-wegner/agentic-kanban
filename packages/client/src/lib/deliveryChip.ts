@@ -67,7 +67,7 @@ export function buildDeliveryChipView(status: DeliveryStatusResponse, nowMs: num
     `Review: ${posture.reviewMode}`,
     `Red base policy: ${posture.redBasePolicy}`,
     `Merges / cycle: ${posture.mergesPerCycle}`,
-    `Merge train: max ${status.trainWindowMaxSize}, wait ${formatMs(status.trainWindowMaxWaitMs)}${sourceNote}`,
+    `Merge train: max ${status.trainWindowMaxSize} members, wait ${formatMs(status.trainWindowMaxWaitMs)}${sourceNote}`,
     status.baseSweep.reason,
     describeRedBase(status.redBase),
   ];

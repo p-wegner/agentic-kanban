@@ -21,6 +21,7 @@ import type { StackProfile } from "@agentic-kanban/shared";
 import {
   decideWindowHold,
   resolveTrainWindowConfig,
+  splitTrainRelease,
   type MergeTrainWindowVerdict,
 } from "../services/merge-train-window.js";
 import { resolveBaseRedVeto, type BaseRedVeto } from "../services/merge-train-base-veto.js";
@@ -683,9 +684,12 @@ export function createAutoMergeOrchestrator(deps: {
         }
       }
       if (hold.release) {
-        console.log(`[auto-merge] train window closed for project ${projectId} (${hold.reason}, size ${config.maxSize}/wait ${config.maxWaitMs}ms): releasing ${ids.length} workspace(s)${config.batchingFromPosture ? formatPostureNote(config.posture) : ""}`);
-        released.push(...ids);
-        await dropWindow(projectId, existing);
+        // #1771: maxSize is the membership cap too - the overflow stays pending for the next window.
+        const { released: departing, remaining } = splitTrainRelease(ids, config.maxSize);
+        console.log(`[auto-merge] train window closed for project ${projectId} (${hold.reason}, size ${config.maxSize}/wait ${config.maxWaitMs}ms): releasing ${departing.length} of ${ids.length} ready workspace(s) (max_size ${config.maxSize})${config.batchingFromPosture ? formatPostureNote(config.posture) : ""}`);
+        released.push(...departing);
+        if (remaining.length === 0) await dropWindow(projectId, existing);
+        else await persistWindow(projectId, existing, { pendingIds: remaining, firstSeenAt, lastVerdict: hold, lastEvaluatedAt: now });
       } else {
         await persistWindow(projectId, existing, {
           pendingIds: ids,

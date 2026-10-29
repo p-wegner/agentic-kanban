@@ -358,7 +358,7 @@ export interface DeliveryStatusResponse {
    *  `train_max_size_<projectId>` override rather than the posture. */
   trainSizeFromOverride: boolean;
   /** The merge-train WINDOW's effective size (`resolveTrainWindowConfig`) — when to stop
-   *  collecting, distinct from the queue's opt-in size above. */
+   *  collecting AND the cap on members per released train (#1771), distinct from the queue's opt-in size above. */
   trainWindowMaxSize: number;
   trainWindowMaxWaitMs: number;
   /** Did the train WINDOW pick up the posture's numbers, or stay on the shipped defaults? */
