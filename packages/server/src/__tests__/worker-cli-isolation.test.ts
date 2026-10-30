@@ -152,14 +152,10 @@ describe("agentic-kanban-worker binary isolation", () => {
     // Raised 87 -> 88 for #1551's worker-startup-step.ts (restart-after-update connect step).
     // Raised 88 -> 92 for #1605: worker-daemon-register/-shutdown, worker-connect-markdown, worker-format (pure splits, no new deps).
     // Raised 92 -> 94 for #1661: worker-last-gasp.ts, worker-state-discovery.ts (standalone, no db).
-<<<<<<< HEAD
-    // Raised 94 -> 95 for #1768: worker disk-floor module (standalone, node builtins only).
-    expect(files.size).toBeLessThan(95);
-=======
     // Raised 94 -> 96 for #1774: worker tray status helper module(s) reached by setup/doctor (no db).
     // Raised 96 -> 97 for #1756: worker-assign-auth.ts (HMAC frame verify; node:crypto only).
-    expect(files.size).toBeLessThan(97);
->>>>>>> master
+    // Raised 97 -> 98 for #1768: worker disk-floor module (standalone, node builtins only).
+    expect(files.size).toBeLessThan(98);
   });
 
   it("never reaches the database or board-service layer", () => {
