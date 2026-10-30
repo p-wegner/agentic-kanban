@@ -695,46 +695,52 @@ function parseLaterWorkerFrame(msg: Record<string, unknown>): WorkerToBoardMessa
   return status ? { type: "toolchain_install_status", status } : null;
 }
 
+function parseHelloFrame(msg: Record<string, unknown>): WorkerToBoardMessage | null {
+  if (typeof msg.workerId !== "string") return null;
+  const capabilities = parseWorkerCapabilities(msg.capabilities);
+  return {
+    type: "hello",
+    workerId: msg.workerId,
+    runningSessionIds: Array.isArray(msg.runningSessionIds)
+      ? msg.runningSessionIds.filter((s): s is string => typeof s === "string")
+      : [],
+    // Optional on the wire on purpose: a pre-handshake worker must still PARSE, so
+    // that the board can refuse it with a sentence instead of dropping it as
+    // malformed — which is the failure mode #754 exists to remove.
+    ...(typeof msg.protocolVersion === "number" ? { protocolVersion: msg.protocolVersion } : {}),
+    ...(typeof msg.workerVersion === "string" ? { workerVersion: msg.workerVersion } : {}),
+    ...(typeof msg.instanceId === "string" && msg.instanceId ? { instanceId: msg.instanceId } : {}),
+    ...(capabilities ? { capabilities } : {}),
+  };
+}
+
+function parseEventFrame(msg: Record<string, unknown>): WorkerToBoardMessage | null {
+  const event = asRecord(msg.event);
+  if (!event || typeof event.sessionId !== "string") return null;
+  if (event.type !== "stdout" && event.type !== "stderr" && event.type !== "exit") return null;
+  return {
+    type: "event",
+    event: {
+      type: event.type,
+      sessionId: event.sessionId,
+      data: typeof event.data === "string" ? event.data : undefined,
+      exitCode: typeof event.exitCode === "number" || event.exitCode === null ? event.exitCode : undefined,
+      ...(event.type === "exit" && parseWorkerPhaseTimings(event.phases)
+        ? { phases: parseWorkerPhaseTimings(event.phases) }
+        : {}),
+    },
+  };
+}
+
 /** Parse + shape-check a message arriving at the board. Null = drop it. */
 export function parseWorkerToBoardMessage(raw: unknown): WorkerToBoardMessage | null {
   const msg = parseJson(raw);
   if (!msg) return null;
   switch (msg.type) {
-    case "hello": {
-      if (typeof msg.workerId !== "string") return null;
-      const capabilities = parseWorkerCapabilities(msg.capabilities);
-      return {
-        type: "hello",
-        workerId: msg.workerId,
-        runningSessionIds: Array.isArray(msg.runningSessionIds)
-          ? msg.runningSessionIds.filter((s): s is string => typeof s === "string")
-          : [],
-        // Optional on the wire on purpose: a pre-handshake worker must still PARSE, so
-        // that the board can refuse it with a sentence instead of dropping it as
-        // malformed — which is the failure mode #754 exists to remove.
-        ...(typeof msg.protocolVersion === "number" ? { protocolVersion: msg.protocolVersion } : {}),
-        ...(typeof msg.workerVersion === "string" ? { workerVersion: msg.workerVersion } : {}),
-        ...(typeof msg.instanceId === "string" && msg.instanceId ? { instanceId: msg.instanceId } : {}),
-        ...(capabilities ? { capabilities } : {}),
-      };
-    }
-    case "event": {
-      const event = asRecord(msg.event);
-      if (!event || typeof event.sessionId !== "string") return null;
-      if (event.type !== "stdout" && event.type !== "stderr" && event.type !== "exit") return null;
-      return {
-        type: "event",
-        event: {
-          type: event.type,
-          sessionId: event.sessionId,
-          data: typeof event.data === "string" ? event.data : undefined,
-          exitCode: typeof event.exitCode === "number" || event.exitCode === null ? event.exitCode : undefined,
-          ...(event.type === "exit" && parseWorkerPhaseTimings(event.phases)
-            ? { phases: parseWorkerPhaseTimings(event.phases) }
-            : {}),
-        },
-      };
-    }
+    case "hello":
+      return parseHelloFrame(msg);
+    case "event":
+      return parseEventFrame(msg);
     case "assign_failed":
       if (typeof msg.sessionId !== "string" || typeof msg.error !== "string") return null;
       return { type: "assign_failed", sessionId: msg.sessionId, error: msg.error };
@@ -775,40 +781,43 @@ function parseTokenRotate(msg: Record<string, unknown>): BoardToWorkerMessage | 
   };
 }
 
+function parseAssignFrame(msg: Record<string, unknown>, sessionId: string): BoardToWorkerMessage | null {
+  const spec = asRecord(msg.spec);
+  if (!spec) return null;
+  if (typeof spec.command !== "string" || typeof spec.cwd !== "string") return null;
+  if (!Array.isArray(spec.args)) return null;
+  const repo = parseRepoTransport(msg.repo);
+  const intent = parseLaunchIntent(spec.intent);
+  return {
+    type: "assign",
+    sessionId,
+    ...(repo ? { repo } : {}),
+    spec: {
+      command: spec.command,
+      args: spec.args.filter((a): a is string => typeof a === "string"),
+      env: asRecord(spec.env)
+        ? Object.fromEntries(Object.entries(spec.env as Record<string, unknown>).filter(([, v]) => typeof v === "string")) as Record<string, string>
+        : {},
+      cwd: spec.cwd,
+      stdinPrompt: typeof spec.stdinPrompt === "string" ? spec.stdinPrompt : undefined,
+      keepStdinOpen: spec.keepStdinOpen === true,
+      suppressStdinPrompt: spec.suppressStdinPrompt === true,
+      useShell: spec.useShell === true,
+      ...(intent ? { intent } : {}),
+      hangTimeoutMs: typeof spec.hangTimeoutMs === "number" && Number.isFinite(spec.hangTimeoutMs)
+        ? spec.hangTimeoutMs
+        : undefined,
+    },
+  };
+}
+
 export function parseBoardToWorkerMessage(raw: unknown): BoardToWorkerMessage | null {
   const msg = parseJson(raw);
   if (msg?.type === "token_rotate") return parseTokenRotate(msg); // #1766: sessionless
   if (!msg || isServiceFrameType(msg.type) || typeof msg.sessionId !== "string") return parseToolchainInstallRequest(msg); // sessionless frames (#1447: the services frames carry a sessionId but are not a session's)
   switch (msg.type) {
-    case "assign": {
-      const spec = asRecord(msg.spec);
-      if (!spec) return null;
-      if (typeof spec.command !== "string" || typeof spec.cwd !== "string") return null;
-      if (!Array.isArray(spec.args)) return null;
-      const repo = parseRepoTransport(msg.repo);
-      const intent = parseLaunchIntent(spec.intent);
-      return {
-        type: "assign",
-        sessionId: msg.sessionId,
-        ...(repo ? { repo } : {}),
-        spec: {
-          command: spec.command,
-          args: spec.args.filter((a): a is string => typeof a === "string"),
-          env: asRecord(spec.env)
-            ? Object.fromEntries(Object.entries(spec.env as Record<string, unknown>).filter(([, v]) => typeof v === "string")) as Record<string, string>
-            : {},
-          cwd: spec.cwd,
-          stdinPrompt: typeof spec.stdinPrompt === "string" ? spec.stdinPrompt : undefined,
-          keepStdinOpen: spec.keepStdinOpen === true,
-          suppressStdinPrompt: spec.suppressStdinPrompt === true,
-          useShell: spec.useShell === true,
-          ...(intent ? { intent } : {}),
-          hangTimeoutMs: typeof spec.hangTimeoutMs === "number" && Number.isFinite(spec.hangTimeoutMs)
-            ? spec.hangTimeoutMs
-            : undefined,
-        },
-      };
-    }
+    case "assign":
+      return parseAssignFrame(msg, msg.sessionId);
     case "input":
       if (typeof msg.data !== "string") return null;
       return { type: "input", sessionId: msg.sessionId, data: msg.data };
