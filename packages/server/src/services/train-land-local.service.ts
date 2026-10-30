@@ -266,10 +266,10 @@ export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps)
   }
 }
 
-type ResolvedTarget = { train: LandLocalTrainRow | null; memberIds: string[]; label: string };
+type LandLocalTarget = { train: LandLocalTrainRow | null; memberIds: string[]; label: string };
 
 /** Target from a persisted train row. */
-async function resolveTrainTarget(deps: LandLocalDeps, projectId: string, trainId: string): Promise<ResolvedTarget | LandLocalOutcome> {
+async function resolveTrainTarget(deps: LandLocalDeps, projectId: string, trainId: string): Promise<LandLocalTarget | LandLocalOutcome> {
   const train = await deps.getTrain(trainId);
   if (!train) return { status: "error", message: `train ${trainId} not found` };
   if (train.projectId !== projectId) return { status: "error", message: `train ${train.id} belongs to another project` };
@@ -309,7 +309,7 @@ async function resolveWindowLabel(deps: LandLocalDeps, input: LandLocalInput, re
   };
 }
 
-async function resolveTarget(deps: LandLocalDeps, input: LandLocalInput, repo: string): Promise<ResolvedTarget | LandLocalOutcome> {
+async function resolveTarget(deps: LandLocalDeps, input: LandLocalInput, repo: string): Promise<LandLocalTarget | LandLocalOutcome> {
   if (input.trainId) return resolveTrainTarget(deps, input.projectId, input.trainId);
   if (!input.fromWindow) return { status: "error", message: "give a train id or --from-window" };
   const memberIds = await deps.getWindowMemberIds(input.projectId);
