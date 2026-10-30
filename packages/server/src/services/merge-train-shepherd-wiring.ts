@@ -6,6 +6,7 @@
  * Extracted from `merge-queue-train.ts` (at the god-module ceiling). The shepherd only works on the
  * whole train's attempt (`attemptLabel === label`); a bisect half is already a search.
  */
+import { attributeStaticTierFailure } from "./merge-train-static-attribution.js";
 import type { MergeTrainShepherdDto } from "@agentic-kanban/shared/types";
 import type { MergeTrainRedPolicy } from "@agentic-kanban/shared/lib/merge-train-red-strategy";
 import type { Database } from "../db/index.js";
@@ -95,6 +96,13 @@ export function buildTrainOnRed(args: {
   return async ({ gateWorktree, message, failedSuites, regate }) => {
     // #1573: a retry that still names failing suites is a real red, whatever the message says.
     if (looksLikeMissingDepsFailure(message) && !failedSuites?.length) return null;
+    // #1769: a static-tier guard that names a file one member touched is attributable — decline, so
+    // the train regates without the owner instead of a fix agent fighting N members at once.
+    const guardOwners = attributeStaticTierFailure(message, aboard);
+    if (guardOwners) {
+      console.log(`[merge-train] ${label}: gate RED but attributable to ${guardOwners.owners.map((o) => `#${o.issueNumber ?? "?"}`).join(" ")} via ${guardOwners.files.join(", ")} - no fix agent`);
+      return null;
+    }
     console.log(`[merge-train] ${label}: gate RED - spawning the fix agent in ${gateWorktree} (strategy ${policy.strategy}, timeout ${policy.caps.timeoutMs}ms, ${policy.caps.maxTurns} turn(s))`);
     shepherd.setAction("fixing gate");
     try {
