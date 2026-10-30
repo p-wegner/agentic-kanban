@@ -128,8 +128,37 @@ export async function planVerifyPlacement(args: Pick<PlaceVerifyCommandArgs, "ki
   return { target: "worker", reason: decision.reason, workerId: decision.workerId, workerName: decision.workerName, active, allowlist };
 }
 
+/** #1778: worker runs in flight, keyed by what they verify. A second request for the same tree + command joins the run instead of spending another slot. */
+const inFlightWorkerRuns = new Map<string, Promise<PlacedVerifyResult>>();
+
+export function workerRunKey(args: Pick<PlaceVerifyCommandArgs, "projectId" | "sha" | "tier" | "command" | "workingDir" | "env">): string | null {
+  if (!args.sha) return null;
+  return JSON.stringify([args.projectId, args.sha, args.tier, args.command, args.env ?? null]);
+}
+
+/** The run already in flight for this request, if any (callers check this BEFORE planning: a joiner needs no free slot). */
+export function joinInFlightWorkerRun(args: PlaceVerifyCommandArgs): Promise<PlacedVerifyResult> | null {
+  const key = workerRunKey(args);
+  const existing = key ? inFlightWorkerRuns.get(key) : undefined;
+  if (!existing) return null;
+  (args.log ?? ((l: string) => console.log(`[verify-placement] ${l}`)))(`${args.kind} for ${args.sha.slice(0, 9)} joins the identical verify run already in flight`);
+  return existing;
+}
+
 /** Run on the worker a plan chose and judge its report through `acceptWorkerVerdict`. */
 export async function runOnPlannedWorker(plan: Extract<VerifyPlan, { target: "worker" }>, args: PlaceVerifyCommandArgs, isLoadRetry = false): Promise<PlacedVerifyResult> {
+  const key = isLoadRetry ? null : workerRunKey(args);
+  if (!key) return runOnPlannedWorkerUnshared(plan, args, isLoadRetry);
+  const joined = joinInFlightWorkerRun(args);
+  if (joined) return joined;
+  const run = runOnPlannedWorkerUnshared(plan, args, isLoadRetry);
+  inFlightWorkerRuns.set(key, run);
+  const clear = (): void => { if (inFlightWorkerRuns.get(key) === run) inFlightWorkerRuns.delete(key); };
+  run.then(clear, clear);
+  return run;
+}
+
+async function runOnPlannedWorkerUnshared(plan: Extract<VerifyPlan, { target: "worker" }>, args: PlaceVerifyCommandArgs, isLoadRetry: boolean): Promise<PlacedVerifyResult> {
   const log = args.log ?? ((l: string) => console.log(`[verify-placement] ${l}`));
   const request: VerifyRequest = { requestId: randomUUID(), workerId: plan.workerId, sha: args.sha, tier: args.tier };
   log(`${plan.reason} (worker ${plan.workerName})`);
@@ -163,6 +192,8 @@ export async function runOnPlannedWorker(plan: Extract<VerifyPlan, { target: "wo
 }
 
 export async function runPlacedVerifyCommand(args: PlaceVerifyCommandArgs): Promise<PlacedVerifyResult> {
+  const joined = joinInFlightWorkerRun(args);
+  if (joined) return joined;
   const plan = await planVerifyPlacement(args);
   if (plan.target === "hold") throw new VerifyJobHeldError(plan.reason);
   if (plan.target === "host") return { result: await args.runOnHost(), target: "host" };
@@ -181,6 +212,8 @@ export async function readHeadSha(workingDir: string): Promise<string> {
  * throws `VerifyJobHeldError` so the caller holds with a reason instead of recording red/green.
  */
 export async function tryRunOnWorker(args: PlaceVerifyCommandArgs): Promise<PlacedVerifyResult | null> {
+  const joined = joinInFlightWorkerRun(args);
+  if (joined) return joined;
   const plan = await planVerifyPlacement(args);
   if (plan.target === "hold") throw new VerifyJobHeldError(plan.reason);
   if (plan.target === "host") return null;

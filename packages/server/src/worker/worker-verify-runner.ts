@@ -31,6 +31,7 @@ import {
 import { killProcessTree } from "../services/process-exec.js";
 import { stripCheckoutPrefix } from "../services/failed-suite-parse.js";
 import { composeGitUrl, deriveFallbackSetupCommand, gitAuthEnv } from "./worker-repo.js";
+import { retryOnRefLockRace, withCacheLock } from "./worker-repo-lock.js";
 
 export type CheckoutOutcome = { ok: true; dir: string; sha: string } | { ok: false; refused: VerifyRefusal; reason: string; sha?: string };
 export interface ScriptOutcome { exitCode: number; timedOut: boolean; output: string }
@@ -189,18 +190,21 @@ async function defaultPrepareCheckout(deps: VerifyRunnerDeps, job: VerifyJobFram
   const cacheDir = join(deps.workRoot, "repos", job.auth.projectId);
   mkdirSync(join(deps.workRoot, "repos"), { recursive: true });
   try {
-    if (!existsSync(join(cacheDir, ".git"))) {
-      await gitExecOrThrow(["clone", url, cacheDir], { timeout: 10 * 60 * 1000, env });
-    } else {
-      await gitExecOrThrow(["fetch", url, "+refs/heads/*:refs/remotes/origin/*", "--prune"], { cwd: cacheDir, timeout: 10 * 60 * 1000, env });
-    }
+    // #1779: same per-clone mutex + one ref-lock retry as session provisioning (#1474).
+    await withCacheLock(cacheDir, () => retryOnRefLockRace(async () => {
+      if (!existsSync(join(cacheDir, ".git"))) {
+        await gitExecOrThrow(["clone", url, cacheDir], { timeout: 10 * 60 * 1000, env });
+      } else {
+        await gitExecOrThrow(["fetch", url, "+refs/heads/*:refs/remotes/origin/*", "--prune"], { cwd: cacheDir, timeout: 10 * 60 * 1000, env });
+      }
+    }, deps.log));
   } catch (err) {
     return { ok: false, refused: "fetch_failed", reason: errorMessage(err) };
   }
   let have = await gitExec(["cat-file", "-e", `${job.sha}^{commit}`], { cwd: cacheDir });
   if (!execSucceeded(have)) {
     // A staging or detached tip no branch points at: ask for the sha itself.
-    await gitExec(["fetch", url, job.sha], { cwd: cacheDir, timeout: 10 * 60 * 1000, env });
+    await withCacheLock(cacheDir, () => gitExec(["fetch", url, job.sha], { cwd: cacheDir, timeout: 10 * 60 * 1000, env }));
     have = await gitExec(["cat-file", "-e", `${job.sha}^{commit}`], { cwd: cacheDir });
   }
   if (!execSucceeded(have)) return { ok: false, refused: "sha_unavailable", reason: `this worker cannot fetch ${job.sha} from the board` };
