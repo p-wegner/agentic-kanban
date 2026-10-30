@@ -23,6 +23,7 @@ export interface PersistedGitTokenScope {
   workerId: string;
   projectId: string;
   incomingRef?: string;
+  sessionId?: string;
   issuedAtMs: number;
   expiresAtMs: number;
 }
@@ -45,6 +46,7 @@ export async function insertGitToken(
     workerId: scope.workerId,
     projectId: scope.projectId,
     incomingRef: scope.incomingRef ?? null,
+    sessionId: scope.sessionId ?? null,
     issuedAtMs: scope.issuedAtMs,
     expiresAtMs: scope.expiresAtMs,
   };

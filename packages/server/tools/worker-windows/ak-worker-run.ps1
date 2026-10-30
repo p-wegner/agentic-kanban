@@ -89,6 +89,7 @@ $argList = @(
   '--providers', $cfg.providers,
   '--max-concurrency', [string]$cfg.maxConcurrency
 )
+if ($cfg.profiles) { $argList += '--profiles'; $argList += [string]$cfg.profiles }  # #1774: persisted by the tray's profile toggles
 if ($cfg.autoUpdate) { $argList += '--auto-update' }
 
 # --- self-update (#1338) ---------------------------------------------------------------

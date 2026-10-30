@@ -4,7 +4,8 @@
 // later push half (#1079) can import just this, not the rest of the pull machinery.
 
 import { adfToMarkdown } from "./adf.mjs";
-import { hasManagedPrefix, jiraContextOf } from "./jira-context.mjs";
+import { categoryForBoardStatus } from "./transitions.mjs";
+import { hasManagedPrefix, jiraContextOf, parentBlock } from "./jira-context.mjs";
 
 /** The Jira fields a pull needs to fetch to populate every mapped board field. */
 export const FIELDS = [
@@ -57,16 +58,60 @@ const STATUS_CATEGORY_CANDIDATES = {
   done: ["Done", "Closed"],
 };
 
+/** The `statusMap` setting (board status -> Jira status name) as an object; null when it is not a JSON object. */
+export function parseStatusMap(raw) {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A pull cannot place an issue on the board without a mapping the operator must supply (#1730). */
+export class StatusMappingError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "StatusMappingError";
+    this.code = "STATUS_CONFIG";
+  }
+}
+
+const sameStatusName = (a, b) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+
 /**
+ * Board status for a Jira status (#1730). Order: the current board column when it already has the Jira
+ * status's category (agreement, never moved); the inverse `statusMap` (board status -> Jira status name);
+ * the category's candidate names; then the project default. A `done` issue never falls through to the
+ * default (startable) column: that throws a StatusMappingError naming the missing mapping.
+ *
  * @param {string|null} statusCategoryKey
  * @param {Array<{id:string,name:string,isDefault?:boolean}>} boardStatuses
+ * @param {{ statusMap?: Record<string,string>, jiraStatusName?: string|null, currentStatusId?: string|null }} [opts]
  * @returns {string|null} a status id, or null when the project has no statuses at all
  */
-export function resolveBoardStatusId(statusCategoryKey, boardStatuses) {
-  const candidates = STATUS_CATEGORY_CANDIDATES[statusCategoryKey] ?? [];
-  for (const name of candidates) {
-    const match = boardStatuses.find((s) => s.name.toLowerCase() === name.toLowerCase());
+export function resolveBoardStatusId(statusCategoryKey, boardStatuses, { statusMap = {}, jiraStatusName = null, currentStatusId = null } = {}) {
+  const mapped = Object.entries(statusMap ?? {}).filter(([, jira]) => jiraStatusName && sameStatusName(jira, jiraStatusName));
+  const current = currentStatusId ? boardStatuses.find((s) => s.id === currentStatusId) : null;
+  if (current) {
+    if (mapped.some(([board]) => sameStatusName(board, current.name))) return current.id;
+    const mappedAway = Object.keys(statusMap ?? {}).some((board) => sameStatusName(board, current.name));
+    if (!mappedAway && statusCategoryKey && categoryForBoardStatus(current.name) === statusCategoryKey) return current.id;
+  }
+  for (const [board] of mapped) {
+    const match = boardStatuses.find((s) => sameStatusName(s.name, board));
     if (match) return match.id;
+  }
+  for (const name of STATUS_CATEGORY_CANDIDATES[statusCategoryKey] ?? []) {
+    const match = boardStatuses.find((s) => sameStatusName(s.name, name));
+    if (match) return match.id;
+  }
+  if (statusCategoryKey === "done" && boardStatuses.length > 0) {
+    throw new StatusMappingError(
+      `no board column resolves for the Jira status "${jiraStatusName ?? "Done"}" (category done): add a "Done" column or map one in statusMap ` +
+        `(board status -> Jira status name, e.g. {"Shipped":"${jiraStatusName ?? "Done"}"}). Nothing was written.`,
+    );
   }
   const fallback = boardStatuses.find((s) => s.isDefault) ?? boardStatuses[0];
   return fallback ? fallback.id : null;
@@ -208,7 +253,7 @@ export function mapJiraIssueToBoardFields(jiraIssue, { siteUrl, sprintFieldId = 
     const parentIsEpic = String(parent.fields?.issuetype?.name ?? "").toLowerCase() === "epic";
     tags.push(`${parentIsEpic ? "epic" : "parent"}:${parent.key}`);
     const parentSummary = parent.fields?.summary;
-    parentLine = `**Parent:** ${parent.key}${parentSummary ? ` (${parentSummary})` : ""}`;
+    parentLine = parentBlock(`**Parent:** ${parent.key}${parentSummary ? ` (${parentSummary})` : ""}`);
   }
   const body = markdownFromDescription(fields.description ?? null);
   const description = parentLine ? (body ? `${parentLine}
@@ -240,6 +285,7 @@ ${body}` : parentLine) : body;
     contextTags: context.tags,
     attachmentFooter: context.footer,
     statusCategoryKey: fields.status?.statusCategory?.key ?? null,
+    statusName: fields.status?.name ?? null,
     jiraUpdated: fields.updated ?? null,
   };
 }

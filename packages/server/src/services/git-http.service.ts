@@ -225,7 +225,7 @@ function createGitTokenStore(database: Database) {
       track(
         insertGitToken(
           sha256Hex(token),
-          { workerId: scope.workerId, projectId: scope.projectId, incomingRef: scope.incomingRef, issuedAtMs, expiresAtMs: issuedAtMs + (input.ttlMs ?? DEFAULT_GIT_TOKEN_TTL_MS) },
+          { workerId: scope.workerId, projectId: scope.projectId, incomingRef: scope.incomingRef, sessionId: scope.sessionId, issuedAtMs, expiresAtMs: issuedAtMs + (input.ttlMs ?? DEFAULT_GIT_TOKEN_TTL_MS) },
           database,
         ).catch((err) =>
           console.error(`[git-http] failed to persist token scope for worker ${input.workerId}:`, err),
@@ -264,6 +264,7 @@ function createGitTokenStore(database: Database) {
         workerId: row.workerId,
         projectId: row.projectId,
         incomingRef: row.incomingRef ?? undefined,
+        sessionId: row.sessionId ?? undefined,
         issuedAtMs: row.issuedAtMs,
       };
     },
@@ -303,7 +304,9 @@ export function branchFromIncomingRef(incomingRef: string | undefined): string |
 
 export type AuthorizeOutcome =
   | { ok: true; reason: "assignment-current" | "settling" }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; transient?: false }
+  /** The lookup itself failed (#1748): still fail closed, but the token must survive. */
+  | { ok: false; reason: string; transient: true };
 
 /**
  * Is this token's assignment still current (#753)?
@@ -333,7 +336,7 @@ export async function authorizeAssignment(
       superseded = await isSuperseded({ projectId: scope.projectId, branch, sessionId: scope.sessionId });
     } catch (err) {
       console.error(`[git-http] supersession lookup failed for session ${scope.sessionId}:`, err);
-      return { ok: false, reason: "supersession lookup failed" };
+      return { ok: false, reason: "supersession lookup failed", transient: true };
     }
     if (superseded) {
       return { ok: false, reason: `session ${scope.sessionId} is no longer the current session of ${branch}` };
@@ -348,7 +351,7 @@ export async function authorizeAssignment(
       // token holder whose session ended, and this transport's job is handing out repo
       // contents — the wrong answer here is not a degraded feature.
       console.error(`[git-http] assignment lookup failed for worker ${scope.workerId}:`, err);
-      return { ok: false, reason: "assignment lookup failed" };
+      return { ok: false, reason: "assignment lookup failed", transient: true };
     }
     if (current) return { ok: true, reason: "assignment-current" };
   }
@@ -656,6 +659,15 @@ export async function startGitHttpServer(opts?: {
         // #753: the token proves WHO, the assignment proves STILL. Checked before the path
         // is even parsed, so no request of any shape outlives its session.
         const authorized = await authorizeAssignment(scope, assignmentLookup, Date.now(), supersededLookup);
+        if (!authorized.ok && authorized.transient) {
+          // #1748: the lookup THREW (locked DB), so we do not know the assignment is over.
+          // Refuse this request but keep the token; the worker retries a 503.
+          denial = `unavailable: ${authorized.reason}`;
+          console.warn(`[git-http] 503 for worker ${scope.workerId}: ${authorized.reason} (token kept)`);
+          res.writeHead(503, { "Content-Type": "text/plain", "Retry-After": "5" });
+          res.end("assignment lookup temporarily unavailable");
+          return;
+        }
         if (!authorized.ok) {
           await tokens.drop(provided);
           denial = `ref not allowed: ${authorized.reason}`;

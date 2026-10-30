@@ -58,10 +58,11 @@ test("push toggles suppress status and comment entries", () => {
   assert.deepEqual(r.entries, []);
 });
 
-function fakeJira({ reject } = {}) {
+function fakeJira({ reject, description = null } = {}) {
   const calls = [];
   return {
     calls,
+    async getIssue() { return { fields: { description } }; },
     async updateIssueFields(key, fields) {
       calls.push({ key, fields });
       const bad = reject ? Object.keys(fields).filter((f) => reject.includes(f)) : [];
@@ -199,4 +200,13 @@ test("one create switch: pushCreate alone enables push-create", () => {
   const r = plan({ issues, snapshot: sn, createEnabled: true });
   assert.equal(r.entries.length, 1);
   assert.equal(r.entries[0].kind, "create");
+});
+
+test("a Jira description with media/table/panel is not overwritten by a board description push; the rest is written", async () => {
+  const adf = { type: "doc", version: 1, content: [{ type: "mediaSingle", content: [{ type: "media", attrs: {} }] }, { type: "panel", content: [] }] };
+  const client = fakeJira({ description: adf });
+  const r = await runPush(client, [entry]);
+  assert.ok(!("description" in client.calls[0].fields));
+  assert.ok("summary" in client.calls[0].fields);
+  assert.match(JSON.stringify(r), /description not pushed.*media/);
 });

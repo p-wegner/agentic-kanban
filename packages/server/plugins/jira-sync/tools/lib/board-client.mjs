@@ -98,11 +98,6 @@ export class BoardClient {
     return all;
   }
 
-  async listComments(issueId) {
-    const page = await this.request(`/api/issues/${encodeURIComponent(issueId)}/comments`);
-    return Array.isArray(page) ? page : (page?.comments ?? []);
-  }
-
   createIssue(body) {
     return this.request("/api/issues", { method: "POST", body });
   }

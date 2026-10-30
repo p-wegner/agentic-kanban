@@ -68,7 +68,7 @@ export function isOutboundComment(comment) {
  *   outboxEntries?: Array<object>, pendingWritebackIds?: Set<string>, createEnabled?: boolean,
  *   directions?: ReturnType<typeof import("./sync-direction.mjs").resolveSyncDirections>,
  * }} input
- * @returns `supersedeKeys` / `supersedeAssigneeKeys`: Jira keys whose already-queued `fields` / `assignee` entry this run replaces.
+ * @returns `supersedeKeys` / `supersedeAssigneeKeys`: Jira keys whose already-queued `fields` / `assignee` entry this run replaces; `supersedeTransitionKeys`: keys whose queued `transition` entry (any target) it replaces (#1733).
  */
 export function planOutbox({
   issues,
@@ -88,6 +88,7 @@ export function planOutbox({
   const entries = [];
   const supersedeKeys = [];
   const supersedeAssigneeKeys = [];
+  const supersedeTransitionKeys = [];
   const next = { issues: {}, commentsSeen: [] };
   const queued = (pred) => outboxEntries.some(pred) || entries.some(pred);
 
@@ -102,9 +103,12 @@ export function planOutbox({
       // Never queue outbound entries for an issue whose Jira twin is gone (#1629).
       if (isTaggedDeleted(issue)) continue;
       if (directions.pushStatus && !baseline && prev && prev.status !== status && status) {
+        // At most one transition per Jira key (#1733): a new move replaces a queued/failed one for another
+        // target, so a stale entry can never apply later and move the Jira issue backwards.
         const same = (e) => e.kind === "transition" && e.key === issue.externalKey && e.targetStatus === status;
         if (!queued(same)) {
-          entries.push({ kind: "transition", key: issue.externalKey, targetStatus: status, boardIssueId: issue.id });
+          entries.push({ kind: "transition", key: issue.externalKey, targetStatus: status, fromStatus: prev.status ?? null, boardIssueId: issue.id });
+          supersedeTransitionKeys.push(issue.externalKey);
         }
       }
       if (!baseline && prev?.fields) {
@@ -173,5 +177,5 @@ export function planOutbox({
     for (const k of linkKeys) if (!before.has(k)) push("add", k);
     for (const k of before) if (!now.has(k)) push("remove", k);
   }
-  return { entries, nextSnapshot: next, supersedeKeys, supersedeAssigneeKeys };
+  return { entries, nextSnapshot: next, supersedeKeys, supersedeAssigneeKeys, supersedeTransitionKeys };
 }

@@ -23,6 +23,7 @@ import {
   substitutePluginPlaceholders,
   type PluginManifest,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
+import { pluginProjectDataDir } from "./plugin-fs.js";
 import { spawnShellCommand, killProcessTree } from "./process-exec.js";
 import { tailOutput as tail } from "./plugin-exec.js";
 import { findView, probeHealth } from "./plugin-view-probe.js";
@@ -322,6 +323,7 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
       port,
       boardUrl,
       projectId,
+      pluginDataDir: pluginProjectDataDir(plugin.pluginId, projectId),
     });
     const env: Record<string, string> = substitutePluginEnv(view.serve.env, vars);
     if (view.serve.portEnv) env[view.serve.portEnv] = String(port);

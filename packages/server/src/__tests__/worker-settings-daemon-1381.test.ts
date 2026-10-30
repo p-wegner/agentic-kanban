@@ -31,6 +31,7 @@ function controls() {
     setMaxConcurrency: (n) => calls.push(`max=${n}`),
     setLabels: (l) => calls.push(`labels=${l.join("|")}`),
     setDrain: (on) => calls.push(`drain=${on}`),
+    setProfiles: (p) => calls.push(`profiles=${p.join("|")}`),
   };
   return { calls, c };
 }

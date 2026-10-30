@@ -94,7 +94,7 @@ export class ClaudeProvider implements AgentProvider {
     } else {
       args = ["--output-format", "stream-json", "--verbose"];
       try {
-        args.push("--mcp-config", getMcpConfigPath(this.fs));
+        args.push("--mcp-config", getMcpConfigPath(this.fs, options.builderContext?.policy === "isolated" ? options.builderContext.boardTools : undefined));
       } catch (err) {
         console.warn(`[agent] Failed to generate MCP config: ${String(err)}`);
       }

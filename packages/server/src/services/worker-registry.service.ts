@@ -48,6 +48,11 @@ import {
 import { recordWorkerEvent } from "./worker-events.service.js";
 import type { WorkerUpdateReport } from "../lib/worker-update.js";
 
+/** #1766: a worker bearer token lives ~30 days; workers rotate well before that. */
+export const WORKER_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** #1766: how long the token a rotation replaced stays valid (covers in-flight heartbeats). */
+export const WORKER_TOKEN_ROTATE_GRACE_MS = 2 * 30 * 1000;
+
 export const PAIRING_TOKEN_TTL_MS = 10 * 60 * 1000;
 /** A worker whose last heartbeat is older than this reads as offline. */
 export const WORKER_HEARTBEAT_STALE_MS = 90 * 1000;
@@ -92,7 +97,7 @@ export const PROTOCOL_MISMATCH_PREFIX = "incompatible worker protocol:";
  * credential digest, and shipping it to the UI/CLI would hand every board client
  * material to brute-force a worker token offline. It stays inside this service.
  */
-export interface WorkerView extends Omit<WorkerRow, "tokenHash" | "desiredSettings"> {
+export interface WorkerView extends Omit<WorkerRow, "tokenHash" | "desiredSettings" | "prevTokenHash" | "prevTokenValidUntil"> {
   /** Stored status downgraded to "offline" when the heartbeat is stale/absent. */
   effectiveStatus: WorkerStatus;
   /**
@@ -268,7 +273,7 @@ export function createWorkerRegistry(database: Database = realDb) {
   }
 
   async function registerWorker(input: RegisterWorkerInput): Promise<
-    | { ok: true; workerId: string; workerToken: string; sameNamed: { id: string; lastHeartbeatAt: string | null }[] }
+    | { ok: true; workerId: string; workerToken: string; tokenExpiresAt: string; sameNamed: { id: string; lastHeartbeatAt: string | null }[] }
     | { ok: false; error: string }
   > {
     const now = input.now ?? new Date().toISOString();
@@ -306,6 +311,7 @@ export function createWorkerRegistry(database: Database = realDb) {
       ...(input.maxConcurrency ? {} : { desiredSettings: JSON.stringify({ rev: now, settings: { maxConcurrency: "auto" } } satisfies WorkerSettingsEnvelope) }),
       status: "online",
       tokenHash: sha256Hex(workerToken),
+      tokenExpiresAt: new Date(nowMs + WORKER_TOKEN_TTL_MS).toISOString(),
       lastHeartbeatAt: now,
       createdAt: now,
       updatedAt: now,
@@ -322,15 +328,47 @@ export function createWorkerRegistry(database: Database = realDb) {
       `[worker-registry] registered worker: id=${workerId} name=${input.name.trim()} ` +
         `protocol=${input.protocolVersion ?? "?"} build=${input.workerVersion ?? "?"}`,
     );
-    return { ok: true, workerId, workerToken, sameNamed };
+    return { ok: true, workerId, workerToken, tokenExpiresAt: new Date(nowMs + WORKER_TOKEN_TTL_MS).toISOString(), sameNamed };
   }
 
   /** Bearer-token check for worker-called endpoints. A revoked worker fails closed. */
-  async function authenticateWorker(workerId: string, token: string): Promise<boolean> {
+  async function authenticateWorker(workerId: string, token: string, nowMs: number = Date.now()): Promise<boolean> {
     if (!workerId || !token) return false;
     const row = await workerRepo.getWorkerById(workerId, database);
     if (!row) return false;
-    return tokensMatch(sha256Hex(token), row.tokenHash);
+    return rowAccepts(row, sha256Hex(token), nowMs);
+  }
+
+  /**
+   * #1766: current token (until `tokenExpiresAt`; NULL = a pre-rotation worker, never expires),
+   * or the token a rotation replaced while its grace window is open.
+   */
+  function rowAccepts(row: WorkerRow, digest: string, nowMs: number): boolean {
+    const current = tokensMatch(digest, row.tokenHash);
+    const expired = row.tokenExpiresAt ? nowMs >= new Date(row.tokenExpiresAt).getTime() : false;
+    if (current && !expired) return true;
+    if (row.prevTokenHash && row.prevTokenValidUntil && nowMs < new Date(row.prevTokenValidUntil).getTime()) {
+      return tokensMatch(digest, row.prevTokenHash);
+    }
+    return false;
+  }
+
+  /** #1766: mint a new token for an ALREADY-authenticated worker (its socket). The old one stays valid for a grace. */
+  async function rotateWorkerToken(workerId: string, now?: string): Promise<{ workerToken: string; tokenExpiresAt: string } | null> {
+    const row = await workerRepo.getWorkerById(workerId, database);
+    if (!row) return null;
+    const at = now ?? new Date().toISOString();
+    const nowMs = new Date(at).getTime();
+    const workerToken = mintToken();
+    const tokenExpiresAt = new Date(nowMs + WORKER_TOKEN_TTL_MS).toISOString();
+    await workerRepo.updateWorkerToken(workerId, {
+      tokenHash: sha256Hex(workerToken),
+      tokenExpiresAt,
+      prevTokenHash: row.tokenHash,
+      prevTokenValidUntil: new Date(nowMs + WORKER_TOKEN_ROTATE_GRACE_MS).toISOString(),
+    }, at, database);
+    console.log(`[worker-registry] rotated token: worker=${workerId} expires=${tokenExpiresAt}`);
+    return { workerToken, tokenExpiresAt };
   }
 
   async function heartbeat(
@@ -462,8 +500,9 @@ export function createWorkerRegistry(database: Database = realDb) {
     const digest = sha256Hex(token);
     const rows = await workerRepo.listWorkers(database);
     let match = false;
+    const nowMs = Date.now();
     for (const row of rows) {
-      if (tokensMatch(digest, row.tokenHash)) match = true;
+      if (rowAccepts(row, digest, nowMs)) match = true;
     }
     return match;
   }
@@ -472,7 +511,7 @@ export function createWorkerRegistry(database: Database = realDb) {
     const nowMs = now ? new Date(now).getTime() : Date.now();
     const rows = await workerRepo.listWorkers(database);
     return rows.map((row) => {
-      const { tokenHash: _tokenHash, desiredSettings: _desiredSettings, ...safe } = row;
+      const { tokenHash: _tokenHash, desiredSettings: _desiredSettings, prevTokenHash: _prevTokenHash, prevTokenValidUntil: _prevValidUntil, ...safe } = row;
       const reported = reportedVersions.get(row.id);
       const current = effectiveStatus(row, nowMs);
       noteEffectiveStatus(row, current);
@@ -688,7 +727,7 @@ export function createWorkerRegistry(database: Database = realDb) {
   }
 
   return {
-    mintPairingToken, registerWorker, authenticateWorker, heartbeat, touchHeartbeat,
+    mintPairingToken, registerWorker, authenticateWorker, rotateWorkerToken, heartbeat, touchHeartbeat,
     listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles, notePackageManagers, noteToolchains, noteToolchainInstallInfo, noteVerify, noteToolchainInstallRequested, noteToolchainInstallStatus, noteProviderNotice, noteDoctor, noteCapabilities,
     requestUpdate, authenticateAnyWorker, isPairingTokenValid, getDesiredSettings, setDesiredSettings,
   };

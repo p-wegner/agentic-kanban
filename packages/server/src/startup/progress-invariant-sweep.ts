@@ -23,6 +23,7 @@ import { setWorkspaceStatus } from "../repositories/workspace-status.repository.
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { readTrainWindowsFromPrefMap } from "../services/merge-train-window-state.js";
 import { resolveTrainWindowConfig } from "../services/merge-train-window.js";
+import { breakerIsPaused, readAutoMergeBreaker } from "../services/auto-merge-breaker.js";
 import { monitorDrivenProjectIds } from "../services/start-policy.service.js";
 import { workspaceHasCommittedWork } from "../services/workspace-commits.js";
 import { implementExitHoldReason } from "../services/implement-exit-check-state.js";
@@ -87,8 +88,14 @@ async function loadDefaultSnapshots(database: Database, nowMs: number): Promise<
   const projectIds = [...monitorDrivenProjectIds(prefMap)];
   const rows = await listOpenTicketRows(projectIds, database);
   const trainMembers = new Map<string, Set<string>>();
+  const trainInFlight = new Set<string>();
+  const breakerPaused = new Set<string>();
   for (const projectId of projectIds) {
     const trains = await listActiveMergeTrainsForProject(projectId, ["assembling", "gating"], database);
+    // #1767: a train past its window (gating/landing) drives every ready ticket that missed it.
+    const flying = await listActiveMergeTrainsForProject(projectId, ["gating", "landing"], database).catch(() => []);
+    if (flying.length > 0) trainInFlight.add(projectId);
+    if (breakerIsPaused(await readAutoMergeBreaker(projectId, database))) breakerPaused.add(projectId);
     const members = new Set<string>();
     for (const t of trains) {
       try {
@@ -109,7 +116,10 @@ async function loadDefaultSnapshots(database: Database, nowMs: number): Promise<
   for (const r of rows) {
     // Forks and plan-mode workspaces are driven by their join / the plan reconciler, not by this invariant.
     if (r.parentWorkspaceId || r.planMode) continue;
-    snapshots.push(await toSnapshot(r, trainMembers.get(r.projectId), windowDepartures.get(r.workspaceId) ?? null, database));
+    const snap = await toSnapshot(r, trainMembers.get(r.projectId), windowDepartures.get(r.workspaceId) ?? null, database);
+    snap.projectTrainInFlight = trainInFlight.has(r.projectId);
+    snap.projectBreakerPaused = breakerPaused.has(r.projectId);
+    snapshots.push(snap);
   }
   return snapshots;
 }
@@ -310,7 +320,9 @@ export function createProgressRecoveryPort(deps: {
       await deps.sendBuilderTurn(workspaceId, content);
     },
     async escalate(s, why) {
-      await setWorkspaceStatus(database, s.workspaceId, "blocked", { caller: "progress-invariant" });
+      // #1767: a READY workspace stays queue-eligible; `blocked` makes the monitor and merge queue skip it,
+      // so the escalation would create the stall it reports. Surface it via the health event only.
+      if (!s.readyForMerge) await setWorkspaceStatus(database, s.workspaceId, "blocked", { caller: "progress-invariant" });
       await logBoardHealthEvent({
         projectId: s.projectId,
         cycleId: `progress-invariant-${s.workspaceId}`,

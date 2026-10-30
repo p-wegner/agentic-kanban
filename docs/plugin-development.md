@@ -651,6 +651,7 @@ Available in every `command` and every `env` value, and in the scaffold template
 | `{{port}}` | views only, filled at serve time |
 | `{{boardUrl}}` | the board API's externally reachable base URL, no trailing slash (e.g. `http://localhost:3001`) — call `{{boardUrl}}/api/...` to read board data. Always the PUBLIC port: in dev the backend binds an internal port behind a proxy, and this is the proxy; a worktree server on 3001+N hands out its own URL. CORS already reflects loopback origins, so an iframe view page can fetch it directly. |
 | `{{projectId}}` | the id of the project the view/script/loop was started for — pass it as `projectId` in board API calls |
+| `{{pluginDataDir}}` | board-owned state dir for this plugin AND project (`<data dir>/plugin-data/<plugin>/<projectId>`), outside every repo — use it for state that must not be committed or shared between projects on one repo |
 
 An unknown placeholder is left as-is. Paths are absolute; on Windows they contain backslashes.
 `{{boardUrl}}`/`{{projectId}}` are substituted in view serve commands/env, script commands/env,

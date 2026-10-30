@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { mcpError, mcpJson, mcpText, nextIssueNumber, resolveActiveProjectId, resolveProjectName } from "../db-utils.js";
 import { ISSUE_TYPES } from "@agentic-kanban/shared";
+import { guardRiskTags, recordRiskTagApplied } from "../risk-tag-guard.js";
 
 const issueInputSchema = z.object({
   title: z.string(),
@@ -130,6 +131,10 @@ export function registerCreateIssuesBatch(server: McpServer, deps: ToolDeps = pr
         }
       }
 
+      // #1745: an agent may not born-tag a batch ticket with a softer-than-project `risk:<level>`.
+      const riskRefusal = await guardRiskTags(db, schema, pid, issues.flatMap((i) => i.tags ?? []));
+      if (riskRefusal) return riskRefusal;
+
       let nextNumber = await nextIssueNumber(db, schema, pid);
 
       const now = new Date().toISOString();
@@ -218,6 +223,9 @@ export function registerCreateIssuesBatch(server: McpServer, deps: ToolDeps = pr
           });
         }
       });
+      for (let i = 0; i < created.length; i++) {
+        await recordRiskTagApplied(db, schema, created[i].id, (issues[i].tags ?? []).map((t) => t.trim()), "MCP create_issues_batch", now);
+      }
 
       notifyBoard(pid, "mcp_create_issues_batch");
       if (parentIssueId || edges.length > 0) notifyBoard(pid, "mcp_dependency_added");

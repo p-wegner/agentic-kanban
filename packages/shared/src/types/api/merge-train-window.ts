@@ -37,7 +37,11 @@ export type MergeTrainWindowHoldReason =
    * fix. Cleared by `POST /api/projects/:id/auto-merge/resume`, by the base sha moving, or by
    * the failing workspace's setup verdict changing.
    */
-  | "breaker_paused";
+  | "breaker_paused"
+  /** #1741 - the last train(s) over these members ended inconclusive repeatedly; the retry waits out a 15/30/60 min ramp. */
+  | "inconclusive_backoff"
+  /** #1741 - the inconclusive ramp is spent; held until an operator departs the train or the members change. */
+  | "inconclusive_exhausted";
 
 export type MergeTrainWindowReason = MergeTrainWindowReleaseReason | MergeTrainWindowHoldReason;
 

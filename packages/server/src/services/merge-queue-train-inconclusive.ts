@@ -4,10 +4,14 @@
  */
 import type { MergeQueueEvent } from "./merge-queue.service.js";
 import { describeFailedSuites } from "./verify-failed-suites.js";
+import { classifyInfraRed } from "./merge-train-verdict.js";
 
 /** A watchdog kill / timeout / held run is inconclusive, not red — nothing for a fix agent to fix. */
-export function isInconclusiveGate(gate: { passed: boolean; timedOut?: boolean; held?: boolean }): boolean {
-  return !gate.passed && (gate.timedOut === true || gate.held === true);
+export function isInconclusiveGate(gate: { passed: boolean; timedOut?: boolean; held?: boolean; message?: string; failedSuites?: readonly string[] }, scopedSuiteCount?: number): boolean {
+  if (gate.passed) return false;
+  if (gate.timedOut === true || gate.held === true) return true;
+  // #1772: an infra red (full disk, zero-suite worker failure, a mass failure) is never a verdict on the code.
+  return gate.message !== undefined && classifyInfraRed({ passed: false, message: gate.message, failedSuites: gate.failedSuites }, scopedSuiteCount) !== null;
 }
 
 /** Prefix of the `reconciledReason` an inconclusive train is closed out with. */
@@ -29,6 +33,48 @@ export function isInconclusiveRetry(
   if (!Array.isArray(prior) || pendingIds.length === 0) return false;
   const set = new Set(prior);
   return pendingIds.every((id) => set.has(id));
+}
+
+/** #1741 - retries 1..N-1 depart at once; from the Nth consecutive inconclusive abandon the retry waits a ramp. */
+export const INCONCLUSIVE_RAMP_AFTER = 2;
+export const INCONCLUSIVE_RAMP_MS: readonly number[] = [15 * 60_000, 30 * 60_000, 60 * 60_000];
+
+export type InconclusiveRetryDecision =
+  | { kind: "retry" }
+  | { kind: "none" }
+  | { kind: "backoff"; waitUntilMs: number; count: number }
+  | { kind: "exhausted"; count: number; trainId?: string };
+
+/**
+ * #1741 - counts the consecutive inconclusive abandons (newest first) whose members cover the
+ * pending set, and turns the count into retry-now / wait-the-ramp / exhausted. Pure.
+ */
+export function decideInconclusiveRetry(
+  pendingIds: readonly string[],
+  recentTrains: ReadonlyArray<{ id?: string; state: string; reconciledReason?: string | null; memberWorkspaceIds: string; startedAt?: string; finishedAt?: string | null }>,
+  nowMs: number,
+): InconclusiveRetryDecision {
+  const finished = recentTrains.filter((t) => t.state !== "assembling" && t.state !== "gating");
+  let count = 0;
+  while (count < finished.length && isInconclusiveRetry(pendingIds, [finished[count]!])) count++;
+  if (count === 0) return { kind: "none" };
+  if (count < INCONCLUSIVE_RAMP_AFTER) return { kind: "retry" };
+  const idx = count - INCONCLUSIVE_RAMP_AFTER;
+  if (idx >= INCONCLUSIVE_RAMP_MS.length) return { kind: "exhausted", count, trainId: finished[0]!.id };
+  const last = finished[0]!;
+  const lastAt = new Date(last.finishedAt ?? last.startedAt ?? 0).getTime();
+  const waitUntilMs = (Number.isFinite(lastAt) ? lastAt : 0) + INCONCLUSIVE_RAMP_MS[idx]!;
+  return nowMs >= waitUntilMs ? { kind: "retry" } : { kind: "backoff", waitUntilMs, count };
+}
+
+const attentionLogged = new Set<string>();
+
+/** One `ATTENTION` line per exhausted train, however many ticks hold it. */
+export function logInconclusiveExhausted(projectId: string, d: Extract<InconclusiveRetryDecision, { kind: "exhausted" }>, log: (line: string) => void = console.log): void {
+  const key = `${projectId}|${d.trainId ?? d.count}`;
+  if (attentionLogged.has(key)) return;
+  attentionLogged.add(key);
+  log(`[auto-merge] ATTENTION: train window held (inconclusive_exhausted) for project ${projectId} - ${d.count} consecutive inconclusive gate abandons for the same members; not retrying until an operator departs the train (pnpm cli -- train depart) or the members change`);
 }
 
 export function describeInconclusiveGate(label: string, attemptLabel: string, message: string): string {

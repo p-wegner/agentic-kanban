@@ -447,7 +447,8 @@ export { checkGitInstalled, checkGitIdentity, checkGitSafeDirectory, checkPackag
 // god-module gate's 20-declaration ceiling (#889), and the check pushed it to 21.
 import { checkNodeVersion } from "./worker-doctor-node-check.js";
 export { MIN_SUPPORTED_NODE_MAJOR, checkNodeVersion } from "./worker-doctor-node-check.js";
-import { checkGlobalLauncher, checkLogonTaskLauncher, checkWorkerBuild, probeGlobalVersion, readEntryVersion } from "./worker-doctor-build-check.js";
+import { checkTray } from "./worker-tray-check.js";
+import { checkGlobalLauncher, checkLogonTaskLauncher, checkLogonTaskProfiles, checkWorkerBuild, probeGlobalVersion, readEntryVersion } from "./worker-doctor-build-check.js";
 import { installedBuildOf, launcherCommand, useLauncherInRemedies } from "./worker-update-notes.js";
 import { parseBuildId } from "../../lib/worker-update.js";
 import { checkBoardBuild } from "./worker-board-build.js";
@@ -702,6 +703,8 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   const globalVersion = opts.globalVersion === undefined ? probeGlobalVersion() : opts.globalVersion;
   checks.push(checkGlobalLauncher({ stateFile: opts.stateFile, runningEntry: opts.runningEntry ?? null, globalVersion }));
   checks.push(checkLogonTaskLauncher({ globalVersion })); // #1482
+  const tray = checkTray(); // #1774
+  if (tray) checks.push(tray);
   if (!opts.local) {
     checks.push(await checkBoardBuild({
       daemonRunning: readControlFile(opts.stateFile) !== null,
@@ -723,6 +726,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   }
   checks.push(...checkProfileCredentials(opts.home, undefined, opts.profiles, undefined, opts.profileAliases, opts.harness?.dirFor("claude")));
   checks.push(checkAttestedProfiles(discoverLocalProfiles(opts.home, bindDefaultAlias(parseProfileAliases(opts.profileAliases), opts.harness?.dirFor("claude"))), opts.profiles, daemonStatus ? { daemonRunning: true, daemonProfiles: daemonAttestedProfiles(daemonStatus) } : undefined));
+  if (daemonStatus) checks.push(checkLogonTaskProfiles({ attested: ((daemonStatus.profiles ?? daemonStatus.attestedProfiles) as string[] | undefined) ?? null })); // #1773
   // #1372: while the global launcher is stale or absent, remedies name the shim that always runs the current build.
   const launcher = launcherCommand({
     stateFile: opts.stateFile,
@@ -759,6 +763,7 @@ interface BoardWorkerRow {
   ineligibleReason: string | null;
   workerVersion?: string;
   lastHeartbeatAt?: string | null;
+  tokenExpiresAt?: string | null;
 }
 
 /** Offline longer than this earns a "consider `worker revoke`" hint. */
@@ -937,7 +942,14 @@ export async function runBoardDoctor(opts: {
       });
       continue;
     }
-    checks.push(ok(`worker ${w.name}`, `online, connected, eligible - ${w.freeSlots}/${w.maxConcurrency} slots free`));
+    // #1766: show the bearer-token expiry; warn when a connected worker is past it or about to be.
+    const expMs = w.tokenExpiresAt ? Date.parse(w.tokenExpiresAt) : NaN;
+    const expiry = Number.isFinite(expMs) ? `, token expires ${w.tokenExpiresAt}` : "";
+    if (Number.isFinite(expMs) && expMs - (opts.nowMs ?? Date.now()) < 3 * 24 * 60 * 60 * 1000) {
+      checks.push({ name: `worker ${w.name}`, status: "warn", detail: `online, but its bearer token expires ${w.tokenExpiresAt}`, remedy: "The worker rotates its token over the socket; if this persists it runs a pre-rotation build - `worker update` it." });
+      continue;
+    }
+    checks.push(ok(`worker ${w.name}`, `online, connected, eligible - ${w.freeSlots}/${w.maxConcurrency} slots free${expiry}`));
   }
 
   if (reachableEligible.length === 0) {

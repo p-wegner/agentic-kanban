@@ -27,6 +27,11 @@ export const workers = sqliteTable("workers", {
   desiredSettings: text("desired_settings"),
   status: text("status").notNull().default("online"),
   tokenHash: text("token_hash").notNull(),
+  /** #1766: ISO expiry of the bearer token. NULL = a pre-rotation worker; never expires until it rotates. */
+  tokenExpiresAt: text("token_expires_at"),
+  /** #1766: digest of the token a rotation replaced, honoured until `prevTokenValidUntil`. */
+  prevTokenHash: text("prev_token_hash"),
+  prevTokenValidUntil: text("prev_token_valid_until"),
   lastHeartbeatAt: text("last_heartbeat_at"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
@@ -67,6 +72,8 @@ export const workerGitTokens = sqliteTable("worker_git_tokens", {
   projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
   /** The one ref a receive-pack under this token may update. NULL = read-only in practice. */
   incomingRef: text("incoming_ref"),
+  /** The session the token was issued to (#1751), so the #1407 supersession check survives a restart. NULL = legacy row. */
+  sessionId: text("session_id"),
   /** Epoch ms — the clock the assignment-settle window is measured from. */
   issuedAtMs: integer("issued_at_ms").notNull(),
   /** Epoch ms ceiling. Not the bound that matters (see #753), but it bounds this table's growth. */

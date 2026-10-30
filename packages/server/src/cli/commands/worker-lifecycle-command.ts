@@ -125,7 +125,7 @@ export function registerWorkerLifecycle(workerCmd: Command): void {
       .command(verb)
       .description(
         `Run ON THE WORKER MACHINE (#1443): ${verb} the running daemon (found through the state file) - no manual node-pid kill. ` +
-          `With --drain it first stops taking new sessions and waits for the running ones, then ${verb}s (in-flight verify jobs count as running; a restart re-execs with the ORIGINAL start flags - to change flags, stop --drain and start again); without it, running agents are killed like Ctrl+C.`,
+          `With --drain it first stops taking new sessions and waits for the running ones, then ${verb}s (in-flight verify jobs count as running; a restart re-execs with the original start flags, with the persisted config set|unset values (#1443) applied over them - to change other flags, stop --drain and start again); without it, running agents are killed like Ctrl+C.`,
       )
       .option("--drain", `Let running sessions finish before the ${verb} (returns at once; follow with 'status')`)
       .option(...stateOpt)
@@ -185,7 +185,7 @@ export function registerWorkerLifecycle(workerCmd: Command): void {
     .description(
       "Edit the worker's persisted start args (#1443). `config set <key> <value>` pins a setting, `config unset <key>` " +
         "drops its pin (the board's value applies again), `config show` lists them. Keys: " +
-        `${START_CONFIG_KEYS.join(", ")}. Applied on the next (self-)restart - e.g. 'config unset maxConcurrency' then 'restart --drain'.`,
+        `${START_CONFIG_KEYS.join(", ")}. Applied on the next (self-)restart - e.g. 'config unset maxConcurrency' then 'restart --drain' - except profiles, which the running daemon re-attests live within one heartbeat (#1773).`,
     )
     .option(...stateOpt)
     .action((action: string, key: string | undefined, value: string | undefined, options: { stateFile?: string }) => {

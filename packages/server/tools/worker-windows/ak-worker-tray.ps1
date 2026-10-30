@@ -43,6 +43,7 @@ $StateDir   = Join-Path $env:LOCALAPPDATA 'agentic-kanban-worker'
 $ConfigFile = Join-Path $StateDir 'config.json'
 $LogFile    = Join-Path $StateDir 'worker.log'
 $TaskName   = 'AgenticKanbanWorker'
+$ControlFile = Join-Path (Join-Path $HOME '.agentic-kanban') 'worker-control.json'
 
 # ── icons, built once ─────────────────────────────────────────────────────────
 function New-DotIcon {
@@ -140,6 +141,8 @@ $miStart   = $menu.Items.Add('Start')
 $miStop    = $menu.Items.Add('Stop')
 $miRestart = $menu.Items.Add('Restart')
 $menu.Items.Add('-') | Out-Null
+$miProfiles = New-Object System.Windows.Forms.ToolStripMenuItem 'Attested profiles'
+$menu.Items.Add($miProfiles) | Out-Null
 $miLog     = $menu.Items.Add('Open log')
 $miDash    = $menu.Items.Add('Open dashboard (live)')
 $menu.Items.Add('-') | Out-Null
@@ -170,6 +173,82 @@ $miExit.Add_Click({
   foreach ($i in $Icons.Values) { $i.Dispose() }
   [System.Windows.Forms.Application]::Exit()
 })
+# ── attested profiles (#1774) ─────────────────────────────────────────────────
+# Ask the RUNNING daemon (loopback control endpoint, token from worker-control.json)
+# which profiles it attests; the submenu is rebuilt only when that set changes.
+function Get-ControlStatus {
+  if (-not (Test-Path $ControlFile)) { return $null }
+  try {
+    $c = Get-Content $ControlFile -Raw | ConvertFrom-Json
+    return @{ ctl = $c; status = (Invoke-RestMethod -Uri "http://127.0.0.1:$($c.port)/status" -Headers @{ 'x-worker-control-token' = $c.token } -TimeoutSec 3) }
+  } catch { return $null }
+}
+function ConvertTo-ProfileNames($list) {
+  # the daemon reports 'provider:name'; --profiles / config set take the bare name
+  @($list | ForEach-Object { if ($_ -is [string]) { ($_ -split ':')[-1] } elseif ($_.profile) { $_.profile } elseif ($_.name) { $_.name } } | Where-Object { $_ } | Select-Object -Unique)
+}
+function Get-ConfiguredProfiles {
+  if (-not (Test-Path $ConfigFile)) { return @() }
+  try { $p = (Get-Content $ConfigFile -Raw | ConvertFrom-Json).profiles; if ($p) { return @(([string]$p) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) } } catch { }
+  return @()
+}
+# Daemon-reported set; a daemon that does not report one yet falls back to the configured set,
+# so a toggle never collapses the set to the single clicked profile.
+function Get-CurrentProfiles($cs) {
+  $l = if ($cs.status.profiles) { $cs.status.profiles } else { $cs.status.attestedProfiles }
+  if ($l) { return @(ConvertTo-ProfileNames $l) }
+  return @(Get-ConfiguredProfiles)
+}
+# Persist FIRST (so a restart or reboot keeps it), then apply it live via
+# `config set profiles`; a daemon without a control file (or without a control file) gets a service restart.
+function Set-ProfileSet([string[]]$Names) {
+  $cfg = Get-Content $ConfigFile -Raw | ConvertFrom-Json
+  $cfg | Add-Member -NotePropertyName profiles -NotePropertyValue $(if ($Names.Count -gt 0) { $Names -join ',' } else { 'none' }) -Force
+  $cfg | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigFile -Encoding utf8
+  # Live path (#1773): `config set profiles` is re-read by the running daemon on every beat.
+  $live = $false
+  $cmd = Get-Command agentic-kanban-worker -ErrorAction SilentlyContinue
+  if ($cmd -and (Get-ControlStatus)) {
+    try {
+      $csv = if ($Names.Count -gt 0) { $Names -join ',' } else { 'none' }
+      $p = Start-Process -FilePath $cmd.Source -ArgumentList @('config','set','profiles',$csv) -WindowStyle Hidden -Wait -PassThru
+      $live = ($p.ExitCode -eq 0)
+    } catch { }
+  }
+  if (-not $live) { try { & $svc '-Restart' } catch { } }
+}
+$script:profileKey = $null
+function Update-ProfileMenu {
+  $cs = Get-ControlStatus
+  $attested = if ($cs) { @(Get-CurrentProfiles $cs) } else { @() }
+  $all = @($attested + (Get-ConfiguredProfiles) | Select-Object -Unique)
+  $key = ($(if ($cs) { 'up' } else { 'down' })) + '|' + ($all -join ',') + '|' + ($attested -join ',')
+  if ($key -eq $script:profileKey) { return }
+  $script:profileKey = $key
+  $miProfiles.DropDownItems.Clear()
+  if (-not $cs) { $miProfiles.Text = 'Attested profiles (daemon not reachable)' } else { $miProfiles.Text = "Attested profiles ($($attested.Count))" }
+  if ($all.Count -eq 0) { $e = $miProfiles.DropDownItems.Add('(none reported)'); $e.Enabled = $false; return }
+  foreach ($n in $all) {
+    $it = New-Object System.Windows.Forms.ToolStripMenuItem $n
+    $it.CheckOnClick = $false
+    $it.Checked = ($attested -contains $n)
+    $it.Tag = $n
+    $it.Add_Click({
+      param($sender, $e)
+      try {
+        $name = [string]$sender.Tag
+        $cur = @()
+        $cs2 = Get-ControlStatus
+        if ($cs2) { $cur = @(Get-CurrentProfiles $cs2) } else { $cur = @(Get-ConfiguredProfiles) }
+        $new = if ($cur -contains $name) { @($cur | Where-Object { $_ -ne $name }) } else { @($cur + $name) }
+        Set-ProfileSet $new
+        $script:profileKey = $null
+      } catch { }
+    })
+    $miProfiles.DropDownItems.Add($it) | Out-Null
+  }
+}
+
 # Double-click is the fast path to the log, which is where every answer has been.
 $tray.Add_DoubleClick({ try { if (Test-Path $LogFile) { Start-Process notepad.exe $LogFile } } catch { } })
 
@@ -197,6 +276,7 @@ $timer.Add_Tick({
     $t = "kanban worker: $($v.text)"
     if ($t.Length -gt 63) { $t = $t.Substring(0, 60) + '...' }
     $tray.Text = $t
+    if ($script:tick % 3 -eq 1) { Update-ProfileMenu }
     $miState.Text = "$($v.text) - $reach$(if ($s.since) { " - since $($s.since)" })"
   } catch { }
 })

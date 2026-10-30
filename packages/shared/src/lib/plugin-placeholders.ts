@@ -22,6 +22,9 @@ export interface PluginPlaceholderVars {
   /** The board project the view/script/loop was started FOR — the id to pass as `projectId`
    *  in board API calls. */
   projectId?: string;
+  /** Board-owned scratch dir for THIS (plugin, project) pair, outside every repo checkout — for
+   *  state that must not be committed or shared between projects on one repo (#1737). */
+  pluginDataDir?: string;
 }
 
 /**
@@ -39,6 +42,7 @@ export const PLUGIN_PLACEHOLDER_KEYS = [
   "port",
   "boardUrl",
   "projectId",
+  "pluginDataDir",
 ] as const satisfies ReadonlyArray<keyof PluginPlaceholderVars>;
 
 /**
@@ -58,6 +62,7 @@ export function buildPluginPlaceholderVars(input: {
   pluginPath: string;
   projectId: string;
   boardUrl?: string;
+  pluginDataDir?: string;
   /** Only a view has one — allocated per start, so it is filled at serve time. */
   port?: number | string;
 }): PluginPlaceholderVars {
@@ -69,6 +74,7 @@ export function buildPluginPlaceholderVars(input: {
     ...(input.port !== undefined ? { port: input.port } : {}),
     boardUrl: input.boardUrl,
     projectId: input.projectId,
+    ...(input.pluginDataDir !== undefined ? { pluginDataDir: input.pluginDataDir } : {}),
   };
 }
 

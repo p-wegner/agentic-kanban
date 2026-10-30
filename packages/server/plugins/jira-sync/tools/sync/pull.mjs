@@ -6,10 +6,11 @@
 // board writes, and returns the summary that would result.
 
 import { checkProfile } from "../lib/profile.mjs";
-import { buildClientFromEnv, printResult, isDryRun, checkAuth } from "../lib/cli-client.mjs";
+import { buildClientFromEnv, printResult, isDryRun, checkAuth, rateLimitResult } from "../lib/cli-client.mjs";
 import { defaultJql } from "../lib/pull-plan.mjs";
 import { runInboundSync } from "../lib/sync-engine.mjs";
 import {
+  checkStateFiles,
   readPullState,
   writeJsonFile,
   pullStatePath,
@@ -21,11 +22,12 @@ import {
   writebacksPath,
   readBoardSnapshot,
   boardSnapshotPath,
+  migrateLegacyState,
 } from "../lib/state.mjs";
 import { updateRegister } from "../lib/conflict-register.mjs";
 import { JiraAuthError } from "../lib/auth.mjs";
 import { BoardClient, BoardConfigError, resolveBoardConfigFromEnv } from "../lib/board-client.mjs";
-import { assigneeMapFromEnv } from "../lib/field-map.mjs";
+import { assigneeMapFromEnv, parseStatusMap, StatusMappingError } from "../lib/field-map.mjs";
 import { resolveSyncDirections } from "../lib/sync-direction.mjs";
 import { applyWritebacks } from "../lib/writebacks.mjs";
 import { snapshotAfterPull } from "../lib/state-sync.mjs";
@@ -55,6 +57,10 @@ async function main() {
 
   const stateDir = process.env.JIRA_SYNC_STATE_DIR;
   if (!stateDir) return { ok: false, step: "config", reason: "JIRA_SYNC_STATE_DIR is not set" };
+  migrateLegacyState(stateDir);
+
+  const stateFailure = checkStateFiles(stateDir);
+  if (stateFailure) return stateFailure;
 
   let boardConfig;
   try {
@@ -86,6 +92,9 @@ async function main() {
     }
   }
 
+  const statusMap = parseStatusMap(process.env.SYNC_CONFIG_STATUSMAP ?? process.env.JIRA_SYNC_STATUS_MAP);
+  if (statusMap === null) return { ok: false, step: "config", reason: "statusMap must be a JSON object of board status -> Jira status name" };
+
   let result;
   try {
     result = await runInboundSync(ctx.client, boardClient, {
@@ -97,11 +106,15 @@ async function main() {
       directions: resolveSyncDirections(process.env),
       customFieldMap: process.env.SYNC_CONFIG_CUSTOMFIELDMAP ?? "",
       assigneeMap: assigneeMapFromEnv(process.env),
+      statusMap,
       pendingWritebackKeys: new Set(Object.values(writebacks.keys)),
       deletedStatusName: process.env.JIRA_SYNC_DELETED_STATUS || undefined,
+      maxIssuesPerRun: positiveInt(process.env.SYNC_CONFIG_MAXISSUESPERRUN),
+      outOfScopeRecheckMs: positiveInt(process.env.SYNC_CONFIG_OUTOFSCOPERECHECKHOURS, 24) * 3_600_000,
     });
   } catch (err) {
-    return { ok: false, step: "sync", reason: err.message, code: err.code ?? null, retryable: err.retryable ?? false };
+    if (err instanceof StatusMappingError) return { ok: false, step: "config", reason: err.message, code: err.code };
+    return rateLimitResult(err) ?? { ok: false, step: "sync", reason: err.message, code: err.code ?? null, retryable: err.retryable ?? false };
   }
 
   if (!dryRun) {
@@ -141,6 +154,11 @@ async function main() {
 
   const { nextState: _nextState, linkSnapshotAdjust: _linkAdjust, ...summary } = result;
   return { ok: true, step: "pull", syncDirection: resolveSyncDirections(process.env).default, dryRun, applied: !dryRun, ...summary };
+}
+
+function positiveInt(raw, fallback) {
+  const n = Math.floor(Number(String(raw ?? "").trim()));
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
 const result = await main();

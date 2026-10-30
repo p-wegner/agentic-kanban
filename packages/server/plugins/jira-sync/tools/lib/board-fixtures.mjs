@@ -26,10 +26,17 @@ function unknownFields(body, extra = []) {
   return Object.keys(body ?? {}).filter((k) => !WRITABLE_ISSUE_FIELDS.has(k) && !extra.includes(k));
 }
 
-/** A fresh in-memory board: one default status, no issues, no tags. */
+/**
+ * A fresh in-memory board: a default Todo column plus a Done column, no issues, no tags.
+ * The Jira fixtures include a done-category issue, and since #1730 a pull refuses to land one
+ * in a startable column, so the fake board needs the Done column a real board would have.
+ */
 export function createBoardFixtureState() {
   return {
-    statuses: [{ id: "status-todo", name: "Todo", isDefault: true, sortOrder: 0 }],
+    statuses: [
+      { id: "status-todo", name: "Todo", isDefault: true, sortOrder: 0 },
+      { id: "status-done", name: "Done", sortOrder: 1 },
+    ],
     issues: [],
     tags: [],
     issueTags: new Map(), // issueId -> Set<tagId>

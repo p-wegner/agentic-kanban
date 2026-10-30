@@ -118,6 +118,9 @@ function queueStatsWrite<T>(sessionId: string, run: () => Promise<T>): Promise<T
   return next;
 }
 
+/** Sessions whose first-request size (#1765) is already persisted. */
+const firstTurnRecorded = new Set<string>();
+
 /** Merge a patch into the session's stats blob, serialised against the other writers. */
 function mergeAndSaveStats(sessionId: string, patch: Record<string, unknown>): Promise<void> {
   return queueStatsWrite(sessionId, async () => {
@@ -131,6 +134,7 @@ function mergeAndSaveStats(sessionId: string, patch: Record<string, unknown>): P
  * so a write that arrives after the exit re-arms the chain rather than losing its ordering.
  */
 function releaseStatsWriteChain(sessionId: string): void {
+  firstTurnRecorded.delete(sessionId);
   const tail = statsWriteChains.get(sessionId);
   if (!tail) return;
   void tail.finally(() => {
@@ -404,6 +408,13 @@ function applyLiveStats(
   ctx: SessionContext | undefined,
 ): void {
   if (ls.model) state.sessionModels.set(sessionId, ls.model);
+  const firstRequest = ls.requestTokens ?? ls.contextTokens;
+  if (firstRequest > 0 && !firstTurnRecorded.has(sessionId)) {
+    // #1765: the session's first request size, recorded once — a total conflates context size with turn count.
+    firstTurnRecorded.add(sessionId);
+    mergeAndSaveStats(sessionId, { firstTurnContextTokens: firstRequest })
+      .catch((err) => console.error("[session] Failed to persist first-turn context size:", err));
+  }
   if (ls.contextTokens > 0) {
     state.sessionContextTokens.set(sessionId, ls.contextTokens);
     emitActivityThrottled(state, `${sessionId}:live-persist`, () =>

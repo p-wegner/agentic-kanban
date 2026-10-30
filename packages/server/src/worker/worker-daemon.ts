@@ -31,6 +31,7 @@
 //  * `hello` and `register` carry a protocol version; an incompatible board
 //    refuses with a sentence instead of failing as a silence.
 
+import { createFrameGate } from "./worker-assign-auth.js"; // #1756
 import { runStartupStep, refreshPreConnectState } from "./worker-startup-step.js";
 import { readFileSync } from "node:fs";
 import { homedir, platform, arch, totalmem, cpus } from "node:os";
@@ -44,6 +45,7 @@ import {
   normalizeBoardUrl,
   parseBoardList,
   saveIdentity,
+  createTokenRotator,
   urlsOfBoard,
   type BoardProbe,
   type WorkerIdentity,
@@ -69,12 +71,13 @@ import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
 import { packageManagersField, toolchainsField } from "../cli/commands/worker-doctor-git-prereqs.js";
 import { cleanUpBeforeStart, createPendingDeleteSweeper } from "./agent-process-tree.js";
 import { attestAndNotice, attestProviders } from "./worker-provider-notice.js";
-import { flushCritical, reattestProviders } from "./worker-daemon-helpers.js";
+import { duplicateIdentityGiveUp, flushCritical, newInstanceId, reattestProviders } from "./worker-daemon-helpers.js";
 export { attestProviders };
 import { defaultWorkerName, sameNamedNotice } from "./worker-name.js";
 import { createDoctorSummaryTracker } from "../cli/commands/worker-doctor-daemon.js";
 import { resolveProfileAliases } from "./worker-profile-aliases.js";
 import { createWorkerSettingsApplier } from "./worker-settings-apply.js";
+import { persistedProfilesOverride } from "./worker-lifecycle.js";
 import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
 import type { WorkerHarness } from "./worker-harness.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -172,6 +175,8 @@ export interface WorkerDaemonOptions extends VerifySlotsStartOption { // #1496: 
   log?: (line: string) => void;
   /** How long `stop()` waits for in-flight result pushes (#754). */
   drainTimeoutMs?: number;
+  /** #1756: refuse unsigned board frames from the first one (otherwise required once the board has signed one). */
+  requireSignedFrames?: boolean;
   lifecycle?: (ctx: import("./worker-lifecycle.js").LifecycleCtx) => import("./worker-lifecycle.js").LifecycleHandlers; // #1443: status details + stop/restart for the control endpoint
   /**
    * Called once when this daemon can never work against this board again â€” a 401 with no
@@ -256,6 +261,40 @@ function buildProfileAttestor(opts: WorkerDaemonOptions, aliases: ReturnType<typ
   });
 }
 
+/** #1773: re-point `opts.profiles` and build the new attestor; null when the set is unchanged. */
+function swapAttestedProfiles(opts: WorkerDaemonOptions, aliases: ReturnType<typeof resolveProfileAliases>, log: (m: string) => void, next: string[] | undefined, via: string): WorkerProfileAttestor | null {
+  if (JSON.stringify(next ?? null) === JSON.stringify(opts.profiles ?? null)) return null;
+  opts.profiles = next;
+  log(`[worker] attested profiles changed (${via}) -> ${next ? next.join(",") : "every discovered login"}`);
+  return buildProfileAttestor(opts, aliases, log);
+}
+
+/** #1773: `worker config set|unset profiles` edits the state file; the heartbeat picks it up (no restart, no reconnect). */
+function adoptPersistedProfiles(opts: WorkerDaemonOptions, aliases: ReturnType<typeof resolveProfileAliases>, log: (m: string) => void, stateFile: string, desired: string[] | undefined): WorkerProfileAttestor | null {
+  const override = persistedProfilesOverride(stateFile, desired);
+  return override ? swapAttestedProfiles(opts, aliases, log, override.profiles, "config") : null;
+}
+
+/** #754: the 401 give-up texts, kept out of `startWorkerDaemon` (nloc ratchet). */
+function tokenRejectedMessage(where: string, stateFile: string): string {
+  return (
+    `board rejected this worker's token (401 on ${where}). It was probably revoked, or the ` +
+    `board's database was reset. Mint a new pairing token on the board ` +
+    `('agentic-kanban worker pair') and restart with --token <token>; the stale pairing in ` +
+    `${stateFile} is dropped automatically when you do.`
+  );
+}
+
+function repairExhaustedMessage(where: string, attempts: number): string {
+  return (
+    `board rejected this worker's token again after ${attempts} re-pairing attempt(s) ` +
+    `(401 on ${where}). A pairing token is single-use, so this is not something another ` +
+    `token will fix: check that the board still lists this worker ` +
+    `('agentic-kanban worker list' on the board machine) and that --board points at the ` +
+    `fleet port of the board you paired with.`
+  );
+}
+
 export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<WorkerDaemonHandle> {
   const stateFile = opts.stateFile ?? defaultWorkerStateFile();
   // #1381: flags pin their keys; the rest start from what the board last pushed.
@@ -284,7 +323,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // carriers each time, so a role a human just changed with claude-pick takes effect
   // without restarting the daemon â€” the same freshness rule the board's own roster has.
   const profileAliases = resolveProfileAliases(stateFile, opts.profileAliases, log, opts.harness?.dirFor("claude"));
-  const profileAttestor = buildProfileAttestor(opts, profileAliases, log);
+  let profileAttestor = buildProfileAttestor(opts, profileAliases, log);
   const attestedProfiles = (): WorkerProfileAttestation[] => profileAttestor.current();
   const declaredProviders = opts.providers;
   let providerNotice: string | undefined;
@@ -315,6 +354,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   const currentUrl = (): string => boardUrls[urlIndex]!;
   let ws: WebSocket | null = null;
   let stopped = false;
+  const acceptFrame = createFrameGate(() => identity.workerToken, opts.requireSignedFrames ?? process.env.KANBAN_WORKER_REQUIRE_SIGNED_FRAMES === "1", log); // #1756
   let draining = settings.startDrained();
   let fatal: string | null = null;
   /** Re-pairings attempted, and whether one is in flight (#754 â€” see handleUnauthorized). */
@@ -333,6 +373,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   const pendingCritical: WorkerToBoardMessage[] = [];
   const workerVersion = resolveWorkerVersion();
+  const instanceId = newInstanceId(); // #1754
 
   /**
    * Give up on this board for good (#754): stop reconnecting and tell the caller why.
@@ -362,22 +403,11 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   const handleUnauthorized = async (where: string): Promise<void> => {
     if (stopped || fatal || repairing) return;
     if (!opts.pairingToken) {
-      giveUp(
-        `board rejected this worker's token (401 on ${where}). It was probably revoked, or the ` +
-          `board's database was reset. Mint a new pairing token on the board ` +
-          `('agentic-kanban worker pair') and restart with --token <token>; the stale pairing in ` +
-          `${stateFile} is dropped automatically when you do.`,
-      );
+      giveUp(tokenRejectedMessage(where, stateFile));
       return;
     }
     if (repairAttempts >= MAX_REPAIR_ATTEMPTS) {
-      giveUp(
-        `board rejected this worker's token again after ${repairAttempts} re-pairing attempt(s) ` +
-          `(401 on ${where}). A pairing token is single-use, so this is not something another ` +
-          `token will fix: check that the board still lists this worker ` +
-          `('agentic-kanban worker list' on the board machine) and that --board points at the ` +
-          `fleet port of the board you paired with.`,
-      );
+      giveUp(repairExhaustedMessage(where, repairAttempts));
       return;
     }
     // One repair at a time, and never re-entrantly: a 401 arrives on BOTH the heartbeat and
@@ -402,6 +432,8 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       giveUp(`re-registration after a 401 failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
+
+  const tokenRotator = createTokenRotator({ getIdentity: () => identity, setIdentity: (next) => { identity = next; }, stateFile, boardUrl: () => currentUrl(), urls: () => urlsOfBoard(boardUrls, probes, identity.boardId), send: (m) => sendToBoard(m), log }); // #1766
 
   const sendToBoard = (message: WorkerToBoardMessage): void => {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -466,7 +498,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         boardUrl,
         workerVersion,
         log,
-        handlers: { updateNow: () => selfUpdate.updateNow(), status: () => selfUpdate.controlStatus(), ...opts.lifecycle?.({ stateFile, workRoot, boardUrl, draining: () => draining, sessionsLeft: () => runner.runningSessionIds().length + (verifyJobs.capability().jobIds?.length ?? 0), /* #1559: a drain also waits for in-flight verify jobs */ effective: () => ({ ...settings.effectiveOptions(opts), verifySlots }), pinned: () => settings.report().pinned, desired: () => settings.desired(), profiles: () => attestedProfiles().map((p) => `${p.provider}:${p.name}`), harnessMode: () => opts.harness?.mode, verify: () => ({ ...verifyJobs.capability(), jobs: verifyJobs.jobs() }) }) }, // #1443/#1451/#1479
+        handlers: { updateNow: () => selfUpdate.updateNow(), status: () => selfUpdate.controlStatus(), ...opts.lifecycle?.({ stateFile, workRoot, boardUrl, draining: () => draining, sessionsLeft: () => runner.runningSessionIds().length + (verifyJobs.capability().jobIds?.length ?? 0), /* #1559: a drain also waits for in-flight verify jobs */ effective: () => ({ ...settings.effectiveOptions(opts), profiles: opts.profiles, verifySlots }), pinned: () => settings.report().pinned, desired: () => settings.desired(), profiles: () => attestedProfiles().map((p) => `${p.provider}:${p.name}`), harnessMode: () => opts.harness?.mode, verify: () => ({ ...verifyJobs.capability(), jobs: verifyJobs.jobs() }) }) }, // #1443/#1451/#1479
       })
     : null;
 
@@ -519,13 +551,14 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           // gained docker (or changed its ceiling) says so without being re-paired.
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
+          instanceId,
           capabilities: capabilitiesOf(opts, attestedProfiles(), providerNotice, doctor.takeCurrent(), toolchains.installer.info(), verifyJobs.capability(), workRoot, profileAttestor.unattested()),
         } satisfies WorkerToBoardMessage));
         while (pendingCritical.length > 0) {
           socket.send(JSON.stringify(pendingCritical.shift()));
         }
         retryRetainedResults(runner, sendToBoard, log); verifyJobs.onConnected(); // #1465: re-announce running verify jobs, deliver verdicts buffered while disconnected
-        selfUpdate?.onConnected();
+        selfUpdate?.onConnected(); tokenRotator.reset(); tokenRotator.maybeRotate(); // #1766
         resolveConnected();
       } catch (err) {
         log(`[worker] open-handler error (daemon staying up): ${err instanceof Error ? err.message : String(err)}`);
@@ -536,12 +569,14 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     socket.on("message", (data) => {
       // `data` is ws's RawData: Buffer | ArrayBuffer | Buffer[]. A bare `.toString()` on the
       // array case yields comma-joined garbage rather than the frame (no-base-to-string).
-      const message = parseBoardToWorkerMessage(rawDataToBuffer(data).toString("utf8"));
+      const rawFrame = rawDataToBuffer(data).toString("utf8");
+      if (!acceptFrame(rawFrame)) return; // #1756: authenticate BEFORE parsing/dispatching
+      const message = parseBoardToWorkerMessage(rawFrame);
       if (!message) {
         log(`[worker] dropping malformed board message`);
         return;
       }
-      if (toolchains.handle(message) || oneShots.handle(message) || verifyJobs.handle(message) || services.handle(message)) return; // #1431, #1437, #1447
+      if (tokenRotator.handle(message) || toolchains.handle(message) || oneShots.handle(message) || verifyJobs.handle(message) || services.handle(message)) return; // #1431, #1437, #1447
       try {
         dispatchBoardMessage(message, runner, sendToBoard, draining);
       } catch (err) {
@@ -609,6 +644,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       // like. Without the code both render identically and a self-sustaining
       // reconnect/evict loop is indistinguishable from a flaky link.
       const detail = reason.length > 0 ? `: ${reason.toString("utf8").trim()}` : "";
+      const duplicate = duplicateIdentityGiveUp(code, identity.workerId, detail); if (duplicate) return giveUp(duplicate); // #1754
       const kind = code === 1006 ? "transport failed, no close frame" : "closed by board";
       scheduleReconnect(`code ${code}${detail} - ${kind}`, code === 1001);
     });
@@ -643,6 +679,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   const settingsControls = {
     setMaxConcurrency: (n: number) => { opts.maxConcurrency = n; runner.setMaxConcurrency(n); },
     setLabels: (labels: string[]) => { opts.labels = labels; },
+    setProfiles: (profiles: string[]) => { const swapped = swapAttestedProfiles(opts, profileAliases, log, profiles.length > 0 ? profiles : undefined, "live"); if (swapped) { profileAttestor = swapped; void sendHeartbeat(); } }, // #1773: swap in place; the heartbeat sent now re-attests on the live socket, running sessions untouched
     setDrain: (on: boolean) => { if (on === draining) return; draining = on; if (!on) announceOnline = true; void sendHeartbeat(); },
   };
   selfUpdate?.begin();
@@ -686,8 +723,10 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     } catch (err) {
       log(`[worker] profile quota refresh failed (continuing): ${errorMessage(err)}`);
     }
+    // #1773: `worker config set|unset profiles` edits the state file; pick it up here (no restart, no reconnect).
+    profileAttestor = adoptPersistedProfiles(opts, profileAliases, log, stateFile, settings.desired()?.profiles) ?? profileAttestor;
     // #1370: re-run the doctor in the background every few minutes; it never delays a beat.
-    doctor.refreshIfDue();
+    doctor.refreshIfDue(); tokenRotator.maybeRotate(); // #1766: no-op unless the token is near expiry
     const doctorToSend = doctor.pending();
     let res: Response;
     try {

@@ -4091,6 +4091,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/plugins/{id}/sync/trigger:
     post:
       summary: POST /api/plugins/{id}/sync/trigger
@@ -9488,11 +9493,6 @@ paths:
         - workers
       operationId: get_api_workers_build
       parameters:
-        - name: token
-          in: query
-          required: false
-          schema:
-            type: string
         - name: wait
           in: query
           required: false
@@ -9526,11 +9526,6 @@ paths:
         - workers
       operationId: get_api_workers_build_tarball
       parameters:
-        - name: token
-          in: query
-          required: false
-          schema:
-            type: string
         - name: wait
           in: query
           required: false

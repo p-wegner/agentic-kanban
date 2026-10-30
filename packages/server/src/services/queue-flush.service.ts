@@ -25,6 +25,7 @@ import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { getWorkspaceById } from "../repositories/workspace-reads.repository.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import { getLatestBaseBranchHealth, getLastGreenBaseBranchHealth, decodeFailedSuites, isBaseHealthAnswer } from "../repositories/base-branch-health.repository.js";
+import { listActiveMergeTrainsForProject } from "../repositories/merge-train.repository.js";
 import { requireProject } from "./require-project.js";
 import { resolveRiskPosture } from "./risk-posture.service.js";
 import { currentRcCandidate, readRcState, resolveStableCheckoutFor } from "./rc-state.js";
@@ -39,13 +40,14 @@ import {
   queueFlushThresholdsPrefKey, supersedesInFlight, type QueueFlushMode,
 } from "./queue-flush-trigger.service.js";
 import { formatFlushMessage } from "./merge-train-flush.js";
-import { DEFAULT_FLUSH_GATE_SCRIPT, type FlushLanding, type FlushRunSpec } from "./merge-train-flush-run.js";
+import { resolveFlushGate, type FlushLanding, type FlushRunSpec } from "./merge-train-flush-run.js";
 import { getQueuePressure, readQueuePressureMembers } from "./queue-pressure.service.js";
 import { listOpenHealTickets, reconcileBaseHealthHealTicket } from "./base-health-heal-ticket.service.js";
 import { requestBaseBranchReprobe } from "./base-branch-health-reprobe.service.js";
 import * as gitService from "./git.service.js";
 import type { MergeQueueEvent } from "./merge-queue.service.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const queueFlushGatePref = projectPref("queue_flush_gate");
@@ -58,6 +60,8 @@ export interface QueueFlushDeps {
   requestSweep?: (projectId: string, database: Database, opts?: { branch?: string | null }) => Promise<unknown>;
   /** Where a flush's lifecycle file lives; defaults to the project's stable checkout. */
   stableCheckoutFor?: (repoPath: string) => string;
+  /** Test seam: a trusted script that runs INSTEAD of the resolved gate (bypasses the allowlist; never set in production). */
+  gateScriptOverride?: string;
 }
 
 export interface FlushPlan {
@@ -69,6 +73,8 @@ export interface FlushPlan {
   /** `previous flush is red, will be abandoned and its heal tickets carried over`. */
   supersedes: FlushRecord | null;
   dryRunText: string;
+  /** The non-default gate script that will run (#1742); null = arch + typecheck. */
+  gateScript: string | null;
 }
 
 export interface FlushOutcome {
@@ -96,7 +102,8 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
   const requestSweep = deps.requestSweep
     ?? ((projectId: string, db: Database, opts?: { branch?: string | null }) =>
       requestBaseBranchReprobe(projectId, db, undefined, Date.now(), { ignoreRecency: true, branch: opts?.branch ?? null }));
-  const running = new Set<string>();
+  /** projectId -> repoPath of every flush running in this process. */
+  const running = new Map<string, string>();
 
   async function plan(projectId: string, now: string): Promise<{ plan: FlushPlan; repoPath: string; prefMap: Map<string, string> }> {
     const project = await requireProject(projectId, database);
@@ -107,12 +114,17 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
     const stable = stableOf(project.repoPath);
     const flushes = sortFlushes(readFlushState(stable).flushes);
     const rcSweeping = currentRcCandidate(readRcState(stable))?.state === "sweeping";
+    const gate = resolveFlushGate(prefMap.get(queueFlushGatePref.key(projectId)));
+    if (gate.warning) console.warn(`[queue-flush] ${gate.warning}`);
     const members = (await readQueuePressureMembers(projectId, database)).map((m) => ({ workspaceId: m.workspaceId, issueNumber: m.issueNumber }));
 
+    const liveTrains = await listActiveMergeTrainsForProject(projectId, ["assembling", "gating"], database).catch(() => []);
     let refusal = checkQueueFlushRails({
       mode, posture: posture.level, flushTimestamps: flushes.map((f) => f.at),
       dailyCap: parseQueueFlushDailyCap(prefMap.get(queueFlushDailyCapPrefKey(projectId))), now,
       promotionSweeping: rcSweeping,
+      liveTrainLabel: liveTrains[0]?.label ?? null,
+      otherFlushOnSameRepo: [...running].some(([pid, rp]) => pid !== projectId && rp === project.repoPath),
     })?.reason ?? null;
     if (!refusal && running.has(projectId)) refusal = "a flush is already running for this project";
     if (!refusal && members.length === 0) refusal = "nothing is ready for merge — the queue is empty";
@@ -124,9 +136,9 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
     const dryRunText = formatQueueFlushDryRun({
       refusal: refusal ? { reason: refusal } : null,
       memberBranches: members.map((m) => (m.issueNumber != null ? `#${m.issueNumber}` : m.workspaceId)),
-      healTarget,
+      healTarget, gateScript: gate.override,
     }) + (supersedes && !refusal ? ` (supersedes red flush ${supersedes.id})` : "");
-    return { plan: { projectId, mode, healTarget, refusal, members, supersedes, dryRunText }, repoPath: project.repoPath, prefMap };
+    return { plan: { projectId, mode, healTarget, refusal, members, supersedes, dryRunText, gateScript: gate.override }, repoPath: project.repoPath, prefMap };
   }
 
   async function runFlush(
@@ -141,21 +153,24 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
 
     // Re-checked with no await between the check and the add, so two racing starts cannot both pass.
     if (running.has(projectId)) return { ok: false, refused: "a flush is already running for this project", plan: p, ...empty };
-    running.add(projectId);
+    running.set(projectId, repoPath);
     const stable = stableOf(repoPath);
     let flush: FlushRecord | undefined;
     const spec: FlushRunSpec = {
-      gateScript: prefMap.get(queueFlushGatePref.key(projectId))?.trim() || DEFAULT_FLUSH_GATE_SCRIPT,
+      gateScript: deps.gateScriptOverride ?? resolveFlushGate(prefMap.get(queueFlushGatePref.key(projectId))).script,
       now,
       onFinished: async (landing) => {
-        flush = await recordLanding({ projectId, stable, landing, healTarget: p.healTarget, triggeredBy: opts.triggeredBy, now, supersedes: p.supersedes });
+        flush = await recordLanding({ projectId, stable, landing, healTarget: p.healTarget, triggeredBy: opts.triggeredBy, now, supersedes: p.supersedes, gateScript: p.gateScript });
       },
     };
     const outcome: FlushOutcome = { ok: false, plan: p, ...empty };
+    const skipReasons: string[] = [];
     try {
       for await (const ev of executeQueue(p.members.map((m) => m.workspaceId), { flush: spec })) {
         if (ev.type === "done") {
           outcome.merged = ev.merged; outcome.failed = ev.failed; outcome.skipped = ev.skipped;
+        } else if (ev.type === "skipped") {
+          if (!skipReasons.includes(ev.reason)) skipReasons.push(ev.reason);
         } else if (ev.type === "error" && !outcome.message) {
           outcome.message = ev.error;
         }
@@ -166,18 +181,20 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
     outcome.flush = flush;
     outcome.ok = outcome.merged.length > 0 && Boolean(flush);
     if (flush) {
-      outcome.message = formatFlushMessage({ landedCount: outcome.merged.length, healTarget: p.healTarget });
+      outcome.message = formatFlushMessage({ landedCount: outcome.merged.length, healTarget: p.healTarget, gateScript: p.gateScript });
       // Start the sweep right away; failures here are the next tick's job, never the flush's.
       await reconcileHeal(projectId, { now }).catch((err) => console.warn(`[queue-flush] first heal pass failed (non-fatal): ${errorMessage(err)}`));
     } else if (!outcome.message) {
-      outcome.message = "the flush train landed nothing (gate red, or every member was sided)";
+      outcome.message = skipReasons.length > 0
+        ? `the flush train landed nothing: ${skipReasons.slice(0, 3).join("; ")}`
+        : "the flush train landed nothing (gate red, or every member was sided)";
     }
     return outcome;
   }
 
   async function recordLanding(args: {
     projectId: string; stable: string; landing: FlushLanding; healTarget: HealTarget;
-    triggeredBy: "manual" | "cli" | "auto"; now: string; supersedes: FlushRecord | null;
+    triggeredBy: "manual" | "cli" | "auto"; now: string; supersedes: FlushRecord | null; gateScript?: string | null;
   }): Promise<FlushRecord | undefined> {
     const { landing, healTarget, now } = args;
     const { run, tag } = landing;
@@ -195,10 +212,11 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
       landingSha: run.mergeSha ?? null, tag,
       sweepTarget: healTarget === "rc" ? "rc" : "master",
       state: "flushed", openHealTickets: carriedTickets, updatedAt: now,
+      ...(args.gateScript ? { gateScript: args.gateScript } : {}),
     };
     appendFlushRecord(args.stable, record);
     const body = `Landed in queue flush ${tag} (${run.landed.length} branch(es), landing ${run.mergeSha?.slice(0, 8)}): `
-      + `gate = arch + typecheck only; the full suite is deferred to the ${healTarget} sweep — a red will be filed as a heal ticket.`;
+      + `gate = ${args.gateScript ?? "arch + typecheck"} only; the full suite is deferred to the ${healTarget} sweep — a red will be filed as a heal ticket.`;
     for (const m of run.landed) {
       const ws = await getWorkspaceById(m.workspaceId, database).catch(() => undefined);
       if (!ws) continue;
@@ -216,6 +234,10 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
     const project = await requireProject(projectId, database);
     const stable = stableOf(project.repoPath);
     const moved: FlushRecord[] = [];
+    // #1743: a landing whose record write never happened (crash / reload between tag and record) is rebuilt from git.
+    if (!running.has(projectId)) {
+      await reconstructMissingRecords(projectId, project.repoPath, stable).catch((err) => console.warn(`[queue-flush] flush record reconstruction failed (non-fatal): ${errorMessage(err)}`));
+    }
     for (const rec of readFlushState(stable).flushes) {
       if (isTerminalFlushState(rec.state)) continue;
       try {
@@ -226,6 +248,34 @@ export function createQueueFlushService(deps: QueueFlushDeps) {
       }
     }
     return moved;
+  }
+
+  /**
+   * #1743 — every `flush/*` tag on the project's repo with no record in flush-state.json gets one
+   * (`flushed`, landing sha = tag target, members from the merge commit subject's `#N` list), so
+   * the heal machine, the daily cap and the member trail see a landing the process died before recording.
+   */
+  async function reconstructMissingRecords(projectId: string, repoPath: string, stable: string): Promise<FlushRecord[]> {
+    const known = new Set(readFlushState(stable).flushes.map((f) => f.id));
+    const tags = (await gitExecOrThrow(["tag", "--list", "flush/*"], { cwd: repoPath })).split(/\r?\n/).map((t) => t.trim()).filter(Boolean);
+    const missing = tags.filter((t) => !known.has(t));
+    if (missing.length === 0) return [];
+    const healTarget = resolveHealTarget(toPrefMap(await getAllPreferences(database)), projectId);
+    const rebuilt: FlushRecord[] = [];
+    for (const tag of missing) {
+      const [sha = "", at = "", subject = ""] = (await gitExecOrThrow(["log", "-1", "--format=%H%x09%cI%x09%s", `${tag}^{commit}`], { cwd: repoPath })).trim().split("\t");
+      if (!sha) continue;
+      const memberIssueNumbers = [...subject.matchAll(/#(\d+)/g)].map((m) => Number(m[1]));
+      const record: FlushRecord = {
+        id: tag, at: new Date(at).toISOString(), triggeredBy: "auto", memberIssueNumbers, memberBranches: [],
+        landingSha: sha, tag, sweepTarget: healTarget === "rc" ? "rc" : "master",
+        state: "flushed", openHealTickets: [], updatedAt: new Date().toISOString(),
+      };
+      appendFlushRecord(stable, record);
+      rebuilt.push(record);
+      console.warn(`[queue-flush] reconstructed missing flush record for ${tag} (landing ${sha.slice(0, 8)}, members ${memberIssueNumbers.map((n) => `#${n}`).join(" ") || "unknown"}) — the process died between the tag and the record`);
+    }
+    return rebuilt;
   }
 
   async function advance(projectId: string, repoPath: string, stable: string, rec: FlushRecord, now: string): Promise<FlushRecord | null> {

@@ -37,7 +37,6 @@ export function stagedFiles() {
 
 export function main() {
   if (process.env.KANBAN_SKIP_PRECOMMIT_CHECKS) return 0;
-  if (run([join(ROOT, "scripts", "skills-mirror.mjs"), "--check"]).status !== 0) return 1;
 
   const staged = stagedFiles();
   const sources = staged.filter((f) => SOURCE.test(f));

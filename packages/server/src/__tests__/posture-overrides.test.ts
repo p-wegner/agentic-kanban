@@ -29,3 +29,32 @@ describe("detectPostureOverrides (#1560)", () => {
     ).toEqual([]);
   });
 });
+
+describe("detectPostureOverrides — consumer prefs (#1747)", () => {
+  it("reports guards_at_merge=intersecting on strict", () => {
+    const found = detectPostureOverrides(prefs({ [`risk_posture_${P}`]: "strict", [`guards_at_merge_${P}`]: "intersecting" }), P);
+    expect(found).toEqual([
+      { key: `guards_at_merge_${P}`, label: "guards at merge", value: "intersecting", postureValue: "all" },
+    ]);
+  });
+
+  it("reports review_mode, train red strategy, flush gate and red base policy", () => {
+    const found = detectPostureOverrides(
+      prefs({
+        [`risk_posture_${P}`]: "strict",
+        [`review_mode_${P}`]: "per-train",
+        [`merge_train_red_strategy_${P}`]: "agent-fix",
+        [`queue_flush_gate_${P}`]: "pnpm typecheck",
+        [`red_base_policy_${P}`]: "report",
+      }),
+      P,
+    );
+    expect(found.map((o) => o.label).sort()).toEqual(["flush gate", "red base policy", "review mode", "train red strategy"]);
+    expect(found.find((o) => o.label === "red base policy")).toMatchObject({ value: "report", postureValue: "block" });
+  });
+
+  it("reports nothing when the prefs equal what the posture implies", () => {
+    expect(detectPostureOverrides(prefs({ [`risk_posture_${P}`]: "iterate", [`guards_at_merge_${P}`]: "intersecting" }), P)).toEqual([]);
+    expect(detectPostureOverrides(prefs({ [`risk_posture_${P}`]: "fast", [`review_mode_${P}`]: "per-train" }), P)).toEqual([]);
+  });
+});

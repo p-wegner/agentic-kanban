@@ -189,6 +189,19 @@ export const reposTouchedBody = z.object({
   reposTouched: arrayOnly<string>("reposTouched (array) is required"),
 }).passthrough();
 
+/**
+ * The `risk:` tag guard's PEEK at a `POST /api/issues`, `/batch` or `/:id/tags` body (#1745,
+ * `issue-risk-tag-guard.ts`). It runs as middleware BEFORE the handler, which then parses the
+ * same body against its own schema (`createIssueBody`, `batchIssuesBody`, `issueTagBody`) and
+ * owns every field message. So this schema checks nothing but "valid JSON" — the only answer
+ * the guard may give early is the `invalid JSON body` 400 those handlers give anyway — and a
+ * non-object body passes through to be refused with the handler's own text. Rule 3: a shape
+ * check here would refuse, with a different message, what the handler refuses today.
+ */
+export const riskTagGuardPeekBody = z.custom<
+  { tagId?: unknown; tags?: unknown; projectId?: unknown; issues?: unknown } | null
+>(() => true);
+
 /** `POST /api/issues/:id/tags`. */
 export const issueTagBody = z.object({
   tagId: requiredRaw("tagId is required"),

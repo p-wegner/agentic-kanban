@@ -15,32 +15,42 @@ butler-fragment.md       what the assistant should (and must not) do with this p
 tools/
   bootstrap.mjs           script: validate credentials + connectivity, read-only
   plan.mjs                script: dry-run of a Jira-side-only pull diff, prints JSON
-  loop-plan.mjs           loops.sync-conflicts' plan command (#1080) — see below
+  loop-plan.mjs           loops.sync-conflicts' plan command (#1080) - see below
   selftest.mjs            script (developer): exercises the client offline against fixtures
   sync/pull.mjs           sync.pull: map Jira issues through the field map and write board issues
-  sync/push.mjs           sync.push: apply a local outbox of transitions/comments
+  sync/push.mjs           sync.push: queue board-side changes into the outbox and apply it
+  sync/resolve.mjs        sync.resolve: settle one conflict / failed push (`--keep jira|board`)
   lib/
-    jira-client.mjs        the zero-dependency Jira REST client (search, get, transition, comment, create)
+    jira-client.mjs        the zero-dependency Jira Cloud REST client (search, get, transition, comment, create)
     auth.mjs                Jira credential resolution (env) + auth header construction
     errors.mjs              HTTP/network failures normalized to one JiraApiError shape
     fixtures.mjs            fixture-backed Jira fetch for offline testing
+    cli-client.mjs          shared CLI bootstrap: credentials, client, dry-run flag, rate-limit result
     field-map.mjs           the declared Jira -> board field map (#1078) + status/priority mapping
+    field-snapshot.mjs      last-synced field snapshot behind field-level conflict detection (#1635)
+    sync-direction.mjs      syncDirection / fieldDirections resolution (#1672)
+    adf.mjs                 Markdown <-> Atlassian Document Format
+    jira-context.mjs        read-only Jira context on pull: sprint/version tags, custom fields (#1701)
+    link-sync.mjs           issue-link sync
     board-client.mjs        thin REST client for the BOARD's own API (create/update issues, tags)
     board-fixtures.mjs      in-memory fake of the board API, for `--self-test` pull runs
     sync-engine.mjs         the pull itself: fetch, map, create/update by externalKey, report conflicts
     pull-plan.mjs           the Jira-side-only diff behind plan.mjs (no board involved), shared with pull.mjs
     push-plan.mjs           the deterministic push apply/describe logic, shared by push.mjs
-    transitions.mjs         resolves a target status name to a Jira transition id via the graph
+    outbox-producer.mjs     turns board-side changes (status, comments, field edits, creates) into outbox entries (#1623, #1672)
+    transitions.mjs         resolves a target status name to a Jira transition id from the issue's LIVE transitions
+    writebacks.mjs          board-issue -> new Jira key writebacks for pushed creates
+    state-sync.mjs          reconciles pull state with the board
+    resolve.mjs             logic behind sync/resolve.mjs
     comment-marker.mjs      attribution marker so a pushed comment isn't re-imported as new
     state.mjs               JSON state file helpers (pull state, outbox, writebacks, cursor, registers)
     conflict-register.mjs  pure round-tracking shared by the conflict/failure registers (#1080)
     loop-plan.mjs           pure plan-building logic behind tools/loop-plan.mjs (#1080)
-    profile.mjs             the same TODO-marker gate the board's scaffold uses
+    profile.mjs             the profile gate (TODO markers; complete settings override it)
   fixtures/                 recorded JSON Jira responses used offline
-__tests__/                  unit tests (node:test) — auth, pagination, backoff, error normalization,
-                             field mapping, sync engine (create/idempotent/update/conflict),
-                             transition resolution, comment marker, push plan, writebacks,
-                             conflict/failure register round-tracking, loop plan
+__tests__/                  unit tests (node:test), one file per lib module plus round-trip,
+                             pagination, backoff, state-dir and auth-guard; run with
+                             `node --test plugins/jira-sync/__tests__/*.test.mjs`
 ```
 
 ## Credentials
@@ -52,8 +62,10 @@ encrypted in `kanban.db` and injects them, plus the config as `SYNC_CONFIG_*`, i
 win over the injected values):
 
 - `JIRA_SITE_URL`, `JIRA_PROJECT_KEY`, `JIRA_JQL` (optional — defaults to the whole project)
-- `JIRA_EMAIL` + `JIRA_API_TOKEN` for Jira Cloud (basic auth), or just `JIRA_API_TOKEN` for a
-  Jira Server/Data Center Personal Access Token (sent as a bearer token)
+- `JIRA_EMAIL` + `JIRA_API_TOKEN` for Jira Cloud (basic auth). **Jira Cloud only:** Jira
+  Server/Data Center is not supported. The client's `deployment: "server"` switch only reroutes
+  search; every other call is hard-coded to `/rest/api/3/...` and nothing sets the switch, so a
+  Server PAT would fail `bootstrap` with a misleading auth error.
 - `JIRA_SYNC_BOARD_URL` + `JIRA_SYNC_BOARD_PROJECT_ID` for `sync/pull.mjs` — where and which
   board project to write issues into. The manifest's `sync.pull.env` already fills these from
   `{{boardUrl}}`/`{{projectId}}` whenever the board invokes `sync.pull` (the panel's Pull now and
@@ -191,6 +203,7 @@ node tools/sync/push.mjs --dry-run     # what the outbox would send
 node tools/selftest.mjs --self-test
 JIRA_SYNC_SELF_TEST=1 node tools/bootstrap.mjs
 node --test __tests__/*.test.mjs   # the bare directory form fails on Node 24
+# the merge gate runs the same command: packages/server/src/__tests__/plugin-jira-sync-node-tests.test.ts (@gate:always-run)
 ```
 
 Every command prints one JSON object to stdout and exits non-zero on failure — safe to run from
@@ -219,8 +232,10 @@ the board's `scripts`/`sync` machinery or straight from a shell.
 - **Conflicts are field-level (#1635).** A moved board `updatedAt` is only a conflict when the
   mapped fields (title, description, priority, type, status) differ from the last-synced snapshot
   AND from what Jira now says. Equal to Jira = resolved and re-baselined; unchanged vs the snapshot
-  = a plain update. **Board field edits are not pushed to Jira** (push sends status transitions,
-  comments and creates only), so a board-side edit stays local until Jira is changed to match.
+  = a plain update. **Board field edits are pushed per `syncDirection` / `fieldDirections`** (#1672:
+  title, description, priority, type, labels, assignee, queued by `outbox-producer.mjs`, applied by
+  `push-plan.mjs`). A field whose direction is `jira-to-board` (the default when `syncDirection` is
+  empty) is never pushed, so a board-side edit to it stays local until Jira is changed to match.
 - **Run summary contract.** The board normalizes pull output (`created/updated/skipped/conflicted`,
   `details`) and push output (`appliedCount/failedCount`, `applied/failed`) into counts, issues,
   conflicts and failures, and a failed run records the script's `step`/`reason` plus the stderr

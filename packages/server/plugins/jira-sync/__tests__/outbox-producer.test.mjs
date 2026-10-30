@@ -24,7 +24,7 @@ test("a status change on a synced issue produces exactly one transition entry", 
   const moved = [issue({ statusId: "s-prog" })];
   const second = plan({ issues: moved, snapshot: first.nextSnapshot });
   assert.equal(second.entries.length, 1);
-  assert.deepEqual(second.entries[0], { kind: "transition", key: "KD-1", targetStatus: "In Progress", boardIssueId: "i1" });
+  assert.deepEqual(second.entries[0], { kind: "transition", key: "KD-1", targetStatus: "In Progress", fromStatus: "Todo", boardIssueId: "i1" });
   // unchanged on the next diff, and an already-queued entry is not duplicated
   assert.equal(plan({ issues: moved, snapshot: second.nextSnapshot }).entries.length, 0);
   assert.equal(plan({ issues: moved, snapshot: first.nextSnapshot, outboxEntries: second.entries }).entries.length, 0);
@@ -91,4 +91,16 @@ test("a Done loop ticket (plugin-loop: key) queues no outbox entry (#1718)", () 
   const first = plan({ issues: [loop] });
   const done = plan({ issues: [{ ...loop, statusId: "s-prog" }], snapshot: first.nextSnapshot });
   assert.deepEqual(done.entries, []);
+});
+
+test("a new status move supersedes a queued transition for another target (#1733)", () => {
+  const first = plan({ issues: [issue()] });
+  const prog = plan({ issues: [issue({ statusId: "s-prog" })], snapshot: first.nextSnapshot });
+  const queuedEntry = { kind: "transition", key: "KD-1", targetStatus: "Elsewhere", boardIssueId: "i1" };
+  const moved = plan({ issues: [issue({ statusId: "s-prog" })], snapshot: first.nextSnapshot, outboxEntries: [queuedEntry] });
+  assert.deepEqual(moved.supersedeTransitionKeys, ["KD-1"]);
+  assert.equal(moved.entries.length, 1);
+  // an identical queued target is kept, not replaced
+  const same = plan({ issues: [issue({ statusId: "s-prog" })], snapshot: first.nextSnapshot, outboxEntries: prog.entries });
+  assert.deepEqual(same.supersedeTransitionKeys, []);
 });

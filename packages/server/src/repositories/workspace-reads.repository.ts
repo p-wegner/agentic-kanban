@@ -292,7 +292,10 @@ export async function findOpenUnmergedWorkspace(
 export async function findLiveWorkspacesOnBranch(
   branch: string,
   database: Database = db,
+  projectId?: string,
 ) {
+  // Branch names are not unique across projects; a caller that knows its project passes it so
+  // another project's workspace on the same branch name can never be chosen (#1749).
   return database
     .select({
       id: workspaces.id,
@@ -301,9 +304,11 @@ export async function findLiveWorkspacesOnBranch(
       issueId: workspaces.issueId,
     })
     .from(workspaces)
+    .innerJoin(issues, eq(issues.id, workspaces.issueId))
     .where(and(
       eq(workspaces.branch, branch),
       ne(workspaces.status, "closed"),
+      projectId ? eq(issues.projectId, projectId) : undefined,
     ))
     .limit(3);
 }

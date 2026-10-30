@@ -30,6 +30,16 @@ export async function updateWorkerHeartbeat(
     .where(eq(workers.id, id));
 }
 
+/** #1766: swap in a rotated token, keeping the replaced digest for its grace window. */
+export async function updateWorkerToken(
+  id: string,
+  patch: { tokenHash: string; tokenExpiresAt: string; prevTokenHash: string | null; prevTokenValidUntil: string | null },
+  at: string,
+  database: Database = db,
+): Promise<void> {
+  await database.update(workers).set({ ...patch, updatedAt: at }).where(eq(workers.id, id));
+}
+
 export async function updateWorkerStatus(
   id: string,
   status: string,
@@ -152,6 +162,29 @@ export async function listWorkerBranchAssignments(
   return rows
     .map((r) => ({ ...r, workerId: r.workerId! }))
     .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
+}
+
+/** One fleet dispatch by session id, with the project and branch it was for (#1750). */
+export async function findWorkerSessionDispatch(
+  sessionId: string,
+  database: Database = db,
+): Promise<(WorkerBranchAssignment & { projectId: string }) | null> {
+  const [row] = await database
+    .select({
+      sessionId: sessions.id,
+      workerId: sessions.workerId,
+      branch: workspaces.branch,
+      projectId: issues.projectId,
+      status: sessions.status,
+      startedAt: sessions.startedAt,
+      endedAt: sessions.endedAt,
+    })
+    .from(sessions)
+    .innerJoin(workspaces, eq(workspaces.id, sessions.workspaceId))
+    .innerJoin(issues, eq(issues.id, workspaces.issueId))
+    .where(and(eq(sessions.id, sessionId), isNotNull(sessions.workerId)))
+    .limit(1);
+  return row ? { ...row, workerId: row.workerId! } : null;
 }
 
 /**

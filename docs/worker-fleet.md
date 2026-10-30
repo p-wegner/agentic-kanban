@@ -190,6 +190,14 @@ worker was started with a flag for (`--labels`, `--max-concurrency`, `--provider
 projects are enforced by the board in placement (`fleetForProject`; `worker explain` names the
 bar). Each change is a `settings_changed` row in the worker's event timeline.
 
+**Attested profiles change live (#1773).** `profiles` (the board's setting, or `worker config set
+profiles a,b` on the machine) is applied by the running daemon without a restart or reconnect: it
+rebuilds its attestation and sends a heartbeat at once, so the board sees the new set within one beat.
+Sessions already running on a removed profile finish; no new placement goes to it. `config set` persists
+in the state file, and `start` (so also `restart --drain` and a reboot) applies persisted config over the
+original start flags. `config unset profiles` returns to the board's set, else every discovered login.
+`worker doctor` warns when the logon task's `--profiles` differs from what the daemon attests.
+
 ## 5. Opting a project in, and strict dispatch
 
 > **There is a UI for this now (#774).** Command palette → **Worker Fleet** → *Remote
@@ -410,7 +418,7 @@ worker. Before binding a LAN address on a Windows board machine:
    `192.168.0.0/24`) and to the **Private profile only** — not `Any`/`Domain,Public`.
 3. Keep the tailnet rules from `scripts/fleet-firewall.ps1` as they are; do not widen them to cover the LAN.
 
-TLS or a frame MAC on these listeners (so the LAN path stops being a plaintext RCE channel) is out of
+TLS on these listeners is out of
 scope here and still open.
 
 ### Threat model: everything here is plaintext
@@ -423,7 +431,7 @@ because "keep it on a trusted network" is too vague to act on:
 | The per-worker bearer token (every heartbeat, and the WS upgrade) | Impersonate that worker: take its assignments, stream fabricated output into its sessions | — |
 | The per-assignment git token (in the `assign` frame, then `Authorization: Basic` on every git request) | Clone that one project, for as long as that assignment is current | Push a chosen tree to that branch's incoming ref |
 | Repo contents, both directions | Source disclosure | — |
-| The board-authored `setupScript` inside the `assign` frame | — | **Arbitrary code execution on the worker machine**, as the worker's user |
+| The board-authored `setupScript` inside the `assign` frame | — | ~~Arbitrary code execution~~ — **blocked for an off-path injector by frame signing (#1756)**; still open for anyone who captured the WS upgrade's bearer token (see below) |
 
 The last row decides the posture: this is not merely a confidentiality-sensitive transport,
 it is an **RCE channel into every worker** for anyone who can inject frames. So:
@@ -437,7 +445,18 @@ it is an **RCE channel into every worker** for anyone who can inject frames. So:
 - **Do not put a TLS-terminating proxy in front of the git transport.** The worker rebuilds
   the URL itself and drops any path prefix (section 8), so such a proxy is bypassed rather
   than enforced.
-- TLS on either listener is **not implemented**. Until it is, the network *is* the control.
+- **Frame authentication (#1756, protocol 3).** Every board->worker frame carries `frameAuth: { seq, mac }`:
+  HMAC-SHA256 over the frame, keyed from the worker's bearer token (the board derives the same key
+  from the stored token digest; `worker/worker-assign-auth.ts`). `seq` is strictly increasing per worker
+  and doubles as a timestamp. The daemon verifies before parsing and drops frames that are bad-MAC,
+  replayed (`seq` not above the last accepted) or older than 15 minutes. Once it has seen one signed
+  frame, or when started with `requireSignedFrames` / `KANBAN_WORKER_REQUIRE_SIGNED_FRAMES=1`, it also refuses **unsigned** frames, so an
+  injected `assign`/`stop`/`verify_job` no longer runs. Until the first signed frame an unsigned
+  frame is accepted, so an old (unsigning) board keeps working; set `KANBAN_WORKER_REQUIRE_SIGNED_FRAMES=1` to close
+  that window. **Limit:** the bearer token itself still travels in the clear in the upgrade header, so
+  an on-path attacker who *captured that handshake* can derive the key. Signing stops blind
+  injection and replay, not a passive sniffer; confidentiality and that case still need the tailnet.
+- TLS on either listener is **not implemented** (the alternative control in #1756 was not chosen).
 
 The scoping in #247 / #246 / #753 bounds what a stolen *git* token is worth — one worker, one
 project, one ref, and only while its dispatch is current. It does not make the channel
@@ -1152,3 +1171,15 @@ Not a bug, not fixable by more plumbing — write it down so it is not re-opened
   `startup/worker-incoming-sweep.ts`
 - Worker-side modules: `worker/worker-{cli,daemon,agent-runner,repo,command-resolver}.ts`
 - Wire protocol (both sides): `packages/shared/src/lib/worker-protocol.ts`
+
+## Windows tray: attested profiles and the "tray not running" warning (#1774)
+
+The systray (`tools/worker-windows/ak-worker-tray.ps1`) has an **Attested profiles** submenu: the profiles
+the running daemon reports on its loopback control endpoint, checked when attested. Clicking one toggles it.
+The new set is written to `config.json` (`profiles`, which `ak-worker-run.ps1` passes as `--profiles`), then
+applied live with `agentic-kanban-worker config set profiles <csv>` (#1773; the daemon re-reads it each beat). A daemon
+that is not reachable, or a missing CLI, gets a service restart instead, so the toggle always takes effect and always persists. The list is the
+attested set plus the configured one; a never-attested profile appears only once it is in `config.json`.
+
+`worker doctor` has a `systray` check (Windows only, `warn` when no `ak-worker-tray.ps1` process runs), and
+`worker setup` prints the same warning and offers to start the tray (`--yes` accepts).

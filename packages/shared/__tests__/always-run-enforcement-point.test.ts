@@ -1,5 +1,5 @@
-// @gate:always-run when:package.json,scripts/gate-always-run.mjs,scripts/test-mine.mjs,.claude/skills/direct-master/**,.codex/skills/direct-master/** — reads `package.json`, `scripts/gate-always-run.mjs` and the two
-// `direct-master` SKILL.md copies; it imports none of them, so `vitest related` is blind to it.
+// @gate:always-run when:package.json,scripts/gate-always-run.mjs,scripts/test-mine.mjs,.claude/skills/direct-master/** — reads `package.json`, `scripts/gate-always-run.mjs` and the
+// `direct-master` SKILL.md; it imports none of them, so `vitest related` is blind to it.
 //
 // #817 — the `@gate:always-run` guard set had NO enforcement point on the direct-master path.
 //
@@ -36,10 +36,9 @@ const REPO_ROOT = resolve(__dirname, "../../..");
 
 const read = (rel: string) => readFileSync(resolve(REPO_ROOT, rel), "utf8");
 
-/** Both copies: `.codex/skills` is a committed mirror of `.claude/skills` (codex-skills-parity). */
+/** The skill copy (`.codex/skills` is a junction onto it, not tracked). */
 const SKILL_COPIES = [
   ".claude/skills/direct-master/SKILL.md",
-  ".codex/skills/direct-master/SKILL.md",
 ];
 
 const SCRIPT_NAME = "gate:always-run";

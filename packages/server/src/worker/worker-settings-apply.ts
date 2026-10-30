@@ -72,6 +72,8 @@ function savePersistedSettings(stateFile: string, boardUrl: string, envelope: Wo
 export interface WorkerSettingsControls {
   setMaxConcurrency(n: number): void;
   setLabels(labels: string[]): void;
+  /** #1773: re-attest a new profile set live (empty = every discovered login). */
+  setProfiles(profiles: string[]): void;
   /** Drain / undrain on the board's behalf. Fire-and-forget: it sends a heartbeat. */
   setDrain(on: boolean): void;
 }
@@ -111,6 +113,7 @@ export function createWorkerSettingsApplier(deps: {
       ...opts,
       ...(!isPinned("maxConcurrency") && s.maxConcurrency !== undefined ? { maxConcurrency: localCeiling(s.maxConcurrency) } : {}),
       ...(!isPinned("labels") && s.labels !== undefined ? { labels: s.labels } : {}),
+      ...(!isPinned("profiles") && s.profiles !== undefined && s.profiles.length > 0 ? { profiles: s.profiles } : {}),
       ...(!isPinned("providers") && s.providers !== undefined && s.providers.length > 0 ? { providers: s.providers } : {}),
     };
   }
@@ -131,6 +134,9 @@ export function createWorkerSettingsApplier(deps: {
         case "labels":
           controls.setLabels(next.labels ?? []);
           break;
+        case "profiles":
+          controls.setProfiles(next.profiles ?? []);
+          break;
         case "drain":
           if (next.drain === true) { drainedByBoard = true; controls.setDrain(true); }
           else if (drainedByBoard) { drainedByBoard = false; controls.setDrain(false); }
@@ -141,7 +147,7 @@ export function createWorkerSettingsApplier(deps: {
         default:
           break;
       }
-      const restart = WORKER_RESTART_SETTING_KEYS.includes(key) ? " (takes effect on the next restart)" : "";
+      const restart = WORKER_RESTART_SETTING_KEYS.includes(key) && key !== "profiles" ? " (takes effect on the next restart)" : "";
       log(`[worker] board changed ${key} -> ${JSON.stringify(next[key] ?? null)}${restart}`);
     }
   }

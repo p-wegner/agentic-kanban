@@ -25,29 +25,21 @@ import {
   cursorPath,
   readBoardSnapshot,
   boardSnapshotPath,
+  checkStateFiles,
   readPullState,
   pullStatePath,
+  migrateLegacyState,
 } from "../lib/state.mjs";
 import { BoardClient, BoardConfigError, resolveBoardConfigFromEnv } from "../lib/board-client.mjs";
 import { createDefaultBoardFixtureFetch } from "../lib/board-fixtures.mjs";
 import { loadBoardState, refreshPullStateAfterPush } from "../lib/state-sync.mjs";
-import { assigneeMapFromEnv } from "../lib/field-map.mjs";
+import { assigneeMapFromEnv, parseStatusMap } from "../lib/field-map.mjs";
 import { resolveSyncDirections } from "../lib/sync-direction.mjs";
-import { planOutbox, isNonJiraKey } from "../lib/outbox-producer.mjs";
+import { planOutbox, isNonJiraKey, statusNameOf } from "../lib/outbox-producer.mjs";
 import { applyWritebacks } from "../lib/writebacks.mjs";
 import { runPush } from "../lib/push-plan.mjs";
 import { updateRegister, pushFailureIdentity } from "../lib/conflict-register.mjs";
 import { JiraAuthError } from "../lib/auth.mjs";
-
-function parseStatusMap(raw) {
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
 
 async function main() {
   const profile = checkProfile(process.env.JIRA_SYNC_PROFILE_PATH);
@@ -63,6 +55,10 @@ async function main() {
 
   const stateDir = process.env.JIRA_SYNC_STATE_DIR;
   if (!stateDir) return { ok: false, step: "config", reason: "JIRA_SYNC_STATE_DIR is not set" };
+  migrateLegacyState(stateDir);
+
+  const stateFailure = checkStateFiles(stateDir);
+  if (stateFailure) return stateFailure;
 
   const authFailure = await checkAuth(ctx.client);
   if (authFailure) return authFailure;
@@ -103,7 +99,10 @@ async function main() {
   let plannedEntries = [];
   let supersede = new Set(); // keys whose queued `fields` entry the freshly planned one replaces (#1672)
   let supersedeAssignee = new Set(); // same for `assignee` entries (#1702)
-  const isSuperseded = (e) => (e.kind === "fields" && supersede.has(e.key)) || (e.kind === "assignee" && supersedeAssignee.has(e.key));
+  let supersedeTransition = new Set(); // same for `transition` entries, any target (#1733)
+  let boardStatusById = null; // board issue id -> current status name; a transition entry for another status is stale
+  const isSuperseded = (e) =>
+    (e.kind === "fields" && supersede.has(e.key)) || (e.kind === "assignee" && supersedeAssignee.has(e.key)) || (e.kind === "transition" && supersedeTransition.has(e.key));
   const issueNumberByKey = new Map(); // Jira key -> board issue number
   const issueNumberById = new Map(); // board issue id -> board issue number
   let pendingWritebacks = readWritebacks(stateDir);
@@ -133,6 +132,8 @@ async function main() {
       plannedEntries = planned.entries;
       supersede = new Set(planned.supersedeKeys);
       supersedeAssignee = new Set(planned.supersedeAssigneeKeys);
+      supersedeTransition = new Set(planned.supersedeTransitionKeys);
+      boardStatusById = new Map(boardState.issues.map((i) => [i.id, statusNameOf(i, boardState.statusNameById)]));
       if (!dryRun) {
         const kept = readOutbox(stateDir).entries.filter((e) => !isSuperseded(e));
         writeJsonFile(outboxPath(stateDir), { entries: [...kept, ...planned.entries] });
@@ -153,8 +154,8 @@ async function main() {
   const entries = dryRun
     ? [...outbox.entries.filter((e) => !isSuperseded(e)), ...plannedEntries]
     : outbox.entries;
-  const pushResult = await runPush(ctx.client, entries, pushOptions);
-  const { remaining, writebacks } = pushResult;
+  const pushResult = await runPush(ctx.client, entries, { ...pushOptions, boardStatusById });
+  const { remaining, writebacks, stale } = pushResult;
   const withNumber = (row) => ({
     ...row,
     localIssueNumber: issueNumberById.get(row.boardIssueId) ?? issueNumberByKey.get(row.key) ?? (row.key == null ? undefined : issueNumberById.get(row.key)),
@@ -163,7 +164,7 @@ async function main() {
   const failed = pushResult.failed.map(withNumber);
 
   if (!dryRun) {
-    writeJsonFile(outboxPath(stateDir), { entries: remaining });
+    // Writebacks first, outbox last: a crash in between re-sends at worst, and never loses a created key (#1732).
     if (writebacks.length > 0) {
       const existing = readWritebacks(stateDir);
       for (const wb of writebacks) existing.keys[wb.boardIssueId] = wb.key;
@@ -175,6 +176,7 @@ async function main() {
         writeJsonFile(writebacksPath(stateDir), { keys: landed.keys });
       }
     }
+    writeJsonFile(outboxPath(stateDir), { entries: remaining });
 
     if (boardClient) {
       try {
@@ -214,6 +216,7 @@ async function main() {
     ...(droppedEntries.length > 0
       ? { droppedNonJira: droppedEntries.map((e) => e.key), droppedNote: `${dryRun ? "would drop" : "dropped"} ${droppedEntries.length} outbox entr${droppedEntries.length === 1 ? "y" : "ies"} for a non-Jira key` }
       : {}),
+    ...(stale.length > 0 ? { stale, staleNote: `${dryRun ? "would drop" : "dropped"} ${stale.length} stale transition entr${stale.length === 1 ? "y" : "ies"}` } : {}),
     appliedCount: applied.length,
     failedCount: failed.length,
     applied,

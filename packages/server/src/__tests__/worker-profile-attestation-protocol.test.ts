@@ -50,7 +50,7 @@ function attest(
 
 describe("protocol version (#1027 bumps, #754 compatibility stands)", () => {
   it("is 2, with the floor left at 1", () => {
-    expect(WORKER_PROTOCOL_VERSION).toBe(2);
+    expect(WORKER_PROTOCOL_VERSION).toBe(3);
     expect(MIN_SUPPORTED_WORKER_PROTOCOL_VERSION).toBe(1);
   });
 
@@ -65,7 +65,7 @@ describe("protocol version (#1027 bumps, #754 compatibility stands)", () => {
   });
 
   it("still refuses a worker NEWER than the board", () => {
-    const verdict = checkProtocolCompatibility(3);
+    const verdict = checkProtocolCompatibility(4);
     expect(verdict.ok).toBe(false);
     if (verdict.ok) throw new Error("unreachable");
     expect(verdict.reason).toMatch(/NEWER than this board/);

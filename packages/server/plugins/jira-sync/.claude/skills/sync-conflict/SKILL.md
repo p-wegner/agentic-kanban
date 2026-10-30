@@ -51,8 +51,8 @@ side should win:
 **"Fix failed push: `<key or board issue id>`"** — a queued outbound change (a transition, a
 comment, or a new-issue create) failed to apply and is sitting in the outbox
 (`${JIRA_SYNC_STATE_DIR}/outbox.json`) — see `plugins/jira-sync/tools/lib/push-plan.mjs`. Common
-causes: the target status has no transition from the issue's current Jira status (extend
-`plugins/jira-sync/tools/lib/transitions.mjs`'s graph), or the Jira issue itself changed
+causes: the target status has no transition from the issue's current Jira status (the graph is read live from
+Jira, so fix the `statusMap` setting or the Jira workflow, not `transitions.mjs`), or the Jira issue itself changed
 underneath the queued entry. Fix the root cause rather than editing the outbox by hand.
 
 ## Closing it out

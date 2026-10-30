@@ -145,6 +145,16 @@ export function getWorkerFleet(database: Database = realDb): WorkerFleet {
         summary: "worker opened a board WebSocket",
       });
     });
+    // #1754: a second daemon process sharing this pairing was refused; leave a durable trace for the Runners panel.
+    connections.onDuplicateIdentity((workerId, info) => {
+      void recordWorkerEvent({
+        database,
+        workerId,
+        type: "duplicate_identity",
+        summary: "a second daemon process using this worker's credentials was refused (told to stop)",
+        payload: { heldInstanceId: info.heldInstanceId ?? null, newInstanceId: info.newInstanceId ?? null },
+      });
+    });
     connections.onDisconnect((workerId) => {
       void recordWorkerEvent({
         database,

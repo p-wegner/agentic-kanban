@@ -51,7 +51,8 @@ describe("pairing token on the build routes (#1358)", () => {
     for (const path of ["/api/workers/build", "/api/workers/build/tarball"]) {
       expect((await app.request(path, { headers: { authorization: `Bearer ${pairingToken}` } })).status).toBe(200);
       expect((await app.request(path, { headers: { "x-pairing-token": pairingToken } })).status).toBe(200);
-      expect((await app.request(`${path}?token=${pairingToken}`)).status).toBe(200);
+      // #1755: a query-string token is no credential (it lands in access logs).
+      expect((await app.request(`${path}?token=${pairingToken}`)).status).toBe(401);
     }
     // Still unconsumed: it can register afterwards.
     const reg = await app.request("/api/workers/register", {

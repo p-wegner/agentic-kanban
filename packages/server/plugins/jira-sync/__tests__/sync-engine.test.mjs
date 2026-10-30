@@ -75,6 +75,9 @@ function fakeBoardClient() {
       if (!state.issueTags.has(issueId)) state.issueTags.set(issueId, new Set());
       state.issueTags.get(issueId).add(tagId);
     },
+    async detachTag(issueId, tagId) {
+      state.issueTags.get(issueId)?.delete(tagId);
+    },
   };
 }
 
@@ -353,7 +356,7 @@ test("issue type and epic parent: Bug -> bug, Story -> feature, parent becomes a
   assert.equal(byKey["ENG-1"].issueType, "bug");
   assert.equal(byKey["ENG-2"].issueType, "feature");
   assert.equal(byKey["ENG-3"].issueType, "task");
-  assert.equal(byKey["ENG-1"].description, "**Parent:** ENG-9 (Checkout)\n\nBoom");
+  assert.equal(byKey["ENG-1"].description, "<!-- jira-sync:parent -->**Parent:** ENG-9 (Checkout)<!-- /jira-sync:parent -->\n\nBoom");
   const tags = (await board.listIssueTags(byKey["ENG-1"].id)).map((t) => t.name);
   assert.deepEqual(tags, ["epic:ENG-9"]);
 });
@@ -433,4 +436,86 @@ test("deleted vs out of scope: both marked and non-startable, only deleted moves
   });
   assert.equal(third.deleted.length, 0); // a deletion is reported once, by the run that applied it
   assert.deepEqual(await tagsOf("ENG-1"), ["jira:deleted", "no-auto-start"]);
+});
+
+test("out-of-scope (#1738): a classified key costs no GET until it returns", async () => {
+  const board = fakeBoardClient();
+  const inScope = jiraIssue("ENG-1", { summary: "In", updated: "2026-09-01T00:00:00.000Z" });
+  const gone = jiraIssue("ENG-2", { summary: "Out", updated: "2026-09-01T00:00:00.000Z" });
+  const first = await runInboundSync(fakeJiraClient([inScope, gone]), board, { jql: "q", projectId: "p", knownState: { issues: {} } });
+  const gets = [];
+  const counting = (issues) => ({ ...fakeJiraClient(issues), async getIssue(key) { gets.push(key); return { key }; } });
+
+  const t0 = Date.parse("2026-10-01T00:00:00.000Z");
+  const second = await runInboundSync(counting([inScope]), board, { jql: "q", projectId: "p", knownState: first.nextState, now: new Date(t0).toISOString() });
+  assert.deepEqual(gets, ["ENG-2"]);
+  assert.deepEqual(second.reportedOutOfScope, ["ENG-2"]);
+
+  const third = await runInboundSync(counting([inScope]), board, { jql: "q", projectId: "p", knownState: second.nextState, now: new Date(t0 + 3_600_000).toISOString() });
+  assert.deepEqual(gets, ["ENG-2"], "no second GET within the interval");
+  assert.deepEqual(third.reportedOutOfScope, [], "settled by #1731: reported once");
+
+  await runInboundSync(counting([inScope]), board, { jql: "q", projectId: "p", knownState: third.nextState, now: new Date(t0 + 25 * 3_600_000).toISOString() });
+  assert.deepEqual(gets, ["ENG-2"], "a settled out-of-scope key stays unchecked until it returns (#1731)");
+
+  const back = await runInboundSync(counting([inScope, gone]), board, { jql: "q", projectId: "p", knownState: third.nextState, now: new Date(t0 + 3_600_000).toISOString() });
+  assert.equal(back.nextState.issues["ENG-2"].outOfScopeCheckedAt, undefined);
+  assert.equal(back.nextState.issues["ENG-2"].outOfScopeAt, undefined);
+});
+
+test("maxIssuesPerRun (#1738): truncates, flags moreAvailable, and classifies nothing as missing", async () => {
+  const board = fakeBoardClient();
+  const issues = ["ENG-1", "ENG-2", "ENG-3"].map((k) => jiraIssue(k, { summary: k, updated: "2026-09-01T00:00:00.000Z" }));
+  const first = await runInboundSync(fakeJiraClient(issues), board, { jql: "q", projectId: "p", knownState: { issues: {} } });
+  const capped = await runInboundSync(fakeJiraClient(issues), board, { jql: "q", projectId: "p", knownState: first.nextState, maxIssuesPerRun: 1 });
+  assert.equal(capped.moreAvailable, true);
+  assert.deepEqual(capped.reportedOutOfScope, []);
+  assert.equal(capped.skipped, 1);
+});
+
+function withStatuses(board, names) {
+  board.state.statuses = names.map((name, i) => ({ id: `s-${name.toLowerCase().replace(/\s+/g, "-")}`, name, isDefault: i === 0 }));
+}
+
+function jiraWithStatus(key, updated, name, category) {
+  const issue = jiraIssue(key, { summary: "S", updated });
+  issue.fields.status = { name, statusCategory: { key: category } };
+  return issue;
+}
+
+test("a board column move inside the same Jira status category is not reverted by a later pull (#1730)", async () => {
+  const board = fakeBoardClient();
+  withStatuses(board, ["Todo", "In Progress", "In Review", "Done"]);
+  const baseOpts = { jql: "project = KD", projectId: "proj-1" };
+  const first = await runInboundSync(fakeJiraClient([jiraWithStatus("KD-1", "2026-09-01T00:00:00.000Z", "In Progress", "indeterminate")]), board, {
+    ...baseOpts,
+    knownState: { issues: {} },
+  });
+  assert.equal(board.state.issues[0].statusId, "s-in-progress");
+
+  // The user moves the card; push transitions Jira and re-baselines the board side.
+  const moved = await board.updateIssue(board.state.issues[0].id, { statusId: "s-in-review" });
+  const state = structuredClone(first.nextState);
+  state.issues["KD-1"].boardUpdatedAt = moved.updatedAt;
+  state.issues["KD-1"].fields.statusId = "s-in-review";
+
+  const second = await runInboundSync(fakeJiraClient([jiraWithStatus("KD-1", "2026-09-02T00:00:00.000Z", "In Progress", "indeterminate")]), board, {
+    ...baseOpts,
+    knownState: state,
+  });
+  assert.equal(board.state.issues[0].statusId, "s-in-review");
+  assert.ok(!second.details.some((d) => d.changes?.includes("status")));
+});
+
+test("a Jira-Done issue never lands in the default column; statusMap steers the pull inversely (#1730)", async () => {
+  const board = fakeBoardClient();
+  withStatuses(board, ["Backlog", "Shipped"]);
+  const opts = { jql: "project = KD", projectId: "proj-1", knownState: { issues: {} } };
+  const jira = fakeJiraClient([jiraWithStatus("KD-1", "2026-09-01T00:00:00.000Z", "Done", "done")]);
+
+  await assert.rejects(runInboundSync(jira, board, opts), (err) => err.code === "STATUS_CONFIG" && /statusMap/.test(err.message));
+  assert.equal(board.state.issues.length, 0);
+
+  await runInboundSync(jira, board, { ...opts, statusMap: { Shipped: "Done" } });
+  assert.equal(board.state.issues[0].statusId, "s-shipped");
 });

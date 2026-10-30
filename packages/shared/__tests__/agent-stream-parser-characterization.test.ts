@@ -179,6 +179,7 @@ describe("claude parser characterization", () => {
         "liveStats": {
           "contextTokens": 150,
           "model": "claude-opus-4",
+          "requestTokens": 150,
         },
         "todos": [
           {
@@ -220,6 +221,7 @@ describe("claude parser characterization", () => {
         "liveStats": {
           "contextTokens": 0,
           "model": "m",
+          "requestTokens": 0,
           "subagentDelta": 1,
         },
         "toolActivity": {

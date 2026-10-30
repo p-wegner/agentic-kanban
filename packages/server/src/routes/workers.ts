@@ -658,9 +658,9 @@ function registerWorkerFacingRoutes(
 
   // #1358: a fresh machine has no worker token yet, so these two ALSO accept an unexpired
   // pairing token (checked, never consumed, so the same token still pairs afterwards). The
-  // header is `Authorization: Bearer <token>`, `x-pairing-token`, or `?token=` (curl-friendly).
+  // header is `Authorization: Bearer <token>` or `x-pairing-token`. Never `?token=` (#1755): a query string lands in proxy/access logs and shell history (decision 012).
   const requireWorkerOrPairing = async (c: Context): Promise<Response | null> => {
-    const candidates = [bearerFrom(c), c.req.header("x-pairing-token"), c.req.query("token")];
+    const candidates = [bearerFrom(c), c.req.header("x-pairing-token")];
     for (const t of candidates) {
       if (t && reg.isPairingTokenValid(t)) return null;
     }

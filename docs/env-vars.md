@@ -81,6 +81,7 @@ guarded by `board-client-port-ladder-single-source.test.ts`.
 | `KANBAN_HOST` | Interface the board API binds. **Never `0.0.0.0`** — the API has no auth. |
 | `KANBAN_FLEET_PORT` | Port for the worker-fleet listener (register/heartbeat/ws, the allowlisted board-MCP bridge at `/mcp` (#769), + `/health`, nothing else). **Unset = disabled**: no port is opened — and with no listener a remote builder gets no board tools, which is what its brief then says. |
 | `KANBAN_FLEET_HOST` | Interface the fleet port binds (the worker-facing surface above, board API never). **Unset = `127.0.0.1`** since #753 — a cross-machine fleet must name the interface (or set `KANBAN_FLEET_INSECURE=1`). |
+| `KANBAN_WORKER_REQUIRE_SIGNED_FRAMES` | Worker side (#1756). `1` = the daemon refuses unsigned board->worker frames from the very first one. Default: unsigned frames are accepted until the board has sent one validly signed frame, then they are refused. |
 | `KANBAN_GIT_BASH` | Path to Git Bash on Windows (#1657). The workspace teardown/setup `runScript` runs POSIX scripts through it; unset = the standard Git install directories are tried. |
 | `KANBAN_GIT_HTTP_PORT` | Port for the git smart-HTTP transport. **Unset = an OS-assigned port**, which changes every board boot. **REQUIRED whenever `KANBAN_FLEET_PORT` is set** (#776): the git transport refuses to start on an ephemeral port while a fleet listener is configured, because a worker holds the `gitPort` from its `assign` and rebuilds every clone/push URL from it. |
 | `KANBAN_GIT_HTTP_HOST` | Interface the git transport binds. **Unset = `127.0.0.1`** since #753, same rule as `KANBAN_FLEET_HOST`. |
@@ -113,6 +114,7 @@ Set by the board on an agent subprocess; read by hooks and skills inside a workt
 | `KANBAN_SESSION_ID` | Board session id for the running agent. |
 | `KANBAN_ISSUES_URL` | GitHub issues URL used by the `gh-issue` board-feedback mode. |
 | `KANBAN_MCP_TOKEN` | Bearer token the spawned MCP server authenticates with. |
+| `KANBAN_MCP_ALLOWED_TOOLS` | Comma-separated board-tool allowlist the spawned MCP server registers (#1761); absent = every tool. Set by the host builder launch; name pinned by `MCP_ALLOWED_TOOLS_ENV` in `board-tool-allowlist.ts`. |
 | `KANBAN_REPOS_DIR` | Root directory the board clones project repos into. |
 | `KANBAN_AGENT_HANG_TIMEOUT_MS` | How long an agent may produce nothing before it is treated as hung. |
 
@@ -199,6 +201,7 @@ unambiguous prefix" is an argument about the NAME and says nothing about what ea
 |---|---|
 | `AGENTIC_KANBAN_DIR` | Data directory. Decides where `kanban.db` lives when no explicit `KANBAN_DB_URL` is set. |
 | `AGENTIC_KANBAN_PLUGINS_DIR` | Where installed plugin checkouts live. Default `~/.agentic-kanban/plugins`. |
+| `AGENTIC_KANBAN_PLUGIN_DATA_DIR` | Where plugins keep their per-project state (e.g. jira-sync). Default `<data dir>/plugin-data`. Read in `packages/server/src/services/plugin-fs.ts`. |
 | `AGENTIC_KANBAN_BUNDLED_PLUGINS_DIR` | Override the directory the marketplace reads bundled plugins from. |
 | `AGENTIC_KANBAN_BACKUP_DIR` | Where DB backups are written. Default `<data dir>/.db-backups`. |
 | `AGENTIC_KANBAN_BACKUP_MAX_BYTES` | Cap on total backup size before the oldest are pruned. |

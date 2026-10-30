@@ -16,7 +16,7 @@
 
 import { resolveTransitionId, TransitionNotFoundError } from "./transitions.mjs";
 import { attributeComment } from "./comment-marker.mjs";
-import { markdownToAdf } from "./adf.mjs";
+import { markdownToAdf, lossyAdfNodes } from "./adf.mjs";
 import { stripAttachmentFooter } from "./jira-context.mjs";
 import { BOARD_PRIORITY_TO_JIRA, accountIdForAssignee, mapBoardTypeToJira } from "./field-map.mjs";
 import { jiraLinksOf, linkKey } from "./link-sync.mjs";
@@ -119,8 +119,19 @@ async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaul
   if (entry.kind === "fields") {
     // A priority with no Jira mapping is a failure, never "applied" (#1719); the other fields still go out.
     const unmapped = "priority" in entry.fields && !BOARD_PRIORITY_TO_JIRA[String(entry.fields.priority ?? "").toLowerCase()] ? entry.fields.priority : undefined;
-    const sendable = unmapped === undefined ? entry.fields : Object.fromEntries(Object.entries(entry.fields).filter(([f]) => f !== "priority"));
-    const unmappedFailure = unmapped === undefined ? undefined : { key: entry.key, boardIssueId: entry.boardIssueId, kind: "fields", reason: new UnmappablePriorityError(unmapped).message };
+    // A Jira description the Markdown round trip would degrade (media, table, panel, expand) is never overwritten.
+    let lossy = [];
+    if ("description" in entry.fields) {
+      const live = await client.getIssue(entry.key, { fields: ["description"] });
+      lossy = lossyAdfNodes(live?.fields?.description);
+    }
+    const dropped = (f) => (f === "priority" && unmapped !== undefined) || (f === "description" && lossy.length > 0);
+    const sendable = Object.fromEntries(Object.entries(entry.fields).filter(([f]) => !dropped(f)));
+    const reasons = [
+      ...(unmapped === undefined ? [] : [new UnmappablePriorityError(unmapped).message]),
+      ...(lossy.length === 0 ? [] : [`description not pushed: the Jira description holds ${lossy.join(", ")} content that Markdown cannot round-trip`]),
+    ];
+    const unmappedFailure = reasons.length === 0 ? undefined : { key: entry.key, boardIssueId: entry.boardIssueId, kind: "fields", reason: reasons.join("; ") };
     const payload = prepareFieldUpdate(sendable, { defaultIssueType });
     const description = { key: entry.key, boardIssueId: entry.boardIssueId, kind: "fields", fields: Object.keys(payload).map((f) => JIRA_FIELD_TO_BOARD[f] ?? f) };
     description.change = `fields ${description.fields.join(", ")}`;
@@ -205,25 +216,46 @@ async function describeAndMaybeApply(client, entry, { dryRun, projectKey, defaul
  * report an accurate outcome still runs (e.g. resolving the transition
  * graph) but no WRITE (`transitionIssue`/`addComment`/`createIssue`) does.
  */
-export async function runPush(client, entries, { dryRun = false, projectKey, defaultIssueType, statusMap = {}, assigneeMap = {} } = {}) {
+export const MAX_IDENTICAL_FAILURES = 5;
+
+export async function runPush(client, entries, { dryRun = false, projectKey, defaultIssueType, statusMap = {}, assigneeMap = {}, boardStatusById = null, maxFailures = MAX_IDENTICAL_FAILURES } = {}) {
+  const stale = [];
   const applied = [];
   const failed = [];
   const remaining = [];
   const writebacks = [];
 
+  // Records a failure on the entry (a count of identical reasons); at maxFailures it is parked (#1733).
+  const keepFailed = (entry, row) => {
+    const identical = entry.lastReason === row.reason;
+    const failures = (identical ? entry.failures ?? 0 : 0) + 1;
+    const parked = failures >= maxFailures;
+    const reason = parked ? `${row.reason} (parked after ${failures} identical failures; not retried)` : row.reason;
+    failed.push({ ...row, reason });
+    remaining.push({ ...entry, failures, lastReason: row.reason, ...(parked ? { parked: true } : {}) });
+  };
+
   for (const entry of entries) {
+    // A transition whose board issue has left the target status is stale: applying it would move Jira backwards.
+    if (entry.kind === "transition" && boardStatusById && entry.boardIssueId && boardStatusById.has(entry.boardIssueId) && boardStatusById.get(entry.boardIssueId) !== entry.targetStatus) {
+      stale.push({ key: entry.key, kind: "transition", targetStatus: entry.targetStatus, boardStatus: boardStatusById.get(entry.boardIssueId), reason: "stale: board issue is no longer in the target status" });
+      continue;
+    }
+    if (entry.parked) {
+      failed.push({ key: entry.key ?? entry.boardIssueId ?? null, kind: entry.kind, reason: `${entry.lastReason} (parked after ${entry.failures} identical failures; not retried)` });
+      remaining.push(entry);
+      continue;
+    }
     let outcome;
     try {
       outcome = await describeAndMaybeApply(client, entry, { dryRun, projectKey, defaultIssueType, statusMap, assigneeMap });
     } catch (err) {
-      failed.push({ key: entry.key ?? entry.boardIssueId ?? null, kind: entry.kind ?? "unknown", reason: err.message, code: err.code ?? null });
-      remaining.push(entry);
+      keepFailed(entry, { key: entry.key ?? entry.boardIssueId ?? null, kind: entry.kind ?? "unknown", reason: err.message, code: err.code ?? null });
       continue;
     }
 
     if (!outcome.ok) {
-      failed.push(outcome.failed);
-      remaining.push(entry);
+      keepFailed(entry, outcome.failed);
       continue;
     }
 
@@ -232,5 +264,5 @@ export async function runPush(client, entries, { dryRun = false, projectKey, def
     if (outcome.writeback) writebacks.push(outcome.writeback);
   }
 
-  return { applied, failed, remaining, writebacks };
+  return { applied, failed, remaining, writebacks, stale };
 }

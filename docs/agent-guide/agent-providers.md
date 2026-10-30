@@ -77,3 +77,41 @@ attesting only a forbidden profile gets nothing. Nothing attested = today's #651
 is also what every protocol-1 worker gets: `WORKER_PROTOCOL_VERSION` is 2 but
 `MIN_SUPPORTED` stays 1, since `profiles` is an optional capability field.
 
+
+## What a Codex builder sees that a Claude builder does not (and vice versa) (#1760)
+
+- **Skills:** both read the same set. `.codex/skills` is a board-created junction to `.claude/skills`
+  (`ensureCodexSkillsLink`), never a tracked copy — both paths are gitignored and a guard test
+  (`claude-md-git-invariants.test.ts`) fails if `.codex/skills/**` is tracked. A DB-row or plugin skill
+  written into `.claude/skills` therefore shows on both sides.
+- **No lean listing for Codex:** `BUILDER_CONTEXT_SUPPORT` has no Codex skill-listing lever, so every
+  skill description loads in full; Claude builders get non-core skills `name-only` (#1312).
+- **Context files:** Codex gets the whole `CLAUDE.local.md` appended to its prompt
+  (`context-files-prompt.ts`) and an `AGENTS.md` that says "read CLAUDE.md" — a file written for Claude
+  Code tools (Bash/PowerShell sections, `mcp__agentic-kanban__*` names). Claude loads `CLAUDE.md` natively.
+- **Settings:** Claude reads `.claude/settings*.json` (`--setting-sources project,local`); Codex reads
+  `.codex/hooks.json` and its own config.
+
+## Board MCP surface for host builders (#1761)
+
+A host builder (`builderSession`, isolated policy) gets `BUILDER_BOARD_TOOLS`
+(`shared/lib/board-tool-allowlist.ts`): the remote bridge's `REMOTE_BOARD_TOOLS` — the SAME constant,
+imported by `fleet-mcp-bridge.service.ts` — plus `propose_transition` and `approve_tool_use`.
+Claude's `--mcp-config` carries `KANBAN_MCP_ALLOWED_TOOLS` so the stdio server registers only those
+tools; Codex gets `-c mcp_servers.agentic-kanban.enabled_tools=[...]` (it has no tool deferral, so every
+exposed schema is paid per request). `inherit` keeps the full surface. `REVIEW_BOARD_TOOLS` adds the diff
+and scorecard readers for reviewer launches; reviewers are not `builderSession` and are not yet wired to it.
+
+## Safety-hook (tool-call guard) matrix (#1758)
+
+Declared in `packages/server/src/services/agent-provider/safety-hooks.ts`, pinned by the `safety-hooks` row of `provider-pair-parity.test.ts`.
+
+| Provider | PreToolUse guards | Stop checks | Nested CLAUDE.md disclosure |
+|---|---|---|---|
+| claude | `.claude/settings.json` (all) | all | `disclose-context.mjs` PostToolUse |
+| codex | `.codex/hooks.json` PreToolUse (relative `node .claude/hooks/...`; depends on cwd = worktree root, unverified after the agent `cd`s) | 3 Stop checks | none |
+| pi | `.pi/plugin/agentic-kanban-hooks.ts` via `--extension` | none | none |
+| copilot | **none (declared unsupported)** | none | none |
+
+An unguarded launch (copilot, or pi without the extension file) logs `[agent] <provider>: no tool-call guards ...` / `[agent] pi: no agentic-kanban-hooks extension in <worktree>; builder runs unguarded`.
+Not yet done: persisting the flag on the session row and refusing the launch under `strict`/`standard` posture.

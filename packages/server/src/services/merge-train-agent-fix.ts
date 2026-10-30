@@ -16,7 +16,7 @@
  * Pure orchestration over ports (`runAgent`, `regate`, git), so the cap behaviour is testable
  * without an agent, a gate or a repo.
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,6 +27,7 @@ import type { MergeTrainAgentFixDto, MergeTrainAttemptDto } from "@agentic-kanba
 import type { MergeTrainAgentFixCaps } from "@agentic-kanban/shared/lib/merge-train-red-strategy";
 import type { Database } from "../db/index.js";
 import { getLeadIssueForMembersBlock } from "../repositories/workspace-issue-members.repository.js";
+import { findGuardEdits } from "./merge-train-verdict.js";
 import { invokeClaudePrompt, type ClaudeCliOptions } from "./claude-cli.service.js";
 
 /** What one gate run says, as far as the fix agent cares. */
@@ -188,6 +189,13 @@ function summarizeFixRun(r: Omit<MergeTrainAgentFixDto, "infraRetries" | "tokens
   return { verdict: FIX_VERDICT[r.outcome], agentFix };
 }
 
+async function defaultFindGuardEdits(worktree: string, baseSha: string, head: string): Promise<string[]> {
+  const diff = await gitExec(["diff", "--name-only", baseSha, head], { cwd: worktree });
+  if (diff.error) return [];
+  const files = diff.stdout.split(/\r?\n/).filter(Boolean);
+  return findGuardEdits(files, (f) => { try { return readFileSync(join(worktree, f), "utf8"); } catch { return undefined; } });
+}
+
 async function headSha(worktree: string): Promise<string> {
   return (await gitExecOrThrow(["rev-parse", "HEAD"], { cwd: worktree })).trim();
 }
@@ -231,6 +239,8 @@ export async function runAgentFix(args: {
   /** #1572: spend the shepherd's conflict turns already put on the shared cost cap. */
   priorCostUsd?: number;
   writeBrief?: (label: string, brief: string) => Promise<string | undefined>;
+  /** #1772: the guard test files changed between two shas (default: git diff + the ratchet name / `@gate:always-run` marker). */
+  findGuardEdits?: (worktree: string, baseSha: string, headSha: string) => Promise<string[]>;
 }): Promise<AgentFixOutcome> {
   const { worktree, label, caps } = args;
   const startedMs = Date.now();
@@ -293,6 +303,9 @@ export async function runAgentFix(args: {
     }
     const head = await headSha(worktree).catch(() => null);
     if (!head || head === baseHead) { outcome = "capped"; capped = "no-change"; reason = "fix agent made no change"; break; }
+    // #1772: a ratchet/always-run guard is never edited to make a red go away - fail the attempt before re-gating.
+    const guards = await (args.findGuardEdits ?? defaultFindGuardEdits)(worktree, baseHead!, head).catch(() => [] as string[]);
+    if (guards.length > 0) { outcome = "red"; reason = `shepherd edited a guard: ${guards.slice(0, 5).join(", ")}`; break; }
     gateStartedAt ??= new Date().toISOString();
     lastGate = await args.regate();
     gateFinishedAt = new Date().toISOString();

@@ -44,6 +44,19 @@ function snap(over: Partial<TicketDriverSnapshot>): TicketDriverSnapshot {
 
 const READY: Partial<TicketDriverSnapshot> = { stage: "in_review", readyForMerge: true };
 
+describe("#1767 train-in-flight / breaker-paused drivers", () => {
+  const stale = { ...READY, workspaceUpdatedAt: ago(60) };
+  it("a ready ticket is driven while the project train is gating", () => {
+    expect(decideTicketDriver(snap({ ...stale, projectTrainInFlight: true }), NOW)).toEqual({ driven: true, driver: "train-in-flight" });
+  });
+  it("a ready ticket is driven while the project breaker is paused", () => {
+    expect(decideTicketDriver(snap({ ...stale, projectBreakerPaused: true }), NOW)).toEqual({ driven: true, driver: "breaker-paused" });
+  });
+  it("without either it still escalates", () => {
+    expect(decideTicketDriver(snap(stale), NOW)).toMatchObject({ driven: false, shape: "ready-idle" });
+  });
+});
+
 describe("#1653 train-window driver", () => {
   const WINDOW_MAX_WAIT_MS = 30 * 60_000;
   // Window opened 20 min ago with a 30 min max wait: departs 10 min from NOW.

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   BUILDER_SKILL_ALLOWLIST,
+  CORE_BUILDER_SKILLS,
   isBuilderRelevantSkill,
   selectBuilderSkills,
   buildSkillInvocationBlock,
@@ -16,7 +17,7 @@ async function tmp(): Promise<string> {
 
 describe("BUILDER_SKILL_ALLOWLIST", () => {
   it("keeps the skills a worktree agent fires", () => {
-    for (const name of ["board-navigator", "kanban-workflow", "scope-guard", "code-review"]) {
+    for (const name of ["board-navigator", "kanban-workflow", "scope-guard", "code-review", "dev-server", "db-doctor"]) {
       expect(isBuilderRelevantSkill(name)).toBe(true);
     }
   });
@@ -25,6 +26,14 @@ describe("BUILDER_SKILL_ALLOWLIST", () => {
     for (const name of ["dependency-analyzer", "ticket-enhancer", "orchestrator", "monitor-nudge", "code-review-thorough"]) {
       expect(isBuilderRelevantSkill(name)).toBe(false);
     }
+  });
+
+  it("announced set equals the full-listed (core) set — one list, not two (#1763)", () => {
+    expect([...BUILDER_SKILL_ALLOWLIST].sort()).toEqual(Object.keys(CORE_BUILDER_SKILLS).sort());
+  });
+
+  it("never declares the rest unavailable: name-only skills are still invocable", () => {
+    expect(buildSkillInvocationBlock([...BUILDER_SKILL_ALLOWLIST])).not.toMatch(/not available/i);
   });
 
   it("has no duplicates", () => {

@@ -103,6 +103,27 @@ export function probeLogonTaskAction(): string | null {
 }
 
 /**
+ * #1773: the logon task's `--profiles` flag against the profiles the daemon attests. A persisted `config set profiles`
+ * wins over the flag at every start, so a mismatch is not a bug today, but it is what a reboot would silently undo
+ * once the config is unset. WARN; pass when the task names none (or none is registered).
+ */
+export function checkLogonTaskProfiles(opts: { taskAction?: string | null; attested: string[] | null }): DoctorCheck {
+  const name = "logon task profiles";
+  const action = opts.taskAction === undefined ? probeLogonTaskAction() : opts.taskAction;
+  const m = action ? /--profiles[ =]+"?([^\s"]+)/.exec(action) : null;
+  if (!m) return { name, status: "pass", detail: "the logon task passes no --profiles flag (or none is registered)" };
+  const flag = m[1].split(",").map((x) => x.trim()).filter(Boolean).sort();
+  const live = (opts.attested ?? []).map((p) => p.replace(/^[^:]+:/, "")).sort();
+  if (flag.join(",") === live.join(",")) return { name, status: "pass", detail: `the logon task's --profiles (${flag.join(",")}) matches what the daemon attests` };
+  return {
+    name,
+    status: "warn",
+    detail: `the logon task starts the worker with --profiles ${flag.join(",")}, but the daemon attests ${live.join(",") || "none"}; a persisted 'worker config set profiles' wins until it is unset, after which a reboot restores the task's list`,
+    remedy: "Edit the AgenticKanbanWorker task's arguments to the wanted --profiles, or run 'agentic-kanban-worker config set profiles <csv>' to keep it persisted.",
+  };
+}
+
+/**
  * #1482: a logon task that calls the global `agentic-kanban-worker` runs the setup-time build after a reboot, so a flag
  * added since then fails before self-update can run. WARN unless the task goes through the stable shim.
  */

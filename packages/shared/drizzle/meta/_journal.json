@@ -1128,6 +1128,20 @@
       "when": 1791795871597,
       "tag": "0160_worker_desired_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 161,
+      "version": "6",
+      "when": 1791882271597,
+      "tag": "0161_worker_git_token_session",
+      "breakpoints": true
+    },
+    {
+      "idx": 162,
+      "version": "6",
+      "when": 1791882271598,
+      "tag": "0162_worker_token_expiry",
+      "breakpoints": true
     }
   ]
 }

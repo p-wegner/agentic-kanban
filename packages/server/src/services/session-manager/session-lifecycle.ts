@@ -15,7 +15,7 @@ import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
 import { emitButlerSystemEvent } from "../butler-event-feed.js";
 import { narrowProviderName, type ProviderName } from "../agent-provider.js";
-import { applyBuilderSkillListing } from "../builder-skill-listing.service.js";
+import { applyBuilderSkillListing, noteSkillListingUnapplied } from "../builder-skill-listing.service.js";
 import { applyCodexUserScope, builderContextApplies, resolveBuilderContext } from "../agent-provider/builder-context.js";
 import { getProviderExitBehavior } from "../agent-provider/provider-exit-behavior.js";
 import { type AgentOutputMessage, modelBelongsToProvider } from "@agentic-kanban/shared";
@@ -221,7 +221,7 @@ export function createSessionLifecycle(
 
     const effectiveSystemInstructions = await resolveEffectiveSystemInstructions(db, systemInstructions, executor, builderSession);
     // #1302/#1310: builder context policy, Claude and Codex builders (see agent-provider/builder-context.ts).
-    const builderContext = await resolveBuilderContext(builderContextApplies(executor, builderSession), projectId, workspaceId, (key) => lifecycleRepo.getPreferenceValue(key, db), executor === "claude-code", (lean) => applyBuilderSkillListing(effectiveWorkingDir, lean, workspace.isDirect ?? false)); // #1312: lean profile + name-only skills
+    const builderContext = await resolveBuilderContext(builderContextApplies(executor, builderSession), projectId, workspaceId, (key) => lifecycleRepo.getPreferenceValue(key, db), executor === "claude-code", (lean) => applyBuilderSkillListing(effectiveWorkingDir, lean, workspace.isDirect ?? false, (message) => noteSkillListingUnapplied(db, workspaceId, message))); // #1312: lean profile + name-only skills
     const launchDiagnostics = {
       launch: {
         builderContext: builderContext ?? null,

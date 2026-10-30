@@ -24,7 +24,7 @@ export function createProjectQueueFlushRoute(
   options?: {
     boardEvents?: BoardEventSink;
     /** Test seams: the on-demand sweep and the stable-checkout location. */
-    flushDeps?: Pick<Partial<QueueFlushDeps>, "requestSweep" | "stableCheckoutFor">;
+    flushDeps?: Pick<Partial<QueueFlushDeps>, "requestSweep" | "stableCheckoutFor" | "gateScriptOverride">;
   },
 ) {
   const router = createRouter();

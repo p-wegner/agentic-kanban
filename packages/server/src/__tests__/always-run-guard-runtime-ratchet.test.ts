@@ -327,10 +327,6 @@ import {
  * that script, so an ordinary diff does not pay it; it is two string assertions and runs in well
  * under a second, so the next capture should give the 3 s back.
  *
- * #1576: `skills-mirror-hook.test.ts` at the ASSUMED 3,000 ms. It drives a throwaway git repo
- * through `scripts/skills-mirror.mjs` (outside every import graph), with a `when:` territory of
- * `.claude/skills/**`, `.codex/skills/**` and that script, so an ordinary diff does not pay it.
- *
  * #1562: `ci-status.test.ts` at the ASSUMED 3,000 ms. It imports `scripts/promote-ci.mjs`, which no
  * package-local diff links to, with a `when:` territory of the promote CI/plan scripts, so an
  * ordinary diff does not pay it.
@@ -371,8 +367,21 @@ import {
  * Train 2026-10-25-04: 531,689 -> 534,689 (+3,000 ms, one more suite at the ASSUMED 3,000 ms).
  * #1724's `worker-build-no-board-build.test.ts` imports `scripts/promote-lock.mjs`, outside its
  * package's import graph; its `when:` territory is that script, pack-worker and the service.
+ *
+ * Train 2026-10-29-18: 534,689 -> 546,689 (+12,000 ms, four more suites at the ASSUMED 3,000 ms).
+ * #1737's `jira-sync-docs-agree.test.ts` reads the plugin's docs and manifest off disk; #1745's
+ * `train-gate-no-softened-pass.test.ts`, `posture-overrides-coverage.test.ts` and
+ * `risk-tag-reader-ratchet.test.ts` read train-path, posture-resolver and server sources off disk
+ * (the forged-`risk:` tag they pin is a gate-softening path, so none is optional). All four carry
+ * a `when:` territory (the last three got theirs in this train), so an ordinary diff does not pay
+ * them; the floor counts every marker regardless. Expect the placeholder to shrink at the next
+ * `durations.json` capture.
+ *
+ * +2 994 ms (train 2026-10-29-21): `plugin-jira-sync-node-tests` (#1736) runs the jira-sync plugin's
+ * node:test suites, which vitest excludes, so nothing else covers them. It already carries a
+ * `when:packages/server/plugins/jira-sync/**` territory; the floor counts it at the assumed 3000ms.
  */
-const BASELINE_TOTAL_MS = 534_689;
+const BASELINE_TOTAL_MS = 549_683;
 
 /**
  * The MERGE-TIME floor under `KANBAN_TEST_GUARDS=intersecting` (#1232), for a representative

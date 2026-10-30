@@ -114,8 +114,10 @@ export function nextFlushSeq(dateStamp: string, existingTags: string[]): number 
 export function formatFlushMessage(args: {
   landedCount: number;
   healTarget: string;
+  /** The non-default gate script that actually ran (#1742); absent = arch + typecheck. */
+  gateScript?: string | null;
 }): string {
-  return `FLUSH: ${args.landedCount} branches landed, gate = arch + typecheck, suite deferred to ${args.healTarget}`;
+  return `FLUSH: ${args.landedCount} branches landed, gate = ${args.gateScript ?? "arch + typecheck"}, suite deferred to ${args.healTarget}`;
 }
 
 /** The `TrainGate` flush mode must run: `check:arch && typecheck`, no test run, no selection. */

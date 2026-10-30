@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { baseBranchHealth, issueComments, issues, preferences, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
+import { createMergeTrain } from "../repositories/merge-train.repository.js";
 import { initializeProjectStatuses } from "../repositories/issue.repository.js";
 import { invalidatePreferencesCache } from "../repositories/preferences.repository.js";
 import { createProjectQueueFlushRoute } from "../routes/project-queue-flush.js";
@@ -22,6 +23,8 @@ import { reconcileQueueFlush } from "../startup/queue-flush-sweep.js";
 
 const git = (repoPath: string, args: string[]) => gitExecOrThrow(args, { cwd: repoPath });
 const dirs: string[] = [];
+// The real default gate is `pnpm check:arch && pnpm typecheck` — far too heavy for a fixture repo.
+const FIXTURE_GATE = 'node -e "process.exit(0)"';
 
 async function commitOn(repoPath: string, branch: string, file: string) {
   await git(repoPath, ["checkout", "-q", branch]);
@@ -93,7 +96,7 @@ describe("queue flush, end to end (#1463)", { timeout: 300_000 }, () => {
     await setPref(db, `queue_flush_gate_${projectId}`, 'node -e "process.exit(0)"');
 
     app = new Hono();
-    app.route("/api/projects", createProjectQueueFlushRoute(db as never, () => ({}) as never, { flushDeps: { requestSweep } }));
+    app.route("/api/projects", createProjectQueueFlushRoute(db as never, () => ({}) as never, { flushDeps: { requestSweep, gateScriptOverride: FIXTURE_GATE } }));
   }, 180_000);
 
   afterEach(() => {
@@ -123,6 +126,57 @@ describe("queue flush, end to end (#1463)", { timeout: 300_000 }, () => {
     expect(body.dryRun).toBe(true);
     expect(body.plan.dryRunText).toMatch(/would flush 2 branch\(es\).*heal target: master/);
     expect((await git(repoPath, ["tag", "--list", "flush/*"])).trim()).toBe("");
+  });
+
+  it("#1742: an allowlisted gate override is named in the dry-run; 'echo ok' fails closed to the default", async () => {
+    await setPref(db, `queue_flush_gate_${projectId}`, "typecheck");
+    const named = (await (await post({ dryRun: true })).json() as { plan: { dryRunText: string; gateScript: string | null } }).plan;
+    expect(named.dryRunText).toContain("gate = pnpm typecheck");
+    expect(named.gateScript).toBe("pnpm typecheck");
+
+    await setPref(db, `queue_flush_gate_${projectId}`, "echo ok");
+    const refused = (await (await post({ dryRun: true })).json() as { plan: { dryRunText: string; gateScript: string | null } }).plan;
+    expect(refused.dryRunText).toContain("gate = arch + typecheck");
+    expect(refused.gateScript).toBeNull();
+  });
+
+  it("#1744: a live merge train refuses the flush with its label; nothing starts", async () => {
+    await createMergeTrain({ id: randomUUID(), projectId, label: "train/2026-10-29-01", memberWorkspaceIds: ["w1"] }, db);
+    const res = await post({});
+    expect(res.status).toBe(409);
+    expect((await res.json() as { refused: string }).refused).toBe("a merge train is in flight (train/2026-10-29-01) — wait for it or cancel it");
+  });
+
+  it("#1744: runFlush names the train's skip reasons when nothing landed", async () => {
+    const service = createQueueFlushService({
+      database: db, requestSweep,
+      executeQueue: async function* () {
+        yield { type: "skipped", workspaceId: "w", issueNumber: 1, issueTitle: "", reason: "a merge train is already in flight for this project — not assembling a second one" } as const;
+        yield { type: "done", merged: [], failed: [], skipped: ["w"] } as const;
+      },
+    });
+    const outcome = await service.runFlush(projectId, { triggeredBy: "manual" });
+    expect(outcome.ok).toBe(false);
+    expect(outcome.message).toContain("already in flight for this project");
+  });
+
+  it("#1743: a tagged landing with no record (onFinished threw) is reconstructed by the next heal pass, and the sweep is requested", async () => {
+    await git(repoPath, ["checkout", "-q", "main"]);
+    writeFileSync(join(repoPath, "landed.txt"), "x\n", "utf8");
+    await git(repoPath, ["add", "landed.txt"]);
+    await git(repoPath, ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "Merge train 2026-10-29-01: #1 #2"]);
+    await git(repoPath, ["tag", "flush/2026-10-29-1"]);
+    expect(readFlushState(stable).flushes).toHaveLength(0);
+
+    const service = createQueueFlushService({ database: db, executeQueue: () => { throw new Error("not used"); }, requestSweep });
+    await service.reconcileHeal(projectId);
+    const [rec] = readFlushState(stable).flushes;
+    expect(rec).toMatchObject({ id: "flush/2026-10-29-1", memberIssueNumbers: [1, 2], state: "sweeping" });
+    expect(rec.landingSha).toBe((await git(repoPath, ["rev-parse", "main"])).trim());
+    expect(requestSweep).toHaveBeenCalledTimes(1);
+    // Idempotent: a second tick adds nothing.
+    await service.reconcileHeal(projectId);
+    expect(readFlushState(stable).flushes).toHaveLength(1);
   });
 
   it("route -> train -> tag -> record -> member comment -> sweep -> heal ticket -> merged-back", async () => {
@@ -187,7 +241,7 @@ describe("queue flush, end to end (#1463)", { timeout: 300_000 }, () => {
 
   it("auto: the tick fires a flush when the thresholds hold, and not when mode is manual", async () => {
     const queue = createMergeQueueService({ database: db });
-    const service = createQueueFlushService({ database: db, executeQueue: (ids, opts) => queue.executeQueue(ids, opts), requestSweep });
+    const service = createQueueFlushService({ database: db, executeQueue: (ids, opts) => queue.executeQueue(ids, opts), requestSweep, gateScriptOverride: FIXTURE_GATE });
     expect((await service.evaluateAuto(projectId)).fired).toBe(false);
 
     await setPref(db, `queue_flush_${projectId}`, "auto");

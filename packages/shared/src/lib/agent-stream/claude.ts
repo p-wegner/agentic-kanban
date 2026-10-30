@@ -106,7 +106,11 @@ function handleAssistantEvent(
   const model = stringValue(message.model) ?? "";
   const contextTokens = numberValue(usage.cache_read_input_tokens) + numberValue(usage.input_tokens);
   if (!isSubagentMessage && (model || contextTokens > 0)) {
-    result.liveStats = { model, contextTokens };
+    result.liveStats = {
+      model,
+      contextTokens,
+      requestTokens: contextTokens + numberValue(usage.cache_creation_input_tokens),
+    };
   }
 
   // arch-review §2.2: two inner-field drift sites. A PRESENT-but-renamed

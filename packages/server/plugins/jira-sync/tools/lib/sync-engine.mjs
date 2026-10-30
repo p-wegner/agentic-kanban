@@ -33,6 +33,7 @@ const NO_AUTO_START_TAG = "no-auto-start";
 // that shape is a wrong token, a wrong site or a broken JQL, not a real mass deletion.
 export const MAX_DELETIONS_PER_PULL = 3;
 export const MAX_DELETION_SHARE = 0.2;
+export const DEFAULT_OUT_OF_SCOPE_RECHECK_MS = 24 * 3_600_000;
 
 export class MassDeletionError extends Error {
   constructor(count, known) {
@@ -43,6 +44,20 @@ export class MassDeletionError extends Error {
     );
     this.name = "MassDeletionError";
     this.code = "MASS_DELETION";
+  }
+}
+
+// The same shape refused for out-of-scope marking (#1731): a typo'd or narrowed JQL would otherwise
+// tag every known issue `no-auto-start` in one run.
+export class MassOutOfScopeError extends Error {
+  constructor(count, known) {
+    super(
+      `refusing to mark ${count} out of ${known} known issues out of scope at once ` +
+        `(limit: ${MAX_DELETIONS_PER_PULL}, or ${MAX_DELETION_SHARE * 100}% of known issues); ` +
+        "check the JQL. Nothing was written.",
+    );
+    this.name = "MassOutOfScopeError";
+    this.code = "MASS_OUT_OF_SCOPE";
   }
 }
 
@@ -62,6 +77,7 @@ function exceedsDeletionLimit(count, known) {
  *   pendingWritebackKeys?: Set<string>, // keys push created whose board writeback has not landed yet
  *   deletedStatusName?: string,
  *   directions?: per-field sync direction (#1672); a `board-to-jira` field is never overwritten by pull
+ *   statusMap?: board status -> Jira status name (#1730); applied inversely when placing a pulled issue
  *   assigneeMap?: Jira accountId -> board name (#1702); an unmapped accountId falls back to the displayName
  *   forceKeys?: Set<string>, // keys whose Jira state overwrites the board even when it was edited locally (`sync resolve --keep jira`)
  *   customFieldMap?: string, // raw `customFieldMap` setting (#1701): Jira field -> tag:<prefix>, read-only
@@ -71,8 +87,10 @@ function exceedsDeletionLimit(count, known) {
 export async function runInboundSync(
   client,
   boardClient,
-  { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set(), deletedStatusName = "Cancelled", forceKeys = new Set(), directions = LEGACY_DIRECTIONS, customFieldMap = "", assigneeMap = {}, now = new Date().toISOString() },
+  { jql, siteUrl, projectId, knownState, dryRun = false, pendingWritebackKeys = new Set(), deletedStatusName = "Cancelled", forceKeys = new Set(), directions = LEGACY_DIRECTIONS, customFieldMap = "", assigneeMap = {}, statusMap = {}, maxIssuesPerRun, outOfScopeRecheckMs = DEFAULT_OUT_OF_SCOPE_RECHECK_MS, now = new Date().toISOString() },
 ) {
+  const statusFor = (mapped, currentStatusId = null) =>
+    resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses, { statusMap, jiraStatusName: mapped.statusName, currentStatusId });
   // dryRun only suppresses WRITES (create/update/tag calls below) — these three are
   // reads, and skipping them would make every issue look brand-new (boardIssuesByKey
   // empty), so a dry run could never report skip/update/conflict, only create.
@@ -85,16 +103,41 @@ export async function runInboundSync(
   const context = await resolveJiraContext(client, customFieldMap);
   const mapOpts = { siteUrl, sprintFieldId: context.sprintFieldId, customFields: context.customFields, assigneeMap };
   const jiraIssues = [];
-  for await (const jiraIssue of client.searchAll(jql, { fields: context.fields })) jiraIssues.push(jiraIssue);
+  let moreAvailable = false;
+  for await (const jiraIssue of client.searchAll(jql, { fields: context.fields })) {
+    if (maxIssuesPerRun && jiraIssues.length >= maxIssuesPerRun) {
+      moreAvailable = true;
+      break;
+    }
+    jiraIssues.push(jiraIssue);
+  }
   const seenKeys = new Set(jiraIssues.map((i) => i.key));
   // Entries already marked deleted are settled; they are only revisited when Jira returns them.
   const activeKnownKeys = Object.keys(knownState.issues).filter((key) => !knownState.issues[key].deletedAt);
-  const missingKeys = activeKnownKeys.filter((key) => !seenKeys.has(key));
+  // A truncated read (maxIssuesPerRun) cannot say which known keys left the JQL: classify nothing.
+  // Entries already marked out of scope are not re-classified (no GET) or re-reported until they
+  // return (#1731).
+  const missingKeys = moreAvailable ? [] : activeKnownKeys.filter((key) => !seenKeys.has(key) && !knownState.issues[key].outOfScopeAt);
+  // Keys already classified out of scope are re-checked only after `outOfScopeRecheckMs` (#1738);
+  // a returning key is in `seenKeys` and so never lands here.
+  const nowMs = Date.parse(now);
+  const cachedOutOfScope = new Set(
+    missingKeys.filter((key) => {
+      const checked = Date.parse(knownState.issues[key].outOfScopeCheckedAt ?? "");
+      return Number.isFinite(checked) && nowMs - checked < outOfScopeRecheckMs;
+    }),
+  );
   const classified = new Map();
-  for (const key of missingKeys) classified.set(key, await classifyMissingIssue(client, key));
+  for (const key of missingKeys) {
+    if (!cachedOutOfScope.has(key)) classified.set(key, await classifyMissingIssue(client, key));
+  }
   const pendingDeletions = [...classified.values()].filter((r) => r === "deleted").length;
   if (exceedsDeletionLimit(pendingDeletions, activeKnownKeys.length)) {
     throw new MassDeletionError(pendingDeletions, activeKnownKeys.length);
+  }
+  const pendingOutOfScope = [...classified.values()].filter((r) => r === "out-of-scope").length;
+  if (exceedsDeletionLimit(pendingOutOfScope, activeKnownKeys.length)) {
+    throw new MassOutOfScopeError(pendingOutOfScope, activeKnownKeys.length);
   }
 
   const details = [];
@@ -106,6 +149,7 @@ export async function runInboundSync(
   let commentsImported = 0;
 
   const restored = [];
+  const restoredFromScope = new Set();
   for (const jiraIssue of jiraIssues) {
     const mapped = mapJiraIssueToBoardFields(jiraIssue, mapOpts);
     let known = knownState.issues[jiraIssue.key];
@@ -121,6 +165,15 @@ export async function runInboundSync(
       if (!dryRun) nextState.issues[jiraIssue.key] = known;
     }
 
+    // Back in the JQL result after being marked out of scope: drop the tags the plugin attached (#1731).
+    if (known?.outOfScopeAt) {
+      const recovered = await recoverFromOutOfScope(boardClient, boardIssue, known, dryRun);
+      known = recovered.known;
+      restored.push(jiraIssue.key);
+      restoredFromScope.add(jiraIssue.key);
+      if (!dryRun) nextState.issues[jiraIssue.key] = known;
+    }
+
     if (!boardIssue && pendingWritebackKeys.has(jiraIssue.key)) {
       // push created this Jira issue from a board issue whose externalKey writeback is still
       // pending: importing it now would duplicate that board issue (#1623).
@@ -132,7 +185,7 @@ export async function runInboundSync(
     if (!boardIssue) {
       let createdIssue;
       if (!dryRun) {
-        const statusId = resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses);
+        const statusId = statusFor(mapped);
         const created_ = await boardClient.createIssue({
           projectId,
           title: mapped.title,
@@ -171,7 +224,7 @@ export async function runInboundSync(
     const jiraOwned = OWNABLE.filter((f) => !pushesField(directions, f));
     const boardOwned = OWNABLE.filter((f) => !pullsField(directions, f));
     const earlyCurrent = boardFieldsOf(boardIssue);
-    const earlyJira = incomingFieldsOf(mapped, resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses));
+    const earlyJira = incomingFieldsOf(mapped, statusFor(mapped, boardIssue?.statusId));
     const ownedEdits = known?.fields ? jiraOwned.filter((f) => known.fields[f] !== undefined && earlyCurrent[f] !== known.fields[f]) : [];
     const jiraDiffers = Object.fromEntries(boardOwned.filter((f) => earlyCurrent[f] !== earlyJira[f]).map((f) => [f, earlyJira[f]]));
     const driftNote = Object.keys(jiraDiffers).length > 0 ? { jiraDiffers } : {};
@@ -194,7 +247,7 @@ export async function runInboundSync(
     // -> converged, resolve it and re-baseline; otherwise a real conflict.
     const timestampMoved = known == null || boardIssue.updatedAt !== known.boardUpdatedAt;
     const currentFields = boardFieldsOf(boardIssue);
-    const incomingStatusId = resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses);
+    const incomingStatusId = statusFor(mapped, boardIssue?.statusId);
     const jiraFields = incomingFieldsOf(mapped, incomingStatusId);
     // A field the board owns (#1672) is not Jira's to change: compare as if Jira agreed with the board,
     // so a board edit to it is neither a conflict nor overwritten. The conflict view still shows Jira's value.
@@ -258,7 +311,7 @@ export async function runInboundSync(
 
     // Only a real board write counts as an update (#1696): a mapped field pull would change, a status
     // move, a label to attach, or a comment to import.
-    const statusId = resolveBoardStatusId(mapped.statusCategoryKey, boardStatuses);
+    const statusId = statusFor(mapped, boardIssue?.statusId);
     const writtenDiff = OWNABLE.filter((f) => pullsField(directions, f) && currentFields[f] !== jiraFields[f]);
     // The assignee is a tag, not an issue column: it is applied below with the other tags.
     const columnDiff = writtenDiff.filter((f) => f !== "assignee");
@@ -358,6 +411,12 @@ export async function runInboundSync(
     });
   }
 
+  // The detail line of an issue that came back into scope names the restore (#1731).
+  for (const key of restoredFromScope) {
+    const entry = details.find((x) => x.key === key);
+    if (entry) entry.restored = true;
+  }
+
   // Issue links -> board dependencies (#1700), once every issue of this run has a board id.
   const idByKey = new Map([...boardIssuesByKey].map(([k, i]) => [k, i.id]));
   for (const [k, entry] of Object.entries(nextState.issues)) if (entry.boardIssueId && !entry.deletedAt) idByKey.set(k, entry.boardIssueId);
@@ -403,7 +462,16 @@ export async function runInboundSync(
   const outOfScope = [];
   const deleted = [];
   const deletedStatus = boardStatuses.find((st) => st.name.toLowerCase() === String(deletedStatusName).toLowerCase());
+  // A key that came back into scope drops its out-of-scope marker.
+  for (const key of seenKeys) {
+    const entry = nextState.issues[key];
+    if (entry?.outOfScopeCheckedAt) {
+      const { outOfScopeCheckedAt: _marker, ...rest } = entry;
+      nextState.issues[key] = rest;
+    }
+  }
   for (const key of missingKeys) {
+    if (cachedOutOfScope.has(key)) continue;
     const reason = classified.get(key);
     const boardIssue = boardIssuesByKey.get(key);
     const entry = { key, reason, localIssueNumber: boardIssue?.issueNumber };
@@ -412,6 +480,7 @@ export async function runInboundSync(
     if (boardIssue) {
       const tag = reason === "deleted" ? DELETED_TAG : OUT_OF_SCOPE_TAG;
       const existingTags = await boardClient.listIssueTags(boardIssue.id);
+      entry.noAutoStartWasPresent = existingTags.some((t) => t.name === NO_AUTO_START_TAG);
       await attachMissingTags(boardClient, tagCache, boardIssue.id, [tag, NO_AUTO_START_TAG], existingTags);
       if (reason === "deleted" && deletedStatus && boardIssue.statusId !== deletedStatus.id) {
         const moved = await boardClient.updateIssue(boardIssue.id, { statusId: deletedStatus.id });
@@ -420,11 +489,22 @@ export async function runInboundSync(
         if (prior) nextState.issues[key] = { ...prior, boardUpdatedAt: moved.updatedAt };
       }
     }
+    if (reason === "out-of-scope" && !dryRun && nextState.issues[key]) {
+      nextState.issues[key] = { ...nextState.issues[key], outOfScopeCheckedAt: now };
+    }
     // A deletion is applied once: keep the entry (comment ids, baseline) marked `deletedAt` so
     // later pulls do not report it again and a reappearance can be recognised (#1641).
     if (reason === "deleted") {
       const prior = nextState.issues[key];
       nextState.issues[key] = { ...prior, deletedAt: now, preDeleteStatusId: boardIssue?.statusId ?? prior?.preDeleteStatusId, deletedStatusId: deletedStatus?.id };
+    }
+    // Out of scope is applied once too (`outOfScopeAt`), remembering whether `no-auto-start` was
+    // the plugin's own or a hand-added tag so the return only removes what it attached.
+    if (reason === "out-of-scope") {
+      const prior = nextState.issues[key];
+      const noAutoStartAttached = boardIssue ? entry.noAutoStartWasPresent === false : false;
+      delete entry.noAutoStartWasPresent;
+      nextState.issues[key] = { ...prior, outOfScopeAt: now, noAutoStartAttached };
     }
   }
   for (const entry of deleted) details.push({ key: entry.key, action: "delete", localIssueNumber: entry.localIssueNumber });
@@ -439,6 +519,8 @@ export async function runInboundSync(
     conflicted,
     commentsImported,
     reportedOutOfScope,
+    outOfScopeCached: cachedOutOfScope.size,
+    moreAvailable,
     restored,
     outOfScope,
     deleted,
@@ -478,6 +560,24 @@ async function recoverReappeared(boardClient, tagCache, boardIssue, known, board
     }
   }
   return { boardIssue: restored, known: { ...rest, boardUpdatedAt: restored.updatedAt, fields: boardFieldsOf(restored) } };
+}
+
+/**
+ * Undoes the out-of-scope marking of a board issue whose Jira twin is back in the JQL result: drops
+ * `jira:out-of-scope`, and `no-auto-start` only when the plugin attached it (not a hand-added one).
+ * The returned entry has no marker and keeps its baseline, so the regular pull flow carries on.
+ */
+async function recoverFromOutOfScope(boardClient, boardIssue, known, dryRun) {
+  const { outOfScopeAt: _outOfScopeAt, noAutoStartAttached, ...rest } = known;
+  if (boardIssue && !dryRun) {
+    const tags = await boardClient.listIssueTags(boardIssue.id);
+    for (const tag of tags) {
+      if (tag.name === OUT_OF_SCOPE_TAG || (tag.name === NO_AUTO_START_TAG && noAutoStartAttached)) {
+        await boardClient.detachTag(boardIssue.id, tag.id);
+      }
+    }
+  }
+  return { known: rest };
 }
 
 /** `deleted` (Jira answers 404), `out-of-scope` (still exists), or `unknown` (lookup failed). */

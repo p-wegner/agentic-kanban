@@ -4,6 +4,7 @@
 import type { WorkerRepoOpKind } from "@agentic-kanban/shared/lib/worker-protocol";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { Database } from "../db/index.js";
+import { findCurrentWorkerAssignment, findWorkerSessionDispatch } from "../repositories/worker.repository.js";
 import { getProjectByRepoPath } from "../repositories/project.repository.js";
 import { ensureGitHttpServer } from "./git-http.service.js";
 import { incomingRefFor } from "./worker-remote-sync.service.js";
@@ -156,6 +157,26 @@ export function createRemoteRepoService(deps: {
     );
   }
 
+  async function issueFromDispatch(workerId: string, sessionId: string): Promise<{ gitToken?: string; error?: string }> {
+    const untracked = { error: `this board does not track session ${sessionId} as a git-transport session on worker ${workerId}` };
+    const dispatch = await findWorkerSessionDispatch(sessionId, database);
+    if (!dispatch || dispatch.workerId !== workerId) return untracked;
+    const current = await findCurrentWorkerAssignment(
+      { workerId, projectId: dispatch.projectId, branch: dispatch.branch },
+      database,
+    );
+    if (!current) return untracked;
+    const git = await ensureGitHttpServer(database);
+    return {
+      gitToken: git.issueToken({
+        workerId,
+        projectId: dispatch.projectId,
+        incomingRef: incomingRefFor(dispatch.branch),
+        sessionId,
+      }),
+    };
+  }
+
   /**
    * #1383: a worker whose result push got a 401 asks for a fresh token instead of retrying
    * the rejected one. Answered only for a session this board tracks AS ON THAT WORKER; the
@@ -165,7 +186,14 @@ export function createRemoteRepoService(deps: {
     const session = sessions.get(sessionId);
     let reply: { gitToken?: string; error?: string };
     if (!session?.repo || session.workerId !== workerId) {
-      reply = { error: `this board does not track session ${sessionId} as a git-transport session on worker ${workerId}` };
+      // #1750: a restarted daemon's hello omits the session, so the board has already dropped
+      // it from memory. The git transport's own authority rule (a current dispatch of this
+      // branch to this worker, running or ended within the landable window) is the DB truth.
+      try {
+        reply = await issueFromDispatch(workerId, sessionId);
+      } catch (err) {
+        reply = { error: errorMessage(err) };
+      }
     } else {
       try {
         reply = { gitToken: (await resolveOpAuth(sessionId, session, session.repo)).gitToken };
