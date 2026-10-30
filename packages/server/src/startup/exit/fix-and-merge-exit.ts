@@ -259,6 +259,10 @@ export function createFixAndMergeExitHandler({ database: db, gitService, boardEv
       if (!noop) return false;
 
       console.warn(`[workflow] #1209 resolve-conflicts session ${sessionId} for workspace ${workspace.id} was a NO-OP (branch tip unchanged, still conflicts with ${baseBranch}) — not retrying the merge`);
+      // #1776: don't leave the host worktree detached mid-rebase after a no-op session.
+      try {
+        await gitService.abortRebase(workspace.workingDir);
+      } catch { /* no rebase in progress */ }
       await setWorkspaceStatus(db, workspace.id, "idle", { now: ctx.now, set: { readyForMerge: false } });
       await clearWorkspaceReadyForMergeAt(workspace.id, db);
       await clearMergeGateEvidence(workspace.id, db);

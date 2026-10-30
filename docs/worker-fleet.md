@@ -1183,3 +1183,12 @@ attested set plus the configured one; a never-attested profile appears only once
 
 `worker doctor` has a `systray` check (Windows only, `warn` when no `ak-worker-tray.ps1` process runs), and
 `worker setup` prints the same warning and offers to start the tray (`--yes` accepts).
+
+## resolve-conflicts placement (#1776)
+
+`resolveConflicts` rebases in the HOST worktree and leaves the conflicted rebase in progress, so its
+`fix-conflicts` session is launched with an explicit `placement: { kind: "host" }` (this also skips the
+strict-dispatch hold). A remote worker works in its own clone where no rebase is in progress and would
+find nothing to resolve. A no-op `fix-conflicts` exit aborts the host rebase so the worktree is not left
+detached. The conflict prompt also tells an agent in a fresh clone to rebase onto `origin/<base>` itself
+and push the rebased branch. `fixAndMerge` and the train send-back path were not changed here.

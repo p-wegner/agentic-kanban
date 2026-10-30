@@ -170,6 +170,8 @@ After resolving all conflicts:
 - If this was a rebase: run "git rebase --continue"
 - If this was a merge: run "git commit --no-edit"
 
+If no rebase or merge is in progress and no conflict markers exist (for example you are running in a fresh clone), the conflict has not been reproduced here: run "git fetch origin" then "git rebase origin/${baseBranch}" in your own checkout, resolve the conflicts it reports, run "git rebase --continue", and push the rebased branch to its incoming ref. Do not report "nothing to resolve" before trying this.
+
 Base branch: ${baseBranch}`;
 }
 
